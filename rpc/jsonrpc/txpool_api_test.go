@@ -214,8 +214,7 @@ func TestMapResultsMarshalAsJSONDoes(t *testing.T) {
 			}).MarshalFastJSONTo(s))
 			require.NoError(t, s.Flush())
 
-			require.JSONEq(t, string(want), string(s.Buffer()))
-			require.Equal(t, string(want), string(s.Buffer()), "key order must match encoding/json")
+			require.Equal(t, string(want), string(s.Buffer()), "bytes and key order must match encoding/json")
 		})
 	}
 }

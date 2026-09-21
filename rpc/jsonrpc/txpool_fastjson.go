@@ -28,7 +28,7 @@ import (
 
 // TxPoolContent is txpool_content's answer: sub-pool, then sender, then nonce. A map result
 // reaches the reflection encoder whatever its values implement, so the transactions inside
-// only get their own marshaller once the map has one.
+// only get their marshaller once the map has one.
 type TxPoolContent map[string]map[string]map[string]*ethapi.RPCTransaction
 
 // TxPoolContentFrom is txpool_contentFrom's answer: sub-pool, then nonce.
