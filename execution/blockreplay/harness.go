@@ -99,13 +99,15 @@ func Capture(
 	if fx.ParentHeaderRLP, err = rlpEncodeHeader(parent); err != nil {
 		return nil, err
 	}
-	captureAncestors(ctx, tx, blockReader, block.Header(), fx)
+	if err := captureAncestors(ctx, tx, blockReader, block.Header(), fx); err != nil {
+		return nil, err
+	}
 	return fx, nil
 }
 
 // captureAncestors records the last 256 ancestor hashes so replay can answer
 // the BLOCKHASH opcode without a DB.
-func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, header *types.Header, fx *Fixture) {
+func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservices.FullBlockReader, header *types.Header, fx *Fixture) error {
 	n := header.Number.Uint64()
 	lo := uint64(0)
 	if n > 256 {
@@ -113,11 +115,15 @@ func captureAncestors(ctx context.Context, tx kv.TemporalTx, blockReader dbservi
 	}
 	for a := lo; a < n; a++ {
 		h, ok, err := blockReader.CanonicalHash(ctx, tx, a)
-		if err != nil || !ok {
-			continue
+		if err != nil {
+			return fmt.Errorf("capture ancestor %d: %w", a, err)
+		}
+		if !ok {
+			return fmt.Errorf("capture ancestor %d: missing canonical hash", a)
 		}
 		fx.Ancestors[a] = h
 	}
+	return nil
 }
 
 // Replay re-executes the fixture's block against an in-memory reader with no DB.
