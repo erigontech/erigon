@@ -279,15 +279,28 @@ func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
 func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, snapshot int, entryStateReservoir uint64, stateGasSpill uint64) {
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
+	tracer := evm.config.Tracer
+	gasTracing := tracer.HasGasChangeHook()
 	if evm.chainRules.IsAmsterdam {
+		var old mdgas.MdGas
+		if gasTracing {
+			old = *gasRemaining
+		}
 		gasRemaining.Execution += stateGasSpill
 		gasRemaining.State = entryStateReservoir
+		if gasTracing && old != *gasRemaining {
+			tracer.EmitGasChange(old, *gasRemaining, tracing.GasChangeRefundRevertedState)
+		}
 	}
 	if err != ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
-		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
-			evm.config.Tracer.OnGasChange(gasRemaining.Execution, 0, tracing.GasChangeCallFailedExecution)
+		var old mdgas.MdGas
+		if gasTracing {
+			old = *gasRemaining
 		}
 		gasRemaining.Execution = 0
+		if gasTracing {
+			tracer.EmitGasChange(old, *gasRemaining, tracing.GasChangeCallFailedExecution)
+		}
 	}
 }
 
@@ -446,7 +459,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// It is allowed to call precompiles, even via delegatecall
 	switch {
 	case isPrecompile:
-		ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
+		ret, gasRemaining, err = RunPrecompiledContract(p, input, gasRemaining, evm.Config().Tracer)
 	case len(code) == 0:
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -679,10 +692,11 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	}
 	if collision {
 		err = ErrContractAddressCollision
-		if evm.config.Tracer != nil && evm.config.Tracer.OnGasChange != nil {
-			evm.Config().Tracer.OnGasChange(gasRemaining.Execution, 0, tracing.GasChangeCallFailedExecution)
+		gasRemaining.Execution = 0
+		if tracer := evm.config.Tracer; tracer.HasGasChangeHook() {
+			tracer.EmitGasChange(gas, gasRemaining, tracing.GasChangeCallFailedExecution)
 		}
-		return nil, accounts.NilAddress, mdgas.MdGas{State: gas.State}, mdgas.MdGasUsage{}, err
+		return nil, accounts.NilAddress, gasRemaining, mdgas.MdGasUsage{}, err
 	}
 	// Create a new account on the state
 	snapshot := evm.intraBlockState.PushSnapshot()
@@ -731,31 +745,23 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	if err == nil {
 		// EIP-8037: GAS_CODE_DEPOSIT = cpsb/byte (state) + 6*ceil(len/32) (execution)
 		// Pre-Amsterdam: GAS_CODE_DEPOSIT = 200/byte (execution only)
-		preDepositGas := gasRemaining
-
-		// Charge state gas (Amsterdam only).
-		stateGasOk := true
-		var stateGas, depositStateSpill uint64
+		var executionGas uint64
 		if evm.chainRules.IsAmsterdam {
+			executionGas = params.Keccak256WordGas * ToWordSize(uint64(len(ret)))
+		} else {
+			executionGas = uint64(len(ret)) * params.CreateDataGas
+		}
+		var gasOK bool
+		gasRemaining, _, gasOK = useMdGas(gasRemaining, executionGas, mdgas.ExecutionGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+
+		var stateGas uint64
+		var depositStateSpill uint64
+		if gasOK && evm.chainRules.IsAmsterdam {
 			stateGas = uint64(len(ret)) * params.CostPerStateByte
-			gasRemaining, depositStateSpill, stateGasOk = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
+			gasRemaining, depositStateSpill, gasOK = useMdGas(gasRemaining, stateGas, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
 		}
 
-		// Charge execution gas.
-		var executionGasOk bool
-		if stateGasOk {
-			var executionGas uint64
-			if evm.chainRules.IsAmsterdam {
-				// EIP-8037 "Contract deployment cost calculation", success path:
-				// HASH_COST(L) = 6*ceil(L/32); the state component (cpsb*L) is charged above.
-				executionGas = params.Keccak256WordGas * ToWordSize(uint64(len(ret)))
-			} else {
-				executionGas = uint64(len(ret)) * params.CreateDataGas
-			}
-			gasRemaining, _, executionGasOk = useMdGas(gasRemaining, executionGas, mdgas.ExecutionGas, evm.Config().Tracer, tracing.GasChangeCallCodeStorage)
-		}
-
-		if stateGasOk && executionGasOk {
+		if gasOK {
 			if err := evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation); err != nil {
 				return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 			}
@@ -765,12 +771,6 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 			gasUsed.State += int64(stateGas)
 			gasUsed.StateSpill += depositStateSpill
 		} else {
-			if evm.chainRules.IsAmsterdam {
-				// Code deposit failed: per EIP-8037 the failure cost is
-				// GAS_CREATE + initcode_execution_cost only; code deposit
-				// gas (both state and execution) is excluded.
-				gasRemaining = preDepositGas
-			}
 			// If we run out of gas, we do not store the code: the returned code must be empty.
 			ret = []byte{}
 			if evm.chainRules.IsHomestead {
@@ -864,16 +864,16 @@ func (evm *EVM) captureBegin(depth int, typ OpCode, from accounts.Address, to ac
 	if tracer.OnEnter != nil {
 		tracer.OnEnter(depth, byte(typ), from, to, precompile, input, startGas.Execution, value, code)
 	}
-	if tracer.OnGasChange != nil {
-		tracer.OnGasChange(0, startGas.Execution, tracing.GasChangeCallInitialBalance)
+	if tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(mdgas.MdGas{}, startGas, tracing.GasChangeCallInitialBalance)
 	}
 }
 
 func (evm *EVM) captureEnd(depth int, typ OpCode, startGas mdgas.MdGas, leftOverGas mdgas.MdGas, ret []byte, err error) {
 	tracer := evm.Config().Tracer
 
-	if leftOverGas.Execution != 0 && tracer.OnGasChange != nil {
-		tracer.OnGasChange(leftOverGas.Execution, 0, tracing.GasChangeCallLeftOverReturned)
+	if tracer.HasGasChangeHook() && leftOverGas != (mdgas.MdGas{}) {
+		tracer.EmitGasChange(leftOverGas, mdgas.MdGas{}, tracing.GasChangeCallLeftOverReturned)
 	}
 
 	var reverted bool
