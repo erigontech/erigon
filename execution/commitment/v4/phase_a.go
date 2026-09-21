@@ -164,11 +164,30 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	before := reachableRecordKeys(root, task.addrHash)
 
 	for _, entry := range task.entries {
-		if entry.update == nil || len(entry.path) != 64 {
+		if len(entry.path) != 64 {
 			return [32]byte{}, errPhaseAUpdate
 		}
-		if err := ensureStoragePath(ctx, root, entry.path, task.addrHash); err != nil {
-			return [32]byte{}, err
+		if entry.update == nil || entry.update.Flags == 0 {
+			continue
+		}
+		if len(root.path) != 0 && !bytes.HasPrefix(entry.path, root.path) && rootBitsCount(root.childMask) == 1 && root.leafMask == 0 {
+			nib := trailingNibble(root.childMask)
+			if root.children[nib] == nil && len(root.childHash[nib]) == 32 {
+				child, err := unfold(ctx, root.path, planeStorage, task.addrHash[:])
+				if err != nil {
+					return [32]byte{}, err
+				}
+				if child == nil {
+					return [32]byte{}, errPhaseAStorage
+				}
+				child.plane = planeStorage
+				root.setChild(nib, child)
+			}
+		}
+		if len(root.path) == 0 || bytes.HasPrefix(entry.path, root.path) {
+			if err := ensureStoragePath(ctx, root, entry.path, task.addrHash); err != nil {
+				return [32]byte{}, err
+			}
 		}
 		if entry.update.Deleted() {
 			if err := removeRoot(root, entry.path); err != nil {

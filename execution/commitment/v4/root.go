@@ -66,15 +66,26 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 		return ErrRootShape
 	}
 	oldNib := trailingNibble(n.childMask)
+	oldChild := n.children[oldNib]
+	if oldChild != nil && !bytes.Equal(oldChild.path, n.path) {
+		return ErrRootShape
+	}
 	oldPath := append(append([]byte(nil), n.path...), byte(oldNib))
 	oldPath = append(oldPath, n.childExt[oldNib]...)
-	if len(n.childHash[oldNib]) != 32 {
+	oldHash := n.childHash[oldNib]
+	if oldChild != nil {
+		hash, err := fold(oldChild, len(oldChild.path))
+		if err != nil {
+			return err
+		}
+		oldHash = hash[:]
+	} else if len(oldHash) != 32 {
 		return ErrRootShape
 	}
 	if common >= len(path) || nibbles.CommonPrefixLen(oldPath, path) != common {
 		return ErrRootPath
 	}
-	oldHash := append([]byte(nil), n.childHash[oldNib]...)
+	oldHash = append([]byte(nil), oldHash...)
 	oldExtension := append([]byte(nil), oldPath[common+1:]...)
 	oldNib = int(oldPath[common])
 	newNib := int(path[common])
@@ -84,7 +95,11 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 
 	root := fork(nil)
 	root.plane = n.plane
-	root.setStoredChild(oldNib, oldHash, oldExtension)
+	if oldChild != nil {
+		root.setChild(oldNib, oldChild)
+	} else {
+		root.setStoredChild(oldNib, oldHash, oldExtension)
+	}
 	root.setLeaf(newNib, packPath(path[1:], nil), value)
 	*n = *root
 	return nil

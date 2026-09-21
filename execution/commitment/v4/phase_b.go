@@ -71,7 +71,17 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 			}
 			continue
 		}
-		if entry.update == nil && !entry.storageDirty {
+		if !entry.storageDirty && (entry.update == nil || entry.update.Flags == 0) {
+			continue
+		}
+		if !found && entry.update == nil && entry.storageDirty {
+			addrHash := hashAddressPath(entry.hashedKey)
+			storageRoot, ok := roots[addrHash]
+			if !ok || storageRoot == empty.RootHash {
+				continue
+			}
+		}
+		if !found && entry.update != nil && entry.update.Flags == 0 {
 			continue
 		}
 

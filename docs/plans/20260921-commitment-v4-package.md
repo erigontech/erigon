@@ -624,13 +624,13 @@ formats differ by construction, which is the whole point of v4 — so this subst
 against the sequential trie plus **byte** parity of v4 against itself across two routes to the same
 state. Recorded so a later reader does not "restore" the original wording.
 
-- [ ] apply N ≥ 3 incremental batches through v4 and HPH, asserting root equality after each
-- [ ] after each batch, reload v4's persisted records through the task-19 restore path into a fresh trie and recompute the root from them alone — root parity on a single batch is a weak oracle, and invariant 14 says batch-2 branch damage only surfaces at batch 3
-- [ ] assert the stored record set after batch k is byte-identical whether reached incrementally or by a single bulk batch over the union
-- [ ] cover unwind and re-execute
-- [ ] cover a repeated write and a write-delete-write within one batch
-- [ ] cover a key-only historical touch — `domain_shared.go:2075` passes nil for changed historical keys, so a nil payload must mean "discover this key" and not "this leaf is empty", or existing leaves get deleted
-- [ ] run the incremental suite — must pass before task 23
+- [x] apply N ≥ 3 incremental batches through v4 and HPH, asserting root equality after each
+- [x] after each batch, reload v4's persisted records through the task-19 restore path into a fresh trie and recompute the root from them alone — root parity on a single batch is a weak oracle, and invariant 14 says batch-2 branch damage only surfaces at batch 3
+- [x] assert the stored record set after batch k is byte-identical whether reached incrementally or by a single bulk batch over the union
+- [x] cover unwind and re-execute
+- [x] cover a repeated write and a write-delete-write within one batch
+- [x] cover a key-only historical touch — `domain_shared.go:2075` passes nil for changed historical keys, so a nil payload must mean "discover this key" and not "this leaf is empty", or existing leaves get deleted
+- [x] run the incremental suite — must pass before task 23
 
 ### Task 23: Concurrency — one shared semaphore, longest-first
 
