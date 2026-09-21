@@ -18,7 +18,10 @@ package jsonrpc
 
 import (
 	"cmp"
+	"encoding/json"
+	"net/http/httptest"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,14 +32,17 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/privateapi"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -120,5 +126,60 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	})
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		require.Equal(t, i, receipts[i-1].BlockNumber)
+	}
+}
+
+// sharedJSON reaches rpc through interfaces that package keeps unexported; these mirror them, so a
+// pointer receiver or a renamed method fails here instead of sending {} to every subscriber.
+var (
+	_ interface{ MarshalFastJSON() ([]byte, error) } = sharedJSON[*types.Header]{}
+	_ interface{ LocalValue() any }                  = sharedJSON[*types.Header]{}
+)
+
+func TestSharedJSONEncodesTheValue(t *testing.T) {
+	h := &types.Header{Number: *uint256.NewInt(7)}
+	s := sharedJSON[*types.Header]{&rpchelper.Shared[*types.Header]{Value: h}, headerValue}
+	got, err := s.MarshalFastJSON()
+	require.NoError(t, err)
+	want, err := json.Marshal(h)
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(got))
+	require.Same(t, h, s.LocalValue())
+}
+
+// newHeads through the rpc package's notifier, as a websocket client receives it.
+func TestEthSubscribeNewHeadsOverWebsocket(t *testing.T) {
+	m := execmoduletester.New(t)
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m), m.DB, nil, nil)
+
+	server := rpc.NewServer(50, false, false, true, m.Log, 100)
+	require.NoError(t, server.RegisterName("eth", api))
+	defer server.Stop()
+	httpsrv := httptest.NewServer(server.WebsocketHandler([]string{"*"}, nil, false, m.Log))
+	defer httpsrv.Close()
+	client, err := rpc.DialWebsocket(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", m.Log)
+	require.NoError(t, err)
+	defer client.Close()
+
+	ch := make(chan json.RawMessage, 1)
+	sub, err := client.EthSubscribe(t.Context(), ch, "newHeads")
+	require.NoError(t, err)
+	defer sub.Unsubscribe()
+
+	header := &types.Header{Number: *uint256.NewInt(7)}
+	payload, err := rlp.EncodeToBytes(header)
+	require.NoError(t, err)
+	ff.OnNewEvent(&remoteproto.SubscribeReply{Type: remoteproto.Event_HEADER, Data: payload})
+
+	want, err := json.Marshal(header)
+	require.NoError(t, err)
+	select {
+	case got := <-ch:
+		require.Equal(t, string(want), string(got))
+	case err := <-sub.Err():
+		t.Fatal(err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("no newHeads notification")
 	}
 }
