@@ -257,8 +257,9 @@ func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 // notification wraps result, which is already encoded, in the subscription message without
 // parsing it again: every subscriber would otherwise re-check the same payload.
 func notification(namespace string, id ID, result json.RawMessage) []byte {
+	method, _ := json.Marshal(namespace + notificationMethodSuffix)
 	quotedID, _ := json.Marshal(string(id))
-	return slices.Concat([]byte(`{"jsonrpc":"`+vsn+`","method":"`+namespace+notificationMethodSuffix+`","params":{"subscription":`),
+	return slices.Concat([]byte(`{"jsonrpc":"`+vsn+`","method":`), method, []byte(`,"params":{"subscription":`),
 		quotedID, []byte(`,"result":`), result, []byte("}}"))
 }
 
