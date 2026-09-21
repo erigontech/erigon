@@ -17,14 +17,18 @@
 package ethutils
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
@@ -57,4 +61,58 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	receipt.Bloom = types.Bloom{}
 	fields = MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
 	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
+}
+
+// The fast marshaller has to produce the bytes encoding/json produced, field order and
+// omitempty included, for both log shapes MarshalReceipt can put in Logs.
+func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	txn := dynamicFeeTx(&to)
+	txn.SetSender(accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef03")))
+	header := &types.Header{Number: *uint256.NewInt(7), Time: 1_750_000_000, BaseFee: uint256.NewInt(50)}
+
+	for _, tc := range []struct {
+		name               string
+		logs               int
+		withBlockTimestamp bool
+		nilLogs            bool
+	}{
+		{"no logs", 0, false, false},
+		{"two logs", 2, false, false},
+		{"two logs with timestamp", 2, true, false},
+		{"nil logs", 0, false, true},
+		{"nil logs with timestamp", 0, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := make(types.Logs, tc.logs)
+			for i := range logs {
+				logs[i] = &types.Log{Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64)}
+			}
+			if tc.nilLogs {
+				logs = nil
+			}
+			receipt := &types.Receipt{
+				Status:            types.ReceiptStatusSuccessful,
+				CumulativeGasUsed: 42_000,
+				Logs:              logs,
+				TxHash:            common.HexToHash("0xbeef"),
+				GasUsed:           21_000,
+				BlockHash:         common.HexToHash("0xb10c"),
+				BlockNumber:       uint256.NewInt(7),
+				TransactionIndex:  3,
+			}
+			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, tc.withBlockTimestamp)
+
+			want, err := json.Marshal(r)
+			require.NoError(t, err)
+
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, r.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+
+			require.Equal(t, string(want), string(s.Buffer()))
+		})
+	}
 }
