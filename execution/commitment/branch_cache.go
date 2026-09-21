@@ -73,6 +73,7 @@ type BranchCache struct {
 
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
+	lastPublishedStaleEvicted atomic.Uint64
 
 	putStripes [256]sync.Mutex
 
@@ -554,6 +555,18 @@ func (c *BranchCache) PinnedCount() int {
 	return int(n)
 }
 
+func (c *BranchCache) PinnedCountFor(contractHash []byte) int {
+	p := c.pinned.Load()
+	if p == nil {
+		return 0
+	}
+	st, ok := p.Get(contractHash)
+	if !ok {
+		return 0
+	}
+	return int(st.entries.Load())
+}
+
 func (c *BranchCache) UnpinContract(contractHash []byte) {
 	if p := c.pinned.Load(); p != nil {
 		p.Delete(contractHash)
@@ -659,6 +672,7 @@ func (c *BranchCache) Clear() {
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
 	c.staleEvicted.Store(0)
+	c.lastPublishedStaleEvicted.Store(0)
 	c.coh.Reset()
 }
 
