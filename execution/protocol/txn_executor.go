@@ -677,7 +677,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			typ = vm.CREATE
 			destination = createAddress
 		}
-		gasUsed = runtimeGasAccounting{frame: st.handleRuntimeFailure(typ, destination, runtimeGas, vmerr)}
+		frameGasUsed := st.handleRuntimeFailure(typ, destination, runtimeGas, vmerr)
+		gasUsed = runtimeGasAccounting{frame: frameGasUsed}
 	} else {
 		frameGas := st.gasRemaining
 		if contractCreation {
