@@ -20,7 +20,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // Result structs for GetProof
@@ -39,41 +38,33 @@ type StorProofResult struct {
 	Proof []hexutil.Bytes `json:"proof"`
 }
 
-func (r *AccProofResult) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	w.WriteObjectStart()
-	w.WriteObjectField("address").WriteHex(r.Address[:])
-	writeHexArray(w, "accountProof", r.AccountProof)
-	jsonw.Text(w, "balance", r.Balance)
-	jsonw.Hex(w, "codeHash", r.CodeHash[:])
-	jsonw.Text(w, "nonce", &r.Nonce)
-	jsonw.Hex(w, "storageHash", r.StorageHash[:])
-	jsonw.Array(w, "storageProof", &r.StorageProof, writeStorProofElem)
-	w.WriteObjectEnd()
+func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	s.WriteObjectStart()
+	s.WriteObjectField("address").WriteHex(r.Address[:])
+	writeHexArray(s, "accountProof", r.AccountProof)
+	jsonstream.Text(s, "balance", r.Balance)
+	jsonstream.Field(s, "codeHash").WriteHex(r.CodeHash[:])
+	jsonstream.Text(s, "nonce", &r.Nonce)
+	jsonstream.Field(s, "storageHash").WriteHex(r.StorageHash[:])
+	jsonstream.Field(s, "storageProof")
+	jsonstream.ArrayValue(s, r.StorageProof, writeStorProofElem)
+	s.WriteObjectEnd()
 	return nil
 }
 
-// writeHexArray writes the proof nodes as one value when the stream allows it, which costs
-// one buffer growth instead of one per node.
-func writeHexArray(w jsonw.JSONWriter, name string, nodes []hexutil.Bytes) {
-	s := jsonstream.Concrete(w)
-	if s == nil {
-		jsonw.Array(w, name, &nodes, writeHexElem)
-		return
-	}
+func writeHexArray(s *jsonstream.StackStream, name string, nodes []hexutil.Bytes) {
+	jsonstream.Field(s, name)
 	if nodes == nil {
-		jsonw.Field(w, name).WriteNil()
+		s.WriteNil()
 		return
 	}
-	jsonw.Field(w, name)
 	jsonstream.WriteHexBytes(s, nodes)
 }
 
-func writeHexElem(w jsonw.JSONWriter, b *hexutil.Bytes) { w.WriteHex(*b) }
-
-func writeStorProofElem(w jsonw.JSONWriter, sp *StorProofResult) {
-	w.WriteObjectStart()
-	w.WriteObjectField("key").WriteString(sp.Key)
-	jsonw.Text(w, "value", sp.Value)
-	writeHexArray(w, "proof", sp.Proof)
-	w.WriteObjectEnd()
+func writeStorProofElem(s *jsonstream.StackStream, sp *StorProofResult) {
+	s.WriteObjectStart()
+	s.WriteObjectField("key").WriteString(sp.Key)
+	jsonstream.Text(s, "value", sp.Value)
+	writeHexArray(s, "proof", sp.Proof)
+	s.WriteObjectEnd()
 }

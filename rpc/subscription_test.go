@@ -29,7 +29,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestNewID(t *testing.T) {
@@ -244,7 +244,7 @@ func (fastJSONPayload) MarshalFastJSON() ([]byte, error) { return []byte(`"fast"
 
 type streamedPayload struct{}
 
-func (streamedPayload) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteHex([]byte{0xab})
 	return nil
 }
@@ -255,7 +255,7 @@ type bothFastJSON struct{ data []byte }
 
 func (b bothFastJSON) MarshalFastJSON() ([]byte, error) { return json.Marshal(b.data) }
 
-func (b bothFastJSON) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (b bothFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteHex(b.data)
 	return nil
 }

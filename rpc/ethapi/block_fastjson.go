@@ -22,107 +22,106 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // MarshalFastJSONTo writes the header as its own object. RPCBlock flattens the same fields
 // into its own object instead, through WriteFieldsTo.
-func (h *RPCHeader) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (h *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if h == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return nil
 	}
-	w.WriteObjectStart()
-	h.WriteFieldsTo(w)
-	w.WriteObjectEnd()
+	s.WriteObjectStart()
+	h.WriteFieldsTo(s)
+	s.WriteObjectEnd()
 	return nil
 }
 
 // WriteFieldsTo writes the header's fields without the enclosing object, in the order the
 // struct declares them so the bytes match reflection exactly. The caller owns the braces,
 // which is how RPCBlock flattens the embedded header into its own object.
-func (h *RPCHeader) WriteFieldsTo(w jsonw.JSONWriter) {
-	w.WriteObjectField("number")
+func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
+	s.WriteObjectField("number")
 	if h.Number == nil {
-		w.WriteNil()
+		s.WriteNil()
 	} else {
-		w.WriteQuotedText(h.Number)
+		s.WriteQuotedText(h.Number)
 	}
-	jsonw.Field(w, "hash")
+	jsonstream.Field(s, "hash")
 	if h.Hash == nil {
-		w.WriteNil()
+		s.WriteNil()
 	} else {
-		w.WriteHex(h.Hash[:])
+		s.WriteHex(h.Hash[:])
 	}
-	jsonw.Hex(w, "parentHash", h.ParentHash[:])
-	jsonw.Field(w, "nonce")
+	jsonstream.Field(s, "parentHash").WriteHex(h.ParentHash[:])
+	jsonstream.Field(s, "nonce")
 	if h.Nonce == nil {
-		w.WriteNil()
+		s.WriteNil()
 	} else {
-		w.WriteHex(h.Nonce[:])
+		s.WriteHex(h.Nonce[:])
 	}
-	jsonw.Hex(w, "mixHash", h.MixHash[:])
-	jsonw.Hex(w, "sha3Uncles", h.Sha3Uncles[:])
-	jsonw.Field(w, "logsBloom")
+	jsonstream.Field(s, "mixHash").WriteHex(h.MixHash[:])
+	jsonstream.Field(s, "sha3Uncles").WriteHex(h.Sha3Uncles[:])
+	jsonstream.Field(s, "logsBloom")
 	if h.LogsBloom == nil {
-		w.WriteNil()
+		s.WriteNil()
 	} else {
-		w.WriteHex(h.LogsBloom[:])
+		s.WriteHex(h.LogsBloom[:])
 	}
-	jsonw.Hex(w, "stateRoot", h.StateRoot[:])
-	jsonw.Field(w, "miner")
+	jsonstream.Field(s, "stateRoot").WriteHex(h.StateRoot[:])
+	jsonstream.Field(s, "miner")
 	if h.Miner == nil {
-		w.WriteNil()
+		s.WriteNil()
 	} else {
-		w.WriteHex(h.Miner[:])
+		s.WriteHex(h.Miner[:])
 	}
-	jsonw.Text(w, "difficulty", h.Difficulty)
-	jsonw.Field(w, "extraData").WriteHex(h.ExtraData)
-	jsonw.Text(w, "gasLimit", &h.GasLimit)
-	jsonw.Text(w, "gasUsed", &h.GasUsed)
-	jsonw.Text(w, "timestamp", &h.Timestamp)
-	jsonw.Hex(w, "transactionsRoot", h.TransactionsRoot[:])
-	jsonw.Hex(w, "receiptsRoot", h.ReceiptsRoot[:])
+	jsonstream.Text(s, "difficulty", h.Difficulty)
+	jsonstream.Field(s, "extraData").WriteHex(h.ExtraData)
+	jsonstream.Text(s, "gasLimit", &h.GasLimit)
+	jsonstream.Text(s, "gasUsed", &h.GasUsed)
+	jsonstream.Text(s, "timestamp", &h.Timestamp)
+	jsonstream.Field(s, "transactionsRoot").WriteHex(h.TransactionsRoot[:])
+	jsonstream.Field(s, "receiptsRoot").WriteHex(h.ReceiptsRoot[:])
 
 	// omitempty: a nil pointer is left out entirely.
 	if h.BaseFeePerGas != nil {
-		jsonw.Text(w, "baseFeePerGas", h.BaseFeePerGas)
+		jsonstream.Text(s, "baseFeePerGas", h.BaseFeePerGas)
 	}
 	if h.WithdrawalsRoot != nil {
-		jsonw.Hex(w, "withdrawalsRoot", h.WithdrawalsRoot[:])
+		jsonstream.Field(s, "withdrawalsRoot").WriteHex(h.WithdrawalsRoot[:])
 	}
 	if h.BlobGasUsed != nil {
-		jsonw.Text(w, "blobGasUsed", h.BlobGasUsed)
+		jsonstream.Text(s, "blobGasUsed", h.BlobGasUsed)
 	}
 	if h.ExcessBlobGas != nil {
-		jsonw.Text(w, "excessBlobGas", h.ExcessBlobGas)
+		jsonstream.Text(s, "excessBlobGas", h.ExcessBlobGas)
 	}
 	if h.ParentBeaconBlockRoot != nil {
-		jsonw.Hex(w, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot[:])
+		jsonstream.Field(s, "parentBeaconBlockRoot").WriteHex(h.ParentBeaconBlockRoot[:])
 	}
 	if h.RequestsHash != nil {
-		jsonw.Hex(w, "requestsHash", h.RequestsHash[:])
+		jsonstream.Field(s, "requestsHash").WriteHex(h.RequestsHash[:])
 	}
 	if h.BlockAccessListHash != nil {
-		jsonw.Hex(w, "blockAccessListHash", h.BlockAccessListHash[:])
+		jsonstream.Field(s, "blockAccessListHash").WriteHex(h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
-		jsonw.Text(w, "slotNumber", h.SlotNumber)
+		jsonstream.Text(s, "slotNumber", h.SlotNumber)
 	}
 	if h.AuraSeal != nil {
-		jsonw.Field(w, "auraSeal").WriteHex(*h.AuraSeal)
+		jsonstream.Field(s, "auraSeal").WriteHex(*h.AuraSeal)
 	}
 	if h.AuraStep != nil {
-		jsonw.Text(w, "auraStep", h.AuraStep)
+		jsonstream.Text(s, "auraStep", h.AuraStep)
 	}
 }
 
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
 // without it the promoted header method would satisfy the fast-JSON interface and a block
 // would serialise as a bare header, losing its transactions.
-func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if b == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return nil
 	}
 
@@ -144,49 +143,52 @@ func (b *RPCBlock) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		return err
 	}
 
-	w.WriteObjectStart()
-	b.RPCHeader.WriteFieldsTo(w)
+	s.WriteObjectStart()
+	b.RPCHeader.WriteFieldsTo(s)
 
-	jsonw.Text(w, "size", &b.Size)
+	jsonstream.Text(s, "size", &b.Size)
 
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
 	case hashesOK:
-		jsonstream.HexesField(w, "transactions", hashes)
+		jsonstream.HexesField(s, "transactions", hashes)
 	case fullTxs != nil:
-		jsonw.Field(w, "transactions").WriteRawBytes(fullTxs)
+		jsonstream.Field(s, "transactions").WriteRawBytes(fullTxs)
 	}
 
-	jsonstream.HexesField(w, "uncles", b.Uncles)
+	jsonstream.HexesField(s, "uncles", b.Uncles)
 
-	jsonw.Array(w, "withdrawals", b.Withdrawals, writeWithdrawalElem)
+	if b.Withdrawals != nil {
+		jsonstream.Field(s, "withdrawals")
+		jsonstream.ArrayValue(s, *b.Withdrawals, writeWithdrawalElem)
+	}
 	if txCount != nil {
-		jsonw.Field(w, "transactionCount").WriteRawBytes(txCount)
+		jsonstream.Field(s, "transactionCount").WriteRawBytes(txCount)
 	}
 	if b.TotalDifficulty != nil {
-		jsonw.Text(w, "totalDifficulty", b.TotalDifficulty)
+		jsonstream.Text(s, "totalDifficulty", b.TotalDifficulty)
 	}
 	if calls != nil {
-		jsonw.Field(w, "calls").WriteRawBytes(calls)
+		jsonstream.Field(s, "calls").WriteRawBytes(calls)
 	}
-	w.WriteObjectEnd()
+	s.WriteObjectEnd()
 	return nil
 }
 
-func writeWithdrawalElem(w jsonw.JSONWriter, wd **types.Withdrawal) {
+func writeWithdrawalElem(s *jsonstream.StackStream, wd **types.Withdrawal) {
 	if *wd == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return
 	}
-	w.WriteObjectStart()
-	w.WriteObjectField("index").WriteQuotedText(&(*wd).Index)
-	w.WriteMore()
-	w.WriteObjectField("validatorIndex").WriteQuotedText(&(*wd).Validator)
-	w.WriteMore()
-	w.WriteObjectField("address").WriteHex((*wd).Address[:])
-	w.WriteMore()
-	w.WriteObjectField("amount").WriteQuotedText(&(*wd).Amount)
-	w.WriteObjectEnd()
+	s.WriteObjectStart()
+	s.WriteObjectField("index").WriteQuotedText(&(*wd).Index)
+	s.WriteMore()
+	s.WriteObjectField("validatorIndex").WriteQuotedText(&(*wd).Validator)
+	s.WriteMore()
+	s.WriteObjectField("address").WriteHex((*wd).Address[:])
+	s.WriteMore()
+	s.WriteObjectField("amount").WriteQuotedText(&(*wd).Amount)
+	s.WriteObjectEnd()
 }
 
 // marshalIfSet encodes v unless it is absent, so the caller states each field once.
