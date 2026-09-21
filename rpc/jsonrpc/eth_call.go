@@ -69,6 +69,16 @@ func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
 	return nil
 }
 
+// requireBlockSelector rejects a block selector that carries neither a number nor a
+// hash. Used by the methods whose selector is mandatory, so it has no default to
+// fall back on.
+func requireBlockSelector(blockNrOrHash rpc.BlockNumberOrHash) error {
+	if blockNrOrHash.BlockNumber == nil && blockNrOrHash.BlockHash == nil {
+		return &rpc.InvalidParamsError{Message: "block selector must carry a blockNumber or a blockHash"}
+	}
+	return nil
+}
+
 // blockOrLatest resolves an optional block selector, defaulting to the latest block
 // when the caller omitted the parameter (nil). Used by the state-reading methods
 // whose Block parameter is optional per execution-apis (default 'latest').
