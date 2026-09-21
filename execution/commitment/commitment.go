@@ -120,9 +120,30 @@ type TrieVariant string
 const (
 	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
+	VariantCommitmentV4        TrieVariant = "commitment-v4"
 )
 
+type TrieFunc func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+
+var trieFuncs = make(map[TrieVariant]TrieFunc)
+
+func RegisterTrieFunc(variant TrieVariant, fn TrieFunc) {
+	if variant == "" || fn == nil {
+		panic("commitment: invalid trie registration")
+	}
+	if _, ok := trieFuncs[variant]; ok {
+		panic(fmt.Sprintf("commitment: trie variant %q already registered", variant))
+	}
+	trieFuncs[variant] = fn
+}
+
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
+	if fn, ok := trieFuncs[cfg.Variant]; ok {
+		if cfg.Variant == VariantCommitmentV4 && mode != ModeUpdate {
+			panic(fmt.Sprintf("commitment v4 requires ModeUpdate, got %s mode", mode))
+		}
+		return fn(tmpdir, cfg)
+	}
 	switch cfg.Variant {
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.

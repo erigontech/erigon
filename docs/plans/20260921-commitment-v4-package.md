@@ -526,16 +526,16 @@ transitions, so testing them apart from the record that implements them was an o
 - Create: `execution/commitment/v4/trie_test.go`
 - Modify: `execution/commitment/commitment.go`
 
-- [ ] add to `commitment`: `VariantCommitmentV4 TrieVariant = "commitment-v4"`, `type TrieFunc func(tmpdir string, cfg TrieConfig) (Trie, *Updates)`, a `RegisterTrieFunc(TrieVariant, TrieFunc)` and a registry lookup in `InitializeTrieAndUpdates` before the existing switch
-- [ ] register v4 from its own `init()` — `commitment` must **not** import v4, because v4 imports `commitment` for `Update`, `KeyUpdate` and `Trie`, and a direct arm closes the cycle
-- [ ] add the single blank import of `.../execution/commitment/v4` at the node wiring site
-- [ ] implement `commitment.Trie` on a `*Trie` in the v4 package: `RootHash`, `SetTraceWriter`, `Variant`, `Reset`, `ResetContext`, `Process`, `Release`
-- [ ] `Process` drives phase A then phase B **sequentially** through `updates.HashSort` and returns the root; no writes and no concurrency in this task
-- [ ] reject `ModeDirect` and `ModeParallel` by **panic** with a message naming the reason — `InitializeTrieAndUpdates` returns `(Trie, *Updates)` with no error, so an error return is not expressible without changing every existing caller
-- [ ] write a test that the v4 variant returns a `ModeUpdate` `Updates` and a v4 `Trie`
-- [ ] write `require.Panics` tests for the other two modes, asserting the message names the mode
-- [ ] write a test that `Process` issues zero `Account`/`Storage` calls for a mixed account-and-storage batch
-- [ ] run `go build ./...` to prove no import cycle, then `go test ./execution/commitment/...` — must pass before task 17
+- [x] add to `commitment`: `VariantCommitmentV4 TrieVariant = "commitment-v4"`, `type TrieFunc func(tmpdir string, cfg TrieConfig) (Trie, *Updates)`, a `RegisterTrieFunc(TrieVariant, TrieFunc)` and a registry lookup in `InitializeTrieAndUpdates` before the existing switch
+- [x] register v4 from its own `init()` — `commitment` must **not** import v4, because v4 imports `commitment` for `Update`, `KeyUpdate` and `Trie`, and a direct arm closes the cycle
+- [x] add the single blank import of `.../execution/commitment/v4` at the node wiring site
+- [x] implement `commitment.Trie` on a `*Trie` in the v4 package: `RootHash`, `SetTraceWriter`, `Variant`, `Reset`, `ResetContext`, `Process`, `Release`
+- [x] `Process` drives phase A then phase B **sequentially** through `updates.HashSort` and returns the root; no writes and no concurrency in this task
+- [x] reject `ModeDirect` and `ModeParallel` by **panic** with a message naming the reason — `InitializeTrieAndUpdates` returns `(Trie, *Updates)` with no error, so an error return is not expressible without changing every existing caller
+- [x] write a test that the v4 variant returns a `ModeUpdate` `Updates` and a v4 `Trie`
+- [x] write `require.Panics` tests for the other two modes, asserting the message names the mode
+- [x] write a test that `Process` issues zero `Account`/`Storage` calls for a mixed account-and-storage batch
+- [x] run `go build ./...` to prove no import cycle, then `go test ./execution/commitment/...` — must pass before task 17
 
 ### Task 17: Encode on fold, v4-local apply
 
