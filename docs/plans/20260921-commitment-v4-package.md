@@ -314,15 +314,15 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/key.go`
 - Create: `execution/commitment/v4/key_test.go`
 
-- [ ] add the tag constants `tagAccountNode = 0x40`, `tagStorageNode = 0x41`, `tagState = 0x42`
-- [ ] add `AccountNodeKey(path []byte, dst []byte) []byte` and `StorageNodeKey(addrHash [32]byte, path []byte, dst []byte) []byte` emitting `tag ‖ pack ‖ nibbleCount u8`
-- [ ] add `AccountRootKey()` = `40 00`, `StorageRootKey(addrHash)` = `41 ‖ addrHash ‖ 00`, `StateKey()` = `42`
-- [ ] add `ParseKey(key []byte) (tag byte, addrHash []byte, path []byte, err error)` rejecting a `nibbleCount` inconsistent with the packed length
-- [ ] add `AssertV1Keyed(domainKeyVersion) error` per **C1** — v4 refuses to run against a V2-keyed commitment domain, because `EncodeKeyV2([4,0])` is `40 00` and collides with the account-root key
-- [ ] write round-trip tests across depths 0..64 in both planes
-- [ ] write the disjointness test with **two arms**: `HexToCompact` over 10k random paths never produces a first byte ≥ 0x40 (passes), and `nibbles.EncodeKeyV2` **does** collide — assert `EncodeKeyV2([]byte{4,0})` equals `AccountRootKey()`, so the guard's reason is pinned by a test rather than by a comment
-- [ ] write a test that `AssertV1Keyed` rejects a V2 domain with a named error
-- [ ] run tests — must pass before task 3
+- [x] add the tag constants `tagAccountNode = 0x40`, `tagStorageNode = 0x41`, `tagState = 0x42`
+- [x] add `AccountNodeKey(path []byte, dst []byte) []byte` and `StorageNodeKey(addrHash [32]byte, path []byte, dst []byte) []byte` emitting `tag ‖ pack ‖ nibbleCount u8`
+- [x] add `AccountRootKey()` = `40 00`, `StorageRootKey(addrHash)` = `41 ‖ addrHash ‖ 00`, `StateKey()` = `42`
+- [x] add `ParseKey(key []byte) (tag byte, addrHash []byte, path []byte, err error)` rejecting a `nibbleCount` inconsistent with the packed length
+- [x] add `AssertV1Keyed(domainKeyVersion) error` per **C1** — v4 refuses to run against a V2-keyed commitment domain, because `EncodeKeyV2([4,0])` is `40 00` and collides with the account-root key
+- [x] write round-trip tests across depths 0..64 in both planes
+- [x] write the disjointness test with **two arms**: `HexToCompact` over 10k random paths never produces a first byte ≥ 0x40 (passes), and `nibbles.EncodeKeyV2` **does** collide — assert `EncodeKeyV2([]byte{4,0})` equals `AccountRootKey()`, so the guard's reason is pinned by a test rather than by a comment
+- [x] write a test that `AssertV1Keyed` rejects a V2 domain with a named error
+- [x] run tests — must pass before task 3
 
 ### Task 3: Record decode
 
