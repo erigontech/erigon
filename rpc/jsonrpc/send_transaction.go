@@ -115,7 +115,12 @@ func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeou
 
 	// The filter update reaches the server asynchronously, so a receipt produced before it lands is never
 	// delivered on the channel. Look the receipt up once to cover a transaction mined by then.
-	if receipt, err := api.GetTransactionReceipt(timeoutCtx, hash); err == nil && receipt != nil {
+	// An exhausted budget is the timeout itself and is reported as such below; any other lookup failure is real.
+	receipt, err := api.GetTransactionReceipt(timeoutCtx, hash)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		return nil, err
+	}
+	if receipt != nil {
 		return receipt, nil
 	}
 
