@@ -35,12 +35,7 @@ type ReceiptsFilterAggregator struct {
 type ReceiptsFilter struct {
 	allTxHashes       int                                   // Counter: subscribe to all receipts if > 0
 	transactionHashes *concurrent.SyncMap[common.Hash, int] // Transaction hashes to filter, with ref count
-	sender            Sub[*remoteproto.SubscribeReceiptsReply]
-}
-
-// Send sends a receipt to the subscriber
-func (f *ReceiptsFilter) Send(receipt *remoteproto.SubscribeReceiptsReply) {
-	f.sender.Send(receipt)
+	sender            Sub[*Shared[*remoteproto.SubscribeReceiptsReply]]
 }
 
 // Close closes the sender
@@ -60,7 +55,7 @@ func NewReceiptsFilterAggregator() *ReceiptsFilterAggregator {
 
 // insertReceiptsFilter creates a fully-configured filter, inserts it into the map,
 // and adds its counts to the aggregate, all under the write lock.
-func (a *ReceiptsFilterAggregator) insertReceiptsFilter(sender Sub[*remoteproto.SubscribeReceiptsReply], txHashes []common.Hash, maxTxHashes int) ReceiptsSubID {
+func (a *ReceiptsFilterAggregator) insertReceiptsFilter(sender Sub[*Shared[*remoteproto.SubscribeReceiptsReply]], txHashes []common.Hash, maxTxHashes int) ReceiptsSubID {
 	filter := &ReceiptsFilter{
 		transactionHashes: concurrent.NewSyncMap[common.Hash, int](),
 		sender:            sender,
@@ -159,6 +154,7 @@ func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.Subscr
 	defer a.receiptsFilterLock.RUnlock()
 
 	txHash := gointerfaces.ConvertH256ToHash(receipt.TransactionHash)
+	ev := &Shared[*remoteproto.SubscribeReceiptsReply]{Value: receipt}
 
 	_ = a.receiptsFilters.Range(func(k ReceiptsSubID, filter *ReceiptsFilter) error {
 		// Check if this filter matches the receipt
@@ -171,7 +167,7 @@ func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.Subscr
 		// allTxHashes > 0 means subscribe to all receipts
 
 		// Send to subscriber
-		filter.sender.Send(receipt)
+		filter.sender.Send(ev)
 		return nil
 	})
 }

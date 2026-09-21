@@ -127,7 +127,7 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 			log.Warn("[rpc] receipts subscription was closed")
 			return nil, fmt.Errorf("receipts subscription was closed")
 		}
-		return ethutils.MarshalSubscribeReceipt(protoReceipt), nil
+		return ethutils.MarshalSubscribeReceipt(protoReceipt.Value), nil
 	}
 }
 
