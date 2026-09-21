@@ -48,16 +48,20 @@ import (
 
 // TxEvent carries one transaction's execution-index output to observers.
 type TxEvent struct {
-	ChainID    *uint256.Int
-	BlockNum   uint64
-	BlockTime  uint64 // header timestamp (0 if unavailable on this exec path)
-	TxNum      uint64
-	TxHash     common.Hash // this tx's hash (zero for the synthetic block-end task)
-	Status     uint64      // receipt status: 1 success, 0 reverted (undefined when TxHash is zero)
-	Logs       []*types.Log
-	Senders    []common.Address // trace "froms" (callers, at the top and nested frames)
-	Callers    []common.Address // trace "tos" (callees)
-	IsBlockEnd bool             // the synthetic block-end task, not a user tx
+	ChainID   *uint256.Int
+	BlockNum  uint64
+	BlockTime uint64 // header timestamp (0 if unavailable on this exec path)
+	TxNum     uint64
+	TxHash    common.Hash // this tx's hash (zero for the synthetic block-end task)
+	Status    uint64      // receipt status: 1 success, 0 reverted (undefined when TxHash is zero)
+	GasUsed   uint64      // gas this tx consumed (0 when TxHash is zero)
+	// ContractAddress is the address a CREATE deployed to, zero otherwise. Carried for the same
+	// reason as Status: so confirming your own transaction needs no receipt lookup.
+	ContractAddress common.Address
+	Logs            []*types.Log
+	Senders         []common.Address // trace "froms" (callers, at the top and nested frames)
+	Callers         []common.Address // trace "tos" (callees)
+	IsBlockEnd      bool             // the synthetic block-end task, not a user tx
 	// Tx is a read handle onto chain state as of this execution point. Do not
 	// retain past the callback.
 	Tx kv.TemporalTx

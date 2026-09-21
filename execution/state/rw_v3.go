@@ -437,6 +437,13 @@ func (rs *StateV3) ApplyTxIndexes(
 		if receipt != nil {
 			ev.TxHash = receipt.TxHash
 			ev.Status = receipt.Status
+			// …and the two fields that otherwise force a caller back to eth_getTransactionReceipt.
+			// An observer confirming its OWN transaction wants gas for its journal and, for a
+			// create, the address it deployed to. Without them the exec feed answers "it ran" and
+			// the caller still has to ask the INDEXED view for the rest — which lags execution, so
+			// the round-trip this extension point exists to remove came straight back.
+			ev.GasUsed = receipt.GasUsed
+			ev.ContractAddress = receipt.ContractAddress
 		}
 		if len(traceFroms) > 0 {
 			ev.Senders = make([]common.Address, 0, len(traceFroms))
