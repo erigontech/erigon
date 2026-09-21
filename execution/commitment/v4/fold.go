@@ -55,6 +55,23 @@ func fold(n *node, depth int) ([32]byte, error) {
 		}
 		return hash32(ref), nil
 	}
+	if depth == 0 && len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
+		nib := bits.TrailingZeros16(n.childMask)
+		var childHash []byte
+		if child := n.children[nib]; child != nil {
+			hash, err := fold(child, len(child.path))
+			if err != nil {
+				return [32]byte{}, err
+			}
+			childHash = hash[:]
+		} else {
+			childHash = n.childHash[nib]
+		}
+		if len(childHash) != 32 {
+			return [32]byte{}, fmt.Errorf("%w: root child %d hash", errFoldNode, nib)
+		}
+		return extensionRef(n.path, childHash), nil
+	}
 
 	var refs [16][]byte
 	for nib := range 16 {
@@ -101,7 +118,7 @@ func foldLeaf(n *node, nib, depth int, includeNib bool) ([]byte, error) {
 	if n.plane == planeAccount {
 		nonce, balance, codeHash, storageRoot, err := decodeAccountLeaf(payload)
 		if err != nil {
-			return nil, fmt.Errorf("%w: account leaf %d: %v", errFoldNode, nib, err)
+			return nil, fmt.Errorf("%w: account leaf %d: %w", errFoldNode, nib, err)
 		}
 		payload = accountConsensusRLP(nonce, &balance, storageRoot, codeHash, nil)
 		return leafRef(planeStorage, compact, payload, nil), nil

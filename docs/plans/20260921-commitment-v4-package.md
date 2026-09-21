@@ -479,15 +479,15 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 Merged with the former storage-root task: the 0→1, 1→2 and 2→1 transitions *are* the root-record
 transitions, so testing them apart from the record that implements them was an ordering inversion.
 
-- [ ] add `partition(stream []commitment.KeyUpdate) (storage []storageTask, accounts []accountEntry)` cutting the hashed-key-sorted stream at 64-nibble prefixes; a storage hashed key is `keccak(addr)‖keccak(slot)` so the stream is already grouped by account
-- [ ] add `runStorageTask(ctx commitment.PatriciaContext, t storageTask) (storageRoot [32]byte, err error)` — unfold, mutate, fold, bounded by the account's subtree, with no split rule because the subtree is disjoint by construction
-- [ ] write the root record at `41 ‖ keccak(addr) ‖ 00` whenever the trie is non-empty — an ordinary branch record at two slots or more, a `leafRoot` at exactly one (D10)
-- [ ] tombstone the root record when the trie empties, and tombstone the orphaned children on the 2→1 replacement
-- [ ] write the D10 independence test as a named case: account A holds exactly one slot S1, the next block writes only S2, phase A sees S2 alone and must still produce the correct `storageRoot`
-- [ ] write tests for storage transitions 0→1, 1→2, 2→1, 1→0 and a storage-only update with no account-field change
-- [ ] write a test for a storage wipe followed by a re-insert in the same block
-- [ ] write a test that the 2→1 replacement leaves no orphaned child records behind
-- [ ] run tests — must pass before task 14
+- [x] add `partition(stream []commitment.KeyUpdate) (storage []storageTask, accounts []accountEntry)` cutting the hashed-key-sorted stream at 64-nibble prefixes; a storage hashed key is `keccak(addr)‖keccak(slot)` so the stream is already grouped by account
+- [x] add `runStorageTask(ctx commitment.PatriciaContext, t storageTask) (storageRoot [32]byte, err error)` — unfold, mutate, fold, bounded by the account's subtree, with no split rule because the subtree is disjoint by construction
+- [x] write the root record at `41 ‖ keccak(addr) ‖ 00` whenever the trie is non-empty — an ordinary branch record at two slots or more, a `leafRoot` at exactly one (D10)
+- [x] tombstone the root record when the trie empties, and tombstone the orphaned children on the 2→1 replacement
+- [x] write the D10 independence test as a named case: account A holds exactly one slot S1, the next block writes only S2, phase A sees S2 alone and must still produce the correct `storageRoot`
+- [x] write tests for storage transitions 0→1, 1→2, 2→1, 1→0 and a storage-only update with no account-field change
+- [x] write a test for a storage wipe followed by a re-insert in the same block
+- [x] write a test that the 2→1 replacement leaves no orphaned child records behind
+- [x] run tests — must pass before task 14
 
 ### Task 14: Wipe and self-destruct jobs
 
