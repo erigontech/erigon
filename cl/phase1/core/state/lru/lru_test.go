@@ -232,9 +232,7 @@ func TestCacheWithTTLConcurrentUse(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for g := range 8 {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range 2000 {
 				k := (g + i) % 64
 				switch i % 4 {
@@ -248,7 +246,7 @@ func TestCacheWithTTLConcurrentUse(t *testing.T) {
 					c.Len()
 				}
 			}
-		}()
+		})
 	}
 	wg.Wait()
 
