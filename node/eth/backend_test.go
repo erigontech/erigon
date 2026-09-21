@@ -8,6 +8,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
@@ -30,6 +31,58 @@ func TestValidateEmbeddedBuilderMode(t *testing.T) {
 			err := validateEmbeddedBuilderMode(&cfg)
 			if test.wantError {
 				require.ErrorContains(t, err, "embedded Caplin")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestValidateEmbeddedBuilderRPCExposure(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		enabled   bool
+		api       []string
+		configure func(*httpcfg.HttpCfg)
+		wantError bool
+	}{
+		{name: "RPC globally disabled", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) {
+			cfg.Enabled = false
+			cfg.HttpServerEnabled = true
+			cfg.HttpListenAddress = "0.0.0.0"
+		}},
+		{name: "builder disabled", api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpServerEnabled = true; cfg.HttpListenAddress = "0.0.0.0" }},
+		{name: "builder namespace disabled", enabled: true, api: []string{"eth"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpServerEnabled = true; cfg.HttpListenAddress = "0.0.0.0" }},
+		{name: "loopback IPv4", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpServerEnabled = true; cfg.HttpListenAddress = "127.0.0.1" }},
+		{name: "loopback IPv6", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpServerEnabled = true; cfg.HttpListenAddress = "::1" }},
+		{name: "localhost", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpServerEnabled = true; cfg.HttpListenAddress = "localhost" }},
+		{name: "localhost case insensitive", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpServerEnabled = true; cfg.HttpListenAddress = "LOCALHOST" }},
+		{name: "unix override", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) {
+			cfg.HttpServerEnabled = true
+			cfg.HttpURL = "unix:///tmp/erigon-builder.sock"
+		}},
+		{name: "wildcard HTTP", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpServerEnabled = true; cfg.HttpListenAddress = "0.0.0.0" }, wantError: true},
+		{name: "public HTTPS", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpsServerEnabled = true; cfg.HttpsListenAddress = "192.0.2.1" }, wantError: true},
+		{name: "HTTPS URL enables listener", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpsURL = "tcp://192.0.2.1:8546" }, wantError: true},
+		{name: "wildcard websocket", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.WebsocketEnabled = true; cfg.HttpListenAddress = "0.0.0.0" }, wantError: true},
+		{name: "separate websocket ignores HTTP Unix override", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) {
+			cfg.HttpServerEnabled = true
+			cfg.HttpURL = "unix:///tmp/erigon-builder.sock"
+			cfg.HttpPort = 8545
+			cfg.WebsocketEnabled = true
+			cfg.WebsocketPort = 8546
+			cfg.HttpListenAddress = "0.0.0.0"
+		}, wantError: true},
+		{name: "remote TCP override", enabled: true, api: []string{"builder"}, configure: func(cfg *httpcfg.HttpCfg) { cfg.HttpServerEnabled = true; cfg.HttpURL = "tcp://0.0.0.0:8545" }, wantError: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			builderCfg := ethconfig.Config{}
+			builderCfg.CaplinConfig.EpbsBuilder.Enabled = test.enabled
+			httpCfg := httpcfg.HttpCfg{Enabled: true, API: test.api}
+			test.configure(&httpCfg)
+			err := validateEmbeddedBuilderRPCExposure(&builderCfg, &httpCfg)
+			if test.wantError {
+				require.ErrorContains(t, err, "loopback")
 			} else {
 				require.NoError(t, err)
 			}

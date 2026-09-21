@@ -118,6 +118,49 @@ func (p *coordinatorPublisher) Publish(_ context.Context, topic string, data []b
 	return p.err
 }
 
+func TestCoordinatorRecordsOnlyPublishedBids(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		publishErr error
+		wantBid    bool
+	}{
+		{name: "published", wantBid: true},
+		{name: "publish failed", publishErr: errors.New("unavailable")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			config := gloasCoordinatorConfig()
+			input := validCoordinatorSlotInput(config)
+			assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+			status := builder.NewEmbeddedBuilderStatus(true)
+			coordinator := NewCoordinator(
+				&config,
+				new(coordinatorSigner),
+				FixedMarginStrategy{Margin: 1},
+				&coordinatorAssembler{payload: assembled},
+				&coordinatorPublisher{err: test.publishErr},
+				1,
+			)
+			coordinator.status = status
+
+			bid, err := coordinator.RunSlot(t.Context(), input)
+			if test.publishErr != nil {
+				require.ErrorContains(t, err, "publish bid")
+			} else {
+				require.NoError(t, err)
+			}
+			snapshot := status.Snapshot()
+			require.Equal(t, input.Slot, snapshot.LastAttemptSlot)
+			if test.wantBid {
+				require.Equal(t, input.Slot, snapshot.LastBidSlot)
+				require.Equal(t, bid.Message.Value, snapshot.LastBidValueGwei)
+			} else {
+				require.Zero(t, snapshot.LastBidSlot)
+				require.Zero(t, snapshot.LastBidValueGwei)
+			}
+		})
+	}
+}
+
 type blockingCoordinatorPublisher struct {
 	started chan struct{}
 	release chan struct{}

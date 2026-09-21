@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	executionbuilder "github.com/erigontech/erigon/execution/builder"
 )
 
 type runtimePublisher struct {
@@ -210,7 +211,8 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 	runtimeCfg := epbscfg.DefaultConfig()
 	runtimeCfg.Enabled = true
 	runtimeCfg.KeyPath = keyPath
-	runtime, err := NewRuntime(runtimeCfg, RuntimeDependencies{
+	status := executionbuilder.NewEmbeddedBuilderStatus(true)
+	deps := RuntimeDependencies{
 		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
 		Clock:            clock,
@@ -223,7 +225,9 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
 		Events:           beaconevents.NewEventEmitter(),
-	})
+		Status:           status,
+	}
+	runtime, err := NewRuntime(runtimeCfg, deps)
 	require.NoError(t, err)
 
 	runCtx, cancel := context.WithCancel(t.Context())
@@ -236,8 +240,22 @@ func TestRuntimePublishesBidForValidatedPreferences(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("validated preferences did not publish a bid")
 	}
+	require.Equal(t, executionbuilder.BuilderPhaseRunning, status.Snapshot().Phase)
 	cancel()
 	require.ErrorIs(t, <-done, context.Canceled)
+	require.Equal(t, executionbuilder.BuilderPhaseStopped, status.Snapshot().Phase)
+	require.Equal(t, executionbuilder.BuilderStoppedNode, status.Snapshot().Reason)
+
+	deadlineStatus := executionbuilder.NewEmbeddedBuilderStatus(true)
+	deps.PendingDirectory = filepath.Join(t.TempDir(), "deadline-pending")
+	deps.Status = deadlineStatus
+	deadlineRuntime, err := NewRuntime(runtimeCfg, deps)
+	require.NoError(t, err)
+	deadlineCtx, deadlineCancel := context.WithDeadline(t.Context(), time.Now().Add(-time.Second))
+	defer deadlineCancel()
+	require.ErrorIs(t, deadlineRuntime.Run(deadlineCtx), context.DeadlineExceeded)
+	require.Equal(t, executionbuilder.BuilderPhaseStopped, deadlineStatus.Snapshot().Phase)
+	require.Equal(t, executionbuilder.BuilderStoppedNode, deadlineStatus.Snapshot().Reason)
 }
 
 func TestRuntimeProcessesBidLocallyBeforeRetryingIdenticalPublication(t *testing.T) {

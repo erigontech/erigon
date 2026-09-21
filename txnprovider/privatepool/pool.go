@@ -55,6 +55,11 @@ type Pool struct {
 	snapshots chan struct{}
 }
 
+type Stats struct {
+	Pending  int
+	Capacity int
+}
+
 type bundleContextKey struct {
 	slot       uint64
 	parentHash common.Hash
@@ -289,6 +294,15 @@ func (p *Pool) TransactionSetRevision(blockTime, parentBlockNum uint64) uint64 {
 	privateRevision := p.revision
 	p.mu.RUnlock()
 	return combineRevisions(baseRevision, privateRevision)
+}
+
+func (p *Pool) Stats() Stats {
+	if p == nil {
+		return Stats{}
+	}
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return Stats{Pending: len(p.bundles), Capacity: p.capacity}
 }
 
 func (p *Pool) snapshot(targetSlot uint64, targetParentHash common.Hash, targetGeneration uint64) ([]Bundle, uint64) {

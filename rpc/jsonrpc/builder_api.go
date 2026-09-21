@@ -36,6 +36,30 @@ type BuilderAPI interface {
 	SimulateBundle(context.Context, PrivateBundleRequest) (*PrivateBundleSimulationResult, error)
 }
 
+type BuilderStatusAPI interface {
+	BuilderAPI
+	Status() BuilderStatus
+}
+
+type BuilderStatus struct {
+	Enabled          bool                          `json:"enabled"`
+	Phase            string                        `json:"phase"`
+	Reason           string                        `json:"reason,omitempty"`
+	LastAttemptSlot  hexutil.Uint64                `json:"lastAttemptSlot"`
+	LastBidSlot      hexutil.Uint64                `json:"lastBidSlot"`
+	LastBidValueGwei hexutil.Uint64                `json:"lastBidValueGwei"`
+	PrivateOrderflow BuilderPrivateOrderflowStatus `json:"privateOrderflow"`
+}
+
+type BuilderPrivateOrderflowStatus struct {
+	Available      bool           `json:"available"`
+	Accepting      bool           `json:"accepting"`
+	ActiveSlot     hexutil.Uint64 `json:"activeSlot"`
+	LastBuildSlot  hexutil.Uint64 `json:"lastBuildSlot"`
+	PendingBundles hexutil.Uint64 `json:"pendingBundles"`
+	Capacity       hexutil.Uint64 `json:"capacity"`
+}
+
 type PrivateBundleRequest struct {
 	TargetTransaction common.Hash    `json:"targetTransaction"`
 	Transaction       hexutil.Bytes  `json:"transaction"`
@@ -99,15 +123,57 @@ type BuilderAPIImpl struct {
 	admission   privateBundleAdmission
 	chainConfig *chain.Config
 	simulator   privateBundleSimulator
+	status      *executionbuilder.EmbeddedBuilderStatus
+	contexts    *executionbuilder.BuildContextStore
+	pool        *privatepool.Pool
 }
 
 func NewBuilderAPI(submitter privateBundleSubmitter, chainConfig *chain.Config, simulator privateBundleSimulator, contexts *executionbuilder.BuildContextStore) *BuilderAPIImpl {
+	return NewBuilderAPIWithStatus(submitter, chainConfig, simulator, contexts, nil)
+}
+
+func NewBuilderAPIWithStatus(submitter privateBundleSubmitter, chainConfig *chain.Config, simulator privateBundleSimulator, contexts *executionbuilder.BuildContextStore, status *executionbuilder.EmbeddedBuilderStatus) *BuilderAPIImpl {
 	validator, _ := simulator.(privateBundleTargetValidator)
-	return newBuilderAPI(chainConfig, simulator, &activePrivateBundleAdmission{submitter: submitter, contexts: contexts, validator: validator})
+	pool, _ := submitter.(*privatepool.Pool)
+	return newBuilderAPIWithStatus(chainConfig, simulator, &activePrivateBundleAdmission{submitter: submitter, contexts: contexts, validator: validator}, status, contexts, pool)
 }
 
 func newBuilderAPI(chainConfig *chain.Config, simulator privateBundleSimulator, admission privateBundleAdmission) *BuilderAPIImpl {
 	return &BuilderAPIImpl{admission: admission, chainConfig: chainConfig, simulator: simulator}
+}
+
+func newBuilderAPIWithStatus(
+	chainConfig *chain.Config,
+	simulator privateBundleSimulator,
+	admission privateBundleAdmission,
+	status *executionbuilder.EmbeddedBuilderStatus,
+	contexts *executionbuilder.BuildContextStore,
+	pool *privatepool.Pool,
+) *BuilderAPIImpl {
+	return &BuilderAPIImpl{
+		admission: admission, chainConfig: chainConfig, simulator: simulator,
+		status: status, contexts: contexts, pool: pool,
+	}
+}
+
+func (api *BuilderAPIImpl) Status() BuilderStatus {
+	runtime := api.status.Snapshot()
+	result := BuilderStatus{
+		Enabled: runtime.Enabled, Phase: runtime.Phase, Reason: runtime.Reason,
+		LastAttemptSlot: hexutil.Uint64(runtime.LastAttemptSlot), LastBidSlot: hexutil.Uint64(runtime.LastBidSlot),
+		LastBidValueGwei: hexutil.Uint64(runtime.LastBidValueGwei),
+	}
+	if api.contexts == nil || api.pool == nil {
+		return result
+	}
+	contextStatus := api.contexts.PrivateOrderflowStatus()
+	poolStats := api.pool.Stats()
+	result.PrivateOrderflow = BuilderPrivateOrderflowStatus{
+		Available: true, Accepting: contextStatus.Accepting,
+		ActiveSlot: hexutil.Uint64(contextStatus.ActiveSlot), LastBuildSlot: hexutil.Uint64(contextStatus.LastBuildSlot),
+		PendingBundles: hexutil.Uint64(poolStats.Pending), Capacity: hexutil.Uint64(poolStats.Capacity),
+	}
+	return result
 }
 
 func (api *BuilderAPIImpl) SendPrivateBundle(ctx context.Context, request PrivateBundleRequest) (common.Hash, error) {

@@ -1,0 +1,121 @@
+---
+title: "Run the Embedded ePBS Builder Pilot"
+description: "Start, verify, and use Erigon's experimental embedded ePBS builder on a Gloas devnet."
+sidebar_position: 3
+---
+
+# Run the Embedded ePBS Builder Pilot
+
+Erigon's embedded builder can assemble execution payloads from the public transaction pool, publish ePBS bids through Caplin, retain selected payloads for reveal, and optionally accept a narrow private-orderflow bundle. This is an experimental Gloas-devnet pilot, not a mainnet production recommendation.
+
+## Before you start
+
+You need:
+
+- a fully synced Erigon node using embedded Caplin on a Gloas-enabled network;
+- a builder BLS private key registered through that network's builder-deposit process;
+- enough builder deposit for the network to consider the builder active; and
+- the 32-byte raw BLS private key in a file readable only by the Erigon process.
+
+Erigon does not create the builder registration or deposit. Use the network's official tooling, then confirm that the builder public key is active before starting Erigon. Keep the key outside the datadir and restrict its permissions, for example with `chmod 600 /secure/builder.key`.
+
+## Start the passive builder
+
+The passive mode builds from transactions Erigon already receives. It does not require private orderflow.
+
+```bash
+erigon \
+  --datadir=/data/erigon \
+  --chain=<network> \
+  --builder \
+  --builder.key=/secure/builder.key \
+  --builder.bid-margin=0.85 \
+  --builder.bid-delay=<tested-network-delay> \
+  --http \
+  --http.addr=127.0.0.1 \
+  --http.api=eth,net,web3,builder
+```
+
+For a custom devnet, also provide its `--caplin.custom-config` and `--caplin.custom-genesis` files. Bid timing is network-specific; begin with the delay validated for that devnet rather than copying a mainnet assumption.
+
+The `builder` RPC namespace is intentionally local-only. Erigon rejects startup if this namespace is enabled on a non-loopback HTTP, HTTPS, or WebSocket listener. A Unix-domain socket is also accepted. Put authentication and access control in a local sidecar if a remote professional user must reach it.
+
+## Check builder health
+
+Call `builder_status` over the local RPC endpoint:
+
+```bash
+curl -s http://127.0.0.1:8545 \
+  -H 'content-type: application/json' \
+  --data '{"jsonrpc":"2.0","id":1,"method":"builder_status","params":[]}'
+```
+
+The result distinguishes configuration from runtime state:
+
+- `enabled` confirms that `--builder` was configured and remains true if the configured runtime later becomes disabled.
+- `phase` is `starting`, `running`, `disabled`, or `stopped`.
+- `reason` explains a disabled or stopped state, such as `pending_payload_store_unavailable`, `runtime_error`, or `node_stopping`.
+- `lastAttemptSlot` advances when payload assembly starts.
+- `lastBidSlot` and `lastBidValueGwei` advance only after a bid is processed and published successfully.
+- `privateOrderflow.available` says whether the private service is wired into this process.
+- `privateOrderflow.accepting` is true only during the short admission window for the active build; it is normally false between builds.
+
+A bid is not proof that the block became canonical. Check the network explorer for the builder public key and compare canonical blocks separately.
+
+## Enable professional private orderflow
+
+Set a bounded admission window if a local searcher needs time to simulate and submit a signed transaction:
+
+```bash
+--builder.private-orderflow-window=350ms
+```
+
+The first API accepts exactly one public mempool target transaction plus one private signed transaction for a target slot. It is designed for a backrun pilot, not arbitrary multi-transaction bundles.
+
+Simulate first:
+
+```bash
+curl -s http://127.0.0.1:8545 \
+  -H 'content-type: application/json' \
+  --data '{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"builder_simulateBundle",
+    "params":[{
+      "targetTransaction":"0x<public-transaction-hash>",
+      "transaction":"0x<signed-private-transaction>",
+      "targetSlot":"0x<slot-in-hex>"
+    }]
+  }'
+```
+
+Submit the same bundle while its build context is still current:
+
+```bash
+curl -s http://127.0.0.1:8545 \
+  -H 'content-type: application/json' \
+  --data '{
+    "jsonrpc":"2.0",
+    "id":1,
+    "method":"builder_sendPrivateBundle",
+    "params":[{
+      "targetTransaction":"0x<public-transaction-hash>",
+      "transaction":"0x<signed-private-transaction>",
+      "targetSlot":"0x<slot-in-hex>"
+    }]
+  }'
+```
+
+The service re-simulates before admission and rejects a stale target or build context. Private blob transactions and private account-abstraction transactions are not supported in this pilot. Public blob transactions remain eligible for ordinary payload construction.
+
+## Diagnose common states
+
+| Observation | Meaning | Action |
+| --- | --- | --- |
+| `phase: starting` does not change | Caplin has not finished initializing the builder runtime | Check sync progress, Gloas configuration, builder key loading, and Caplin logs |
+| `phase: disabled` with `pending_payload_store_unavailable` | Durable pending-payload recovery could not open or recover | Check permissions and storage under `<datadir>/builder/pending` before restarting |
+| `lastAttemptSlot` advances but `lastBidSlot` does not | Assembly or bid publication is failing, or the candidate is not profitable enough to bid | Inspect the matching slot logs; do not infer a registration problem from this signal alone |
+| `lastBidSlot` advances but no canonical block appears | The bid was published but was not selected or did not become canonical | Compare competing bids and proposer selection on the network explorer |
+| `privateOrderflow.accepting` is always false | Calls are outside the configured admission window or no active build context exists | Observe `builder_status` around the configured bid delay and shorten the searcher round trip |
+
+Stop the process normally so the runtime reports `node_stopping` and retained payload state remains recoverable on restart.

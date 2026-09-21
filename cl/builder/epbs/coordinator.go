@@ -152,6 +152,7 @@ type Coordinator struct {
 	privateOrderflowWindow  time.Duration
 	waitForPrivateOrderflow func(context.Context, time.Duration) error
 	onPayloadMeasured       func(*cltypes.SignedProposerPreferences, PayloadParentIdentity, PayloadMeasurement)
+	status                  *builder.EmbeddedBuilderStatus
 
 	mu        sync.Mutex
 	slotFloor uint64
@@ -309,6 +310,7 @@ func (c *Coordinator) runSlotGuarded(
 	if err := validateSlotInputFreshness(ctx, input, freshness); err != nil {
 		return nil, err
 	}
+	c.status.RecordAttempt(input.Slot)
 	log.Debug("Embedded builder payload attempt", "slot", input.Slot, "parentBlockRoot", input.ParentBlockRoot, "parentBlockHash", input.ParentBlockHash)
 
 	preferences := input.ValidatedPreferences.Clone().(*cltypes.SignedProposerPreferences)
@@ -495,6 +497,7 @@ func (c *Coordinator) runSlotGuarded(
 	if publishErr != nil {
 		return signedBid, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
 	}
+	c.status.RecordBid(input.Slot, bidValue)
 	return signedBid, nil
 }
 

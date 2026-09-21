@@ -157,6 +157,69 @@ func TestBuilderSimulateBundleDoesNotSubmitTransaction(t *testing.T) {
 	require.True(t, senderFound)
 }
 
+func TestBuilderStatusReportsRuntimeAndPrivateOrderflow(t *testing.T) {
+	status := executionbuilder.NewEmbeddedBuilderStatus(true)
+	status.MarkRunning()
+	status.RecordAttempt(42)
+	status.RecordBid(41, 123)
+
+	contexts := executionbuilder.NewBuildContextStore()
+	slot := uint64(42)
+	contexts.Prepare(&executionbuilder.Parameters{
+		SlotNumber:               &slot,
+		Timestamp:                math.MaxInt64,
+		ValidatedProposerContext: true,
+	})
+	pool := privatepool.New(nil, 8)
+	txn, _ := signedPrivateTransaction(t)
+	_, err := pool.Submit(privatepool.Bundle{
+		TargetHash:       common.Hash{0x33},
+		TargetParentHash: common.Hash{0x44},
+		TargetGeneration: 1,
+		Transaction:      txn,
+		TargetSlot:       slot,
+	})
+	require.NoError(t, err)
+
+	api := newBuilderAPIWithStatus(chain.AllProtocolChanges, nil, nil, status, contexts, pool)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	t.Cleanup(server.Stop)
+	require.NoError(t, server.RegisterName("builder", BuilderStatusAPI(api)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(client.Close)
+	var got BuilderStatus
+	require.NoError(t, client.CallContext(t.Context(), &got, "builder_status"))
+	require.True(t, got.Enabled)
+	require.Equal(t, "running", got.Phase)
+	require.Empty(t, got.Reason)
+	require.Equal(t, hexutil.Uint64(42), got.LastAttemptSlot)
+	require.Equal(t, hexutil.Uint64(41), got.LastBidSlot)
+	require.Equal(t, hexutil.Uint64(123), got.LastBidValueGwei)
+	require.True(t, got.PrivateOrderflow.Available)
+	require.True(t, got.PrivateOrderflow.Accepting)
+	require.Equal(t, hexutil.Uint64(42), got.PrivateOrderflow.ActiveSlot)
+	require.Equal(t, hexutil.Uint64(1), got.PrivateOrderflow.PendingBundles)
+	require.Equal(t, hexutil.Uint64(8), got.PrivateOrderflow.Capacity)
+}
+
+func TestBuilderStatusReportsDisabledReasonWithoutPrivateDependencies(t *testing.T) {
+	status := executionbuilder.NewEmbeddedBuilderStatus(true)
+	status.MarkDisabled(executionbuilder.BuilderDisabledPendingPayloadStore)
+
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	t.Cleanup(server.Stop)
+	require.NoError(t, server.RegisterName("builder", BuilderStatusAPI(newBuilderAPIWithStatus(chain.AllProtocolChanges, nil, nil, status, nil, nil))))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(client.Close)
+	var got BuilderStatus
+	require.NoError(t, client.CallContext(t.Context(), &got, "builder_status"))
+	require.True(t, got.Enabled)
+	require.Equal(t, "disabled", got.Phase)
+	require.Equal(t, executionbuilder.BuilderDisabledPendingPayloadStore, got.Reason)
+	require.False(t, got.PrivateOrderflow.Available)
+	require.False(t, got.PrivateOrderflow.Accepting)
+}
+
 type recordingPrivateBundleSubmitter struct {
 	calls atomic.Uint64
 	last  privatepool.Bundle

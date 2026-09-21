@@ -25,9 +25,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -44,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/devvalidator"
 	"github.com/erigontech/erigon/cmd/caplin/caplin1"
 	rpcdaemoncli "github.com/erigontech/erigon/cmd/rpcdaemon/cli"
+	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/dbg"
@@ -190,6 +194,7 @@ type Ethereum struct {
 	shutterPool               *shutter.Pool
 	privateBundlePool         *privatepool.Pool
 	privateBundleContexts     *builder.BuildContextStore
+	builderStatus             *builder.EmbeddedBuilderStatus
 	blockBuilderNotifyNewTxns chan struct{}
 	components                *nodebuilder.Builder
 
@@ -281,6 +286,9 @@ func New(
 	if err := validateEmbeddedBuilderMode(config); err != nil {
 		return nil, err
 	}
+	if err := validateEmbeddedBuilderRPCExposure(config, &stack.Config().Http); err != nil {
+		return nil, err
+	}
 	caplinConfig := config.CaplinConfig
 	caplinConfig.NetworkId = clparams.NetworkType(config.NetworkID)
 	if err := caplin1.ValidateEmbeddedBuilderConfig(caplinConfig); err != nil {
@@ -363,6 +371,7 @@ func New(
 		config:                    config,
 		networkID:                 config.NetworkID,
 		etherbase:                 config.Builder.Etherbase,
+		builderStatus:             builder.NewEmbeddedBuilderStatus(config.CaplinConfig.EpbsBuilder.Enabled),
 		blockBuilderNotifyNewTxns: make(chan struct{}, 1),
 		sealCancel:                make(chan struct{}),
 		minedBlocks:               make(chan *types.Block, 1),
@@ -1015,7 +1024,7 @@ func New(
 		}
 		go func() {
 			eth1Getter := getters.NewExecutionSnapshotReader(ctx, blockReader, backend.chainDB)
-			if err := caplin1.RunCaplinService(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.execModule); err != nil {
+			if err := caplin1.RunCaplinServiceWithBuilderStatus(ctx, executionEngine, config.CaplinConfig, dirs, eth1Getter, backend.downloaderClient, creds, segmentsBuildLimiter, backend.execModule, backend.builderStatus); err != nil {
 				if !errors.Is(err, context.Canceled) {
 					logger.Error("could not start caplin", "err", err)
 				}
@@ -1073,6 +1082,53 @@ func validateEmbeddedBuilderMode(config *ethconfig.Config) error {
 		return errors.New("embedded ePBS builder requires embedded Caplin")
 	}
 	return nil
+}
+
+func validateEmbeddedBuilderRPCExposure(config *ethconfig.Config, httpCfg *httpcfg.HttpCfg) error {
+	if config == nil || httpCfg == nil || !httpCfg.Enabled || !config.CaplinConfig.EpbsBuilder.Enabled || !slices.Contains(httpCfg.API, "builder") {
+		return nil
+	}
+	websocketOverride := httpCfg.HttpURL
+	if httpCfg.WebsocketPort != httpCfg.HttpPort {
+		websocketOverride = ""
+	}
+	for _, listener := range []struct {
+		enabled  bool
+		name     string
+		address  string
+		override string
+	}{
+		{httpCfg.HttpServerEnabled, "HTTP", httpCfg.HttpListenAddress, httpCfg.HttpURL},
+		{httpCfg.HttpsServerEnabled || httpCfg.HttpsURL != "", "HTTPS", httpCfg.HttpsListenAddress, httpCfg.HttpsURL},
+		{httpCfg.WebsocketEnabled, "WebSocket", httpCfg.HttpListenAddress, websocketOverride},
+		{httpCfg.SocketServerEnabled, "socket", "", httpCfg.SocketListenUrl},
+	} {
+		if listener.enabled && !isLocalBuilderEndpoint(listener.address, listener.override) {
+			return fmt.Errorf("embedded builder %s RPC must use a loopback or Unix-socket listener", listener.name)
+		}
+	}
+	return nil
+}
+
+func isLocalBuilderEndpoint(address, override string) bool {
+	if override != "" {
+		endpoint, err := url.Parse(override)
+		if err != nil {
+			return false
+		}
+		if endpoint.Scheme == "unix" {
+			return endpoint.Path != ""
+		}
+		if endpoint.Scheme != "tcp" {
+			return false
+		}
+		address = endpoint.Hostname()
+	}
+	if strings.EqualFold(address, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(address)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig *chain.Config) error {
@@ -1164,7 +1220,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 		allAPIs = append(allAPIs, rpc.API{
 			Namespace: "builder",
 			Public:    false,
-			Service:   jsonrpc.BuilderAPI(jsonrpc.NewBuilderAPI(s.privateBundlePool, chainConfig, bundleSimulator, s.privateBundleContexts)),
+			Service:   jsonrpc.BuilderStatusAPI(jsonrpc.NewBuilderAPIWithStatus(s.privateBundlePool, chainConfig, bundleSimulator, s.privateBundleContexts, s.builderStatus)),
 			Version:   "1.0",
 		})
 	}

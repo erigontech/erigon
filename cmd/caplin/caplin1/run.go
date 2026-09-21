@@ -81,6 +81,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/version"
+	executionbuilder "github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/node/ethconfig"
 	p2pnat "github.com/erigontech/erigon/p2p/nat"
@@ -219,6 +220,22 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
 	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
 	executionModule execmodule.ExecutionModule,
+) error {
+	return runCaplinService(ctx, engine, config, dirs, eth1Getter, snDownloader, creds, snBuildSema, executionModule, nil)
+}
+
+func RunCaplinServiceWithBuilderStatus(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
+	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
+	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	executionModule execmodule.ExecutionModule, builderStatus *executionbuilder.EmbeddedBuilderStatus,
+) error {
+	return runCaplinService(ctx, engine, config, dirs, eth1Getter, snDownloader, creds, snBuildSema, executionModule, builderStatus)
+}
+
+func runCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
+	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
+	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted,
+	executionModule execmodule.ExecutionModule, builderStatus *executionbuilder.EmbeddedBuilderStatus,
 ) error {
 
 	var networkConfig *clparams.NetworkConfig
@@ -544,11 +561,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			PayloadProcessor: executionPayloadService,
 			AcceptedBlocks:   forkChoice,
 			Events:           emitters,
+			Status:           builderStatus,
 		})
 		if err != nil {
 			if !errors.Is(err, epbs.ErrPendingPayloadStore) {
 				return fmt.Errorf("initialize embedded ePBS builder: %w", err)
 			}
+			builderStatus.MarkDisabled(executionbuilder.BuilderDisabledPendingPayloadStore)
 			logger.Error("Embedded ePBS builder disabled; pending payload recovery unavailable", "err", err)
 		}
 	}

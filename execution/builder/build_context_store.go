@@ -52,6 +52,14 @@ type buildContext struct {
 	params    *Parameters
 }
 
+type PrivateOrderflowContextStatus struct {
+	Accepting     bool
+	ActiveSlot    uint64
+	Generation    uint64
+	ExpiresAt     uint64
+	LastBuildSlot uint64
+}
+
 const maxRetainedBuildContextsPerSlot = 16
 
 type BuildContextStoreOption func(*BuildContextStore)
@@ -316,6 +324,34 @@ func (s *BuildContextStore) IsContextCurrent(slot, token uint64) bool {
 	}
 	expiresAt, ok := (*current)[activeBuildContext{slot: slot, token: token}]
 	return ok && (expiresAt == 0 || s.currentTime() < expiresAt)
+}
+
+func (s *BuildContextStore) PrivateOrderflowStatus() PrivateOrderflowContextStatus {
+	if s == nil {
+		return PrivateOrderflowContextStatus{}
+	}
+	now := s.currentTime()
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	current := s.current.Load()
+	status := PrivateOrderflowContextStatus{}
+	if current != nil {
+		for key, expiresAt := range *current {
+			if expiresAt != 0 && now >= expiresAt {
+				continue
+			}
+			if !status.Accepting || key.slot > status.ActiveSlot || key.slot == status.ActiveSlot && key.token > status.Generation {
+				status.Accepting = true
+				status.ActiveSlot = key.slot
+				status.Generation = key.token
+				status.ExpiresAt = expiresAt
+			}
+		}
+	}
+	if s.hasRetained {
+		status.LastBuildSlot = s.retainedSlot
+	}
+	return status
 }
 
 func (s *BuildContextStore) updateActiveSlots() {

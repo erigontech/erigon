@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common/log/v3"
+	executionbuilder "github.com/erigontech/erigon/execution/builder"
 )
 
 var ErrPendingPayloadStore = errors.New("epbs/runtime: pending payload storage unavailable")
@@ -37,6 +38,7 @@ type RuntimeDependencies struct {
 	PayloadProcessor PayloadProcessor
 	AcceptedBlocks   AcceptedBlockReader
 	Events           *beaconevents.EventEmitter
+	Status           *executionbuilder.EmbeddedBuilderStatus
 }
 
 type Runtime struct {
@@ -45,6 +47,7 @@ type Runtime struct {
 	shadow      *shadowValueCurveRunner
 	reveals     *revealRunner
 	events      *beaconevents.EventEmitter
+	status      *executionbuilder.EmbeddedBuilderStatus
 }
 
 func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) {
@@ -79,6 +82,7 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 		return nil, fmt.Errorf("%w: recover: %w", ErrPendingPayloadStore, err)
 	}
 	coordinator.privateOrderflowWindow = cfg.PrivateOrderflowWindow
+	coordinator.status = deps.Status
 	resolver := NewLiveSlotInputResolver(deps.BeaconConfig, signer, deps.Clock, deps.Head, deps.Forkchoice)
 	live := NewLiveCoordinator(coordinator, resolver, resolver)
 	runner, err := newValidatedPreferencesRunnerWithTiming(
@@ -130,7 +134,7 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 		deps.Publisher, deps.Forkchoice, deps.Forkchoice, cfg.RetryInterval, cfg.MaxRetained,
 	)
 	reveals.blobData = newBlobDataPreparer(deps.BeaconConfig, deps.ColumnStorage, deps.Publisher)
-	return &Runtime{coordinator: coordinator, runner: runner, shadow: shadow, reveals: reveals, events: deps.Events}, nil
+	return &Runtime{coordinator: coordinator, runner: runner, shadow: shadow, reveals: reveals, events: deps.Events, status: deps.Status}, nil
 }
 
 func ValidateRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainConfig) error {
@@ -218,13 +222,23 @@ func (r *Runtime) SubmitValidatedPreferences(preferences *cltypes.SignedProposer
 	r.runner.SubmitValidatedPreferences(preferences)
 }
 
-func (r *Runtime) Run(ctx context.Context) error {
+func (r *Runtime) Run(ctx context.Context) (resultErr error) {
 	if r == nil || r.runner == nil || r.reveals == nil || r.events == nil {
 		return errors.New("epbs/runtime: not initialized")
 	}
 	if ctx == nil {
 		return errors.New("epbs/runtime: nil context")
 	}
+	r.status.MarkRunning()
+	defer func() {
+		if ctxErr := ctx.Err(); ctxErr != nil && errors.Is(resultErr, ctxErr) {
+			r.status.MarkStopped(executionbuilder.BuilderStoppedNode)
+			return
+		}
+		if resultErr != nil {
+			r.status.MarkStopped(executionbuilder.BuilderStoppedRuntimeError)
+		}
+	}()
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	events := make(chan *beaconevents.EventStream, r.reveals.maxQueue())
