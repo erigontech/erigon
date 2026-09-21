@@ -433,14 +433,14 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Modify: `execution/commitment/v4/mutate.go`
 - Create: `execution/commitment/v4/collapse_test.go`
 
-- [ ] add `remove(n *node, path []byte) error` clearing a leaf slot and both masks
-- [ ] add the collapse path: when a branch is reduced to one survivor `n`, the parent takes the survivor with a new extension `[n]‖E(n)` prepended onto the **stored pre-extension hash** — no read (D6)
-- [ ] handle the survivor being a leaf: it moves up into the parent's leaf trailer with a longer suffix, taken from the record
-- [ ] handle the survivor being itself an extension: extensions concatenate, which is exactly why the slot holds the pre-extension hash
-- [ ] write the D6 case as a named test: parent at `P`, child 0 an extension `E=[1,2]` to branch hash `H`, child 1 a leaf; delete child 1; assert the result is extension `[0,1,2] → H` and not the adjacent-extension chain
-- [ ] write a test for collapse where the sole survivor is a leaf, and one where it is a branch with no extension
-- [ ] write a test that collapse issues zero `Branch` calls beyond the nodes already unfolded
-- [ ] run tests — must pass before task 11
+- [x] add `remove(n *node, path []byte) error` clearing a leaf slot and both masks
+- [x] add the collapse path: when a branch is reduced to one survivor `n`, the parent takes the survivor with a new extension `[n]‖E(n)` prepended onto the **stored pre-extension hash** — no read (D6)
+- [x] handle the survivor being a leaf: it moves up into the parent's leaf trailer with a longer suffix, taken from the record
+- [x] handle the survivor being itself an extension: extensions concatenate, which is exactly why the slot holds the pre-extension hash
+- [x] write the D6 case as a named test: parent at `P`, child 0 an extension `E=[1,2]` to branch hash `H`, child 1 a leaf; delete child 1; assert the result is extension `[0,1,2] → H` and not the adjacent-extension chain
+- [x] write a test for collapse where the sole survivor is a leaf, and one where it is a branch with no extension
+- [x] write a test that collapse issues zero `Branch` calls beyond the nodes already unfolded
+- [x] run tests — must pass before task 11
 
 ### Task 11: Fold — hash a subtree
 

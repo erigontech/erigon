@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/bits"
 
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -28,7 +29,142 @@ var (
 	ErrInsertPath        = errors.New("commitment v4: invalid insert path")
 	ErrInsertSuffix      = errors.New("commitment v4: invalid insert suffix")
 	ErrInsertStoredChild = errors.New("commitment v4: cannot insert below a stored child")
+	ErrRemovePath        = errors.New("commitment v4: invalid remove path")
+	ErrRemoveNotFound    = errors.New("commitment v4: remove path not found")
+	ErrRemoveStoredChild = errors.New("commitment v4: cannot remove below a stored child")
 )
+
+type removalKind byte
+
+const (
+	removalEmpty removalKind = iota
+	removalKeep
+	removalLeaf
+	removalBranch
+)
+
+type removalState struct {
+	kind  removalKind
+	path  []byte
+	hash  []byte
+	value []byte
+}
+
+func remove(n *node, path []byte) error {
+	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) {
+		return ErrRemovePath
+	}
+	for _, nib := range path {
+		if nib > 0x0f {
+			return ErrRemovePath
+		}
+	}
+	_, err := removeAt(n, path)
+	return err
+}
+
+func removeAt(n *node, path []byte) (removalState, error) {
+	if n == nil || len(n.path) >= len(path) || !bytes.HasPrefix(path, n.path) {
+		return removalState{}, ErrRemovePath
+	}
+	depth := len(n.path)
+	nib := int(path[depth])
+	bit := uint16(1) << nib
+	if n.childMask&bit == 0 {
+		return removalState{}, ErrRemoveNotFound
+	}
+
+	if n.leafMask&bit != 0 {
+		if !leafPathMatches(n, nib, path) {
+			return removalState{}, ErrRemovePath
+		}
+		n.clear(nib)
+		return collapsedState(n), nil
+	}
+
+	child := n.children[nib]
+	if child == nil {
+		return removalState{}, ErrRemoveStoredChild
+	}
+	state, err := removeAt(child, path)
+	if err != nil {
+		return removalState{}, err
+	}
+	switch state.kind {
+	case removalEmpty:
+		n.clear(nib)
+	case removalLeaf:
+		setLeafPath(n, nib, state.path, state.value)
+	case removalBranch:
+		setBranchPath(n, nib, state.path, state.hash)
+	}
+	return collapsedState(n), nil
+}
+
+func leafPathMatches(n *node, nib int, path []byte) bool {
+	suffixCount := len(path) - len(n.path) - 1
+	if suffixCount < 0 || len(n.leafSuffix[nib]) != packedLen(suffixCount) {
+		return false
+	}
+	fullPath := make([]byte, 0, len(path))
+	fullPath = append(fullPath, n.path...)
+	fullPath = append(fullPath, byte(nib))
+	fullPath = append(fullPath, unpackPath(n.leafSuffix[nib], suffixCount, nil)...)
+	return bytes.Equal(fullPath, path)
+}
+
+func collapsedState(n *node) removalState {
+	count := bits.OnesCount16(n.childMask)
+	if count == 0 {
+		return removalState{kind: removalEmpty}
+	}
+	if count > 1 {
+		return removalState{kind: removalKeep}
+	}
+
+	nib := bits.TrailingZeros16(n.childMask)
+	bit := uint16(1) << nib
+	if n.leafMask&bit != 0 {
+		path := append(append([]byte(nil), n.path...), byte(nib))
+		path = append(path, unpackPath(n.leafSuffix[nib], 64-len(n.path)-1, nil)...)
+		return removalState{kind: removalLeaf, path: path, value: append([]byte(nil), n.leafValue[nib]...)}
+	}
+	if child := n.children[nib]; child != nil {
+		state := collapsedState(child)
+		switch state.kind {
+		case removalEmpty:
+			n.clear(nib)
+			return collapsedState(n)
+		case removalLeaf:
+			setLeafPath(n, nib, state.path, state.value)
+			return collapsedState(n)
+		case removalBranch:
+			setBranchPath(n, nib, state.path, state.hash)
+			return collapsedState(n)
+		default:
+			return removalState{kind: removalKeep}
+		}
+	}
+	path := append(append([]byte(nil), n.path...), byte(nib))
+	path = append(path, n.childExt[nib]...)
+	return removalState{kind: removalBranch, path: path, hash: append([]byte(nil), n.childHash[nib]...)}
+}
+
+func setLeafPath(n *node, nib int, path, value []byte) {
+	depth := len(n.path)
+	if len(path) != 64 || len(path) <= depth || path[depth] != byte(nib) || !bytes.HasPrefix(path, n.path) {
+		panic("commitment v4: invalid collapsed leaf path")
+	}
+	n.setLeaf(nib, packPath(path[depth+1:], nil), value)
+}
+
+func setBranchPath(n *node, nib int, path, hash []byte) {
+	depth := len(n.path)
+	if len(path) <= depth || path[depth] != byte(nib) || !bytes.HasPrefix(path, n.path) {
+		panic("commitment v4: invalid collapsed branch path")
+	}
+	n.setStoredChild(nib, hash, path[depth+1:])
+}
 
 func insert(n *node, path, suffix, value []byte) error {
 	if n == nil {
