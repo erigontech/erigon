@@ -404,14 +404,14 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/unfold_test.go`
 - Create: `execution/commitment/v4/mock_context_test.go`
 
-- [ ] add a mock `commitment.PatriciaContext` backed by in-memory maps, serving `Branch`, `PutBranch`, `Account` and `Storage` — `HexPatriciaHashed` consumes the same interface, so this one mock drives both arms of the parity harness in task 21
-- [ ] add `unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []byte) (*node, error)` issuing one exact `Branch(key)` per touched node — never a cursor walk (D1)
-- [ ] link the decoded record into a `node`: stored 32 B hashes for branch children, suffix+value for leaf children, extensions from the trailer
-- [ ] handle a missing record as an absent node, distinct from a zero-length tombstone
-- [ ] make the mock count `Account` / `Storage` calls so every later task can assert zero
-- [ ] write tests that unfolding a known trie issues exactly one `Branch` call per node on the path and zero `Account`/`Storage` calls
-- [ ] write tests for an absent record, a tombstoned record, and a malformed record surfacing as an error rather than a panic
-- [ ] run tests — must pass before task 9
+- [x] add a mock `commitment.PatriciaContext` backed by in-memory maps, serving `Branch`, `PutBranch`, `Account` and `Storage` — `HexPatriciaHashed` consumes the same interface, so this one mock drives both arms of the parity harness in task 21
+- [x] add `unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []byte) (*node, error)` issuing one exact `Branch(key)` per touched node — never a cursor walk (D1)
+- [x] link the decoded record into a `node`: stored 32 B hashes for branch children, suffix+value for leaf children, extensions from the trailer
+- [x] handle a missing record as an absent node, distinct from a zero-length tombstone
+- [x] make the mock count `Account` / `Storage` calls so every later task can assert zero
+- [x] write tests that unfolding a known trie issues exactly one `Branch` call per node on the path and zero `Account`/`Storage` calls
+- [x] write tests for an absent record, a tombstoned record, and a malformed record surfacing as an error rather than a panic
+- [x] run tests — must pass before task 9
 
 ### Task 9: Insert and split
 
