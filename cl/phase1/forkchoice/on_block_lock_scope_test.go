@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -400,18 +401,35 @@ func TestNewPayloadSkipsELWhenBlockIsNoLongerAdmissible(t *testing.T) {
 	require.EqualValues(t, execution_client.PayloadStatusNone, status)
 }
 
-// parkBeforeAdmissionWait holds the next caller at the point where it has cleared the
-// entry admission check and released f.mu, but has not yet queued for the admission token.
-func parkBeforeAdmissionWait(store *ForkChoiceStore) (queued, proceed chan struct{}) {
-	queued, proceed = make(chan struct{}), make(chan struct{})
-	var once sync.Once
-	store.testHookBeforeAdmissionWait = func() {
-		once.Do(func() {
-			close(queued)
-			<-proceed
-		})
-	}
-	return queued, proceed
+// signalOnAdmissionCheck reports the first admission check. validateBlockAdmissionLocked
+// runs under f.mu, so a test that takes f.mu after the signal is handed the lock only once
+// the caller yields it for the EL call.
+type signalOnAdmissionCheck struct {
+	fork_graph.ForkGraph
+	once sync.Once
+	at   chan struct{}
+}
+
+func (g *signalOnAdmissionCheck) AnchorSlot() uint64 {
+	g.once.Do(func() { close(g.at) })
+	return g.ForkGraph.AnchorSlot()
+}
+
+// parkBeforeAdmissionWait starts an OnBlock caller and holds it between its entry
+// admission check and the admission token: the token is taken up front so the caller has
+// to block on it, and f.mu is handed to the test as soon as the caller releases it.
+// It returns with f.mu held; admit hands the token over.
+func parkBeforeAdmissionWait(t *testing.T, store *ForkChoiceStore, start func()) (admit func()) {
+	t.Helper()
+	checking := make(chan struct{})
+	store.forkGraph = &signalOnAdmissionCheck{ForkGraph: store.forkGraph, at: checking}
+	store.payloadValidationOnce.Do(func() { store.payloadValidationAdmission = make(chan struct{}, 1) })
+	store.payloadValidationAdmission <- struct{}{}
+
+	start()
+	awaitSignal(t, checking, "the caller to reach its entry admission check")
+	store.mu.Lock()
+	return func() { <-store.payloadValidationAdmission }
 }
 
 func awaitOnBlock(t *testing.T, done <-chan error) error {
@@ -437,16 +455,20 @@ func TestOnBlockRejectsBlockThatWentStaleWaitingForAdmission(t *testing.T) {
 			NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Times(0)
 		store, block := buildExAnteStorePendingLast(t, engine)
-		queued, proceed := parkBeforeAdmissionWait(store)
-
 		done := make(chan error, 1)
-		go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
-		awaitSignal(t, queued, "the caller to reach the admission gate")
+		admit := parkBeforeAdmissionWait(t, store, func() {
+			go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+		})
 
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 0, Root: common.HexToHash("0xdead")})
-		close(proceed)
+		store.mu.Unlock()
+		admit()
 
-		require.ErrorIs(t, awaitOnBlock(t, done), ErrNotFinalizedDescendant)
+		err := awaitOnBlock(t, done)
+		require.ErrorIs(t, err, ErrNotFinalizedDescendant)
+		// Gossip maps ErrNewPayloadNoStatus to IGNORE and a requeue, so a stale block has
+		// to come back as the admission verdict itself, not as a missing EL verdict.
+		require.NotErrorIs(t, err, ErrNewPayloadNoStatus)
 		requireBlockNotAdded(t, store, block)
 	})
 
@@ -457,15 +479,15 @@ func TestOnBlockRejectsBlockThatWentStaleWaitingForAdmission(t *testing.T) {
 			NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Times(0)
 		store, block := buildExAnteStorePendingLast(t, engine)
-		queued, proceed := parkBeforeAdmissionWait(store)
-
 		done := make(chan error, 1)
-		go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
-		awaitSignal(t, queued, "the caller to reach the admission gate")
+		admit := parkBeforeAdmissionWait(t, store, func() {
+			go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+		})
 
 		// Epoch 1 starts at slot 32, above the block's slot.
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
-		close(proceed)
+		store.mu.Unlock()
+		admit()
 
 		require.NoError(t, awaitOnBlock(t, done))
 		requireBlockNotAdded(t, store, block)
@@ -474,17 +496,15 @@ func TestOnBlockRejectsBlockThatWentStaleWaitingForAdmission(t *testing.T) {
 	t.Run("busy lock, the skipped re-check leaves it to the post-relock one", func(t *testing.T) {
 		engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
 		store, block := buildExAnteStorePendingLast(t, engine)
-		queued, proceed := parkBeforeAdmissionWait(store)
-
 		done := make(chan error, 1)
-		go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
-		awaitSignal(t, queued, "the caller to reach the admission gate")
+		admit := parkBeforeAdmissionWait(t, store, func() {
+			go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+		})
 
-		// Holding f.mu makes TryRLock fail, so the re-check inside the token is skipped
+		// Keeping f.mu makes TryRLock fail, so the re-check inside the token is skipped
 		// and the EL call goes ahead on a block that is already stale.
-		store.mu.Lock()
 		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 0, Root: common.HexToHash("0xdead")})
-		close(proceed)
+		admit()
 		awaitSignal(t, elEntered, "NewPayload to start with the re-check skipped")
 		store.mu.Unlock()
 		close(releaseEL)

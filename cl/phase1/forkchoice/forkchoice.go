@@ -220,7 +220,6 @@ type ForkChoiceStore struct {
 	pendingELPayloads           []PendingELPayload
 	payloadValidationOnce       sync.Once
 	payloadValidationAdmission  chan struct{}
-	testHookBeforeAdmissionWait func()
 	envelopeIndexWrites         sync.Map
 	envelopeIndexRepairs        envelopeIndexRepairTracker
 	executionPayloadFirstSeenMu sync.Mutex
