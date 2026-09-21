@@ -125,9 +125,19 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClientWithBaseCtx(connCtx, codec, &s.services, s.logger, s.newConnHandler)
-	<-codec.closed()
-	c.Close()
+	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
+	for {
+		msgs, batch, err := readBatch(codec, s.logger)
+		if err != nil {
+			h.close(err, nil)
+			return
+		}
+		if batch {
+			h.handleBatch(msgs)
+		} else {
+			h.handleMsg(msgs[0], nil)
+		}
+	}
 }
 
 // newConnHandler builds the handler of one connection, so every transport applies the
