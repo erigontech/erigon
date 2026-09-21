@@ -23,8 +23,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -427,10 +425,12 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*WorkerContext, applyWorker *WorkerContext, clear func(), wait func(), err error) {
+	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*WorkerContext, applyWorker *WorkerContext, clear func(), err error) {
 	reconWorkers = make([]*WorkerContext, workerCount)
 
-	g, gctx := errgroup.WithContext(ctx)
+	// Worker contexts are driven per-task by the dispatcher (goroutine-per-task,
+	// joined via pe.runWG on shutdown), so the pool owns no goroutines of its own.
+	gctx := ctx
 
 	// Assigned before the fallible ResetState loop so every early return hands
 	// back a callable closure — the teardown path invokes it unconditionally.
@@ -440,7 +440,6 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			return
 		}
 		clearDone = true
-		_ = g.Wait()
 		for _, w := range reconWorkers {
 			if w != nil {
 				_ = w.ResetTx(nil)
@@ -463,13 +462,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			}
 		}
 	}
-	if background {
-		// Worker contexts are created (each with its own roTx via ResetState) but
-		// driven directly by the dispatcher (goroutine-per-task), not via a pull loop.
-		wait = func() { _ = g.Wait() }
-	}
-
 	applyWorker = NewWorkerContext(ctx, false, nil, chainDb, blockReader, chainConfig, genesis, engine, dirs, logger)
 
-	return reconWorkers, applyWorker, clear, wait, err
+	return reconWorkers, applyWorker, clear, err
 }

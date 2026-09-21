@@ -92,7 +92,6 @@ type parallelExecutor struct {
 	failedHash  common.Hash
 	execWorkers []*exec.WorkerContext
 	stopWorkers func()
-	waitWorkers func()
 	// prevBlocks lists the finished-but-not-yet-committed blocks' versionMaps. A
 	// worker executing block M reads blocks < M from this list in front of its raw
 	// sd read, so it sees earlier blocks' writes that apply has not yet committed
@@ -1518,7 +1517,7 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 	pe.workersCtx = workersCtx
 
 	var err error
-	pe.execWorkers, _, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
+	pe.execWorkers, _, pe.stopWorkers, err = exec.NewWorkersPool(
 		workersCtx, nil, true, pe.cfg.db, nil, nil, nil,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
@@ -1586,7 +1585,6 @@ func (pe *parallelExecutor) wait(ctx context.Context) error {
 				doneCh <- err
 				return
 			}
-			pe.waitWorkers()
 		}
 		doneCh <- nil
 	}()
