@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -106,6 +107,57 @@ func TestRepeatedForkchoiceDoesNotWaitForWriter(t *testing.T) {
 		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
 		return nil
 	}))
+}
+
+func TestRepeatedForkchoicePersistsAfterCallerTimeout(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(4, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
+	m.ExecModule.Drain()
+	head, safe, finalized := chain.TopBlock.Hash(), chain.Blocks[2].Hash(), chain.Blocks[1].Hash()
+
+	// Release the writer before draining, including on assertion failures.
+	defer m.ExecModule.Drain()
+	writer, err := m.DB.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer writer.Rollback()
+	previousSafe, previousFinalized := rawdb.ReadForkchoiceSafe(writer), rawdb.ReadForkchoiceFinalized(writer)
+	require.NotEqual(t, safe, previousSafe)
+	require.NotEqual(t, finalized, previousFinalized)
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	result, err := m.ExecModule.UpdateForkChoice(ctx, head, safe, finalized)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusBusy, result.Status, "changed markers cannot succeed before the durable write")
+	require.ErrorIs(t, ctx.Err(), context.DeadlineExceeded)
+	require.EventuallyWithT(t, func(collect *assert.CollectT) {
+		ready, err := m.ExecModule.Ready(t.Context())
+		require.NoError(collect, err)
+		require.False(collect, ready, "the pending marker update must hold the execution semaphore")
+	}, time.Minute, 10*time.Millisecond)
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, previousSafe, rawdb.ReadForkchoiceSafe(tx))
+		require.Equal(t, previousFinalized, rawdb.ReadForkchoiceFinalized(tx))
+		return nil
+	}))
+
+	writer.Rollback()
+	idleCtx, idleCancel := context.WithTimeout(t.Context(), time.Minute)
+	defer idleCancel()
+	m.ExecModule.WaitIdle(idleCtx)
+	require.NoError(t, idleCtx.Err(), "the marker update must finish after the writer is released")
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		require.Equal(t, head, rawdb.ReadHeadBlockHash(tx))
+		require.Equal(t, head, rawdb.ReadForkchoiceHead(tx))
+		require.Equal(t, safe, rawdb.ReadForkchoiceSafe(tx))
+		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
+		return nil
+	}))
+	result, err = m.ExecModule.UpdateForkChoice(idleCtx, head, safe, finalized)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status, "later FCUs must be able to acquire the execution semaphore")
 }
 
 func TestRepeatedForkchoiceWithLaggingFinish(t *testing.T) {

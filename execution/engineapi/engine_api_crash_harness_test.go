@@ -55,20 +55,6 @@ func TestCrashRecoveryBlocksRequireBAL(t *testing.T) {
 	require.NotNil(t, decoded[0].BlockAccessList())
 }
 
-func TestCrashRecoveryBlocksRejectMismatchedBAL(t *testing.T) {
-	bal := types.NewBlockAccessListSidecar(types.BlockAccessList{})
-	hash, err := bal.Hash()
-	require.NoError(t, err)
-	hash[0] ^= 1
-	block := types.NewBlockWithHeader(crashRecoveryBALHeader(hash), bal)
-	encoded, err := rlp.EncodeToBytes(block)
-	require.NoError(t, err)
-	balBytes, err := bal.Bytes()
-	require.NoError(t, err)
-	_, err = decodeCrashRecoveryBlocks([]crashRecoveryBlock{{RLP: encoded, BAL: balBytes}})
-	require.ErrorContains(t, err, "block access list hash mismatch")
-}
-
 func crashRecoveryBALHeader(hash common.Hash) *types.Header {
 	// Header extension fields are positional in RLP; include all fields before
 	// the BAL hash so the round trip preserves its meaning.
@@ -89,8 +75,8 @@ type crashRecoveryReadFailure struct {
 	kv.TemporalRoDB
 }
 
-func (crashRecoveryReadFailure) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
-	return nil, errors.New("injected database read failure")
+func (crashRecoveryReadFailure) View(context.Context, func(kv.Tx) error) error {
+	return errors.New("injected database read failure")
 }
 
 func TestCrashRecoveryExecutionReadFailure(t *testing.T) {

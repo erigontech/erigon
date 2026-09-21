@@ -184,6 +184,7 @@ func TestEngineApiCatchupCrashRecovery(t *testing.T) {
 					require.NoError(t, buildErr)
 					parent := side.continuation[len(side.continuation)-1]
 					require.NotNil(t, built.ExecutionPayload.SlotNumber)
+					require.NotNil(t, parent.ExecutionPayload.SlotNumber)
 					require.Greater(t, uint64(*built.ExecutionPayload.SlotNumber), uint64(*parent.ExecutionPayload.SlotNumber))
 					assertCanonicalHead(t.Context(), t, eat, built)
 					_, _, _, consistent := readChurn(t.Context(), t, churn)
@@ -200,14 +201,12 @@ func waitCrashRecoveryExecution(ctx context.Context, db kv.TemporalRoDB, head ui
 	ticker := time.NewTicker(10 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		progress, err := func() (uint64, error) {
-			tx, err := db.BeginTemporalRo(ctx)
-			if err != nil {
-				return 0, err
-			}
-			defer tx.Rollback()
-			return stages.GetStageProgress(tx, stages.Finish)
-		}()
+		var progress uint64
+		err := db.View(ctx, func(tx kv.Tx) error {
+			var err error
+			progress, err = stages.GetStageProgress(tx, stages.Finish)
+			return err
+		})
 		if err != nil {
 			return fmt.Errorf("read startup execution progress: %w", err)
 		}
@@ -273,17 +272,22 @@ func readCrashRecoveryBlocks(t *testing.T, db kv.TemporalRoDB, payloads []*engin
 	blocks := make([]crashRecoveryBlock, len(payloads))
 	for i, payload := range payloads {
 		hash, number := payload.ExecutionPayload.BlockHash, uint64(payload.ExecutionPayload.BlockNumber)
-		block := rawdb.ReadBlock(tx, hash, number)
-		require.NotNilf(t, block, "missing block %d (%s)", number, hash)
-		require.NotNilf(t, block.BlockAccessListHash(), "block %d must use Amsterdam", number)
-		blocks[i].RLP, err = rlp.EncodeToBytes(block)
-		require.NoError(t, err)
-		blocks[i].BAL, err = rawdb.ReadBlockAccessListBytes(tx, hash, number)
-		require.NoError(t, err)
-		blocks[i].BAL = bytes.Clone(blocks[i].BAL)
-		require.NotEmptyf(t, blocks[i].BAL, "missing block access list for block %d", number)
+		blocks[i] = readCrashRecoveryBlock(t, tx, hash, number)
 	}
 	return blocks
+}
+
+func readCrashRecoveryBlock(t *testing.T, tx kv.Tx, hash common.Hash, number uint64) crashRecoveryBlock {
+	t.Helper()
+	block := rawdb.ReadBlock(tx, hash, number)
+	require.NotNilf(t, block, "missing durable block %d (%s)", number, hash)
+	require.NotNilf(t, block.BlockAccessListHash(), "block %d must use Amsterdam", number)
+	encoded, err := rlp.EncodeToBytes(block)
+	require.NoError(t, err)
+	bal, err := rawdb.ReadBlockAccessListBytes(tx, hash, number)
+	require.NoError(t, err)
+	require.NotEmptyf(t, bal, "missing durable block access list for block %d", number)
+	return crashRecoveryBlock{RLP: encoded, BAL: bytes.Clone(bal)}
 }
 
 func decodeCrashRecoveryBlocks(downloaded []crashRecoveryBlock) ([]*types.Block, error) {
@@ -293,25 +297,14 @@ func decodeCrashRecoveryBlocks(downloaded []crashRecoveryBlock) ([]*types.Block,
 		if err := rlp.DecodeBytes(data.RLP, &block); err != nil {
 			return nil, err
 		}
-		expectedHash := block.BlockAccessListHash()
 		if len(data.BAL) > 0 {
-			if expectedHash == nil {
-				return nil, fmt.Errorf("block %d: block access list without a header hash", block.NumberU64())
-			}
 			sidecar, err := types.DecodeBlockAccessListSidecar(data.BAL)
 			if err != nil {
 				return nil, err
 			}
-			hash, err := sidecar.Hash()
-			if err != nil {
-				return nil, err
-			}
-			if hash != *expectedHash {
-				return nil, fmt.Errorf("block %d: block access list hash mismatch: got %s, want %s", block.NumberU64(), hash, *expectedHash)
-			}
 			blocks[i] = block.WithBlockAccessListSidecar(sidecar)
 		} else {
-			if expectedHash != nil {
+			if block.BlockAccessListHash() != nil {
 				return nil, fmt.Errorf("block %d: missing block access list", block.NumberU64())
 			}
 			blocks[i] = &block

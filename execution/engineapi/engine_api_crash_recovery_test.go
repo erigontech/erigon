@@ -508,29 +508,7 @@ func runUnwindCrashChild(t *testing.T) {
 	startForkchoice := func(head common.Hash) <-chan error {
 		response := make(chan error, 1)
 		go func() {
-			state := enginetypes.ForkChoiceState{
-				HeadHash:           head,
-				SafeBlockHash:      eat.GenesisBlock.Hash(),
-				FinalizedBlockHash: eat.GenesisBlock.Hash(),
-			}
-			result, err := engineapitester.RetryEngine(ctx, []enginetypes.EngineStatus{enginetypes.SyncingStatus}, nil,
-				func() (*enginetypes.ForkChoiceUpdatedResponse, enginetypes.EngineStatus, error) {
-					var result *enginetypes.ForkChoiceUpdatedResponse
-					var err error
-					if eat.ChainConfig.AmsterdamTime != nil {
-						result, err = eat.EngineApiClient.ForkchoiceUpdatedV4(ctx, &state, nil, nil)
-					} else {
-						result, err = eat.EngineApiClient.ForkchoiceUpdatedV3(ctx, &state, nil)
-					}
-					if err != nil {
-						return nil, "", err
-					}
-					return result, result.PayloadStatus.Status, nil
-				})
-			if err == nil && result.PayloadStatus.Status != enginetypes.ValidStatus {
-				err = fmt.Errorf("forkchoice returned %s", result.PayloadStatus.Status)
-			}
-			response <- err
+			response <- eat.MockCl.UpdateForkChoiceByHash(ctx, head)
 		}()
 		return response
 	}
@@ -566,6 +544,15 @@ func runUnwindCrashChild(t *testing.T) {
 		status, err := eat.ExecutionModule.InsertBlocks(ctx, blocks)
 		require.NoError(t, err)
 		require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+		// The crash windows require durable block data before execution starts.
+		// Read the DB directly: the execution module can also serve its overlay.
+		require.NoError(t, eat.ChainDB.View(ctx, func(tx kv.Tx) error {
+			for i, block := range blocks {
+				require.Equal(t, request.Downloaded[i], readCrashRecoveryBlock(t, tx, block.Hash(), block.NumberU64()),
+					"block %d and its BAL must be durable before the replacement FCU", block.NumberU64())
+			}
+			return nil
+		}))
 		seen := 0
 		boundary = transitions.holdMatching(t, request.Point, 1, func(context.Context) bool {
 			seen++
