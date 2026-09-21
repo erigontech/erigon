@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -210,7 +209,7 @@ func TestMapResultsMarshalAsJSONDoes(t *testing.T) {
 			s := jsonstream.Get(nil)
 			defer jsonstream.Put(s)
 			require.NoError(t, result.(interface {
-				MarshalFastJSONTo(jsonw.JSONWriter) error
+				MarshalFastJSONTo(*jsonstream.StackStream) error
 			}).MarshalFastJSONTo(s))
 			require.NoError(t, s.Flush())
 
