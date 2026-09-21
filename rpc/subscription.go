@@ -30,6 +30,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var (
@@ -255,21 +257,23 @@ func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 	if n.prefix == nil {
 		n.prefix = notificationPrefix(n.namespace, sub.ID)
 	}
-	bp := notificationBufs.Get().(*[]byte)
-	defer notificationBufs.Put(bp)
-	*bp = append(append(append((*bp)[:0], n.prefix...), data...), "}}"...)
-	return n.h.conn.WriteJSON(context.Background(), rawResponse(*bp))
+	// A pooled stream, not a fresh buffer: every subscriber of an event gets the same result,
+	// and a buffer per send would copy it once per subscriber.
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	s.WriteRawBytes(n.prefix)
+	s.WriteRawBytes(data)
+	s.WriteRawBytes(notificationSuffix)
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(s.Buffer()))
 }
-
-// notificationBufs holds the buffers notifications are assembled in. Every subscriber of an
-// event gets the same result, so a fresh buffer per send would copy it once per subscriber.
-var notificationBufs = sync.Pool{New: func() any { return new([]byte) }}
 
 // notification wraps result, which is already encoded, in the subscription message without
 // parsing it again: every subscriber would otherwise re-check the same payload.
 func notification(namespace string, id ID, result json.RawMessage) []byte {
-	return append(append(notificationPrefix(namespace, id), result...), "}}"...)
+	return append(append(notificationPrefix(namespace, id), result...), notificationSuffix...)
 }
+
+var notificationSuffix = []byte("}}")
 
 // notificationPrefix is the part of a notification before its result, fixed for a subscription.
 func notificationPrefix(namespace string, id ID) []byte {
