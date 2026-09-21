@@ -145,17 +145,19 @@ func (t *Tracer) OnEnterV2(depth int, typ byte, from, to accounts.Address, preco
 	}
 	inputCopy := make([]byte, len(input))
 	copy(inputCopy, input)
-	t.traces.Append(Trace{OnEnterV2: &OnEnterTraceV2{
-		Depth:      depth,
-		Type:       typ,
-		From:       from.Value(),
-		To:         to.Value(),
-		Precompile: precompile,
-		Input:      inputCopy,
-		Gas:        gas,
-		Value:      &value,
-		Code:       code,
-	}})
+	t.traces.Append(Trace{
+		OnEnterV2: &OnEnterTraceV2{
+			Depth:      depth,
+			Type:       typ,
+			From:       from.Value(),
+			To:         to.Value(),
+			Precompile: precompile,
+			Input:      inputCopy,
+			Gas:        gas,
+			Value:      &value,
+			Code:       code,
+		},
+	})
 }
 
 func (t *Tracer) OnExitV2(depth int, output []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
@@ -174,13 +176,15 @@ func (t *Tracer) OnExitV2(depth int, output []byte, gasLeft mdgas.MdGas, err err
 	if err != nil {
 		errStr = err.Error()
 	}
-	t.traces.Append(Trace{OnExitV2: &OnExitTraceV2{
-		Depth:    depth,
-		Output:   output,
-		GasLeft:  gasLeft,
-		Error:    errStr,
-		Reverted: reverted,
-	}})
+	t.traces.Append(Trace{
+		OnExitV2: &OnExitTraceV2{
+			Depth:    depth,
+			Output:   output,
+			GasLeft:  gasLeft,
+			Error:    errStr,
+			Reverted: reverted,
+		},
+	})
 }
 
 func (t *Tracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, opContext tracing.OpContext, returnData []byte, depth int, err error) {
@@ -195,19 +199,21 @@ func (t *Tracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, opContext
 	if err != nil {
 		errStr = err.Error()
 	}
-	t.traces.Append(Trace{OnOpcodeV2: &OnOpcodeTraceV2{
-		PC:         pc,
-		Op:         fmt.Sprintf("%v", vm.OpCode(op)),
-		Gas:        gas,
-		Cost:       cost,
-		Caller:     opContext.Caller().Value(),
-		Stack:      stack,
-		Memory:     memory,
-		MemorySize: len(memory),
-		ReturnData: returnData,
-		Depth:      depth,
-		Error:      errStr,
-	}})
+	t.traces.Append(Trace{
+		OnOpcodeV2: &OnOpcodeTraceV2{
+			PC:         pc,
+			Op:         fmt.Sprintf("%v", vm.OpCode(op)),
+			Gas:        gas,
+			Cost:       cost,
+			Caller:     opContext.Caller().Value(),
+			Stack:      stack,
+			Memory:     memory,
+			MemorySize: len(memory),
+			ReturnData: returnData,
+			Depth:      depth,
+			Error:      errStr,
+		},
+	})
 }
 
 func (t *Tracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, opContext tracing.OpContext, depth int, err error) {
@@ -222,18 +228,20 @@ func (t *Tracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, opContext 
 	if err != nil {
 		errStr = err.Error()
 	}
-	t.traces.Append(Trace{OnFaultV2: &OnFaultTraceV2{
-		PC:         pc,
-		Op:         op,
-		Gas:        gas,
-		Cost:       cost,
-		Caller:     opContext.Caller().Value(),
-		Stack:      stack,
-		Memory:     memory,
-		MemorySize: len(memory),
-		Depth:      depth,
-		Error:      errStr,
-	}})
+	t.traces.Append(Trace{
+		OnFaultV2: &OnFaultTraceV2{
+			PC:         pc,
+			Op:         op,
+			Gas:        gas,
+			Cost:       cost,
+			Caller:     opContext.Caller().Value(),
+			Stack:      stack,
+			Memory:     memory,
+			MemorySize: len(memory),
+			Depth:      depth,
+			Error:      errStr,
+		},
+	})
 }
 
 func (t *Tracer) captureMemoryAndStack(opContext tracing.OpContext) (hexutil.Bytes, []hexutil.Bytes) {
