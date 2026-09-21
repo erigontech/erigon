@@ -207,8 +207,12 @@ func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
 
 func headerValue(h *types.Header) any { return h }
 
-func subscribeReceiptValue(r *remoteproto.SubscribeReceiptsReply) any {
-	return ethutils.RPCReceipts{ethutils.MarshalSubscribeReceipt(r)}
+func subscribeReceiptsValue(rs []*remoteproto.SubscribeReceiptsReply) any {
+	out := make(ethutils.RPCReceipts, len(rs))
+	for i, r := range rs {
+		out[i] = ethutils.MarshalSubscribeReceipt(r)
+	}
+	return out
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
@@ -293,16 +297,16 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.Recei
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
-		func() (<-chan *rpchelper.Shared[*remoteproto.SubscribeReceiptsReply], func(), error) {
+		func() (<-chan *rpchelper.Shared[[]*remoteproto.SubscribeReceiptsReply], func(), error) {
 			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, criteria)
 			if err != nil {
 				return nil, nil, err
 			}
 			return receipts, func() { api.filters.UnsubscribeReceipts(id) }, nil
 		},
-		func(emit func(payload any), r *rpchelper.Shared[*remoteproto.SubscribeReceiptsReply]) {
-			if r != nil && r.Value != nil {
-				emit(sharedJSON[*remoteproto.SubscribeReceiptsReply]{r, subscribeReceiptValue})
+		func(emit func(payload any), r *rpchelper.Shared[[]*remoteproto.SubscribeReceiptsReply]) {
+			if r != nil && len(r.Value) > 0 {
+				emit(sharedJSON[[]*remoteproto.SubscribeReceiptsReply]{r, subscribeReceiptsValue})
 			}
 		},
 		"[rpc] receipts channel was closed")
