@@ -291,7 +291,7 @@ func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t, log.N
 //
 // The HTTP transport uses synctest with in-memory connections for deterministic timing.
 // The WebSocket transport uses real TCP because its long-lived server goroutines
-// (pingLoop, ServeCodec, dispatch) have complex shutdown dependencies incompatible
+// (ServeCodec, dispatch) have complex shutdown dependencies incompatible
 // with synctest's requirement that all bubble goroutines exit.
 func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 	if testing.Short() {
