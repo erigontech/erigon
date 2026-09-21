@@ -230,7 +230,7 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 			}
 			return nil, hErr
 		}
-		return NewWebsocketCodec(conn, endpoint, header, endpoint), nil
+		return newWebsocketCodec(conn, nil, endpoint, header, endpoint), nil
 	}, logger)
 }
 
@@ -295,9 +295,7 @@ func (a *wsConnAdapter) encode(v any) error {
 	ctx := context.Background()
 	if a.netConn != nil {
 		if !dl.IsZero() {
-			if err := a.netConn.SetWriteDeadline(dl); err != nil {
-				return err
-			}
+			a.netConn.SetWriteDeadline(dl)                //nolint:errcheck
 			defer a.netConn.SetWriteDeadline(time.Time{}) //nolint:errcheck
 		}
 	} else if !dl.IsZero() {
@@ -347,12 +345,9 @@ type websocketCodec struct {
 	pingReset chan struct{}
 }
 
-// NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
-// remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
-func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
-	return newWebsocketCodec(conn, nil, host, req, remoteAddr)
-}
-
+// newWebsocketCodec wraps a coder websocket connection as a ServerCodec. netConn is the
+// hijacked socket on the server side and nil on the client side. remoteAddr should be
+// r.RemoteAddr on the server side, or the endpoint URL on the client side.
 func newWebsocketCodec(conn *websocket.Conn, netConn net.Conn, host string, req http.Header, remoteAddr string) *websocketCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	adapter := &wsConnAdapter{conn: conn, netConn: netConn}
