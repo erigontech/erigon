@@ -147,8 +147,7 @@ func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
-// is used to serve HTTP connections. Subscriptions and reverse calls are not allowed in
-// this mode.
+// is used to serve HTTP connections. Subscriptions are not allowed in this mode.
 func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream jsonstream.Stream) *jsonrpcMessage {
 	// Don't serve if server is stopped.
 	if !s.run.Load() {
