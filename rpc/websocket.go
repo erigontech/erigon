@@ -288,7 +288,7 @@ func (a *wsConnAdapter) encode(v any) error {
 	a.mu.Unlock()
 
 	ctx := context.Background()
-	if !dl.IsZero() {
+	if !dl.IsZero() && !wsCoderBg {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, dl)
 		defer cancel()
@@ -466,6 +466,9 @@ func (wc *gorillaCodec) cork(on bool) {
 }
 
 var wsCork = dbg.EnvBool("WS_CORK", false)
+
+// wsCoderBg is a bench-only switch: coder writes without a deadline context.
+var wsCoderBg = dbg.EnvBool("WS_CODER_BG", false)
 
 func (wc *gorillaCodec) WriteJSON(ctx context.Context, v any) error {
 	err := wc.jsonCodec.WriteJSON(ctx, v)
