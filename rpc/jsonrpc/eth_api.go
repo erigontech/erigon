@@ -83,7 +83,7 @@ type EthAPI interface {
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
-	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethutils.RPCReceipt, error)
+	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
 	GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error)
@@ -107,8 +107,8 @@ type EthAPI interface {
 	Accounts(ctx context.Context) ([]common.Address, error)
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.U256, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
-	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (string, error)
-	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (common.Hash, error)
+	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (StorageValues, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)

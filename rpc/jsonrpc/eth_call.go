@@ -69,6 +69,16 @@ func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
 	return nil
 }
 
+// requireBlockSelector rejects a block selector that carries neither a number nor a
+// hash. Used by the methods whose selector is mandatory, so it has no default to
+// fall back on.
+func requireBlockSelector(blockNrOrHash rpc.BlockNumberOrHash) error {
+	if blockNrOrHash.BlockNumber == nil && blockNrOrHash.BlockHash == nil {
+		return &rpc.InvalidParamsError{Message: "block selector must carry a blockNumber or a blockHash"}
+	}
+	return nil
+}
+
 // blockOrLatest resolves an optional block selector, defaulting to the latest block
 // when the caller omitted the parameter (nil). Used by the state-reading methods
 // whose Block parameter is optional per execution-apis (default 'latest').
@@ -796,7 +806,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// fold superset, so the op-stream carries the same data and the stateless verifier isn't
 	// fed redundant memoizationOff nodes. leanNodes is the same set, root first, without code
 	// attached — the form the node-set self-verifier consumes.
-	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, "eth_getWitness", true /* produceExclusionProofs */)
+	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, true /* produceExclusionProofs */)
 	if err != nil {
 		return nil, err
 	}
@@ -814,43 +824,45 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, err
 	}
 
-	// Gate on the serialized op-stream we actually return: decode it back and confirm it
-	// reconstructs the parent state root. Any lossy/malformed serialization yields a
-	// different (hence wrong) root, so this catches an ExtractWitness/WriteInto defect the
-	// pre-serialization witness-root check above cannot.
-	decodedWitness, err := trie.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
-	if err != nil {
-		return nil, fmt.Errorf("decode produced witness: %w", err)
-	}
-	decodedTrie, err := trie.BuildTrieFromWitness(decodedWitness, false)
-	if err != nil {
-		return nil, fmt.Errorf("rebuild trie from produced witness: %w", err)
-	}
-	if decodedTrie.Hash() != expectedParentRoot {
-		return nil, fmt.Errorf("produced witness root mismatch actual(%x)!=expected(%x)", decodedTrie.Hash(), expectedParentRoot)
-	}
+	if dbg.AssertEnabled {
+		// Gate on the serialized op-stream we actually return: decode it back and confirm it
+		// reconstructs the parent state root. Any lossy/malformed serialization yields a
+		// different (hence wrong) root, so this catches an ExtractWitness/WriteInto defect the
+		// pre-serialization witness-root check above cannot.
+		decodedWitness, err := trie.NewWitnessFromReader(bytes.NewReader(witnessBuffer.Bytes()), false)
+		if err != nil {
+			return nil, fmt.Errorf("decode produced witness: %w", err)
+		}
+		decodedTrie, err := trie.BuildTrieFromWitness(decodedWitness, false)
+		if err != nil {
+			return nil, fmt.Errorf("rebuild trie from produced witness: %w", err)
+		}
+		if decodedTrie.Hash() != expectedParentRoot {
+			return nil, fmt.Errorf("produced witness root mismatch actual(%x)!=expected(%x)", decodedTrie.Hash(), expectedParentRoot)
+		}
 
-	// Self-verify: re-execute the block statelessly from the lean node set (the modern,
-	// node-set verifier debug_executionWitness uses) and confirm the resulting state root
-	// matches the header. The pre-state root is already gated above, so a post-state
-	// mismatch is logged rather than failing the request.
-	_, headerByNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
-	if err != nil {
-		return nil, err
-	}
-	verifyResult := &ExecutionWitnessResult{
-		State:          make([]hexutil.Bytes, len(leanNodes)),
-		Codes:          accessed.SortedCodes,
-		headerByNumber: headerByNumber,
-	}
-	for i, node := range leanNodes {
-		verifyResult.State[i] = node
-	}
-	newStateRoot, _, err := execBlockStatelessly(verifyResult, block, chainConfig, fullEngine)
-	if err != nil {
-		logger.Warn("stateless re-execution failed for witness", "block", blockNr, "err", err)
-	} else if newStateRoot != block.Root() {
-		logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
+		// Self-verify: re-execute the block statelessly from the lean node set (the modern,
+		// node-set verifier debug_executionWitness uses) and confirm the resulting state root
+		// matches the header. The pre-state root is already gated above, so a post-state
+		// mismatch is logged rather than failing the request.
+		_, headerByNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
+		if err != nil {
+			return nil, err
+		}
+		verifyResult := &ExecutionWitnessResult{
+			State:          make([]hexutil.Bytes, len(leanNodes)),
+			Codes:          accessed.SortedCodes,
+			headerByNumber: headerByNumber,
+		}
+		for i, node := range leanNodes {
+			verifyResult.State[i] = node
+		}
+		newStateRoot, _, err := execBlockStatelessly(verifyResult, block, chainConfig, fullEngine)
+		if err != nil {
+			logger.Warn("stateless re-execution failed for witness", "block", blockNr, "err", err)
+		} else if newStateRoot != block.Root() {
+			logger.Warn("state root mismatch after stateless execution", "actual", newStateRoot, "expected", block.Root())
+		}
 	}
 
 	return bytes.Clone(witnessBuffer.Bytes()), nil
@@ -1097,7 +1109,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, config)
+		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, config), txCtx, ibs, chainConfig, config)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
