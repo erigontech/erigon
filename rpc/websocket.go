@@ -252,8 +252,8 @@ func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
 }
 
 // wsConnAdapter adapts coder/websocket.Conn to satisfy the deadlineCloser interface
-// used by jsonCodec. Write deadlines set by jsonCodec are stored and applied as
-// context deadlines on the underlying coder write calls.
+// used by jsonCodec. A write deadline set by jsonCodec bounds the next write: on the
+// hijacked socket on the server side, as a context deadline on the client side.
 type wsConnAdapter struct {
 	conn     *websocket.Conn
 	netConn  net.Conn // the hijacked socket on the server side, nil on the client side
