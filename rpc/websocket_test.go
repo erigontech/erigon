@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -587,5 +588,84 @@ func TestWebsocketIdlePing(t *testing.T) {
 			t.Fatal("ping did not re-arm the timer")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+type writeCountingListener struct {
+	net.Listener
+	writes *atomic.Int64
+}
+
+func (l writeCountingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	return writeCountingConn{c, l.writes}, err
+}
+
+type writeCountingConn struct {
+	net.Conn
+	writes *atomic.Int64
+}
+
+func (c writeCountingConn) Write(p []byte) (int, error) {
+	c.writes.Add(1)
+	return c.Conn.Write(p)
+}
+
+func TestWebsocketCoalescedMessagesLeaveInOneWrite(t *testing.T) {
+	t.Parallel()
+
+	var writes atomic.Int64
+	codecs := make(chan *websocketCodec, 1)
+	httpsrv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, nil)
+		if err != nil {
+			return
+		}
+		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		defer wc.Close()
+		codecs <- wc
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}))
+	httpsrv.Listener = writeCountingListener{httpsrv.Listener, &writes}
+	httpsrv.Start()
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+
+	wc := <-codecs
+	before := writes.Load()
+	err = wc.coalesce(func() {
+		for i := range 3 {
+			if err := wc.WriteJSON(context.Background(), rawResponse(strconv.Itoa(i))); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := writes.Load() - before; got != 1 {
+		t.Errorf("3 coalesced messages took %d socket writes, want 1", got)
+	}
+	for i := range 3 {
+		_, data, err := conn.Read(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != strconv.Itoa(i) {
+			t.Fatalf("message %d is %q", i, data)
+		}
 	}
 }
