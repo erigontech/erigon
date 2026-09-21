@@ -278,14 +278,16 @@ func (ctx *CallContext) restoreChildGas(returnGas mdgas.MdGas, tracer *tracing.H
 	if returnGas.Execution == 0 && returnGas.State == ctx.stateGas {
 		return
 	}
-	if tracer.HasGasChangeHook() {
-		old := ctx.Gas()
-		defer func() {
-			tracer.EmitGasChange(old, ctx.Gas(), tracing.GasChangeCallLeftOverRefunded)
-		}()
+	gasTracing := tracer.HasGasChangeHook()
+	var old mdgas.MdGas
+	if gasTracing {
+		old = ctx.Gas()
 	}
 	ctx.stateGas = returnGas.State
 	ctx.gas += returnGas.Execution
+	if gasTracing {
+		tracer.EmitGasChange(old, ctx.Gas(), tracing.GasChangeCallLeftOverRefunded)
+	}
 }
 
 func (ctx *CallContext) forwardStateGas(tracer *tracing.Hooks) {
@@ -453,10 +455,11 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if err == nil {
 				return
 			}
-			if !logged && tracer.HasOpcodeHook() {
+			// Masked opcodes still report faults. Fault delivery requires an opcode hook.
+			switch {
+			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
 				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
-			}
-			if logged && tracer.HasFaultHook() {
+			case tracer.HasOpcodeHook() && tracer.HasFaultHook():
 				tracer.EmitFault(pcCopy, byte(op), oldGas, cost, callContext, evm.depth, VMErrorFromErr(err))
 			}
 		}()
@@ -551,7 +554,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if tracer.HasGasChangeHook() {
 				tracer.EmitGasChange(oldGas, callContext.Gas(), tracing.GasChangeCallOpCode)
 			}
-			if tracer.HasOpcodeHook() {
+			if tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)) {
 				tracer.EmitOpcode(pc, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))
 				logged = true
 			}

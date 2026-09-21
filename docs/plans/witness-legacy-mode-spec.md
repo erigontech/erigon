@@ -111,9 +111,9 @@ structural differences.
 
 Before returning, the producer self-verifies the witness: `verifyWitnessStateless` re-executes the block using
 only the witness as state, and asserts that the resulting post-state root equals `block.Root()`. A witness that
-fails this check is never returned — the call errors. The check is on by default and can be disabled for
-diagnostics with `ERIGON_WITNESS_NO_VERIFY=true`. `WITNESS_STRICT_VERIFY=true` tightens it further, making
-re-execution error on any unresolved (missing) trie node instead of treating it as empty.
+fails this check is never returned — the call errors. The check runs only with `ERIGON_ASSERT=true`.
+`WITNESS_STRICT_VERIFY=true` tightens it further, making re-execution error on any unresolved (missing) trie
+node instead of treating it as empty.
 
 A witness is a **sufficient** proof, not a canonical-minimal one: re-execution to the correct root is the only
 correctness condition, so two conforming producers may legitimately differ in which redundant nodes or codes
@@ -128,8 +128,10 @@ serving fills that gap for the last N blocks: with `--witness.cache.head-capture
 the same block-hash-keyed LRU the durable path uses. The commitment parent state is read from a *pinned parent
 RO snapshot* (a temporal tx lagging the tip by one committed block, whose commitment-latest equals the parent's
 commitment); the account/storage/code parent and block-end state come from the history a minimal node still
-retains. Each built witness passes the same self-verification gates before it is cached, so a stale or
-incomplete view fails closed and simply leaves that block uncached — never a wrong witness.
+retains. Each built witness passes the same checks as the durable path before it is cached. By default that is
+the parent state-root check, plus the block-end commitment check every non-empty build runs through
+`detectCollapseSiblings`. Stateless re-execution, which also catches a missing node, code or key, runs only
+with `ERIGON_ASSERT=true`.
 
 Flags (embedded RPC only):
 
