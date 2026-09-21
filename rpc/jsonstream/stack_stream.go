@@ -19,10 +19,11 @@ package jsonstream
 import (
 	"encoding"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
 	"strings"
+
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 
 	jsoniter "github.com/json-iterator/go"
 

@@ -152,7 +152,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	replayTransactions = block.Transactions()[:transactionIndex]
 
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.filters, api.stateCache, api._txNumReader)
-
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +226,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		results := []map[string]any{}
 		for i := range bundle.Transactions {
 			txn := &bundle.Transactions[i]
-			if txn.Gas == nil || *(txn.Gas) == 0 {
+			if txn.Gas == nil || *txn.Gas == 0 {
 				txn.Gas = (*hexutil.Uint64)(&api.GasCap)
 			}
 			msg, err := txn.ToMessage(api.GasCap, &blockCtx.BaseFee)

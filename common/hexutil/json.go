@@ -111,7 +111,7 @@ func (b *Big) UnmarshalText(input []byte) error {
 	}
 	var dec big.Int
 	dec.SetBits(words)
-	*b = (Big)(dec)
+	*b = Big(dec)
 	return nil
 }
 
@@ -131,7 +131,7 @@ func (b *Big) String() string {
 }
 
 func (b *Big) Uint64() uint64 {
-	return ((*big.Int)(b)).Uint64()
+	return (*big.Int)(b).Uint64()
 }
 
 // U256 marshals/unmarshals as a JSON string with 0x prefix, byte-identical to
@@ -256,7 +256,7 @@ func (b Uint64) String() string {
 }
 
 func (b Uint64) Uint64() uint64 {
-	return (uint64)(b)
+	return uint64(b)
 }
 
 // Uint16 marshals/unmarshals as a JSON string with 0x prefix.

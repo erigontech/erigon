@@ -62,7 +62,8 @@ func writeDevGenesisBeaconBlock(ctx context.Context, genesisState *state.Caching
 		return fmt.Errorf("compute genesis block root: %w", err)
 	}
 
-	log.Info("[genesis] writing genesis beacon block to DB",
+	log.Info(
+		"[genesis] writing genesis beacon block to DB",
 		"blockRoot", common.Hash(blockRoot).Hex(),
 		"stateRoot", common.Hash(stateRoot).Hex(),
 	)

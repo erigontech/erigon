@@ -616,9 +616,9 @@ func TestStackStream_BoundaryValues(t *testing.T) {
 	assert.Contains(t, result, `"uint16_max":65535`)
 	assert.Contains(t, result, `"uint32_max":4294967295`)
 	// NaN and Infinity are represented as null in JSON
-	//assert.Contains(t, result, `"float32_special":null`)
-	//assert.Contains(t, result, `"float64_inf":null`)
-	//assert.Contains(t, result, `"float64_neg_inf":null`)
+	// assert.Contains(t, result, `"float32_special":null`)
+	// assert.Contains(t, result, `"float64_inf":null`)
+	// assert.Contains(t, result, `"float64_neg_inf":null`)
 	assert.True(t, ss.IsComplete())
 }
 
@@ -655,7 +655,6 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 
 // TestStackStream_ErrorHandlingWithoutClosing tests error handling and propagation *without* closing pending elements
 func TestStackStream_ErrorHandlingWithoutClosing(t *testing.T) {
-
 	// Test with a writer that will fail
 	failWriter := &failingWriter{failAfter: 10}
 
@@ -674,7 +673,6 @@ func TestStackStream_ErrorHandlingWithoutClosing(t *testing.T) {
 
 // TestStackStream_ErrorHandlingWithClosing tests error handling and propagation *with* closing pending elements
 func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
-
 	// Test with a writer that will fail
 	failWriter := &failingWriter{failAfter: 10}
 
@@ -956,7 +954,8 @@ func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 
 		assert.Equal(t, 0, ss.Depth())
 		// Output must be valid: partial result closed, error inside tx object
-		assert.Equal(t,
+		assert.Equal(
+			t,
 			`[{"result":{"structLogs":[]},"error":"trace failed"}]`,
 			string(ss.Buffer()),
 		)

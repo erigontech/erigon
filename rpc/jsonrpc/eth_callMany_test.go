@@ -129,7 +129,7 @@ func TestCallMany(t *testing.T) {
 	hexBytes, _ = hex.DecodeString(transferAddr2)
 	transferCallData := hexutil.Bytes(hexBytes)
 
-	//submit 3 Transactions and commit the results
+	// submit 3 Transactions and commit the results
 	transactOpts, _ := bind.NewKeyedTransactorWithChainID(key, chainID)
 	transactOpts1, _ := bind.NewKeyedTransactorWithChainID(key1, chainID)
 	transactOpts2, _ := bind.NewKeyedTransactorWithChainID(key2, chainID)
@@ -152,18 +152,21 @@ func TestCallMany(t *testing.T) {
 	engine := contractBackend.Engine()
 	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), engine, &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())}), db, nil, nil)
 
-	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
+	callArgAddr1 := ethapi.CallArgs{
+		From: &address, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
 		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &balanceCallAddr1,
 	}
-	callArgAddr2 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &secondNonce,
+	callArgAddr2 := ethapi.CallArgs{
+		From: &address, To: &tokenAddr, Nonce: &secondNonce,
 		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
 		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &balanceCallAddr2,
 	}
 
-	callArgTransferAddr2 := ethapi.CallArgs{From: &address2, To: &tokenAddr, Nonce: &nonce,
+	callArgTransferAddr2 := ethapi.CallArgs{
+		From: &address2, To: &tokenAddr, Nonce: &nonce,
 		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
 		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &transferCallData,
@@ -172,7 +175,8 @@ func TestCallMany(t *testing.T) {
 	timeout := int64(50000)
 	txIndex := -1
 	res, err := api.CallMany(ctx, []Bundle{{
-		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}, nil, &timeout)
+		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2},
+	}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), TransactionIndex: &txIndex}, nil, &timeout)
 	if err != nil {
 		t.Errorf("eth_callMany: %v", err)
 	}
@@ -185,7 +189,6 @@ func TestCallMany(t *testing.T) {
 		t.Errorf("eth_callMany: %v", err)
 	}
 	addr2Balance, err := strconv.ParseInt(addr2CalRet, 16, 64)
-
 	if err != nil {
 		t.Errorf("eth_callMany: %v", err)
 	}
@@ -195,7 +198,8 @@ func TestCallMany(t *testing.T) {
 
 	txIndex = 2
 	res, err = api.CallMany(ctx, []Bundle{{
-		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2}}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: &txIndex}, nil, &timeout)
+		Transactions: []ethapi.CallArgs{callArgAddr1, callArgAddr2},
+	}}, StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(1), TransactionIndex: &txIndex}, nil, &timeout)
 	if err != nil {
 		t.Errorf("eth_callMany: %v", err)
 	}
@@ -272,7 +276,8 @@ func TestTraceCallManyStreamsEachResult(t *testing.T) {
 	for i := range calls {
 		nonce := hexutil.Uint64(i)
 		to := address
-		calls[i] = ethapi.CallArgs{From: &address, To: &to, Nonce: &nonce,
+		calls[i] = ethapi.CallArgs{
+			From: &address, To: &to, Nonce: &nonce,
 			MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
 			MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		}

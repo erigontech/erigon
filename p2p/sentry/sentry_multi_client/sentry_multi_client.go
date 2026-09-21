@@ -159,8 +159,10 @@ type MultiClient struct {
 	balGenerator                     eth.BlockAccessListGetter
 }
 
-var _ eth.ReceiptsGetter = new(receipts.Generator)     // compile-time interface-check
-var _ eth.BlockAccessListGetter = new(bal.Regenerator) // compile-time interface-check
+var (
+	_ eth.ReceiptsGetter        = new(receipts.Generator) // compile-time interface-check
+	_ eth.BlockAccessListGetter = new(bal.Regenerator)    // compile-time interface-check
+)
 
 func NewMultiClient(
 	dirs datadir.Dirs,
@@ -580,7 +582,8 @@ func GrpcClient(ctx context.Context, sentryAddr string) (*direct.SentryClientRem
 	backoffCfg.BaseDelay = 500 * time.Millisecond
 	backoffCfg.MaxDelay = 10 * time.Second
 	dialOpts := make([]grpc.DialOption, 0, 4)
-	dialOpts = append(dialOpts,
+	dialOpts = append(
+		dialOpts,
 		grpc.WithConnectParams(grpc.ConnectParams{Backoff: backoffCfg, MinConnectTimeout: 10 * time.Minute}),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(int(16*datasize.MB))),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{}),

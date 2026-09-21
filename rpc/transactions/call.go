@@ -128,7 +128,8 @@ func DoCall(
 }
 
 func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineReader, header *types.Header, tx kv.Getter,
-	reader dbservices.CanonicalReader, config *chain.Config, blockOverrides *ethapi2.BlockOverrides, blockHashOverrides ethapi2.BlockHashOverrides) evmtypes.BlockContext {
+	reader dbservices.CanonicalReader, config *chain.Config, blockOverrides *ethapi2.BlockOverrides, blockHashOverrides ethapi2.BlockHashOverrides,
+) evmtypes.BlockContext {
 	blockHashFunc := MakeBlockHashProvider(ctx, tx, reader, blockHashOverrides)
 	blockContext := protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 	if blockOverrides != nil {
@@ -138,7 +139,8 @@ func NewEVMBlockContextWithOverrides(ctx context.Context, engine rules.EngineRea
 }
 
 func NewEVMBlockContext(engine rules.EngineReader, header *types.Header, requireCanonical bool, tx kv.Getter,
-	headerReader dbservices.HeaderReader, config *chain.Config) evmtypes.BlockContext {
+	headerReader dbservices.HeaderReader, config *chain.Config,
+) evmtypes.BlockContext {
 	blockHashFunc := MakeHeaderGetter(requireCanonical, tx, headerReader)
 	return protocol.NewEVMBlockContext(header, blockHashFunc, engine, accounts.NilAddress /* author */, config)
 }
@@ -221,7 +223,8 @@ func (r *ReusableCaller) InitialState() (*state.IntraBlockState, vm.PrecompiledC
 func (r *ReusableCaller) DoCallWithNewGas(
 	ctx context.Context,
 	newGas uint64,
-	engine rules.EngineReader) (*evmtypes.ExecutionResult, error) {
+	engine rules.EngineReader,
+) (*evmtypes.ExecutionResult, error) {
 	var cancel context.CancelFunc
 	if r.callTimeout > 0 {
 		ctx, cancel = context.WithTimeout(ctx, r.callTimeout)
@@ -294,7 +297,6 @@ func NewReusableCaller(
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
-
 	baseFee := header.BaseFee
 
 	msg, err := initialArgs.ToMessage(gasCap, baseFee)

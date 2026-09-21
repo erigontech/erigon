@@ -509,13 +509,17 @@ var pruneGatingConfigs = []pruneGatingConfig{
 	{name: "full_legacy", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode}},
 	// The same shape on a chain that declares a merge point: there the blocks
 	// sentinel is chain history expiry rather than a no-op.
-	{name: "full_legacy_merge_chain", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode},
-		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight), dropPreMergeTxs: true},
+	{
+		name: "full_legacy_merge_chain", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight), dropPreMergeTxs: true,
+	},
 	// Both retentions carry the chain-history-expiry sentinel, the pair a legacy
 	// archive datadir and an operator asking for expiry on top of archive persist
 	// alike. This fixture holds every body, so it is the archive one.
-	{name: "legacy_archive_sentinel_pair", mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
-		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight)},
+	{
+		name: "legacy_archive_sentinel_pair", mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	},
 	// State history in full while block bodies follow a window, the shape an operator
 	// asks for with --prune.mode=archive --prune.distance.blocks=N. It is the only row
 	// where the blocks boundary is stricter than the history one.

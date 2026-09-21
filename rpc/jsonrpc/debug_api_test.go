@@ -668,7 +668,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
 		s := jsonstream.New(&buf)
-		var norefunds = true
+		norefunds := true
 		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{NoRefunds: &norefunds}, s)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
@@ -759,7 +759,8 @@ func TestStorageRangeAt(t *testing.T) {
 		}
 		expect := StorageRangeResult{
 			storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]], keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]},
-			nil}
+			nil,
+		}
 
 		result, err := api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 100)
 		require.NoError(t, err)
@@ -783,7 +784,6 @@ func TestStorageRangeAt(t *testing.T) {
 			t.Fatalf("wrong result:\ngot %s\nwant %s", dumper.Sdump(result), dumper.Sdump(&expect))
 		}
 	})
-
 }
 
 func TestStorageRangeAtGethCompat(t *testing.T) {
@@ -820,7 +820,8 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 		// all entries
 		expect := StorageRangeResult{
 			storageMap{keys[0]: storage[keys[0]], keys[2]: storage[keys[2]], keys[4]: storage[keys[4]], keys[6]: storage[keys[6]]},
-			nil}
+			nil,
+		}
 		result, err := api.StorageRangeAt(m.Ctx, latestBlock.Hash(), 0, addr, nil, 100)
 		require.NoError(t, err)
 		if !reflect.DeepEqual(result, expect) {
@@ -1260,7 +1261,6 @@ func TestAccountAt(t *testing.T) {
 		require.NoError(err)
 		require.Equal(39, int(results.Nonce))
 		require.Equal(crypto.Keccak256Hash(results.Code), results.CodeHash)
-
 	})
 	t.Run("code matches code hash", func(t *testing.T) {
 		tokenContract := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
@@ -1288,7 +1288,7 @@ func TestGetBadBlocks(t *testing.T) {
 	ctx := context.Background()
 
 	require := require.New(t)
-	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
 	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
@@ -1372,7 +1372,7 @@ func TestGetRawTransaction(t *testing.T) {
 	if number < 1 {
 		t.Error("TestSentry doesn't have enough blocks for this test")
 	}
-	var testedOnce = false
+	testedOnce := false
 	for i := range number {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)

@@ -752,7 +752,7 @@ func (sd *StateDiff) CompareStates(initialIbs, ibs *state.IntraBlockState) error
 		switch {
 		case initialExist:
 			if exist {
-				var allEqual = len(accountDiff.Storage) == 0
+				allEqual := len(accountDiff.Storage) == 0
 				ifromBalance, err := initialIbs.GetBalance(addr)
 				if err != nil {
 					return err
@@ -1067,7 +1067,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	engine := api.engine()
 
 	if blockNrOrHash == nil {
-		var num = rpc.LatestBlockNumber
+		num := rpc.LatestBlockNumber
 		blockNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 	if err := rejectPending(*blockNrOrHash); err != nil {
@@ -1285,7 +1285,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 	var baseFee *uint256.Int
 	if parentNrOrHash == nil {
-		var num = rpc.LatestBlockNumber
+		num := rpc.LatestBlockNumber
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 	if err := rejectPending(*parentNrOrHash); err != nil {
@@ -1337,7 +1337,8 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 	stateCache := shards.NewStateCache(
-		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+		32, 0, /* no limit */
+	) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
@@ -1671,7 +1672,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	engine := api.engine()
 
-	var num = rpc.LatestBlockNumber
+	num := rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
 	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, nil)

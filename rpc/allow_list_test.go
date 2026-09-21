@@ -25,7 +25,6 @@ import (
 )
 
 func TestAllowListMarshaling(t *testing.T) {
-
 }
 
 func TestAllowListUnmarshaling(t *testing.T) {

@@ -82,7 +82,7 @@ type handler struct {
 	maxBatchConcurrency uint
 	traceRequests       bool
 
-	//slow requests
+	// slow requests
 	slowLogThreshold time.Duration
 	slowLogBlacklist []string
 }

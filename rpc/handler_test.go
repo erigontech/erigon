@@ -30,7 +30,6 @@ import (
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
-
 	tests := map[string]struct {
 		params   []byte
 		expected string
@@ -125,7 +124,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				streamable:  true,
 			}
 
-			args, err := parsePositionalArguments((msg).Params, cb.argTypes)
+			args, err := parsePositionalArguments(msg.Params, cb.argTypes)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,7 +141,6 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			assert.Equal(t, testParams.expected, output, "expected output should match")
 		})
 	}
-
 }
 
 // Smoke test for the streamable-callback path: runMethod writes the result

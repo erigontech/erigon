@@ -21,11 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/common/dbg"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon/common/dbg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -397,7 +398,6 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 		return 0, errors.New("header number not found")
 	}
 	return *number, nil
-
 }
 
 // headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db

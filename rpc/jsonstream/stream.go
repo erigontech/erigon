@@ -18,8 +18,9 @@ package jsonstream
 
 import (
 	"encoding"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
+
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // Stream is an interface that defines the common functionality between

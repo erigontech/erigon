@@ -23,7 +23,6 @@ import (
 )
 
 func Bench6(erigon_url string) error {
-
 	setRoutes(erigon_url, "")
 	reqGen := &RequestGenerator{}
 

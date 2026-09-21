@@ -76,13 +76,13 @@ type ReceiptEnv struct {
 }
 
 var (
-	receiptsCacheLimit      = dbg.EnvInt("R_LRU", 1024) //ethmainnet: 1K receipts is ~200mb RAM
+	receiptsCacheLimit      = dbg.EnvInt("R_LRU", 1024) // ethmainnet: 1K receipts is ~200mb RAM
 	receiptsCacheTrace      = dbg.EnvBool("R_LRU_TRACE", false)
 	receiptsExecConcurrency = dbg.EnvInt("R_EXEC_CONCURRENCY", max(1, runtime.GOMAXPROCS(0)/2))
 )
 
 func NewGenerator(dirs datadir.Dirs, blockReader dbservices.FullBlockReader, engine rules.EngineReader, stateCache kvcache.Cache, evmTimeout time.Duration, filters ...*rpchelper.Filters) *Generator {
-	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) //TODO: is handling both of them a good idea though...?
+	receiptsCache, err := lru.New[common.Hash, types.Receipts](receiptsCacheLimit) // TODO: is handling both of them a good idea though...?
 	if err != nil {
 		panic(err)
 	}
@@ -194,7 +194,6 @@ func readPersistedReceipt(tx kv.TemporalTx, blockNum uint64, blockHash, txnHash 
 func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *chain.Config, tx kv.TemporalTx, txIndex int) (*ReceiptEnv, error) {
 	txNumsReader := g.blockReader.TxnumReader()
 	ibs, _, _, _, _, err := transactions.ComputeBlockContext(ctx, g.engine, header, cfg, g.blockReader, g.stateCache, txNumsReader, tx, txIndex)
-
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
 	}
@@ -253,7 +252,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 
 	calculatePostState := postState != nil
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	// if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptFromDB, receipt *types.Receipt
 	var firstLogIndex, logIdxAfterTx uint32
 	var cumGasUsed uint64
@@ -497,7 +496,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 	blockHash := block.Hash()
 	blockNum := block.NumberU64()
 
-	//if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
+	// if can find in DB - then don't need store in `receiptsCache` - because DB it's already kind-of cache (small, mmaped, hot file)
 	var receiptsFromDB types.Receipts
 	receipts := make(types.Receipts, len(block.Transactions()))
 	defer func() {

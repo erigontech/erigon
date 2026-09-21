@@ -18,8 +18,9 @@ package jsonstream
 
 import (
 	"encoding"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
+
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 var (
@@ -108,6 +109,7 @@ func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
 func (s *LazyFieldStream) WriteMore() { s.inner.WriteMore() }
+
 func (s *LazyFieldStream) WriteObjectField(name string) jsonw.JSONWriter {
 	return s.inner.WriteObjectField(name)
 }
