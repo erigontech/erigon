@@ -22,9 +22,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/filters"
 )
@@ -246,27 +245,10 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 // distributeLog processes an event log and distributes it to all subscribed log filters.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
 func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) {
-	addr := gointerfaces.ConvertH160toAddress(eventLog.Address)
-	topics := make([]common.Hash, len(eventLog.Topics))
-	for i, topic := range eventLog.Topics {
-		topics[i] = gointerfaces.ConvertH256ToHash(topic)
-	}
 	// The same log instance is sent to every matching subscriber, each reading it from
 	// its own goroutine, so it must not be mutated after the first Send.
-	lg := &types.RPCLog{
-		Log: types.Log{
-			Address:     addr,
-			Topics:      topics,
-			Data:        eventLog.Data,
-			BlockNumber: hexutil.Uint64(eventLog.BlockNumber),
-			TxHash:      gointerfaces.ConvertH256ToHash(eventLog.TransactionHash),
-			TxIndex:     hexutil.Uint(eventLog.TransactionIndex),
-			BlockHash:   gointerfaces.ConvertH256ToHash(eventLog.BlockHash),
-			Index:       hexutil.Uint(eventLog.LogIndex),
-			Removed:     eventLog.Removed,
-		},
-		BlockTimestamp: hexutil.Uint64(eventLog.BlockTimestamp),
-	}
+	lg := ethutils.RPCLogFromProto(eventLog)
+	addr, topics := lg.Address, lg.Topics
 
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
