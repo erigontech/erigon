@@ -217,3 +217,12 @@ func TestMarshalSubscribeReceiptFullLogs(t *testing.T) {
 		BlockTimestamp: 99,
 	}}, r.Logs)
 }
+
+// A log without an address, which the receipt subscription always tolerated, still converts.
+func TestRPCLogFromProtoWithoutAddress(t *testing.T) {
+	lg := RPCLogFromProto(&remoteproto.SubscribeLogsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(common.HexToHash("0xb1")),
+		TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash("0xaa")),
+	})
+	require.Equal(t, common.Address{}, lg.Address)
+}

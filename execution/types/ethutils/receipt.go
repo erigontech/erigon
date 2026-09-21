@@ -163,7 +163,6 @@ func MarshalReceipt(
 func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.RPCLog {
 	lg := &types.RPCLog{
 		Log: types.Log{
-			Address:     gointerfaces.ConvertH160toAddress(l.Address),
 			Topics:      make([]common.Hash, len(l.Topics)),
 			Data:        l.Data,
 			BlockNumber: hexutil.Uint64(l.BlockNumber),
@@ -177,6 +176,9 @@ func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.RPCLog {
 	}
 	for i, topic := range l.Topics {
 		lg.Topics[i] = gointerfaces.ConvertH256ToHash(topic)
+	}
+	if l.Address != nil {
+		lg.Address = gointerfaces.ConvertH160toAddress(l.Address)
 	}
 	return lg
 }
