@@ -173,6 +173,48 @@ func TestOnHeadStateWithBlockRootSerializesConcurrentWriters(t *testing.T) {
 	}))
 }
 
+// TestOnHeadStateSerializesAgainstOnHeadStateWithBlockRoot verifies that
+// OnHeadState's own BlockRoot() resolution is covered by writeLock like the
+// rest of a publish: a concurrent OnHeadStateWithBlockRoot call - the entry
+// point every real caller uses - must not be able to publish and then be
+// overwritten once OnHeadState's slower root resolution finishes.
+//
+// slowRoot is sized so BlockRoot() alone takes tens of milliseconds
+// (calibrated). It is launched first and confirmed started before the
+// second writer launches, with a head start well inside that window, so a
+// correct implementation deterministically serializes them regardless of
+// scheduling.
+func TestOnHeadStateSerializesAgainstOnHeadStateWithBlockRoot(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(bigValidatorState(t, 1), common.Hash{0x00}))
+
+	slowRoot := bigValidatorState(t, 100_000)
+	require.NoError(t, slowRoot.SetSlot(100))
+	fast := bigValidatorState(t, 1)
+	require.NoError(t, fast.SetSlot(200))
+
+	slowStarted := make(chan struct{})
+	slowDone := make(chan error, 1)
+	go func() {
+		close(slowStarted)
+		slowDone <- manager.OnHeadState(slowRoot)
+	}()
+	<-slowStarted
+	time.Sleep(10 * time.Millisecond)
+
+	fastDone := make(chan error, 1)
+	go func() { fastDone <- manager.OnHeadStateWithBlockRoot(fast, common.Hash{0xbb}) }()
+
+	require.NoError(t, <-slowDone)
+	require.NoError(t, <-fastDone)
+
+	require.NoError(t, manager.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		require.Equal(t, uint64(200), headState.Slot(),
+			"OnHeadState must hold writeLock across BlockRoot() resolution, not just the copy, or a concurrent writer can be overwritten once the slower root resolution finishes")
+		return nil
+	}))
+}
+
 // TestUnsetHeadStateSerializesWithPublish verifies that UnsetHeadState
 // cannot land in the middle of an in-flight publish and then be resurrected
 // by it: it must either fully precede or fully follow any given publish.
