@@ -55,20 +55,16 @@ func TestAllowListAppliesToEveryTransport(t *testing.T) {
 	wssrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 	defer wssrv.Close()
 
-	dialURL := func(url string) func(t *testing.T) *Client {
-		return func(t *testing.T) *Client {
-			client, err := DialContext(t.Context(), url, logger)
-			require.NoError(t, err)
-			return client
-		}
-	}
-	for name, dial := range map[string]func(t *testing.T) *Client{
-		"http":  dialURL(httpsrv.URL),
-		"ws":    dialURL("ws:" + strings.TrimPrefix(wssrv.URL, "http:")),
-		"codec": func(*testing.T) *Client { return DialInProc(srv, logger) }, // the path IPC takes
+	for name, dial := range map[string]func() (*Client, error){
+		"http": func() (*Client, error) { return DialContext(t.Context(), httpsrv.URL, logger) },
+		"ws": func() (*Client, error) {
+			return DialContext(t.Context(), "ws:"+strings.TrimPrefix(wssrv.URL, "http:"), logger)
+		},
+		"codec": func() (*Client, error) { return DialInProc(srv, logger), nil }, // the path IPC takes
 	} {
 		t.Run(name, func(t *testing.T) {
-			client := dial(t)
+			client, err := dial()
+			require.NoError(t, err)
 			defer client.Close()
 
 			var res echoResult
