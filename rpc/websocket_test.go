@@ -471,3 +471,49 @@ func TestWebsocketPingNotRearmedAfterClose(t *testing.T) {
 		t.Fatal("ping timer re-armed on a closed codec")
 	}
 }
+
+// An idle connection gets a ping, and each ping arms the timer for the next one.
+func TestWebsocketIdlePing(t *testing.T) {
+	t.Parallel()
+
+	pinged := make(chan struct{}, 1)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			OnPingReceived: func(context.Context, []byte) bool {
+				select {
+				case pinged <- struct{}{}:
+				default:
+				}
+				return true
+			},
+		})
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		conn.Read(r.Context()) //nolint:errcheck
+	}))
+	defer httpsrv.Close()
+
+	conn, _, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		t.Fatalf("can't dial: %v", err)
+	}
+	wc := NewWebsocketCodec(conn, "", nil, "").(*websocketCodec)
+	defer wc.Close()
+	go conn.Read(context.Background()) //nolint:errcheck
+
+	wc.pingTimer.Reset(time.Millisecond)
+	select {
+	case <-pinged:
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle connection was not pinged")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !wc.pingTimer.Stop() {
+		if time.Now().After(deadline) {
+			t.Fatal("ping did not re-arm the timer")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}

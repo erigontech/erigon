@@ -302,7 +302,6 @@ func (a *wsConnAdapter) encode(v any) error {
 // readFrame returns the next message. Every websocket frame is one message, so
 // it can be read in one go and checked once.
 func (a *wsConnAdapter) readFrame() ([]byte, error) {
-	// Uses context.Background() — dead connections are detected via the ping loop.
 	_, data, err := a.conn.Read(context.Background())
 	return data, err
 }
@@ -334,7 +333,8 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 		wc.info.HTTP.Origin = req.Get("Origin")
 		wc.info.HTTP.UserAgent = req.Get("User-Agent")
 	}
-	// Armed by Reset only after the assignment, which ping reads.
+	// ping reads wc.pingTimer, so the timer must not fire before the assignment:
+	// create it unarmed, then arm it.
 	wc.pingTimer = time.AfterFunc(math.MaxInt64, wc.ping)
 	wc.pingTimer.Reset(wsPingInterval)
 	return wc
