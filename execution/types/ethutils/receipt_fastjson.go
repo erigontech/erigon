@@ -19,10 +19,34 @@ package ethutils
 import (
 	"fmt"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
+
+// RPCReceipts is eth_getBlockReceipts' answer. The RPC encoder only consults the top-level
+// result for a fast marshaller, so a plain []*RPCReceipt would take the reflection path
+// however the element is written.
+type RPCReceipts []*RPCReceipt
+
+func (rs RPCReceipts) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	if rs == nil {
+		w.WriteNil()
+		return nil
+	}
+	w.WriteArrayStart()
+	for i, r := range rs {
+		if i > 0 {
+			w.WriteMore()
+		}
+		if err := r.MarshalFastJSONTo(w); err != nil {
+			return err
+		}
+	}
+	w.WriteArrayEnd()
+	return nil
+}
 
 // field writes the separator a following field needs, then its name, and returns the writer
 // so the value chains onto it. An object's first field must not go through it.
@@ -103,6 +127,10 @@ func writeLogs(w jsonw.JSONWriter, logs any) error {
 	case []*types.Log:
 		writeLogList(w, v)
 	case []*types.RPCLog:
+		if v == nil {
+			w.WriteNil()
+			return nil
+		}
 		w.WriteArrayStart()
 		for i, l := range v {
 			if i > 0 {
@@ -115,13 +143,71 @@ func writeLogs(w jsonw.JSONWriter, logs any) error {
 			writeLog(w, &l.Log, &l.BlockTimestamp)
 		}
 		w.WriteArrayEnd()
+	case []map[string]any:
+		// MarshalSubscribeReceipt's shape, which eth_sendRawTransactionSync answers with.
+		return writeSubscribeLogs(w, v)
 	default:
 		return fmt.Errorf("ethutils: receipt logs of unexpected type %T", logs)
 	}
 	return nil
 }
 
+// writeSubscribeLogs writes the map form MarshalSubscribeReceipt builds. encoding/json
+// orders an object's keys, and address is only present when the proto log carried one.
+func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) error {
+	if logs == nil {
+		w.WriteNil()
+		return nil
+	}
+	w.WriteArrayStart()
+	for i, entry := range logs {
+		if i > 0 {
+			w.WriteMore()
+		}
+		w.WriteObjectStart()
+		first := true
+		for _, k := range []string{"address", "data", "topics", "transactionHash"} {
+			val, ok := entry[k]
+			if !ok {
+				continue
+			}
+			if first {
+				w.WriteObjectField(k)
+				first = false
+			} else {
+				field(w, k)
+			}
+			switch t := val.(type) {
+			case common.Address:
+				w.WriteHex(t[:])
+			case common.Hash:
+				w.WriteHex(t[:])
+			case hexutil.Bytes:
+				w.WriteHex(t)
+			case []common.Hash:
+				w.WriteArrayStart()
+				for j := range t {
+					if j > 0 {
+						w.WriteMore()
+					}
+					w.WriteHex(t[j][:])
+				}
+				w.WriteArrayEnd()
+			default:
+				return fmt.Errorf("ethutils: subscribe log field %q of unexpected type %T", k, val)
+			}
+		}
+		w.WriteObjectEnd()
+	}
+	w.WriteArrayEnd()
+	return nil
+}
+
 func writeLogList(w jsonw.JSONWriter, logs []*types.Log) {
+	if logs == nil {
+		w.WriteNil()
+		return
+	}
 	w.WriteArrayStart()
 	for i := range logs {
 		if i > 0 {

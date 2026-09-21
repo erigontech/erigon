@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -112,6 +113,79 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 			require.NoError(t, r.MarshalFastJSONTo(s))
 			require.NoError(t, s.Flush())
 
+			require.Equal(t, string(want), string(s.Buffer()))
+		})
+	}
+}
+
+// encoding/json writes null for a typed nil slice, not []. MarshalReceipt normalizes nil
+// receipt logs to an empty slice, so only a direct construction reaches these branches.
+func TestRPCReceiptMarshalFastJSONToTypedNilLogs(t *testing.T) {
+	for name, logs := range map[string]any{
+		"nil types.Logs": types.Logs(nil),
+		"nil []*Log":     []*types.Log(nil),
+		"nil []*RPCLog":  []*types.RPCLog(nil),
+		"nil []map":      []map[string]any(nil),
+		"untyped nil":    nil,
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := &RPCReceipt{Logs: logs}
+			want, err := json.Marshal(r)
+			require.NoError(t, err)
+
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, r.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+			require.Equal(t, string(want), string(s.Buffer()))
+		})
+	}
+}
+
+// eth_sendRawTransactionSync answers with MarshalSubscribeReceipt, whose logs are maps.
+func TestRPCReceiptMarshalFastJSONToSubscribeLogs(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	r := &RPCReceipt{
+		TransactionHash: common.HexToHash("0xbeef"),
+		Logs: []map[string]any{
+			{
+				"address":         to,
+				"topics":          []common.Hash{{0x01}, {0x02}},
+				"data":            hexutil.Bytes{0xaa, 0xbb},
+				"transactionHash": common.HexToHash("0xbeef"),
+			},
+			{ // address is only set when the proto log carried one
+				"topics":          []common.Hash{},
+				"data":            hexutil.Bytes{},
+				"transactionHash": common.HexToHash("0xbeef"),
+			},
+		},
+	}
+	want, err := json.Marshal(r)
+	require.NoError(t, err)
+
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	require.NoError(t, r.MarshalFastJSONTo(s))
+	require.NoError(t, s.Flush())
+	require.Equal(t, string(want), string(s.Buffer()))
+}
+
+// The list is what eth_getBlockReceipts returns; the encoder only sees the top-level type.
+func TestRPCReceiptsMarshalFastJSONTo(t *testing.T) {
+	for name, rs := range map[string]RPCReceipts{
+		"nil":   nil,
+		"empty": {},
+		"two":   {{TransactionHash: common.HexToHash("0x1")}, {TransactionHash: common.HexToHash("0x2")}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(rs)
+			require.NoError(t, err)
+
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, rs.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
 			require.Equal(t, string(want), string(s.Buffer()))
 		})
 	}
