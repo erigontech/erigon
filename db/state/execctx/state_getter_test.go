@@ -278,3 +278,30 @@ func TestCachedTemporalTxStateGetterWithoutCacheReadsEveryTime(t *testing.T) {
 		require.Equal(t, i, tx.reads)
 	}
 }
+
+// roWrappingRwTx is a read-only facade over a writable tx: it satisfies only
+// kv.TemporalTx, so the writable check has to unwrap to find the hazard.
+type roWrappingRwTx struct {
+	kv.TemporalTx
+	under kv.TemporalTx
+}
+
+func (tx roWrappingRwTx) UnderlyingTx() kv.TemporalTx { return tx.under }
+
+func TestCachedTemporalTxStateGetterRefusesWrappedWritableTx(t *testing.T) {
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	stateCache := newSmallStateCache()
+	defer stateCache.Close()
+
+	counting := &countingLatestTx{TemporalTx: rwTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(roWrappingRwTx{TemporalTx: counting, under: rwTx}, stateCache)
+	key := make([]byte, 20)
+	for i := 1; i <= 2; i++ {
+		_, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Equal(t, i, counting.reads)
+	}
+}
