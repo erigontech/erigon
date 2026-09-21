@@ -25,7 +25,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"math/big"
 )
 
 // AccountLifecycle is the single revival definition the scattered consumers
@@ -241,4 +243,35 @@ func TestWriterStorageKeyIsReused(t *testing.T) {
 		_ = quiet.WriteAccountStorage(addr, 0, slot1, uint256.Int{}, *uint256.NewInt(1))
 	})
 	require.Equal(t, float64(1), allocs, "the composite key must not allocate")
+}
+
+// WriteSet.Apply builds one storage key for the whole call rather than one per slot, so its
+// allocations must not scale twice per slot. The domains keep a string copy of each key, so
+// one allocation per slot is expected and stays; a reinstated per-slot make would double it.
+func TestWriteSetApplyKeyDoesNotScalePerSlot(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+
+	applyAllocs := func(slots int) float64 {
+		writes := &WriteSet{
+			storage: map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]{addr: {}},
+		}
+		for i := range slots {
+			key := accounts.InternKey(common.BigToHash(big.NewInt(int64(i + 1))))
+			writes.storage[addr][key] = &VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath},
+				Val:         *uint256.NewInt(uint64(i + 1)),
+			}
+		}
+		return testing.AllocsPerRun(5, func() {
+			require.NoError(t, writes.Apply(domains, tx, 1, 1, nil, &chain.Rules{}, nil, false))
+		})
+	}
+
+	few, many := applyAllocs(2), applyAllocs(16)
+	perSlot := (many - few) / 14
+	// Measured 2.21 with the shared key and 3.21 with a per-slot make: the extra
+	// allocation is exactly the key, so the bound sits between the two.
+	require.Less(t, perSlot, 2.7,
+		"allocations per storage slot (%v) must not include a composite key", perSlot)
 }
