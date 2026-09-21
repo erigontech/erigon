@@ -139,11 +139,13 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		ethClock:    ethClock,
 		bannedPeers: lru.NewWithTTL[peer.ID, struct{}]("bannedPeers", 1_000, 30*time.Minute),
 	}
+	p2pCtx, cancel := context.WithCancel(ctx)
 	initialized := false
 	defer func() {
 		if initialized {
 			return
 		}
+		cancel()
 		if p.udpv5 != nil {
 			p.udpv5.Close()
 			if localNode := p.udpv5.LocalNode(); localNode != nil {
@@ -152,10 +154,9 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		}
 		host.Close()
 	}()
-
 	// pubsub
 	pubsub.TimeCacheDuration = gossipSubSeenTTL * gossipSubHeartbeatInterval
-	p.pubsub, err = pubsub.NewGossipSub(ctx, host, p.pubsubOptions(cfg.BeaconConfig)...)
+	p.pubsub, err = pubsub.NewGossipSub(p2pCtx, host, p.pubsubOptions(cfg.BeaconConfig)...)
 	if err != nil {
 		return nil, err
 	}
@@ -165,13 +166,13 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		PrivateKey: privateKey,
 		Bootnodes:  enodes,
 	}
-	p.udpv5, err = NewUDPv5Listener(ctx, cfg, discCfg, logger)
+	p.udpv5, err = NewUDPv5Listener(p2pCtx, cfg, discCfg, logger)
 	if err != nil {
 		return nil, err
 	}
 
 	// connect to bootnodes
-	if err := p.connectToBootnodes(ctx, discCfg); err != nil {
+	if err := p.connectToBootnodes(p2pCtx, discCfg); err != nil {
 		return nil, err
 	}
 
@@ -180,7 +181,7 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 		return nil, err
 	}
 	go p.updateENR()
-	go p.peerMonitor(ctx)
+	go p.peerMonitor(p2pCtx)
 	initialized = true
 	return &p, nil
 }

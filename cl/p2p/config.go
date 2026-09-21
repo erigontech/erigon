@@ -16,6 +16,7 @@ import (
 	libp2pquic "github.com/libp2p/go-libp2p/p2p/transport/quic"
 	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
 	"github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 )
 
 func convertToCryptoPrivkey(privkey *ecdsa.PrivateKey) (crypto.PrivKey, error) {
@@ -39,48 +40,37 @@ func privKeyOption(privkey *ecdsa.PrivateKey) libp2p.Option {
 
 // multiAddressBuilder takes in an ip address string and port to produce a go multiaddr format.
 func multiAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) {
-	parsedIP := net.ParseIP(ipAddr)
-	if parsedIP.To4() == nil && parsedIP.To16() == nil {
-		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
-	}
-	if parsedIP.To4() != nil {
-		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/tcp/%d", ipAddr, port))
-	}
-	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/tcp/%d", ipAddr, port))
+	return addressBuilder(ipAddr, fmt.Sprintf("/tcp/%d", port))
 }
 
 func quicAddressBuilder(ipAddr string, port uint) (multiaddr.Multiaddr, error) {
-	parsedIP := net.ParseIP(ipAddr)
-	if parsedIP.To4() == nil && parsedIP.To16() == nil {
-		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
-	}
-	if parsedIP.To4() != nil {
-		return multiaddr.NewMultiaddr(fmt.Sprintf("/ip4/%s/udp/%d/quic-v1", ipAddr, port))
-	}
-	return multiaddr.NewMultiaddr(fmt.Sprintf("/ip6/%s/udp/%d/quic-v1", ipAddr, port))
+	return addressBuilder(ipAddr, fmt.Sprintf("/udp/%d/quic-v1", port))
 }
 
-func appendAdvertisedAddresses(addrs []multiaddr.Multiaddr, hostPrefix string) []multiaddr.Multiaddr {
+func addressBuilder(ipAddr, transport string) (multiaddr.Multiaddr, error) {
+	parsedIP := net.ParseIP(ipAddr)
+	if parsedIP == nil {
+		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
+	}
+	host, err := manet.FromIP(parsedIP)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ip address provided: %s", ipAddr)
+	}
+	transportAddr, err := multiaddr.NewMultiaddr(transport)
+	if err != nil {
+		return nil, err
+	}
+	return host.Encapsulate(transportAddr), nil
+}
+
+func appendAdvertisedAddresses(addrs []multiaddr.Multiaddr, host multiaddr.Multiaddr) []multiaddr.Multiaddr {
 	advertised := slices.Clone(addrs)
 	for _, addr := range addrs {
-		if port, err := addr.ValueForProtocol(multiaddr.P_TCP); err == nil {
-			external, err := multiaddr.NewMultiaddr(fmt.Sprintf("%s/tcp/%s", hostPrefix, port))
-			if err == nil {
-				advertised = append(advertised, external)
-			}
+		_, transport := multiaddr.SplitFirst(addr)
+		if transport == nil {
 			continue
 		}
-		if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err != nil {
-			continue
-		}
-		port, err := addr.ValueForProtocol(multiaddr.P_UDP)
-		if err != nil {
-			continue
-		}
-		external, err := multiaddr.NewMultiaddr(fmt.Sprintf("%s/udp/%s/quic-v1", hostPrefix, port))
-		if err == nil {
-			advertised = append(advertised, external)
-		}
+		advertised = append(advertised, host.Encapsulate(transport))
 	}
 	return advertised
 }
@@ -130,25 +120,20 @@ func buildOptions(cfg *P2PConfig, privateKey *ecdsa.PrivateKey) ([]libp2p.Option
 		externalAddr = cfg.ExternalIP.String()
 	}
 	if externalAddr != "" {
-		parsedIP := net.ParseIP(externalAddr)
-		hostPrefix := ""
-		if parsedIP.To4() != nil {
-			hostPrefix = "/ip4/" + externalAddr
-		} else if parsedIP.To16() != nil {
-			hostPrefix = "/ip6/" + externalAddr
+		host, err := manet.FromIP(net.ParseIP(externalAddr))
+		if err == nil {
+			options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+				return appendAdvertisedAddresses(addrs, host)
+			}))
 		}
-		options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			if hostPrefix == "" {
-				return addrs
-			}
-			return appendAdvertisedAddresses(addrs, hostPrefix)
-		}))
 	}
 	if cfg.HostDNS != "" {
-		hostPrefix := "/dns4/" + cfg.HostDNS
-		options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
-			return appendAdvertisedAddresses(addrs, hostPrefix)
-		}))
+		host, err := multiaddr.NewMultiaddr("/dns4/" + cfg.HostDNS)
+		if err == nil {
+			options = append(options, libp2p.AddrsFactory(func(addrs []multiaddr.Multiaddr) []multiaddr.Multiaddr {
+				return appendAdvertisedAddresses(addrs, host)
+			}))
+		}
 	}
 	// Disable Ping Service.
 	options = append(options, libp2p.Ping(false))

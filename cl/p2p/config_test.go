@@ -111,6 +111,14 @@ func TestMultiAddressBuilder(t *testing.T) {
 	}
 }
 
+func TestAddressBuildersRejectOutOfRangePorts(t *testing.T) {
+	for _, build := range []func(string, uint) (multiaddr.Multiaddr, error){multiAddressBuilder, quicAddressBuilder} {
+		addr, err := build("127.0.0.1", 1<<16)
+		require.Error(t, err)
+		require.Nil(t, addr)
+	}
+}
+
 func TestBuildOptionsListenOnTCPAndQUIC(t *testing.T) {
 	key, err := crypto.GenerateKey()
 	require.NoError(t, err)

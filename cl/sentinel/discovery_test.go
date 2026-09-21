@@ -35,7 +35,7 @@ import (
 	"golang.org/x/sync/semaphore"
 )
 
-func TestFilterPublicPeerAddressesRemovesLocalEndpoints(t *testing.T) {
+func TestFilterNonPrivatePeerAddressesPreservesExistingLocalDiscoveryBehavior(t *testing.T) {
 	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
 		multiaddr.StringCast("/ip6/::1/udp/9001/quic-v1"),
 		multiaddr.StringCast("/ip6/fc00::1/tcp/9000"),
@@ -45,20 +45,32 @@ func TestFilterPublicPeerAddressesRemovesLocalEndpoints(t *testing.T) {
 		multiaddr.StringCast("/ip6/2001:db8::1/udp/9001/quic-v1"),
 	}}
 
-	require.True(t, filterPublicPeerAddresses(info))
+	require.True(t, filterNonPrivatePeerAddresses(info))
 	require.Equal(t, []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip6/::1/udp/9001/quic-v1"),
+		multiaddr.StringCast("/ip4/127.0.0.1/udp/9001/quic-v1"),
 		multiaddr.StringCast("/ip4/198.51.100.1/tcp/9000"),
 		multiaddr.StringCast("/ip6/2001:db8::1/udp/9001/quic-v1"),
 	}, info.Addrs)
 }
 
-func TestFilterPublicPeerAddressesRejectsLocalOnlyPeer(t *testing.T) {
+func TestFilterNonPrivatePeerAddressesPreservesLinkLocalEndpoints(t *testing.T) {
 	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
 		multiaddr.StringCast("/ip4/169.254.1.1/tcp/9000"),
 		multiaddr.StringCast("/ip6/fe80::1/udp/9001/quic-v1"),
 	}}
 
-	require.False(t, filterPublicPeerAddresses(info))
+	require.True(t, filterNonPrivatePeerAddresses(info))
+	require.Len(t, info.Addrs, 2)
+}
+
+func TestFilterNonPrivatePeerAddressesRejectsPrivateOnlyPeer(t *testing.T) {
+	info := &peer.AddrInfo{Addrs: []multiaddr.Multiaddr{
+		multiaddr.StringCast("/ip4/10.0.0.1/tcp/9000"),
+		multiaddr.StringCast("/ip6/fc00::1/udp/9001/quic-v1"),
+	}}
+
+	require.False(t, filterNonPrivatePeerAddresses(info))
 	require.Empty(t, info.Addrs)
 }
 

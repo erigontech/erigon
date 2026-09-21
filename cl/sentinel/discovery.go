@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
 	"slices"
 	"time"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -49,17 +49,10 @@ const (
 	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
 )
 
-func filterPublicPeerAddresses(info *peer.AddrInfo) bool {
+func filterNonPrivatePeerAddresses(info *peer.AddrInfo) bool {
 	info.Addrs = slices.DeleteFunc(info.Addrs, func(addr multiaddr.Multiaddr) bool {
-		for _, protocol := range []int{multiaddr.P_IP4, multiaddr.P_IP6} {
-			value, err := addr.ValueForProtocol(protocol)
-			if err != nil {
-				continue
-			}
-			ip := net.ParseIP(value)
-			return ip == nil || ip.IsPrivate() || !ip.IsGlobalUnicast()
-		}
-		return true
+		ip, err := manet.ToIP(addr)
+		return err != nil || ip.IsPrivate()
 	})
 	return len(info.Addrs) > 0
 }
@@ -142,7 +135,7 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		if err != nil {
 			continue
 		}
-		if !s.cfg.P2PConfig.LocalDiscovery && !filterPublicPeerAddresses(peerInfo) {
+		if !s.cfg.P2PConfig.LocalDiscovery && !filterNonPrivatePeerAddresses(peerInfo) {
 			continue
 		}
 
@@ -543,7 +536,7 @@ func (s *Sentinel) listenForPeers() {
 			log.Debug("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
-		if !s.cfg.P2PConfig.LocalDiscovery && !filterPublicPeerAddresses(peerInfo) {
+		if !s.cfg.P2PConfig.LocalDiscovery && !filterNonPrivatePeerAddresses(peerInfo) {
 			continue
 		}
 		s.pidToEnr.Store(peerInfo.ID, node)
