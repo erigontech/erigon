@@ -37,6 +37,12 @@ var (
 
 var _ SyncedData = (*SyncedDataManager)(nil)
 
+// copyHookForTest, when non-nil, runs inside publishHeadState's writeLock
+// section immediately before copying the incoming state. Tests use it to
+// pause a writer at a known point and prove other operations do or do not
+// block on it.
+var copyHookForTest func()
+
 type SyncedDataManager struct {
 	enabled bool
 	cfg     *clparams.BeaconChainConfig
@@ -87,10 +93,11 @@ func (s *SyncedDataManager) OnHeadState(newState *state.CachingBeaconState) erro
 	if !s.enabled {
 		return nil
 	}
-	return s.publishHeadState(newState, func() (common.Hash, error) {
-		root, err := newState.BlockRoot()
-		return common.Hash(root), err
-	})
+	root, err := newState.BlockRoot()
+	if err != nil {
+		return err
+	}
+	return s.OnHeadStateWithBlockRoot(newState, common.Hash(root))
 }
 
 // OnHeadStateWithBlockRoot updates the head state with a known block root,
@@ -101,24 +108,21 @@ func (s *SyncedDataManager) OnHeadStateWithBlockRoot(newState *state.CachingBeac
 	if !s.enabled {
 		return nil
 	}
-	return s.publishHeadState(newState, func() (common.Hash, error) { return blockRoot, nil })
+	return s.publishHeadState(newState, blockRoot)
 }
 
 // publishHeadState materializes newState into a standalone copy and swaps it
-// in as the head state, demoting the current head state to previous. Root
-// resolution and the copy both run under writeLock rather than mu/accessLock,
-// so concurrent callers - including OnHeadState's own BlockRoot() computation -
-// are still serialized in arrival order; a writer copying a large state cannot
-// be overtaken and overwritten by a writer that started later but copies a
-// smaller state faster. ViewHeadState, ViewPreviousHeadState, and the
-// single-field accessors below only ever wait for the pointer swap.
-func (s *SyncedDataManager) publishHeadState(newState *state.CachingBeaconState, resolveRoot func() (common.Hash, error)) error {
+// in as the head state, demoting the current head state to previous. The
+// copy runs under writeLock rather than mu/accessLock, so a writer copying a
+// large state cannot be overtaken and overwritten by a writer that started
+// later but copies a smaller state faster; readers only ever wait for the
+// pointer swap.
+func (s *SyncedDataManager) publishHeadState(newState *state.CachingBeaconState, blockRoot common.Hash) error {
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
 
-	blockRoot, err := resolveRoot()
-	if err != nil {
-		return err
+	if copyHookForTest != nil {
+		copyHookForTest()
 	}
 
 	copied, err := newState.Copy()
