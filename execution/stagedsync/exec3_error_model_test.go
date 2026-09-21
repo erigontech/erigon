@@ -58,3 +58,25 @@ func TestResolveExecResumePoint(t *testing.T) {
 	require.Equal(t, uint64(42), txNum)
 	require.Equal(t, uint64(10), blockNum)
 }
+
+// TestResolveExecResumePoint_ExecOnlyAdvanced covers the branch the base cases
+// deliberately avoid: exec-only with Execution progress past the commitment
+// boundary resumes from the block's max txNum read via the reader, not the
+// (stale) commitment seek point.
+func TestResolveExecResumePoint_ExecOnlyAdvanced(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	db := newResumeTestDB(t)
+
+	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const execProgress, blockMaxTxNum = uint64(20), uint64(999)
+	require.NoError(t, rawdbv3.TxNums.Append(tx, execProgress, blockMaxTxNum))
+
+	txNum, blockNum, err := resolveExecResumePoint(ctx, rawdbv3.TxNums, tx, true, execProgress, 42, 10)
+	require.NoError(t, err)
+	require.Equal(t, blockMaxTxNum, txNum, "advanced exec-only resume uses the block's max txNum")
+	require.Equal(t, execProgress, blockNum, "advanced exec-only resume uses the current Execution progress")
+}
