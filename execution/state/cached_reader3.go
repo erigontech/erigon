@@ -17,10 +17,10 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -32,7 +32,7 @@ type CachedReader3 struct {
 	cache kvcache.CacheView
 	db    kv.TemporalTx
 	// addr and storageKey are the keys the next read looks up. As reader fields their slices
-	// reach the cache interface without escaping a local.
+	// reach the cache interface without escaping a local; a reader is not used concurrently.
 	addr       common.Address
 	storageKey [length.Addr + length.Hash]byte
 }
