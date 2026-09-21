@@ -389,13 +389,13 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Modify: `execution/commitment/v4/record.go`
 - Create: `execution/commitment/v4/record_encode_test.go`
 
-- [ ] add `encodeRecord(n *node, depth int, dst []byte) []byte` emitting header, masks, slots ascending, then the ext / emb / leaf trailers ascending
-- [ ] emit `selfExt` inline behind `hdrHasSelfExt` for root records only, and the three root forms `leafRoot` / `extensionRoot` / `branchRoot`
-- [ ] splice an untouched run of children through one `copy` rather than per-child appends
-- [ ] write encode/decode round-trip tests across the same combination table as task 3
-- [ ] write a test that every encoded record passes task 3's `Validate` at its own depth
-- [ ] write a test that a record with no children and no leaves encodes to the tombstone form
-- [ ] run tests — must pass before task 8
+- [x] add `encodeRecord(n *node, depth int, dst []byte) []byte` emitting header, masks, slots ascending, then the ext / emb / leaf trailers ascending
+- [x] emit `selfExt` inline behind `hdrHasSelfExt` for root records only, and the three root forms `leafRoot` / `extensionRoot` / `branchRoot`
+- [x] splice an untouched run of children through one `copy` rather than per-child appends
+- [x] write encode/decode round-trip tests across the same combination table as task 3
+- [x] write a test that every encoded record passes task 3's `Validate` at its own depth
+- [x] write a test that a record with no children and no leaves encodes to the tombstone form
+- [x] run tests — must pass before task 8
 
 ### Task 8: Unfold — exact Seek per touched node
 
