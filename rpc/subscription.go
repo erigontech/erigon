@@ -31,7 +31,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/common/pool"
 )
 
 var (
@@ -257,14 +257,14 @@ func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 	if n.prefix == nil {
 		n.prefix = notificationPrefix(n.namespace, sub.ID)
 	}
-	// A pooled stream, not a fresh buffer: every subscriber of an event gets the same result,
-	// and a buffer per send would copy it once per subscriber.
-	s := jsonstream.Get(nil)
-	defer jsonstream.Put(s)
-	s.WriteRawBytes(n.prefix)
-	s.WriteRawBytes(data)
-	s.WriteRawBytes(notificationSuffix)
-	return n.h.conn.WriteJSON(context.Background(), rawResponse(s.Buffer()))
+	// A pooled buffer, not a fresh one: every subscriber of an event gets the same result, and
+	// a buffer per send would copy it once per subscriber.
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
+	buf.Write(n.prefix)
+	buf.Write(data)
+	buf.Write(notificationSuffix)
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(buf.Bytes()))
 }
 
 var notificationSuffix = []byte("}}")
