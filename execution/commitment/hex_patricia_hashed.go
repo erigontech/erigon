@@ -1763,15 +1763,24 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 		return err
 	}
 
+	// A proof fold keeps the stored hash of a branch below the top branch. The top branch is
+	// still hashed, so the root check stands, but it can no longer catch a row that disagrees
+	// with its parent's stored hash: that row folds to the stored hash and only the emitted
+	// proof node is wrong. Assert builds hash every row.
+	storedHash := hph.readOnlyWitness && upCell.hashLen == length.Hash && slices.Contains(hph.branchBefore[:row], true) && !dbg.AssertEnabled
+	var rowHasher io.Writer = hph.keccak2
+	if storedHash {
+		rowHasher = io.Discard
+	}
 	hph.keccak2.Reset()
 	pt := rlp.EncodeListPrefixToBuf(int(totalBranchLen), hph.hashAuxBuffer[:])
-	if _, err := hph.keccak2.Write(hph.hashAuxBuffer[:pt]); err != nil {
+	if _, err := rowHasher.Write(hph.hashAuxBuffer[:pt]); err != nil {
 		return err
 	}
 	hph.witness.beginBranch(hph.hashAuxBuffer[:pt])
 
-	// Single pass: feed keccak2 + extract cellEncodeData
-	cellData, err := hph.hashRow(row, depth)
+	// Single pass: feed rowHasher + extract cellEncodeData
+	cellData, err := hph.hashRow(row, depth, rowHasher)
 	if err != nil {
 		return err
 	}
@@ -1796,8 +1805,10 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 	}
 	upCell.storageAddrLen = 0
 	upCell.hashLen = 32
-	if _, err := hph.keccak2.Read(upCell.hash[:]); err != nil {
-		return err
+	if !storedHash {
+		if _, err := hph.keccak2.Read(upCell.hash[:]); err != nil {
+			return err
+		}
 	}
 	hph.witness.emitBranch(upCell.hash[:])
 	if hph.traceW != nil {
@@ -1807,17 +1818,17 @@ func (hph *HexPatriciaHashed) foldBranch(row int, nibble, upDepth, depth int16, 
 }
 
 // hashRow performs a single pass over all 17 branch slots (16 nibbles + terminator),
-// feeding cell hashes to keccak2 for present cells (per afterMap) and writing 0x80
+// feeding cell hashes to hasher for present cells (per afterMap) and writing 0x80
 // for empty slots. It simultaneously extracts cellEncodeData for each present cell into hph.cellData.
-func (hph *HexPatriciaHashed) hashRow(row int, depth int16) (*[16]cellEncodeData, error) {
+func (hph *HexPatriciaHashed) hashRow(row int, depth int16, hasher io.Writer) (*[16]cellEncodeData, error) {
 	cellData := &hph.cellData
 	capture := hph.witness.active()
 
 	for bitset, lastNib := hph.afterMap[row], 0; ; {
 		if bitset == 0 {
-			// Write remaining empty cells to keccak2 (up to slot 16 inclusive = terminator)
+			// Write remaining empty cells to hasher (up to slot 16 inclusive = terminator)
 			for i := lastNib; i < 17; i++ {
-				if _, err := hph.keccak2.Write(emptyBranchSlotBytes); err != nil {
+				if _, err := hasher.Write(emptyBranchSlotBytes); err != nil {
 					return cellData, err
 				}
 				if capture {
@@ -1831,7 +1842,7 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) (*[16]cellEncodeData
 
 		// Write empty cells before this nibble
 		for i := lastNib; i < nibble; i++ {
-			if _, err := hph.keccak2.Write(emptyBranchSlotBytes); err != nil {
+			if _, err := hasher.Write(emptyBranchSlotBytes); err != nil {
 				return cellData, err
 			}
 			if capture {
@@ -1892,7 +1903,7 @@ func (hph *HexPatriciaHashed) hashRow(row int, depth int16) (*[16]cellEncodeData
 			hph.hadToLoadL[hph.depthsToTxNum[depth]] = counters
 		}
 
-		if _, err := hph.keccak2.Write(cellHash); err != nil {
+		if _, err := hasher.Write(cellHash); err != nil {
 			return cellData, err
 		}
 		if capture {
