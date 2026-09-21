@@ -287,7 +287,7 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 		"[rpc] log channel was closed")
 }
 
-// TransactionReceipts send a notification each time a new receipt appears.
+// TransactionReceipts sends one notification per block, with the block's receipts that match the filter.
 func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
 	var criteria filters.ReceiptsFilterCriteria
 	if crit != nil {
