@@ -134,7 +134,7 @@ func (l *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	s.WriteObjectStart()
 	s.WriteObjectField("address").WriteHex(l.Address[:])
 	jsonstream.HexesField(s, "topics", l.Topics)
-	// A nil Data is "0x", not null, so it bypasses jsonw.Hex.
+	// A nil Data is "0x", not null.
 	jsonstream.Field(s, "data").WriteHex(l.Data)
 	jsonstream.Text(s, "blockNumber", &l.BlockNumber)
 	jsonstream.Field(s, "transactionHash").WriteHex(l.TxHash[:])
