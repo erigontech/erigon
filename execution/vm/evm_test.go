@@ -149,13 +149,13 @@ func TestZeroUnpricedBaseFee(t *testing.T) {
 			blockCtx := evmtypes.BlockContext{BaseFee: *uint256.NewInt(7)}
 			txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(tc.gasPrice)}
 
-			ZeroUnpricedBaseFee(&blockCtx, &txCtx, Config{NoBaseFee: tc.noBaseFee})
+			got := ZeroUnpricedBaseFee(blockCtx, txCtx, Config{NoBaseFee: tc.noBaseFee})
 
 			want := uint256.NewInt(7)
 			if tc.wantZeroed {
 				want = uint256.NewInt(0)
 			}
-			require.Equal(t, want, &blockCtx.BaseFee)
+			require.Equal(t, want, &got.BaseFee)
 		})
 	}
 }

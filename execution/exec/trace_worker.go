@@ -118,8 +118,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	if e.vmConfig.TraceJumpDest {
 		txContext.TxHash = txn.Hash()
 	}
-	blockCtx := *e.blockCtx
-	vm.ZeroUnpricedBaseFee(&blockCtx, &txContext, *e.vmConfig)
+	blockCtx := vm.ZeroUnpricedBaseFee(*e.blockCtx, txContext, *e.vmConfig)
 	e.evm.ResetBetweenBlocks(blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 
 	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())

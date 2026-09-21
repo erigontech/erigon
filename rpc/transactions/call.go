@@ -95,8 +95,7 @@ func DoCall(
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
 	vmConfig := vm.Config{NoBaseFee: true}
-	vm.ZeroUnpricedBaseFee(&blockCtx, &txCtx, vmConfig)
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vmConfig)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state, chainConfig, vmConfig)
 	// done is closed on return to stop the watcher goroutine before it can
 	// cancel the EVM for a subsequent call.
 	done := make(chan struct{})
@@ -320,9 +319,8 @@ func NewReusableCaller(
 	initialArgs.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
 	vmConfig := vm.Config{NoBaseFee: true}
-	vm.ZeroUnpricedBaseFee(&blockCtx, &txCtx, vmConfig)
 
-	evm := vm.NewEVM(blockCtx, txCtx, state.New(stateReader), chainConfig, vmConfig)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.New(stateReader), chainConfig, vmConfig)
 
 	return &ReusableCaller{
 		evm:            evm,

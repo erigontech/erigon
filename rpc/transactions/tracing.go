@@ -225,8 +225,7 @@ func ExecuteTraceTx(
 	ibs.SetHooks(tracer.Hooks)
 	// Run the transaction with tracing enabled.
 	vmConfig := vm.Config{Tracer: tracer.Hooks, NoBaseFee: true}
-	vm.ZeroUnpricedBaseFee(&blockCtx, &txCtx, vmConfig)
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 	refunds := true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false

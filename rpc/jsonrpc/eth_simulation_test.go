@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -21,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -589,6 +591,46 @@ func TestSimulateV1BaseFeeOverrideReachesEVM(t *testing.T) {
 	require.Len(t, calls, 1)
 	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
 	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000007", calls[0].ReturnData)
+}
+
+// A non-validating call pays no fee, so an overridden base fee must not credit
+// the burnt contract of a chain that has one (AuRa/Gnosis).
+func TestSimulateV1BaseFeeOverrideDoesNotFundBurntContract(t *testing.T) {
+	burntAddr := common.HexToAddress("0x00000000000000000000000000000000b0b0b0b0")
+	chainConfig := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	chainConfig.BurntContract = map[string]common.Address{"0": burntAddr}
+
+	m, _, bankAddr := fundedBankGenesis(t, chainConfig)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	baseFeeCode := hexutil.Bytes(runtimeReturningOpcode(opBasefee))
+	balanceCode := hexutil.Bytes(runtimeReturningOpcode(byte(vm.SELFBALANCE)))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			BlockOverrides: &ethapi.BlockOverrides{BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(7))},
+			StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &baseFeeCode},
+				accounts.InternAddress(burntAddr):    {Code: &balanceCode},
+			},
+			Calls: []ethapi.CallArgs{
+				{From: &bankAddr, To: &contractAddr, Gas: &gas},
+				{From: &bankAddr, To: &burntAddr, Gas: &gas},
+			},
+		}},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls, ok := result[0].Calls.([]CallResult)
+	require.True(t, ok, "expected typed call results")
+	require.Len(t, calls, 2)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[1].Status))
+	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000000", calls[1].ReturnData)
 }
 
 func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {
