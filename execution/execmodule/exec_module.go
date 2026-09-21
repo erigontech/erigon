@@ -108,6 +108,40 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 type Cache struct {
 	execModule  *ExecModule
 	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events
+
+	probeOnce sync.Once
+	probeSD   *execctx.SharedDomains
+}
+
+// rpcStateCacheProbe makes RPC reads take the StateCache path on a node whose CL
+// never publishes an overlay. Bench probe, not for production.
+var rpcStateCacheProbe = dbg.EnvBool("RPC_STATECACHE_PROBE", false)
+
+// stateCacheProbeSD builds one read-only SharedDomains and keeps it, so every
+// RPC view reads through the process state cache instead of the bare tx.
+func (c *Cache) stateCacheProbeSD() *execctx.SharedDomains {
+	if c.execModule == nil {
+		return nil
+	}
+	c.probeOnce.Do(func() {
+		ctx := context.Background()
+		tx, err := c.execModule.db.BeginTemporalRo(ctx)
+		if err != nil {
+			c.execModule.logger.Warn("[statecache-probe] begin ro", "err", err)
+			return
+		}
+		sd, err := execctx.NewSharedDomains(ctx, tx, c.execModule.logger)
+		if err != nil {
+			tx.Rollback()
+			c.execModule.logger.Warn("[statecache-probe] new shared domains", "err", err)
+			return
+		}
+		sd.SetStateCache(c.execModule.stateCache)
+		sd.SetCodeStore(c.execModule.codeStore)
+		c.probeSD = sd
+		c.execModule.logger.Info("[statecache-probe] RPC reads now go through the state cache")
+	})
+	return c.probeSD
 }
 
 // SetPublishedSD wires the Cache to fall back to the published SD from Events
@@ -130,6 +164,9 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 	// (currentContext is nil but the SD is still valid in memory).
 	if sd == nil && c.publishedSD != nil {
 		sd = c.publishedSD()
+	}
+	if sd == nil && rpcStateCacheProbe {
+		sd = c.stateCacheProbeSD()
 	}
 
 	var view *CacheView
