@@ -31,6 +31,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -1144,6 +1145,8 @@ func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
 // A separator and a field name carry no value, so the wrapper leaves them alone:
 // opening the field for one emits `"result":` with nothing able to follow it.
 func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
 	for name, write := range map[string]func(s Stream){
 		"WriteMore":        func(s Stream) { s.WriteMore() },
 		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
@@ -1161,21 +1164,11 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 	}
 }
 
-// A value chained onto an explicit field must land on that field, not behind the pending one.
-func TestLazyFieldStreamChainsValueOntoExplicitField(t *testing.T) {
-	inner := newStackStream(nil, 64)
-	inner.WriteObjectStart()
-	lazy := NewLazyFieldStream(inner, "result", false)
-
-	lazy.WriteObjectField("error").WriteString("boom")
-
-	require.False(t, lazy.Written(), "a chained value must not open the pending field")
-	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
-}
-
 // Nested wrappers must hand the chained value to the stream that took the field name, not to a
 // wrapper still holding a pending field of its own.
 func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
 	inner := newStackStream(nil, 64)
 	inner.WriteObjectStart()
 	outer := NewLazyFieldStream(inner, "outer", false)
@@ -1382,4 +1375,48 @@ func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
 
 	require.NoError(t, s.Flush(), "jsoniter reports nil for a stream with no writer")
 	require.Error(t, s.Err(), "the latched appender error must stay reachable")
+}
+
+// A field name or separator written before the lazy field opened would put its value in the
+// enclosing object, silently dropping the field. Asserts catch a marshaller that starts with
+// jsonw.Field instead of a value write.
+func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	for name, write := range map[string]func(s Stream){
+		"WriteMore":        func(s Stream) { s.WriteMore() },
+		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := newStackStream(nil, 64)
+			inner.WriteObjectStart()
+			lazy := NewLazyFieldStream(inner, "result", false)
+
+			require.Panics(t, func() { write(lazy) })
+
+			lazy.WriteObjectStart()
+			require.NotPanics(t, func() { write(lazy) })
+		})
+	}
+}
+
+// A nil slice is the caller's to write as null: WriteHexBytes always writes an array.
+func TestWriteHexBytes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		items [][]byte
+		want  string
+	}{
+		"nil":           {nil, `[]`},
+		"empty":         {[][]byte{}, `[]`},
+		"empty element": {[][]byte{{}}, `["0x"]`},
+		"multi":         {[][]byte{{0x01}, {0xab, 0xcd}, nil}, `["0x01","0xabcd","0x"]`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := Get(nil)
+			defer Put(s)
+			WriteHexBytes(s, tc.items)
+			require.NoError(t, s.Err())
+			require.Equal(t, tc.want, string(s.Buffer()))
+		})
+	}
 }
