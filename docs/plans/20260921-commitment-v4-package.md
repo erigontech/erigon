@@ -360,15 +360,15 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/account.go`
 - Create: `execution/commitment/v4/account_test.go`
 
-- [ ] add `encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []byte` — the **record body**, `flags u8 | nonce | balance | codeHash? | storage`, eliding a zero balance and the empty code hash as flag bits
-- [ ] add `decodeAccountLeaf(b []byte) (nonce uint64, balance uint256.Int, codeHash []byte, storageRoot []byte, err error)`
-- [ ] add `accountConsensusRLP(nonce uint64, balance *uint256.Int, storageRoot, codeHash []byte, dst []byte) []byte` producing `rlp([nonce, balance, storageRoot, codeHash])` with **nothing elided** — this is what `leafRef` hashes, and it is a different encoding from the record body
-- [ ] encode the body's `storage` field as `none -> EmptyRoot` or `root -> 32 B`, and expand `none` back to `EmptyRoot` in the consensus RLP
-- [ ] write round-trip tests for the body: an EOA, a contract with storage, a contract with code but no storage
-- [ ] write tests for the elision flags: zero balance, empty code hash, both, neither — asserting the decoded values, not the byte counts
-- [ ] write a test that `accountConsensusRLP` matches the RLP `HexPatriciaHashed` produces for the same account, across the four elision combinations — a mismatch here diverges every account root
-- [ ] write rejection tests for a truncated body and an impossible flag combination
-- [ ] run tests — must pass before task 6
+- [x] add `encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []byte` — the **record body**, `flags u8 | nonce | balance | codeHash? | storage`, eliding a zero balance and the empty code hash as flag bits
+- [x] add `decodeAccountLeaf(b []byte) (nonce uint64, balance uint256.Int, codeHash []byte, storageRoot []byte, err error)`
+- [x] add `accountConsensusRLP(nonce uint64, balance *uint256.Int, storageRoot, codeHash []byte, dst []byte) []byte` producing `rlp([nonce, balance, storageRoot, codeHash])` with **nothing elided** — this is what `leafRef` hashes, and it is a different encoding from the record body
+- [x] encode the body's `storage` field as `none -> EmptyRoot` or `root -> 32 B`, and expand `none` back to `EmptyRoot` in the consensus RLP
+- [x] write round-trip tests for the body: an EOA, a contract with storage, a contract with code but no storage
+- [x] write tests for the elision flags: zero balance, empty code hash, both, neither — asserting the decoded values, not the byte counts
+- [x] write a test that `accountConsensusRLP` matches the RLP `HexPatriciaHashed` produces for the same account, across the four elision combinations — a mismatch here diverges every account root
+- [x] write rejection tests for a truncated body and an impossible flag combination
+- [x] run tests — must pass before task 6
 
 ### Task 6: In-memory node and the fork/join seam
 
