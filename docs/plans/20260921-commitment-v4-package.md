@@ -330,14 +330,14 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/record.go`
 - Create: `execution/commitment/v4/record_decode_test.go`
 
-- [ ] define the header bits `hdrHasSelfExt`, `hdrHasChildExt`, `hdrHasEmb`, `hdrIsLeafRoot` and the format nibble
-- [ ] add a `Record` view over a `[]byte` exposing `ChildMask()`, `LeafMask()`, `ExtMask()`, `EmbMask()`, `SelfExt()` with no allocation
-- [ ] add `SlotAt(nib int) []byte` computing `hdrLen + 32*rank(childMask &^ leafMask &^ embMask, nib)`, and `LeafAt(nib int) (suffix, value []byte)`, `ExtAt(nib int) []byte`, `EmbAt(nib int) []byte` walking the trailers
-- [ ] add `LeafRootBody() (hashedKey, value []byte)` for `isLeafRoot`
-- [ ] add `Validate(rec []byte, depth int) error` checking mask subset relations, trailer lengths against `suffix = 64 - depth - 1`, the `isLeafRoot`/`selfExt` exclusion, and the D6 root invariant `hasSelfExt ⇒ popcount(childMask) == 1`
-- [ ] write table-driven decode tests over hand-built fixtures for every header-bit combination
-- [ ] write rejection tests: truncated body, `leafMask` not a subset of `childMask`, `extMask` overlapping `leafMask`, both `isLeafRoot` and `selfExt` set, `hasSelfExt` with two child bits, trailer shorter than declared
-- [ ] run tests — must pass before task 4
+- [x] define the header bits `hdrHasSelfExt`, `hdrHasChildExt`, `hdrHasEmb`, `hdrIsLeafRoot` and the format nibble
+- [x] add a `Record` view over a `[]byte` exposing `ChildMask()`, `LeafMask()`, `ExtMask()`, `EmbMask()`, `SelfExt()` with no allocation
+- [x] add `SlotAt(nib int) []byte` computing `hdrLen + 32*rank(childMask &^ leafMask &^ embMask, nib)`, and `LeafAt(nib int) (suffix, value []byte)`, `ExtAt(nib int) []byte`, `EmbAt(nib int) []byte` walking the trailers
+- [x] add `LeafRootBody() (hashedKey, value []byte)` for `isLeafRoot`
+- [x] add `Validate(rec []byte, depth int) error` checking mask subset relations, trailer lengths against `suffix = 64 - depth - 1`, the `isLeafRoot`/`selfExt` exclusion, and the D6 root invariant `hasSelfExt ⇒ popcount(childMask) == 1`
+- [x] write table-driven decode tests over hand-built fixtures for every header-bit combination
+- [x] write rejection tests: truncated body, `leafMask` not a subset of `childMask`, `extMask` overlapping `leafMask`, both `isLeafRoot` and `selfExt` set, `hasSelfExt` with two child bits, trailer shorter than declared
+- [x] run tests — must pass before task 4
 
 ### Task 4: RLP and keccak primitives, and the D7 assert
 
