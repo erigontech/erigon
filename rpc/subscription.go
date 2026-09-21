@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -186,10 +187,12 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 	)
 	if isNilPointer(data) {
 		enc, err = json.Marshal(data)
+	} else if fm, ok := data.(fastJSONResult); ok {
+		// A notification needs the bytes, so a value that can size its own buffer beats
+		// streaming into a pooled one and cloning it back out.
+		enc, err = fm.MarshalFastJSON()
 	} else if fm, ok := data.(fastJSONMarshalerTo); ok {
 		enc, err = marshalFastJSONTo(fm)
-	} else if fm, ok := data.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
 	} else {
 		enc, err = json.Marshal(data)
 	}
@@ -248,16 +251,16 @@ func (n *RemoteNotifier) activate() error {
 }
 
 func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
-	params, err := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
-	if err != nil {
-		return err
-	}
-	ctx := context.Background()
-	return n.h.conn.WriteJSON(ctx, &jsonrpcMessage{
-		Version: vsn,
-		Method:  n.namespace + notificationMethodSuffix,
-		Params:  params,
-	})
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(notification(n.namespace, sub.ID, data)))
+}
+
+// notification wraps result, which is already encoded, in the subscription message without
+// parsing it again: every subscriber would otherwise re-check the same payload.
+func notification(namespace string, id ID, result json.RawMessage) []byte {
+	method, _ := json.Marshal(namespace + notificationMethodSuffix) //nolint:errchkjson
+	quotedID, _ := json.Marshal(string(id))                         //nolint:errchkjson
+	return slices.Concat([]byte(`{"jsonrpc":"`+vsn+`","method":`), method, []byte(`,"params":{"subscription":`),
+		quotedID, []byte(`,"result":`), result, []byte("}}"))
 }
 
 // A Subscription is created by a notifier and tied to that notifier. The client can use
