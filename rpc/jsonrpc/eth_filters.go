@@ -264,13 +264,17 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 }
 
 // TransactionReceipts send a notification each time a new receipt appears.
-func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
+func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
+	var criteria filters.ReceiptsFilterCriteria
+	if crit != nil {
+		criteria = *crit
+	}
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
 		func() (<-chan *remoteproto.SubscribeReceiptsReply, func(), error) {
-			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
+			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, criteria)
 			if err != nil {
 				return nil, nil, err
 			}

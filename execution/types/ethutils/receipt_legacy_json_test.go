@@ -358,7 +358,7 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 			require.NoError(t, err)
 			got, err := json.Marshal(MarshalSubscribeReceipt(r))
 			require.NoError(t, err)
-			require.JSONEq(t, string(want), string(got))
+			require.JSONEq(t, withoutLogs(t, want), withoutLogs(t, got))
 		})
 	}
 }
@@ -384,4 +384,14 @@ func TestMarshalSubscribeReceiptOddLogsBloom(t *testing.T) {
 			require.Contains(t, string(b), `"logsBloom":null`)
 		})
 	}
+}
+
+// withoutLogs drops the logs, which the subscription now sends in full: TestMarshalSubscribeReceiptFullLogs pins them.
+func withoutLogs(t *testing.T, b []byte) string {
+	var m map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(b, &m))
+	delete(m, "logs")
+	out, err := json.Marshal(m)
+	require.NoError(t, err)
+	return string(out)
 }
