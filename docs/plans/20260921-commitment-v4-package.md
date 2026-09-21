@@ -419,13 +419,13 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/mutate.go`
 - Create: `execution/commitment/v4/split_test.go`
 
-- [ ] add `insert(n *node, path []byte, suffix, value []byte) error` placing a leaf in an empty slot
-- [ ] add the split path: a new key colliding with an existing leaf pushes that leaf deeper — a new branch at the divergence, both leaves re-suffixed, a new extension if the divergence is more than one nibble past the parent
-- [ ] recompute the pushed leaf's suffix from its stored full path; its value comes from the record, not from state — this is what D2 buys
-- [ ] write split tests at every depth 0..62 in the account plane and 0..62 in the storage plane
-- [ ] write a test for a split creating an extension of length 1, of length > 1, and of length 0 (adjacent divergence)
-- [ ] write a test that a split issues zero `Account`/`Storage` calls on the mock context
-- [ ] run tests — must pass before task 10
+- [x] add `insert(n *node, path []byte, suffix, value []byte) error` placing a leaf in an empty slot
+- [x] add the split path: a new key colliding with an existing leaf pushes that leaf deeper — a new branch at the divergence, both leaves re-suffixed, a new extension if the divergence is more than one nibble past the parent
+- [x] recompute the pushed leaf's suffix from its stored full path; its value comes from the record, not from state — this is what D2 buys
+- [x] write split tests at every depth 0..62 in the account plane and 0..62 in the storage plane
+- [x] write a test for a split creating an extension of length 1, of length > 1, and of length 0 (adjacent divergence)
+- [x] write a test that a split issues zero `Account`/`Storage` calls on the mock context
+- [x] run tests — must pass before task 10
 
 ### Task 10: Collapse and delete
 
