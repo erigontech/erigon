@@ -27,6 +27,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 )
 
 // Benchmarks the sample inputs from the SHA256 precompile.
@@ -164,7 +165,7 @@ func benchmarkPrecompiled(b *testing.B, addr string, test precompiledTest) {
 		bench.ResetTimer()
 		for i := 0; i < bench.N; i++ {
 			copy(data, in)
-			res, _, err = RunPrecompiledContract(p, data, reqGas, nil)
+			res, _, err = RunPrecompiledContract(p, data, mdgas.MdGas{Execution: reqGas}, nil)
 		}
 		bench.StopTimer()
 		elapsed := max(uint64(time.Since(start)), 1)

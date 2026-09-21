@@ -21,10 +21,39 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestMuxForwardsGasChangeV2(t *testing.T) {
+	old := mdgas.MdGas{Execution: 100, State: 200}
+	new := mdgas.MdGas{Execution: 90, State: 150}
+	var received [][2]mdgas.MdGas
+	var reasons []tracing.GasChangeReason
+	var legacy [][2]uint64
+	children := []*tracers.Tracer{
+		{Hooks: &tracing.Hooks{
+			OnGasChangeV2: func(old, new mdgas.MdGas, reason tracing.GasChangeReason) {
+				received = append(received, [2]mdgas.MdGas{old, new})
+				reasons = append(reasons, reason)
+			},
+			OnGasChange: func(_, _ uint64, _ tracing.GasChangeReason) { t.Fatal("V2 must take precedence") },
+		}},
+		{Hooks: &tracing.Hooks{OnGasChange: func(old, new uint64, _ tracing.GasChangeReason) {
+			legacy = append(legacy, [2]uint64{old, new})
+		}}},
+		{},
+	}
+	mux := newTestMuxTracer([]string{"v2", "v1", "nil"}, children)
+	mux.EmitGasChange(old, new, tracing.GasChangeCallOpCode)
+	require.Equal(t, [][2]mdgas.MdGas{{old, new}}, received)
+	require.Equal(t, []tracing.GasChangeReason{tracing.GasChangeCallOpCode}, reasons)
+	require.Equal(t, [][2]uint64{{100, 90}}, legacy)
+	mux.EmitGasChange(old, new, tracing.GasChangeTxIntrinsicGas)
+	require.Equal(t, [2]uint64{100, 90}, legacy[1])
+}
 
 // newTestMuxTracer is a test helper that constructs a muxTracer from
 // pre-built child tracers, bypassing the JSON-based registry lookup
