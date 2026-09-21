@@ -311,8 +311,7 @@ type websocketCodec struct {
 	conn *websocket.Conn
 	info PeerInfo
 
-	wg        sync.WaitGroup
-	pingReset chan struct{}
+	pingTimer *time.Timer
 }
 
 // NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
@@ -323,7 +322,6 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 	wc := &websocketCodec{
 		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
-		pingReset: make(chan struct{}, 1),
 		info: PeerInfo{
 			Transport:  "ws",
 			RemoteAddr: remoteAddr,
@@ -335,14 +333,15 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 		wc.info.HTTP.Origin = req.Get("Origin")
 		wc.info.HTTP.UserAgent = req.Get("User-Agent")
 	}
-	// Start pinger.
-	wc.wg.Go(wc.pingLoop)
+	wc.pingTimer = time.AfterFunc(wsPingInterval, wc.ping)
+	// Orders the assignment before the first ping run, which reads pingTimer.
+	wc.pingTimer.Reset(wsPingInterval)
 	return wc
 }
 
 func (wc *websocketCodec) Close() {
 	wc.jsonCodec.Close()
-	wc.wg.Wait()
+	wc.pingTimer.Stop()
 }
 
 func (wc *websocketCodec) peerInfo() PeerInfo {
@@ -357,34 +356,19 @@ func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 	}
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
-		// Notify pingLoop to delay the next idle ping.
-		select {
-		case wc.pingReset <- struct{}{}:
-		default:
-		}
+		wc.pingTimer.Reset(wsPingInterval)
 	}
 	return err
 }
 
-// pingLoop sends periodic ping frames when the connection is idle.
-func (wc *websocketCodec) pingLoop() {
-	timer := time.NewTimer(wsPingInterval)
-	defer timer.Stop()
-
-	for {
-		select {
-		case <-wc.closed():
-			return
-		case <-wc.pingReset:
-			if !timer.Stop() {
-				<-timer.C
-			}
-			timer.Reset(wsPingInterval)
-		case <-timer.C:
-			pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
-			wc.conn.Ping(pingCtx) //nolint:errcheck
-			cancel()
-			timer.Reset(wsPingInterval)
-		}
+// ping sends a ping frame once the connection has been idle for wsPingInterval.
+func (wc *websocketCodec) ping() {
+	pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
+	wc.conn.Ping(pingCtx) //nolint:errcheck
+	cancel()
+	select {
+	case <-wc.closed():
+	default:
+		wc.pingTimer.Reset(wsPingInterval)
 	}
 }
