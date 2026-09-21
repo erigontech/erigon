@@ -490,13 +490,16 @@ func TestWebsocketIdlePing(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.CloseNow()
+		defer func() { _ = conn.CloseNow() }()
 		conn.Read(r.Context()) //nolint:errcheck
 	}))
 	defer httpsrv.Close()
 
-	conn, _, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
 	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
 		t.Fatalf("can't dial: %v", err)
 	}
 	wc := NewWebsocketCodec(conn, "", nil, "").(*websocketCodec)
