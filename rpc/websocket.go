@@ -320,8 +320,10 @@ type websocketCodec struct {
 func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	adapter := &wsConnAdapter{conn: conn}
+	jc := newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame)
+	jc.writeTimeout = wsPingInterval
 	wc := &websocketCodec{
-		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
+		jsonCodec: jc,
 		conn:      conn,
 		pingReset: make(chan struct{}, 1),
 		info: PeerInfo{
@@ -350,11 +352,6 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 }
 
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, wsPingInterval)
-		defer cancel()
-	}
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		// Notify pingLoop to delay the next idle ping.
