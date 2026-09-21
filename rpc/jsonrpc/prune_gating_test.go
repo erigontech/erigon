@@ -372,7 +372,8 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
 		return apis.eth.CreateAccessList(ctx, pruneGatingCallArgs(), &bnh, nil, nil)
 	}},
-	{"eth_callMany", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	// The bundles run on top of the block's own transactions, so the body has to be there.
+	{"eth_callMany", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bundles, simulate := pruneGatingBundle(ref.num)
 		return apis.eth.CallMany(ctx, bundles, simulate, nil, nil)
 	}},
