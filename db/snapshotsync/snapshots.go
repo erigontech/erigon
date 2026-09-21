@@ -1669,9 +1669,9 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	return s.RemoveOwnTmpFiles()
 }
 
-// RemoveOwnTmpFiles unlinks leftover .tmp files of this collection's own types. Another
-// collection may be compressing into the same directory, and its in-progress target is a .tmp
-// that must not be touched. Call it once at startup, before this collection compresses anything.
+// RemoveOwnTmpFiles unlinks leftover .tmp files of this collection's own types, leaving those of
+// any other collection compressing into the same directory. Safe only while this collection has no
+// compression in flight, since its own in-progress .tmp is indistinguishable from a leftover.
 func (s *BaseRoSnapshots) RemoveOwnTmpFiles() error {
 	tmpFiles, err := snaptype.TmpFiles(s.dir)
 	if err != nil {
