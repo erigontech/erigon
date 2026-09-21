@@ -376,10 +376,10 @@ func TestGetHeadOnceDiscardsSupersededCheckpoint(t *testing.T) {
 	require.Equal(t, common.Hash{}, store.headHash, "nothing may be cached from the stale checkpoint")
 }
 
-// A caller that queues for the admission token can go stale while it waits. It must not
-// spend an EL call on a block that is no longer admissible, because that call serializes on
-// the shared token and delays unrelated payloads behind it.
-func TestNewPayloadSkipsELWhenBlockWentStaleWhileQueued(t *testing.T) {
+// A block can go stale between entry and the admission token being taken. When the
+// re-check inside the token sees that, it must not spend an EL call, because that call
+// serializes on the shared token and delays unrelated payloads behind it.
+func TestNewPayloadSkipsELWhenBlockIsNoLongerAdmissible(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().

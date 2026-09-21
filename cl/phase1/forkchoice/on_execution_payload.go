@@ -437,9 +437,10 @@ func (f *ForkChoiceStore) rootMarkedInvalid(blockRoot common.Hash) bool {
 }
 
 // newPayloadForBlockWhileYieldingForkChoiceLock validates a pre-Gloas block's payload with
-// the EL without holding f.mu. stillAdmissible is called under a read lock, and skipped if
-// that lock is not free, so the global admission token is never held waiting on f.mu. Admission is re-checked and the verdict recorded while the
-// admission token is still held, so queued callers neither resend nor run stale work.
+// the EL without holding f.mu. stillAdmissible is best effort: it runs under a read lock
+// when that lock is free and is skipped when it is not, so the admission token is never
+// held waiting on f.mu. An invalid or validated verdict reaches the status caches before
+// the token is released, so a queued caller can short-circuit instead of re-asking the EL.
 func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	blockRoot common.Hash,
@@ -456,7 +457,8 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 		// The wait for the token can be long enough for the block to go stale. The check
 		// needs f.mu, but this owns the global token, so never wait for it: whoever holds
 		// the lock may be in a slow EL call of its own and every payload would queue
-		// behind that. Skipping only costs a call the re-check afterwards still undoes.
+		// behind that. Skipping costs an EL round trip plus the status and optimistic
+		// entries the caller records before its own re-check rejects the block.
 		if f.mu.TryRLock() {
 			err := stillAdmissible()
 			f.mu.RUnlock()
@@ -667,22 +669,7 @@ func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus ex
 }
 
 func (f *ForkChoiceStore) payloadInvalidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
-	if f.invalidatedExecutionPayloads != nil {
-		if _, invalidated := f.invalidatedExecutionPayloads.Load(executionBlockHash); invalidated {
-			return true
-		}
-	}
-	if f.payloadStatusByRoot != nil {
-		if status, ok := f.payloadStatusByRoot.Get(blockRoot); ok && status == execution_client.PayloadStatusInvalidated {
-			return true
-		}
-	}
-	if f.executionPayloadStatus != nil {
-		if status, ok := f.executionPayloadStatus.Get(executionBlockHash); ok && status == execution_client.PayloadStatusInvalidated {
-			return true
-		}
-	}
-	return false
+	return f.rootMarkedInvalid(blockRoot) || f.executionHashMarkedInvalid(executionBlockHash)
 }
 
 func (f *ForkChoiceStore) payloadValidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
