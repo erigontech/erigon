@@ -68,11 +68,18 @@ func (e ttlEntry[V]) expired(now time.Time) bool {
 	return !e.expiresAt.IsZero() && now.After(e.expiresAt)
 }
 
+// expiredTailDrops is how many expired entries an Add reclaims from the least recently used end.
+// Two per Add keeps ahead of the one entry an Add inserts, so a backlog of expired entries drains
+// while the cache is written to.
+const expiredTailDrops = 2
+
 // CacheWithTTL is a size-bounded cache with lazy expiry. For a positive ttl, Add sets a fresh
-// deadline and Get treats an entry past its deadline as a miss and removes it. An expired entry
-// that is never read again stays resident until it is removed, replaced or evicted by the size
-// cap, so the cap, not the ttl, bounds what the cache holds. A ttl of zero or less disables
-// expiry. The cache starts no goroutine.
+// deadline and Get treats an entry past its deadline as a miss and removes it. An entry that is
+// never read again reaches the least recently used end in deadline order, where an Add reclaims
+// it, so a cache that is written to holds roughly a ttl's worth of entries rather than filling to
+// its size cap. An entry a Get promoted is reclaimed once everything less recently used than it
+// has gone, and the size cap bounds it until then. A ttl of zero or less disables expiry. The
+// cache starts no goroutine.
 type CacheWithTTL[K comparable, V any] struct {
 	ttl time.Duration
 	// metrics
@@ -98,7 +105,8 @@ func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Durat
 	}
 }
 
-// Add stores v under k with a fresh deadline, replacing any entry k had, expired or not.
+// Add stores v under k with a fresh deadline, replacing any entry k had, expired or not, and
+// reclaims expired entries from the least recently used end.
 func (c *CacheWithTTL[K, V]) Add(k K, v V) (evicted bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -107,9 +115,23 @@ func (c *CacheWithTTL[K, V]) Add(k K, v V) (evicted bool) {
 		// The deadline is taken under the lock: time spent waiting for it would otherwise be
 		// charged to the entry's ttl, and a long enough wait would store a value that is already
 		// expired.
-		e.expiresAt = time.Now().Add(c.ttl)
+		now := time.Now()
+		e.expiresAt = now.Add(c.ttl)
+		c.dropExpiredTail(now)
 	}
 	return c.cache.Add(k, e)
+}
+
+// dropExpiredTail removes up to expiredTailDrops expired entries from the least recently used end,
+// stopping at the first live one. c.mu is held.
+func (c *CacheWithTTL[K, V]) dropExpiredTail(now time.Time) {
+	for range expiredTailDrops {
+		k, e, ok := c.cache.GetOldest()
+		if !ok || !e.expired(now) {
+			return
+		}
+		c.cache.Remove(k)
+	}
 }
 
 // Get returns k's value if it is present and not past its deadline. An expired entry is a miss and
@@ -138,7 +160,8 @@ func (c *CacheWithTTL[K, V]) Remove(k K) bool {
 	return c.cache.Remove(k)
 }
 
-// Len counts the resident entries, including any past their deadline that no Get has dropped yet.
+// Len counts the resident entries, including any past their deadline that no Get or Add has
+// reclaimed yet.
 func (c *CacheWithTTL[K, V]) Len() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
