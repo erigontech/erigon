@@ -77,6 +77,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	record := NewRecord(data, len(path))
 	n := fork(path)
 	n.plane = plane
+	n.storageRoot = plane == planeStorage && len(path) == 0
 	if len(path) == 0 && data[0]&hdrHasSelfExt != 0 {
 		n.path = unpackPath(record.SelfExt()[1:], int(data[1]), nil)
 	}

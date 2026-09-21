@@ -607,12 +607,12 @@ import cycle, even in a test file) and it cannot be `package commitment_test` (`
 test helpers). The task-8 mock implements `commitment.PatriciaContext`, which `HexPatriciaHashed`
 also consumes, so one mock drives every arm.
 
-- [ ] build `seqTrie` (`commitment.NewHexPatriciaHashed`), `parTrie` and `v4Trie` over the same mock, feed one update set, `require.Equal` on all three roots
-- [ ] cover accounts only, storage only, and mixed, at 1, 2, 16, 1 000 and 100 000 keys
-- [ ] cover every §10 case that produces a root: leaf split at every depth in both planes, both collapse shapes, the storage transitions, an account deleted with non-empty storage, wipe-then-reinsert, an embedded leaf appearing and disappearing, an extension at a trie root
-- [ ] write a fuzz target driving random insert / update / delete sequences through v4 and HPH, asserting root equality each step
-- [ ] assert zero `Account`/`Storage` calls on the v4 arm while the HPH arm is free to make them
-- [ ] run `go test ./execution/commitment/v4/ -run Parity` and the fuzz target's seed corpus — must pass before task 22
+- [x] build `seqTrie` (`commitment.NewHexPatriciaHashed`), `parTrie` and `v4Trie` over the same mock, feed one update set, `require.Equal` on all three roots
+- [x] cover accounts only, storage only, and mixed, at 1, 2, 16, 1 000 and 100 000 keys
+- [x] cover every §10 case that produces a root: leaf split at every depth in both planes, both collapse shapes, the storage transitions, an account deleted with non-empty storage, wipe-then-reinsert, an embedded leaf appearing and disappearing, an extension at a trie root
+- [x] write a fuzz target driving random insert / update / delete sequences through v4 and HPH, asserting root equality each step
+- [x] assert zero `Account`/`Storage` calls on the v4 arm while the HPH arm is free to make them
+- [x] run `go test ./execution/commitment/v4/ -run Parity` and the fuzz target's seed corpus — must pass before task 22
 
 ### Task 22: Incremental and reload parity over N ≥ 3 batches
 

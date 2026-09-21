@@ -19,8 +19,9 @@ package v4
 import "fmt"
 
 type node struct {
-	path  []byte
-	plane byte
+	path        []byte
+	plane       byte
+	storageRoot bool
 
 	childMask uint16
 	leafMask  uint16

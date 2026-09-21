@@ -160,6 +160,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		root = fork(nil)
 	}
 	root.plane = planeStorage
+	markStorageRoot(root)
 	before := reachableRecordKeys(root, task.addrHash)
 
 	for _, entry := range task.entries {
@@ -184,10 +185,24 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		}
 	}
 
+	markStorageRoot(root)
 	if err := persistStorageGraph(ctx, root, task.addrHash, before); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
+}
+
+func markStorageRoot(root *node) {
+	if root == nil {
+		return
+	}
+	root.storageRoot = true
+	for nib := range 16 {
+		if root.childMask&(uint16(1)<<nib) == 0 || root.leafMask&(uint16(1)<<nib) != 0 {
+			continue
+		}
+		markStorageRoot(root.children[nib])
+	}
 }
 
 func ensureStoragePath(ctx commitment.PatriciaContext, n *node, path []byte, addrHash [32]byte) error {

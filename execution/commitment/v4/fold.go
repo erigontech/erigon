@@ -105,7 +105,7 @@ func foldLeaf(n *node, nib, depth int, includeNib bool) ([]byte, error) {
 		return nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
 	}
 	key := make([]byte, 0, suffixCount)
-	if n.plane == planeStorage {
+	if n.plane == planeStorage && (includeNib || !n.storageRoot) {
 		key = append(key, n.path...)
 		key = append(key, byte(nib))
 	} else if includeNib {
