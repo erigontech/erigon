@@ -2069,7 +2069,7 @@ A non-empty `snapshots/backup/domains/` blocks the next conversion, and pre-flig
 
 **Is the node stopped?** Yes. The command opens the chaindata DB read-write and applies migrations.
 
-**What does it cost?** Every commitment `.kv` file that is not already plain is rewritten and its accessors (`.kvi` / `.bt` / `.kvei`) rebuilt. Converted output is written into `snapshots/rebuild/domain/` while the originals are still in place, so at peak you need free space for a second copy of the commitment domain — use the `commitment` row of `erigon seg du --datadir <path> -v` to size it. Plain output is larger than the referenced input.
+**What does it cost?** Every commitment `.kv` file whose encoding does not already match the target on **both** axes is rewritten and its accessors (`.kvi` / `.bt` / `.kvei`) rebuilt — which includes a file that is already plain but carries V2 keys, since the default target is V1. Sizing this by the referenced files alone understates it. Converted output is written into `snapshots/rebuild/domain/` while the originals are still in place, so at peak you need free space for a second copy of the commitment domain — use the `commitment` row of `erigon seg du --datadir <path> -v` to size it. Plain output is larger than the referenced input.
 
 ### If a run is interrupted
 
