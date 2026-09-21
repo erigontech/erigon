@@ -53,13 +53,30 @@ func bigValidatorState(t *testing.T, n int) *state.CachingBeaconState {
 // reader running concurrently with OnHeadStateWithBlockRoot is not made to
 // wait for the incoming state to finish copying: readers should only ever be
 // blocked for the swap itself, regardless of how large the new state is.
+//
+// Any threshold on absolute read latency is inherently fragile - too tight
+// and it flakes on scheduling/GC noise (as the first version of this test
+// did under -race), too loose and it stops discriminating the bug it exists
+// to catch (as the second version did: a reproduction against the pre-fix
+// code showed max read latency landing at 26.8-36.5ms, comfortably under a
+// 50ms threshold meant to tolerate -race noise). This version drops
+// absolute timing entirely: it waits until the writer has genuinely entered
+// its critical section (proven by TryLock failing, not by counting reads or
+// guessing a timing margin), then asserts a real read completes before the
+// writer does - true on the fix regardless of how long the copy or any
+// scheduling delay takes. On a synthetic worst-case regression (the copy
+// moved back under mu, with the smallest possible gap between mu and
+// writeLock releasing), this reliably catches it (16/20 runs); the residual
+// miss rate is the unavoidable tail race between a read unblocking and this
+// check running, not a calibration problem, and does not occur on the fix
+// (20/20 clean).
 func TestViewHeadStateDoesNotWaitForHeadStateCopy(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 
 	seed := bigValidatorState(t, 1)
 	require.NoError(t, manager.OnHeadStateWithBlockRoot(seed, common.Hash{0x01}))
 
-	big := bigValidatorState(t, 500_000)
+	big := bigValidatorState(t, 500_000) // large enough that the copy takes tens of ms
 
 	writerDone := make(chan struct{})
 	var writeErr error
@@ -68,29 +85,32 @@ func TestViewHeadStateDoesNotWaitForHeadStateCopy(t *testing.T) {
 		writeErr = manager.OnHeadStateWithBlockRoot(big, common.Hash{0x02})
 	}()
 
-	var maxReadLatency time.Duration
-	var readCount int
 	for {
 		select {
 		case <-writerDone:
-			require.NoError(t, writeErr)
-			require.GreaterOrEqual(t, readCount, 100,
-				"too few ViewHeadState calls overlapped the writer for this assertion to be meaningful")
-			// The threshold is well above ordinary scheduling/GC noise (observed
-			// up to ~19ms under -race) and well below the copy this is guarding
-			// against (~36ms without -race, ~370-420ms with it, per calibration).
-			require.Less(t, maxReadLatency, 50*time.Millisecond,
-				"a ViewHeadState call blocked for close to the full head-state copy duration")
-			return
+			t.Fatal("writer finished before it was observed to enter its critical section")
 		default:
 		}
-		start := time.Now()
-		require.NoError(t, manager.ViewHeadState(func(*state.CachingBeaconState) error { return nil }))
-		readCount++
-		if elapsed := time.Since(start); elapsed > maxReadLatency {
-			maxReadLatency = elapsed
+		if manager.writeLock.TryLock() {
+			// Nothing else in this test holds writeLock, so succeeding here
+			// only proves the writer has not reached it yet - keep polling.
+			manager.writeLock.Unlock()
+			continue
 		}
+		break
 	}
+
+	require.NoError(t, manager.ViewHeadState(func(*state.CachingBeaconState) error { return nil }))
+
+	select {
+	case <-writerDone:
+		t.Fatal("the writer already finished by the time the read completed - " +
+			"the read did not overlap the copy, so this run proves nothing")
+	default:
+	}
+
+	<-writerDone
+	require.NoError(t, writeErr)
 }
 
 // TestOnHeadStateWithBlockRootColdStart verifies that the first update
