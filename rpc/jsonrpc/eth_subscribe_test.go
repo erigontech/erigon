@@ -68,7 +68,7 @@ func TestEthSubscribe(t *testing.T) {
 	require.NoError(t, err)
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		header := <-newHeads
-		require.Equal(t, i, header.Number.Uint64())
+		require.Equal(t, i, header.Value.Number.Uint64())
 	}
 }
 
@@ -110,7 +110,7 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	receipts := make([]*remoteproto.SubscribeReceiptsReply, highestSeenHeader)
 	for i := uint64(1); i <= highestSeenHeader; i++ {
 		// 1 tx per block -> 1 receipt per block
-		receipts[i-1] = <-newReceipts
+		receipts[i-1] = (<-newReceipts).Value
 	}
 	slices.SortFunc(receipts, func(a, b *remoteproto.SubscribeReceiptsReply) int {
 		return cmp.Compare(a.BlockNumber, b.BlockNumber)
