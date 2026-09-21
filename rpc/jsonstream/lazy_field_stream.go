@@ -69,7 +69,7 @@ func (s *LazyFieldStream) ensure() {
 	if !s.written {
 		s.written = true
 		if s.prependSeparator {
-			s.inner.WriteMore()
+			markSeparator(s.inner)
 		}
 		s.inner.WriteObjectField(s.field)
 		s.openDepth = uint(s.inner.Depth() - 1)
@@ -134,4 +134,20 @@ func (s *LazyFieldStream) Err() error                     { return s.inner.Err()
 func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.inner.Reset(out)
 	s.written = false
+}
+
+func (s *LazyFieldStream) markSeparatorPending() { markSeparator(s.inner) }
+
+// separatorMarker is the streams that write separators themselves. It stays off Stream so
+// an implementation outside this package still satisfies it.
+type separatorMarker interface{ markSeparatorPending() }
+
+// markSeparator asserts a sibling precedes the next value, falling back to the manual
+// comma for a stream that does not write separators itself.
+func markSeparator(s Stream) {
+	if m, ok := s.(separatorMarker); ok {
+		m.markSeparatorPending()
+		return
+	}
+	s.WriteMore()
 }
