@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -289,11 +288,6 @@ type SharedDomains struct {
 	// Backing frontiers stay fixed while writes and staged unwinds remain in
 	// mem; both reach the transaction during flush, which resets the memo.
 	visibleEnds domainVisibleEndMemo
-
-	// codeStore is the optional two-tier (in-mem + MDBX) codehash-keyed code
-	// cache, reached via StateGetter so an addr-keyed reader can serve a
-	// code-by-hash read with the application's authoritative codehash.
-	codeStore *cache.CodeStore
 
 	// changesetMu serializes the exec loop's install of a block's changeset
 	// accumulator against the calculator's swap of the commitment writer's
@@ -994,11 +988,6 @@ func GuardAggregatorForCache(db any, sc *cache.StateCache) {
 	f.ForbidVisibilityLowering()
 }
 
-// SetCodeStore sets the persistent codehash-keyed code cache.
-func (sd *SharedDomains) SetCodeStore(codeStore *cache.CodeStore) {
-	sd.codeStore = codeStore
-}
-
 // PrintCacheStats logs the state cache hit/miss counters and resets them.
 // No-op when the cache is disabled. The cache is an SD-internal detail, so
 // callers observe it through SD rather than reaching for the cache directly.
@@ -1206,7 +1195,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		return nil
 	}
 
-	if sd.branchCache == nil && sd.stateCache == nil && sd.codeStore == nil {
+	if sd.branchCache == nil && sd.stateCache == nil {
 		if err := sd.flushMem(ctx, tx); err != nil {
 			return err
 		}
@@ -1250,38 +1239,10 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		opts = append(opts, stash(kv.CommitmentDomain))
 	}
 	if sd.stateCache != nil {
-		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain))
-	}
-	// CodeDomain flush stashes state-cache updates and collects code for the
-	// persistent store. The code-store MDBX write is deferred to after flushMem —
-	// an in-callback tx.Put interleaves with the in-progress domain flush and
-	// corrupts it (reorg/unwind wrong root).
-	var codeStoreWrites [][2][]byte
-	if sd.stateCache != nil || sd.codeStore != nil {
-		opts = append(opts, kv.WithFlushCallback(kv.CodeDomain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
-			var codeHash []byte
-			if sd.codeStore != nil && len(v) > 0 {
-				codeHash = crypto.Keccak256(v)
-				codeStoreWrites = append(codeStoreWrites, [2][]byte{codeHash, v})
-			}
-			if sd.stateCache != nil {
-				pendingState = append(pendingState, cache.StateUpdate{
-					Domain:   kv.CodeDomain,
-					Key:      k,
-					Value:    v,
-					CodeHash: codeHash,
-					TxNum:    txNum,
-				})
-			}
-		}))
+		opts = append(opts, stash(kv.AccountsDomain), stash(kv.StorageDomain), stash(kv.CodeDomain))
 	}
 	if err := sd.flushMem(ctx, tx, opts...); err != nil {
 		return err
-	}
-	for _, cw := range codeStoreWrites {
-		if err := sd.codeStore.PutByHash(tx, cw[0], cw[1]); err != nil {
-			return err
-		}
 	}
 	if err := runValidate(); err != nil {
 		return err
@@ -1647,22 +1608,11 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 		return nil, false, errors.New("sd.GetCode: unexpected nil tx")
 	}
 
-	// Fast path: addr → account codeHash → content-addressed bytes, no
-	// per-address CodeDomain read. The codeHash is resolved mem-first, so it
-	// reflects in-block code changes — keying the code store off it (rather than
-	// a stateObject's stale snapshot) is reorg-safe.
 	var codeHash []byte
-	if sd.stateCache != nil || sd.codeStore != nil {
+	if sd.stateCache != nil {
 		if codeHash = sd.codeHashForAddr(tx, view, addr, txNum); len(codeHash) > 0 {
-			if sd.stateCache != nil {
-				if cv, ok := view.GetCodeByHash(codeHash); ok {
-					return cv, true, nil
-				}
-			}
-			if sd.codeStore != nil {
-				if cv, ok := sd.codeStore.GetByHash(tx, codeHash); ok {
-					return cv, true, nil
-				}
+			if cv, ok := view.GetCodeByHash(codeHash); ok {
+				return cv, true, nil
 			}
 		}
 	}
