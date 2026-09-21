@@ -513,7 +513,8 @@ func TestEIP2780RecipientStartsWarm(t *testing.T) {
 	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
 	require.NoError(t, err)
 	require.NoError(t, result.Err)
-	require.Equal(t,
+	require.Equal(
+		t,
 		params.TxBaseEIP2780+params.ColdAccountAccessEIP2780+vm.GasQuickStep+params.WarmStorageReadCostEIP2929,
 		result.BlockExecutionGasUsed,
 	)

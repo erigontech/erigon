@@ -30,9 +30,9 @@ import (
 )
 
 const (
-	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
+	// FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
 	FirstContractIncarnation = 1
-	//NonContractIncarnation incarnation for non contracts
+	// NonContractIncarnation incarnation for non contracts
 	NonContractIncarnation = 0
 )
 
@@ -113,8 +113,7 @@ func (nw *NoopWriter) CreateContract(address accounts.Address) error {
 	return nil
 }
 
-type NoopReader struct {
-}
+type NoopReader struct{}
 
 var noopReader = &NoopReader{}
 
@@ -126,14 +125,19 @@ func (*NoopReader) SetTx(kv.TemporalTx) {}
 func (*NoopReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (*NoopReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (*NoopReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error)        { return nil, nil }
-func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error)       { return 0, nil }
+
+func (*NoopReader) ReadAccountCode(address accounts.Address) ([]byte, error) { return nil, nil }
+
+func (*NoopReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+
 func (*NoopReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) { return 0, nil }
 
 func (*NoopReader) SetTrace(_ bool, _ string) {}

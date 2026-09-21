@@ -146,6 +146,7 @@ func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 		})
 	}
 }
+
 func TestSignedExecutionPayloadEnvelopeCloneNilMessage(t *testing.T) {
 	envelope := &SignedExecutionPayloadEnvelope{
 		Signature: common.Bytes96{1, 2, 3},

@@ -106,7 +106,7 @@ func Test_BtreeIndex_Seek(t *testing.T) {
 		_, _, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) // seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 		cur.Close()
@@ -399,7 +399,7 @@ func TestFooter_ZeroKeyCount(t *testing.T) {
 	require.NoError(t, footer.Encode(&body))
 
 	indexPath := filepath.Join(tmp, "zero_keys.bt")
-	require.NoError(t, os.WriteFile(indexPath, body.Bytes(), 0644))
+	require.NoError(t, os.WriteFile(indexPath, body.Bytes(), 0o644))
 
 	// Use a 1-key KV as the reader — it won't be consulted because Open will
 	// fail before building the BpsTree.
@@ -517,7 +517,7 @@ func Test_BtreeIndex_Seek2(t *testing.T) {
 		_, _, _, err = bt.dataLookup(bt.ef.Count()-1, getter)
 		require.NoError(t, err)
 
-		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) //seek beyeon the last key
+		cur, err := bt.Seek(getter, common.FromHex("0xffffffffffffff")) // seek beyeon the last key
 		require.NoError(t, err)
 		require.Nil(t, cur)
 		cur.Close()

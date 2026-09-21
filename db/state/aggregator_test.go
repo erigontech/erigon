@@ -472,7 +472,6 @@ func TestReceiptFilesVersionAdjust(t *testing.T) {
 		require.True(v_versions.Current.Cmp(version.V2_1) >= 0)
 		require.Equal(v_versions.MinSupported, version.V1_0)
 	})
-
 }
 
 func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []testFileRange) {

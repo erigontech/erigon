@@ -309,7 +309,8 @@ func requireDeferredMatchesEager(tb testing.TB, rounds ...*UpdateBuilder) {
 func Test_HexPatriciaHashed_DeferredBranchUpdatesDifferential(t *testing.T) {
 	t.Parallel()
 
-	requireDeferredMatchesEager(t,
+	requireDeferredMatchesEager(
+		t,
 		NewUpdateBuilder().
 			Balance("1000000000000000000000000000000000000001", 1).
 			Nonce("1000000000000000000000000000000000000002", 2).
@@ -596,7 +597,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 		Balance("ff", 900234).
 		Balance("04", 1233).
 		Storage("04", "01", "0401").
-		Balance("ba", 065606).
+		Balance("ba", 0o65606).
 		Balance("00", 4).
 		Balance("01", 5).
 		Balance("02", 6).
@@ -743,7 +744,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 		Balance("ff", 900234).
 		Balance("04", 1233).
 		Storage("04", "01", "0401").
-		Balance("ba", 065606).
+		Balance("ba", 0o65606).
 		Balance("00", 4).
 		Balance("01", 5).
 		Balance("02", 6).
@@ -880,7 +881,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
 		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 0o65606).
 		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
 		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
 		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
@@ -893,7 +894,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
 		Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "0000fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
 		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 0o65606).
 		Nonce("27456647f49ba65e220e86cba9abfc4fc1587b81", 1).
 		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 3*1e17).
 		Nonce("b13363d527cdc18173c54ac5d4a54af05dbec22e", 1).
@@ -978,12 +979,15 @@ func TestUpdate_EncodeDecode(t *testing.T) {
 	updates := []Update{
 		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
 		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
-		{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
+		{
+			Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
 			CodeHash: common.Hash{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			},
+		},
 		{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
 		{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 	}
@@ -1024,17 +1028,21 @@ func TestUpdate_Merge(t *testing.T) {
 		},
 		{
 			a: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(4568314), Nonce: 123, CodeHash: empty.CodeHash},
-			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
+			b: Update{
+				Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
 				CodeHash: common.Hash{
 					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+				},
+			},
 			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124, CodeHash: common.Hash{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			}},
 		},
 		{
 			a: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
@@ -1288,7 +1296,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		Balance("00000000000000000000000000000000000000ff", 900234).
 		Balance("0000000000000000000000000000000000000004", 1233).
 		Storage("0000000000000000000000000000000000000004", "01", "0401").
-		Balance("00000000000000000000000000000000000000ba", 065606).
+		Balance("00000000000000000000000000000000000000ba", 0o65606).
 		Balance("0000000000000000000000000000000000000000", 4).
 		Balance("0000000000000000000000000000000000000001", 5).
 		Balance("0000000000000000000000000000000000000002", 6).

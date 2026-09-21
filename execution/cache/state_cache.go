@@ -228,7 +228,8 @@ func (c *StateCache) getAddrCodeHashWithTxNum(addr []byte) ([32]byte, uint64, bo
 // The mapping derives from an account record, so admission checks the accounts
 // frontier even though the mapping lives in the code cache.
 func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd,
-	viewEpoch uint64) {
+	viewEpoch uint64,
+) {
 	cc, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok {
 		return
@@ -255,7 +256,8 @@ func (c *StateCache) deleteAddrCodeHash(addr []byte) {
 // read view without replacing an authoritative entry. Negatives use the view's
 // last included txNum. Code goes through fillCodeIfFresh.
 func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, readTxNum, visibleEnd,
-	viewEpoch uint64) {
+	viewEpoch uint64,
+) {
 	cache := c.caches[domain]
 	if cache == nil {
 		return
@@ -284,7 +286,8 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 // negatives are not cached here: "no code" is cached at the addr→codeHash
 // mapping instead (the zero-hash sentinel seeded by SeedAddrCodeHash).
 func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibleEnd, accountsVisibleEnd,
-	viewEpoch uint64) {
+	viewEpoch uint64,
+) {
 	if len(value) == 0 {
 		return
 	}
@@ -294,7 +297,8 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 }
 
 func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTxNum, visibleEnd, accountsVisibleEnd,
-	viewEpoch uint64) {
+	viewEpoch uint64,
+) {
 	codeCache, ok := c.caches[kv.CodeDomain].(*CodeCache)
 	if !ok || len(value) == 0 || len(codeHash) != len(common.Hash{}) {
 		return
@@ -476,7 +480,8 @@ func (c *StateCache) initialize(stateVersion uint64) {
 }
 
 func (c *StateCache) beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
-	hasUnwind bool) bool {
+	hasUnwind bool,
+) bool {
 	c.admissionMu.Lock()
 	defer c.admissionMu.Unlock()
 	if committedStateVersion <= sourceStateVersion || !c.canAdvanceStateVersionLocked(committedStateVersion) {
@@ -508,7 +513,8 @@ func (c *StateCache) finishPublication(committedStateVersion uint64) {
 }
 
 func (c *StateCache) publish(sourceStateVersion, committedStateVersion, unwindToTxNum uint64,
-	hasUnwind bool, updates []StateUpdate) {
+	hasUnwind bool, updates []StateUpdate,
+) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
 	if !c.beginPublication(sourceStateVersion, committedStateVersion, unwindToTxNum, hasUnwind) {

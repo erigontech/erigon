@@ -396,6 +396,7 @@ func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	return pc, nil, nil
 }
+
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if caller := scope.Contract.Caller(); caller.IsNil() {
 		scope.Stack.pushRef().Clear()
@@ -794,13 +795,15 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 		if usedBitmap {
 			if evm.config.TraceJumpDest {
-				log.Debug("Code Bitmap used for detecting invalid jump",
+				log.Debug(
+					"Code Bitmap used for detecting invalid jump",
 					"tx", fmt.Sprintf("0x%x", evm.TxHash),
 					"block_num", evm.Context.BlockNumber,
 				)
 			} else {
 				// This is "cheaper" version because it does not require calculation of txHash for each transaction
-				log.Debug("Code Bitmap used for detecting invalid jump",
+				log.Debug(
+					"Code Bitmap used for detecting invalid jump",
 					"block_num", evm.Context.BlockNumber,
 				)
 			}
@@ -825,13 +828,15 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 			if usedBitmap {
 				if evm.config.TraceJumpDest {
-					log.Warn("Code Bitmap used for detecting invalid jump",
+					log.Warn(
+						"Code Bitmap used for detecting invalid jump",
 						"tx", fmt.Sprintf("0x%x", evm.TxHash),
 						"block_num", evm.Context.BlockNumber,
 					)
 				} else {
 					// This is "cheaper" version because it does not require calculation of txHash for each transaction
-					log.Warn("Code Bitmap used for detecting invalid jump",
+					log.Warn(
+						"Code Bitmap used for detecting invalid jump",
 						"block_num", evm.Context.BlockNumber,
 					)
 				}

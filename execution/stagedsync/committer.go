@@ -905,8 +905,10 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 // path; the per-call differences live in m.
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
 	if err := cc.state.LazyLoadErr(); err != nil {
-		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
-			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
+		cc.publish(ctx, commitmentResult{
+			blockNum: t.blockNum, txNum: t.lastTxNum,
+			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err),
+		})
 		return
 	}
 	cc.state.FlushToUpdates(cc.updates)
@@ -929,8 +931,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		rh, err = cc.computeWithBlockAccumulator(ctx, t)
 	}
 	if err != nil {
-		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
-			err: fmt.Errorf("commitmentCalculator: %scompute failed: %w", m.label, err)})
+		cc.publish(ctx, commitmentResult{
+			blockNum: t.blockNum, txNum: t.lastTxNum,
+			err: fmt.Errorf("commitmentCalculator: %scompute failed: %w", m.label, err),
+		})
 		return
 	}
 
@@ -939,8 +943,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		if mismatch {
 			cc.doms.GetCommitmentContext().ResetPendingUpdates()
 		} else if ferr := flushOwn(); ferr != nil {
-			cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
-				err: fmt.Errorf("commitmentCalculator: %sflush failed: %w", m.label, ferr)})
+			cc.publish(ctx, commitmentResult{
+				blockNum: t.blockNum, txNum: t.lastTxNum,
+				err: fmt.Errorf("commitmentCalculator: %sflush failed: %w", m.label, ferr),
+			})
 			return
 		}
 	}
