@@ -230,7 +230,7 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 			}
 			return nil, hErr
 		}
-		return newWebsocketCodec(conn, nil, endpoint, header, endpoint), nil
+		return NewWebsocketCodec(conn, endpoint, header, endpoint), nil
 	}, logger)
 }
 
@@ -345,9 +345,13 @@ type websocketCodec struct {
 	pingReset chan struct{}
 }
 
-// newWebsocketCodec wraps a coder websocket connection as a ServerCodec. netConn is the
-// hijacked socket on the server side and nil on the client side. remoteAddr should be
-// r.RemoteAddr on the server side, or the endpoint URL on the client side.
+// NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
+// remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
+func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
+	return newWebsocketCodec(conn, nil, host, req, remoteAddr)
+}
+
+// newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds server writes.
 func newWebsocketCodec(conn *websocket.Conn, netConn net.Conn, host string, req http.Header, remoteAddr string) *websocketCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	adapter := &wsConnAdapter{conn: conn, netConn: netConn}
