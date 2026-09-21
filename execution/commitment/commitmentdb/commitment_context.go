@@ -246,6 +246,9 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 		cfg.Variant = commitment.VariantHexPatriciaTrie
 		ctx.pendingCfg = cfg
 	}
+	if variant == commitment.VariantCommitmentV4 {
+		mode = commitment.ModeUpdate
+	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
 }
@@ -823,6 +826,8 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 // truth so BranchCache can exclude it by construction.
 var KeyCommitmentState = commitment.KeyCommitmentState
 
+var KeyCommitmentV4State = commitment.KeyCommitmentV4State
+
 var ErrBehindCommitment = errors.New("behind commitment")
 
 func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
@@ -1223,13 +1228,24 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
-	if err != nil {
-		return 0, err
+	for _, key := range [][]byte{KeyCommitmentV4State, KeyCommitmentState} {
+		stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+		if err != nil {
+			return 0, err
+		}
+		if len(stateVal) == 0 {
+			continue
+		}
+		if bytes.Equal(key, KeyCommitmentV4State) {
+			if len(stateVal) != 1+8+8+32 || stateVal[0] != commitment.CommitmentV4StateMarker {
+				return 0, errors.New("invalid commitment v4 state")
+			}
+			return binary.BigEndian.Uint64(stateVal[9:17]), nil
+		}
+		if len(stateVal) >= 16 {
+			_, minUnwindable := DecodeTxBlockNums(stateVal)
+			return minUnwindable, nil
+		}
 	}
-	if len(stateVal) < 16 {
-		return 0, nil
-	}
-	_, minUnwindable := DecodeTxBlockNums(stateVal)
-	return minUnwindable, nil
+	return 0, nil
 }

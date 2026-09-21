@@ -17,7 +17,6 @@
 package commitment
 
 import (
-	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -37,7 +36,7 @@ func u64ident(k uint64) uint32 { return uint32(k) }
 var KeyCommitmentState = []byte("state")
 
 func isCommitmentStateKey(prefix []byte) bool {
-	return bytes.Equal(prefix, KeyCommitmentState)
+	return IsCommitmentStateKey(prefix)
 }
 
 // BranchCache: writer stripes only make stamped publications atomic with

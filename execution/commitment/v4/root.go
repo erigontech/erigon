@@ -169,6 +169,30 @@ func removeRoot(n *node, path []byte) error {
 	return collapseRoot(n)
 }
 
+func promoteRootExtension(n *node) error {
+	if n == nil || len(n.path) != 0 || n.leafMask != 0 || rootBitsCount(n.childMask) != 1 {
+		return nil
+	}
+	nib := trailingNibble(n.childMask)
+	if child := n.children[nib]; child != nil {
+		if len(child.path) == 0 || child.path[0] != byte(nib) {
+			return ErrRootShape
+		}
+		n.path = append(n.path[:0], child.path...)
+	} else {
+		if len(n.childHash[nib]) != 32 {
+			return ErrRootShape
+		}
+		n.path = append(n.path[:0], byte(nib))
+		n.path = append(n.path, n.childExt[nib]...)
+	}
+	if len(n.path) == 0 || len(n.path) > 63 {
+		return ErrRootShape
+	}
+	n.childExt[nib] = nil
+	return nil
+}
+
 func collapseRoot(n *node) error {
 	if n == nil {
 		return ErrRootShape

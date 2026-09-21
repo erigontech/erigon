@@ -130,6 +130,12 @@ const (
 	CommitmentV4StateMarker    byte        = 0x04
 )
 
+var KeyCommitmentV4State = []byte{0x42}
+
+func IsCommitmentStateKey(key []byte) bool {
+	return bytes.Equal(key, KeyCommitmentState) || bytes.Equal(key, KeyCommitmentV4State)
+}
+
 type TrieFunc func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 
 var trieFuncs = make(map[TrieVariant]TrieFunc)

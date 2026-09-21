@@ -222,7 +222,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			if plan.skip || plan.delete {
 				return
 			}
-			var storageRoot [32]byte = empty.RootHash
+			storageRoot := empty.RootHash
 			if plan.entry.storageDirty {
 				addrHash := hashAddressPath(plan.entry.hashedKey)
 				result, ok := results[addrHash]
@@ -240,6 +240,13 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 					accountResults[i].plan.skip = true
 					return
 				}
+			} else if plan.found {
+				_, _, _, existingRoot, decodeErr := decodeAccountLeaf(plan.oldValue)
+				if decodeErr != nil {
+					accountResults[i].err = fmt.Errorf("%w: %w", errPhaseBRecord, decodeErr)
+					return
+				}
+				copy(storageRoot[:], existingRoot)
 			}
 			accountResults[i].err = schedule.run(ctx, func() error {
 				update, updateErr := accountUpdate(plan.oldValue, plan.found, plan.entry.update)

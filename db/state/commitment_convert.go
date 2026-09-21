@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -37,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
@@ -99,7 +98,7 @@ type sampledPair struct {
 func detectKeyEncoding(samples []sampledPair) (bool, error) {
 	sawAny := false
 	for _, p := range samples {
-		if bytes.Equal(p.k, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(p.k) {
 			continue
 		}
 		sawAny = true
@@ -460,7 +459,7 @@ func convertCommitmentFile(
 		v, _ = reader.Next(v[:0])
 		ki++
 
-		isState := bytes.Equal(k, commitmentdb.KeyCommitmentState)
+		isState := commitment.IsCommitmentStateKey(k)
 		var outKey []byte
 		if isState {
 			outKey = append([]byte(nil), k...)

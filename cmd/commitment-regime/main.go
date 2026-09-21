@@ -4,14 +4,12 @@
 package main
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"path/filepath"
 
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 // scan reads every key/value pair greedily and stops at the first branch that
@@ -39,7 +37,7 @@ func scan(path string) (referenced bool, firstAt, pairs uint64, err error) {
 		}
 		valBuf, _ = r.Next(valBuf[:0])
 		pairs++
-		if bytes.Equal(keyBuf, commitmentdb.KeyCommitmentState) {
+		if commitment.IsCommitmentStateKey(keyBuf) {
 			continue
 		}
 		if commitment.BranchData(valBuf).HasShortenedKeys() {

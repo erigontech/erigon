@@ -338,7 +338,10 @@ func reachableAccountRecordKeys(root *node) map[string][]byte {
 				continue
 			}
 			if len(n.childHash[nib]) == 32 {
-				childPath := append(append([]byte(nil), n.path...), byte(nib))
+				childPath := append([]byte(nil), n.path...)
+				if isRoot && len(n.path) == 0 {
+					childPath = append(childPath, byte(nib))
+				}
 				childPath = append(childPath, n.childExt[nib]...)
 				childKey := AccountNodeKey(childPath, nil)
 				keys[string(childKey)] = childKey
@@ -352,6 +355,9 @@ func reachableAccountRecordKeys(root *node) map[string][]byte {
 func persistAccountGraph(ctx commitment.PatriciaContext, root *node, before map[string][]byte) error {
 	if root == nil {
 		return errPhaseBRecord
+	}
+	if err := promoteRootExtension(root); err != nil {
+		return err
 	}
 	deltas := make([]recordDelta, 0, len(before)+1)
 	var materialize func(*node) ([32]byte, error)

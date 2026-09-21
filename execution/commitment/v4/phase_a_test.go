@@ -90,6 +90,16 @@ func TestPhaseAStorageTransitions(t *testing.T) {
 	require.Empty(t, ctx.branches[string(StorageRootKey(address))])
 }
 
+func TestPhaseAIgnoresAbsentStorageDelete(t *testing.T) {
+	ctx := newMockContext()
+	var address [32]byte
+	path := append([]byte{1}, bytes.Repeat([]byte{2}, 63)...)
+
+	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: path, update: &commitment.Update{Flags: commitment.DeleteUpdate}}}})
+	require.NoError(t, err)
+	require.Empty(t, ctx.branches[string(StorageRootKey(address))])
+}
+
 func TestPhaseAStorageOnlyUpdateKeepsAccountEntrySeparate(t *testing.T) {
 	account := bytes.Repeat([]byte{0x9}, 64)
 	path := append(append([]byte(nil), account...), bytes.Repeat([]byte{0x2}, 64)...)

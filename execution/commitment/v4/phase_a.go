@@ -191,6 +191,9 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		}
 		if entry.update.Deleted() {
 			if err := removeRoot(root, entry.path); err != nil {
+				if errors.Is(err, ErrRemoveNotFound) {
+					continue
+				}
 				return [32]byte{}, err
 			}
 			continue
@@ -302,7 +305,7 @@ func reachableRecordKeys(root *node, addrHash [32]byte) map[string][]byte {
 			}
 			if len(n.childHash[nib]) == 32 {
 				childPath := append([]byte(nil), n.path...)
-				if len(n.path) == 0 {
+				if isRoot && len(n.path) == 0 {
 					childPath = append(childPath, byte(nib))
 				}
 				childPath = append(childPath, n.childExt[nib]...)
@@ -318,6 +321,9 @@ func reachableRecordKeys(root *node, addrHash [32]byte) map[string][]byte {
 func persistStorageGraph(ctx commitment.PatriciaContext, root *node, addrHash [32]byte, before map[string][]byte) error {
 	if root == nil {
 		return errPhaseAStorage
+	}
+	if err := promoteRootExtension(root); err != nil {
+		return err
 	}
 	deltas := make([]recordDelta, 0, len(before)+1)
 	var materialize func(*node) ([32]byte, error)

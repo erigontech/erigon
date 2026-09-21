@@ -10,6 +10,7 @@ const (
 
 type TrieConfig struct {
 	Variant                TrieVariant
+	NibblesV2              bool
 	DeferBranchUpdates     bool
 	LeaveDeferredForCaller bool
 	EnableTrieWarmup       bool

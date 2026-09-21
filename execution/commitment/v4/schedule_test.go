@@ -22,6 +22,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/commitment"
@@ -111,10 +112,42 @@ func TestScheduleWorkerBoundDuringTrieProcess(t *testing.T) {
 	trie.Release()
 }
 
+func TestScheduledFieldUpdatePreservesStorageRoot(t *testing.T) {
+	address := parityAddress(3)
+	ctx := newParityContext()
+	trie := &Trie{scheduleWorkers: 1}
+	trie.ResetContext(ctx)
+	initial := []parityUpdate{
+		{key: address, update: accountParityUpdate(3)},
+		{key: append(append([]byte(nil), address...), paritySlot(3)...), update: storageParityUpdate(3)},
+	}
+	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, initial), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+	path := commitment.KeyToHexNibbleHash(address)
+	_, _, _, before, err := decodeAccountLeaf(accountLeafFromParityContext(t, ctx, path))
+	require.NoError(t, err)
+
+	partial := &commitment.Update{Flags: commitment.BalanceUpdate, Balance: *uint256.NewInt(99)}
+	_, err = trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, []parityUpdate{{key: address, update: partial}}), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+	_, _, _, after, err := decodeAccountLeaf(accountLeafFromParityContext(t, ctx, path))
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}
+
 func storageTaskLengths(tasks []storageTask) []int {
 	lengths := make([]int, len(tasks))
 	for i := range tasks {
 		lengths[i] = len(tasks[i].entries)
 	}
 	return lengths
+}
+
+func accountLeafFromParityContext(t *testing.T, ctx *parityContext, path []byte) []byte {
+	t.Helper()
+	root, err := unfold(ctx, nil, planeAccount, nil)
+	require.NoError(t, err)
+	value, ok := accountLeafAt(root, path)
+	require.True(t, ok)
+	return value
 }

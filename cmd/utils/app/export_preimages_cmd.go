@@ -116,16 +116,35 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer tx.Rollback()
 
-	commitmentState, _, ok, err := aggTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, tx, kv.GetLatestOptions{})
-	if err != nil {
-		return fmt.Errorf("read commitment state: %w", err)
+	var commitmentState, stateKey []byte
+	var ok bool
+	for _, key := range [][]byte{commitment.KeyCommitmentV4State, commitmentdb.KeyCommitmentState} {
+		commitmentState, _, ok, err = aggTx.GetLatest(kv.CommitmentDomain, key, tx, kv.GetLatestOptions{})
+		if err != nil {
+			return fmt.Errorf("read commitment state: %w", err)
+		}
+		if ok {
+			stateKey = key
+			break
+		}
 	}
-	if !ok {
+	if len(stateKey) == 0 {
 		return fmt.Errorf("commitment state record not found in %s", dirs.DataDir)
 	}
-	rootBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(commitmentState)
-	if err != nil {
-		return fmt.Errorf("extract state root: %w", err)
+	var rootBytes []byte
+	var blockNum, txNum uint64
+	if bytes.Equal(stateKey, commitment.KeyCommitmentV4State) {
+		if len(commitmentState) != 1+8+8+32 || commitmentState[0] != commitment.CommitmentV4StateMarker {
+			return fmt.Errorf("extract state root: invalid commitment v4 state")
+		}
+		txNum = binary.BigEndian.Uint64(commitmentState[1:9])
+		blockNum = binary.BigEndian.Uint64(commitmentState[9:17])
+		rootBytes = commitmentState[17:]
+	} else {
+		rootBytes, blockNum, txNum, err = commitment.HexTrieExtractStateRoot(commitmentState)
+		if err != nil {
+			return fmt.Errorf("extract state root: %w", err)
+		}
 	}
 	commitmentRoot := common.BytesToHash(rootBytes)
 	if err := checkRootPin(commitmentRoot, rawdb.ReadHeaderByNumber(tx, blockNum), blockNum); err != nil {

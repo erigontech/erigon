@@ -43,6 +43,19 @@ type headerNumberErrorReader struct {
 	err error
 }
 
+type headerNumberNilReader struct {
+	dbservices.FullBlockReader
+	head common.Hash
+}
+
+func (r headerNumberNilReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+	if hash != r.head {
+		return nil, nil
+	}
+	n := uint64(10)
+	return &n, nil
+}
+
 func (r headerNumberErrorReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
 	return nil, r.err
 }
@@ -140,6 +153,14 @@ func TestUnwindToCommonCanonicalReturnsCanonicalityError(t *testing.T) {
 	err := e.unwindToCommonCanonical(nil, emptyStageProgressTx{}, header, func() error { return nil })
 
 	require.ErrorIs(t, err, expectedErr)
+}
+
+func TestVerifyForkchoiceHashesRejectsUnknownFinalizedHash(t *testing.T) {
+	head := common.HexToHash("0x01")
+	e := &ExecModule{blockReader: headerNumberNilReader{head: head}}
+	valid, err := e.verifyForkchoiceHashes(t.Context(), nil, head, common.HexToHash("0x02"), common.Hash{})
+	require.NoError(t, err)
+	require.False(t, valid)
 }
 
 func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {

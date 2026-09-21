@@ -41,6 +41,9 @@ type Trie struct {
 }
 
 func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
+	if err := AssertV1Keyed(cfg.NibblesV2); err != nil {
+		panic(err)
+	}
 	return &Trie{}, commitment.NewUpdates(commitment.ModeUpdate, tmpdir, commitment.KeyToHexNibbleHash)
 }
 
@@ -69,7 +72,7 @@ func (t *Trie) Variant() commitment.TrieVariant {
 }
 
 func (*Trie) StateKey() []byte {
-	return StateKey()
+	return bytes.Clone(commitment.KeyCommitmentV4State)
 }
 
 func (t *Trie) Reset() {
