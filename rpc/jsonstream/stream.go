@@ -18,7 +18,6 @@ package jsonstream
 
 import (
 	"encoding"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 )
 
@@ -68,7 +67,7 @@ type Stream interface {
 	WriteArrayStart()
 	WriteArrayEnd()
 	WriteMore()
-	WriteObjectField(fieldName string) jsonw.JSONWriter
+	WriteObjectField(fieldName string) *StackStream
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)

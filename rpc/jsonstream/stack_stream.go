@@ -23,11 +23,9 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
-
 	jsoniter "github.com/json-iterator/go"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -101,48 +99,18 @@ func (s *StackStream) WriteHex(b []byte) {
 	buf := s.stream.Buffer()
 	start := len(buf)
 	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
-	if s.out != nil && len(buf)-start >= FlushThreshold {
-		s.stream.SetBuffer(buf[:start])
-		s.writeThrough(buf[start:])
-	} else {
-		s.stream.SetBuffer(buf)
-	}
+	s.commit(buf, start)
 	s.afterValue()
 }
 
-// Concrete returns the stream that owns the buffer, opening any field a wrapper is still
-// holding, so a marshaller can write values without an interface call each time.
-func Concrete(w jsonw.JSONWriter) *StackStream {
-	for {
-		switch t := w.(type) {
-		case *StackStream:
-			return t
-		case *LazyFieldStream:
-			t.ensure()
-			w = t.inner
-		default:
-			panic(fmt.Sprintf("jsonstream: %T does not wrap a StackStream", w))
-		}
-	}
-}
-
-// HexesField writes a hash array as one field: one buffer growth for the whole array,
-// where a value write per element grows once per hash.
-func HexesField(w jsonw.JSONWriter, name string, hashes []common.Hash) {
-	jsonw.Field(w, name)
-	if hashes == nil {
-		w.WriteNil()
+// HexesField writes fixed-size values as one array field: one buffer growth for the whole
+// array, where a value write per element grows once per element. A nil slice is null.
+func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
+	Field(s, name)
+	if items == nil {
+		s.WriteNil()
 		return
 	}
-	WriteHexes(Concrete(w), hashes)
-}
-
-// WriteHexes writes fixed-size values as an array of hex strings. The whole array is one
-// value, so the buffer grows once and the stack is touched once, where a write per element
-// does both per item. These are functions rather than methods: the element types live in
-// packages jsonw cannot import, and one generic per core type covers every named type
-// built on it.
-func WriteHexes[S ~[]E, E ~[length.Hash]byte](s *StackStream, items S) {
 	s.beforeValue()
 	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
 	buf = append(buf, '[')
@@ -180,6 +148,7 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 // for hex quantities, which never need escaping.
 func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 	s.beforeValue()
+	start := len(s.stream.Buffer())
 	buf, err := v.AppendText(append(s.stream.Buffer(), '"'))
 	if err != nil {
 		// An empty string keeps the JSON well-formed; the latched error stops it reaching the client.
@@ -188,8 +157,35 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 			s.stream.Error = err
 		}
 	}
-	s.stream.SetBuffer(append(buf, '"'))
+	assertNoEscapes(buf[start+1:])
+	buf = append(buf, '"')
+	s.commit(buf, start)
 	s.afterValue()
+}
+
+// assertNoEscapes holds WriteQuotedText's caller to its side of the bargain: the text goes out
+// unscanned, so a byte JSON would escape would leave the response malformed. Every appender the
+// RPC can answer with today is a hex quantity; this is what catches the next one that is not.
+func assertNoEscapes(text []byte) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	for _, c := range text {
+		if c == '"' || c == '\\' || c < 0x20 {
+			panic(fmt.Sprintf("jsonstream: quoted text holds %q, which JSON escapes", c))
+		}
+	}
+}
+
+// commit takes the buffer a value was appended to, handing anything past FlushThreshold
+// straight to the writer rather than holding a whole large value in memory.
+func (s *StackStream) commit(buf []byte, start int) {
+	if s.out != nil && len(buf)-start >= FlushThreshold {
+		s.stream.SetBuffer(buf[:start])
+		s.writeThrough(buf[start:])
+		return
+	}
+	s.stream.SetBuffer(buf)
 }
 
 // writeThrough drains what is buffered and hands content to the writer. The
@@ -373,11 +369,21 @@ func (s *StackStream) WriteArrayEnd() {
 func (s *StackStream) WriteMore() {}
 
 // WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
+func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, fieldName)
 	s.push(ItemField)
 	return s
+}
+
+// rewindField drops a field name whose value never arrived, with the separator written before
+// it. Only bytes still in the buffer can go back, so the caller checks that nothing was written
+// after the field name.
+func (s *StackStream) rewindField(buf, depth int) {
+	b := s.stream.Buffer()
+	s.separatorPending = b[buf] == ','
+	s.stream.SetBuffer(b[:buf])
+	s.stack = s.stack[:depth]
 }
 
 // Flush flushes the underlying stream
