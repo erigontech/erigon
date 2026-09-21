@@ -376,12 +376,12 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/node.go`
 - Create: `execution/commitment/v4/node_test.go`
 
-- [ ] define `node`: `childMask`, `leafMask`, child pointers or stored 32 B hashes per slot, per-child extension, leaf suffix + value per leaf slot, and the node's own path
-- [ ] add `fork(prefix []byte) *node` and `join(parent *node, nib int, ref []byte)` — the whole seam, against nine functions over the grid today (`split_point.go`'s seven plus `mountTo` and `foldMounted`)
-- [ ] add `setLeaf(nib int, suffix, value []byte)`, `setChild(nib int, n *node)`, `setStoredChild(nib int, hash []byte, ext []byte)`, `clear(nib int)` keeping the two masks consistent
-- [ ] write tests for mask consistency across every mutation, including leaf→child and child→leaf transitions on the same slot
-- [ ] write a test that `fork` returns a pointer and not a copied row — mutating through the fork is visible at the parent
-- [ ] run tests — must pass before task 7
+- [x] define `node`: `childMask`, `leafMask`, child pointers or stored 32 B hashes per slot, per-child extension, leaf suffix + value per leaf slot, and the node's own path
+- [x] add `fork(prefix []byte) *node` and `join(parent *node, nib int, ref []byte)` — the whole seam, against nine functions over the grid today (`split_point.go`'s seven plus `mountTo` and `foldMounted`)
+- [x] add `setLeaf(nib int, suffix, value []byte)`, `setChild(nib int, n *node)`, `setStoredChild(nib int, hash []byte, ext []byte)`, `clear(nib int)` keeping the two masks consistent
+- [x] write tests for mask consistency across every mutation, including leaf→child and child→leaf transitions on the same slot
+- [x] write a test that `fork` returns a pointer and not a copied row — mutating through the fork is visible at the parent
+- [x] run tests — must pass before task 7
 
 ### Task 7: Record encode
 

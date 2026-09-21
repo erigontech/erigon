@@ -119,7 +119,7 @@ func TestParseKeyRejectsMalformedPath(t *testing.T) {
 
 func TestV1KeyedTagDisjointness(t *testing.T) {
 	rng := rand.New(rand.NewPCG(0x6b657973, 0x7634))
-	for i := 0; i < 10_000; i++ {
+	for range 10_000 {
 		path := make([]byte, rng.IntN(65))
 		for j := range path {
 			path[j] = byte(rng.IntN(16))
