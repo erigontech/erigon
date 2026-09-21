@@ -19,8 +19,6 @@ package ethutils
 import (
 	"encoding/json"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -145,27 +143,17 @@ func writeSubscribeLog(w *jsonstream.StackStream, l *SubscribeLog) {
 		w.WriteMore()
 	}
 	w.WriteObjectField("data").WriteHex(l.Data)
-	field(w, "topics")
-	jsonstream.ArrayValue(w, l.Topics, writeHash)
+	jsonstream.HexesField(w, "topics", l.Topics)
 	field(w, "transactionHash").WriteHex(l.TransactionHash[:])
 	w.WriteObjectEnd()
 }
 
-func writeLogElem(w *jsonstream.StackStream, l **types.Log) { writeLog(w, *l, nil) }
+func writeLogElem(w *jsonstream.StackStream, l **types.Log) { writeLog(w, *l) }
 
-func writeRPCLogElem(w *jsonstream.StackStream, l **types.RPCLog) {
-	if *l == nil {
-		w.WriteNil()
-		return
-	}
-	writeLog(w, &(*l).Log, &(*l).BlockTimestamp)
-}
+func writeRPCLogElem(w *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).MarshalFastJSONTo(w) }
 
-func writeHash(w *jsonstream.StackStream, h *common.Hash) { w.WriteHex(h[:]) }
-
-// writeLog writes one log in the order types.Log declares its fields, with RPCLog's
-// blockTimestamp appended when the caller has one.
-func writeLog(w *jsonstream.StackStream, l *types.Log, blockTimestamp *hexutil.Uint64) {
+// writeLog writes one log in the order types.Log declares its fields.
+func writeLog(w *jsonstream.StackStream, l *types.Log) {
 	if l == nil {
 		w.WriteNil()
 		return
@@ -173,8 +161,7 @@ func writeLog(w *jsonstream.StackStream, l *types.Log, blockTimestamp *hexutil.U
 	w.WriteObjectStart()
 	w.WriteObjectField("address")
 	w.WriteHex(l.Address[:])
-	field(w, "topics")
-	jsonstream.ArrayValue(w, l.Topics, writeHash)
+	jsonstream.HexesField(w, "topics", l.Topics)
 	field(w, "data").WriteHex(l.Data)
 	field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
 	field(w, "transactionHash").WriteHex(l.TxHash[:])
@@ -182,8 +169,5 @@ func writeLog(w *jsonstream.StackStream, l *types.Log, blockTimestamp *hexutil.U
 	field(w, "blockHash").WriteHex(l.BlockHash[:])
 	field(w, "logIndex").WriteQuotedText(&l.Index)
 	field(w, "removed").WriteBool(l.Removed)
-	if blockTimestamp != nil {
-		field(w, "blockTimestamp").WriteQuotedText(blockTimestamp)
-	}
 	w.WriteObjectEnd()
 }
