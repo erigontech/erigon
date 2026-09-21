@@ -122,7 +122,14 @@ func (n *LocalNotifier) CreateSubscription() *Subscription {
 	return n.sub
 }
 
+// localValuer is a notification that carries its wire encoding; an in-process subscriber gets
+// the value it wraps instead.
+type localValuer interface{ LocalValue() any }
+
 func (n *LocalNotifier) Notify(id ID, data any) error {
+	if lv, ok := data.(localValuer); ok {
+		data = lv.LocalValue()
+	}
 	if n.sub == nil {
 		panic("can't Notify before subscription is created")
 	} else if n.sub.ID != id {

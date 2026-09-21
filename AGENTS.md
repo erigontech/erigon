@@ -2,6 +2,16 @@
 
 Use B2-level English in code, code-comments, github. Use programming terminology freely and exactly
 
+## Ponytail
+
+Use [Ponytail](https://github.com/DietrichGebert/ponytail) for coding tasks to keep changes simple.
+
+- Reuse an existing installation. Otherwise, follow the upstream [installation instructions](https://github.com/DietrichGebert/ponytail#install) and [portability guide](https://github.com/DietrichGebert/ponytail/blob/main/docs/agent-portability.md) for your agent and version. Prefer user-local setup, complete prerequisites and activation steps, and verify it is loaded.
+- If native integration is unavailable, clone Ponytail outside the Erigon checkout and read `skills/ponytail/SKILL.md` from that checkout at the start of each coding session. Preserve existing agent configuration and this `AGENTS.md`.
+- Before handing off code changes, use `ponytail-review` through your agent's invocation syntax, or read and apply `skills/ponytail-review/SKILL.md` from the Ponytail checkout. Review the current diff for unnecessary complexity; this supplements correctness, security, and performance checks.
+
+Explicit task requirements and Erigon's guidelines take precedence, including TDD, test coverage, and comment rules. Keep downloaded files and personal settings out of commits.
+
 ## Build & Test
 
 ```bash
