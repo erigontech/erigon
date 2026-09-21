@@ -590,11 +590,11 @@ transitions, so testing them apart from the record that implements them was an o
 Design §13 step 2 gates on these two by name and says to promote them out of the scratch harness
 first. They are the only things in the repo that catch a root divergence.
 
-- [ ] move `TestLegacyVsHexRoot` (`zz_legacy_cmp_test.go:48`) into a tracked test file, unchanged in behaviour
-- [ ] move `TestIncrementalRootsAgree` (`zz_incremental_bench_test.go:53`) likewise, separating it from the benchmark it currently shares a file with
-- [ ] confirm both still pass against the existing tries before v4 is added to them
-- [ ] leave the remaining `zz_` files alone — they are scratch and out of scope
-- [ ] run `go test ./execution/commitment/ -run 'TestLegacyVsHexRoot|TestIncrementalRootsAgree'` — must pass before task 21
+- [x] move `TestLegacyVsHexRoot` (`zz_legacy_cmp_test.go:48`) into a tracked test file, unchanged in behaviour
+- [x] move `TestIncrementalRootsAgree` (`zz_incremental_bench_test.go:53`) likewise, separating it from the benchmark it currently shares a file with
+- [x] confirm both still pass against the existing tries before v4 is added to them
+- [x] leave the remaining `zz_` files alone — they are scratch and out of scope
+- [x] run `go test ./execution/commitment/ -run 'TestLegacyVsHexRoot|TestIncrementalRootsAgree'` — must pass before task 21
 
 ### Task 21: Root parity — v4 against HPH and the parallel trie
 
