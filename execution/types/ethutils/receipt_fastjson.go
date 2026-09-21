@@ -152,6 +152,10 @@ func writeLogs(w jsonw.JSONWriter, logs any) error {
 	return nil
 }
 
+// subscribeLogKeys is every key MarshalSubscribeReceipt puts in a log entry, in the order
+// encoding/json emits them.
+var subscribeLogKeys = []string{"address", "data", "topics", "transactionHash"}
+
 // writeSubscribeLogs writes the map form MarshalSubscribeReceipt builds. encoding/json
 // orders an object's keys, and address is only present when the proto log carried one.
 func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) error {
@@ -165,12 +169,14 @@ func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) error {
 			w.WriteMore()
 		}
 		w.WriteObjectStart()
+		written := 0
 		first := true
-		for _, k := range []string{"address", "data", "topics", "transactionHash"} {
+		for _, k := range subscribeLogKeys {
 			val, ok := entry[k]
 			if !ok {
 				continue
 			}
+			written++
 			if first {
 				w.WriteObjectField(k)
 				first = false
@@ -196,6 +202,11 @@ func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) error {
 			default:
 				return fmt.Errorf("ethutils: subscribe log field %q of unexpected type %T", k, val)
 			}
+		}
+		if written != len(entry) {
+			// A key outside the known set would be dropped silently, where the reflection
+			// path this replaces would have written it.
+			return fmt.Errorf("ethutils: subscribe log has %d keys, %d of them known", len(entry), written)
 		}
 		w.WriteObjectEnd()
 	}

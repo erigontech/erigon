@@ -174,9 +174,10 @@ func TestRPCReceiptMarshalFastJSONToSubscribeLogs(t *testing.T) {
 // The list is what eth_getBlockReceipts returns; the encoder only sees the top-level type.
 func TestRPCReceiptsMarshalFastJSONTo(t *testing.T) {
 	for name, rs := range map[string]RPCReceipts{
-		"nil":   nil,
-		"empty": {},
-		"two":   {{TransactionHash: common.HexToHash("0x1")}, {TransactionHash: common.HexToHash("0x2")}},
+		"nil":         nil,
+		"empty":       {},
+		"two":         {{TransactionHash: common.HexToHash("0x1")}, {TransactionHash: common.HexToHash("0x2")}},
+		"nil element": {nil},
 	} {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(rs)
@@ -189,4 +190,15 @@ func TestRPCReceiptsMarshalFastJSONTo(t *testing.T) {
 			require.Equal(t, string(want), string(s.Buffer()))
 		})
 	}
+}
+
+// A key MarshalSubscribeReceipt might add later must fail loudly rather than be dropped.
+func TestRPCReceiptMarshalFastJSONToRejectsUnknownSubscribeKey(t *testing.T) {
+	r := &RPCReceipt{Logs: []map[string]any{{
+		"data":     hexutil.Bytes{0x01},
+		"newField": "surprise",
+	}}}
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	require.ErrorContains(t, r.MarshalFastJSONTo(s), "keys")
 }
