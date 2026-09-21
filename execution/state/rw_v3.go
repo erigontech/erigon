@@ -91,8 +91,7 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 		if dbg.AssertEnabled {
 			writes.assertSelfDestructNormalized()
 		}
-		// One buffer for every storage key this call writes: the domains copy the key
-		// they keep, so building it per slot only fed the allocator.
+		// One buffer for every storage key this call writes: consumers copy what they keep.
 		var storageKey [length.Addr + length.Hash]byte
 		// Field presence is tracked with has-flags rather than pointers: the
 		// pointer form heap-escapes one allocation per field per address.
@@ -1420,6 +1419,13 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 	return nil, nil
 }
 
+// HasAccount goes through ReadAccountData so it sees blockCache, which the promoted
+// ReaderV3 method would skip.
+func (r *CachedReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (r *CachedReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if r.blockCache != nil && r.readCurrent {
 		if code, ok := r.blockCache.GetCurrentCode(address); ok {
@@ -1474,6 +1480,12 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
 	return acc, err
+}
+
+func (r *ReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	r.addr = address.Value()
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
+	return len(enc) > 0, err
 }
 
 func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
