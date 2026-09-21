@@ -586,3 +586,49 @@ func TestWebsocketIdlePing(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 }
+
+// peakService records the most calls it ran at once.
+type peakService struct{ inflight, peak atomic.Int32 }
+
+func (s *peakService) Hold() {
+	n := s.inflight.Add(1)
+	for p := s.peak.Load(); n > p && !s.peak.CompareAndSwap(p, n); p = s.peak.Load() {
+	}
+	time.Sleep(20 * time.Millisecond)
+	s.inflight.Add(-1)
+}
+
+func TestWebsocketBatchUsesServerConcurrency(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	srv.batchConcurrency = 2
+	svc := new(peakService)
+	if err := srv.RegisterName("peak", svc); err != nil {
+		t.Fatal(err)
+	}
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+
+	client, err := DialContext(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), logger)
+	if err != nil {
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer client.Close()
+	batch := make([]BatchElem, 8)
+	for i := range batch {
+		batch[i] = BatchElem{Method: "peak_hold", Result: new(any)}
+	}
+	if err := client.BatchCall(batch); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range batch {
+		if e.Error != nil {
+			t.Fatal(e.Error)
+		}
+	}
+	if peak := svc.peak.Load(); peak > 2 {
+		t.Fatalf("websocket batch ran %d calls at once, server allows 2", peak)
+	}
+}
