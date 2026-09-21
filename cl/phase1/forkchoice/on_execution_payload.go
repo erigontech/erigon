@@ -420,6 +420,11 @@ func (f *ForkChoiceStore) executionHashMarkedInvalid(executionBlockHash common.H
 			return true
 		}
 	}
+	if f.inFlightInvalidPayloads != nil {
+		if _, invalidated := f.inFlightInvalidPayloads.Load(executionBlockHash); invalidated {
+			return true
+		}
+	}
 	if f.executionPayloadStatus == nil {
 		return false
 	}
@@ -450,10 +455,11 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	parentBlockRoot *common.Hash,
 	versionedHashes []common.Hash,
 	executionRequestsList []hexutil.Bytes,
-) (execution_client.PayloadStatus, error) {
+) (execution_client.PayloadStatus, common.Hash, error) {
+	var publishedInvalidHash common.Hash
 	f.mu.Unlock()
 	defer f.mu.Lock()
-	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
+	status, err := f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
 		// The wait for the token can be long enough for the block to go stale. The check
 		// needs f.mu, but this owns the global token, so never wait for it: whoever holds
 		// the lock may be in a slow EL call of its own and every payload would queue
@@ -500,9 +506,14 @@ func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 			if f.executionPayloadStatus != nil {
 				f.executionPayloadStatus.Add(executionHash, status)
 			}
+			if f.inFlightInvalidPayloads != nil {
+				f.inFlightInvalidPayloads.Store(executionHash, struct{}{})
+				publishedInvalidHash = executionHash
+			}
 		}
 		return status, err
 	})
+	return status, publishedInvalidHash, err
 }
 
 func (f *ForkChoiceStore) validateEnvelopePersistenceCommitmentsWhileYieldingForkChoiceLock(

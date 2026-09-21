@@ -356,7 +356,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				}
 			}
 			var admissionErr error
-			payloadStatus, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
+			payloadStatus, publishedInvalidHash, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
 				_, _, admissionErr = f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
 				return admissionErr
 			}, func() (common.Hash, bool) {
@@ -367,6 +367,11 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 				executionHash, hashErr := block.Block.Body.ExecutionPayload.ComputeBlockHash(&block.Block.ParentRoot, requestsHash, nil)
 				return executionHash, hashErr == nil
 			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			if publishedInvalidHash != (common.Hash{}) {
+				// Only the caller that published the verdict may retract it, and only once
+				// its own durable write below has happened.
+				defer f.inFlightInvalidPayloads.Delete(publishedInvalidHash)
+			}
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 			f.invalidateCachedHead()
 			// Report a stale block exactly as the post-EL recheck below does, so the same
