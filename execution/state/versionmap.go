@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 
 	"github.com/holiman/uint256"
 	"github.com/tidwall/btree"
@@ -163,6 +164,21 @@ type VersionMap struct {
 	// unchanged; only the lock granularity moved from global to per-account.
 	s     sync.Map // accounts.Address -> *AddressEntry
 	trace bool
+
+	// sealed/sealedArmed mark a finalized tx's cells immutable (TxIndex <= sealed).
+	// SealUpTo is single-writer (the finalize sweep); reads are many-reader.
+	sealed      atomic.Int64
+	sealedArmed atomic.Bool
+}
+
+// SealUpTo marks every tx at TxIndex <= txIndex as finalized/immutable. Monotonic:
+// the frontier never regresses. Called from the single-threaded finalize sweep.
+func (vm *VersionMap) SealUpTo(txIndex int) {
+	if vm.sealedArmed.Load() && int64(txIndex) <= vm.sealed.Load() {
+		return
+	}
+	vm.sealed.Store(int64(txIndex))
+	vm.sealedArmed.Store(true)
 }
 
 func NewVersionMap(changes types.BlockAccessList) *VersionMap {
@@ -409,6 +425,9 @@ func readFloor[T any](vm *VersionMap, addr accounts.Address, txIdx int, sel func
 	switch fv.flag {
 	case FlagDone:
 		res.incarnation = fv.incarnation
+	case FlagValidated:
+		res.incarnation = fv.incarnation
+		res.validated = true
 	case FlagEstimate:
 	default:
 		panic("unknown flag value")
@@ -1765,11 +1784,15 @@ const (
 	MVReadResultDone       = 0
 	MVReadResultDependency = 1
 	MVReadResultNone       = 2
+	MVReadResultValidated  = 3
 )
 
 type ReadResult struct {
 	depIdx      int
 	incarnation int
+	// validated: the floor cell was Validated (pre-seal, revertible); the reader
+	// continues on it like Done but the dep is not yet final.
+	validated bool
 }
 
 func (res *ReadResult) DepString() string {
@@ -1796,6 +1819,9 @@ func (res *ReadResult) Version() Version {
 
 func (mvr ReadResult) Status() int {
 	if mvr.depIdx != UnknownDep {
+		if mvr.validated {
+			return MVReadResultValidated
+		}
 		if mvr.incarnation == -1 {
 			return MVReadResultDependency
 		} else {
@@ -1804,4 +1830,103 @@ func (mvr ReadResult) Status() int {
 	}
 
 	return MVReadResultNone
+}
+
+type AccountLifecycleState uint8
+
+const (
+	// LifecycleLive: no Done SelfDestruct=true in effect at txIdx.
+	LifecycleLive AccountLifecycleState = iota
+	// LifecycleAbsent: destroyed with no revival above it; a pre-block base read is not stale.
+	LifecycleAbsent
+	// LifecycleRevived: destroyed but re-created above the destruct; storage on/before the
+	// destruct is wiped and stale base reads are invalidated. EIP-8246 balance-preserve is
+	// not resolved here — only a fork-aware caller can decide whether the account still exists.
+	LifecycleRevived
+)
+
+// AccountLifecycleAt resolves an account's lifecycle in one pass: the state, the canonical version dependent reads must anchor on, and the destruct (wipe) TxIndex.
+func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+	if vm == nil {
+		return LifecycleLive, Version{}, 0
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return LifecycleLive, Version{}, 0
+	}
+	// One RLock for the whole verdict so it cannot observe the account mid-flush.
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.SelfDestruct == nil {
+		return LifecycleLive, Version{}, 0
+	}
+
+	var latest *WriteCell[bool]
+	var latestIdx, wipeInc int
+	haveLatest := false
+	wiped := false
+	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
+		if !haveLatest {
+			latest, latestIdx, haveLatest = v, k, true
+		}
+		// A validated (pre-seal) self-destruct is as authoritative as a Done one:
+		// the read side (readSelfDestructMemo→resolved) already treats it as a
+		// destruct, so this single lifecycle authority must too, or the two disagree
+		// on a validated destruct and a wiped-slot read never settles.
+		if (v.flag == FlagDone || v.flag == FlagValidated) && v.Value {
+			destroyedAt, wipeInc, wiped = k, v.incarnation, true
+			return false
+		}
+		return true
+	})
+	if !wiped {
+		return LifecycleLive, Version{}, 0
+	}
+	if latest.flag == FlagDone || latest.flag == FlagValidated {
+		canonicalVer = Version{TxIndex: latestIdx, Incarnation: latest.incarnation}
+	} else {
+		canonicalVer = Version{TxIndex: destroyedAt, Incarnation: wipeInc}
+	}
+
+	revivalLimit := txIdx - 1
+	if hi, ok := highestBelow(e.Address, revivalLimit); ok && hi >= destroyedAt {
+		return LifecycleRevived, canonicalVer, destroyedAt
+	}
+	if hi, ok := highestBelow(e.Balance, revivalLimit); ok && hi > destroyedAt {
+		return LifecycleRevived, canonicalVer, destroyedAt
+	}
+	if hi, ok := highestBelow(e.Nonce, revivalLimit); ok && hi > destroyedAt {
+		return LifecycleRevived, canonicalVer, destroyedAt
+	}
+	if hi, ok := highestBelow(e.CodeHash, revivalLimit); ok && hi > destroyedAt {
+		return LifecycleRevived, canonicalVer, destroyedAt
+	}
+	return LifecycleAbsent, canonicalVer, destroyedAt
+}
+
+// highestBelow returns the largest TxIndex ≤ limit present in cells, if any. The
+// caller must hold the owning AddressEntry's lock.
+func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int) (int, bool) {
+	if cells == nil {
+		return 0, false
+	}
+	hi, ok := 0, false
+	cells.Descend(limit, func(k int, _ *WriteCell[T]) bool {
+		hi, ok = k, true
+		return false
+	})
+	return hi, ok
+}
+
+// IsNetAbsent reports whether the account reads as gone at txIdx (LifecycleAbsent; see AccountLifecycleAt).
+func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
+	state, _, _ := vm.AccountLifecycleAt(addr, txIdx)
+	return state == LifecycleAbsent
+}
+
+const FlagValidated statusFlag = 2
+
+func (mvr ReadResult) resolved() bool {
+	s := mvr.Status()
+	return s == MVReadResultDone || s == MVReadResultValidated
 }
