@@ -57,3 +57,5 @@ type engineRPC interface {
 	EngineAPI
 	ExchangeCapabilities(fromCl []string) []string
 }
+
+var _ engineRPC = (*EngineServer)(nil)

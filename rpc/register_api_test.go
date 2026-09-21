@@ -67,6 +67,18 @@ func TestRegisterAPIRejectsAnInterfaceTheServiceDoesNotImplement(t *testing.T) {
 		Iface:     reflect.TypeFor[unimplementedTestService](),
 	})
 
-	require.ErrorContains(t, err, "Ech0")
+	require.ErrorContains(t, err, "does not implement")
+	require.NotContains(t, server.services.services, "test")
+}
+
+func TestRegisterAPIRejectsANonInterfaceIface(t *testing.T) {
+	server := NewServer(50, false, false, true, log.New(), 100)
+	err := server.RegisterAPI(API{
+		Namespace: "test",
+		Service:   new(testService),
+		Iface:     reflect.TypeFor[*testService](),
+	})
+
+	require.ErrorContains(t, err, "not an interface")
 	require.NotContains(t, server.services.services, "test")
 }
