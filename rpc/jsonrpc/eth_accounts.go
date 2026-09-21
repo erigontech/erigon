@@ -225,8 +225,8 @@ func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, in
 	defer tx.Rollback()
 
 	addr := accounts.InternAddress(address)
-	acc, err := reader.ReadAccountData(addr)
-	if acc == nil || err != nil {
+	exists, err := state.HasAccount(reader, addr)
+	if !exists || err != nil {
 		return common.Hash{}, err
 	}
 
@@ -246,13 +246,5 @@ func (api *APIImpl) Exist(ctx context.Context, address common.Address, blockNrOr
 	}
 	defer tx.Rollback()
 
-	acc, err := reader.ReadAccountData(accounts.InternAddress(address))
-	if err != nil {
-		return false, err
-	}
-	if acc == nil {
-		return false, nil
-	}
-
-	return true, nil
+	return state.HasAccount(reader, accounts.InternAddress(address))
 }

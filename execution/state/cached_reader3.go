@@ -17,6 +17,8 @@
 package state
 
 import (
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/db/kv"
@@ -29,6 +31,10 @@ import (
 type CachedReader3 struct {
 	cache kvcache.CacheView
 	db    kv.TemporalTx
+	// addr and storageKey are the keys the next read looks up. As reader fields their slices
+	// reach the cache interface without escaping a local.
+	addr       common.Address
+	storageKey [length.Addr + length.Hash]byte
 }
 
 // NewCachedReader3 wraps a given state reader into the cached reader
@@ -42,8 +48,8 @@ func (r *CachedReader3) TracePrefix() string       { return "" }
 
 // ReadAccountData is called when an account needs to be fetched from the state
 func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	addressValue := address.Value()
-	enc, err := r.cache.Get(addressValue[:])
+	r.addr = address.Value()
+	enc, err := r.cache.Get(r.addr[:])
 	if err != nil {
 		return nil, err
 	}
@@ -57,6 +63,12 @@ func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Acc
 	return &a, nil
 }
 
+func (r *CachedReader3) HasAccount(address accounts.Address) (bool, error) {
+	r.addr = address.Value()
+	enc, err := r.cache.Get(r.addr[:])
+	return len(enc) > 0, err
+}
+
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
 func (r *CachedReader3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
@@ -66,10 +78,9 @@ func (r *CachedReader3) ReadAccountDataForDebug(address accounts.Address) (*acco
 func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
-	compositeKey := make([]byte, 0, len(addressValue)+len(keyValue))
-	compositeKey = append(compositeKey, addressValue[:]...)
-	compositeKey = append(compositeKey, keyValue[:]...)
-	enc, err := r.cache.Get(compositeKey)
+	copy(r.storageKey[:], addressValue[:])
+	copy(r.storageKey[length.Addr:], keyValue[:])
+	enc, err := r.cache.Get(r.storageKey[:])
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
@@ -82,8 +93,8 @@ func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key account
 }
 
 func (r *CachedReader3) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	addressValue := address.Value()
-	code, err := r.cache.GetCode(addressValue[:])
+	r.addr = address.Value()
+	code, err := r.cache.GetCode(r.addr[:])
 	if err != nil {
 		return nil, err
 	}
