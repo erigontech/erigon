@@ -29,6 +29,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -118,14 +121,13 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
 	for name, logs := range map[string]any{
-		"nil types.Logs":         types.Logs(nil),
-		"nil []*Log":             []*types.Log(nil),
-		"nil []*RPCLog":          []*types.RPCLog(nil),
-		"untyped nil":            nil,
-		"nil in types.Logs":      types.Logs{nil, {Address: to}},
-		"nil in []*Log":          []*types.Log{{Address: to}, nil},
-		"subscription map shape": []map[string]any{{"address": to, "data": hexutil.Bytes{0xaa}}},
-		"unknown shape":          []string{"a"},
+		"nil types.Logs":    types.Logs(nil),
+		"nil []*Log":        []*types.Log(nil),
+		"nil []*RPCLog":     []*types.RPCLog(nil),
+		"untyped nil":       nil,
+		"nil in types.Logs": types.Logs{nil, {Address: to}},
+		"nil in []*Log":     []*types.Log{{Address: to}, nil},
+		"unknown shape":     []string{"a"},
 	} {
 		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
 	}
@@ -190,4 +192,34 @@ func requireFastJSONMatches(t *testing.T, v interface {
 	require.NoError(t, v.MarshalFastJSONTo(s))
 	require.NoError(t, s.Flush())
 	require.Equal(t, string(want), string(s.Buffer()))
+}
+
+// Subscription receipts carry the same log objects as eth_getTransactionReceipt.
+func TestMarshalSubscribeReceiptFullLogs(t *testing.T) {
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	blockHash, txHash, topic := common.HexToHash("0xb1"), common.HexToHash("0xaa"), common.HexToHash("0x01")
+	r := MarshalSubscribeReceipt(&remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(blockHash),
+		TransactionHash: gointerfaces.ConvertHashToH256(txHash),
+		From:            gointerfaces.ConvertAddressToH160(addr),
+		Logs: []*remoteproto.SubscribeLogsReply{{
+			Address:          gointerfaces.ConvertAddressToH160(addr),
+			BlockHash:        gointerfaces.ConvertHashToH256(blockHash),
+			BlockNumber:      7,
+			Data:             []byte{0x2a},
+			LogIndex:         3,
+			Topics:           []*typesproto.H256{gointerfaces.ConvertHashToH256(topic)},
+			TransactionHash:  gointerfaces.ConvertHashToH256(txHash),
+			TransactionIndex: 2,
+			Removed:          true,
+			BlockTimestamp:   99,
+		}},
+	})
+	require.Equal(t, []*types.RPCLog{{
+		Log: types.Log{
+			Address: addr, Topics: []common.Hash{topic}, Data: []byte{0x2a}, BlockNumber: 7,
+			TxHash: txHash, TxIndex: 2, BlockHash: blockHash, Index: 3, Removed: true,
+		},
+		BlockTimestamp: 99,
+	}}, r.Logs)
 }
