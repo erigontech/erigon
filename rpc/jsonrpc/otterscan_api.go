@@ -415,7 +415,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 		return nil, err
 	}
 
-	result := make([]*ethutils.RPCReceipt, 0, len(receipts))
+	result := make(ethutils.RPCReceipts, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := b.Transactions()[receipt.TransactionIndex]
 		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)

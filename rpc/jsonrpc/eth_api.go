@@ -83,7 +83,7 @@ type EthAPI interface {
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
-	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethutils.RPCReceipt, error)
+	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
 	GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error)
