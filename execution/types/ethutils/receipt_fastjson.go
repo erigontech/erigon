@@ -62,6 +62,11 @@ func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		w.WriteNil()
 		return nil
 	}
+	// The contract has no way to retract a result that has already started, so a
+	// shape the writer cannot encode has to fail before the first byte.
+	if err := validateLogs(r.Logs); err != nil {
+		return err
+	}
 	w.WriteObjectStart()
 
 	w.WriteObjectField("blockHash")
@@ -113,6 +118,43 @@ func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	}
 
 	w.WriteObjectEnd()
+	return nil
+}
+
+func validateLogs(logs any) error {
+	switch v := logs.(type) {
+	case nil, types.Logs, []*types.Log, []*types.RPCLog:
+		return nil
+	case []map[string]any:
+		for _, entry := range v {
+			if err := validateSubscribeLog(entry); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	return fmt.Errorf("ethutils: receipt logs of unexpected type %T", logs)
+}
+
+func validateSubscribeLog(entry map[string]any) error {
+	known := 0
+	for _, k := range subscribeLogKeys {
+		val, ok := entry[k]
+		if !ok {
+			continue
+		}
+		known++
+		switch val.(type) {
+		case common.Address, common.Hash, hexutil.Bytes, []common.Hash:
+		default:
+			return fmt.Errorf("ethutils: subscribe log field %q of unexpected type %T", k, val)
+		}
+	}
+	if known != len(entry) {
+		// A key outside the known set would be dropped silently, where the reflection
+		// path this replaces would have written it.
+		return fmt.Errorf("ethutils: subscribe log has %d keys, %d of them known", len(entry), known)
+	}
 	return nil
 }
 

@@ -204,3 +204,62 @@ func TestRPCReceiptMarshalFastJSONToRejectsUnknownSubscribeKey(t *testing.T) {
 	defer jsonstream.Put(s)
 	require.ErrorContains(t, r.MarshalFastJSONTo(s), "keys")
 }
+
+// The optional fields decide whether a key is written at all, and To and
+// ContractAddress decide null vs a hex string.
+func TestRPCReceiptMarshalFastJSONToOptionalFields(t *testing.T) {
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	status := hexutil.Uint64(1)
+	price := hexutil.U256(*uint256.NewInt(7))
+	blobGas := hexutil.Uint64(131072)
+	bloom := types.Bloom{}
+	for _, tc := range []struct {
+		name string
+		r    RPCReceipt
+	}{
+		{"nil to and contract", RPCReceipt{}},
+		{"contract creation", RPCReceipt{ContractAddress: &addr}},
+		{"call", RPCReceipt{To: &addr}},
+		{"bloom", RPCReceipt{LogsBloom: &bloom}},
+		{"effective gas price", RPCReceipt{EffectiveGasPrice: &price}},
+		{"status", RPCReceipt{Status: &status}},
+		{"pre-byzantium root", RPCReceipt{Root: hexutil.Bytes{0x01, 0x02}}},
+		{"blob fields", RPCReceipt{BlobGasPrice: &price, BlobGasUsed: &blobGas}},
+		{"everything", RPCReceipt{
+			To: &addr, ContractAddress: &addr, LogsBloom: &bloom, EffectiveGasPrice: &price,
+			Status: &status, Root: hexutil.Bytes{0x03}, BlobGasPrice: &price, BlobGasUsed: &blobGas,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.r
+			r.Logs = types.Logs{}
+			want, err := json.Marshal(&r)
+			require.NoError(t, err)
+
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, r.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+			require.Equal(t, string(want), string(s.Buffer()))
+		})
+	}
+}
+
+// A logs shape the writer rejects must fail before anything is written, or the
+// response carries a partial result next to the error.
+func TestRPCReceiptMarshalFastJSONToRejectsBadLogsBeforeWriting(t *testing.T) {
+	for name, logs := range map[string]any{
+		"unknown shape": []string{"nope"},
+		"unknown key":   []map[string]any{{"address": common.Address{}, "surprise": 1}},
+		"unknown value": []map[string]any{{"data": 42}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := &RPCReceipt{Logs: logs}
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.Error(t, r.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+			require.Empty(t, s.Buffer())
+		})
+	}
+}
