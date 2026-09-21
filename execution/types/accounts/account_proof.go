@@ -19,6 +19,8 @@ package accounts
 import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // Result structs for GetProof
@@ -35,4 +37,43 @@ type StorProofResult struct {
 	Key   string          `json:"key"`
 	Value *hexutil.U256   `json:"value"`
 	Proof []hexutil.Bytes `json:"proof"`
+}
+
+func (r *AccProofResult) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+	w.WriteObjectStart()
+	w.WriteObjectField("address").WriteHex(r.Address[:])
+	writeHexArray(w, "accountProof", r.AccountProof)
+	jsonw.Text(w, "balance", r.Balance)
+	jsonw.Hex(w, "codeHash", r.CodeHash[:])
+	jsonw.Text(w, "nonce", &r.Nonce)
+	jsonw.Hex(w, "storageHash", r.StorageHash[:])
+	jsonw.Array(w, "storageProof", &r.StorageProof, writeStorProofElem)
+	w.WriteObjectEnd()
+	return nil
+}
+
+// writeHexArray writes the proof nodes as one value when the stream allows it, which costs
+// one buffer growth instead of one per node.
+func writeHexArray(w jsonw.JSONWriter, name string, nodes []hexutil.Bytes) {
+	s := jsonstream.Concrete(w)
+	if s == nil {
+		jsonw.Array(w, name, &nodes, writeHexElem)
+		return
+	}
+	if nodes == nil {
+		jsonw.Field(w, name).WriteNil()
+		return
+	}
+	jsonw.Field(w, name)
+	jsonstream.WriteHexBytes(s, nodes)
+}
+
+func writeHexElem(w jsonw.JSONWriter, b *hexutil.Bytes) { w.WriteHex(*b) }
+
+func writeStorProofElem(w jsonw.JSONWriter, sp *StorProofResult) {
+	w.WriteObjectStart()
+	w.WriteObjectField("key").WriteString(sp.Key)
+	jsonw.Text(w, "value", sp.Value)
+	writeHexArray(w, "proof", sp.Proof)
+	w.WriteObjectEnd()
 }

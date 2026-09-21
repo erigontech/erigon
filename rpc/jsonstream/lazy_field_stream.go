@@ -16,7 +16,13 @@
 
 package jsonstream
 
-import "io"
+import (
+	"encoding"
+	"io"
+
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+)
 
 var (
 	_ Stream = (*StackStream)(nil)
@@ -89,16 +95,31 @@ func (s *LazyFieldStream) WriteFloat64(v float64) { s.ensure(); s.inner.WriteFlo
 func (s *LazyFieldStream) WriteString(v string)   { s.ensure(); s.inner.WriteString(v) }
 func (s *LazyFieldStream) WriteRaw(v string)      { s.ensure(); s.inner.WriteRaw(v) }
 func (s *LazyFieldStream) WriteRawBytes(v []byte) { s.ensure(); s.inner.WriteRawBytes(v) }
+func (s *LazyFieldStream) WriteHex(v []byte)      { s.ensure(); s.inner.WriteHex(v) }
 func (s *LazyFieldStream) WriteObjectStart()      { s.ensure(); s.inner.WriteObjectStart() }
 func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArrayStart() }
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
+func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
+	s.ensure()
+	s.inner.WriteQuotedText(v)
+}
+
 // A separator and a field name carry no value bytes, so opening the field for
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
-func (s *LazyFieldStream) WriteMore()                   { s.inner.WriteMore() }
-func (s *LazyFieldStream) WriteObjectField(name string) { s.inner.WriteObjectField(name) }
+func (s *LazyFieldStream) WriteMore() { s.assertOpened(); s.inner.WriteMore() }
+func (s *LazyFieldStream) WriteObjectField(name string) jsonw.JSONWriter {
+	s.assertOpened()
+	return s.inner.WriteObjectField(name)
+}
+
+func (s *LazyFieldStream) assertOpened() {
+	if dbg.AssertEnabled && !s.written {
+		panic("jsonstream: field written before " + s.field + " opened, its value would land in the enclosing object")
+	}
+}
 
 // The ends close what a value opened, so the field is already there.
 func (s *LazyFieldStream) WriteObjectEnd() { s.inner.WriteObjectEnd() }
@@ -108,6 +129,7 @@ func (s *LazyFieldStream) Buffer() []byte                 { return s.inner.Buffe
 func (s *LazyFieldStream) Flush() error                   { return s.inner.Flush() }
 func (s *LazyFieldStream) ClosePending(target uint) error { return s.inner.ClosePending(target) }
 func (s *LazyFieldStream) Depth() int                     { return s.inner.Depth() }
+func (s *LazyFieldStream) Err() error                     { return s.inner.Err() }
 
 func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.inner.Reset(out)

@@ -19,10 +19,14 @@ package engineapi
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"math/big"
+	"strings"
 	"testing"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
@@ -32,21 +36,25 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // Do 1 step to start txPool
@@ -223,10 +231,8 @@ func TestGetBlobsV2(t *testing.T) {
 	}
 }
 
-func TestGetBlobsV3(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
-	}
+func newGetBlobsTxPoolFixture(t *testing.T) (context.Context, *EngineServer, *types.BlobTxWrapper) {
+	t.Helper()
 	buf := bytes.NewBuffer(nil)
 	mockSentry := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 	require := require.New(t)
@@ -269,6 +275,16 @@ func TestGetBlobsV3(t *testing.T) {
 	require.NoError(err)
 	require.NotEmpty(hh)
 
+	return ctx, engineServer, wrappedTxn
+}
+
+func TestGetBlobsV3(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	ctx, engineServer, wrappedTxn := newGetBlobsTxPoolFixture(t)
+	require := require.New(t)
+
 	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
 	blobsResp, err := engineServer.GetBlobsV3(ctx, blobHashes)
 	require.NoError(err)
@@ -288,6 +304,268 @@ func TestGetBlobsV3(t *testing.T) {
 		require.Equal(blobsResp[0].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i][:]))
 		require.Equal(blobsResp[1].CellProofs[i], hexutil.Bytes(wrappedTxn.Proofs[i+128][:]))
 	}
+}
+
+func TestGetBlobsV4WithTxPool(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	ctx, engineServer, wrappedTxn := newGetBlobsTxPoolFixture(t)
+	require := require.New(t)
+
+	blobHashes := append([]common.Hash{{}}, wrappedTxn.Tx.BlobVersionedHashes...)
+	indices := []uint64{0, 64, 127}
+	mask := hexutil.MustDecodeHex("0x01000000000000000100000000000080")
+	cellBundles, err := engineServer.GetBlobsV4(ctx, blobHashes, mask)
+	require.NoError(err)
+	require.Len(cellBundles, 3)
+	require.Nil(cellBundles[0])
+	for i, bundle := range cellBundles[1:] {
+		require.NotNil(bundle)
+		require.Len(bundle.BlobCells, len(indices))
+		require.Len(bundle.Proofs, len(indices))
+		cells := make([]*goethkzg.Cell, len(indices))
+		proofs := make([]goethkzg.KZGProof, len(indices))
+		commitments := make([]goethkzg.KZGCommitment, len(indices))
+		for j := range indices {
+			require.NotNil(bundle.BlobCells[j])
+			require.NotNil(bundle.Proofs[j])
+			require.Len(*bundle.BlobCells[j], len(goethkzg.Cell{}))
+			require.Len(*bundle.Proofs[j], len(goethkzg.KZGProof{}))
+			cells[j] = (*goethkzg.Cell)(*bundle.BlobCells[j])
+			proofs[j] = goethkzg.KZGProof(*bundle.Proofs[j])
+			commitments[j] = goethkzg.KZGCommitment(wrappedTxn.Commitments[i])
+		}
+		require.NoError(kzg.Ctx().VerifyCellKZGProofBatch(commitments, indices, cells, proofs))
+	}
+}
+
+type blobGetterFunc func([]common.Hash) []txpool.PoolBlobBundle
+
+func (f blobGetterFunc) GetBlobs(hashes []common.Hash) []txpool.PoolBlobBundle {
+	return f(hashes)
+}
+
+type blobGetterMap map[common.Hash]txpool.PoolBlobBundle
+
+func (m blobGetterMap) GetBlobs(hashes []common.Hash) []txpool.PoolBlobBundle {
+	bundles := make([]txpool.PoolBlobBundle, len(hashes))
+	for i, hash := range hashes {
+		bundles[i] = m[hash]
+	}
+	return bundles
+}
+
+func getBlobsV4Fixture(t *testing.T, value byte) (common.Hash, txpool.PoolBlobBundle, []*goethkzg.Cell) {
+	t.Helper()
+	var blob goethkzg.Blob
+	blob[31] = value
+	cells, proofs, err := kzg.Ctx().ComputeCellsAndKZGProofs(&blob, 2)
+	require.NoError(t, err)
+	commitment, err := kzg.Ctx().BlobToKZGCommitment(&blob, 2)
+	require.NoError(t, err)
+	return common.Hash(kzg.KZGToVersionedHash(commitment)), txpool.PoolBlobBundle{
+		Commitment: commitment,
+		Blob:       blob[:],
+		Proofs:     proofs[:],
+	}, cells[:]
+}
+
+func newGetBlobsV4Client(t *testing.T, getter txpool.BlobGetter) *rpc.Client {
+	t.Helper()
+	logger := log.New()
+	server := rpc.NewServer(1, false, false, false, logger, 0)
+	t.Cleanup(server.Stop)
+	require.NoError(t, server.RegisterName("engine", &EngineServer{logger: logger, blobGetter: getter}))
+	client := rpc.DialInProc(server, logger)
+	t.Cleanup(client.Close)
+	return client
+}
+
+func TestGetBlobsV4(t *testing.T) {
+	hash, bundle, cells := getBlobsV4Fixture(t, 1)
+	client := newGetBlobsV4Client(t, blobGetterMap{hash: bundle})
+	allIndices := make([]int, goethkzg.CellsPerExtBlob)
+	for i := range allIndices {
+		allIndices[i] = i
+	}
+	for _, tc := range []struct {
+		name    string
+		mask    hexutil.Bytes
+		indices []int
+	}{
+		{"selected_cells", hexutil.MustDecodeHex("0x81010000000000800100000000000080"), []int{0, 7, 8, 63, 64, 127}},
+		{"all_cells", bytes.Repeat([]byte{0xff}, 16), allIndices},
+		{"no_cells", make(hexutil.Bytes, 16), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var result []struct {
+				BlobCells []hexutil.Bytes `json:"blob_cells"`
+				Proofs    []hexutil.Bytes `json:"proofs"`
+			}
+			require.NoError(t, client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{hash}, tc.mask))
+			require.Len(t, result, 1)
+			require.NotNil(t, result[0].BlobCells)
+			require.NotNil(t, result[0].Proofs)
+			require.Len(t, result[0].BlobCells, len(tc.indices))
+			require.Len(t, result[0].Proofs, len(tc.indices))
+			for i, index := range tc.indices {
+				require.Equal(t, hexutil.Bytes(cells[index][:]), result[0].BlobCells[i])
+				require.Equal(t, hexutil.Bytes(bundle.Proofs[index][:]), result[0].Proofs[i])
+			}
+		})
+	}
+}
+
+func TestGetBlobsV4FastJSON(t *testing.T) {
+	hash, bundle, _ := getBlobsV4Fixture(t, 1)
+	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{hash: bundle}}
+	result, err := server.GetBlobsV4(t.Context(), []common.Hash{hash, {}}, hexutil.MustDecodeHex("0x01000000000000000100000000000080"))
+	require.NoError(t, err)
+	marshaler, ok := any(result).(interface{ MarshalFastJSON() ([]byte, error) })
+	require.True(t, ok, "GetBlobsV4 must return a fast JSON result")
+	want, err := json.Marshal(result)
+	require.NoError(t, err)
+	got, err := marshaler.MarshalFastJSON()
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(got))
+}
+
+func TestGetBlobsV4PartialResponse(t *testing.T) {
+	hashA, bundleA, cellsA := getBlobsV4Fixture(t, 1)
+	hashB, bundleB, cellsB := getBlobsV4Fixture(t, 2)
+	pool := blobGetterMap{hashA: bundleA, hashB: bundleB}
+	cells := map[common.Hash][]*goethkzg.Cell{hashA: cellsA, hashB: cellsB}
+	client := newGetBlobsV4Client(t, pool)
+	hashes := []common.Hash{hashB, {}, hashA, hashB}
+	mask := hexutil.Bytes(hexutil.MustDecodeHex("0x80010000000000000000000000000080"))
+	var result []*engine_types.BlobCellsAndProofsV1
+	require.NoError(t, client.CallContext(t.Context(), &result, "engine_getBlobsV4", hashes, mask))
+	require.Len(t, result, len(hashes))
+	for i, hash := range hashes {
+		bundle, available := pool[hash]
+		if !available {
+			require.Nil(t, result[i])
+			continue
+		}
+		require.NotNil(t, result[i])
+		require.Len(t, result[i].BlobCells, 3)
+		require.Len(t, result[i].Proofs, 3)
+		for j, index := range []int{7, 8, 127} {
+			require.NotNil(t, result[i].BlobCells[j])
+			require.NotNil(t, result[i].Proofs[j])
+			require.Equal(t, hexutil.Bytes(cells[hash][index][:]), *result[i].BlobCells[j])
+			require.Equal(t, hexutil.Bytes(bundle.Proofs[index][:]), *result[i].Proofs[j])
+		}
+	}
+}
+
+func TestGetBlobsV4InvalidMask(t *testing.T) {
+	client := newGetBlobsV4Client(t, blobGetterFunc(func(hashes []common.Hash) []txpool.PoolBlobBundle {
+		return make([]txpool.PoolBlobBundle, len(hashes))
+	}))
+	for _, tc := range []struct {
+		name string
+		mask any
+	}{
+		{"long", "0x" + strings.Repeat("00", 17)},
+		{"short", "0x" + strings.Repeat("00", 15)},
+		{"empty", "0x"},
+		{"null", nil},
+		{"missing_prefix", strings.Repeat("00", 16)},
+		{"invalid_hex", "0x" + strings.Repeat("gg", 16)},
+		{"wrong_type", 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var result any
+			err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{}, tc.mask)
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, -32602, rpcErr.ErrorCode())
+		})
+	}
+}
+
+func TestGetBlobsV4RequestLimit(t *testing.T) {
+	client := newGetBlobsV4Client(t, blobGetterFunc(func(hashes []common.Hash) []txpool.PoolBlobBundle {
+		return make([]txpool.PoolBlobBundle, len(hashes))
+	}))
+	for _, count := range []int{0, 128, 129} {
+		t.Run(fmt.Sprint(count), func(t *testing.T) {
+			var result []*engine_types.BlobCellsAndProofsV1
+			err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", make([]common.Hash, count), make(hexutil.Bytes, 16))
+			if count > 128 {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, -38004, rpcErr.ErrorCode())
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, make([]*engine_types.BlobCellsAndProofsV1, count), result)
+		})
+	}
+}
+
+func TestGetBlobsV4PoolDisabled(t *testing.T) {
+	client := newGetBlobsV4Client(t, nil)
+	var result json.RawMessage
+	err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{{1}}, make(hexutil.Bytes, 16))
+	require.EqualError(t, err, txpool.ErrPoolDisabled.Error())
+}
+
+func TestGetBlobsV4Unavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		getter txpool.BlobGetter
+	}{
+		{"unavailable", blobGetterFunc(func([]common.Hash) []txpool.PoolBlobBundle { return nil })},
+		{"invalid_response_length", blobGetterFunc(func([]common.Hash) []txpool.PoolBlobBundle {
+			return make([]txpool.PoolBlobBundle, 2)
+		})},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			client := newGetBlobsV4Client(t, tc.getter)
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{{1}}, make(hexutil.Bytes, 16))
+			require.NoError(t, err)
+			require.JSONEq(t, "null", string(result))
+		})
+	}
+}
+
+func TestGetBlobsV4JSONRPCClient(t *testing.T) {
+	client := &JsonRpcClient{rpcClient: newGetBlobsV4Client(t, blobGetterFunc(func(hashes []common.Hash) []txpool.PoolBlobBundle {
+		return make([]txpool.PoolBlobBundle, len(hashes))
+	}))}
+	result, err := client.GetBlobsV4(t.Context(), []common.Hash{{1}, {2}}, make(hexutil.Bytes, 16))
+	require.NoError(t, err)
+	require.Equal(t, []*engine_types.BlobCellsAndProofsV1{nil, nil}, result)
+}
+
+func TestGetBlobsV4InvalidBlobLength(t *testing.T) {
+	for _, size := range []int{1, len(goethkzg.Blob{}) - 1, len(goethkzg.Blob{}) + 1} {
+		t.Run(fmt.Sprint(size), func(t *testing.T) {
+			hash := common.Hash{1}
+			client := newGetBlobsV4Client(t, blobGetterMap{hash: {
+				Blob:   make([]byte, size),
+				Proofs: make([]goethkzg.KZGProof, goethkzg.CellsPerExtBlob),
+			}})
+			var result []*engine_types.BlobCellsAndProofsV1
+			err := client.CallContext(t.Context(), &result, "engine_getBlobsV4", []common.Hash{hash}, make(hexutil.Bytes, 16))
+			require.NoError(t, err)
+			require.Equal(t, []*engine_types.BlobCellsAndProofsV1{nil}, result)
+		})
+	}
+}
+
+func TestGetBlobsV4Canceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{}}
+	result, err := server.GetBlobsV4(ctx, []common.Hash{{1}}, make(hexutil.Bytes, 16))
+	require.ErrorIs(t, err, context.Canceled)
+	require.Nil(t, result)
 }
 
 func canonicalHashAt(t *testing.T, db kv.TemporalRoDB, blockNum uint64) common.Hash {
