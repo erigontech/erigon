@@ -76,6 +76,7 @@ type CallContext struct {
 	cachedAddrGen uint64
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
+	_             [40]byte // keeps Stack's cache-line offset: cachedKey grew 8 -> 32 B
 
 	// Contract carries pointers, so it must precede the pointer-free Stack:
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and

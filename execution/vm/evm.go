@@ -140,6 +140,7 @@ func (c *storageKeyCache) fill(i uint64, word *uint256.Int) accounts.StorageKey 
 // for words seen before. Short-lived EVMs intern uncached: the table only earns
 // back its allocation over a few hundred storage ops.
 func (evm *EVM) internStorageKey(word *uint256.Int) accounts.StorageKey {
+	return accounts.InternKey(word.Bytes32())
 	c := evm.internCache
 	if c == nil {
 		if evm.internOps < storageKeyCacheMinOps {

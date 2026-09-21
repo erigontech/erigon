@@ -434,7 +434,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 				// SelfDestructPath=false there means the account was revived, so we
 				// fall through.
 				sd, sdOK := false, false
-				if key == accounts.NilKey {
+				if path != StoragePath {
 					sd, sdOK = s.versionedWriteSelfDestruct(addr)
 				}
 				if !sdOK || sd {
