@@ -25,6 +25,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"reflect"
 	"slices"
 	"strconv"
@@ -258,11 +259,40 @@ func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
 // through: the whole response is built in a pooled stream and sent in one piece.
 // It owns the stream, so the pool gets it back on any exit.
 func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
+	if ms, ok := h.conn.(messageStreamer); ok {
+		h.answerStreamed(cp, msg, ms)
+		return
+	}
 	stream := jsonstream.Get(nil)
 	defer jsonstream.Put(stream)
 
 	h.answerInto(cp, msg, stream)
 	if err := h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer())); err != nil {
+		h.logger.Debug("Failed to write RPC response", "err", err)
+	}
+}
+
+// messageStreamer is a transport that can send one message while it is still being written.
+type messageStreamer interface {
+	// messageWriter returns a writer for the next message. Nothing is sent until the first
+	// Write; finish sends what is left and completes the message.
+	messageWriter(ctx context.Context) streamedMessage
+}
+
+type streamedMessage interface {
+	io.Writer
+	finish(rest []byte, encodeErr error) error
+}
+
+// answerStreamed serves a call for a transport that frames messages: a response larger than
+// the stream's buffer goes out in pieces as it is encoded, instead of being held whole.
+func (h *handler) answerStreamed(cp *callProc, msg *jsonrpcMessage, ms messageStreamer) {
+	w := ms.messageWriter(cp.ctx)
+	stream := jsonstream.Get(w)
+	defer jsonstream.Put(stream)
+
+	h.answerInto(cp, msg, stream)
+	if err := w.finish(stream.Buffer(), stream.Err()); err != nil {
 		h.logger.Debug("Failed to write RPC response", "err", err)
 	}
 }

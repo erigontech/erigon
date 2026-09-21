@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net/http"
 	"net/url"
@@ -297,6 +298,59 @@ func (a *wsConnAdapter) encode(v any) error {
 		data = marshaled
 	}
 	return a.conn.Write(ctx, websocket.MessageText, data)
+}
+
+func (wc *websocketCodec) messageWriter(ctx context.Context) streamedMessage {
+	return &wsMessage{wc: wc, ctx: ctx}
+}
+
+// wsMessage sends one response. Until the stream first flushes it holds nothing, so a response
+// that fits the stream's buffer is still one frame; a larger one opens a message writer and
+// goes out a frame per flush, holding the connection's write lock until finish.
+type wsMessage struct {
+	wc     *websocketCodec
+	ctx    context.Context
+	cancel context.CancelFunc
+	w      io.WriteCloser
+}
+
+func (m *wsMessage) Write(p []byte) (int, error) {
+	if m.w == nil {
+		m.wc.encMu.Lock()
+		deadline, ok := m.ctx.Deadline()
+		if !ok {
+			deadline = time.Now().Add(wsPingInterval)
+		}
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
+		w, err := m.wc.conn.Writer(ctx, websocket.MessageText)
+		if err != nil {
+			cancel()
+			m.wc.encMu.Unlock()
+			return 0, err
+		}
+		m.w, m.cancel = w, cancel
+	}
+	return m.w.Write(p)
+}
+
+func (m *wsMessage) finish(rest []byte, encodeErr error) error {
+	if m.w == nil {
+		if encodeErr != nil {
+			return encodeErr
+		}
+		return m.wc.WriteJSON(m.ctx, rawResponse(rest))
+	}
+	defer m.wc.encMu.Unlock()
+	defer m.cancel()
+	if encodeErr != nil {
+		// Part of the message is already out and cannot be taken back.
+		_ = m.wc.conn.CloseNow()
+		return encodeErr
+	}
+	if _, err := m.w.Write(rest); err != nil {
+		return err
+	}
+	return m.w.Close()
 }
 
 // readFrame returns the next message. Every websocket frame is one message, so

@@ -20,8 +20,12 @@
 package rpc
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -518,5 +522,91 @@ func TestWebsocketIdlePing(t *testing.T) {
 			t.Fatal("ping did not re-arm the timer")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+// A response larger than the stream's buffer leaves in several frames as it is encoded, and
+// the client reads them back as one message.
+func TestWebsocketStreamsLargeResponse(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+
+	item := strings.Repeat("x", 1000)
+	const n = 300 // about 300 KB, several stream flushes
+	frames, msg := wsRawCall(t, strings.TrimPrefix(httpsrv.URL, "http://"), `{"jsonrpc":"2.0","id":1,"method":"test_streamRepeat","params":["`+item+`",300]}`)
+	if frames < 2 {
+		t.Fatalf("a %d-byte response came in %d frame(s), want it streamed", len(msg), frames)
+	}
+	var resp struct{ Result []string }
+	if err := json.Unmarshal(msg, &resp); err != nil {
+		t.Fatalf("reassembled message is not JSON: %v", err)
+	}
+	if len(resp.Result) != n || resp.Result[0] != item {
+		t.Fatalf("got %d items", len(resp.Result))
+	}
+}
+
+// wsRawCall sends one request over a hand-made websocket connection and returns how many
+// frames the response came in, with their payloads joined.
+func wsRawCall(t *testing.T, host, req string) (int, []byte) {
+	t.Helper()
+	conn, err := net.Dial("tcp", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(conn)
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	// A client frame is masked; a zero mask leaves the payload as it is.
+	frame := []byte{0x81, 0x80 | 126, byte(len(req) >> 8), byte(len(req)), 0, 0, 0, 0}
+	if _, err := conn.Write(append(frame, req...)); err != nil {
+		t.Fatal(err)
+	}
+	var msg []byte
+	for frames := 1; ; frames++ {
+		var h [2]byte
+		if _, err := io.ReadFull(r, h[:]); err != nil {
+			t.Fatal(err)
+		}
+		size := uint64(h[1] & 0x7f)
+		switch size {
+		case 126:
+			var ext [2]byte
+			if _, err := io.ReadFull(r, ext[:]); err != nil {
+				t.Fatal(err)
+			}
+			size = uint64(binary.BigEndian.Uint16(ext[:]))
+		case 127:
+			var ext [8]byte
+			if _, err := io.ReadFull(r, ext[:]); err != nil {
+				t.Fatal(err)
+			}
+			size = binary.BigEndian.Uint64(ext[:])
+		}
+		payload := make([]byte, size)
+		if _, err := io.ReadFull(r, payload); err != nil {
+			t.Fatal(err)
+		}
+		msg = append(msg, payload...)
+		if h[0]&0x80 != 0 {
+			return frames, msg
+		}
 	}
 }
