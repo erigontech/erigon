@@ -230,3 +230,51 @@ func TestStateGetterCodeBufNotLentWithoutCodeHash(t *testing.T) {
 		require.Equal(t, codes[i], got[i], "read %d must not alias the buffer a later read decodes into", i)
 	}
 }
+
+type countingLatestTx struct {
+	kv.TemporalTx
+	reads int
+}
+
+func (tx *countingLatestTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	tx.reads++
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestCachedTemporalTxStateGetterServesRepeatReadFromCache(t *testing.T) {
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	stateCache := newSmallStateCache()
+	defer stateCache.Close()
+
+	tx := &countingLatestTx{TemporalTx: roTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(tx, stateCache)
+	key := make([]byte, 20)
+
+	first, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, 1, tx.reads)
+
+	second, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, first, second)
+	require.Equal(t, 1, tx.reads)
+}
+
+func TestCachedTemporalTxStateGetterWithoutCacheReadsEveryTime(t *testing.T) {
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	tx := &countingLatestTx{TemporalTx: roTx}
+	getter := execctx.NewCachedTemporalTxStateGetter(tx, nil)
+	key := make([]byte, 20)
+	for i := 1; i <= 2; i++ {
+		_, _, err = getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
+		require.NoError(t, err)
+		require.Equal(t, i, tx.reads)
+	}
+}
