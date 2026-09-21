@@ -19,87 +19,87 @@ package ethapi
 import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // MarshalFastJSONTo writes the transaction's fields in the order the struct declares them,
 // so the bytes match reflection exactly.
-func (t *RPCTransaction) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (t *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if t == nil {
-		w.WriteNil()
+		s.WriteNil()
 		return nil
 	}
-	w.WriteObjectStart()
-	w.WriteObjectField("blockHash")
+	s.WriteObjectStart()
+	s.WriteObjectField("blockHash")
 	if t.BlockHash == nil {
-		w.WriteNil()
+		s.WriteNil()
 	} else {
-		w.WriteHex(t.BlockHash[:])
+		s.WriteHex(t.BlockHash[:])
 	}
-	jsonw.Text(w, "blockNumber", t.BlockNumber)
-	jsonw.Text(w, "blockTimestamp", t.BlockTimestamp)
-	jsonw.Hex(w, "from", t.From[:])
-	jsonw.Text(w, "gas", &t.Gas)
-	jsonw.Text(w, "gasPrice", t.GasPrice)
+	jsonstream.Text(s, "blockNumber", t.BlockNumber)
+	jsonstream.Text(s, "blockTimestamp", t.BlockTimestamp)
+	jsonstream.Field(s, "from").WriteHex(t.From[:])
+	jsonstream.Text(s, "gas", &t.Gas)
+	jsonstream.Text(s, "gasPrice", t.GasPrice)
 	if t.MaxPriorityFeePerGas != nil {
-		jsonw.Text(w, "maxPriorityFeePerGas", t.MaxPriorityFeePerGas)
+		jsonstream.Text(s, "maxPriorityFeePerGas", t.MaxPriorityFeePerGas)
 	}
 	if t.MaxFeePerGas != nil {
-		jsonw.Text(w, "maxFeePerGas", t.MaxFeePerGas)
+		jsonstream.Text(s, "maxFeePerGas", t.MaxFeePerGas)
 	}
-	jsonw.Hex(w, "hash", t.Hash[:])
-	// A nil Input is "0x", not null, so it bypasses jsonw.Hex.
-	jsonw.Field(w, "input").WriteHex(t.Input)
-	jsonw.Text(w, "nonce", &t.Nonce)
-	jsonw.Field(w, "to")
+	jsonstream.Field(s, "hash").WriteHex(t.Hash[:])
+	jsonstream.Field(s, "input").WriteHex(t.Input)
+	jsonstream.Text(s, "nonce", &t.Nonce)
+	jsonstream.Field(s, "to")
 	if t.To == nil {
-		w.WriteNil()
+		s.WriteNil()
 	} else {
-		w.WriteHex(t.To[:])
+		s.WriteHex(t.To[:])
 	}
-	jsonw.Text(w, "transactionIndex", t.TransactionIndex)
-	jsonw.Text(w, "value", t.Value)
-	jsonw.Text(w, "type", &t.Type)
+	jsonstream.Text(s, "transactionIndex", t.TransactionIndex)
+	jsonstream.Text(s, "value", t.Value)
+	jsonstream.Text(s, "type", &t.Type)
 	if t.Accesses != nil {
-		jsonw.Array(w, "accessList", (*[]types.AccessTuple)(t.Accesses), writeAccessTuple)
+		jsonstream.Field(s, "accessList")
+		jsonstream.ArrayValue(s, *t.Accesses, writeAccessTuple)
 	}
 	if t.ChainID != nil {
-		jsonw.Text(w, "chainId", t.ChainID)
+		jsonstream.Text(s, "chainId", t.ChainID)
 	}
 	if t.MaxFeePerBlobGas != nil {
-		jsonw.Text(w, "maxFeePerBlobGas", t.MaxFeePerBlobGas)
+		jsonstream.Text(s, "maxFeePerBlobGas", t.MaxFeePerBlobGas)
 	}
 	// A plain slice with omitempty: empty is omitted, not [].
 	if len(t.BlobVersionedHashes) > 0 {
-		jsonstream.HexesField(w, "blobVersionedHashes", t.BlobVersionedHashes)
+		jsonstream.HexesField(s, "blobVersionedHashes", t.BlobVersionedHashes)
 	}
 	if t.Authorizations != nil {
-		jsonw.Array(w, "authorizationList", t.Authorizations, writeAuthorization)
+		jsonstream.Field(s, "authorizationList")
+		jsonstream.ArrayValue(s, *t.Authorizations, writeAuthorization)
 	}
-	jsonw.Text(w, "v", t.V)
+	jsonstream.Text(s, "v", t.V)
 	if t.YParity != nil {
-		jsonw.Text(w, "yParity", t.YParity)
+		jsonstream.Text(s, "yParity", t.YParity)
 	}
-	jsonw.Text(w, "r", t.R)
-	jsonw.Text(w, "s", t.S)
-	w.WriteObjectEnd()
+	jsonstream.Text(s, "r", t.R)
+	jsonstream.Text(s, "s", t.S)
+	s.WriteObjectEnd()
 	return nil
 }
 
-func writeAccessTuple(w jsonw.JSONWriter, a *types.AccessTuple) {
-	w.WriteObjectStart()
-	w.WriteObjectField("address").WriteHex(a.Address[:])
-	jsonstream.HexesField(w, "storageKeys", a.StorageKeys)
-	w.WriteObjectEnd()
+func writeAccessTuple(s *jsonstream.StackStream, a *types.AccessTuple) {
+	s.WriteObjectStart()
+	s.WriteObjectField("address").WriteHex(a.Address[:])
+	jsonstream.HexesField(s, "storageKeys", a.StorageKeys)
+	s.WriteObjectEnd()
 }
 
-func writeAuthorization(w jsonw.JSONWriter, a *types.JsonAuthorization) {
-	w.WriteObjectStart()
-	w.WriteObjectField("chainId").WriteQuotedText(&a.ChainID)
-	jsonw.Hex(w, "address", a.Address[:])
-	jsonw.Text(w, "nonce", &a.Nonce)
-	jsonw.Text(w, "yParity", &a.YParity)
-	jsonw.Text(w, "r", &a.R)
-	jsonw.Text(w, "s", &a.S)
-	w.WriteObjectEnd()
+func writeAuthorization(s *jsonstream.StackStream, a *types.JsonAuthorization) {
+	s.WriteObjectStart()
+	s.WriteObjectField("chainId").WriteQuotedText(&a.ChainID)
+	jsonstream.Field(s, "address").WriteHex(a.Address[:])
+	jsonstream.Text(s, "nonce", &a.Nonce)
+	jsonstream.Text(s, "yParity", &a.YParity)
+	jsonstream.Text(s, "r", &a.R)
+	jsonstream.Text(s, "s", &a.S)
+	s.WriteObjectEnd()
 }
