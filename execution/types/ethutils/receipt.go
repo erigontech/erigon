@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-// RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, types.Logs, []*types.Log, []map[string]any or nil.
+// RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, types.Logs, []*types.Log or nil.
 type RPCReceipt struct {
 	BlockHash         common.Hash     `json:"blockHash"`
 	BlockNumber       hexutil.Uint64  `json:"blockNumber"`
@@ -160,6 +160,29 @@ func MarshalReceipt(
 	return result
 }
 
+// RPCLogFromProto is the log a subscription delivers, the same object eth_getLogs returns. The
+// address and both hashes must be set, as every backend sets them.
+func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.RPCLog {
+	lg := &types.RPCLog{
+		Log: types.Log{
+			Address:     gointerfaces.ConvertH160toAddress(l.Address),
+			Topics:      make([]common.Hash, len(l.Topics)),
+			Data:        l.Data,
+			BlockNumber: hexutil.Uint64(l.BlockNumber),
+			TxHash:      gointerfaces.ConvertH256ToHash(l.TransactionHash),
+			TxIndex:     hexutil.Uint(l.TransactionIndex),
+			BlockHash:   gointerfaces.ConvertH256ToHash(l.BlockHash),
+			Index:       hexutil.Uint(l.LogIndex),
+			Removed:     l.Removed,
+		},
+		BlockTimestamp: hexutil.Uint64(l.BlockTimestamp),
+	}
+	for i, topic := range l.Topics {
+		lg.Topics[i] = gointerfaces.ConvertH256ToHash(topic)
+	}
+	return lg
+}
+
 func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *RPCReceipt {
 	txHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.TransactionHash))
 	status := hexutil.Uint64(protoReceipt.Status)
@@ -183,23 +206,9 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		log.Warn("[rpc] subscribed receipt has a malformed logs bloom", "len", n, "txHash", txHash)
 	}
 
-	logs := make([]map[string]any, 0, len(protoReceipt.Logs))
-	for _, protoLog := range protoReceipt.Logs {
-		logEntry := make(map[string]any)
-
-		if protoLog.Address != nil {
-			logEntry["address"] = common.Address(gointerfaces.ConvertH160toAddress(protoLog.Address))
-		}
-
-		topics := make([]common.Hash, len(protoLog.Topics))
-		for i, topic := range protoLog.Topics {
-			topics[i] = common.Hash(gointerfaces.ConvertH256ToHash(topic))
-		}
-		logEntry["topics"] = topics
-		logEntry["data"] = hexutil.Bytes(protoLog.Data)
-		logEntry["transactionHash"] = txHash
-
-		logs = append(logs, logEntry)
+	logs := make([]*types.RPCLog, len(protoReceipt.Logs))
+	for i, protoLog := range protoReceipt.Logs {
+		logs[i] = RPCLogFromProto(protoLog)
 	}
 	result.Logs = logs
 

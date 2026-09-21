@@ -31,6 +31,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -161,16 +162,18 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 	ss.WriteMore() // Missing final value
 
 	// Incomplete JSON at this point
-	assert.Equal(t, `[1,2,`, string(ss.Buffer()))
+	// WriteMore is a no-op: the separator is written with the value that follows, so a
+	// value that never arrives leaves no dangling comma to repair.
+	assert.Equal(t, `[1,2`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 2, ss.Depth()) // Array, Field
+	assert.Equal(t, 1, ss.Depth()) // Array
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
 
 	// Should have completed the JSON properly
-	assert.Equal(t, `[1,2,null]`, string(ss.Buffer()))
+	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
 }
 
@@ -385,7 +388,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 			expected: `{"array":[{"field":null}]}`,
 		},
 		{
-			name: "array with multiple trailing commas",
+			name: "array with a redundant WriteMore after each element",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteArrayStart()
 				ss.WriteInt(1)
@@ -393,7 +396,7 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 				ss.WriteInt(2)
 				ss.WriteMore()
 			},
-			expected: `[1,2,null]`,
+			expected: `[1,2]`,
 		},
 	}
 
@@ -709,19 +712,19 @@ func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
 	// Test 3: Multiple pushes and pops
 	ss.Reset(nil)
 	ss.push(ItemObject)
+	ss.push(ItemArray)
 	ss.push(ItemField)
-	ss.push(ItemComma)
 	assert.Equal(t, 3, ss.Depth())
 
-	ss.pop(ItemComma)
 	ss.pop(ItemField)
+	ss.pop(ItemArray)
 	assert.Equal(t, 1, ss.Depth())
 
 	// Test 4: Verify stack state with StackSummary
 	summary := ss.StackSummary()
 	assert.Contains(t, summary, "Object")
 	assert.NotContains(t, summary, "Field")
-	assert.NotContains(t, summary, "Comma")
+	assert.NotContains(t, summary, "Array")
 }
 
 // TestStackStream_MixedWriteOperations tests mixing different write operations
@@ -792,13 +795,13 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			expected: `{"field":null}`,
 		},
 		{
-			name: "array with trailing comma",
+			name: "array with a redundant WriteMore after its element",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteArrayStart()
 				ss.WriteInt(1)
-				ss.WriteMore() // Trailing comma
+				ss.WriteMore()
 			},
-			expected: `[1,null]`,
+			expected: `[1]`,
 		},
 		{
 			name: "nested object with missing field in inner object",
@@ -811,7 +814,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			expected: `{"outer":{"inner":null}}`,
 		},
 		{
-			name: "object with field and separator",
+			name: "object with a redundant WriteMore after each field",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
 				ss.WriteObjectField("first")
@@ -821,7 +824,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 				ss.WriteInt(42)
 				ss.WriteMore()
 			},
-			expected: `{"first":"value","second":42,"":""}`,
+			expected: `{"first":"value","second":42}`,
 		},
 		{
 			name: "multiple nested incomplete structures",
@@ -1056,12 +1059,12 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 		write func(s *StackStream)
 		want  string
 	}{
-		{"trailing comma in an array", func(s *StackStream) {
+		{"redundant WriteMore in an array", func(s *StackStream) {
 			s.WriteArrayStart()
 			s.WriteInt(1)
 			s.WriteMore()
 			s.WriteArrayEnd()
-		}, `[1,null]`},
+		}, `[1]`},
 		{"field with no value", func(s *StackStream) {
 			s.WriteObjectStart()
 			s.WriteObjectField("a")
@@ -1144,6 +1147,8 @@ func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
 // A separator and a field name carry no value, so the wrapper leaves them alone:
 // opening the field for one emits `"result":` with nothing able to follow it.
 func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
 	for name, write := range map[string]func(s Stream){
 		"WriteMore":        func(s Stream) { s.WriteMore() },
 		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
@@ -1161,11 +1166,59 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 	}
 }
 
+// Nested wrappers must hand the chained value to the stream that took the field name, not to a
+// wrapper still holding a pending field of its own.
+func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+	inner := newStackStream(nil, 64)
+	inner.WriteObjectStart()
+	outer := NewLazyFieldStream(inner, "outer", false)
+	nested := NewLazyFieldStream(outer, "inner", false)
+
+	nested.WriteObjectField("error").WriteString("boom")
+
+	require.False(t, nested.Written(), "a chained value must not open the nested pending field")
+	require.False(t, outer.Written(), "a chained value must not open the outer pending field")
+	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
+}
+
+// WriteQuotedText writes its text unscanned, so a byte JSON would escape has to be caught
+// where it is produced rather than reaching a client as malformed JSON.
+func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	s := newStackStream(nil, 64)
+
+	require.PanicsWithValue(t, `jsonstream: quoted text holds '"', which JSON escapes`, func() {
+		s.WriteQuotedText(appenderFunc(`say "hi"`))
+	})
+	require.NotPanics(t, func() { s.WriteQuotedText(appenderFunc("0xdeadbeef")) })
+}
+
+type appenderFunc string
+
+func (a appenderFunc) AppendText(dst []byte) ([]byte, error) { return append(dst, a...), nil }
+
+// Open must reach the stream that owns the buffer, however many wrappers sit above it.
+func TestLazyFieldStreamNestedOpenReturnsTheOwner(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false
+	inner := newStackStream(nil, 64)
+	inner.WriteObjectStart()
+	outer := NewLazyFieldStream(inner, "outer", false)
+	nested := NewLazyFieldStream(outer, "inner", false)
+
+	require.Same(t, inner, nested.Open())
+	nested.Open().WriteString("v")
+	require.Equal(t, `{"inner":"v"`, string(inner.Buffer()))
+}
+
 // Put clears the writer as well as the bytes. A pooled stream that kept one
 // would pin the connection it came from until the next Get.
 func TestPutReleasesWriterAndBytes(t *testing.T) {
 	var out bytes.Buffer
-	s := Get(&out).(*StackStream)
+	s := Get(&out)
 	s.WriteString("pending")
 	Put(s)
 
@@ -1177,13 +1230,13 @@ func TestPutReleasesWriterAndBytes(t *testing.T) {
 // A response above the bound is dropped rather than pooled, so one outsized
 // value cannot pin its peak per goroutine.
 func TestPutDropsOversizedBuffer(t *testing.T) {
-	s := Get(nil).(*StackStream)
+	s := Get(nil)
 	s.WriteString(strings.Repeat("x", maxPooledBufferSize))
 	require.Greater(t, cap(s.Buffer()), maxPooledBufferSize)
 
 	Put(s)
 	require.NotEmpty(t, s.Buffer(), "an oversized stream is dropped, not reset and pooled")
-	require.NotSame(t, s, Get(nil).(*StackStream))
+	require.NotSame(t, s, Get(nil))
 }
 
 // WriteHex matches json.Marshal of hexutil.Bytes inside a container, whether the value
@@ -1283,7 +1336,7 @@ func TestWriteRawBytesNilWriterAlwaysBuffers(t *testing.T) {
 // buffer, so the stream survives Put instead of being dropped by the size check.
 func TestPutKeepsStreamAfterLargeWriteThrough(t *testing.T) {
 	var out bytes.Buffer
-	s := Get(&out).(*StackStream)
+	s := Get(&out)
 	s.WriteObjectStart()
 	s.WriteObjectField("result")
 	s.WriteRawBytes(append(bytes.Repeat([]byte(`"a`), 2<<20), '"'))
@@ -1323,6 +1376,175 @@ func TestWriteRawBytesWriteThroughError(t *testing.T) {
 			require.Error(t, s.Flush(), "the writer failure must reach the caller")
 			require.Less(t, len(s.Buffer()), FlushThreshold,
 				"a failed write must not accumulate, buffer holds %d", len(s.Buffer()))
+		})
+	}
+}
+
+// TestStackStream_SeparatorsAreAutomatic pins the contract: the stream writes the comma a
+// value needs, so a caller that never calls WriteMore still produces valid JSON.
+func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(*StackStream)
+		want  string
+	}{
+		{"array elements", func(s *StackStream) {
+			s.WriteArrayStart()
+			s.WriteInt(1)
+			s.WriteInt(2)
+			s.WriteInt(3)
+			s.WriteArrayEnd()
+		}, `[1,2,3]`},
+		{"object fields", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("a")
+			s.WriteInt(1)
+			s.WriteObjectField("b")
+			s.WriteString("x")
+			s.WriteObjectEnd()
+		}, `{"a":1,"b":"x"}`},
+		{"nested containers", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("list")
+			s.WriteArrayStart()
+			s.WriteObjectStart()
+			s.WriteObjectField("k")
+			s.WriteInt(7)
+			s.WriteObjectEnd()
+			s.WriteObjectStart()
+			s.WriteObjectEnd()
+			s.WriteArrayEnd()
+			s.WriteObjectField("after")
+			s.WriteBool(true)
+			s.WriteObjectEnd()
+		}, `{"list":[{"k":7},{}],"after":true}`},
+		{"empty containers", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("o")
+			s.WriteObjectStart()
+			s.WriteObjectEnd()
+			s.WriteObjectField("a")
+			s.WriteArrayStart()
+			s.WriteArrayEnd()
+			s.WriteObjectEnd()
+		}, `{"o":{},"a":[]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ss := newStackStream(nil, InitialBufferSize)
+			tc.write(ss)
+			require.Equal(t, tc.want, string(ss.Buffer()))
+			require.True(t, json.Valid(ss.Buffer()))
+			require.True(t, ss.IsComplete())
+		})
+	}
+}
+
+// TestStackStream_WriteMoreIsNoop pins that WriteMore writes nothing, however often a
+// caller written against the old manual API calls it.
+func TestStackStream_WriteMoreIsNoop(t *testing.T) {
+	withMore := newStackStream(nil, InitialBufferSize)
+	withMore.WriteArrayStart()
+	withMore.WriteInt(1)
+	withMore.WriteMore()
+	withMore.WriteMore()
+	withMore.WriteInt(2)
+	withMore.WriteMore()
+	withMore.WriteArrayEnd()
+
+	without := newStackStream(nil, InitialBufferSize)
+	without.WriteArrayStart()
+	without.WriteInt(1)
+	without.WriteInt(2)
+	without.WriteArrayEnd()
+
+	require.Equal(t, `[1,2]`, string(without.Buffer()))
+	require.Equal(t, string(without.Buffer()), string(withMore.Buffer()),
+		"WriteMore must not change the bytes")
+	require.Equal(t, without.Depth(), withMore.Depth(), "WriteMore must not change the stack")
+}
+
+type failingAppender struct{}
+
+func (failingAppender) AppendText(dst []byte) ([]byte, error) {
+	return nil, errors.New("append failed")
+}
+
+// A failing appender must not truncate what the stream already holds.
+func TestWriteQuotedTextKeepsBufferOnError(t *testing.T) {
+	t.Parallel()
+	var out bytes.Buffer
+	s := New(&out)
+	s.WriteObjectStart()
+	s.WriteObjectField("balance")
+	s.WriteQuotedText(failingAppender{})
+	s.WriteObjectEnd()
+	require.Equal(t, `{"balance":""}`, string(s.Buffer()))
+	require.Error(t, s.Flush())
+}
+
+// A latched write error must reach the caller. Flush cannot report it on a writerless stream,
+// so marshalFastJSONTo would otherwise clone a buffer holding the empty-string placeholder.
+func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
+	s := Get(nil)
+	defer Put(s)
+	s.WriteQuotedText(failingAppender{})
+
+	require.NoError(t, s.Flush(), "jsoniter reports nil for a stream with no writer")
+	require.Error(t, s.Err(), "the latched appender error must stay reachable")
+}
+
+// Closing to the root ends the last value's container, so the next top-level value is not a
+// member of anything and takes no separator.
+func TestClosePendingToRootClearsSeparator(t *testing.T) {
+	s := newStackStream(nil, InitialBufferSize)
+	s.WriteArrayStart()
+	s.WriteInt(1)
+	require.NoError(t, s.ClosePending(0))
+	s.WriteInt(2)
+
+	require.Equal(t, `[1]2`, string(s.Buffer()))
+}
+
+// A field name or separator written before the lazy field opened would put its value in the
+// enclosing object, silently dropping the field. Asserts catch a marshaller that starts with
+// jsonstream.Field instead of a value write.
+func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	for name, write := range map[string]func(s Stream){
+		"WriteMore":        func(s Stream) { s.WriteMore() },
+		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := newStackStream(nil, 64)
+			inner.WriteObjectStart()
+			lazy := NewLazyFieldStream(inner, "result", false)
+
+			require.Panics(t, func() { write(lazy) })
+
+			lazy.WriteObjectStart()
+			require.NotPanics(t, func() { write(lazy) })
+		})
+	}
+}
+
+// A nil slice is the caller's to write as null: WriteHexBytes always writes an array.
+func TestWriteHexBytes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		items [][]byte
+		want  string
+	}{
+		"nil":           {nil, `[]`},
+		"empty":         {[][]byte{}, `[]`},
+		"empty element": {[][]byte{{}}, `["0x"]`},
+		"multi":         {[][]byte{{0x01}, {0xab, 0xcd}, nil}, `["0x01","0xabcd","0x"]`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := Get(nil)
+			defer Put(s)
+			WriteHexBytes(s, tc.items)
+			require.NoError(t, s.Err())
+			require.Equal(t, tc.want, string(s.Buffer()))
 		})
 	}
 }

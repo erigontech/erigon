@@ -206,6 +206,9 @@ func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeac
 }
 
 func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
+	// Count before taking the store mutex so queued imports are visible as in progress.
+	f.blocksProcessing.Add(1)
+	defer f.blocksProcessing.Add(-1)
 	f.mu.Lock()
 	unlocked := false
 	defer f.drainQueuedWork()

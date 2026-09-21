@@ -16,7 +16,12 @@
 
 package jsonstream
 
-import "io"
+import (
+	"encoding"
+	"io"
+
+	"github.com/erigontech/erigon/common/dbg"
+)
 
 var (
 	_ Stream = (*StackStream)(nil)
@@ -33,7 +38,10 @@ var (
 // added to the interface.
 type LazyFieldStream struct {
 	inner            Stream
+	owner            *StackStream
 	written          bool
+	mark             int
+	markDepth        int
 	openDepth        uint
 	field            string
 	prependSeparator bool
@@ -62,12 +70,36 @@ func (s *LazyFieldStream) CloseIfOpen() {
 func (s *LazyFieldStream) ensure() {
 	if !s.written {
 		s.written = true
+		s.mark, s.markDepth = len(s.inner.Buffer()), s.inner.Depth()
 		if s.prependSeparator {
-			s.inner.WriteMore()
+			markSeparator(s.inner)
 		}
-		s.inner.WriteObjectField(s.field)
+		s.owner = s.inner.WriteObjectField(s.field)
 		s.openDepth = uint(s.inner.Depth() - 1)
 	}
+}
+
+// RewindIfEmpty unwrites the field name when the buffer still ends with it, so the caller can
+// put something else in the enclosing object. Anything else — a value written after it, or a
+// flush that carried it off to the writer — leaves the field where it is and reports false.
+func (s *LazyFieldStream) RewindIfEmpty() bool {
+	if !s.written || s.mark > len(s.owner.Buffer()) || !s.bufferEndsWithField() {
+		return false
+	}
+	s.owner.rewindField(s.mark, s.markDepth)
+	s.written = false
+	return true
+}
+
+func (s *LazyFieldStream) bufferEndsWithField() bool {
+	rest := s.owner.Buffer()[s.mark:]
+	if len(rest) > 0 && rest[0] == ',' {
+		rest = rest[1:]
+	} else if s.prependSeparator {
+		return false
+	}
+	return len(rest) == len(s.field)+3 && rest[0] == '"' &&
+		string(rest[1:len(rest)-2]) == s.field && rest[len(rest)-2] == '"' && rest[len(rest)-1] == ':'
 }
 
 func (s *LazyFieldStream) WriteNil()              { s.ensure(); s.inner.WriteNil() }
@@ -95,11 +127,31 @@ func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArr
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
+// Open writes the field this stream is holding and returns the stream that owns the buffer.
+func (s *LazyFieldStream) Open() *StackStream {
+	s.ensure()
+	return s.owner
+}
+
+func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
+	s.ensure()
+	s.inner.WriteQuotedText(v)
+}
+
 // A separator and a field name carry no value bytes, so opening the field for
 // them would emit `"result":` with nothing to follow it. They belong to a
 // container a value write already opened.
-func (s *LazyFieldStream) WriteMore()                   { s.inner.WriteMore() }
-func (s *LazyFieldStream) WriteObjectField(name string) { s.inner.WriteObjectField(name) }
+func (s *LazyFieldStream) WriteMore() { s.assertOpened(); s.inner.WriteMore() }
+func (s *LazyFieldStream) WriteObjectField(name string) *StackStream {
+	s.assertOpened()
+	return s.inner.WriteObjectField(name)
+}
+
+func (s *LazyFieldStream) assertOpened() {
+	if dbg.AssertEnabled && !s.written {
+		panic("jsonstream: field written before " + s.field + " opened, its value would land in the enclosing object")
+	}
+}
 
 // The ends close what a value opened, so the field is already there.
 func (s *LazyFieldStream) WriteObjectEnd() { s.inner.WriteObjectEnd() }
@@ -109,8 +161,25 @@ func (s *LazyFieldStream) Buffer() []byte                 { return s.inner.Buffe
 func (s *LazyFieldStream) Flush() error                   { return s.inner.Flush() }
 func (s *LazyFieldStream) ClosePending(target uint) error { return s.inner.ClosePending(target) }
 func (s *LazyFieldStream) Depth() int                     { return s.inner.Depth() }
+func (s *LazyFieldStream) Err() error                     { return s.inner.Err() }
 
 func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.inner.Reset(out)
 	s.written = false
+}
+
+func (s *LazyFieldStream) markSeparatorPending() { markSeparator(s.inner) }
+
+// separatorMarker is the streams that write separators themselves. It stays off Stream so
+// an implementation outside this package still satisfies it.
+type separatorMarker interface{ markSeparatorPending() }
+
+// markSeparator asserts a sibling precedes the next value, falling back to the manual
+// comma for a stream that does not write separators itself.
+func markSeparator(s Stream) {
+	if m, ok := s.(separatorMarker); ok {
+		m.markSeparatorPending()
+		return
+	}
+	s.WriteMore()
 }

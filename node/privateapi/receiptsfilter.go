@@ -22,6 +22,8 @@ import (
 	"io"
 	"sync"
 
+	"google.golang.org/protobuf/proto"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
@@ -147,6 +149,17 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
 	filtersToDelete := make(map[uint64]*ReceiptsFilter)
+	// Each stream's latest receipt is held back until the next one shows whether it ends its block.
+	held := make(map[uint64]*remoteproto.SubscribeReceiptsReply)
+	send := func(filterId uint64, reply *remoteproto.SubscribeReceiptsReply, lastInBlock bool) {
+		if lastInBlock {
+			reply = proto.CloneOf(reply) // the unflagged reply may also go to other streams
+			reply.LastInBlock = true
+		}
+		if err := a.receiptsFilters[filterId].sender.Send(reply); err != nil {
+			filtersToDelete[filterId] = a.receiptsFilters[filterId]
+		}
+	}
 	for _, rn := range receipts {
 		txHash := rn.Receipt.TxHash
 		if a.aggReceiptsFilter.allTxHashes == 0 {
@@ -155,20 +168,24 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 			}
 		}
 		// Lazy convert: only build protobuf when we actually need to send
-		var proto *remoteproto.SubscribeReceiptsReply
+		var reply *remoteproto.SubscribeReceiptsReply
 		for filterId, filter := range a.receiptsFilters {
 			if filter.allTxHashes == 0 {
 				if _, ok := filter.txHashes[txHash]; !ok {
 					continue
 				}
 			}
-			if proto == nil {
-				proto = a.receiptNotificationToProto(rn)
+			if reply == nil {
+				reply = a.receiptNotificationToProto(rn)
 			}
-			if err := filter.sender.Send(proto); err != nil {
-				filtersToDelete[filterId] = filter
+			if prev := held[filterId]; prev != nil {
+				send(filterId, prev, prev.BlockNumber != reply.BlockNumber)
 			}
+			held[filterId] = reply
 		}
+	}
+	for filterId, reply := range held {
+		send(filterId, reply, true)
 	}
 	for filterId, filter := range filtersToDelete {
 		a.subtractReceiptsFilters(filter)

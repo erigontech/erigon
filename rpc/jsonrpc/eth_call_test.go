@@ -617,6 +617,11 @@ func TestStateCallMethodsRejectPendingTag(t *testing.T) {
 		require.ErrorIs(t, err, errPendingStateNotSupported)
 	})
 
+	t.Run("eth_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, nil, StateContext{BlockNumber: pending}, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
 	t.Run("graphql_call", func(t *testing.T) {
 		_, err := graphqlAPI.Call(ctx, rpc.PendingBlockNumber, ethapi.CallArgs{})
 		require.ErrorIs(t, err, errPendingStateNotSupported)
@@ -2234,4 +2239,42 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 		require.Len(t, *res.Accesslist, 1)
 		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
 	})
+}
+
+func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	chainConfig := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	historyAddr := params.HistoryStorageAddress.Value()
+	gspec := &types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: []byte{0x00}, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
+
+	const bn = 2
+	slot := func(n uint64) hexutil.Bytes {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[24:], n)
+		return h[:]
+	}
+	proof, err := api.GetProof(context.Background(), historyAddr, []hexutil.Bytes{slot(bn - 1), slot(bn)}, bnhPtr(rpc.BlockNumberOrHashWithNumber(bn)))
+	require.NoError(t, err)
+	require.NoError(t, trie.VerifyAccountProof(ch.Blocks[bn-1].Root(), proof))
+	require.Len(t, proof.StorageProof, 2)
+
+	written, notYetWritten := proof.StorageProof[0], proof.StorageProof[1]
+	require.Equal(t, ch.Blocks[bn-2].Hash(), common.Hash((*uint256.Int)(written.Value).Bytes32()))
+	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, written))
+	require.True(t, (*uint256.Int)(notYetWritten.Value).IsZero(), "slot %d at block %d holds %x, which only block %d writes", bn, bn, (*uint256.Int)(notYetWritten.Value).Bytes32(), bn+1)
+	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, notYetWritten))
 }

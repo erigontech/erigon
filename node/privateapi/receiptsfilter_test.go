@@ -19,6 +19,7 @@ package privateapi
 import (
 	"context"
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -328,4 +329,37 @@ func TestReceiptsFilter_RecoversSenderWithoutCachedFrom(t *testing.T) {
 	proto := agg.receiptNotificationToProto(rn)
 	require.NotNil(t, proto.From)
 	assert.Equal(t, crypto.PubkeyToAddress(key.PublicKey), common.Address(gointerfaces.ConvertH160toAddress(proto.From)))
+}
+
+// The RPC side sends one notification per block, so the last receipt of a block that a stream
+// gets carries the flag, whichever receipts its filter lets through.
+func TestReceiptsFilter_FlagsLastReceiptOfBlockPerStream(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hashes []*typesproto.H256
+		want   []bool
+	}{
+		"all receipts":  {[]*typesproto.H256{}, []bool{false, true}},
+		"first matched": {[]*typesproto.H256{gointerfaces.ConvertHashToH256(txHash1)}, []bool{true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+			srv := newTestReceiptsServer(t.Context())
+			srv.received <- &remoteproto.ReceiptsFilterRequest{TransactionHashes: tc.hashes}
+			go func() {
+				if err := agg.subscribeReceipts(srv); err != nil {
+					t.Error(err)
+				}
+			}()
+			<-srv.receiveCompleted
+
+			agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1), createReceiptNotification(txHash2)})
+			var got []bool
+			for _, r := range srv.sent {
+				got = append(got, r.LastInBlock)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("LastInBlock per sent receipt = %v, want %v", got, tc.want)
+			}
+		})
+	}
 }
