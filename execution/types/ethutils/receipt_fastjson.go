@@ -231,6 +231,10 @@ func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) {
 			case hexutil.Bytes:
 				w.WriteHex(t)
 			case []common.Hash:
+				if t == nil {
+					w.WriteNil()
+					break
+				}
 				w.WriteArrayStart()
 				for j := range t {
 					if j > 0 {

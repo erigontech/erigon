@@ -263,3 +263,23 @@ func TestRPCReceiptMarshalFastJSONToRejectsBadLogsBeforeWriting(t *testing.T) {
 		})
 	}
 }
+
+// A nil value inside a subscribe log entry is null, the same as everywhere else.
+func TestRPCReceiptMarshalFastJSONToNilSubscribeLogValues(t *testing.T) {
+	for name, entry := range map[string]map[string]any{
+		"nil topics": {"topics": []common.Hash(nil)},
+		"nil data":   {"data": hexutil.Bytes(nil)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := &RPCReceipt{Logs: []map[string]any{entry}}
+			want, err := json.Marshal(r)
+			require.NoError(t, err)
+
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, r.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+			require.Equal(t, string(want), string(s.Buffer()))
+		})
+	}
+}
