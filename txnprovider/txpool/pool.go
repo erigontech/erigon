@@ -2228,6 +2228,14 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 }
 
+func announceFirstPending(announcements *Announcements, mt *metaTxn) {
+	if mt.announced {
+		return
+	}
+	mt.announced = true
+	announcements.Append(mt.TxnSlot.TxType(), mt.TxnSlot.Size, mt.TxnSlot.IDHash[:])
+}
+
 // promote reasserts invariants of the subpool and returns the list of transactions that ended up
 // being promoted to the pending or basefee pool, for re-broadcasting
 func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
@@ -2244,7 +2252,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	// Promote best transactions from base fee pool to pending pool while they qualify
 	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (best.TxnSlot.TxType() != BlobTxnType || best.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
-		announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
+		announceFirstPending(announcements, tx)
 		p.pending.Add(tx, logger)
 	}
 
@@ -2258,7 +2266,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
 		tx := p.queued.PopBest()
 		if best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0 {
-			announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
+			announceFirstPending(announcements, tx)
 			p.pending.Add(tx, logger)
 		} else {
 			p.baseFee.Add(tx, "promote-queued", logger)
