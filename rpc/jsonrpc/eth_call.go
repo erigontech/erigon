@@ -796,7 +796,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	// fold superset, so the op-stream carries the same data and the stateless verifier isn't
 	// fed redundant memoizationOff nodes. leanNodes is the same set, root first, without code
 	// attached — the form the node-set self-verifier consumes.
-	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, "eth_getWitness", true /* produceExclusionProofs */)
+	witnessTrie, leanNodes, witnessRoot, err := sdCtx.WitnessLean(ctx, accessed.CodeReads, true /* produceExclusionProofs */)
 	if err != nil {
 		return nil, err
 	}
