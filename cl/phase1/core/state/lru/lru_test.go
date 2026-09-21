@@ -266,11 +266,13 @@ func TestCacheWithTTLWriteTrafficBoundsResidencyByTheTTL(t *testing.T) {
 	// A cache written to with a fresh key every step and never read: key i is stamped as if it had
 	// been written (writes-live-i) steps ago, so only the last live of them are within their ttl.
 	// The cap is far above that, so residency follows the ttl only if the writes reclaim.
+	// Deadlines sit half a step off the clock in both directions: a deadline equal to the clock
+	// reading is not expired, and on Windows the clock can read the same instant across the loop.
 	c := NewWithTTL[int, int]("ttl_bounds_residency", 64, time.Hour)
 	base := time.Now()
 	for i := range writes {
 		c.Add(i, i)
-		setDeadline(t, c, i, base.Add(time.Duration(i-writes+live+1)*step))
+		setDeadline(t, c, i, base.Add(time.Duration(i-writes+live)*step+step/2))
 	}
 
 	require.Equal(t, live, c.Len(), "residency follows the ttl, not the size cap")
