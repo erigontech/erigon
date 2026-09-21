@@ -488,7 +488,12 @@ func TestWebsocketWriteTimeoutClosesStalledConn(t *testing.T) {
 		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
-		<-r.Context().Done()
+		// A hijacked request's context never ends, so wait for the connection itself.
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				return
+			}
+		}
 	}))
 	defer httpsrv.Close()
 

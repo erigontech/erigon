@@ -231,7 +231,7 @@ func DialWebsocket(ctx context.Context, endpoint, origin string, logger log.Logg
 			}
 			return nil, hErr
 		}
-		return newWebsocketCodec(conn, nil, endpoint, header, endpoint), nil
+		return NewWebsocketCodec(conn, endpoint, header, endpoint), nil
 	}, logger)
 }
 
@@ -253,8 +253,8 @@ func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
 }
 
 // wsConnAdapter adapts coder/websocket.Conn to satisfy the deadlineCloser interface
-// used by jsonCodec. Write deadlines set by jsonCodec are stored and applied as
-// context deadlines on the underlying coder write calls.
+// used by jsonCodec. A write deadline set by jsonCodec bounds the next write: on the
+// hijacked socket on the server side, as a context deadline on the client side.
 type wsConnAdapter struct {
 	conn     *websocket.Conn
 	netConn  net.Conn // the hijacked socket on the server side, nil on the client side
@@ -296,7 +296,9 @@ func (a *wsConnAdapter) encode(v any) error {
 	ctx := context.Background()
 	if a.netConn != nil {
 		if !dl.IsZero() {
-			a.netConn.SetWriteDeadline(dl)                //nolint:errcheck
+			if err := a.netConn.SetWriteDeadline(dl); err != nil {
+				return err
+			}
 			defer a.netConn.SetWriteDeadline(time.Time{}) //nolint:errcheck
 		}
 	} else if !dl.IsZero() {
@@ -345,9 +347,13 @@ type websocketCodec struct {
 	pingTimer *time.Timer
 }
 
-// newWebsocketCodec wraps a coder websocket connection as a ServerCodec. netConn is the
-// hijacked socket on the server side and nil on the client side. remoteAddr should be
-// r.RemoteAddr on the server side, or the endpoint URL on the client side.
+// NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
+// remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
+func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
+	return newWebsocketCodec(conn, nil, host, req, remoteAddr)
+}
+
+// newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds server writes.
 func newWebsocketCodec(conn *websocket.Conn, netConn net.Conn, host string, req http.Header, remoteAddr string) *websocketCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	adapter := &wsConnAdapter{conn: conn, netConn: netConn}
