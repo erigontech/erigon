@@ -543,14 +543,14 @@ transitions, so testing them apart from the record that implements them was an o
 - Create: `execution/commitment/v4/delta.go`
 - Create: `execution/commitment/v4/delta_test.go`
 
-- [ ] define a v4-local `recordDelta{key, data, prev []byte}` and an `applyDeltas(deltas, putBranch)` — per **C2**, `ApplyDeferredBranchUpdates` (`commitment.go:359`) runs `mergeDeferredUpdate` (`:319`) → `merger.Merge` (`BranchMerger`, legacy compact format) on every entry, and every `DeferredBranchUpdate` field plus `getDeferredUpdate` (`:218`) is unexported, so it is unusable from outside the package and wrong for v4 bytes anyway
-- [ ] reimplement the no-op skip that lives inside `mergeDeferredUpdate` at `:321-323`: if `prev` equals `data`, emit nothing. v4 compares complete against complete, so it fires more often than today's partial-vs-stored comparison
-- [ ] encode each record inside the fold task that produced it, not after
-- [ ] copy `prev` out of the context buffer at read time — `TrieContext.Branch` reuses its buffer on the next read (`commitment_context.go:1029`), so the original bytes do not survive on their own
-- [ ] write a test that **node-graph** peak memory is bounded by the walk and not by batch size, at 1 K and 100 K keys. Do not assert this of the delta set: task 18 retains one entry per changed record by design, so total retained bytes are O(changed records) and only the graph is O(depth)
-- [ ] write a test that `prev` survives a subsequent `Branch` call on the same context
-- [ ] write a test that an unchanged record produces no delta
-- [ ] run tests — must pass before task 18
+- [x] define a v4-local `recordDelta{key, data, prev []byte}` and an `applyDeltas(deltas, putBranch)` — per **C2**, `ApplyDeferredBranchUpdates` (`commitment.go:359`) runs `mergeDeferredUpdate` (`:319`) → `merger.Merge` (`BranchMerger`, legacy compact format) on every entry, and every `DeferredBranchUpdate` field plus `getDeferredUpdate` (`:218`) is unexported, so it is unusable from outside the package and wrong for v4 bytes anyway
+- [x] reimplement the no-op skip that lives inside `mergeDeferredUpdate` at `:321-323`: if `prev` equals `data`, emit nothing. v4 compares complete against complete, so it fires more often than today's partial-vs-stored comparison
+- [x] encode each record inside the fold task that produced it, not after
+- [x] copy `prev` out of the context buffer at read time — `TrieContext.Branch` reuses its buffer on the next read (`commitment_context.go:1029`), so the original bytes do not survive on their own
+- [x] write a test that **node-graph** peak memory is bounded by the walk and not by batch size, at 1 K and 100 K keys. Do not assert this of the delta set: task 18 retains one entry per changed record by design, so total retained bytes are O(changed records) and only the graph is O(depth)
+- [x] write a test that `prev` survives a subsequent `Branch` call on the same context
+- [x] write a test that an unchanged record produces no delta
+- [x] run tests — must pass before task 18
 
 ### Task 18: The complete delta set
 

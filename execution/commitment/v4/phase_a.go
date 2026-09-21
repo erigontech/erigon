@@ -27,10 +27,9 @@ import (
 )
 
 var (
-	errPhaseAKey       = errors.New("commitment v4: invalid phase A key")
-	errPhaseAUpdate    = errors.New("commitment v4: invalid phase A update")
-	errPhaseAStorage   = errors.New("commitment v4: invalid storage task")
-	errPhaseARecordKey = errors.New("commitment v4: invalid storage record key")
+	errPhaseAKey     = errors.New("commitment v4: invalid phase A key")
+	errPhaseAUpdate  = errors.New("commitment v4: invalid phase A update")
+	errPhaseAStorage = errors.New("commitment v4: invalid storage task")
 )
 
 type phaseAInput struct {
@@ -286,12 +285,11 @@ func persistStorageGraph(ctx commitment.PatriciaContext, root *node, addrHash [3
 	if root == nil {
 		return errPhaseAStorage
 	}
-	dataByKey := make(map[string][]byte)
-	var nodes []*node
-	var materialize func(*node) error
-	materialize = func(n *node) error {
+	deltas := make([]recordDelta, 0, len(before)+1)
+	var materialize func(*node) ([32]byte, error)
+	materialize = func(n *node) ([32]byte, error) {
 		if n == nil {
-			return nil
+			return [32]byte{}, errPhaseAStorage
 		}
 		for nib := range 16 {
 			bit := uint16(1) << nib
@@ -301,32 +299,22 @@ func persistStorageGraph(ctx commitment.PatriciaContext, root *node, addrHash [3
 			child := n.children[nib]
 			if child == nil {
 				if len(n.childHash[nib]) != 32 {
-					return errPhaseAStorage
+					return [32]byte{}, errPhaseAStorage
 				}
 				continue
 			}
-			if err := materialize(child); err != nil {
-				return err
-			}
-			hash, err := fold(child, len(child.path))
+			childHash, err := materialize(child)
 			if err != nil {
-				return err
+				return [32]byte{}, err
 			}
-			n.childHash[nib] = appendCopy(n.childHash[nib], hash[:])
+			n.childHash[nib] = appendCopy(n.childHash[nib], childHash[:])
 			var ext []byte
 			if !(n == root && len(n.path) != 0 && bytes.Equal(child.path, n.path)) {
 				ext = child.path[len(n.path)+1:]
 			}
 			n.childExt[nib] = appendCopy(n.childExt[nib], ext)
+			n.children[nib] = nil
 		}
-		nodes = append(nodes, n)
-		return nil
-	}
-	if err := materialize(root); err != nil {
-		return err
-	}
-
-	for _, n := range nodes {
 		path := n.path
 		depth := len(path)
 		if n == root {
@@ -334,34 +322,40 @@ func persistStorageGraph(ctx commitment.PatriciaContext, root *node, addrHash [3
 			depth = 0
 		}
 		key := StorageNodeKey(addrHash, path, nil)
-		data := encodeRecord(n, depth, nil)
-		dataByKey[string(key)] = append([]byte(nil), data...)
+		hash, delta, err := foldAndEncodeRecord(ctx, n, depth, key)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		deltas = append(deltas, delta)
+		return hash, nil
+	}
+	if _, err := materialize(root); err != nil {
+		return err
 	}
 	after := reachableRecordKeys(root, addrHash)
+	for _, delta := range deltas {
+		after[string(delta.key)] = delta.key
+	}
 	for keyString := range before {
 		if _, ok := after[keyString]; ok {
 			continue
 		}
-		if err := putStorageRecord(ctx, before[keyString], nil); err != nil {
+		delta, err := readRecordDelta(ctx, before[keyString], nil)
+		if err != nil {
 			return err
 		}
+		deltas = append(deltas, delta)
 	}
-	for keyString, data := range dataByKey {
-		key := after[keyString]
-		if key == nil {
-			return errPhaseARecordKey
-		}
-		if err := putStorageRecord(ctx, key, data); err != nil {
-			return err
-		}
+	if err := applyDeltas(deltas, ctx.PutBranch); err != nil {
+		return err
 	}
 	return nil
 }
 
 func putStorageRecord(ctx commitment.PatriciaContext, key, data []byte) error {
-	prev, _, err := ctx.Branch(key)
+	delta, err := readRecordDelta(ctx, key, data)
 	if err != nil {
 		return err
 	}
-	return ctx.PutBranch(key, data, append([]byte(nil), prev...))
+	return applyDeltas([]recordDelta{delta}, ctx.PutBranch)
 }

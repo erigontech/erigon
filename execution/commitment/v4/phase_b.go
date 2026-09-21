@@ -173,8 +173,11 @@ func persistDetachedAccountSubtree(ctx commitment.PatriciaContext, root *node) e
 			ext := child.path[len(n.path)+1:]
 			n.childExt[nib] = appendCopy(n.childExt[nib], ext)
 		}
-		data := encodeRecord(n, len(n.path), nil)
-		return putAccountRecord(ctx, AccountNodeKey(n.path, nil), data)
+		_, delta, err := foldAndEncodeRecord(ctx, n, len(n.path), AccountNodeKey(n.path, nil))
+		if err != nil {
+			return err
+		}
+		return applyDeltas([]recordDelta{delta}, ctx.PutBranch)
 	}
 	return visit(root)
 }
@@ -340,12 +343,11 @@ func persistAccountGraph(ctx commitment.PatriciaContext, root *node, before map[
 	if root == nil {
 		return errPhaseBRecord
 	}
-	dataByKey := make(map[string][]byte)
-	var nodes []*node
-	var materialize func(*node) error
-	materialize = func(n *node) error {
+	deltas := make([]recordDelta, 0, len(before)+1)
+	var materialize func(*node) ([32]byte, error)
+	materialize = func(n *node) ([32]byte, error) {
 		if n == nil {
-			return nil
+			return [32]byte{}, errPhaseBRecord
 		}
 		for nib := range 16 {
 			bit := uint16(1) << nib
@@ -355,32 +357,22 @@ func persistAccountGraph(ctx commitment.PatriciaContext, root *node, before map[
 			child := n.children[nib]
 			if child == nil {
 				if len(n.childHash[nib]) != 32 {
-					return errPhaseBRecord
+					return [32]byte{}, errPhaseBRecord
 				}
 				continue
 			}
-			if err := materialize(child); err != nil {
-				return err
-			}
-			hash, err := fold(child, len(child.path))
+			childHash, err := materialize(child)
 			if err != nil {
-				return err
+				return [32]byte{}, err
 			}
-			n.childHash[nib] = appendCopy(n.childHash[nib], hash[:])
+			n.childHash[nib] = appendCopy(n.childHash[nib], childHash[:])
 			var ext []byte
 			if !(n == root && len(n.path) != 0 && bytes.Equal(child.path, n.path)) {
 				ext = child.path[len(n.path)+1:]
 			}
 			n.childExt[nib] = appendCopy(n.childExt[nib], ext)
+			n.children[nib] = nil
 		}
-		nodes = append(nodes, n)
-		return nil
-	}
-	if err := materialize(root); err != nil {
-		return err
-	}
-
-	for _, n := range nodes {
 		path := n.path
 		depth := len(path)
 		if n == root {
@@ -388,33 +380,32 @@ func persistAccountGraph(ctx commitment.PatriciaContext, root *node, before map[
 			depth = 0
 		}
 		key := AccountNodeKey(path, nil)
-		dataByKey[string(key)] = append([]byte(nil), encodeRecord(n, depth, nil)...)
+		hash, delta, err := foldAndEncodeRecord(ctx, n, depth, key)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		deltas = append(deltas, delta)
+		return hash, nil
+	}
+	if _, err := materialize(root); err != nil {
+		return err
 	}
 	after := reachableAccountRecordKeys(root)
+	for _, delta := range deltas {
+		after[string(delta.key)] = delta.key
+	}
 	for keyString := range before {
 		if _, ok := after[keyString]; ok {
 			continue
 		}
-		if err := putAccountRecord(ctx, before[keyString], nil); err != nil {
+		delta, err := readRecordDelta(ctx, before[keyString], nil)
+		if err != nil {
 			return err
 		}
+		deltas = append(deltas, delta)
 	}
-	for keyString, data := range dataByKey {
-		key := after[keyString]
-		if key == nil {
-			return errPhaseBRecord
-		}
-		if err := putAccountRecord(ctx, key, data); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func putAccountRecord(ctx commitment.PatriciaContext, key, data []byte) error {
-	prev, _, err := ctx.Branch(key)
-	if err != nil {
+	if err := applyDeltas(deltas, ctx.PutBranch); err != nil {
 		return err
 	}
-	return ctx.PutBranch(key, data, append([]byte(nil), prev...))
+	return nil
 }
