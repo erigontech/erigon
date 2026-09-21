@@ -230,9 +230,20 @@ func (a *AccessListTracer) markUsedBeforeCreation(addr common.Address) {
 	a.usedBeforeCreation[addr] = struct{}{}
 }
 
+// accessListOpcodes are the only opcodes OnOpcode reacts to; the rest fall through
+// its switch, so the interpreter is told not to deliver them at all.
+var accessListOpcodes = tracing.NewOpcodeMask(
+	byte(vm.SLOAD), byte(vm.SSTORE),
+	byte(vm.EXTCODECOPY), byte(vm.EXTCODEHASH), byte(vm.EXTCODESIZE),
+	byte(vm.BALANCE), byte(vm.SELFDESTRUCT),
+	byte(vm.DELEGATECALL), byte(vm.CALL), byte(vm.STATICCALL), byte(vm.CALLCODE),
+	byte(vm.CREATE), byte(vm.CREATE2),
+)
+
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnOpcode: a.OnOpcode,
+		OnOpcode:     a.OnOpcode,
+		OnOpcodeMask: accessListOpcodes,
 	}
 }
 

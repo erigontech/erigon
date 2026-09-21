@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -108,7 +107,7 @@ type EthAPI interface {
 	Accounts(ctx context.Context) ([]common.Address, error)
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.U256, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
-	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (string, error)
+	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (common.Hash, error)
 	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
@@ -939,16 +938,8 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 }
 
 // newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
-func newRPCPendingTransaction(txn types.Transaction, current *types.Header, config *chain.Config) *ethapi.RPCTransaction {
-	var (
-		baseFee   *uint256.Int
-		blockTime = uint64(0)
-	)
-	if current != nil {
-		baseFee = misc.CalcBaseFee(config, current)
-		blockTime = current.Time
-	}
-	return ethapi.NewRPCTransaction(txn, common.Hash{}, blockTime, 0, 0, baseFee)
+func newRPCPendingTransaction(txn types.Transaction) *ethapi.RPCTransaction {
+	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.
