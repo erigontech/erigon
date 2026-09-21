@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -301,7 +302,6 @@ func (a *wsConnAdapter) encode(v any) error {
 // readFrame returns the next message. Every websocket frame is one message, so
 // it can be read in one go and checked once.
 func (a *wsConnAdapter) readFrame() ([]byte, error) {
-	// Uses context.Background() — dead connections are detected via the ping loop.
 	_, data, err := a.conn.Read(context.Background())
 	return data, err
 }
@@ -311,8 +311,7 @@ type websocketCodec struct {
 	conn *websocket.Conn
 	info PeerInfo
 
-	wg        sync.WaitGroup
-	pingReset chan struct{}
+	pingTimer *time.Timer
 }
 
 // NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
@@ -323,7 +322,6 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 	wc := &websocketCodec{
 		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
-		pingReset: make(chan struct{}, 1),
 		info: PeerInfo{
 			Transport:  "ws",
 			RemoteAddr: remoteAddr,
@@ -336,14 +334,16 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 		wc.info.HTTP.Origin = req.Get("Origin")
 		wc.info.HTTP.UserAgent = req.Get("User-Agent")
 	}
-	// Start pinger.
-	wc.wg.Go(wc.pingLoop)
+	// ping reads wc.pingTimer, so the timer must not fire before the assignment:
+	// create it unarmed, then arm it.
+	wc.pingTimer = time.AfterFunc(math.MaxInt64, wc.ping)
+	wc.pingTimer.Reset(wsPingInterval)
 	return wc
 }
 
 func (wc *websocketCodec) Close() {
 	wc.jsonCodec.Close()
-	wc.wg.Wait()
+	wc.pingTimer.Stop()
 }
 
 func (wc *websocketCodec) peerInfo() PeerInfo {
@@ -353,34 +353,26 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
-		// Notify pingLoop to delay the next idle ping.
-		select {
-		case wc.pingReset <- struct{}{}:
-		default:
-		}
+		wc.resetPing()
 	}
 	return err
 }
 
-// pingLoop sends periodic ping frames when the connection is idle.
-func (wc *websocketCodec) pingLoop() {
-	timer := time.NewTimer(wsPingInterval)
-	defer timer.Stop()
+// ping sends a ping frame once the connection has been idle for wsPingInterval.
+func (wc *websocketCodec) ping() {
+	pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
+	wc.conn.Ping(pingCtx) //nolint:errcheck
+	cancel()
+	wc.resetPing()
+}
 
-	for {
-		select {
-		case <-wc.closed():
-			return
-		case <-wc.pingReset:
-			if !timer.Stop() {
-				<-timer.C
-			}
-			timer.Reset(wsPingInterval)
-		case <-timer.C:
-			pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
-			wc.conn.Ping(pingCtx) //nolint:errcheck
-			cancel()
-			timer.Reset(wsPingInterval)
-		}
+// resetPing checks closed after Reset: Close closes before its Stop, so a Reset
+// racing with Close is undone by one of the two Stops.
+func (wc *websocketCodec) resetPing() {
+	wc.pingTimer.Reset(wsPingInterval)
+	select {
+	case <-wc.closed():
+		wc.pingTimer.Stop()
+	default:
 	}
 }
