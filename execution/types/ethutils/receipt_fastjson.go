@@ -91,9 +91,7 @@ func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		w.WriteHex(r.ContractAddress[:])
 	}
 	field(w, "logs")
-	if err := writeLogs(w, r.Logs); err != nil {
-		return err
-	}
+	writeLogs(w, r.Logs)
 	field(w, "logsBloom")
 	if r.LogsBloom == nil {
 		w.WriteNil()
@@ -160,10 +158,9 @@ func validateSubscribeLog(entry map[string]any) error {
 
 // writeLogs handles both shapes MarshalReceipt puts in Logs: []*types.Log, and
 // []*types.RPCLog when the caller asked for blockTimestamp.
-func writeLogs(w jsonw.JSONWriter, logs any) error {
+// validateLogs has already rejected any shape not handled here.
+func writeLogs(w jsonw.JSONWriter, logs any) {
 	switch v := logs.(type) {
-	case nil:
-		w.WriteNil()
 	case types.Logs:
 		writeLogList(w, v)
 	case []*types.Log:
@@ -171,7 +168,7 @@ func writeLogs(w jsonw.JSONWriter, logs any) error {
 	case []*types.RPCLog:
 		if v == nil {
 			w.WriteNil()
-			return nil
+			return
 		}
 		w.WriteArrayStart()
 		for i, l := range v {
@@ -187,11 +184,10 @@ func writeLogs(w jsonw.JSONWriter, logs any) error {
 		w.WriteArrayEnd()
 	case []map[string]any:
 		// MarshalSubscribeReceipt's shape, which eth_sendRawTransactionSync answers with.
-		return writeSubscribeLogs(w, v)
+		writeSubscribeLogs(w, v)
 	default:
-		return fmt.Errorf("ethutils: receipt logs of unexpected type %T", logs)
+		w.WriteNil()
 	}
-	return nil
 }
 
 // subscribeLogKeys is every key MarshalSubscribeReceipt puts in a log entry, in the order
@@ -200,10 +196,10 @@ var subscribeLogKeys = []string{"address", "data", "topics", "transactionHash"}
 
 // writeSubscribeLogs writes the map form MarshalSubscribeReceipt builds. encoding/json
 // orders an object's keys, and address is only present when the proto log carried one.
-func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) error {
+func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) {
 	if logs == nil {
 		w.WriteNil()
-		return nil
+		return
 	}
 	w.WriteArrayStart()
 	for i, entry := range logs {
@@ -215,14 +211,12 @@ func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) error {
 			continue
 		}
 		w.WriteObjectStart()
-		written := 0
 		first := true
 		for _, k := range subscribeLogKeys {
 			val, ok := entry[k]
 			if !ok {
 				continue
 			}
-			written++
 			if first {
 				w.WriteObjectField(k)
 				first = false
@@ -245,19 +239,11 @@ func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) error {
 					w.WriteHex(t[j][:])
 				}
 				w.WriteArrayEnd()
-			default:
-				return fmt.Errorf("ethutils: subscribe log field %q of unexpected type %T", k, val)
 			}
-		}
-		if written != len(entry) {
-			// A key outside the known set would be dropped silently, where the reflection
-			// path this replaces would have written it.
-			return fmt.Errorf("ethutils: subscribe log has %d keys, %d of them known", len(entry), written)
 		}
 		w.WriteObjectEnd()
 	}
 	w.WriteArrayEnd()
-	return nil
 }
 
 func writeLogList(w jsonw.JSONWriter, logs []*types.Log) {
