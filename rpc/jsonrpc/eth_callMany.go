@@ -162,11 +162,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// The state a block starts from is its parent state plus the opening system
 	// transaction. Addressing it by the block itself keeps block 0 representable,
 	// where the parent block number would underflow.
-	cacheView, err := api.stateCache.View(ctx, tx)
+	stateTx := api.filters.WithTemporalOverlay(tx)
+	cacheView, err := api.stateCache.View(ctx, stateTx)
 	if err != nil {
 		return nil, err
 	}
-	stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNum, 0, api._txNumReader)
+	stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, stateTx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
