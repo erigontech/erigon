@@ -665,10 +665,10 @@ a concurrency bug and nothing else.
 
 ### Task 25: [Final] Update documentation
 
-- [ ] record in the design doc which decisions were implemented as specified and which moved, with the reason — in particular that D8's disjointness argument is false against V2 keys (C1) and that §9's "`ApplyDeferredBranchUpdates` unchanged" contradicts §11 and lost (C2)
-- [ ] add a `README.md` in `execution/commitment/v4/` giving the key and record layouts, the ModeUpdate constraint, and the V1-only guard
-- [ ] update `CLAUDE.md` only if a new pattern emerged that future work needs
-- [ ] move this plan to `docs/plans/completed/`
+- [x] record in the design doc which decisions were implemented as specified and which moved, with the reason — in particular that D8's disjointness argument is false against V2 keys (C1) and that §9's "`ApplyDeferredBranchUpdates` unchanged" contradicts §11 and lost (C2)
+- [x] add a `README.md` in `execution/commitment/v4/` giving the key and record layouts, the ModeUpdate constraint, and the V1-only guard
+- [x] update `CLAUDE.md` only if a new pattern emerged that future work needs — no new repository-wide pattern emerged
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

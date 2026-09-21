@@ -481,8 +481,10 @@ storage root    41 || keccak(addr) || 00
 
 Tags are >= 0x40 deliberately. `HexToCompact`'s first byte is `terminator<<5 | oddFlag<<4 | firstNibble`,
 so every legacy commitment key starts in 0x00-0x3f; `00 00` — the obvious account-root key — is exactly
-today's `HexToCompact([0,0])`. Tags at 0x40/0x41/0x42 make the v4 namespace disjoint from the legacy
-one by construction, which is what lets both live in one domain during shadow mode.
+today's `HexToCompact([0,0])`. Tags at 0x40/0x41/0x42 make the v4 namespace disjoint from a V1-keyed
+legacy domain. They do not make it disjoint from V2 keys: `EncodeKeyV2([4,0])` is `40 00`, the v4
+account-root key. The implementation therefore rejects V2-keyed commitment domains; a longer tag,
+different key shape, or separate domain remains a design decision before V2 coexistence.
 ```
 
 `pack` puts an odd trailing nibble in the high half of the last byte and zeroes the low half. The
@@ -581,7 +583,8 @@ the walk.
                              NOTHING WRITTEN. The root is final here.
 2  ENCODE         in-fold    each task encodes its own records as it folds them, into a compact
                              immutable delta (record bytes + prevData). NOT deferred.
-3  PERSIST        deferred   on accept only. ApplyDeferredBranchUpdates(deferred, numWorkers, putBranch)
+3  PERSIST        deferred   on accept only. Apply the v4 complete delta set through its local apply path.
+                             Legacy variants continue to use ApplyDeferredBranchUpdates.
 ```
 
 **Shape and hash stay fused.** Separating them (Nethermind F16) looks strictly better — the account
@@ -642,9 +645,11 @@ assumed:
 ## 9. Compatibility surface
 
 `commitment.Trie` (`commitment.go:87`), `PatriciaContext` (`:109`), `Updates` and every public touch
-method, `DeferredBranchUpdate`, `ApplyDeferredBranchUpdates`, `commitmentdb.TrieContext`,
-`SharedDomainsCommitmentContext` and `BranchCache`'s public API are unchanged. v4 is a third
-`TrieVariant` beside the two at `:121`, selected in `InitializeTrieAndUpdates` (`:125`).
+method, `commitmentdb.TrieContext`, `SharedDomainsCommitmentContext` and `BranchCache`'s public API
+are unchanged. v4 is a third `TrieVariant` beside the two at `:121`, selected in
+`InitializeTrieAndUpdates` (`:125`). `DeferredBranchUpdate` and `ApplyDeferredBranchUpdates` remain
+the legacy path; v4 uses its own complete delta type because the legacy apply path parses the old
+compact branch format and its delta fields are not constructible outside `commitment`.
 
 These read the old layout and each needs a variant-aware implementation before a mixed datadir can
 exist:
@@ -763,6 +768,27 @@ unique changed keys and ~13 K folded records per block; the ~300 ns leaf keccak.
 The touch-phase fixes of D5 are an independent track: they ship against the current trie, change no
 format, and are a bulk win rather than a tip win. Red test first — duplicate `TouchPlainKeyDirect`
 calls invoke an injected hasher once and merge flags correctly.
+
+## Implementation status
+
+Tasks 1–24 implement the contained format, node graph, fold, two phases, registry, state marker,
+complete delta persistence, and schedule described by this document. The decisions land as follows:
+
+- D1–D4, D6, D9 and D10 are implemented as specified. D7's 32-byte slots and branch-size assert
+  are implemented; the reserved embedded-child encoding is not enabled.
+- D5 is implemented for `ModeUpdate`. `ModeDirect` and `ModeParallel` are rejected because the
+  current direct stream does not carry the final value needed by a read-free fold; the richer seal
+  and keccak-cache work remains independent follow-on work.
+- D8's packed variable-width keys are implemented for V1-keyed domains. The original claim that
+  the tags are disjoint from every legacy key is narrowed by C1: V2 keys can collide with `40 00`,
+  so construction rejects V2-keyed domains until the key shape or domain is redesigned.
+- The §7 encode-on-fold and deferred-persist split is implemented. C2 moves v4 persistence away
+  from `ApplyDeferredBranchUpdates`: v4 applies complete local deltas directly, while legacy
+  variants retain the existing API and merge format.
+
+The §9 compatibility readers, default promotion, deletion of the old trie, and mainnet
+measurements remain follow-on work. The C1 key-space issue is a design referral, not a resolved
+compatibility claim.
 
 ## 14. Retracted
 
