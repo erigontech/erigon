@@ -217,13 +217,23 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
-	hasher := newHasher(false)
-	defer returnHasherToPool(hasher)
-	byHash := make(map[common.Hash][]byte, len(nodes))
+	byHash := make(map[string][]byte, len(nodes))
 	for _, n := range nodes {
-		byHash[crypto.Keccak256Hash(n)] = n
+		h := crypto.Keccak256Hash(n)
+		byHash[string(h[:])] = n
 	}
 	rootHash := crypto.Keccak256Hash(nodes[0])
+	return WitnessNodesForKeysByHash(byHash, rootHash[:], hexKeys)
+}
+
+// WitnessNodesForKeysByHash is WitnessNodesForKeysFromNodes over nodes already indexed by their hash.
+func WitnessNodesForKeysByHash(byHash map[string][]byte, root []byte, hexKeys [][]byte) ([][]byte, error) {
+	if len(byHash) == 0 {
+		return nil, nil
+	}
+	hasher := newHasher(false)
+	defer returnHasherToPool(hasher)
+	rootHash := common.BytesToHash(root)
 
 	seen := make(map[string]struct{})
 	var out [][]byte
@@ -254,7 +264,7 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 	// node shared by many proof paths is decoded a single time (nil node if blinded).
 	decoded := make(map[common.Hash]Node)
 	nodeAt := func(h common.Hash) (Node, []byte, error) {
-		rlp, ok := byHash[h]
+		rlp, ok := byHash[string(h[:])]
 		if !ok {
 			return nil, nil, nil
 		}
@@ -279,7 +289,7 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 		return nodeAt(common.BytesToHash(hn.hash))
 	}
 
-	if _, ok := byHash[rootHash]; !ok {
+	if _, ok := byHash[string(rootHash[:])]; !ok {
 		return nil, fmt.Errorf("witness root %x absent from node set", rootHash)
 	}
 	for _, key := range hexKeys {
