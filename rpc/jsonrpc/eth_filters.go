@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -52,7 +53,7 @@ func (api *APIImpl) NewBlockFilter(_ context.Context) (string, error) {
 	ch, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolHTTP)
 	go func() {
 		for block := range ch {
-			api.filters.AddPendingBlock(id, block)
+			api.filters.AddPendingBlock(id, block.Value)
 		}
 	}()
 	return "0x" + string(id), nil
@@ -191,19 +192,38 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 	return rpcSub, nil
 }
 
+// sharedJSON gives every remote subscriber the bytes of one encoding of the event, and an
+// in-process one the value itself.
+type sharedJSON[T any] struct {
+	ev    *rpchelper.Shared[T]
+	value func(T) any
+}
+
+func (s sharedJSON[T]) MarshalFastJSON() ([]byte, error) {
+	return s.ev.Encode(func(v T) ([]byte, error) { return json.Marshal(s.value(v)) })
+}
+
+func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
+
+func headerValue(h *types.Header) any { return h }
+
+func subscribeReceiptValue(r *remoteproto.SubscribeReceiptsReply) any {
+	return ethutils.RPCReceipts{ethutils.MarshalSubscribeReceipt(r)}
+}
+
 // NewHeads send a notification each time a new (header) block is appended to the chain.
 func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
-		func() (<-chan *types.Header, func(), error) {
+		func() (<-chan *rpchelper.Shared[*types.Header], func(), error) {
 			headers, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolWS)
 			return headers, func() { api.filters.UnsubscribeHeads(id) }, nil
 		},
-		func(emit func(payload any), h *types.Header) {
-			if h != nil {
-				emit(h)
+		func(emit func(payload any), h *rpchelper.Shared[*types.Header]) {
+			if h != nil && h.Value != nil {
+				emit(sharedJSON[*types.Header]{h, headerValue})
 			}
 		},
 		"[rpc] new heads channel was closed")
@@ -269,17 +289,16 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.Receip
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
-		func() (<-chan *remoteproto.SubscribeReceiptsReply, func(), error) {
+		func() (<-chan *rpchelper.Shared[*remoteproto.SubscribeReceiptsReply], func(), error) {
 			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
 			if err != nil {
 				return nil, nil, err
 			}
 			return receipts, func() { api.filters.UnsubscribeReceipts(id) }, nil
 		},
-		func(emit func(payload any), protoReceipt *remoteproto.SubscribeReceiptsReply) {
-			if protoReceipt != nil {
-				receipt := ethutils.MarshalSubscribeReceipt(protoReceipt)
-				emit(ethutils.RPCReceipts{receipt})
+		func(emit func(payload any), r *rpchelper.Shared[*remoteproto.SubscribeReceiptsReply]) {
+			if r != nil && r.Value != nil {
+				emit(sharedJSON[*remoteproto.SubscribeReceiptsReply]{r, subscribeReceiptValue})
 			}
 		},
 		"[rpc] receipts channel was closed")

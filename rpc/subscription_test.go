@@ -262,7 +262,7 @@ func (b bothFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 func TestNotifyUsesFastJSON(t *testing.T) {
 	t.Parallel()
 
-	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null"} {
+	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null", &bothFastJSON{data: []byte{0xab}}: `"qw=="`} {
 		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
 		if err := n.Notify("0x1", payload); err != nil {
 			t.Fatal(err)
@@ -270,5 +270,22 @@ func TestNotifyUsesFastJSON(t *testing.T) {
 		if len(n.buffer) != 1 || string(n.buffer[0]) != want {
 			t.Fatalf("%T: want %s, got %#v", payload, want, n.buffer)
 		}
+	}
+}
+
+type wireOnly struct{ v int }
+
+func (w wireOnly) LocalValue() any { return w.v }
+
+// A payload that carries a wire encoding reaches an in-process subscriber as the value it wraps.
+func TestLocalNotifierDeliversLocalValue(t *testing.T) {
+	resc, closec := make(chan any, 1), make(chan any)
+	n := NewLocalNotifier("eth", resc, closec)
+	sub := n.CreateSubscription()
+	if err := n.Notify(sub.ID, wireOnly{v: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-resc; got != 7 {
+		t.Fatalf("delivered %#v, want 7", got)
 	}
 }

@@ -18,8 +18,8 @@ package jsonstream
 
 import "encoding"
 
-// Field writes the separator a following field needs, then the field name. On a stream
-// that writes its own separators WriteMore is a no-op, so this is correct either way.
+// Field writes the separator a following field needs, then the field name. An object's
+// first field must use WriteObjectField directly.
 func Field(s *StackStream, name string) *StackStream {
 	s.WriteMore()
 	return s.WriteObjectField(name)
