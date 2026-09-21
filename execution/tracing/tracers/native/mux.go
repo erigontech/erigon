@@ -72,13 +72,9 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
 			OnTxEnd:             t.OnTxEnd,
-			OnEnter:             t.OnEnter,
 			OnEnterV2:           t.OnEnterV2,
-			OnExit:              t.OnExit,
 			OnExitV2:            t.OnExitV2,
-			OnOpcode:            t.OnOpcode,
 			OnOpcodeV2:          t.OnOpcodeV2,
-			OnFault:             t.OnFault,
 			OnFaultV2:           t.OnFaultV2,
 			OnGasChangeV2:       t.OnGasChangeV2,
 			OnBalanceChange:     t.OnBalanceChange,
@@ -91,28 +87,6 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
-	}
-}
-
-func (t *muxTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnOpcode != nil {
-			t.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
-		}
-	}
-}
-
-func (t *muxTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnFault != nil {
-			t.OnFault(pc, op, gas, cost, scope, depth, err)
-		}
 	}
 }
 
@@ -131,28 +105,6 @@ func (t *muxTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope t
 func (t *muxTracer) OnGasChangeV2(old, new mdgas.MdGas, reason tracing.GasChangeReason) {
 	for _, child := range t.tracers {
 		child.Hooks.EmitGasChange(old, new, reason)
-	}
-}
-
-func (t *muxTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnEnter != nil {
-			t.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
-		}
-	}
-}
-
-func (t *muxTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnExit != nil {
-			t.OnExit(depth, output, gasUsed, err, reverted)
-		}
 	}
 }
 

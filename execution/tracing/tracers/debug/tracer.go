@@ -67,13 +67,9 @@ func (t *Tracer) Hooks() *tracing.Hooks {
 		// VM events
 		OnTxStart:     t.OnTxStart,
 		OnTxEnd:       t.OnTxEnd,
-		OnEnter:       t.OnEnter,
 		OnEnterV2:     t.OnEnterV2,
-		OnExit:        t.OnExit,
 		OnExitV2:      t.OnExitV2,
-		OnOpcode:      t.OnOpcode,
 		OnOpcodeV2:    t.OnOpcodeV2,
-		OnFault:       t.OnFault,
 		OnFaultV2:     t.OnFaultV2,
 		OnGasChangeV2: t.OnGasChangeV2,
 		// Chain events
@@ -139,57 +135,6 @@ func (t *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
 	t.mustFlushToFile(path.Join(t.outputDir, txnTraceFile))
 }
 
-func (t *Tracer) OnEnter(depth int, typ byte, from, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
-	if t.recordOptions.DisableOnEnterRecording {
-		return
-	}
-
-	if t.wrapped != nil && t.wrapped.OnEnter != nil {
-		t.wrapped.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
-	}
-
-	inputCopy := make([]byte, len(input))
-	copy(inputCopy, input)
-	t.traces.Append(Trace{
-		OnEnter: &OnEnterTrace{
-			Depth:      depth,
-			Type:       typ,
-			From:       from.Value(),
-			To:         to.Value(),
-			Precompile: precompile,
-			Input:      inputCopy,
-			Gas:        gas,
-			Value:      &value,
-			Code:       code,
-		},
-	})
-}
-
-func (t *Tracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	if t.recordOptions.DisableOnExitRecording {
-		return
-	}
-
-	if t.wrapped != nil && t.wrapped.OnExit != nil {
-		t.wrapped.OnExit(depth, output, gasUsed, err, reverted)
-	}
-
-	var errStr string
-	if err != nil {
-		errStr = err.Error()
-	}
-
-	t.traces.Append(Trace{
-		OnExit: &OnExitTrace{
-			Depth:    depth,
-			Output:   output,
-			GasUsed:  gasUsed,
-			Error:    errStr,
-			Reverted: reverted,
-		},
-	})
-}
-
 func (t *Tracer) OnEnterV2(depth int, typ byte, from, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	t.entryGas = append(t.entryGas, gas)
 	if t.recordOptions.DisableOnEnterRecording {
@@ -236,71 +181,6 @@ func (t *Tracer) OnExitV2(depth int, output []byte, gasLeft mdgas.MdGas, err err
 		Error:    errStr,
 		Reverted: reverted,
 	}})
-}
-
-func (t *Tracer) OnOpcode(pc uint64, op byte, gas, cost uint64, opContext tracing.OpContext, returnData []byte, depth int, err error) {
-	if t.recordOptions.DisableOnOpcodeRecording {
-		return
-	}
-
-	if t.wrapped != nil && t.wrapped.OnOpcode != nil {
-		t.wrapped.OnOpcode(pc, op, gas, cost, opContext, returnData, depth, err)
-	}
-
-	memory, stack := t.captureMemoryAndStack(opContext)
-
-	var errStr string
-	if err != nil {
-		errStr = err.Error()
-	}
-
-	t.traces.Append(Trace{
-		OnOpcode: &OnOpcodeTrace{
-			PC:         pc,
-			Op:         fmt.Sprintf("%v", vm.OpCode(op)),
-			Gas:        gas,
-			Cost:       cost,
-			Caller:     opContext.Caller().Value(),
-			Stack:      stack,
-			Memory:     memory,
-			MemorySize: len(memory),
-			ReturnData: returnData,
-			Depth:      depth,
-			Error:      errStr,
-		},
-	})
-}
-
-func (t *Tracer) OnFault(pc uint64, op byte, gas, cost uint64, opContext tracing.OpContext, depth int, err error) {
-	if t.recordOptions.DisableOnFaultRecording {
-		return
-	}
-
-	if t.wrapped != nil && t.wrapped.OnFault != nil {
-		t.wrapped.OnFault(pc, op, gas, cost, opContext, depth, err)
-	}
-
-	memory, stack := t.captureMemoryAndStack(opContext)
-
-	var errStr string
-	if err != nil {
-		errStr = err.Error()
-	}
-
-	t.traces.Append(Trace{
-		OnFault: &OnFaultTrace{
-			PC:         pc,
-			Op:         op,
-			Gas:        gas,
-			Cost:       cost,
-			Caller:     opContext.Caller().Value(),
-			Stack:      stack,
-			Memory:     memory,
-			MemorySize: len(memory),
-			Depth:      depth,
-			Error:      errStr,
-		},
-	})
 }
 
 func (t *Tracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, opContext tracing.OpContext, returnData []byte, depth int, err error) {
@@ -707,13 +587,9 @@ type Trace struct {
 	// VM events
 	OnTxStart     *OnTxStartTrace     `json:"onTxStart,omitempty"`
 	OnTxEnd       *OnTxEndTrace       `json:"onTxEnd,omitempty"`
-	OnEnter       *OnEnterTrace       `json:"onEnter,omitempty"`
 	OnEnterV2     *OnEnterTraceV2     `json:"onEnterV2,omitempty"`
-	OnExit        *OnExitTrace        `json:"onExit,omitempty"`
 	OnExitV2      *OnExitTraceV2      `json:"onExitV2,omitempty"`
-	OnOpcode      *OnOpcodeTrace      `json:"onOpcode,omitempty"`
 	OnOpcodeV2    *OnOpcodeTraceV2    `json:"onOpcodeV2,omitempty"`
-	OnFault       *OnFaultTrace       `json:"onFault,omitempty"`
 	OnFaultV2     *OnFaultTraceV2     `json:"onFaultV2,omitempty"`
 	OnGasChangeV2 *OnGasChangeTraceV2 `json:"onGasChangeV2,omitempty"`
 	// Chain events
@@ -742,26 +618,6 @@ type OnTxEndTrace struct {
 	Error   string         `json:"error,omitempty"`
 }
 
-type OnEnterTrace struct {
-	Depth      int            `json:"depth,omitempty"`
-	Type       byte           `json:"type,omitempty"`
-	From       common.Address `json:"from,omitempty"`
-	To         common.Address `json:"to,omitempty"`
-	Precompile bool           `json:"precompile,omitempty"`
-	Input      hexutil.Bytes  `json:"input,omitempty"`
-	Gas        uint64         `json:"gas,omitempty"`
-	Value      *uint256.Int   `json:"value,omitempty"`
-	Code       hexutil.Bytes  `json:"code,omitempty"`
-}
-
-type OnExitTrace struct {
-	Depth    int           `json:"depth,omitempty"`
-	Output   hexutil.Bytes `json:"output,omitempty"`
-	GasUsed  uint64        `json:"gasUsed,omitempty"`
-	Error    string        `json:"error,omitempty"`
-	Reverted bool          `json:"reverted,omitempty"`
-}
-
 type OnEnterTraceV2 struct {
 	Depth      int            `json:"depth,omitempty"`
 	Type       byte           `json:"type,omitempty"`
@@ -780,33 +636,6 @@ type OnExitTraceV2 struct {
 	GasLeft  mdgas.MdGas   `json:"gasLeft"`
 	Error    string        `json:"error,omitempty"`
 	Reverted bool          `json:"reverted,omitempty"`
-}
-
-type OnOpcodeTrace struct {
-	PC         uint64          `json:"pc,omitempty"`
-	Op         string          `json:"op,omitempty"`
-	Gas        uint64          `json:"gas,omitempty"`
-	Cost       uint64          `json:"cost,omitempty"`
-	Caller     common.Address  `json:"caller,omitempty"`
-	Stack      []hexutil.Bytes `json:"stack,omitempty"`
-	Memory     hexutil.Bytes   `json:"memory,omitempty"`
-	MemorySize int             `json:"memSize,omitempty"`
-	ReturnData hexutil.Bytes   `json:"returnData,omitempty"`
-	Depth      int             `json:"depth,omitempty"`
-	Error      string          `json:"error,omitempty"`
-}
-
-type OnFaultTrace struct {
-	PC         uint64          `json:"pc,omitempty"`
-	Op         byte            `json:"op,omitempty"`
-	Gas        uint64          `json:"gas,omitempty"`
-	Cost       uint64          `json:"cost,omitempty"`
-	Caller     common.Address  `json:"caller,omitempty"`
-	Stack      []hexutil.Bytes `json:"stack,omitempty"`
-	Memory     hexutil.Bytes   `json:"memory,omitempty"`
-	MemorySize int             `json:"memSize,omitempty"`
-	Depth      int             `json:"depth,omitempty"`
-	Error      string          `json:"error,omitempty"`
 }
 
 type OnOpcodeTraceV2 struct {
