@@ -345,14 +345,14 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/hash.go`
 - Create: `execution/commitment/v4/hash_test.go`
 
-- [ ] add `leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte` — build the leaf RLP from the packed suffix and the **consensus** payload, inline it if under 32 B, keccak it otherwise; recomputed at hash time, never stored (D7)
-- [ ] add `extensionRef(ext []byte, childHash []byte) [32]byte` = `keccak(rlp([compact(ext), childHash]))`; given a hashed child the extension RLP is `1 + (1 + ⌊|E|/2⌋ + 1) + 33 ≥ 37 B`, always above the inline threshold, so it is unconditionally hashed
-- [ ] add `branchRef(refs *[16][]byte) [32]byte` over the 17-item list
-- [ ] put the D7 assert **here**, not in the encoder: `branchRef` panics if the branch RLP it just built is under 32 B, naming the depth. The encoder only ever writes 32 B slots and never sees a child's RLP, so it is the wrong place for the check. The format reserves `embMask` and the `emb` trailer; the code does not implement the path
-- [ ] write tests pinning each primitive against known vectors — the single-leaf trie root, a two-leaf branch root, an extension over a branch
-- [ ] write a test that `leafRef` inlines below 32 B and hashes at and above it, exercising both sides of the boundary
-- [ ] write a test that the assert fires on a hand-built 17-item list whose two refs are each ≤7 B — two leaves with 1-byte values under a depth-56 branch give 22 B — and on nothing else across a sweep of ordinary branches
-- [ ] run tests — must pass before task 5
+- [x] add `leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte` — build the leaf RLP from the packed suffix and the **consensus** payload, inline it if under 32 B, keccak it otherwise; recomputed at hash time, never stored (D7)
+- [x] add `extensionRef(ext []byte, childHash []byte) [32]byte` = `keccak(rlp([compact(ext), childHash]))`; given a hashed child the extension RLP is `1 + (1 + ⌊|E|/2⌋ + 1) + 33 ≥ 37 B`, always above the inline threshold, so it is unconditionally hashed
+- [x] add `branchRef(refs *[16][]byte) [32]byte` over the 17-item list
+- [x] put the D7 assert **here**, not in the encoder: `branchRef` panics if the branch RLP it just built is under 32 B, naming the depth. The encoder only ever writes 32 B slots and never sees a child's RLP, so it is the wrong place for the check. The format reserves `embMask` and the `emb` trailer; the code does not implement the path
+- [x] write tests pinning each primitive against known vectors — the single-leaf trie root, a two-leaf branch root, an extension over a branch
+- [x] write a test that `leafRef` inlines below 32 B and hashes at and above it, exercising both sides of the boundary
+- [x] write a test that the assert fires on a hand-built 17-item list whose two refs are each ≤7 B — two leaves with 1-byte values under a depth-56 branch give 22 B — and on nothing else across a sweep of ordinary branches
+- [x] run tests — must pass before task 5
 
 ### Task 5: Account leaf — record body and consensus RLP
 
