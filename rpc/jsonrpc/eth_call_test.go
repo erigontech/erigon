@@ -617,6 +617,11 @@ func TestStateCallMethodsRejectPendingTag(t *testing.T) {
 		require.ErrorIs(t, err, errPendingStateNotSupported)
 	})
 
+	t.Run("eth_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, nil, StateContext{BlockNumber: pending}, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
 	t.Run("graphql_call", func(t *testing.T) {
 		_, err := graphqlAPI.Call(ctx, rpc.PendingBlockNumber, ethapi.CallArgs{})
 		require.ErrorIs(t, err, errPendingStateNotSupported)
