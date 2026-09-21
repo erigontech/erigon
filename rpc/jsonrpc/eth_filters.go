@@ -192,18 +192,23 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 	return rpcSub, nil
 }
 
-// sharedJSON gives every subscriber the bytes of one encoding of the event.
+// sharedJSON gives every remote subscriber the bytes of one encoding of the event, and an
+// in-process one the value itself.
 type sharedJSON[T any] struct {
-	ev     *rpchelper.Shared[T]
-	encode func(T) ([]byte, error)
+	ev    *rpchelper.Shared[T]
+	value func(T) any
 }
 
-func (s sharedJSON[T]) MarshalFastJSON() ([]byte, error) { return s.ev.Encode(s.encode) }
+func (s sharedJSON[T]) MarshalFastJSON() ([]byte, error) {
+	return s.ev.Encode(func(v T) ([]byte, error) { return json.Marshal(s.value(v)) })
+}
 
-func encodeHeader(h *types.Header) ([]byte, error) { return json.Marshal(h) }
+func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
 
-func encodeSubscribeReceipt(r *remoteproto.SubscribeReceiptsReply) ([]byte, error) {
-	return json.Marshal([]*ethutils.RPCReceipt{ethutils.MarshalSubscribeReceipt(r)})
+func headerValue(h *types.Header) any { return h }
+
+func subscribeReceiptValue(r *remoteproto.SubscribeReceiptsReply) any {
+	return []*ethutils.RPCReceipt{ethutils.MarshalSubscribeReceipt(r)}
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.
@@ -218,7 +223,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 		},
 		func(emit func(payload any), h *rpchelper.Shared[*types.Header]) {
 			if h != nil && h.Value != nil {
-				emit(sharedJSON[*types.Header]{h, encodeHeader})
+				emit(sharedJSON[*types.Header]{h, headerValue})
 			}
 		},
 		"[rpc] new heads channel was closed")
@@ -293,7 +298,7 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.Receip
 		},
 		func(emit func(payload any), r *rpchelper.Shared[*remoteproto.SubscribeReceiptsReply]) {
 			if r != nil && r.Value != nil {
-				emit(sharedJSON[*remoteproto.SubscribeReceiptsReply]{r, encodeSubscribeReceipt})
+				emit(sharedJSON[*remoteproto.SubscribeReceiptsReply]{r, subscribeReceiptValue})
 			}
 		},
 		"[rpc] receipts channel was closed")

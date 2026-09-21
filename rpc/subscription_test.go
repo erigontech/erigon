@@ -272,3 +272,20 @@ func TestNotifyUsesFastJSON(t *testing.T) {
 		}
 	}
 }
+
+type wireOnly struct{ v int }
+
+func (w wireOnly) LocalValue() any { return w.v }
+
+// A payload that carries a wire encoding reaches an in-process subscriber as the value it wraps.
+func TestLocalNotifierDeliversLocalValue(t *testing.T) {
+	resc, closec := make(chan any, 1), make(chan any)
+	n := NewLocalNotifier("eth", resc, closec)
+	sub := n.CreateSubscription()
+	if err := n.Notify(sub.ID, wireOnly{v: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-resc; got != 7 {
+		t.Fatalf("delivered %#v, want 7", got)
+	}
+}
