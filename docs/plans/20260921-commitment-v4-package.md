@@ -495,14 +495,14 @@ transitions, so testing them apart from the record that implements them was an o
 - Create: `execution/commitment/v4/wipe.go`
 - Create: `execution/commitment/v4/wipe_test.go`
 
-- [ ] derive a phase-A cleanup job from the **account** update, not from a storage-prefix partition — `versionedio.go:1909` emits an account `DeleteUpdate` and its storage loop emits nothing (`:1917`), so a self-destruct reaches phase A only this way
-- [ ] enumerate the commitment records to tombstone from the masks, with no hashing and no plain keys; `DomainDelPrefix` (`domain_shared.go:1950`) still owns plain-state deletion and is unchanged
-- [ ] resolve the `wiped` set against later writes in the same block before phase A sees the task, so delete-then-write recreates rather than deletes
-- [ ] write a test for an account deleted with a non-empty storage subtree — every storage record tombstoned, the root record included
-- [ ] write a test for a `WriteSet` carrying only a self-destruct, asserting the cleanup job is created and the fixed storage-root key is not left available for a later recreation
-- [ ] write a test for delete-then-write on one account within a block
-- [ ] write a test that a wipe performs **zero keccaks** — the real invariant; do not assert a tombstone-count ratio, since it derives from `f ≈ 3.8`, which §12 says is trie theory rather than this database
-- [ ] run tests — must pass before task 15
+- [x] derive a phase-A cleanup job from the **account** update, not from a storage-prefix partition — `versionedio.go:1909` emits an account `DeleteUpdate` and its storage loop emits nothing (`:1917`), so a self-destruct reaches phase A only this way
+- [x] enumerate the commitment records to tombstone from the masks, with no hashing and no plain keys; `DomainDelPrefix` (`domain_shared.go:1950`) still owns plain-state deletion and is unchanged
+- [x] resolve the `wiped` set against later writes in the same block before phase A sees the task, so delete-then-write recreates rather than deletes
+- [x] write a test for an account deleted with a non-empty storage subtree — every storage record tombstoned, the root record included
+- [x] write a test for a `WriteSet` carrying only a self-destruct, asserting the cleanup job is created and the fixed storage-root key is not left available for a later recreation
+- [x] write a test for delete-then-write on one account within a block
+- [x] write a test that a wipe performs **zero keccaks** — the real invariant; do not assert a tombstone-count ratio, since it derives from `f ≈ 3.8`, which §12 says is trie theory rather than this database
+- [x] run tests — must pass before task 15
 
 ### Task 15: Phase B — account trie
 

@@ -47,6 +47,7 @@ type storageEntry struct {
 type storageTask struct {
 	addrHash [32]byte
 	entries  []storageEntry
+	wipe     bool
 }
 
 type accountEntry struct {
@@ -59,6 +60,7 @@ type accountEntry struct {
 func partition(stream []phaseAInput) (storage []storageTask, accounts []accountEntry) {
 	storageByAddress := make(map[string]int)
 	accountByHash := make(map[string]int)
+	wiped := make(map[[32]byte]struct{})
 	for _, item := range stream {
 		if len(item.hashedKey) != 64 && len(item.hashedKey) != 128 {
 			continue
@@ -77,11 +79,17 @@ func partition(stream []phaseAInput) (storage []storageTask, accounts []accountE
 
 		if len(item.hashedKey) == 64 {
 			accounts[accountIndex].update = cloneUpdate(item.update)
+			addrHash := hashAddressPath(accountHash)
+			if item.update != nil && item.update.Deleted() {
+				wiped[addrHash] = struct{}{}
+			} else {
+				delete(wiped, addrHash)
+			}
 			continue
 		}
 
-		var addrHash [32]byte
-		copy(addrHash[:], packPath(item.hashedKey[:64], nil))
+		addrHash := hashAddressPath(item.hashedKey[:64])
+		delete(wiped, addrHash)
 		storageKey := string(addrHash[:])
 		storageIndex, ok := storageByAddress[storageKey]
 		if !ok {
@@ -102,7 +110,19 @@ func partition(stream []phaseAInput) (storage []storageTask, accounts []accountE
 	sort.SliceStable(storage, func(i, j int) bool {
 		return bytes.Compare(storage[i].addrHash[:], storage[j].addrHash[:]) < 0
 	})
+	for addrHash := range wiped {
+		storage = append(storage, storageTask{addrHash: addrHash, wipe: true})
+	}
+	sort.SliceStable(storage, func(i, j int) bool {
+		return bytes.Compare(storage[i].addrHash[:], storage[j].addrHash[:]) < 0
+	})
 	return storage, accounts
+}
+
+func hashAddressPath(path []byte) [32]byte {
+	var addrHash [32]byte
+	copy(addrHash[:], packPath(path, nil))
+	return addrHash
 }
 
 func clonePrefix(src []byte, n int) []byte {
@@ -122,6 +142,12 @@ func cloneUpdate(update *commitment.Update) *commitment.Update {
 func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte, error) {
 	if ctx == nil {
 		return [32]byte{}, errors.New("commitment v4: nil phase A context")
+	}
+	if task.wipe {
+		if err := wipeStorageRecords(ctx, task.addrHash); err != nil {
+			return [32]byte{}, err
+		}
+		return empty.RootHash, nil
 	}
 	if len(task.entries) == 0 {
 		return empty.RootHash, nil
