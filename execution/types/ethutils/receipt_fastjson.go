@@ -128,45 +128,14 @@ func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 }
 
 func validateLogs(logs any) error {
-	switch v := logs.(type) {
-	case nil, types.Logs, []*types.Log, []*types.RPCLog:
-		return nil
-	case []map[string]any:
-		for _, entry := range v {
-			if err := validateSubscribeLog(entry); err != nil {
-				return err
-			}
-		}
+	switch logs.(type) {
+	case nil, types.Logs, []*types.Log, []*types.RPCLog, []SubscribeLog:
 		return nil
 	}
 	return fmt.Errorf("ethutils: receipt logs of unexpected type %T", logs)
 }
 
-func validateSubscribeLog(entry map[string]any) error {
-	known := 0
-	for _, k := range subscribeLogKeys {
-		val, ok := entry[k]
-		if !ok {
-			continue
-		}
-		known++
-		switch val.(type) {
-		case common.Address, common.Hash, hexutil.Bytes, []common.Hash:
-		default:
-			return fmt.Errorf("ethutils: subscribe log field %q of unexpected type %T", k, val)
-		}
-	}
-	if known != len(entry) {
-		// A key outside the known set would be dropped silently, where the reflection
-		// path this replaces would have written it.
-		return fmt.Errorf("ethutils: subscribe log has %d keys, %d of them known", len(entry), known)
-	}
-	return nil
-}
-
-// writeLogs handles both shapes MarshalReceipt puts in Logs: []*types.Log, and
-// []*types.RPCLog when the caller asked for blockTimestamp.
-// validateLogs has already rejected any shape not handled here.
+// writeLogs writes every shape validateLogs accepts.
 func writeLogs(w jsonw.JSONWriter, logs any) {
 	switch v := logs.(type) {
 	case types.Logs:
@@ -190,72 +159,35 @@ func writeLogs(w jsonw.JSONWriter, logs any) {
 			writeLog(w, &l.Log, &l.BlockTimestamp)
 		}
 		w.WriteArrayEnd()
-	case []map[string]any:
-		// MarshalSubscribeReceipt's shape, which eth_sendRawTransactionSync answers with.
-		writeSubscribeLogs(w, v)
+	case []SubscribeLog:
+		if v == nil {
+			w.WriteNil()
+			return
+		}
+		w.WriteArrayStart()
+		for i := range v {
+			if i > 0 {
+				w.WriteMore()
+			}
+			writeSubscribeLog(w, &v[i])
+		}
+		w.WriteArrayEnd()
 	default:
 		w.WriteNil()
 	}
 }
 
-// subscribeLogKeys is every key MarshalSubscribeReceipt puts in a log entry, in the order
-// encoding/json emits them.
-var subscribeLogKeys = []string{"address", "data", "topics", "transactionHash"}
-
-// writeSubscribeLogs writes the map form MarshalSubscribeReceipt builds. encoding/json
-// orders an object's keys, and address is only present when the proto log carried one.
-func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) {
-	if logs == nil {
-		w.WriteNil()
-		return
+func writeSubscribeLog(w jsonw.JSONWriter, l *SubscribeLog) {
+	w.WriteObjectStart()
+	if l.Address != nil {
+		w.WriteObjectField("address").WriteHex(l.Address[:])
+		w.WriteMore()
 	}
-	w.WriteArrayStart()
-	for i, entry := range logs {
-		if i > 0 {
-			w.WriteMore()
-		}
-		if entry == nil {
-			w.WriteNil()
-			continue
-		}
-		w.WriteObjectStart()
-		first := true
-		for _, k := range subscribeLogKeys {
-			val, ok := entry[k]
-			if !ok {
-				continue
-			}
-			if first {
-				w.WriteObjectField(k)
-				first = false
-			} else {
-				field(w, k)
-			}
-			switch t := val.(type) {
-			case common.Address:
-				w.WriteHex(t[:])
-			case common.Hash:
-				w.WriteHex(t[:])
-			case hexutil.Bytes:
-				w.WriteHex(t)
-			case []common.Hash:
-				if t == nil {
-					w.WriteNil()
-					break
-				}
-				w.WriteArrayStart()
-				for j := range t {
-					if j > 0 {
-						w.WriteMore()
-					}
-					w.WriteHex(t[j][:])
-				}
-				w.WriteArrayEnd()
-			}
-		}
-		w.WriteObjectEnd()
-	}
-	w.WriteArrayEnd()
+	w.WriteObjectField("data").WriteHex(l.Data)
+	field(w, "topics")
+	writeHashes(w, l.Topics)
+	field(w, "transactionHash").WriteHex(l.TransactionHash[:])
+	w.WriteObjectEnd()
 }
 
 func writeLogList(w jsonw.JSONWriter, logs []*types.Log) {
@@ -284,18 +216,7 @@ func writeLog(w jsonw.JSONWriter, l *types.Log, blockTimestamp *hexutil.Uint64) 
 	w.WriteObjectField("address")
 	w.WriteHex(l.Address[:])
 	field(w, "topics")
-	if l.Topics == nil {
-		w.WriteNil()
-	} else {
-		w.WriteArrayStart()
-		for i := range l.Topics {
-			if i > 0 {
-				w.WriteMore()
-			}
-			w.WriteHex(l.Topics[i][:])
-		}
-		w.WriteArrayEnd()
-	}
+	writeHashes(w, l.Topics)
 	field(w, "data").WriteHex(l.Data)
 	field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
 	field(w, "transactionHash").WriteHex(l.TxHash[:])
@@ -307,4 +228,19 @@ func writeLog(w jsonw.JSONWriter, l *types.Log, blockTimestamp *hexutil.Uint64) 
 		field(w, "blockTimestamp").WriteQuotedText(blockTimestamp)
 	}
 	w.WriteObjectEnd()
+}
+
+func writeHashes(w jsonw.JSONWriter, hashes []common.Hash) {
+	if hashes == nil {
+		w.WriteNil()
+		return
+	}
+	w.WriteArrayStart()
+	for i := range hashes {
+		if i > 0 {
+			w.WriteMore()
+		}
+		w.WriteHex(hashes[i][:])
+	}
+	w.WriteArrayEnd()
 }
