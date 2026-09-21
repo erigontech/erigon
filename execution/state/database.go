@@ -36,6 +36,18 @@ const (
 	NonContractIncarnation = 0
 )
 
+// HasAccount answers whether the account exists. A reader that can tell without decoding
+// the account says so with a HasAccount method of its own; the rest read and discard.
+func HasAccount(r StateReader, address accounts.Address) (bool, error) {
+	if h, ok := r.(interface {
+		HasAccount(accounts.Address) (bool, error)
+	}); ok {
+		return h.HasAccount(address)
+	}
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 type StateReader interface {
 	ReadAccountData(address accounts.Address) (*accounts.Account, error)
 	ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error)
