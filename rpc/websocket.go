@@ -350,7 +350,7 @@ func (m *wsMessage) open() error {
 	if !ok {
 		deadline = time.Now().Add(wsPingInterval)
 	}
-	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	ctx, cancel := context.WithDeadline(m.ctx, deadline)
 	w, err := m.wc.conn.Writer(ctx, websocket.MessageText)
 	if err != nil {
 		cancel()
