@@ -2236,8 +2236,8 @@ func announceFirstPending(announcements *Announcements, mt *metaTxn) {
 	announcements.Append(mt.TxnSlot.TxType(), mt.TxnSlot.Size, mt.TxnSlot.IDHash[:])
 }
 
-// promote reasserts invariants of the subpool and returns the list of transactions that ended up
-// being promoted to the pending or basefee pool, for re-broadcasting
+// promote reasserts the sub-pool invariants and adds to announcements each txn that enters pending
+// for the first time.
 func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
 	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.TxType() == BlobTxnType && worst.TxnSlot.GetBlobFeeCap().LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
