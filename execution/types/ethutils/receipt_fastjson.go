@@ -35,6 +35,14 @@ func (rs RPCReceipts) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		w.WriteNil()
 		return nil
 	}
+	for _, r := range rs {
+		if r == nil {
+			continue
+		}
+		if err := validateLogs(r.Logs); err != nil {
+			return err
+		}
+	}
 	w.WriteArrayStart()
 	for i, r := range rs {
 		if i > 0 {
