@@ -118,7 +118,7 @@ func Concrete(w jsonw.JSONWriter) *StackStream {
 			t.ensure()
 			w = t.inner
 		default:
-			return nil
+			panic(fmt.Sprintf("jsonstream: %T does not wrap a StackStream", w))
 		}
 	}
 }
