@@ -52,12 +52,10 @@ var PrunedError = errors.New("old data not available due to pruning")
 // flushed to the history index yet are still visible.
 //
 // RPC and other consumers that want to read strictly persisted history
-// pass sd=nil and blockCache=nil via the legacy NewHistoryReaderV3
-// constructor.
+// pass sd=nil via the legacy NewHistoryReaderV3 constructor.
 type HistoryReaderV3 struct {
 	ttx         kv.TemporalTx
-	sd          *execctx.SharedDomains
-	blockCache  *BlockStateCache
+	sd          execctx.DomainReader
 	tracePrefix string
 	txNum       uint64
 	composite   [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
@@ -73,78 +71,17 @@ func NewHistoryReaderV3(ttx kv.TemporalTx, txNum uint64) *HistoryReaderV3 {
 // parallel executor. Reads chain sd.GetAsOf (in-memory batch state) then
 // fall back to ttx.GetAsOf so a tx can see prior-tx writes from the same
 // batch that have not yet been flushed to the history index.
-func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd *execctx.SharedDomains, txNum uint64) *HistoryReaderV3 {
+func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainReader, txNum uint64) *HistoryReaderV3 {
 	return &HistoryReaderV3{ttx: ttx, sd: sd, txNum: txNum}
 }
 
-// NewHistoryReaderV3WithBlockCache is the finalize-time variant used by
-// the parallel executor for historic blocks. In addition to the
-// sd.GetAsOf → ttx.GetAsOf chain, it consults the per-block BlockStateCache
-// first so the block-finalize IBS (withdrawals, EIP-7002/7251 system calls)
-// sees every prior-tx write recorded in the current block, not just the
-// pre-block committed state.
-func NewHistoryReaderV3WithBlockCache(ttx kv.TemporalTx, sd *execctx.SharedDomains, blockCache *BlockStateCache, txNum uint64) *HistoryReaderV3 {
-	return &HistoryReaderV3{ttx: ttx, sd: sd, blockCache: blockCache, txNum: txNum}
-}
-
-// SetBlockStateCache updates the in-flight block cache tier. Used when the
-// reader is reused across blocks in the parallel executor.
-func (hr *HistoryReaderV3) SetBlockStateCache(cache *BlockStateCache) {
-	hr.blockCache = cache
-}
-
-// getAsOf chains blockCache (in-flight parallel block writes, per-field)
-// before sd.GetAsOf (in-batch memory) and ttx.GetAsOf (DB history +
-// snapshot files). Callers requesting only persisted history construct the
-// reader with sd=nil and blockCache=nil. If sd.mem has inMemHistoryReads
-// disabled (e.g. the serial executor path), sd.GetAsOf returns an error —
-// we silently fall through to ttx so the same reader type is usable in
-// both modes.
-//
-// blockCache is consulted for the AccountsDomain and StorageDomain only;
-// CodeDomain is not currently cached per block, so for code reads we fall
-// straight through to sd/ttx. For storage we use the full 52-byte
-// composite key (addr||slot) like the rest of the state domain.
+// getAsOf chains sd.GetAsOf (in-batch memory) before ttx.GetAsOf (DB history
+// + snapshot files). Callers requesting only persisted history construct the
+// reader with sd=nil via the legacy NewHistoryReaderV3 constructor. If sd.mem
+// has inMemHistoryReads disabled (e.g. the serial executor path), sd.GetAsOf
+// returns an error — we silently fall through to ttx so the same reader type
+// is usable in both modes.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
-	if hr.blockCache != nil {
-		switch domain {
-		case kv.AccountsDomain:
-			if len(key) == 20 {
-				var raw common.Address
-				copy(raw[:], key)
-				addr := accounts.InternAddress(raw)
-				if cached, hit := hr.blockCache.GetCurrentAccount(addr); hit {
-					// hit==true is authoritative for the in-flight block, including the
-					// deletion case (cached==nil). Return immediately rather than falling
-					// through to sd/ttx, which would surface the pre-deletion value from
-					// history. Downstream callers (ReadAccountData) treat enc=nil as
-					// "no account" regardless of ok, so emitting ok=true here just
-					// reflects the cache's authoritative status.
-					if cached == nil {
-						return nil, false, nil
-					}
-					return cached, true, nil
-				}
-			}
-		case kv.StorageDomain:
-			if len(key) == 20+32 {
-				var rawAddr common.Address
-				var rawSlot common.Hash
-				copy(rawAddr[:], key[:20])
-				copy(rawSlot[:], key[20:])
-				addr := accounts.InternAddress(rawAddr)
-				slot := accounts.InternKey(rawSlot)
-				if cached, hit := hr.blockCache.GetCurrentStorage(addr, slot); hit {
-					// Same as the account case above: hit==true is authoritative even
-					// when the slot was cleared (len(cached)==0), so do not fall through.
-					if len(cached) == 0 {
-						return nil, false, nil
-					}
-					return cached, true, nil
-				}
-			}
-		}
-	}
 	if hr.sd != nil {
 		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)
 		if err == nil && ok {

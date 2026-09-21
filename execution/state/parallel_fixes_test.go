@@ -47,7 +47,7 @@ func TestValueTiebreaker_BalancePath(t *testing.T) {
 	readVal := *balance // Same value
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256, absentUint256, recordBalance, // value tiebreaker
+		readVal, liveBalance, eqUint256, // value tiebreaker
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -68,7 +68,7 @@ func TestValueTiebreaker_DifferentBalance(t *testing.T) {
 	readVal := *uint256.NewInt(500)
 
 	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		readVal, liveBalance, eqUint256, absentUint256, recordBalance,
+		readVal, liveBalance, eqUint256,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 
@@ -86,14 +86,14 @@ func TestValueTiebreaker_NoncePath(t *testing.T) {
 
 	// Same nonce from storage → valid
 	valid := validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(42), liveNonce, eqUint64, absentUint64, recordNonce,
+		uint64(42), liveNonce, eqUint64,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionValid, valid, "Same nonce should be valid")
 
 	// Different nonce → invalid
 	valid = validateRead(vm, 10, addr, NoncePath, accounts.NilKey, StorageRead, Version{TxIndex: UnknownDep},
-		uint64(41), liveNonce, eqUint64, absentUint64, recordNonce,
+		uint64(41), liveNonce, eqUint64,
 		func(rv, wv Version) VersionValidity { return VersionValid },
 		false, "")
 	assert.Equal(t, VersionInvalid, valid, "Different nonce should be invalid")
@@ -322,111 +322,6 @@ func TestTouchUpdates_MixedBatch(t *testing.T) {
 	assert.Equal(t, uint64(2), updates.Size(), "2 unique keys (addr1 merged, addr2 storage)")
 }
 
-// TestBlockStateCacheWriteAccount_NilCommitted verifies that WriteAccount
-// doesn't panic when the committed cache has a nil account entry.
-// This can happen when PutCommittedAccount stores nil (account doesn't exist).
-func TestBlockStateCacheWriteAccount_NilCommitted(t *testing.T) {
-	cache := NewBlockStateCache()
-
-	addr := accounts.InternAddress([20]byte{0x42})
-
-	// Put a nil committed account (account doesn't exist in pre-block state)
-	cache.PutCommittedAccount(addr, nil)
-
-	// Write a new account — should not panic
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(1000)
-	acc.Nonce = 1
-	enc := accounts.SerialiseV3(&acc)
-
-	assert.NotPanics(t, func() {
-		cache.WriteAccount(addr, enc, 1)
-	}, "WriteAccount should not panic with nil committed account")
-
-	// Verify the write is recorded.
-	current, ok := cache.GetCurrentAccount(addr)
-	assert.True(t, ok, "Should have current account")
-	assert.Equal(t, enc, current, "Current account should match written value")
-}
-
-// TestBlockStateCacheWriteAccountUpdatesCurrent verifies that successive
-// writes update the current view to the latest value (last write wins
-// for read access via GetCurrentAccount). The full per-tx history is
-// preserved in writeLog for Flush.
-func TestBlockStateCacheWriteAccountUpdatesCurrent(t *testing.T) {
-	cache := NewBlockStateCache()
-
-	addr := accounts.InternAddress([20]byte{0x55})
-
-	// Set up committed account
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(500)
-	acc.Nonce = 3
-	cache.PutCommittedAccount(addr, &acc)
-
-	enc := accounts.SerialiseV3(&acc)
-	cache.WriteAccount(addr, enc, 3)
-
-	acc2 := accounts.NewAccount()
-	acc2.Balance = *uint256.NewInt(600)
-	acc2.Nonce = 3
-	enc2 := accounts.SerialiseV3(&acc2)
-	cache.WriteAccount(addr, enc2, 5)
-
-	current, ok := cache.GetCurrentAccount(addr)
-	assert.True(t, ok)
-	assert.Equal(t, enc2, current, "GetCurrentAccount should return the latest write")
-}
-
-// Pins that a second DeleteAccount in the same block is a writeLog no-op —
-// Flush must emit exactly one DomainDel per address (matching serial's IBS
-// short-circuit). Without this dedup the redundant nil-history entry feeds
-// into commitment-cache step keys and produces a non-deterministic state
-// root between parallel-exec nodes validating each other's blocks.
-func TestBlockStateCacheDeleteAccount_IdempotentInBlock(t *testing.T) {
-	cache := NewBlockStateCache()
-	addr := accounts.InternAddress([20]byte{0x77})
-
-	cache.DeleteAccount(addr, 1)
-	cache.DeleteAccount(addr, 2)
-
-	deletes := 0
-	for i := range cache.writeLog {
-		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
-			deletes++
-		}
-	}
-	assert.Equal(t, 1, deletes, "second DeleteAccount in the same block must not append a second writeLog entry")
-
-	enc, present := cache.GetCurrentAccount(addr)
-	assert.True(t, present, "current view must still report addr as present-and-empty")
-	assert.Nil(t, enc, "current view value must remain nil")
-}
-
-// Pins the recreate-then-redelete pattern: an intervening WriteAccount
-// resets the dedup so the next DeleteAccount IS recorded — only the
-// "no write in between" duplicate is collapsed.
-func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
-	cache := NewBlockStateCache()
-	addr := accounts.InternAddress([20]byte{0x88})
-
-	acc := accounts.NewAccount()
-	acc.Balance = *uint256.NewInt(1)
-	enc := accounts.SerialiseV3(&acc)
-
-	cache.DeleteAccount(addr, 1)
-	cache.WriteAccount(addr, enc, 2)
-	cache.DeleteAccount(addr, 3)
-
-	deletes := 0
-	for i := range cache.writeLog {
-		if cache.writeLog[i].kind == bcOpDeleteAccount && cache.writeLog[i].addr == addr {
-			deletes++
-		}
-	}
-	assert.Equal(t, 2, deletes, "delete after recreate must be recorded; only no-op duplicates are collapsed")
-}
-
 // TestSelfDestructKeepsDirtyStorageReadableSameTx verifies that after an
 // account self-destructs (versionMap active), a subsequent same-tx GetState
 // still returns the dirty value written before the SELFDESTRUCT. Pre-Cancun
@@ -439,7 +334,7 @@ func TestBlockStateCacheDeleteAccount_RecreateThenDeleteRecords(t *testing.T) {
 // spurious zero writes made same-tx re-reads return 0 — wrong gas
 // (SSTORE_SET vs dirty-update, +19900) and a wrong written value
 // (EEST cancun/eip6780_selfdestruct/* under EXEC3_PARALLEL). The calc now
-// gets per-slot DELETEs from Normalize's SD cascade instead.
+// gets per-slot DELETEs from the self-destruct storage cascade instead.
 func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xAA})
 	slot0 := accounts.InternKey([32]byte{0x00})

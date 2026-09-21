@@ -67,7 +67,7 @@ func TestRevivalConsistency_SameTxMetamorphic_ReaderAndValidatorAgree(t *testing
 
 	// Reader: tx4 sees the re-created account (AddressPath >= destructTx arm).
 	reader := newAccountStateReader(addr)
-	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader))
+	ibs := New(NewVersionedStateReader(4, ReadSet{}, vm, reader, false))
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -86,7 +86,7 @@ func TestRevivalConsistency_SameTxMetamorphic_ReaderAndValidatorAgree(t *testing
 		Val:        *uint256.NewInt(1_000),
 	})
 	io.RecordReads(Version{TxIndex: 4}, rs)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(4, io, validateEqualVersion, true, false, false, ""),
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(4, io, validateEqualVersion, false, ""),
 		"pre-destruct field read is stale after same-tx re-create — reader and validator agree the old value is gone")
 }
 
@@ -107,7 +107,7 @@ func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing
 	vm.WriteAddress(addr, Version{TxIndex: 2}, recreatedAccount(2), true)
 
 	reader := newAccountStateReader(addr)
-	ibs := New(NewVersionedStateReader(5, ReadSet{}, vm, reader))
+	ibs := New(NewVersionedStateReader(5, ReadSet{}, vm, reader, false))
 	ibs.SetTxContext(0, 5)
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
@@ -126,6 +126,6 @@ func TestRevivalConsistency_AddressPathOnly_ReaderAndValidatorDiverge(t *testing
 		Val:        *uint256.NewInt(1_000),
 	})
 	io.RecordReads(Version{TxIndex: 5}, rs)
-	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, true, false, false, ""),
+	require.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""),
 		"validator lacks the AddressPath >= revival arm, so it diverges from the reader on an AddressPath-only revival")
 }

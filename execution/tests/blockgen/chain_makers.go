@@ -175,13 +175,29 @@ func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number 
 	if b.gasPool == nil {
 		b.SetCoinbase(common.Address{})
 	}
-	b.ibs.SetTxContext(b.header.Number.Uint64(), len(b.txs))
+	if b.ibs.IsVersioned() {
+		b.ibs.ResetVersionedIO()
+	}
+	txVersion := state.Version{BlockNum: b.header.Number.Uint64(), TxIndex: len(b.txs)}
+	b.ibs.SetTxContext(txVersion.BlockNum, txVersion.TxIndex)
 	if b.gasUsed == nil {
 		b.gasUsed = new(protocol.GasUsed)
 	}
 	receipt, err := protocol.ApplyTransaction(b.config, protocol.GetHashFn(b.header, getHeader), engine, accounts.InternAddress(b.header.Coinbase), b.gasPool, b.ibs, state.NewNoopWriter(), b.header, txn, b.gasUsed, vm.Config{})
 	protocol.SetGasUsed(b.header, b.gasUsed)
-	_ = err // accept failed transactions
+	// A reverted transaction (err==nil, status Failed) is still included: its nonce
+	// bump and gas payment survive the revert and must be flushed so a later tx of
+	// the same sender sees the advanced nonce. A truly invalid tx (err!=nil) bumps
+	// nothing, so its versioned writes are not flushed.
+	if err == nil && b.ibs.IsVersioned() {
+		writes := b.ibs.FinalizedWrites(b.blockRules())
+		if b.blockIO != nil {
+			b.blockIO.RecordReads(txVersion, b.ibs.VersionedReads())
+			b.blockIO.RecordWrites(txVersion, writes)
+		}
+		b.versionMap.FlushVersionedWrites(writes, true, "")
+		b.ibs.ResetVersionedIO()
+	}
 	b.txs = append(b.txs, txn)
 	b.receipts = append(b.receipts, receipt)
 }
@@ -459,6 +475,11 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if needsVersionMap {
 			versionMap = state.NewVersionMap(nil)
 			ibs.SetVersionMap(versionMap)
+			// Generation must match the parallel executor's cache-free path: the
+			// stateObject cache lets a reused IBS serve stale account state across
+			// txs (e.g. a revived account's code hash), producing a header the
+			// executor's noMaterialize run then disagrees with.
+			ibs.SetNoMaterialize(true)
 		}
 
 		b := &BlockGen{i: i,
@@ -565,25 +586,17 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 			blockContext := protocol.NewEVMBlockContext(b.header, protocol.GetHashFn(b.header, nil), b.engine, accounts.NilAddress, config)
 			blockRules := blockContext.Rules(config)
 			if b.versionMap != nil && b.blockIO != nil {
-				// Commit from the versionMap write-set via WriteSet.Normalize/Apply
-				// — the same path the parallel executor uses — instead of so.data
-				// via CommitBlock, so generation matches import once the write path
-				// bypasses so.data. Each recorded phase (init txIdx=-1, txs,
-				// finalize) is applied in order; applying a phase before normalizing
-				// the next lets the next phase's stateReader fallback see it.
+				// Commit from the versionMap write-set via ApplyWrites — the same
+				// domain apply the parallel executor uses (rw_v3 handles the
+				// self-destruct delete, EIP-161 removal and storage-subtree cascade)
+				// — instead of so.data via CommitBlock, so generation matches import.
+				// Each recorded phase (init txIdx=-1, txs, finalize) is applied in order.
 				blockNum := b.header.Number.Uint64()
-				domainStorageKeys := state.CommittedStorageKeysFn(domains, tx)
-				emptyRemoval := blockNum != 0 && config.IsEIP161Enabled(blockNum)
-				isAura := config.Aura != nil
-				for i, ws := range b.blockIO.Outputs() {
+				for _, ws := range b.blockIO.Outputs() {
 					if ws == nil || ws.IsEmpty() {
 						continue
 					}
-					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
-					if normErr != nil {
-						return nil, nil, fmt.Errorf("normalize block writes: %w", normErr)
-					}
-					if err := normalized.Apply(domains, tx, blockNum, txNum, nil, blockRules, nil, false); err != nil {
+					if err := state.ApplyWrites(ws, domains, tx, blockNum, txNum, nil, blockRules, false); err != nil {
 						return nil, nil, fmt.Errorf("apply versioned block writes: %w", err)
 					}
 				}

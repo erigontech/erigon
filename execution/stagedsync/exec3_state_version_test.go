@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -30,7 +31,14 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// computeAndCheckCommitmentV3 on the serial path advances the Execution stage progress
+// (e.Update) but must NOT bump the durable state version a second time — the state
+// version is bumped once by the SharedDomains flush on Commit; a second bump here would
+// double-count it. Exercised in exec-only (DiscardCommitment) mode so no trie work runs
+// against the empty overlay.
 func TestComputeAndCheckCommitmentDoesNotAdvanceStateVersionInOverlay(t *testing.T) {
+	defer dbg.OverrideDiscardCommitment(true)()
+
 	_, tx := temporaltest.NewTestTx(t)
 	overlay, err := membatchwithdb.NewMemoryBatch(tx, t.TempDir(), log.New())
 	require.NoError(t, err)
@@ -45,7 +53,7 @@ func TestComputeAndCheckCommitmentDoesNotAdvanceStateVersionInOverlay(t *testing
 		&types.Header{Number: *uint256.NewInt(1)},
 		overlay,
 		nil,
-		ExecuteBlockCfg{discardCommitment: true},
+		ExecuteBlockCfg{},
 		stage,
 		false,
 		log.New(),
