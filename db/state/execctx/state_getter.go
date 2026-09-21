@@ -83,19 +83,31 @@ func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCac
 		return g
 	}
 	// A writable tx's visible end comes from the SharedDomains flush memo, not
-	// from the tx, so only a read-only tx can vouch for a fill here.
+	// from the tx, so only a read-only tx can vouch for a fill here. A read-only
+	// wrapper can hide a writable tx, so both ends are checked.
 	generationTx := cacheGenerationTx(tx)
-	if _, writable := tx.(kv.TemporalRwTx); writable || generationTx == nil {
+	if generationTx == nil || writableTx(tx) || writableTx(generationTx) {
 		return g
 	}
 	stateVersion, err := rawdb.GetStateVersion(generationTx)
 	if err != nil {
 		return g
 	}
+	view := stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
+	// A view the cache refuses fills from belongs to a superseded or unknown
+	// durable generation, so its hits are not this tx's state either.
+	if !view.CanFill() {
+		return g
+	}
 	g.stateCache = stateCache
-	g.view = stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
+	g.view = view
 	g.stepSize = tx.Debug().StepSize()
 	return g
+}
+
+func writableTx(tx kv.TemporalTx) bool {
+	_, writable := tx.(kv.TemporalRwTx)
+	return writable
 }
 
 func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
