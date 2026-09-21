@@ -216,10 +216,6 @@ func initClient(conn ServerCodec, logger log.Logger) *Client {
 	return c
 }
 
-// RegisterName creates a service for the given receiver type under the given name. When no
-// methods on the given receiver match the criteria to be either a RPC method or a
-// subscription an error is returned. Otherwise a new service is created and added to the
-// service collection this client provides to the server.
 func (c *Client) nextID() json.RawMessage {
 	id := c.idCounter.Add(1)
 	return strconv.AppendUint(nil, uint64(id), 10)
