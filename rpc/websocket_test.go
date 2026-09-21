@@ -464,7 +464,7 @@ func TestWebsocketPingNotRearmedAfterClose(t *testing.T) {
 		}
 		t.Fatalf("can't dial: %v", err)
 	}
-	wc := NewWebsocketCodec(conn, "", nil, "").(*websocketCodec)
+	wc := newWebsocketCodec(conn, nil, "", nil, "")
 	wc.Close()
 	wc.resetPing() // a write or ping that finished before Close can reset after it
 	if wc.pingTimer.Stop() {
