@@ -2511,6 +2511,13 @@ func (sdb *IntraBlockState) encodeExistingEmptyRemovals(chainRules *chain.Rules,
 			continue
 		}
 		view := NewVersionedAccountView(addr, sdb.txIndex, sdb.versionMap, sdb.stateReader)
+		if err := view.Err(); err != nil {
+			// A failed base read zeroes the composed fields, which would read as
+			// an EIP-161 empty and delete a live account. Surface the error and
+			// leave the account's writes intact instead.
+			sdb.recordStateReadError(err)
+			continue
+		}
 		bal, nonce, codeHash := view.GetBalance(), view.GetNonce(), view.GetCodeHash()
 		if w, ok := writes.GetBalance(addr); ok {
 			bal = w.Val
@@ -3204,6 +3211,7 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.versionedWrites.ReleaseAndReset()
 	sdb.dep = UnknownDep
 	sdb.recordAccess = false
+	sdb.stateReadErr = nil
 }
 
 // ResetVersionedReads clears tracked versioned reads without affecting writes.

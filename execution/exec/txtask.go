@@ -624,7 +624,16 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TxOut = txTask.VersionedWrites(ibs)
 		}
 
-		result.TxIn = txTask.VersionedReads(ibs)
+		// FinalizedWrites composes pre-tx state to decide EIP-161 removals and can
+		// hit a read failure of its own; surface it operationally and drop the
+		// write-set built from it rather than committing a wrong deletion.
+		if stateErr := ibs.StateReadError(); stateErr != nil && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+			result.Operational = true
+			result.Err = stateErr
+			result.TxOut = nil
+		} else {
+			result.TxIn = txTask.VersionedReads(ibs)
+		}
 	}
 
 	return &result
