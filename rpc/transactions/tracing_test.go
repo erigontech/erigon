@@ -17,19 +17,90 @@
 package transactions
 
 import (
+	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/tracing/tracers"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native" // registers callTracer
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
+
+func TestTraceTxCompletionV2(t *testing.T) {
+	name := "testTxCompletionV2"
+	var received *mdgas.TxGasUsage
+	var completionErr error
+	var calls int
+	tracers.RegisterLookup(false, func(code string, _ *tracers.Context, _ json.RawMessage) (*tracers.Tracer, error) {
+		if code != name {
+			return nil, errors.New("unknown tracer")
+		}
+		return &tracers.Tracer{
+			Hooks: &tracing.Hooks{OnTxEndV2: func(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
+				received = gasUsed
+				completionErr = err
+				calls++
+			}},
+			GetResult: func() (json.RawMessage, error) { return json.RawMessage(`{}`), nil },
+			Stop:      func(error) {},
+		}, nil
+	})
+	for _, gasLimit := range []uint64{200_000, 100} {
+		t.Run(fmt.Sprintf("gas=%d", gasLimit), func(t *testing.T) {
+			calls = 0
+			received = nil
+			completionErr = nil
+			sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+			recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, ibs.SetCode(recipient, []byte{
+				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
+			}, tracing.CodeChangeUnspecified))
+			msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), gasLimit,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0), nil, nil, false, false, true, false, nil)
+			blockCtx := evmtypes.BlockContext{CanTransfer: protocol.CanTransfer, Transfer: misc.Transfer, GasLimit: 1_000_000}
+			gasUsed, err := TraceTx(t.Context(), nil, nil, msg, blockCtx, protocol.NewEVMTxContext(msg),
+				uint256.NewInt(0), common.Hash{}, 0, ibs, &tracersConfig.TraceConfig{Tracer: &name},
+				chain.AllProtocolChanges, jsonstream.New(io.Discard), time.Second, nil)
+			require.Equal(t, 1, calls)
+			if gasLimit == 100 {
+				require.Error(t, err)
+				require.ErrorIs(t, err, completionErr)
+				require.Nil(t, received)
+				return
+			}
+			require.NoError(t, err)
+			require.NoError(t, completionErr)
+			require.NotNil(t, received)
+			require.Equal(t, gasUsed, received.ReceiptGasUsed)
+			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
+			require.Equal(t, gasUsed, received.BlockExecutionGasUsed+received.BlockStateGasUsed)
+			require.Zero(t, received.GasRefund)
+		})
+	}
+}
 
 func assembleWithLogConfig(t *testing.T, cfg *logger.LogConfig, tracerName *string) error {
 	t.Helper()

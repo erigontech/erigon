@@ -58,6 +58,14 @@ type MdGasUsage struct {
 	StateSpill uint64
 }
 
+// TxGasUsage contains the settled transaction gas accounting.
+type TxGasUsage struct {
+	ReceiptGasUsed        uint64 // Gas paid after refunds and the calldata floor
+	BlockExecutionGasUsed uint64 // Execution contribution to block gas
+	BlockStateGasUsed     uint64 // State contribution to block gas
+	GasRefund             uint64 // Capped refund before applying the calldata floor
+}
+
 // PlusIntrinsic folds intrinsic execution gas into the frame-usage report.
 func (u MdGasUsage) PlusIntrinsic(intrinsicGas uint64) MdGasUsage {
 	u.Execution += intrinsicGas

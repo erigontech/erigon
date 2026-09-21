@@ -31,6 +31,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -1420,7 +1421,9 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 	txResult := &exec.TxResult{
 		Task: tVersion,
 		ExecutionResult: evmtypes.ExecutionResult{
-			ReceiptGasUsed: 10000,
+			TxGasUsage: mdgas.TxGasUsage{
+				ReceiptGasUsed: 10000,
+			},
 		},
 	}
 
@@ -1503,7 +1506,9 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 	txResult := &exec.TxResult{
 		Task: tVersion,
 		ExecutionResult: evmtypes.ExecutionResult{
-			ReceiptGasUsed: 10000,
+			TxGasUsage: mdgas.TxGasUsage{
+				ReceiptGasUsed: 10000,
+			},
 		},
 	}
 
@@ -1576,7 +1581,9 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	txResult := &exec.TxResult{
 		Task: tVersion,
 		ExecutionResult: evmtypes.ExecutionResult{
-			ReceiptGasUsed: 10000,
+			TxGasUsage: mdgas.TxGasUsage{
+				ReceiptGasUsed: 10000,
+			},
 		},
 	}
 
@@ -1641,7 +1648,9 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 	txResult1 := &exec.TxResult{
 		Task: tVersion1,
 		ExecutionResult: evmtypes.ExecutionResult{
-			ReceiptGasUsed: 10000,
+			TxGasUsage: mdgas.TxGasUsage{
+				ReceiptGasUsed: 10000,
+			},
 		},
 	}
 
@@ -1709,8 +1718,12 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 					execTask: eTask,
 					version:  state.Version{BlockNum: tc.blockNum, TxIndex: 0, Incarnation: 0, TxNum: 1},
 				},
-				TxIn:            reads,
-				ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 10000},
+				TxIn: reads,
+				ExecutionResult: evmtypes.ExecutionResult{
+					TxGasUsage: mdgas.TxGasUsage{
+						ReceiptGasUsed: 10000,
+					},
+				},
 			}
 			_, err := be.nextResult(context.Background(), pe, txResult, roTx)
 			require.NoError(t, err)
@@ -1932,7 +1945,11 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 			execTask: eTask,
 			version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 1},
 		},
-		ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
+		ExecutionResult: evmtypes.ExecutionResult{
+			TxGasUsage: mdgas.TxGasUsage{
+				ReceiptGasUsed: 21000,
+			},
+		},
 	}
 
 	res, err := be.nextResult(context.Background(), pe, txResult, roTx)

@@ -45,7 +45,7 @@ func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, er
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart:       t.OnTxStart,
-			OnTxEnd:         t.OnTxEnd,
+			OnTxEndV2:       t.OnTxEndV2,
 			OnEnterV2:       t.OnEnterV2,
 			OnExitV2:        t.OnExitV2,
 			OnOpcodeV2:      t.OnOpcodeV2,
@@ -79,7 +79,7 @@ func (t *noopTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage
 func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 }
 
-func (*noopTracer) OnTxEnd(receipt *types.Receipt, err error) {}
+func (*noopTracer) OnTxEndV2(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {}
 
 func (*noopTracer) OnBalanceChange(a accounts.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 }

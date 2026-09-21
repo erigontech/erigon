@@ -26,8 +26,36 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestMuxForwardsTxEndV2(t *testing.T) {
+	receipt := &types.Receipt{GasUsed: 100}
+	usage := &mdgas.TxGasUsage{ReceiptGasUsed: 100, BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
+	var calls int
+	var legacyCalls int
+	mux := newTestMuxTracer([]string{"v2", "v1", "nil"}, []*tracers.Tracer{
+		{Hooks: &tracing.Hooks{
+			OnTxEndV2: func(gotReceipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
+				require.Same(t, receipt, gotReceipt)
+				require.Same(t, usage, gasUsed)
+				require.NoError(t, err)
+				calls++
+			},
+			OnTxEnd: func(*types.Receipt, error) { t.Fatal("V2 must take precedence") },
+		}},
+		{Hooks: &tracing.Hooks{OnTxEnd: func(gotReceipt *types.Receipt, err error) {
+			require.Same(t, receipt, gotReceipt)
+			require.NoError(t, err)
+			legacyCalls++
+		}}},
+		{},
+	})
+	mux.EmitTxEnd(receipt, usage, nil)
+	require.Equal(t, 1, calls)
+	require.Equal(t, 1, legacyCalls)
+}
 
 func TestMuxForwardsFrameV2(t *testing.T) {
 	entry := []mdgas.MdGas{{Execution: 100, State: 200}, {Execution: 30, State: 50}}

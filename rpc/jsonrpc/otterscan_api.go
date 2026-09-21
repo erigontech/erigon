@@ -179,14 +179,14 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	result, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
 	if err != nil {
-		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(nil, err)
+		if tracer != nil && tracer.Hooks.HasTxEndHook() {
+			tracer.Hooks.EmitTxEnd(nil, nil, err)
 		}
 		return nil, fmt.Errorf("tracing failed: %w", err)
 	}
 
-	if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-		tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+	if tracer != nil && tracer.Hooks.HasTxEndHook() {
+		tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, &result.TxGasUsage, nil)
 	}
 	return result, nil
 }
