@@ -76,41 +76,26 @@ func NewTemporalTxStateGetter(tx kv.TemporalTx) *TemporalTxStateGetter {
 	return &TemporalTxStateGetter{TemporalTx: tx}
 }
 
-// NewCachedTemporalTxStateGetter reads through the shared state cache. It is the
-// getter for readers with no SharedDomains, which would otherwise take every
-// account, storage and code read to the domain.
+// NewCachedTemporalTxStateGetter reads through the shared state cache.
 func NewCachedTemporalTxStateGetter(tx kv.TemporalTx, stateCache *cache.StateCache) *TemporalTxStateGetter {
 	g := &TemporalTxStateGetter{TemporalTx: tx}
 	if stateCache == nil || !dbg.UseStateCache {
 		return g
 	}
 	// A writable tx's visible end comes from the SharedDomains flush memo, not
-	// from the tx, so only read-only txs can vouch for a fill here.
-	if _, writable := tx.(kv.TemporalRwTx); writable {
-		return g
-	}
-	frontier := txCacheFrontier(tx)
-	if frontier == nil {
-		return g
-	}
-	g.stateCache = stateCache
-	g.view = stateCache.View(frontier)
-	g.stepSize = tx.Debug().StepSize()
-	return g
-}
-
-// txCacheFrontier binds fill authority to the transaction's durable state
-// version, the same contract SharedDomains readers get.
-func txCacheFrontier(tx kv.TemporalTx) cache.Frontier {
+	// from the tx, so only a read-only tx can vouch for a fill here.
 	generationTx := cacheGenerationTx(tx)
-	if generationTx == nil {
-		return nil
+	if _, writable := tx.(kv.TemporalRwTx); writable || generationTx == nil {
+		return g
 	}
 	stateVersion, err := rawdb.GetStateVersion(generationTx)
 	if err != nil {
-		return nil
+		return g
 	}
-	return cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion)
+	g.stateCache = stateCache
+	g.view = stateCache.View(cache.FrontierWithStateVersion(cache.FrontierFunc(tx.Debug().DomainVisibleEnd), stateVersion))
+	g.stepSize = tx.Debug().StepSize()
+	return g
 }
 
 func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
@@ -134,10 +119,8 @@ func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, er
 }
 
 func (g *TemporalTxStateGetter) GetCodeSize(addr []byte, _ uint64) (int, bool, error) {
-	if g.stateCache != nil {
-		if code, ok := g.view.Get(kv.CodeDomain, addr); ok {
-			return len(code), len(code) > 0, nil
-		}
+	if code, ok := g.view.Get(kv.CodeDomain, addr); ok {
+		return len(code), len(code) > 0, nil
 	}
 	size, found, err := g.GetLatestValSize(kv.CodeDomain, addr)
 	return size, found && size > 0, err

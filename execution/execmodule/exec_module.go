@@ -123,7 +123,9 @@ var (
 
 func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	var sd *execctx.SharedDomains
+	var stateCache *cache.StateCache
 	if c.execModule != nil {
+		stateCache = c.execModule.stateCache
 		c.execModule.lock.RLock()
 		sd = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
@@ -138,10 +140,6 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 	if sd != nil {
 		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
-		var stateCache *cache.StateCache
-		if c.execModule != nil {
-			stateCache = c.execModule.stateCache
-		}
 		view = &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}
 	}
 	return view, nil
