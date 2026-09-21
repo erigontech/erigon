@@ -66,6 +66,10 @@ func TestAllowListAppliesToEveryTransport(t *testing.T) {
 			var res echoResult
 			require.NoError(t, client.Call(&res, "test_echo", "x", 1, &echoArgs{S: "y"}))
 			require.ErrorContains(t, client.Call(nil, "test_noArgsRets"), "does not exist/is not available")
+			if name != "http" { // subscriptions need a stream transport
+				_, err = client.Subscribe(t.Context(), "nftest", make(chan int), "someSubscription", 1, 1)
+				require.ErrorContains(t, err, "does not exist/is not available")
+			}
 		})
 	}
 }
