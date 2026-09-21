@@ -94,21 +94,16 @@ func DoCall(
 	}
 	args.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
-	evm := vm.NewEVM(blockCtx, txCtx, state, chainConfig, vm.Config{NoBaseFee: true})
-	// done is closed on return to stop the watcher goroutine before it can
-	// cancel the EVM for a subsequent call.
-	done := make(chan struct{})
-	defer close(done) // runs before cancel() (LIFO), so goroutine exits cleanly on success
-
+	vmConfig := vm.Config{NoBaseFee: true}
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state, chainConfig, vmConfig)
+	// stop() runs before cancel() (LIFO), so the callback cannot fire for a later call, and
+	// this EVM is not reused, so a callback already running needs no join.
 	var timedOut atomic.Bool
-	go func() {
-		select {
-		case <-ctx.Done():
-			timedOut.Store(true)
-			evm.Cancel()
-		case <-done:
-		}
-	}()
+	stop := context.AfterFunc(ctx, func() {
+		timedOut.Store(true)
+		evm.Cancel()
+	})
+	defer stop()
 
 	// Override the fields of specified contracts before execution.
 	if stateOverrides != nil {
@@ -317,8 +312,9 @@ func NewReusableCaller(
 	}
 	initialArgs.ZeroUnpricedBlobBaseFee(&blockCtx)
 	txCtx := protocol.NewEVMTxContext(msg)
+	vmConfig := vm.Config{NoBaseFee: true}
 
-	evm := vm.NewEVM(blockCtx, txCtx, state.New(stateReader), chainConfig, vm.Config{NoBaseFee: true})
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, state.New(stateReader), chainConfig, vmConfig)
 
 	return &ReusableCaller{
 		evm:            evm,

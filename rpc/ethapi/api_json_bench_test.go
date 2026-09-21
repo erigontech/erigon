@@ -3,6 +3,7 @@ package ethapi
 import (
 	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -11,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func benchHeader(prague bool) *types.Header {
@@ -83,6 +85,49 @@ func BenchmarkRPCMarshalBlock(b *testing.B) {
 					if err != nil || len(out) == 0 {
 						b.Fatal(err)
 					}
+				}
+			})
+		}
+	}
+}
+
+// The fast path in the shape the server uses it: a pooled stream over the response writer,
+// with the result field lazily opened.
+func BenchmarkRPCBlockMarshalFastJSONTo(b *testing.B) {
+	for _, txCount := range []int{0, 1, 200} {
+		txs := make([]types.Transaction, txCount)
+		for i := range txs {
+			txs[i] = pinnedLegacyTx()
+			txs[i].SetSender(accounts.InternAddress(pinSender))
+			txs[i].Hash()
+		}
+		block := types.NewBlock(benchHeader(true), txs, nil, nil, types.Withdrawals{}, nil)
+		block.Hash()
+
+		for _, fullTx := range []bool{true, false} {
+			rpcBlock := RPCMarshalBlock(block, true, fullTx)
+			b.Run(fmt.Sprintf("txs=%d/fullTx=%t", txCount, fullTx), func(b *testing.B) {
+				b.ReportAllocs()
+				rec := httptest.NewRecorder()
+				for b.Loop() {
+					rec.Body.Reset()
+					s := jsonstream.Get(rec)
+					s.WriteObjectStart()
+					s.WriteObjectField("jsonrpc")
+					s.WriteString("2.0")
+					s.WriteMore()
+					rs := jsonstream.NewLazyFieldStream(s, "result", false)
+					if err := rpcBlock.MarshalFastJSONTo(rs.Open()); err != nil {
+						b.Fatal(err)
+					}
+					s.WriteObjectEnd()
+					if err := s.Flush(); err != nil {
+						b.Fatal(err)
+					}
+					jsonstream.Put(s)
+				}
+				if rec.Body.Len() == 0 {
+					b.Fatal("empty response")
 				}
 			})
 		}

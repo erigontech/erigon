@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
@@ -929,6 +930,18 @@ func TestReverseNonces(t *testing.T) {
 	defer tx.Rollback()
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
+	announced := func() (ids []byte) {
+		select {
+		case a := <-ch:
+			for i := 0; i < a.Len(); i++ {
+				_, _, hash := a.At(i)
+				ids = append(ids, hash[0])
+			}
+		default:
+		}
+		slices.Sort(ids)
+		return ids
+	}
 	// 1. Send high fee transaction with nonce gap
 	{
 		var txnSlots TxnSlots
@@ -942,15 +955,7 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	select {
-	case annoucements := <-ch:
-		for i := 0; i < annoucements.Len(); i++ {
-			_, _, hash := annoucements.At(i)
-			fmt.Printf("propagated hash %x\n", hash)
-		}
-	default:
-
-	}
+	assert.Empty(announced(), "a txn with a nonce gap is not pending")
 	// 2. Send low fee (below base fee) transaction without nonce gap
 	{
 		var txnSlots TxnSlots
@@ -964,15 +969,7 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	select {
-	case annoucements := <-ch:
-		for i := 0; i < annoucements.Len(); i++ {
-			_, _, hash := annoucements.At(i)
-			fmt.Printf("propagated hash %x\n", hash)
-		}
-	default:
-
-	}
+	assert.Empty(announced(), "a txn below the base fee is not pending")
 
 	{
 		var txnSlots TxnSlots
@@ -986,15 +983,7 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	select {
-	case annoucements := <-ch:
-		for i := 0; i < annoucements.Len(); i++ {
-			_, _, hash := annoucements.At(i)
-			fmt.Printf("propagated hash %x\n", hash)
-		}
-	default:
-
-	}
+	assert.Equal([]byte{1, 3}, announced(), "both txns become pending once, together")
 }
 
 // When local transaction is send to the pool, but it cannot replace existing transaction,

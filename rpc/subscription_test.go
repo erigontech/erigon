@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -28,7 +29,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestNewID(t *testing.T) {
@@ -243,7 +244,7 @@ func (fastJSONPayload) MarshalFastJSON() ([]byte, error) { return []byte(`"fast"
 
 type streamedPayload struct{}
 
-func (streamedPayload) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteHex([]byte{0xab})
 	return nil
 }
@@ -254,7 +255,7 @@ type bothFastJSON struct{ data []byte }
 
 func (b bothFastJSON) MarshalFastJSON() ([]byte, error) { return json.Marshal(b.data) }
 
-func (b bothFastJSON) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (b bothFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteHex(b.data)
 	return nil
 }
@@ -262,13 +263,49 @@ func (b bothFastJSON) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 func TestNotifyUsesFastJSON(t *testing.T) {
 	t.Parallel()
 
-	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null"} {
+	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null", &bothFastJSON{data: []byte{0xab}}: `"qw=="`} {
 		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
 		if err := n.Notify("0x1", payload); err != nil {
 			t.Fatal(err)
 		}
 		if len(n.buffer) != 1 || string(n.buffer[0]) != want {
 			t.Fatalf("%T: want %s, got %#v", payload, want, n.buffer)
+		}
+	}
+}
+
+type wireOnly struct{ v int }
+
+func (w wireOnly) LocalValue() any { return w.v }
+
+// A payload that carries a wire encoding reaches an in-process subscriber as the value it wraps.
+func TestLocalNotifierDeliversLocalValue(t *testing.T) {
+	resc, closec := make(chan any, 1), make(chan any)
+	n := NewLocalNotifier("eth", resc, closec)
+	sub := n.CreateSubscription()
+	if err := n.Notify(sub.ID, wireOnly{v: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-resc; got != 7 {
+		t.Fatalf("delivered %#v, want 7", got)
+	}
+}
+
+// The notification is built around bytes that are already encoded, and must come out as the
+// message json.Marshal made of them.
+func TestNotificationMatchesMarshalledMessage(t *testing.T) {
+	result := json.RawMessage(`[{"blockHash":"0x01","logs":[]},{"blockHash":"0x02","logs":[]}]`)
+	params, err := json.Marshal(&subscriptionResult{ID: "0x9a", Result: result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, namespace := range []string{"eth", `quote"back\slash`} {
+		want, err := json.Marshal(&jsonrpcMessage{Version: vsn, Method: namespace + notificationMethodSuffix, Params: params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := notification(namespace, "0x9a", result); !bytes.Equal(got, want) {
+			t.Fatalf("notification = %s, want %s", got, want)
 		}
 	}
 }
