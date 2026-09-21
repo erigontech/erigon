@@ -810,7 +810,8 @@ type Writer struct {
 	trace       bool
 	accumulator *shards.Accumulator
 	txNum       uint64
-	// storageKey is the address+slot the next storage write addresses.
+	// storageKey is the address+slot the next storage write addresses. Consumers copy what
+	// they keep; the buffer holds only across sequential writes, and a Writer is used that way.
 	storageKey [length.Addr + length.Hash]byte
 }
 
