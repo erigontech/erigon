@@ -658,11 +658,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 							applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 							break
 						}
-						if !r.isFinalize {
-							if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos); err != nil {
-								applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
-								break
-							}
+						// Index on the apply loop — the sole sd.mem writer — for every
+						// result including finalize (whose logs are the block-end syscall
+						// logs). skipReceiptCache for finalize: it shares the last regular
+						// tx's txNum, so a receipt-cache write here would clobber that entry.
+						if err := pe.rs.ApplyTxIndexes(rwTx, r.txNum, r.receipt, r.cumulativeBlobGasUsed, r.logs, r.traceFroms, r.traceTos, r.isFinalize); err != nil {
+							applyErr = fmt.Errorf("splitApply index block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
+							break
 						}
 					}
 					restoreCS()
@@ -1653,7 +1655,10 @@ type txResult struct {
 	traceTos              map[accounts.Address]struct{}
 	writes                state.WriteSetView
 	rules                 *chain.Rules
-	isFinalize            bool
+	// isFinalize marks the block-end result. It shares the last regular tx's txNum,
+	// so its indexing skips the receipt cache; its logs are the block-end syscall
+	// logs (no receipt), indexed on the apply loop rather than racing the exec loop.
+	isFinalize bool
 }
 
 // Block-STM model: workers own execution AND validation. Each worker flushes its
@@ -3408,6 +3413,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		// Block finalize: run engine.Finalize so finalize writes land in the
 		// versionMap and the block writeset.
 		var finalizeWrites state.WriteSetView
+		var blockEndLogs []*types.Log
 		if be.blockNum > 0 {
 			lastResult := be.results[len(be.results)-1]
 			finalTask := be.tasks[len(be.tasks)-1].Task
@@ -3461,18 +3467,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.blockNum, finErr)), nil
 				}
 
-				blockEndLogs := syscallIBS.GetRawLogs(tt.TxIndex)
-
-				// Block-end logs belong to no receipt, so the per-tx publish
-				// loop, which indexes receipt logs only, never sees them. Index
-				// them here, on the exec loop that owns sd.mem, to keep the log
-				// indexes identical to the ones the serial executor builds.
-				if len(blockEndLogs) > 0 {
-					if err := pe.rs.ApplyTxIndexes(applyTx, finalVersion.TxNum, nil, 0,
-						blockEndLogs, nil, nil, true); err != nil {
-						return nil, fmt.Errorf("[parallel] block-end log indexes: %w", err)
-					}
-				}
+				// Block-end logs belong to no receipt, so the per-tx publish loop,
+				// which indexes receipt logs only, never sees them. Carry them on the
+				// finalize result so the apply loop — now the sole sd.mem writer —
+				// indexes them; doing it here on the exec loop would race the apply
+				// loop on the NotThreadSafe inverted-index writer.
+				blockEndLogs = syscallIBS.GetRawLogs(tt.TxIndex)
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
@@ -3488,20 +3488,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// Send the finalize txResult; the apply loop folds its state writes at block end.
-		if finalizeWrites != nil && !finalizeWrites.IsEmpty() {
+		// Send the finalize txResult; the apply loop folds its state writes and
+		// indexes its block-end logs at block end. Sent when there are finalize
+		// writes OR block-end logs to index (a block-end syscall may emit logs
+		// without a net state change).
+		if (finalizeWrites != nil && !finalizeWrites.IsEmpty()) || len(blockEndLogs) > 0 {
 			lastResult := be.results[len(be.results)-1]
+			// The finalize result carries the block-end syscall logs (no receipt, no
+			// per-tx traces — the last tx's own result already indexed those). The
+			// apply loop indexes them with skipReceiptCache, since finalize shares the
+			// last regular tx's txNum.
 			if err := be.sendResult(ctx, &txResult{
-				blockNum:              be.blockNum,
-				blockHash:             be.blockHash,
-				txNum:                 txTask.Version().TxNum,
-				rules:                 lastResult.Rules(),
-				writes:                finalizeWrites,
-				logs:                  lastResult.Logs,
-				traceFroms:            lastResult.TraceFroms,
-				traceTos:              lastResult.TraceTos,
-				cumulativeBlobGasUsed: be.blobGasUsed,
-				isFinalize:            true,
+				blockNum:   be.blockNum,
+				blockHash:  be.blockHash,
+				txNum:      txTask.Version().TxNum,
+				rules:      lastResult.Rules(),
+				writes:     finalizeWrites,
+				logs:       blockEndLogs,
+				isFinalize: true,
 			}, false); err != nil {
 				return nil, err
 			}
