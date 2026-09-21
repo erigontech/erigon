@@ -121,11 +121,7 @@ func (s *SyncedDataManager) publishHeadState(newState *state.CachingBeaconState,
 	s.writeLock.Lock()
 	defer s.writeLock.Unlock()
 
-	if copyHookForTest != nil {
-		copyHookForTest()
-	}
-
-	copied, err := newState.Copy()
+	copied, err := s.copyState(newState)
 	if err != nil {
 		return err
 	}
@@ -139,6 +135,17 @@ func (s *SyncedDataManager) publishHeadState(newState *state.CachingBeaconState,
 	s.headState = copied
 	s.stateHead.Store(&headIdentity{root: blockRoot, slot: newState.Slot()})
 	return nil
+}
+
+// copyState performs the copy that publishHeadState swaps in. copyHookForTest,
+// when set, runs immediately before it - bundled into the same call so that
+// wherever the copy ends up relative to other locks, the hook's pause point
+// moves with it.
+func (s *SyncedDataManager) copyState(newState *state.CachingBeaconState) (*state.CachingBeaconState, error) {
+	if copyHookForTest != nil {
+		copyHookForTest()
+	}
+	return newState.Copy()
 }
 
 // ViewHeadState allows safe, read-only access to the current head state.
