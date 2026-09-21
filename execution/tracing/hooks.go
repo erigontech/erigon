@@ -242,10 +242,6 @@ func (h *Hooks) EmitEnter(depth int, typ byte, from accounts.Address, to account
 	}
 }
 
-func (h *Hooks) HasExitHook() bool {
-	return h != nil && (h.OnExitV2 != nil || h.OnExit != nil)
-}
-
 func (h *Hooks) EmitExit(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if h == nil {
 		return

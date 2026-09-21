@@ -1330,12 +1330,8 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 	tracer := evm.Config().Tracer
-	if tracer.HasEnterHook() {
-		tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	}
-	if tracer.HasExitHook() {
-		tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
-	}
+	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1401,12 +1397,8 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer
-	if tracer.HasEnterHook() {
-		tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
-	}
-	if tracer.HasExitHook() {
-		tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
-	}
+	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 

@@ -175,8 +175,6 @@ func HandleRuntimeFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts
 			tracer.EmitGasChange(*gasRemaining, mdgas.MdGas{}, tracing.GasChangeCallLeftOverReturned)
 		}
 	}
-	if tracer.HasExitHook() {
-		tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(err), true)
-	}
+	tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(err), true)
 	return gasUsed
 }
