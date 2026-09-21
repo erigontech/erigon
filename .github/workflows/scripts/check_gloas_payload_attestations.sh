@@ -6,6 +6,8 @@ api_tmp_dir=${2:?temporary output directory is required}
 poll_timeout=${GLOAS_POLL_TIMEOUT_SECONDS:-180}
 target_advance=${GLOAS_POLL_TARGET_ADVANCE:-8}
 poll_sleep=${GLOAS_POLL_SLEEP_SECONDS:-3}
+max_payload_attestations=4
+terminal_head_budget=2
 
 normalize_poll_config() {
   local name=$1 value=$2
@@ -35,18 +37,21 @@ curl_args=(
 )
 
 deadline=$((SECONDS + poll_timeout))
+scan_deadline=$((deadline - terminal_head_budget))
 scan_incomplete=false
 scan_incomplete_near_head_404_only=false
 head_fetch_unavailable=false
 
 wait_for_next_poll() {
-  local remaining_time sleep_time
+  local reserve_time=${1:-0} remaining_time sleep_time
   remaining_time=$((deadline - SECONDS))
   if ((remaining_time <= 0)); then
     return 1
   fi
-  sleep_time=$((poll_sleep < remaining_time ? poll_sleep : remaining_time))
-  sleep "$sleep_time"
+  sleep_time=$((poll_sleep < remaining_time - reserve_time ? poll_sleep : remaining_time - reserve_time))
+  if ((sleep_time > 0)); then
+    sleep "$sleep_time"
+  fi
 }
 
 read_head_slot() {
@@ -72,10 +77,12 @@ initial_head_slot=
 while ((SECONDS < deadline)); do
   remaining=$((deadline - SECONDS))
   request_timeout=$((remaining < 15 ? remaining : 15))
-  if curl --fail "${curl_args[@]}" \
+  if initial_head_http_code=$(curl --fail "${curl_args[@]}" \
     --max-time "$request_timeout" \
+    --write-out '%{http_code}' \
     "$beacon_url/eth/v2/beacon/blocks/head" \
-    --output "$api_tmp_dir/head.json" && initial_head_slot=$(read_head_slot); then
+    --output "$api_tmp_dir/head.json") && \
+    [ "$initial_head_http_code" = 200 ] && initial_head_slot=$(read_head_slot); then
     if ((SECONDS >= deadline)); then
       initial_head_slot=
       head_fetch_unavailable=true
@@ -101,26 +108,46 @@ next_slot=$((initial_head_slot > 8 ? initial_head_slot - 8 : 1))
 while ((SECONDS < deadline)); do
   remaining=$((deadline - SECONDS))
   request_timeout=$((remaining < 15 ? remaining : 15))
-  if ! curl --fail "${curl_args[@]}" \
+  terminal_head_poll=false
+  if ((remaining <= terminal_head_budget)); then
+    terminal_head_poll=true
+  fi
+  if ! head_http_code=$(curl --fail "${curl_args[@]}" \
     --max-time "$request_timeout" \
+    --write-out '%{http_code}' \
     "$beacon_url/eth/v2/beacon/blocks/head" \
-    --output "$api_tmp_dir/head.json"; then
+    --output "$api_tmp_dir/head.json") || [ "$head_http_code" != 200 ]; then
     head_fetch_unavailable=true
-    wait_for_next_poll || break
+    if [ "$terminal_head_poll" = true ]; then
+      break
+    fi
+    wait_for_next_poll "$terminal_head_budget" || break
     continue
   fi
   if ! head_slot=$(read_head_slot); then
     echo "Head block response was invalid; retrying"
     head_fetch_unavailable=true
-    wait_for_next_poll || break
+    if [ "$terminal_head_poll" = true ]; then
+      break
+    fi
+    wait_for_next_poll "$terminal_head_budget" || break
     continue
   fi
   if ((SECONDS >= deadline)); then
-    head_fetch_unavailable=true
+    if [ "$terminal_head_poll" = false ]; then
+      head_fetch_unavailable=true
+    fi
     break
   fi
   head_fetch_unavailable=false
   last_head_slot=$head_slot
+  if [ "$terminal_head_poll" = true ]; then
+    if [ "$scan_incomplete" = false ] && ((next_slot <= head_slot)); then
+      scan_incomplete=true
+      scan_incomplete_near_head_404_only=false
+    fi
+    break
+  fi
   pass_incomplete=false
   pass_near_head_404_only=true
   first_unresolved_slot=0
@@ -132,13 +159,14 @@ while ((SECONDS < deadline)); do
   fi
 
   for ((slot = next_slot; slot <= head_slot; slot++)); do
-    if ((SECONDS >= deadline)); then
+    if ((SECONDS >= scan_deadline)); then
       scan_incomplete=true
       scan_incomplete_near_head_404_only=false
-      break 2
+      next_slot=$((first_unresolved_slot == 0 ? slot : first_unresolved_slot))
+      continue 2
     fi
 
-    remaining=$((deadline - SECONDS))
+    remaining=$((scan_deadline - SECONDS))
     request_timeout=$((remaining < 15 ? remaining : 15))
     slot_unresolved=false
     slot_near_head_404=false
@@ -147,17 +175,21 @@ while ((SECONDS < deadline)); do
       --write-out '%{http_code}' \
       "$beacon_url/eth/v2/beacon/blocks/$slot" \
       --output "$api_tmp_dir/candidate.json"); then
-      if ((SECONDS >= deadline)); then
+      if ((SECONDS >= scan_deadline)); then
         scan_incomplete=true
         scan_incomplete_near_head_404_only=false
-        break 2
+        next_slot=$((first_unresolved_slot == 0 ? slot : first_unresolved_slot))
+        continue 2
       fi
 
       case "$candidate_http_code" in
         200)
-          if ! payload_available=$(jq -sr \
+          payload_available_file="$api_tmp_dir/candidate-payload-available"
+          : >"$payload_available_file"
+          jq -sr \
             --arg requested_slot "$slot" \
-            --arg attestation_slot "$((slot - 1))" '
+            --arg attestation_slot "$((slot - 1))" \
+            --argjson max_payload_attestations "$max_payload_attestations" '
             def canonical_decimal:
               type == "string" and
               length > 0 and
@@ -177,6 +209,7 @@ while ((SECONDS < deadline)); do
               (.data.message.parent_root | test("^0x[0-9a-fA-F]{64}\\z")) and
               (.data.message.body | type == "object") and
               (.data.message.body.payload_attestations | type == "array") and
+              (.data.message.body.payload_attestations | length <= $max_payload_attestations) and
               all(.data.message.body.payload_attestations[];
                 (. | type == "object") and
                 (.aggregation_bits | type == "string") and
@@ -203,17 +236,39 @@ while ((SECONDS < deadline)); do
             any(.data.message.body.payload_attestations[];
               .data.payload_present == true
             )
-          ' "$api_tmp_dir/candidate.json"); then
-            echo "Candidate block response for slot $slot was invalid; retrying"
-            slot_unresolved=true
-          elif [[ "$payload_available" != true && "$payload_available" != false ]]; then
+          ' "$api_tmp_dir/candidate.json" >"$payload_available_file" &
+          jq_pid=$!
+          jq_timed_out=false
+          while kill -0 "$jq_pid" 2>/dev/null; do
+            if ((SECONDS >= scan_deadline)); then
+              jq_timed_out=true
+              kill "$jq_pid" 2>/dev/null || true
+              break
+            fi
+            sleep 0.05
+          done
+          if [ "$jq_timed_out" = true ]; then
+            wait "$jq_pid" 2>/dev/null || true
+            scan_incomplete=true
+            scan_incomplete_near_head_404_only=false
+            next_slot=$((first_unresolved_slot == 0 ? slot : first_unresolved_slot))
+            continue 2
+          elif ! wait "$jq_pid"; then
             echo "Candidate block response for slot $slot was invalid; retrying"
             slot_unresolved=true
           else
-            if ((SECONDS >= deadline)); then
+            payload_available=$(<"$payload_available_file")
+          fi
+          if [ "$slot_unresolved" = false ] && \
+            [[ "$payload_available" != true && "$payload_available" != false ]]; then
+            echo "Candidate block response for slot $slot was invalid; retrying"
+            slot_unresolved=true
+          elif [ "$slot_unresolved" = false ]; then
+            if ((SECONDS >= scan_deadline)); then
               scan_incomplete=true
               scan_incomplete_near_head_404_only=false
-              break 2
+              next_slot=$((first_unresolved_slot == 0 ? slot : first_unresolved_slot))
+              continue 2
             fi
             if [ "$payload_available" = true ]; then
               echo "Found available payload attestations in Gloas block at slot $slot"
@@ -254,14 +309,14 @@ while ((SECONDS < deadline)); do
   scan_incomplete_near_head_404_only=$pass_near_head_404_only
   if [ "$scan_incomplete" = true ]; then
     next_slot=$first_unresolved_slot
-    wait_for_next_poll || break
+    wait_for_next_poll "$terminal_head_budget" || break
     continue
   fi
   if ((head_slot >= target_head_slot)); then
     break
   fi
   echo "Waiting for payload attestations: head slot $head_slot, target slot $target_head_slot"
-  wait_for_next_poll || break
+  wait_for_next_poll "$terminal_head_budget" || break
 done
 
 if [ "$scan_incomplete" = true ] && [ "$head_fetch_unavailable" = true ]; then

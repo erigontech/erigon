@@ -109,6 +109,11 @@ if [[ "$url" == */head ]]; then
       4) printf '[]\n' >"$output"; exit 0 ;;
     esac
   fi
+  head_http_code=200
+  if [[ "$GLOAS_TEST_SCENARIO" == initial_non_200_head && "$count" -eq 1 ]] ||
+    [[ "$GLOAS_TEST_SCENARIO" == later_non_200_head && "$count" -eq 2 ]]; then
+    head_http_code=201
+  fi
   case "$GLOAS_TEST_SCENARIO" in
     deadline)
       slot=$((count == 1 ? 0 : 100000))
@@ -121,6 +126,31 @@ if [[ "$url" == */head ]]; then
       ;;
     stalled_near_head_404)
       slot=$((count == 1 ? 0 : 2))
+      ;;
+    near_head_404_then_empty)
+      slot=$((count == 1 ? 0 : count == 2 ? 1 : 8))
+      ;;
+    stale_head_reaches_target)
+      if [[ -f "$GLOAS_TEST_STATE_DIR/terminal-head-ready" ]]; then
+        slot=8
+      else
+        slot=$((count == 1 ? 0 : 7))
+      fi
+      ;;
+    post_deadline_head_advance)
+      if [[ -f "$GLOAS_TEST_STATE_DIR/terminal-head-ready" ]]; then
+        sleep 2
+        slot=8
+      else
+        slot=$((count == 1 ? 0 : 7))
+      fi
+      ;;
+    scan_complete_head_reaches_target)
+      if [[ -f "$GLOAS_TEST_STATE_DIR/terminal-head-ready" ]]; then
+        slot=8
+      else
+        slot=$((count == 1 ? 0 : 7))
+      fi
       ;;
     api_hole)
       slot=$((count == 1 ? 0 : 2))
@@ -152,6 +182,7 @@ if [[ "$url" == */head ]]; then
       ;;
   esac
   printf '{"data":{"message":{"slot":"%s"}}}\n' "$slot" >"$output"
+  $write_out && printf '%s' "$head_http_code"
   exit 0
 fi
 
@@ -162,6 +193,10 @@ candidate_slot=${url##*/}
 slot_count_file="$GLOAS_TEST_STATE_DIR/candidate-$candidate_slot-count"
 slot_count=$(($(cat "$slot_count_file" 2>/dev/null || echo 0) + 1))
 echo "$slot_count" >"$slot_count_file"
+
+if [[ "$GLOAS_TEST_SCENARIO" == candidate_reserves_terminal_budget ]]; then
+  printf '%s\n' "$max_time" >"$GLOAS_TEST_STATE_DIR/candidate-max-time"
+fi
 
 if [[ "$GLOAS_TEST_SCENARIO" == deadline ]]; then
   : >"$output"
@@ -174,7 +209,15 @@ if [[ "$GLOAS_TEST_SCENARIO" == retry* ]] && ((slot_count == 1)); then
   exit 7
 fi
 
-if [[ "$GLOAS_TEST_SCENARIO" == retry_empty ]]; then
+if [[ "$GLOAS_TEST_SCENARIO" == near_head_404_then_empty && "$candidate_slot" == 1 ]] &&
+  ((slot_count == 1)); then
+  : >"$output"
+  $write_out && printf '404'
+  exit 0
+fi
+
+if [[ "$GLOAS_TEST_SCENARIO" == retry_empty ||
+  "$GLOAS_TEST_SCENARIO" == near_head_404_then_empty ]]; then
   printf '{"version":"gloas","data":{"message":{"slot":"%s","parent_root":"0xabababababababababababababababababababababababababababababababab","body":{"payload_attestations":[]}}}}\n' \
     "$candidate_slot" >"$output"
   $write_out && printf '200'
@@ -198,6 +241,25 @@ if [[ "$GLOAS_TEST_SCENARIO" == near_head_404 && "$candidate_slot" == 1 ]] ||
   exit 0
 fi
 
+if [[ "$GLOAS_TEST_SCENARIO" == stale_head_reaches_target ||
+  "$GLOAS_TEST_SCENARIO" == post_deadline_head_advance ]] && ((candidate_slot >= 6)); then
+  touch "$GLOAS_TEST_STATE_DIR/terminal-head-ready"
+  : >"$output"
+  $write_out && printf '404'
+  exit 0
+fi
+
+if [[ "$GLOAS_TEST_SCENARIO" == scan_complete_head_reaches_target ]] && ((candidate_slot == 7)); then
+  touch "$GLOAS_TEST_STATE_DIR/terminal-head-ready"
+fi
+
+if [[ "$GLOAS_TEST_SCENARIO" == late_candidate_response ]] && ((slot_count == 1)); then
+  sleep "$max_time"
+  : >"$output"
+  $write_out && printf '404'
+  exit 0
+fi
+
 if [[ "$GLOAS_TEST_SCENARIO" == malformed ]] && ((slot_count == 1)); then
   printf '{}\n' >"$output"
   $write_out && printf '200'
@@ -211,6 +273,44 @@ if [[ "$GLOAS_TEST_SCENARIO" == multi_document_candidate ]] && ((slot_count == 1
   printf '{"version":"gloas","data":{"message":{"slot":"1","parent_root":"0x%s","body":{"payload_attestations":[{"aggregation_bits":"0x%s","data":{"slot":"0","beacon_block_root":"0x%s","payload_present":true,"blob_data_available":true},"signature":"0x%s"}]}}}}\n{}\n' \
     "$root" "$aggregation_bits" "$root" "$signature" >"$output"
   $write_out && printf '200'
+  exit 0
+fi
+
+write_multi_attestation_response() {
+  local count=$1 malformed_last=$2
+  local signature aggregation_bits root attestations='' attestation attestation_signature index
+  signature=$(printf '01%.0s' {1..96})
+  aggregation_bits=$(printf '01%.0s' {1..64})
+  root=$(printf 'ab%.0s' {1..32})
+  for ((index = 0; index < count; index++)); do
+    attestation_signature=$signature
+    if [ "$malformed_last" = true ] && ((index + 1 == count)); then
+      attestation_signature=bad
+    fi
+    attestation=$(printf '{"aggregation_bits":"0x%s","data":{"slot":"%s","beacon_block_root":"0x%s","payload_present":true,"blob_data_available":true},"signature":"0x%s"}' \
+      "$aggregation_bits" "$((candidate_slot - 1))" "$root" "$attestation_signature")
+    if [ -n "$attestations" ]; then
+      attestations+=,
+    fi
+    attestations+=$attestation
+  done
+  printf '{"version":"gloas","data":{"message":{"slot":"%s","parent_root":"0x%s","body":{"payload_attestations":[%s]}}}}\n' \
+    "$candidate_slot" "$root" "$attestations" >"$output"
+  $write_out && printf '200'
+}
+
+if [[ "$GLOAS_TEST_SCENARIO" == four_attestations ]]; then
+  write_multi_attestation_response 4 false
+  exit 0
+fi
+
+if [[ "$GLOAS_TEST_SCENARIO" == too_many_attestations ]] && ((slot_count == 1)); then
+  write_multi_attestation_response 5 false
+  exit 0
+fi
+
+if [[ "$GLOAS_TEST_SCENARIO" == mixed_attestations ]] && ((slot_count == 1)); then
+  write_multi_attestation_response 2 true
   exit 0
 fi
 
@@ -228,6 +328,7 @@ beacon_block_root=$(printf 'ab%.0s' {1..32})
 response_slot=$candidate_slot
 attestation_slot=$((candidate_slot - 1))
 parent_root=$beacon_block_root
+version=gloas
 if [[ "$GLOAS_TEST_SCENARIO" == wrong_slot ]] && ((slot_count == 1)); then
   response_slot=$((candidate_slot + 1))
   attestation_slot=$((response_slot - 1))
@@ -263,6 +364,9 @@ fi
 if [[ "$GLOAS_TEST_SCENARIO" == noncanonical_attestation ]] && ((slot_count == 1)); then
   attestation_slot='0\n'
 fi
+if [[ "$GLOAS_TEST_SCENARIO" == wrong_version ]] && ((slot_count == 1)); then
+  version=fulu
+fi
 payload_present=true
 if [[ "$GLOAS_TEST_SCENARIO" == late_empty_candidate_parse ]] && ((slot_count == 1)); then
   payload_present=false
@@ -270,7 +374,10 @@ fi
 if [[ "$GLOAS_TEST_SCENARIO" == api_hole ||
   "$GLOAS_TEST_SCENARIO" == api_hole_then_head_failure ||
   "$GLOAS_TEST_SCENARIO" == stalled_near_head_404 ||
-  "$GLOAS_TEST_SCENARIO" == near_head_404_then_head_failure ]]; then
+  "$GLOAS_TEST_SCENARIO" == near_head_404_then_head_failure ||
+  "$GLOAS_TEST_SCENARIO" == stale_head_reaches_target ||
+  "$GLOAS_TEST_SCENARIO" == post_deadline_head_advance ||
+  "$GLOAS_TEST_SCENARIO" == scan_complete_head_reaches_target ]]; then
   payload_present=false
 fi
 beacon_block_root_field=",\"beacon_block_root\":\"0x$beacon_block_root\""
@@ -282,7 +389,7 @@ if [[ "$GLOAS_TEST_SCENARIO" == missing_attestation_fields ]] && ((slot_count ==
   blob_data_available_field=
 fi
 cat >"$output" <<EOF_JSON
-{"version":"gloas","data":{"message":{"slot":"$response_slot","parent_root":"0x$parent_root","body":{"payload_attestations":[{"aggregation_bits":"0x$aggregation_bits","data":{"slot":"$attestation_slot"$beacon_block_root_field,"payload_present":$payload_present$blob_data_available_field},"signature":"0x$signature"}]}}}}
+{"version":"$version","data":{"message":{"slot":"$response_slot","parent_root":"0x$parent_root","body":{"payload_attestations":[{"aggregation_bits":"0x$aggregation_bits","data":{"slot":"$attestation_slot"$beacon_block_root_field,"payload_present":$payload_present$blob_data_available_field},"signature":"0x$signature"}]}}}}
 EOF_JSON
 $write_out && printf '200'
 EOF
@@ -324,7 +431,7 @@ fail=0
 run_scenario() {
   local name=$1 scenario=$2 want_exit=$3 want_re=$4 reject_re=$5
   local timeout=$6 target_advance=$7 poll_sleep=$8
-  local output status why= file comparison expected actual
+  local output status why='' file comparison expected actual
   shift 8
 
   export GLOAS_TEST_SCENARIO=$scenario
@@ -370,6 +477,7 @@ run_scenario() {
     case "$comparison" in
       eq) ((actual == expected)) || why="$file: want $expected, got $actual" ;;
       ge) ((actual >= expected)) || why="$file: want >= $expected, got $actual" ;;
+      le) ((actual <= expected)) || why="$file: want <= $expected, got $actual" ;;
       *) why="unknown count comparison $comparison" ;;
     esac
   done
@@ -389,6 +497,9 @@ run_scenario "deadline exhaustion reports incomplete scan" deadline 1 \
 run_scenario "candidate transport failure retries" retry 0 \
   'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
   candidate-count eq 2
+run_scenario "candidate request reserves terminal head budget" candidate_reserves_terminal_budget 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 10 1 0 \
+  candidate-max-time le 8
 run_scenario "later candidate progress survives an earlier hole" permanent_then_later 0 \
   'Found available payload attestations in Gloas block at slot 2' - 30 2 0 \
   candidate-1-count eq 1 candidate-2-count eq 1
@@ -397,6 +508,16 @@ run_scenario "near-head 404 is revisited" near_head_404 0 \
   candidate-1-count eq 2
 run_scenario "stalled chain with near-head 404 reports liveness" stalled_near_head_404 1 \
   'Chain liveness failure' 'Payload-attestation scan incomplete' 4 8 4
+run_scenario "terminal head refresh prevents stale liveness diagnosis" stale_head_reaches_target 1 \
+  'Payload-attestation scan incomplete' 'Chain liveness failure' 4 8 4
+run_scenario "post-deadline head advance does not satisfy liveness target" post_deadline_head_advance 1 \
+  'Chain liveness failure' 'Payload-attestation scan incomplete' 4 8 4 \
+  head-count ge 3
+run_scenario "terminal head sample exposes an unscanned target slot" scan_complete_head_reaches_target 1 \
+  'Payload-attestation scan incomplete' 'Chain liveness failure' 4 8 4
+run_scenario "resolved near-head 404 clears incomplete state" near_head_404_then_empty 1 \
+  'No canonical Gloas block' 'Payload-attestation scan incomplete|Chain liveness failure' 30 8 0 \
+  candidate-1-count ge 2
 run_scenario "stalled chain with API hole reports incomplete scan" api_hole 1 \
   'Payload-attestation scan incomplete' 'Chain liveness failure' 4 8 4
 run_scenario "candidate hole remains primary after head polling fails" api_hole_then_head_failure 1 \
@@ -414,11 +535,26 @@ run_scenario "invalid head JSON roots are rejected" invalid_head_roots 0 \
 run_scenario "multi-document candidate response is rejected" multi_document_candidate 0 \
   'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
   candidate-1-count eq 2
+run_scenario "maximum payload attestation count is accepted" four_attestations 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 1
+run_scenario "too many payload attestations are rejected" too_many_attestations 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "mixed valid and malformed attestations are rejected" mixed_attestations 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
 run_scenario "invalid candidate JSON roots are rejected" invalid_candidate_roots 0 \
   'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
   candidate-1-count eq 4
 run_scenario "initial request obeys the poll deadline" initial_deadline 0 \
   'Found available payload attestations in Gloas block at slot 1' - 4 1 0
+run_scenario "initial non-200 head response is rejected" initial_non_200_head 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
+run_scenario "later non-200 head response is rejected" later_non_200_head 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  head-count ge 3
 run_scenario "fractional head slot is rejected" fractional_head 0 \
   'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
   head-count ge 3
@@ -447,7 +583,11 @@ run_scenario "terminal initial failure reports no head" terminal_initial_failure
   'no valid head slot was observed' - 4 1 0
 run_scenario "late candidate parse reports incomplete scan" late_candidate_parse 1 \
   'Payload-attestation scan incomplete before the deadline' \
-  'Found available payload attestations' 4 1 0
+  'Found available payload attestations' 4 1 0 \
+  head-count ge 3
+run_scenario "late candidate response reports incomplete scan" late_candidate_response 1 \
+  'Payload-attestation scan incomplete before the deadline' \
+  'Chain liveness failure' 8 1 0
 run_scenario "late empty candidate parse reports incomplete scan" late_empty_candidate_parse 1 \
   'Payload-attestation scan incomplete before the deadline' \
   'No canonical Gloas block' 4 1 0
@@ -471,6 +611,9 @@ run_scenario "head transport failure recovers" head_retry_recovery 0 \
 run_scenario "stalled head reports liveness" head_retry_liveness 1 \
   'Chain liveness failure' 'Payload-attestation scan incomplete' 4 1 4
 run_scenario "wrong candidate slot is rejected" wrong_slot 0 \
+  'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
+  candidate-1-count eq 2
+run_scenario "wrong candidate version is rejected" wrong_version 0 \
   'Found available payload attestations in Gloas block at slot 1' - 30 1 0 \
   candidate-1-count eq 2
 run_scenario "invalid signature is rejected" invalid_attestation 0 \
