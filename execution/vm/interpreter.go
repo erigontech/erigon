@@ -379,13 +379,12 @@ func stackBoundsErr(sLen int, operation *operation) error {
 // traceGas picks the figure the dev instruction trace should report: call
 // opcodes forward gas to the callee, so their charged cost is not the
 // interesting number.
-func traceGas(op OpCode, callGas, cost uint64) uint64 {
+func traceGas(op OpCode, callGas mdgas.MdGas, cost mdgas.MdGas) mdgas.MdGas {
 	switch op {
 	case CALL, CALLCODE, DELEGATECALL, STATICCALL:
 		return callGas
-	default:
-		return cost
 	}
+	return cost
 }
 
 // Run loops and evaluates the contract's code with the given input data and returns
@@ -415,7 +414,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// copies used by tracer
 		pcCopy  uint64 // needed for the deferred Tracer
 		oldGas  mdgas.MdGas
-		callGas uint64
+		callGas mdgas.MdGas
 		logged  bool   // deferred Tracer should ignore already logged steps
 		res     []byte // result of the opcode execution function
 		tracer  = evm.config.Tracer
@@ -487,7 +486,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 		// enough stack items available to perform the operation.
 		op = contract.GetOp(pc)
 		operation := &jt[op]
-		cost = mdgas.MdGas{Execution: operation.constantGas}
+		cost = mdgas.MdGas{Execution: operation.constantGas} // For tracing
 		// Valid iff numPop <= sLen <= maxStack, as one unsigned range check:
 		// a stack shallower than numPop wraps negative and fails the compare.
 		if sLen := stack.len(); uint(sLen-operation.numPop) > uint(operation.maxStack-operation.numPop) {
@@ -532,9 +531,11 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			}
 			if anyTrace {
 				cost = cost.Plus(dynamicCost)
-				callGas = operation.constantGas + dynamicCost.Execution - evm.CallGasTemp()
-				if dbg.TraceDynamicGas && dynamicCost.Execution > 0 {
-					fmt.Printf("%d (%d.%d) Dynamic Gas: %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), traceGas(op, callGas, cost.Execution), op)
+				callGas = cost
+				callGas.Execution -= evm.CallGasTemp()
+				if dbg.TraceDynamicGas && dynamicCost != (mdgas.MdGas{}) {
+					gasCost := traceGas(op, callGas, cost)
+					fmt.Printf("%d (%d.%d) Dynamic Gas: %d %d (%s)\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), gasCost.Execution, gasCost.State, op)
 				}
 			}
 			if callContext.gas < dynamicCost.Execution {
@@ -574,7 +575,8 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 				opstr = op.String()
 			}
 
-			fmt.Printf("%d (%d.%d) %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, traceGas(op, callGas, cost.Execution), opstr)
+			gasCost := traceGas(op, callGas, cost)
+			fmt.Printf("%d (%d.%d) %5d %5d %5d %s\n", evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), pc, gasCost.Execution, gasCost.State, opstr)
 		}
 
 		// execute the operation
