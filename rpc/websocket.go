@@ -295,7 +295,9 @@ func (a *wsConnAdapter) encode(v any) error {
 	ctx := context.Background()
 	if a.netConn != nil {
 		if !dl.IsZero() {
-			a.netConn.SetWriteDeadline(dl)                //nolint:errcheck
+			if err := a.netConn.SetWriteDeadline(dl); err != nil {
+				return err
+			}
 			defer a.netConn.SetWriteDeadline(time.Time{}) //nolint:errcheck
 		}
 	} else if !dl.IsZero() {
