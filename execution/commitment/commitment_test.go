@@ -1297,9 +1297,9 @@ func TestApplyDeferredUpdates_ShardedFlushMergesAndWritesEachPrefixOnce(t *testi
 				getDeferredUpdate([]byte{0x01}, raw, prev),
 				getDeferredUpdate([]byte{0x02}, raw, nil),
 				getDeferredUpdate([]byte{0x03}, same, same))
-			for i := range 64 {
+			for i := range (workers - 1) * deferredWritesPerWorker {
 				pu.deferredCombined = append(pu.deferredCombined,
-					getDeferredUpdate([]byte{0x10, byte(i)}, raw, prev))
+					getDeferredUpdate([]byte{0x10, byte(i >> 8), byte(i)}, raw, prev))
 			}
 			wantWrites := int64(len(pu.deferredCombined) - 1)
 
@@ -1315,7 +1315,7 @@ func TestApplyDeferredUpdates_ShardedFlushMergesAndWritesEachPrefixOnce(t *testi
 				"prev must survive the merge for the changeset undo record")
 			require.Equal(t, []byte(raw), written[string([]byte{0x02})], "an empty prev encodes as raw")
 			require.NotContains(t, written, string([]byte{0x03}), "prev==raw stays a skipped write")
-			require.LessOrEqual(t, made.Load(), int64(workers), "no worker shares a trie context")
+			require.Equal(t, int64(workers), made.Load(), "one trie context per flush worker, none shared")
 		})
 	}
 }
