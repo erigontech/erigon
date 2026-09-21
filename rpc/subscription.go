@@ -221,6 +221,17 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 // Closed returns a channel that is closed when the RPC connection is closed.
 //
 // Deprecated: use subscription error channel
+// Batch runs send with the connection corked, so the notifications it sends leave together.
+func Batch(n Notifier, send func()) {
+	if r, ok := n.(*RemoteNotifier); ok {
+		if c, ok := r.h.conn.(interface{ cork(bool) }); ok {
+			c.cork(true)
+			defer c.cork(false)
+		}
+	}
+	send()
+}
+
 func (n *RemoteNotifier) Closed() <-chan any {
 	return n.h.conn.closed()
 }

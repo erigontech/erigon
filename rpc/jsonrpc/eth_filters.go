@@ -182,7 +182,7 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					log.Warn(closedWarn)
 					return
 				}
-				notify(emit, item)
+				rpc.Batch(notifier, func() { notify(emit, item) })
 			case <-rpcSub.Err():
 				return
 			}

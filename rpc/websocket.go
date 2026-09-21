@@ -34,7 +34,9 @@ import (
 
 	"github.com/coder/websocket"
 	mapset "github.com/deckarep/golang-set/v2"
+	gorilla "github.com/gorilla/websocket"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -68,15 +70,26 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-			InsecureSkipVerify: true, // origin already validated above
-			CompressionMode:    compressionMode,
-		})
-		if err != nil {
-			logger.Warn("WebSocket upgrade failed", "err", err)
-			return
+		var codec ServerCodec
+		if wsGorilla {
+			up := gorilla.Upgrader{CheckOrigin: func(*http.Request) bool { return true }, EnableCompression: compression}
+			conn, err := up.Upgrade(w, r, nil)
+			if err != nil {
+				logger.Warn("WebSocket upgrade failed", "err", err)
+				return
+			}
+			codec = newGorillaCodec(conn, r.Host, r.Header, r.RemoteAddr)
+		} else {
+			conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+				InsecureSkipVerify: true, // origin already validated above
+				CompressionMode:    compressionMode,
+			})
+			if err != nil {
+				logger.Warn("WebSocket upgrade failed", "err", err)
+				return
+			}
+			codec = NewWebsocketCodec(conn, r.Host, r.Header, r.RemoteAddr)
 		}
-		codec := NewWebsocketCodec(conn, r.Host, r.Header, r.RemoteAddr)
 		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
 		// instead of blocking indefinitely when the DB semaphore is full.
 		// r.Context() remains valid for the lifetime of the WebSocket session because
@@ -369,6 +382,105 @@ func (wc *websocketCodec) ping() {
 // resetPing checks closed after Reset: Close closes before its Stop, so a Reset
 // racing with Close is undone by one of the two Stops.
 func (wc *websocketCodec) resetPing() {
+	wc.pingTimer.Reset(wsPingInterval)
+	select {
+	case <-wc.closed():
+		wc.pingTimer.Stop()
+	default:
+	}
+}
+
+// wsGorilla is a prototype switch: serve websocket connections with gorilla, as geth does.
+var wsGorilla = dbg.EnvBool("WS_GORILLA", false)
+
+type gorillaConnAdapter struct{ conn *gorilla.Conn }
+
+func (a gorillaConnAdapter) Close() error {
+	msg := gorilla.FormatCloseMessage(gorilla.CloseNormalClosure, "")
+	a.conn.WriteControl(gorilla.CloseMessage, msg, time.Now().Add(wsPingWriteTimeout)) //nolint:errcheck
+	return a.conn.Close()
+}
+
+func (a gorillaConnAdapter) SetWriteDeadline(t time.Time) error { return a.conn.SetWriteDeadline(t) }
+
+func (a gorillaConnAdapter) encode(v any) error {
+	switch r := v.(type) {
+	case rawResponse:
+		return a.conn.WriteMessage(gorilla.TextMessage, r)
+	case rawBatch:
+		s := jsonstream.Get(nil)
+		defer jsonstream.Put(s)
+		r.writeTo(s)
+		return a.conn.WriteMessage(gorilla.TextMessage, s.Buffer())
+	default:
+		data, err := json.Marshal(v)
+		if err != nil {
+			return err
+		}
+		return a.conn.WriteMessage(gorilla.TextMessage, data)
+	}
+}
+
+func (a gorillaConnAdapter) readFrame() ([]byte, error) {
+	_, data, err := a.conn.ReadMessage()
+	return data, err
+}
+
+type gorillaCodec struct {
+	*jsonCodec
+	conn      *gorilla.Conn
+	info      PeerInfo
+	pingTimer *time.Timer
+}
+
+func newGorillaCodec(conn *gorilla.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
+	conn.SetReadLimit(wsMessageSizeLimit)
+	adapter := gorillaConnAdapter{conn: conn}
+	wc := &gorillaCodec{
+		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
+		conn:      conn,
+		info:      PeerInfo{Transport: "ws", RemoteAddr: remoteAddr},
+	}
+	wc.writeTimeout = wsPingInterval
+	wc.info.HTTP.Host = host
+	if req != nil {
+		wc.info.HTTP.Origin = req.Get("Origin")
+		wc.info.HTTP.UserAgent = req.Get("User-Agent")
+	}
+	wc.pingTimer = time.AfterFunc(math.MaxInt64, wc.ping)
+	wc.pingTimer.Reset(wsPingInterval)
+	return wc
+}
+
+func (wc *gorillaCodec) Close() {
+	wc.jsonCodec.Close()
+	wc.pingTimer.Stop()
+}
+
+func (wc *gorillaCodec) peerInfo() PeerInfo { return wc.info }
+
+func (wc *gorillaCodec) cork(on bool) {
+	if wsCork {
+		setCork(wc.conn.UnderlyingConn(), on)
+	}
+}
+
+var wsCork = dbg.EnvBool("WS_CORK", false)
+
+func (wc *gorillaCodec) WriteJSON(ctx context.Context, v any) error {
+	err := wc.jsonCodec.WriteJSON(ctx, v)
+	if err == nil {
+		wc.resetPing()
+	}
+	return err
+}
+
+func (wc *gorillaCodec) ping() {
+	wc.conn.WriteControl(gorilla.PingMessage, nil, time.Now().Add(wsPingWriteTimeout)) //nolint:errcheck
+	wc.resetPing()
+}
+
+func (wc *gorillaCodec) resetPing() {
 	wc.pingTimer.Reset(wsPingInterval)
 	select {
 	case <-wc.closed():
