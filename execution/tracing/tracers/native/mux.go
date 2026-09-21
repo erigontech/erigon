@@ -38,9 +38,8 @@ func init() {
 // muxTracer is a go implementation of the Tracer interface which
 // runs multiple tracers in one go.
 type muxTracer struct {
-	names    []string
-	tracers  []*tracers.Tracer
-	entryGas []mdgas.MdGas
+	names   []string
+	tracers []*tracers.Tracer
 }
 
 // newMuxTracer returns a new mux tracer.
@@ -109,20 +108,14 @@ func (t *muxTracer) OnGasChangeV2(old, new mdgas.MdGas, reason tracing.GasChange
 }
 
 func (t *muxTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
-	t.entryGas = append(t.entryGas, gas)
 	for _, child := range t.tracers {
 		child.Hooks.EmitEnter(depth, typ, from, to, precompile, input, gas, value, code)
 	}
 }
 
-func (t *muxTracer) OnExitV2(depth int, output []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
-	var entry mdgas.MdGas
-	if n := len(t.entryGas); n > 0 {
-		entry = t.entryGas[n-1]
-		t.entryGas = t.entryGas[:n-1]
-	}
+func (t *muxTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	for _, child := range t.tracers {
-		child.Hooks.EmitExit(depth, output, entry, gasLeft, err, reverted)
+		child.Hooks.EmitExit(depth, output, gasUsed, err, reverted)
 	}
 }
 

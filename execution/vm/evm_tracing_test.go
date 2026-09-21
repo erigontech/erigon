@@ -53,7 +53,7 @@ func TestFrameV2Gas(t *testing.T) {
 			ibs := state.New(state.NewNoopReader())
 			defer ibs.Close()
 			var entered []mdgas.MdGas
-			var exited []mdgas.MdGas
+			var exited []mdgas.MdGasUsage
 			hooks := &tracing.Hooks{
 				OnEnter: func(_ int, _ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
 					t.Fatal("V2 must take precedence")
@@ -66,28 +66,31 @@ func TestFrameV2Gas(t *testing.T) {
 				OnExit: func(_ int, _ []byte, _ uint64, _ error, _ bool) {
 					t.Fatal("V2 must take precedence")
 				},
-				OnExitV2: func(depth int, _ []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
+				OnExitV2: func(depth int, _ []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 					require.Zero(t, depth)
 					require.NoError(t, err)
 					require.False(t, reverted)
-					exited = append(exited, gasLeft)
+					exited = append(exited, gasUsed)
 				},
 			}
 			evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
-			initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet}
+			initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet / 2}
 			code := []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE), byte(STOP)}
 			var remaining mdgas.MdGas
+			var used mdgas.MdGasUsage
 			var err error
 			if tc.typ == CREATE {
-				_, _, remaining, _, err = evm.Create(accounts.ZeroAddress, code, initial, uint256.Int{}, nil, false)
+				_, _, remaining, used, err = evm.Create(accounts.ZeroAddress, code, initial, uint256.Int{}, nil, false)
 			} else {
 				address := accounts.InternAddress(common.HexToAddress("0x1000"))
 				require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
-				_, remaining, _, err = evm.CallCode(accounts.ZeroAddress, address, nil, initial, uint256.Int{})
+				_, remaining, used, err = evm.CallCode(accounts.ZeroAddress, address, nil, initial, uint256.Int{})
 			}
 			require.NoError(t, err)
 			require.Equal(t, []mdgas.MdGas{initial}, entered)
-			require.Equal(t, []mdgas.MdGas{remaining}, exited)
+			require.Equal(t, mdgas.MdGasUsage{Execution: 12_106, State: params.StateGasPerStorageSet, StateSpill: params.StateGasPerStorageSet / 2}, used)
+			require.Equal(t, []mdgas.MdGasUsage{used}, exited)
+			require.Equal(t, initial.Execution-remaining.Execution, used.Execution+used.StateSpill)
 			require.Zero(t, remaining.State)
 		})
 	}
@@ -114,10 +117,10 @@ func TestFrameV2Selfdestruct(t *testing.T) {
 						require.Equal(t, mdgas.MdGas{}, gas)
 					}
 				},
-				OnExitV2: func(depth int, _ []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
+				OnExitV2: func(depth int, _ []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 					if depth == 1 {
 						exits++
-						require.Equal(t, mdgas.MdGas{}, gasLeft)
+						require.Equal(t, mdgas.MdGasUsage{}, gasUsed)
 						require.NoError(t, err)
 						require.False(t, reverted)
 					}

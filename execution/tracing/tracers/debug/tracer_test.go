@@ -32,7 +32,7 @@ import (
 
 func TestFrameV2Recording(t *testing.T) {
 	initial := mdgas.MdGas{Execution: 100, State: 200}
-	left := mdgas.MdGas{Execution: 80, State: 210}
+	usage := mdgas.MdGasUsage{Execution: 20, State: -10}
 	var legacyEntry []uint64
 	var legacyUsage []uint64
 	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
@@ -46,7 +46,7 @@ func TestFrameV2Recording(t *testing.T) {
 	input := []byte{0xab}
 	recorder.Hooks().EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, input, initial, uint256.Int{}, nil)
 	input[0] = 0
-	recorder.Hooks().EmitExit(0, nil, initial, left, nil, false)
+	recorder.Hooks().EmitExit(0, nil, usage, nil, false)
 	require.Equal(t, []uint64{100}, legacyEntry)
 	require.Equal(t, []uint64{20}, legacyUsage)
 	encoded, err := json.Marshal(recorder.traces)
@@ -63,13 +63,13 @@ func TestFrameV2Recording(t *testing.T) {
 		Input string
 	}
 	var exit struct {
-		GasLeft mdgas.MdGas
+		GasUsed mdgas.MdGasUsage
 	}
 	require.NoError(t, json.Unmarshal(recorded.Traces[0]["onEnterV2"], &enter))
 	require.NoError(t, json.Unmarshal(recorded.Traces[1]["onExitV2"], &exit))
 	require.Equal(t, initial, enter.Gas)
 	require.Equal(t, "0xab", enter.Input)
-	require.Equal(t, left, exit.GasLeft)
+	require.Equal(t, usage, exit.GasUsed)
 }
 
 func TestOpcodeV2Recording(t *testing.T) {

@@ -31,9 +31,9 @@ import (
 
 func TestMuxForwardsFrameV2(t *testing.T) {
 	entry := []mdgas.MdGas{{Execution: 100, State: 200}, {Execution: 30, State: 50}}
-	left := []mdgas.MdGas{{Execution: 25, State: 55}, {Execution: 80, State: 210}}
+	usage := []mdgas.MdGasUsage{{Execution: 3, State: 12, StateSpill: 2}, {Execution: 20, State: -10}}
 	var entered []mdgas.MdGas
-	var exited []mdgas.MdGas
+	var exited []mdgas.MdGasUsage
 	var legacyEntry []uint64
 	var legacyUsage []uint64
 	children := []*tracers.Tracer{
@@ -41,8 +41,8 @@ func TestMuxForwardsFrameV2(t *testing.T) {
 			OnEnterV2: func(_ int, _ byte, _, _ accounts.Address, _ bool, _ []byte, gas mdgas.MdGas, _ uint256.Int, _ []byte) {
 				entered = append(entered, gas)
 			},
-			OnExitV2: func(_ int, _ []byte, gasLeft mdgas.MdGas, _ error, _ bool) {
-				exited = append(exited, gasLeft)
+			OnExitV2: func(_ int, _ []byte, gasUsed mdgas.MdGasUsage, _ error, _ bool) {
+				exited = append(exited, gasUsed)
 			},
 			OnEnter: func(_ int, _ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
 				t.Fatal("V2 must take precedence")
@@ -65,12 +65,12 @@ func TestMuxForwardsFrameV2(t *testing.T) {
 	mux := newTestMuxTracer([]string{"v2", "v1", "nil", "empty"}, children)
 	mux.EmitEnter(0, 0xf1, accounts.ZeroAddress, accounts.ZeroAddress, false, nil, entry[0], uint256.Int{}, nil)
 	mux.EmitEnter(1, 0xf1, accounts.ZeroAddress, accounts.ZeroAddress, false, nil, entry[1], uint256.Int{}, nil)
-	mux.EmitExit(1, nil, entry[1], left[0], nil, false)
-	mux.EmitExit(0, nil, entry[0], left[1], nil, false)
+	mux.EmitExit(1, nil, usage[0], nil, false)
+	mux.EmitExit(0, nil, usage[1], nil, false)
 	require.Equal(t, entry, entered)
-	require.Equal(t, left, exited)
+	require.Equal(t, usage, exited)
 	require.Equal(t, []uint64{100, 30}, legacyEntry)
-	require.Equal(t, []uint64{5, 20}, legacyUsage)
+	require.Equal(t, []uint64{3, 20}, legacyUsage)
 }
 
 func TestMuxForwardsOpcodeV2(t *testing.T) {

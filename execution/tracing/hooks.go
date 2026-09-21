@@ -109,8 +109,8 @@ type (
 	// be indicated by `reverted == false` and `err == ErrCodeStoreOutOfGas`.
 	ExitHook = func(depth int, output []byte, gasUsed uint64, err error, reverted bool)
 
-	// ExitHookV2 reports the remaining gas balances and takes precedence over ExitHook.
-	ExitHookV2 = func(depth int, output []byte, gasLeft mdgas.MdGas, err error, reverted bool)
+	// ExitHookV2 reports multidimensional gas usage and takes precedence over ExitHook.
+	ExitHookV2 = func(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool)
 
 	// OpcodeHook is invoked just prior to the execution of an opcode.
 	OpcodeHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, rData []byte, depth int, err error)
@@ -248,14 +248,14 @@ func (h *Hooks) HasExitHook() bool {
 	return h != nil && (h.OnExitV2 != nil || h.OnExit != nil)
 }
 
-func (h *Hooks) EmitExit(depth int, output []byte, gas, gasLeft mdgas.MdGas, err error, reverted bool) {
+func (h *Hooks) EmitExit(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if h == nil {
 		return
 	}
 	if h.OnExitV2 != nil {
-		h.OnExitV2(depth, output, gasLeft, err, reverted)
+		h.OnExitV2(depth, output, gasUsed, err, reverted)
 	} else if h.OnExit != nil {
-		h.OnExit(depth, output, gas.Execution-gasLeft.Execution, err, reverted)
+		h.OnExit(depth, output, gasUsed.Execution, err, reverted)
 	}
 }
 

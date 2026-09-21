@@ -56,7 +56,7 @@ func TestFrameV2RuntimeFailure(t *testing.T) {
 	initial := mdgas.MdGas{Execution: 100, State: 50}
 	remaining := mdgas.MdGas{Execution: 10, State: 20}
 	var entered []mdgas.MdGas
-	var exited []mdgas.MdGas
+	var exited []mdgas.MdGasUsage
 	hooks := &tracing.Hooks{
 		OnEnterV2: func(depth int, typ byte, _, _ accounts.Address, precompile bool, _ []byte, gas mdgas.MdGas, _ uint256.Int, _ []byte) {
 			require.Zero(t, depth)
@@ -64,18 +64,19 @@ func TestFrameV2RuntimeFailure(t *testing.T) {
 			require.True(t, precompile)
 			entered = append(entered, gas)
 		},
-		OnExitV2: func(depth int, _ []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
+		OnExitV2: func(depth int, _ []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 			require.Zero(t, depth)
 			require.ErrorIs(t, err, vm.ErrRuntimeOutOfGas)
 			require.True(t, reverted)
-			exited = append(exited, gasLeft)
+			exited = append(exited, gasUsed)
 		},
 	}
 	evm := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: hooks})
-	HandleRuntimeFailure(evm, vm.CALL, accounts.ZeroAddress, accounts.InternAddress(common.HexToAddress("0x04")), nil, initial, &remaining, uint256.Int{}, vm.ErrRuntimeOutOfGas)
+	gasUsed := HandleRuntimeFailure(evm, vm.CALL, accounts.ZeroAddress, accounts.InternAddress(common.HexToAddress("0x04")), nil, initial, &remaining, uint256.Int{}, vm.ErrRuntimeOutOfGas)
 	require.Equal(t, []mdgas.MdGas{initial}, entered)
-	require.Equal(t, []mdgas.MdGas{{State: initial.State}}, exited)
-	require.Equal(t, exited[0], remaining)
+	require.Equal(t, mdgas.MdGasUsage{Execution: initial.Execution}, gasUsed)
+	require.Equal(t, []mdgas.MdGasUsage{gasUsed}, exited)
+	require.Equal(t, mdgas.MdGas{State: initial.State}, remaining)
 }
 
 func TestGasChangeV2RuntimeCharges(t *testing.T) {

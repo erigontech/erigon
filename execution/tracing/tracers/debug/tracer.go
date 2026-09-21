@@ -42,7 +42,6 @@ type Tracer struct {
 	wrapped       *tracers.Tracer
 	traces        Traces
 	currentBlock  *types.Block
-	entryGas      []mdgas.MdGas
 }
 
 func New(outputDir string, opts ...Option) *tracers.Tracer {
@@ -136,7 +135,6 @@ func (t *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
 }
 
 func (t *Tracer) OnEnterV2(depth int, typ byte, from, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
-	t.entryGas = append(t.entryGas, gas)
 	if t.recordOptions.DisableOnEnterRecording {
 		return
 	}
@@ -160,17 +158,12 @@ func (t *Tracer) OnEnterV2(depth int, typ byte, from, to accounts.Address, preco
 	})
 }
 
-func (t *Tracer) OnExitV2(depth int, output []byte, gasLeft mdgas.MdGas, err error, reverted bool) {
-	var entry mdgas.MdGas
-	if n := len(t.entryGas); n > 0 {
-		entry = t.entryGas[n-1]
-		t.entryGas = t.entryGas[:n-1]
-	}
+func (t *Tracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if t.recordOptions.DisableOnExitRecording {
 		return
 	}
 	if t.wrapped != nil {
-		t.wrapped.Hooks.EmitExit(depth, output, entry, gasLeft, err, reverted)
+		t.wrapped.Hooks.EmitExit(depth, output, gasUsed, err, reverted)
 	}
 	var errStr string
 	if err != nil {
@@ -180,7 +173,7 @@ func (t *Tracer) OnExitV2(depth int, output []byte, gasLeft mdgas.MdGas, err err
 		OnExitV2: &OnExitTraceV2{
 			Depth:    depth,
 			Output:   output,
-			GasLeft:  gasLeft,
+			GasUsed:  gasUsed,
 			Error:    errStr,
 			Reverted: reverted,
 		},
@@ -639,11 +632,11 @@ type OnEnterTraceV2 struct {
 }
 
 type OnExitTraceV2 struct {
-	Depth    int           `json:"depth,omitempty"`
-	Output   hexutil.Bytes `json:"output,omitempty"`
-	GasLeft  mdgas.MdGas   `json:"gasLeft"`
-	Error    string        `json:"error,omitempty"`
-	Reverted bool          `json:"reverted,omitempty"`
+	Depth    int              `json:"depth,omitempty"`
+	Output   hexutil.Bytes    `json:"output,omitempty"`
+	GasUsed  mdgas.MdGasUsage `json:"gasUsed"`
+	Error    string           `json:"error,omitempty"`
+	Reverted bool             `json:"reverted,omitempty"`
 }
 
 type OnOpcodeTraceV2 struct {
