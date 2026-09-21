@@ -394,15 +394,10 @@ func persistAccountGraph(ctx commitment.PatriciaContext, root *node, before map[
 	for _, delta := range deltas {
 		after[string(delta.key)] = delta.key
 	}
-	for keyString := range before {
-		if _, ok := after[keyString]; ok {
-			continue
-		}
-		delta, err := readRecordDelta(ctx, before[keyString], nil)
-		if err != nil {
-			return err
-		}
-		deltas = append(deltas, delta)
+	var err error
+	deltas, err = appendRemovedDeltas(ctx, deltas, before, after)
+	if err != nil {
+		return err
 	}
 	if err := applyDeltas(deltas, ctx.PutBranch); err != nil {
 		return err

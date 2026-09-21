@@ -558,13 +558,13 @@ transitions, so testing them apart from the record that implements them was an o
 - Modify: `execution/commitment/v4/delta.go`
 - Create: `execution/commitment/v4/delta_complete_test.go`
 
-- [ ] emit every changed record with correct `prev`
-- [ ] emit every removed record as a zero-length value: collapse survivors, wiped storage subtrees, deleted accounts, and the 2→1 storage-root replacement's orphaned children
-- [ ] route through `PutBranch` → `DomainPut` (`commitment_context.go:1046-1057`) so `DomainPutCommitmentDiff` records the explicit diff (`domain_shared.go:728-746`) — the commitment domain has `HistoryDisabled` and `SnapshotsDisabled` (`state_schema.go:271-289`), so those diffs **are** the recovery path
-- [ ] write a test per removal class asserting a tombstone is emitted
-- [ ] write a test that replaying the delta set onto an empty domain reproduces the post-state records byte-for-byte
-- [ ] write a domain-level recovery test: apply deltas, drop the in-memory trie, reload from the domain, assert the root is unchanged. Do **not** reach for `engine_api_crash_recovery_test.go` — it is in `execution/engineapi` and drives the full engine API, which needs the §9 surface this plan excludes
-- [ ] run tests — must pass before task 19
+- [x] emit every changed record with correct `prev`
+- [x] emit every removed record as a zero-length value: collapse survivors, wiped storage subtrees, deleted accounts, and the 2→1 storage-root replacement's orphaned children
+- [x] route through `PutBranch` → `DomainPut` (`commitment_context.go:1046-1057`) so `DomainPutCommitmentDiff` records the explicit diff (`domain_shared.go:728-746`) — the commitment domain has `HistoryDisabled` and `SnapshotsDisabled` (`state_schema.go:271-289`), so those diffs **are** the recovery path
+- [x] write a test per removal class asserting a tombstone is emitted
+- [x] write a test that replaying the delta set onto an empty domain reproduces the post-state records byte-for-byte
+- [x] write a domain-level recovery test: apply deltas, drop the in-memory trie, reload from the domain, assert the root is unchanged. Do **not** reach for `engine_api_crash_recovery_test.go` — it is in `execution/engineapi` and drives the full engine API, which needs the §9 surface this plan excludes
+- [x] run tests — must pass before task 19
 
 ### Task 19: State codec and the variant marker
 

@@ -138,14 +138,13 @@ func TestWipeStorageRecordsFromMasks(t *testing.T) {
 	require.NotEmpty(t, ctx.branchCalls)
 }
 
-func TestWipeMissingStorageStillTombstonesFixedRoot(t *testing.T) {
+func TestWipeMissingStorageEmitsNoDelta(t *testing.T) {
 	var address [32]byte
 	address[0] = 0xb2
 	ctx := newMockContext()
 	_, err := runStorageTask(ctx, storageTask{addrHash: address, wipe: true})
 	require.NoError(t, err)
-	require.Contains(t, ctx.branches, string(StorageRootKey(address)))
-	require.Empty(t, ctx.branches[string(StorageRootKey(address))])
+	require.Empty(t, ctx.branches)
 }
 
 func TestWipeRejectsMalformedChildRecord(t *testing.T) {

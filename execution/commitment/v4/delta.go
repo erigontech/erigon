@@ -18,6 +18,7 @@ package v4
 
 import (
 	"bytes"
+	"sort"
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -64,4 +65,22 @@ func applyDeltas(deltas []recordDelta, putBranch putBranchFunc) error {
 		}
 	}
 	return nil
+}
+
+func appendRemovedDeltas(ctx commitment.PatriciaContext, deltas []recordDelta, before, after map[string][]byte) ([]recordDelta, error) {
+	removed := make([]string, 0, len(before))
+	for key := range before {
+		if _, ok := after[key]; !ok {
+			removed = append(removed, key)
+		}
+	}
+	sort.Strings(removed)
+	for _, key := range removed {
+		delta, err := readRecordDelta(ctx, before[key], nil)
+		if err != nil {
+			return nil, err
+		}
+		deltas = append(deltas, delta)
+	}
+	return deltas, nil
 }

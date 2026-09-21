@@ -33,19 +33,7 @@ func wipeStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) error
 	if err != nil {
 		return err
 	}
-	for i, key := range keys {
-		if i == 0 {
-			data, _, branchErr := ctx.Branch(key)
-			if branchErr != nil {
-				return branchErr
-			}
-			if data == nil {
-				if err := ctx.PutBranch(key, nil, nil); err != nil {
-					return err
-				}
-				continue
-			}
-		}
+	for _, key := range keys {
 		if err := putStorageRecord(ctx, key, nil); err != nil {
 			return err
 		}
