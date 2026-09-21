@@ -92,8 +92,8 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			writes.assertSelfDestructNormalized()
 		}
 		// One buffer for every storage key this call writes: the domains copy the key
-		// they keep, so building it per slot only fed the allocator.
-		var storageKey [length.Addr + length.Hash]byte
+		// they keep. Made on the first slot, since an array here escapes even when unused.
+		var storageKey []byte
 		// Field presence is tracked with has-flags rather than pointers: the
 		// pointer form heap-escapes one allocation per field per address.
 		type addrState struct {
@@ -311,9 +311,12 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 
 			for _, item := range d.storage {
 				key := item.key.Value()
-				copy(storageKey[:], address[:])
+				if storageKey == nil {
+					storageKey = make([]byte, length.Addr+length.Hash)
+				}
+				copy(storageKey, address[:])
 				copy(storageKey[length.Addr:], key[:])
-				composite := storageKey[:]
+				composite := storageKey
 				v := item.value.Bytes()
 				if len(v) == 0 {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {

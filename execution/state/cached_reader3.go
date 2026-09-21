@@ -17,9 +17,9 @@
 package state
 
 import (
-	"github.com/erigontech/erigon/common/length"
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -31,7 +31,7 @@ type CachedReader3 struct {
 	cache kvcache.CacheView
 	db    kv.TemporalTx
 	// storageKey is the address+slot the next storage read looks up. The cache clones a key
-	// it keeps, and one reader serves one request, so the same bytes are reused every time.
+	// it keeps; the buffer holds only across sequential reads, and a reader is not used concurrently.
 	storageKey [length.Addr + length.Hash]byte
 }
 
