@@ -461,6 +461,9 @@ func TestWebsocketWriteTimeoutClosesStalledConn(t *testing.T) {
 		if err != nil {
 			return
 		}
+		if hw.conn == nil {
+			t.Error("the hijacked socket was not recorded")
+		}
 		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
