@@ -28,10 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func TestAllowListMarshaling(t *testing.T) {
-
-}
-
 func TestAllowListUnmarshaling(t *testing.T) {
 	allowListJSON := `[ "one", "two", "three" ]`
 
