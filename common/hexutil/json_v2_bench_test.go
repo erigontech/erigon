@@ -28,8 +28,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by json/v2 vs
-// StackStream.WriteHex, which is what the response writer calls for a hexutil.Bytes result.
+// BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by json/v2, by
+// WriteQuotedText (what the response writer calls for a hexutil.Bytes result) and by WriteHex.
 func BenchmarkBytesMarshalJSON(b *testing.B) {
 	code := make(hexutil.Bytes, 64*1024)
 	for i := range code {
