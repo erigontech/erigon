@@ -56,7 +56,12 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	jsonstream.Field(w, "blockNumber").WriteQuotedText(&r.BlockNumber)
 	jsonstream.Field(w, "transactionHash").WriteHex(r.TransactionHash[:])
 	jsonstream.Field(w, "transactionIndex").WriteQuotedText(&r.TransactionIndex)
-	jsonstream.Field(w, "from").WriteHex(r.From[:])
+	jsonstream.Field(w, "from")
+	if r.From == nil {
+		w.WriteNil()
+	} else {
+		w.WriteHex(r.From[:])
+	}
 	jsonstream.Field(w, "to")
 	if r.To == nil {
 		w.WriteNil()
