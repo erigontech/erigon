@@ -462,13 +462,13 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/root.go`
 - Create: `execution/commitment/v4/root_test.go`
 
-- [ ] add the transition logic only — task 7 already owns the three root encodings and task 3 owns decoding them; this task does not add a second codec
-- [ ] carry `selfExt` inline behind `hdrHasSelfExt` — a trie root has no parent, so its own extension has no parent trailer to live in
-- [ ] keep the key pinned at the root position regardless of the node's true depth, so the record never moves when `selfExt` changes
-- [ ] implement the `extensionRoot` transitions: an insert diverging inside `selfExt` rewrites the root record and adds one, never relocating a body; a collapse rewrites only the root record, never promoting an untouched child's body
-- [ ] write tests for `selfExt` present, absent, appearing and disappearing, in both planes
-- [ ] write tests for the transitions between all three root forms, including `leafRoot` → `branchRoot` on a second key and back on a delete
-- [ ] run tests — must pass before task 13
+- [x] add the transition logic only — task 7 already owns the three root encodings and task 3 owns decoding them; this task does not add a second codec
+- [x] carry `selfExt` inline behind `hdrHasSelfExt` — a trie root has no parent, so its own extension has no parent trailer to live in
+- [x] keep the key pinned at the root position regardless of the node's true depth, so the record never moves when `selfExt` changes
+- [x] implement the `extensionRoot` transitions: an insert diverging inside `selfExt` rewrites the root record and adds one, never relocating a body; a collapse rewrites only the root record, never promoting an untouched child's body
+- [x] write tests for `selfExt` present, absent, appearing and disappearing, in both planes
+- [x] write tests for the transitions between all three root forms, including `leafRoot` → `branchRoot` on a second key and back on a delete
+- [x] run tests — must pass before task 13
 
 ### Task 13: Phase A — storage tries and their root records
 
