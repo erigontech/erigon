@@ -301,12 +301,12 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/path.go`
 - Create: `execution/commitment/v4/path_test.go`
 
-- [ ] add `packPath(nibbles []byte, dst []byte) []byte` — two nibbles per byte, odd trailing nibble in the high half of the last byte, low half zeroed
-- [ ] add `unpackPath(packed []byte, count int, dst []byte) []byte` and `packedLen(nibbleCount int) int` returning `ceil(n/2)`
-- [ ] use `nibbles.CommonPrefixLen` (`nibbles/nibbles.go:128`) rather than writing another one — the `nibbles` package does not import `commitment`, so there is no cycle
-- [ ] write round-trip tests for every nibble count 0..64, both parities
-- [ ] write a sort-order test asserting the subtree range is contiguous under `bytes.Compare` and that an ancestor may sort between two of its own descendants — the D8 case `a00`=`40 a0 00 03`, `a`=`40 a0 01`, `a02`=`40 a0 20 03`
-- [ ] run `go test ./execution/commitment/v4/...` — must pass before task 2
+- [x] add `packPath(nibbles []byte, dst []byte) []byte` — two nibbles per byte, odd trailing nibble in the high half of the last byte, low half zeroed
+- [x] add `unpackPath(packed []byte, count int, dst []byte) []byte` and `packedLen(nibbleCount int) int` returning `ceil(n/2)`
+- [x] use `nibbles.CommonPrefixLen` (`nibbles/nibbles.go:128`) rather than writing another one — the `nibbles` package does not import `commitment`, so there is no cycle
+- [x] write round-trip tests for every nibble count 0..64, both parities
+- [x] write a sort-order test asserting the subtree range is contiguous under `bytes.Compare` and that an ancestor may sort between two of its own descendants — the D8 case `a00`=`40 a0 00 03`, `a`=`40 a0 01`, `a02`=`40 a0 20 03`
+- [x] run `go test ./execution/commitment/v4/...` — must pass before task 2
 
 ### Task 2: Record keys, and the V1-only guard
 
