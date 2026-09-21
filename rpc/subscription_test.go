@@ -21,9 +21,11 @@ package rpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -307,5 +309,34 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 		if got := notification(namespace, "0x9a", result); !bytes.Equal(got, want) {
 			t.Fatalf("notification = %s, want %s", got, want)
 		}
+	}
+}
+
+type discardWriter struct{}
+
+func (discardWriter) WriteJSON(context.Context, any) error { return nil }
+func (discardWriter) closed() <-chan any                   { return nil }
+func (discardWriter) remoteAddr() string                   { return "" }
+
+// Every subscriber gets the same encoded result, so wrapping it for one subscriber must not
+// allocate a copy of it: at 2000 subscribers a block's receipts would be copied 2000 times.
+func TestNotifySendDoesNotCopyResult(t *testing.T) {
+	result := json.RawMessage(`"` + strings.Repeat("x", 160*1024) + `"`)
+	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, namespace: "eth", sub: &Subscription{ID: "0x9a"}, activated: true}
+	send := func() {
+		if err := n.send(n.sub, result); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send()
+	var m0, m1 runtime.MemStats
+	runtime.ReadMemStats(&m0)
+	const runs = 100
+	for range runs {
+		send()
+	}
+	runtime.ReadMemStats(&m1)
+	if perSend := (m1.TotalAlloc - m0.TotalAlloc) / runs; perSend > uint64(len(result))/10 {
+		t.Fatalf("a send allocates %d bytes for a %d-byte result", perSend, len(result))
 	}
 }

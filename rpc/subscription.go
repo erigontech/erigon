@@ -159,6 +159,7 @@ type RemoteNotifier struct {
 	buffer       []json.RawMessage
 	callReturned bool
 	activated    bool
+	prefix       []byte // the notification up to its result, set on the first send
 }
 
 // CreateSubscription returns a new subscription that is coupled to the
@@ -251,16 +252,31 @@ func (n *RemoteNotifier) activate() error {
 }
 
 func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
-	return n.h.conn.WriteJSON(context.Background(), rawResponse(notification(n.namespace, sub.ID, data)))
+	if n.prefix == nil {
+		n.prefix = notificationPrefix(n.namespace, sub.ID)
+	}
+	bp := notificationBufs.Get().(*[]byte)
+	defer notificationBufs.Put(bp)
+	*bp = append(append(append((*bp)[:0], n.prefix...), data...), "}}"...)
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(*bp))
 }
+
+// notificationBufs holds the buffers notifications are assembled in. Every subscriber of an
+// event gets the same result, so a fresh buffer per send would copy it once per subscriber.
+var notificationBufs = sync.Pool{New: func() any { return new([]byte) }}
 
 // notification wraps result, which is already encoded, in the subscription message without
 // parsing it again: every subscriber would otherwise re-check the same payload.
 func notification(namespace string, id ID, result json.RawMessage) []byte {
+	return append(append(notificationPrefix(namespace, id), result...), "}}"...)
+}
+
+// notificationPrefix is the part of a notification before its result, fixed for a subscription.
+func notificationPrefix(namespace string, id ID) []byte {
 	method, _ := json.Marshal(namespace + notificationMethodSuffix) //nolint:errchkjson
 	quotedID, _ := json.Marshal(string(id))                         //nolint:errchkjson
 	return slices.Concat([]byte(`{"jsonrpc":"`+vsn+`","method":`), method, []byte(`,"params":{"subscription":`),
-		quotedID, []byte(`,"result":`), result, []byte("}}"))
+		quotedID, []byte(`,"result":`))
 }
 
 // A Subscription is created by a notifier and tied to that notifier. The client can use
