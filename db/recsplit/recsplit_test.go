@@ -643,3 +643,34 @@ func BenchmarkBuildParallel(b *testing.B) {
 		})
 	}
 }
+
+// TestRecSplitIdenticalKeysCollideUnderEverySalt pins why a collision
+// retry loop must be bounded. ErrCollision normally means two distinct
+// keys happened to hash alike under the current salt, which a fresh salt
+// clears. Byte-identical keys hash alike under every salt, so retrying
+// can never succeed — a caller that loops on ErrCollision without a bound
+// spins forever on a corrupt input.
+func TestRecSplitIdenticalKeysCollideUnderEverySalt(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	salt := uint32(1)
+	rs, err := NewRecSplit(RecSplitArgs{
+		KeyCount:   2,
+		BucketSize: 10,
+		Salt:       &salt,
+		TmpDir:     tmpDir,
+		IndexFile:  filepath.Join(tmpDir, "index"),
+		LeafSize:   8,
+	}, logger)
+	require.NoError(t, err)
+	defer rs.Close()
+
+	for attempt := range 16 {
+		rs.ResetNextSalt()
+		require.NoError(t, rs.AddKey([]byte("same_key"), 0))
+		require.NoError(t, rs.AddKey([]byte("same_key"), 1))
+		err := rs.Build(t.Context())
+		require.ErrorIs(t, err, ErrCollision,
+			"attempt %d: identical keys must keep colliding however often the salt is reset", attempt)
+	}
+}

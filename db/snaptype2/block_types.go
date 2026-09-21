@@ -89,6 +89,23 @@ var Indexes = struct {
 	TxnHash2BlockNum: snaptype.Index{Name: statecfg.TransactionsToBlockIdx, Version: statecfg.Schema.TxnHash2BlockNumBlock.FileVersion.AccessorIdx, Offset: 1},
 }
 
+// recsplitSaltRetryLimit bounds the collision retry when building a
+// transactions index. A collision between two distinct keys clears on a
+// fresh salt, so a handful of attempts is generous; byte-identical keys
+// collide under every salt, and retrying those forever turns a segment
+// holding duplicate transactions into a silent hang rather than a fault.
+const recsplitSaltRetryLimit = 8
+
+// saltRetryExhausted reports that no further salt is worth trying.
+func saltRetryExhausted(attempt int, sn snaptype.FileInfo, cause error) error {
+	if attempt < recsplitSaltRetryLimit {
+		return nil
+	}
+	return fmt.Errorf("TransactionsIdx: at=%d-%d, %d salt retries all collided: %w; "+
+		"the segment holds duplicate transaction keys, which no salt resolves",
+		sn.From, sn.To, attempt+1, cause)
+}
+
 var (
 	Salt = snaptype.RegisterType(
 		Enums.Salt,
@@ -267,7 +284,7 @@ var (
 				defer d.MadvSequential().DisableReadAhead()
 				defer bodiesSegment.MadvSequential().DisableReadAhead()
 
-				for {
+				for attempt := 0; ; attempt++ {
 					txnHashIdx.SetProgress(p)
 					g, bodyGetter := d.MakeGetter(), bodiesSegment.MakeGetter()
 					var ti, offset, nextPos uint64
@@ -331,6 +348,9 @@ var (
 
 					if err := txnHashIdx.Build(ctx); err != nil {
 						if errors.Is(err, recsplit.ErrCollision) {
+							if exhausted := saltRetryExhausted(attempt, sn, err); exhausted != nil {
+								return exhausted
+							}
 							logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 							txnHashIdx.ResetNextSalt()
 							txnHash2BlockNumIdx.ResetNextSalt()
@@ -340,6 +360,9 @@ var (
 					}
 					if err := txnHash2BlockNumIdx.Build(ctx); err != nil {
 						if errors.Is(err, recsplit.ErrCollision) {
+							if exhausted := saltRetryExhausted(attempt, sn, err); exhausted != nil {
+								return exhausted
+							}
 							logger.Warn("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
 							txnHashIdx.ResetNextSalt()
 							txnHash2BlockNumIdx.ResetNextSalt()
