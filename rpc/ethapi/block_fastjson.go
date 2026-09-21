@@ -25,9 +25,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
-// MarshalFastJSONTo writes the header as its own object, for eth_getHeaderByNumber and
-// eth_getHeaderByHash. RPCBlock flattens the same fields into its own object instead,
-// through WriteFieldsTo.
+// MarshalFastJSONTo writes the header as its own object. RPCBlock flattens the same fields
+// into its own object instead, through WriteFieldsTo.
 func (h *RPCHeader) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	if h == nil {
 		w.WriteNil()
