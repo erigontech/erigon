@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // TxPoolContent is txpool_content's answer: sub-pool, then sender, then nonce. A map result
@@ -34,26 +34,26 @@ type TxPoolContent map[string]map[string]map[string]*ethapi.RPCTransaction
 // TxPoolContentFrom is txpool_contentFrom's answer: sub-pool, then nonce.
 type TxPoolContentFrom map[string]map[string]*ethapi.RPCTransaction
 
-func (c TxPoolContent) MarshalFastJSONTo(w jsonw.JSONWriter) error {
-	return writeSortedMap(w, c, func(w jsonw.JSONWriter, senders map[string]map[string]*ethapi.RPCTransaction) error {
+func (c TxPoolContent) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	return writeSortedMap(w, c, func(w *jsonstream.StackStream, senders map[string]map[string]*ethapi.RPCTransaction) error {
 		return writeSortedMap(w, senders, writeNonceMap)
 	})
 }
 
-func (c TxPoolContentFrom) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (c TxPoolContentFrom) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	return writeSortedMap(w, c, writeNonceMap)
 }
 
 // A nil transaction writes itself as null, so the map's values go straight to the marshaller.
-func writeNonceMap(w jsonw.JSONWriter, byNonce map[string]*ethapi.RPCTransaction) error {
-	return writeSortedMap(w, byNonce, func(w jsonw.JSONWriter, txn *ethapi.RPCTransaction) error {
+func writeNonceMap(w *jsonstream.StackStream, byNonce map[string]*ethapi.RPCTransaction) error {
+	return writeSortedMap(w, byNonce, func(w *jsonstream.StackStream, txn *ethapi.RPCTransaction) error {
 		return txn.MarshalFastJSONTo(w)
 	})
 }
 
 // writeSortedMap writes a map as a JSON object with its keys in the order encoding/json
 // emits them, which is what keeps the answer byte-identical to the reflected one.
-func writeSortedMap[V any](w jsonw.JSONWriter, m map[string]V, value func(jsonw.JSONWriter, V) error) error {
+func writeSortedMap[V any](w *jsonstream.StackStream, m map[string]V, value func(*jsonstream.StackStream, V) error) error {
 	if m == nil {
 		w.WriteNil()
 		return nil
@@ -81,7 +81,7 @@ func writeSortedMap[V any](w jsonw.JSONWriter, m map[string]V, value func(jsonw.
 // StorageValues is eth_getStorageValues' answer: the slots asked for, per account.
 type StorageValues map[common.Address][]hexutil.Bytes
 
-func (v StorageValues) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (v StorageValues) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	if v == nil {
 		w.WriteNil()
 		return nil
@@ -99,7 +99,7 @@ func (v StorageValues) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 		if i > 0 {
 			w.WriteMore()
 		}
-		// Not Hex(): that is the EIP-55 checksum form, where the key is lowercase. jsonw.Array
+		// Not Hex(): that is the EIP-55 checksum form, where the key is lowercase. jsonstream.Field
 		// writes the field's separator too, which an object's first field must not have.
 		w.WriteObjectField(hexutil.Encode(addrs[i][:]))
 		slots := v[addrs[i]]
