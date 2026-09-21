@@ -575,6 +575,9 @@ func (f *ForkChoiceStore) withPayloadValidationAdmission(ctx context.Context, va
 	f.payloadValidationOnce.Do(func() {
 		f.payloadValidationAdmission = make(chan struct{}, 1)
 	})
+	if f.testHookBeforeAdmissionWait != nil {
+		f.testHookBeforeAdmissionWait()
+	}
 	select {
 	case f.payloadValidationAdmission <- struct{}{}:
 		defer func() { <-f.payloadValidationAdmission }()

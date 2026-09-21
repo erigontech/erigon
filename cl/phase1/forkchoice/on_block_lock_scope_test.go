@@ -19,6 +19,7 @@ package forkchoice
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -397,6 +398,100 @@ func TestNewPayloadSkipsELWhenBlockIsNoLongerAdmissible(t *testing.T) {
 
 	require.ErrorIs(t, err, errBlockAtFinalizedHorizon)
 	require.EqualValues(t, execution_client.PayloadStatusNone, status)
+}
+
+// parkBeforeAdmissionWait holds the next caller at the point where it has cleared the
+// entry admission check and released f.mu, but has not yet queued for the admission token.
+func parkBeforeAdmissionWait(store *ForkChoiceStore) (queued, proceed chan struct{}) {
+	queued, proceed = make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	store.testHookBeforeAdmissionWait = func() {
+		once.Do(func() {
+			close(queued)
+			<-proceed
+		})
+	}
+	return queued, proceed
+}
+
+func awaitOnBlock(t *testing.T, done <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("OnBlock did not finish")
+		return nil
+	}
+}
+
+// A block admissible on entry can go stale while its caller waits for the capacity-1
+// admission token. The re-check inside the token is best effort, so both outcomes have to
+// hold through public OnBlock: the block is never committed, and the caller answers with
+// the same verdict either way.
+func TestOnBlockRejectsBlockThatWentStaleWaitingForAdmission(t *testing.T) {
+	t.Run("free lock, re-check rejects before the EL", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		engine := execution_client.NewMockExecutionEngine(ctrl)
+		engine.EXPECT().
+			NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(0)
+		store, block := buildExAnteStorePendingLast(t, engine)
+		queued, proceed := parkBeforeAdmissionWait(store)
+
+		done := make(chan error, 1)
+		go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+		awaitSignal(t, queued, "the caller to reach the admission gate")
+
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 0, Root: common.HexToHash("0xdead")})
+		close(proceed)
+
+		require.ErrorIs(t, awaitOnBlock(t, done), ErrNotFinalizedDescendant)
+		requireBlockNotAdded(t, store, block)
+	})
+
+	t.Run("free lock, a block below the horizon is not an error", func(t *testing.T) {
+		ctrl := gomock.NewController(t)
+		engine := execution_client.NewMockExecutionEngine(ctrl)
+		engine.EXPECT().
+			NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Times(0)
+		store, block := buildExAnteStorePendingLast(t, engine)
+		queued, proceed := parkBeforeAdmissionWait(store)
+
+		done := make(chan error, 1)
+		go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+		awaitSignal(t, queued, "the caller to reach the admission gate")
+
+		// Epoch 1 starts at slot 32, above the block's slot.
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 1, Root: block.Block.ParentRoot})
+		close(proceed)
+
+		require.NoError(t, awaitOnBlock(t, done))
+		requireBlockNotAdded(t, store, block)
+	})
+
+	t.Run("busy lock, the skipped re-check leaves it to the post-relock one", func(t *testing.T) {
+		engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusValidated, nil)
+		store, block := buildExAnteStorePendingLast(t, engine)
+		queued, proceed := parkBeforeAdmissionWait(store)
+
+		done := make(chan error, 1)
+		go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+		awaitSignal(t, queued, "the caller to reach the admission gate")
+
+		// Holding f.mu makes TryRLock fail, so the re-check inside the token is skipped
+		// and the EL call goes ahead on a block that is already stale.
+		store.mu.Lock()
+		store.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 0, Root: common.HexToHash("0xdead")})
+		close(proceed)
+		awaitSignal(t, elEntered, "NewPayload to start with the re-check skipped")
+		store.mu.Unlock()
+		close(releaseEL)
+
+		require.ErrorIs(t, awaitOnBlock(t, done), ErrNotFinalizedDescendant)
+		requireBlockNotAdded(t, store, block)
+	})
 }
 
 // Invalid is terminal. A root invalidated while the EL call was in flight must not be
