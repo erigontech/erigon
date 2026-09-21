@@ -1428,9 +1428,10 @@ func (api *BaseAPI) collectAccessedHeaders(
 	return headers, byNumber, nil
 }
 
-// verifyWitnessStateless optionally re-executes the block statelessly against the
-// generated witness and asserts the resulting state root matches. Verification is
-// a no-op when ERIGON_WITNESS_NO_VERIFY=true (it roughly doubles execution cost).
+// verifyWitnessStateless re-executes the block from the witness alone and checks the post-state root and
+// result.Keys. It runs only under ERIGON_ASSERT. Without it a build still checks the parent state root, and
+// for a non-empty accessed set the block-end commitment as well; what the gate removes is the stateless
+// replay, which is what covers Codes, Keys and node sufficiency.
 func (api *DebugAPIImpl) verifyWitnessStateless(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1438,7 +1439,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	block *types.Block,
 	fullEngine rules.Engine,
 ) error {
-	if dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+	if !dbg.AssertEnabled {
 		return nil
 	}
 
