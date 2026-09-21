@@ -76,9 +76,10 @@ func loadMultiBlockRange(t *testing.T) *blockreplay.RangeFixture {
 //	RANGE_FIXTURE=<path> EPHEMERAL_WORKERS=8 MULTIBLOCK_ITERS=200 \
 //	  DISCARD_COMMITMENT=true <gates...> go test -run TestEphemeralMultiBlockReplay
 func TestEphemeralMultiBlockReplay(t *testing.T) {
-	if !dbg.DiscardCommitment() {
-		t.Skip("run with DISCARD_COMMITMENT=true: the witness carries no commitment trie")
-	}
+	// The witness carries no commitment trie, so this replay must run in
+	// discard-commitment mode; force it rather than gating on the env (which
+	// would leave the guard un-exercised). The fixture itself is still the gate.
+	defer dbg.OverrideDiscardCommitment(true)()
 	rf := loadMultiBlockRange(t)
 	require.NotNil(t, rf.Outputs, "range fixture missing captured outputs")
 
@@ -171,8 +172,11 @@ func TestEphemeralMultiBlockReplay(t *testing.T) {
 			t.Fatalf("iter %d: post-state mismatch (%d diffs): %v", it, len(diffs), diffs)
 		}
 	}
-	if diagContinue {
-		fmt.Printf("[DIAG-TOTAL] %d/%d iters failed\n", fails, iters)
+	// DIAG_CONTINUE collects failures across all iters instead of stopping at the
+	// first, but the test must still fail when any iter failed — a diagnostic mode
+	// must never turn a real failure into a pass.
+	if fails > 0 {
+		t.Fatalf("[DIAG-TOTAL] %d/%d iters failed", fails, iters)
 	}
 }
 
@@ -188,9 +192,10 @@ func TestEphemeralMultiBlockReplay(t *testing.T) {
 //	RANGE_FIXTURE=<path> EPHEMERAL_WORKERS=8 DISCARD_COMMITMENT=true <gates...> \
 //	  go test -run TestEphemeralMultiBlockPerBlock
 func TestEphemeralMultiBlockPerBlock(t *testing.T) {
-	if !dbg.DiscardCommitment() {
-		t.Skip("run with DISCARD_COMMITMENT=true: the witness carries no commitment trie")
-	}
+	// The witness carries no commitment trie, so this replay must run in
+	// discard-commitment mode; force it rather than gating on the env (which
+	// would leave the guard un-exercised). The fixture itself is still the gate.
+	defer dbg.OverrideDiscardCommitment(true)()
 	rf := loadMultiBlockRange(t)
 
 	// Generate mode backfills each block's own post-state (projected onto the
