@@ -573,13 +573,13 @@ transitions, so testing them apart from the record that implements them was an o
 - Create: `execution/commitment/v4/state_test.go`
 - Modify: `execution/commitment/commitmentdb/commitment_context.go`
 
-- [ ] add v4 state encode/restore carrying an explicit variant marker as the first byte, keyed at `tagState` (`42`) from task 2 — the tag is declared there and this is its only user
-- [ ] add the two `commitmentdb` switch arms: `encodeCommitmentState` (`commitment_context.go:928-945`) and the matching restore path, which today handle only `*commitment.HexPatriciaHashed` and `*commitment.ParallelPatriciaHashed` and `default:` to an error. This is a deliberate, named exception to the §9 exclusion — without it the codec has no caller and task 22's reload arm cannot use the production path
-- [ ] restore enough state that a v4 datadir resumes after a restart without recomputing from genesis
-- [ ] write a round-trip test over a non-trivial state
-- [ ] write tests that v4 rejects a legacy state blob and a legacy reader rejects a v4 blob, both with a named error rather than a misparse
-- [ ] write a test that `encodeCommitmentState` dispatches to v4 for a v4 trie and still to HPH for the other two
-- [ ] run tests — must pass before task 20
+- [x] add v4 state encode/restore carrying an explicit variant marker as the first byte, keyed at `tagState` (`42`) from task 2 — the tag is declared there and this is its only user
+- [x] add the two `commitmentdb` switch arms: `encodeCommitmentState` (`commitment_context.go:928-945`) and the matching restore path, which today handle only `*commitment.HexPatriciaHashed` and `*commitment.ParallelPatriciaHashed` and `default:` to an error. This is a deliberate, named exception to the §9 exclusion — without it the codec has no caller and task 22's reload arm cannot use the production path
+- [x] restore enough state that a v4 datadir resumes after a restart without recomputing from genesis
+- [x] write a round-trip test over a non-trivial state
+- [x] write tests that v4 rejects a legacy state blob and a legacy reader rejects a v4 blob, both with a named error rather than a misparse
+- [x] write a test that `encodeCommitmentState` dispatches to v4 for a v4 trie and still to HPH for the other two
+- [x] run tests — must pass before task 20
 
 ### Task 20: Promote the gate tests
 

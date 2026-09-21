@@ -65,6 +65,10 @@ func (t *Trie) Variant() commitment.TrieVariant {
 	return commitment.VariantCommitmentV4
 }
 
+func (*Trie) StateKey() []byte {
+	return StateKey()
+}
+
 func (t *Trie) Reset() {
 	if t != nil {
 		t.root = nil

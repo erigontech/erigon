@@ -2,10 +2,13 @@ package commitmentdb
 
 import (
 	"context"
+	"errors"
+	"io"
 	"math/rand"
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -31,6 +34,96 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, cs.txNum, dec.txNum)
 	require.Equal(t, cs.trieState, dec.trieState)
+}
+
+func TestCommitmentV4StateDispatch(t *testing.T) {
+	t.Parallel()
+
+	trie := &stateCodecTrie{}
+	sdc := &SharedDomainsCommitmentContext{patriciaTrie: trie}
+	state, err := sdc.encodeCommitmentState(12, 34)
+	require.NoError(t, err)
+	require.Equal(t, commitment.CommitmentV4StateMarker, state[0])
+	stateKey, err := sdc.commitmentStateKey()
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x42}, stateKey)
+
+	blockNum, txNum, err := sdc.restorePatriciaState(state)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12), blockNum)
+	require.Equal(t, uint64(34), txNum)
+}
+
+func TestLegacyCommitmentStateDispatch(t *testing.T) {
+	t.Parallel()
+
+	variants := []commitment.Trie{
+		commitment.NewHexPatriciaHashed(length.Addr, nil, commitment.DefaultTrieConfig()),
+		commitment.NewParallelPatriciaHashed(nil, length.Addr, commitment.DefaultTrieConfig()),
+	}
+	for _, trie := range variants {
+		sdc := &SharedDomainsCommitmentContext{patriciaTrie: trie}
+		state, err := sdc.encodeCommitmentState(12, 34)
+		require.NoError(t, err)
+		var decoded commitmentState
+		require.NoError(t, decoded.Decode(state))
+		require.Equal(t, uint64(34), decoded.txNum)
+		require.Equal(t, uint64(12), decoded.blockNum)
+	}
+}
+
+func TestCommitmentV4StateRejectsLegacyBlob(t *testing.T) {
+	t.Parallel()
+
+	cs := commitmentState{txNum: 2, blockNum: 1, trieState: []byte{3}}
+	legacy, err := cs.Encode()
+	require.NoError(t, err)
+
+	sdc := &SharedDomainsCommitmentContext{patriciaTrie: &stateCodecTrie{}}
+	_, _, err = sdc.restorePatriciaState(legacy)
+	require.ErrorContains(t, err, "invalid state variant marker")
+}
+
+func TestLegacyStateRejectsCommitmentV4Blob(t *testing.T) {
+	t.Parallel()
+
+	v4State, err := (&stateCodecTrie{}).EncodeState(1, 2, nil)
+	require.NoError(t, err)
+
+	sdc := &SharedDomainsCommitmentContext{patriciaTrie: commitment.NewHexPatriciaHashed(20, nil, commitment.DefaultTrieConfig())}
+	_, _, err = sdc.restorePatriciaState(v4State)
+	require.ErrorContains(t, err, "commitment v4 state cannot be restored")
+}
+
+type stateCodecTrie struct{}
+
+func (*stateCodecTrie) RootHash() ([]byte, error) { return nil, nil }
+
+func (*stateCodecTrie) SetTraceWriter(io.Writer) {}
+
+func (*stateCodecTrie) Variant() commitment.TrieVariant { return commitment.VariantCommitmentV4 }
+
+func (*stateCodecTrie) StateKey() []byte { return []byte{0x42} }
+
+func (*stateCodecTrie) Reset() {}
+
+func (*stateCodecTrie) ResetContext(commitment.PatriciaContext) {}
+
+func (*stateCodecTrie) Process(context.Context, *commitment.Updates, string, func(*commitment.CommitProgress), commitment.WarmupConfig) ([]byte, error) {
+	return nil, nil
+}
+
+func (*stateCodecTrie) Release() {}
+
+func (*stateCodecTrie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
+	return append(dst, commitment.CommitmentV4StateMarker, byte(blockNum), byte(txNum)), nil
+}
+
+func (*stateCodecTrie) RestoreState(value []byte) (uint64, uint64, error) {
+	if len(value) != 3 || value[0] != commitment.CommitmentV4StateMarker {
+		return 0, 0, errors.New("commitment v4: invalid state variant marker")
+	}
+	return uint64(value[1]), uint64(value[2]), nil
 }
 
 type testStateReader struct {

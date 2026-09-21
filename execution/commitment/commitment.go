@@ -100,6 +100,12 @@ type Trie interface {
 	Release()
 }
 
+type TrieStateCodec interface {
+	StateKey() []byte
+	EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error)
+	RestoreState(value []byte) (blockNum, txNum uint64, err error)
+}
+
 type CommitProgress struct {
 	KeyIndex    uint64
 	UpdateCount uint64
@@ -121,6 +127,7 @@ const (
 	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
 	VariantCommitmentV4        TrieVariant = "commitment-v4"
+	CommitmentV4StateMarker    byte        = 0x04
 )
 
 type TrieFunc func(tmpdir string, cfg TrieConfig) (Trie, *Updates)

@@ -833,12 +833,19 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
 	tv := sdc.patriciaTrie.Variant()
-	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia {
+	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantCommitmentV4 {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	var step kv.Step
 
-	state, step, err = trieContext.Branch(KeyCommitmentState)
+	stateKey := KeyCommitmentState
+	if tv == commitment.VariantCommitmentV4 {
+		stateKey, err = sdc.commitmentStateKey()
+		if err != nil {
+			return 0, 0, nil, err
+		}
+	}
+	state, step, err = trieContext.Branch(stateKey)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -847,6 +854,12 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
+	if tv == commitment.VariantCommitmentV4 {
+		if len(state) == 0 {
+			return 0, 0, nil, nil
+		}
+		return 0, 0, bytes.Clone(state), nil
+	}
 	if len(state) < 16 {
 		return 0, 0, nil, nil
 	}
@@ -906,7 +919,11 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	if err != nil {
 		return err
 	}
-	prevState, _, err := trieContext.Branch(KeyCommitmentState)
+	stateKey, err := sdc.commitmentStateKey()
+	if err != nil {
+		return err
+	}
+	prevState, _, err := trieContext.Branch(stateKey)
 	if err != nil {
 		return err
 	}
@@ -921,7 +938,18 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 		return nil
 	}
 
-	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState)
+	return trieContext.PutBranch(stateKey, encodedState, prevState)
+}
+
+func (sdc *SharedDomainsCommitmentContext) commitmentStateKey() ([]byte, error) {
+	if sdc.patriciaTrie != nil && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV4 {
+		trie, ok := sdc.patriciaTrie.(commitment.TrieStateCodec)
+		if !ok {
+			return nil, errors.New("cannot typecast commitment v4 trie")
+		}
+		return trie.StateKey(), nil
+	}
+	return KeyCommitmentState, nil
 }
 
 // Encodes current trie state and returns it
@@ -930,6 +958,8 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 	var err error
 
 	switch trie := (sdc.patriciaTrie).(type) {
+	case commitment.TrieStateCodec:
+		return trie.EncodeState(blockNum, txNum, nil)
 	case *commitment.HexPatriciaHashed:
 		state, err = trie.EncodeCurrentState(nil)
 		if err != nil {
@@ -955,6 +985,21 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 // After commitment state is retored, method .Reset() should NOT be called until new updates.
 // Otherwise state should be restorePatriciaState()d again.
 func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (uint64, uint64, error) {
+	if sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV4 {
+		trie, ok := sdc.patriciaTrie.(commitment.TrieStateCodec)
+		if !ok {
+			return 0, 0, errors.New("cannot typecast commitment v4 trie")
+		}
+		blockNum, txNum, err := trie.RestoreState(value)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed restore v4 state: %w", err)
+		}
+		sdc.justRestored.Store(true)
+		return blockNum, txNum, nil
+	}
+	if len(value) > 0 && value[0] == commitment.CommitmentV4StateMarker {
+		return 0, 0, errors.New("commitment v4 state cannot be restored by a legacy trie")
+	}
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {
 		if len(value) > 0 {
