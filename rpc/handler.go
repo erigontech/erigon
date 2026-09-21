@@ -255,9 +255,9 @@ func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
 	}
 }
 
-// answerBuffered serves a call for a transport that has no stream to write
-// through: the whole response is built in a pooled stream and sent in one piece.
-// It owns the stream, so the pool gets it back on any exit.
+// answerBuffered serves a call for a transport that has no stream to write through. A
+// transport that frames messages streams a large response; any other gets the whole response
+// built in a pooled stream and sent in one piece, and the pool gets it back on any exit.
 func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 	if ms, ok := h.conn.(messageStreamer); ok {
 		h.answerStreamed(cp, msg, ms)
@@ -284,8 +284,8 @@ type streamedMessage interface {
 	finish(rest []byte, encodeErr error) error
 }
 
-// answerStreamed serves a call for a transport that frames messages: a response larger than
-// the stream's buffer goes out in pieces as it is encoded, instead of being held whole.
+// answerStreamed serves a call for a transport that frames messages: a large response goes out
+// in pieces as it is encoded, instead of being held whole.
 func (h *handler) answerStreamed(cp *callProc, msg *jsonrpcMessage, ms messageStreamer) {
 	w := ms.messageWriter(cp.ctx)
 	stream := jsonstream.Get(w)

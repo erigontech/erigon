@@ -34,7 +34,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c2h5oh/datasize"
 	"github.com/coder/websocket"
 	mapset "github.com/deckarep/golang-set/v2"
 
@@ -309,18 +308,20 @@ func (wc *websocketCodec) messageWriter(ctx context.Context) streamedMessage {
 
 // wsStreamThreshold is how much of a response is gathered before any of it goes out. A smaller
 // response stays one frame, as framing it would cost more than holding it; a larger one leaves
-// in frames of about this size, so the server never holds it whole.
-const wsStreamThreshold = int(1 * datasize.MB)
+// in frames of about this size, so the server never holds it whole. Half of pool.MaxBufferCap,
+// so the gathering buffer still goes back to the pool.
+const wsStreamThreshold = pool.MaxBufferCap / 2
 
 // wsMessage sends one response. It holds the stream's flushes until they reach
 // wsStreamThreshold; past that it opens a message writer and holds the connection's write
-// lock until finish.
+// lock until finish. The write timeout bounds each frame, not the whole message, whose
+// generation is bounded by the call itself.
 type wsMessage struct {
-	wc     *websocketCodec
-	ctx    context.Context
-	cancel context.CancelFunc
-	w      io.WriteCloser // open once the response outgrew wsStreamThreshold
-	buf    *bytes.Buffer
+	wc    *websocketCodec
+	ctx   context.Context
+	w     io.WriteCloser // open once the response outgrew wsStreamThreshold
+	stall *time.Timer    // closes the connection when one frame's write outlasts the timeout
+	buf   *bytes.Buffer
 }
 
 func (m *wsMessage) Write(p []byte) (int, error) {
@@ -336,29 +337,34 @@ func (m *wsMessage) Write(p []byte) (int, error) {
 		}
 	}
 	if m.buf.Len() > 0 {
-		if _, err := m.w.Write(m.buf.Bytes()); err != nil {
+		if err := m.frame(m.buf.Bytes()); err != nil {
 			return 0, err
 		}
 		m.buf.Reset()
 	}
-	return m.w.Write(p)
+	if err := m.frame(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func (m *wsMessage) open() error {
 	m.wc.encMu.Lock()
-	deadline, ok := m.ctx.Deadline()
-	if !ok {
-		deadline = time.Now().Add(wsPingInterval)
-	}
-	ctx, cancel := context.WithDeadline(m.ctx, deadline)
-	w, err := m.wc.conn.Writer(ctx, websocket.MessageText)
+	w, err := m.wc.conn.Writer(m.ctx, websocket.MessageText)
 	if err != nil {
-		cancel()
 		m.wc.encMu.Unlock()
 		return err
 	}
-	m.w, m.cancel = w, cancel
+	m.w = w
+	m.stall = time.AfterFunc(math.MaxInt64, func() { _ = m.wc.conn.CloseNow() })
 	return nil
+}
+
+func (m *wsMessage) frame(p []byte) error {
+	m.stall.Reset(m.wc.writeTimeout)
+	_, err := m.w.Write(p)
+	m.stall.Stop()
+	return err
 }
 
 func (m *wsMessage) finish(rest []byte, encodeErr error) error {
@@ -376,16 +382,19 @@ func (m *wsMessage) finish(rest []byte, encodeErr error) error {
 		return m.wc.WriteJSON(m.ctx, rawResponse(rest))
 	}
 	defer m.wc.encMu.Unlock()
-	defer m.cancel()
-	if encodeErr != nil {
-		// Part of the message is already out and cannot be taken back.
+	err := encodeErr
+	if err == nil {
+		if err = m.frame(rest); err == nil {
+			m.stall.Reset(m.wc.writeTimeout)
+			err = m.w.Close()
+			m.stall.Stop()
+		}
+	}
+	if err != nil {
+		// Part of the message is already out: without its last frame the connection is unusable.
 		_ = m.wc.conn.CloseNow()
-		return encodeErr
 	}
-	if _, err := m.w.Write(rest); err != nil {
-		return err
-	}
-	return m.w.Close()
+	return err
 }
 
 // readFrame returns the next message. Every websocket frame is one message, so
@@ -416,6 +425,7 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 			RemoteAddr: remoteAddr,
 		},
 	}
+	wc.writeTimeout = wsPingInterval
 	// Fill in connection details.
 	wc.info.HTTP.Host = host
 	if req != nil {
@@ -439,11 +449,6 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 }
 
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, wsPingInterval)
-		defer cancel()
-	}
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		wc.resetPing()

@@ -32,6 +32,7 @@ import (
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -613,6 +614,63 @@ func wsRawCall(t *testing.T, host, req string) (int, []byte) {
 		msg = append(msg, payload...)
 		if h[0]&0x80 != 0 {
 			return frames, msg
+		}
+	}
+}
+
+// A streamed response that pauses longer than the write timeout still completes: the timeout
+// bounds each write, not the whole generation. Calls answered while it holds the connection
+// must not find their own timeout spent and take the connection down.
+func TestWebsocketStreamOutlastsWriteTimeout(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		codec := NewWebsocketCodec(conn, r.Host, r.Header, r.RemoteAddr).(*websocketCodec)
+		codec.writeTimeout = 100 * time.Millisecond
+		srv.ServeCodecWithContext(r.Context(), codec, 0)
+	}))
+	defer httpsrv.Close()
+
+	client, err := DialWebsocket(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", logger)
+	if err != nil {
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer client.Close()
+
+	item := strings.Repeat("x", 1000)
+	streamed := make(chan error, 1)
+	go func() {
+		var got []string
+		err := client.Call(&got, "test_streamPaused", item, 3000, 300)
+		if err == nil && (len(got) != 3000 || got[0] != item) {
+			err = fmt.Errorf("got %d items", len(got))
+		}
+		streamed <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // the stream has passed the threshold and is paused
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 10)
+	for range 10 {
+		wg.Go(func() {
+			var res echoResult
+			errs <- client.Call(&res, "test_echo", "x", 1)
+		})
+	}
+	if err := <-streamed; err != nil {
+		t.Fatalf("streamed call: %v", err)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("call queued behind the stream: %v", err)
 		}
 	}
 }

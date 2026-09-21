@@ -99,6 +99,20 @@ func (s *testService) StreamRepeat(str string, n int, stream jsonstream.Stream) 
 	return nil
 }
 
+// StreamPaused writes n copies of str as an array and pauses for pauseMs halfway, as a slow
+// trace does between the parts of its result.
+func (s *testService) StreamPaused(str string, n, pauseMs int, stream jsonstream.Stream) error {
+	stream.WriteArrayStart()
+	for i := range n {
+		if i == n/2 {
+			time.Sleep(time.Duration(pauseMs) * time.Millisecond)
+		}
+		stream.WriteString(str)
+	}
+	stream.WriteArrayEnd()
+	return nil
+}
+
 func (s *testService) PeerInfo(ctx context.Context) PeerInfo {
 	return PeerInfoFromContext(ctx)
 }

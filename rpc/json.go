@@ -289,6 +289,9 @@ type jsonCodec struct {
 	encMu     sync.Mutex        // guards the encoder
 	encode    func(v any) error // encoder to allow multiple transports
 	conn      deadlineCloser
+	// writeTimeout bounds a write whose context has no deadline. It starts once the write holds
+	// the connection, so time spent queued behind another write does not count.
+	writeTimeout time.Duration
 }
 
 // newFuncCodec creates a codec that uses the given functions to read and write. If conn
@@ -297,11 +300,12 @@ type jsonCodec struct {
 // decode, so it may be nil.
 func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
 	codec := &jsonCodec{
-		closeCh:   make(chan any),
-		encode:    encode,
-		decode:    decode,
-		readFrame: readFrame,
-		conn:      conn,
+		closeCh:      make(chan any),
+		encode:       encode,
+		decode:       decode,
+		readFrame:    readFrame,
+		conn:         conn,
+		writeTimeout: defaultWriteTimeout,
 	}
 	if ra, ok := conn.(ConnRemoteAddr); ok {
 		codec.remote = ra.RemoteAddr()
@@ -419,7 +423,7 @@ func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 
 	deadline, ok := ctx.Deadline()
 	if !ok {
-		deadline = time.Now().Add(defaultWriteTimeout)
+		deadline = time.Now().Add(c.writeTimeout)
 	}
 	if err := c.conn.SetWriteDeadline(deadline); err != nil {
 		return err
