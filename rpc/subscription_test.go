@@ -306,11 +306,27 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := notification(namespace, "0x9a", result); !bytes.Equal(got, want) {
+		w := &captureWriter{}
+		n := &RemoteNotifier{h: &handler{conn: w}, namespace: namespace, sub: &Subscription{ID: "0x9a"}, activated: true}
+		if err := n.send(n.sub, result); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.got; !bytes.Equal(got, want) {
 			t.Fatalf("notification = %s, want %s", got, want)
 		}
 	}
 }
+
+// captureWriter keeps a copy of what it is given: a notification's buffer is reused once the
+// write returns.
+type captureWriter struct{ got []byte }
+
+func (w *captureWriter) WriteJSON(_ context.Context, v any) error {
+	w.got = bytes.Clone(v.(rawResponse))
+	return nil
+}
+func (*captureWriter) closed() <-chan any { return nil }
+func (*captureWriter) remoteAddr() string { return "" }
 
 type discardWriter struct{}
 

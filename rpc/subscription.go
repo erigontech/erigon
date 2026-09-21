@@ -267,15 +267,10 @@ func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 	return n.h.conn.WriteJSON(context.Background(), rawResponse(s.Buffer()))
 }
 
-// notification wraps result, which is already encoded, in the subscription message without
-// parsing it again: every subscriber would otherwise re-check the same payload.
-func notification(namespace string, id ID, result json.RawMessage) []byte {
-	return append(append(notificationPrefix(namespace, id), result...), notificationSuffix...)
-}
-
 var notificationSuffix = []byte("}}")
 
 // notificationPrefix is the part of a notification before its result, fixed for a subscription.
+// The result is wrapped as it is, already encoded: every subscriber would otherwise re-check it.
 func notificationPrefix(namespace string, id ID) []byte {
 	method, _ := json.Marshal(namespace + notificationMethodSuffix) //nolint:errchkjson
 	quotedID, _ := json.Marshal(string(id))                         //nolint:errchkjson
