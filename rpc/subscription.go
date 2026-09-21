@@ -122,7 +122,14 @@ func (n *LocalNotifier) CreateSubscription() *Subscription {
 	return n.sub
 }
 
+// localValuer is a notification that carries its wire encoding; an in-process subscriber gets
+// the value it wraps instead.
+type localValuer interface{ LocalValue() any }
+
 func (n *LocalNotifier) Notify(id ID, data any) error {
+	if lv, ok := data.(localValuer); ok {
+		data = lv.LocalValue()
+	}
 	if n.sub == nil {
 		panic("can't Notify before subscription is created")
 	} else if n.sub.ID != id {
@@ -179,10 +186,12 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 	)
 	if isNilPointer(data) {
 		enc, err = json.Marshal(data)
+	} else if fm, ok := data.(fastJSONResult); ok {
+		// A notification needs the bytes, so a value that can size its own buffer beats
+		// streaming into a pooled one and cloning it back out.
+		enc, err = fm.MarshalFastJSON()
 	} else if fm, ok := data.(fastJSONMarshalerTo); ok {
 		enc, err = marshalFastJSONTo(fm)
-	} else if fm, ok := data.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
 	} else {
 		enc, err = json.Marshal(data)
 	}

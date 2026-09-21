@@ -173,3 +173,30 @@ func TestEVMFitsItsSizeClass(t *testing.T) {
 			"existing padding, or raise evmSizeClass knowing every EVM allocation grows", got, evmSizeClass)
 	}
 }
+
+func TestZeroUnpricedBaseFee(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		noBaseFee  bool
+		gasPrice   uint64
+		wantZeroed bool
+	}{
+		{name: "unpriced call skipping the fee checks", noBaseFee: true, gasPrice: 0, wantZeroed: true},
+		{name: "priced call skipping the fee checks", noBaseFee: true, gasPrice: 3, wantZeroed: false},
+		{name: "unpriced call under the fee checks", noBaseFee: false, gasPrice: 0, wantZeroed: false},
+		{name: "priced call under the fee checks", noBaseFee: false, gasPrice: 3, wantZeroed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockCtx := evmtypes.BlockContext{BaseFee: *uint256.NewInt(7)}
+			txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(tc.gasPrice)}
+
+			got := ZeroUnpricedBaseFee(blockCtx, txCtx, Config{NoBaseFee: tc.noBaseFee})
+
+			want := uint256.NewInt(7)
+			if tc.wantZeroed {
+				want = uint256.NewInt(0)
+			}
+			require.Equal(t, want, &got.BaseFee)
+		})
+	}
+}
