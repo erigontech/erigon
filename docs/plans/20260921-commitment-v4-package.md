@@ -510,14 +510,14 @@ transitions, so testing them apart from the record that implements them was an o
 - Create: `execution/commitment/v4/phase_b.go`
 - Create: `execution/commitment/v4/phase_b_test.go`
 
-- [ ] add `runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, roots map[[32]byte][32]byte) ([32]byte, error)` taking the exactly-64-nibble entries
-- [ ] put `storageRoot` in the account leaf's record body from phase A's result, so phase B never re-reads the storage root record
-- [ ] hash the leaf through `accountConsensusRLP` from task 5, not through the record body
-- [ ] rewrite the leaf of any account whose storage changed even when its fields did not — its fields come from the record, so there is nothing to reset and no `resetRatio` patch is needed
-- [ ] write tests for an account with a storage change and no field change, a field change and no storage change, and both
-- [ ] write a test for a newly created account with storage in the same block
-- [ ] write a test that the account trie root over 1000 accounts matches `HexPatriciaHashed` on the same input
-- [ ] run tests — must pass before task 16
+- [x] add `runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, roots map[[32]byte][32]byte) ([32]byte, error)` taking the exactly-64-nibble entries
+- [x] put `storageRoot` in the account leaf's record body from phase A's result, so phase B never re-reads the storage root record
+- [x] hash the leaf through `accountConsensusRLP` from task 5, not through the record body
+- [x] rewrite the leaf of any account whose storage changed even when its fields did not — its fields come from the record, so there is nothing to reset and no `resetRatio` patch is needed
+- [x] write tests for an account with a storage change and no field change, a field change and no storage change, and both
+- [x] write a test for a newly created account with storage in the same block
+- [x] write a test that the account trie root over 1000 accounts matches `HexPatriciaHashed` on the same input
+- [x] run tests — must pass before task 16
 
 ### Task 16: Trie interface, registry, variant
 
