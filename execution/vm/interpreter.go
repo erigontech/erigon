@@ -454,7 +454,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 			if err == nil {
 				return
 			}
-			// Masked opcodes still report faults. Fault delivery requires an opcode hook.
 			switch {
 			case !logged && tracer.HasOpcodeHook() && tracer.WantsOpcode(byte(op)):
 				tracer.EmitOpcode(pcCopy, byte(op), oldGas, cost, callContext, evm.returnData, evm.depth, VMErrorFromErr(err))

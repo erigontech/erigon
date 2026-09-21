@@ -207,9 +207,7 @@ type Hooks struct {
 	OnFaultV2     FaultHookV2
 	OnGasChange   GasChangeHook
 	OnGasChangeV2 GasChangeHookV2
-	// OnOpcodeMask names the opcodes OnOpcode or OnOpcodeV2 wants. The interpreter
-	// skips the call for every other opcode. Nil means every opcode is delivered.
-	OnOpcodeMask *OpcodeMask
+	OnOpcodeMask  *OpcodeMask
 	// Chain events
 	OnBlockchainInit    BlockchainInitHook
 	OnBlockStart        BlockStartHook
