@@ -126,7 +126,7 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 	defer s.codecs.Remove(codec)
 
 	c := initClientWithBaseCtx(connCtx, codec, s.idgen, &s.services, s.batchLimit, s.logger)
-	<-codec.closed()
+	c.read(codec)
 	c.Close()
 }
 
