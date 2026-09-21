@@ -298,11 +298,13 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := json.Marshal(&jsonrpcMessage{Version: vsn, Method: "eth" + notificationMethodSuffix, Params: params})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got := notification("eth", "0x9a", result); string(got) != string(want) {
-		t.Fatalf("notification = %s, want %s", got, want)
+	for _, namespace := range []string{"eth", `quote"back\slash`} {
+		want, err := json.Marshal(&jsonrpcMessage{Version: vsn, Method: namespace + notificationMethodSuffix, Params: params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := notification(namespace, "0x9a", result); string(got) != string(want) {
+			t.Fatalf("notification = %s, want %s", got, want)
+		}
 	}
 }
