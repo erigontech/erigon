@@ -88,7 +88,7 @@ func TestWitnessNodesForKeys_ByHashEquivalence(t *testing.T) {
 			indexed, err := trie.WitnessNodesForKeysByHash(byHash, root, indexedKeys)
 			require.NoError(t, err)
 
-			full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, tc.exclude, "")
+			full, provedKeys, _, err := hph.Witnesses(ctx, toWitness, tc.exclude)
 			require.NoError(t, err)
 
 			wt, err := trie.RLPDecode(full)
@@ -145,7 +145,7 @@ func TestWitnessNodesForKeys_AbsentSlotStopsAtBlindedChild(t *testing.T) {
 	toWitness.TouchPlainKey(string(storageKey(addrPlain, slots[0])), nil, toWitness.TouchStorage)
 	toWitness.TouchPlainKey(string(storageKey(addrPlain, absentSlot)), nil, toWitness.TouchStorage)
 
-	nodes, provedKeys, _, err := hph.Witnesses(ctx, toWitness, false, "")
+	nodes, provedKeys, _, err := hph.Witnesses(ctx, toWitness, false)
 	require.NoError(t, err)
 
 	wt, err := trie.RLPDecode(nodes)
@@ -331,7 +331,7 @@ func Test_Witnesses_ExclusionAcrossFoldedExtension(t *testing.T) {
 
 	hph, root := processFreshTrie(t, plainKeys, updates)
 	setB, _, rootW, err := hph.Witnesses(context.Background(),
-		touchUpdates([][]byte{acctPlain}, [][]byte{absentStorageKey}), true, "")
+		touchUpdates([][]byte{acctPlain}, [][]byte{absentStorageKey}), true)
 	require.NoError(t, err)
 	require.Equal(t, root, rootW)
 
@@ -370,7 +370,7 @@ func Test_WitnessNodesByHash_ReadOnlyFold(t *testing.T) {
 
 	proven := [][]byte{accts[0], accts[5]}
 	provenSlots := [][]byte{storageKey(accts[0], slots[0]), storageKey(accts[0], slots[7])}
-	full, _, _, err := hph.Witnesses(context.Background(), touchUpdates(proven, provenSlots), false, "")
+	full, _, _, err := hph.Witnesses(context.Background(), touchUpdates(proven, provenSlots), false)
 	require.NoError(t, err)
 	fullTrie, err := trie.RLPDecode(full)
 	require.NoError(t, err)
