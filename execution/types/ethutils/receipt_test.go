@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
@@ -105,64 +106,29 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
 			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, tc.withBlockTimestamp)
 
-			want, err := json.Marshal(r)
-			require.NoError(t, err)
-
-			s := jsonstream.Get(nil)
-			defer jsonstream.Put(s)
-			require.NoError(t, r.MarshalFastJSONTo(s))
-			require.NoError(t, s.Flush())
-
-			require.Equal(t, string(want), string(s.Buffer()))
+			requireFastJSONMatches(t, r)
 		})
 	}
 }
 
-// encoding/json writes null for a typed nil slice, not []. MarshalReceipt normalizes nil
-// receipt logs to an empty slice, so only a direct construction reaches these branches.
-func TestRPCReceiptMarshalFastJSONToTypedNilLogs(t *testing.T) {
-	for name, logs := range map[string]any{
-		"nil types.Logs":  types.Logs(nil),
-		"nil []*Log":      []*types.Log(nil),
-		"nil []*RPCLog":   []*types.RPCLog(nil),
-		"nil []Subscribe": []SubscribeLog(nil),
-		"untyped nil":     nil,
-	} {
-		t.Run(name, func(t *testing.T) {
-			r := &RPCReceipt{Logs: logs}
-			want, err := json.Marshal(r)
-			require.NoError(t, err)
-
-			s := jsonstream.Get(nil)
-			defer jsonstream.Put(s)
-			require.NoError(t, r.MarshalFastJSONTo(s))
-			require.NoError(t, s.Flush())
-			require.Equal(t, string(want), string(s.Buffer()))
-		})
-	}
-}
-
-// eth_sendRawTransactionSync answers with MarshalSubscribeReceipt's logs.
-func TestRPCReceiptMarshalFastJSONToSubscribeLogs(t *testing.T) {
+// Every Logs shape against encoding/json. MarshalReceipt never builds a nil slice, so only a
+// direct construction reaches the typed-nil branches.
+func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	for name, logs := range map[string][]SubscribeLog{
-		"with address": {{Address: &to, Topics: []common.Hash{{0x01}, {0x02}}, Data: hexutil.Bytes{0xaa, 0xbb}, TransactionHash: common.HexToHash("0xbeef")}},
-		"no address":   {{Topics: []common.Hash{}, Data: hexutil.Bytes{}, TransactionHash: common.HexToHash("0xbeef")}},
-		"nil values":   {{}},
-		"two":          {{Address: &to}, {}},
-		"empty":        {},
+	for name, logs := range map[string]any{
+		"nil types.Logs":         types.Logs(nil),
+		"nil []*Log":             []*types.Log(nil),
+		"nil []*RPCLog":          []*types.RPCLog(nil),
+		"nil []SubscribeLog":     []SubscribeLog(nil),
+		"untyped nil":            nil,
+		"subscribe with address": []SubscribeLog{{Address: &to, Topics: []common.Hash{{0x01}, {0x02}}, Data: hexutil.Bytes{0xaa, 0xbb}, TransactionHash: common.HexToHash("0xbeef")}},
+		"subscribe no address":   []SubscribeLog{{Topics: []common.Hash{}, Data: hexutil.Bytes{}}},
+		"subscribe nil values":   []SubscribeLog{{}},
+		"two subscribe logs":     []SubscribeLog{{Address: &to}, {}},
+		"no subscribe logs":      []SubscribeLog{},
+		"unknown shape":          []string{"a"},
 	} {
-		t.Run(name, func(t *testing.T) {
-			r := &RPCReceipt{TransactionHash: common.HexToHash("0xbeef"), Logs: logs}
-			want, err := json.Marshal(r)
-			require.NoError(t, err)
-
-			s := jsonstream.Get(nil)
-			defer jsonstream.Put(s)
-			require.NoError(t, r.MarshalFastJSONTo(s))
-			require.NoError(t, s.Flush())
-			require.Equal(t, string(want), string(s.Buffer()))
-		})
+		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
 	}
 }
 
@@ -175,14 +141,7 @@ func TestRPCReceiptsMarshalFastJSONTo(t *testing.T) {
 		"nil element": {nil},
 	} {
 		t.Run(name, func(t *testing.T) {
-			want, err := json.Marshal(rs)
-			require.NoError(t, err)
-
-			s := jsonstream.Get(nil)
-			defer jsonstream.Put(s)
-			require.NoError(t, rs.MarshalFastJSONTo(s))
-			require.NoError(t, s.Flush())
-			require.Equal(t, string(want), string(s.Buffer()))
+			requireFastJSONMatches(t, rs)
 		})
 	}
 }
@@ -215,34 +174,21 @@ func TestRPCReceiptMarshalFastJSONToOptionalFields(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := tc.r
 			r.Logs = types.Logs{}
-			want, err := json.Marshal(&r)
-			require.NoError(t, err)
-
-			s := jsonstream.Get(nil)
-			defer jsonstream.Put(s)
-			require.NoError(t, r.MarshalFastJSONTo(s))
-			require.NoError(t, s.Flush())
-			require.Equal(t, string(want), string(s.Buffer()))
+			requireFastJSONMatches(t, &r)
 		})
 	}
 }
 
-// A logs shape the writer rejects must fail before anything is written, or the
-// response carries a partial result next to the error.
-func TestRPCReceiptMarshalFastJSONToRejectsBadLogsBeforeWriting(t *testing.T) {
-	r := &RPCReceipt{Logs: []string{"nope"}}
-	s := jsonstream.Get(nil)
-	defer jsonstream.Put(s)
-	require.Error(t, r.MarshalFastJSONTo(s))
-	require.NoError(t, s.Flush())
-	require.Empty(t, s.Buffer())
-}
+func requireFastJSONMatches(t *testing.T, v interface {
+	MarshalFastJSONTo(jsonw.JSONWriter) error
+}) {
+	t.Helper()
+	want, err := json.Marshal(v)
+	require.NoError(t, err)
 
-func TestRPCReceiptsMarshalFastJSONToRejectsBadLogsBeforeWriting(t *testing.T) {
-	rs := RPCReceipts{{}, nil, {Logs: []string{"nope"}}}
 	s := jsonstream.Get(nil)
 	defer jsonstream.Put(s)
-	require.Error(t, rs.MarshalFastJSONTo(s))
+	require.NoError(t, v.MarshalFastJSONTo(s))
 	require.NoError(t, s.Flush())
-	require.Empty(t, s.Buffer())
+	require.Equal(t, string(want), string(s.Buffer()))
 }

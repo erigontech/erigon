@@ -28,6 +28,8 @@ type JSONWriter interface {
 	// WriteString writes s as an escaped JSON string.
 	WriteString(s string)
 	WriteBool(v bool)
+	// WriteRawBytes writes already-encoded JSON.
+	WriteRawBytes(b []byte)
 	WriteNil()
 	WriteObjectStart()
 	// WriteObjectField returns the writer, so a field and its value can be chained.
