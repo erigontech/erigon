@@ -1430,3 +1430,24 @@ func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 		})
 	}
 }
+
+// A nil slice is the caller's to write as null: WriteHexBytes always writes an array.
+func TestWriteHexBytes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		items [][]byte
+		want  string
+	}{
+		"nil":           {nil, `[]`},
+		"empty":         {[][]byte{}, `[]`},
+		"empty element": {[][]byte{{}}, `["0x"]`},
+		"multi":         {[][]byte{{0x01}, {0xab, 0xcd}, nil}, `["0x01","0xabcd","0x"]`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := Get(nil)
+			defer Put(s)
+			WriteHexBytes(s, tc.items)
+			require.NoError(t, s.Err())
+			require.Equal(t, tc.want, string(s.Buffer()))
+		})
+	}
+}
