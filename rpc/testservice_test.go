@@ -89,16 +89,6 @@ func (s *testService) StreamEcho(str string, stream jsonstream.Stream) error {
 	return nil
 }
 
-// StreamRepeat writes n copies of str as an array, one value at a time, as a streamed result does.
-func (s *testService) StreamRepeat(str string, n int, stream jsonstream.Stream) error {
-	stream.WriteArrayStart()
-	for range n {
-		stream.WriteString(str)
-	}
-	stream.WriteArrayEnd()
-	return nil
-}
-
 // StreamPaused writes n copies of str as an array and pauses for pauseMs halfway, as a slow
 // trace does between the parts of its result.
 func (s *testService) StreamPaused(str string, n, pauseMs int, stream jsonstream.Stream) error {

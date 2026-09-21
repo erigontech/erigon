@@ -42,7 +42,7 @@ const (
 	unsubscribeMethodSuffix  = "_unsubscribe"
 	notificationMethodSuffix = "_subscription"
 
-	defaultWriteTimeout = 10 * time.Minute // used if context has no deadline
+	defaultWriteTimeout = 10 * time.Minute
 )
 
 var null = json.RawMessage("null")
@@ -285,13 +285,11 @@ type jsonCodec struct {
 	// readFrame is set only by transports that delimit messages themselves. Each
 	// call must return bytes it does not reuse: parsed messages point into them
 	// and are handled asynchronously, so they outlive the call that read them.
-	readFrame func() ([]byte, error)
-	encMu     sync.Mutex        // guards the encoder
-	encode    func(v any) error // encoder to allow multiple transports
-	conn      deadlineCloser
-	// writeTimeout bounds a write whose context has no deadline. It starts once the write holds
-	// the connection, so time spent queued behind another write does not count.
-	writeTimeout time.Duration
+	readFrame    func() ([]byte, error)
+	encMu        sync.Mutex        // guards the encoder
+	encode       func(v any) error // encoder to allow multiple transports
+	conn         deadlineCloser
+	writeTimeout time.Duration // used if the context has no deadline, counted once the write holds the connection
 }
 
 // newFuncCodec creates a codec that uses the given functions to read and write. If conn

@@ -543,7 +543,7 @@ func TestWebsocketStreamsLargeResponse(t *testing.T) {
 		n        int
 		streamed bool
 	}{{300, false}, {3000, true}} {
-		frames, msg := wsRawCall(t, host, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"test_streamRepeat","params":["%s",%d]}`, item, tc.n))
+		frames, msg := wsRawCall(t, host, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"test_streamPaused","params":["%s",%d,0]}`, item, tc.n))
 		if streamed := frames > 1; streamed != tc.streamed {
 			t.Fatalf("a %d-byte response came in %d frame(s), streamed=%v, want %v", len(msg), frames, streamed, tc.streamed)
 		}

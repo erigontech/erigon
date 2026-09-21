@@ -25,7 +25,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"reflect"
 	"slices"
 	"strconv"
@@ -259,8 +258,8 @@ func (h *handler) sendBatchAnswers(ctx context.Context, answers [][]byte) {
 // transport that frames messages streams a large response; any other gets the whole response
 // built in a pooled stream and sent in one piece, and the pool gets it back on any exit.
 func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
-	if ms, ok := h.conn.(messageStreamer); ok {
-		h.answerStreamed(cp, msg, ms)
+	if wc, ok := h.conn.(*websocketCodec); ok {
+		h.answerStreamed(cp, msg, wc)
 		return
 	}
 	stream := jsonstream.Get(nil)
@@ -272,22 +271,10 @@ func (h *handler) answerBuffered(cp *callProc, msg *jsonrpcMessage) {
 	}
 }
 
-// messageStreamer is a transport that can send one message while it is still being written.
-type messageStreamer interface {
-	// messageWriter returns a writer for the next message. Nothing is sent until the first
-	// Write; finish sends what is left and completes the message.
-	messageWriter(ctx context.Context) streamedMessage
-}
-
-type streamedMessage interface {
-	io.Writer
-	finish(rest []byte, encodeErr error) error
-}
-
 // answerStreamed serves a call for a transport that frames messages: a large response goes out
 // in pieces as it is encoded, instead of being held whole.
-func (h *handler) answerStreamed(cp *callProc, msg *jsonrpcMessage, ms messageStreamer) {
-	w := ms.messageWriter(cp.ctx)
+func (h *handler) answerStreamed(cp *callProc, msg *jsonrpcMessage, wc *websocketCodec) {
+	w := wc.messageWriter(cp.ctx)
 	stream := jsonstream.Get(w)
 	defer jsonstream.Put(stream)
 

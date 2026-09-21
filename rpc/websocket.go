@@ -302,7 +302,9 @@ func (a *wsConnAdapter) encode(v any) error {
 	return a.conn.Write(ctx, websocket.MessageText, data)
 }
 
-func (wc *websocketCodec) messageWriter(ctx context.Context) streamedMessage {
+// messageWriter returns a writer for the next message. Nothing is sent until the first Write;
+// finish sends what is left and completes the message.
+func (wc *websocketCodec) messageWriter(ctx context.Context) *wsMessage {
 	return &wsMessage{wc: wc, ctx: ctx}
 }
 
