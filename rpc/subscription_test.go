@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -303,7 +304,7 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got := notification(namespace, "0x9a", result); string(got) != string(want) {
+		if got := notification(namespace, "0x9a", result); !bytes.Equal(got, want) {
 			t.Fatalf("notification = %s, want %s", got, want)
 		}
 	}

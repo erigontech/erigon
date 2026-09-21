@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"bytes"
+	"maps"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -58,11 +59,7 @@ func writeSortedMap[V any](w *jsonstream.StackStream, m map[string]V, value func
 		w.WriteNil()
 		return nil
 	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	slices.Sort(keys)
+	keys := slices.Sorted(maps.Keys(m))
 
 	w.WriteObjectStart()
 	for i, k := range keys {
@@ -86,35 +83,23 @@ func (v StorageValues) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 		w.WriteNil()
 		return nil
 	}
-	addrs := make([]common.Address, 0, len(v))
-	for a := range v {
-		addrs = append(addrs, a)
-	}
 	// encoding/json orders these by the key's marshalled text, which for an address is its
 	// lowercase hex, so raw byte order is the same order.
-	slices.SortFunc(addrs, func(a, b common.Address) int { return bytes.Compare(a[:], b[:]) })
+	addrs := slices.SortedFunc(maps.Keys(v), func(a, b common.Address) int { return bytes.Compare(a[:], b[:]) })
 
 	w.WriteObjectStart()
 	for i := range addrs {
 		if i > 0 {
 			w.WriteMore()
 		}
-		// Not Hex(): that is the EIP-55 checksum form, where the key is lowercase. jsonstream.Field
-		// writes the field's separator too, which an object's first field must not have.
+		// Not Hex(): that is the EIP-55 checksum form, where the key is lowercase.
 		w.WriteObjectField(hexutil.Encode(addrs[i][:]))
 		slots := v[addrs[i]]
 		if slots == nil {
 			w.WriteNil()
 			continue
 		}
-		w.WriteArrayStart()
-		for j := range slots {
-			if j > 0 {
-				w.WriteMore()
-			}
-			w.WriteHex(slots[j])
-		}
-		w.WriteArrayEnd()
+		jsonstream.WriteHexBytes(w, slots)
 	}
 	w.WriteObjectEnd()
 	return nil
