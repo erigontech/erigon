@@ -65,48 +65,54 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. Each figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
 
 <Tabs>
 <TabItem value="ethereum-mainnet" label="Ethereum mainnet">
 | Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
-| Archive | {/* ds:mainnet:archive */}2.03 TB{/* ds:end */} | 4 TB | 32 GB | 64 GB |
-| Full (Default) | {/* ds:mainnet:full */}419.04 GB{/* ds:end */} | 2 TB | 16 GB | 32 GB |
-| Minimal | {/* ds:mainnet:minimal */}478.40 GB{/* ds:end */} | 1 TB | 16 GB | 64 GB |
+| Archive | {/* ds:mainnet:archive */}2.25 TB{/* ds:end */} | 4 TB | 32 GB | 64 GB |
+| Full (Default) | {/* ds:mainnet:full */}534.94 GB{/* ds:end */} | 2 TB | 16 GB | 32 GB |
+| Minimal | {/* ds:mainnet:minimal */}510.82 GB{/* ds:end */} | 1 TB | 16 GB | 64 GB |
 
-_Current Disk Usage measured as of {/* ds-date:mainnet */}2026-07-19{/* ds:end */}; usage grows over time as the chain grows._
+_Current Disk Usage measured as of {/* ds-date:mainnet */}2026-09-17{/* ds:end */}; usage grows over time as the chain grows._
 
 </TabItem>
 <TabItem value="gnosis-chain" label="Gnosis Chain">
 | **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | {/* ds:gnosis:archive */}673.59 GB{/* ds:end */} | 1 TB                        | 16 GB              | 32 GB                 |
-| Full (Default) | {/* ds:gnosis:full */}220.10 GB{/* ds:end */}    | 1 TB                        | 8 GB               | 16 GB                 |
-| Minimal        | {/* ds:gnosis:minimal */}304.67 GB{/* ds:end */} | 500 GB                      | 8 GB               | 16 GB                 |
+| Archive        | {/* ds:gnosis:archive */}803.35 GB{/* ds:end */} | 1 TB                        | 16 GB              | 32 GB                 |
+| Full (Default) | {/* ds:gnosis:full */}314.35 GB{/* ds:end */}    | 1 TB                        | 8 GB               | 16 GB                 |
+| Minimal        | {/* ds:gnosis:minimal */}311.75 GB{/* ds:end */} | 500 GB                      | 8 GB               | 16 GB                 |
 
-_Current Disk Usage measured as of {/* ds-date:gnosis */}2026-07-21{/* ds:end */}; usage grows over time as the chain grows._
+_Current Disk Usage measured as of {/* ds-date:gnosis */}2026-09-19{/* ds:end */}; usage grows over time as the chain grows._
 </TabItem>
 <TabItem value="sepolia" label="Sepolia">
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | {/* ds:sepolia:archive */}1.10 TB{/* ds:end */} |
+| Archive        | {/* ds:sepolia:archive */}1.12 TB{/* ds:end */} |
+| Full (Default) | {/* ds:sepolia:full */}301.82 GB{/* ds:end */} |
+| Minimal        | {/* ds:sepolia:minimal */}272.59 GB{/* ds:end */} |
 
-_Current Disk Usage measured as of {/* ds-date:sepolia */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+_Current Disk Usage measured as of {/* ds-date:sepolia */}2026-09-18{/* ds:end */}; usage grows over time as the chain grows._
 </TabItem>
 <TabItem value="hoodi" label="Hoodi">
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | {/* ds:hoodi:archive */}133.73 GB{/* ds:end */} |
+| Archive        | {/* ds:hoodi:archive */}132.92 GB{/* ds:end */} |
+| Full (Default) | {/* ds:hoodi:full */}62.86 GB{/* ds:end */} |
+| Minimal        | {/* ds:hoodi:minimal */}58.89 GB{/* ds:end */} |
 
-_Current Disk Usage measured as of {/* ds-date:hoodi */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+_Current Disk Usage measured as of {/* ds-date:hoodi */}2026-09-20{/* ds:end */}; usage grows over time as the chain grows._
 </TabItem>
 <TabItem value="chiado" label="Chiado">
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | {/* ds:chiado:archive */}29.64 GB{/* ds:end */} |
+| Archive        | {/* ds:chiado:archive */}29.98 GB{/* ds:end */} |
+| Full (Default) | {/* ds:chiado:full */}16.07 GB{/* ds:end */} |
+| Minimal        | {/* ds:chiado:minimal */}16.00 GB{/* ds:end */} |
 
-_Current Disk Usage measured as of {/* ds-date:chiado */}2026-07-29{/* ds:end */}; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+_Current Disk Usage measured as of {/* ds-date:chiado */}2026-09-20{/* ds:end */}; usage grows over time as the chain grows._
 </TabItem>
 </Tabs>
 
@@ -127,11 +133,15 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 
 Approximate times to sync from scratch to the tip of the chain.
 
-| Chain    | Archive | Full (Default) | Minimal |
-| -------- | ------- | -------------- | ------- |
-| Ethereum | ~8 h    | ~4–6 h         | ~2 h    |
-| Gnosis   | ~2 h    | ~1–2 h         | ~30 m   |
+| Chain    | Archive  | Full (Default) | Minimal  |
+| -------- | -------- | -------------- | -------- |
+| Ethereum | ~14 h 20 m | ~5 h 40 m    | ~5 h 20 m |
+| Gnosis   | ~5 h 15 m  | ~2 h 50 m    | ~2 h 50 m |
 
 :::info
-These figures are indicative and are **not measured by CI** — read them as an order of magnitude, not a target. Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result more than CPU does: expect proportionally faster syncs on a well-connected host and slower ones on a constrained link.
+Measured on Erigon 3.6.1 in September 2026, syncing each node from an empty datadir on one machine (16-core Intel Core Ultra 9 185H, 93 GB RAM, NVMe SSD on ext4), one node at a time. Time is measured from process start to the first report of a head at the chain tip.
+
+**The download rate was capped at 50 MB/s, and that cap — not the hardware — is what set these times.** Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result far more than CPU does: expect proportionally faster syncs on a better-connected host and slower ones on a constrained link. Treat these as an order of magnitude, not a target — they are a single sample per configuration, with no variance estimate, and sync time also depends on peer quality and chain activity on the day.
+
+Note that full and minimal land within a few percent of each other on both chains. The gap between them is small; the gap to archive is 2–3×.
 :::
