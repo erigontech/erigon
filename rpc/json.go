@@ -407,13 +407,14 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 }
 
 func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
-	c.encMu.Lock()
-	defer c.encMu.Unlock()
-
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		deadline = time.Now().Add(c.writeTimeout)
 	}
+
+	c.encMu.Lock()
+	defer c.encMu.Unlock()
+
 	if err := c.conn.SetWriteDeadline(deadline); err != nil {
 		return err
 	}
