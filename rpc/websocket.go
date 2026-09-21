@@ -320,10 +320,8 @@ type websocketCodec struct {
 func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
 	adapter := &wsConnAdapter{conn: conn}
-	jc := newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame)
-	jc.writeTimeout = wsPingInterval
 	wc := &websocketCodec{
-		jsonCodec: jc,
+		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
 		pingReset: make(chan struct{}, 1),
 		info: PeerInfo{
@@ -331,6 +329,7 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 			RemoteAddr: remoteAddr,
 		},
 	}
+	wc.writeTimeout = wsPingInterval
 	// Fill in connection details.
 	wc.info.HTTP.Host = host
 	if req != nil {
