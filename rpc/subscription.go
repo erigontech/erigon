@@ -187,10 +187,12 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 	)
 	if isNilPointer(data) {
 		enc, err = json.Marshal(data)
+	} else if fm, ok := data.(fastJSONResult); ok {
+		// A notification needs the bytes, so a value that can size its own buffer beats
+		// streaming into a pooled one and cloning it back out.
+		enc, err = fm.MarshalFastJSON()
 	} else if fm, ok := data.(fastJSONMarshalerTo); ok {
 		enc, err = marshalFastJSONTo(fm)
-	} else if fm, ok := data.(fastJSONResult); ok {
-		enc, err = fm.MarshalFastJSON()
 	} else {
 		enc, err = json.Marshal(data)
 	}

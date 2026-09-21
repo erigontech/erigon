@@ -540,7 +540,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 	p.kickKZGOffenders(ctx, validateReasons)
 
-	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
+	announcements, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 	if err != nil {
 		return err
@@ -548,19 +548,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
-
-	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
-	for i, reason := range reasons {
-		txn := newTxns.Txns[i]
-
-		if reason == txpoolcfg.Success {
-
-			if txn.Traced {
-				p.logger.Info(fmt.Sprintf("TX TRACING: processRemoteTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
-			}
-			p.promoted.Append(txn.TxType(), txn.Size, txn.IDHash[:])
-		}
-	}
 
 	if p.promoted.Len() > 0 {
 		copied := p.promoted.Copy()
@@ -1509,15 +1496,6 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	p.promoted.AppendOther(announcements)
 
 	reasons = fillDiscardReasons(reasons, originalTxns, p.discardReasonsLRU)
-	for i, reason := range reasons {
-		if reason == txpoolcfg.Success {
-			txn := originalTxns.Txns[i]
-			if txn.Traced {
-				p.logger.Info(fmt.Sprintf("TX TRACING: AddLocalTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
-			}
-			p.promoted.Append(txn.TxType(), txn.Size, txn.IDHash[:])
-		}
-	}
 	if p.promoted.Len() > 0 {
 		select {
 		case p.newPendingTxns <- p.promoted.Copy():

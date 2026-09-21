@@ -460,11 +460,72 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 			b.LogsBloom = nil
 			return b
 		}()},
+		{"no transactions, full shape", RPCMarshalBlock(empty, true, true)},
+		{"transactions excluded, full shape", RPCMarshalBlock(withTx, false, true)},
+		{"typed nil full tx slice", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, true)
+			b.Transactions = []*RPCTransaction(nil)
+			return b
+		}()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			want, err := json.Marshal(tc.b)
 			require.NoError(t, err)
 			require.Equal(t, string(want), fastJSON(t, tc.b))
+		})
+	}
+}
+
+func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
+	u := func(v uint64) *hexutil.U256 { n := hexutil.U256(*uint256.NewInt(v)); return &n }
+	q := func(v uint64) *hexutil.Uint64 { n := hexutil.Uint64(v); return &n }
+	hash := common.HexToHash("0xaabb")
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	base := func() *RPCTransaction {
+		return &RPCTransaction{
+			BlockHash: &hash, BlockNumber: u(0x1234), BlockTimestamp: q(0x64),
+			From: to, Gas: 0x5208, GasPrice: u(0x9), Hash: hash,
+			Input: hexutil.Bytes{0xde, 0xad}, Nonce: 3, To: &to,
+			TransactionIndex: q(2), Value: u(0x100), Type: 0,
+			V: u(0x1b), R: u(0xaa), S: u(0xbb),
+		}
+	}
+	dynamic := base()
+	dynamic.Type, dynamic.MaxPriorityFeePerGas, dynamic.MaxFeePerGas = 2, u(0x1), u(0x2)
+	dynamic.ChainID, dynamic.YParity = u(1), u(0)
+	dynamic.Accesses = &types.AccessList{
+		{Address: to, StorageKeys: []common.Hash{hash, {}}},
+		{Address: common.Address{}, StorageKeys: nil},
+		{Address: to, StorageKeys: []common.Hash{}},
+	}
+	blob := base()
+	blob.Type, blob.MaxFeePerBlobGas = 3, u(0x7)
+	blob.BlobVersionedHashes = []common.Hash{hash}
+	setcode := base()
+	setcode.Type = 4
+	setcode.Authorizations = &[]types.JsonAuthorization{
+		{ChainID: hexutil.U256(*uint256.NewInt(1)), Address: to, Nonce: 1, YParity: 0,
+			R: hexutil.U256(*uint256.NewInt(0xaa)), S: hexutil.U256(*uint256.NewInt(0xbb))},
+		{},
+	}
+	pending := base()
+	pending.BlockHash, pending.BlockNumber, pending.BlockTimestamp, pending.TransactionIndex = nil, nil, nil, nil
+	noTo := base()
+	noTo.To, noTo.Input = nil, nil
+	emptyAccesses := base()
+	emptyAccesses.Accesses = &types.AccessList{}
+	emptyBlobs := base()
+	emptyBlobs.BlobVersionedHashes = []common.Hash{}
+
+	for name, txn := range map[string]*RPCTransaction{
+		"zero": {}, "legacy": base(), "dynamic fee": dynamic, "blob": blob,
+		"set code": setcode, "pending": pending, "contract creation": noTo,
+		"empty access list": emptyAccesses, "empty blob hashes": emptyBlobs,
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(txn)
+			require.NoError(t, err)
+			require.Equal(t, string(want), fastJSON(t, txn))
 		})
 	}
 }

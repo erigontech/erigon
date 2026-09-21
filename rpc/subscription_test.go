@@ -263,7 +263,7 @@ func (b bothFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 func TestNotifyUsesFastJSON(t *testing.T) {
 	t.Parallel()
 
-	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null"} {
+	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null", &bothFastJSON{data: []byte{0xab}}: `"qw=="`} {
 		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
 		if err := n.Notify("0x1", payload); err != nil {
 			t.Fatal(err)
