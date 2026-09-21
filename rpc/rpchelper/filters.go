@@ -424,6 +424,20 @@ func (ff *Filters) TouchSubscription(id SubscriptionID) (FilterType, bool) {
 	return sub.ft, true
 }
 
+// SetWake makes subscription id call wake after each event it queues, so its reader can drain
+// it on demand instead of parking a goroutine on the channel.
+func (ff *Filters) SetWake(id SubscriptionID, wake func()) bool {
+	t, ok := ff.trackedSubs.Get(id)
+	if !ok {
+		return false
+	}
+	w, ok := t.tracker.(interface{ setWake(func()) })
+	if ok {
+		w.setWake(wake)
+	}
+	return ok
+}
+
 func (ff *Filters) registerSubscription(id SubscriptionID, ft FilterType, tracker SubTracker) {
 	ff.trackedSubs.Put(id, trackedSub{ft: ft, tracker: tracker})
 	ff.logger.Debug("[rpc] [filters] registered subscription", "type", ft, "id", id, "protocol", tracker.Protocol())

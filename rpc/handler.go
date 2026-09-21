@@ -435,7 +435,7 @@ func (h *handler) cancelServerSubscriptions(err error) {
 
 	for id, s := range h.serverSubs {
 		s.err <- err
-		close(s.err)
+		s.close()
 		delete(h.serverSubs, id)
 	}
 }
@@ -704,7 +704,7 @@ func (h *handler) unsubscribe(ctx context.Context, id ID) (bool, error) {
 	if s == nil {
 		return false, ErrSubscriptionNotFound
 	}
-	close(s.err)
+	s.close()
 	delete(h.serverSubs, id)
 	return true, nil
 }

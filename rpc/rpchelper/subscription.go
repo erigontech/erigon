@@ -70,6 +70,7 @@ type chan_sub[T any] struct {
 	// lastAccess is the last poll time for timeout eviction; zero means no
 	// timeout tracking (push subscriptions die with their connection instead).
 	lastAccess time.Time
+	wake       func() // called after each queued item, see Filters.SetWake
 }
 
 // newChanSub - buffered channel
@@ -87,15 +88,30 @@ func newChanSub[T any](size int, protocol SubProtocol) *chan_sub[T] {
 	return s
 }
 func (s *chan_sub[T]) Send(x T) {
+	if wake := s.send(x); wake != nil {
+		wake()
+	}
+}
+
+// send returns the wake hook when x was queued; the hook runs after the lock is released.
+func (s *chan_sub[T]) send(x T) func() {
 	s.lock.Lock()
 	defer s.lock.Unlock()
 	if s.closed {
-		return
+		return nil
 	}
 	select {
 	case s.ch <- x:
+		return s.wake
 	default: // the sub is overloaded, dispose message
+		return nil
 	}
+}
+
+func (s *chan_sub[T]) setWake(wake func()) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	s.wake = wake
 }
 
 // SendLatest delivers with latest-value semantics: when the subscriber is
