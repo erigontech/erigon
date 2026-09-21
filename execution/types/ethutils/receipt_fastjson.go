@@ -17,10 +17,8 @@
 package ethutils
 
 import (
-	"fmt"
+	"encoding/json"
 
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -48,6 +46,13 @@ func (rs RPCReceipts) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	return nil
 }
 
+// field writes the separator a following field needs, then its name, and returns the writer
+// so the value chains onto it. An object's first field must not go through it.
+func field(w *jsonstream.StackStream, name string) *jsonstream.StackStream {
+	w.WriteMore()
+	return w.WriteObjectField(name)
+}
+
 // MarshalFastJSONTo writes the receipt's fields in the order the struct declares them, so
 // the bytes match reflection exactly.
 func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
@@ -55,37 +60,33 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 		w.WriteNil()
 		return nil
 	}
-	// The contract has no way to retract a result that has already started, so a
-	// shape the writer cannot encode has to fail before the first byte.
-	if err := validateLogs(r.Logs); err != nil {
-		return err
-	}
 	w.WriteObjectStart()
 
-	w.WriteObjectField("blockHash")
-	w.WriteHex(r.BlockHash[:])
-	jsonstream.Field(w, "blockNumber").WriteQuotedText(&r.BlockNumber)
-	jsonstream.Field(w, "transactionHash").WriteHex(r.TransactionHash[:])
-	jsonstream.Field(w, "transactionIndex").WriteQuotedText(&r.TransactionIndex)
-	jsonstream.Field(w, "from").WriteHex(r.From[:])
-	jsonstream.Field(w, "to")
+	w.WriteObjectField("blockHash").WriteHex(r.BlockHash[:])
+	field(w, "blockNumber").WriteQuotedText(&r.BlockNumber)
+	field(w, "transactionHash").WriteHex(r.TransactionHash[:])
+	field(w, "transactionIndex").WriteQuotedText(&r.TransactionIndex)
+	field(w, "from").WriteHex(r.From[:])
+	field(w, "to")
 	if r.To == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.To[:])
 	}
-	jsonstream.Field(w, "type").WriteQuotedText(&r.Type)
-	jsonstream.Field(w, "gasUsed").WriteQuotedText(&r.GasUsed)
-	jsonstream.Field(w, "cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
-	jsonstream.Field(w, "contractAddress")
+	field(w, "type").WriteQuotedText(&r.Type)
+	field(w, "gasUsed").WriteQuotedText(&r.GasUsed)
+	field(w, "cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
+	field(w, "contractAddress")
 	if r.ContractAddress == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.ContractAddress[:])
 	}
-	jsonstream.Field(w, "logs")
-	writeLogs(w, r.Logs)
-	jsonstream.Field(w, "logsBloom")
+	field(w, "logs")
+	if err := writeLogs(w, r.Logs); err != nil {
+		return err
+	}
+	field(w, "logsBloom")
 	if r.LogsBloom == nil {
 		w.WriteNil()
 	} else {
@@ -93,203 +94,77 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 
 	if r.EffectiveGasPrice != nil {
-		jsonstream.Field(w, "effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
+		field(w, "effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
 	}
 	if r.Status != nil {
-		jsonstream.Field(w, "status").WriteQuotedText(r.Status)
+		field(w, "status").WriteQuotedText(r.Status)
 	}
 	if len(r.Root) > 0 {
-		jsonstream.Field(w, "root").WriteHex(r.Root)
+		field(w, "root").WriteHex(r.Root)
 	}
 	if r.BlobGasPrice != nil {
-		jsonstream.Field(w, "blobGasPrice").WriteQuotedText(r.BlobGasPrice)
+		field(w, "blobGasPrice").WriteQuotedText(r.BlobGasPrice)
 	}
 	if r.BlobGasUsed != nil {
-		jsonstream.Field(w, "blobGasUsed").WriteQuotedText(r.BlobGasUsed)
+		field(w, "blobGasUsed").WriteQuotedText(r.BlobGasUsed)
 	}
 
 	w.WriteObjectEnd()
 	return nil
 }
 
-func validateLogs(logs any) error {
+// writeLogs streams the shapes this package builds. Any other shape goes through
+// encoding/json, which can only fail on a value no constructor here produces.
+func writeLogs(w *jsonstream.StackStream, logs any) error {
 	switch v := logs.(type) {
-	case nil, types.Logs, []*types.Log, []*types.RPCLog:
-		return nil
-	case []map[string]any:
-		for _, entry := range v {
-			if err := validateSubscribeLog(entry); err != nil {
-				return err
-			}
+	case types.Logs:
+		jsonstream.ArrayValue(w, v, writeLog)
+	case []*types.Log:
+		jsonstream.ArrayValue(w, v, writeLog)
+	case []*types.RPCLog:
+		jsonstream.ArrayValue(w, v, writeRPCLogElem)
+	case []SubscribeLog:
+		jsonstream.ArrayValue(w, v, writeSubscribeLog)
+	default:
+		b, err := json.Marshal(v)
+		if err != nil {
+			return err
 		}
-		return nil
-	}
-	return fmt.Errorf("ethutils: receipt logs of unexpected type %T", logs)
-}
-
-func validateSubscribeLog(entry map[string]any) error {
-	known := 0
-	for _, k := range subscribeLogKeys {
-		val, ok := entry[k]
-		if !ok {
-			continue
-		}
-		known++
-		switch val.(type) {
-		case common.Address, common.Hash, hexutil.Bytes, []common.Hash:
-		default:
-			return fmt.Errorf("ethutils: subscribe log field %q of unexpected type %T", k, val)
-		}
-	}
-	if known != len(entry) {
-		// A key outside the known set would be dropped silently, where the reflection
-		// path this replaces would have written it.
-		return fmt.Errorf("ethutils: subscribe log has %d keys, %d of them known", len(entry), known)
+		w.WriteRawBytes(b)
 	}
 	return nil
 }
 
-// writeLogs handles both shapes MarshalReceipt puts in Logs: []*types.Log, and
-// []*types.RPCLog when the caller asked for blockTimestamp.
-// validateLogs has already rejected any shape not handled here.
-func writeLogs(w *jsonstream.StackStream, logs any) {
-	switch v := logs.(type) {
-	case types.Logs:
-		writeLogList(w, v)
-	case []*types.Log:
-		writeLogList(w, v)
-	case []*types.RPCLog:
-		if v == nil {
-			w.WriteNil()
-			return
-		}
-		w.WriteArrayStart()
-		for i, l := range v {
-			if i > 0 {
-				w.WriteMore()
-			}
-			if l == nil {
-				w.WriteNil()
-				continue
-			}
-			writeLog(w, &l.Log, &l.BlockTimestamp)
-		}
-		w.WriteArrayEnd()
-	case []map[string]any:
-		// MarshalSubscribeReceipt's shape, which eth_sendRawTransactionSync answers with.
-		writeSubscribeLogs(w, v)
-	default:
-		w.WriteNil()
+func writeSubscribeLog(w *jsonstream.StackStream, l *SubscribeLog) {
+	w.WriteObjectStart()
+	if l.Address != nil {
+		w.WriteObjectField("address").WriteHex(l.Address[:])
+		w.WriteMore()
 	}
+	w.WriteObjectField("data").WriteHex(l.Data)
+	jsonstream.HexesField(w, "topics", l.Topics)
+	field(w, "transactionHash").WriteHex(l.TransactionHash[:])
+	w.WriteObjectEnd()
 }
 
-// subscribeLogKeys is every key MarshalSubscribeReceipt puts in a log entry, in the order
-// encoding/json emits them.
-var subscribeLogKeys = []string{"address", "data", "topics", "transactionHash"}
+func writeRPCLogElem(w *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).MarshalFastJSONTo(w) }
 
-// writeSubscribeLogs writes the map form MarshalSubscribeReceipt builds. encoding/json
-// orders an object's keys, and address is only present when the proto log carried one.
-func writeSubscribeLogs(w *jsonstream.StackStream, logs []map[string]any) {
-	if logs == nil {
-		w.WriteNil()
-		return
-	}
-	w.WriteArrayStart()
-	for i, entry := range logs {
-		if i > 0 {
-			w.WriteMore()
-		}
-		if entry == nil {
-			w.WriteNil()
-			continue
-		}
-		w.WriteObjectStart()
-		first := true
-		for _, k := range subscribeLogKeys {
-			val, ok := entry[k]
-			if !ok {
-				continue
-			}
-			if first {
-				w.WriteObjectField(k)
-				first = false
-			} else {
-				jsonstream.Field(w, k)
-			}
-			switch t := val.(type) {
-			case common.Address:
-				w.WriteHex(t[:])
-			case common.Hash:
-				w.WriteHex(t[:])
-			case hexutil.Bytes:
-				w.WriteHex(t)
-			case []common.Hash:
-				if t == nil {
-					w.WriteNil()
-					break
-				}
-				w.WriteArrayStart()
-				for j := range t {
-					if j > 0 {
-						w.WriteMore()
-					}
-					w.WriteHex(t[j][:])
-				}
-				w.WriteArrayEnd()
-			}
-		}
-		w.WriteObjectEnd()
-	}
-	w.WriteArrayEnd()
-}
-
-func writeLogList(w *jsonstream.StackStream, logs []*types.Log) {
-	if logs == nil {
-		w.WriteNil()
-		return
-	}
-	w.WriteArrayStart()
-	for i := range logs {
-		if i > 0 {
-			w.WriteMore()
-		}
-		writeLog(w, logs[i], nil)
-	}
-	w.WriteArrayEnd()
-}
-
-// writeLog writes one log in the order types.Log declares its fields, with RPCLog's
-// blockTimestamp appended when the caller has one.
-func writeLog(w *jsonstream.StackStream, l *types.Log, blockTimestamp *hexutil.Uint64) {
+// writeLog writes one log in the order types.Log declares its fields.
+func writeLog(w *jsonstream.StackStream, lp **types.Log) {
+	l := *lp
 	if l == nil {
 		w.WriteNil()
 		return
 	}
 	w.WriteObjectStart()
-	w.WriteObjectField("address")
-	w.WriteHex(l.Address[:])
-	jsonstream.Field(w, "topics")
-	if l.Topics == nil {
-		w.WriteNil()
-	} else {
-		w.WriteArrayStart()
-		for i := range l.Topics {
-			if i > 0 {
-				w.WriteMore()
-			}
-			w.WriteHex(l.Topics[i][:])
-		}
-		w.WriteArrayEnd()
-	}
-	jsonstream.Field(w, "data").WriteHex(l.Data)
-	jsonstream.Field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
-	jsonstream.Field(w, "transactionHash").WriteHex(l.TxHash[:])
-	jsonstream.Field(w, "transactionIndex").WriteQuotedText(&l.TxIndex)
-	jsonstream.Field(w, "blockHash").WriteHex(l.BlockHash[:])
-	jsonstream.Field(w, "logIndex").WriteQuotedText(&l.Index)
-	jsonstream.Field(w, "removed").WriteBool(l.Removed)
-	if blockTimestamp != nil {
-		jsonstream.Field(w, "blockTimestamp").WriteQuotedText(blockTimestamp)
-	}
+	w.WriteObjectField("address").WriteHex(l.Address[:])
+	jsonstream.HexesField(w, "topics", l.Topics)
+	field(w, "data").WriteHex(l.Data)
+	field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
+	field(w, "transactionHash").WriteHex(l.TxHash[:])
+	field(w, "transactionIndex").WriteQuotedText(&l.TxIndex)
+	field(w, "blockHash").WriteHex(l.BlockHash[:])
+	field(w, "logIndex").WriteQuotedText(&l.Index)
+	field(w, "removed").WriteBool(l.Removed)
 	w.WriteObjectEnd()
 }

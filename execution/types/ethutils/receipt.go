@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-// RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, types.Logs, []*types.Log, []map[string]any or nil.
+// RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, types.Logs, []*types.Log, []SubscribeLog or nil.
 type RPCReceipt struct {
 	BlockHash         common.Hash     `json:"blockHash"`
 	BlockNumber       hexutil.Uint64  `json:"blockNumber"`
@@ -159,6 +159,15 @@ func MarshalReceipt(
 	return result
 }
 
+// SubscribeLog is a log as the receipt subscription carries it. The fields are in the key
+// order of the map it replaced, so the JSON bytes did not change.
+type SubscribeLog struct {
+	Address         *common.Address `json:"address,omitempty"`
+	Data            hexutil.Bytes   `json:"data"`
+	Topics          []common.Hash   `json:"topics"`
+	TransactionHash common.Hash     `json:"transactionHash"`
+}
+
 func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *RPCReceipt {
 	txHash := common.Hash(gointerfaces.ConvertH256ToHash(protoReceipt.TransactionHash))
 	status := hexutil.Uint64(protoReceipt.Status)
@@ -182,23 +191,19 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		log.Warn("[rpc] subscribed receipt has a malformed logs bloom", "len", n, "txHash", txHash)
 	}
 
-	logs := make([]map[string]any, 0, len(protoReceipt.Logs))
-	for _, protoLog := range protoReceipt.Logs {
-		logEntry := make(map[string]any)
-
+	logs := make([]SubscribeLog, len(protoReceipt.Logs))
+	for i, protoLog := range protoReceipt.Logs {
+		l := &logs[i]
 		if protoLog.Address != nil {
-			logEntry["address"] = common.Address(gointerfaces.ConvertH160toAddress(protoLog.Address))
+			addr := common.Address(gointerfaces.ConvertH160toAddress(protoLog.Address))
+			l.Address = &addr
 		}
-
-		topics := make([]common.Hash, len(protoLog.Topics))
-		for i, topic := range protoLog.Topics {
-			topics[i] = common.Hash(gointerfaces.ConvertH256ToHash(topic))
+		l.Topics = make([]common.Hash, len(protoLog.Topics))
+		for j, topic := range protoLog.Topics {
+			l.Topics[j] = common.Hash(gointerfaces.ConvertH256ToHash(topic))
 		}
-		logEntry["topics"] = topics
-		logEntry["data"] = hexutil.Bytes(protoLog.Data)
-		logEntry["transactionHash"] = txHash
-
-		logs = append(logs, logEntry)
+		l.Data = hexutil.Bytes(protoLog.Data)
+		l.TransactionHash = txHash
 	}
 	result.Logs = logs
 
