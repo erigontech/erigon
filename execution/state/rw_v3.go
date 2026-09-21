@@ -1418,6 +1418,13 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 	return nil, nil
 }
 
+// HasAccount goes through ReadAccountData so it sees blockCache, which the promoted
+// ReaderV3 method would skip.
+func (r *CachedReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (r *CachedReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if r.blockCache != nil && r.readCurrent {
 		if code, ok := r.blockCache.GetCurrentCode(address); ok {
