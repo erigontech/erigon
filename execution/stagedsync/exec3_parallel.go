@@ -562,6 +562,15 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					if sc, ok := stopCauseOf(executorContext); ok && sc.kind == stopOperational {
 						return sc.err
 					}
+					// A plain (non-stopCause) context cancellation — shutdown, or the CL
+					// cancelling the payload — is operational, not a block verdict: return
+					// it raw before the missing-block guard, which a cancel would otherwise
+					// trip into a spurious ErrInvalidBlock reported to the CL as INVALID.
+					// A stopCause cancellation falls through to the switch below, which
+					// maps stopReachedMax/stopMoreWork to their proper results.
+					if _, isStop := stopCauseOf(executorContext); !isStop && executorContext.Err() != nil {
+						return context.Cause(executorContext)
+					}
 					if missing := applyLoopMissingBlocks(txResultBlocks, appliedBlocks); len(missing) > 0 {
 						return fmt.Errorf("%w: apply loop exited (lastBlockResult=%d maxBlockNum=%d) but %d block(s) had tx-results without a blockResult: %v",
 							rules.ErrInvalidBlock, lastBlockResult.BlockNum, pe.maxBlockNum, len(missing), missing)
@@ -1423,10 +1432,14 @@ func (pe *parallelExecutor) closeApplyChannels() (closedOrder []string) {
 // invalid block could be accepted) — surface it as a loud InvalidBlock error. The
 // reason argument tags the call site in the failure log.
 func (pe *parallelExecutor) execLoopExitCheck(ctx context.Context, reason string) error {
-	// Only a deliberate stopCause exempts the pending-blocks completeness check;
-	// an unrelated cancel (shutdown, parent cancel) with blocks still pending is a
-	// genuine silent-miss and must surface.
+	// A deliberate stopCause, or any context cancellation (shutdown, parent/CL
+	// cancel), explains the exit — pending blocks are then not a silent miss.
+	// Cancellation is operational, never a block-validity verdict. Only an
+	// uncancelled exit with blocks still pending is a genuine silent miss.
 	if _, ok := stopCauseOf(ctx); ok {
+		return nil
+	}
+	if ctx.Err() != nil {
 		return nil
 	}
 	pe.RLock()

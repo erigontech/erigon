@@ -1004,8 +1004,11 @@ func TestApplyLoopCloseBranchSurfacesDeferredRootBeforeMissing(t *testing.T) {
 	})
 }
 
-// TestExecLoopExitCheckDeliberateStop verifies that a ctx cancelled with a
-// stopCause suppresses the pending-block ErrInvalidBlock noise.
+// TestExecLoopExitCheckDeliberateStop verifies that a deliberate stopCause OR any
+// context cancellation (shutdown, parent/CL cancel) exempts the pending-block
+// completeness check — both are operational, not a block verdict. Only an
+// uncancelled exit with blocks still pending is a genuine silent miss that must
+// surface as ErrInvalidBlock.
 func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 	t.Run("pending blocks but stopCause returns nil", func(t *testing.T) {
 		pe := &parallelExecutor{}
@@ -1024,13 +1027,13 @@ func TestExecLoopExitCheckDeliberateStop(t *testing.T) {
 		require.ErrorIs(t, err, rules.ErrInvalidBlock, "must still flag silent miss when not deliberately stopped")
 	})
 
-	t.Run("pending blocks with unrelated cancel cause still errors", func(t *testing.T) {
+	t.Run("cancelled context (shutdown) is operational, not a silent miss", func(t *testing.T) {
 		pe := &parallelExecutor{}
 		pe.blockExecutors = map[uint64]*blockExecutor{3: {}}
 		ctx, cancel := context.WithCancelCause(context.Background())
 		cancel(errors.New("shutdown"))
-		err := pe.execLoopExitCheck(ctx, "non-deliberate-cancel")
-		require.ErrorIs(t, err, rules.ErrInvalidBlock, "unrelated cancel cause must not suppress the silent-miss error")
+		err := pe.execLoopExitCheck(ctx, "shutdown-cancel")
+		require.NoError(t, err, "a cancelled context (shutdown, parent/CL cancel) explains the exit; pending blocks are then not a silent miss and must not be reported as invalid")
 	})
 }
 
