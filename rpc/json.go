@@ -152,8 +152,8 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 			}
 			return err
 		}
-		// Erigon return: `hexutil.Bytes/Uint/Uint64/U256, common.Hash,common.Address
-		// such low-level types are json-safe, but can't carry marshaler method
+		// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
+		// reflection encoder and must not catch a type whose json.Marshaler writes something else.
 		if ta, ok := result.(encoding.TextAppender); ok {
 			rs.Open().WriteQuotedText(ta)
 			return rs.Err()

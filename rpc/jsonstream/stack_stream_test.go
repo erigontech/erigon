@@ -1410,7 +1410,7 @@ func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
 
 // A field name or separator written before the lazy field opened would put its value in the
 // enclosing object, silently dropping the field. Asserts catch a marshaller that starts with
-// jsonw.Field instead of a value write.
+// jsonstream.Field instead of a value write.
 func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
@@ -1427,6 +1427,27 @@ func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 
 			lazy.WriteObjectStart()
 			require.NotPanics(t, func() { write(lazy) })
+		})
+	}
+}
+
+// A nil slice is the caller's to write as null: WriteHexBytes always writes an array.
+func TestWriteHexBytes(t *testing.T) {
+	for name, tc := range map[string]struct {
+		items [][]byte
+		want  string
+	}{
+		"nil":           {nil, `[]`},
+		"empty":         {[][]byte{}, `[]`},
+		"empty element": {[][]byte{{}}, `["0x"]`},
+		"multi":         {[][]byte{{0x01}, {0xab, 0xcd}, nil}, `["0x01","0xabcd","0x"]`},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s := Get(nil)
+			defer Put(s)
+			WriteHexBytes(s, tc.items)
+			require.NoError(t, s.Err())
+			require.Equal(t, tc.want, string(s.Buffer()))
 		})
 	}
 }
