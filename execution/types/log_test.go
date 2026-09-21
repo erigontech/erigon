@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -607,11 +608,13 @@ func TestRPCLogsMarshalFastJSONTo(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(logs)
 			require.NoError(t, err)
-			s := jsonstream.Get(nil)
+			var sink bytes.Buffer
+			s := jsonstream.Get(&sink)
 			defer jsonstream.Put(s)
 			require.NoError(t, logs.MarshalFastJSONTo(s))
 			require.NoError(t, s.Flush())
-			require.Equal(t, string(want), string(s.Buffer()))
+			require.NoError(t, s.Err())
+			require.Equal(t, string(want), sink.String())
 		})
 	}
 }
