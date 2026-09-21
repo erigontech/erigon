@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
 func TestRepeatedForkchoicePersistsFinality(t *testing.T) {
@@ -105,6 +106,54 @@ func TestRepeatedForkchoiceDoesNotWaitForWriter(t *testing.T) {
 		require.Equal(t, finalized, rawdb.ReadForkchoiceFinalized(tx))
 		return nil
 	}))
+}
+
+func TestRepeatedForkchoiceWithLaggingFinish(t *testing.T) {
+	for _, tc := range []struct {
+		name               string
+		requestedHeadIndex int
+		ignored            bool
+	}{
+		{name: "below_finality", requestedHeadIndex: 0, ignored: true},
+		{name: "at_finality", requestedHeadIndex: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := execmoduletester.New(t)
+			chain, err := m.GenerateChain(4, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chain.Blocks))
+			m.ExecModule.Drain()
+			head, safe, finalized := chain.TopBlock.Hash(), chain.Blocks[2].Hash(), chain.Blocks[1].Hash()
+			result, err := m.ExecModule.UpdateForkChoice(t.Context(), head, safe, finalized)
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+			m.ExecModule.Drain()
+
+			requestedHead := chain.Blocks[tc.requestedHeadIndex]
+			// A matching Finish height must not override stored finality, even when
+			// stage progress and forkchoice markers disagree.
+			require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+				return stages.SaveStageProgress(tx, stages.Finish, requestedHead.NumberU64())
+			}))
+			result, err = m.ExecModule.UpdateForkChoice(t.Context(), requestedHead.Hash(), requestedHead.Hash(), requestedHead.Hash())
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+			require.Equal(t, requestedHead.Hash(), result.LatestValidHash)
+			m.ExecModule.Drain()
+
+			wantHead, wantSafe, wantFinalized := head, safe, finalized
+			if !tc.ignored {
+				wantHead, wantSafe, wantFinalized = requestedHead.Hash(), requestedHead.Hash(), requestedHead.Hash()
+			}
+			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+				require.Equal(t, wantHead, rawdb.ReadHeadBlockHash(tx), "head block marker")
+				require.Equal(t, wantHead, rawdb.ReadForkchoiceHead(tx), "forkchoice head marker")
+				require.Equal(t, wantSafe, rawdb.ReadForkchoiceSafe(tx), "safe marker")
+				require.Equal(t, wantFinalized, rawdb.ReadForkchoiceFinalized(tx), "finalized marker")
+				return nil
+			}))
+		})
+	}
 }
 
 func TestCatchupCommitObservations(t *testing.T) {

@@ -166,9 +166,9 @@ type canonicalEntry struct {
 }
 
 // unwindIfNeeded returns a non-nil result when the FCU can stop before execution.
-// For a successful short circuit, acceptsMarkerUpdate is true for a same-head
-// update and false for an ignored ancestor below finality. It does not indicate
-// whether the stored markers differ.
+// For a successful short circuit, acceptsMarkerUpdate is true only for a
+// same-head update at or above stored finality. It does not indicate whether
+// the stored markers differ.
 func (e *ExecModule) unwindIfNeeded(
 	ctx context.Context,
 	tx kv.TemporalRwTx,
@@ -200,8 +200,9 @@ func (e *ExecModule) unwindIfNeeded(
 	// we short circuit reorgs if:
 	//   1. the head is an ancestor of the last finalised block
 	//   2. the head is a duplicate FCU (e.g. CLs sending the same FCU repeatedly)
-	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash &&
-		(fcuHeader.Number.Uint64() < finalisedBlockNum || fcuHeader.Number.Uint64() == finishProgressBefore) {
+	belowFinality := fcuHeader.Number.Uint64() < finalisedBlockNum
+	sameExecutedHead := fcuHeader.Number.Uint64() == finishProgressBefore
+	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedHead) {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
 			return nil, false, err
@@ -215,7 +216,7 @@ func (e *ExecModule) unwindIfNeeded(
 		return &ForkChoiceResult{
 			LatestValidHash: blockHash,
 			Status:          ExecutionStatusSuccess,
-		}, fcuHeader.Number.Uint64() == finishProgressBefore, nil
+		}, sameExecutedHead && !belowFinality, nil
 	}
 	if fcuHeader.Number.Sign() == 0 && canonicalHash != blockHash {
 		return &ForkChoiceResult{
