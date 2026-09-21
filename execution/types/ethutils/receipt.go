@@ -159,10 +159,12 @@ func MarshalReceipt(
 	return result
 }
 
-// RPCLogFromProto is the log a subscription delivers, the same object eth_getLogs returns.
+// RPCLogFromProto is the log a subscription delivers, the same object eth_getLogs returns. The
+// address and both hashes must be set, as every backend sets them.
 func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.RPCLog {
 	lg := &types.RPCLog{
 		Log: types.Log{
+			Address:     gointerfaces.ConvertH160toAddress(l.Address),
 			Topics:      make([]common.Hash, len(l.Topics)),
 			Data:        l.Data,
 			BlockNumber: hexutil.Uint64(l.BlockNumber),
@@ -176,9 +178,6 @@ func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.RPCLog {
 	}
 	for i, topic := range l.Topics {
 		lg.Topics[i] = gointerfaces.ConvertH256ToHash(topic)
-	}
-	if l.Address != nil {
-		lg.Address = gointerfaces.ConvertH160toAddress(l.Address)
 	}
 	return lg
 }
