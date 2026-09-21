@@ -448,13 +448,13 @@ keys against 8.4 MB bounded by workers. Deferring the **encode** breaks the same
 - Create: `execution/commitment/v4/fold.go`
 - Create: `execution/commitment/v4/fold_test.go`
 
-- [ ] add `fold(n *node, depth int) ([32]byte, error)` computing bottom-up: leaf slots through `leafRef` with the right plane, branch slots as `ref = slot`, and `ref = extensionRef(E, slot)` where the `extMask` bit is set
-- [ ] build the 17-item branch list from the two masks and hand it to `branchRef`
-- [ ] write tests that the root of a hand-built trie matches a root computed through `HexPatriciaHashed` on the same keys, for 1, 2, 16 and 1000 keys, in each plane and mixed
-- [ ] write a test for the empty trie and the single-leaf trie in both planes
-- [ ] write a test that folding an untouched subtree returns its stored hash without descending
-- [ ] write a test asserting zero `Account`/`Storage` calls across the whole fold
-- [ ] run tests — must pass before task 12
+- [x] add `fold(n *node, depth int) ([32]byte, error)` computing bottom-up: leaf slots through `leafRef` with the right plane, branch slots as `ref = slot`, and `ref = extensionRef(E, slot)` where the `extMask` bit is set
+- [x] build the 17-item branch list from the two masks and hand it to `branchRef`
+- [x] write tests that the root of a hand-built trie matches a root computed through `HexPatriciaHashed` on the same keys, for 1, 2, 16 and 1000 keys, in each plane and mixed
+- [x] write a test for the empty trie and the single-leaf trie in both planes
+- [x] write a test that folding an untouched subtree returns its stored hash without descending
+- [x] write a test asserting zero `Account`/`Storage` calls across the whole fold
+- [x] run tests — must pass before task 12
 
 ### Task 12: Root record transitions
 

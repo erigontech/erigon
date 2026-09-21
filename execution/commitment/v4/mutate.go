@@ -232,7 +232,7 @@ func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 func splitChild(parent *node, nib int, child *node, path, suffix, value []byte) error {
 	common := nibbles.CommonPrefixLen(child.path, path)
 	if common == len(child.path) {
-		return insert(child, path, suffix, value)
+		return insert(child, path, packPath(path[len(child.path)+1:], nil), value)
 	}
 	if common < len(parent.path)+1 || common >= len(path) {
 		return ErrInsertPath

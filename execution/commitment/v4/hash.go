@@ -17,6 +17,7 @@
 package v4
 
 import (
+	"bytes"
 	"fmt"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -59,6 +60,26 @@ func leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte {
 	}
 	hash := keccak.Sum256(encoded[start:])
 	return append(encoded[:start], hash[:]...)
+}
+
+func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
+	var encoded bytes.Buffer
+	var prefix [8]byte
+	if err := (rlp.RlpSerializableBytes(payload)).ToDoubleRLP(&encoded, prefix[:]); err != nil {
+		panic(err)
+	}
+	contentLen := rlp.StringLen(suffix) + encoded.Len()
+	start := len(dst)
+	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
+	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
+	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
+	pos += copy(dst[pos:], encoded.Bytes())
+	encodedBytes := dst[start:pos]
+	if len(encodedBytes) < 32 {
+		return encodedBytes
+	}
+	hash := keccak.Sum256(encodedBytes)
+	return append(dst[:start], hash[:]...)
 }
 
 func extensionRef(ext []byte, childHash []byte) [32]byte {

@@ -19,7 +19,8 @@ package v4
 import "fmt"
 
 type node struct {
-	path []byte
+	path  []byte
+	plane byte
 
 	childMask uint16
 	leafMask  uint16
@@ -64,6 +65,9 @@ func (n *node) setChild(nib int, child *node) {
 	bit := uint16(1) << nib
 	n.childMask |= bit
 	n.leafMask &^= bit
+	if child != nil && n.plane != 0 {
+		child.plane = n.plane
+	}
 	n.children[nib] = child
 	n.childHash[nib] = nil
 	n.childExt[nib] = nil
