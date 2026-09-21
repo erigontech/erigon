@@ -24,6 +24,13 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
+// field writes the separator a following field needs, then its name, and returns the writer
+// so the value chains onto it. An object's first field must not go through it.
+func field(w jsonw.JSONWriter, name string) jsonw.JSONWriter {
+	w.WriteMore()
+	return w.WriteObjectField(name)
+}
+
 // MarshalFastJSONTo writes the receipt's fields in the order the struct declares them, so
 // the bytes match reflection exactly.
 func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
@@ -35,48 +42,30 @@ func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 
 	w.WriteObjectField("blockHash")
 	w.WriteHex(r.BlockHash[:])
-	w.WriteMore()
-	w.WriteObjectField("blockNumber")
-	w.WriteQuotedText(&r.BlockNumber)
-	w.WriteMore()
-	w.WriteObjectField("transactionHash")
-	w.WriteHex(r.TransactionHash[:])
-	w.WriteMore()
-	w.WriteObjectField("transactionIndex")
-	w.WriteQuotedText(&r.TransactionIndex)
-	w.WriteMore()
-	w.WriteObjectField("from")
-	w.WriteHex(r.From[:])
-	w.WriteMore()
-	w.WriteObjectField("to")
+	field(w, "blockNumber").WriteQuotedText(&r.BlockNumber)
+	field(w, "transactionHash").WriteHex(r.TransactionHash[:])
+	field(w, "transactionIndex").WriteQuotedText(&r.TransactionIndex)
+	field(w, "from").WriteHex(r.From[:])
+	field(w, "to")
 	if r.To == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.To[:])
 	}
-	w.WriteMore()
-	w.WriteObjectField("type")
-	w.WriteQuotedText(&r.Type)
-	w.WriteMore()
-	w.WriteObjectField("gasUsed")
-	w.WriteQuotedText(&r.GasUsed)
-	w.WriteMore()
-	w.WriteObjectField("cumulativeGasUsed")
-	w.WriteQuotedText(&r.CumulativeGasUsed)
-	w.WriteMore()
-	w.WriteObjectField("contractAddress")
+	field(w, "type").WriteQuotedText(&r.Type)
+	field(w, "gasUsed").WriteQuotedText(&r.GasUsed)
+	field(w, "cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
+	field(w, "contractAddress")
 	if r.ContractAddress == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.ContractAddress[:])
 	}
-	w.WriteMore()
-	w.WriteObjectField("logs")
+	field(w, "logs")
 	if err := writeLogs(w, r.Logs); err != nil {
 		return err
 	}
-	w.WriteMore()
-	w.WriteObjectField("logsBloom")
+	field(w, "logsBloom")
 	if r.LogsBloom == nil {
 		w.WriteNil()
 	} else {
@@ -84,29 +73,19 @@ func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 	}
 
 	if r.EffectiveGasPrice != nil {
-		w.WriteMore()
-		w.WriteObjectField("effectiveGasPrice")
-		w.WriteQuotedText(r.EffectiveGasPrice)
+		field(w, "effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
 	}
 	if r.Status != nil {
-		w.WriteMore()
-		w.WriteObjectField("status")
-		w.WriteQuotedText(r.Status)
+		field(w, "status").WriteQuotedText(r.Status)
 	}
 	if len(r.Root) > 0 {
-		w.WriteMore()
-		w.WriteObjectField("root")
-		w.WriteHex(r.Root)
+		field(w, "root").WriteHex(r.Root)
 	}
 	if r.BlobGasPrice != nil {
-		w.WriteMore()
-		w.WriteObjectField("blobGasPrice")
-		w.WriteQuotedText(r.BlobGasPrice)
+		field(w, "blobGasPrice").WriteQuotedText(r.BlobGasPrice)
 	}
 	if r.BlobGasUsed != nil {
-		w.WriteMore()
-		w.WriteObjectField("blobGasUsed")
-		w.WriteQuotedText(r.BlobGasUsed)
+		field(w, "blobGasUsed").WriteQuotedText(r.BlobGasUsed)
 	}
 
 	w.WriteObjectEnd()
@@ -163,8 +142,7 @@ func writeLog(w jsonw.JSONWriter, l *types.Log, blockTimestamp *hexutil.Uint64) 
 	w.WriteObjectStart()
 	w.WriteObjectField("address")
 	w.WriteHex(l.Address[:])
-	w.WriteMore()
-	w.WriteObjectField("topics")
+	field(w, "topics")
 	if l.Topics == nil {
 		w.WriteNil()
 	} else {
@@ -177,31 +155,15 @@ func writeLog(w jsonw.JSONWriter, l *types.Log, blockTimestamp *hexutil.Uint64) 
 		}
 		w.WriteArrayEnd()
 	}
-	w.WriteMore()
-	w.WriteObjectField("data")
-	w.WriteHex(l.Data)
-	w.WriteMore()
-	w.WriteObjectField("blockNumber")
-	w.WriteQuotedText(&l.BlockNumber)
-	w.WriteMore()
-	w.WriteObjectField("transactionHash")
-	w.WriteHex(l.TxHash[:])
-	w.WriteMore()
-	w.WriteObjectField("transactionIndex")
-	w.WriteQuotedText(&l.TxIndex)
-	w.WriteMore()
-	w.WriteObjectField("blockHash")
-	w.WriteHex(l.BlockHash[:])
-	w.WriteMore()
-	w.WriteObjectField("logIndex")
-	w.WriteQuotedText(&l.Index)
-	w.WriteMore()
-	w.WriteObjectField("removed")
-	w.WriteBool(l.Removed)
+	field(w, "data").WriteHex(l.Data)
+	field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
+	field(w, "transactionHash").WriteHex(l.TxHash[:])
+	field(w, "transactionIndex").WriteQuotedText(&l.TxIndex)
+	field(w, "blockHash").WriteHex(l.BlockHash[:])
+	field(w, "logIndex").WriteQuotedText(&l.Index)
+	field(w, "removed").WriteBool(l.Removed)
 	if blockTimestamp != nil {
-		w.WriteMore()
-		w.WriteObjectField("blockTimestamp")
-		w.WriteQuotedText(blockTimestamp)
+		field(w, "blockTimestamp").WriteQuotedText(blockTimestamp)
 	}
 	w.WriteObjectEnd()
 }
