@@ -1099,7 +1099,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, config)
+		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, config), txCtx, ibs, chainConfig, config)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 		res, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
