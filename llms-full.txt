@@ -1997,7 +1997,7 @@ Nothing breaks, and nothing is rewritten eagerly:
 
 Lazy conversion is not a guarantee that the datadir ends up fully plain. Two conditions have to hold, and neither is automatic:
 
-- **Plain writes must actually be selected for this datadir.** The compiled default is plain from v3.6, but `references_in_commitment_branches` in `snapshots/erigondb.toml` overrides it, and an explicit `true` survives the upgrade. While it is set, merges keep writing *referenced* output and nothing migrates, however long the node runs.
+- **Plain writes must actually be selected for this datadir.** The compiled default is plain from v3.6, but an explicit `references_in_commitment_branches` in `snapshots/erigondb.toml` overrides it, and while it reads `true` merges keep writing *referenced* output — nothing migrates, however long the node runs. A datadir carried over from v3.5 will not have the key: v3.5's `erigondb.toml` recorded only `step_size` and `steps_in_frozen_file`, and v3.6 never adds the field to a file that already exists. So for a plain v3.5 upgrade this condition holds by default; it is the one to check if the toml has been hand-edited, or if a published set delivered one that sets it.
 - **The file has to take part in a later merge.** Under the default cap, merge spans stop at `stepSize * steps_in_frozen_file` (`findMergeRange` in `db/state/aggregator.go`), and a file that already covers the whole candidate range is skipped (`findMergeRangeInFiles` in `db/state/merge.go`). A commitment file already at the frozen span therefore has nothing left to merge into and stays referenced indefinitely. `--erigondb.domain.steps-in-frozen-file` raises that cap (or lifts it entirely), which lets frozen files merge again — but that is an explicit operator choice, not something an upgrade does.
 
 So the two paths below are not simply a faster route to where merging would arrive anyway: short of raising the merge cap yourself, they are the only route for files that are already frozen. For most operators upgrading from v3.5 the correct action is still **none** — referenced files stay readable, and the encoding is a performance property, not a correctness one. Take a path below only if you want plain across the whole datadir, and are prepared to pay for it.
@@ -2008,7 +2008,7 @@ Downgrading to v3.5 after v3.6 has written new snapshot files is **not supported
 
 ### Path 1 — re-download the snapshot set (`erigon seg reset`)
 
-Reconciles the local snapshot set against the published preverified set, then lets the next start fetch what is missing in the published v3.6 form, which is already plain. Files whose names appear in the preverified set are kept; at the default `--local=true` the ones removed are those the set does not describe, plus any file whose `.torrent` carries the wrong infohash or cannot be read at all.
+Reconciles the local snapshot set against the published preverified set, then lets the next start fetch what is missing in the published v3.6 form, which is already plain. At the default `--local=true` it removes what the preverified set does not describe. Independently of `--local`, it also removes any file whose `.torrent` carries the wrong infohash or cannot be read at all, together with the data file that torrent vouched for. Everything else the set does describe stays.
 
 ```bash
 erigon seg reset --datadir /your/datadir
@@ -2085,7 +2085,7 @@ What to do depends on how far it got, and `snapshots/backup/domains/` is what te
 :::danger
 **Copy `snapshots/domain/`, `snapshots/backup/domains/` and `snapshots/rebuild/domain/` aside before you restore.** Restore decides what to sweep out of `snapshots/domain/` by comparing against the files it finds in the backup, and it cannot tell an original that had not been moved yet from a converted file that had already been moved in. If the run died midway through moving one step range's files out, restore deletes the part of that range still sitting in `snapshots/domain/` — and reports success.
 
-At that moment the only remaining copy of that range is the converted one in `snapshots/rebuild/domain/`, which the next conversion discards on pre-flight. So do not convert again straight after a restore: check first that every commitment step range present before the interrupted run is back in `snapshots/domain/`, and if one is short, recover it from your copy before running anything else.
+At that moment the only remaining copy of that range is the converted one in `snapshots/rebuild/domain/`, which a conversion re-run without `--continue` discards on pre-flight. So do not convert again straight after a restore: check first that every commitment step range present before the interrupted run is back in `snapshots/domain/`, and if one is short, recover it from your copy before running anything else.
 :::
 
 :::warning
@@ -2094,7 +2094,7 @@ When you resume with `--continue`, you **must** pass the same `--squeeze` and `-
 
 ### Prerequisite for pre-3.4 step sizes (`erigon seg step-rebase`)
 
-Erigon groups state files into *steps*. Up to v3.3 a step was 1,562,500 transactions; from v3.4 the default is **390,625** — a quarter of the old size, and still the default in v3.6. v3.4 and v3.5 offered the smaller step as an optional gain (about 4× smaller `chaindata/`) rather than forcing it, so a datadir first created by v3.3 or earlier can still be recorded at the legacy size. The v3.6 release notes require those datadirs to rebase, or to take the `seg reset` path above, before their first normal v3.6 start.
+Erigon groups state files into *steps*. The compiled default was 1,562,500 transactions through v3.4 and became **390,625** in v3.5 — a quarter of the old size, and still the default in v3.6. The smaller step was offered as a gain (about 4× smaller `chaindata/`) rather than forced, and the step size is a per-datadir record, so an older datadir can still be at the legacy size whatever version you are running now. Do not infer it from the version that created the datadir — read it. The v3.6 release notes require those datadirs to rebase, or to take the `seg reset` path above, before their first normal v3.6 start.
 
 Check `step_size` in `snapshots/erigondb.toml`. If it reads `1562500`:
 
