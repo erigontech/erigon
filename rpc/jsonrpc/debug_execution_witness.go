@@ -56,6 +56,8 @@ type RecordingState struct {
 	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
 	// already created in-block is redundant in the witness (the verifier replays the create).
 	createdCodeHashes map[common.Hash]struct{}
+	// codeHashes is keyed by the code itself: one code is recorded under several maps and addresses.
+	codeHashes map[string]common.Hash
 
 	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
@@ -90,6 +92,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		AccessedCode:          make(map[common.Address][]byte),
 		PreStateCode:          make(map[common.Address][]byte),
 		createdCodeHashes:     make(map[common.Hash]struct{}),
+		codeHashes:            make(map[string]common.Hash),
 		accountOverlay:        make(map[common.Address]*accounts.Account),
 		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
 		codeOverlay:           make(map[common.Address][]byte),
@@ -241,7 +244,7 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 	if len(code) > 0 {
 		s.AccessedCode[addr] = code
 		if _, already := s.PreStateCode[addr]; !already {
-			if _, created := s.createdCodeHashes[crypto.Keccak256Hash(code)]; !created {
+			if _, created := s.createdCodeHashes[s.codeHash(code)]; !created {
 				s.PreStateCode[addr] = code
 			}
 		}
@@ -319,6 +322,15 @@ func (s *RecordingState) UpdateAccountData(address accounts.Address, original, a
 		fmt.Printf("[TRACE] UpdateAccountData %s nonce=%d balance=%d codeHash=%x\n", addr.Hex(), account.Nonce, &account.Balance, account.CodeHash)
 	}
 	return nil
+}
+
+func (s *RecordingState) codeHash(code []byte) common.Hash {
+	if h, ok := s.codeHashes[string(code)]; ok {
+		return h
+	}
+	h := crypto.Keccak256Hash(code)
+	s.codeHashes[string(code)] = h
+	return h
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -1132,7 +1144,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		// canonical: only pre-state bytecode (excludes in-block-created), non-empty.
 		for _, code := range rs.GetPreStateCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 	default:
@@ -1142,17 +1154,17 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		// by its resolved target code and survives only in PreStateCode.
 		for _, code := range rs.GetAccessedCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		for _, code := range rs.GetModifiedCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		for _, code := range rs.GetPreStateCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		emptyEntry = rs.emptyCodeAccessed
@@ -1173,7 +1185,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	preCode := rs.GetPreStateCode()
 	for addr, code := range preCode {
 		if len(code) > 0 {
-			codeHash := crypto.Keccak256Hash(code)
+			codeHash := rs.codeHash(code)
 			addrHash := crypto.Keccak256Hash(addr[:])
 			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
 				Code:     code,
@@ -1307,7 +1319,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs, "debug_executionWitness_witness_construction")
+	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1573,8 +1585,7 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 	// Build code map from codes list
 	codeMap := make(map[common.Hash][]byte)
 	for _, code := range result.Codes {
-		codeHash := crypto.Keccak256Hash(code)
-		codeMap[codeHash] = code
+		codeMap[crypto.Keccak256Hash(code)] = code
 	}
 
 	return &witnessStateless{

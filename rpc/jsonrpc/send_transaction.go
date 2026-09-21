@@ -122,12 +122,13 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 			Msg:  fmt.Sprintf("the transaction was added to the mempool but wasn't processed in %v", timeout),
 			Hash: hash,
 		}
-	case protoReceipt, ok := <-receiptsCh:
-		if !ok || protoReceipt == nil {
+	case batch, ok := <-receiptsCh:
+		// The filter is this transaction's hash, so the batch holds only its receipt.
+		if !ok || batch == nil || len(batch.Value) == 0 {
 			log.Warn("[rpc] receipts subscription was closed")
 			return nil, fmt.Errorf("receipts subscription was closed")
 		}
-		return ethutils.MarshalSubscribeReceipt(protoReceipt), nil
+		return ethutils.MarshalSubscribeReceipt(batch.Value[0]), nil
 	}
 }
 
