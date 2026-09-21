@@ -174,6 +174,18 @@ func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.Subscr
 	}
 }
 
+// endStream sends a block the ended stream left half-received and forgets that the backend marks
+// blocks: the next stream may come from a backend that does not.
+func (a *ReceiptsFilterAggregator) endStream() {
+	a.blockMu.Lock()
+	defer a.blockMu.Unlock()
+	if len(a.block) > 0 {
+		a.distributeBlock(a.block)
+		a.block = nil
+	}
+	a.markers = false
+}
+
 // distributeBlock sends every subscriber the block's receipts it asked for as one event. The
 // subscribers that take every receipt share one event, so it is encoded once for all of them.
 func (a *ReceiptsFilterAggregator) distributeBlock(receipts []*remoteproto.SubscribeReceiptsReply) {

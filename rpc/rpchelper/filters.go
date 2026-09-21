@@ -224,7 +224,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
+			err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
 				ff.mu.Lock()
 				ff.receiptsRequestor.Store(send)
 				ff.mu.Unlock()
@@ -233,7 +233,9 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
 					}
 				}
-			}); err != nil {
+			})
+			ff.receiptsSubs.endStream()
+			if err != nil {
 				select {
 				case <-ctx.Done():
 					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Dec()
