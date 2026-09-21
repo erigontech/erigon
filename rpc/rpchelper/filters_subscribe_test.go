@@ -440,3 +440,64 @@ func TestReceiptsSubscribersShareOneEvent(t *testing.T) {
 	evA, evB := <-a, <-b
 	require.Same(t, evA, evB)
 }
+
+// Once the backend has marked a block's last receipt, the subscription sends each block's receipts
+// as one event; a backend that never marks them still gets one event per receipt.
+func TestReceiptsSubscriptionBatchesPerBlock(t *testing.T) {
+	receipt := func(hash string, block uint64, last bool) *remoteproto.SubscribeReceiptsReply {
+		return &remoteproto.SubscribeReceiptsReply{
+			TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash(hash)),
+			BlockNumber:     block,
+			LastInBlock:     last,
+		}
+	}
+	f := newTestFilters(t)
+	ch, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	require.NoError(t, err)
+	defer f.UnsubscribeReceipts(id)
+
+	f.OnReceipts(receipt("0x00", 6, true)) // the backend shows it marks blocks
+	require.Len(t, (<-ch).Value, 1)
+
+	f.OnReceipts(receipt("0x01", 7, false))
+	f.OnReceipts(receipt("0x02", 7, true))
+	require.Len(t, (<-ch).Value, 2)
+
+	f.OnReceipts(receipt("0x03", 8, true))
+	require.Len(t, (<-ch).Value, 1)
+}
+
+func TestReceiptsSubscriptionWithoutBlockMarkersSendsEachReceipt(t *testing.T) {
+	f := newTestFilters(t)
+	ch, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	require.NoError(t, err)
+	defer f.UnsubscribeReceipts(id)
+
+	f.OnReceipts(&remoteproto.SubscribeReceiptsReply{TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash("0x01")), BlockNumber: 7})
+	require.Len(t, (<-ch).Value, 1)
+}
+
+// A stream that ends in the middle of a block must not keep the receipts it already delivered,
+// and the next stream may come from a backend that does not mark blocks.
+func TestReceiptsStreamEndFlushesHalfBlock(t *testing.T) {
+	receipt := func(hash string, block uint64, last bool) *remoteproto.SubscribeReceiptsReply {
+		return &remoteproto.SubscribeReceiptsReply{
+			TransactionHash: gointerfaces.ConvertHashToH256(common.HexToHash(hash)),
+			BlockNumber:     block,
+			LastInBlock:     last,
+		}
+	}
+	f := newTestFilters(t)
+	ch, id, err := f.SubscribeReceipts(8, filters.ReceiptsFilterCriteria{})
+	require.NoError(t, err)
+	defer f.UnsubscribeReceipts(id)
+
+	f.OnReceipts(receipt("0x00", 6, true))
+	<-ch
+	f.OnReceipts(receipt("0x01", 7, false))
+	f.receiptsSubs.endStream()
+	require.Len(t, (<-ch).Value, 1)
+
+	f.OnReceipts(receipt("0x02", 8, false))
+	require.Len(t, (<-ch).Value, 1, "after a new stream, unmarked receipts go out one by one")
+}
