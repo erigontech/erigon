@@ -25,6 +25,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -525,8 +526,8 @@ func TestWebsocketIdlePing(t *testing.T) {
 	}
 }
 
-// A response larger than the stream's buffer leaves in several frames as it is encoded, and
-// the client reads them back as one message.
+// A response past wsStreamThreshold leaves in several frames as it is encoded, and the client
+// reads them back as one message; a smaller one stays one frame.
 func TestWebsocketStreamsLargeResponse(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
@@ -534,19 +535,24 @@ func TestWebsocketStreamsLargeResponse(t *testing.T) {
 	defer srv.Stop()
 	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
 	defer httpsrv.Close()
+	host := strings.TrimPrefix(httpsrv.URL, "http://")
 
 	item := strings.Repeat("x", 1000)
-	const n = 300 // about 300 KB, several stream flushes
-	frames, msg := wsRawCall(t, strings.TrimPrefix(httpsrv.URL, "http://"), `{"jsonrpc":"2.0","id":1,"method":"test_streamRepeat","params":["`+item+`",300]}`)
-	if frames < 2 {
-		t.Fatalf("a %d-byte response came in %d frame(s), want it streamed", len(msg), frames)
-	}
-	var resp struct{ Result []string }
-	if err := json.Unmarshal(msg, &resp); err != nil {
-		t.Fatalf("reassembled message is not JSON: %v", err)
-	}
-	if len(resp.Result) != n || resp.Result[0] != item {
-		t.Fatalf("got %d items", len(resp.Result))
+	for _, tc := range []struct {
+		n        int
+		streamed bool
+	}{{300, false}, {3000, true}} {
+		frames, msg := wsRawCall(t, host, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"test_streamRepeat","params":["%s",%d]}`, item, tc.n))
+		if streamed := frames > 1; streamed != tc.streamed {
+			t.Fatalf("a %d-byte response came in %d frame(s), streamed=%v, want %v", len(msg), frames, streamed, tc.streamed)
+		}
+		var resp struct{ Result []string }
+		if err := json.Unmarshal(msg, &resp); err != nil {
+			t.Fatalf("reassembled message is not JSON: %v", err)
+		}
+		if len(resp.Result) != tc.n || resp.Result[0] != item {
+			t.Fatalf("got %d items, want %d", len(resp.Result), tc.n)
+		}
 	}
 }
 

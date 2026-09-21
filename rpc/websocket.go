@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
@@ -33,10 +34,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/coder/websocket"
 	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -304,36 +307,68 @@ func (wc *websocketCodec) messageWriter(ctx context.Context) streamedMessage {
 	return &wsMessage{wc: wc, ctx: ctx}
 }
 
-// wsMessage sends one response. Until the stream first flushes it holds nothing, so a response
-// that fits the stream's buffer is still one frame; a larger one opens a message writer and
-// goes out a frame per flush, holding the connection's write lock until finish.
+// wsStreamThreshold is how much of a response is gathered before any of it goes out. A smaller
+// response stays one frame, as framing it would cost more than holding it; a larger one leaves
+// in frames of about this size, so the server never holds it whole.
+const wsStreamThreshold = int(1 * datasize.MB)
+
+// wsMessage sends one response. It holds the stream's flushes until they reach
+// wsStreamThreshold; past that it opens a message writer and holds the connection's write
+// lock until finish.
 type wsMessage struct {
 	wc     *websocketCodec
 	ctx    context.Context
 	cancel context.CancelFunc
-	w      io.WriteCloser
+	w      io.WriteCloser // open once the response outgrew wsStreamThreshold
+	buf    *bytes.Buffer
 }
 
 func (m *wsMessage) Write(p []byte) (int, error) {
+	if m.buf == nil {
+		m.buf = pool.GetBuffer()
+	}
+	if m.buf.Len()+len(p) < wsStreamThreshold {
+		return m.buf.Write(p)
+	}
 	if m.w == nil {
-		m.wc.encMu.Lock()
-		deadline, ok := m.ctx.Deadline()
-		if !ok {
-			deadline = time.Now().Add(wsPingInterval)
-		}
-		ctx, cancel := context.WithDeadline(context.Background(), deadline)
-		w, err := m.wc.conn.Writer(ctx, websocket.MessageText)
-		if err != nil {
-			cancel()
-			m.wc.encMu.Unlock()
+		if err := m.open(); err != nil {
 			return 0, err
 		}
-		m.w, m.cancel = w, cancel
+	}
+	if m.buf.Len() > 0 {
+		if _, err := m.w.Write(m.buf.Bytes()); err != nil {
+			return 0, err
+		}
+		m.buf.Reset()
 	}
 	return m.w.Write(p)
 }
 
+func (m *wsMessage) open() error {
+	m.wc.encMu.Lock()
+	deadline, ok := m.ctx.Deadline()
+	if !ok {
+		deadline = time.Now().Add(wsPingInterval)
+	}
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	w, err := m.wc.conn.Writer(ctx, websocket.MessageText)
+	if err != nil {
+		cancel()
+		m.wc.encMu.Unlock()
+		return err
+	}
+	m.w, m.cancel = w, cancel
+	return nil
+}
+
 func (m *wsMessage) finish(rest []byte, encodeErr error) error {
+	if m.buf != nil {
+		defer pool.PutBuffer(m.buf)
+		if encodeErr == nil {
+			m.buf.Write(rest)
+			rest = m.buf.Bytes()
+		}
+	}
 	if m.w == nil {
 		if encodeErr != nil {
 			return encodeErr
