@@ -30,6 +30,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/erigontech/erigon/common/pool"
 )
 
 var (
@@ -159,6 +161,7 @@ type RemoteNotifier struct {
 	buffer       []json.RawMessage
 	callReturned bool
 	activated    bool
+	prefix       []byte // the notification up to its result, set on the first send
 }
 
 // CreateSubscription returns a new subscription that is coupled to the
@@ -251,16 +254,27 @@ func (n *RemoteNotifier) activate() error {
 }
 
 func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
-	return n.h.conn.WriteJSON(context.Background(), rawResponse(notification(n.namespace, sub.ID, data)))
+	if n.prefix == nil {
+		n.prefix = notificationPrefix(n.namespace, sub.ID)
+	}
+	// A pooled buffer, not a fresh one: every subscriber of an event gets the same result, and a
+	// buffer per send would allocate its size once per subscriber.
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
+	buf.Write(n.prefix)
+	buf.Write(data)
+	buf.Write(notificationSuffix)
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(buf.Bytes()))
 }
 
-// notification wraps result, which is already encoded, in the subscription message without
-// parsing it again: every subscriber would otherwise re-check the same payload.
-func notification(namespace string, id ID, result json.RawMessage) []byte {
+var notificationSuffix = []byte("}}")
+
+// notificationPrefix is the part of a notification before its result, fixed for a subscription.
+func notificationPrefix(namespace string, id ID) []byte {
 	method, _ := json.Marshal(namespace + notificationMethodSuffix) //nolint:errchkjson
 	quotedID, _ := json.Marshal(string(id))                         //nolint:errchkjson
 	return slices.Concat([]byte(`{"jsonrpc":"`+vsn+`","method":`), method, []byte(`,"params":{"subscription":`),
-		quotedID, []byte(`,"result":`), result, []byte("}}"))
+		quotedID, []byte(`,"result":`))
 }
 
 // A Subscription is created by a notifier and tied to that notifier. The client can use
