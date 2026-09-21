@@ -109,8 +109,11 @@ func TestEthSubscribeReceipts(t *testing.T) {
 	highestSeenHeader := chain.TopBlock.NumberU64()
 	receipts := make([]*remoteproto.SubscribeReceiptsReply, highestSeenHeader)
 	for i := uint64(1); i <= highestSeenHeader; i++ {
-		// 1 tx per block -> 1 receipt per block
-		receipts[i-1] = (<-newReceipts).Value
+		// 1 tx per block -> 1 receipt per block, delivered as that block's batch
+		batch := (<-newReceipts).Value
+		require.Len(t, batch, 1)
+		require.True(t, batch[0].LastInBlock)
+		receipts[i-1] = batch[0]
 	}
 	slices.SortFunc(receipts, func(a, b *remoteproto.SubscribeReceiptsReply) int {
 		return cmp.Compare(a.BlockNumber, b.BlockNumber)

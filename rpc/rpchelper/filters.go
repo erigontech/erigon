@@ -720,8 +720,8 @@ func (ff *Filters) unsubscribePendingTxsInternal(id PendingTxsSubID) bool {
 // SubscribeReceipts subscribes to transaction receipts and returns a channel to receive the receipts
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription
 // is installed and the error is returned.
-func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *Shared[*remoteproto.SubscribeReceiptsReply], ReceiptsSubID, error) {
-	sub := newChanSub[*Shared[*remoteproto.SubscribeReceiptsReply]](size, "")
+func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *Shared[[]*remoteproto.SubscribeReceiptsReply], ReceiptsSubID, error) {
+	sub := newChanSub[*Shared[[]*remoteproto.SubscribeReceiptsReply]](size, "")
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
 	if err := ff.sendReceiptsFilterUpdate(); err != nil {
 		ff.receiptsSubs.removeReceiptsFilter(id)
