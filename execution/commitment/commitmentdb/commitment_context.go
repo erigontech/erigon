@@ -89,6 +89,11 @@ type SharedDomainsCommitmentContext struct {
 	warnedUnwired  sync.Once
 }
 
+type deferredCommitmentTrie interface {
+	SetDeferCommitmentUpdates(bool)
+	TakeDeferredUpdates() func(func(prefix, data, prevData []byte) error) error
+}
+
 // checkParaTrieWired reports a context that selected the parallel trie and never
 // received the DB it needs. Falling back to the sequential trie is deliberate for
 // the DB-less RPC and integrity contexts, and a bug for anything that computes a
@@ -624,6 +629,10 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		ptrie.SetLeaveDeferredForCaller(true)
 		defer ptrie.SetLeaveDeferredForCaller(false)
 	}
+	if trie, ok := sdc.patriciaTrie.(deferredCommitmentTrie); ok && sdc.deferCommitmentUpdates {
+		trie.SetDeferCommitmentUpdates(true)
+		defer trie.SetDeferCommitmentUpdates(false)
+	}
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 
@@ -674,6 +683,15 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 				TxNum:    txNum,
 				Deferred: trie.TakeDeferredUpdates(),
 				Metrics:  trie.Metrics(),
+			}
+		}
+	}
+	if trie, ok := sdc.patriciaTrie.(deferredCommitmentTrie); ok && sdc.deferCommitmentUpdates {
+		if apply := trie.TakeDeferredUpdates(); apply != nil {
+			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
+				BlockNum:      blockNum,
+				TxNum:         txNum,
+				DeferredApply: apply,
 			}
 		}
 	}

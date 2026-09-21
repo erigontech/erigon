@@ -79,6 +79,27 @@ func TestTrieProcessDoesNotReadState(t *testing.T) {
 	}())
 }
 
+func TestTrieDeferredUpdatesWaitForApply(t *testing.T) {
+	trie := &Trie{}
+	ctx := newMockContext()
+	trie.ResetContext(ctx)
+	trie.SetDeferCommitmentUpdates(true)
+
+	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	address := bytes.Repeat([]byte{0x11}, 20)
+	account := fullAccountUpdate(3, 5, common.HexToHash("0x1234"))
+	updates.TouchPlainKeyDirect(string(address), &account)
+
+	_, err := trie.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+	require.Zero(t, ctx.putCalls)
+
+	apply := trie.TakeDeferredUpdates()
+	require.NotNil(t, apply)
+	require.NoError(t, apply(ctx.PutBranch))
+	require.NotZero(t, ctx.putCalls)
+}
+
 func TestTrieProcessRejectsWrongUpdateMode(t *testing.T) {
 	trie, _ := NewTrie(t.TempDir(), commitment.TrieConfig{})
 	trie.ResetContext(newMockContext())

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"sync"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -38,6 +39,29 @@ type Trie struct {
 	scheduleOrder   scheduleOrder
 	scheduleWorkers int
 	scheduleStats   *scheduleStats
+	deferUpdates    bool
+	deferred        []recordDelta
+}
+
+type deferredPatriciaContext struct {
+	commitment.PatriciaContext
+	mu     sync.Mutex
+	deltas []recordDelta
+}
+
+func (c *deferredPatriciaContext) PutBranch(key, data, prev []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.deltas = append(c.deltas, recordDelta{key: bytes.Clone(key), data: bytes.Clone(data), prev: bytes.Clone(prev)})
+	return nil
+}
+
+func (c *deferredPatriciaContext) take() []recordDelta {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	deltas := c.deltas
+	c.deltas = nil
+	return deltas
 }
 
 func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
@@ -87,6 +111,23 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	}
 }
 
+func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) {
+	if t != nil {
+		t.deferUpdates = deferUpdates
+	}
+}
+
+func (t *Trie) TakeDeferredUpdates() func(func(prefix, data, prevData []byte) error) error {
+	if t == nil || len(t.deferred) == 0 {
+		return nil
+	}
+	deltas := t.deferred
+	t.deferred = nil
+	return func(putBranch func(prefix, data, prevData []byte) error) error {
+		return applyDeltas(deltas, putBranch)
+	}
+}
+
 func (t *Trie) Process(
 	ctx context.Context,
 	updates *commitment.Updates,
@@ -121,9 +162,21 @@ func (t *Trie) Process(
 	}
 
 	storage, accounts := partition(stream)
-	root, err := runScheduledPhases(ctx, t.ctx, storage, accounts, t.scheduleOrder, t.scheduleWorkers, t.scheduleStats)
+	processCtx := t.ctx
+	var deferredCtx *deferredPatriciaContext
+	if t.deferUpdates {
+		if len(t.deferred) != 0 {
+			return nil, errors.New("commitment v4: deferred updates were not taken")
+		}
+		deferredCtx = &deferredPatriciaContext{PatriciaContext: t.ctx}
+		processCtx = deferredCtx
+	}
+	root, err := runScheduledPhases(ctx, processCtx, storage, accounts, t.scheduleOrder, t.scheduleWorkers, t.scheduleStats)
 	if err != nil {
 		return nil, err
+	}
+	if deferredCtx != nil {
+		t.deferred = deferredCtx.take()
 	}
 	t.root = append(t.root[:0], root[:]...)
 	if onProgress != nil {

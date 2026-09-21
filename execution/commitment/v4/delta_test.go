@@ -63,6 +63,18 @@ func TestReadRecordDeltaCopiesBranchBuffer(t *testing.T) {
 	require.Equal(t, []byte{7, 8}, delta.data)
 }
 
+func TestRemovedRecordDeltaUsesNonNilTombstone(t *testing.T) {
+	ctx := newMockContext()
+	key := []byte{0x40, 0}
+	ctx.branches[string(key)] = []byte{1, 2, 3}
+
+	deltas, err := appendRemovedDeltas(ctx, nil, map[string][]byte{string(key): key}, nil)
+	require.NoError(t, err)
+	require.Len(t, deltas, 1)
+	require.NotNil(t, deltas[0].data)
+	require.Empty(t, deltas[0].data)
+}
+
 func TestFoldAndEncodeRecordKeepsFoldAndRecordInOneWalk(t *testing.T) {
 	ctx := newMockContext()
 	n := fork(nil)

@@ -48,6 +48,9 @@ func readRecordDelta(ctx commitment.PatriciaContext, key, data []byte) (recordDe
 	if err != nil {
 		return recordDelta{}, err
 	}
+	if data == nil {
+		data = []byte{}
+	}
 	return recordDelta{
 		key:  bytes.Clone(key),
 		data: bytes.Clone(data),
