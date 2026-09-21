@@ -208,7 +208,7 @@ func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
 func headerValue(h *types.Header) any { return h }
 
 func subscribeReceiptValue(r *remoteproto.SubscribeReceiptsReply) any {
-	return ethutils.RPCReceipts{ethutils.MarshalSubscribeReceipt(r)}
+	return []*ethutils.RPCReceipt{ethutils.MarshalSubscribeReceipt(r)}
 }
 
 // NewHeads send a notification each time a new (header) block is appended to the chain.

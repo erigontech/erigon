@@ -87,7 +87,10 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			logs := make(types.Logs, tc.logs)
 			for i := range logs {
-				logs[i] = &types.Log{Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64)}
+				// Every derived field distinct, so a field written from the wrong source shows.
+				logs[i] = &types.Log{Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64),
+					BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3, BlockHash: common.HexToHash("0xb10c"),
+					Index: hexutil.Uint(10 + i), Removed: i == 1}
 			}
 			if tc.nilLogs {
 				logs = nil
@@ -118,13 +121,10 @@ func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
 		"nil types.Logs":         types.Logs(nil),
 		"nil []*Log":             []*types.Log(nil),
 		"nil []*RPCLog":          []*types.RPCLog(nil),
-		"nil []SubscribeLog":     []SubscribeLog(nil),
 		"untyped nil":            nil,
-		"subscribe with address": []SubscribeLog{{Address: &to, Topics: []common.Hash{{0x01}, {0x02}}, Data: hexutil.Bytes{0xaa, 0xbb}, TransactionHash: common.HexToHash("0xbeef")}},
-		"subscribe no address":   []SubscribeLog{{Topics: []common.Hash{}, Data: hexutil.Bytes{}}},
-		"subscribe nil values":   []SubscribeLog{{}},
-		"two subscribe logs":     []SubscribeLog{{Address: &to}, {}},
-		"no subscribe logs":      []SubscribeLog{},
+		"nil in types.Logs":      types.Logs{nil, {Address: to}},
+		"nil in []*Log":          []*types.Log{{Address: to}, nil},
+		"subscription map shape": []map[string]any{{"address": to, "data": hexutil.Bytes{0xaa}}},
 		"unknown shape":          []string{"a"},
 	} {
 		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
