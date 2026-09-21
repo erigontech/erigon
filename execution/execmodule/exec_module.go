@@ -136,7 +136,11 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 	if sd != nil {
 		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
-		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
+		var stateCache *cache.StateCache
+		if c.execModule != nil {
+			stateCache = c.execModule.stateCache
+		}
+		view = &CacheView{getter: execctx.NewCachedTemporalTxStateGetter(tx, stateCache)}
 	}
 	return view, nil
 }
