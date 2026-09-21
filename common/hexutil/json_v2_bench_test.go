@@ -28,7 +28,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by json/v2 vs MarshalFastJSONTo.
+// BenchmarkBytesMarshalJSON compares a 64KB eth_getCode result encoded by json/v2 vs
+// StackStream.WriteHex, which is what the response writer calls for a hexutil.Bytes result.
 func BenchmarkBytesMarshalJSON(b *testing.B) {
 	code := make(hexutil.Bytes, 64*1024)
 	for i := range code {
@@ -49,15 +50,34 @@ func BenchmarkBytesMarshalJSON(b *testing.B) {
 		}
 	})
 
+	b.Run("quoted_text", func(b *testing.B) {
+		w := httptest.NewRecorder()
+		serve := func() {
+			w.Body.Reset()
+			stream := jsonstream.Get(w)
+			defer jsonstream.Put(stream)
+			stream.WriteQuotedText(&code)
+			if err := stream.Flush(); err != nil {
+				b.Fatal(err)
+			}
+		}
+		b.SetBytes(size)
+		b.ReportAllocs()
+		for b.Loop() {
+			serve()
+		}
+		if w.Body.Len() != int(size) {
+			b.Fatalf("wrote %d bytes, want %d", w.Body.Len(), size)
+		}
+	})
+
 	b.Run("fast_v2_stream", func(b *testing.B) {
 		w := httptest.NewRecorder()
 		serve := func() {
 			w.Body.Reset()
 			stream := jsonstream.Get(w)
 			defer jsonstream.Put(stream)
-			if err := code.MarshalFastJSONTo(stream); err != nil {
-				b.Fatal(err)
-			}
+			stream.WriteHex(code)
 			if err := stream.Flush(); err != nil {
 				b.Fatal(err)
 			}

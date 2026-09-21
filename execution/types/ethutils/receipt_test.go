@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 )
 
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
@@ -180,7 +179,7 @@ func TestRPCReceiptMarshalFastJSONToOptionalFields(t *testing.T) {
 }
 
 func requireFastJSONMatches(t *testing.T, v interface {
-	MarshalFastJSONTo(jsonw.JSONWriter) error
+	MarshalFastJSONTo(*jsonstream.StackStream) error
 }) {
 	t.Helper()
 	want, err := json.Marshal(v)

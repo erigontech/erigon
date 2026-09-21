@@ -22,7 +22,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // RPCReceipts is eth_getBlockReceipts' answer. The RPC encoder only consults the top-level
@@ -30,7 +30,7 @@ import (
 // however the element is written.
 type RPCReceipts []*RPCReceipt
 
-func (rs RPCReceipts) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (rs RPCReceipts) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	if rs == nil {
 		w.WriteNil()
 		return nil
@@ -50,14 +50,14 @@ func (rs RPCReceipts) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 
 // field writes the separator a following field needs, then its name, and returns the writer
 // so the value chains onto it. An object's first field must not go through it.
-func field(w jsonw.JSONWriter, name string) jsonw.JSONWriter {
+func field(w *jsonstream.StackStream, name string) *jsonstream.StackStream {
 	w.WriteMore()
 	return w.WriteObjectField(name)
 }
 
 // MarshalFastJSONTo writes the receipt's fields in the order the struct declares them, so
 // the bytes match reflection exactly.
-func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
+func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	if r == nil {
 		w.WriteNil()
 		return nil
@@ -118,16 +118,16 @@ func (r *RPCReceipt) MarshalFastJSONTo(w jsonw.JSONWriter) error {
 
 // writeLogs streams the shapes this package builds. Any other shape goes through
 // encoding/json, which can only fail on a value no constructor here produces.
-func writeLogs(w jsonw.JSONWriter, logs any) error {
+func writeLogs(w *jsonstream.StackStream, logs any) error {
 	switch v := logs.(type) {
 	case types.Logs:
-		writeArray(w, v, writeLogElem)
+		jsonstream.ArrayValue(w, v, writeLogElem)
 	case []*types.Log:
-		writeArray(w, v, writeLogElem)
+		jsonstream.ArrayValue(w, v, writeLogElem)
 	case []*types.RPCLog:
-		writeArray(w, v, writeRPCLogElem)
+		jsonstream.ArrayValue(w, v, writeRPCLogElem)
 	case []SubscribeLog:
-		writeArray(w, v, writeSubscribeLog)
+		jsonstream.ArrayValue(w, v, writeSubscribeLog)
 	default:
 		b, err := json.Marshal(v)
 		if err != nil {
@@ -138,7 +138,7 @@ func writeLogs(w jsonw.JSONWriter, logs any) error {
 	return nil
 }
 
-func writeSubscribeLog(w jsonw.JSONWriter, l *SubscribeLog) {
+func writeSubscribeLog(w *jsonstream.StackStream, l *SubscribeLog) {
 	w.WriteObjectStart()
 	if l.Address != nil {
 		w.WriteObjectField("address").WriteHex(l.Address[:])
@@ -146,14 +146,14 @@ func writeSubscribeLog(w jsonw.JSONWriter, l *SubscribeLog) {
 	}
 	w.WriteObjectField("data").WriteHex(l.Data)
 	field(w, "topics")
-	writeArray(w, l.Topics, writeHash)
+	jsonstream.ArrayValue(w, l.Topics, writeHash)
 	field(w, "transactionHash").WriteHex(l.TransactionHash[:])
 	w.WriteObjectEnd()
 }
 
-func writeLogElem(w jsonw.JSONWriter, l **types.Log) { writeLog(w, *l, nil) }
+func writeLogElem(w *jsonstream.StackStream, l **types.Log) { writeLog(w, *l, nil) }
 
-func writeRPCLogElem(w jsonw.JSONWriter, l **types.RPCLog) {
+func writeRPCLogElem(w *jsonstream.StackStream, l **types.RPCLog) {
 	if *l == nil {
 		w.WriteNil()
 		return
@@ -161,11 +161,11 @@ func writeRPCLogElem(w jsonw.JSONWriter, l **types.RPCLog) {
 	writeLog(w, &(*l).Log, &(*l).BlockTimestamp)
 }
 
-func writeHash(w jsonw.JSONWriter, h *common.Hash) { w.WriteHex(h[:]) }
+func writeHash(w *jsonstream.StackStream, h *common.Hash) { w.WriteHex(h[:]) }
 
 // writeLog writes one log in the order types.Log declares its fields, with RPCLog's
 // blockTimestamp appended when the caller has one.
-func writeLog(w jsonw.JSONWriter, l *types.Log, blockTimestamp *hexutil.Uint64) {
+func writeLog(w *jsonstream.StackStream, l *types.Log, blockTimestamp *hexutil.Uint64) {
 	if l == nil {
 		w.WriteNil()
 		return
@@ -174,7 +174,7 @@ func writeLog(w jsonw.JSONWriter, l *types.Log, blockTimestamp *hexutil.Uint64) 
 	w.WriteObjectField("address")
 	w.WriteHex(l.Address[:])
 	field(w, "topics")
-	writeArray(w, l.Topics, writeHash)
+	jsonstream.ArrayValue(w, l.Topics, writeHash)
 	field(w, "data").WriteHex(l.Data)
 	field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
 	field(w, "transactionHash").WriteHex(l.TxHash[:])
@@ -186,20 +186,4 @@ func writeLog(w jsonw.JSONWriter, l *types.Log, blockTimestamp *hexutil.Uint64) 
 		field(w, "blockTimestamp").WriteQuotedText(blockTimestamp)
 	}
 	w.WriteObjectEnd()
-}
-
-// writeArray writes items as an array, and a nil slice as null, as encoding/json does.
-func writeArray[E any](w jsonw.JSONWriter, items []E, elem func(jsonw.JSONWriter, *E)) {
-	if items == nil {
-		w.WriteNil()
-		return
-	}
-	w.WriteArrayStart()
-	for i := range items {
-		if i > 0 {
-			w.WriteMore()
-		}
-		elem(w, &items[i])
-	}
-	w.WriteArrayEnd()
 }

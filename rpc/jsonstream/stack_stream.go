@@ -19,14 +19,15 @@ package jsonstream
 import (
 	"encoding"
 	"fmt"
-	"github.com/erigontech/erigon/rpc/jsonstream/jsonw"
 	"io"
 	"slices"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 )
 
 // InitialStackSize is the initial capacity of the stack
@@ -95,18 +96,53 @@ func (s *StackStream) WriteHex(b []byte) {
 	buf := s.stream.Buffer()
 	start := len(buf)
 	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
-	if s.out != nil && len(buf)-start >= FlushThreshold {
-		s.stream.SetBuffer(buf[:start])
-		s.writeThrough(buf[start:])
-	} else {
-		s.stream.SetBuffer(buf)
+	s.commit(buf, start)
+	s.popCommaOrField()
+}
+
+// HexesField writes fixed-size values as one array field: one buffer growth for the whole
+// array, where a value write per element grows once per element. A nil slice is null.
+func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
+	Field(s, name)
+	if items == nil {
+		s.WriteNil()
+		return
 	}
+	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
+	buf = append(buf, '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i][:])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
+	s.popCommaOrField()
+}
+
+// WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
+// and so are summed before the single growth.
+func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
+	size := 2 + len(items)
+	for i := range items {
+		size += hexutil.QuotedLen(len(items[i]))
+	}
+	buf := slices.Grow(s.stream.Buffer(), size)
+	buf = append(buf, '[')
+	for i := range items {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = hexutil.AppendQuoted(buf, items[i])
+	}
+	s.stream.SetBuffer(append(buf, ']'))
 	s.popCommaOrField()
 }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
 // for hex quantities, which never need escaping.
 func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
+	start := len(s.stream.Buffer())
 	buf, err := v.AppendText(append(s.stream.Buffer(), '"'))
 	if err != nil {
 		// An empty string keeps the JSON well-formed; the latched error stops it reaching the client.
@@ -115,8 +151,35 @@ func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 			s.stream.Error = err
 		}
 	}
-	s.stream.SetBuffer(append(buf, '"'))
+	assertNoEscapes(buf[start+1:])
+	buf = append(buf, '"')
+	s.commit(buf, start)
 	s.popCommaOrField()
+}
+
+// assertNoEscapes holds WriteQuotedText's caller to its side of the bargain: the text goes out
+// unscanned, so a byte JSON would escape would leave the response malformed. Every appender the
+// RPC can answer with today is a hex quantity; this is what catches the next one that is not.
+func assertNoEscapes(text []byte) {
+	if !dbg.AssertEnabled {
+		return
+	}
+	for _, c := range text {
+		if c == '"' || c == '\\' || c < 0x20 {
+			panic(fmt.Sprintf("jsonstream: quoted text holds %q, which JSON escapes", c))
+		}
+	}
+}
+
+// commit takes the buffer a value was appended to, handing anything past FlushThreshold
+// straight to the writer rather than holding a whole large value in memory.
+func (s *StackStream) commit(buf []byte, start int) {
+	if s.out != nil && len(buf)-start >= FlushThreshold {
+		s.stream.SetBuffer(buf[:start])
+		s.writeThrough(buf[start:])
+		return
+	}
+	s.stream.SetBuffer(buf)
 }
 
 // writeThrough drains what is buffered and hands content to the writer. The
@@ -280,11 +343,23 @@ func (s *StackStream) WriteMore() {
 }
 
 // WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) jsonw.JSONWriter {
+func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
 	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
 	return s
+}
+
+// rewindField drops a field name whose value never arrived, putting back the comma it
+// consumed. Only bytes still in the buffer can go back, so the caller checks that nothing
+// was written after the field name.
+func (s *StackStream) rewindField(buf, depth int) {
+	s.stream.SetBuffer(s.stream.Buffer()[:buf])
+	if len(s.stack) == depth { // WriteObjectField replaced a comma with its field
+		s.stack[depth-1] = ItemComma
+		return
+	}
+	s.stack = s.stack[:depth]
 }
 
 // Flush flushes the underlying stream
