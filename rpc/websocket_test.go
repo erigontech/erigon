@@ -447,3 +447,27 @@ func TestWebsocketServerGracefulClose(t *testing.T) {
 		}
 	}
 }
+
+func TestWebsocketPingNotRearmedAfterClose(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	wc := NewWebsocketCodec(conn, "", nil, "").(*websocketCodec)
+	wc.Close()
+	wc.resetPing() // a write or ping that finished before Close can reset after it
+	if wc.pingTimer.Stop() {
+		t.Fatal("ping timer re-armed on a closed codec")
+	}
+}
