@@ -62,8 +62,7 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 	w.WriteObjectStart()
 
-	w.WriteObjectField("blockHash")
-	w.WriteHex(r.BlockHash[:])
+	w.WriteObjectField("blockHash").WriteHex(r.BlockHash[:])
 	field(w, "blockNumber").WriteQuotedText(&r.BlockNumber)
 	field(w, "transactionHash").WriteHex(r.TransactionHash[:])
 	field(w, "transactionIndex").WriteQuotedText(&r.TransactionIndex)
@@ -119,9 +118,9 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 func writeLogs(w *jsonstream.StackStream, logs any) error {
 	switch v := logs.(type) {
 	case types.Logs:
-		jsonstream.ArrayValue(w, v, writeLogElem)
+		jsonstream.ArrayValue(w, v, writeLog)
 	case []*types.Log:
-		jsonstream.ArrayValue(w, v, writeLogElem)
+		jsonstream.ArrayValue(w, v, writeLog)
 	case []*types.RPCLog:
 		jsonstream.ArrayValue(w, v, writeRPCLogElem)
 	case []SubscribeLog:
@@ -148,19 +147,17 @@ func writeSubscribeLog(w *jsonstream.StackStream, l *SubscribeLog) {
 	w.WriteObjectEnd()
 }
 
-func writeLogElem(w *jsonstream.StackStream, l **types.Log) { writeLog(w, *l) }
-
 func writeRPCLogElem(w *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).MarshalFastJSONTo(w) }
 
 // writeLog writes one log in the order types.Log declares its fields.
-func writeLog(w *jsonstream.StackStream, l *types.Log) {
+func writeLog(w *jsonstream.StackStream, lp **types.Log) {
+	l := *lp
 	if l == nil {
 		w.WriteNil()
 		return
 	}
 	w.WriteObjectStart()
-	w.WriteObjectField("address")
-	w.WriteHex(l.Address[:])
+	w.WriteObjectField("address").WriteHex(l.Address[:])
 	jsonstream.HexesField(w, "topics", l.Topics)
 	field(w, "data").WriteHex(l.Data)
 	field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
