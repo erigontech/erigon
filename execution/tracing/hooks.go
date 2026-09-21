@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -111,8 +112,11 @@ type (
 	// FaultHook is invoked when an error occurs during the execution of an opcode.
 	FaultHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, depth int, err error)
 
-	// GasChangeHook is invoked when the gas changes.
+	// GasChangeHook reports changes to the execution gas balance.
 	GasChangeHook = func(old, new uint64, reason GasChangeReason)
+
+	// GasChangeHookV2 takes precedence over GasChangeHook when both are registered.
+	GasChangeHookV2 = func(old, new mdgas.MdGas, reason GasChangeReason)
 
 	/*
 		- Chain events -
@@ -179,13 +183,18 @@ type (
 
 type Hooks struct {
 	// VM events
-	OnTxStart   TxStartHook
-	OnTxEnd     TxEndHook
-	OnEnter     EnterHook
-	OnExit      ExitHook
-	OnOpcode    OpcodeHook
-	OnFault     FaultHook
-	OnGasChange GasChangeHook
+	OnTxStart     TxStartHook
+	OnTxEnd       TxEndHook
+	OnEnter       EnterHook
+	OnExit        ExitHook
+	OnOpcode      OpcodeHook
+	OnFault       FaultHook
+	OnGasChange   GasChangeHook
+	OnGasChangeV2 GasChangeHookV2
+	// OnOpcodeMask, when set, names the opcodes OnOpcode wants. The interpreter skips
+	// the call for every other one, so a tracer that watches a handful of opcodes does
+	// not pay an indirect call per instruction. Nil means every opcode is delivered.
+	OnOpcodeMask *OpcodeMask
 	// Chain events
 	OnBlockchainInit    BlockchainInitHook
 	OnBlockStart        BlockStartHook
@@ -203,6 +212,22 @@ type Hooks struct {
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
 	Flush           func(tx types.Transaction)
+}
+
+func (h *Hooks) HasGasChangeHook() bool {
+	return h != nil && (h.OnGasChangeV2 != nil || h.OnGasChange != nil)
+}
+
+// EmitGasChange prefers V2; the legacy hook receives only execution gas.
+func (h *Hooks) EmitGasChange(old, new mdgas.MdGas, reason GasChangeReason) {
+	if h == nil || reason == GasChangeIgnored {
+		return
+	}
+	if h.OnGasChangeV2 != nil {
+		h.OnGasChangeV2(old, new, reason)
+	} else if h.OnGasChange != nil {
+		h.OnGasChange(old.Execution, new.Execution, reason)
+	}
 }
 
 // BalanceChangeReason is used to indicate the reason for a balance change, useful
@@ -300,9 +325,9 @@ const (
 	// executed completed. This value is always positive as we are giving gas back to the you, the left over gas of the child.
 	// If there was no gas left to be refunded, no such even will be emitted.
 	GasChangeCallLeftOverRefunded GasChangeReason = 7
-	// GasChangeCallContractCreation is the amount of gas that will be burned for a CREATE.
+	// GasChangeCallContractCreation is gas forwarded to a CREATE child.
 	GasChangeCallContractCreation GasChangeReason = 8
-	// GasChangeContractCreation is the amount of gas that will be burned for a CREATE2.
+	// GasChangeCallContractCreation2 is gas forwarded to a CREATE2 child.
 	GasChangeCallContractCreation2 GasChangeReason = 9
 	// GasChangeCallCodeStorage is the amount of gas that will be charged for code storage.
 	GasChangeCallCodeStorage GasChangeReason = 10
@@ -321,6 +346,16 @@ const (
 	// child frame refilled a slot this frame had spilled gas_left to allocate. This value is always positive. It is
 	// not GasChangeCallLeftOverRefunded: no gas crosses a frame boundary, it changes dimension within one frame.
 	GasChangeCallStateGasReturned GasChangeReason = 16
+	// GasChangeRefundRevertedState is state gas restored on frame rollback.
+	GasChangeRefundRevertedState GasChangeReason = 17
+	// GasChangeCallGasForwarded is gas forwarded to a child call.
+	GasChangeCallGasForwarded GasChangeReason = 18
+	// GasChangeCallNewAccount is state gas charged for creating an account.
+	GasChangeCallNewAccount GasChangeReason = 19
+	// GasChangeTxAuthorization is gas charged for processing an EIP-7702 authorization.
+	GasChangeTxAuthorization GasChangeReason = 20
+	// GasChangeRefundAccountCreation is state gas refunded for cancelled account creation.
+	GasChangeRefundAccountCreation GasChangeReason = 21
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
@@ -387,3 +422,26 @@ const (
 	// It is only emitted when the tracer has opted in to use the journaling wrapper (WrapWithJournal).
 	CodeChangeRevert CodeChangeReason = 6
 )
+
+// OpcodeMask is the set of opcodes a tracer asks to see, one bit per opcode so the
+// whole set is 32 bytes and the interpreter's test stays inside one cache line.
+// The words are unexported so a mask shared by several tracers cannot be narrowed
+// through one of them.
+type OpcodeMask struct{ words [4]uint64 }
+
+// NewOpcodeMask returns a mask holding exactly ops.
+func NewOpcodeMask(ops ...byte) *OpcodeMask {
+	var m OpcodeMask
+	for _, op := range ops {
+		m.words[op>>6] |= 1 << (op & 63)
+	}
+	return &m
+}
+
+// wants reports whether op is in the mask. A nil mask wants everything.
+func (m *OpcodeMask) wants(op byte) bool {
+	return m == nil || m.words[op>>6]&(1<<(op&63)) != 0
+}
+
+// WantsOpcode reports whether the hooks ask to see op.
+func (h *Hooks) WantsOpcode(op byte) bool { return h.OnOpcodeMask.wants(op) }

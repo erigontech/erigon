@@ -63,7 +63,7 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 		return nil, nil, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		tx.Rollback()
 		return nil, nil, err
@@ -182,7 +182,7 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 		return nil, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, 0, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNumber, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -207,36 +207,35 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 }
 
 // GetStorageAt implements eth_getStorageAt. Returns the value from a storage position at a given address.
-func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHashArg *rpc.BlockNumberOrHash) (string, error) {
+func (api *APIImpl) GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHashArg *rpc.BlockNumberOrHash) (common.Hash, error) {
 	blockNrOrHash := blockOrLatest(blockNrOrHashArg)
-	var empty []byte
 	// Validation for index i.e. storage slot is non-standard: it can be interpreted as QUANTITY (stricter) or as DATA (like Hive tests do).
 	// Waiting for a spec, we choose the latter because it's more general, but we check that the length is not greater than 64 hex-digits.
 	indexBytes, err := hexutil.FromHexWithValidation(index)
 	if err != nil {
-		return "", &rpc.InvalidParamsError{Message: "unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error()}
+		return common.Hash{}, &rpc.InvalidParamsError{Message: "unable to decode storage key: " + hexutil.ErrHexStringInvalid.Error()}
 	}
 	if len(indexBytes) > 32 {
-		return "", &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
+		return common.Hash{}, &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
 	tx, reader, err := api.stateReaderAt(ctx, blockNrOrHash)
 	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+		return common.Hash{}, err
 	}
 	defer tx.Rollback()
 
 	addr := accounts.InternAddress(address)
 	acc, err := reader.ReadAccountData(addr)
 	if acc == nil || err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+		return common.Hash{}, err
 	}
 
-	location := accounts.InternKey(common.HexToHash(index))
+	location := accounts.InternKey(common.BytesToHash(indexBytes))
 	res, _, err := reader.ReadAccountStorage(addr, location)
 	if err != nil {
-		return hexutil.Encode(common.LeftPadBytes(empty, 32)), err
+		return common.Hash{}, err
 	}
-	return hexutil.Encode(res.PaddedBytes(32)), err
+	return res.Bytes32(), nil
 }
 
 // Exist returns whether an account for a given address exists in the database.
