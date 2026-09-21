@@ -168,6 +168,10 @@ func writeSubscribeLogs(w jsonw.JSONWriter, logs []map[string]any) error {
 		if i > 0 {
 			w.WriteMore()
 		}
+		if entry == nil {
+			w.WriteNil()
+			continue
+		}
 		w.WriteObjectStart()
 		written := 0
 		first := true

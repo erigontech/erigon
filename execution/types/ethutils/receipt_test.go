@@ -159,6 +159,8 @@ func TestRPCReceiptMarshalFastJSONToSubscribeLogs(t *testing.T) {
 				"data":            hexutil.Bytes{},
 				"transactionHash": common.HexToHash("0xbeef"),
 			},
+			nil, // a nil map is null, not {}
+			{},  // an empty one is {}
 		},
 	}
 	want, err := json.Marshal(r)
