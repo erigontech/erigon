@@ -444,8 +444,8 @@ func (f *ForkChoiceStore) rootMarkedInvalid(blockRoot common.Hash) bool {
 // newPayloadForBlockWhileYieldingForkChoiceLock validates a pre-Gloas block's payload with
 // the EL without holding f.mu. stillAdmissible is best effort: it runs under a read lock
 // when that lock is free and is skipped when it is not, so the admission token is never
-// held waiting on f.mu. An invalid or validated verdict reaches the status caches before
-// the token is released, so a queued caller can short-circuit instead of re-asking the EL.
+// held waiting on f.mu. Verdicts it accepts reach the status caches before the token is
+// released, so a queued caller can short-circuit instead of re-asking the EL.
 func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
 	ctx context.Context,
 	blockRoot common.Hash,

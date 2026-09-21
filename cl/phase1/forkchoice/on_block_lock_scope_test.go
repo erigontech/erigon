@@ -726,7 +726,7 @@ func TestNewPayloadInvalidVerdictSurvivesStatusCacheEviction(t *testing.T) {
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().
 		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(execution_client.PayloadStatusInvalidated, nil).
+		Return(execution_client.PayloadStatusInvalidated, errors.New("bad block")).
 		Times(1)
 	store, block := buildExAnteStorePendingLast(t, engine)
 	derived := selfConsistentPayload(t, block)
@@ -739,7 +739,7 @@ func TestNewPayloadInvalidVerdictSurvivesStatusCacheEviction(t *testing.T) {
 		blockRoot, func() error { return nil }, derived,
 		block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, nil, nil)
 	store.mu.Unlock()
-	require.NoError(t, err)
+	require.ErrorContains(t, err, "bad block")
 	require.EqualValues(t, execution_client.PayloadStatusInvalidated, status)
 
 	// The caller has not relocked yet, so nothing durable exists. Dropping the bounded
@@ -754,21 +754,47 @@ func TestNewPayloadInvalidVerdictSurvivesStatusCacheEviction(t *testing.T) {
 // The in-flight entry only bridges the gap until the verdict is durable. Leaving it behind
 // would be a permanent entry in an unbounded map, which is what the refcounted set avoids.
 func TestOnBlockClearsTheInFlightInvalidEntry(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().
-		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(execution_client.PayloadStatusInvalidated, nil).
-		Times(1)
+	engine, elEntered, releaseEL := blockingEngine(t, 1, execution_client.PayloadStatusInvalidated, errors.New("bad block"))
 	store, block := buildExAnteStorePendingLast(t, engine)
 	selfConsistentPayload(t, block)
 	executionHash := block.Block.Body.ExecutionPayload.BlockHash
 
-	require.Error(t, store.OnBlock(context.Background(), block, true, true, false))
+	done := make(chan error, 1)
+	go func() { done <- store.OnBlock(context.Background(), block, true, true, false) }()
+	awaitSignal(t, elEntered, "NewPayload to start")
+
+	// Pin f.mu so the writer parks on its relock with the entry recorded but not durable.
+	pinned, unpin := make(chan struct{}), make(chan struct{})
+	go func() {
+		store.mu.Lock()
+		close(pinned)
+		<-unpin
+		store.mu.Unlock()
+	}()
+	awaitSignal(t, pinned, "the competing writer to take the fork-choice lock")
+	close(releaseEL)
+
+	select {
+	case store.payloadValidationAdmission <- struct{}{}:
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("timed out waiting for the admission token to be released")
+	}
+	_, recorded := store.inFlightInvalidPayloads.Load(executionHash)
+	require.True(t, recorded, "the writer must record its verdict before releasing the token")
+	<-store.payloadValidationAdmission
+
+	close(unpin)
+	select {
+	case err := <-done:
+		require.Error(t, err)
+	case <-time.After(lockScopeTimeout):
+		t.Fatal("OnBlock did not finish after the lock was released")
+	}
 
 	_, stillInFlight := store.inFlightInvalidPayloads.Load(executionHash)
 	require.False(t, stillInFlight, "the writer must retract its entry once the verdict is durable")
-	require.True(t, store.executionHashMarkedInvalid(executionHash), "the durable verdict stays")
+	_, durable := store.invalidatedExecutionPayloads.Load(executionHash)
+	require.True(t, durable, "the verdict the entry stood in for must have been made durable")
 }
 
 // A caller that short-circuits on somebody else's verdict derives nothing, so it must not
