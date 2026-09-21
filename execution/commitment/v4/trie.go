@@ -32,9 +32,12 @@ var (
 )
 
 type Trie struct {
-	ctx    commitment.PatriciaContext
-	root   []byte
-	traceW io.Writer
+	ctx             commitment.PatriciaContext
+	root            []byte
+	traceW          io.Writer
+	scheduleOrder   scheduleOrder
+	scheduleWorkers int
+	scheduleStats   *scheduleStats
 }
 
 func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
@@ -115,15 +118,7 @@ func (t *Trie) Process(
 	}
 
 	storage, accounts := partition(stream)
-	roots := make(map[[32]byte][32]byte, len(storage))
-	for _, task := range storage {
-		root, err := runStorageTask(t.ctx, task)
-		if err != nil {
-			return nil, err
-		}
-		roots[task.addrHash] = root
-	}
-	root, err := runAccountTrie(t.ctx, accounts, roots)
+	root, err := runScheduledPhases(ctx, t.ctx, storage, accounts, t.scheduleOrder, t.scheduleWorkers, t.scheduleStats)
 	if err != nil {
 		return nil, err
 	}

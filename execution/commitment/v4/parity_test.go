@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -39,6 +40,7 @@ type parityUpdate struct {
 }
 
 type parityContext struct {
+	mu           sync.Mutex
 	branches     map[string][]byte
 	accounts     map[string]*commitment.Update
 	storage      map[string]*commitment.Update
@@ -55,15 +57,21 @@ func newParityContext() *parityContext {
 }
 
 func (p *parityContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return bytes.Clone(p.branches[string(key)]), 0, nil
 }
 
 func (p *parityContext) PutBranch(key, data, _ []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.branches[string(key)] = bytes.Clone(data)
 	return nil
 }
 
 func (p *parityContext) Account(key []byte) (*commitment.Update, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.accountCalls++
 	if update, ok := p.accounts[string(key)]; ok {
 		return update.Copy(), nil
@@ -72,6 +80,8 @@ func (p *parityContext) Account(key []byte) (*commitment.Update, error) {
 }
 
 func (p *parityContext) Storage(key []byte) (*commitment.Update, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.storageCalls++
 	if update, ok := p.storage[string(key)]; ok {
 		return update.Copy(), nil
@@ -204,8 +214,10 @@ func TestParityAccountsStorageAndMixed(t *testing.T) {
 		{name: "mixed", build: func(n int) []parityUpdate {
 			entries := make([]parityUpdate, 0, n*2)
 			for i := range n {
-				entries = append(entries, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)})
-				entries = append(entries, parityUpdate{key: append(parityAddress(i), paritySlot(i)...), update: storageParityUpdate(i)})
+				entries = append(entries,
+					parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)},
+					parityUpdate{key: append(parityAddress(i), paritySlot(i)...), update: storageParityUpdate(i)},
+				)
 			}
 			return entries
 		}, counts: []int{1, 2, 16, 1000, 100000}},

@@ -642,14 +642,14 @@ state. Recorded so a later reader does not "restore" the original wording.
 Deliberately last. Tasks 21 and 22 prove the root sequentially first, so a divergence found here is
 a concurrency bug and nothing else.
 
-- [ ] add one semaphore shared across phase A and phase B, sized to the physical core count — invariant 13 measured what nested per-whale errgroups do, and Nethermind reaches the same answer with `BlockCommitter._concurrency = ProcessorCount`
-- [ ] sort phase-A tasks by touched-slot count descending: 94.6% of storage tries are one record and 5.4% hold 95.4% of the slots, so the tail dominates otherwise
-- [ ] start a phase-B subtree as its storage roots land — the barrier is per account, not global
-- [ ] subdivide inside a whale and inside the account trie through the fork/join seam of task 6
-- [ ] re-run the whole of task 21 and task 22 with concurrency enabled — same roots, no new failures
-- [ ] write a test that the root is identical under a forced sequential schedule, a reversed schedule and the longest-first schedule
-- [ ] write a test that the in-flight worker count never exceeds the semaphore bound across phase A and phase B combined
-- [ ] run `go test -race ./execution/commitment/v4/...` unfiltered — must pass before task 24
+- [x] add one semaphore shared across phase A and phase B, sized to the physical core count — invariant 13 measured what nested per-whale errgroups do, and Nethermind reaches the same answer with `BlockCommitter._concurrency = ProcessorCount`
+- [x] sort phase-A tasks by touched-slot count descending: 94.6% of storage tries are one record and 5.4% hold 95.4% of the slots, so the tail dominates otherwise
+- [x] start a phase-B subtree as its storage roots land — the barrier is per account, not global
+- [x] subdivide inside a whale and inside the account trie through the fork/join seam of task 6
+- [x] re-run the whole of task 21 and task 22 with concurrency enabled — same roots, no new failures
+- [x] write a test that the root is identical under a forced sequential schedule, a reversed schedule and the longest-first schedule
+- [x] write a test that the in-flight worker count never exceeds the semaphore bound across phase A and phase B combined
+- [x] run `go test -race ./execution/commitment/v4/...` unfiltered — must pass before task 24
 
 ### Task 24: Verify acceptance criteria
 
