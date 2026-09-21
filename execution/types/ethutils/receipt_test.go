@@ -78,3 +78,16 @@ func TestMarshalSubscribeReceiptWithoutSender(t *testing.T) {
 	require.NoError(t, err)
 	assert.Contains(t, string(encoded), `"from":null`)
 }
+
+// A sender the backend did set must survive as an address, the zero one
+// included: only an unset "from" marshals to null.
+func TestMarshalSubscribeReceiptKeepsZeroSender(t *testing.T) {
+	reply := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+		TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+		From:            gointerfaces.ConvertAddressToH160(common.Address{}),
+	}
+	receipt := MarshalSubscribeReceipt(reply)
+	require.NotNil(t, receipt.From)
+	assert.Equal(t, common.Address{}, *receipt.From)
+}
