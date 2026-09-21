@@ -31,9 +31,8 @@ import (
 type CachedReader3 struct {
 	cache kvcache.CacheView
 	db    kv.TemporalTx
-	// addr and storageKey are the keys the next read looks up. As fields of the heap-allocated
-	// reader their slices reach the cache interface without escaping a local; the cache clones
-	// any key it keeps, and one reader serves one request.
+	// addr and storageKey are the keys the next read looks up. As reader fields their slices
+	// reach the cache interface without escaping a local.
 	addr       common.Address
 	storageKey [length.Addr + length.Hash]byte
 }

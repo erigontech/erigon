@@ -91,8 +91,7 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 		if dbg.AssertEnabled {
 			writes.assertSelfDestructNormalized()
 		}
-		// One buffer for every storage key this call writes: the domains copy the key
-		// they keep, so building it per slot only fed the allocator.
+		// One buffer for every storage key this call writes: consumers copy what they keep.
 		var storageKey [length.Addr + length.Hash]byte
 		// Field presence is tracked with has-flags rather than pointers: the
 		// pointer form heap-escapes one allocation per field per address.
@@ -811,8 +810,7 @@ type Writer struct {
 	trace       bool
 	accumulator *shards.Accumulator
 	txNum       uint64
-	// storageKey is the address+slot the next storage write addresses. Every consumer
-	// copies the key it keeps, and one writer serves one transaction.
+	// storageKey is the address+slot the next storage write addresses.
 	storageKey [length.Addr + length.Hash]byte
 }
 
