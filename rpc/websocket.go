@@ -24,6 +24,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -333,8 +334,8 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 		wc.info.HTTP.Origin = req.Get("Origin")
 		wc.info.HTTP.UserAgent = req.Get("User-Agent")
 	}
-	wc.pingTimer = time.AfterFunc(wsPingInterval, wc.ping)
-	// Orders the assignment before the first ping run, which reads pingTimer.
+	// Armed by Reset only after the assignment, which ping reads.
+	wc.pingTimer = time.AfterFunc(math.MaxInt64, wc.ping)
 	wc.pingTimer.Reset(wsPingInterval)
 	return wc
 }
