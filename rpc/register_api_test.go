@@ -53,3 +53,20 @@ func TestRegisterAPIWithoutInterfaceExposesEveryMethod(t *testing.T) {
 	require.True(t, ok)
 	require.NotNil(t, svc.callbacks["noArgsRets"])
 }
+
+type unimplementedTestService interface {
+	Echo(str string, i int, args *echoArgs) echoResult
+	Ech0(str string, i int, args *echoArgs) echoResult
+}
+
+func TestRegisterAPIRejectsAnInterfaceTheServiceDoesNotImplement(t *testing.T) {
+	server := NewServer(50, false, false, true, log.New(), 100)
+	err := server.RegisterAPI(API{
+		Namespace: "test",
+		Service:   new(testService),
+		Iface:     reflect.TypeFor[unimplementedTestService](),
+	})
+
+	require.ErrorContains(t, err, "Ech0")
+	require.NotContains(t, server.services.services, "test")
+}

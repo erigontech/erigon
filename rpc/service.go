@@ -75,6 +75,9 @@ func (r *serviceRegistry) registerName(name string, rcvr any, iface reflect.Type
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", rcvrVal.Type().String())
 	}
+	if iface != nil && !rcvrVal.Type().Implements(iface) {
+		return fmt.Errorf("service %s does not implement %s: %s", rcvrVal.Type(), iface, ifaceGap(rcvrVal.Type(), iface))
+	}
 	callbacks := suitableCallbacks(rcvrVal, iface, r.logger)
 	if len(callbacks) == 0 {
 		return fmt.Errorf("service %T doesn't have any suitable methods/subscriptions to expose", rcvr)
@@ -292,6 +295,20 @@ func servedByIface(iface reflect.Type, method string) bool {
 	}
 	_, declared := iface.MethodByName(method)
 	return declared
+}
+
+// ifaceGap describes why typ falls short of iface, for the registration error.
+func ifaceGap(typ, iface reflect.Type) string {
+	var missing []string
+	for method := range iface.Methods() {
+		if _, ok := typ.MethodByName(method.Name); !ok {
+			missing = append(missing, method.Name)
+		}
+	}
+	if len(missing) == 0 {
+		return "signatures differ"
+	}
+	return "missing " + strings.Join(missing, ", ")
 }
 
 // formatName converts to first character of name to lowercase.
