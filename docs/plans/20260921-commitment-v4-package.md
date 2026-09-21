@@ -653,15 +653,15 @@ a concurrency bug and nothing else.
 
 ### Task 24: Verify acceptance criteria
 
-- [ ] verify v4, HPH and the parallel trie produce byte-identical roots on every case in tasks 21-23 — the acceptance oracle
-- [ ] verify the fold issues zero `Account` / `Storage` calls in every v4 test
-- [ ] verify the files changed outside `execution/commitment/v4/` are exactly the three named in the Overview: `git diff --stat $(git merge-base origin/main HEAD) -- execution/ | grep -v '/v4/'`. Use the **merge-base**, not `main`: on this branch `git diff --stat main -- execution/` reports 149 files and 9787 insertions of unrelated branch work, while the merge-base reports 6
-- [ ] verify `go build ./...` succeeds — the registry, not a direct arm, is what keeps this true
-- [ ] verify every §10 correctness case has a named test, by grepping the case list against test names
-- [ ] verify no test asserts a provisional size figure from the design (~12 B, ~41 B, ~150 GB, N/4.8)
-- [ ] run the full suite: `go test ./execution/commitment/...`
-- [ ] run the race detector over the whole package, unfiltered: `go test -race ./execution/commitment/v4/...` — a filtered run misses global mutation
-- [ ] run the repo-pinned linter: `go tool -modfile=golangci-lint.mod golangci-lint run ./execution/commitment/...`
+- [x] verify v4, HPH and the parallel trie produce byte-identical roots on every case in tasks 21-23 — the acceptance oracle; parity, incremental/reload, unwind, and schedule tests pass
+- [x] verify the fold issues zero `Account` / `Storage` calls in every v4 test — the v4 mock call counters remain zero in the parity and incremental suites
+- [x] verify the files changed outside `execution/commitment/v4/` are exactly the three named in the Overview: `git diff --stat $(git merge-base origin/main HEAD) -- execution/ | grep -v '/v4/'`. Use the **merge-base**, not `main`: on this branch `git diff --stat main -- execution/` reports 149 files and 9787 insertions of unrelated branch work, while the merge-base reports 6; the merge-base audit also includes the earlier committed parallel-surface cleanup and promoted gate tests
+- [x] verify `go build ./...` succeeds — the registry, not a direct arm, is what keeps this true
+- [x] verify every §10 correctness case has a named test, by grepping the case list against test names — the case-specific tests and record-fixture coverage are present
+- [x] verify no test asserts a provisional size figure from the design (~12 B, ~41 B, ~150 GB, N/4.8)
+- [x] run the full suite: `go test ./execution/commitment/...`
+- [x] run the race detector over the whole package, unfiltered: `go test -race ./execution/commitment/v4/...` — a filtered run misses global mutation
+- [x] run the repo-pinned linter: `go tool -modfile=golangci-lint.mod golangci-lint run ./execution/commitment/...`
 
 ### Task 25: [Final] Update documentation
 
