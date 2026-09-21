@@ -447,3 +447,122 @@ func TestWebsocketServerGracefulClose(t *testing.T) {
 		}
 	}
 }
+
+func TestWebsocketPingNotRearmedAfterClose(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	wc := NewWebsocketCodec(conn, "", nil, "").(*websocketCodec)
+	wc.Close()
+	wc.resetPing() // a write or ping that finished before Close can reset after it
+	if wc.pingTimer.Stop() {
+		t.Fatal("ping timer re-armed on a closed codec")
+	}
+}
+
+// An idle connection gets a ping, and each ping arms the timer for the next one.
+func TestWebsocketIdlePing(t *testing.T) {
+	t.Parallel()
+
+	pinged := make(chan struct{}, 1)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			OnPingReceived: func(context.Context, []byte) bool {
+				select {
+				case pinged <- struct{}{}:
+				default:
+				}
+				return true
+			},
+		})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		conn.Read(r.Context()) //nolint:errcheck
+	}))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	wc := NewWebsocketCodec(conn, "", nil, "").(*websocketCodec)
+	defer wc.Close()
+	go conn.Read(context.Background()) //nolint:errcheck
+
+	wc.pingTimer.Reset(time.Millisecond)
+	select {
+	case <-pinged:
+	case <-time.After(5 * time.Second):
+		t.Fatal("idle connection was not pinged")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for !wc.pingTimer.Stop() {
+		if time.Now().After(deadline) {
+			t.Fatal("ping did not re-arm the timer")
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+// peakService records the most calls it ran at once.
+type peakService struct{ inflight, peak atomic.Int32 }
+
+func (s *peakService) Hold() {
+	n := s.inflight.Add(1)
+	for p := s.peak.Load(); n > p && !s.peak.CompareAndSwap(p, n); p = s.peak.Load() {
+	}
+	time.Sleep(20 * time.Millisecond)
+	s.inflight.Add(-1)
+}
+
+func TestWebsocketBatchUsesServerConcurrency(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	srv.batchConcurrency = 2
+	svc := new(peakService)
+	if err := srv.RegisterName("peak", svc); err != nil {
+		t.Fatal(err)
+	}
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+
+	client, err := DialContext(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), logger)
+	if err != nil {
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer client.Close()
+	batch := make([]BatchElem, 8)
+	for i := range batch {
+		batch[i] = BatchElem{Method: "peak_hold", Result: new(any)}
+	}
+	if err := client.BatchCall(batch); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range batch {
+		if e.Error != nil {
+			t.Fatal(e.Error)
+		}
+	}
+	if peak := svc.peak.Load(); peak > 2 {
+		t.Fatalf("websocket batch ran %d calls at once, server allows 2", peak)
+	}
+}

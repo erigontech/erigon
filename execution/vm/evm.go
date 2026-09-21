@@ -217,14 +217,20 @@ func (evm *EVM) internAddress(word *uint256.Int) accounts.Address {
 	return c.fill(i, word)
 }
 
+// ZeroUnpricedBaseFee returns blockCtx with the base fee dropped for a call that
+// skips the fee checks and puts no price on gas, so that its fee cap is never
+// below the base fee. Call it before building the EVM, as ZeroUnpricedBlobBaseFee
+// is called for the blob fee.
+func ZeroUnpricedBaseFee(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, vmConfig Config) evmtypes.BlockContext {
+	if vmConfig.NoBaseFee && txCtx.GasPrice.IsZero() {
+		blockCtx.BaseFee = uint256.Int{}
+	}
+	return blockCtx
+}
+
 // NewEVM returns a new EVM. The returned EVM is not thread safe and should
 // only ever be used *once*.
 func NewEVM(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, chainConfig *chain.Config, vmConfig Config) *EVM {
-	if vmConfig.NoBaseFee {
-		if txCtx.GasPrice.IsZero() {
-			blockCtx.BaseFee = uint256.Int{}
-		}
-	}
 	evm := &EVM{
 		Context:         blockCtx,
 		TxContext:       txCtx,
@@ -250,11 +256,6 @@ func (evm *EVM) Reset(txCtx evmtypes.TxContext, ibs *state.IntraBlockState) {
 }
 
 func (evm *EVM) ResetBetweenBlocks(blockCtx evmtypes.BlockContext, txCtx evmtypes.TxContext, ibs *state.IntraBlockState, vmConfig Config, chainRules *chain.Rules) {
-	if vmConfig.NoBaseFee {
-		if txCtx.GasPrice.IsZero() {
-			blockCtx.BaseFee = uint256.Int{}
-		}
-	}
 	evm.Context = blockCtx
 	evm.TxContext = txCtx
 	evm.intraBlockState = ibs

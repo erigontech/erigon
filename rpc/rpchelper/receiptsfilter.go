@@ -29,13 +29,19 @@ type ReceiptsFilterAggregator struct {
 	aggReceiptsFilter  ReceiptsFilter                                      // Aggregation of all current receipt filters
 	receiptsFilters    *concurrent.SyncMap[ReceiptsSubID, *ReceiptsFilter] // Filter for each subscriber
 	receiptsFilterLock sync.RWMutex
+
+	blockMu sync.Mutex
+	block   []*remoteproto.SubscribeReceiptsReply // receipts of the block in progress
+	// markers is set once the backend flags the last receipt of a block; before that each
+	// receipt is sent on its own, so a backend without the flag gets no added latency.
+	markers bool
 }
 
 // ReceiptsFilter filters receipts by transaction hashes
 type ReceiptsFilter struct {
 	allTxHashes       int                                   // Counter: subscribe to all receipts if > 0
 	transactionHashes *concurrent.SyncMap[common.Hash, int] // Transaction hashes to filter, with ref count
-	sender            Sub[*Shared[*remoteproto.SubscribeReceiptsReply]]
+	sender            Sub[*Shared[[]*remoteproto.SubscribeReceiptsReply]]
 }
 
 // Close closes the sender
@@ -55,7 +61,7 @@ func NewReceiptsFilterAggregator() *ReceiptsFilterAggregator {
 
 // insertReceiptsFilter creates a fully-configured filter, inserts it into the map,
 // and adds its counts to the aggregate, all under the write lock.
-func (a *ReceiptsFilterAggregator) insertReceiptsFilter(sender Sub[*Shared[*remoteproto.SubscribeReceiptsReply]], txHashes []common.Hash, maxTxHashes int) ReceiptsSubID {
+func (a *ReceiptsFilterAggregator) insertReceiptsFilter(sender Sub[*Shared[[]*remoteproto.SubscribeReceiptsReply]], txHashes []common.Hash, maxTxHashes int) ReceiptsSubID {
 	filter := &ReceiptsFilter{
 		transactionHashes: concurrent.NewSyncMap[common.Hash, int](),
 		sender:            sender,
@@ -150,24 +156,57 @@ func (a *ReceiptsFilterAggregator) createFilterRequest() *remoteproto.ReceiptsFi
 
 // distributeReceipt processes a receipt and distributes it to matching filters
 func (a *ReceiptsFilterAggregator) distributeReceipt(receipt *remoteproto.SubscribeReceiptsReply) {
+	a.blockMu.Lock()
+	defer a.blockMu.Unlock()
+	a.markers = a.markers || receipt.LastInBlock
+	if !a.markers {
+		a.distributeBlock([]*remoteproto.SubscribeReceiptsReply{receipt})
+		return
+	}
+	if len(a.block) > 0 && a.block[0].BlockNumber != receipt.BlockNumber { // the flag got lost
+		a.distributeBlock(a.block)
+		a.block = nil
+	}
+	a.block = append(a.block, receipt)
+	if receipt.LastInBlock {
+		a.distributeBlock(a.block)
+		a.block = nil
+	}
+}
+
+// endStream sends a block the ended stream left half-received and forgets that the backend marks
+// blocks: the next stream may come from a backend that does not.
+func (a *ReceiptsFilterAggregator) endStream() {
+	a.blockMu.Lock()
+	defer a.blockMu.Unlock()
+	if len(a.block) > 0 {
+		a.distributeBlock(a.block)
+		a.block = nil
+	}
+	a.markers = false
+}
+
+// distributeBlock sends every subscriber the block's receipts it asked for as one event. The
+// subscribers that take every receipt share one event, so it is encoded once for all of them.
+func (a *ReceiptsFilterAggregator) distributeBlock(receipts []*remoteproto.SubscribeReceiptsReply) {
 	a.receiptsFilterLock.RLock()
 	defer a.receiptsFilterLock.RUnlock()
 
-	txHash := gointerfaces.ConvertH256ToHash(receipt.TransactionHash)
-	ev := &Shared[*remoteproto.SubscribeReceiptsReply]{Value: receipt}
-
+	all := &Shared[[]*remoteproto.SubscribeReceiptsReply]{Value: receipts}
 	_ = a.receiptsFilters.Range(func(k ReceiptsSubID, filter *ReceiptsFilter) error {
-		// Check if this filter matches the receipt
-		if filter.allTxHashes == 0 {
-			// Filter has specific transaction hashes
-			if _, ok := filter.transactionHashes.Get(txHash); !ok {
-				return nil // This filter doesn't want this receipt
+		if filter.allTxHashes > 0 {
+			filter.sender.Send(all)
+			return nil
+		}
+		var matched []*remoteproto.SubscribeReceiptsReply
+		for _, r := range receipts {
+			if _, ok := filter.transactionHashes.Get(gointerfaces.ConvertH256ToHash(r.TransactionHash)); ok {
+				matched = append(matched, r)
 			}
 		}
-		// allTxHashes > 0 means subscribe to all receipts
-
-		// Send to subscriber
-		filter.sender.Send(ev)
+		if len(matched) > 0 {
+			filter.sender.Send(&Shared[[]*remoteproto.SubscribeReceiptsReply]{Value: matched})
+		}
 		return nil
 	})
 }
