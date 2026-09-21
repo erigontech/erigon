@@ -1666,8 +1666,13 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 
 	s.removeOrphanedIdx(supersededIdx)
 
-	// Remove leftover .tmp files of this collection's own types only. Caplin compresses into
-	// this same directory, and its in-progress target is a .tmp that must not be unlinked.
+	return s.RemoveOwnTmpFiles()
+}
+
+// RemoveOwnTmpFiles unlinks leftover .tmp files of this collection's own types. Another
+// collection may be compressing into the same directory, and its in-progress target is a .tmp
+// that must not be touched. Call it once at startup, before this collection compresses anything.
+func (s *BaseRoSnapshots) RemoveOwnTmpFiles() error {
 	tmpFiles, err := snaptype.TmpFiles(s.dir)
 	if err != nil {
 		return err

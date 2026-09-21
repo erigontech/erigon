@@ -85,3 +85,27 @@ func TestRemoveOverlapsKeepsUnparsableTmp(t *testing.T) {
 	require.NoError(t, s.RemoveOverlaps(nil))
 	require.FileExists(t, junk)
 }
+
+// The sweep must be reachable without a merge: CaplinSnapshots never calls RemoveOverlaps, so
+// without a standalone entry point its own interrupted compressions leak multi-GB .tmp files
+// that nothing on a running node ever removes.
+func TestRemoveOwnTmpFilesSweepsOnlyOwnTypes(t *testing.T) {
+	dir := t.TempDir()
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet},
+		dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenFolder())
+
+	own := filepath.Join(dir, "v1.0-000000-000500-headers.seg.123.tmp")
+	foreign := filepath.Join(dir, "v1.1-014790-014800-blobsidecars.seg.2774720258.tmp")
+	junk := filepath.Join(dir, "not-a-snapshot-name.tmp")
+	for _, p := range []string{own, foreign, junk} {
+		require.NoError(t, os.WriteFile(p, []byte("x"), 0o644))
+	}
+
+	require.NoError(t, s.RemoveOwnTmpFiles())
+
+	require.NoFileExists(t, own)
+	require.FileExists(t, foreign, "another collection's in-progress .tmp must survive")
+	require.FileExists(t, junk, "an unattributable .tmp must survive")
+}
