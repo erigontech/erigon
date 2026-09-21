@@ -27,6 +27,7 @@ import (
 	"encoding/json"
 	"errors"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 )
@@ -257,14 +258,8 @@ func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 // parsing it again: every subscriber would otherwise re-check the same payload.
 func notification(namespace string, id ID, result json.RawMessage) []byte {
 	quotedID, _ := json.Marshal(string(id))
-	buf := make([]byte, 0, len(namespace)+len(quotedID)+len(result)+80)
-	buf = append(buf, `{"jsonrpc":"`+vsn+`","method":"`...)
-	buf = append(buf, namespace...)
-	buf = append(buf, notificationMethodSuffix+`","params":{"subscription":`...)
-	buf = append(buf, quotedID...)
-	buf = append(buf, `,"result":`...)
-	buf = append(buf, result...)
-	return append(buf, "}}"...)
+	return slices.Concat([]byte(`{"jsonrpc":"`+vsn+`","method":"`+namespace+notificationMethodSuffix+`","params":{"subscription":`),
+		quotedID, []byte(`,"result":`), result, []byte("}}"))
 }
 
 // A Subscription is created by a notifier and tied to that notifier. The client can use
