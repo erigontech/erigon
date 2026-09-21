@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"strings"
 	"sync"
 	"time"
@@ -119,6 +120,11 @@ func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
+var (
+	mxRPCViewWithSD = metrics.GetOrCreateCounter(`rpc_state_view{source="shared_domains"}`)
+	mxRPCViewNoSD   = metrics.GetOrCreateCounter(`rpc_state_view{source="uncached_tx"}`)
+)
+
 func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	var sd *execctx.SharedDomains
 	if c.execModule != nil {
@@ -134,8 +140,13 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 
 	var view *CacheView
 	if sd != nil {
+		mxRPCViewWithSD.Inc()
 		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
+		// No published overlay: the read still answers correctly through tx, but without the
+		// SharedDomains' StateCache view every state read goes to the domain. A node whose CL
+		// is detached serves every RPC this way, so it is worth counting.
+		mxRPCViewNoSD.Inc()
 		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
 	return view, nil
