@@ -257,8 +257,8 @@ func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 	if n.prefix == nil {
 		n.prefix = notificationPrefix(n.namespace, sub.ID)
 	}
-	// A pooled buffer, not a fresh one: every subscriber of an event gets the same result, and
-	// a buffer per send would copy it once per subscriber.
+	// A pooled buffer, not a fresh one: every subscriber of an event gets the same result, and a
+	// buffer per send would allocate its size once per subscriber.
 	buf := pool.GetBuffer()
 	defer pool.PutBuffer(buf)
 	buf.Write(n.prefix)
@@ -270,7 +270,6 @@ func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 var notificationSuffix = []byte("}}")
 
 // notificationPrefix is the part of a notification before its result, fixed for a subscription.
-// The result is wrapped as it is, already encoded: every subscriber would otherwise re-check it.
 func notificationPrefix(namespace string, id ID) []byte {
 	method, _ := json.Marshal(namespace + notificationMethodSuffix) //nolint:errchkjson
 	quotedID, _ := json.Marshal(string(id))                         //nolint:errchkjson

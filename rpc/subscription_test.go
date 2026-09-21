@@ -335,8 +335,8 @@ func (discardWriter) closed() <-chan any                   { return nil }
 func (discardWriter) remoteAddr() string                   { return "" }
 
 // Every subscriber gets the same encoded result, so wrapping it for one subscriber must not
-// allocate a copy of it: at 2000 subscribers a block's receipts would be copied 2000 times.
-func TestNotifySendDoesNotCopyResult(t *testing.T) {
+// allocate its size: at 2000 subscribers a block's receipts would be allocated 2000 times.
+func TestNotifySendDoesNotAllocateResult(t *testing.T) {
 	result := json.RawMessage(`"` + strings.Repeat("x", 160*1024) + `"`)
 	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, namespace: "eth", sub: &Subscription{ID: "0x9a"}, activated: true}
 	send := func() {
