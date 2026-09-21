@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -220,17 +221,45 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
-	return subscribeRPC(ctx,
-		func() (<-chan *rpchelper.Shared[*types.Header], func(), error) {
-			headers, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolWS)
-			return headers, func() { api.filters.UnsubscribeHeads(id) }, nil
-		},
-		func(emit func(payload any), h *rpchelper.Shared[*types.Header]) {
-			if h != nil && h.Value != nil {
-				emit(sharedJSON[*types.Header]{h, headerValue})
+	notifier, supported := rpc.NotifierFromContext(ctx)
+	if !supported {
+		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
+	}
+	headers, id := api.filters.SubscribeNewHeads(32, rpchelper.ProtocolWS)
+	rpcSub := notifier.CreateSubscription()
+	var draining atomic.Bool
+	drain := func() {
+		defer dbg.LogPanic()
+		for {
+			select {
+			case h, ok := <-headers:
+				if !ok {
+					return
+				}
+				if h != nil && h.Value != nil {
+					if err := notifier.Notify(rpcSub.ID, sharedJSON[*types.Header]{h, headerValue}); err != nil {
+						log.Warn("[rpc] error while notifying subscription", "err", err)
+					}
+				}
+			default:
+				// A Send between the empty check and Store sees draining set and does not
+				// wake, so re-check before leaving.
+				draining.Store(false)
+				if len(headers) == 0 || !draining.CompareAndSwap(false, true) {
+					return
+				}
 			}
-		},
-		"[rpc] new heads channel was closed")
+		}
+	}
+	wake := func() {
+		if draining.CompareAndSwap(false, true) {
+			go drain()
+		}
+	}
+	api.filters.SetWake(rpchelper.SubscriptionID(id), wake)
+	rpcSub.OnClose(func() { api.filters.UnsubscribeHeads(id) })
+	wake() // events queued before SetWake
+	return rpcSub, nil
 }
 
 // NewPendingTransactions send a notification each time when a transaction had added into mempool.

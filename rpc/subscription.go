@@ -269,6 +269,20 @@ type Subscription struct {
 	ID        ID
 	namespace string
 	err       chan error // closed on unsubscribe
+	onClose   func()
+}
+
+// OnClose sets f to run once the subscription ends, by unsubscribe or by closing its
+// connection. It must be set before the subscribe call returns.
+func (s *Subscription) OnClose(f func()) {
+	s.onClose = f
+}
+
+func (s *Subscription) close() {
+	close(s.err)
+	if s.onClose != nil {
+		s.onClose()
+	}
 }
 
 // Err returns a channel that is closed when the client send an unsubscribe request.
