@@ -137,6 +137,8 @@ func warmBALCommitment(ctx context.Context, db kv.RoDB, bal types.BlockAccessLis
 		NumWorkers: workers,
 		MaxDepth:   commitment.WarmupMaxDepth,
 		LogPrefix:  "BAL",
+		Key:        commitment.HexPatriciaWarmupKey,
+		Step:       commitment.HexPatriciaWarmupStep,
 	})
 	warmuper.Start()
 	var previous []byte

@@ -312,8 +312,6 @@ the worker pool, the `CtxFactory`, the epoch/coherence model, the put stripes, a
 - Modify: `execution/commitment/branch_cache.go`
 - Create: `execution/commitment/branch_cache_v4_test.go`
 
-- [ ] capture the Task 5 baseline arm first, before any edit: per-tier `BranchCache.Stats()` (`:639`) and
-      `warmuper.Stats()` on a v4 run at this HEAD — it is unrecoverable once Task 1 lands
 - [x] write the failing tier table test in `branch_cache_v4_test.go`: for each v4 key shape (account root
       `40 00`, account depths 1-6, storage root `41||H||00`, storage depths 1-6) assert the entry lands in
       the intended tier and reads back byte-identical
@@ -344,25 +342,25 @@ the worker pool, the `CtxFactory`, the epoch/coherence model, the put stripes, a
 - Modify: `execution/commitment/warmuper_test.go`
 - Modify: `execution/commitment/testutil_test.go`
 
-- [ ] add `WarmupKeyFunc` and `WarmupStepFunc` declarations and the two `WarmupConfig` fields in
+- [x] add `WarmupKeyFunc` and `WarmupStepFunc` declarations and the two `WarmupConfig` fields in
       `warmuper.go:37`, beside the struct — not in `config.go`
-- [ ] move the V2 key construction (`HexToCompactInto`, `warmuper.go:148`) and the V2 record parse
+- [x] move the V2 key construction (`HexToCompactInto`, `warmuper.go:148`) and the V2 record parse
       (`:165-200`, including `skipCellFields` use) out of `warmupKey` into `hex_patricia_hashed.go` as the
       two functions HPH supplies, preserving the existing descent decisions exactly
-- [ ] rewrite `warmupKey` (`:144`) as a format-agnostic loop over the two functions, holding only
+- [x] rewrite `warmupKey` (`:144`) as a format-agnostic loop over the two functions, holding only
       `startDepth`, `maxDepth` and the stop condition — no plane logic, no nibble selection
-- [ ] have `hex_patricia_hashed.go:2622-2628` populate both fields when constructing the Warmuper
-- [ ] update `execution/exec/bal_commitment_warmup.go:134` — an out-of-package `NewWarmuper` site that sets
+- [x] have `hex_patricia_hashed.go:2622-2628` populate both fields when constructing the Warmuper
+- [x] update `execution/exec/bal_commitment_warmup.go:134` — an out-of-package `NewWarmuper` site that sets
       neither field and relies on the parse being moved — to supply the HPH pair
-- [ ] update `testutil_test.go:190` and the six `warmuper_test.go` construction sites
-- [ ] make a nil `Key` or `Step` **panic** in `NewWarmuper` (`:80` returns no error), or return it from
+- [x] update `testutil_test.go:190` and the six `warmuper_test.go` construction sites
+- [x] make a nil `Key` or `Step` **panic** in `NewWarmuper` (`:80` returns no error), or return it from
       `Start()` the way the nil-`PatriciaContext` case already does at `:113-118` — pick one and say which
-- [ ] write a test that the HPH key function reproduces `HexToCompactInto` for depths 0-64, both parities
-- [ ] write a test that the HPH step function reproduces the old descent decisions on a V2 record fixture
+- [x] write a test that the HPH key function reproduces `HexToCompactInto` for depths 0-64, both parities
+- [x] write a test that the HPH step function reproduces the old descent decisions on a V2 record fixture
       (child present, child absent, leaf terminator, extension advance, truncated record)
-- [ ] write a test that a nil `Key` or `Step` is rejected, not silently treated as no-descent
-- [ ] mutation-verify the HPH step test by file copy: invert the extension advance, confirm red, restore
-- [ ] run `go test ./execution/commitment/... ./execution/exec/...` — HPH behaviour unchanged before Task 3
+- [x] write a test that a nil `Key` or `Step` is rejected, not silently treated as no-descent
+- [x] mutation-verify the HPH step test by file copy: invert the extension advance, confirm red, restore
+- [x] run `go test ./execution/commitment/... ./execution/exec/...` — HPH behaviour unchanged before Task 3
 
 ### Task 3: Supply the v4 key and step functions and stop dropping the warmuper
 
@@ -427,17 +425,20 @@ the worker pool, the `CtxFactory`, the epoch/coherence model, the put stripes, a
 - Create: `~/org/mode/e/research/commitment-v4-cache-warmup.org`
 
 - [ ] start a research log (`research-log` skill): the question, the numbers, and any claim that dies
-- [ ] capture the after arm on the same corpus and machine as the Task 1 baseline, interleaved, not
-      sequentially
-- [ ] record per-tier hit rate, `RecordsFound`, `Duration`, `staleEvicted` and `bytesServed` with
-      provenance — the machine, the block range, the arm
-- [ ] measure the overlap question from Technical Details: does warming during the partition pass pay, or
-      does the arena barrier just throttle partitioning? Compare `Process` wall clock with warmup on and off
-- [ ] answer the leaf question from the numbers: what share of reads is the deepest branch per key, and is
-      it shareable at all
-- [ ] decide and record, with the number behind each: cold-start seed pass (yes/no), leaf warming (yes/no),
-      removing the `branchBuf` copy on a cache hit (yes/no), lazy ext unpack (yes/no)
-- [ ] write each rejected option into the log with the measurement that killed it, so it is not re-derived
+- [ ] record that no local v4 + `BranchCache` harness exists: the local arm is limited to the counter
+      assertions already made by the Task 4 tests
+- [ ] record per-tier hit rate, `RecordsFound`, `Duration`, `staleEvicted` and `bytesServed` from the real
+      bed with provenance — the machine, the block range, the arm
+- [ ] measure the overlap question from Technical Details on the real bed: does warming during the partition
+      pass pay, or does the arena barrier just throttle partitioning? Compare `Process` wall clock with
+      warmup on and off
+- [ ] answer the leaf question from real-bed numbers: what share of reads is the deepest branch per key, and
+      is it shareable at all
+- [ ] decide and record from real-bed numbers, with the number behind each: cold-start seed pass (yes/no),
+      leaf warming (yes/no), removing the `branchBuf` copy on a cache hit (yes/no), lazy ext unpack (yes/no)
+- [ ] write each rejected option into the log with the real-bed measurement that killed it, so it is not
+      re-derived
+- Local v4 + `BranchCache` benchmark construction is unscheduled work and is not part of this plan.
 - [ ] update this plan's "What this plan does not do" section with the outcomes
 
 ### Task 6: Verify acceptance criteria

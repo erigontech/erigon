@@ -18,7 +18,6 @@ package commitment
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
@@ -29,10 +28,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
+
+type WarmupKeyFunc func(hashedKey []byte, depth int, dst []byte) ([]byte, bool)
+
+type WarmupStepFunc func(record, hashedKey []byte, depth int) (nextDepth int, stop bool)
 
 type WarmupConfig struct {
 	Enabled    bool
@@ -40,6 +42,8 @@ type WarmupConfig struct {
 	NumWorkers int
 	MaxDepth   int
 	LogPrefix  string
+	Key        WarmupKeyFunc
+	Step       WarmupStepFunc
 }
 
 const WarmupMaxDepth = 128
@@ -56,6 +60,8 @@ type Warmuper struct {
 	maxDepth   int
 	numWorkers int
 	logPrefix  string
+	key        WarmupKeyFunc
+	step       WarmupStepFunc
 
 	work chan warmupWorkItem
 	g    *errgroup.Group
@@ -78,6 +84,12 @@ type warmupWorkItem struct {
 }
 
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
+	if cfg.Key == nil {
+		panic("warmup key function is nil")
+	}
+	if cfg.Step == nil {
+		panic("warmup step function is nil")
+	}
 	ctx, cancel := context.WithCancel(ctx)
 	w := &Warmuper{
 		ctx:        ctx,
@@ -86,6 +98,8 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		maxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
+		key:        cfg.Key,
+		step:       cfg.Step,
 	}
 	w.cond = sync.NewCond(&w.mu)
 	return w
@@ -145,7 +159,10 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	depth := startDepth
 	var compactBuf [maxCompactKeyLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
+		prefix, ok := w.key(hashedKey, depth, compactBuf[:])
+		if !ok {
+			break
+		}
 
 		branchData, _, err := trieCtx.Branch(prefix)
 		if err != nil {
@@ -153,57 +170,11 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 				"prefix", common.Bytes2Hex(prefix), "error", err)
 		}
 
-		if len(branchData) < 4 {
+		nextDepth, stop := w.step(branchData, hashedKey, depth)
+		if stop {
 			break
 		}
-
-		if depth >= len(hashedKey) {
-			break
-		}
-		nextNibble := int(hashedKey[depth])
-
-		branchData = branchData[2:] // skip touch map
-
-		bitmap := binary.BigEndian.Uint16(branchData[0:2])
-		childBit := uint16(1) << nextNibble
-
-		if bitmap&childBit == 0 {
-			break
-		}
-
-		pos := 2
-		for n := range nextNibble {
-			if bitmap&(uint16(1)<<n) != 0 {
-				if pos >= len(branchData) {
-					break
-				}
-				fieldBits := branchData[pos]
-				pos++
-				pos = skipCellFields(branchData, pos, fieldBits)
-			}
-		}
-
-		if pos >= len(branchData) {
-			break
-		}
-
-		fieldBits := branchData[pos]
-		pos++
-
-		if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
-			break
-		}
-
-		hasExtension := (fieldBits & 1) != 0
-		if hasExtension && pos < len(branchData) {
-			extLen, n := binary.Uvarint(branchData[pos:])
-			if n > 0 && extLen > 0 {
-				depth += int(extLen)
-				continue
-			}
-		}
-
-		depth++
+		depth = nextDepth
 	}
 }
 

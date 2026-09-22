@@ -744,6 +744,55 @@ func skipCellFields(data []byte, pos int, fieldBits byte) int {
 	return pos
 }
 
+func HexPatriciaWarmupKey(hashedKey []byte, depth int, dst []byte) ([]byte, bool) {
+	return nibbles.HexToCompactInto(dst, hashedKey[:depth]), true
+}
+
+func HexPatriciaWarmupStep(record, hashedKey []byte, depth int) (nextDepth int, stop bool) {
+	if len(record) < 4 || depth >= len(hashedKey) {
+		return 0, true
+	}
+
+	branchData := record[2:]
+	nextNibble := int(hashedKey[depth])
+	bitmap := binary.BigEndian.Uint16(branchData[0:2])
+	childBit := uint16(1) << nextNibble
+	if bitmap&childBit == 0 {
+		return 0, true
+	}
+
+	pos := 2
+	for n := range nextNibble {
+		if bitmap&(uint16(1)<<n) != 0 {
+			if pos >= len(branchData) {
+				return 0, true
+			}
+			fieldBits := branchData[pos]
+			pos++
+			pos = skipCellFields(branchData, pos, fieldBits)
+		}
+	}
+
+	if pos >= len(branchData) {
+		return 0, true
+	}
+
+	fieldBits := branchData[pos]
+	pos++
+	if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
+		return 0, true
+	}
+
+	if fieldBits&1 != 0 && pos < len(branchData) {
+		extLen, n := binary.Uvarint(branchData[pos:])
+		if n > 0 && extLen > 0 {
+			return depth + int(extLen), false
+		}
+	}
+
+	return depth + 1, false
+}
+
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
@@ -2621,6 +2670,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
+		warmup.Key = HexPatriciaWarmupKey
+		warmup.Step = HexPatriciaWarmupStep
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
