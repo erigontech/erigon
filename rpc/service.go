@@ -217,11 +217,11 @@ func (c *callback) call(ctx context.Context, method string, args []reflect.Value
 		fullargs = append(fullargs, c.rcvr)
 	}
 	if c.hasCtx {
-		fullargs = append(fullargs, reflect.ValueOf(ctx))
+		fullargs = append(fullargs, reflect.ValueOf(&ctx).Elem())
 	}
 	fullargs = append(fullargs, args...)
 	if c.streamable {
-		fullargs = append(fullargs, reflect.ValueOf(stream))
+		fullargs = append(fullargs, reflect.ValueOf(&stream).Elem())
 	}
 
 	// Catch panic while running the callback.
