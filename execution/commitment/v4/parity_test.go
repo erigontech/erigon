@@ -90,6 +90,8 @@ func (p *parityContext) Storage(key []byte) (*commitment.Update, error) {
 	return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
 }
 
+func (p *parityContext) factory(context.Context) (commitment.PatriciaContext, func()) { return p, nil }
+
 var _ commitment.PatriciaContext = (*parityContext)(nil)
 
 func accountParityUpdate(i int) *commitment.Update {
@@ -149,6 +151,7 @@ func parityRoots(t *testing.T, initial, entries []parityUpdate) ([3][]byte, *par
 
 	v4 := &Trie{}
 	v4.ResetContext(ctxV4)
+	v4.SetTrieContextFactory(ctxV4.factory)
 	hph := commitment.NewHexPatriciaHashed(length.Addr, ctxHPH, commitment.DefaultTrieConfig())
 	parallel := commitment.NewParallelPatriciaHashed(func(context.Context) (commitment.PatriciaContext, func()) {
 		return ctxParallel, nil

@@ -24,13 +24,11 @@ import (
 	"math/bits"
 	"runtime"
 	"slices"
-	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/empty"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -66,44 +64,6 @@ func (s *scheduleStats) leave() {
 	}
 }
 
-type lockedPatriciaContext struct {
-	mu  sync.Mutex
-	ctx commitment.PatriciaContext
-}
-
-func (c *lockedPatriciaContext) Branch(key []byte) ([]byte, kv.Step, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	data, step, err := c.ctx.Branch(key)
-	return bytes.Clone(data), step, err
-}
-
-func (c *lockedPatriciaContext) PutBranch(key, data, prev []byte) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.ctx.PutBranch(key, data, prev)
-}
-
-func (c *lockedPatriciaContext) Account(key []byte) (*commitment.Update, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	update, err := c.ctx.Account(key)
-	if update == nil {
-		return nil, err
-	}
-	return update.Copy(), err
-}
-
-func (c *lockedPatriciaContext) Storage(key []byte) (*commitment.Update, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	update, err := c.ctx.Storage(key)
-	if update == nil {
-		return nil, err
-	}
-	return update.Copy(), err
-}
-
 type accountPlan struct {
 	entry    accountEntry
 	oldValue []byte
@@ -131,7 +91,60 @@ func orderedStorageTasks(tasks []storageTask, order scheduleOrder) []storageTask
 	return ordered
 }
 
-func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, storage []storageTask, accounts []accountEntry, order scheduleOrder, workers int, stats *scheduleStats) ([32]byte, error) {
+const storageChunk = 16
+
+func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, workers int, stats *scheduleStats) error {
+	if len(storage) == 0 {
+		return nil
+	}
+	if factory == nil || workers <= 1 {
+		for i, task := range storage {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			root, err := runStorageTask(rawCtx, task)
+			if err != nil {
+				return err
+			}
+			roots[i] = root
+		}
+		return nil
+	}
+
+	workers = min(workers, len(storage))
+	var next atomic.Int64
+	g, gCtx := errgroup.WithContext(ctx)
+	for range workers {
+		g.Go(func() error {
+			workerCtx, cleanup := factory(gCtx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			for {
+				if err := gCtx.Err(); err != nil {
+					return err
+				}
+				start := int(next.Add(storageChunk)) - storageChunk
+				if start >= len(storage) {
+					return nil
+				}
+				stats.enter()
+				for i := start; i < min(start+storageChunk, len(storage)); i++ {
+					root, err := runStorageTask(workerCtx, storage[i])
+					if err != nil {
+						stats.leave()
+						return err
+					}
+					roots[i] = root
+				}
+				stats.leave()
+			}
+		})
+	}
+	return g.Wait()
+}
+
+func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, order scheduleOrder, workers int, stats *scheduleStats) ([32]byte, error) {
 	if rawCtx == nil {
 		return [32]byte{}, errors.New("commitment v4: nil scheduled context")
 	}
@@ -141,25 +154,10 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	safeCtx := &lockedPatriciaContext{ctx: rawCtx}
 	storage = orderedStorageTasks(storage, order)
 
 	storageRoots := make([][32]byte, len(storage))
-	sg, sgCtx := errgroup.WithContext(ctx)
-	sg.SetLimit(workers)
-	for i, task := range storage {
-		sg.Go(func() error {
-			if sgCtx.Err() != nil {
-				return sgCtx.Err()
-			}
-			stats.enter()
-			defer stats.leave()
-			var err error
-			storageRoots[i], err = runStorageTask(safeCtx, task)
-			return err
-		})
-	}
-	if err := sg.Wait(); err != nil {
+	if err := runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, workers, stats); err != nil {
 		return [32]byte{}, err
 	}
 	results := make(map[[32]byte][32]byte, len(storage))
@@ -167,7 +165,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		results[task.addrHash] = storageRoots[i]
 	}
 
-	root, err := unfold(safeCtx, nil, planeAccount, nil)
+	root, err := unfold(rawCtx, nil, planeAccount, nil)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -177,7 +175,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	root.plane = planeAccount
 	g := accountGraph()
 	before := g.reachableRecordKeys(root)
-	plans, err := makeAccountPlans(safeCtx, g, root, accounts)
+	plans, err := makeAccountPlans(rawCtx, g, root, accounts)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -239,7 +237,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			continue
 		}
 		if len(root.path) != 0 && !bytes.HasPrefix(result.plan.entry.hashedKey, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
-			if err := materializeAccountRootChild(safeCtx, root); err != nil {
+			if err := materializeAccountRootChild(rawCtx, root); err != nil {
 				return [32]byte{}, err
 			}
 		}
@@ -251,7 +249,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			return [32]byte{}, err
 		}
 	}
-	if err := g.persistGraph(safeCtx, root, before); err != nil {
+	if err := g.persistGraph(rawCtx, root, before); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)

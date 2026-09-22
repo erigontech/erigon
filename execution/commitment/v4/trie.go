@@ -34,6 +34,7 @@ var (
 
 type Trie struct {
 	ctx             commitment.PatriciaContext
+	ctxFactory      commitment.TrieContextFactory
 	root            []byte
 	traceW          io.Writer
 	scheduleOrder   scheduleOrder
@@ -105,6 +106,12 @@ func (t *Trie) Reset() {
 	}
 }
 
+func (t *Trie) SetTrieContextFactory(f commitment.TrieContextFactory) {
+	if t != nil {
+		t.ctxFactory = f
+	}
+}
+
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	if t != nil {
 		t.ctx = ctx
@@ -154,15 +161,17 @@ func (t *Trie) Process(
 	}
 	storage, accounts := p.done()
 	processCtx := t.ctx
+	factory := t.ctxFactory
 	var deferredCtx *deferredPatriciaContext
 	if t.deferUpdates {
+		factory = nil
 		if len(t.deferred) != 0 {
 			return nil, errors.New("commitment v4: deferred updates were not taken")
 		}
 		deferredCtx = &deferredPatriciaContext{PatriciaContext: t.ctx}
 		processCtx = deferredCtx
 	}
-	root, err := runScheduledPhases(ctx, processCtx, storage, accounts, t.scheduleOrder, t.scheduleWorkers, t.scheduleStats)
+	root, err := runScheduledPhases(ctx, processCtx, factory, storage, accounts, t.scheduleOrder, t.scheduleWorkers, t.scheduleStats)
 	if err != nil {
 		return nil, err
 	}
