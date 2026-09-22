@@ -32,7 +32,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -1545,8 +1544,7 @@ func fundedBankGenesis(t testing.TB, cfg *chain.Config) (m *execmoduletester.Exe
 	bankFunds, ok := new(big.Int).SetString("100000000000000000000", 10)
 	require.True(t, ok)
 
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, cfg, copier.Option{DeepCopy: true}))
+	chainConfig := cfg.Copy()
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},

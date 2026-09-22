@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -1706,10 +1705,9 @@ func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 
 func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
 	t.Parallel()
-	var config chain.Config
-	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime = nil
-	m, chainPack := newPayloadBodiesBALTestChain(t, &config)
+	m, chainPack := newPayloadBodiesBALTestChain(t, config)
 	block := chainPack.Blocks[0]
 	require.Nil(t, block.Header().BlockAccessListHash)
 	requirePayloadBodiesBlockAccessList(t, m, block, nil)
