@@ -31,7 +31,7 @@ func benchmarkSimpleObject(b *testing.B, s Stream) {
 		s.Field("name")
 		s.WriteString("John")
 		s.Field("age")
-		s.WriteInt(30)
+		s.Int(30)
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
@@ -83,7 +83,7 @@ func benchmarkLargeArray(b *testing.B, s Stream) {
 	for b.Loop() {
 		s.WriteArrayStart()
 		for j := range 1000 {
-			s.WriteInt(j)
+			s.Int(int64(j))
 		}
 		s.WriteArrayEnd()
 
@@ -106,7 +106,7 @@ func benchmarkMixedTypes(b *testing.B, s Stream) {
 		s.Field("string")
 		s.WriteString("value")
 		s.Field("int")
-		s.WriteInt(42)
+		s.Int(42)
 		s.Field("float")
 		s.WriteFloat64(3.14159)
 		s.Field("bool")
@@ -136,7 +136,7 @@ func benchmarkWriteToBuffer(b *testing.B, s Stream) {
 		s.Field("name")
 		s.WriteString("John")
 		s.Field("age")
-		s.WriteInt(30)
+		s.Int(30)
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
@@ -161,7 +161,7 @@ func benchmarkIncompleteStructure(b *testing.B, s Stream) {
 		s.Field("details")
 		s.WriteObjectStart()
 		s.Field("age")
-		s.WriteInt(30)
+		s.Int(30)
 		s.Field("address") // Missing value
 
 		err := s.Flush()

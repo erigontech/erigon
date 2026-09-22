@@ -243,7 +243,7 @@ func ExecuteTraceTx(
 	if streaming {
 		stream.WriteArrayEnd()
 		stream.Field("gas")
-		stream.WriteUint64(result.ReceiptGasUsed)
+		stream.Uint(result.ReceiptGasUsed)
 		stream.Field("failed")
 		stream.WriteBool(result.Failed())
 		// If the result contains a revert reason, return it.

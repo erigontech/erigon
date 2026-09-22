@@ -209,7 +209,7 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 func closeStreamLikeCaller(stream jsonstream.Stream) {
 	stream.WriteArrayEnd()
 	stream.Field("gas")
-	stream.WriteUint64(0)
+	stream.Uint(0)
 	stream.Field("failed")
 	stream.WriteBool(false)
 	stream.WriteObjectEnd()

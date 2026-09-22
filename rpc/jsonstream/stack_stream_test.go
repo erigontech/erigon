@@ -47,7 +47,7 @@ func TestStackStream_BasicOperations(t *testing.T) {
 	ss.Field("name")
 	ss.WriteString("John")
 	ss.Field("age")
-	ss.WriteInt(30)
+	ss.Int(30)
 	ss.WriteObjectEnd()
 
 	assert.Equal(t, `{"name":"John","age":30}`, string(ss.Buffer()))
@@ -84,9 +84,9 @@ func TestStackStream_ArrayOperations(t *testing.T) {
 
 	// Write an array
 	ss.WriteArrayStart()
-	ss.WriteInt(1)
-	ss.WriteInt(2)
-	ss.WriteInt(3)
+	ss.Int(1)
+	ss.Int(2)
+	ss.Int(3)
 	ss.WriteArrayEnd()
 
 	assert.Equal(t, `[1,2,3]`, string(ss.Buffer()))
@@ -102,9 +102,9 @@ func TestStackStream_MixedStructures(t *testing.T) {
 	ss.WriteString("John")
 	ss.Field("scores")
 	ss.WriteArrayStart()
-	ss.WriteInt(85)
-	ss.WriteInt(90)
-	ss.WriteInt(95)
+	ss.Int(85)
+	ss.Int(90)
+	ss.Int(95)
 	ss.WriteArrayEnd()
 	ss.Field("details")
 	ss.WriteObjectStart()
@@ -145,8 +145,8 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 
 	// Start an array but don't finish it
 	ss.WriteArrayStart()
-	ss.WriteInt(1)
-	ss.WriteInt(2)
+	ss.Int(1)
+	ss.Int(2)
 
 	// Incomplete JSON at this point
 	assert.Equal(t, `[1,2`, string(ss.Buffer()))
@@ -257,8 +257,8 @@ func TestStackStream_Reset(t *testing.T) {
 
 	// Write new data
 	ss.WriteArrayStart()
-	ss.WriteInt(1)
-	ss.WriteInt(2)
+	ss.Int(1)
+	ss.Int(2)
 	ss.WriteArrayEnd()
 
 	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
@@ -295,7 +295,7 @@ func TestStackStream_SequentialOperations(t *testing.T) {
 	ss.Field("name")
 	ss.WriteString("John")
 	ss.Field("age")
-	ss.WriteInt(30)
+	ss.Int(30)
 	ss.WriteObjectEnd()
 
 	expected := `{"name":"John","age":30}`
@@ -466,25 +466,25 @@ func TestStackStream_AllDataTypes(t *testing.T) {
 	ss.Field("bool_var")
 	ss.WriteBool(true)
 	ss.Field("int")
-	ss.WriteInt(-42)
+	ss.Int(int64(-42))
 	ss.Field("int8")
-	ss.WriteInt8(127)
+	ss.Int(127)
 	ss.Field("int16")
-	ss.WriteInt16(-32000)
+	ss.Int(int64(-32000))
 	ss.Field("int32")
-	ss.WriteInt32(2147483647)
+	ss.Int(2147483647)
 	ss.Field("int64")
-	ss.WriteInt64(-9223372036854775807)
+	ss.Int(-9223372036854775807)
 	ss.Field("uint")
-	ss.WriteUint(42)
+	ss.Uint(42)
 	ss.Field("uint8")
-	ss.WriteUint8(255)
+	ss.Uint(255)
 	ss.Field("uint16")
-	ss.WriteUint16(65535)
+	ss.Uint(65535)
 	ss.Field("uint32")
-	ss.WriteUint32(4294967295)
+	ss.Uint(4294967295)
 	ss.Field("uint64")
-	ss.WriteUint64(18446744073709551615)
+	ss.Uint(18446744073709551615)
 	ss.Field("float32")
 	ss.WriteFloat32(3.14159)
 	ss.Field("float64")
@@ -521,27 +521,27 @@ func TestStackStream_BoundaryValues(t *testing.T) {
 	// Test boundary values
 	ss.WriteObjectStart()
 	ss.Field("int8_min")
-	ss.WriteInt8(math.MinInt8)
+	ss.Int(int64(math.MinInt8))
 	ss.Field("int8_max")
-	ss.WriteInt8(math.MaxInt8)
+	ss.Int(int64(math.MaxInt8))
 	ss.Field("int16_min")
-	ss.WriteInt16(math.MinInt16)
+	ss.Int(int64(math.MinInt16))
 	ss.Field("int16_max")
-	ss.WriteInt16(math.MaxInt16)
+	ss.Int(int64(math.MaxInt16))
 	ss.Field("int32_min")
-	ss.WriteInt32(math.MinInt32)
+	ss.Int(int64(math.MinInt32))
 	ss.Field("int32_max")
-	ss.WriteInt32(math.MaxInt32)
+	ss.Int(int64(math.MaxInt32))
 	ss.Field("int64_min")
-	ss.WriteInt64(math.MinInt64)
+	ss.Int(math.MinInt64)
 	ss.Field("int64_max")
-	ss.WriteInt64(math.MaxInt64)
+	ss.Int(math.MaxInt64)
 	ss.Field("uint8_max")
-	ss.WriteUint8(math.MaxUint8)
+	ss.Uint(uint64(math.MaxUint8))
 	ss.Field("uint16_max")
-	ss.WriteUint16(math.MaxUint16)
+	ss.Uint(uint64(math.MaxUint16))
 	ss.Field("uint32_max")
-	ss.WriteUint32(math.MaxUint32)
+	ss.Uint(uint64(math.MaxUint32))
 	ss.WriteObjectEnd()
 
 	// NaN and Infinity for Float64 not supported by jsoniter
@@ -676,7 +676,7 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 	ss.Field("raw")
 	ss.WriteRaw("42")
 	ss.Field("normal")
-	ss.WriteInt(42)
+	ss.Int(42)
 	ss.WriteObjectEnd()
 
 	assert.Equal(t, `{"raw":42,"normal":42}`, string(ss.Buffer()))
@@ -935,8 +935,8 @@ func (w *discardCounter) Write(p []byte) (int, error) { w.n += int64(len(p)); re
 func TestBufferBoundedForEveryWriter(t *testing.T) {
 	rawValue := []byte(`{"pc":1024,"op":"SSTORE","gas":"0x5208"}`)
 	for name, writeValue := range map[string]func(s *StackStream, i int){
-		"WriteInt":      func(s *StackStream, i int) { s.WriteInt(i) },
-		"WriteUint64":   func(s *StackStream, i int) { s.WriteUint64(uint64(i)) },
+		"WriteInt":      func(s *StackStream, i int) { s.Int(int64(i)) },
+		"WriteUint64":   func(s *StackStream, i int) { s.Uint(uint64(i)) },
 		"WriteRawBytes": func(s *StackStream, i int) { s.WriteRawBytes(rawValue) },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -978,14 +978,14 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 			s.WriteObjectStart()
 			s.Field("result")
 			s.WriteArrayStart()
-			s.WriteInt(1)
+			s.Int(1)
 			s.WriteObjectEnd()
 		}, `{"result":[1]}`},
 		{"complete output is untouched", func(s *StackStream) {
 			s.WriteObjectStart()
 			s.Field("a")
 			s.WriteArrayStart()
-			s.WriteInt(1)
+			s.Int(1)
 			s.WriteArrayEnd()
 			s.WriteObjectEnd()
 		}, `{"a":[1]}`},
@@ -1023,7 +1023,7 @@ func TestStackStreamResetClearsError(t *testing.T) {
 // the enclosing object's level.
 func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
 	for name, first := range map[string]func(s Stream){
-		"WriteInt":         func(s Stream) { s.WriteInt(1) },
+		"WriteInt":         func(s Stream) { s.Int(1) },
 		"WriteString":      func(s Stream) { s.WriteString("a") },
 		"WriteNil":         func(s Stream) { s.WriteNil() },
 		"WriteRaw":         func(s Stream) { s.WriteRaw("1") },
@@ -1292,15 +1292,15 @@ func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
 	}{
 		{"array elements", func(s *StackStream) {
 			s.WriteArrayStart()
-			s.WriteInt(1)
-			s.WriteInt(2)
-			s.WriteInt(3)
+			s.Int(1)
+			s.Int(2)
+			s.Int(3)
 			s.WriteArrayEnd()
 		}, `[1,2,3]`},
 		{"object fields", func(s *StackStream) {
 			s.WriteObjectStart()
 			s.Field("a")
-			s.WriteInt(1)
+			s.Int(1)
 			s.Field("b")
 			s.WriteString("x")
 			s.WriteObjectEnd()
@@ -1311,7 +1311,7 @@ func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
 			s.WriteArrayStart()
 			s.WriteObjectStart()
 			s.Field("k")
-			s.WriteInt(7)
+			s.Int(7)
 			s.WriteObjectEnd()
 			s.WriteObjectStart()
 			s.WriteObjectEnd()
@@ -1376,9 +1376,9 @@ func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
 func TestClosePendingToRootClearsSeparator(t *testing.T) {
 	s := newStackStream(nil, InitialBufferSize)
 	s.WriteArrayStart()
-	s.WriteInt(1)
+	s.Int(1)
 	require.NoError(t, s.ClosePending(0))
-	s.WriteInt(2)
+	s.Int(2)
 
 	require.Equal(t, `[1]2`, string(s.Buffer()))
 }

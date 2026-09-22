@@ -419,7 +419,7 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	stream.Field("jsonrpc")
 	stream.WriteString("2.0")
 	stream.Field("id")
-	stream.WriteInt(1)
+	stream.Int(1)
 	result := jsonstream.NewLazyFieldStream(stream, "result", false)
 
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{

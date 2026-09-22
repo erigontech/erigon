@@ -178,19 +178,19 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	// create a new snapshot of the EVM.
 	l.stream.WriteObjectStart()
 	l.stream.Field("pc")
-	l.stream.WriteUint64(pc)
+	l.stream.Uint(pc)
 	l.stream.Field("op")
 	l.stream.WriteString(op.String())
 	l.stream.Field("gas")
-	l.stream.WriteUint64(gas)
+	l.stream.Uint(gas)
 	l.stream.Field("gasCost")
-	l.stream.WriteUint64(cost)
+	l.stream.Uint(cost)
 	l.stream.Field("depth")
-	l.stream.WriteInt(depth)
+	l.stream.Int(int64(depth))
 	refund := l.env.IntraBlockState.GetRefund()
 	if refund != 0 {
 		l.stream.Field("refund")
-		l.stream.WriteUint64(refund)
+		l.stream.Uint(refund)
 	}
 
 	if err != nil {

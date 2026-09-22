@@ -430,7 +430,7 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					for i := range entries {
 						stream.WriteObjectStart()
 						stream.Field("pc")
-						stream.WriteInt(i)
+						stream.Int(int64(i))
 						stream.Field("op")
 						stream.WriteString("SSTORE")
 						stream.Field("stack")
