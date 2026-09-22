@@ -679,8 +679,8 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		if dataRLP == nil {
 			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
 		}
-		var body types.BodyForStorage
-		if e := rlp.DecodeBytes(dataRLP, &body); e != nil {
+		var body types.BodyOnlyTxn
+		if e := body.DecodeRLPBytes(dataRLP); e != nil {
 			return false, e
 		}
 		if body.TxCount == 0 {
