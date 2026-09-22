@@ -174,7 +174,7 @@ func (e *EngineServer) Start(
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{
-	 {
+		{
 			Namespace: "eth",
 			Public:    true,
 			Service:   jsonrpc.EthAPI(ethImpl),
