@@ -156,7 +156,7 @@ func storageUpdate(value byte) commitment.Update {
 func accountLeafFromContext(t *testing.T, ctx *mockContext, path []byte) []byte {
 	t.Helper()
 	rootData := ctx.branches[string(AccountRootKey())]
-	n, err := unfold(ctx, nil, planeAccount, nil)
+	n, err := unfold(ctx, nil, planeAccount, nil, &unfoldScratch{})
 	require.NoError(t, err)
 	value, ok := accountLeafAt(n, path)
 	require.True(t, ok)

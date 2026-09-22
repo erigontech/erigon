@@ -137,7 +137,7 @@ func storageTaskLengths(tasks []storageTask) []int {
 
 func accountLeafFromParityContext(t *testing.T, ctx *parityContext, path []byte) []byte {
 	t.Helper()
-	root, err := unfold(ctx, nil, planeAccount, nil)
+	root, err := unfold(ctx, nil, planeAccount, nil, &unfoldScratch{})
 	require.NoError(t, err)
 	value, ok := accountLeafAt(root, path)
 	require.True(t, ok)

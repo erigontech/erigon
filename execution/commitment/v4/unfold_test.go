@@ -54,7 +54,7 @@ func TestUnfoldReadsOneExactRecordWithoutStateReads(t *testing.T) {
 	n.setLeaf(7, packPath(bytes.Repeat([]byte{9}, 60), nil), []byte{0x42})
 	ctx.branches[string(AccountNodeKey(path, nil))] = encodeRecord(n, len(path), nil)
 
-	got, err := unfold(ctx, path, planeAccount, nil)
+	got, err := unfold(ctx, path, planeAccount, nil, &unfoldScratch{})
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{AccountNodeKey(path, nil)}, ctx.branchCalls)
 	require.Equal(t, 0, ctx.accountCalls)
@@ -75,7 +75,7 @@ func TestUnfoldStorageUsesAddressQualifiedKey(t *testing.T) {
 	n.setStoredChild(6, hash, nil)
 	ctx.branches[string(StorageNodeKey(addrHash, path, nil))] = encodeRecord(n, len(path), nil)
 
-	got, err := unfold(ctx, path, planeStorage, addrHash[:])
+	got, err := unfold(ctx, path, planeStorage, addrHash[:], &unfoldScratch{})
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{StorageNodeKey(addrHash, path, nil)}, ctx.branchCalls)
 	require.Equal(t, path, got.path)
@@ -90,7 +90,7 @@ func TestUnfoldRootForms(t *testing.T) {
 		n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), []byte{0x01, 0x02})
 		ctx.branches[string(AccountRootKey())] = encodeRecord(n, 0, nil)
 
-		got, err := unfold(ctx, nil, planeAccount, nil)
+		got, err := unfold(ctx, nil, planeAccount, nil, &unfoldScratch{})
 		require.NoError(t, err)
 		require.Equal(t, []byte{0x01, 0x02}, got.leafValue[3])
 		require.Equal(t, packPath(fullPath[1:], nil), got.leafSuffix[3])
@@ -104,7 +104,7 @@ func TestUnfoldRootForms(t *testing.T) {
 		n.setStoredChild(4, hash, nil)
 		ctx.branches[string(AccountRootKey())] = encodeRecord(n, 0, nil)
 
-		got, err := unfold(ctx, nil, planeAccount, nil)
+		got, err := unfold(ctx, nil, planeAccount, nil, &unfoldScratch{})
 		require.NoError(t, err)
 		require.Equal(t, ext, got.path)
 		require.Equal(t, hash, got.childHash[4])
@@ -113,12 +113,12 @@ func TestUnfoldRootForms(t *testing.T) {
 
 func TestUnfoldMissingAndTombstone(t *testing.T) {
 	ctx := newMockContext()
-	got, err := unfold(ctx, nil, planeAccount, nil)
+	got, err := unfold(ctx, nil, planeAccount, nil, &unfoldScratch{})
 	require.NoError(t, err)
 	require.Nil(t, got)
 
 	ctx.branches[string(AccountRootKey())] = []byte{}
-	got, err = unfold(ctx, nil, planeAccount, nil)
+	got, err = unfold(ctx, nil, planeAccount, nil, &unfoldScratch{})
 	require.NoError(t, err)
 	require.NotNil(t, got)
 	require.Empty(t, got.childMask)
@@ -127,7 +127,7 @@ func TestUnfoldMissingAndTombstone(t *testing.T) {
 func TestUnfoldRejectsMalformedRecord(t *testing.T) {
 	ctx := newMockContext()
 	ctx.branches[string(AccountRootKey())] = []byte{recordFormat}
-	got, err := unfold(ctx, nil, planeAccount, nil)
+	got, err := unfold(ctx, nil, planeAccount, nil, &unfoldScratch{})
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrRecordTruncated)
 	require.Nil(t, got)
@@ -135,9 +135,9 @@ func TestUnfoldRejectsMalformedRecord(t *testing.T) {
 
 func TestUnfoldRejectsInvalidPlaneAndAddress(t *testing.T) {
 	ctx := newMockContext()
-	_, err := unfold(ctx, nil, 0xff, nil)
+	_, err := unfold(ctx, nil, 0xff, nil, &unfoldScratch{})
 	require.Error(t, err)
-	_, err = unfold(ctx, nil, planeStorage, nil)
+	_, err = unfold(ctx, nil, planeStorage, nil, &unfoldScratch{})
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrUnfoldAddress))
 }

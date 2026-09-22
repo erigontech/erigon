@@ -201,7 +201,7 @@ func TestCompleteDeltasReplayAndReloadRecovery(t *testing.T) {
 	for key, data := range final {
 		reloaded.branches[key] = bytes.Clone(data)
 	}
-	n, err := unfold(reloaded, nil, planeStorage, address[:])
+	n, err := unfold(reloaded, nil, planeStorage, address[:], &unfoldScratch{})
 	require.NoError(t, err)
 	require.NotNil(t, n)
 	got, err := fold(n, 0)
