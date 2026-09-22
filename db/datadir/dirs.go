@@ -272,7 +272,7 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -340,7 +340,7 @@ func (d *Dirs) RenameNewVersions() error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -370,7 +370,6 @@ func (d *Dirs) RenameNewVersions() error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}
@@ -378,7 +377,7 @@ func (d *Dirs) RenameNewVersions() error {
 		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc, unsupported in 3.0)
 		if err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -418,6 +417,7 @@ func (d *Dirs) RenameNewVersions() error {
 
 	return nil
 }
+
 func (d *Dirs) PreverifiedPath() string {
 	return filepath.Join(d.Snap, PreverifiedFileName)
 }

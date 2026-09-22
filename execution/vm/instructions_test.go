@@ -55,8 +55,10 @@ type twoOperandParams struct {
 	y string
 }
 
-var commonParams []*twoOperandParams
-var twoOpMethods map[string]executionFunc
+var (
+	commonParams []*twoOperandParams
+	twoOpMethods map[string]executionFunc
+)
 
 type contractRef struct {
 	addr common.Address
@@ -67,7 +69,6 @@ func (c contractRef) Address() common.Address {
 }
 
 func init() {
-
 	// Params is a list of common edgecases that should be used for some common tests
 	params := []string{
 		"0000000000000000000000000000000000000000000000000000000000000000", // 0
@@ -87,7 +88,8 @@ func init() {
 			commonParams[i*len(params)+j] = &twoOperandParams{x, y}
 		}
 	}
-	twoOpMethods = map[string]executionFunc{"add": opAdd,
+	twoOpMethods = map[string]executionFunc{
+		"add":     opAdd,
 		"sub":     opSub,
 		"mul":     opMul,
 		"div":     opDiv,
@@ -226,7 +228,8 @@ func TestAddMod(t *testing.T) {
 		z        string
 		expected string
 	}{
-		{"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		{
+			"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 			"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",
 			"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
 			"fffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffe",

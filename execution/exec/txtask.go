@@ -181,7 +181,6 @@ func (r *TxResult) CreateReceipt(txIndex int, cumulativeGasUsed uint64, firstLog
 
 	// if the transaction created a contract, store the creation address in the receipt.
 	txMessage, err := r.TxMessage()
-
 	if err != nil {
 		return nil, err
 	}
@@ -302,7 +301,6 @@ func (t *TxTask) TxMessage() (*types.Message, error) {
 				t.signer = types.MakeSigner(t.Config, t.BlockNumber(), t.Header.Time)
 			}
 			message, err := tx.AsMessage(*t.signer, t.Header.BaseFee, t.Rules())
-
 			if err != nil {
 				return nil, err
 			}
@@ -471,7 +469,6 @@ func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *call
 			vmCfg.Tracer = callTracer.Tracer().Hooks
 		}
 		msg, err := t.TxMessage()
-
 		if err != nil {
 			return err
 		}
@@ -494,7 +491,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) *TxResult {
+	calcFees bool,
+) *TxResult {
 	var result TxResult
 
 	ibs.SetTrace(txTask.Trace)
@@ -527,7 +525,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		}
 
 		// Block initialisation
-		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
+		// fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
 			// Block initialisation runs between transactions, so the worker's EVM is
 			// free: reuse it instead of building one per system call.
@@ -571,7 +569,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// MA applytx
 		result.ExecutionResult, result.Err = func() (evmtypes.ExecutionResult, error) {
 			message, err := txTask.TxMessage()
-
 			if err != nil {
 				return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: err}
 			}
@@ -646,7 +643,8 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	evm *vm.EVM,
 	gasPool *protocol.GasPool,
 	ibs *state.IntraBlockState,
-	chainConfig *chain.Config) *TxResult {
+	chainConfig *chain.Config,
+) *TxResult {
 	var result TxResult
 
 	if !txTask.InBatch {
@@ -731,6 +729,7 @@ type Queue[T queueable[T]] []T
 func (h Queue[T]) Len() int {
 	return len(h)
 }
+
 func (h Queue[T]) Less(i, j int) bool {
 	return h[i].compare(h[j]) < 0
 }
@@ -797,6 +796,7 @@ func (q *QueueWithRetry) RetriesLen() (l int) {
 	q.lock.Unlock()
 	return l
 }
+
 func (q *QueueWithRetry) RetryTxNumsList() (out []uint64) {
 	q.lock.Lock()
 	for _, t := range q.retires {
@@ -910,6 +910,7 @@ func (q *QueueWithRetry) popWait(ctx context.Context) (task Task, ok bool) {
 		}
 	}
 }
+
 func (q *QueueWithRetry) popNoWait() (task Task, ok bool) {
 	q.lock.Lock()
 	has := q.retires.Len() > 0

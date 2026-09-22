@@ -9,7 +9,6 @@ import (
 )
 
 func TestOperatoLoaderByteArray(t *testing.T) {
-
 	var cbor codec.CborHandle
 
 	var buffer bytes.Buffer
@@ -87,7 +86,6 @@ func TestAccountBigBalance(t *testing.T) {
 	if acc2.Balance.Cmp(acc.Balance) != 0 {
 		t.Errorf("wrong deserialization of balance (expected: %s got %s)", acc.Balance.String(), acc2.Balance.String())
 	}
-
 }
 
 // mustWriteAccountOp serializes acc and returns the raw bytes plus the minimal (no-optional-fields) encoding length.

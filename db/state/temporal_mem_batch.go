@@ -182,7 +182,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 	sd.latestStateLocks[domain].Lock()
 	defer sd.latestStateLocks[domain].Unlock()
 
-	var updateMetrics = func(domain kv.Domain, putKeySize int, putValueSize int) {
+	updateMetrics := func(domain kv.Domain, putKeySize int, putValueSize int) {
 		sd.metrics.Lock()
 		defer sd.metrics.Unlock()
 		sd.metrics.CachePutCount++
@@ -270,7 +270,7 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 // The caller must already hold the domain's lock (either RLock or Lock),
 // e.g. from within an IteratePrefix callback.
 func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
+	unwoundLatest := func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
 		if sd.unwindChangeset != nil {
 			if values := sd.unwindChangeset[domain]; values != nil {
 				if value, ok := values[key]; ok {
@@ -855,7 +855,7 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 		if err := w.Flush(ctx, tx); err != nil {
 			return err
 		}
-		aggTx.d[di].closeValsCursor() //TODO: why?
+		aggTx.d[di].closeValsCursor() // TODO: why?
 		w.Close()
 	}
 	for _, writer := range slices.Backward(sd.pastIIWriters) {

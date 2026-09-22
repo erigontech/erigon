@@ -449,7 +449,6 @@ func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 			return fmt.Errorf("[open index] find files by pattern err %w fname %s", os.ErrNotExist, fName)
 		}
 		index, err := recsplit.OpenIndex(fPath)
-
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)
 		}
@@ -496,8 +495,8 @@ type BaseRoSnapshots struct {
 	downloadReady atomic.Bool
 	segmentsReady atomic.Bool
 
-	types []snaptype.Type //immutable
-	enums []snaptype.Enum //immutable
+	types []snaptype.Type // immutable
+	enums []snaptype.Enum // immutable
 
 	// baseSegType is the type Ranges reports against — each collection picks the one whose
 	// ranges stand for its coverage. Immutable.
@@ -592,7 +591,8 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 		panic(fmt.Sprintf("baseSegType %s is not in types", baseSegType.Name()))
 	}
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
-	s := &BaseRoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
+	s := &BaseRoSnapshots{
+		dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums, baseSegType: baseSegType,
 		dirty:             make(DirtyFiles, snaptype.MaxEnum),
 		alignMin:          alignMin,
@@ -649,6 +649,7 @@ func (s *BaseRoSnapshots) SegmentsMin() (min uint64, complete bool) {
 
 	return min, complete
 }
+
 func (s *BaseRoSnapshots) BlocksAvailable() uint64 {
 	if s == nil {
 		return 0
@@ -734,7 +735,6 @@ func (s *BaseRoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snap
 		s.operators[t.Enum()] = &retireOperators{
 			rangeExtractor: rangeExtractor,
 		}
-
 	}
 }
 
@@ -806,6 +806,7 @@ func (s *BaseRoSnapshots) EnableReadAhead() *BaseRoSnapshots {
 
 	return s
 }
+
 func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 	v := s.View()
 	defer v.Close()
@@ -851,7 +852,7 @@ func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSeg
 				}
 			}
 
-			//protect from overlaps
+			// protect from overlaps
 			for len(newVisibleSegments) > 0 && newVisibleSegments[len(newVisibleSegments)-1].src.isSubSetOf(sn) {
 				newVisibleSegments[len(newVisibleSegments)-1].src = nil
 				newVisibleSegments = newVisibleSegments[:len(newVisibleSegments)-1]
@@ -1382,7 +1383,6 @@ func (s *BaseRoSnapshots) OpenSegments(types []snaptype.Type, alignMin bool) err
 	defer s.recalcVisibleFiles(alignMin, nil)
 
 	files, err := AllTypedSegments(s.dir, types)
-
 	if err != nil {
 		return err
 	}
