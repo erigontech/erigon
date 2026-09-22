@@ -274,6 +274,14 @@ func (h *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	return c, rw, err
 }
 
+// WriteHeaderNow passes on the probe coder makes after writing the 101, so a writer that
+// delays its header still sends it.
+func (h *hijackRecorder) WriteHeaderNow() {
+	if w, ok := h.ResponseWriter.(interface{ WriteHeaderNow() }); ok {
+		w.WriteHeaderNow()
+	}
+}
+
 func (a *wsConnAdapter) Close() error {
 	return a.conn.Close(websocket.StatusNormalClosure, "")
 }
@@ -292,7 +300,8 @@ func (a *wsConnAdapter) encode(v any) error {
 
 	// The deadline goes on the socket rather than the context when there is one: for a context
 	// that can expire, coder arms a timer and a callback per frame, which doubled the cost of a
-	// small notification. It holds only for this write, so coder's own pongs never hit it.
+	// small notification. coder's own pongs and close frames stay off it: its frame lock keeps
+	// them from running during this write, and they carry their own 5s context, well inside it.
 	ctx := context.Background()
 	if a.netConn != nil {
 		if !dl.IsZero() {
