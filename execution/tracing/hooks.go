@@ -95,7 +95,7 @@ type (
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
 
-	// TxEndHookV2 takes precedence over TxEndHook. Usage is zero when settlement is unavailable.
+	// TxEndHookV2 takes precedence over TxEndHook.
 	TxEndHookV2 = func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error)
 
 	// EnterHook is invoked when the processing of a message starts.
