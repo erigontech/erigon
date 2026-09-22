@@ -30,6 +30,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -328,6 +329,30 @@ func TestNotifyStreamsTheNotification(t *testing.T) {
 		if want := string(notificationPrefix("eth", "0x9a")) + result + "}}"; string(w.got) != want {
 			t.Fatalf("%T: notification = %s, want %s", payload, w.got, want)
 		}
+	}
+}
+
+// A pending-tx hash is sent to every subscriber, so it must not go through reflection:
+// only the any box and the envelope's rawResponse box may allocate.
+func TestNotifyHashSkipsReflection(t *testing.T) {
+	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
+	h := common.Hash{0xab}
+	allocs := testing.AllocsPerRun(100, func() {
+		if err := n.Notify("0x9a", h); err != nil {
+			t.Fatal(err)
+		}
+	})
+	if !race.Enabled && allocs > 2 { // the race detector allocates inside sync.Pool
+		t.Fatalf("Notify(hash) allocates %.0f times, want at most 2", allocs)
+	}
+	w := &captureWriter{}
+	n.h = &handler{conn: w}
+	if err := n.Notify("0x9a", h); err != nil {
+		t.Fatal(err)
+	}
+	want, _ := json.Marshal(h)
+	if got := string(w.got); !strings.Contains(got, `"result":`+string(want)+"}}") {
+		t.Fatalf("notification = %s, want result %s", got, want)
 	}
 }
 

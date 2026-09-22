@@ -24,6 +24,7 @@ import (
 	"container/list"
 	"context"
 	crand "crypto/rand"
+	"encoding"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -219,6 +220,11 @@ func writeNotificationResult(s *jsonstream.StackStream, data any) error {
 		if err := fm.MarshalFastJSONTo(s); err != nil {
 			return err
 		}
+		return s.Err()
+	}
+	// As in writeResponse: a TextAppender's JSON is taken to be its quoted text.
+	if ta, ok := data.(encoding.TextAppender); ok && !isNilPointer(data) {
+		s.WriteQuotedText(ta)
 		return s.Err()
 	}
 	enc, err := json.Marshal(data)
