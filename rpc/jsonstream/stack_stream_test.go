@@ -44,10 +44,10 @@ func TestStackStream_BasicOperations(t *testing.T) {
 
 	// Write a simple object
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 	ss.WriteString("John")
-	ss.WriteObjectField("age")
-	ss.WriteInt(30)
+	ss.Field("age")
+	ss.Int(30)
 	ss.WriteObjectEnd()
 
 	assert.Equal(t, `{"name":"John","age":30}`, string(ss.Buffer()))
@@ -59,19 +59,19 @@ func TestStackStream_NestedStructures(t *testing.T) {
 
 	// Write a nested structure
 	ss.WriteObjectStart()
-	ss.WriteObjectField("person")
+	ss.Field("person")
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 	ss.WriteString("John")
-	ss.WriteObjectField("address")
+	ss.Field("address")
 	ss.WriteObjectStart()
-	ss.WriteObjectField("city")
+	ss.Field("city")
 	ss.WriteString("New York")
-	ss.WriteObjectField("zip")
+	ss.Field("zip")
 	ss.WriteString("10001")
 	ss.WriteObjectEnd()
 	ss.WriteObjectEnd()
-	ss.WriteObjectField("active")
+	ss.Field("active")
 	ss.WriteTrue()
 	ss.WriteObjectEnd()
 
@@ -84,9 +84,9 @@ func TestStackStream_ArrayOperations(t *testing.T) {
 
 	// Write an array
 	ss.WriteArrayStart()
-	ss.WriteInt(1)
-	ss.WriteInt(2)
-	ss.WriteInt(3)
+	ss.Int(1)
+	ss.Int(2)
+	ss.Int(3)
 	ss.WriteArrayEnd()
 
 	assert.Equal(t, `[1,2,3]`, string(ss.Buffer()))
@@ -98,17 +98,17 @@ func TestStackStream_MixedStructures(t *testing.T) {
 
 	// Write a complex structure
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 	ss.WriteString("John")
-	ss.WriteObjectField("scores")
+	ss.Field("scores")
 	ss.WriteArrayStart()
-	ss.WriteInt(85)
-	ss.WriteInt(90)
-	ss.WriteInt(95)
+	ss.Int(85)
+	ss.Int(90)
+	ss.Int(95)
 	ss.WriteArrayEnd()
-	ss.WriteObjectField("details")
+	ss.Field("details")
 	ss.WriteObjectStart()
-	ss.WriteObjectField("active")
+	ss.Field("active")
 	ss.WriteTrue()
 	ss.WriteObjectEnd()
 	ss.WriteObjectEnd()
@@ -122,9 +122,9 @@ func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
 
 	// Start an object but don't finish it
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 	ss.WriteString("John")
-	ss.WriteObjectField("age") // Missing value
+	ss.Field("age") // Missing value
 
 	// Incomplete JSON at this point
 	assert.Equal(t, `{"name":"John","age":`, string(ss.Buffer()))
@@ -145,8 +145,8 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 
 	// Start an array but don't finish it
 	ss.WriteArrayStart()
-	ss.WriteInt(1)
-	ss.WriteInt(2)
+	ss.Int(1)
+	ss.Int(2)
 
 	// Incomplete JSON at this point
 	assert.Equal(t, `[1,2`, string(ss.Buffer()))
@@ -167,15 +167,15 @@ func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 
 	// Create a deeply nested structure but don't complete it
 	ss.WriteObjectStart()
-	ss.WriteObjectField("person")
+	ss.Field("person")
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 	ss.WriteString("John")
-	ss.WriteObjectField("address")
+	ss.Field("address")
 	ss.WriteObjectStart()
-	ss.WriteObjectField("city")
+	ss.Field("city")
 	ss.WriteString("New York")
-	ss.WriteObjectField("zip") // Missing value
+	ss.Field("zip") // Missing value
 	// Several unclosed objects
 
 	// Incomplete JSON at this point
@@ -198,15 +198,15 @@ func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 	// Create a deeply nested structure but don't complete it
 	ss.WriteArrayStart()
 	ss.WriteObjectStart()
-	ss.WriteObjectField("person")
+	ss.Field("person")
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 	ss.WriteString("John")
-	ss.WriteObjectField("address")
+	ss.Field("address")
 	ss.WriteObjectStart()
-	ss.WriteObjectField("city")
+	ss.Field("city")
 	ss.WriteString("New York")
-	ss.WriteObjectField("zip") // Missing value
+	ss.Field("zip") // Missing value
 	// Several unclosed objects
 
 	// Incomplete JSON at this point
@@ -228,9 +228,9 @@ func TestStackStream_BufferAsString(t *testing.T) {
 
 	// Create incomplete JSON
 	ss.WriteObjectStart()
-	ss.WriteObjectField("status")
+	ss.Field("status")
 	ss.WriteString("pending")
-	ss.WriteObjectField("data") // Missing value
+	ss.Field("data") // Missing value
 
 	// Get buffer as a string (should auto-close)
 	result, err := ss.BufferAsString()
@@ -244,7 +244,7 @@ func TestStackStream_Reset(t *testing.T) {
 
 	// Write some data
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 	ss.WriteString("John")
 	ss.WriteObjectEnd()
 
@@ -257,8 +257,8 @@ func TestStackStream_Reset(t *testing.T) {
 
 	// Write new data
 	ss.WriteArrayStart()
-	ss.WriteInt(1)
-	ss.WriteInt(2)
+	ss.Int(1)
+	ss.Int(2)
 	ss.WriteArrayEnd()
 
 	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
@@ -272,10 +272,10 @@ func TestStackStream_GetStackSummary(t *testing.T) {
 
 	// Add items to the stack
 	ss.WriteObjectStart()
-	ss.WriteObjectField("users")
+	ss.Field("users")
 	ss.WriteArrayStart()
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 
 	// Check summary
 	summary := ss.StackSummary()
@@ -292,10 +292,10 @@ func TestStackStream_SequentialOperations(t *testing.T) {
 
 	// Perform operations without chaining
 	ss.WriteObjectStart()
-	ss.WriteObjectField("name")
+	ss.Field("name")
 	ss.WriteString("John")
-	ss.WriteObjectField("age")
-	ss.WriteInt(30)
+	ss.Field("age")
+	ss.Int(30)
 	ss.WriteObjectEnd()
 
 	expected := `{"name":"John","age":30}`
@@ -309,7 +309,7 @@ func TestStackStream_RecoveryFromIncompleteState(t *testing.T) {
 
 	// Create an incomplete structure
 	ss.WriteObjectStart()
-	ss.WriteObjectField("incomplete")
+	ss.Field("incomplete")
 
 	// Check that it's incomplete
 	assert.False(t, ss.IsComplete())
@@ -347,9 +347,9 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 			name: "incomplete nested objects",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
-				ss.WriteObjectField("a")
+				ss.Field("a")
 				ss.WriteObjectStart()
-				ss.WriteObjectField("b")
+				ss.Field("b")
 				ss.WriteObjectStart()
 			},
 			expected: `{"a":{"b":{}}}`,
@@ -358,10 +358,10 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 			name: "mixed incomplete structures",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
-				ss.WriteObjectField("array")
+				ss.Field("array")
 				ss.WriteArrayStart()
 				ss.WriteObjectStart()
-				ss.WriteObjectField("field")
+				ss.Field("field")
 			},
 			expected: `{"array":[{"field":null}]}`,
 		},
@@ -405,7 +405,7 @@ func TestStackStream_MultipleFlushCalls(t *testing.T) {
 
 	// Create an incomplete structure
 	ss.WriteObjectStart()
-	ss.WriteObjectField("test")
+	ss.Field("test")
 
 	// The first flush should complete the structure
 	err := ss.closeAllPendingElements()
@@ -440,10 +440,10 @@ func TestStackStream_EmptyStructures(t *testing.T) {
 	// Reset and test nested empty structures
 	ss.Reset(nil)
 	ss.WriteObjectStart()
-	ss.WriteObjectField("emptyObj")
+	ss.Field("emptyObj")
 	ss.WriteObjectStart()
 	ss.WriteObjectEnd()
-	ss.WriteObjectField("emptyArr")
+	ss.Field("emptyArr")
 	ss.WriteArrayStart()
 	ss.WriteArrayEnd()
 	ss.WriteObjectEnd()
@@ -457,39 +457,39 @@ func TestStackStream_AllDataTypes(t *testing.T) {
 
 	// Test all primitive data types
 	ss.WriteObjectStart()
-	ss.WriteObjectField("nil")
+	ss.Field("nil")
 	ss.WriteNil()
-	ss.WriteObjectField("bool_true")
+	ss.Field("bool_true")
 	ss.WriteTrue()
-	ss.WriteObjectField("bool_false")
+	ss.Field("bool_false")
 	ss.WriteFalse()
-	ss.WriteObjectField("bool_var")
+	ss.Field("bool_var")
 	ss.WriteBool(true)
-	ss.WriteObjectField("int")
-	ss.WriteInt(-42)
-	ss.WriteObjectField("int8")
-	ss.WriteInt8(127)
-	ss.WriteObjectField("int16")
-	ss.WriteInt16(-32000)
-	ss.WriteObjectField("int32")
-	ss.WriteInt32(2147483647)
-	ss.WriteObjectField("int64")
-	ss.WriteInt64(-9223372036854775807)
-	ss.WriteObjectField("uint")
-	ss.WriteUint(42)
-	ss.WriteObjectField("uint8")
-	ss.WriteUint8(255)
-	ss.WriteObjectField("uint16")
-	ss.WriteUint16(65535)
-	ss.WriteObjectField("uint32")
-	ss.WriteUint32(4294967295)
-	ss.WriteObjectField("uint64")
-	ss.WriteUint64(18446744073709551615)
-	ss.WriteObjectField("float32")
+	ss.Field("int")
+	ss.Int(int64(-42))
+	ss.Field("int8")
+	ss.Int(127)
+	ss.Field("int16")
+	ss.Int(int64(-32000))
+	ss.Field("int32")
+	ss.Int(2147483647)
+	ss.Field("int64")
+	ss.Int(-9223372036854775807)
+	ss.Field("uint")
+	ss.Uint(42)
+	ss.Field("uint8")
+	ss.Uint(255)
+	ss.Field("uint16")
+	ss.Uint(65535)
+	ss.Field("uint32")
+	ss.Uint(4294967295)
+	ss.Field("uint64")
+	ss.Uint(18446744073709551615)
+	ss.Field("float32")
 	ss.WriteFloat32(3.14159)
-	ss.WriteObjectField("float64")
+	ss.Field("float64")
 	ss.WriteFloat64(2.7182818284590452353602874713527)
-	ss.WriteObjectField("string")
+	ss.Field("string")
 	ss.WriteString("Hello, World!")
 	ss.WriteObjectEnd()
 
@@ -520,28 +520,28 @@ func TestStackStream_BoundaryValues(t *testing.T) {
 
 	// Test boundary values
 	ss.WriteObjectStart()
-	ss.WriteObjectField("int8_min")
-	ss.WriteInt8(math.MinInt8)
-	ss.WriteObjectField("int8_max")
-	ss.WriteInt8(math.MaxInt8)
-	ss.WriteObjectField("int16_min")
-	ss.WriteInt16(math.MinInt16)
-	ss.WriteObjectField("int16_max")
-	ss.WriteInt16(math.MaxInt16)
-	ss.WriteObjectField("int32_min")
-	ss.WriteInt32(math.MinInt32)
-	ss.WriteObjectField("int32_max")
-	ss.WriteInt32(math.MaxInt32)
-	ss.WriteObjectField("int64_min")
-	ss.WriteInt64(math.MinInt64)
-	ss.WriteObjectField("int64_max")
-	ss.WriteInt64(math.MaxInt64)
-	ss.WriteObjectField("uint8_max")
-	ss.WriteUint8(math.MaxUint8)
-	ss.WriteObjectField("uint16_max")
-	ss.WriteUint16(math.MaxUint16)
-	ss.WriteObjectField("uint32_max")
-	ss.WriteUint32(math.MaxUint32)
+	ss.Field("int8_min")
+	ss.Int(int64(math.MinInt8))
+	ss.Field("int8_max")
+	ss.Int(int64(math.MaxInt8))
+	ss.Field("int16_min")
+	ss.Int(int64(math.MinInt16))
+	ss.Field("int16_max")
+	ss.Int(int64(math.MaxInt16))
+	ss.Field("int32_min")
+	ss.Int(int64(math.MinInt32))
+	ss.Field("int32_max")
+	ss.Int(int64(math.MaxInt32))
+	ss.Field("int64_min")
+	ss.Int(math.MinInt64)
+	ss.Field("int64_max")
+	ss.Int(math.MaxInt64)
+	ss.Field("uint8_max")
+	ss.Uint(uint64(math.MaxUint8))
+	ss.Field("uint16_max")
+	ss.Uint(uint64(math.MaxUint16))
+	ss.Field("uint32_max")
+	ss.Uint(uint64(math.MaxUint32))
 	ss.WriteObjectEnd()
 
 	// NaN and Infinity for Float64 not supported by jsoniter
@@ -575,7 +575,7 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 	// Open nested objects
 	for i := range nestingDepth {
 		ss.WriteObjectStart()
-		ss.WriteObjectField(fmt.Sprintf("level%d", i))
+		ss.Field(fmt.Sprintf("level%d", i))
 	}
 
 	// Write a value at the deepest level
@@ -606,7 +606,7 @@ func TestStackStream_ErrorHandlingWithoutClosing(t *testing.T) {
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
-	ss.WriteObjectField("longString")
+	ss.Field("longString")
 	ss.WriteString("This string should cause the writer to fail")
 
 	// Flush should propagate the error
@@ -625,7 +625,7 @@ func TestStackStream_ErrorHandlingWithClosing(t *testing.T) {
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
-	ss.WriteObjectField("longString")
+	ss.Field("longString")
 	ss.WriteString("This string should cause the writer to fail")
 	err := ss.closeAllPendingElements()
 	assert.NoError(t, err)
@@ -673,10 +673,10 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 
 	// Test mixing WriteRaw with other operations
 	ss.WriteObjectStart()
-	ss.WriteObjectField("raw")
+	ss.Field("raw")
 	ss.WriteRaw("42")
-	ss.WriteObjectField("normal")
-	ss.WriteInt(42)
+	ss.Field("normal")
+	ss.Int(42)
 	ss.WriteObjectEnd()
 
 	assert.Equal(t, `{"raw":42,"normal":42}`, string(ss.Buffer()))
@@ -696,7 +696,7 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 	// appends a placeholder null right after the value just written.
 	ss.Reset(nil)
 	ss.WriteObjectStart()
-	ss.WriteObjectField("result")
+	ss.Field("result")
 	ss.WriteRawBytes([]byte(`{"gas":21000}`))
 	assert.Equal(t, 1, ss.Depth())
 	assert.NoError(t, ss.ClosePending(0))
@@ -727,7 +727,7 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			name: "object with missing field value",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
-				ss.WriteObjectField("field") // Missing value
+				ss.Field("field") // Missing value
 			},
 			expected: `{"field":null}`,
 		},
@@ -735,9 +735,9 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			name: "nested object with missing field in inner object",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
-				ss.WriteObjectField("outer")
+				ss.Field("outer")
 				ss.WriteObjectStart()
-				ss.WriteObjectField("inner") // Missing value for the inner field
+				ss.Field("inner") // Missing value for the inner field
 			},
 			expected: `{"outer":{"inner":null}}`,
 		},
@@ -745,10 +745,10 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			name: "multiple nested incomplete structures",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
-				ss.WriteObjectField("a")
+				ss.Field("a")
 				ss.WriteArrayStart()
 				ss.WriteObjectStart()
-				ss.WriteObjectField("b") // Missing value for b
+				ss.Field("b") // Missing value for b
 			},
 			expected: `{"a":[{"b":null}]}`,
 		},
@@ -782,7 +782,7 @@ func TestStackStream_BufferAsStringWithErrors(t *testing.T) {
 
 	// Write enough data to trigger the error
 	ss.WriteObjectStart()
-	ss.WriteObjectField("longString")
+	ss.Field("longString")
 	ss.WriteString("This string should cause the writer to fail")
 
 	// Complete the structure and flush
@@ -807,7 +807,7 @@ func TestStackStream_Depth(t *testing.T) {
 	assert.Equal(t, 1, ss.Depth())
 	ss.WriteObjectStart()
 	assert.Equal(t, 2, ss.Depth())
-	ss.WriteObjectField("k")
+	ss.Field("k")
 	assert.Equal(t, 3, ss.Depth()) // ItemField on stack
 	ss.WriteString("v")
 	assert.Equal(t, 2, ss.Depth()) // ItemField consumed
@@ -829,7 +829,7 @@ func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 		ss := newSS()
 		ss.WriteArrayStart()  // depth 1
 		ss.WriteObjectStart() // depth 2
-		ss.WriteObjectField("txHash")
+		ss.Field("txHash")
 		ss.WriteString("0xabc") // depth back to 2
 
 		assert.Equal(t, 2, ss.Depth())
@@ -838,7 +838,7 @@ func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 		assert.Equal(t, 2, ss.Depth()) // stack preserved
 
 		// Can still write inside the tx object
-		ss.WriteObjectField("error")
+		ss.Field("error")
 		ss.WriteString("oops")
 		ss.WriteObjectEnd()
 		ss.WriteArrayEnd()
@@ -854,9 +854,9 @@ func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 		txDepth := ss.Depth()
 
 		// Tracer starts writing result: opens a nested object
-		ss.WriteObjectField("result")
+		ss.Field("result")
 		ss.WriteObjectStart() // depth 3  ← partial result
-		ss.WriteObjectField("structLogs")
+		ss.Field("structLogs")
 		ss.WriteArrayStart() // depth 4  ← partial array, left open on error
 
 		assert.Equal(t, 4, ss.Depth())
@@ -865,7 +865,7 @@ func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 		assert.Equal(t, txDepth, ss.Depth()) // back to tx object level
 
 		// The tx object is still open; write the error field and close it
-		ss.WriteObjectField("error")
+		ss.Field("error")
 		ss.WriteString("trace failed")
 		ss.WriteObjectEnd()
 		ss.WriteArrayEnd()
@@ -935,8 +935,8 @@ func (w *discardCounter) Write(p []byte) (int, error) { w.n += int64(len(p)); re
 func TestBufferBoundedForEveryWriter(t *testing.T) {
 	rawValue := []byte(`{"pc":1024,"op":"SSTORE","gas":"0x5208"}`)
 	for name, writeValue := range map[string]func(s *StackStream, i int){
-		"WriteInt":      func(s *StackStream, i int) { s.WriteInt(i) },
-		"WriteUint64":   func(s *StackStream, i int) { s.WriteUint64(uint64(i)) },
+		"WriteInt":      func(s *StackStream, i int) { s.Int(int64(i)) },
+		"WriteUint64":   func(s *StackStream, i int) { s.Uint(uint64(i)) },
 		"WriteRawBytes": func(s *StackStream, i int) { s.WriteRawBytes(rawValue) },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -971,21 +971,21 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 	}{
 		{"field with no value", func(s *StackStream) {
 			s.WriteObjectStart()
-			s.WriteObjectField("a")
+			s.Field("a")
 			s.WriteObjectEnd()
 		}, `{"a":null}`},
 		{"inner array left open", func(s *StackStream) {
 			s.WriteObjectStart()
-			s.WriteObjectField("result")
+			s.Field("result")
 			s.WriteArrayStart()
-			s.WriteInt(1)
+			s.Int(1)
 			s.WriteObjectEnd()
 		}, `{"result":[1]}`},
 		{"complete output is untouched", func(s *StackStream) {
 			s.WriteObjectStart()
-			s.WriteObjectField("a")
+			s.Field("a")
 			s.WriteArrayStart()
-			s.WriteInt(1)
+			s.Int(1)
 			s.WriteArrayEnd()
 			s.WriteObjectEnd()
 		}, `{"a":[1]}`},
@@ -1023,7 +1023,7 @@ func TestStackStreamResetClearsError(t *testing.T) {
 // the enclosing object's level.
 func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
 	for name, first := range map[string]func(s Stream){
-		"WriteInt":         func(s Stream) { s.WriteInt(1) },
+		"WriteInt":         func(s Stream) { s.Int(1) },
 		"WriteString":      func(s Stream) { s.WriteString("a") },
 		"WriteNil":         func(s Stream) { s.WriteNil() },
 		"WriteRaw":         func(s Stream) { s.WriteRaw("1") },
@@ -1054,7 +1054,7 @@ func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = false
 	for name, write := range map[string]func(s Stream){
-		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
+		"Field": func(s Stream) { s.Field("a") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			inner := newStackStream(nil, 64)
@@ -1079,7 +1079,7 @@ func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
 	outer := NewLazyFieldStream(inner, "outer", false)
 	nested := NewLazyFieldStream(outer, "inner", false)
 
-	nested.WriteObjectField("error").WriteString("boom")
+	nested.Field("error").WriteString("boom")
 
 	require.False(t, nested.Written(), "a chained value must not open the nested pending field")
 	require.False(t, outer.Written(), "a chained value must not open the outer pending field")
@@ -1160,7 +1160,7 @@ func TestWriteHex(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/writer=%t", name, out != nil), func(t *testing.T) {
 				s := New(out)
 				s.WriteObjectStart()
-				s.WriteObjectField("result")
+				s.Field("result")
 				s.WriteArrayStart()
 				s.WriteHex(b)
 				s.WriteHex(b)
@@ -1200,7 +1200,7 @@ func TestWriteRawBytesLargePayloadWritesThrough(t *testing.T) {
 			var out bytes.Buffer
 			s := New(&out)
 			s.WriteObjectStart()
-			s.WriteObjectField("result")
+			s.Field("result")
 			s.WriteRawBytes(payload)
 			s.WriteObjectEnd()
 			require.NoError(t, s.Flush())
@@ -1227,7 +1227,7 @@ func TestWriteRawBytesNilWriterAlwaysBuffers(t *testing.T) {
 
 	s := New(nil)
 	s.WriteObjectStart()
-	s.WriteObjectField("result")
+	s.Field("result")
 	s.WriteRawBytes(payload)
 	s.WriteObjectEnd()
 
@@ -1240,7 +1240,7 @@ func TestPutKeepsStreamAfterLargeWriteThrough(t *testing.T) {
 	var out bytes.Buffer
 	s := Get(&out)
 	s.WriteObjectStart()
-	s.WriteObjectField("result")
+	s.Field("result")
 	s.WriteRawBytes(append(bytes.Repeat([]byte(`"a`), 2<<20), '"'))
 	s.WriteObjectEnd()
 	require.NoError(t, s.Flush())
@@ -1271,7 +1271,7 @@ func TestWriteRawBytesWriteThroughError(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			s := New(out).(*StackStream)
 			s.WriteObjectStart()
-			s.WriteObjectField("result")
+			s.Field("result")
 			s.WriteRawBytes(payload)
 			s.WriteObjectEnd()
 
@@ -1292,40 +1292,40 @@ func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
 	}{
 		{"array elements", func(s *StackStream) {
 			s.WriteArrayStart()
-			s.WriteInt(1)
-			s.WriteInt(2)
-			s.WriteInt(3)
+			s.Int(1)
+			s.Int(2)
+			s.Int(3)
 			s.WriteArrayEnd()
 		}, `[1,2,3]`},
 		{"object fields", func(s *StackStream) {
 			s.WriteObjectStart()
-			s.WriteObjectField("a")
-			s.WriteInt(1)
-			s.WriteObjectField("b")
+			s.Field("a")
+			s.Int(1)
+			s.Field("b")
 			s.WriteString("x")
 			s.WriteObjectEnd()
 		}, `{"a":1,"b":"x"}`},
 		{"nested containers", func(s *StackStream) {
 			s.WriteObjectStart()
-			s.WriteObjectField("list")
+			s.Field("list")
 			s.WriteArrayStart()
 			s.WriteObjectStart()
-			s.WriteObjectField("k")
-			s.WriteInt(7)
+			s.Field("k")
+			s.Int(7)
 			s.WriteObjectEnd()
 			s.WriteObjectStart()
 			s.WriteObjectEnd()
 			s.WriteArrayEnd()
-			s.WriteObjectField("after")
+			s.Field("after")
 			s.WriteBool(true)
 			s.WriteObjectEnd()
 		}, `{"list":[{"k":7},{}],"after":true}`},
 		{"empty containers", func(s *StackStream) {
 			s.WriteObjectStart()
-			s.WriteObjectField("o")
+			s.Field("o")
 			s.WriteObjectStart()
 			s.WriteObjectEnd()
-			s.WriteObjectField("a")
+			s.Field("a")
 			s.WriteArrayStart()
 			s.WriteArrayEnd()
 			s.WriteObjectEnd()
@@ -1353,7 +1353,7 @@ func TestWriteQuotedTextKeepsBufferOnError(t *testing.T) {
 	var out bytes.Buffer
 	s := New(&out)
 	s.WriteObjectStart()
-	s.WriteObjectField("balance")
+	s.Field("balance")
 	s.WriteQuotedText(failingAppender{})
 	s.WriteObjectEnd()
 	require.Equal(t, `{"balance":""}`, string(s.Buffer()))
@@ -1376,21 +1376,21 @@ func TestStackStreamErrSurvivesWriterlessFlush(t *testing.T) {
 func TestClosePendingToRootClearsSeparator(t *testing.T) {
 	s := newStackStream(nil, InitialBufferSize)
 	s.WriteArrayStart()
-	s.WriteInt(1)
+	s.Int(1)
 	require.NoError(t, s.ClosePending(0))
-	s.WriteInt(2)
+	s.Int(2)
 
 	require.Equal(t, `[1]2`, string(s.Buffer()))
 }
 
 // A field name or separator written before the lazy field opened would put its value in the
 // enclosing object, silently dropping the field. Asserts catch a marshaller that starts with
-// jsonstream.Field instead of a value write.
+// Stream.Field instead of a value write.
 func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
 	for name, write := range map[string]func(s Stream){
-		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
+		"Field": func(s Stream) { s.Field("a") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			inner := newStackStream(nil, 64)
