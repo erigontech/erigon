@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -786,8 +787,16 @@ func TestPBinWitnessVerifyGateChecksKeys(t *testing.T) {
 // TestWitnessVerifySkippedOnlyUnderHex: the same env var may skip the gate
 // under hex but never under bin — see witnessVerifySkipped for why.
 func TestWitnessVerifySkippedOnlyUnderHex(t *testing.T) {
-	require.False(t, witnessVerifySkipped(false /* binTrie */), "hex verification is off by default")
-	require.False(t, witnessVerifySkipped(true /* binTrie */), "bin verification is off by default")
+	assertEnabled := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = assertEnabled })
+
+	dbg.AssertEnabled = false
+	require.True(t, witnessVerifySkipped(false /* binTrie */), "hex verification waits for ERIGON_ASSERT")
+	require.False(t, witnessVerifySkipped(true /* binTrie */), "bin verification runs without ERIGON_ASSERT")
+
+	dbg.AssertEnabled = true
+	require.False(t, witnessVerifySkipped(false /* binTrie */), "hex verification runs under ERIGON_ASSERT")
+	require.False(t, witnessVerifySkipped(true /* binTrie */))
 
 	t.Setenv("ERIGON_WITNESS_NO_VERIFY", "true")
 	require.True(t, witnessVerifySkipped(false /* binTrie */))

@@ -92,6 +92,9 @@ func measureWitnessSizes(t *testing.T, binTrie bool) []witnessSizes {
 	t.Helper()
 
 	t.Setenv("ERIGON_WITNESS_NO_VERIFY", "false")
+	assertEnabled := dbg.AssertEnabled
+	t.Cleanup(func() { dbg.AssertEnabled = assertEnabled })
+	dbg.AssertEnabled = true
 	if binTrie {
 		withBinCommitmentDatadir(t)
 	}

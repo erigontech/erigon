@@ -1613,7 +1613,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	binTrie bool,
 	parentRoot common.Hash,
 ) error {
-	if !dbg.AssertEnabled {
+	if witnessVerifySkipped(binTrie) {
 		return nil
 	}
 
@@ -1625,12 +1625,13 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	return verifyWitnessAgainstBlock(ctx, result, block, parentRoot, chainCfg, fullEngine, binTrie)
 }
 
-// witnessVerifySkipped reports whether ERIGON_WITNESS_NO_VERIFY may turn the
-// stateless gate off. Under bin it never may: binary witnesses have no external
+// witnessVerifySkipped reports whether the stateless gate is off: hex runs it
+// only under ERIGON_ASSERT, and ERIGON_WITNESS_NO_VERIFY turns it off there
+// even then. Under bin it is never off: binary witnesses have no external
 // conformance oracle, so re-execution is the only correctness evidence there is,
 // while hex's opt-out exists only to save the roughly doubled execution cost.
 func witnessVerifySkipped(binTrie bool) bool {
-	return !binTrie && dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false)
+	return !binTrie && (!dbg.AssertEnabled || dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false))
 }
 
 // verifyWitnessAgainstBlock re-executes the block from the witness alone and
