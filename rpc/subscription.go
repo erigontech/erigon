@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -249,7 +250,7 @@ func (n *RemoteNotifier) activate() error {
 	defer n.mu.Unlock()
 
 	for _, data := range n.buffer {
-		if err := n.send(n.sub, data); err != nil {
+		if err := n.send(data); err != nil {
 			return err
 		}
 	}
@@ -257,14 +258,15 @@ func (n *RemoteNotifier) activate() error {
 	return nil
 }
 
-func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
-	return n.h.conn.WriteJSON(context.Background(), rawResponse(notification(n.namespace, sub.ID, data)))
-}
-
-// notification wraps result, which is already encoded, in the subscription message without
-// parsing it again: every subscriber would otherwise re-check the same payload.
-func notification(namespace string, id ID, result json.RawMessage) []byte {
-	return slices.Concat(notificationPrefix(namespace, id), result, []byte("}}"))
+func (n *RemoteNotifier) send(data json.RawMessage) error {
+	// A pooled buffer, not a fresh one: every subscriber of an event gets the same result, and a
+	// buffer per send would allocate its size once per subscriber.
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
+	buf.Write(n.prefix)
+	buf.Write(data)
+	buf.WriteString("}}")
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(buf.Bytes()))
 }
 
 // notificationPrefix is the part of a notification before its result, fixed for a subscription.
