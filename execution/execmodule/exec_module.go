@@ -384,12 +384,11 @@ func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, b
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
+func (e *ExecModule) getRawBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.RawBody, error) {
 	if e.blockReader == nil {
-		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
-		return body, nil
+		return rawdb.ReadRawBody(tx, blockHash, blockNumber)
 	}
-	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	return e.blockReader.BodyWithRawTransactions(ctx, tx, blockHash, blockNumber)
 }
 
 func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {

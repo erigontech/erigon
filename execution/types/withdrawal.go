@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // Withdrawal represents a validator withdrawal from the consensus layer.
@@ -74,6 +75,21 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	}
 
 	return rlp.EncodeU64(uint64(obj.Amount), w, b[:])
+}
+
+// MarshalFastJSONTo writes the same bytes as encoding/json.
+func (obj *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if obj == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteObjectStart()
+	s.WriteObjectField("index").WriteQuotedText(&obj.Index)
+	s.WriteObjectField("validatorIndex").WriteQuotedText(&obj.Validator)
+	s.WriteObjectField("address").WriteHex(obj.Address[:])
+	s.WriteObjectField("amount").WriteQuotedText(&obj.Amount)
+	s.WriteObjectEnd()
+	return nil
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {

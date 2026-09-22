@@ -57,19 +57,16 @@ func TestBlockReaderFrozenHashLookup(t *testing.T) {
 			if i > 1 {
 				return
 			}
-			tx, txErr := types.SignTx(
-				&types.LegacyTx{
-					CommonTx: types.CommonTx{
-						Nonce:    b.TxNonce(m.Address),
-						To:       &to,
-						GasLimit: params.TxGas,
-						Value:    *uint256.NewInt(value + uint64(i)),
-					},
-					GasPrice: *uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2),
-				},
-				*types.LatestSignerForChainID(m.ChainConfig.ChainID),
-				m.Key,
-			)
+			nonce := b.TxNonce(m.Address)
+			commonTx := func() types.CommonTx {
+				return types.CommonTx{Nonce: nonce, To: &to, GasLimit: params.TxGas, Value: *uint256.NewInt(value + uint64(i))}
+			}
+			gasPrice := *uint256.NewInt(m.Genesis.BaseFee().Uint64() * 2)
+			var txn types.Transaction = &types.LegacyTx{CommonTx: commonTx(), GasPrice: gasPrice}
+			if i == 1 {
+				txn = &types.DynamicFeeTransaction{CommonTx: commonTx(), ChainID: *m.ChainConfig.ChainID, TipCap: gasPrice, FeeCap: gasPrice}
+			}
+			tx, txErr := types.SignTx(txn, *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
 			require.NoError(t, txErr)
 			b.AddTx(tx)
 		})
@@ -152,6 +149,10 @@ func TestBlockReaderFrozenHashLookup(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, gotBodyWithTxs, "BodyWithTransactions returned the canonical sibling's body")
 
+		gotRawBody, err := m.BlockReader.BodyWithRawTransactions(m.Ctx, tx, orphanBlock.Hash(), orphanBlock.NumberU64())
+		require.NoError(t, err)
+		require.Nil(t, gotRawBody, "BodyWithRawTransactions returned the canonical sibling's body")
+
 		gotBody, _, err := m.BlockReader.Body(m.Ctx, tx, orphanBlock.Hash(), orphanBlock.NumberU64())
 		require.NoError(t, err)
 		require.Nil(t, gotBody, "Body returned the canonical sibling's body")
@@ -183,6 +184,10 @@ func TestBlockReaderFrozenHashLookup(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, gotBodyWithTxs)
 
+		gotRawBody, err := m.BlockReader.BodyWithRawTransactions(m.Ctx, tx, canonicalBlock.Hash(), wrongHeight)
+		require.NoError(t, err)
+		require.Nil(t, gotRawBody)
+
 		gotBody, _, err := m.BlockReader.Body(m.Ctx, tx, canonicalBlock.Hash(), wrongHeight)
 		require.NoError(t, err)
 		require.Nil(t, gotBody)
@@ -213,6 +218,14 @@ func TestBlockReaderFrozenHashLookup(t *testing.T) {
 		gotBodyRlp, err := m.BlockReader.BodyRlp(m.Ctx, tx, canonicalBlock.Hash(), canonicalBlock.NumberU64())
 		require.NoError(t, err)
 		require.NotEmpty(t, gotBodyRlp)
+
+		for _, block := range []*types.Block{canonicalBlock, nextCanonicalBlock} {
+			want, err := block.Body().BinaryRawBody()
+			require.NoError(t, err)
+			gotRawBody, err := m.BlockReader.BodyWithRawTransactions(m.Ctx, tx, block.Hash(), block.NumberU64())
+			require.NoError(t, err)
+			require.Equal(t, want.Transactions, gotRawBody.Transactions, "block %d", block.NumberU64())
+		}
 	})
 
 	t.Run("zero hash reads by height only", func(t *testing.T) {
@@ -318,6 +331,13 @@ func TestBlockReaderFrozenHashFallsBackToDB(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, gotBodyWithTxs, "BodyWithTransactions refused a body that is still in the db")
 	require.Equal(t, orphanBlock.Transactions()[0].Hash(), gotBodyWithTxs.Transactions[0].Hash())
+
+	wantRawBody, err := orphanBlock.Body().BinaryRawBody()
+	require.NoError(t, err)
+	gotRawBody, err := m.BlockReader.BodyWithRawTransactions(m.Ctx, tx, orphanBlock.Hash(), orphanBlock.NumberU64())
+	require.NoError(t, err)
+	require.NotNil(t, gotRawBody, "BodyWithRawTransactions refused a body that is still in the db")
+	require.Equal(t, wantRawBody.Transactions, gotRawBody.Transactions)
 
 	gotBody, _, err := m.BlockReader.Body(m.Ctx, tx, orphanBlock.Hash(), orphanBlock.NumberU64())
 	require.NoError(t, err)

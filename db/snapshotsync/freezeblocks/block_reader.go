@@ -17,6 +17,7 @@
 package freezeblocks
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -352,6 +353,14 @@ func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash 
 		return false, nil
 	}
 	return expected == hash, nil
+}
+
+func (r *RemoteBlockReader) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.RawBody, error) {
+	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
+	if err != nil || body == nil {
+		return nil, err
+	}
+	return body.BinaryRawBody()
 }
 
 func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
@@ -763,15 +772,51 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
+	return readBody(ctx, r, tx, hash, blockHeight, "BodyWithTransactions", rawdb.ReadBodyWithTransactions,
+		func(body *types.Body, baseTxnID uint64, txCount uint32, txnSeg *snapshotsync.VisibleSegment, buf []byte) (*types.Body, error) {
+			txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf)
+			if err != nil || txs == nil {
+				return nil, err
+			}
+			body.Transactions = txs
+			body.SendersToTxs(senders)
+			return body, nil
+		})
+}
+
+// BodyWithRawTransactions is BodyWithTransactions with each transaction left in its binary
+// (canonical EIP-2718) encoding instead of decoded.
+func (r *BlockReader) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.RawBody, error) {
+	return readBody(ctx, r, tx, hash, blockHeight, "BodyWithRawTransactions", rawdb.ReadRawBody,
+		func(body *types.Body, baseTxnID uint64, txCount uint32, txnSeg *snapshotsync.VisibleSegment, buf []byte) (*types.RawBody, error) {
+			txs := make([][]byte, txCount)
+			ok, err := frozenTxns(baseTxnID, txCount, txnSeg, buf, func(i uint32, _, stored []byte) error {
+				txn, err := types.BinaryFromStoredTxn(stored)
+				txs[i] = bytes.Clone(txn)
+				return err
+			})
+			if err != nil || !ok {
+				return nil, err
+			}
+			return &types.RawBody{Transactions: txs, Uncles: body.Uncles, Withdrawals: body.Withdrawals}, nil
+		})
+}
+
+// readBody finds the body of block hash at blockHeight: in the db through fromDB, or else in the
+// block files, where fromFiles reads the txns of the frozen body. It returns nil when neither holds it.
+func readBody[B any](ctx context.Context, r *BlockReader, tx kv.Getter, hash common.Hash, blockHeight uint64, method string,
+	fromDB func(kv.Getter, common.Hash, uint64) (*B, error),
+	fromFiles func(body *types.Body, baseTxnID uint64, txCount uint32, txnSeg *snapshotsync.VisibleSegment, buf []byte) (*B, error),
+) (*B, error) {
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).BodyWithTransactions(hash=%x,blk=%d) -> ", r.FrozenBlocksInView(tx), hash, blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).%s(hash=%x,blk=%d) -> ", r.FrozenBlocksInView(tx), method, hash, blockHeight)
 	}
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
-		body, err = rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+		body, err := fromDB(tx, hash, blockHeight)
 		if err != nil {
 			return nil, err
 		}
@@ -799,13 +844,10 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		if dbgLogs {
 			log.Info(dbgPrefix + "requested hash is not the block held at this height")
 		}
-		return rawdb.ReadBodyWithTransactions(tx, hash, blockHeight)
+		return fromDB(tx, hash, blockHeight)
 	}
 
-	var baseTxnID uint64
-	var txCount uint32
-	var buf []byte
-	body, baseTxnID, txCount, buf, err = r.bodyFromSnapshot(blockHeight, seg, buf)
+	body, baseTxnID, txCount, buf, err := r.bodyFromSnapshot(blockHeight, seg, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -825,23 +867,18 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		return nil, nil
 	}
 
-	txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf)
+	res, err := fromFiles(body, baseTxnID, txCount, txnSeg, buf)
 	if err != nil {
 		return nil, err
 	}
-
-	if txs == nil {
-		if dbgLogs {
-			log.Info(dbgPrefix + "got nil txs from file")
-		}
-		return nil, nil
-	}
 	if dbgLogs {
-		log.Info(dbgPrefix+"got non-nil txs from file", "len(txs)", len(txs))
+		if res == nil {
+			log.Info(dbgPrefix + "got nil txs from file")
+		} else {
+			log.Info(dbgPrefix+"got non-nil txs from file", "len(txs)", txCount)
+		}
 	}
-	body.Transactions = txs
-	body.SendersToTxs(senders)
-	return body, nil
+	return res, nil
 }
 
 func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
@@ -1201,6 +1238,27 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 }
 
 func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
+	txs = make([]types.Transaction, txCount)
+	senders = make([]common.Address, txCount)
+	ok, err := frozenTxns(baseTxnID, txCount, txsSeg, buf, func(i uint32, sender, txRlp []byte) error {
+		senders[i].SetBytes(sender)
+		var err error
+		if txs[i], err = types.DecodeTransaction(txRlp); err != nil {
+			return err
+		}
+		txs[i].SetSender(accounts.InternAddress(senders[i]))
+		return nil
+	})
+	if err != nil || !ok {
+		return nil, nil, err
+	}
+	return txs, senders, nil
+}
+
+// frozenTxns calls fn with the sender and the stored encoding of each of txCount frozen txns
+// from baseTxnID; both slices are only valid during the call. ok is false when the segment does
+// not hold them.
+func frozenTxns(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte, fn func(i uint32, sender, txn []byte) error) (ok bool, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.From(), txsSeg.To(), dbg.Stack()))
@@ -1210,41 +1268,33 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	idxTxnHash := txsSeg.Src().Index(snaptype2.Indexes.TxnHash)
 
 	if idxTxnHash == nil {
-		return nil, nil, nil
+		return false, nil
 	}
 	if baseTxnID < idxTxnHash.BaseDataID() {
-		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", baseTxnID, idxTxnHash.BaseDataID(), txsSeg.Src().FileName())
+		return false, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", baseTxnID, idxTxnHash.BaseDataID(), txsSeg.Src().FileName())
 	}
-
-	txs = make([]types.Transaction, txCount)
-	senders = make([]common.Address, txCount)
 	if txCount == 0 {
-		return txs, senders, nil
+		return true, nil
 	}
 	txnOffset := idxTxnHash.OrdinalLookup(baseTxnID - idxTxnHash.BaseDataID())
 	if txsSeg.Src() == nil {
-		return nil, nil, nil
+		return false, nil
 	}
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
 	for i := range txCount {
 		if !gg.HasNext() {
-			return nil, nil, nil
+			return false, nil
 		}
 		buf, _ = gg.Next(buf[:0])
 		if len(buf) < 1+20 {
-			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
+			return false, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
 		}
-		senders[i].SetBytes(buf[1 : 1+20])
-		txRlp := buf[1+20:]
-		txs[i], err = types.DecodeTransaction(txRlp)
-		if err != nil {
-			return nil, nil, err
+		if err := fn(i, buf[1:1+20], buf[1+20:]); err != nil {
+			return false, err
 		}
-		txs[i].SetSender(accounts.InternAddress(senders[i]))
 	}
-
-	return txs, senders, nil
+	return true, nil
 }
 
 // txnRlpByID returns the sender and the stored encoding of a frozen transaction, or nils when it is missing.
