@@ -84,12 +84,6 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
-	// Nothing else sweeps caplin's .tmp on a running node: CaplinSnapshots never calls
-	// RemoveOverlaps, and each interrupted compression leaves a differently-suffixed
-	// multi-GB file behind.
-	if err := c.RemoveOwnTmpFiles(); err != nil {
-		logger.Warn("[CaplinSnapshots] could not sweep leftover .tmp files", "err", err)
-	}
 	return c
 }
 
