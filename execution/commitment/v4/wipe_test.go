@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -160,3 +161,59 @@ func TestWipeRejectsMalformedChildRecord(t *testing.T) {
 	_, err := runStorageTask(ctx, storageTask{addrHash: address, wipe: true})
 	require.ErrorIs(t, err, ErrRecordTruncated)
 }
+
+func TestWipeEnumeratesAllBranchChildrenUnderAliasingContext(t *testing.T) {
+	var address [32]byte
+	address[0] = 0xd4
+	paths := [][]byte{
+		append([]byte{1, 1}, bytes.Repeat([]byte{4}, 62)...),
+		append([]byte{1, 2}, bytes.Repeat([]byte{4}, 62)...),
+		append([]byte{1, 3}, bytes.Repeat([]byte{4}, 62)...),
+		append([]byte{1, 4}, bytes.Repeat([]byte{4}, 62)...),
+		append([]byte{5, 7, 1}, bytes.Repeat([]byte{6}, 61)...),
+		append([]byte{5, 7, 2}, bytes.Repeat([]byte{6}, 61)...),
+	}
+	entries := make([]storageEntry, len(paths))
+	for i, p := range paths {
+		entries[i] = storageEntry{path: p, update: phaseAStorageUpdate(bytes.Repeat([]byte{byte(i + 1)}, 32))}
+	}
+	ctx := newMockContext()
+	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: entries})
+	require.NoError(t, err)
+
+	before := make(map[string]struct{}, len(ctx.branches))
+	for key, data := range ctx.branches {
+		if len(data) != 0 {
+			before[key] = struct{}{}
+		}
+	}
+	require.GreaterOrEqual(t, len(before), 3)
+
+	_, err = runStorageTask(&grownBufContext{inner: ctx, buf: make([]byte, 0, 4096)}, storageTask{addrHash: address, wipe: true})
+	require.NoError(t, err)
+	for key := range before {
+		require.Empty(t, ctx.branches[key], "record %x survived the wipe", key)
+	}
+}
+
+type grownBufContext struct {
+	inner *mockContext
+	buf   []byte
+}
+
+func (g *grownBufContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	data, step, err := g.inner.Branch(key)
+	if err != nil || data == nil {
+		return nil, step, err
+	}
+	g.buf = append(g.buf[:0], data...)
+	return g.buf, step, nil
+}
+
+func (g *grownBufContext) PutBranch(key, data, prev []byte) error {
+	return g.inner.PutBranch(key, data, prev)
+}
+func (g *grownBufContext) Account(k []byte) (*commitment.Update, error) { return g.inner.Account(k) }
+func (g *grownBufContext) Storage(k []byte) (*commitment.Update, error) { return g.inner.Storage(k) }
+
+var _ commitment.PatriciaContext = (*grownBufContext)(nil)
