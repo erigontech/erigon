@@ -85,6 +85,7 @@ type StructLogRes struct {
 	Op                string             `json:"op"`
 	Gas               uint64             `json:"gas"`
 	GasCost           uint64             `json:"gasCost"`
+	StateGasCost      uint64             `json:"stateGasCost,omitempty"`
 	StateGasReservoir uint64             `json:"stateGasReservoir,omitempty"`
 	Depth             int                `json:"depth"`
 	Error             error              `json:"error,omitempty"`
@@ -281,6 +282,7 @@ func FormatLogs(logs []StructLog) []StructLogRes {
 			Gas:               trace.Gas.Execution,
 			StateGasReservoir: trace.Gas.State,
 			GasCost:           trace.GasCost.Execution,
+			StateGasCost:      trace.GasCost.State,
 			Depth:             trace.Depth,
 			Error:             trace.Err,
 		}
@@ -314,7 +316,7 @@ func FormatLogs(logs []StructLog) []StructLogRes {
 func WriteTrace(writer io.Writer, logs []StructLog) {
 	for i := range logs {
 		log := &logs[i]
-		fmt.Fprintf(writer, "%-16spc=%08d gas=%v cost=%v stateGasReservoir=%v", log.Op, log.Pc, log.Gas.Execution, log.GasCost.Execution, log.Gas.State)
+		fmt.Fprintf(writer, "%-16spc=%08d gas=%v cost=%v stateGasCost=%v stateGasReservoir=%v", log.Op, log.Pc, log.Gas.Execution, log.GasCost.Execution, log.GasCost.State, log.Gas.State)
 		if log.Err != nil {
 			fmt.Fprintf(writer, " ERROR: %v", log.Err)
 		}
@@ -405,8 +407,8 @@ func (t *mdLogger) captureStartOrEnter(from, to accounts.Address, create bool, i
 	}
 
 	fmt.Fprintf(t.out, `
-|  Pc   |      Op     | Cost | State reservoir |   Stack   |   RStack  |  Refund |
-|-------|-------------|------|-----------------|-----------|-----------|---------|
+|  Pc   |      Op     | Cost | State cost | State reservoir |   Stack   |   RStack  |  Refund |
+|-------|-------------|------|------------|-----------------|-----------|-----------|---------|
 `)
 }
 
@@ -429,7 +431,7 @@ func (t *mdLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, 
 func (t *mdLogger) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 	stack := scope.StackData()
 
-	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d | %3d |", pc, op, cost.Execution, gas.State)
+	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d | %3d | %3d |", pc, op, cost.Execution, cost.State, gas.State)
 
 	if !t.cfg.DisableStack {
 		// format stack

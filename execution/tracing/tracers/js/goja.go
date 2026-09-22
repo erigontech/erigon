@@ -1007,6 +1007,7 @@ type steplog struct {
 func (l *steplog) GetPC() uint64                { return l.pc }
 func (l *steplog) GetGas() uint64               { return l.gas.Execution }
 func (l *steplog) GetCost() uint64              { return l.cost.Execution }
+func (l *steplog) GetStateGasCost() uint64      { return l.cost.State }
 func (l *steplog) GetStateGasReservoir() uint64 { return l.gas.State }
 func (l *steplog) GetDepth() int                { return l.depth }
 func (l *steplog) GetRefund() uint64            { return l.refund }
@@ -1024,6 +1025,7 @@ func (l *steplog) setupObject() *goja.Object {
 	_ = o.Set("getPC", l.vm.ToValue(l.GetPC))
 	_ = o.Set("getGas", l.vm.ToValue(l.GetGas))
 	_ = o.Set("getCost", l.vm.ToValue(l.GetCost))
+	_ = o.Set("getStateGasCost", l.vm.ToValue(l.GetStateGasCost))
 	_ = o.Set("getStateGasReservoir", l.vm.ToValue(l.GetStateGasReservoir))
 	_ = o.Set("getDepth", l.vm.ToValue(l.GetDepth))
 	_ = o.Set("getRefund", l.vm.ToValue(l.GetRefund))

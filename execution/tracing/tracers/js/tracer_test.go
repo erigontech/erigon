@@ -292,7 +292,7 @@ func TestEnterExit(t *testing.T) {
 func TestFaultStateGasWithoutStep(t *testing.T) {
 	tracer, err := newJsTracer(`{
 		fault: function(log) {
-			this.gas = [log.getGas(), log.getStateGasReservoir(), log.getCost()];
+			this.gas = [log.getGas(), log.getStateGasReservoir(), log.getCost(), log.getStateGasCost()];
 		},
 		result: function() { return this.gas; }
 	}`, nil, nil)
@@ -300,7 +300,7 @@ func TestFaultStateGasWithoutStep(t *testing.T) {
 	tracer.EmitFault(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGas{Execution: 10, State: 300}, nil, 1, vm.ErrOutOfGas)
 	result, err := tracer.GetResult()
 	require.NoError(t, err)
-	require.JSONEq(t, `[100,200,10]`, string(result))
+	require.JSONEq(t, `[100,200,10,300]`, string(result))
 }
 
 func TestSetup(t *testing.T) {

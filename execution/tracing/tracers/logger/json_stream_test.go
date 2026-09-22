@@ -216,6 +216,27 @@ func closeStreamLikeCaller(stream jsonstream.Stream) {
 	stream.WriteObjectEnd()
 }
 
+func TestJsonStreamLoggerStateGasCost(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{DisableStack: true, DisableStorage: true}, t.Context(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+	scope := &mockOpContext{}
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 10, State: 30}, scope, nil, 1, nil)
+	l.OnOpcodeV2(1, byte(vm.STOP), mdgas.MdGas{Execution: 60}, mdgas.MdGas{}, scope, nil, 1, nil)
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+	var result struct {
+		StructLogs []map[string]json.RawMessage `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result.StructLogs, 2)
+	require.Contains(t, result.StructLogs[0], "stateGasCost")
+	require.JSONEq(t, `30`, string(result.StructLogs[0]["stateGasCost"]))
+	require.JSONEq(t, `10`, string(result.StructLogs[0]["gasCost"]))
+	require.NotContains(t, result.StructLogs[1], "stateGasCost")
+}
+
 // The structLogs prologue must be written at most once. OnExitV2 opens it too, for
 // traces that captured no step, and the caller closes exactly one object and one
 // array however many frames exited.

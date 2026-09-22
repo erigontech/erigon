@@ -42,6 +42,7 @@ type jsonStructLog struct {
 	Op                vm.OpCode           `json:"op"`
 	Gas               math.HexOrDecimal64 `json:"gas"`
 	GasCost           math.HexOrDecimal64 `json:"gasCost"`
+	StateGasCost      uint64              `json:"stateGasCost,omitempty"`
 	StateGasReservoir uint64              `json:"stateGasReservoir,omitempty"`
 	Memory            hexutil.Bytes       `json:"memory"`
 	MemorySize        int                 `json:"memSize"`
@@ -100,6 +101,7 @@ func (l *JSONLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas, scop
 		Op:                op,
 		Gas:               math.HexOrDecimal64(gas.Execution),
 		GasCost:           math.HexOrDecimal64(cost.Execution),
+		StateGasCost:      cost.State,
 		StateGasReservoir: gas.State,
 		MemorySize:        len(memory),
 		Depth:             depth,

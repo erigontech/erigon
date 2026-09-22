@@ -186,6 +186,10 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas
 	l.stream.WriteUint64(gas.Execution)
 	l.stream.WriteObjectField("gasCost")
 	l.stream.WriteUint64(cost.Execution)
+	if cost.State != 0 {
+		l.stream.WriteObjectField("stateGasCost")
+		l.stream.WriteUint64(cost.State)
+	}
 	if gas.State != 0 {
 		l.stream.WriteObjectField("stateGasReservoir")
 		l.stream.WriteUint64(gas.State)
