@@ -706,15 +706,13 @@ func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible
 // generation, else the read is torn across entities.
 func (d *Domain) initFilesRo(dt *DomainRoTx, ht *HistoryRoTx, iit *InvertedIndexRoTx, dv *domainVisible, hf visibleFiles, hiv *iiVisible) {
 	d.History.initFilesRo(ht, iit, hf, hiv)
-	*dt = DomainRoTx{
-		name:     d.Name,
-		stepSize: d.stepSize,
-		d:        d,
-		ht:       ht,
-		visible:  dv,
-		files:    dv.files,
-		salt:     d.salt.Load(),
-	}
+	dt.name = d.Name
+	dt.stepSize = d.stepSize
+	dt.d = d
+	dt.ht = ht
+	dt.visible = dv
+	dt.files = dv.files
+	dt.salt = d.salt.Load()
 }
 
 func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
