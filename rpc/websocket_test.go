@@ -25,6 +25,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -462,9 +463,6 @@ func TestWebsocketWriteTimeoutClosesStalledConn(t *testing.T) {
 		if err != nil {
 			return
 		}
-		if hw.conn == nil {
-			t.Error("the hijacked socket was not recorded")
-		}
 		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
@@ -491,13 +489,19 @@ func TestWebsocketWriteTimeoutClosesStalledConn(t *testing.T) {
 	wc.writeTimeout = 200 * time.Millisecond
 	payload := rawResponse(`"` + strings.Repeat("x", 1<<20) + `"`)
 	failed := make(chan struct{})
+	var writeErr error
 	go func() {
-		for wc.WriteJSON(context.Background(), payload) == nil {
+		for writeErr == nil {
+			writeErr = wc.WriteJSON(context.Background(), payload)
 		}
 		close(failed)
 	}()
 	select {
 	case <-failed:
+		// The socket deadline surfaces as an i/o timeout; a context deadline would not.
+		if !errors.Is(writeErr, os.ErrDeadlineExceeded) {
+			t.Fatalf("the stalled write failed with %v, want the socket deadline", writeErr)
+		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("writes to a peer that does not read never failed")
 	}
