@@ -32,6 +32,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/sync/errgroup"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -168,26 +170,21 @@ func (h *handler) isRpcMethodNeedsCheck(method string) bool {
 	return !slices.Contains(h.slowLogBlacklist, method)
 }
 
-// handleBatch executes all messages in a batch and returns the responses.
 // inOrderMethods change state that a later call of the same batch may depend on, such as a
 // sender's next nonce in the txpool. A batch holding one runs its calls one by one, in order.
 var inOrderMethods = map[string]struct{}{
-	"eth_sendRawTransaction":          {},
-	"eth_sendRawTransactionSync":      {},
-	"eth_sendTransaction":             {},
-	"graphql_sendRawTransaction":      {},
-	"eth_newFilter":                   {},
-	"eth_newBlockFilter":              {},
-	"eth_newPendingTransactionFilter": {},
-	"eth_uninstallFilter":             {},
-	"eth_getFilterChanges":            {},
-	"admin_addPeer":                   {},
-	"admin_removePeer":                {},
-	"admin_addTrustedPeer":            {},
-	"admin_removeTrustedPeer":         {},
-	"debug_setHead":                   {},
-	"debug_setGCPercent":              {},
-	"debug_setMemoryLimit":            {},
+	"eth_sendRawTransaction":     {},
+	"eth_sendRawTransactionSync": {},
+	"graphql_sendRawTransaction": {},
+	"eth_uninstallFilter":        {},
+	"eth_getFilterChanges":       {},
+	"admin_addPeer":              {},
+	"admin_removePeer":           {},
+	"admin_addTrustedPeer":       {},
+	"admin_removeTrustedPeer":    {},
+	"debug_setHead":              {},
+	"debug_setGCPercent":         {},
+	"debug_setMemoryLimit":       {},
 }
 
 func hasInOrderCall(calls []*jsonrpcMessage) bool {
@@ -222,6 +219,7 @@ func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage) []byte {
 	return buf.Bytes()
 }
 
+// handleBatch executes all messages in a batch and returns the responses.
 func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
 	if len(msgs) == 0 {
@@ -258,20 +256,12 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				answersWithNils[i] = h.answerBatchCall(cp, msg)
 			}
 		} else {
-			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
-			boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
-			defer close(boundedConcurrency)
-			wg := sync.WaitGroup{}
+			var g errgroup.Group
+			g.SetLimit(int(h.maxBatchConcurrency))
 			for i := range calls {
-				boundedConcurrency <- struct{}{}
-				wg.Go(func() {
-					defer func() {
-						<-boundedConcurrency
-					}()
-					answersWithNils[i] = h.answerBatchCall(cp, calls[i])
-				})
+				g.Go(func() error { answersWithNils[i] = h.answerBatchCall(cp, calls[i]); return nil })
 			}
-			wg.Wait()
+			_ = g.Wait()
 		}
 		h.addSubscriptions(cp.notifiers)
 		h.sendBatchAnswers(cp.ctx, answersWithNils)
