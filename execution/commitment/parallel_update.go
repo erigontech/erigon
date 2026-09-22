@@ -55,6 +55,7 @@ type parallelUpdate struct {
 	chunkKeys int
 	buildCh   chan *presorter
 	freeCh    chan *presorter
+	pool      []*presorter
 	inflight  sync.WaitGroup
 
 	deferredMu       sync.Mutex
@@ -83,16 +84,36 @@ func (pu *parallelUpdate) startBuilder() {
 	pu.buildCh = make(chan *presorter, presortBuffers)
 	pu.freeCh = make(chan *presorter, presortBuffers)
 	for range presortBuffers {
-		pu.freeCh <- new(presorter)
+		if n := len(pu.pool); n > 0 {
+			pu.freeCh <- pu.pool[n-1]
+			pu.pool = pu.pool[:n-1]
+		} else {
+			pu.freeCh <- new(presorter)
+		}
 	}
-	go func() {
-		for p := range pu.buildCh {
+	go func(build <-chan *presorter, free chan<- *presorter) {
+		for p := range build {
 			pu.insertSorted(p)
 			p.reset()
-			pu.freeCh <- p
+			free <- p
 			pu.inflight.Done()
 		}
-	}()
+	}(pu.buildCh, pu.freeCh)
+}
+
+func (pu *parallelUpdate) stopBuilder() {
+	if pu.buildCh == nil {
+		return
+	}
+	close(pu.buildCh)
+	for range presortBuffers {
+		select {
+		case p := <-pu.freeCh:
+			pu.pool = append(pu.pool, p)
+		default:
+		}
+	}
+	pu.buildCh, pu.freeCh = nil, nil
 }
 
 func (pu *parallelUpdate) handOff() {
@@ -130,6 +151,7 @@ func (pu *parallelUpdate) Build() {
 		}
 	}
 	pu.inflight.Wait()
+	pu.stopBuilder()
 }
 
 func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
@@ -147,6 +169,7 @@ func (pu *parallelUpdate) drainDeferred() {
 
 func (pu *parallelUpdate) Reset() {
 	pu.inflight.Wait()
+	pu.stopBuilder()
 	pu.pending.reset()
 	if pu.trie != nil {
 		pu.trie.Reset()
@@ -157,10 +180,8 @@ func (pu *parallelUpdate) Reset() {
 
 func (pu *parallelUpdate) Close() {
 	pu.inflight.Wait()
-	if pu.buildCh != nil {
-		close(pu.buildCh)
-		pu.buildCh, pu.freeCh = nil, nil
-	}
+	pu.stopBuilder()
+	pu.pool = nil
 	pu.pending.reset()
 	pu.trie = nil
 	pu.drainDeferred()

@@ -116,7 +116,7 @@ func buildReferenceTrie(cases []presortCase) *prefixTrie {
 	return tr
 }
 
-func buildPresortedTrie(cases []presortCase, chunkKeys int) (*prefixTrie, bool) {
+func buildPresorted(cases []presortCase, chunkKeys int) (*parallelUpdate, bool) {
 	pu := newParallelUpdate()
 	if chunkKeys > 0 {
 		pu.chunkKeys = chunkKeys
@@ -129,13 +129,9 @@ func buildPresortedTrie(cases []presortCase, chunkKeys int) (*prefixTrie, bool) 
 		}
 		pu.Collect(c.hashedKey, c.plainKey, upd)
 	}
+	backgrounded := pu.buildCh != nil
 	pu.Build()
-	tr, backgrounded := pu.trie, pu.buildCh != nil
-	if backgrounded {
-		close(pu.buildCh)
-		pu.buildCh = nil
-	}
-	return tr, backgrounded
+	return pu, backgrounded
 }
 
 func TestPresort_MatchesInsertionOrderTrie(t *testing.T) {
@@ -144,9 +140,9 @@ func TestPresort_MatchesInsertionOrderTrie(t *testing.T) {
 	for _, n := range []int{1, 2, 17, 5000} {
 		cases := randomPresortCases(int64(n)*7919+3, n, 4)
 		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
-		got, backgrounded := buildPresortedTrie(cases, 1<<20)
+		pu, backgrounded := buildPresorted(cases, 1<<20)
 		require.False(t, backgrounded, "n=%d must stay under the hand-off threshold", n)
-		require.Equal(t, want, flattenPrefixTrie(t, got),
+		require.Equal(t, want, flattenPrefixTrie(t, pu.trie),
 			"presorted build must match insertion-order build for n=%d", n)
 	}
 }
@@ -157,11 +153,29 @@ func TestPresort_BackgroundBuildKeepsMergeOrder(t *testing.T) {
 	for _, n := range []int{1, 2, 17, 3000} {
 		cases := randomPresortCases(int64(n)*4242+1, n, 3)
 		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
-		got, backgrounded := buildPresortedTrie(cases, 8)
+		pu, backgrounded := buildPresorted(cases, 8)
 		require.Equal(t, n > 8, backgrounded, "n=%d must cross the hand-off threshold", n)
-		require.Equal(t, want, flattenPrefixTrie(t, got),
+		require.Nil(t, pu.buildCh, "Build must reap the builder goroutine")
+		require.Equal(t, want, flattenPrefixTrie(t, pu.trie),
 			"chunks built in the background must not change the merge order for n=%d", n)
 	}
+}
+
+func TestPresort_BuffersReturnToThePoolAcrossBatches(t *testing.T) {
+	t.Parallel()
+
+	cases := randomPresortCases(777, 200, 0)
+	pu, backgrounded := buildPresorted(cases, 8)
+	require.True(t, backgrounded)
+	require.Len(t, pu.pool, presortBuffers, "every chunk buffer must come back to the pool")
+
+	pu.Reset()
+	for _, c := range cases {
+		pu.Collect(c.hashedKey, c.plainKey, nil)
+	}
+	pu.Build()
+	require.Len(t, pu.pool, presortBuffers, "a second batch must reuse the pooled buffers")
+	require.EqualValues(t, len(cases), pu.trie.root.subtreeCount)
 }
 
 func TestPresort_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {

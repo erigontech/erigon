@@ -401,7 +401,7 @@ func TestForkWalk_ForkStartsHelpersOnlyOnIdleLeases(t *testing.T) {
 		bw := &walker{trie: base}
 		require.NoError(t, fw.attach(ctx, bw))
 		ut.parallel.Build()
-	root := ut.parallel.trie.root
+		root := ut.parallel.trie.root
 		err := fw.walk(ctx, bw, root, append(make([]byte, 0, forkPathCap), root.ext...))
 		fw.detach(bw)
 		require.NoError(t, err)
