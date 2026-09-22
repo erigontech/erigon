@@ -543,7 +543,7 @@ func TestWebsocketStreamsLargeResponse(t *testing.T) {
 		n        int
 		streamed bool
 	}{{300, false}, {3000, true}} {
-		frames, msg := wsRawCall(t, host, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"test_streamPaused","params":["%s",%d,0]}`, item, tc.n))
+		frames, msg := wsRawCall(t, host, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"test_streamPaused","params":[%q,%d,0]}`, item, tc.n))
 		if streamed := frames > 1; streamed != tc.streamed {
 			t.Fatalf("a %d-byte response came in %d frame(s), streamed=%v, want %v", len(msg), frames, streamed, tc.streamed)
 		}
@@ -561,7 +561,7 @@ func TestWebsocketStreamsLargeResponse(t *testing.T) {
 // frames the response came in, with their payloads joined.
 func wsRawCall(t *testing.T, host, req string) (int, []byte) {
 	t.Helper()
-	conn, err := net.Dial("tcp", host)
+	conn, err := new(net.Dialer).DialContext(t.Context(), "tcp", host)
 	if err != nil {
 		t.Fatal(err)
 	}
