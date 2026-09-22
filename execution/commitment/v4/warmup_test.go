@@ -166,3 +166,52 @@ func TestWarmupV4KeyScratchReuse(t *testing.T) {
 	})
 	require.Zero(t, allocs)
 }
+
+func TestWarmupV4RecordsFound(t *testing.T) {
+	ctx := newMockContext()
+	hashedKey := make([]byte, 64)
+	hashedKey[0] = 2
+	ctx.branches[string(AccountNodeKey(nil, nil))] = recordFixture(0, 0, 1<<2, 0, 0, 0, nil, nil, nil, nil)
+	ctx.branches[string(AccountNodeKey([]byte{2}, nil))] = recordFixture(0, 0, 0, 0, 0, 0, nil, nil, nil, nil)
+	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
+		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 1,
+		MaxDepth:   commitment.WarmupMaxDepth,
+		Key:        warmupKeyV4,
+		Step:       warmupStepV4,
+	})
+	w.Start()
+	w.WarmKey(hashedKey, 0, 0)
+	require.NoError(t, w.WaitBufferFree(0))
+	w.CloseAndWait()
+	require.Greater(t, w.Stats().RecordsFound, uint64(0))
+}
+
+func TestWarmupV4RecordsFoundDistinguishesMissingRecord(t *testing.T) {
+	_, stop := warmupStepV4([]byte{0}, make([]byte, 64), 0)
+	require.True(t, stop)
+	_, stop = warmupStepV4(nil, make([]byte, 64), 0)
+	require.True(t, stop)
+
+	read := func(record []byte) uint64 {
+		ctx := newMockContext()
+		if record != nil {
+			ctx.branches[string(AccountNodeKey(nil, nil))] = record
+		}
+		w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
+			CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return ctx, nil },
+			NumWorkers: 1,
+			MaxDepth:   commitment.WarmupMaxDepth,
+			Key:        warmupKeyV4,
+			Step:       warmupStepV4,
+		})
+		w.Start()
+		w.WarmKey(make([]byte, 64), 0, 0)
+		require.NoError(t, w.WaitBufferFree(0))
+		w.CloseAndWait()
+		return w.Stats().RecordsFound
+	}
+
+	require.Greater(t, read([]byte{0}), uint64(0))
+	require.Zero(t, read(nil))
+}

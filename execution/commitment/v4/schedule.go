@@ -167,7 +167,8 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		results[task.addrHash] = storageRoots[i]
 	}
 
-	root, err := unfold(safeCtx, nil, planeAccount, nil)
+	scratch := &unfoldScratch{}
+	root, err := unfold(safeCtx, nil, planeAccount, nil, scratch)
 	if err != nil {
 		return [32]byte{}, err
 	}

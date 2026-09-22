@@ -29,7 +29,12 @@ var (
 	ErrUnfoldEmbedded = errors.New("commitment v4: embedded children are unsupported")
 )
 
-func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []byte) (*node, error) {
+type unfoldScratch struct {
+	key  [66]byte
+	pack [32]byte
+}
+
+func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []byte, scratch ...*unfoldScratch) (*node, error) {
 	if ctx == nil {
 		return nil, errors.New("commitment v4: nil unfold context")
 	}
@@ -45,21 +50,26 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		}
 	}
 
-	var keyBuf [66]byte
-	var packBuf [32]byte
+	var work *unfoldScratch
+	if len(scratch) != 0 {
+		work = scratch[0]
+	}
+	if work == nil {
+		work = &unfoldScratch{}
+	}
 	var key []byte
 	if plane == planeAccount {
 		if len(addrHash) != 0 {
 			return nil, ErrUnfoldAddress
 		}
-		key = nodeKey(tagAccountNode, nil, path, keyBuf[:0], packBuf[:0])
+		key = nodeKey(tagAccountNode, nil, path, work.key[:0], work.pack[:0])
 	} else {
 		if len(addrHash) != 32 {
 			return nil, ErrUnfoldAddress
 		}
 		var address [32]byte
 		copy(address[:], addrHash)
-		key = nodeKey(tagStorageNode, address[:], path, keyBuf[:0], packBuf[:0])
+		key = nodeKey(tagStorageNode, address[:], path, work.key[:0], work.pack[:0])
 	}
 
 	data, _, err := ctx.Branch(key)

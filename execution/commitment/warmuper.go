@@ -51,6 +51,7 @@ const warmupKeyScratchLen = maxCompactKeyLen + 1
 
 type WarmupStats struct {
 	KeysProcessed uint64
+	RecordsFound  uint64
 	Duration      time.Duration
 }
 
@@ -68,6 +69,7 @@ type Warmuper struct {
 	g    *errgroup.Group
 
 	keysProcessed atomic.Uint64
+	recordsFound  atomic.Uint64
 	startTime     time.Time
 
 	outstanding [arenaRingSize]atomic.Int64
@@ -110,6 +112,7 @@ func (w *Warmuper) Start() {
 	if w.started.Swap(true) {
 		return
 	}
+	w.startTime = time.Now()
 	if w.numWorkers <= 0 {
 		return
 	}
@@ -170,9 +173,15 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
 		}
+		if len(branchData) != 0 {
+			w.recordsFound.Add(1)
+		}
 
 		nextDepth, stop := w.step(branchData, hashedKey, depth)
 		if stop {
+			break
+		}
+		if nextDepth <= depth {
 			break
 		}
 		depth = nextDepth
@@ -224,6 +233,7 @@ func (w *Warmuper) Stats() WarmupStats {
 	}
 	return WarmupStats{
 		KeysProcessed: w.keysProcessed.Load(),
+		RecordsFound:  w.recordsFound.Load(),
 		Duration:      duration,
 	}
 }

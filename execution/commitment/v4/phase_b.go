@@ -36,7 +36,8 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 		return [32]byte{}, errors.New("commitment v4: nil phase B context")
 	}
 
-	root, err := unfold(ctx, nil, planeAccount, nil)
+	scratch := &unfoldScratch{}
+	root, err := unfold(ctx, nil, planeAccount, nil, scratch)
 	if err != nil {
 		return [32]byte{}, err
 	}

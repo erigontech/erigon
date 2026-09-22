@@ -22,7 +22,28 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 )
+
+type noAllocUnfoldContext struct{}
+
+func (*noAllocUnfoldContext) Branch([]byte) ([]byte, kv.Step, error) {
+	return nil, 0, nil
+}
+
+func (*noAllocUnfoldContext) PutBranch([]byte, []byte, []byte) error {
+	return nil
+}
+
+func (*noAllocUnfoldContext) Account([]byte) (*commitment.Update, error) {
+	return nil, nil
+}
+
+func (*noAllocUnfoldContext) Storage([]byte) (*commitment.Update, error) {
+	return nil, nil
+}
 
 func TestUnfoldReadsOneExactRecordWithoutStateReads(t *testing.T) {
 	ctx := newMockContext()
@@ -119,4 +140,14 @@ func TestUnfoldRejectsInvalidPlaneAndAddress(t *testing.T) {
 	_, err = unfold(ctx, nil, planeStorage, nil)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrUnfoldAddress))
+}
+
+func TestUnfoldKeyScratchIsAllocationFree(t *testing.T) {
+	ctx := &noAllocUnfoldContext{}
+	scratch := &unfoldScratch{}
+	allocs := testing.AllocsPerRun(100, func() {
+		_, err := unfold(ctx, nil, planeAccount, nil, scratch)
+		require.NoError(t, err)
+	})
+	require.Zero(t, allocs)
 }

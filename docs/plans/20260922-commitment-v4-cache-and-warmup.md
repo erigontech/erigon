@@ -405,18 +405,18 @@ the worker pool, the `CtxFactory`, the epoch/coherence model, the put stripes, a
 - Modify: `execution/commitment/v4/warmup_test.go`
 - Modify: `execution/commitment/warmuper_test.go`
 
-- [ ] write the failing test first: on a v4 fixture, `Stats().RecordsFound` must be greater than zero — it
+- [x] write the failing test first: on a v4 fixture, `Stats().RecordsFound` must be greater than zero — it
       is zero today and stays zero under every one of the traps
-- [ ] add `RecordsFound` to `WarmupStats` and the backing `atomic.Uint64`, incremented in `warmupKey` only
+- [x] add `RecordsFound` to `WarmupStats` and the backing `atomic.Uint64`, incremented in `warmupKey` only
       when a read returns a non-empty record
-- [ ] assign `w.startTime` in `Start()` — it is declared at `:64` and read at `:250-251` but never set, so
+- [x] assign `w.startTime` in `Start()` — it is declared at `:64` and read at `:250-251` but never set, so
       `Stats().Duration` is always 0 and Task 5 would measure nothing
-- [ ] write the trap-3 test: a truncated record (`layout().ok == false`) and a genuinely absent child both
+- [x] write the trap-3 test: a truncated record (`layout().ok == false`) and a genuinely absent child both
       stop, and `RecordsFound` distinguishes them
-- [ ] write a `Stats().Duration > 0` test
+- [x] write a `Stats().Duration > 0` test
 - [ ] mutation-verify the `RecordsFound` guard by file copy: revert the v4 key function to the V2 compact
       key, confirm the nonzero assertion goes red while every other test still passes, restore
-- [ ] run `go test ./execution/commitment/...` — all green before Task 5
+- [x] run `go test ./execution/commitment/...` — all green before Task 5
 
 ### Task 5: Measure, then decide the deferred items
 

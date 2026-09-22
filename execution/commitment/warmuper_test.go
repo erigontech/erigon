@@ -18,14 +18,25 @@ package commitment
 
 import (
 	"context"
+	"encoding/hex"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
+
+type warmupRecordContext struct {
+	noopPatriciaContext
+	record []byte
+}
+
+func (c *warmupRecordContext) Branch([]byte) ([]byte, kv.Step, error) {
+	return c.record, 0, nil
+}
 
 func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
 	t.Parallel()
@@ -342,4 +353,29 @@ func TestWarmupHPHStepUsesExtensionLength(t *testing.T) {
 	next, stop := HexPatriciaWarmupStep(record, []byte{0, 0, 0, 0, 2}, 4)
 	require.False(t, stop)
 	require.Equal(t, 11, next)
+}
+
+func TestWarmupKeyStopsOnBackwardsStep(t *testing.T) {
+	record, err := hex.DecodeString("302f033cd3c1afb6afd59e92bbf69401b89a7f")
+	require.NoError(t, err)
+	w := &Warmuper{
+		maxDepth: WarmupMaxDepth,
+		key:      HexPatriciaWarmupKey,
+		step:     HexPatriciaWarmupStep,
+	}
+	ctx := &warmupRecordContext{record: record}
+	require.NotPanics(t, func() {
+		w.warmupKey(ctx, []byte{6, 6, 3}, 2)
+	})
+}
+
+func TestWarmuperStatsDurationStartsWithWarmuper(t *testing.T) {
+	w := NewWarmuper(context.Background(), WarmupConfig{
+		MaxDepth: WarmupMaxDepth,
+		Key:      HexPatriciaWarmupKey,
+		Step:     HexPatriciaWarmupStep,
+	})
+	w.Start()
+	require.Greater(t, w.Stats().Duration, time.Duration(0))
+	w.CloseAndWait()
 }

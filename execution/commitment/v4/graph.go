@@ -29,14 +29,15 @@ type graph struct {
 	addrHash []byte
 	errKey   error
 	errNode  error
+	scratch  *unfoldScratch
 }
 
 func accountGraph() graph {
-	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord}
+	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord, scratch: &unfoldScratch{}}
 }
 
 func storageGraph(addrHash []byte) graph {
-	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage}
+	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage, scratch: &unfoldScratch{}}
 }
 
 func (g graph) nodeKey(path []byte) []byte {
@@ -44,7 +45,7 @@ func (g graph) nodeKey(path []byte) []byte {
 }
 
 func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, error) {
-	child, err := unfold(ctx, path, g.plane, g.addrHash)
+	child, err := unfold(ctx, path, g.plane, g.addrHash, g.scratch)
 	if err != nil {
 		return nil, err
 	}

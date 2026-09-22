@@ -160,7 +160,8 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		return empty.RootHash, nil
 	}
 
-	root, err := unfold(ctx, nil, planeStorage, task.addrHash[:])
+	scratch := &unfoldScratch{}
+	root, err := unfold(ctx, nil, planeStorage, task.addrHash[:], scratch)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -182,7 +183,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		if len(root.path) != 0 && !bytes.HasPrefix(entry.path, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
 			nib := bits.TrailingZeros16(root.childMask)
 			if root.children[nib] == nil && len(root.childHash[nib]) == 32 {
-				child, err := unfold(ctx, root.path, planeStorage, task.addrHash[:])
+				child, err := unfold(ctx, root.path, planeStorage, task.addrHash[:], scratch)
 				if err != nil {
 					return [32]byte{}, err
 				}
