@@ -401,3 +401,21 @@ func TestPBinLeafCellHashChecksZoneLength(t *testing.T) {
 		})
 	}
 }
+
+func TestPBinChunkifyCodeEndsInTruncatedPush(t *testing.T) {
+	t.Parallel()
+
+	for _, immediates := range []int{0, 1} {
+		tail := append([]byte{pbinPush1 + 1}, bytes.Repeat([]byte{0xAA}, immediates)...)
+		code := append(bytes.Repeat([]byte{0x5B}, pbinChunkDataLen), tail...)
+		require.Len(t, code, pbinChunkDataLen+1+immediates)
+
+		chunks := pbinChunkifyCode(code)
+		require.Len(t, chunks, 2, "immediates=%d", immediates)
+		require.EqualValues(t, 0, chunks[0][0], "chunk 0 starts on an opcode, immediates=%d", immediates)
+		require.EqualValues(t, 0, chunks[1][0], "the PUSH2 itself opens chunk 1, immediates=%d", immediates)
+		require.Equal(t, tail, chunks[1][1:1+len(tail)], "immediates=%d", immediates)
+		require.Equal(t, make([]byte, pbinChunkDataLen-len(tail)), chunks[1][1+len(tail):],
+			"the immediate the code lacks is zero padding, immediates=%d", immediates)
+	}
+}
