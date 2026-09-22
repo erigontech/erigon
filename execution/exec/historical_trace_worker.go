@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -453,9 +454,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		hooks := result.TracingHooks()
 		if result.Err != nil {
-			if hooks.HasTxEndHook() {
-				hooks.EmitTxEnd(nil, nil, result.Err)
-			}
+			hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, result.Err)
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
 		}
 
@@ -467,14 +466,11 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		}
 
 		receipt, err := result.CreateNextReceipt(prev)
-
-		if hooks.HasTxEndHook() {
-			hooks.EmitTxEnd(receipt, &result.ExecutionResult.TxGasUsage, err)
-		}
-
 		if err != nil {
+			hooks.EmitTxEnd(receipt, result.ExecutionResult.TxnGasUsage, err)
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, err)
 		}
+		hooks.EmitTxEnd(receipt, result.ExecutionResult.TxnGasUsage, nil)
 
 		if receipt != nil {
 			p.blockResult.Receipts = append(p.blockResult.Receipts, receipt)

@@ -398,11 +398,11 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	}
 	statedb.PopSnapshot(snapshot)
 	if vmconfig.Tracer.HasTxEndHook() {
-		var usage *mdgas.TxGasUsage
+		var txnGasUsage mdgas.TxnGasUsage
 		if res != nil {
-			usage = &res.TxGasUsage
+			txnGasUsage = res.TxnGasUsage
 		}
-		vmconfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: gasUsed}, usage, err)
+		vmconfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: gasUsed}, txnGasUsage, err)
 	}
 	if err != nil {
 		return statedb, root, gasUsed, err

@@ -209,10 +209,8 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 // over: exactly one array end and one object end, whatever the logger emitted.
 func closeStreamLikeCaller(stream jsonstream.Stream) {
 	stream.WriteArrayEnd()
-	stream.WriteMore()
 	stream.WriteObjectField("gas")
 	stream.WriteUint64(0)
-	stream.WriteMore()
 	stream.WriteObjectField("failed")
 	stream.WriteBool(false)
 	stream.WriteObjectEnd()

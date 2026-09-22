@@ -42,7 +42,7 @@ const (
 	unsubscribeMethodSuffix  = "_unsubscribe"
 	notificationMethodSuffix = "_subscription"
 
-	defaultWriteTimeout = 10 * time.Minute // used if context has no deadline
+	defaultWriteTimeout = 10 * time.Minute
 )
 
 var null = json.RawMessage("null")
@@ -119,19 +119,6 @@ type fastJSONMarshalerTo interface {
 	MarshalFastJSONTo(s *jsonstream.StackStream) error
 }
 
-// marshalFastJSONTo encodes fm into a byte slice the caller owns.
-func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
-	s := jsonstream.Get(nil)
-	defer jsonstream.Put(s)
-	if err := fm.MarshalFastJSONTo(s); err != nil {
-		return nil, err
-	}
-	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
-		return nil, err
-	}
-	return bytes.Clone(s.Buffer()), nil
-}
-
 // writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {
@@ -169,11 +156,9 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString(vsn)
-	stream.WriteMore()
 	if id != nil {
 		stream.WriteObjectField("id")
 		stream.WriteRawBytes(id)
-		stream.WriteMore()
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
 	err := write(rs)
@@ -182,7 +167,6 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 		// response would carry result and error both.
 		if rs.Written() && !rs.RewindIfEmpty() {
 			rs.CloseIfOpen()
-			stream.WriteMore()
 		}
 		HandleError(err, stream)
 	} else if !rs.Written() {
@@ -285,10 +269,12 @@ type jsonCodec struct {
 	// readFrame is set only by transports that delimit messages themselves. Each
 	// call must return bytes it does not reuse: parsed messages point into them
 	// and are handled asynchronously, so they outlive the call that read them.
-	readFrame func() ([]byte, error)
-	encMu     sync.Mutex        // guards the encoder
-	encode    func(v any) error // encoder to allow multiple transports
-	conn      deadlineCloser
+	readFrame    func() ([]byte, error)
+	encMu        sync.Mutex        // guards the encoder
+	encode       func(v any) error // encoder to allow multiple transports
+	conn         deadlineCloser
+	writeTimeout time.Duration // used if the context has no deadline, counted once the write holds the connection
+	held         *heldConn     // the socket, when the transport can hold writes back; nil otherwise
 }
 
 // newFuncCodec creates a codec that uses the given functions to read and write. If conn
@@ -297,11 +283,12 @@ type jsonCodec struct {
 // decode, so it may be nil.
 func newFuncCodec(conn deadlineCloser, encode, decode func(v any) error, readFrame func() ([]byte, error)) *jsonCodec {
 	codec := &jsonCodec{
-		closeCh:   make(chan any),
-		encode:    encode,
-		decode:    decode,
-		readFrame: readFrame,
-		conn:      conn,
+		closeCh:      make(chan any),
+		encode:       encode,
+		decode:       decode,
+		readFrame:    readFrame,
+		conn:         conn,
+		writeTimeout: defaultWriteTimeout,
 	}
 	if ra, ok := conn.(ConnRemoteAddr); ok {
 		codec.remote = ra.RemoteAddr()
@@ -319,10 +306,7 @@ type rawBatch [][]byte
 
 func (b rawBatch) writeTo(s jsonstream.Stream) {
 	s.WriteArrayStart()
-	for i, answer := range b {
-		if i > 0 {
-			s.WriteMore()
-		}
+	for _, answer := range b {
 		s.WriteRawBytes(answer)
 	}
 	s.WriteArrayEnd()
@@ -333,7 +317,9 @@ func (b rawBatch) writeTo(s jsonstream.Stream) {
 func NewCodec(conn Conn) ServerCodec {
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	return newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c := newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c.held, _ = conn.(*heldConn)
+	return c
 }
 
 // newJSONEncoder returns the writer side every JSON transport shares.
@@ -419,12 +405,32 @@ func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 
 	deadline, ok := ctx.Deadline()
 	if !ok {
-		deadline = time.Now().Add(defaultWriteTimeout)
+		deadline = time.Now().Add(c.writeTimeout)
 	}
 	if err := c.conn.SetWriteDeadline(deadline); err != nil {
 		return err
 	}
 	return c.encode(v)
+}
+
+// coalesce runs send with the socket held, so the messages it writes leave in one socket write.
+func (c *jsonCodec) coalesce(send func()) (err error) {
+	if c.held == nil {
+		send()
+		return nil
+	}
+	c.held.hold()
+	defer func() {
+		// Writes set the socket deadline under encMu, so the release holds it too: a concurrent write
+		// would re-arm the deadline mid-flush.
+		c.encMu.Lock()
+		defer c.encMu.Unlock()
+		if err = c.held.release(time.Now().Add(c.writeTimeout)); err != nil {
+			_ = c.held.Conn.Close()
+		}
+	}()
+	send()
+	return nil
 }
 
 func (c *jsonCodec) Close() {

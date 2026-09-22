@@ -19,6 +19,7 @@ package state
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -30,8 +31,9 @@ import (
 type CachedReader3 struct {
 	cache kvcache.CacheView
 	db    kv.TemporalTx
-	// storageKey is the address+slot the next storage read looks up. The cache clones a key
-	// it keeps; the buffer holds only across sequential reads, and a reader is not used concurrently.
+	// addr and storageKey are the keys the next read looks up. As reader fields their slices
+	// reach the cache interface without escaping a local; a reader is not used concurrently.
+	addr       common.Address
 	storageKey [length.Addr + length.Hash]byte
 }
 
@@ -46,8 +48,8 @@ func (r *CachedReader3) TracePrefix() string       { return "" }
 
 // ReadAccountData is called when an account needs to be fetched from the state
 func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
-	addressValue := address.Value()
-	enc, err := r.cache.Get(addressValue[:])
+	r.addr = address.Value()
+	enc, err := r.cache.Get(r.addr[:])
 	if err != nil {
 		return nil, err
 	}
@@ -59,6 +61,12 @@ func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Acc
 		return nil, err
 	}
 	return &a, nil
+}
+
+func (r *CachedReader3) HasAccount(address accounts.Address) (bool, error) {
+	r.addr = address.Value()
+	enc, err := r.cache.Get(r.addr[:])
+	return len(enc) > 0, err
 }
 
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
@@ -85,8 +93,8 @@ func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key account
 }
 
 func (r *CachedReader3) ReadAccountCode(address accounts.Address) ([]byte, error) {
-	addressValue := address.Value()
-	code, err := r.cache.GetCode(addressValue[:])
+	r.addr = address.Value()
+	code, err := r.cache.GetCode(r.addr[:])
 	if err != nil {
 		return nil, err
 	}

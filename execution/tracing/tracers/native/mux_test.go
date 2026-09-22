@@ -32,14 +32,14 @@ import (
 
 func TestMuxForwardsTxEndV2(t *testing.T) {
 	receipt := &types.Receipt{GasUsed: 100}
-	usage := &mdgas.TxGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
+	usage := mdgas.TxnGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
 	var calls int
 	var legacyCalls int
 	mux := newTestMuxTracer([]string{"v2", "v1", "nil"}, []*tracers.Tracer{
 		{Hooks: &tracing.Hooks{
-			OnTxEndV2: func(gotReceipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
+			OnTxEndV2: func(gotReceipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 				require.Same(t, receipt, gotReceipt)
-				require.Same(t, usage, gasUsed)
+				require.Equal(t, usage, txnGasUsage)
 				require.NoError(t, err)
 				calls++
 			},

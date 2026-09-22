@@ -90,6 +90,9 @@ type EthBackend interface {
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader dbservices.FullBlockReader,
 	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
+	if chainConfig == nil {
+		panic("privateapi: NewEthBackendServer: nil chainConfig")
+	}
 	s := &EthBackendServer{
 		ctx:                   ctx,
 		eth:                   eth,
@@ -97,7 +100,7 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 		db:                    db,
 		blockReader:           blockReader,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
-		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
+		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events, chainConfig),
 		logger:                logger,
 		latestBlockBuiltStore: latestBlockBuiltStore,
 		chainConfig:           chainConfig,

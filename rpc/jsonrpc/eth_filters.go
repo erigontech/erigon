@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -182,7 +183,15 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					log.Warn(closedWarn)
 					return
 				}
-				notify(emit, item)
+				err := rpc.CoalesceNotifications(notifier, func() {
+					notify(emit, item)
+					for range len(ch) {
+						notify(emit, <-ch)
+					}
+				})
+				if err != nil {
+					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
+				}
 			case <-rpcSub.Err():
 				return
 			}
@@ -199,8 +208,21 @@ type sharedJSON[T any] struct {
 	value func(T) any
 }
 
-func (s sharedJSON[T]) MarshalFastJSON() ([]byte, error) {
-	return s.ev.Encode(func(v T) ([]byte, error) { return json.Marshal(s.value(v)) })
+func (s sharedJSON[T]) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	enc, err := s.ev.Encode(func(v T) ([]byte, error) {
+		val := s.value(v)
+		if fm, ok := val.(interface {
+			MarshalFastJSONTo(*jsonstream.StackStream) error
+		}); ok {
+			return jsonstream.Marshal(fm)
+		}
+		return json.Marshal(val)
+	})
+	if err != nil {
+		return err
+	}
+	w.WriteRawBytes(enc)
+	return nil
 }
 
 func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
@@ -208,7 +230,7 @@ func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
 func headerValue(h *types.Header) any { return h }
 
 func subscribeReceiptsValue(rs []*remoteproto.SubscribeReceiptsReply) any {
-	out := make([]*ethutils.RPCReceipt, len(rs))
+	out := make(ethutils.RPCReceipts, len(rs))
 	for i, r := range rs {
 		out[i] = ethutils.MarshalSubscribeReceipt(r)
 	}
@@ -288,13 +310,17 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 }
 
 // TransactionReceipts sends one notification per block, with the block's receipts that match the filter.
-func (api *APIImpl) TransactionReceipts(ctx context.Context, crit filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
+func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.ReceiptsFilterCriteria) (*rpc.Subscription, error) {
+	var criteria filters.ReceiptsFilterCriteria
+	if crit != nil {
+		criteria = *crit
+	}
 	if api.filters == nil {
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
 		func() (<-chan *rpchelper.Shared[[]*remoteproto.SubscribeReceiptsReply], func(), error) {
-			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, crit)
+			receipts, id, err := api.filters.SubscribeReceipts(api.SubscribeLogsChannelSize, criteria)
 			if err != nil {
 				return nil, nil, err
 			}

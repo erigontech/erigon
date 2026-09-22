@@ -105,17 +105,13 @@ func (t *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from ac
 	})
 }
 
-func (t *Tracer) OnTxEndV2(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
+func (t *Tracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if t.recordOptions.DisableOnTxEndRecording {
 		return
 	}
 
 	if t.wrapped != nil {
-		t.wrapped.Hooks.EmitTxEnd(receipt, gasUsed, err)
-	}
-	if gasUsed != nil {
-		usage := *gasUsed
-		gasUsed = &usage
+		t.wrapped.Hooks.EmitTxEnd(receipt, txnGasUsage, err)
 	}
 
 	var errStr string
@@ -126,12 +122,12 @@ func (t *Tracer) OnTxEndV2(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, er
 	t.traces.Append(Trace{
 		OnTxEndV2: &OnTxEndTraceV2{
 			Receipt: receipt,
-			GasUsed: gasUsed,
+			GasUsed: txnGasUsage,
 			Error:   errStr,
 		},
 	})
 
-	if t.flushMode != FlushModeTxn || receipt == nil {
+	if t.flushMode != FlushModeTxn {
 		return
 	}
 
@@ -621,7 +617,7 @@ type OnTxStartTrace struct {
 
 type OnTxEndTraceV2 struct {
 	Receipt *types.Receipt    `json:"receipt,omitempty"`
-	GasUsed *mdgas.TxGasUsage `json:"gasUsed,omitempty"`
+	GasUsed mdgas.TxnGasUsage `json:"gasUsed"`
 	Error   string            `json:"error,omitempty"`
 }
 

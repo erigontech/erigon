@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -191,7 +192,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -454,8 +455,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if first {
 			stream.WriteArrayStart()
 			first = false
-		} else {
-			stream.WriteMore()
 		}
 		stream.WriteRawBytes(b)
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
@@ -526,19 +525,19 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		if timer != nil && evm.Cancelled() {
 			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
-			if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
-				ot.Tracer().EmitTxEnd(nil, nil, timeoutErr)
+			if ot.Tracer() != nil {
+				ot.Tracer().EmitTxEnd(nil, mdgas.TxnGasUsage{}, timeoutErr)
 			}
 			return nil, timeoutErr
 		}
 		if execErr != nil {
-			if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
-				ot.Tracer().EmitTxEnd(nil, nil, execErr)
+			if ot.Tracer() != nil {
+				ot.Tracer().EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 			}
 			return nil, execErr
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
-			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if err := ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -635,6 +634,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue // guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
+		if err := checkOverriddenSigner(traceConfig, lastSigner, txn); err != nil {
+			return err
+		}
 		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)
 		if err != nil {
 			return err
@@ -963,14 +965,12 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
 				if execErr != nil {
-					if tracer.Hooks.HasTxEndHook() {
-						tracer.Hooks.EmitTxEnd(nil, nil, execErr)
-					}
+					tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 					return fmt.Errorf("txIndex %d: %w", job.txIndex, execErr)
 				}
 
 				if tracer.Hooks.HasTxEndHook() {
-					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 				}
 
 				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
@@ -1058,6 +1058,9 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	txnHash := txn.Hash()
+	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
+	}
 	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 	if err != nil {
 		return nil, fmt.Errorf("convert txn into msg: %w", err)

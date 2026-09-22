@@ -249,6 +249,18 @@ func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.Bl
 	return traceConfig.BlockOverrides.Override(blockCtx)
 }
 
+// checkOverriddenSigner recovers txn's sender with the overridden block's signer: a stored sender
+// was derived with the real block's signer, which may accept a txn the overridden one rejects.
+// Only a number or time override changes the signer.
+func checkOverriddenSigner(traceConfig *config.TraceConfig, signer *types.Signer, txn types.Transaction) error {
+	if traceConfig == nil || traceConfig.BlockOverrides == nil ||
+		(traceConfig.BlockOverrides.Number == nil && traceConfig.BlockOverrides.Time == nil) {
+		return nil
+	}
+	_, err := signer.Sender(txn)
+	return err
+}
+
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
 	if traceConfig != nil && traceConfig.Tracer != nil && *traceConfig.Tracer != "" {
 		return OeTracerConfig{}, errors.New("trace_* does not support custom tracers; use debug_* (e.g. debug_traceTransaction) for named or JS tracers")
@@ -944,7 +956,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 
-	blockNumber, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNumber, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1075,7 +1087,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, nil)
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1186,13 +1198,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if vmConfig.Tracer.HasTxEndHook() {
-			vmConfig.Tracer.EmitTxEnd(nil, nil, err)
-		}
+		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
-		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 	}
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1292,7 +1302,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err := rejectPending(*parentNrOrHash); err != nil {
 		return nil, err
 	}
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, nil)
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1465,14 +1475,14 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
 		if err != nil {
-			if tracer != nil && tracer.Hooks.HasTxEndHook() {
-				tracer.Hooks.EmitTxEnd(nil, nil, err)
+			if tracer != nil {
+				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 			}
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
 
 		if tracer != nil && tracer.Hooks.HasTxEndHook() {
-			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)
@@ -1675,7 +1685,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	var num = rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, nil)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1770,13 +1780,11 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if vmConfig.Tracer.HasTxEndHook() {
-			vmConfig.Tracer.EmitTxEnd(nil, nil, err)
-		}
+		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
-		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 	}
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)

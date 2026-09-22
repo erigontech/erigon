@@ -16,7 +16,7 @@
 ##
 ##   5. DOCKER_BINARIES='erigon downloader rpcdaemon' make docker
 
-ARG BUILDER_IMAGE="golang:1.26-trixie" \
+ARG BUILDER_IMAGE="golang:1.27-trixie" \
     TARGET_BASE_IMAGE="debian:13-slim" \
     BINARIES="erigon" \
     BUILD_DBTOOLS="false" \
