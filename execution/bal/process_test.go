@@ -68,7 +68,7 @@ func TestCreateBALOrdering(t *testing.T) {
 	}
 
 	// Addresses must be sorted lexicographically.
-	if bal[0].Address != addrA.Value() || bal[1].Address != addrB.Value() {
+	if bal[0].Address != addrA || bal[1].Address != addrB {
 		t.Fatalf("unexpected account ordering: %x, %x", bal[0].Address, bal[1].Address)
 	}
 
@@ -198,17 +198,17 @@ func TestBALBlock943Direct(t *testing.T) {
 	bal := types.BlockAccessList{
 		// EIP-7002: only storage reads (empty queue, all writes are net-zero)
 		{
-			Address:      eip7002Addr.Value(),
+			Address:      eip7002Addr,
 			StorageReads: []accounts.StorageKey{slot0, slot1, slot2, slot3},
 		},
 		// EIP-7251: only storage reads (empty queue, all writes are net-zero)
 		{
-			Address:      eip7251Addr.Value(),
+			Address:      eip7251Addr,
 			StorageReads: []accounts.StorageKey{slot0, slot1, slot2, slot3},
 		},
 		// EIP-2935: 1 storage change at accessIndex 0 (system call txIndex=-1)
 		{
-			Address: eip2935Addr.Value(),
+			Address: eip2935Addr,
 			StorageChanges: []types.SlotChanges{
 				{
 					Slot:    slot2935,
@@ -218,7 +218,7 @@ func TestBALBlock943Direct(t *testing.T) {
 		},
 		// EIP-4788: 2 storage changes at accessIndex 0 (system call txIndex=-1)
 		{
-			Address: eip4788Addr.Value(),
+			Address: eip4788Addr,
 			StorageChanges: []types.SlotChanges{
 				{
 					Slot:    slot4788Timestamp,
@@ -336,7 +336,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 	t.Logf("BAL accounts: %d", len(bal))
 	for i, ac := range bal {
 		t.Logf("  [%d] %s: storage_changes=%d storage_reads=%d balance_changes=%d nonce_changes=%d code_changes=%d",
-			i, ac.Address.Hex(),
+			i, ac.Address.Value().Hex(),
 			len(ac.StorageChanges), len(ac.StorageReads),
 			len(ac.BalanceChanges), len(ac.NonceChanges), len(ac.CodeChanges))
 		for _, sc := range ac.StorageChanges {
@@ -358,7 +358,7 @@ func TestBALBlock943ViaVersionedIO(t *testing.T) {
 
 	// Verify system address was filtered out
 	for _, ac := range bal {
-		if ac.Address == systemAddr.Value() {
+		if ac.Address == systemAddr {
 			t.Fatal("system address should have been filtered from BAL")
 		}
 	}

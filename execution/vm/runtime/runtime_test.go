@@ -833,7 +833,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	statedb.MergeTxIOInto(&io, statedb.VersionedWrites())
 	bal := io.AsBlockAccessList()
 	for _, accountChanges := range bal {
-		require.NotEqual(t, systemAddr.Value(), accountChanges.Address,
+		require.NotEqual(t, systemAddr, accountChanges.Address,
 			"SYSTEM_ADDRESS should be absent from the BAL after a zero-value syscall")
 	}
 

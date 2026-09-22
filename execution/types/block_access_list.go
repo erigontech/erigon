@@ -159,7 +159,7 @@ const (
 )
 
 type AccountChanges struct {
-	Address        common.Address
+	Address        accounts.Address
 	StorageChanges []SlotChanges
 	StorageReads   []accounts.StorageKey
 	BalanceChanges []*BalanceChange
@@ -303,7 +303,7 @@ func (ac *AccountChanges) EncodeRLP(w io.Writer) error {
 	if _, err := w.Write(b[:1]); err != nil {
 		return err
 	}
-	address := ac.Address
+	address := ac.Address.Value()
 	if _, err := w.Write(address[:]); err != nil {
 		return err
 	}
@@ -334,7 +334,7 @@ func (ac *AccountChanges) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return fmt.Errorf("read Address: %w", err)
 	}
-	ac.Address = address
+	ac.Address = accounts.InternAddress(address)
 	list, err := decodeSlotChangesList(s)
 	if err != nil {
 		return fmt.Errorf("read StorageChanges: %w", err)
@@ -911,7 +911,7 @@ func (bal BlockAccessList) Validate() error {
 	var hasPrev bool
 	for i := range bal {
 		account := &bal[i]
-		address := account.Address
+		address := account.Address.Value()
 		if hasPrev && bytes.Compare(prev[:], address[:]) >= 0 {
 			return fmt.Errorf("account addresses must be strictly increasing (index %d)", i)
 		}
@@ -1095,7 +1095,7 @@ func (bal BlockAccessList) DebugPrint(w io.Writer) {
 	fmt.Fprintf(w, "accounts=%d", len(bal))
 	for i := range bal {
 		account := &bal[i]
-		fmt.Fprintf(w, "\n[%d] addr=%s", i, account.Address.Hex())
+		fmt.Fprintf(w, "\n[%d] addr=%s", i, account.Address.Value().Hex())
 		if len(account.StorageChanges) > 0 {
 			fmt.Fprint(w, "\n  storageChanges:")
 			for _, slotChange := range account.StorageChanges {
@@ -1177,7 +1177,7 @@ func ConvertBlockAccessListFromTypesProto(protoList []*typesproto.BlockAccessLis
 	bal := make(BlockAccessList, len(protoList))
 	for i, acc := range protoList {
 		bal[i] = AccountChanges{
-			Address: gointerfaces.ConvertH160toAddress(acc.Address),
+			Address: accounts.InternAddress(gointerfaces.ConvertH160toAddress(acc.Address)),
 		}
 		if acc.StorageChanges != nil {
 			bal[i].StorageChanges = make([]SlotChanges, len(acc.StorageChanges))
@@ -1247,7 +1247,7 @@ func ConvertBlockAccessListToTypesProto(bal BlockAccessList) []*typesproto.Block
 	for ai := range bal {
 		account := &bal[ai]
 		balAccount := &typesproto.BlockAccessListAccount{
-			Address: gointerfaces.ConvertAddressToH160(account.Address),
+			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
 		for si := range account.StorageChanges {
 			storageChange := &account.StorageChanges[si]
@@ -1327,7 +1327,7 @@ func ConvertBlockAccessListToExecutionProto(bal BlockAccessList) []*executionpro
 	for ai := range bal {
 		account := &bal[ai]
 		rpcAccount := &executionproto.BlockAccessListAccount{
-			Address: gointerfaces.ConvertAddressToH160(account.Address),
+			Address: gointerfaces.ConvertAddressToH160(account.Address.Value()),
 		}
 		for si := range account.StorageChanges {
 			storageChange := &account.StorageChanges[si]
@@ -1396,7 +1396,7 @@ func ConvertExecutionProtoToBlockAccessList(protoList []*executionproto.BlockAcc
 			return nil, fmt.Errorf("blockAccessList account %d missing address", accountIdx)
 		}
 		accountChanges := &AccountChanges{
-			Address: gointerfaces.ConvertH160toAddress(account.Address),
+			Address: accounts.InternAddress(gointerfaces.ConvertH160toAddress(account.Address)),
 		}
 		for slotIdx, storageChange := range account.StorageChanges {
 			if storageChange == nil {

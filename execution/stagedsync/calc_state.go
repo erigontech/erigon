@@ -311,13 +311,12 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 	// it here, gated exactly as the incremental path (Normalize).
 	for i := range blockAccessList {
 		ac := &blockAccessList[i]
-		addr := accounts.InternAddress(ac.Address)
-		acc := cs.accounts[addr]
+		acc := cs.accounts[ac.Address]
 		if acc == nil || !acc.dirty || acc.Deleted {
 			continue
 		}
 		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
-			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
+			state.EIP161EmptyRemoval(emptyRemoval, isAura, ac.Address) {
 			acc.Deleted = true
 			acc.Incarnation = 0
 		}

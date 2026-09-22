@@ -30,12 +30,13 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestValidateBALResponse(t *testing.T) {
 	t.Parallel()
 	wantBAL := types.BlockAccessList{{
-		Address: common.Address{1},
+		Address: accounts.InternAddress(common.Address{1}),
 	}}
 	bal, err := types.EncodeBlockAccessListBytes(wantBAL)
 	require.NoError(t, err)
@@ -163,8 +164,8 @@ func TestFetchAcrossPeers(t *testing.T) {
 	h0 := common.BytesToHash([]byte{1})
 	h1 := common.BytesToHash([]byte{2})
 	reqs := []BALRequest{{Hash: h0}, {Hash: h1}}
-	balA := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0xaa}}})
-	balB := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{0xbb}}})
+	balA := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: accounts.InternAddress(common.Address{0xaa})}})
+	balB := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: accounts.InternAddress(common.Address{0xbb})}})
 	serveAll := func(rs []BALRequest) map[common.Hash]*types.BlockAccessListSidecar {
 		out := map[common.Hash]*types.BlockAccessListSidecar{}
 		for _, r := range rs {

@@ -283,11 +283,10 @@ func uniqueTransactionDestinations(txns types.Transactions) map[accounts.Address
 }
 
 func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges, task balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}) error {
-	address := accounts.InternAddress(account.Address)
 	var accountData *accounts.Account
 	if task.slotFrom == 0 {
 		var err error
-		accountData, err = stateReader.ReadAccountData(address)
+		accountData, err = stateReader.ReadAccountData(account.Address)
 		if err != nil {
 			return err
 		}
@@ -300,7 +299,7 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 		} else {
 			slot = account.StorageReads[slotIndex-storageChanges]
 		}
-		if _, _, err := stateReader.ReadAccountStorage(address, slot); err != nil {
+		if _, _, err := stateReader.ReadAccountStorage(account.Address, slot); err != nil {
 			return err
 		}
 	}
@@ -310,11 +309,11 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 	warmCode := false
 	if codeMode == balCodeWarmupAll {
 		warmCode = len(account.CodeChanges) > 0 || (accountData != nil && !accountData.CodeHash.IsEmpty())
-	} else if _, ok := txCodeDestinations[address]; ok {
+	} else if _, ok := txCodeDestinations[account.Address]; ok {
 		warmCode = accountData != nil && !accountData.CodeHash.IsEmpty()
 	}
 	if warmCode {
-		_, err := stateReader.ReadAccountCode(address)
+		_, err := stateReader.ReadAccountCode(account.Address)
 		return err
 	}
 	return nil

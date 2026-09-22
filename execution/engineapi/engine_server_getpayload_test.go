@@ -272,7 +272,7 @@ func TestAssembledBlockToPayloadResponseReturnsSidecarEncodingError(t *testing.T
 	// A nil nested StorageChange is the encoding failure that survives an
 	// account list of values.
 	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{{
-		Address: common.Address{2},
+		Address: accounts.InternAddress(common.Address{2}),
 		StorageChanges: []types.SlotChanges{{
 			Slot:    accounts.InternKey(common.Hash{3}),
 			Changes: []*types.StorageChange{nil},

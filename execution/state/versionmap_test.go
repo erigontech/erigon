@@ -874,7 +874,7 @@ func TestGetVersionedAccount_SynthesizesCreatedFromBAL(t *testing.T) {
 func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 	balFedChanges := func(addr accounts.Address) types.BlockAccessList {
 		return []types.AccountChanges{{
-			Address: addr.Value(),
+			Address: addr,
 			BalanceChanges: []*types.BalanceChange{{
 				Index: 1,
 				Value: *uint256.NewInt(53771),
@@ -883,7 +883,7 @@ func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 	}
 	contractFedChanges := func(addr accounts.Address) types.BlockAccessList {
 		return []types.AccountChanges{{
-			Address: addr.Value(),
+			Address: addr,
 			NonceChanges: []*types.NonceChange{{
 				Index: 1,
 				Value: 1,
@@ -1329,7 +1329,7 @@ func TestSynthesizedAccountRecordsNoIncarnationGuess(t *testing.T) {
 		return VersionInvalid
 	}
 	vm := NewVersionMap([]types.AccountChanges{{
-		Address:      addr.Value(),
+		Address:      addr,
 		NonceChanges: []*types.NonceChange{{Index: 227, Value: 1}},
 	}})
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
@@ -1366,7 +1366,7 @@ func TestDBLoadedAccountRecordsNoIncarnationDefault(t *testing.T) {
 	deployed := accounts.NewCode([]byte{0x60, 0x80, 0x60, 0x40})
 	reader := &codeReader{addr: addr, account: &accounts.Account{Balance: *uint256.NewInt(9), CodeHash: accounts.EmptyCodeHash}}
 	vm := NewVersionMap([]types.AccountChanges{{
-		Address:      addr.Value(),
+		Address:      addr,
 		NonceChanges: []*types.NonceChange{{Index: 227, Value: 1}},
 		CodeChanges:  []*types.CodeChange{{Index: 227, Bytecode: deployed.Bytes}},
 	}})
@@ -1395,7 +1395,7 @@ func TestBALPrePopulatesDerivedCodeCells(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x01})
 	bytecode := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 	vm := NewVersionMap([]types.AccountChanges{{
-		Address:     addr.Value(),
+		Address:     addr,
 		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: bytecode}},
 	}})
 	size, sres, ok := vm.ReadCodeSize(addr, 5)
@@ -1413,7 +1413,7 @@ func TestBALPrePopulatesDerivedCodeCells(t *testing.T) {
 func TestBALPrePopulatesDerivedCodeCells_ClearedCode(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x02})
 	vm := NewVersionMap([]types.AccountChanges{{
-		Address:     addr.Value(),
+		Address:     addr,
 		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: nil}},
 	}})
 	size, sres, ok := vm.ReadCodeSize(addr, 5)
@@ -1467,7 +1467,7 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 func TestBALFedReaderSurvivesCreatorFlushMidLoad(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xfd, 0x01})
 	vm := NewVersionMap([]types.AccountChanges{{
-		Address: addr.Value(),
+		Address: addr,
 		NonceChanges: []*types.NonceChange{{
 			Index: 1,
 			Value: 1,

@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type recordingSealEngine struct {
@@ -102,7 +103,7 @@ func TestFinishBlockValidatesBlockAccessListBeforeSealing(t *testing.T) {
 			BuiltBlock: &exec.AssembledBlock{
 				Header: &types.Header{GasLimit: types.BalItemCost - 1},
 				BlockAccessList: types.BlockAccessList{{
-					Address: common.Address{1},
+					Address: accounts.InternAddress(common.Address{1}),
 				}},
 			},
 		},

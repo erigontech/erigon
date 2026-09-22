@@ -155,7 +155,7 @@ func TestVersionedRead_DestructedStorageRecordsBALReadAfterRevert(t *testing.T) 
 	require.Equal(t, VersionValid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
 	blockAccessList := io.AsBlockAccessList()
 	require.Len(t, blockAccessList, 1)
-	require.Equal(t, addr.Value(), blockAccessList[0].Address)
+	require.Equal(t, addr, blockAccessList[0].Address)
 	require.Equal(t, []accounts.StorageKey{key}, blockAccessList[0].StorageReads)
 }
 

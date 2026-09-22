@@ -126,7 +126,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 	for i := range bal {
 		ac := &bal[i]
 		entry := &types.AccountChanges{
-			Address:        ac.Address,
+			Address:        accounts.InternAddress(ac.Address),
 			StorageChanges: make([]types.SlotChanges, 0, len(ac.StorageChanges)),
 			StorageReads:   make([]accounts.StorageKey, 0, len(ac.StorageReads)),
 			BalanceChanges: make([]*types.BalanceChange, 0, len(ac.BalanceChanges)),
