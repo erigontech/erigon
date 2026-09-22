@@ -157,22 +157,26 @@ func removeRoot(n *node, path []byte) error {
 	if len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
 		nib := bits.TrailingZeros16(n.childMask)
 		if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
-			if err := remove(child, path); err != nil {
+			state, err := removeCollapsing(child, path)
+			if err != nil {
 				return err
 			}
-			if child.childMask == 0 {
+			switch state.kind {
+			case removalEmpty:
 				n.path = nil
 				n.clear(nib)
-				return nil
-			}
-			if bits.OnesCount16(child.childMask) == 1 && child.leafMask == child.childMask {
-				leafNib := bits.TrailingZeros16(child.childMask)
-				fullPath := append(append([]byte(nil), child.path...), byte(leafNib))
-				fullPath = append(fullPath, unpackPath(child.leafSuffixAt(leafNib), 64-len(child.path)-1, nil)...)
-				value := append([]byte(nil), child.leafValueAt(leafNib)...)
+			case removalLeaf:
 				n.path = nil
 				n.clear(nib)
-				n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), value)
+				n.setLeaf(int(state.path[0]), packPath(state.path[1:], nil), state.value)
+			case removalBranch:
+				n.clear(nib)
+				n.path = append([]byte(nil), state.path...)
+				n.setStoredChild(int(state.path[0]), state.hash, nil)
+			case removalNode:
+				n.clear(nib)
+				n.path = append([]byte(nil), state.node.path...)
+				n.setChild(int(state.node.path[0]), state.node)
 			}
 			return nil
 		}
@@ -234,10 +238,13 @@ func collapseRoot(n *node) error {
 		n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), value)
 		return nil
 	}
-	if len(n.childHashAt(nib)) != 32 && n.child(nib) == nil {
-		return ErrRootShape
-	}
 	if n.child(nib) != nil {
+		if len(n.path) != 0 {
+			return ErrRootShape
+		}
+		return promoteRootExtension(n)
+	}
+	if len(n.childHashAt(nib)) != 32 {
 		return ErrRootShape
 	}
 	ext := append(append([]byte(nil), n.path...), byte(nib))

@@ -29,14 +29,15 @@ type graph struct {
 	addrHash []byte
 	errKey   error
 	errNode  error
+	unfolded map[string]struct{}
 }
 
 func accountGraph() graph {
-	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord}
+	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord, unfolded: make(map[string]struct{})}
 }
 
 func storageGraph(addrHash []byte) graph {
-	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage}
+	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage, unfolded: make(map[string]struct{})}
 }
 
 func (g graph) nodeKey(path, dst []byte) []byte {
@@ -52,6 +53,9 @@ func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, 
 		return nil, fmt.Errorf("%w: missing child at depth %d", g.errNode, len(path))
 	}
 	child.plane = g.plane
+	if g.unfolded != nil {
+		g.unfolded[string(g.nodeKey(path, nil))] = struct{}{}
+	}
 	return child, nil
 }
 
@@ -234,6 +238,9 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, before m
 	}
 	for _, delta := range deltas {
 		after[string(delta.key)] = struct{}{}
+	}
+	for key := range g.unfolded {
+		before[key] = struct{}{}
 	}
 	deltas, err := appendRemovedDeltas(ctx, deltas, before, after)
 	if err != nil {

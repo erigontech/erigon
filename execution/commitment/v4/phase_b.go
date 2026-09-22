@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/bits"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -30,60 +29,6 @@ var (
 	errPhaseBKey    = errors.New("commitment v4: invalid phase B key")
 	errPhaseBRecord = errors.New("commitment v4: invalid account record")
 )
-
-func materializeAccountRootChild(ctx commitment.PatriciaContext, root *node) error {
-	nib := bits.TrailingZeros16(root.childMask)
-	child := root.child(nib)
-	if child == nil {
-		return nil
-	}
-	hash, err := persistDetachedAccountSubtree(ctx, child)
-	if err != nil {
-		return err
-	}
-	var ext []byte
-	if !bytes.Equal(child.path, root.path) {
-		if len(child.path) <= len(root.path)+1 {
-			return errPhaseBRecord
-		}
-		ext = child.path[len(root.path)+1:]
-	}
-	root.setStoredChild(nib, hash[:], ext)
-	return nil
-}
-
-func persistDetachedAccountSubtree(ctx commitment.PatriciaContext, root *node) ([32]byte, error) {
-	if root == nil {
-		return [32]byte{}, errPhaseBRecord
-	}
-	var visit func(*node) ([32]byte, error)
-	visit = func(n *node) ([32]byte, error) {
-		for nib := range 16 {
-			bit := uint16(1) << nib
-			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-				continue
-			}
-			child := n.child(nib)
-			if child == nil {
-				if len(n.childHashAt(nib)) != 32 {
-					return [32]byte{}, errPhaseBRecord
-				}
-				continue
-			}
-			childHash, err := visit(child)
-			if err != nil {
-				return [32]byte{}, err
-			}
-			n.setChildHashExt(nib, childHash[:], child.path[len(n.path)+1:])
-		}
-		hash, delta, err := foldAndEncodeRecord(ctx, n, len(n.path), AccountNodeKey(n.path, nil))
-		if err != nil {
-			return [32]byte{}, err
-		}
-		return hash, applyDelta(delta, ctx.PutBranch)
-	}
-	return visit(root)
-}
 
 func accountUpdate(value []byte, found bool, update *commitment.Update) (*commitment.Update, error) {
 	result := &commitment.Update{CodeHash: empty.CodeHash}

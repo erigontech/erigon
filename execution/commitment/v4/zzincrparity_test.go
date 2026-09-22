@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math/rand"
+	"sort"
 	"strings"
 	"testing"
 
@@ -43,12 +44,14 @@ type incrWorld struct {
 	accounts map[string]*commitment.Update
 	storage  map[string]*commitment.Update
 	history  []string
+	hphDrift int
 }
 
 func newIncrWorld(t *testing.T) *incrWorld {
 	t.Helper()
 	w := &incrWorld{
 		t:        t,
+		hphDrift: -1,
 		ctxV4:    newParityContext(),
 		ctxHPH:   newParityContext(),
 		accounts: make(map[string]*commitment.Update),
@@ -95,24 +98,143 @@ func (w *incrWorld) apply(entries []parityUpdate) {
 	w.ctxHPH.mu.Unlock()
 }
 
-func (w *incrWorld) block(n int, entries []parityUpdate) {
+func (w *incrWorld) block(n int, entries []parityUpdate) bool {
 	w.t.Helper()
 	if len(entries) == 0 {
-		return
+		return true
 	}
 	w.apply(entries)
 	ctx := context.Background()
 	rootV4, err := w.v4.Process(ctx, makeParityUpdates(w.t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
 	require.NoErrorf(w.t, err, "block %d v4", n)
-	rootHPH, err := w.hph.Process(ctx, makeParityUpdates(w.t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{})
-	require.NoErrorf(w.t, err, "block %d hph", n)
 	require.Zero(w.t, w.ctxV4.accountCalls)
 	require.Zero(w.t, w.ctxV4.storageCalls)
+	w.checkRecords(n)
 	w.history = append(w.history, fmt.Sprintf("block %d:\n%s", n, formatEntries(entries)))
-	if !bytes.Equal(rootHPH, rootV4) {
-		truth := w.rebuildFromScratch()
-		w.t.Fatalf("block %d root mismatch\n v4    %x\n hph   %x\n fresh %x (v4Right=%v hphRight=%v)\nhistory:\n%s",
-			n, rootV4, rootHPH, truth, bytes.Equal(truth, rootV4), bytes.Equal(truth, rootHPH), strings.Join(w.history, ""))
+	rootHPH, err := w.hph.Process(ctx, makeParityUpdates(w.t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{})
+	if err != nil {
+		w.hphDrift = n
+		return false
+	}
+	if bytes.Equal(rootHPH, rootV4) {
+		return true
+	}
+	truth := w.rebuildFromScratch()
+	if !bytes.Equal(truth, rootV4) {
+		w.t.Fatalf("block %d: v4 root differs from a trie rebuilt from the same state\n v4    %x\n hph   %x\n fresh %x\nhistory:\n%s",
+			n, rootV4, rootHPH, truth, strings.Join(w.history, ""))
+	}
+	w.hphDrift = n
+	return false
+}
+
+func walkRecords(ctx *parityContext, plane byte, addrHash [32]byte) (leaves map[string][]byte, issues []string) {
+	leaves = make(map[string][]byte)
+	key := func(path []byte) []byte { return nodeKey(plane, addrHash[:], path, nil) }
+	if plane == planeAccount {
+		key = func(path []byte) []byte { return AccountNodeKey(path, nil) }
+	}
+	var visit func(path []byte)
+	visit = func(path []byte) {
+		data, _, _ := ctx.Branch(key(path))
+		if len(data) == 0 {
+			issues = append(issues, fmt.Sprintf("missing record at path %x", path))
+			return
+		}
+		depth := len(path)
+		if err := Validate(data, depth); err != nil {
+			issues = append(issues, fmt.Sprintf("invalid record at %x: %v", path, err))
+			return
+		}
+		r := NewRecord(data, depth)
+		if r.isLeafRoot() {
+			hashedKey, value := r.LeafRootBody()
+			leaves[string(unpackPath(hashedKey, 64, nil))] = bytes.Clone(value)
+			return
+		}
+		l := r.layout()
+		if depth == 0 && l.selfExtLen != 0 {
+			visit(unpackPath(r.SelfExt()[1:], l.selfExtLen, nil))
+			return
+		}
+		for nib := range 16 {
+			bit := uint16(1) << nib
+			if l.child&bit == 0 {
+				continue
+			}
+			if l.leaf&bit != 0 {
+				suffix, value := r.leafAt(l, nib)
+				full := append(append([]byte(nil), path...), byte(nib))
+				full = append(full, unpackPath(suffix, 64-depth-1, nil)...)
+				if _, dup := leaves[string(full)]; dup {
+					issues = append(issues, fmt.Sprintf("duplicate leaf %x", full))
+				}
+				leaves[string(full)] = bytes.Clone(value)
+				continue
+			}
+			childPath := append(append([]byte(nil), path...), byte(nib))
+			if e := r.extAt(l, nib); len(e) != 0 {
+				decoded, err := decodeExtension(e)
+				if err != nil {
+					issues = append(issues, fmt.Sprintf("bad extension at %x nibble %d: %v", path, nib, err))
+					continue
+				}
+				childPath = append(childPath, decoded...)
+			}
+			visit(childPath)
+		}
+	}
+	visit(nil)
+	return leaves, issues
+}
+
+func (w *incrWorld) checkRecords(n int) {
+	w.t.Helper()
+	var noAddr [32]byte
+	leaves, issues := walkRecords(w.ctxV4, planeAccount, noAddr)
+	want := make(map[string]struct{}, len(w.accounts))
+	for plain := range w.accounts {
+		want[string(commitment.KeyToHexNibbleHash([]byte(plain)))] = struct{}{}
+	}
+	for k := range want {
+		if _, ok := leaves[k]; !ok {
+			issues = append(issues, fmt.Sprintf("account leaf %x is missing", k))
+		}
+	}
+	for k := range leaves {
+		if _, ok := want[k]; !ok {
+			issues = append(issues, fmt.Sprintf("account leaf %x is unexpected", k))
+		}
+	}
+	slots := make(map[string]map[string]struct{})
+	for plain := range w.storage {
+		if _, ok := w.accounts[plain[:length.Addr]]; !ok {
+			continue
+		}
+		hashed := commitment.KeyToHexNibbleHash([]byte(plain))
+		addr := string(hashed[:64])
+		if slots[addr] == nil {
+			slots[addr] = make(map[string]struct{})
+		}
+		slots[addr][string(hashed[64:])] = struct{}{}
+	}
+	for addr, wantSlots := range slots {
+		got, storageIssues := walkRecords(w.ctxV4, planeStorage, hashAddressPath([]byte(addr)))
+		issues = append(issues, storageIssues...)
+		for k := range wantSlots {
+			if _, ok := got[k]; !ok {
+				issues = append(issues, fmt.Sprintf("storage leaf %x/%x is missing", addr, k))
+			}
+		}
+		for k := range got {
+			if _, ok := wantSlots[k]; !ok {
+				issues = append(issues, fmt.Sprintf("storage leaf %x/%x is unexpected", addr, k))
+			}
+		}
+	}
+	if len(issues) != 0 {
+		sort.Strings(issues)
+		w.t.Fatalf("block %d record integrity: %d issues\n%s", n, len(issues), strings.Join(issues, "\n"))
 	}
 }
 
@@ -140,6 +262,11 @@ func (w *incrWorld) rebuildFromScratch() []byte {
 		w.t.Fatalf("fresh rebuild disagrees: v4 %x hph %x", rootV4, root)
 	}
 	return root
+}
+
+func (w *incrWorld) mustBlock(n int, entries []parityUpdate) {
+	w.t.Helper()
+	require.Truef(w.t, w.block(n, entries), "block %d: HexPatriciaHashed drifted from ground truth", n)
 }
 
 func formatEntries(entries []parityUpdate) string {
@@ -225,7 +352,10 @@ func runIncrStress(t *testing.T, seed int64, blocks, addrs, slots, opsPerBlock i
 				}
 			}
 		}
-		w.block(n, entries)
+		if !w.block(n, entries) {
+			t.Logf("HexPatriciaHashed drifted from ground truth at block %d; v4 matched", w.hphDrift)
+			return
+		}
 	}
 }
 
@@ -267,8 +397,8 @@ func TestParityRootExtensionSplitsAgainstStoredChild(t *testing.T) {
 				}
 				return entries
 			}
-			w.block(0, build(tc.first))
-			w.block(1, build(tc.then))
+			w.mustBlock(0, build(tc.first))
+			w.mustBlock(1, build(tc.then))
 		})
 	}
 }
@@ -289,23 +419,40 @@ func TestParityAccountRootExtensionWithStoredChild(t *testing.T) {
 
 	t.Run("insert_under_shared_prefix", func(t *testing.T) {
 		w := newIncrWorld(t)
-		w.block(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}})
-		w.block(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
-		w.block(2, []parityUpdate{{key: incrAddress(15), update: acct(15)}})
+		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}})
+		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
+		w.mustBlock(2, []parityUpdate{{key: incrAddress(15), update: acct(15)}})
 	})
 
 	t.Run("update_keeps_storage_root", func(t *testing.T) {
 		w := newIncrWorld(t)
-		w.block(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}, storageOf(5, 1, 0x11), storageOf(5, 2, 0x22)})
-		w.block(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
-		w.block(2, []parityUpdate{{key: incrAddress(5), update: acct(50)}})
+		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}, storageOf(5, 1, 0x11), storageOf(5, 2, 0x22)})
+		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
+		w.mustBlock(2, []parityUpdate{{key: incrAddress(5), update: acct(50)}})
 	})
 
 	t.Run("delete_under_shared_prefix", func(t *testing.T) {
 		w := newIncrWorld(t)
-		w.block(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}})
-		w.block(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
-		w.block(2, []parityUpdate{{key: incrAddress(15), update: acct(15)}, {key: incrAddress(31), update: acct(31)}})
-		w.block(3, []parityUpdate{{key: incrAddress(5), update: &commitment.Update{Flags: commitment.DeleteUpdate}}})
+		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}})
+		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
+		w.mustBlock(2, []parityUpdate{{key: incrAddress(15), update: acct(15)}, {key: incrAddress(31), update: acct(31)}})
+		w.mustBlock(3, []parityUpdate{{key: incrAddress(5), update: &commitment.Update{Flags: commitment.DeleteUpdate}}})
+	})
+}
+
+func TestParityDeleteCollapsesBranchBelowRoot(t *testing.T) {
+	acct := func(i int) *commitment.Update {
+		u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
+		u.Nonce = uint64(i + 1)
+		u.Balance = *uint256.NewInt(uint64(i + 1))
+		u.CodeHash = empty.CodeHash
+		return u
+	}
+	w := newIncrWorld(t)
+	w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}})
+	w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
+	w.mustBlock(2, []parityUpdate{
+		{key: incrAddress(15), update: acct(15)},
+		{key: incrAddress(8), update: &commitment.Update{Flags: commitment.DeleteUpdate}},
 	})
 }

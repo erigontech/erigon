@@ -40,6 +40,7 @@ const (
 	removalKeep
 	removalLeaf
 	removalBranch
+	removalNode
 )
 
 type removalState struct {
@@ -47,6 +48,7 @@ type removalState struct {
 	path  []byte
 	hash  []byte
 	value []byte
+	node  *node
 }
 
 func remove(n *node, path []byte) error {
@@ -63,6 +65,13 @@ func remove(n *node, path []byte) error {
 	}
 	_, err := removeAt(n, path)
 	return err
+}
+
+func removeCollapsing(n *node, path []byte) (removalState, error) {
+	if err := remove(n, path); err != nil {
+		return removalState{}, err
+	}
+	return collapsedState(n), nil
 }
 
 func removeAt(n *node, path []byte) (removalState, error) {
@@ -109,6 +118,8 @@ func removeAt(n *node, path []byte) (removalState, error) {
 		setLeafPath(n, nib, state.path, state.value)
 	case removalBranch:
 		setBranchPath(n, nib, state.path, state.hash)
+	case removalNode:
+		setNodePath(n, nib, state.node)
 	}
 	return collapsedState(n), nil
 }
@@ -145,9 +156,11 @@ func collapsedState(n *node) removalState {
 		case removalBranch:
 			setBranchPath(n, nib, state.path, state.hash)
 			return collapsedState(n)
-		default:
-			return removalState{kind: removalKeep}
+		case removalNode:
+			setNodePath(n, nib, state.node)
+			return collapsedState(n)
 		}
+		return removalState{kind: removalNode, path: child.path, node: child}
 	}
 	path := append(append([]byte(nil), n.path...), byte(nib))
 	path = append(path, n.childExtAt(nib)...)
@@ -161,6 +174,14 @@ func setLeafPath(n *node, nib int, path, value []byte) {
 	}
 	var packScratch [32]byte
 	n.setLeaf(nib, packPath(path[depth+1:], packScratch[:0]), value)
+}
+
+func setNodePath(n *node, nib int, child *node) {
+	depth := len(n.path)
+	if child == nil || len(child.path) <= depth || child.path[depth] != byte(nib) || !bytes.HasPrefix(child.path, n.path) {
+		panic("commitment v4: invalid collapsed node path")
+	}
+	n.setChild(nib, child)
 }
 
 func setBranchPath(n *node, nib int, path, hash []byte) {

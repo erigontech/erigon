@@ -17,11 +17,9 @@
 package v4
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"math/bits"
 	"runtime"
 	"slices"
 	"sync/atomic"
@@ -219,11 +217,6 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 				return [32]byte{}, err
 			}
 			continue
-		}
-		if len(root.path) != 0 && !bytes.HasPrefix(result.plan.entry.hashedKey, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
-			if err := materializeAccountRootChild(rawCtx, root); err != nil {
-				return [32]byte{}, err
-			}
 		}
 		if len(root.path) == 0 {
 			if err := insert(root, result.plan.entry.hashedKey, result.value); err != nil {

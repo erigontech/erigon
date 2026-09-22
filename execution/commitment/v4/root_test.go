@@ -99,6 +99,28 @@ func TestRootTransitionsRejectMalformedShape(t *testing.T) {
 	require.ErrorIs(t, insertRoot(n, bytes.Repeat([]byte{2}, 64), []byte{1}), ErrRootShape)
 
 	n = fork(nil)
-	n.setChild(1, fork([]byte{1}))
+	n.setChild(1, fork([]byte{2}))
 	require.ErrorIs(t, collapseRoot(n), ErrRootShape)
+}
+
+func TestRootCollapseAdoptsInMemoryChild(t *testing.T) {
+	for _, plane := range []byte{planeAccount, planeStorage} {
+		t.Run(fmtPlane(plane), func(t *testing.T) {
+			n := fork(nil)
+			n.plane = plane
+			child := fork([]byte{3})
+			leafA := appendPath([]byte{3}, 1, bytes.Repeat([]byte{7}, 62))
+			leafB := appendPath([]byte{3}, 2, bytes.Repeat([]byte{8}, 62))
+			child.setLeaf(1, packPath(leafA[2:], nil), []byte{0xa1})
+			child.setLeaf(2, packPath(leafB[2:], nil), []byte{0xa2})
+			n.setChild(3, child)
+			removed := appendPath(nil, 9, bytes.Repeat([]byte{6}, 63))
+			n.setLeaf(9, packPath(removed[1:], nil), []byte{0x44})
+
+			require.NoError(t, removeRoot(n, removed))
+			require.Equal(t, []byte{3}, n.path)
+			require.Equal(t, 1, bits.OnesCount16(n.childMask))
+			require.Same(t, child, n.child(3))
+		})
+	}
 }

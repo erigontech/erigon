@@ -156,16 +156,6 @@ func (n *node) setStoredChild(nib int, hash []byte, ext []byte) {
 	s.value = nil
 }
 
-func (n *node) setChildHashExt(nib int, hash []byte, ext []byte) {
-	if len(hash) != 32 {
-		panic(fmt.Sprintf("commitment v4: child hash has length %d", len(hash)))
-	}
-	s := n.ensureSlot(nib)
-	n.hashMask |= uint16(1) << nib
-	copy(s.hash[:], hash)
-	s.ext = appendCopy(s.ext, ext)
-}
-
 func (n *node) clearChildExt(nib int) {
 	if s := n.slot(nib); s != nil {
 		s.ext = nil
