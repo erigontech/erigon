@@ -107,7 +107,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	)
 
 	overrideBlockHash = make(map[uint64]common.Hash)
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -122,7 +122,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 
 	defer func(start time.Time) { log.Trace("Executing EVM callMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -132,12 +132,12 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, err
 	}
 
-	err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), blockNum)
+	err = rpchelper.CheckBlockExecuted(tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -162,12 +162,11 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// The state a block starts from is its parent state plus the opening system
 	// transaction. Addressing it by the block itself keeps block 0 representable,
 	// where the parent block number would underflow.
-	stateTx := api.filters.WithTemporalOverlay(tx)
-	cacheView, err := api.stateCache.View(ctx, stateTx)
+	cacheView, err := api.stateCache.View(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, stateTx, blockNum, 0, api._txNumReader)
+	stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

@@ -29,7 +29,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -141,10 +140,9 @@ type overlayAheadHarness struct {
 func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarness {
 	t.Helper()
 
-	var cfg chain.Config
-	require.NoError(t, copier.CopyWithOption(&cfg, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
+	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.LondonBlock = common.NewUint64(0)
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(&cfg))
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(cfg))
 
 	c := insertOverlayRaceChain(t, m)
 	base, doms, events, overlayRoTx := newPublishedOverlayTestBase(t, m)
@@ -913,7 +911,10 @@ func TestHeaderHelpersDoNotReselectOverlay(t *testing.T) {
 	}
 }
 
-func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
+// TestGetBlockNumberReadsOnlyThePassedView pins tx to one overlay generation,
+// publishes a different one, and asserts the resolver still answers from the
+// generation the caller handed it.
+func TestGetBlockNumberReadsOnlyThePassedView(t *testing.T) {
 	base, m, firstHeader, events := newOverlayAheadTestAPIWithEvents(t)
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -942,7 +943,6 @@ func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
 		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(firstHeader.Number.Uint64())),
 		pinnedTx,
 		m.BlockReader,
-		base.filters,
 	)
 	require.NoError(t, err)
 	require.Equal(t, firstHeader.Hash(), hash)

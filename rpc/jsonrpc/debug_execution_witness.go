@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -539,18 +540,23 @@ type ExecutionWitnessResult struct {
 
 	// cachedJSON, when non-nil, is this result's pre-marshaled JSON. The eager
 	// witness cache stores a shell carrying only this, so a hit serves the bytes
-	// verbatim via MarshalFastJSON instead of re-marshaling the struct.
+	// verbatim via MarshalFastJSONTo instead of re-marshaling the struct.
 	cachedJSON []byte
 }
 
-// MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
-// returns its stored bytes verbatim; a freshly built result marshals its exported
-// fields, byte-identical to the cached form so both paths agree.
-func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
-	if m.cachedJSON != nil {
-		return m.cachedJSON, nil
+// MarshalFastJSONTo is the rpc fast-result path: a cache shell writes its stored bytes
+// verbatim; a freshly built result marshals its exported fields, byte-identical to the
+// cached form so both paths agree.
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	enc := m.cachedJSON
+	if enc == nil {
+		var err error
+		if enc, err = json.Marshal(m); err != nil {
+			return err
+		}
 	}
-	return json.Marshal(m)
+	s.WriteRawBytes(enc)
+	return nil
 }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
@@ -765,7 +771,7 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	// orphan into a plain miss and losing the reorged-away signal.
 	resolve := blockNrOrHash
 	resolve.RequireCanonical = false
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false, false
@@ -1343,7 +1349,7 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
 	// TxNums and commitment history must describe the same block view.
-	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}

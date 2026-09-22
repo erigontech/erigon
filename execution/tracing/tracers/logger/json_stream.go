@@ -147,9 +147,6 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		return
 	}
 	l.writePrologueOnce()
-	if l.opcodeSteps > 0 {
-		l.stream.WriteMore()
-	}
 	l.opcodeSteps++
 	var outputStorage bool
 	if !l.cfg.DisableStorage {
@@ -182,62 +179,46 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.WriteObjectStart()
 	l.stream.WriteObjectField("pc")
 	l.stream.WriteUint64(pc)
-	l.stream.WriteMore()
 	l.stream.WriteObjectField("op")
 	l.stream.WriteString(op.String())
-	l.stream.WriteMore()
 	l.stream.WriteObjectField("gas")
 	l.stream.WriteUint64(gas)
-	l.stream.WriteMore()
 	l.stream.WriteObjectField("gasCost")
 	l.stream.WriteUint64(cost)
-	l.stream.WriteMore()
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
 	refund := l.env.IntraBlockState.GetRefund()
 	if refund != 0 {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("refund")
 		l.stream.WriteUint64(refund)
 	}
 
 	if err != nil {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("error")
 		l.stream.WriteString(err.Error())
 	}
 	if !l.cfg.DisableStack {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("stack")
 		l.stream.WriteArrayStart()
 		for i := range stack {
-			if i > 0 {
-				l.stream.WriteMore()
-			}
 			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
 		}
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableMemory && len(memory) > 0 {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
 			end := min(i+32, len(memory))
-			if i > 0 {
-				l.stream.WriteMore()
-			}
 			l.writeWord(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("returnData")
 		l.stream.WriteHex(rData)
 	}
 	if outputStorage {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("storage")
 		l.stream.WriteObjectStart()
 		// Sorted by location for easier comparison with geth
@@ -245,9 +226,6 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.locations = slices.AppendSeq(l.locations[:0], maps.Keys(s))
 		l.locations.Sort()
 		for i := range l.locations {
-			if i > 0 {
-				l.stream.WriteMore()
-			}
 			loc := &l.locations[i]
 			value := s[*loc]
 			l.stream.WriteObjectField(l.hexWithPrefix(loc))

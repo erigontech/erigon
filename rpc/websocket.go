@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -27,6 +28,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -34,6 +36,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/coder/websocket"
 	mapset "github.com/deckarep/golang-set/v2"
 
@@ -47,6 +50,7 @@ const (
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
 	wsMessageSizeLimit = 32 * 1024 * 1024
+	heldWriteLimit     = int(64 * datasize.KB) // held bytes past which a coalesced batch writes out early
 )
 
 // WebsocketHandler returns a handler that serves JSON-RPC to WebSocket connections.
@@ -71,7 +75,8 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			http.Error(w, "Forbidden", http.StatusForbidden)
 			return
 		}
-		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, &websocket.AcceptOptions{
 			InsecureSkipVerify: true, // origin already validated above
 			CompressionMode:    compressionMode,
 		})
@@ -79,7 +84,7 @@ func (s *Server) WebsocketHandler(allowedOrigins []string, jwtSecret []byte, com
 			logger.Warn("WebSocket upgrade failed", "err", err)
 			return
 		}
-		codec := NewWebsocketCodec(conn, r.Host, r.Header, r.RemoteAddr)
+		codec := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
 		// Tag the connection context so BeginRo fails fast (ErrReadTxLimitExceeded)
 		// instead of blocking indefinitely when the DB semaphore is full.
 		// r.Context() remains valid for the lifetime of the WebSocket session because
@@ -253,12 +258,98 @@ func wsClientHeaders(endpoint, origin string) (string, http.Header, error) {
 }
 
 // wsConnAdapter adapts coder/websocket.Conn to satisfy the deadlineCloser interface
-// used by jsonCodec. Write deadlines set by jsonCodec are stored and applied as
-// context deadlines on the underlying coder write calls.
+// used by jsonCodec. A write deadline set by jsonCodec bounds the next write: on the
+// hijacked socket on the server side, as a context deadline on the client side.
 type wsConnAdapter struct {
 	conn     *websocket.Conn
+	netConn  *heldConn // the hijacked socket on the server side, nil on the client side
 	mu       sync.Mutex
 	deadline time.Time
+}
+
+// hijackRecorder keeps the socket websocket.Accept hijacks, so writes can bound it directly.
+type hijackRecorder struct {
+	http.ResponseWriter
+	conn *heldConn
+}
+
+func (h *hijackRecorder) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	c, rw, err := http.NewResponseController(h.ResponseWriter).Hijack()
+	if err != nil {
+		return c, rw, err
+	}
+	h.conn = &heldConn{Conn: c}
+	rw.Writer.Reset(h.conn)
+	return h.conn, rw, nil
+}
+
+// heldConn holds back its writes while a batch is open, so the batch leaves in one socket write.
+type heldConn struct {
+	net.Conn
+	mu      sync.Mutex
+	batches int
+	held    *bytes.Buffer
+}
+
+func (c *heldConn) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.batches == 0 {
+		return c.Conn.Write(p)
+	}
+	if len(p) >= heldWriteLimit { // holding it saves no socket write, only copies it
+		if c.held != nil {
+			if err := c.flushLocked(); err != nil {
+				return 0, err
+			}
+		}
+		return c.Conn.Write(p)
+	}
+	if c.held == nil {
+		c.held = pool.GetBuffer()
+	}
+	c.held.Write(p)
+	if c.held.Len() < heldWriteLimit {
+		return len(p), nil
+	}
+	return len(p), c.flushLocked()
+}
+
+func (c *heldConn) hold() {
+	c.mu.Lock()
+	c.batches++
+	c.mu.Unlock()
+}
+
+// release ends a batch and writes out all held bytes, those of other open batches too: bytes
+// leave in the order they were written either way.
+func (c *heldConn) release(deadline time.Time) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.batches--
+	if c.held == nil {
+		return nil
+	}
+	if err := c.Conn.SetWriteDeadline(deadline); err != nil {
+		return err
+	}
+	defer c.Conn.SetWriteDeadline(time.Time{}) //nolint:errcheck
+	return c.flushLocked()
+}
+
+func (c *heldConn) flushLocked() error {
+	_, err := c.Conn.Write(c.held.Bytes())
+	pool.PutBuffer(c.held)
+	c.held = nil
+	return err
+}
+
+// WriteHeaderNow passes on the probe coder makes after writing the 101, so a writer that
+// delays its header still sends it.
+func (h *hijackRecorder) WriteHeaderNow() {
+	if w, ok := h.ResponseWriter.(interface{ WriteHeaderNow() }); ok {
+		w.WriteHeaderNow()
+	}
 }
 
 func (a *wsConnAdapter) Close() error {
@@ -277,8 +368,19 @@ func (a *wsConnAdapter) encode(v any) error {
 	dl := a.deadline
 	a.mu.Unlock()
 
+	// The deadline goes on the socket rather than the context when there is one: for a context
+	// that can expire, coder arms a timer and a callback per frame, which doubled the cost of a
+	// small notification. coder's own pongs and close frames carry their own 5s context, well
+	// inside it.
 	ctx := context.Background()
-	if !dl.IsZero() {
+	if a.netConn != nil {
+		if !dl.IsZero() {
+			if err := a.netConn.SetWriteDeadline(dl); err != nil {
+				return err
+			}
+			defer a.netConn.SetWriteDeadline(time.Time{}) //nolint:errcheck
+		}
+	} else if !dl.IsZero() {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithDeadline(ctx, dl)
 		defer cancel()
@@ -299,7 +401,13 @@ func (a *wsConnAdapter) encode(v any) error {
 		}
 		data = marshaled
 	}
-	return a.conn.Write(ctx, websocket.MessageText, data)
+	err := a.conn.Write(ctx, websocket.MessageText, data)
+	if err != nil && a.netConn != nil {
+		// A write cut off by the socket deadline can leave half a frame. coder closes the
+		// connection when a context expires; do the same.
+		_ = a.conn.CloseNow()
+	}
+	return err
 }
 
 // messageWriter returns a writer for the next message. Nothing is sent until the first Write;
@@ -417,8 +525,13 @@ type websocketCodec struct {
 // NewWebsocketCodec wraps a coder websocket connection as a ServerCodec.
 // remoteAddr should be r.RemoteAddr on the server side, or the endpoint URL on the client side.
 func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remoteAddr string) ServerCodec {
+	return newWebsocketCodec(conn, nil, host, req, remoteAddr)
+}
+
+// newWebsocketCodec is NewWebsocketCodec with the hijacked socket, which bounds and coalesces server writes.
+func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, host string, req http.Header, remoteAddr string) *websocketCodec {
 	conn.SetReadLimit(wsMessageSizeLimit)
-	adapter := &wsConnAdapter{conn: conn}
+	adapter := &wsConnAdapter{conn: conn, netConn: netConn}
 	wc := &websocketCodec{
 		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
@@ -427,6 +540,7 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 			RemoteAddr: remoteAddr,
 		},
 	}
+	wc.held = netConn
 	wc.writeTimeout = wsPingInterval
 	// Fill in connection details.
 	wc.info.HTTP.Host = host

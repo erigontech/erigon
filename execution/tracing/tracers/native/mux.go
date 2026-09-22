@@ -71,10 +71,10 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
 			OnTxEnd:             t.OnTxEnd,
-			OnEnter:             t.OnEnter,
-			OnExit:              t.OnExit,
-			OnOpcode:            t.OnOpcode,
-			OnFault:             t.OnFault,
+			OnEnterV2:           t.OnEnterV2,
+			OnExitV2:            t.OnExitV2,
+			OnOpcodeV2:          t.OnOpcodeV2,
+			OnFaultV2:           t.OnFaultV2,
 			OnGasChangeV2:       t.OnGasChangeV2,
 			OnBalanceChange:     t.OnBalanceChange,
 			OnNonceChangeV2:     t.OnNonceChangeV2,
@@ -89,25 +89,15 @@ func (t *muxTracer) tracer() *tracers.Tracer {
 	}
 }
 
-func (t *muxTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnOpcode != nil {
-			t.OnOpcode(pc, op, gas, cost, scope, rData, depth, err)
-		}
+func (t *muxTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+	for _, child := range t.tracers {
+		child.Hooks.EmitOpcode(pc, op, gas, cost, scope, rData, depth, err)
 	}
 }
 
-func (t *muxTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnFault != nil {
-			t.OnFault(pc, op, gas, cost, scope, depth, err)
-		}
+func (t *muxTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+	for _, child := range t.tracers {
+		child.Hooks.EmitFault(pc, op, gas, cost, scope, depth, err)
 	}
 }
 
@@ -117,25 +107,15 @@ func (t *muxTracer) OnGasChangeV2(old, new mdgas.MdGas, reason tracing.GasChange
 	}
 }
 
-func (t *muxTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnEnter != nil {
-			t.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
-		}
+func (t *muxTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	for _, child := range t.tracers {
+		child.Hooks.EmitEnter(depth, typ, from, to, precompile, input, gas, value, code)
 	}
 }
 
-func (t *muxTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	for _, t := range t.tracers {
-		if t.Hooks == nil {
-			continue
-		}
-		if t.OnExit != nil {
-			t.OnExit(depth, output, gasUsed, err, reverted)
-		}
+func (t *muxTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
+	for _, child := range t.tracers {
+		child.Hooks.EmitExit(depth, output, gasUsed, err, reverted)
 	}
 }
 

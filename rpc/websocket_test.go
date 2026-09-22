@@ -30,7 +30,9 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"runtime"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -454,6 +456,78 @@ func TestWebsocketServerGracefulClose(t *testing.T) {
 	}
 }
 
+// A peer that stops reading must not hold a writer forever: once the socket buffers fill, a
+// write fails at the codec's write timeout, and the connection is closed rather than left
+// with half a frame on the wire.
+func TestWebsocketWriteTimeoutClosesStalledConn(t *testing.T) {
+	t.Parallel()
+
+	codecs := make(chan *websocketCodec, 1)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, nil)
+		if err != nil {
+			return
+		}
+		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		defer wc.Close()
+		codecs <- wc
+		// A hijacked request's context never ends, so wait for the connection itself.
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	conn.SetReadLimit(-1)
+
+	wc := <-codecs
+	wc.writeTimeout = 200 * time.Millisecond
+	payload := rawResponse(`"` + strings.Repeat("x", 1<<20) + `"`)
+	failed := make(chan struct{})
+	var writeErr error
+	go func() {
+		for writeErr == nil {
+			writeErr = wc.WriteJSON(context.Background(), payload)
+		}
+		close(failed)
+	}()
+	select {
+	case <-failed:
+		// The socket deadline surfaces as an i/o timeout; a context deadline would not.
+		if !errors.Is(writeErr, os.ErrDeadlineExceeded) {
+			t.Fatalf("the stalled write failed with %v, want the socket deadline", writeErr)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("writes to a peer that does not read never failed")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				close(closed)
+				return
+			}
+		}
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the connection with the cut-off write was not closed")
+	}
+}
+
 func TestWebsocketPingNotRearmedAfterClose(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
@@ -524,6 +598,142 @@ func TestWebsocketIdlePing(t *testing.T) {
 			t.Fatal("ping did not re-arm the timer")
 		}
 		time.Sleep(time.Millisecond)
+	}
+}
+
+type writeCountingConn struct {
+	net.Conn
+	writes *atomic.Int64
+}
+
+func (c writeCountingConn) Write(p []byte) (int, error) {
+	c.writes.Add(1)
+	return c.Conn.Write(p)
+}
+
+func TestWebsocketCoalescedMessagesLeaveInOneWrite(t *testing.T) {
+	t.Parallel()
+
+	var writes atomic.Int64
+	codecs := make(chan *websocketCodec, 1)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, nil)
+		if err != nil {
+			return
+		}
+		hw.conn.Conn = writeCountingConn{hw.conn.Conn, &writes}
+		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		defer wc.Close()
+		codecs <- wc
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+
+	wc := <-codecs
+	before := writes.Load()
+	err = wc.coalesce(func() {
+		for i := range 3 {
+			if err := wc.WriteJSON(context.Background(), rawResponse(strconv.Itoa(i))); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := writes.Load() - before; got != 1 {
+		t.Errorf("3 coalesced messages took %d socket writes, want 1", got)
+	}
+	for i := range 3 {
+		_, data, err := conn.Read(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != strconv.Itoa(i) {
+			t.Fatalf("message %d is %q", i, data)
+		}
+	}
+
+	msgs := []string{"0", strconv.Quote(strings.Repeat("x", 2*heldWriteLimit)), "2"}
+	conn.SetReadLimit(int64(4 * heldWriteLimit))
+	err = wc.coalesce(func() {
+		for _, m := range msgs {
+			if err := wc.WriteJSON(context.Background(), rawResponse(m)); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range msgs {
+		_, data, err := conn.Read(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != want {
+			t.Fatalf("message %d is %d bytes, want %d", i, len(data), len(want))
+		}
+	}
+}
+
+// peakService records the most calls it ran at once.
+type peakService struct{ inflight, peak atomic.Int32 }
+
+func (s *peakService) Hold() {
+	n := s.inflight.Add(1)
+	for p := s.peak.Load(); n > p && !s.peak.CompareAndSwap(p, n); p = s.peak.Load() {
+	}
+	time.Sleep(20 * time.Millisecond)
+	s.inflight.Add(-1)
+}
+
+func TestWebsocketBatchUsesServerConcurrency(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	srv.batchConcurrency = 2
+	svc := new(peakService)
+	if err := srv.RegisterName("peak", svc); err != nil {
+		t.Fatal(err)
+	}
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+
+	client, err := DialContext(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), logger)
+	if err != nil {
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer client.Close()
+	batch := make([]BatchElem, 8)
+	for i := range batch {
+		batch[i] = BatchElem{Method: "peak_hold", Result: new(any)}
+	}
+	if err := client.BatchCall(batch); err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range batch {
+		if e.Error != nil {
+			t.Fatal(e.Error)
+		}
+	}
+	if peak := svc.peak.Load(); peak > 2 {
+		t.Fatalf("websocket batch ran %d calls at once, server allows 2", peak)
 	}
 }
 

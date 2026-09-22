@@ -98,7 +98,14 @@ func (s *Server) SetBatchLimit(limit int) {
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this server provides to clients.
 func (s *Server) RegisterName(name string, receiver any) error {
-	return s.services.registerName(name, receiver)
+	return s.services.registerName(name, receiver, nil)
+}
+
+// RegisterAPI registers api.Service under api.Namespace, limited to api.Iface when set.
+// It fails when api.Service does not implement api.Iface, so a renamed or mistyped method
+// is not withheld silently.
+func (s *Server) RegisterAPI(api API) error {
+	return s.services.registerName(api.Namespace, api.Service, api.Iface)
 }
 
 // ServeCodec reads incoming requests from codec, calls the appropriate callback and writes
@@ -125,21 +132,36 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClientWithBaseCtx(connCtx, codec, s.idgen, &s.services, s.batchLimit, s.logger)
-	<-codec.closed()
-	c.Close()
+	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
+	for {
+		msgs, batch, err := readBatch(codec, s.logger)
+		if err != nil {
+			h.close(err, nil)
+			return
+		}
+		if batch {
+			h.handleBatch(msgs)
+		} else {
+			h.handleMsg(msgs[0], nil)
+		}
+	}
+}
+
+// newConnHandler builds the handler of one connection, so every transport applies the
+// server's allow list and limits.
+func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
+	return newHandler(ctx, conn, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
-// is used to serve HTTP connections. Subscriptions and reverse calls are not allowed in
-// this mode.
+// is used to serve HTTP connections. Subscriptions are not allowed in this mode.
 func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream jsonstream.Stream) *jsonrpcMessage {
 	// Don't serve if server is stopped.
 	if !s.run.Load() {
 		return nil
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
+	h := s.newConnHandler(ctx, codec)
 	h.allowSubscribe = false
 	h.inlineCalls = true
 	defer h.close(io.EOF, nil)
