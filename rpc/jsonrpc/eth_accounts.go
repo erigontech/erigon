@@ -41,7 +41,9 @@ const maxGetStorageSlots = 1024
 // building has not been executed, so there is no state for it yet.
 func pendingStateAtLatest(blockNrOrHash rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
-		return rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+		latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+		latest.RequireCanonical = blockNrOrHash.RequireCanonical
+		return latest
 	}
 	return blockNrOrHash
 }

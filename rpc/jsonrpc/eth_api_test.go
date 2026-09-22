@@ -113,8 +113,8 @@ func TestStateReadAtPendingWhileBlockIsBuilt(t *testing.T) {
 	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7")
-	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
-	want, err := api.GetBalance(t.Context(), addr, &latest)
+	latestExecuted := rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+	want, err := api.GetBalance(t.Context(), addr, &latestExecuted)
 	require.NoError(t, err)
 
 	head, err := api.BlockNumber(t.Context())
