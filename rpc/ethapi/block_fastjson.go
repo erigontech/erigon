@@ -182,20 +182,9 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
 func writeTxElem(s *jsonstream.StackStream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }
 
+// writeWithdrawalElem never fails: Withdrawal.MarshalFastJSONTo reports no error.
 func writeWithdrawalElem(s *jsonstream.StackStream, wd **types.Withdrawal) {
-	if *wd == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	s.WriteObjectField("index").WriteQuotedText(&(*wd).Index)
-	s.WriteMore()
-	s.WriteObjectField("validatorIndex").WriteQuotedText(&(*wd).Validator)
-	s.WriteMore()
-	s.WriteObjectField("address").WriteHex((*wd).Address[:])
-	s.WriteMore()
-	s.WriteObjectField("amount").WriteQuotedText(&(*wd).Amount)
-	s.WriteObjectEnd()
+	_ = (*wd).MarshalFastJSONTo(s)
 }
 
 // marshalIfSet encodes v unless it is absent, so the caller states each field once.

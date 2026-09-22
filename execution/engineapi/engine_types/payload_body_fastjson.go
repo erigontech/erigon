@@ -67,17 +67,5 @@ func writeBodyFields(s *jsonstream.StackStream, txs []hexutil.Bytes, withdrawals
 	s.WriteObjectField("transactions")
 	jsonstream.ArrayValue(s, txs, func(s *jsonstream.StackStream, txn *hexutil.Bytes) { s.WriteHex(*txn) })
 	s.WriteObjectField("withdrawals")
-	jsonstream.ArrayValue(s, withdrawals, func(s *jsonstream.StackStream, wp **types.Withdrawal) {
-		w := *wp
-		if w == nil {
-			s.WriteNil()
-			return
-		}
-		s.WriteObjectStart()
-		s.WriteObjectField("index").WriteQuotedText(&w.Index)
-		s.WriteObjectField("validatorIndex").WriteQuotedText(&w.Validator)
-		s.WriteObjectField("address").WriteHex(w.Address[:])
-		s.WriteObjectField("amount").WriteQuotedText(&w.Amount)
-		s.WriteObjectEnd()
-	})
+	jsonstream.ArrayValue(s, withdrawals, func(s *jsonstream.StackStream, w **types.Withdrawal) { _ = (*w).MarshalFastJSONTo(s) })
 }
