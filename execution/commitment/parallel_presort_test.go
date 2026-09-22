@@ -153,6 +153,27 @@ func TestPresort_MidBatchFlushKeepsMergeOrder(t *testing.T) {
 	require.Equal(t, want, got, "a memory-limited flush must not change the merge order")
 }
 
+func TestPresort_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {
+	t.Parallel()
+
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+
+	buf := make([]byte, 64)
+	for v := byte(1); v <= 2; v++ {
+		for i := range buf {
+			buf[i] = v
+		}
+		ut.TouchHashedKey(buf)
+	}
+
+	require.Equal(t, uint64(2), ut.Size())
+	ut.parallel.Build()
+	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount,
+		"a reused caller buffer must not collapse two keys into one")
+	require.Len(t, ut.parallel.trie.root.children, 2)
+}
+
 func TestPresort_BucketOfIsOrderPreserving(t *testing.T) {
 	t.Parallel()
 

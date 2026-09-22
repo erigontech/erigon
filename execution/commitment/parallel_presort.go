@@ -23,11 +23,10 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"unsafe"
 )
 
 const presortBuckets = 256
-
-const presortEntrySize = 64
 
 const presortBucketKeep = 8192
 
@@ -39,6 +38,8 @@ type presortEntry struct {
 	update    *Update
 	seq       uint32
 }
+
+const presortEntrySize = int(unsafe.Sizeof(presortEntry{}))
 
 type presorter struct {
 	buckets [presortBuckets][]presortEntry

@@ -1582,7 +1582,7 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			t.parallel.Collect(hashedKey, nil, nil)
+			t.parallel.Collect(common.ToBytesZeroCopy(dedupKey), nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
 	case ModeUpdate:
