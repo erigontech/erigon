@@ -150,7 +150,7 @@ func TestPBinStorageGroupSharing(t *testing.T) {
 
 		pph.Reset()
 		upd := WrapKeyUpdates(t, ModeDirect, pbinKeyHasher(), touched.plainKeys, touched.updates)
-		got, proved, root, err := pph.Witnesses(context.Background(), upd, false, "")
+		got, proved, root, err := pph.Witnesses(context.Background(), upd, false)
 		require.NoError(t, err)
 		lean, err := PBinWitnessNodesForKeys(got, root, proved)
 		require.NoError(t, err)

@@ -144,7 +144,7 @@ func pbinWitnessCapture(t *testing.T, variant commitment.TrieVariant) (nodes, pr
 
 	sdc := pbinWitnessTrieCtx(t, variant, state)
 	pbinWitnessTouchAll(sdc, touches)
-	nodes, provedKeys, root, err = sdc.witnessCapture(t.Context(), false, "test")
+	nodes, provedKeys, root, err = sdc.witnessCapture(t.Context(), false)
 	return nodes, provedKeys, root, committedRoot, err
 }
 
@@ -178,14 +178,14 @@ func TestPBinWitnessCaptureHexUnchanged(t *testing.T) {
 
 	viaCapture := pbinWitnessTrieCtx(t, commitment.VariantHexPatriciaTrie, state)
 	pbinWitnessTouchAll(viaCapture, touches)
-	nodes, provedKeys, root, err := viaCapture.witnessCapture(t.Context(), true, "test")
+	nodes, provedKeys, root, err := viaCapture.witnessCapture(t.Context(), true)
 	require.NoError(t, err)
 
 	direct := pbinWitnessTrieCtx(t, commitment.VariantHexPatriciaTrie, state)
 	pbinWitnessTouchAll(direct, touches)
 	hph, ok := direct.Trie().(*commitment.HexPatriciaHashed)
 	require.True(t, ok)
-	wantNodes, wantKeys, wantRoot, err := hph.Witnesses(t.Context(), direct.updates, true, "test")
+	wantNodes, wantKeys, wantRoot, err := hph.Witnesses(t.Context(), direct.updates, true)
 	require.NoError(t, err)
 
 	require.Equal(t, committedRoot, wantRoot)
@@ -210,12 +210,12 @@ func TestPBinWitnessNodesPrunesPerVariant(t *testing.T) {
 
 			capture := pbinWitnessTrieCtx(t, variant, state)
 			pbinWitnessTouchAll(capture, touches)
-			full, provedKeys, root, err := capture.witnessCapture(t.Context(), false, "test")
+			full, provedKeys, root, err := capture.witnessCapture(t.Context(), false)
 			require.NoError(t, err)
 
 			sdc := pbinWitnessTrieCtx(t, variant, state)
 			pbinWitnessTouchAll(sdc, touches)
-			lean, rootHash, err := sdc.WitnessNodes(t.Context(), false, "test")
+			lean, rootHash, err := sdc.WitnessNodes(t.Context(), false)
 			require.NoError(t, err)
 			require.Equal(t, committedRoot, rootHash)
 			require.NotEmpty(t, lean)
@@ -248,7 +248,7 @@ func TestPBinWitnessCaptureRejectsUnknownTrie(t *testing.T) {
 	sdc := pbinStateTestCtx(t, commitment.VariantHexPatriciaTrie)
 	sdc.patriciaTrie = pbinWitnessCaptureLessTrie{}
 
-	_, _, _, err := sdc.witnessCapture(context.Background(), false, "test")
+	_, _, _, err := sdc.witnessCapture(context.Background(), false)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "pbinWitnessCaptureLessTrie")
 	require.Contains(t, err.Error(), "captures no witness")

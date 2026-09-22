@@ -18,15 +18,25 @@ package rpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -476,11 +486,8 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
-// respond mirrors answerInto: the success response, or the error response if the result does not encode.
 func respond(s jsonstream.Stream, id json.RawMessage, result any) {
-	if errMsg := (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result); errMsg != nil {
-		errMsg.writeTo(s)
-	}
+	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
 
 func blockResultFixture(n int) map[string]any {
@@ -545,17 +552,54 @@ func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
+func TestResponseWritesJSONToStream(t *testing.T) {
+	large := hexutil.Bytes(bytes.Repeat([]byte{0xab}, 2*jsonstream.FlushThreshold))
+	results := []any{
+		hexutil.Bytes("small"), large, hexutil.Bytes(nil), (*hexutil.Bytes)(nil),
+		hexutil.Uint64(0x1234), hexutil.Uint(7), (*hexutil.Uint)(nil),
+		common.HexToHash("0xdead"), common.HexToAddress("0xbeef"),
+		(*hexutil.U256)(uint256.NewInt(255)),
+	}
+	for _, result := range results {
+		want, err := json.Marshal(result)
+		require.NoError(t, err)
+		for _, out := range []io.Writer{new(bytes.Buffer), nil} {
+			s := jsonstream.Get(out)
+			respond(s, json.RawMessage(`7`), result)
+			require.NoError(t, s.Flush())
+			got := s.Buffer()
+			if b, ok := out.(*bytes.Buffer); ok {
+				got = b.Bytes()
+			}
+			require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":`+string(want)+`}`, string(got))
+			jsonstream.Put(s)
+		}
+	}
+}
+
 // WS/IPC reads the bytes back out of Buffer with no writer at all, so a failure
 // signalled only through Flush would be invisible there.
 func TestResponseEncodeFailureAcrossTransports(t *testing.T) {
+	t.Run("json", func(t *testing.T) { testResponseEncodeFailure(t, make(chan int)) })
+	t.Run("fast", func(t *testing.T) { testResponseEncodeFailure(t, failingFastJSON{}) })
+}
+
+type failingFastJSON struct{}
+
+func (failingFastJSON) MarshalFastJSONTo(*jsonstream.StackStream) error {
+	return errors.New("encode failed")
+}
+
+func testResponseEncodeFailure(t *testing.T, result any) {
 	bad := func(s jsonstream.Stream) {
-		respond(s, json.RawMessage(`7`), make(chan int))
+		respond(s, json.RawMessage(`7`), result)
 	}
 	assertErrorResponse := func(t *testing.T, raw []byte) {
 		t.Helper()
 		var got jsonrpcMessage
 		require.NoError(t, json.Unmarshal(raw, &got), "must be valid JSON: %s", raw)
 		require.NotNil(t, got.Error, "must be an error response, got %s", raw)
+		require.Nil(t, got.Result, "a response carries error or result, never both: %s", raw)
 		require.Equal(t, `7`, string(got.ID))
 	}
 
@@ -649,4 +693,57 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		require.NotContains(t, back, "result")
 	}
 
+}
+
+type failingAppender struct{}
+
+func (failingAppender) AppendText([]byte) ([]byte, error) { return nil, errors.New("append failed") }
+
+type failingMidWrite struct{}
+
+func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	w.WriteObjectStart()
+	w.WriteObjectField("balance")
+	w.WriteQuotedText(failingAppender{})
+	w.WriteObjectEnd()
+	return nil
+}
+
+// A write that fails after the result opened keeps the response valid JSON: the partial result
+// stays, the error follows it, and the caller learns about it for its metrics and log.
+func TestResponseLatchedErrorKeepsValidJSON(t *testing.T) {
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+
+	err := (&jsonrpcMessage{Version: vsn, ID: json.RawMessage(`7`)}).writeResponse(s, failingMidWrite{})
+
+	require.Error(t, err)
+	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32000,"message":"append failed"}}`, string(s.Buffer()))
+	require.True(t, json.Valid(s.Buffer()))
+}
+
+// An IPC connection coalesces notifications like a websocket one does.
+func TestCodecCoalescedMessagesLeaveInOneWrite(t *testing.T) {
+	t.Parallel()
+	server, client := net.Pipe()
+	defer client.Close()
+	var writes atomic.Int64
+	codec := NewCodec(&heldConn{Conn: writeCountingConn{server, &writes}}).(*jsonCodec)
+	defer codec.Close()
+	read := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(io.LimitReader(client, int64(len("0\n1\n2\n"))))
+		read <- string(b)
+	}()
+
+	err := codec.coalesce(func() {
+		for i := range 3 {
+			if err := codec.WriteJSON(context.Background(), rawResponse(strconv.Itoa(i))); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), writes.Load(), "3 coalesced messages, socket writes")
+	require.Equal(t, "0\n1\n2\n", <-read)
 }

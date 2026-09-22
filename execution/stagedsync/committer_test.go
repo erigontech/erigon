@@ -268,6 +268,7 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 		balRoots:      map[uint64][]byte{},
 		hasFirstBlock: true,
 		firstBlockNum: 5, // gate open for block 5 without a prior blockResult
+		perBlockFrom:  100,
 	}
 
 	// Coalesce block M=4: block 5 is past M and must not compute ahead.
@@ -275,6 +276,65 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
 
 	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+func TestComputeAheadCap_StopsOperationalWindDown(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	defer cancel(nil)
+
+	cause := errors.New("commitment lazy-load failed")
+	pe := &parallelExecutor{cancelExecLoop: cancel}
+	pe.cancelOperational(4, cause)
+
+	sc, ok := stopCauseOf(signalCtx)
+	require.True(t, ok, "operational cancellation must publish its block boundary")
+	require.Equal(t, uint64(4), sc.block)
+	require.Equal(t, stopOperational, sc.kind)
+	require.Same(t, cause, sc.err)
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  100,
+	}
+
+	cc.maybeComputeAhead(context.Background(), 5)
+	assert.False(t, cc.computedAhead[5], "failure wind-down must not compute ahead past its block")
+}
+
+func TestComputeAheadCap_StopsUnboundedCancellation(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	dbg.BALDrivenCommitment = true
+
+	signalCtx, cancel := context.WithCancelCause(context.Background())
+	cancel(errors.New("apply loop panicked"))
+	_, bounded := stopCauseOf(signalCtx)
+	require.False(t, bounded, "a raw cancellation has no safe compute-ahead boundary")
+
+	cc := &commitmentCalculator{
+		signalCtx: signalCtx,
+		pending: map[uint64]*pendingBlock{
+			5: {req: &blockRequest{blockNum: 5, bal: make(types.BlockAccessList, 1)}, mode: calcModeBALDriven},
+		},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  100,
+	}
+
+	require.NotPanics(t, func() { cc.maybeComputeAhead(context.Background(), 5) },
+		"an unbounded cancellation must stop new speculative commitment work")
+	assert.False(t, cc.computedAhead[5])
 }
 
 // TestContiguityGuard_ChainNeverRecovers pins that one block without a BAL ends
@@ -420,7 +480,7 @@ func testCommitmentCalculatorBALDualFold(t *testing.T, code []byte, withStorage 
 
 	key := accounts.InternAddress(common.Address{2})
 	keyBytes := key.Value()
-	changes := types.AccountChanges{Address: key, NonceChanges: []*types.NonceChange{{Index: 0, Value: 2}}}
+	changes := types.AccountChanges{Address: key.Value(), NonceChanges: []*types.NonceChange{{Index: 0, Value: 2}}}
 	if code != nil {
 		changes.CodeChanges = []*types.CodeChange{{Index: 0, Bytecode: code}}
 	}
@@ -437,7 +497,7 @@ func testCommitmentCalculatorBALDualFold(t *testing.T, code []byte, withStorage 
 		logger:      log.New(),
 	}
 	t.Cleanup(cc.updates.Close)
-	result, err := cc.computeRootFromBAL(t.Context(), &blockRequest{
+	result, _, err := cc.computeRootFromBAL(t.Context(), &blockRequest{
 		blockNum:   1,
 		blockHash:  common.Hash{2},
 		lastTxNum:  1,

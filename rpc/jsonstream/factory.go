@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"bytes"
 	"io"
 	"sync"
 
@@ -34,9 +35,15 @@ const FlushThreshold = int(64 * datasize.KB)
 // flushIfFull hands the buffer over once it is full, so a large response streams
 // instead of being held whole.
 func flushIfFull(stream *jsoniter.Stream) {
-	if len(stream.Buffer()) < FlushThreshold {
-		return
+	if len(stream.Buffer()) >= FlushThreshold {
+		flushFull(stream)
 	}
+}
+
+// flushFull is outlined so the threshold check stays inlinable into every value write.
+//
+//go:noinline
+func flushFull(stream *jsoniter.Stream) {
 	if err := stream.Flush(); err != nil {
 		// Discarded, not retried: jsoniter latches err on the stream, so every
 		// later Flush returns it without draining and these bytes can never
@@ -60,7 +67,7 @@ const maxPooledBufferSize = 16 * FlushThreshold
 
 // Get is New over a pool. Put the stream back once its bytes have left it;
 // skipping Put only costs the recycling.
-func Get(out io.Writer) Stream {
+func Get(out io.Writer) *StackStream {
 	s := streamPool.Get().(*StackStream)
 	s.Reset(out)
 	return s
@@ -75,4 +82,17 @@ func Put(s Stream) {
 	}
 	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection
 	streamPool.Put(ss)
+}
+
+// Marshal encodes v into a byte slice the caller owns.
+func Marshal(v interface{ MarshalFastJSONTo(*StackStream) error }) ([]byte, error) {
+	s := Get(nil)
+	defer Put(s)
+	if err := v.MarshalFastJSONTo(s); err != nil {
+		return nil, err
+	}
+	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
+		return nil, err
+	}
+	return bytes.Clone(s.Buffer()), nil
 }

@@ -44,6 +44,8 @@ type MockState struct {
 	cm     map[string]BranchData
 	code   map[string][]byte
 	numBuf [binary.MaxVarintLen64]byte
+
+	putBranches int
 }
 
 func NewMockState(t testing.TB) *MockState {
@@ -72,6 +74,7 @@ func (ms *MockState) PutBranch(prefix []byte, data []byte, prevData []byte) erro
 	// Clone is required by PutBranch's no-retain contract, not incidental: callers pass
 	// pooled buffers. Storing data directly silently corrupts branches on pool reuse.
 	ms.cm[string(prefix)] = bytes.Clone(data)
+	ms.putBranches++
 	return nil
 }
 

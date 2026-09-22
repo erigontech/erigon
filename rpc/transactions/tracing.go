@@ -18,7 +18,6 @@ package transactions
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -225,7 +224,8 @@ func ExecuteTraceTx(
 	// Set the tracer hooks to the intra-block state before execute, so the OnLog hook may be set correctly.
 	ibs.SetHooks(tracer.Hooks)
 	// Run the transaction with tracing enabled.
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
+	vmConfig := vm.Config{Tracer: tracer.Hooks, NoBaseFee: true}
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 	refunds := true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
@@ -242,20 +242,17 @@ func ExecuteTraceTx(
 	// Depending on the tracer type, format and return the output
 	if streaming {
 		stream.WriteArrayEnd()
-		stream.WriteMore()
 		stream.WriteObjectField("gas")
 		stream.WriteUint64(result.ReceiptGasUsed)
-		stream.WriteMore()
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())
-		stream.WriteMore()
 		// If the result contains a revert reason, return it.
-		returnVal := hex.EncodeToString(result.Return())
+		ret := result.Return()
 		if len(result.Revert()) > 0 {
-			returnVal = hex.EncodeToString(result.Revert())
+			ret = result.Revert()
 		}
 		stream.WriteObjectField("returnValue")
-		stream.WriteString("0x" + returnVal)
+		stream.WriteHex(ret)
 		stream.WriteObjectEnd()
 	} else {
 		r, err := tracer.GetResult()

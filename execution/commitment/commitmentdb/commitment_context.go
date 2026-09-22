@@ -382,7 +382,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 // witnessTrie is the capture seam: each engine walks its own tree and returns the
 // nodes it hashed. Both variants implement it, so the capture names no concrete trie.
 type witnessTrie interface {
-	Witnesses(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error)
+	Witnesses(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error)
 }
 
 var (
@@ -406,63 +406,53 @@ func (sdc *SharedDomainsCommitmentContext) SetWitnessBlock(b commitment.PBinWitn
 
 // witnessCapture runs the on-the-fly fold and returns the captured superset node
 // set (root first), the fold's hashed keys, and the root hash.
-func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	defer sdc.SetWitnessBlock(commitment.PBinWitnessBlock{}) // Witnesses clears it too, but only once it runs
 
 	capturer, ok := sdc.Trie().(witnessTrie)
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("commitment trie %T captures no witness", sdc.Trie())
 	}
-	return capturer.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
+	return capturer.Witnesses(ctx, sdc.updates, produceExclusionProofs)
+}
+
+func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+	}
+	byHash, _, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, false)
+	return byHash, rootHash, err
 }
 
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
-// superset to the proof paths of the fold's keys, returning the node bytes (root
-// first) and the root hash. This is the strict-verifier (reth) form.
-//
-// Each variant prunes with its own walker: the hex one is MPT-shaped and cannot
-// read a bin preimage.
-func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
-	full, provedKeys, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
+// superset to the proof paths of the fold's keys, returning the RLP node bytes
+// (root first) and the root hash. This is the strict-verifier (reth) form.
+func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool) (nodes [][]byte, rootHash []byte, err error) {
+	if sdc.variant == commitment.VariantBinPatriciaTrie {
+		full, provedKeys, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs)
+		if err != nil {
+			return nil, nil, err
+		}
+		lean, err := commitment.PBinWitnessNodesForKeys(full, rootHash, provedKeys)
+		if err != nil {
+			return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
+		}
+		return lean, rootHash, nil
+	}
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+	}
+	byHash, provedKeys, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, err
 	}
-	var lean [][]byte
-	if sdc.variant == commitment.VariantBinPatriciaTrie {
-		lean, err = commitment.PBinWitnessNodesForKeys(full, rootHash, provedKeys)
-	} else {
-		lean, err = trie.WitnessNodesForKeysFromNodes(full, provedKeys)
-	}
+	lean, err := trie.WitnessNodesForKeysByHash(byHash, rootHash, provedKeys)
 	if err != nil {
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}
 	return lean, rootHash, nil
-}
-
-// Witness builds the proof trie from the captured superset and re-attaches codeReads
-// to present account nodes, since the consensus RLP carries only the code hash. The
-// trie is returned unpruned; consumers do their own node selection.
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
-	full, _, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
-	if err != nil {
-		return nil, nil, err
-	}
-	proofTrie, err = trie.RLPDecode(full)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
-	}
-	for addrHash, codeWithHash := range codeReads {
-		if len(codeWithHash.Code) == 0 {
-			continue
-		}
-		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
-			continue
-		}
-		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
-			return nil, nil, fmt.Errorf("attach witness code for %x: %w", addrHash, err)
-		}
-	}
-	return proofTrie, rootHash, nil
 }
 
 // WitnessLean builds the proof trie from the lean (pruned) witness node set — the
@@ -471,8 +461,8 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 // superset Witness() returns is for consumers that do their own per-key selection.
 // The returned nodes are the raw lean set (root first, no code attached), suitable for
 // feeding a node-set stateless verifier directly.
-func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, nodes [][]byte, rootHash []byte, err error) {
-	nodes, rootHash, err = sdc.WitnessNodes(ctx, produceExclusionProofs, logPrefix)
+func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, produceExclusionProofs bool) (proofTrie *trie.Trie, nodes [][]byte, rootHash []byte, err error) {
+	nodes, rootHash, err = sdc.WitnessNodes(ctx, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, nil, err
 	}

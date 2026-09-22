@@ -944,6 +944,7 @@ func New(
 		logger,
 		backend.engine,
 		config.Sync,
+		config.ExperimentalBAL,
 		config.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,

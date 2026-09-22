@@ -33,6 +33,7 @@ type sharedDomainOptions struct {
 	hexCommitmentOnly    bool
 	commitmentDomain     *kv.Domain
 	skipCommitmentSeek   bool
+	localCacheUnwind     bool
 	mem                  kv.TemporalMemBatch
 	paraTrieDB           kv.TemporalRoDB
 }
@@ -107,4 +108,9 @@ func WithHexCommitmentOnly() SharedDomainOption {
 		o.hexCommitmentOnly = true
 		WithSequentialCommitment()(o)
 	}
+}
+
+// WithLocalCacheUnwind defers shared-cache invalidation until adoption or commit.
+func WithLocalCacheUnwind() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.localCacheUnwind = true }
 }

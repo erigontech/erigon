@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 // buildBlock reads whatever buildBlockDetailsResponse put under "block", and the
@@ -51,17 +52,15 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 	marshalled.TotalDifficulty = (*hexutil.U256)(uint256.NewInt(99))
 	marshalled.TransactionCount = hexutil.Uint64(0)
 
-	withdrawal := &types.Withdrawal{Index: 7, Validator: 8, Address: common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf02"), Amount: 9}
-
 	r := &queryResolver{}
 	got, err := r.buildBlock(map[string]any{
 		"block":    marshalled,
-		"receipts": []map[string]any{},
-		"withdrawals": []map[string]any{{
-			"index":     withdrawal.Index,
-			"validator": withdrawal.Validator,
-			"address":   withdrawal.Address,
-			"amount":    withdrawal.Amount,
+		"receipts": []*jsonrpc.GraphQLReceipt{},
+		"withdrawals": []jsonrpc.GraphQLWithdrawal{{
+			Index:     7,
+			Validator: 8,
+			Address:   common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf02"),
+			Amount:    9,
 		}},
 	})
 	require.NoError(t, err)
@@ -112,12 +111,30 @@ func TestBuildBlockHandlesPendingBlock(t *testing.T) {
 	r := &queryResolver{}
 	got, err := r.buildBlock(map[string]any{
 		"block":    marshalled,
-		"receipts": []map[string]any{},
+		"receipts": []*jsonrpc.GraphQLReceipt{},
 	})
 	require.NoError(t, err)
 	require.Empty(t, got.Hash)
 	require.Empty(t, got.Nonce)
 	require.Empty(t, got.Miner.Address)
+}
+
+// A withdrawals payload of the wrong type must be an error, not a block that
+// silently reports no withdrawals at all.
+func TestBuildBlockRejectsUnexpectedWithdrawalsType(t *testing.T) {
+	t.Parallel()
+
+	withdrawalsHash := common.HexToHash("0x77")
+	header := &types.Header{Number: *uint256.NewInt(1), WithdrawalsHash: &withdrawalsHash}
+	block := types.NewBlockFromStorage(header.Hash(), header, nil, nil, nil, nil)
+
+	r := &queryResolver{}
+	_, err := r.buildBlock(map[string]any{
+		"block":       ethapi.RPCMarshalBlock(block, true, false),
+		"receipts":    []*jsonrpc.GraphQLReceipt{},
+		"withdrawals": []map[string]any{{"index": hexutil.Uint64(7)}},
+	})
+	require.Error(t, err)
 }
 
 // An unexpected type must be an error, not a panic.

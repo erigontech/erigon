@@ -28,12 +28,14 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -321,12 +323,16 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
+	if req.BaseFeePerGas != nil {
+		baseFee = new(uint256.Int).Set((*uint256.Int)(req.BaseFeePerGas))
+	}
 	header := types.Header{
 		ParentHash:  req.ParentHash,
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
 		Bloom:       bloom,
-		BaseFee:     uint256.MustFromBig(req.BaseFeePerGas.ToInt()),
+		BaseFee:     baseFee,
 		Extra:       req.ExtraData,
 		Number:      *uint256.NewInt(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),
@@ -1116,7 +1122,7 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Time),
 		ExtraData:     header.Extra,
-		BaseFeePerGas: (*hexutil.Big)(header.BaseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(header.BaseFee),
 		BlockHash:     block.Hash(),
 		Transactions:  txs,
 	}
@@ -1162,7 +1168,7 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 
 	return &engine_types.GetPayloadResponse{
 		ExecutionPayload:  ep,
-		BlockValue:        (*hexutil.Big)(blockValue.ToBig()),
+		BlockValue:        (*hexutil.U256)(blockValue),
 		BlobsBundle:       blobsBundle,
 		ExecutionRequests: executionRequests,
 	}, nil
@@ -1238,9 +1244,12 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion) (any, error) {
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion, cellIndices hexutil.Bytes) (any, error) {
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	if version == clparams.GloasVersion && len(cellIndices) != goethkzg.CellsPerExtBlob/8 {
+		return nil, &rpc.InvalidParamsError{Message: "indices_bitarray must be 16 bytes"}
 	}
 	if e.blobGetter == nil {
 		return nil, txpool.ErrPoolDisabled
@@ -1254,6 +1263,40 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 
 	switch version {
+	case clparams.GloasVersion:
+		indices := make([]int, 0, goethkzg.CellsPerExtBlob)
+		for i := range goethkzg.CellsPerExtBlob {
+			if cellIndices[i/8]&(1<<(i%8)) != 0 {
+				indices = append(indices, i)
+			}
+		}
+		ret := make([]*engine_types.BlobCellsAndProofsV1, len(blobHashes))
+		for i, bundle := range bundles {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if len(bundle.Blob) != len(goethkzg.Blob{}) || len(bundle.Proofs) != goethkzg.CellsPerExtBlob {
+				continue
+			}
+			ret[i] = &engine_types.BlobCellsAndProofsV1{
+				BlobCells: make([]*hexutil.Bytes, len(indices)),
+				Proofs:    make([]*hexutil.Bytes, len(indices)),
+			}
+			if len(indices) == 0 {
+				continue
+			}
+			cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
+			if err != nil {
+				return nil, fmt.Errorf("compute cells for blob %s: %w", blobHashes[i], err)
+			}
+			for j, index := range indices {
+				cell := hexutil.Bytes(cells[index][:])
+				proof := hexutil.Bytes(bundle.Proofs[index][:])
+				ret[i].BlobCells[j] = &cell
+				ret[i].Proofs[j] = &proof
+			}
+		}
+		return ret, nil
 	case clparams.FuluVersion: // GetBlobsV3
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
 		for i, bb := range bundles {

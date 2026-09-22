@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
 	"runtime"
 	"slices"
 	"time"
@@ -163,12 +162,12 @@ func rewardKindToString(kind protocolrules.RewardKind) string {
 	}
 }
 
-func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Address, rewardType string, amount *big.Int) ParityTrace {
+func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Address, rewardType string, amount uint256.Int) ParityTrace {
 	var tr ParityTrace
 	rewardAction := &RewardTraceAction{}
 	rewardAction.Author = author
 	rewardAction.RewardType = rewardType
-	rewardAction.Value.ToInt().Set(amount)
+	rewardAction.Value = hexutil.U256(amount)
 	bh := blockHash
 	tr.Action = rewardAction
 	tr.BlockHash = &bh
@@ -192,7 +191,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -247,12 +246,12 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	blockHash := block.Hash()
 	blockNum = block.NumberU64()
 	for _, r := range rewards {
-		out = append(out, newRewardTrace(blockHash, blockNum, r.Beneficiary.Value(), rewardKindToString(r.Kind), r.Amount.ToBig()))
+		out = append(out, newRewardTrace(blockHash, blockNum, r.Beneficiary.Value(), rewardKindToString(r.Kind), r.Amount))
 	}
 
 	if traceConfig.IncludeWithdrawalsEnabled() {
 		for _, wd := range wdiffs {
-			out = append(out, newRewardTrace(blockHash, blockNum, wd.address, rewardTypeWithdrawal, wd.amount.ToBig()))
+			out = append(out, newRewardTrace(blockHash, blockNum, wd.address, rewardTypeWithdrawal, wd.amount))
 		}
 	}
 
@@ -455,8 +454,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if first {
 			stream.WriteArrayStart()
 			first = false
-		} else {
-			stream.WriteMore()
 		}
 		stream.WriteRawBytes(b)
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
@@ -598,7 +595,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			// Block reward section, handle specially
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
-				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward.ToBig())
+				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward)
 				done, err := exportTrace(tr)
 				if err != nil {
 					return err
@@ -610,7 +607,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			for i, uncle := range body.Uncles {
 				if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 					if i < len(uncleRewards) {
-						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i].ToBig())
+						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i])
 						done, err := exportTrace(tr)
 						if err != nil {
 							return err
@@ -636,6 +633,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue // guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
+		if err := checkOverriddenSigner(traceConfig, lastSigner, txn); err != nil {
+			return err
+		}
 		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)
 		if err != nil {
 			return err
@@ -802,7 +802,7 @@ func (api *TraceAPIImpl) callBlock(
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			header, true /* requireCanonical */, gasBailOut /* gasBailout */, traceConfig)
+			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, traceConfig)
 	}
 
 	if cmErr != nil {
@@ -1059,6 +1059,9 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	txnHash := txn.Hash()
+	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
+	}
 	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 	if err != nil {
 		return nil, fmt.Errorf("convert txn into msg: %w", err)

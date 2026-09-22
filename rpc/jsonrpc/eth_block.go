@@ -68,7 +68,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, nil
 		}
 
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -88,8 +88,11 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	}
 	defer func(start time.Time) { log.Trace("Executing EVM call finished", "runtime", time.Since(start)) }(time.Now())
 
-	stateBlockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, stateBlockNumberOrHash, tx, api._blockReader, api.filters)
+	stateBlockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, stateBlockNumberOrHash, tx, api._blockReader)
 	if err != nil {
+		return nil, err
+	}
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, stateBlockNumber); err != nil {
 		return nil, err
 	}
 	var stateReader state.StateReader
@@ -108,7 +111,10 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	ibs := state.New(stateReader)
 	defer ibs.Close()
 
-	parent, _ := api.headerByNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
+	parent, err := api.headerByHashAndNumber(ctx, tx, hash, stateBlockNumber)
+	if err != nil {
+		return nil, err
+	}
 	if parent == nil {
 		return nil, fmt.Errorf("block %d(%x) not found", stateBlockNumber, hash)
 	}
@@ -218,7 +224,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			return nil, err
 		}
 	} else {
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -247,6 +253,50 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	return response, nil
 }
 
+// GetHeaderByNumber implements eth_getHeaderByNumber. Returns a block's header given a block
+// number. Per ethereum/execution-apis#877, the result is null for an unknown block, for the
+// pending tag, and for a safe or finalized tag that cannot be resolved to a block.
+func (api *APIImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*ethapi.RPCHeader, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	header, err := api.headerByNumber(ctx, blockNumber, tx)
+	if err != nil {
+		var unresolvedTag *rpc.CustomError
+		if errors.As(err, &rpc.BlockNotFoundErr{}) ||
+			(errors.As(err, &unresolvedTag) && unresolvedTag.Code == rpchelper.UnknownBlockCode) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	if header == nil {
+		return nil, nil
+	}
+	return ethapi.RPCMarshalHeader(header, header.Hash()), nil
+}
+
+// GetHeaderByHash implements eth_getHeaderByHash. Returns a block's header given a block's hash,
+// or null if the block is unknown.
+func (api *APIImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*ethapi.RPCHeader, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	header, err := api.headerByHash(ctx, hash, tx)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, nil
+	}
+	return ethapi.RPCMarshalHeader(header, header.Hash()), nil
+}
+
 // GetBlockByHash implements eth_getBlockByHash. Returns information about a block given the block's hash.
 func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNumberOrHash, fullTx bool) (*ethapi.RPCBlock, error) {
 	if numberOrHash.BlockHash == nil {
@@ -266,7 +316,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	defer tx.Rollback()
 
-	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
+	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, numberOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, nil
 	}
@@ -328,7 +378,7 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
 		return nil, errBlockAccessListNotFound
 	}
-	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
+	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, errBlockAccessListNotFound
@@ -390,7 +440,7 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return &n, nil
 	}
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
@@ -433,7 +483,7 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 	}
 	defer tx.Rollback()
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, api._blockReader, nil)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHash{BlockHash: &blockHash}, tx, api._blockReader)
 	if err != nil {
 		// (Compatibility) Every other node just return `null` for when the block does not exist.
 		log.Debug("eth_getBlockTransactionCountByHash GetBlockNumber failed", "err", err)

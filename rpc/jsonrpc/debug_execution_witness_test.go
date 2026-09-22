@@ -27,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
@@ -649,4 +651,128 @@ func TestGetWitnessHeadCaptureOutOfWindowWhenPruned(t *testing.T) {
 	bn := rpc.BlockNumber(1)
 	_, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
 	require.ErrorIs(t, err, errWitnessOutOfWindow)
+}
+
+// TestGetWitness covers the eth_getWitness / eth_getTxWitness inputs the head-capture
+// tests do not reach: genesis, a block hash, an unknown block, and the transaction
+// index bound.
+func TestGetWitness(t *testing.T) {
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	dbg.AssertEnabled = true
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	// An empty witness is the one-byte version header, not zero bytes.
+	emptyWitness := hexutil.Bytes{0x00}
+
+	var block1Hash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		return err
+	}))
+
+	t.Run("genesis is an empty witness", func(t *testing.T) {
+		bn := rpc.BlockNumber(0)
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+		require.NoError(t, err)
+		require.Equal(t, emptyWitness, got)
+	})
+
+	bn := rpc.BlockNumber(1)
+	byNumber, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.NoError(t, err)
+	require.NotEqual(t, emptyWitness, byNumber, "block 1 must carry a real witness, not the empty one")
+
+	t.Run("by hash matches by number", func(t *testing.T) {
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHashWithHash(block1Hash, true))
+		require.NoError(t, err)
+		require.Equal(t, byNumber, got)
+	})
+
+	t.Run("unknown block", func(t *testing.T) {
+		unknown := rpc.BlockNumber(999_999)
+		got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &unknown})
+		var notFound rpc.BlockNotFoundErr
+		require.ErrorAs(t, err, &notFound)
+		require.Nil(t, got)
+	})
+
+	t.Run("tx witness for the first transaction", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 0)
+		require.NoError(t, err)
+		require.Equal(t, byNumber, got, "a tx witness carries the whole block's witness")
+	})
+
+	t.Run("tx index out of bounds", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, 100)
+		require.ErrorContains(t, err, "transaction index out of bounds")
+		require.Nil(t, got)
+	})
+
+	// An index above math.MaxInt64 decodes fine and must not wrap negative past the bound.
+	t.Run("tx index overflowing int is out of bounds", func(t *testing.T) {
+		got, err := api.GetTxWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, hexutil.Uint(1)<<63)
+		require.ErrorContains(t, err, "transaction index out of bounds")
+		require.Nil(t, got)
+	})
+}
+
+// TestGetWitnessRequiresCommitmentHistory pins that eth_getWitness reports the missing
+// prerequisite rather than failing deeper in the build.
+func TestGetWitnessRequiresCommitmentHistory(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, false)
+	}))
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	bn := rpc.BlockNumber(1)
+	got, err := api.GetWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+	require.ErrorContains(t, err, "requires commitment history")
+	require.Nil(t, got)
+}
+
+// A witness whose state nodes are wrong is caught only by the stateless replay, so the
+// assert gate is what separates the two modes: off it is accepted, on it fails closed.
+func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
+	previousAssert, previousSchema := dbg.AssertEnabled, statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { dbg.AssertEnabled, statecfg.Schema = previousAssert, previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	tx, err := api.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block, err := api.blockByNumberWithSenders(ctx, tx, 1)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+
+	fullEngine, ok := api.engine().(rules.Engine)
+	require.True(t, ok)
+
+	bad := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
+
+	dbg.AssertEnabled = false
+	require.NoError(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine, false, common.Hash{}),
+		"without the gate a witness is never replayed, so a wrong one passes")
+
+	dbg.AssertEnabled = true
+	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine, false, common.Hash{}),
+		"under the gate the stateless replay rejects a wrong witness")
 }

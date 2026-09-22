@@ -209,6 +209,12 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 	return &a, nil
 }
 
+func (hr *HistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	hr.addr = address.Value()
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
+	return ok && len(enc) > 0, err
+}
+
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
 func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {

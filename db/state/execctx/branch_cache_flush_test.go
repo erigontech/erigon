@@ -238,3 +238,22 @@ func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("v2-branch-bytes"), v, "fresh SD must read the latest committed branch, not the stale read-through entry")
 }
+
+func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := commitmentFileFixture(t, stepSize)
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: []byte{0, 0, 0, 0, 2}})
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
+	branchCache.Clear()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.Unwind(16, nil)
+	_, _, err = sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok, "a speculative session must not seed the shared branch cache")
+}

@@ -103,27 +103,12 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	return common.ToStringZeroCopy(append(b, '"'))
 }
 
-// hexQuotedHash is hexWithPrefix plus the quotes, ready for WriteRaw.
-func (l *JsonStreamLogger) hexQuotedHash(h *common.Hash) string {
-	l.hexEncodeBuf[0], l.hexEncodeBuf[1], l.hexEncodeBuf[2] = '"', '0', 'x'
-	n := hex.Encode(l.hexEncodeBuf[3:], h[:])
-	l.hexEncodeBuf[3+n] = '"'
-	return common.ToStringZeroCopy(l.hexEncodeBuf[:4+n])
-}
-
-// writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
-// to the stream without any heap allocations. Pads to 32 bytes if needed.
-func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
-	if len(chunk) < 32 {
-		var word [32]byte
-		copy(word[:], chunk)
-		hex.Encode(l.hexEncodeBuf[:], word[:])
-	} else {
-		hex.Encode(l.hexEncodeBuf[:], chunk)
-	}
-	l.stream.WriteRaw(`"0x`)
-	l.stream.WriteRawBytes(l.hexEncodeBuf[:64])
-	l.stream.WriteRaw(`"`)
+// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes. It goes through
+// hexEncodeBuf so a caller's local array does not escape through the Stream interface.
+func (l *JsonStreamLogger) writeWord(word []byte) {
+	padded := l.hexEncodeBuf[:32]
+	clear(padded[copy(padded, word):])
+	l.stream.WriteHex(padded)
 }
 
 func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
@@ -162,9 +147,6 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		return
 	}
 	l.writePrologueOnce()
-	if l.opcodeSteps > 0 {
-		l.stream.WriteMore()
-	}
 	l.opcodeSteps++
 	var outputStorage bool
 	if !l.cfg.DisableStorage {
@@ -197,62 +179,46 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.WriteObjectStart()
 	l.stream.WriteObjectField("pc")
 	l.stream.WriteUint64(pc)
-	l.stream.WriteMore()
 	l.stream.WriteObjectField("op")
 	l.stream.WriteString(op.String())
-	l.stream.WriteMore()
 	l.stream.WriteObjectField("gas")
 	l.stream.WriteUint64(gas)
-	l.stream.WriteMore()
 	l.stream.WriteObjectField("gasCost")
 	l.stream.WriteUint64(cost)
-	l.stream.WriteMore()
 	l.stream.WriteObjectField("depth")
 	l.stream.WriteInt(depth)
 	refund := l.env.IntraBlockState.GetRefund()
 	if refund != 0 {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("refund")
 		l.stream.WriteUint64(refund)
 	}
 
 	if err != nil {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("error")
 		l.stream.WriteString(err.Error())
 	}
 	if !l.cfg.DisableStack {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("stack")
 		l.stream.WriteArrayStart()
 		for i := range stack {
-			if i > 0 {
-				l.stream.WriteMore()
-			}
 			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
 		}
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableMemory && len(memory) > 0 {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
 			end := min(i+32, len(memory))
-			if i > 0 {
-				l.stream.WriteMore()
-			}
-			l.writeMemoryWordRaw(memory[i:end])
+			l.writeWord(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("returnData")
-		l.stream.WriteString(hexutil.Encode(rData))
+		l.stream.WriteHex(rData)
 	}
 	if outputStorage {
-		l.stream.WriteMore()
 		l.stream.WriteObjectField("storage")
 		l.stream.WriteObjectStart()
 		// Sorted by location for easier comparison with geth
@@ -260,13 +226,10 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.locations = slices.AppendSeq(l.locations[:0], maps.Keys(s))
 		l.locations.Sort()
 		for i := range l.locations {
-			if i > 0 {
-				l.stream.WriteMore()
-			}
 			loc := &l.locations[i]
 			value := s[*loc]
 			l.stream.WriteObjectField(l.hexWithPrefix(loc))
-			l.stream.WriteRaw(l.hexQuotedHash(&value))
+			l.writeWord(value[:])
 		}
 		l.stream.WriteObjectEnd()
 	}

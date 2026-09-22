@@ -237,7 +237,7 @@ func pbinWitnessCommitted(t *testing.T, corpus *pbinTestCorpus) (*MockState, []b
 
 func pbinWitnessesOf(t *testing.T, ms *MockState, upd *Updates, produceExclusionProofs bool) (nodes, provedKeys [][]byte, root []byte) {
 	t.Helper()
-	nodes, provedKeys, root, err := NewPBinPatriciaHashed(ms).Witnesses(context.Background(), upd, produceExclusionProofs, "")
+	nodes, provedKeys, root, err := NewPBinPatriciaHashed(ms).Witnesses(context.Background(), upd, produceExclusionProofs)
 	require.NoError(t, err)
 	return nodes, provedKeys, root
 }

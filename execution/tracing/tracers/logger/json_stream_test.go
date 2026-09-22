@@ -208,10 +208,8 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 // over: exactly one array end and one object end, whatever the logger emitted.
 func closeStreamLikeCaller(stream jsonstream.Stream) {
 	stream.WriteArrayEnd()
-	stream.WriteMore()
 	stream.WriteObjectField("gas")
 	stream.WriteUint64(0)
-	stream.WriteMore()
 	stream.WriteObjectField("failed")
 	stream.WriteBool(false)
 	stream.WriteObjectEnd()
@@ -568,7 +566,7 @@ func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakB
 // TestJsonStreamLogger_LargeTraceStaysBounded covers the case streaming exists
 // for: one transaction whose trace dwarfs any buffer. Nothing in the RPC layer
 // flushes inside a transaction, so the stream has to do it. Memory tracing used
-// to bound it by accident, because writeMemoryWordRaw went through Write, which
+// to bound it by accident, because memory words went through Write, which
 // flushed per 32-byte word; with memory off nothing drained at all.
 func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
 	for name, cfg := range map[string]*LogConfig{
@@ -602,19 +600,5 @@ func TestHexQuotedMatchesUint256Hex(t *testing.T) {
 	} {
 		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
 		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
-	}
-}
-
-// TestHexQuotedHashMatchesHexWithPrefix pins the pre-quoted form against the
-// one WriteString produced, which the RPC output has to stay identical to.
-func TestHexQuotedHashMatchesHexWithPrefix(t *testing.T) {
-	l := &JsonStreamLogger{}
-	for _, seed := range []int{0, 1, 7, 255} {
-		var h common.Hash
-		for i := range h {
-			h[i] = byte(i*seed + 1)
-		}
-		want := `"` + l.hexWithPrefix(&h) + `"`
-		require.Equal(t, want, l.hexQuotedHash(&h), "seed=%d", seed)
 	}
 }

@@ -20,14 +20,19 @@
 package rpc
 
 import (
+	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestNewID(t *testing.T) {
@@ -236,14 +241,26 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 	}
 }
 
-type fastJSONPayload struct{}
+type streamedPayload struct{}
 
-func (fastJSONPayload) MarshalFastJSON() ([]byte, error) { return []byte(`"fast"`), nil }
+func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	w.WriteHex([]byte{0xab})
+	return nil
+}
+
+// valueFastJSON has a value receiver, so a typed nil panics unless Notify sends it down the
+// reflection path.
+type valueFastJSON struct{ data []byte }
+
+func (b valueFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	w.WriteHex(b.data)
+	return nil
+}
 
 func TestNotifyUsesFastJSON(t *testing.T) {
 	t.Parallel()
 
-	for payload, want := range map[fastJSONResult]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null"} {
+	for payload, want := range map[any]string{streamedPayload{}: `"0xab"`, (*valueFastJSON)(nil): "null", &valueFastJSON{data: []byte{0xab}}: `"0xab"`} {
 		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
 		if err := n.Notify("0x1", payload); err != nil {
 			t.Fatal(err)
@@ -251,5 +268,121 @@ func TestNotifyUsesFastJSON(t *testing.T) {
 		if len(n.buffer) != 1 || string(n.buffer[0]) != want {
 			t.Fatalf("%T: want %s, got %#v", payload, want, n.buffer)
 		}
+	}
+}
+
+type wireOnly struct{ v int }
+
+func (w wireOnly) LocalValue() any { return w.v }
+
+// A payload that carries a wire encoding reaches an in-process subscriber as the value it wraps.
+func TestLocalNotifierDeliversLocalValue(t *testing.T) {
+	resc, closec := make(chan any, 1), make(chan any)
+	n := NewLocalNotifier("eth", resc, closec)
+	sub := n.CreateSubscription()
+	if err := n.Notify(sub.ID, wireOnly{v: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-resc; got != 7 {
+		t.Fatalf("delivered %#v, want 7", got)
+	}
+}
+
+// The notification is built around bytes that are already encoded, and must come out as the
+// message json.Marshal made of them.
+func TestNotificationMatchesMarshalledMessage(t *testing.T) {
+	result := json.RawMessage(`[{"blockHash":"0x01","logs":[]},{"blockHash":"0x02","logs":[]}]`)
+	params, err := json.Marshal(&subscriptionResult{ID: "0x9a", Result: result})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, namespace := range []string{"eth", `quote"back\slash`} {
+		want, err := json.Marshal(&jsonrpcMessage{Version: vsn, Method: namespace + notificationMethodSuffix, Params: params})
+		if err != nil {
+			t.Fatal(err)
+		}
+		w := &captureWriter{}
+		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix(namespace, "0x9a"), activated: true}
+		if err := n.send(result); err != nil {
+			t.Fatal(err)
+		}
+		if got := w.got; !bytes.Equal(got, want) {
+			t.Fatalf("notification = %s, want %s", got, want)
+		}
+	}
+}
+
+// An activated notifier streams the whole notification: the prefix, the result and "}}".
+// emptyStreamed writes nothing; a notification still carries a result, as a response does.
+type emptyStreamed struct{}
+
+func (emptyStreamed) MarshalFastJSONTo(*jsonstream.StackStream) error { return nil }
+
+func TestNotifyStreamsTheNotification(t *testing.T) {
+	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`, emptyStreamed{}: `null`} {
+		w := &captureWriter{}
+		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
+		if err := n.Notify("0x9a", payload); err != nil {
+			t.Fatal(err)
+		}
+		if want := string(notificationPrefix("eth", "0x9a")) + result + "}}"; string(w.got) != want {
+			t.Fatalf("%T: notification = %s, want %s", payload, w.got, want)
+		}
+	}
+}
+
+// A notification buffered before activation carries a result too.
+func TestBufferedNotificationOfEmptyMarshallerCarriesNull(t *testing.T) {
+	w := &captureWriter{}
+	n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}}
+	if err := n.Notify("0x9a", emptyStreamed{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.activate(); err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0x9a","result":null}}`; string(w.got) != want {
+		t.Fatalf("notification = %s, want %s", w.got, want)
+	}
+}
+
+// captureWriter keeps a copy of what it is given: a notification's buffer is reused once the
+// write returns.
+type captureWriter struct{ got []byte }
+
+func (w *captureWriter) WriteJSON(_ context.Context, v any) error {
+	w.got = bytes.Clone(v.(rawResponse))
+	return nil
+}
+func (*captureWriter) closed() <-chan any { return nil }
+func (*captureWriter) remoteAddr() string { return "" }
+
+type discardWriter struct{}
+
+func (discardWriter) WriteJSON(context.Context, any) error { return nil }
+func (discardWriter) closed() <-chan any                   { return nil }
+func (discardWriter) remoteAddr() string                   { return "" }
+
+// Every subscriber gets the same encoded result, so wrapping it for one subscriber must not
+// allocate its size: at 2000 subscribers a block's receipts would be allocated 2000 times.
+func TestNotifySendDoesNotAllocateResult(t *testing.T) {
+	result := json.RawMessage(`"` + strings.Repeat("x", 160*1024) + `"`)
+	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, prefix: notificationPrefix("eth", "0x9a"), activated: true}
+	send := func() {
+		if err := n.send(result); err != nil {
+			t.Fatal(err)
+		}
+	}
+	send()
+	var m0, m1 runtime.MemStats
+	runtime.ReadMemStats(&m0)
+	const runs = 100
+	for range runs {
+		send()
+	}
+	runtime.ReadMemStats(&m1)
+	perSend := (m1.TotalAlloc - m0.TotalAlloc) / runs
+	if !race.Enabled && perSend > uint64(len(result))/10 { // the race detector drops sync.Pool puts at random
+		t.Fatalf("a send allocates %d bytes for a %d-byte result", perSend, len(result))
 	}
 }

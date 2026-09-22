@@ -761,7 +761,7 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 		}
 		idx := uint32(txNum - firstTxNum) // BAL index == txNum - firstTxNum
 		bList = append(bList, types.AccountChanges{
-			Address:        accounts.InternAddress([20]byte(addrBytes)),
+			Address:        [20]byte(addrBytes),
 			BalanceChanges: []*types.BalanceChange{{Index: idx, Value: balV}},
 			NonceChanges:   []*types.NonceChange{{Index: idx, Value: txNum}},
 		})
@@ -844,7 +844,7 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 				addrBytes := make([]byte, length.Addr)
 				rnd.Read(addrBytes)
 				bal := types.BlockAccessList{{
-					Address:      accounts.InternAddress([20]byte(addrBytes)),
+					Address:      [20]byte(addrBytes),
 					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
 				}}
 
@@ -1107,4 +1107,68 @@ func TestShadowCrossCheck_Mismatch(t *testing.T) {
 	res := feedBlock1Shadow(t, 4, bytes.Repeat([]byte{0xEE}, 32))
 	require.Error(t, res.err, "a divergent computed-ahead root must fail the block")
 	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
+}
+
+func isolatedCommitmentBranchKeys(t *testing.T, checkRoot bool) (int, []commitmentResult, bool) {
+	t.Helper()
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(true)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, true, 5, in, nil, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	rnd := rand.New(rand.NewSource(43))
+	for txNum := uint64(1); txNum <= 5; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			rules:    &chain.Rules{},
+			blockNum: 1,
+			txNum:    txNum,
+			writes:   nonceBalanceWrites(addr, txNum, bal),
+		})
+	}
+
+	// isPartial picks computeWithoutCheck over computeAndCheck; the test header
+	// carries the zero root, so a checked root always mismatches.
+	cc.handleMessage(ctx, newTestBlockResult(1, common.Hash{0x01}, 5, !checkRoot))
+
+	var published []commitmentResult
+	for len(out) > 0 {
+		published = append(published, <-out)
+	}
+
+	var branches int
+	require.NoError(t, doms.Flush(ctx, tx))
+	require.NoError(t, doms.GetMemBatch().IteratePrefix(kv.CommitmentDomain, nil, tx, func(k, v []byte) (bool, error) {
+		if len(v) > 0 && !bytes.Equal(k, commitment.KeyCommitmentState) {
+			branches++
+		}
+		return true, nil
+	}))
+	return branches, published, doms.GetCommitmentContext().HasPendingUpdate()
+}
+
+func TestHandleMessage_WrongRootDiscardsIsolatedBranchWrites(t *testing.T) {
+	accepted, published, pending := isolatedCommitmentBranchKeys(t, false)
+	require.NotEmpty(t, accepted, "an unchecked isolated round must write its branch records, or the rejection arm proves nothing")
+	require.Empty(t, published, "an unchecked round publishes nothing")
+	require.False(t, pending, "an accepted round must leave nothing pending")
+
+	rejected, published, pending := isolatedCommitmentBranchKeys(t, true)
+	require.Len(t, published, 1)
+	require.ErrorIs(t, published[0].err, ErrWrongTrieRoot)
+	require.Empty(t, rejected, "a rejected root must leave no branch record in the commitment domain")
+	require.False(t, pending, "the rejected round's output must be released")
 }

@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -432,15 +431,12 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	assert.Equal(u256.U64(0x2a), got, "storage slot must be readable")
 }
 
-// amsterdamGenesisConfig deep-copies AllProtocolChanges: chain.Config carries a sync.Once
-// and a memoized map, and its own doc forbids copying it by value.
 func amsterdamGenesisConfig(t *testing.T) *chain.Config {
 	t.Helper()
-	var cfg chain.Config
-	require.NoError(t, copier.CopyWithOption(&cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	cfg := chain.AllProtocolChanges.Copy()
 	zero := uint64(0)
 	cfg.AmsterdamTime = &zero
-	return &cfg
+	return cfg
 }
 
 func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {

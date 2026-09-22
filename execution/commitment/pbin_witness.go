@@ -87,7 +87,7 @@ func (pph *PBinPatriciaHashed) SetWitnessBlock(b PBinWitnessBlock) {
 // extension node hides, and EIP-8297 has no extension node. The collapse
 // survivors a removal re-hashes are captured unconditionally instead — see
 // captureBranchPreimage.
-func (pph *PBinPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+func (pph *PBinPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	set := newWitnessNodeSet()
 	pph.setWitnessTracer(set)
 	defer pph.setWitnessTracer(nil)
@@ -109,7 +109,7 @@ func (pph *PBinPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, 
 		return err
 	})
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("pbin: witness %s: %w", logPrefix, err)
+		return nil, nil, nil, fmt.Errorf("pbin: witness: %w", err)
 	}
 	for pph.grid.activeRows > 0 {
 		if err = pph.fold(); err != nil {
