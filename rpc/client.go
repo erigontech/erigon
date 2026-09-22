@@ -210,9 +210,13 @@ func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger
 }
 
 func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
-	return initClientWithBaseCtx(context.Background(), conn, services, logger, func(ctx context.Context, conn jsonWriter) *handler {
+	c := initClientWithBaseCtx(context.Background(), conn, services, logger, func(ctx context.Context, conn jsonWriter) *handler {
 		return newHandler(ctx, conn, idgen, services, batchLimit, nil, 50, false /* traceRequests */, logger, 0)
 	})
+	if !c.isHTTP {
+		go c.read(conn)
+	}
+	return c
 }
 
 func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, services *serviceRegistry, logger log.Logger, newHandler func(context.Context, jsonWriter) *handler) *Client {
@@ -595,9 +599,6 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 		}
 		close(c.didClose)
 	}()
-
-	// Spawn the initial read loop.
-	go c.read(codec)
 
 	for {
 		select {

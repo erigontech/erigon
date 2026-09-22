@@ -29,7 +29,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // TestGetAccountStorage_InvalidSlot checks that malformed slot strings are
@@ -81,4 +83,25 @@ func TestMarshalWithdrawalsEmpty(t *testing.T) {
 	got, err := json.Marshal(marshalWithdrawals(nil))
 	require.NoError(t, err)
 	assert.Equal(t, "[]", string(got))
+}
+
+// A type embedding *RPCReceipt inherits its fast marshaller, which knows only the receipt's
+// fields; returned as a result, the embedder must still encode the way reflection does.
+func TestRPCReceiptEmbeddersKeepTheirFields(t *testing.T) {
+	for name, v := range map[string]interface {
+		MarshalFastJSONTo(*jsonstream.StackStream) error
+	}{
+		"otterscan": ReceiptWithTimestamp{RPCReceipt: &ethutils.RPCReceipt{Logs: types.Logs{}}, Timestamp: 7},
+		"graphql":   &GraphQLReceipt{RPCReceipt: &ethutils.RPCReceipt{Logs: types.Logs{}}, Nonce: 3},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(v)
+			require.NoError(t, err)
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, v.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+			require.JSONEq(t, string(want), string(s.Buffer()))
+		})
+	}
 }
