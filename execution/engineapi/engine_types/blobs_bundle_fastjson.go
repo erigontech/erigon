@@ -25,9 +25,14 @@ import (
 // MarshalFastJSONTo streams the getPayload blobs bundle blob by blob, byte-identical to
 // json.Marshal of the bundle.
 func (b *BlobsBundle) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	writeBlobsBundle(s, b)
+	return nil
+}
+
+func writeBlobsBundle(s *jsonstream.StackStream, b *BlobsBundle) {
 	if b == nil {
 		s.WriteNil()
-		return nil
+		return
 	}
 	s.WriteObjectStart()
 	s.WriteObjectField("commitments")
@@ -37,11 +42,11 @@ func (b *BlobsBundle) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	jsonstream.Field(s, "blobs")
 	jsonstream.ArrayValue(s, b.Blobs, writeHex)
 	s.WriteObjectEnd()
-	return nil
 }
 
-// MarshalFastJSONTo writes the getPayload envelope field by field: the BlobsBundle is streamed,
-// the smaller fields go through json.Marshal. Byte-identical to json.Marshal(r).
+// MarshalFastJSONTo writes the getPayload envelope, byte-identical to json.Marshal(r).
+// executionPayload and blockValue go through json.Marshal before the first write, so their
+// errors leave nothing written; the other fields are streamed.
 func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if r == nil {
 		s.WriteNil()
@@ -59,7 +64,7 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error 
 	s.WriteObjectField("executionPayload").WriteRawBytes(executionPayload)
 	jsonstream.Field(s, "blockValue").WriteRawBytes(blockValue)
 	jsonstream.Field(s, "blobsBundle")
-	_ = r.BlobsBundle.MarshalFastJSONTo(s)
+	writeBlobsBundle(s, r.BlobsBundle)
 	jsonstream.Field(s, "executionRequests")
 	jsonstream.ArrayValue(s, r.ExecutionRequests, writeHex)
 	jsonstream.Field(s, "shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
