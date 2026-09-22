@@ -6,8 +6,8 @@ without reading account or storage values from the state domain.
 
 ## Input mode
 
-The implementation accepts `ModeUpdate` updates only. `ModeDirect` and `ModeParallel` are rejected
-because their current streams do not provide the final value required by the read-free fold.
+The implementation accepts `ModeCollect` updates only. The other modes are rejected because their
+current streams do not provide the final value required by the read-free fold.
 
 ## Keys
 
