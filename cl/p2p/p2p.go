@@ -125,12 +125,18 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	if err != nil {
 		return nil, err
 	}
-	if port := hostTCPPort(host); port != 0 {
-		cfg.TCPPort = port
+	tcpPort := hostTCPPort(host)
+	if tcpPort == 0 {
+		host.Close()
+		return nil, fmt.Errorf("failed to bind TCP listener on port %d", cfg.TCPPort)
 	}
-	if port := hostQUICPort(host); port != 0 {
-		cfg.QUICPort = port
+	quicPort := hostQUICPort(host)
+	if quicPort == 0 {
+		host.Close()
+		return nil, fmt.Errorf("failed to bind QUIC listener on port %d", cfg.QUICPort)
 	}
+	cfg.TCPPort = tcpPort
+	cfg.QUICPort = quicPort
 
 	p := p2pManager{
 		cfg:         cfg,

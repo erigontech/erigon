@@ -196,3 +196,82 @@ func TestNewP2PManagerClosesHostWhenDiscoveryStartupFails(t *testing.T) {
 	require.NoError(t, quicListener.Close())
 	require.NoError(t, tcpListener.Close())
 }
+
+func TestNewP2PManagerRejectsPartialStartupWhenTCPPortIsOccupied(t *testing.T) {
+	blockedTCP, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1")})
+	require.NoError(t, err)
+	defer blockedTCP.Close()
+
+	port := blockedTCP.Addr().(*net.TCPAddr).Port
+
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	networkConfigCopy := *networkConfig
+	networkConfigCopy.BootNodes = nil
+	cfg := &P2PConfig{
+		NetworkConfig: &networkConfigCopy,
+		BeaconConfig:  beaconConfig,
+		IpAddr:        "127.0.0.1",
+		Port:          0,
+		TCPPort:       uint(port),
+		QUICPort:      uint(port),
+		TmpDir:        t.TempDir(),
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+	ctx, cancel := context.WithCancel(t.Context())
+
+	manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+	cancel()
+	if manager != nil {
+		listener := manager.UDPv5Listener()
+		localNodeDB := listener.LocalNode().Database()
+		require.NoError(t, manager.Host().Close())
+		listener.Close()
+		localNodeDB.Close()
+	}
+	require.ErrorContains(t, err, "failed to bind TCP listener")
+	require.Nil(t, manager)
+
+	reboundQUIC, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
+	require.NoError(t, err)
+	require.NoError(t, reboundQUIC.Close())
+}
+
+func TestNewP2PManagerRejectsPartialStartupWhenQUICPortIsOccupied(t *testing.T) {
+	blockedQUIC, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+	require.NoError(t, err)
+	defer blockedQUIC.Close()
+	port := blockedQUIC.LocalAddr().(*net.UDPAddr).Port
+
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	networkConfigCopy := *networkConfig
+	networkConfigCopy.BootNodes = nil
+	cfg := &P2PConfig{
+		NetworkConfig: &networkConfigCopy,
+		BeaconConfig:  beaconConfig,
+		IpAddr:        "127.0.0.1",
+		Port:          0,
+		TCPPort:       uint(port),
+		QUICPort:      uint(port),
+		TmpDir:        t.TempDir(),
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+	ctx, cancel := context.WithCancel(t.Context())
+
+	manager, err := NewP2Pmanager(ctx, cfg, log.Root(), clock)
+	cancel()
+	if manager != nil {
+		listener := manager.UDPv5Listener()
+		localNodeDB := listener.LocalNode().Database()
+		require.NoError(t, manager.Host().Close())
+		listener.Close()
+		localNodeDB.Close()
+	}
+	require.ErrorContains(t, err, "failed to bind QUIC listener")
+	require.Nil(t, manager)
+
+	reboundTCP, err := net.ListenTCP("tcp4", &net.TCPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
+	require.NoError(t, err)
+	require.NoError(t, reboundTCP.Close())
+}
