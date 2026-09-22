@@ -1005,6 +1005,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	}
 	gas := scope.Gas()
 	returnGas := gas
+	var childGasUsed mdgas.MdGasUsage
 	var preparation createPreparation
 	var suberr error
 	if evm.chainRules.IsAmsterdam {
@@ -1042,18 +1043,18 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		if !evm.chainRules.IsAmsterdam {
 			preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
 			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
+				childGasUsed.Execution = returnGas.Execution
 				returnGas = mdgas.MdGas{}
 			}
 		}
 	}
 	var res []byte
 	var addr accounts.Address
-	var childGasUsed mdgas.MdGasUsage
 	if suberr == nil {
 		res, addr, returnGas, childGasUsed, suberr = evm.createPrepared(scope.Contract.Address(), codeAndHash, gas, value, address, typ, preparation)
 	} else if forwarded && evm.Config().Tracer != nil {
 		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, gas, value, nil)
-		evm.captureEnd(evm.depth, typ, gas, returnGas, nil, suberr)
+		evm.captureEnd(evm.depth, returnGas, childGasUsed, nil, suberr)
 	}
 	scope.Contract.selfBalanceCached = false
 	if forwarded {
@@ -1329,12 +1330,8 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 	tracer := evm.Config().Tracer
-	if tracer != nil && tracer.OnEnter != nil {
-		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
-	}
-	if tracer != nil && tracer.OnExit != nil {
-		tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
-	}
+	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1400,12 +1397,8 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer
-	if tracer != nil && tracer.OnEnter != nil {
-		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
-	}
-	if tracer != nil && tracer.OnExit != nil {
-		tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
-	}
+	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 

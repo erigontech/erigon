@@ -98,6 +98,9 @@ type (
 	// EnterHook is invoked when the processing of a message starts.
 	EnterHook = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte)
 
+	// EnterHookV2 reports both gas balances and takes precedence over EnterHook.
+	EnterHookV2 = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte)
+
 	// ExitHook is invoked when the processing of a message ends.
 	// `revert` is true when there was an error during the execution.
 	// Exceptionally, before the homestead hardfork a contract creation that
@@ -106,11 +109,20 @@ type (
 	// be indicated by `reverted == false` and `err == ErrCodeStoreOutOfGas`.
 	ExitHook = func(depth int, output []byte, gasUsed uint64, err error, reverted bool)
 
+	// ExitHookV2 reports multidimensional gas usage and takes precedence over ExitHook.
+	ExitHookV2 = func(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool)
+
 	// OpcodeHook is invoked just prior to the execution of an opcode.
 	OpcodeHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, rData []byte, depth int, err error)
 
+	// OpcodeHookV2 reports execution and state gas and takes precedence over OpcodeHook.
+	OpcodeHookV2 = func(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, rData []byte, depth int, err error)
+
 	// FaultHook is invoked when an error occurs during the execution of an opcode.
 	FaultHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, depth int, err error)
+
+	// FaultHookV2 reports execution and state gas and takes precedence over FaultHook.
+	FaultHookV2 = func(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, depth int, err error)
 
 	// GasChangeHook reports changes to the execution gas balance.
 	GasChangeHook = func(old, new uint64, reason GasChangeReason)
@@ -186,15 +198,16 @@ type Hooks struct {
 	OnTxStart     TxStartHook
 	OnTxEnd       TxEndHook
 	OnEnter       EnterHook
+	OnEnterV2     EnterHookV2
 	OnExit        ExitHook
+	OnExitV2      ExitHookV2
 	OnOpcode      OpcodeHook
+	OnOpcodeV2    OpcodeHookV2
 	OnFault       FaultHook
+	OnFaultV2     FaultHookV2
 	OnGasChange   GasChangeHook
 	OnGasChangeV2 GasChangeHookV2
-	// OnOpcodeMask, when set, names the opcodes OnOpcode wants. The interpreter skips
-	// the call for every other one, so a tracer that watches a handful of opcodes does
-	// not pay an indirect call per instruction. Nil means every opcode is delivered.
-	OnOpcodeMask *OpcodeMask
+	OnOpcodeMask  *OpcodeMask
 	// Chain events
 	OnBlockchainInit    BlockchainInitHook
 	OnBlockStart        BlockStartHook
@@ -212,6 +225,62 @@ type Hooks struct {
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
 	Flush           func(tx types.Transaction)
+}
+
+func (h *Hooks) HasEnterHook() bool {
+	return h != nil && (h.OnEnterV2 != nil || h.OnEnter != nil)
+}
+
+func (h *Hooks) EmitEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+	if h == nil {
+		return
+	}
+	if h.OnEnterV2 != nil {
+		h.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
+	} else if h.OnEnter != nil {
+		h.OnEnter(depth, typ, from, to, precompile, input, gas.Execution, value, code)
+	}
+}
+
+func (h *Hooks) EmitExit(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
+	if h == nil {
+		return
+	}
+	if h.OnExitV2 != nil {
+		h.OnExitV2(depth, output, gasUsed, err, reverted)
+	} else if h.OnExit != nil {
+		h.OnExit(depth, output, gasUsed.Execution, err, reverted)
+	}
+}
+
+func (h *Hooks) HasOpcodeHook() bool {
+	return h != nil && (h.OnOpcodeV2 != nil || h.OnOpcode != nil)
+}
+
+func (h *Hooks) EmitOpcode(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, rData []byte, depth int, err error) {
+	if h == nil {
+		return
+	}
+	if h.OnOpcodeV2 != nil {
+		h.OnOpcodeV2(pc, op, gas, cost, scope, rData, depth, err)
+	} else if h.OnOpcode != nil {
+		h.OnOpcode(pc, op, gas.Execution, cost.Execution, scope, rData, depth, err)
+	}
+}
+
+func (h *Hooks) HasFaultHook() bool {
+	return h != nil && (h.OnFaultV2 != nil || h.OnFault != nil)
+}
+
+func (h *Hooks) EmitFault(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, depth int, err error) {
+	if h == nil {
+		return
+	}
+	if h.OnFaultV2 != nil {
+		h.OnFaultV2(pc, op, gas, cost, scope, depth, err)
+	} else if h.OnFault != nil {
+		h.OnFault(pc, op, gas.Execution, cost.Execution, scope, depth, err)
+	}
 }
 
 func (h *Hooks) HasGasChangeHook() bool {
