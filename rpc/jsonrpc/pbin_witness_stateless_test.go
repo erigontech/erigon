@@ -175,7 +175,7 @@ func pbinStatelessWitnessRemoving(t *testing.T, state *pbinStatelessState, acces
 		updates.TouchPlainKeyDirect(string(key), &commitment.Update{})
 	}
 	capturer, ok := trie.(interface {
-		Witnesses(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool, logPrefix string) ([][]byte, [][]byte, []byte, error)
+		Witnesses(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) ([][]byte, [][]byte, []byte, error)
 	})
 	require.True(t, ok, "the binary trie captures no witness")
 	if len(removed) > 0 {
@@ -190,7 +190,7 @@ func pbinStatelessWitnessRemoving(t *testing.T, state *pbinStatelessState, acces
 		setter.SetWitnessBlock(block)
 	}
 
-	full, provedKeys, root, err := capturer.Witnesses(context.Background(), updates, false, "")
+	full, provedKeys, root, err := capturer.Witnesses(context.Background(), updates, false)
 	require.NoError(t, err)
 	lean, err := commitment.PBinWitnessNodesForKeys(full, root, provedKeys)
 	require.NoError(t, err)
