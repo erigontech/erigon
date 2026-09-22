@@ -350,7 +350,8 @@ func (tx *DynamicFeeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 			Value:      &tx.Value,
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
-		})
+		},
+	)
 }
 
 // accessors for innerTx.
@@ -371,6 +372,7 @@ func (tx *DynamicFeeTransaction) cachedSender() (sender accounts.Address, ok boo
 	}
 	return s, true
 }
+
 func (tx *DynamicFeeTransaction) Sender(signer Signer) (accounts.Address, error) {
 	if from := tx.from; !from.IsNil() && !from.IsZero() {
 		// Sender address can never be zero in a transaction with a valid signer

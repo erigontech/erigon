@@ -217,13 +217,23 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 	if len(nodes) == 0 {
 		return nil, nil
 	}
-	hasher := newHasher(false)
-	defer returnHasherToPool(hasher)
-	byHash := make(map[common.Hash][]byte, len(nodes))
+	byHash := make(map[string][]byte, len(nodes))
 	for _, n := range nodes {
-		byHash[crypto.Keccak256Hash(n)] = n
+		h := crypto.Keccak256Hash(n)
+		byHash[string(h[:])] = n
 	}
 	rootHash := crypto.Keccak256Hash(nodes[0])
+	return WitnessNodesForKeysByHash(byHash, rootHash[:], hexKeys)
+}
+
+// WitnessNodesForKeysByHash is WitnessNodesForKeysFromNodes over nodes already indexed by their hash.
+func WitnessNodesForKeysByHash(byHash map[string][]byte, root []byte, hexKeys [][]byte) ([][]byte, error) {
+	if len(byHash) == 0 {
+		return nil, nil
+	}
+	hasher := newHasher(false)
+	defer returnHasherToPool(hasher)
+	rootHash := common.BytesToHash(root)
 
 	seen := make(map[string]struct{})
 	var out [][]byte
@@ -254,7 +264,7 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 	// node shared by many proof paths is decoded a single time (nil node if blinded).
 	decoded := make(map[common.Hash]Node)
 	nodeAt := func(h common.Hash) (Node, []byte, error) {
-		rlp, ok := byHash[h]
+		rlp, ok := byHash[string(h[:])]
 		if !ok {
 			return nil, nil, nil
 		}
@@ -279,7 +289,7 @@ func WitnessNodesForKeysFromNodes(nodes, hexKeys [][]byte) ([][]byte, error) {
 		return nodeAt(common.BytesToHash(hn.hash))
 	}
 
-	if _, ok := byHash[rootHash]; !ok {
+	if _, ok := byHash[string(rootHash[:])]; !ok {
 		return nil, fmt.Errorf("witness root %x absent from node set", rootHash)
 	}
 	for _, key := range hexKeys {
@@ -592,6 +602,9 @@ func VerifyStorageProof(storageRoot common.Hash, proof accounts.StorProofResult)
 // that the pre-image of the storage key hashes to the provided keyHash.
 // Consequently, the Key of the proof is ignored in the validation.
 func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proof accounts.StorProofResult) error {
+	if proof.Value == nil {
+		proof.Value = new(hexutil.U256)
+	}
 	if storageRoot == EmptyRoot || storageRoot == (common.Hash{}) {
 		if proof.Value.ToInt().Sign() != 0 {
 			return errors.New("empty storage root cannot have non-zero values")
@@ -624,8 +637,7 @@ func VerifyStorageProofByHash(storageRoot common.Hash, keyHash common.Hash, proo
 	}
 
 	var expected []byte
-	if value != nil {
-		// A non-nil value proves the storage does exist.
+	if value != nil || proof.Value.ToInt().Sign() != 0 {
 		expected, err = rlp.EncodeToBytes(proof.Value.ToInt().Bytes())
 		if err != nil {
 			return err
@@ -667,4 +679,94 @@ func PrintProof(proof []hexutil.Bytes) error {
 		fmt.Printf("Level %d: hash=%x -> %s\n", i, proofNode.hash, proofNode.node.String())
 	}
 	return nil
+}
+
+// ProofFromNodes returns the proof for key (keybytes) and its leaf value, which is nil when key is absent.
+func ProofFromNodes(byHash map[string][]byte, root, key []byte) (proof [][]byte, value []byte, err error) {
+	enc, ok := byHash[string(root)]
+	if !ok {
+		if common.BytesToHash(root) == EmptyRoot { // an empty trie proves absence with no nodes at all
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("proof node %x absent", root)
+	}
+	path := nibbles.KeybytesToHex(key)[:2*len(key)] // without the terminator nibble
+	for enc != nil {
+		// An inline child is carried inside its parent, so emitting it again would leave the
+		// verifier an element it never asks for.
+		if len(proof) == 0 || len(enc) >= length.Hash {
+			proof = append(proof, enc)
+		}
+		elems, _, err := rlp.SplitList(enc)
+		if err != nil {
+			return nil, nil, err
+		}
+		n, err := rlp.CountValues(elems)
+		if err != nil {
+			return nil, nil, err
+		}
+		switch n {
+		case 2:
+			compact, rest, err := rlp.SplitString(elems)
+			if err != nil {
+				return nil, nil, err
+			}
+			nodeKey := nibbles.CompactToHex(compact)
+			leaf := nibbles.HasTerm(nodeKey)
+			if leaf {
+				nodeKey = nodeKey[:len(nodeKey)-1]
+			}
+			if !bytes.HasPrefix(path, nodeKey) {
+				return proof, nil, nil
+			}
+			path = path[len(nodeKey):]
+			if leaf {
+				if len(path) != 0 {
+					return proof, nil, nil
+				}
+				value, _, err = rlp.SplitString(rest)
+				return proof, value, err
+			}
+			if enc, err = childNode(byHash, rest); err != nil {
+				return nil, nil, err
+			}
+		case 17:
+			rest := elems
+			if len(path) == 0 {
+				return nil, nil, errors.New("key ends at a branch node")
+			}
+			for range path[0] {
+				if _, _, rest, err = rlp.Split(rest); err != nil {
+					return nil, nil, err
+				}
+			}
+			path = path[1:]
+			if enc, err = childNode(byHash, rest); err != nil {
+				return nil, nil, err
+			}
+		default:
+			return nil, nil, fmt.Errorf("invalid number of list elements: %d", n)
+		}
+	}
+	return proof, nil, nil
+}
+
+func childNode(byHash map[string][]byte, buf []byte) ([]byte, error) {
+	kind, val, rest, err := rlp.Split(buf)
+	switch {
+	case err != nil:
+		return nil, err
+	case kind == rlp.List:
+		return buf[:len(buf)-len(rest)], nil
+	case len(val) == 0:
+		return nil, nil
+	case len(val) == 32:
+		enc, ok := byHash[string(val)]
+		if !ok {
+			return nil, fmt.Errorf("proof node %x absent", val)
+		}
+		return enc, nil
+	default:
+		return nil, fmt.Errorf("invalid child reference of %d bytes", len(val))
+	}
 }

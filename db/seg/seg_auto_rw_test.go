@@ -46,6 +46,31 @@ func writeKVFile(t *testing.T, compression FileCompression, words [][]byte) stri
 	return file
 }
 
+func TestReaderPeekSizePreservesPosition(t *testing.T) {
+	words := [][]byte{
+		[]byte("key-0"), bytes.Repeat([]byte("pattern-"), 8192),
+		[]byte("key-1"),
+		{},
+		[]byte("key-2"), []byte("short value"),
+	}
+	for _, compression := range []FileCompression{CompressNone, CompressKeys, CompressVals, CompressKeys | CompressVals} {
+		t.Run(fmt.Sprintf("compression_%d", compression), func(t *testing.T) {
+			d, err := NewDecompressor(writeKVFile(t, compression, words))
+			require.NoError(t, err)
+			defer d.Close()
+			g := NewReader(d.MakeGetter(), compression)
+			for _, word := range words {
+				require.True(t, g.HasNext())
+				require.Equal(t, len(word), g.PeekSize())
+				require.Equal(t, len(word), g.PeekSize())
+				got, _ := g.Next(nil)
+				require.Equal(t, word, got)
+			}
+			require.False(t, g.HasNext())
+		})
+	}
+}
+
 // TestWriterReadFromMixedCompression copies a file whose keys are stored raw
 // and whose values are compressed. An uncompressed read hands back a slice of
 // the read-only mapping, so reusing it as the next read's buffer faults.

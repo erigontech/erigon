@@ -29,7 +29,6 @@ func BenchmarkStreamAcquire(b *testing.B) {
 		s.WriteObjectStart()
 		s.WriteObjectField("jsonrpc")
 		s.WriteString("2.0")
-		s.WriteMore()
 		s.WriteObjectField("result")
 		s.WriteString(result)
 		s.WriteObjectEnd()

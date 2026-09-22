@@ -905,8 +905,10 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 // path; the per-call differences live in m.
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
 	if err := cc.state.LazyLoadErr(); err != nil {
-		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
-			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
+		cc.publish(ctx, commitmentResult{
+			blockNum: t.blockNum, txNum: t.lastTxNum,
+			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err),
+		})
 		return
 	}
 	cc.state.FlushToUpdates(cc.updates)
@@ -929,8 +931,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		rh, err = cc.computeWithBlockAccumulator(ctx, t)
 	}
 	if err != nil {
-		cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
-			err: fmt.Errorf("commitmentCalculator: %scompute failed: %w", m.label, err)})
+		cc.publish(ctx, commitmentResult{
+			blockNum: t.blockNum, txNum: t.lastTxNum,
+			err: fmt.Errorf("commitmentCalculator: %scompute failed: %w", m.label, err),
+		})
 		return
 	}
 
@@ -939,8 +943,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		if mismatch {
 			cc.doms.GetCommitmentContext().ResetPendingUpdates()
 		} else if ferr := flushOwn(); ferr != nil {
-			cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
-				err: fmt.Errorf("commitmentCalculator: %sflush failed: %w", m.label, ferr)})
+			cc.publish(ctx, commitmentResult{
+				blockNum: t.blockNum, txNum: t.lastTxNum,
+				err: fmt.Errorf("commitmentCalculator: %sflush failed: %w", m.label, ferr),
+			})
 			return
 		}
 	}
@@ -1049,10 +1055,9 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 
 // computeWithBlockAccumulator runs ComputeCommitment with block N's saved
 // changeset (looked up by hash) passed as an explicit diff, so that any branch
-// writes during compute (mid-process inline flushes from `pendingPrefixes`
-// collisions, plus the [state] write at end via encodeAndStoreCommitmentState)
-// land in block N's CS rather than whatever the exec loop has installed as
-// current. A mid-block step boundary runs before N is saved and falls back to
+// writes during compute (a capacity flush from the encoder in eager mode, plus
+// the [state] write at end via encodeAndStoreCommitmentState) land in block N's
+// CS rather than whatever the exec loop has installed as current. A mid-block step boundary runs before N is saved and falls back to
 // the live accumulator, which is still N's — see the body.
 //
 // IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator

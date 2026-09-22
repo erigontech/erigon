@@ -59,6 +59,7 @@ func FileMask(from, to uint64, fileType string) string {
 func SegmentFileName(version Version, from, to uint64, t Enum) string {
 	return FileName(version, from, to, t.String()) + ".seg"
 }
+
 func IdxFileName(version Version, from, to uint64, fType string) string {
 	return FileName(version, from, to, fType) + ".idx"
 }
@@ -66,6 +67,7 @@ func IdxFileName(version Version, from, to uint64, fType string) string {
 func SegmentFileMask(from, to uint64, t Enum) string {
 	return FileMask(from, to, t.String()) + ".seg"
 }
+
 func IdxFileMask(from, to uint64, fType string) string {
 	return FileMask(from, to, fType) + ".idx"
 }
@@ -107,6 +109,7 @@ func FilterExt(in []FileInfo, expectExt string) (out []FileInfo) {
 	})
 	return out
 }
+
 func FilesWithExt(dir string, expectExt string) ([]FileInfo, error) {
 	files, err := ParseDir(dir)
 	if err != nil {
@@ -307,10 +310,12 @@ func IsSeedableExtension(name string) bool {
 //   - avoiding having too much files:
 //     more files(shards) - means "more metadata", "more lookups for non-indexed queries", "more dictionaries", "more bittorrent connections", ...
 //     less files - means small files will be removed after merge (no peers for this files).
-const Erigon2OldMergeLimit = 500_000
-const Erigon2MergeLimit = 100_000
-const CaplinMergeLimit = 10_000
-const Erigon2MinSegmentSize = 1_000
+const (
+	Erigon2OldMergeLimit  = 500_000
+	Erigon2MergeLimit     = 100_000
+	CaplinMergeLimit      = 10_000
+	Erigon2MinSegmentSize = 1_000
+)
 
 var MergeSteps = []uint64{100_000, 10_000}
 

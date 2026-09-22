@@ -436,23 +436,8 @@ func senderIsCoinbaseScenario(t *testing.T, value uint64, preBlockCoinbaseBal ui
 	var rules *chain.Rules
 	var header *types.Header
 	if london {
-		// London-enabled config + rules — fresh construction (cannot
-		// dereference-copy chain.Config; it embeds sync.Once via noCopy).
-		config = &chain.Config{
-			ChainID:               uint256.NewInt(1337),
-			Rules:                 chain.EtHashRules,
-			HomesteadBlock:        common.NewUint64(0),
-			TangerineWhistleBlock: common.NewUint64(0),
-			SpuriousDragonBlock:   common.NewUint64(0),
-			ByzantiumBlock:        common.NewUint64(0),
-			ConstantinopleBlock:   common.NewUint64(0),
-			PetersburgBlock:       common.NewUint64(0),
-			IstanbulBlock:         common.NewUint64(0),
-			MuirGlacierBlock:      common.NewUint64(0),
-			BerlinBlock:           common.NewUint64(0),
-			LondonBlock:           common.NewUint64(0),
-			Ethash:                new(chain.EthashConfig),
-		}
+		config = chain.TestChainBerlinConfig.Copy()
+		config.LondonBlock = common.NewUint64(0)
 		rules = &chain.Rules{IsSpuriousDragon: true, IsLondon: true}
 		header = &types.Header{
 			Number:   *uint256.NewInt(1),
@@ -1130,7 +1115,8 @@ func TestNormalizeWriteSet_StorageOnlyAddress(t *testing.T) {
 	val100 := *uint256.NewInt(100)
 
 	emptyCodeHash := accounts.InternCodeHash(common.HexToHash(
-		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+	))
 
 	// Pre-block account state (from domain/stateReader).
 	reader := newMapStateReader()
@@ -1169,7 +1155,8 @@ func TestNormalizeWriteSet_StorageAllNoOps(t *testing.T) {
 	val100 := *uint256.NewInt(100)
 
 	emptyCodeHash := accounts.InternCodeHash(common.HexToHash(
-		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+	))
 
 	reader := newMapStateReader()
 	reader.accounts[addr] = &accounts.Account{
@@ -1204,7 +1191,8 @@ func TestNormalizeWriteSet_CreateContract(t *testing.T) {
 	vm := state.NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x19})
 	codeHash := accounts.InternCodeHash(common.HexToHash(
-		"40802296c24793f9d86e9e09d87c4e03606856c98cbdd749d6499bea4467d07c"))
+		"40802296c24793f9d86e9e09d87c4e03606856c98cbdd749d6499bea4467d07c",
+	))
 
 	// TX 0 creates a contract with nonce=1, balance=0, non-empty codeHash
 	ver0 := state.Version{TxIndex: 0, Incarnation: 0}
@@ -1272,7 +1260,8 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x37, 0x42}) // target account
 
 	emptyCodeHash := accounts.InternCodeHash(common.HexToHash(
-		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+	))
 
 	// The account previously had Balance > 0 (from a prior block).
 	// In this block, a TX zeroes the balance. The account becomes empty
@@ -1328,7 +1317,8 @@ func TestNormalizeWriteSet_EmptyAccountRemoval(t *testing.T) {
 // account.
 func TestNormalizeWriteSet_AuraSystemAddressRetained(t *testing.T) {
 	emptyCodeHash := accounts.InternCodeHash(common.HexToHash(
-		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470"))
+		"c5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470",
+	))
 
 	run := func(isAura bool) *state.WriteSet {
 		vm := state.NewVersionMap(nil)

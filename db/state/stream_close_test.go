@@ -92,6 +92,7 @@ func (tx *testTx) ReadSequence(table string) (uint64, error)       { return 0, n
 func (tx *testTx) ForEach(table string, fromPrefix []byte, walker func(k, v []byte) error) error {
 	return nil
 }
+
 func (tx *testTx) ForAmount(table string, prefix []byte, amount uint32, walker func(k, v []byte) error) error {
 	return nil
 }
@@ -100,9 +101,11 @@ func (tx *testTx) CursorDupSort(table string) (kv.CursorDupSort, error) { return
 func (tx *testTx) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	return nil, nil
 }
+
 func (tx *testTx) Prefix(table string, prefix []byte) (stream.KV, error) {
 	return nil, nil
 }
+
 func (tx *testTx) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	return nil, nil
 }
@@ -140,8 +143,11 @@ func (c *testCursorDupSort) SeekBothExact(key, value []byte) ([]byte, []byte, er
 func (c *testCursorDupSort) SeekBothRange(key, value []byte) ([]byte, error) { return nil, nil }
 func (c *testCursorDupSort) FirstDup() ([]byte, error)                       { return nil, nil }
 func (c *testCursorDupSort) NextDup() ([]byte, []byte, error)                { return nil, nil, nil }
-func (c *testCursorDupSort) NextNoDup() ([]byte, []byte, error)              { return nil, nil, nil }
-func (c *testCursorDupSort) PrevDup() ([]byte, []byte, error)                { return nil, nil, nil }
-func (c *testCursorDupSort) PrevNoDup() ([]byte, []byte, error)              { return nil, nil, nil }
-func (c *testCursorDupSort) LastDup() ([]byte, error)                        { return nil, nil }
-func (c *testCursorDupSort) CountDuplicates() (uint64, error)                { return 0, nil }
+
+func (c *testCursorDupSort) NextNoDup() ([]byte, []byte, error) { return nil, nil, nil }
+
+func (c *testCursorDupSort) PrevDup() ([]byte, []byte, error) { return nil, nil, nil }
+
+func (c *testCursorDupSort) PrevNoDup() ([]byte, []byte, error) { return nil, nil, nil }
+func (c *testCursorDupSort) LastDup() ([]byte, error)           { return nil, nil }
+func (c *testCursorDupSort) CountDuplicates() (uint64, error)   { return 0, nil }

@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -56,6 +57,8 @@ type RecordingState struct {
 	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
 	// already created in-block is redundant in the witness (the verifier replays the create).
 	createdCodeHashes map[common.Hash]struct{}
+	// codeHashes is keyed by the code itself: one code is recorded under several maps and addresses.
+	codeHashes map[string]common.Hash
 
 	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
@@ -90,6 +93,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		AccessedCode:          make(map[common.Address][]byte),
 		PreStateCode:          make(map[common.Address][]byte),
 		createdCodeHashes:     make(map[common.Hash]struct{}),
+		codeHashes:            make(map[string]common.Hash),
 		accountOverlay:        make(map[common.Address]*accounts.Account),
 		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
 		codeOverlay:           make(map[common.Address][]byte),
@@ -241,7 +245,7 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 	if len(code) > 0 {
 		s.AccessedCode[addr] = code
 		if _, already := s.PreStateCode[addr]; !already {
-			if _, created := s.createdCodeHashes[crypto.Keccak256Hash(code)]; !created {
+			if _, created := s.createdCodeHashes[s.codeHash(code)]; !created {
 				s.PreStateCode[addr] = code
 			}
 		}
@@ -319,6 +323,15 @@ func (s *RecordingState) UpdateAccountData(address accounts.Address, original, a
 		fmt.Printf("[TRACE] UpdateAccountData %s nonce=%d balance=%d codeHash=%x\n", addr.Hex(), account.Nonce, &account.Balance, account.CodeHash)
 	}
 	return nil
+}
+
+func (s *RecordingState) codeHash(code []byte) common.Hash {
+	if h, ok := s.codeHashes[string(code)]; ok {
+		return h
+	}
+	h := crypto.Keccak256Hash(code)
+	s.codeHashes[string(code)] = h
+	return h
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -527,18 +540,23 @@ type ExecutionWitnessResult struct {
 
 	// cachedJSON, when non-nil, is this result's pre-marshaled JSON. The eager
 	// witness cache stores a shell carrying only this, so a hit serves the bytes
-	// verbatim via MarshalFastJSON instead of re-marshaling the struct.
+	// verbatim via MarshalFastJSONTo instead of re-marshaling the struct.
 	cachedJSON []byte
 }
 
-// MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
-// returns its stored bytes verbatim; a freshly built result marshals its exported
-// fields, byte-identical to the cached form so both paths agree.
-func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
-	if m.cachedJSON != nil {
-		return m.cachedJSON, nil
+// MarshalFastJSONTo is the rpc fast-result path: a cache shell writes its stored bytes
+// verbatim; a freshly built result marshals its exported fields, byte-identical to the
+// cached form so both paths agree.
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	enc := m.cachedJSON
+	if enc == nil {
+		var err error
+		if enc, err = json.Marshal(m); err != nil {
+			return err
+		}
 	}
-	return json.Marshal(m)
+	s.WriteRawBytes(enc)
+	return nil
 }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
@@ -753,7 +771,7 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	// orphan into a plain miss and losing the reorged-away signal.
 	resolve := blockNrOrHash
 	resolve.RequireCanonical = false
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false, false
@@ -1132,7 +1150,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		// canonical: only pre-state bytecode (excludes in-block-created), non-empty.
 		for _, code := range rs.GetPreStateCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 	default:
@@ -1142,17 +1160,17 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		// by its resolved target code and survives only in PreStateCode.
 		for _, code := range rs.GetAccessedCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		for _, code := range rs.GetModifiedCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		for _, code := range rs.GetPreStateCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		emptyEntry = rs.emptyCodeAccessed
@@ -1173,7 +1191,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	preCode := rs.GetPreStateCode()
 	for addr, code := range preCode {
 		if len(code) > 0 {
-			codeHash := crypto.Keccak256Hash(code)
+			codeHash := rs.codeHash(code)
 			addrHash := crypto.Keccak256Hash(addr[:])
 			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
 				Code:     code,
@@ -1307,7 +1325,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs, "debug_executionWitness_witness_construction")
+	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1331,11 +1349,14 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
 	// TxNums and commitment history must describe the same block view.
-	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
 	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
+		return nil, err
+	}
+	if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
 		return nil, err
 	}
 
@@ -1425,9 +1446,10 @@ func (api *BaseAPI) collectAccessedHeaders(
 	return headers, byNumber, nil
 }
 
-// verifyWitnessStateless optionally re-executes the block statelessly against the
-// generated witness and asserts the resulting state root matches. Verification is
-// a no-op when ERIGON_WITNESS_NO_VERIFY=true (it roughly doubles execution cost).
+// verifyWitnessStateless re-executes the block from the witness alone and checks the post-state root and
+// result.Keys. It runs only under ERIGON_ASSERT. Without it a build still checks the parent state root, and
+// for a non-empty accessed set the block-end commitment as well; what the gate removes is the stateless
+// replay, which is what covers Codes, Keys and node sufficiency.
 func (api *DebugAPIImpl) verifyWitnessStateless(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1435,7 +1457,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	block *types.Block,
 	fullEngine rules.Engine,
 ) error {
-	if dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+	if !dbg.AssertEnabled {
 		return nil
 	}
 
@@ -1569,8 +1591,7 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 	// Build code map from codes list
 	codeMap := make(map[common.Hash][]byte)
 	for _, code := range result.Codes {
-		codeHash := crypto.Keccak256Hash(code)
-		codeMap[codeHash] = code
+		codeMap[crypto.Keccak256Hash(code)] = code
 	}
 
 	return &witnessStateless{

@@ -49,7 +49,6 @@ import (
 
 // Create revival problem
 func TestCreate2Revive(t *testing.T) {
-
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -83,7 +82,7 @@ func TestCreate2Revive(t *testing.T) {
 	var revive *contracts.Revive
 	// Change this address whenever you make any changes in the code of the revive contract in
 	// contracts/revive.sol
-	var create2address = accounts.InternAddress(common.HexToAddress("e70fd65144383e1189bd710b1e23b61e26315ff4"))
+	create2address := accounts.InternAddress(common.HexToAddress("e70fd65144383e1189bd710b1e23b61e26315ff4"))
 
 	// There are 4 blocks
 	// In the first block, we deploy the "factory" contract Revive, which can create children contracts via CREATE2 opcode
@@ -234,12 +233,10 @@ func TestCreate2Revive(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-
 }
 
 // Polymorthic contracts via CREATE2
 func TestCreate2Polymorth(t *testing.T) {
-
 	// Configure and generate a sample block chain
 	var (
 		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -273,7 +270,7 @@ func TestCreate2Polymorth(t *testing.T) {
 
 	// Change this address whenever you make any changes in the code of the poly contract in
 	// contracts/poly.sol
-	var create2address = accounts.InternAddress(common.HexToAddress("c66aa74c220476f244b7f45897a124d1a01ca8a8"))
+	create2address := accounts.InternAddress(common.HexToAddress("c66aa74c220476f244b7f45897a124d1a01ca8a8"))
 
 	// There are 5 blocks
 	// In the first block, we deploy the "factory" contract Poly, which can create children contracts via CREATE2 opcode
@@ -355,7 +352,6 @@ func TestCreate2Polymorth(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-
 		st := state.New(m.NewStateReader(tx))
 		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
@@ -409,7 +405,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(code, common.FromHex("6002ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", code)
 		}
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+		if !m.HistoryV3 { // AccountsDomain: has no "incarnation" concept
 			incarnation, err := st.GetIncarnation(create2address)
 			if err != nil {
 				return err
@@ -457,7 +453,7 @@ func TestCreate2Polymorth(t *testing.T) {
 		if !bytes.Equal(code, common.FromHex("6004ff")) {
 			t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", code)
 		}
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+		if !m.HistoryV3 { // AccountsDomain: has no "incarnation" concept
 			incarnation, err := st.GetIncarnation(create2address)
 			if err != nil {
 				return err
@@ -490,7 +486,7 @@ func TestCreate2Polymorth(t *testing.T) {
 			t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", code)
 		}
 
-		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+		if !m.HistoryV3 { // AccountsDomain: has no "incarnation" concept
 			incarnation, err := st.GetIncarnation(create2address)
 			if err != nil {
 				return err
@@ -502,7 +498,6 @@ func TestCreate2Polymorth(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-
 }
 
 func TestReorgOverSelfDestruct(t *testing.T) {
@@ -595,7 +590,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 	}
 
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-
 		st := state.New(m.NewStateReader(tx))
 		defer st.Close()
 		if exist, err := st.Exist(address); err != nil {
@@ -616,7 +610,7 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key0 = accounts.ZeroKey
+	key0 := accounts.ZeroKey
 	var correctValueX uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -624,7 +618,6 @@ func TestReorgOverSelfDestruct(t *testing.T) {
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
-
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
 
@@ -765,7 +758,6 @@ func TestReorgOverStateChange(t *testing.T) {
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if exist {
-
 			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
 		}
 		return nil
@@ -777,7 +769,7 @@ func TestReorgOverStateChange(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key0 = accounts.ZeroKey
+	key0 := accounts.ZeroKey
 	var correctValueX uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -785,7 +777,6 @@ func TestReorgOverStateChange(t *testing.T) {
 		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
 			t.Error(err)
 		} else if !exist {
-
 			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
 		}
 
@@ -823,7 +814,6 @@ func TestReorgOverStateChange(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-
 }
 
 type BucketsStats struct {
@@ -918,7 +908,7 @@ func TestCreateOnExistingStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key0 = accounts.ZeroKey
+	key0 := accounts.ZeroKey
 	var check0 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -1330,7 +1320,6 @@ func TestWrongIncarnation2(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-
 }
 
 func TestRecreateAndRewind(t *testing.T) {
@@ -1477,7 +1466,7 @@ func TestRecreateAndRewind(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	var key0 = accounts.ZeroKey
+	key0 := accounts.ZeroKey
 	var check0 uint256.Int
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
 		st := state.New(m.NewStateReader(tx))
@@ -1501,7 +1490,6 @@ func TestRecreateAndRewind(t *testing.T) {
 		t.Fatal(err)
 	}
 	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
-
 		st := state.New(m.NewStateReader(tx))
 		defer st.Close()
 		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
@@ -1540,8 +1528,8 @@ func TestRecreateAndRewind(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-
 }
+
 func TestTxLookupUnwind(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

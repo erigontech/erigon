@@ -97,6 +97,7 @@ func (g *persistedEnvelopeForkGraph) DumpEnvelopeOnDisk(_ common.Hash, envelope 
 	g.envelope = envelope
 	return nil
 }
+
 func (g *persistedEnvelopeForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	return g.envelope, nil
 }
@@ -178,6 +179,7 @@ func (g *concurrentPayloadValidationForkGraph) MarkPayloadAccepted(_ common.Hash
 	g.verified.Store(verified)
 	g.accepted.Store(true)
 }
+
 func (g *concurrentPayloadValidationForkGraph) ClearPayloadAccepted(common.Hash) {
 	g.accepted.Store(false)
 	g.verified.Store(false)
@@ -356,6 +358,7 @@ func (g *persistingEnvelopeForkGraph) IsBlockInvalid(common.Hash) bool { return 
 func (*persistingEnvelopeForkGraph) IsPayloadUnavailable(common.Hash) bool {
 	return false
 }
+
 func (g *persistingEnvelopeForkGraph) PayloadAccepted(common.Hash) (bool, bool) {
 	return g.verified.Load(), g.accepted.Load()
 }
@@ -365,10 +368,12 @@ func (g *persistingEnvelopeForkGraph) MarkPayloadAccepted(_ common.Hash, verifie
 	g.verified.Store(verified)
 	g.accepted.Store(true)
 }
+
 func (g *persistingEnvelopeForkGraph) ClearPayloadAccepted(common.Hash) {
 	g.verified.Store(false)
 	g.accepted.Store(false)
 }
+
 func (g *persistingEnvelopeForkGraph) MarkHeaderAsInvalid(common.Hash) {
 	g.invalid.Store(true)
 	g.ClearPayloadAccepted(common.Hash{})
@@ -566,12 +571,14 @@ func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool { return root 
 func (g pendingRetryForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return nil, false
 }
+
 func (g pendingRetryForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if root != g.completed {
 		return nil, nil
 	}
 	return g.completedEnvelope, nil
 }
+
 func (g pendingRetryForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
 	return nil, nil
 }
@@ -1846,13 +1853,12 @@ func TestExecutionPayloadIndexWriteHasSingleNotificationOwner(t *testing.T) {
 		results <- result{notify: notify, err: err}
 	}()
 	<-db.started
-	secondStarted := make(chan struct{})
+	waiterCtx := &observedContext{Context: t.Context(), doneObserved: make(chan struct{})}
 	go func() {
-		close(secondStarted)
-		_, notify, err := f.ensureExecutionPayloadEnvelopeIndices(t.Context(), blockRoot, envelope, true)
+		_, notify, err := f.ensureExecutionPayloadEnvelopeIndices(waiterCtx, blockRoot, envelope, true)
 		results <- result{notify: notify, err: err}
 	}()
-	<-secondStarted
+	<-waiterCtx.doneObserved
 	close(db.release)
 
 	first := <-results
@@ -4332,7 +4338,8 @@ func TestValidateExecutionPayloadEnvelopeForConsensusRechecksAfterEL(t *testing.
 						graph.block = nil
 					}
 					return execution_client.PayloadStatusValidated, nil
-				})
+				},
+			)
 			require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope))
 		})
 	}

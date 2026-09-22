@@ -239,7 +239,8 @@ func (pe *parallelExecutor) clearChangesetAccumulator() {
 func (pe *parallelExecutor) exec(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (*types.Header, kv.TemporalRwTx, error) {
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
+) (*types.Header, kv.TemporalRwTx, error) {
 	var (
 		outHeader *types.Header
 		outTx     kv.TemporalRwTx
@@ -255,8 +256,8 @@ func (pe *parallelExecutor) exec(ctx context.Context,
 func (pe *parallelExecutor) execImpl(ctx context.Context,
 	startBlockNum uint64, offsetFromBlockBeginning uint64, maxBlockNum uint64, blockLimit uint64,
 	initialTxNum uint64, inputTxNum uint64, initialCycle bool, rwTx kv.TemporalRwTx,
-	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker) (outHeader *types.Header, outTx kv.TemporalRwTx, execErr error) {
-
+	stepsInDb float64, accumulator *shards.Accumulator, readAhead chan uint64, logEvery *time.Ticker,
+) (outHeader *types.Header, outTx kv.TemporalRwTx, execErr error) {
 	// The stage write transaction remains on this goroutine. The exec loop and
 	// block dispatcher each open their own read-only transaction.
 
@@ -644,7 +645,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 
 					var blockValidatorWaiter *blockValidator
 					validateFullBlock := blockNum > 0 && !applyResult.isPartial
-					if validateFullBlock { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
+					if validateFullBlock { // Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 						checkBloom := !pe.cfg.vmConfig.StatelessExec && !pe.cfg.vmConfig.NoReceipts
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(blockNum)
 
@@ -1761,7 +1762,6 @@ func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.Tempo
 		pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
 
 		blockResult, err = blockExecutor.nextResult(ctx, pe, txResult, applyTx)
-
 		if err != nil {
 			return blockResult, err
 		}
@@ -1812,7 +1812,8 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, func(erro
 	pe.execWorkers, _, pe.rws, pe.stopWorkers, pe.waitWorkers, err = exec.NewWorkersPool(
 		workersCtx, workerFaults, nil, true, pe.cfg.db, nil, nil, nil, pe.in,
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
-		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger)
+		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
+	)
 
 	executorCancel := func(cause error) error {
 		execLoopCtxCancel(cause)
@@ -1955,12 +1956,11 @@ type txResult struct {
 	blockGasUsed          int64
 	cumulativeBlobGasUsed uint64
 	receipt               *types.Receipt
-	logs                  []*types.Log // yes, logs exist inside `receipt`, but Finalize txn producing `logs` without `receipt`
+	logs                  []*types.Log
 	traceFroms            map[accounts.Address]struct{}
 	traceTos              map[accounts.Address]struct{}
 	writes                *state.WriteSet
 	rules                 *chain.Rules
-	isFinalize            bool // block-end finalize writes — apply to sd.mem directly
 }
 
 // blockRequest is the commitment calculator's per-block heads-up, sent by the
@@ -2417,8 +2417,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) (result *exec.TxResult) {
-
+	calcFees bool,
+) (result *exec.TxResult) {
 	var start time.Time
 	if ev.profile {
 		start = time.Now()
@@ -3448,7 +3448,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
 				_, finalizeErr := pe.cfg.engine.Finalize(
 					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, blockReceipts,
-					tt.Withdrawals, chainReader, syscall, false, pe.logger)
+					tt.Withdrawals, chainReader, syscall, false, pe.logger,
+				)
 				if stateErr := ibs.StateReadError(); stateErr != nil {
 					return be.operationalBlockResult(fmt.Errorf("can't finalize block %d: state read: %w", be.number(), stateErr)), nil
 				}
@@ -3456,7 +3457,18 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.number(), finalizeErr)), nil
 				}
 
-				lastResult.Logs = append(lastResult.Logs, syscallIBS.GetRawLogs(tt.TxIndex)...)
+				blockEndLogs := syscallIBS.GetRawLogs(tt.TxIndex)
+
+				// Block-end logs belong to no receipt, so the per-tx publish
+				// loop, which indexes receipt logs only, never sees them. Index
+				// them here, on the exec loop that owns sd.mem, to keep the log
+				// indexes identical to the ones the serial executor builds.
+				if len(blockEndLogs) > 0 {
+					if err := pe.rs.ApplyTxIndexes(applyTx, finalVersion.TxNum, nil, 0,
+						blockEndLogs, nil, nil, true); err != nil {
+						return nil, fmt.Errorf("[parallel] block-end log indexes: %w", err)
+					}
+				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())
 
@@ -3488,21 +3500,16 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// Send finalize txResult through the channel for index writes.
-		// State writes are already in the BlockStateCache.
+		// Finalize writes are already in BlockStateCache. Forward them as well so
+		// commitment calculation and accumulator notifications include these changes.
 		if !finalizeWrites.IsEmpty() {
 			lastResult := be.results[len(be.results)-1]
 			if err := be.sendResult(ctx, &txResult{
-				blockNum:              be.number(),
-				blockHash:             be.hash(),
-				txNum:                 txTask.Version().TxNum,
-				rules:                 lastResult.Rules(),
-				writes:                finalizeWrites,
-				logs:                  lastResult.Logs,
-				traceFroms:            lastResult.TraceFroms,
-				traceTos:              lastResult.TraceTos,
-				cumulativeBlobGasUsed: be.blobGasUsed,
-				isFinalize:            true,
+				blockNum:  be.number(),
+				blockHash: be.hash(),
+				txNum:     txTask.Version().TxNum,
+				rules:     lastResult.Rules(),
+				writes:    finalizeWrites,
 			}, false); err != nil {
 				return nil, err
 			}

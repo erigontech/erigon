@@ -318,7 +318,6 @@ func (c *Merge) TxDependencies(h *types.Header) [][]int {
 // verifyHeader checks whether a Proof-of-Stake header conforms to the consensus rules of the
 // stock Ethereum rules engine with EIP-3675 modifications.
 func (s *Merge) verifyHeader(chain rules.ChainHeaderReader, header, parent *types.Header) error {
-
 	if uint64(len(header.Extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra-data longer than %d bytes (%d)", params.MaximumExtraDataSize, len(header.Extra))
 	}
@@ -502,7 +501,8 @@ func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 
 func (s *Merge) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 

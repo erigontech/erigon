@@ -17,6 +17,7 @@
 package mdbx_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -396,8 +397,8 @@ func TestHasDelete(t *testing.T) {
 	defer c.Close()
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
-	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1"))) //valid but already deleted
-	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) //valid key but wrong value
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1"))) // valid but already deleted
+	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) // valid key but wrong value
 
 	res, err := tx.Has(table, []byte("key1"))
 	require.NoError(t, err)
@@ -409,7 +410,7 @@ func TestHasDelete(t *testing.T) {
 
 	res, err = tx.Has(table, []byte("key3"))
 	require.NoError(t, err)
-	require.True(t, res) //There is another key3 left
+	require.True(t, res) // There is another key3 left
 
 	res, err = tx.Has(table, []byte("k"))
 	require.NoError(t, err)
@@ -603,8 +604,8 @@ func TestNextDups(t *testing.T) {
 	defer c.Close()
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
-	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1"))) //valid but already deleted
-	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.3"))) //valid key but wrong value
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1"))) // valid but already deleted
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.3"))) // valid key but wrong value
 
 	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value1.1")))
 	require.NoError(t, c.Put([]byte("key2"), []byte("value1.2")))
@@ -687,7 +688,7 @@ func TestDupDelete(t *testing.T) {
 	err = c.Delete([]byte("key1"))
 	require.NoError(t, err)
 
-	//TODO: find better way
+	// TODO: find better way
 	count, err := tx.Count("Table")
 	require.NoError(t, err)
 	assert.Zero(t, count)
@@ -883,7 +884,7 @@ func TestDB_Batch_Panic(t *testing.T) {
 	db := _db.(*mdbx.MdbxKV)
 
 	var sentinel int
-	var bork = &sentinel
+	bork := &sentinel
 	var problem any
 	var err error
 
@@ -1123,4 +1124,86 @@ func TestTxnDpLimitFromRealPageSize(t *testing.T) {
 	dpLimit, err := db.(*mdbx.MdbxKV).Env().GetOption(mdbxgo.OptTxnDpLimit)
 	require.NoError(t, err)
 	require.Equal(t, dirtySpace/db.PageSize().Bytes(), dpLimit)
+}
+
+func TestBeginRoRenewedTxnSeesLatestCommit(t *testing.T) {
+	db := BaseCaseDB(t)
+	put := func(v uint64) {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return tx.Put(kv.Sequence, []byte("k"), u64tob(v)) }))
+	}
+	get := func() []byte {
+		tx, err := db.BeginRo(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		v, err := tx.GetOne(kv.Sequence, []byte("k"))
+		require.NoError(t, err)
+		return bytes.Clone(v)
+	}
+
+	put(1)
+	require.Equal(t, u64tob(1), get())
+	put(2)
+	require.Equal(t, u64tob(2), get(), "a read txn renewed from the pool must start on the latest commit")
+}
+
+func TestBeginRoRenewsPooledTxn(t *testing.T) {
+	db := BaseCaseDB(t)
+	pool := func() int { return mdbx.RoTxPoolLen(db.(*mdbx.MdbxKV)) }
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback() // a safety net: the explicit rollbacks below are what the test exercises
+	parked := pool()
+	tx.Rollback()
+	require.Equal(t, parked+1, pool())
+
+	tx, err = db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.Equal(t, parked, pool())
+	tx.Rollback()
+	require.Equal(t, parked+1, pool())
+}
+
+// TestCursorOnPooledTxn pins that a cursor opened on a read txn that came back from the
+// pool reads through the renewal. Reuse itself is not asserted: mdbx hands a freed txn
+// back at the same address, so CHandle equality holds whether or not pooling ran.
+func TestCursorOnPooledTxn(t *testing.T) {
+	db := BaseCaseDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.Sequence, []byte("k"), u64tob(1))
+	}))
+
+	first, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer first.Rollback() // a safety net: the explicit rollback below is what the test exercises
+	first.Rollback()
+
+	second, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer second.Rollback()
+
+	c, err := second.Cursor(kv.Sequence)
+	require.NoError(t, err)
+	defer c.Close()
+	_, v, err := c.SeekExact([]byte("k"))
+	require.NoError(t, err)
+	require.Equal(t, u64tob(1), v, "a cursor opened on a renewed txn must read through it")
+}
+
+func TestRollbackTwiceParksTxnOnce(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	tx.Rollback()
+	tx.Rollback()
+
+	a, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer a.Rollback()
+	b, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer b.Rollback()
+	require.NotEqual(t, a.CHandle(), b.CHandle(), "two live read txns must never share one handle")
 }

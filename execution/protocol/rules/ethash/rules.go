@@ -406,7 +406,8 @@ func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Heade
 }
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+) error {
 	if config.DAOForkBlock != nil && header.Number.Uint64() == *config.DAOForkBlock {
 		if err := misc.ApplyDAOHardFork(state); err != nil {
 			return err
@@ -434,7 +435,6 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, call rules.Call, logger log.Logger,
 ) (*types.Block, types.FlatRequests, error) {
-
 	// Finalize block
 	_, err := ethash.Finalize(chainConfig, header, state, uncles, r, withdrawals, chain, syscall, false, logger)
 	if err != nil {
@@ -446,7 +446,8 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 
 func (ethash *Ethash) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 

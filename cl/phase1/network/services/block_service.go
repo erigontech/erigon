@@ -45,9 +45,11 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-var ErrInvalidSignature = errors.New("invalid signature")
-var ErrPublishedBlockJobExpired = errors.New("published block integration expired")
-var ErrPublishedBlockJobStopped = errors.New("block service stopped")
+var (
+	ErrInvalidSignature         = errors.New("invalid signature")
+	ErrPublishedBlockJobExpired = errors.New("published block integration expired")
+	ErrPublishedBlockJobStopped = errors.New("block service stopped")
+)
 
 var publishedBlockJobSequence atomic.Uint64
 

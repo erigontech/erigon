@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimit uint64, gasPrice uint256.Int) *types.LegacyTx {
@@ -440,7 +439,7 @@ func TestBodyStorage(t *testing.T) {
 	br := m.BlockReader
 	require := require.New(t)
 
-	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
 	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
@@ -477,7 +476,7 @@ func TestBodyStorage(t *testing.T) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
 	if entry := rawdb.ReadBodyRLP(tx, header.Hash(), 1); entry == nil {
-		//if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
+		// if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
 		t.Fatalf("Stored body RLP not found")
 	} else {
 		bodyRlp, err := rlp.EncodeToBytes(entry)
@@ -1239,7 +1238,7 @@ func TestBlockAccessListStorage(t *testing.T) {
 
 	nonEmpty := types.BlockAccessList{
 		{
-			Address: accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
+			Address: common.HexToAddress("0x00000000000000000000000000000000000000aa"),
 		},
 	}
 	nonEmptyBytes, err := types.EncodeBlockAccessListBytes(nonEmpty)
@@ -1346,7 +1345,7 @@ func TestBadBlocks(t *testing.T) {
 	defer tx.Rollback()
 
 	require := require.New(t)
-	var testKey, _ = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	testKey, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	testAddr := crypto.PubkeyToAddress(testKey.PublicKey)
 
 	mustSign := func(tx types.Transaction, s types.Signer) types.Transaction {
