@@ -176,16 +176,44 @@ The dispatch is safe only because no V1/V2 compact prefix can begin `0x40`/`0x41
 `nibbles.go:55-58` sets only bits `0x20` and `0x10` in the compact flag byte. That precondition is currently
 unstated and untested; Task 1 pins it.
 
-**B — cache bytes, not decoded nodes.** Reading child *k* is a popcount plus a slice (`record.slotAt:116`).
-A decoded tier saves the popcount and costs the E2 residency trap plus the stale-node invalidation problem
-§8 of the architecture doc says v4 does not have. The real per-read cost is three allocations, none of them
-the decode:
+**B — cache bytes, not decoded nodes.** The decision stands. **Both halves of its original reasoning were
+wrong and are replaced below**, re-derived by measurement on 2026-09-22 against the packed 56-byte node.
 
-| per node read | site | disposition |
-|---|---|---|
-| key allocation | `v4/unfold.go:53,60` pass `dst=nil` **and** `nodeKey:105` calls `packPath(path, nil)`, which allocates whenever `cap(dst) < packed` (`path.go:28-29`) — so threading `dst` into the wrappers alone removes nothing | Task 3; both halves or neither |
-| record copy | `commitment_context.go:1092` `branchBuf` — unnecessary on a cache hit, since `Put:563` copies in and `Get:561` returns `entry.data` uncopied | Task 5, after measurement |
-| ext unpack per child | `unfold.go:109` -> `decodeExtension` -> `unpackPath(.., nil)` | Task 5, after measurement |
+The original text claimed reading a child is "a popcount plus a slice", that the decode is free, and that
+a decoded tier is barred by Nethermind's F13 stale-node problem. Measured (median ns/op, allocs/op,
+darwin/arm64, go1.26.8, records built with `encodeRecord`):
+
+| record | bytes | `branchBuf` copy | `unfold` today | pooled + presized |
+|---|---:|---:|---:|---:|
+| d3 fan2 | 69 | 3.7 ns | **268 ns / 5** | 46 ns / 0 |
+| d3 fan16 | 517 | 11.1 ns | **1292 ns / 7** | 236 ns / 0 |
+| d3 fan16, 16 ext | 567 | 12.2 ns | **2180 ns / 39** | ~597 ns / 16 |
+| d6 fan16, 8 leaf | 1061 | 21.4 ns | **2347 ns / 23** | 793 ns / 16 |
+
+- **Cost.** The decode is the dominant per-read cost — 268-2347 ns and 3-37 allocations per node — not a
+  rounding error. The `branchBuf` copy the old table *did* list is 3.7-21.4 ns, 100-600x less. It is
+  removable in place, without a tier: presize `n.slots` to `OnesCount16(l.child)`, unpack extensions into
+  `s.ext` instead of allocating twice, alias leaf suffix and value into the cache-owned bytes.
+- **Coherence.** Not F13. `IsStale` reads `txN`/`epoch` on `branchCacheEntry:85-88`, not the payload, so a
+  decoded tier would inherit the identical check and F13 never arises. The argument that actually holds is
+  **ownership**: an unfolded node is reader-mutated state. `setChild` (`node.go:136-149`) clears the
+  `hashMask` bit and installs a `*node`; `ensurePath` (`graph.go:72-75`) branches on exactly those fields,
+  and `schedule.go:271` runs it *before* the skip decision at `:277-283`, so a node is mutated for an entry
+  that is then skipped. A shared decoded entry would hand the next reader a node with its stored child hash
+  erased and a pointer into the previous block's subtree, and `epoch`/`txN` cannot see it because no write
+  occurred. Bytes are immutable and shareable; decoded nodes are not.
+
+**Falsification condition.** B flips if a pooled, presized `unfold` cannot get under ~300 ns at 0 allocs on
+the real shape mix, or if measured fan-out is dominated by the 16-child-with-extension shape — the only one
+where copy-on-read from a tier won (490 vs 597 ns). It also flips if M6's cross-block hit rate makes a
+per-hit 200-800 ns saving outweigh a 2.74-7.42x residency multiplier on the bounded set (50,000 tail
+entries plus <=69,905 trunk slots; ~25 MB growing to ~100 MB).
+
+Follow-up work this opened, none of it scheduled: `node.go:116` `slotsInitialCap = 4` with `slices.Insert`
+growth reallocates a 16-child slots array three times and retains 224 B unused; `unfold.go:109` plus
+`node.go:161` allocate every child extension twice; `node.go:132-133` `setLeaf` copies suffix and value out
+of the record. Aliasing the last one requires removing the `branchBuf` copy first, since that buffer is
+recycled.
 
 On leaves: under the record design the leaf value lives in the parent record, so there is no separate leaf
 fetch. "Warming a leaf" means warming the deepest branch — the one-per-key, non-shareable part. That is a
