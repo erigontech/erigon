@@ -138,10 +138,9 @@ func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 	s.inner.WriteQuotedText(v)
 }
 
-// A separator and a field name carry no value bytes, so opening the field for
-// them would emit `"result":` with nothing to follow it. They belong to a
-// container a value write already opened.
-func (s *LazyFieldStream) WriteMore() { s.assertOpened(); s.inner.WriteMore() }
+// A field name carries no value bytes, so opening the field for it would emit
+// `"result":` with nothing to follow it. It belongs to a container a value write
+// already opened.
 func (s *LazyFieldStream) WriteObjectField(name string) *StackStream {
 	s.assertOpened()
 	return s.inner.WriteObjectField(name)
@@ -174,12 +173,5 @@ func (s *LazyFieldStream) markSeparatorPending() { markSeparator(s.inner) }
 // an implementation outside this package still satisfies it.
 type separatorMarker interface{ markSeparatorPending() }
 
-// markSeparator asserts a sibling precedes the next value, falling back to the manual
-// comma for a stream that does not write separators itself.
-func markSeparator(s Stream) {
-	if m, ok := s.(separatorMarker); ok {
-		m.markSeparatorPending()
-		return
-	}
-	s.WriteMore()
-}
+// markSeparator asserts a sibling precedes the next value.
+func markSeparator(s Stream) { s.(separatorMarker).markSeparatorPending() }

@@ -169,11 +169,9 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString(vsn)
-	stream.WriteMore()
 	if id != nil {
 		stream.WriteObjectField("id")
 		stream.WriteRawBytes(id)
-		stream.WriteMore()
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
 	err := write(rs)
@@ -182,7 +180,6 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 		// response would carry result and error both.
 		if rs.Written() && !rs.RewindIfEmpty() {
 			rs.CloseIfOpen()
-			stream.WriteMore()
 		}
 		HandleError(err, stream)
 	} else if !rs.Written() {
@@ -319,10 +316,7 @@ type rawBatch [][]byte
 
 func (b rawBatch) writeTo(s jsonstream.Stream) {
 	s.WriteArrayStart()
-	for i, answer := range b {
-		if i > 0 {
-			s.WriteMore()
-		}
+	for _, answer := range b {
 		s.WriteRawBytes(answer)
 	}
 	s.WriteArrayEnd()
