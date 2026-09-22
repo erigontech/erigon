@@ -343,8 +343,8 @@ func TestForkTimestampsCoversEveryTimeField(t *testing.T) {
 	}
 }
 
-// A shared config is read from many goroutines and copied by value while it is, so reading
-// the blob schedule must not write to it.
+// A shared config is read and copied by value from many goroutines at once, so reading the
+// blob schedule must not write to it.
 func TestGetBlobConfigDoesNotWriteConfig(t *testing.T) {
 	c := AllProtocolChanges.Copy()
 	before := *c
