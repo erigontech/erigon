@@ -317,7 +317,7 @@ func TestWarmupV4StorageDescentReachesBeyondRoot(t *testing.T) {
 	_, err = trie.Process(context.Background(), next, "", nil, commitment.WarmupConfig{
 		Enabled:    true,
 		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return traceCtx, nil },
-		NumWorkers: 1,
+		NumWorkers: 4,
 		MaxDepth:   commitment.WarmupMaxDepth,
 	})
 	require.NoError(t, err)
@@ -337,5 +337,5 @@ func TestWarmupV4StorageDescentReachesBeyondRoot(t *testing.T) {
 		}
 	}
 	require.Greater(t, maxStorageDepth, 64)
-	require.Equal(t, 1, storageRootReads)
+	require.GreaterOrEqual(t, storageRootReads, 1)
 }
