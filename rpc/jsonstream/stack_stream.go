@@ -364,10 +364,6 @@ func (s *StackStream) WriteArrayEnd() {
 	s.afterValue()
 }
 
-// WriteMore is a no-op: the stream emits the separator each value needs. It stays so a
-// caller written against the manual API still produces valid JSON.
-func (s *StackStream) WriteMore() {}
-
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
 	s.beforeValue()

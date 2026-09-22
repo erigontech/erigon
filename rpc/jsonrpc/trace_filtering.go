@@ -454,8 +454,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if first {
 			stream.WriteArrayStart()
 			first = false
-		} else {
-			stream.WriteMore()
 		}
 		stream.WriteRawBytes(b)
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace

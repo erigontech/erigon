@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -199,8 +200,21 @@ type sharedJSON[T any] struct {
 	value func(T) any
 }
 
-func (s sharedJSON[T]) MarshalFastJSON() ([]byte, error) {
-	return s.ev.Encode(func(v T) ([]byte, error) { return json.Marshal(s.value(v)) })
+func (s sharedJSON[T]) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	enc, err := s.ev.Encode(func(v T) ([]byte, error) {
+		val := s.value(v)
+		if fm, ok := val.(interface {
+			MarshalFastJSONTo(*jsonstream.StackStream) error
+		}); ok {
+			return jsonstream.Marshal(fm)
+		}
+		return json.Marshal(val)
+	})
+	if err != nil {
+		return err
+	}
+	w.WriteRawBytes(enc)
+	return nil
 }
 
 func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
@@ -208,7 +222,7 @@ func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
 func headerValue(h *types.Header) any { return h }
 
 func subscribeReceiptsValue(rs []*remoteproto.SubscribeReceiptsReply) any {
-	out := make([]*ethutils.RPCReceipt, len(rs))
+	out := make(ethutils.RPCReceipts, len(rs))
 	for i, r := range rs {
 		out[i] = ethutils.MarshalSubscribeReceipt(r)
 	}

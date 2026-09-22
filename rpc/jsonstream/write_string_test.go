@@ -117,7 +117,6 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 		s.WriteObjectStart()
 		s.WriteObjectField("oddName")
 		s.WriteString("0x" + strings.Repeat("ab", 32))
-		s.WriteMore()
 		s.WriteObjectField("clean")
 		s.WriteString("short")
 		require.NoError(t, s.ClosePending(0))
@@ -135,10 +134,7 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 		s.WriteArrayStart()
 		val := strings.Repeat("c", 4096)
 		n := 2*FlushThreshold/len(val) + 1
-		for i := range n {
-			if i > 0 {
-				s.WriteMore()
-			}
+		for range n {
 			s.WriteString(val)
 		}
 		s.WriteArrayEnd()

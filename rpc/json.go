@@ -119,19 +119,6 @@ type fastJSONMarshalerTo interface {
 	MarshalFastJSONTo(s *jsonstream.StackStream) error
 }
 
-// marshalFastJSONTo encodes fm into a byte slice the caller owns.
-func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
-	s := jsonstream.Get(nil)
-	defer jsonstream.Put(s)
-	if err := fm.MarshalFastJSONTo(s); err != nil {
-		return nil, err
-	}
-	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
-		return nil, err
-	}
-	return bytes.Clone(s.Buffer()), nil
-}
-
 // writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {
@@ -169,11 +156,9 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString(vsn)
-	stream.WriteMore()
 	if id != nil {
 		stream.WriteObjectField("id")
 		stream.WriteRawBytes(id)
-		stream.WriteMore()
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
 	err := write(rs)
@@ -182,7 +167,6 @@ func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(
 		// response would carry result and error both.
 		if rs.Written() && !rs.RewindIfEmpty() {
 			rs.CloseIfOpen()
-			stream.WriteMore()
 		}
 		HandleError(err, stream)
 	} else if !rs.Written() {
@@ -321,10 +305,7 @@ type rawBatch [][]byte
 
 func (b rawBatch) writeTo(s jsonstream.Stream) {
 	s.WriteArrayStart()
-	for i, answer := range b {
-		if i > 0 {
-			s.WriteMore()
-		}
+	for _, answer := range b {
 		s.WriteRawBytes(answer)
 	}
 	s.WriteArrayEnd()

@@ -242,13 +242,10 @@ func ExecuteTraceTx(
 	// Depending on the tracer type, format and return the output
 	if streaming {
 		stream.WriteArrayEnd()
-		stream.WriteMore()
 		stream.WriteObjectField("gas")
 		stream.WriteUint64(result.ReceiptGasUsed)
-		stream.WriteMore()
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())
-		stream.WriteMore()
 		// If the result contains a revert reason, return it.
 		ret := result.Return()
 		if len(result.Revert()) > 0 {
