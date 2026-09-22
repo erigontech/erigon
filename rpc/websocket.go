@@ -49,7 +49,7 @@ const (
 	wsPingInterval     = 60 * time.Second
 	wsPingWriteTimeout = 5 * time.Second
 	wsMessageSizeLimit = 32 * 1024 * 1024
-	wsHeldWriteLimit   = int(64 * datasize.KB) // held bytes past which a coalesced batch writes out early
+	heldWriteLimit     = int(64 * datasize.KB) // held bytes past which a coalesced batch writes out early
 )
 
 // WebsocketHandler returns a handler that serves JSON-RPC to WebSocket connections.
@@ -300,7 +300,7 @@ func (c *heldConn) Write(p []byte) (int, error) {
 		c.held = pool.GetBuffer()
 	}
 	c.held.Write(p)
-	if c.held.Len() < wsHeldWriteLimit {
+	if c.held.Len() < heldWriteLimit {
 		return len(p), nil
 	}
 	return len(p), c.flushLocked()
@@ -410,9 +410,8 @@ func (a *wsConnAdapter) readFrame() ([]byte, error) {
 
 type websocketCodec struct {
 	*jsonCodec
-	conn    *websocket.Conn
-	netConn *heldConn
-	info    PeerInfo
+	conn *websocket.Conn
+	info PeerInfo
 
 	pingTimer *time.Timer
 }
@@ -430,12 +429,12 @@ func newWebsocketCodec(conn *websocket.Conn, netConn *heldConn, host string, req
 	wc := &websocketCodec{
 		jsonCodec: newFuncCodec(adapter, adapter.encode, nil, adapter.readFrame),
 		conn:      conn,
-		netConn:   netConn,
 		info: PeerInfo{
 			Transport:  "ws",
 			RemoteAddr: remoteAddr,
 		},
 	}
+	wc.held = netConn
 	wc.writeTimeout = wsPingInterval
 	// Fill in connection details.
 	wc.info.HTTP.Host = host
@@ -465,25 +464,6 @@ func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 		wc.resetPing()
 	}
 	return err
-}
-
-// coalesce runs send with the socket held, so the messages it writes leave in one socket write.
-func (wc *websocketCodec) coalesce(send func()) (err error) {
-	if wc.netConn == nil {
-		send()
-		return nil
-	}
-	wc.netConn.hold()
-	defer func() {
-		// encode sets and clears the socket deadline under encMu, so the release must hold it too.
-		wc.encMu.Lock()
-		defer wc.encMu.Unlock()
-		if err = wc.netConn.release(time.Now().Add(wc.writeTimeout)); err != nil {
-			_ = wc.conn.CloseNow()
-		}
-	}()
-	send()
-	return nil
 }
 
 // ping sends a ping frame once the connection has been idle for wsPingInterval.
