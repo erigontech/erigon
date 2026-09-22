@@ -304,7 +304,7 @@ func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bo
 }
 
 // OnOpcodeV2 implements the Tracer interface to trace a single step of VM execution
-func (t *jsTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *jsTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if !t.traceStep {
 		return
 	}
@@ -329,7 +329,7 @@ func (t *jsTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope t
 }
 
 // OnFaultV2 implements the Tracer interface to trace an execution fault
-func (t *jsTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+func (t *jsTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
 	if t.err != nil {
 		return
 	}
@@ -998,7 +998,7 @@ type steplog struct {
 
 	pc     uint64
 	gas    mdgas.MdGas
-	cost   mdgas.MdGas
+	cost   mdgas.MdGasCost
 	depth  int
 	refund uint64
 	err    error
@@ -1007,7 +1007,7 @@ type steplog struct {
 func (l *steplog) GetPC() uint64                { return l.pc }
 func (l *steplog) GetGas() uint64               { return l.gas.Execution }
 func (l *steplog) GetCost() uint64              { return l.cost.Execution }
-func (l *steplog) GetStateGasCost() uint64      { return l.cost.State }
+func (l *steplog) GetStateGasCost() int64       { return l.cost.State }
 func (l *steplog) GetStateGasReservoir() uint64 { return l.gas.State }
 func (l *steplog) GetDepth() int                { return l.depth }
 func (l *steplog) GetRefund() uint64            { return l.refund }

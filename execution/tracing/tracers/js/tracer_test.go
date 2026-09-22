@@ -184,10 +184,10 @@ func TestHaltBetweenSteps(t *testing.T) {
 	}
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), new(uint256.Int), 0, new(uint256.Int), nil), accounts.ZeroAddress)
 	tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, []byte{}, mdgas.MdGas{}, uint256.Int{}, []byte{})
-	tracer.EmitOpcode(0, 0, mdgas.MdGas{}, mdgas.MdGas{}, scope, nil, 0, nil)
+	tracer.EmitOpcode(0, 0, mdgas.MdGas{}, mdgas.MdGasCost{}, scope, nil, 0, nil)
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
-	tracer.EmitOpcode(0, 0, mdgas.MdGas{}, mdgas.MdGas{}, scope, nil, 0, nil)
+	tracer.EmitOpcode(0, 0, mdgas.MdGas{}, mdgas.MdGasCost{}, scope, nil, 0, nil)
 
 	if _, err := tracer.GetResult(); !strings.Contains(err.Error(), timeout.Error()) {
 		t.Errorf("Expected timeout error, got %v", err)
@@ -297,10 +297,10 @@ func TestFaultStateGasWithoutStep(t *testing.T) {
 		result: function() { return this.gas; }
 	}`, nil, nil)
 	require.NoError(t, err)
-	tracer.EmitFault(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGas{Execution: 10, State: 300}, nil, 1, vm.ErrOutOfGas)
+	tracer.EmitFault(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGasCost{Execution: 10, State: -300}, nil, 1, vm.ErrOutOfGas)
 	result, err := tracer.GetResult()
 	require.NoError(t, err)
-	require.JSONEq(t, `[100,200,10,300]`, string(result))
+	require.JSONEq(t, `[100,200,10,-300]`, string(result))
 }
 
 func TestSetup(t *testing.T) {

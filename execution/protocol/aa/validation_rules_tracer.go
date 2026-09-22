@@ -109,7 +109,7 @@ func (t *ValidationRulesTracer) isDelegatedAccount(code []byte) bool {
 	return len(code) >= 3 && bytes.Equal(code[:3], []byte{0xef, 0x01, 0x00})
 }
 
-func (t *ValidationRulesTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *ValidationRulesTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if t.err != nil {
 		return
 	}
@@ -183,7 +183,7 @@ func (t *ValidationRulesTracer) OnExitV2(depth int, output []byte, gasUsed mdgas
 	t.prevWasGas = false
 }
 
-func (t *ValidationRulesTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+func (t *ValidationRulesTracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
 	if t.err != nil {
 		return
 	}

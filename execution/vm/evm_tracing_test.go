@@ -144,10 +144,10 @@ func TestOpcodeV2StateGas(t *testing.T) {
 		pc   uint64
 		op   OpCode
 		gas  mdgas.MdGas
-		cost mdgas.MdGas
+		cost mdgas.MdGasCost
 	}
 	var steps []step
-	hooks := &tracing.Hooks{OnOpcodeV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, _ []byte, depth int, err error) {
+	hooks := &tracing.Hooks{OnOpcodeV2: func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, _ []byte, depth int, err error) {
 		require.NoError(t, err)
 		require.Equal(t, 1, depth)
 		require.NotNil(t, scope)
@@ -160,37 +160,62 @@ func TestOpcodeV2StateGas(t *testing.T) {
 	_, remaining, _, err := evm.Run(contract, initial, nil, false)
 	require.NoError(t, err)
 	require.Equal(t, []step{
-		{pc: 0, op: PUSH1, gas: initial, cost: mdgas.MdGas{Execution: 3}},
-		{pc: 2, op: PUSH1, gas: mdgas.MdGas{Execution: initial.Execution - 3, State: initial.State}, cost: mdgas.MdGas{Execution: 3}},
-		{pc: 4, op: SSTORE, gas: mdgas.MdGas{Execution: initial.Execution - 6, State: initial.State}, cost: mdgas.MdGas{Execution: params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038, State: params.StateGasPerStorageSet}},
+		{pc: 0, op: PUSH1, gas: initial, cost: mdgas.MdGasCost{Execution: 3}},
+		{pc: 2, op: PUSH1, gas: mdgas.MdGas{Execution: initial.Execution - 3, State: initial.State}, cost: mdgas.MdGasCost{Execution: 3}},
+		{pc: 4, op: SSTORE, gas: mdgas.MdGas{Execution: initial.Execution - 6, State: initial.State}, cost: mdgas.MdGasCost{Execution: params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038, State: params.StateGasPerStorageSet}},
 		{pc: 5, op: STOP, gas: remaining},
 	}, steps)
 }
 
+func TestOpcodeV2StateRefill(t *testing.T) {
+	for _, reservoir := range []uint64{0, params.StateGasPerStorageSet / 2, params.StateGasPerStorageSet} {
+		ibs := state.New(state.NewNoopReader())
+		t.Cleanup(ibs.Close)
+		var costs []int64
+		hooks := &tracing.Hooks{OnOpcodeV2: func(_ uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, err error) {
+			require.NoError(t, err)
+			if OpCode(op) == SSTORE {
+				costs = append(costs, cost.State)
+			}
+		}}
+		evm := NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+		contract := *NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+		contract.Code = []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE), byte(PUSH1), 0, byte(PUSH1), 0, byte(SSTORE)}
+		initial := mdgas.MdGas{Execution: 200_000, State: reservoir}
+		_, remaining, used, err := evm.Run(contract, initial, nil, false)
+		require.NoError(t, err)
+		require.Equal(t, []int64{params.StateGasPerStorageSet, -params.StateGasPerStorageSet}, costs)
+		require.Equal(t, initial.State, remaining.State)
+		require.EqualValues(t, 12+params.ColdStorageAccessCostEIP8038+params.StorageWriteCostEIP8038+params.WarmStorageReadCostEIP2929, initial.Execution-remaining.Execution)
+		require.Zero(t, used.State)
+		require.Zero(t, used.StateSpill)
+	}
+}
+
 func TestOpcodeV2ChargeFailure(t *testing.T) {
-	sstoreCost := mdgas.MdGas{Execution: params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038, State: params.StateGasPerStorageSet}
+	sstoreCost := mdgas.MdGasCost{Execution: params.ColdStorageAccessCostEIP8038 + params.StorageWriteCostEIP8038, State: params.StateGasPerStorageSet}
 	for _, tc := range []struct {
 		name    string
 		code    []byte
 		initial mdgas.MdGas
 		pc      uint64
 		gas     mdgas.MdGas
-		cost    mdgas.MdGas
+		cost    mdgas.MdGasCost
 	}{
 		{
 			name: "constant execution cost", code: []byte{byte(PUSH1), 1},
 			initial: mdgas.MdGas{Execution: 2, State: 50},
-			gas:     mdgas.MdGas{Execution: 2, State: 50}, cost: mdgas.MdGas{Execution: 3},
+			gas:     mdgas.MdGas{Execution: 2, State: 50}, cost: mdgas.MdGasCost{Execution: 3},
 		},
 		{
 			name: "dynamic execution cost", code: []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(MSTORE)},
 			initial: mdgas.MdGas{Execution: 11, State: 50}, pc: 4,
-			gas: mdgas.MdGas{Execution: 5, State: 50}, cost: mdgas.MdGas{Execution: 6},
+			gas: mdgas.MdGas{Execution: 5, State: 50}, cost: mdgas.MdGasCost{Execution: 6},
 		},
 		{
 			name: "state cost", code: []byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE)},
-			initial: mdgas.MdGas{Execution: 6 + sstoreCost.Execution + 10, State: sstoreCost.State - 11}, pc: 4,
-			gas: mdgas.MdGas{Execution: sstoreCost.Execution + 10, State: sstoreCost.State - 11}, cost: sstoreCost,
+			initial: mdgas.MdGas{Execution: 6 + sstoreCost.Execution + 10, State: uint64(sstoreCost.State) - 11}, pc: 4,
+			gas: mdgas.MdGas{Execution: sstoreCost.Execution + 10, State: uint64(sstoreCost.State) - 11}, cost: sstoreCost,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -198,7 +223,7 @@ func TestOpcodeV2ChargeFailure(t *testing.T) {
 			defer ibs.Close()
 			var failures int
 			hooks := &tracing.Hooks{
-				OnOpcodeV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, _ tracing.OpContext, _ []byte, _ int, err error) {
+				OnOpcodeV2: func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, err error) {
 					if err == nil {
 						return
 					}
@@ -209,7 +234,7 @@ func TestOpcodeV2ChargeFailure(t *testing.T) {
 					require.Equal(t, tc.gas, gas)
 					require.Equal(t, tc.cost, cost)
 				},
-				OnFaultV2: func(_ uint64, _ byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ int, _ error) {
+				OnFaultV2: func(_ uint64, _ byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ int, _ error) {
 					t.Fatal("charging failures must use the opcode hook")
 				},
 			}
@@ -234,12 +259,12 @@ func TestFaultV2(t *testing.T) {
 		OnFault: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
 			t.Fatal("V2 must take precedence")
 		},
-		OnFaultV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+		OnFaultV2: func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
 			faults++
 			require.Equal(t, uint64(2), pc)
 			require.Equal(t, byte(JUMP), op)
 			require.Equal(t, mdgas.MdGas{Execution: 97, State: 50}, gas)
-			require.Equal(t, mdgas.MdGas{Execution: 8}, cost)
+			require.Equal(t, mdgas.MdGasCost{Execution: 8}, cost)
 			require.NotNil(t, scope)
 			require.Equal(t, 1, depth)
 			require.ErrorIs(t, err, ErrInvalidJump)

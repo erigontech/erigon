@@ -119,13 +119,13 @@ type (
 	OpcodeHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, rData []byte, depth int, err error)
 
 	// OpcodeHookV2 reports execution and state gas and takes precedence over OpcodeHook.
-	OpcodeHookV2 = func(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, rData []byte, depth int, err error)
+	OpcodeHookV2 = func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, rData []byte, depth int, err error)
 
 	// FaultHook is invoked when an error occurs during the execution of an opcode.
 	FaultHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, depth int, err error)
 
 	// FaultHookV2 reports execution and state gas and takes precedence over FaultHook.
-	FaultHookV2 = func(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, depth int, err error)
+	FaultHookV2 = func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, depth int, err error)
 
 	// GasChangeHook reports changes to the execution gas balance.
 	GasChangeHook = func(old, new uint64, reason GasChangeReason)
@@ -276,7 +276,7 @@ func (h *Hooks) HasOpcodeHook() bool {
 	return h != nil && (h.OnOpcodeV2 != nil || h.OnOpcode != nil)
 }
 
-func (h *Hooks) EmitOpcode(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, rData []byte, depth int, err error) {
+func (h *Hooks) EmitOpcode(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, rData []byte, depth int, err error) {
 	if h == nil {
 		return
 	}
@@ -291,7 +291,7 @@ func (h *Hooks) HasFaultHook() bool {
 	return h != nil && (h.OnFaultV2 != nil || h.OnFault != nil)
 }
 
-func (h *Hooks) EmitFault(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, depth int, err error) {
+func (h *Hooks) EmitFault(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, depth int, err error) {
 	if h == nil {
 		return
 	}

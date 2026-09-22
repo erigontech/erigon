@@ -42,7 +42,7 @@ type jsonStructLog struct {
 	Op                vm.OpCode           `json:"op"`
 	Gas               math.HexOrDecimal64 `json:"gas"`
 	GasCost           math.HexOrDecimal64 `json:"gasCost"`
-	StateGasCost      uint64              `json:"stateGasCost,omitempty"`
+	StateGasCost      int64               `json:"stateGasCost,omitempty"`
 	StateGasReservoir uint64              `json:"stateGasReservoir,omitempty"`
 	Memory            hexutil.Bytes       `json:"memory"`
 	MemorySize        int                 `json:"memSize"`
@@ -91,7 +91,7 @@ func (l *JSONLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 }
 
 // OnOpcodeV2 outputs state information on the logger.
-func (l *JSONLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (l *JSONLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	stack := scope.StackData()
 	op := vm.OpCode(typ)
@@ -127,7 +127,7 @@ func (l *JSONLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas, scop
 	_ = l.encoder.Encode(log) //nolint:errchkjson
 }
 
-func (l *JSONLogger) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+func (l *JSONLogger) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
 }
 
 func (l *JSONLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {

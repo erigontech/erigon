@@ -101,7 +101,7 @@ func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
 	var operand uint256.Int
 	operand.SetBytes(targetAddr[:])
 	stack := []uint256.Int{operand}
-	tr.OnOpcodeV2(0, byte(vm.EXTCODESIZE), mdgas.MdGas{Execution: 1724}, mdgas.MdGas{Execution: 2600}, &fakeOpContext{stack: stack, addr: caller}, nil, 2, vm.ErrOutOfGas)
+	tr.OnOpcodeV2(0, byte(vm.EXTCODESIZE), mdgas.MdGas{Execution: 1724}, mdgas.MdGasCost{Execution: 2600}, &fakeOpContext{stack: stack, addr: caller}, nil, 2, vm.ErrOutOfGas)
 
 	_, ok := tr.pre[target]
 	require.False(t, ok, "account referenced by a faulted EXTCODESIZE must not be recorded in the prestate")
@@ -111,7 +111,7 @@ func TestPrestateTracerOnOpcodeFaultedSkipsLookup(t *testing.T) {
 	slot := common.HexToHash("0xbaaed5f3d2bc4b0bc4f1758fde25c1522c4254f5b2fbfa513449670cff246a98")
 	operand.SetBytes(slot[:])
 	stack = []uint256.Int{operand}
-	tr.OnOpcodeV2(0, byte(vm.SLOAD), mdgas.MdGas{Execution: 1577}, mdgas.MdGas{Execution: 2100}, &fakeOpContext{stack: stack, addr: caller}, nil, 1, vm.ErrOutOfGas)
+	tr.OnOpcodeV2(0, byte(vm.SLOAD), mdgas.MdGas{Execution: 1577}, mdgas.MdGasCost{Execution: 2100}, &fakeOpContext{stack: stack, addr: caller}, nil, 1, vm.ErrOutOfGas)
 
 	require.NotContains(t, tr.pre[caller].Storage, slot,
 		"storage slot referenced by a faulted SLOAD must not be recorded in the prestate")

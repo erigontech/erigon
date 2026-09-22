@@ -130,7 +130,7 @@ func (l *JsonStreamLogger) writePrologueOnce() {
 }
 
 // OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
-func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	contractAddr := scope.Address()
 	memory := scope.MemoryData()
 	stack := scope.StackData()
@@ -188,7 +188,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas
 	l.stream.WriteUint64(cost.Execution)
 	if cost.State != 0 {
 		l.stream.WriteObjectField("stateGasCost")
-		l.stream.WriteUint64(cost.State)
+		l.stream.WriteInt64(cost.State)
 	}
 	if gas.State != 0 {
 		l.stream.WriteObjectField("stateGasReservoir")

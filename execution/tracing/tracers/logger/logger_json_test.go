@@ -35,7 +35,7 @@ func captureJSONLoggerStep(t *testing.T, cfg *LogConfig, scope *mockOpContext, r
 	var buf bytes.Buffer
 	l := NewJSONLogger(cfg, &buf)
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
-	l.OnOpcodeV2(42, byte(vm.SSTORE), mdgas.MdGas{Execution: 1_000_000}, mdgas.MdGas{Execution: 2100}, scope, rData, 3, err)
+	l.OnOpcodeV2(42, byte(vm.SSTORE), mdgas.MdGas{Execution: 1_000_000}, mdgas.MdGasCost{Execution: 2100}, scope, rData, 3, err)
 	return strings.TrimSuffix(buf.String(), "\n")
 }
 

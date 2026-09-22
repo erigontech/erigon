@@ -248,7 +248,7 @@ func (a *AccessListTracer) Hooks() *tracing.Hooks {
 	}
 }
 
-func (a *AccessListTracer) OnOpcodeV2(pc uint64, opcode byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (a *AccessListTracer) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	// StackData crosses an interface, so it cannot inline: keep it off the
 	// opcodes that don't read the stack.
 	switch op := vm.OpCode(opcode); op {

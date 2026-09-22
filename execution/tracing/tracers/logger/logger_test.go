@@ -89,6 +89,14 @@ func TestStoreCapture(t *testing.T) {
 	require.EqualValues(t, params.StateGasPerStorageSet, logs[2]["stateGasReservoir"])
 	require.EqualValues(t, params.StateGasPerStorageSet, logs[2]["stateGasCost"])
 	require.NotContains(t, logs[0], "stateGasCost")
+
+	contract.Code[1] = 0
+	_, _, _, err = evm.Run(contract, mdgas.MdGas{Execution: 200_000}, nil, false)
+	require.NoError(t, err)
+	encoded, err = json.Marshal(FormatLogs(logger.StructLogs()))
+	require.NoError(t, err)
+	require.NoError(t, json.Unmarshal(encoded, &logs))
+	require.EqualValues(t, -int64(params.StateGasPerStorageSet), logs[6]["stateGasCost"])
 }
 
 func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
@@ -97,7 +105,7 @@ func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	logger.OnSystemCallStartV2(&tracing.VMContext{IntraBlockState: &mockIBS{}})
 
 	scope := &mockOpContext{}
-	logger.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGas{Execution: 10, State: 30}, scope, nil, 0, nil)
+	logger.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGasCost{Execution: 10, State: -30}, scope, nil, 0, nil)
 
 	var entry map[string]json.RawMessage
 	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry); err != nil {
@@ -110,7 +118,7 @@ func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	require.NoError(t, json.Unmarshal(entry["stateGasReservoir"], &reservoir))
 	require.EqualValues(t, 200, reservoir)
 	require.Contains(t, entry, "stateGasCost")
-	require.JSONEq(t, `30`, string(entry["stateGasCost"]))
+	require.JSONEq(t, `-30`, string(entry["stateGasCost"]))
 }
 
 //func TestStoreCapture(t *testing.T) {

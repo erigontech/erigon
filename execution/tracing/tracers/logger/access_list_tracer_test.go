@@ -186,7 +186,7 @@ func TestOnOpcodeReadsStackOnlyWhenUsed(t *testing.T) {
 				address: accounts.InternAddress(addr),
 				stack:   make([]uint256.Int, 8),
 			}}
-			NewAccessListTracer(nil, nil, nil).OnOpcodeV2(0, byte(tc.op), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+			NewAccessListTracer(nil, nil, nil).OnOpcodeV2(0, byte(tc.op), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 			require.Equal(t, tc.reads, scope.stackReads)
 		})
 	}
@@ -307,7 +307,7 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 		address: accounts.InternAddress(addr),
 		stack:   []uint256.Int{*new(uint256.Int).SetBytes(slot2[:])},
 	}
-	seeded.OnOpcodeV2(0, byte(vm.SLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+	seeded.OnOpcodeV2(0, byte(vm.SLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 
 	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot1, slot2}}}, seeded.AccessList())
 	require.True(t, seeded.UsedBeforeCreation(addr))

@@ -93,7 +93,7 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 		scope.stack = []uint256.Int{val, key} // bottom=val, top=key
 	}
 
-	l.OnOpcodeV2(0, byte(op), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, rData, 1, nil)
+	l.OnOpcodeV2(0, byte(op), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, rData, 1, nil)
 
 	// Mirror what ExecuteTraceTx does to close the stream after execution.
 	stream.WriteArrayEnd()
@@ -125,7 +125,7 @@ func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.Raw
 
 	scope := &mockOpContext{}
 	for i := range n {
-		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 	}
 
 	// Mirror what ExecuteTraceTx does to close the stream after execution.
@@ -194,7 +194,7 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 
 	scope := &mockOpContext{}
 	for i := range 4 {
-		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 	}
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
@@ -222,19 +222,21 @@ func TestJsonStreamLoggerStateGasCost(t *testing.T) {
 	l := NewJsonStreamLogger(&LogConfig{DisableStack: true, DisableStorage: true}, t.Context(), stream)
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 	scope := &mockOpContext{}
-	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 10, State: 30}, scope, nil, 1, nil)
-	l.OnOpcodeV2(1, byte(vm.STOP), mdgas.MdGas{Execution: 60}, mdgas.MdGas{}, scope, nil, 1, nil)
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 10, State: 30}, scope, nil, 1, nil)
+	l.OnOpcodeV2(1, byte(vm.SSTORE), mdgas.MdGas{Execution: 60}, mdgas.MdGasCost{Execution: 10, State: -30}, scope, nil, 1, nil)
+	l.OnOpcodeV2(2, byte(vm.STOP), mdgas.MdGas{Execution: 80}, mdgas.MdGasCost{}, scope, nil, 1, nil)
 	closeStreamLikeCaller(stream)
 	require.NoError(t, stream.Flush())
 	var result struct {
 		StructLogs []map[string]json.RawMessage `json:"structLogs"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
-	require.Len(t, result.StructLogs, 2)
+	require.Len(t, result.StructLogs, 3)
 	require.Contains(t, result.StructLogs[0], "stateGasCost")
 	require.JSONEq(t, `30`, string(result.StructLogs[0]["stateGasCost"]))
 	require.JSONEq(t, `10`, string(result.StructLogs[0]["gasCost"]))
-	require.NotContains(t, result.StructLogs[1], "stateGasCost")
+	require.JSONEq(t, `-30`, string(result.StructLogs[1]["stateGasCost"]))
+	require.NotContains(t, result.StructLogs[2], "stateGasCost")
 }
 
 // The structLogs prologue must be written at most once. OnExitV2 opens it too, for
@@ -264,7 +266,7 @@ func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
 
 			scope := &mockOpContext{}
 			for i := range tt.opcodes {
-				l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+				l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 			}
 			// Two frames exit, as in any trace of a transaction that makes a call.
 			l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false)
@@ -287,7 +289,7 @@ func TestJsonStreamLogger_SeparatorFollowsStepsNotPrologue(t *testing.T) {
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 
 	l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false)
-	l.OnOpcodeV2(0, byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, &mockOpContext{}, nil, 1, nil)
+	l.OnOpcodeV2(0, byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, &mockOpContext{}, nil, 1, nil)
 	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 
 	closeStreamLikeCaller(stream)
@@ -466,7 +468,7 @@ func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 		key := common.BigToHash(big.NewInt(int64(i + 1)))
 		val := common.BigToHash(big.NewInt(int64(100 + i)))
 		scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
-		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 		want["0x"+hex.EncodeToString(key[:])] = "0x" + hex.EncodeToString(val[:])
 	}
 
@@ -504,7 +506,7 @@ func TestJsonStreamLogger_StorageWithMemory(t *testing.T) {
 	stream := jsonstream.New(&buf)
 	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
-	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	require.NoError(t, stream.Flush())
@@ -536,7 +538,7 @@ func TestJsonStreamLogger_ClosePendingAfterMemory(t *testing.T) {
 
 	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 32*4)}
 	for i := range 3 {
-		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 	}
 
 	require.NoError(t, stream.ClosePending(0))
@@ -574,7 +576,7 @@ func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakB
 		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
 	}
 	for i := range steps {
-		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 		if n := len(stream.Buffer()); n > peakBuffer {
 			peakBuffer = n
 		}

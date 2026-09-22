@@ -67,7 +67,7 @@ type StructLog struct {
 	Pc            uint64
 	Op            vm.OpCode
 	Gas           mdgas.MdGas
-	GasCost       mdgas.MdGas
+	GasCost       mdgas.MdGasCost
 	Memory        []byte
 	MemorySize    int
 	Stack         []uint256.Int
@@ -85,7 +85,7 @@ type StructLogRes struct {
 	Op                string             `json:"op"`
 	Gas               uint64             `json:"gas"`
 	GasCost           uint64             `json:"gasCost"`
-	StateGasCost      uint64             `json:"stateGasCost,omitempty"`
+	StateGasCost      int64              `json:"stateGasCost,omitempty"`
 	StateGasReservoir uint64             `json:"stateGasReservoir,omitempty"`
 	Depth             int                `json:"depth"`
 	Error             error              `json:"error,omitempty"`
@@ -161,7 +161,7 @@ func (l *StructLogger) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGa
 }
 
 // OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
-func (l *StructLogger) OnOpcodeV2(pc uint64, opcode byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (l *StructLogger) OnOpcodeV2(pc uint64, opcode byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	op := vm.OpCode(opcode)
 	memory := scope.MemoryData()
 	stack := scope.StackData()
@@ -428,7 +428,7 @@ func (t *mdLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, 
 }
 
 // OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
-func (t *mdLogger) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *mdLogger) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	stack := scope.StackData()
 
 	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d | %3d | %3d |", pc, op, cost.Execution, cost.State, gas.State)
@@ -449,6 +449,6 @@ func (t *mdLogger) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope t
 	}
 }
 
-func (t *mdLogger) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
+func (t *mdLogger) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, depth int, err error) {
 	fmt.Fprintf(t.out, "\nError: at pc=%d, op=%v: %v\n", pc, op, err)
 }

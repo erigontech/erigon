@@ -30,8 +30,13 @@ type MdGas struct {
 	State     uint64
 }
 
-func (g MdGas) Plus(other MdGas) MdGas {
-	return MdGas{
+type MdGasCost struct {
+	Execution uint64
+	State     int64 // Negative values refill state gas.
+}
+
+func (g MdGasCost) Plus(other MdGasCost) MdGasCost {
+	return MdGasCost{
 		Execution: g.Execution + other.Execution,
 		State:     g.State + other.State,
 	}

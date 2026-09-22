@@ -181,7 +181,7 @@ func (t *Tracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, er
 	})
 }
 
-func (t *Tracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, opContext tracing.OpContext, returnData []byte, depth int, err error) {
+func (t *Tracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, opContext tracing.OpContext, returnData []byte, depth int, err error) {
 	if t.recordOptions.DisableOnOpcodeRecording {
 		return
 	}
@@ -210,7 +210,7 @@ func (t *Tracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, opContext
 	})
 }
 
-func (t *Tracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, opContext tracing.OpContext, depth int, err error) {
+func (t *Tracer) OnFaultV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, opContext tracing.OpContext, depth int, err error) {
 	if t.recordOptions.DisableOnFaultRecording {
 		return
 	}
@@ -645,7 +645,7 @@ type OnOpcodeTraceV2 struct {
 	PC         uint64          `json:"pc,omitempty"`
 	Op         string          `json:"op,omitempty"`
 	Gas        mdgas.MdGas     `json:"gas"`
-	Cost       mdgas.MdGas     `json:"cost"`
+	Cost       mdgas.MdGasCost `json:"cost"`
 	Caller     common.Address  `json:"caller,omitempty"`
 	Stack      []hexutil.Bytes `json:"stack,omitempty"`
 	Memory     hexutil.Bytes   `json:"memory,omitempty"`
@@ -659,7 +659,7 @@ type OnFaultTraceV2 struct {
 	PC         uint64          `json:"pc,omitempty"`
 	Op         byte            `json:"op,omitempty"`
 	Gas        mdgas.MdGas     `json:"gas"`
-	Cost       mdgas.MdGas     `json:"cost"`
+	Cost       mdgas.MdGasCost `json:"cost"`
 	Caller     common.Address  `json:"caller,omitempty"`
 	Stack      []hexutil.Bytes `json:"stack,omitempty"`
 	Memory     hexutil.Bytes   `json:"memory,omitempty"`

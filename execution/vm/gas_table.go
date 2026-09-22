@@ -92,26 +92,26 @@ func memoryGasCost(callContext *CallContext, newMemSize uint64) (uint64, error) 
 // EXTCODECOPY (stack position 3)
 // RETURNDATACOPY (stack position 2)
 func memoryCopierGas(stackpos int) gasFunc {
-	return func(_ *EVM, callContext *CallContext, scaopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+	return func(_ *EVM, callContext *CallContext, scaopeGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 		// Gas for expanding the memory
 		gas, err := memoryGasCost(callContext, memorySize)
 		if err != nil {
-			return mdgas.MdGas{}, err
+			return mdgas.MdGasCost{}, err
 		}
 		// And gas for copying data, charged per word at param.CopyGas
 		words, overflow := callContext.Stack.back(stackpos).Uint64WithOverflow()
 		if overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
 
 		if words, overflow = math.SafeMul(ToWordSize(words), params.CopyGas); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
 
 		if gas, overflow = math.SafeAdd(gas, words); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
-		return mdgas.MdGas{Execution: gas}, nil
+		return mdgas.MdGasCost{Execution: gas}, nil
 	}
 }
 
@@ -123,9 +123,9 @@ var (
 	gasReturnDataCopy = memoryCopierGas(2)
 )
 
-func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	if evm.readOnly {
-		return mdgas.MdGas{}, ErrWriteProtection
+		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
 	value := callContext.Stack.back(1)
 	key := callContext.peekStorageKey(evm)
@@ -141,12 +141,12 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 		// 3. From a non-zero to a non-zero                         (CHANGE)
 		switch {
 		case current.IsZero() && !value.IsZero(): // 0 => non 0
-			return mdgas.MdGas{Execution: params.SstoreSetGas}, nil
+			return mdgas.MdGasCost{Execution: params.SstoreSetGas}, nil
 		case !current.IsZero() && value.IsZero(): // non 0 => 0
 			evm.IntraBlockState().AddRefund(params.SstoreRefundGas)
-			return mdgas.MdGas{Execution: params.SstoreClearGas}, nil
+			return mdgas.MdGasCost{Execution: params.SstoreClearGas}, nil
 		default: // non 0 => non 0 (or 0 => 0)
-			return mdgas.MdGas{Execution: params.SstoreResetGas}, nil
+			return mdgas.MdGasCost{Execution: params.SstoreResetGas}, nil
 		}
 	}
 	// The new gas metering is based on net gas costs (EIP-1283):
@@ -164,22 +164,22 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	//       2.2.2.1. If original value is 0, add 19800 gas to refund counter.
 	// 	     2.2.2.2. Otherwise, add 4800 gas to refund counter.
 	if current.Eq(value) { // noop (1)
-		return mdgas.MdGas{Execution: params.NetSstoreNoopGas}, nil
+		return mdgas.MdGasCost{Execution: params.NetSstoreNoopGas}, nil
 	}
 	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
-			return mdgas.MdGas{Execution: params.NetSstoreInitGas}, nil
+			return mdgas.MdGasCost{Execution: params.NetSstoreInitGas}, nil
 		}
 		if value.IsZero() { // delete slot (2.1.2b)
 			evm.IntraBlockState().AddRefund(params.NetSstoreClearRefund)
 		}
-		return mdgas.MdGas{Execution: params.NetSstoreCleanGas}, nil // write existing slot (2.1.2)
+		return mdgas.MdGasCost{Execution: params.NetSstoreCleanGas}, nil // write existing slot (2.1.2)
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
 			if err := evm.IntraBlockState().SubRefund(params.NetSstoreClearRefund); err != nil {
-				return mdgas.MdGas{}, err
+				return mdgas.MdGasCost{}, err
 			}
 		} else if value.IsZero() { // delete slot (2.2.1.2)
 			evm.IntraBlockState().AddRefund(params.NetSstoreClearRefund)
@@ -193,7 +193,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 		}
 	}
 
-	return mdgas.MdGas{Execution: params.NetSstoreDirtyGas}, nil
+	return mdgas.MdGasCost{Execution: params.NetSstoreDirtyGas}, nil
 }
 
 //  0. If *gasleft* is less than or equal to 2300, fail the current call.
@@ -209,13 +209,13 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 //     2.2.2. If original value equals new value (this storage slot is reset):
 //     2.2.2.1. If original value is 0, add SSTORE_SET_GAS - SLOAD_GAS to refund counter.
 //     2.2.2.2. Otherwise, add SSTORE_RESET_GAS - SLOAD_GAS gas to refund counter.
-func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	if evm.readOnly {
-		return mdgas.MdGas{}, ErrWriteProtection
+		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
 	// If we fail the minimum gas availability invariant, fail (0)
 	if callContext.gas <= params.SstoreSentryGasEIP2200 {
-		return mdgas.MdGas{}, errors.New("not enough gas for reentrancy sentry")
+		return mdgas.MdGasCost{}, errors.New("not enough gas for reentrancy sentry")
 	}
 	// Gas sentry honoured, do the actual gas calculation based on the stored value
 	value := callContext.Stack.back(1)
@@ -223,23 +223,23 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	current, _ := evm.IntraBlockState().GetState(callContext.Address(), key)
 
 	if current.Eq(value) { // noop (1)
-		return mdgas.MdGas{Execution: params.SloadGasEIP2200}, nil
+		return mdgas.MdGasCost{Execution: params.SloadGasEIP2200}, nil
 	}
 
 	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
-			return mdgas.MdGas{Execution: params.SstoreSetGasEIP2200}, nil
+			return mdgas.MdGasCost{Execution: params.SstoreSetGasEIP2200}, nil
 		}
 		if value.IsZero() { // delete slot (2.1.2b)
 			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}
-		return mdgas.MdGas{Execution: params.SstoreResetGasEIP2200}, nil // write existing slot (2.1.2)
+		return mdgas.MdGasCost{Execution: params.SstoreResetGasEIP2200}, nil // write existing slot (2.1.2)
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
 			if err := evm.IntraBlockState().SubRefund(params.SstoreClearsScheduleRefundEIP2200); err != nil {
-				return mdgas.MdGas{}, err
+				return mdgas.MdGasCost{}, err
 			}
 		} else if value.IsZero() { // delete slot (2.2.1.2)
 			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
@@ -252,63 +252,63 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 			evm.IntraBlockState().AddRefund(params.SstoreResetGasEIP2200 - params.SloadGasEIP2200)
 		}
 	}
-	return mdgas.MdGas{Execution: params.SloadGasEIP2200}, nil // dirty update (2.2)
+	return mdgas.MdGasCost{Execution: params.SloadGasEIP2200}, nil // dirty update (2.2)
 }
 
 func makeGasLog(n uint64) gasFunc {
-	return func(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+	return func(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 		requestedSize, overflow := callContext.Stack.back(1).Uint64WithOverflow()
 		if overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
 
 		gas, err := memoryGasCost(callContext, memorySize)
 		if err != nil {
-			return mdgas.MdGas{}, err
+			return mdgas.MdGasCost{}, err
 		}
 
 		if gas, overflow = math.SafeAdd(gas, params.LogGas); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
 		if gas, overflow = math.SafeAdd(gas, n*params.LogTopicGas); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
 
 		var memorySizeGas uint64
 		if memorySizeGas, overflow = math.SafeMul(requestedSize, params.LogDataGas); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
 		if gas, overflow = math.SafeAdd(gas, memorySizeGas); overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
+			return mdgas.MdGasCost{}, ErrGasUintOverflow
 		}
-		return mdgas.MdGas{Execution: gas}, nil
+		return mdgas.MdGasCost{Execution: gas}, nil
 	}
 }
 
-func gasKeccak256(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasKeccak256(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
-		return mdgas.MdGas{}, err
+		return mdgas.MdGasCost{}, err
 	}
 	wordGas, overflow := callContext.Stack.back(1).Uint64WithOverflow()
 	if overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	if wordGas, overflow = math.SafeMul(ToWordSize(wordGas), params.Keccak256WordGas); overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	if gas, overflow = math.SafeAdd(gas, wordGas); overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return mdgas.MdGas{Execution: gas}, nil
+	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
 // pureMemoryGascost is used by several operations, which aside from their
 // static cost have a dynamic cost which is solely based on the memory
 // expansion
-func pureMemoryGascost(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func pureMemoryGascost(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	g, err := memoryGasCost(callContext, memorySize)
-	return mdgas.MdGas{Execution: g}, err
+	return mdgas.MdGasCost{Execution: g}, err
 }
 
 var (
@@ -319,89 +319,89 @@ var (
 	gasMStore  = pureMemoryGascost
 )
 
-func gasCreate(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasCreate(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	if evm.readOnly {
-		return mdgas.MdGas{}, ErrWriteProtection
+		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
 	g, err := memoryGasCost(callContext, memorySize)
-	return mdgas.MdGas{Execution: g}, err
+	return mdgas.MdGasCost{Execution: g}, err
 }
 
-func gasCreate2(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasCreate2(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	if evm.readOnly {
-		return mdgas.MdGas{}, ErrWriteProtection
+		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
-		return mdgas.MdGas{}, err
+		return mdgas.MdGasCost{}, err
 	}
 	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
 	if overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	numWords := ToWordSize(size)
 	wordGas, overflow := math.SafeMul(numWords, params.Keccak256WordGas)
 	if overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	gas, overflow = math.SafeAdd(gas, wordGas)
 	if overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return mdgas.MdGas{Execution: gas}, nil
+	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
-func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
+func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGasCost, err error) {
 	if evm.readOnly {
-		return mdgas.MdGas{}, ErrWriteProtection
+		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
 	gas.Execution, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
-		return mdgas.MdGas{}, err
+		return mdgas.MdGasCost{}, err
 	}
 	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
 	if overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-		return mdgas.MdGas{}, err
+		return mdgas.MdGasCost{}, err
 	}
 	numWords := ToWordSize(size)
 	// Since size <= params.MaxInitCodeSize(Amsterdam), this multiplication cannot overflow
 	wordGas := params.InitCodeWordGas * numWords
 	gas.Execution, overflow = math.SafeAdd(gas.Execution, wordGas)
 	if overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	return gas, nil
 }
 
-func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGas, err error) {
+func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGasCost, err error) {
 	if evm.readOnly {
-		return mdgas.MdGas{}, ErrWriteProtection
+		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
 	gas.Execution, err = memoryGasCost(callContext, memorySize)
 	if err != nil {
-		return mdgas.MdGas{}, err
+		return mdgas.MdGasCost{}, err
 	}
 	size, overflow := callContext.Stack.back(2).Uint64WithOverflow()
 	if overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	if err := CheckMaxInitCodeSize(size, evm.ChainRules().IsShanghai, evm.ChainRules().IsAmsterdam); err != nil {
-		return mdgas.MdGas{}, err
+		return mdgas.MdGasCost{}, err
 	}
 	numWords := ToWordSize(size)
 	// Since size <= params.MaxInitCodeSize(Amsterdam), this multiplication cannot overflow
 	wordGas := (params.InitCodeWordGas + params.Keccak256WordGas) * numWords
 	gas.Execution, overflow = math.SafeAdd(gas.Execution, wordGas)
 	if overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 	return gas, nil
 }
 
-func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	expByteLen := uint64(common.BitLenToByteLen(callContext.Stack.data[callContext.Stack.len()-2].BitLen()))
 
 	var (
@@ -409,12 +409,12 @@ func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, 
 		overflow bool
 	)
 	if gas, overflow = math.SafeAdd(gas, params.ExpGas); overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return mdgas.MdGas{Execution: gas}, nil
+	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
-func gasExpEIP160(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasExpEIP160(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	expByteLen := uint64(common.BitLenToByteLen(callContext.Stack.data[callContext.Stack.len()-2].BitLen()))
 
 	var (
@@ -422,18 +422,18 @@ func gasExpEIP160(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, me
 		overflow bool
 	)
 	if gas, overflow = math.SafeAdd(gas, params.ExpGas); overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return mdgas.MdGas{Execution: gas}, nil
+	return mdgas.MdGasCost{Execution: gas}, nil
 }
 
-func gasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	gas, _, err := statelessGasCall(evm, callContext, availableGas, memorySize, true)
 	return gas, err
 }
 
-func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error) {
-	var gas mdgas.MdGas
+func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error) {
+	var gas mdgas.MdGasCost
 
 	transfersValue := !callContext.Stack.back(2).IsZero()
 	if transfersValue {
@@ -441,20 +441,20 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	}
 	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
-		return mdgas.MdGas{}, transfersValue, err
+		return mdgas.MdGasCost{}, transfersValue, err
 	}
 
 	if evm.readOnly && transfersValue {
-		return mdgas.MdGas{}, false, ErrWriteProtection
+		return mdgas.MdGasCost{}, false, ErrWriteProtection
 	}
 
 	var overflow bool
 	if gas.Execution, overflow = math.SafeAdd(gas.Execution, memoryGas); overflow {
-		return mdgas.MdGas{}, false, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, false, ErrGasUintOverflow
 	}
 
 	if availableGas.Execution < gas.Execution {
-		return mdgas.MdGas{}, false, ErrOutOfGas
+		return mdgas.MdGasCost{}, false, ErrOutOfGas
 	}
 
 	if !withCallGasCalc {
@@ -467,15 +467,15 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 	gas, err = statefulGasCall(evm, callContext, gas, availableGas, transfersValue)
 	if err != nil {
-		return mdgas.MdGas{}, false, err
+		return mdgas.MdGasCost{}, false, err
 	}
 
 	if availableGas.Execution < gas.Execution {
-		return mdgas.MdGas{}, false, ErrOutOfGas
+		return mdgas.MdGasCost{}, false, ErrOutOfGas
 	}
 	callGas, err := calcCallGas(evm, callContext, availableGas.Execution, gas.Execution)
 	if err != nil {
-		return mdgas.MdGas{}, false, err
+		return mdgas.MdGasCost{}, false, err
 	}
 
 	if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
@@ -485,20 +485,20 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 	gas.Execution, overflow = math.SafeAdd(gas.Execution, callGas)
 	if overflow {
-		return mdgas.MdGas{}, false, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, false, ErrGasUintOverflow
 	}
 	return gas, transfersValue, nil
 }
 
-func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
-	var accountGas, stateGas uint64
+func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error) {
+	var accountGas uint64
 	var address = evm.internAddress(callContext.Stack.back(1))
 	rules := evm.ChainRules()
 	callContext.newAccountCharged = false
 	if rules.IsEIP161Enabled() {
 		empty, err := evm.IntraBlockState().Empty(address)
 		if err != nil {
-			return mdgas.MdGas{}, err
+			return mdgas.MdGasCost{}, err
 		}
 		// Empty() reads account state for gas calculation — record for BAL
 		// tracking unconditionally, since the read happens regardless of
@@ -506,7 +506,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if transfersValue && empty {
 			if rules.IsAmsterdam {
-				stateGas = params.StateGasNewAccount
+				gas.State += params.StateGasNewAccount
 				callContext.newAccountCharged = true
 			} else {
 				accountGas = params.CallNewAccountGas
@@ -515,7 +515,7 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 	} else {
 		exists, err := evm.IntraBlockState().Exist(address)
 		if err != nil {
-			return mdgas.MdGas{}, err
+			return mdgas.MdGasCost{}, err
 		}
 		// Exist() reads account state for gas calculation — record for BAL.
 		evm.IntraBlockState().MarkAddressAccess(address, false)
@@ -528,19 +528,12 @@ func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availa
 
 	var overflow bool
 	if gas.Execution, overflow = math.SafeAdd(gas.Execution, accountGas); overflow {
-		return mdgas.MdGas{}, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
 
 	if dbg.TraceDynamicGas && evm.intraBlockState.Trace() {
 		fmt.Printf("%d (%d.%d) Call Gas: account: %d\n",
 			evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), accountGas)
-	}
-
-	if stateGas > 0 {
-		gas.State, overflow = math.SafeAdd(gas.State, stateGas)
-		if overflow {
-			return mdgas.MdGas{}, ErrGasUintOverflow
-		}
 	}
 
 	return gas, nil
@@ -555,22 +548,22 @@ func calcCallGas(evm *EVM, callContext *CallContext, availableGas, baseGas uint6
 	return callGas, nil
 }
 
-func gasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	gas, _, err := statelessGasCallCode(evm, callContext, availableGas, memorySize, true)
 	return gas, err
 }
 
-func statefulGasCallCode(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
+func statefulGasCallCode(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error) {
 	return gas, nil
 }
 
-func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error) {
+func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error) {
 	memoryGas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
-		return mdgas.MdGas{}, false, err
+		return mdgas.MdGasCost{}, false, err
 	}
 	var (
-		gas      mdgas.MdGas
+		gas      mdgas.MdGasCost
 		overflow bool
 	)
 	if !callContext.Stack.back(2).IsZero() {
@@ -578,11 +571,11 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas
 	}
 
 	if gas.Execution, overflow = math.SafeAdd(gas.Execution, memoryGas); overflow {
-		return mdgas.MdGas{}, false, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, false, ErrGasUintOverflow
 	}
 
 	if availableGas.Execution < gas.Execution {
-		return mdgas.MdGas{}, false, ErrOutOfGas
+		return mdgas.MdGasCost{}, false, ErrOutOfGas
 	}
 
 	if !withCallGasCalc {
@@ -602,29 +595,29 @@ func statelessGasCallCode(evm *EVM, callContext *CallContext, availableGas mdgas
 
 	gas.Execution, overflow = math.SafeAdd(gas.Execution, callGas)
 	if overflow {
-		return mdgas.MdGas{}, false, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, false, ErrGasUintOverflow
 	}
 
 	return gas, false, err
 }
 
-func gasDelegateCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasDelegateCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	gas, _, err := statelessGasDelegateCall(evm, callContext, availableGas, memorySize, true)
 	return gas, err
 }
 
-func statefulGasDelegateCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
+func statefulGasDelegateCall(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error) {
 	return gas, nil
 }
 
-func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error) {
+func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
-		return mdgas.MdGas{}, false, err
+		return mdgas.MdGasCost{}, false, err
 	}
 
 	if availableGas.Execution < gas {
-		return mdgas.MdGas{}, false, ErrOutOfGas
+		return mdgas.MdGasCost{}, false, ErrOutOfGas
 	}
 
 	var callGasTemp uint64
@@ -632,7 +625,7 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas m
 	evm.SetCallGasTemp(callGasTemp)
 
 	if err != nil {
-		return mdgas.MdGas{}, false, err
+		return mdgas.MdGasCost{}, false, err
 	}
 
 	if !withCallGasCalc {
@@ -640,7 +633,7 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas m
 			fmt.Printf("%d (%d.%d) DelegateCall Gas: memory(%d): %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas)
 		}
-		return mdgas.MdGas{Execution: gas}, false, nil
+		return mdgas.MdGasCost{Execution: gas}, false, nil
 	}
 
 	callGas, err := calcCallGas(evm, callContext, availableGas.Execution, gas)
@@ -653,29 +646,29 @@ func statelessGasDelegateCall(evm *EVM, callContext *CallContext, availableGas m
 	var overflow bool
 	gas, overflow = math.SafeAdd(gas, callGas)
 	if overflow {
-		return mdgas.MdGas{}, false, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, false, ErrGasUintOverflow
 	}
 
-	return mdgas.MdGas{Execution: gas}, false, err
+	return mdgas.MdGasCost{Execution: gas}, false, err
 }
 
-func gasStaticCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasStaticCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	gas, _, err := statelessGasStaticCall(evm, callContext, availableGas, memorySize, true)
 	return gas, err
 }
 
-func statefulGasStaticCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
+func statefulGasStaticCall(evm *EVM, callContext *CallContext, gas mdgas.MdGasCost, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGasCost, error) {
 	return gas, nil
 }
 
-func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGas, bool, error) {
+func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64, withCallGasCalc bool) (mdgas.MdGasCost, bool, error) {
 	gas, err := memoryGasCost(callContext, memorySize)
 	if err != nil {
-		return mdgas.MdGas{}, false, err
+		return mdgas.MdGasCost{}, false, err
 	}
 
 	if availableGas.Execution < gas {
-		return mdgas.MdGas{}, false, ErrOutOfGas
+		return mdgas.MdGasCost{}, false, ErrOutOfGas
 	}
 
 	if !withCallGasCalc {
@@ -683,7 +676,7 @@ func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas mdg
 			fmt.Printf("%d (%d.%d) StaticCall Gas: memory(%d): %d\n",
 				evm.intraBlockState.BlockNumber(), evm.intraBlockState.TxIndex(), evm.intraBlockState.Incarnation(), memorySize, gas)
 		}
-		return mdgas.MdGas{Execution: gas}, false, nil
+		return mdgas.MdGasCost{Execution: gas}, false, nil
 	}
 
 	callGas, err := calcCallGas(evm, callContext, availableGas.Execution, gas)
@@ -696,18 +689,18 @@ func statelessGasStaticCall(evm *EVM, callContext *CallContext, availableGas mdg
 	var overflow bool
 	gas, overflow = math.SafeAdd(gas, callGas)
 	if overflow {
-		return mdgas.MdGas{}, false, ErrGasUintOverflow
+		return mdgas.MdGasCost{}, false, ErrGasUintOverflow
 	}
 
-	return mdgas.MdGas{Execution: gas}, false, err
+	return mdgas.MdGasCost{Execution: gas}, false, err
 }
 
-func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGas, error) {
+func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {
 	if evm.readOnly {
-		return mdgas.MdGas{}, ErrWriteProtection
+		return mdgas.MdGasCost{}, ErrWriteProtection
 	}
 
-	var gas mdgas.MdGas
+	var gas mdgas.MdGasCost
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Execution = params.SelfdestructGasEIP150
@@ -717,13 +710,13 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 			// if empty and transfers value
 			empty, err := evm.IntraBlockState().Empty(address)
 			if err != nil {
-				return mdgas.MdGas{}, err
+				return mdgas.MdGasCost{}, err
 			}
 			// Empty() reads account state for gas calculation — record for BAL.
 			evm.IntraBlockState().MarkAddressAccess(address, false)
 			balance, err := evm.IntraBlockState().GetBalance(callContext.Address())
 			if err != nil {
-				return mdgas.MdGas{}, err
+				return mdgas.MdGasCost{}, err
 			}
 			if empty && !balance.IsZero() {
 				gas.Execution += params.CreateBySelfdestructGas
@@ -731,7 +724,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 		} else {
 			exist, err := evm.IntraBlockState().Exist(address)
 			if err != nil {
-				return mdgas.MdGas{}, err
+				return mdgas.MdGasCost{}, err
 			}
 			// Exist() reads account state for gas calculation — record for BAL.
 			evm.IntraBlockState().MarkAddressAccess(address, false)
@@ -743,7 +736,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 
 	hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
 	if err != nil {
-		return mdgas.MdGas{}, err
+		return mdgas.MdGasCost{}, err
 	}
 	if !hasSelfdestructed {
 		evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
