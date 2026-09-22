@@ -313,8 +313,13 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 }
 
 // An activated notifier streams the whole notification: the prefix, the result and "}}".
+// emptyStreamed writes nothing; a notification still carries a result, as a response does.
+type emptyStreamed struct{}
+
+func (emptyStreamed) MarshalFastJSONTo(*jsonstream.StackStream) error { return nil }
+
 func TestNotifyStreamsTheNotification(t *testing.T) {
-	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`} {
+	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`, emptyStreamed{}: `null`} {
 		w := &captureWriter{}
 		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
 		if err := n.Notify("0x9a", payload); err != nil {

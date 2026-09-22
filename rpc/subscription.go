@@ -203,6 +203,9 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 	if err := writeNotificationResult(s, data); err != nil {
 		return err
 	}
+	if len(s.Buffer()) == len(n.prefix) {
+		s.WriteNil() // a notification carries a result even when the marshaller wrote none, as a response does
+	}
 	if !n.activated {
 		n.buffer = append(n.buffer, bytes.Clone(s.Buffer()[len(n.prefix):]))
 		return nil
