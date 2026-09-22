@@ -1700,7 +1700,7 @@ func TestSetHead(t *testing.T) {
 	require.Greater(t, head, uint64(1), "test chain must have at least 2 blocks")
 
 	makeAPIWithBase := func(m *execmoduletester.ExecModuleTester, base *BaseAPI, mock *mockEthBackend) *DebugAPIImpl {
-		backendServer := privateapi.NewEthBackendServer(m.Ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
+		backendServer := privateapi.NewEthBackendServer(m.Ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), m.ChainConfig)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 		return NewPrivateDebugAPI(base, m.DB, backend, &rpccfg.DebugApiConfig{})
