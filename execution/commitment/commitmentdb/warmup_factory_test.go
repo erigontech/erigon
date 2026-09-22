@@ -18,12 +18,14 @@ package commitmentdb
 
 import (
 	"context"
+	"io"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -94,4 +96,55 @@ func TestWarmupFactoriesUnblockBeginOnWarmuperClose(t *testing.T) {
 			}
 		})
 	}
+}
+
+type factoryWiringDomains struct{ sd }
+
+func (factoryWiringDomains) AddCommitmentTime(time.Duration)                         {}
+func (factoryWiringDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
+func (factoryWiringDomains) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
+func (factoryWiringDomains) StepSize() uint64                                        { return 1 }
+
+type factoryWiringTrie struct {
+	factory commitment.TrieContextFactory
+	warmup  commitment.WarmupConfig
+}
+
+func (*factoryWiringTrie) RootHash() ([]byte, error) { return []byte{1}, nil }
+func (*factoryWiringTrie) SetTraceWriter(io.Writer)  {}
+func (*factoryWiringTrie) Variant() commitment.TrieVariant {
+	return commitment.VariantCommitmentV4
+}
+func (*factoryWiringTrie) Reset()                                  {}
+func (*factoryWiringTrie) ResetContext(commitment.PatriciaContext) {}
+func (t *factoryWiringTrie) Process(_ context.Context, _ *commitment.Updates, _ string, _ func(*commitment.CommitProgress), warmup commitment.WarmupConfig) ([]byte, error) {
+	t.warmup = warmup
+	return []byte{1}, nil
+}
+func (*factoryWiringTrie) Release() {}
+func (t *factoryWiringTrie) SetTrieContextFactory(factory commitment.TrieContextFactory) {
+	t.factory = factory
+}
+
+func TestComputeCommitmentWiresV4Factories(t *testing.T) {
+	trie := &factoryWiringTrie{}
+	domains := factoryWiringDomains{}
+	updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+	updates.TouchPlainKeyDirect(string([]byte{1}), &commitment.Update{Flags: commitment.BalanceUpdate})
+	sdc := &SharedDomainsCommitmentContext{
+		sharedDomains: &domains,
+		updates:       updates,
+		patriciaTrie:  trie,
+		stateReader:   &testStateReader{},
+		paraTrieDB:    &beginRoRecordingDB{},
+		warmupBase: commitment.WarmupConfig{
+			Enabled:    true,
+			NumWorkers: 2,
+		},
+	}
+
+	_, err := sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
+	require.NoError(t, err)
+	require.NotNil(t, trie.factory, "v4 storage factory must be configured by ComputeCommitment")
+	require.NotNil(t, trie.warmup.CtxFactory, "v4 warmup factory must remain configured")
 }

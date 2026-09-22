@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -102,6 +103,55 @@ func TestScheduleWorkerBoundDuringTrieProcess(t *testing.T) {
 	require.LessOrEqual(t, stats.max.Load(), int64(2))
 	require.Equal(t, int64(0), stats.inFlight.Load())
 	trie.Release()
+}
+
+func TestRunStoragePhaseUsesConfiguredWorkers(t *testing.T) {
+	storage := make([]storageTask, 64)
+	for i := range storage {
+		storage[i].wipe = true
+		storage[i].addrHash[0] = byte(i)
+	}
+	roots := make([][32]byte, len(storage))
+	var factoryCalls atomic.Int32
+	factory := func(context.Context) (commitment.PatriciaContext, func()) {
+		factoryCalls.Add(1)
+		return newMockContext(), nil
+	}
+
+	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, 4, new(scheduleStats))
+	require.NoError(t, err)
+	require.Equal(t, int32(4), factoryCalls.Load())
+}
+
+func TestScheduleSerialAndParallelRootsAgreeForManyContracts(t *testing.T) {
+	entries := make([]parityUpdate, 0, 64)
+	for i := range 32 {
+		address := parityAddress(i)
+		entries = append(entries,
+			parityUpdate{key: address, update: accountParityUpdate(i)},
+			parityUpdate{
+				key:    append(append([]byte(nil), address...), paritySlot(i)...),
+				update: storageParityUpdate(i),
+			},
+		)
+	}
+
+	serial := &Trie{scheduleWorkers: 1}
+	serialCtx := newParityContext()
+	serial.ResetContext(serialCtx)
+	serialRoot, err := serial.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+	serial.Release()
+
+	parallel := &Trie{scheduleWorkers: 4}
+	parallelCtx := newParityContext()
+	parallel.ResetContext(parallelCtx)
+	parallel.SetTrieContextFactory(parallelCtx.factory)
+	parallelRoot, err := parallel.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+	parallel.Release()
+
+	require.Equal(t, serialRoot, parallelRoot)
 }
 
 func TestScheduledFieldUpdatePreservesStorageRoot(t *testing.T) {

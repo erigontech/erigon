@@ -94,6 +94,10 @@ type deferredCommitmentTrie interface {
 	TakeDeferredUpdates() func(func(prefix, data, prevData []byte) error) error
 }
 
+type trieContextFactorySetter interface {
+	SetTrieContextFactory(commitment.TrieContextFactory)
+}
+
 // checkParaTrieWired reports a context that selected the parallel trie and never
 // received the DB it needs. Falling back to the sequential trie is deliberate for
 // the DB-less RPC and integrity contexts, and a bug for anything that computes a
@@ -586,8 +590,8 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		warmupConfig = sdc.warmupBase
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
-		switch trie := sdc.patriciaTrie.(type) {
-		case *commitment.ParallelPatriciaHashed:
+		warmupConfig.CtxFactory = sdc.warmupTrieContextFactory(sdc.paraTrieDB, txNum)
+		if trie, ok := sdc.patriciaTrie.(trieContextFactorySetter); ok {
 			// The parallel fold workers compute the root, so they must read the same
 			// file generation the main tx was built against: pin it and open worker
 			// txns from that pin. Otherwise a worker could pin a newer generation and
@@ -608,10 +612,6 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			var concurrentFactory commitment.TrieContextFactory
 			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(sdc.paraTrieDB, workerPin, txNum)
 			trie.SetTrieContextFactory(concurrentFactory)
-		default:
-			// Serial: this factory only serves page-cache warmup, which does not
-			// compute the root, so its reads need no generation pin.
-			warmupConfig.CtxFactory = sdc.warmupTrieContextFactory(sdc.paraTrieDB, txNum)
 		}
 	}
 
