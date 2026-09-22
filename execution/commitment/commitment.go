@@ -31,9 +31,10 @@ import (
 	"sync"
 	"unsafe"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -133,32 +134,57 @@ const (
 
 var KeyCommitmentV4State = []byte{0x42}
 
+const CommitmentV4StateSize = 1 + 8 + 8 + 32
+
+var (
+	ErrCommitmentV4StateMarker = errors.New("commitment v4: invalid state variant marker")
+	ErrCommitmentV4StateSize   = errors.New("commitment v4: invalid state size")
+)
+
+func EncodeCommitmentV4State(root []byte, blockNum, txNum uint64, dst []byte) ([]byte, error) {
+	if len(root) != length.Hash {
+		return nil, ErrCommitmentV4StateSize
+	}
+	dst = append(dst, make([]byte, CommitmentV4StateSize)...)
+	body := dst[len(dst)-CommitmentV4StateSize:]
+	body[0] = CommitmentV4StateMarker
+	binary.BigEndian.PutUint64(body[1:9], txNum)
+	binary.BigEndian.PutUint64(body[9:17], blockNum)
+	copy(body[17:], root)
+	return dst, nil
+}
+
+func DecodeCommitmentV4State(value []byte) (blockNum, txNum uint64, root []byte, err error) {
+	if len(value) != CommitmentV4StateSize {
+		return 0, 0, nil, ErrCommitmentV4StateSize
+	}
+	if value[0] != CommitmentV4StateMarker {
+		return 0, 0, nil, ErrCommitmentV4StateMarker
+	}
+	return binary.BigEndian.Uint64(value[9:17]), binary.BigEndian.Uint64(value[1:9]), bytes.Clone(value[17:]), nil
+}
+
 func IsCommitmentStateKey(key []byte) bool {
-	return bytes.Equal(key, KeyCommitmentState) || bytes.Equal(key, KeyCommitmentV4State)
+	if len(key) == len(KeyCommitmentV4State) {
+		return key[0] == KeyCommitmentV4State[0]
+	}
+	return bytes.Equal(key, KeyCommitmentState)
 }
 
 type TrieFunc func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 
-var trieFuncs = make(map[TrieVariant]TrieFunc)
-
-func RegisterTrieFunc(variant TrieVariant, fn TrieFunc) {
-	if variant == "" || fn == nil {
-		panic("commitment: invalid trie registration")
-	}
-	if _, ok := trieFuncs[variant]; ok {
-		panic(fmt.Sprintf("commitment: trie variant %q already registered", variant))
-	}
-	trieFuncs[variant] = fn
-}
+var NewCommitmentV4Trie TrieFunc
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
-	if fn, ok := trieFuncs[cfg.Variant]; ok {
-		if cfg.Variant == VariantCommitmentV4 && mode != ModeUpdate {
+	switch cfg.Variant {
+	case VariantCommitmentV4:
+		if NewCommitmentV4Trie == nil {
+			panic("commitment v4 selected without importing execution/commitment/v4")
+		}
+		if mode != ModeUpdate {
 			panic(fmt.Sprintf("commitment v4 requires ModeUpdate, got %s mode", mode))
 		}
-		return fn(tmpdir, cfg)
-	}
-	switch cfg.Variant {
+		return NewCommitmentV4Trie(tmpdir, cfg)
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)

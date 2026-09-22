@@ -46,6 +46,24 @@ func packPath(nibbles []byte, dst []byte) []byte {
 	return dst
 }
 
+func packedMatches(packed []byte, nibbles []byte) bool {
+	if len(packed) != packedLen(len(nibbles)) {
+		return false
+	}
+	for i, nib := range nibbles {
+		b := packed[i/2]
+		if i&1 == 0 {
+			b >>= 4
+		} else {
+			b &= 0x0f
+		}
+		if b != nib {
+			return false
+		}
+	}
+	return true
+}
+
 func unpackPath(packed []byte, count int, dst []byte) []byte {
 	need := packedLen(count)
 	if len(packed) < need {

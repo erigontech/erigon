@@ -68,7 +68,7 @@ func TestRemovedRecordDeltaUsesNonNilTombstone(t *testing.T) {
 	key := []byte{0x40, 0}
 	ctx.branches[string(key)] = []byte{1, 2, 3}
 
-	deltas, err := appendRemovedDeltas(ctx, nil, map[string][]byte{string(key): key}, nil)
+	deltas, err := appendRemovedDeltas(ctx, nil, map[string]struct{}{string(key): {}}, nil)
 	require.NoError(t, err)
 	require.Len(t, deltas, 1)
 	require.NotNil(t, deltas[0].data)
@@ -105,12 +105,13 @@ func TestPersistGraphRetainsOnlyFoldedDeltasAfterChildWalk(t *testing.T) {
 					path[j] = byte(value & 0x0f)
 					value >>= 4
 				}
-				if err := insert(root, path, packPath(path[1:], nil), []byte{byte(i)}); err != nil {
+				if err := insert(root, path, []byte{byte(i)}); err != nil {
 					t.Fatal(err)
 				}
 			}
-			before := reachableRecordKeys(root, addr)
-			require.NoError(t, persistStorageGraph(ctx, root, addr, before))
+			g := storageGraph(addr[:])
+			before := g.reachableRecordKeys(root)
+			require.NoError(t, g.persistGraph(ctx, root, before))
 			require.NotEmpty(t, ctx.branches)
 			require.Equal(t, 1, linkedNodeCount(root))
 			require.Empty(t, ctx.accountCalls)

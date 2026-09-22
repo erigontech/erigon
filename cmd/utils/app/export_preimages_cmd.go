@@ -118,7 +118,7 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 
 	var commitmentState, stateKey []byte
 	var ok bool
-	for _, key := range [][]byte{commitment.KeyCommitmentV4State, commitmentdb.KeyCommitmentState} {
+	for _, key := range commitmentdb.CommitmentStateKeys {
 		commitmentState, _, ok, err = aggTx.GetLatest(kv.CommitmentDomain, key, tx, kv.GetLatestOptions{})
 		if err != nil {
 			return fmt.Errorf("read commitment state: %w", err)
@@ -133,13 +133,11 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	var rootBytes []byte
 	var blockNum, txNum uint64
-	if bytes.Equal(stateKey, commitment.KeyCommitmentV4State) {
-		if len(commitmentState) != 1+8+8+32 || commitmentState[0] != commitment.CommitmentV4StateMarker {
-			return fmt.Errorf("extract state root: invalid commitment v4 state")
+	if bytes.Equal(stateKey, commitmentdb.KeyCommitmentV4State) {
+		blockNum, txNum, rootBytes, err = commitment.DecodeCommitmentV4State(commitmentState)
+		if err != nil {
+			return fmt.Errorf("extract state root: %w", err)
 		}
-		txNum = binary.BigEndian.Uint64(commitmentState[1:9])
-		blockNum = binary.BigEndian.Uint64(commitmentState[9:17])
-		rootBytes = commitmentState[17:]
 	} else {
 		rootBytes, blockNum, txNum, err = commitment.HexTrieExtractStateRoot(commitmentState)
 		if err != nil {

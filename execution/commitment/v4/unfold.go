@@ -81,7 +81,8 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	if len(path) == 0 && data[0]&hdrHasSelfExt != 0 {
 		n.path = unpackPath(record.SelfExt()[1:], int(data[1]), nil)
 	}
-	if record.EmbMask() != 0 {
+	l := record.layout()
+	if l.emb != 0 {
 		return nil, ErrUnfoldEmbedded
 	}
 	if record.isLeafRoot() {
@@ -93,19 +94,19 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 
 	for nib := range 16 {
 		bit := uint16(1) << nib
-		if record.ChildMask()&bit == 0 {
+		if l.child&bit == 0 {
 			continue
 		}
-		if record.LeafMask()&bit != 0 {
-			suffix, value := record.LeafAt(nib)
+		if l.leaf&bit != 0 {
+			suffix, value := record.leafAt(l, nib)
 			n.setLeaf(nib, suffix, value)
 			continue
 		}
-		hash := record.SlotAt(nib)
+		hash := record.slotAt(l, nib)
 		if len(hash) != 32 {
 			return nil, fmt.Errorf("%w: child %d hash", ErrInvalidRecord, nib)
 		}
-		ext, err := decodeExtension(record.ExtAt(nib))
+		ext, err := decodeExtension(record.extAt(l, nib))
 		if err != nil {
 			return nil, err
 		}

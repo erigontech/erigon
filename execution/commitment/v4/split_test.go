@@ -34,7 +34,7 @@ func TestInsertLeafAtEveryDepthInBothPlanes(t *testing.T) {
 				n := fork(prefix)
 				n.setLeaf(4, packPath(existing[depth+1:], nil), []byte{0x11})
 
-				err := insert(n, incoming, packPath(incoming[depth+1:], nil), []byte{0x22})
+				err := insert(n, incoming, []byte{0x22})
 				require.NoError(t, err, "depth %d", depth)
 				bit := uint16(1) << 4
 				require.NotZero(t, n.childMask&bit, "depth %d", depth)
@@ -63,7 +63,7 @@ func TestInsertCreatesExpectedExtensionLengths(t *testing.T) {
 			n := fork(prefix)
 			n.setLeaf(6, packPath(oldPath[8:], nil), []byte{1})
 
-			require.NoError(t, insert(n, newPath, packPath(newPath[8:], nil), []byte{2}))
+			require.NoError(t, insert(n, newPath, []byte{2}))
 			branch := n.children[6]
 			require.NotNil(t, branch)
 			require.Equal(t, append(append([]byte(nil), prefix...), byte(6)), branch.path[:8])
@@ -81,7 +81,7 @@ func TestInsertRecomputesPushedLeafSuffixFromFullPath(t *testing.T) {
 	n := fork(prefix)
 	n.setLeaf(2, packPath(oldPath[6:], nil), []byte{0xaa})
 
-	require.NoError(t, insert(n, newPath, packPath(newPath[6:], nil), []byte{0xbb}))
+	require.NoError(t, insert(n, newPath, []byte{0xbb}))
 	branch := n.children[2]
 	require.NotNil(t, branch)
 	require.Equal(t, packPath(oldPath[len(branch.path)+1:], nil), branch.leafSuffix[int(oldPath[len(branch.path)])])
@@ -96,23 +96,17 @@ func TestInsertUsesNoStateReads(t *testing.T) {
 	oldPath := repeatedPath(64, 1)
 	newPath := append(append([]byte(nil), oldPath[:2]...), bytes.Repeat([]byte{2}, 62)...)
 	n.setLeaf(1, packPath(oldPath[1:], nil), []byte{1})
-	require.NoError(t, insert(n, newPath, packPath(newPath[1:], nil), []byte{2}))
+	require.NoError(t, insert(n, newPath, []byte{2}))
 	require.Zero(t, ctx.accountCalls)
 	require.Zero(t, ctx.storageCalls)
 	require.Empty(t, ctx.branchCalls)
 }
 
-func TestInsertRejectsInvalidSuffixAndStoredDescendant(t *testing.T) {
+func TestInsertRejectsStoredDescendant(t *testing.T) {
 	n := fork(nil)
-	path := repeatedPath(64, 1)
-	tryPath := append(append([]byte(nil), path[:1]...), bytes.Repeat([]byte{2}, 63)...)
-	n.setLeaf(1, packPath(path[1:], nil), []byte{1})
-	require.ErrorIs(t, insert(n, tryPath, []byte{0xff}, []byte{2}), ErrInsertSuffix)
-
-	n = fork(nil)
 	n.setStoredChild(1, bytes.Repeat([]byte{0xab}, 32), []byte{2, 3})
 	storedPath := append([]byte{1, 2, 3}, bytes.Repeat([]byte{4}, 61)...)
-	require.ErrorIs(t, insert(n, storedPath, packPath(storedPath[1:], nil), []byte{2}), ErrInsertStoredChild)
+	require.ErrorIs(t, insert(n, storedPath, []byte{2}), ErrInsertStoredChild)
 }
 
 func repeatedPath(length int, nib byte) []byte {

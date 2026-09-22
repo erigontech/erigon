@@ -29,6 +29,9 @@ import (
 const (
 	planeAccount = tagAccountNode
 	planeStorage = tagStorageNode
+
+	// widest RLP a branch can produce: list prefix + 16 hash refs + the empty value slot
+	refScratch = 3 + 16*33 + 1
 )
 
 func leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte {
@@ -85,7 +88,8 @@ func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
 func extensionRef(ext []byte, childHash []byte) [32]byte {
 	compact := nibbles.HexToCompact(ext)
 	contentLen := rlp.StringLen(compact) + rlp.StringLen(childHash)
-	encoded := make([]byte, rlp.ListLen(contentLen))
+	var scratch [refScratch]byte
+	encoded := scratch[:rlp.ListLen(contentLen)]
 	pos := rlp.EncodeListPrefixToBuf(contentLen, encoded)
 	pos += rlp.EncodeStringToBuf(compact, encoded[pos:])
 	pos += rlp.EncodeStringToBuf(childHash, encoded[pos:])
@@ -93,7 +97,7 @@ func extensionRef(ext []byte, childHash []byte) [32]byte {
 	return hash
 }
 
-func branchRef(refs *[16][]byte, depth ...int) [32]byte {
+func branchRef(refs *[16][]byte, depth int) [32]byte {
 	contentLen := 1
 	for _, ref := range refs {
 		switch {
@@ -108,7 +112,8 @@ func branchRef(refs *[16][]byte, depth ...int) [32]byte {
 		}
 	}
 
-	encoded := make([]byte, rlp.ListLen(contentLen))
+	var scratch [refScratch]byte
+	encoded := scratch[:rlp.ListLen(contentLen)]
 	pos := rlp.EncodeListPrefixToBuf(contentLen, encoded)
 	for _, ref := range refs {
 		switch {
@@ -124,11 +129,7 @@ func branchRef(refs *[16][]byte, depth ...int) [32]byte {
 	encoded[pos] = 0x80
 	pos++
 	if pos < 32 {
-		branchDepth := -1
-		if len(depth) > 0 {
-			branchDepth = depth[0]
-		}
-		panic(fmt.Sprintf("commitment v4: inlinable branch child at depth %d", branchDepth))
+		panic(fmt.Sprintf("commitment v4: inlinable branch child at depth %d", depth))
 	}
 	return keccak.Sum256(encoded[:pos])
 }

@@ -17,7 +17,6 @@
 package v4
 
 import (
-	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -195,9 +194,20 @@ func canonicalCodeHash(codeHash []byte) []byte {
 }
 
 func isEmptyStorageRoot(root []byte) bool {
-	return len(root) == 0 || len(root) == length.Hash && (bytes.Equal(root, empty.RootHash[:]) || bytes.Equal(root, make([]byte, length.Hash)))
+	if len(root) == 0 {
+		return true
+	}
+	if len(root) != length.Hash {
+		return false
+	}
+	h := (*common.Hash)(root)
+	return *h == empty.RootHash || *h == (common.Hash{})
 }
 
 func isEmptyCodeHash(codeHash []byte) bool {
-	return len(codeHash) == length.Hash && (bytes.Equal(codeHash, empty.CodeHash[:]) || bytes.Equal(codeHash, make([]byte, length.Hash)))
+	if len(codeHash) != length.Hash {
+		return false
+	}
+	h := (*common.Hash)(codeHash)
+	return *h == empty.CodeHash || *h == (common.Hash{})
 }

@@ -21,8 +21,9 @@ import (
 	"math/rand/v2"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 func TestNodeKeyRoundTrip(t *testing.T) {

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/bits"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -43,7 +44,8 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 		root = fork(nil)
 	}
 	root.plane = planeAccount
-	before := reachableAccountRecordKeys(root)
+	g := accountGraph()
+	before := g.reachableRecordKeys(root)
 
 	for _, entry := range entries {
 		if len(entry.hashedKey) != 64 {
@@ -57,7 +59,7 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 
 		oldValue, found := accountLeafAt(root, entry.hashedKey)
 		if !found && storedAccountPath(root, entry.hashedKey) {
-			if err := ensureAccountPath(ctx, root, entry.hashedKey); err != nil {
+			if err := g.ensurePath(ctx, root, entry.hashedKey); err != nil {
 				return [32]byte{}, fmt.Errorf("%w: account path %x: %w", errPhaseBRecord, entry.hashedKey, err)
 			}
 			oldValue, found = accountLeafAt(root, entry.hashedKey)
@@ -108,14 +110,14 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 			return [32]byte{}, err
 		}
 		value := encodeAccountLeaf(update, storageRoot, nil)
-		if len(root.path) != 0 && !bytes.HasPrefix(entry.hashedKey, root.path) && rootBitsCount(root.childMask) == 1 && root.leafMask == 0 {
+		if len(root.path) != 0 && !bytes.HasPrefix(entry.hashedKey, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
 			if err := materializeAccountRootChild(ctx, root); err != nil {
 				return [32]byte{}, err
 			}
 		}
 		var insertErr error
 		if len(root.path) == 0 {
-			insertErr = insert(root, entry.hashedKey, packPath(entry.hashedKey[1:], nil), value)
+			insertErr = insert(root, entry.hashedKey, value)
 		} else {
 			insertErr = insertRoot(root, entry.hashedKey, value)
 		}
@@ -124,23 +126,20 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 		}
 	}
 
-	if err := persistAccountGraph(ctx, root, before); err != nil {
+	if err := g.persistGraph(ctx, root, before); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
 }
 
 func materializeAccountRootChild(ctx commitment.PatriciaContext, root *node) error {
-	nib := trailingNibble(root.childMask)
+	nib := bits.TrailingZeros16(root.childMask)
 	child := root.children[nib]
 	if child == nil {
 		return nil
 	}
-	hash, err := fold(child, len(child.path))
+	hash, err := persistDetachedAccountSubtree(ctx, child)
 	if err != nil {
-		return err
-	}
-	if err := persistDetachedAccountSubtree(ctx, child); err != nil {
 		return err
 	}
 	var ext []byte
@@ -154,12 +153,12 @@ func materializeAccountRootChild(ctx commitment.PatriciaContext, root *node) err
 	return nil
 }
 
-func persistDetachedAccountSubtree(ctx commitment.PatriciaContext, root *node) error {
+func persistDetachedAccountSubtree(ctx commitment.PatriciaContext, root *node) ([32]byte, error) {
 	if root == nil {
-		return errPhaseBRecord
+		return [32]byte{}, errPhaseBRecord
 	}
-	var visit func(*node) error
-	visit = func(n *node) error {
+	var visit func(*node) ([32]byte, error)
+	visit = func(n *node) ([32]byte, error) {
 		for nib := range 16 {
 			bit := uint16(1) << nib
 			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
@@ -168,26 +167,22 @@ func persistDetachedAccountSubtree(ctx commitment.PatriciaContext, root *node) e
 			child := n.children[nib]
 			if child == nil {
 				if len(n.childHash[nib]) != 32 {
-					return errPhaseBRecord
+					return [32]byte{}, errPhaseBRecord
 				}
 				continue
 			}
-			if err := visit(child); err != nil {
-				return err
-			}
-			hash, err := fold(child, len(child.path))
+			childHash, err := visit(child)
 			if err != nil {
-				return err
+				return [32]byte{}, err
 			}
-			n.childHash[nib] = appendCopy(n.childHash[nib], hash[:])
-			ext := child.path[len(n.path)+1:]
-			n.childExt[nib] = appendCopy(n.childExt[nib], ext)
+			n.childHash[nib] = appendCopy(n.childHash[nib], childHash[:])
+			n.childExt[nib] = appendCopy(n.childExt[nib], child.path[len(n.path)+1:])
 		}
-		_, delta, err := foldAndEncodeRecord(ctx, n, len(n.path), AccountNodeKey(n.path, nil))
+		hash, delta, err := foldAndEncodeRecord(ctx, n, len(n.path), AccountNodeKey(n.path, nil))
 		if err != nil {
-			return err
+			return [32]byte{}, err
 		}
-		return applyDeltas([]recordDelta{delta}, ctx.PutBranch)
+		return hash, applyDelta(delta, ctx.PutBranch)
 	}
 	return visit(root)
 }
@@ -218,63 +213,6 @@ func accountUpdate(value []byte, found bool, update *commitment.Update) (*commit
 	return result, nil
 }
 
-func ensureAccountPath(ctx commitment.PatriciaContext, n *node, path []byte) error {
-	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) {
-		if n == nil {
-			return fmt.Errorf("%w: nil node", errPhaseBKey)
-		}
-		return fmt.Errorf("%w: node path %x", errPhaseBKey, n.path)
-	}
-	if len(n.path) >= 64 {
-		return nil
-	}
-	nib := int(path[len(n.path)])
-	bit := uint16(1) << nib
-	if len(n.path) != 0 && rootBitsCount(n.childMask) == 1 && n.leafMask == 0 {
-		nib = trailingNibble(n.childMask)
-		if child := n.children[nib]; child != nil && bytes.Equal(child.path, n.path) {
-			return ensureAccountPath(ctx, child, path)
-		}
-		if len(n.childHash[nib]) != 32 {
-			return errPhaseBRecord
-		}
-		child, err := unfold(ctx, n.path, planeAccount, nil)
-		if err != nil {
-			return err
-		}
-		if child == nil {
-			return fmt.Errorf("%w: missing child at depth %d", errPhaseBRecord, len(n.path))
-		}
-		child.plane = planeAccount
-		n.setChild(nib, child)
-		return ensureAccountPath(ctx, child, path)
-	}
-	if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-		return nil
-	}
-	if child := n.children[nib]; child != nil {
-		return ensureAccountPath(ctx, child, path)
-	}
-	if len(n.childHash[nib]) != 32 {
-		return errPhaseBRecord
-	}
-	childPath := append(append([]byte(nil), n.path...), byte(nib))
-	childPath = append(childPath, n.childExt[nib]...)
-	if !bytes.HasPrefix(path, childPath) {
-		return nil
-	}
-	child, err := unfold(ctx, childPath, planeAccount, nil)
-	if err != nil {
-		return err
-	}
-	if child == nil {
-		return fmt.Errorf("%w: missing child at depth %d", errPhaseBRecord, len(childPath))
-	}
-	child.plane = planeAccount
-	n.setChild(nib, child)
-	return ensureAccountPath(ctx, child, path)
-}
-
 func accountLeafAt(n *node, path []byte) ([]byte, bool) {
 	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) || len(n.path) >= len(path) {
 		return nil, false
@@ -285,8 +223,7 @@ func accountLeafAt(n *node, path []byte) ([]byte, bool) {
 		return nil, false
 	}
 	if n.leafMask&bit != 0 {
-		suffixCount := len(path) - len(n.path) - 1
-		if len(n.leafSuffix[nib]) != packedLen(suffixCount) || !bytes.Equal(unpackPath(n.leafSuffix[nib], suffixCount, nil), path[len(n.path)+1:]) {
+		if !packedMatches(n.leafSuffix[nib], path[len(n.path)+1:]) {
 			return nil, false
 		}
 		return append([]byte(nil), n.leafValue[nib]...), true
@@ -312,111 +249,4 @@ func storedAccountPath(n *node, path []byte) bool {
 	childPath := append(append([]byte(nil), n.path...), byte(nib))
 	childPath = append(childPath, n.childExt[nib]...)
 	return bytes.HasPrefix(path, childPath)
-}
-
-func reachableAccountRecordKeys(root *node) map[string][]byte {
-	keys := make(map[string][]byte)
-	var visit func(*node, bool)
-	visit = func(n *node, isRoot bool) {
-		if n == nil {
-			return
-		}
-		var key []byte
-		if isRoot {
-			key = AccountRootKey()
-		} else {
-			key = AccountNodeKey(n.path, nil)
-		}
-		keys[string(key)] = key
-		for nib := range 16 {
-			bit := uint16(1) << nib
-			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-				continue
-			}
-			if child := n.children[nib]; child != nil {
-				visit(child, false)
-				continue
-			}
-			if len(n.childHash[nib]) == 32 {
-				childPath := append([]byte(nil), n.path...)
-				if isRoot && len(n.path) == 0 {
-					childPath = append(childPath, byte(nib))
-				}
-				childPath = append(childPath, n.childExt[nib]...)
-				childKey := AccountNodeKey(childPath, nil)
-				keys[string(childKey)] = childKey
-			}
-		}
-	}
-	visit(root, true)
-	return keys
-}
-
-func persistAccountGraph(ctx commitment.PatriciaContext, root *node, before map[string][]byte) error {
-	if root == nil {
-		return errPhaseBRecord
-	}
-	if err := promoteRootExtension(root); err != nil {
-		return err
-	}
-	deltas := make([]recordDelta, 0, len(before)+1)
-	var materialize func(*node) ([32]byte, error)
-	materialize = func(n *node) ([32]byte, error) {
-		if n == nil {
-			return [32]byte{}, errPhaseBRecord
-		}
-		for nib := range 16 {
-			bit := uint16(1) << nib
-			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-				continue
-			}
-			child := n.children[nib]
-			if child == nil {
-				if len(n.childHash[nib]) != 32 {
-					return [32]byte{}, errPhaseBRecord
-				}
-				continue
-			}
-			childHash, err := materialize(child)
-			if err != nil {
-				return [32]byte{}, err
-			}
-			n.childHash[nib] = appendCopy(n.childHash[nib], childHash[:])
-			var ext []byte
-			if !(n == root && len(n.path) != 0 && bytes.Equal(child.path, n.path)) {
-				ext = child.path[len(n.path)+1:]
-			}
-			n.childExt[nib] = appendCopy(n.childExt[nib], ext)
-			n.children[nib] = nil
-		}
-		path := n.path
-		depth := len(path)
-		if n == root {
-			path = nil
-			depth = 0
-		}
-		key := AccountNodeKey(path, nil)
-		hash, delta, err := foldAndEncodeRecord(ctx, n, depth, key)
-		if err != nil {
-			return [32]byte{}, err
-		}
-		deltas = append(deltas, delta)
-		return hash, nil
-	}
-	if _, err := materialize(root); err != nil {
-		return err
-	}
-	after := reachableAccountRecordKeys(root)
-	for _, delta := range deltas {
-		after[string(delta.key)] = delta.key
-	}
-	var err error
-	deltas, err = appendRemovedDeltas(ctx, deltas, before, after)
-	if err != nil {
-		return err
-	}
-	if err := applyDeltas(deltas, ctx.PutBranch); err != nil {
-		return err
-	}
-	return nil
 }

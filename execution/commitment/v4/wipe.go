@@ -69,12 +69,13 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 	if record.isLeafRoot() {
 		return nil
 	}
+	l := record.layout()
 	for nib := range 16 {
 		bit := uint16(1) << nib
-		if record.ChildMask()&bit == 0 || record.LeafMask()&bit != 0 {
+		if l.child&bit == 0 || l.leaf&bit != 0 {
 			continue
 		}
-		childPath, err := childRecordPath(record, path, nib)
+		childPath, err := childRecordPath(record, l, path, nib)
 		if err != nil {
 			return err
 		}
@@ -98,15 +99,15 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 	return nil
 }
 
-func childRecordPath(record Record, path []byte, nib int) ([]byte, error) {
+func childRecordPath(record Record, l layout, path []byte, nib int) ([]byte, error) {
 	if nib < 0 || nib > 15 {
 		return nil, errWipePath
 	}
-	if len(path) == 0 && len(record.SelfExt()) != 0 {
-		return append([]byte(nil), unpackPath(record.SelfExt()[1:], int(record.SelfExt()[0]), nil)...), nil
+	if selfExt := record.SelfExt(); len(path) == 0 && len(selfExt) != 0 {
+		return unpackPath(selfExt[1:], int(selfExt[0]), nil), nil
 	}
 	childPath := append(append([]byte(nil), path...), byte(nib))
-	ext := record.ExtAt(nib)
+	ext := record.extAt(l, nib)
 	if len(ext) != 0 {
 		decoded, err := decodeExtension(ext)
 		if err != nil {

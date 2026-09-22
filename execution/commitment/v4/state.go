@@ -18,8 +18,6 @@ package v4
 
 import (
 	"bytes"
-	"encoding/binary"
-	"errors"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -27,11 +25,11 @@ import (
 
 const StateMarker byte = commitment.CommitmentV4StateMarker
 
-const stateSize = 1 + 8 + 8 + 32
+const stateSize = commitment.CommitmentV4StateSize
 
 var (
-	ErrStateMarker = errors.New("commitment v4: invalid state variant marker")
-	ErrStateSize   = errors.New("commitment v4: invalid state size")
+	ErrStateMarker = commitment.ErrCommitmentV4StateMarker
+	ErrStateSize   = commitment.ErrCommitmentV4StateSize
 )
 
 func IsStateBlob(value []byte) bool {
@@ -39,31 +37,11 @@ func IsStateBlob(value []byte) bool {
 }
 
 func encodeState(root []byte, blockNum, txNum uint64, dst []byte) ([]byte, error) {
-	if len(root) != 32 {
-		return nil, ErrStateSize
-	}
-	dst = append(dst, make([]byte, stateSize)...)
-	dst[len(dst)-stateSize] = StateMarker
-	pos := len(dst) - stateSize + 1
-	binary.BigEndian.PutUint64(dst[pos:pos+8], txNum)
-	pos += 8
-	binary.BigEndian.PutUint64(dst[pos:pos+8], blockNum)
-	pos += 8
-	copy(dst[pos:], root)
-	return dst, nil
+	return commitment.EncodeCommitmentV4State(root, blockNum, txNum, dst)
 }
 
-func decodeState(value []byte) (blockNum, txNum uint64, root []byte, err error) {
-	if len(value) != stateSize {
-		return 0, 0, nil, ErrStateSize
-	}
-	if value[0] != StateMarker {
-		return 0, 0, nil, ErrStateMarker
-	}
-	txNum = binary.BigEndian.Uint64(value[1:9])
-	blockNum = binary.BigEndian.Uint64(value[9:17])
-	root = bytes.Clone(value[17:])
-	return blockNum, txNum, root, nil
+func DecodeState(value []byte) (blockNum, txNum uint64, root []byte, err error) {
+	return commitment.DecodeCommitmentV4State(value)
 }
 
 func (t *Trie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
@@ -85,7 +63,7 @@ func (t *Trie) RestoreState(value []byte) (uint64, uint64, error) {
 		t.root = nil
 		return 0, 0, nil
 	}
-	blockNum, txNum, root, err := decodeState(value)
+	blockNum, txNum, root, err := DecodeState(value)
 	if err != nil {
 		return 0, 0, err
 	}

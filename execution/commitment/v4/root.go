@@ -19,6 +19,7 @@ package v4
 import (
 	"bytes"
 	"errors"
+	"math/bits"
 
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
@@ -48,24 +49,24 @@ func insertRoot(n *node, path, value []byte) error {
 		if common < len(n.path) {
 			return splitRootExtension(n, path, value, common)
 		}
-		if rootBitsCount(n.childMask) == 1 && n.leafMask == 0 {
-			nib := trailingNibble(n.childMask)
+		if bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
+			nib := bits.TrailingZeros16(n.childMask)
 			if child := n.children[nib]; child != nil && bytes.Equal(child.path, n.path) {
-				return insert(child, path, packPath(path[len(child.path)+1:], nil), value)
+				return insert(child, path, value)
 			}
 		}
 	}
-	if n.leafMask == n.childMask && rootBitsCount(n.childMask) == 1 {
+	if n.leafMask == n.childMask && bits.OnesCount16(n.childMask) == 1 {
 		return insertLeafRoot(n, path, value)
 	}
-	return insert(n, path, packPath(path[len(n.path)+1:], nil), value)
+	return insert(n, path, value)
 }
 
 func splitRootExtension(n *node, path, value []byte, common int) error {
-	if common < 0 || common >= len(n.path) || rootBitsCount(n.childMask) != 1 || n.leafMask != 0 {
+	if common < 0 || common >= len(n.path) || bits.OnesCount16(n.childMask) != 1 || n.leafMask != 0 {
 		return ErrRootShape
 	}
-	oldNib := trailingNibble(n.childMask)
+	oldNib := bits.TrailingZeros16(n.childMask)
 	oldChild := n.children[oldNib]
 	if oldChild != nil && !bytes.Equal(oldChild.path, n.path) {
 		return ErrRootShape
@@ -106,7 +107,7 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 }
 
 func insertLeafRoot(n *node, path, value []byte) error {
-	oldNib := trailingNibble(n.childMask)
+	oldNib := bits.TrailingZeros16(n.childMask)
 	oldPath := append([]byte{byte(oldNib)}, unpackPath(n.leafSuffix[oldNib], 63, nil)...)
 	if bytes.Equal(oldPath, path) {
 		n.setLeaf(oldNib, packPath(path[1:], nil), value)
@@ -140,8 +141,8 @@ func removeRoot(n *node, path []byte) error {
 	if n == nil || len(path) != 64 {
 		return ErrRootPath
 	}
-	if len(n.path) != 0 && rootBitsCount(n.childMask) == 1 && n.leafMask == 0 {
-		nib := trailingNibble(n.childMask)
+	if len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
+		nib := bits.TrailingZeros16(n.childMask)
 		if child := n.children[nib]; child != nil && bytes.Equal(child.path, n.path) {
 			if err := remove(child, path); err != nil {
 				return err
@@ -151,8 +152,8 @@ func removeRoot(n *node, path []byte) error {
 				n.clear(nib)
 				return nil
 			}
-			if rootBitsCount(child.childMask) == 1 && child.leafMask == child.childMask {
-				leafNib := trailingNibble(child.childMask)
+			if bits.OnesCount16(child.childMask) == 1 && child.leafMask == child.childMask {
+				leafNib := bits.TrailingZeros16(child.childMask)
 				fullPath := append(append([]byte(nil), child.path...), byte(leafNib))
 				fullPath = append(fullPath, unpackPath(child.leafSuffix[leafNib], 64-len(child.path)-1, nil)...)
 				value := append([]byte(nil), child.leafValue[leafNib]...)
@@ -170,10 +171,10 @@ func removeRoot(n *node, path []byte) error {
 }
 
 func promoteRootExtension(n *node) error {
-	if n == nil || len(n.path) != 0 || n.leafMask != 0 || rootBitsCount(n.childMask) != 1 {
+	if n == nil || len(n.path) != 0 || n.leafMask != 0 || bits.OnesCount16(n.childMask) != 1 {
 		return nil
 	}
-	nib := trailingNibble(n.childMask)
+	nib := bits.TrailingZeros16(n.childMask)
 	if child := n.children[nib]; child != nil {
 		if len(child.path) == 0 || child.path[0] != byte(nib) {
 			return ErrRootShape
@@ -197,7 +198,7 @@ func collapseRoot(n *node) error {
 	if n == nil {
 		return ErrRootShape
 	}
-	count := rootBitsCount(n.childMask)
+	count := bits.OnesCount16(n.childMask)
 	if count > 1 {
 		if len(n.path) != 0 {
 			n.path = nil
@@ -209,7 +210,7 @@ func collapseRoot(n *node) error {
 		return nil
 	}
 
-	nib := trailingNibble(n.childMask)
+	nib := bits.TrailingZeros16(n.childMask)
 	bit := uint16(1) << nib
 	if n.leafMask&bit != 0 {
 		fullPath := append(append([]byte(nil), n.path...), byte(nib))
@@ -231,22 +232,4 @@ func collapseRoot(n *node) error {
 	n.path = ext
 	n.childExt[nib] = nil
 	return nil
-}
-
-func rootBitsCount(mask uint16) int {
-	count := 0
-	for mask != 0 {
-		mask &= mask - 1
-		count++
-	}
-	return count
-}
-
-func trailingNibble(mask uint16) int {
-	for nib := range 16 {
-		if mask&(uint16(1)<<nib) != 0 {
-			return nib
-		}
-	}
-	return -1
 }

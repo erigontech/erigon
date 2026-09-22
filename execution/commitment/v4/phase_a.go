@@ -19,8 +19,8 @@ package v4
 import (
 	"bytes"
 	"errors"
-	"fmt"
-	"sort"
+	"math/bits"
+	"slices"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -31,12 +31,6 @@ var (
 	errPhaseAUpdate  = errors.New("commitment v4: invalid phase A update")
 	errPhaseAStorage = errors.New("commitment v4: invalid storage task")
 )
-
-type phaseAInput struct {
-	hashedKey []byte
-	plainKey  []byte
-	update    *commitment.Update
-}
 
 type storageEntry struct {
 	path   []byte
@@ -56,64 +50,78 @@ type accountEntry struct {
 	storageDirty bool
 }
 
-func partition(stream []phaseAInput) (storage []storageTask, accounts []accountEntry) {
-	storageByAddress := make(map[string]int)
-	accountByHash := make(map[string]int)
-	wiped := make(map[[32]byte]struct{})
-	for _, item := range stream {
-		if len(item.hashedKey) != 64 && len(item.hashedKey) != 128 {
-			continue
-		}
-		accountHash := append([]byte(nil), item.hashedKey[:64]...)
-		accountKey := string(accountHash)
-		accountIndex, ok := accountByHash[accountKey]
-		if !ok {
-			accountIndex = len(accounts)
-			accountByHash[accountKey] = accountIndex
-			accounts = append(accounts, accountEntry{
-				hashedKey: accountHash,
-				plainKey:  clonePrefix(item.plainKey, 20),
-			})
-		}
+type partitioner struct {
+	storage          []storageTask
+	accounts         []accountEntry
+	storageByAddress map[string]int
+	accountByHash    map[string]int
+	wiped            map[[32]byte]struct{}
+	seen             int
+}
 
-		if len(item.hashedKey) == 64 {
-			accounts[accountIndex].update = cloneUpdate(item.update)
-			addrHash := hashAddressPath(accountHash)
-			if item.update != nil && item.update.Deleted() {
-				wiped[addrHash] = struct{}{}
-			} else {
-				delete(wiped, addrHash)
-			}
-			continue
-		}
+func newPartitioner() *partitioner {
+	return &partitioner{
+		storageByAddress: make(map[string]int),
+		accountByHash:    make(map[string]int),
+		wiped:            make(map[[32]byte]struct{}),
+	}
+}
 
-		addrHash := hashAddressPath(item.hashedKey[:64])
-		delete(wiped, addrHash)
-		storageKey := string(addrHash[:])
-		storageIndex, ok := storageByAddress[storageKey]
-		if !ok {
-			storageIndex = len(storage)
-			storageByAddress[storageKey] = storageIndex
-			storage = append(storage, storageTask{addrHash: addrHash})
-		}
-		accounts[accountIndex].storageDirty = true
-		storage[storageIndex].entries = append(storage[storageIndex].entries, storageEntry{
-			path:   append([]byte(nil), item.hashedKey[64:]...),
-			update: cloneUpdate(item.update),
+func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update) error {
+	p.seen++
+	if len(hashedKey) != 64 && len(hashedKey) != 128 {
+		return nil
+	}
+	accountHash := append([]byte(nil), hashedKey[:64]...)
+	accountKey := string(accountHash)
+	accountIndex, ok := p.accountByHash[accountKey]
+	if !ok {
+		accountIndex = len(p.accounts)
+		p.accountByHash[accountKey] = accountIndex
+		p.accounts = append(p.accounts, accountEntry{
+			hashedKey: accountHash,
+			plainKey:  clonePrefix(plainKey, 20),
 		})
 	}
 
-	sort.SliceStable(accounts, func(i, j int) bool {
-		return bytes.Compare(accounts[i].hashedKey, accounts[j].hashedKey) < 0
+	if len(hashedKey) == 64 {
+		p.accounts[accountIndex].update = cloneUpdate(update)
+		addrHash := hashAddressPath(accountHash)
+		if update != nil && update.Deleted() {
+			p.wiped[addrHash] = struct{}{}
+		} else {
+			delete(p.wiped, addrHash)
+		}
+		return nil
+	}
+
+	addrHash := hashAddressPath(accountHash)
+	delete(p.wiped, addrHash)
+	storageKey := string(addrHash[:])
+	storageIndex, ok := p.storageByAddress[storageKey]
+	if !ok {
+		storageIndex = len(p.storage)
+		p.storageByAddress[storageKey] = storageIndex
+		p.storage = append(p.storage, storageTask{addrHash: addrHash})
+	}
+	p.accounts[accountIndex].storageDirty = true
+	p.storage[storageIndex].entries = append(p.storage[storageIndex].entries, storageEntry{
+		path:   append([]byte(nil), hashedKey[64:]...),
+		update: cloneUpdate(update),
 	})
-	sort.SliceStable(storage, func(i, j int) bool {
-		return bytes.Compare(storage[i].addrHash[:], storage[j].addrHash[:]) < 0
-	})
-	for addrHash := range wiped {
+	return nil
+}
+
+func (p *partitioner) done() (storage []storageTask, accounts []accountEntry) {
+	storage, accounts = p.storage, p.accounts
+	for addrHash := range p.wiped {
 		storage = append(storage, storageTask{addrHash: addrHash, wipe: true})
 	}
-	sort.SliceStable(storage, func(i, j int) bool {
-		return bytes.Compare(storage[i].addrHash[:], storage[j].addrHash[:]) < 0
+	slices.SortStableFunc(accounts, func(a, b accountEntry) int {
+		return bytes.Compare(a.hashedKey, b.hashedKey)
+	})
+	slices.SortStableFunc(storage, func(a, b storageTask) int {
+		return bytes.Compare(a.addrHash[:], b.addrHash[:])
 	})
 	return storage, accounts
 }
@@ -161,7 +169,8 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	}
 	root.plane = planeStorage
 	markStorageRoot(root)
-	before := reachableRecordKeys(root, task.addrHash)
+	g := storageGraph(task.addrHash[:])
+	before := g.reachableRecordKeys(root)
 
 	for _, entry := range task.entries {
 		if len(entry.path) != 64 {
@@ -170,8 +179,8 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		if entry.update == nil || entry.update.Flags == 0 {
 			continue
 		}
-		if len(root.path) != 0 && !bytes.HasPrefix(entry.path, root.path) && rootBitsCount(root.childMask) == 1 && root.leafMask == 0 {
-			nib := trailingNibble(root.childMask)
+		if len(root.path) != 0 && !bytes.HasPrefix(entry.path, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
+			nib := bits.TrailingZeros16(root.childMask)
 			if root.children[nib] == nil && len(root.childHash[nib]) == 32 {
 				child, err := unfold(ctx, root.path, planeStorage, task.addrHash[:])
 				if err != nil {
@@ -185,7 +194,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 			}
 		}
 		if len(root.path) == 0 || bytes.HasPrefix(entry.path, root.path) {
-			if err := ensureStoragePath(ctx, root, entry.path, task.addrHash); err != nil {
+			if err := g.ensurePath(ctx, root, entry.path); err != nil {
 				return [32]byte{}, err
 			}
 		}
@@ -208,7 +217,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	}
 
 	markStorageRoot(root)
-	if err := persistStorageGraph(ctx, root, task.addrHash, before); err != nil {
+	if err := g.persistGraph(ctx, root, before); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
@@ -227,170 +236,10 @@ func markStorageRoot(root *node) {
 	}
 }
 
-func ensureStoragePath(ctx commitment.PatriciaContext, n *node, path []byte, addrHash [32]byte) error {
-	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) {
-		return errPhaseAKey
-	}
-	if len(n.path) >= 64 {
-		return nil
-	}
-	nib := int(path[len(n.path)])
-	bit := uint16(1) << nib
-	if len(n.path) != 0 && rootBitsCount(n.childMask) == 1 && n.leafMask == 0 {
-		nib = trailingNibble(n.childMask)
-		if child := n.children[nib]; child != nil && bytes.Equal(child.path, n.path) {
-			return ensureStoragePath(ctx, child, path, addrHash)
-		}
-		if len(n.childHash[nib]) != 32 {
-			return errPhaseAStorage
-		}
-		child, err := unfold(ctx, n.path, planeStorage, addrHash[:])
-		if err != nil {
-			return err
-		}
-		if child == nil {
-			return fmt.Errorf("%w: missing child at depth %d", errPhaseAStorage, len(n.path))
-		}
-		child.plane = planeStorage
-		n.setChild(nib, child)
-		return ensureStoragePath(ctx, child, path, addrHash)
-	}
-	if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-		return nil
-	}
-	if child := n.children[nib]; child != nil {
-		return ensureStoragePath(ctx, child, path, addrHash)
-	}
-	if len(n.childHash[nib]) != 32 {
-		return errPhaseAStorage
-	}
-	childPath := append(append([]byte(nil), n.path...), byte(nib))
-	childPath = append(childPath, n.childExt[nib]...)
-	if !bytes.HasPrefix(path, childPath) {
-		return nil
-	}
-	child, err := unfold(ctx, childPath, planeStorage, addrHash[:])
-	if err != nil {
-		return err
-	}
-	if child == nil {
-		return fmt.Errorf("%w: missing child at depth %d", errPhaseAStorage, len(childPath))
-	}
-	child.plane = planeStorage
-	n.setChild(nib, child)
-	return ensureStoragePath(ctx, child, path, addrHash)
-}
-
-func reachableRecordKeys(root *node, addrHash [32]byte) map[string][]byte {
-	keys := make(map[string][]byte)
-	var visit func(*node, bool)
-	visit = func(n *node, isRoot bool) {
-		if n == nil {
-			return
-		}
-		path := n.path
-		if isRoot {
-			path = nil
-		}
-		key := StorageNodeKey(addrHash, path, nil)
-		keys[string(key)] = key
-		for nib := range 16 {
-			bit := uint16(1) << nib
-			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-				continue
-			}
-			if child := n.children[nib]; child != nil {
-				visit(child, false)
-				continue
-			}
-			if len(n.childHash[nib]) == 32 {
-				childPath := append([]byte(nil), n.path...)
-				if isRoot && len(n.path) == 0 {
-					childPath = append(childPath, byte(nib))
-				}
-				childPath = append(childPath, n.childExt[nib]...)
-				childKey := StorageNodeKey(addrHash, childPath, nil)
-				keys[string(childKey)] = childKey
-			}
-		}
-	}
-	visit(root, true)
-	return keys
-}
-
-func persistStorageGraph(ctx commitment.PatriciaContext, root *node, addrHash [32]byte, before map[string][]byte) error {
-	if root == nil {
-		return errPhaseAStorage
-	}
-	if err := promoteRootExtension(root); err != nil {
-		return err
-	}
-	deltas := make([]recordDelta, 0, len(before)+1)
-	var materialize func(*node) ([32]byte, error)
-	materialize = func(n *node) ([32]byte, error) {
-		if n == nil {
-			return [32]byte{}, errPhaseAStorage
-		}
-		for nib := range 16 {
-			bit := uint16(1) << nib
-			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-				continue
-			}
-			child := n.children[nib]
-			if child == nil {
-				if len(n.childHash[nib]) != 32 {
-					return [32]byte{}, errPhaseAStorage
-				}
-				continue
-			}
-			childHash, err := materialize(child)
-			if err != nil {
-				return [32]byte{}, err
-			}
-			n.childHash[nib] = appendCopy(n.childHash[nib], childHash[:])
-			var ext []byte
-			if !(n == root && len(n.path) != 0 && bytes.Equal(child.path, n.path)) {
-				ext = child.path[len(n.path)+1:]
-			}
-			n.childExt[nib] = appendCopy(n.childExt[nib], ext)
-			n.children[nib] = nil
-		}
-		path := n.path
-		depth := len(path)
-		if n == root {
-			path = nil
-			depth = 0
-		}
-		key := StorageNodeKey(addrHash, path, nil)
-		hash, delta, err := foldAndEncodeRecord(ctx, n, depth, key)
-		if err != nil {
-			return [32]byte{}, err
-		}
-		deltas = append(deltas, delta)
-		return hash, nil
-	}
-	if _, err := materialize(root); err != nil {
-		return err
-	}
-	after := reachableRecordKeys(root, addrHash)
-	for _, delta := range deltas {
-		after[string(delta.key)] = delta.key
-	}
-	var err error
-	deltas, err = appendRemovedDeltas(ctx, deltas, before, after)
-	if err != nil {
-		return err
-	}
-	if err := applyDeltas(deltas, ctx.PutBranch); err != nil {
-		return err
-	}
-	return nil
-}
-
 func putStorageRecord(ctx commitment.PatriciaContext, key, data []byte) error {
 	delta, err := readRecordDelta(ctx, key, data)
 	if err != nil {
 		return err
 	}
-	return applyDeltas([]recordDelta{delta}, ctx.PutBranch)
+	return applyDelta(delta, ctx.PutBranch)
 }

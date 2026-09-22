@@ -50,49 +50,23 @@ func NewRecord(data []byte, depth int) Record {
 	return Record{data: data, depth: depth}
 }
 
-func (r Record) ChildMask() uint16 {
-	if r.isLeafRoot() {
-		return 0
-	}
-	child, _, _, _, _, ok := r.maskLayout()
-	if !ok {
-		return 0
-	}
-	return child
+type layout struct {
+	child, leaf, ext, emb uint16
+	slotOff               int
+	ok                    bool
 }
 
-func (r Record) LeafMask() uint16 {
-	if r.isLeafRoot() {
-		return 0
-	}
-	_, leaf, _, _, _, ok := r.maskLayout()
-	if !ok {
-		return 0
-	}
-	return leaf
-}
+func (l layout) tree() uint16 { return l.child &^ l.leaf &^ l.emb }
 
-func (r Record) ExtMask() uint16 {
-	if r.isLeafRoot() || r.data == nil || len(r.data) == 0 {
-		return 0
-	}
-	_, _, ext, _, _, ok := r.maskLayout()
-	if !ok {
-		return 0
-	}
-	return ext
-}
+func (l layout) trailerStart() int { return l.slotOff + 32*bits.OnesCount16(l.tree()) }
 
-func (r Record) EmbMask() uint16 {
-	if r.isLeafRoot() || r.data == nil || len(r.data) == 0 {
-		return 0
-	}
-	_, _, _, emb, _, ok := r.maskLayout()
-	if !ok {
-		return 0
-	}
-	return emb
-}
+func (r Record) ChildMask() uint16 { return r.layout().child }
+
+func (r Record) LeafMask() uint16 { return r.layout().leaf }
+
+func (r Record) ExtMask() uint16 { return r.layout().ext }
+
+func (r Record) EmbMask() uint16 { return r.layout().emb }
 
 func (r Record) SelfExt() []byte {
 	if len(r.data) == 0 || r.data[0]&hdrHasSelfExt == 0 || r.isLeafRoot() || len(r.data) < 2 {
@@ -105,70 +79,66 @@ func (r Record) SelfExt() []byte {
 	return r.data[1 : 2+n]
 }
 
-func (r Record) SlotAt(nib int) []byte {
-	if nib < 0 || nib > 15 || r.isLeafRoot() {
+func (r Record) SlotAt(nib int) []byte { return r.slotAt(r.layout(), nib) }
+
+func (r Record) LeafAt(nib int) (suffix, value []byte) { return r.leafAt(r.layout(), nib) }
+
+func (r Record) ExtAt(nib int) []byte { return r.extAt(r.layout(), nib) }
+
+func (r Record) EmbAt(nib int) []byte {
+	l := r.layout()
+	if nib < 0 || nib > 15 || !l.ok || l.emb&(uint16(1)<<nib) == 0 {
 		return nil
 	}
-	child, leaf, _, emb, off, ok := r.maskLayout()
+	off, ok := r.skipExt(l)
 	if !ok {
 		return nil
 	}
-	tree := child &^ leaf &^ emb
-	if tree&(uint16(1)<<nib) == 0 {
+	for i := range 16 {
+		if l.emb&(uint16(1)<<i) == 0 {
+			continue
+		}
+		if len(r.data) <= off {
+			return nil
+		}
+		end := off + 1 + int(r.data[off])
+		if end > len(r.data) {
+			return nil
+		}
+		if i == nib {
+			return r.data[off+1 : end]
+		}
+		off = end
+	}
+	return nil
+}
+
+func (r Record) slotAt(l layout, nib int) []byte {
+	tree := l.tree()
+	if nib < 0 || nib > 15 || !l.ok || tree&(uint16(1)<<nib) == 0 {
 		return nil
 	}
-	off += 32 * bits.OnesCount16(tree&((uint16(1)<<nib)-1))
+	off := l.slotOff + 32*bits.OnesCount16(tree&((uint16(1)<<nib)-1))
 	if len(r.data) < off+32 {
 		return nil
 	}
 	return r.data[off : off+32]
 }
 
-func (r Record) LeafAt(nib int) (suffix, value []byte) {
-	if nib < 0 || nib > 15 || r.isLeafRoot() || r.LeafMask()&(uint16(1)<<nib) == 0 {
+func (r Record) leafAt(l layout, nib int) (suffix, value []byte) {
+	if nib < 0 || nib > 15 || !l.ok || l.leaf&(uint16(1)<<nib) == 0 {
 		return nil, nil
 	}
-	off, ok := r.trailerStart()
+	off, ok := r.skipExtAndEmb(l)
 	if !ok {
 		return nil, nil
 	}
-	if mask := r.ExtMask(); mask != 0 {
-		for i := range 16 {
-			if mask&(uint16(1)<<i) == 0 {
-				continue
-			}
-			if len(r.data) <= off {
-				return nil, nil
-			}
-			n := packedLen(int(r.data[off]))
-			end := off + 1 + n
-			if end > len(r.data) {
-				return nil, nil
-			}
-			off = end
-		}
-	}
-	if mask := r.EmbMask(); mask != 0 {
-		for i := range 16 {
-			if mask&(uint16(1)<<i) == 0 {
-				continue
-			}
-			if len(r.data) <= off {
-				return nil, nil
-			}
-			n := int(r.data[off])
-			end := off + 1 + n
-			if end > len(r.data) {
-				return nil, nil
-			}
-			off = end
-		}
-	}
+	suffixLen := packedLen(64 - r.depth - 1)
 	for i := range 16 {
-		if r.LeafMask()&(uint16(1)<<i) == 0 {
+		if l.leaf&(uint16(1)<<i) == 0 {
 			continue
 		}
-		suffixEnd := off + packedLen(64-r.depth-1)
+		suffixEnd := off + suffixLen
 		if suffixEnd >= len(r.data) {
 			return nil, nil
 		}
@@ -184,16 +154,16 @@ func (r Record) LeafAt(nib int) (suffix, value []byte) {
 	return nil, nil
 }
 
-func (r Record) ExtAt(nib int) []byte {
-	if nib < 0 || nib > 15 || r.isLeafRoot() || r.ExtMask()&(uint16(1)<<nib) == 0 {
+func (r Record) extAt(l layout, nib int) []byte {
+	if nib < 0 || nib > 15 || !l.ok || l.ext&(uint16(1)<<nib) == 0 {
 		return nil
 	}
-	off, ok := r.trailerStart()
-	if !ok {
+	off := l.trailerStart()
+	if off > len(r.data) {
 		return nil
 	}
 	for i := range 16 {
-		if r.ExtMask()&(uint16(1)<<i) == 0 {
+		if l.ext&(uint16(1)<<i) == 0 {
 			continue
 		}
 		if len(r.data) <= off {
@@ -211,42 +181,44 @@ func (r Record) ExtAt(nib int) []byte {
 	return nil
 }
 
-func (r Record) EmbAt(nib int) []byte {
-	if nib < 0 || nib > 15 || r.isLeafRoot() || r.EmbMask()&(uint16(1)<<nib) == 0 {
-		return nil
-	}
-	off, ok := r.trailerStart()
-	if !ok {
-		return nil
+func (r Record) skipExt(l layout) (int, bool) {
+	off := l.trailerStart()
+	if off > len(r.data) {
+		return 0, false
 	}
 	for i := range 16 {
-		if r.ExtMask()&(uint16(1)<<i) != 0 {
-			if len(r.data) <= off {
-				return nil
-			}
-			off += 1 + packedLen(int(r.data[off]))
-			if off > len(r.data) {
-				return nil
-			}
-		}
-	}
-	for i := range 16 {
-		if r.EmbMask()&(uint16(1)<<i) == 0 {
+		if l.ext&(uint16(1)<<i) == 0 {
 			continue
 		}
 		if len(r.data) <= off {
-			return nil
+			return 0, false
 		}
-		end := off + 1 + int(r.data[off])
-		if end > len(r.data) {
-			return nil
+		off += 1 + packedLen(int(r.data[off]))
+		if off > len(r.data) {
+			return 0, false
 		}
-		if i == nib {
-			return r.data[off+1 : end]
-		}
-		off = end
 	}
-	return nil
+	return off, true
+}
+
+func (r Record) skipExtAndEmb(l layout) (int, bool) {
+	off, ok := r.skipExt(l)
+	if !ok {
+		return 0, false
+	}
+	for i := range 16 {
+		if l.emb&(uint16(1)<<i) == 0 {
+			continue
+		}
+		if len(r.data) <= off {
+			return 0, false
+		}
+		off += 1 + int(r.data[off])
+		if off > len(r.data) {
+			return 0, false
+		}
+	}
+	return off, true
 }
 
 func (r Record) LeafRootBody() (hashedKey, value []byte) {
@@ -274,10 +246,8 @@ func Validate(data []byte, depth int) error {
 		}
 		return nil
 	}
-	child := r.ChildMask()
-	leaf := r.LeafMask()
-	ext := r.ExtMask()
-	emb := r.EmbMask()
+	l := r.layout()
+	child, leaf, ext, emb := l.child, l.leaf, l.ext, l.emb
 	if leaf&^child != 0 || ext&leaf != 0 || ext&^child != 0 || emb&leaf != 0 || emb&^child != 0 || ext&emb != 0 {
 		return ErrRecordMasks
 	}
@@ -290,8 +260,8 @@ func Validate(data []byte, depth int) error {
 	if depth < 0 || depth > 63 {
 		return fmt.Errorf("%w: depth %d", ErrInvalidRecord, depth)
 	}
-	off, ok := r.trailerStart()
-	if !ok {
+	off := l.trailerStart()
+	if !l.ok || off > len(data) {
 		return ErrRecordTruncated
 	}
 	suffixCount := 64 - depth - 1
@@ -392,8 +362,7 @@ func (r Record) validateBase() error {
 			return ErrRecordTrailer
 		}
 	}
-	_, _, ok := r.base()
-	if !ok {
+	if !r.layout().ok {
 		return ErrRecordTruncated
 	}
 	return nil
@@ -403,64 +372,39 @@ func (r Record) isLeafRoot() bool {
 	return len(r.data) != 0 && r.data[0]&hdrIsLeafRoot != 0
 }
 
-func (r Record) base() (selfEnd, body int, ok bool) {
-	_, _, _, _, slot, ok := r.maskLayout()
-	return 0, slot, ok
-}
-
-func (r Record) maskLayout() (child, leaf, ext, emb uint16, slot int, ok bool) {
-	if len(r.data) == 0 {
-		return 0, 0, 0, 0, 0, false
+func (r Record) layout() (l layout) {
+	if len(r.data) == 0 || r.isLeafRoot() {
+		return l
 	}
 	off := 1
 	if r.data[0]&hdrHasSelfExt != 0 {
 		if len(r.data) < off+1 {
-			return 0, 0, 0, 0, 0, false
+			return layout{}
 		}
-		n := int(r.data[off])
-		off += 1 + packedLen(n)
+		off += 1 + packedLen(int(r.data[off]))
 	}
 	if len(r.data) < off+4 {
-		return 0, 0, 0, 0, 0, false
+		return layout{}
 	}
+	l.child = binary.BigEndian.Uint16(r.data[off : off+2])
+	l.leaf = binary.BigEndian.Uint16(r.data[off+2 : off+4])
 	off += 4
-	maskOff := off - 4
-	child = binary.BigEndian.Uint16(r.data[maskOff : maskOff+2])
-	leaf = binary.BigEndian.Uint16(r.data[maskOff+2 : maskOff+4])
 	if r.data[0]&hdrHasChildExt != 0 {
 		if len(r.data) < off+2 {
-			return 0, 0, 0, 0, 0, false
+			return layout{}
 		}
-		ext = binary.BigEndian.Uint16(r.data[off : off+2])
+		l.ext = binary.BigEndian.Uint16(r.data[off : off+2])
 		off += 2
 	}
 	if r.data[0]&hdrHasEmb != 0 {
 		if len(r.data) < off+2 {
-			return 0, 0, 0, 0, 0, false
+			return layout{}
 		}
-		emb = binary.BigEndian.Uint16(r.data[off : off+2])
+		l.emb = binary.BigEndian.Uint16(r.data[off : off+2])
 		off += 2
 	}
-	if len(r.data) < off {
-		return 0, 0, 0, 0, 0, false
-	}
-	return child, leaf, ext, emb, off, true
-}
-
-func (r Record) trailerStart() (int, bool) {
-	_, slot, ok := r.base()
-	if !ok {
-		return 0, false
-	}
-	child := r.ChildMask()
-	leaf := r.LeafMask()
-	emb := r.EmbMask()
-	tree := child &^ leaf &^ emb
-	start := slot + 32*bits.OnesCount16(tree)
-	if start > len(r.data) {
-		return 0, false
-	}
-	return start, true
+	l.slotOff, l.ok = off, true
+	return l
 }
 
 func encodeRecord(n *node, depth int, dst []byte) []byte {

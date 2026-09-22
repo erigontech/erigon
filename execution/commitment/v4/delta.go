@@ -18,7 +18,7 @@ package v4
 
 import (
 	"bytes"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -51,35 +51,35 @@ func readRecordDelta(ctx commitment.PatriciaContext, key, data []byte) (recordDe
 	if data == nil {
 		data = []byte{}
 	}
-	return recordDelta{
-		key:  bytes.Clone(key),
-		data: bytes.Clone(data),
-		prev: bytes.Clone(prev),
-	}, nil
+	return recordDelta{key: key, data: data, prev: bytes.Clone(prev)}, nil
+}
+
+func applyDelta(delta recordDelta, putBranch putBranchFunc) error {
+	if bytes.Equal(delta.prev, delta.data) {
+		return nil
+	}
+	return putBranch(delta.key, delta.data, delta.prev)
 }
 
 func applyDeltas(deltas []recordDelta, putBranch putBranchFunc) error {
 	for _, delta := range deltas {
-		if bytes.Equal(delta.prev, delta.data) {
-			continue
-		}
-		if err := putBranch(delta.key, delta.data, delta.prev); err != nil {
+		if err := applyDelta(delta, putBranch); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func appendRemovedDeltas(ctx commitment.PatriciaContext, deltas []recordDelta, before, after map[string][]byte) ([]recordDelta, error) {
+func appendRemovedDeltas(ctx commitment.PatriciaContext, deltas []recordDelta, before, after map[string]struct{}) ([]recordDelta, error) {
 	removed := make([]string, 0, len(before))
 	for key := range before {
 		if _, ok := after[key]; !ok {
 			removed = append(removed, key)
 		}
 	}
-	sort.Strings(removed)
+	slices.Sort(removed)
 	for _, key := range removed {
-		delta, err := readRecordDelta(ctx, before[key], nil)
+		delta, err := readRecordDelta(ctx, []byte(key), nil)
 		if err != nil {
 			return nil, err
 		}

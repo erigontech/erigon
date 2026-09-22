@@ -27,7 +27,6 @@ import (
 
 var (
 	ErrInsertPath        = errors.New("commitment v4: invalid insert path")
-	ErrInsertSuffix      = errors.New("commitment v4: invalid insert suffix")
 	ErrInsertStoredChild = errors.New("commitment v4: cannot insert below a stored child")
 	ErrRemovePath        = errors.New("commitment v4: invalid remove path")
 	ErrRemoveNotFound    = errors.New("commitment v4: remove path not found")
@@ -102,15 +101,7 @@ func removeAt(n *node, path []byte) (removalState, error) {
 }
 
 func leafPathMatches(n *node, nib int, path []byte) bool {
-	suffixCount := len(path) - len(n.path) - 1
-	if suffixCount < 0 || len(n.leafSuffix[nib]) != packedLen(suffixCount) {
-		return false
-	}
-	fullPath := make([]byte, 0, len(path))
-	fullPath = append(fullPath, n.path...)
-	fullPath = append(fullPath, byte(nib))
-	fullPath = append(fullPath, unpackPath(n.leafSuffix[nib], suffixCount, nil)...)
-	return bytes.Equal(fullPath, path)
+	return len(path) > len(n.path) && packedMatches(n.leafSuffix[nib], path[len(n.path)+1:])
 }
 
 func collapsedState(n *node) removalState {
@@ -166,7 +157,7 @@ func setBranchPath(n *node, nib int, path, hash []byte) {
 	n.setStoredChild(nib, hash, path[depth+1:])
 }
 
-func insert(n *node, path, suffix, value []byte) error {
+func insert(n *node, path, value []byte) error {
 	if n == nil {
 		return ErrInsertPath
 	}
@@ -182,9 +173,6 @@ func insert(n *node, path, suffix, value []byte) error {
 	depth := len(n.path)
 	targetNib := int(path[depth])
 	wantSuffix := packPath(path[depth+1:], nil)
-	if !bytes.Equal(suffix, wantSuffix) {
-		return fmt.Errorf("%w: got %d bytes, want %d", ErrInsertSuffix, len(suffix), len(wantSuffix))
-	}
 
 	bit := uint16(1) << targetNib
 	if n.childMask&bit == 0 {
@@ -195,10 +183,10 @@ func insert(n *node, path, suffix, value []byte) error {
 		return splitLeaf(n, targetNib, path, wantSuffix, value)
 	}
 	if child := n.children[targetNib]; child != nil {
-		return splitChild(n, targetNib, child, path, wantSuffix, value)
+		return splitChild(n, targetNib, child, path, value)
 	}
 	if len(n.childHash[targetNib]) == 32 {
-		return splitStoredChild(n, targetNib, path, wantSuffix, value)
+		return splitStoredChild(n, targetNib, path, value)
 	}
 	return ErrInsertPath
 }
@@ -229,10 +217,10 @@ func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 	return nil
 }
 
-func splitChild(parent *node, nib int, child *node, path, suffix, value []byte) error {
+func splitChild(parent *node, nib int, child *node, path, value []byte) error {
 	common := nibbles.CommonPrefixLen(child.path, path)
 	if common == len(child.path) {
-		return insert(child, path, packPath(path[len(child.path)+1:], nil), value)
+		return insert(child, path, value)
 	}
 	if common < len(parent.path)+1 || common >= len(path) {
 		return ErrInsertPath
@@ -247,7 +235,7 @@ func splitChild(parent *node, nib int, child *node, path, suffix, value []byte) 
 	return nil
 }
 
-func splitStoredChild(parent *node, nib int, path, suffix, value []byte) error {
+func splitStoredChild(parent *node, nib int, path, value []byte) error {
 	childPath := make([]byte, 0, len(parent.path)+1+len(parent.childExt[nib]))
 	childPath = append(childPath, parent.path...)
 	childPath = append(childPath, byte(nib))

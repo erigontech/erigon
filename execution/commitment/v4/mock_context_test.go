@@ -66,3 +66,19 @@ func (m *mockContext) Storage([]byte) (*commitment.Update, error) {
 }
 
 var _ commitment.PatriciaContext = (*mockContext)(nil)
+
+type phaseAInput struct {
+	hashedKey []byte
+	plainKey  []byte
+	update    *commitment.Update
+}
+
+func partition(stream []phaseAInput) ([]storageTask, []accountEntry) {
+	p := newPartitioner()
+	for _, item := range stream {
+		if err := p.add(item.hashedKey, item.plainKey, item.update); err != nil {
+			panic(err)
+		}
+	}
+	return p.done()
+}

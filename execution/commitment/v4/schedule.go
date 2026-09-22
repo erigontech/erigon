@@ -21,10 +21,13 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math/bits"
 	"runtime"
-	"sort"
+	"slices"
 	"sync"
 	"sync/atomic"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
@@ -44,40 +47,23 @@ type scheduleStats struct {
 	max      atomic.Int64
 }
 
-type workerSchedule struct {
-	sem   chan struct{}
-	stats *scheduleStats
-}
-
-func newWorkerSchedule(workers int, stats *scheduleStats) *workerSchedule {
-	if workers <= 0 {
-		workers = max(1, runtime.NumCPU())
+func (s *scheduleStats) enter() {
+	if s == nil {
+		return
 	}
-	return &workerSchedule{sem: make(chan struct{}, workers), stats: stats}
-}
-
-func (s *workerSchedule) run(ctx context.Context, fn func() error) error {
-	select {
-	case s.sem <- struct{}{}:
-	case <-ctx.Done():
-		return ctx.Err()
-	}
-	if s.stats != nil {
-		current := s.stats.inFlight.Add(1)
-		for {
-			maximum := s.stats.max.Load()
-			if current <= maximum || s.stats.max.CompareAndSwap(maximum, current) {
-				break
-			}
+	current := s.inFlight.Add(1)
+	for {
+		maximum := s.max.Load()
+		if current <= maximum || s.max.CompareAndSwap(maximum, current) {
+			return
 		}
 	}
-	defer func() {
-		if s.stats != nil {
-			s.stats.inFlight.Add(-1)
-		}
-		<-s.sem
-	}()
-	return fn()
+}
+
+func (s *scheduleStats) leave() {
+	if s != nil {
+		s.inFlight.Add(-1)
+	}
 }
 
 type lockedPatriciaContext struct {
@@ -118,21 +104,6 @@ func (c *lockedPatriciaContext) Storage(key []byte) (*commitment.Update, error) 
 	return update.Copy(), err
 }
 
-type storageResult struct {
-	root [32]byte
-	err  error
-	done chan struct{}
-}
-
-func (r *storageResult) wait(ctx context.Context) ([32]byte, error) {
-	select {
-	case <-r.done:
-		return r.root, r.err
-	case <-ctx.Done():
-		return [32]byte{}, ctx.Err()
-	}
-}
-
 type accountPlan struct {
 	entry    accountEntry
 	oldValue []byte
@@ -148,22 +119,16 @@ type accountResult struct {
 }
 
 func orderedStorageTasks(tasks []storageTask, order scheduleOrder) []storageTask {
-	ordered := append([]storageTask(nil), tasks...)
+	ordered := slices.Clone(tasks)
 	switch order {
 	case orderReversed:
-		slicesReverse(ordered)
+		slices.Reverse(ordered)
 	case orderLongestFirst:
-		sort.SliceStable(ordered, func(i, j int) bool {
-			return len(ordered[i].entries) > len(ordered[j].entries)
+		slices.SortStableFunc(ordered, func(a, b storageTask) int {
+			return len(b.entries) - len(a.entries)
 		})
 	}
 	return ordered
-}
-
-func slicesReverse[T any](items []T) {
-	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
-		items[i], items[j] = items[j], items[i]
-	}
 }
 
 func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, storage []storageTask, accounts []accountEntry, order scheduleOrder, workers int, stats *scheduleStats) ([32]byte, error) {
@@ -173,29 +138,34 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	safeCtx := &lockedPatriciaContext{ctx: rawCtx}
-	schedule := newWorkerSchedule(workers, stats)
-	storage = orderedStorageTasks(storage, order)
-	results := make(map[[32]byte]*storageResult, len(storage))
-	for _, task := range storage {
-		result := &storageResult{done: make(chan struct{})}
-		results[task.addrHash] = result
-		go func(task storageTask, result *storageResult) {
-			err := schedule.run(ctx, func() error {
-				var taskErr error
-				result.root, taskErr = runStorageTask(safeCtx, task)
-				return taskErr
-			})
-			result.err = err
-			close(result.done)
-		}(task, result)
+	if workers <= 0 {
+		workers = runtime.NumCPU()
 	}
-	storageWaited := false
-	defer func() {
-		if !storageWaited {
-			waitStorageResults(results)
-		}
-	}()
+	safeCtx := &lockedPatriciaContext{ctx: rawCtx}
+	storage = orderedStorageTasks(storage, order)
+
+	storageRoots := make([][32]byte, len(storage))
+	sg, sgCtx := errgroup.WithContext(ctx)
+	sg.SetLimit(workers)
+	for i, task := range storage {
+		sg.Go(func() error {
+			if sgCtx.Err() != nil {
+				return sgCtx.Err()
+			}
+			stats.enter()
+			defer stats.leave()
+			var err error
+			storageRoots[i], err = runStorageTask(safeCtx, task)
+			return err
+		})
+	}
+	if err := sg.Wait(); err != nil {
+		return [32]byte{}, err
+	}
+	results := make(map[[32]byte][32]byte, len(storage))
+	for i, task := range storage {
+		results[task.addrHash] = storageRoots[i]
+	}
 
 	root, err := unfold(safeCtx, nil, planeAccount, nil)
 	if err != nil {
@@ -205,67 +175,55 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		root = fork(nil)
 	}
 	root.plane = planeAccount
-	before := reachableAccountRecordKeys(root)
-	plans, err := makeAccountPlans(safeCtx, root, accounts)
+	g := accountGraph()
+	before := g.reachableRecordKeys(root)
+	plans, err := makeAccountPlans(safeCtx, g, root, accounts)
 	if err != nil {
 		return [32]byte{}, err
 	}
 
 	accountResults := make([]accountResult, len(plans))
-	var wg sync.WaitGroup
+	ag := new(errgroup.Group)
+	ag.SetLimit(workers)
 	for i := range plans {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
+		ag.Go(func() error {
 			plan := plans[i]
 			accountResults[i].plan = plan
 			if plan.skip || plan.delete {
-				return
+				return nil
 			}
 			storageRoot := empty.RootHash
 			if plan.entry.storageDirty {
-				addrHash := hashAddressPath(plan.entry.hashedKey)
-				result, ok := results[addrHash]
+				var ok bool
+				storageRoot, ok = results[hashAddressPath(plan.entry.hashedKey)]
 				if !ok {
 					accountResults[i].err = errPhaseBRecord
-					return
-				}
-				var waitErr error
-				storageRoot, waitErr = result.wait(ctx)
-				if waitErr != nil {
-					accountResults[i].err = waitErr
-					return
+					return nil
 				}
 				if !plan.found && plan.entry.update == nil && storageRoot == empty.RootHash {
 					accountResults[i].plan.skip = true
-					return
+					return nil
 				}
 			} else if plan.found {
 				_, _, _, existingRoot, decodeErr := decodeAccountLeaf(plan.oldValue)
 				if decodeErr != nil {
 					accountResults[i].err = fmt.Errorf("%w: %w", errPhaseBRecord, decodeErr)
-					return
+					return nil
 				}
 				copy(storageRoot[:], existingRoot)
 			}
-			accountResults[i].err = schedule.run(ctx, func() error {
-				update, updateErr := accountUpdate(plan.oldValue, plan.found, plan.entry.update)
-				if updateErr != nil {
-					return updateErr
-				}
-				accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], nil)
+			stats.enter()
+			defer stats.leave()
+			update, updateErr := accountUpdate(plan.oldValue, plan.found, plan.entry.update)
+			if updateErr != nil {
+				accountResults[i].err = updateErr
 				return nil
-			})
-		}(i)
+			}
+			accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], nil)
+			return nil
+		})
 	}
-	wg.Wait()
-	waitStorageResults(results)
-	storageWaited = true
-	for _, result := range results {
-		if result.err != nil {
-			return [32]byte{}, result.err
-		}
-	}
+	_ = ag.Wait()
 	for i := range accountResults {
 		result := &accountResults[i]
 		if result.err != nil {
@@ -280,26 +238,26 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			}
 			continue
 		}
-		if len(root.path) != 0 && !bytes.HasPrefix(result.plan.entry.hashedKey, root.path) && rootBitsCount(root.childMask) == 1 && root.leafMask == 0 {
+		if len(root.path) != 0 && !bytes.HasPrefix(result.plan.entry.hashedKey, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
 			if err := materializeAccountRootChild(safeCtx, root); err != nil {
 				return [32]byte{}, err
 			}
 		}
 		if len(root.path) == 0 {
-			if err := insert(root, result.plan.entry.hashedKey, packPath(result.plan.entry.hashedKey[1:], nil), result.value); err != nil {
+			if err := insert(root, result.plan.entry.hashedKey, result.value); err != nil {
 				return [32]byte{}, err
 			}
 		} else if err := insertRoot(root, result.plan.entry.hashedKey, result.value); err != nil {
 			return [32]byte{}, err
 		}
 	}
-	if err := persistAccountGraph(safeCtx, root, before); err != nil {
+	if err := g.persistGraph(safeCtx, root, before); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
 }
 
-func makeAccountPlans(ctx commitment.PatriciaContext, root *node, entries []accountEntry) ([]accountPlan, error) {
+func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entries []accountEntry) ([]accountPlan, error) {
 	plans := make([]accountPlan, 0, len(entries))
 	for _, entry := range entries {
 		if len(entry.hashedKey) != 64 {
@@ -312,7 +270,7 @@ func makeAccountPlans(ctx commitment.PatriciaContext, root *node, entries []acco
 		}
 		oldValue, found := accountLeafAt(root, entry.hashedKey)
 		if !found && storedAccountPath(root, entry.hashedKey) {
-			if err := ensureAccountPath(ctx, root, entry.hashedKey); err != nil {
+			if err := g.ensurePath(ctx, root, entry.hashedKey); err != nil {
 				return nil, fmt.Errorf("%w: account path %x: %w", errPhaseBRecord, entry.hashedKey, err)
 			}
 			oldValue, found = accountLeafAt(root, entry.hashedKey)
@@ -330,10 +288,4 @@ func makeAccountPlans(ctx commitment.PatriciaContext, root *node, entries []acco
 		plans = append(plans, plan)
 	}
 	return plans, nil
-}
-
-func waitStorageResults(results map[[32]byte]*storageResult) {
-	for _, result := range results {
-		<-result.done
-	}
 }

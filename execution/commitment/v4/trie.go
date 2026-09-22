@@ -52,7 +52,7 @@ type deferredPatriciaContext struct {
 func (c *deferredPatriciaContext) PutBranch(key, data, prev []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	c.deltas = append(c.deltas, recordDelta{key: bytes.Clone(key), data: bytes.Clone(data), prev: bytes.Clone(prev)})
+	c.deltas = append(c.deltas, recordDelta{key: key, data: data, prev: prev})
 	return nil
 }
 
@@ -72,7 +72,7 @@ func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commit
 }
 
 func init() {
-	commitment.RegisterTrieFunc(commitment.VariantCommitmentV4, NewTrie)
+	commitment.NewCommitmentV4Trie = NewTrie
 }
 
 func (t *Trie) RootHash() ([]byte, error) {
@@ -96,7 +96,7 @@ func (t *Trie) Variant() commitment.TrieVariant {
 }
 
 func (*Trie) StateKey() []byte {
-	return bytes.Clone(commitment.KeyCommitmentV4State)
+	return commitment.KeyCommitmentV4State
 }
 
 func (t *Trie) Reset() {
@@ -148,20 +148,11 @@ func (t *Trie) Process(
 		return nil, errors.New("commitment v4: Process requires ModeUpdate updates")
 	}
 
-	var stream []phaseAInput
-	err := updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, update *commitment.Update) error {
-		stream = append(stream, phaseAInput{
-			hashedKey: bytes.Clone(hashedKey),
-			plainKey:  bytes.Clone(plainKey),
-			update:    cloneUpdate(update),
-		})
-		return nil
-	})
-	if err != nil {
+	p := newPartitioner()
+	if err := updates.HashSort(ctx, nil, p.add); err != nil {
 		return nil, err
 	}
-
-	storage, accounts := partition(stream)
+	storage, accounts := p.done()
 	processCtx := t.ctx
 	var deferredCtx *deferredPatriciaContext
 	if t.deferUpdates {
@@ -180,7 +171,7 @@ func (t *Trie) Process(
 	}
 	t.root = append(t.root[:0], root[:]...)
 	if onProgress != nil {
-		onProgress(&commitment.CommitProgress{KeyIndex: uint64(len(stream)), UpdateCount: uint64(len(stream))})
+		onProgress(&commitment.CommitProgress{KeyIndex: uint64(p.seen), UpdateCount: uint64(p.seen)})
 	}
 	return bytes.Clone(t.root), nil
 }

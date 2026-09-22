@@ -21,6 +21,7 @@ import (
 	"context"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -41,32 +42,23 @@ func TestOrderedStorageTasks(t *testing.T) {
 	require.Equal(t, []int{1, 4, 2}, storageTaskLengths(tasks))
 }
 
-func TestSharedScheduleBoundAcrossPhases(t *testing.T) {
+func TestScheduleStatsTrackPeakInFlight(t *testing.T) {
 	stats := new(scheduleStats)
-	schedule := newWorkerSchedule(2, stats)
 	release := make(chan struct{})
-	entered := make(chan struct{}, 8)
-	errors := make(chan error, 8)
 	var wg sync.WaitGroup
-	for range 8 {
+	for range 4 {
 		wg.Go(func() {
-			errors <- schedule.run(context.Background(), func() error {
-				entered <- struct{}{}
-				<-release
-				return nil
-			})
+			stats.enter()
+			<-release
+			stats.leave()
 		})
 	}
-	<-entered
-	<-entered
+	require.Eventually(t, func() bool { return stats.inFlight.Load() == 4 }, time.Second, time.Millisecond)
 	close(release)
 	wg.Wait()
-	for range 8 {
-		require.NoError(t, <-errors)
-	}
 
 	require.Equal(t, int64(0), stats.inFlight.Load())
-	require.Equal(t, int64(2), stats.max.Load())
+	require.Equal(t, int64(4), stats.max.Load())
 }
 
 func TestSchedulePoliciesPreserveRoot(t *testing.T) {

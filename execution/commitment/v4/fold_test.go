@@ -50,7 +50,7 @@ func TestFoldSingleLeafMatchesHexPatriciaHashed(t *testing.T) {
 		value := foldValue(plane, 1)
 		n := fork(nil)
 		n.plane = plane
-		require.NoError(t, insert(n, path, packPath(path[1:], nil), value))
+		require.NoError(t, insert(n, path, value))
 
 		got, err := fold(n, 0)
 		require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestFoldMatchesHexPatriciaHashedForEachPlane(t *testing.T) {
 				for i, path := range paths {
 					updates[i] = foldUpdate(plane, i+1)
 					value := foldValue(plane, i+1)
-					require.NoError(t, insert(n, path, packPath(path[1:], nil), value))
+					require.NoError(t, insert(n, path, value))
 				}
 				got, err := fold(n, 0)
 				require.NoError(t, err)
@@ -81,7 +81,7 @@ func TestFoldMatchesHexPatriciaHashedForEachPlane(t *testing.T) {
 						key := append(append([]byte(nil), path...), nibbles.Terminator)
 						refs[path[0]] = storageLeafRef(nibbles.HexToCompact(key), foldValue(plane, i+1), nil)
 					}
-					require.Equal(t, branchRef(&refs), got)
+					require.Equal(t, branchRef(&refs, 0), got)
 				}
 				require.Equal(t, want, got[:])
 			})
@@ -97,7 +97,7 @@ func TestFoldMatchesHexPatriciaHashedMixedPlanes(t *testing.T) {
 		n.plane = plane
 		for i, path := range paths {
 			updates[i] = foldUpdate(plane, i+1)
-			require.NoError(t, insert(n, path, packPath(path[1:], nil), foldValue(plane, i+1)))
+			require.NoError(t, insert(n, path, foldValue(plane, i+1)))
 		}
 		got, err := fold(n, 0)
 		require.NoError(t, err)
@@ -121,7 +121,7 @@ func TestFoldUsesStoredChildHashWithoutStateReads(t *testing.T) {
 	wrapped := extensionRef([]byte{3, 4}, stored)
 	refs[2] = wrapped[:]
 	refs[5] = storageLeafRef(mustCompact(append(append([]byte(nil), path...), nibbles.Terminator)), []byte{7}, nil)
-	want := branchRef(&refs)
+	want := branchRef(&refs, 0)
 	require.Equal(t, want, got)
 	require.Empty(t, ctx.accountCalls)
 	require.Empty(t, ctx.storageCalls)

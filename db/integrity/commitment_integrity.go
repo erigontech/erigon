@@ -211,7 +211,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 }
 
 func latestCommitmentStateFromFiles(tx kv.TemporalTx, maxTxNum uint64) (stateKey, value []byte, found bool, startTxNum, endTxNum uint64, err error) {
-	for _, key := range [][]byte{commitment.KeyCommitmentV4State, commitmentdb.KeyCommitmentState} {
+	for _, key := range commitmentdb.CommitmentStateKeys {
 		value, found, startTxNum, endTxNum, err = tx.Debug().GetLatestFromFiles(kv.CommitmentDomain, key, maxTxNum)
 		if err != nil || found {
 			return key, value, found, startTxNum, endTxNum, err
@@ -221,11 +221,9 @@ func latestCommitmentStateFromFiles(tx kv.TemporalTx, maxTxNum uint64) (stateKey
 }
 
 func extractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64, error) {
-	if bytes.Equal(stateKey, commitment.KeyCommitmentV4State) {
-		if len(value) != 1+8+8+32 || value[0] != commitment.CommitmentV4StateMarker {
-			return nil, 0, 0, errors.New("invalid commitment v4 state")
-		}
-		return bytes.Clone(value[17:]), binary.BigEndian.Uint64(value[9:17]), binary.BigEndian.Uint64(value[1:9]), nil
+	if bytes.Equal(stateKey, commitmentdb.KeyCommitmentV4State) {
+		blockNum, txNum, root, err := commitment.DecodeCommitmentV4State(value)
+		return root, blockNum, txNum, err
 	}
 	return commitment.HexTrieExtractStateRoot(value)
 }
