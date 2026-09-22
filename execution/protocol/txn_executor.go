@@ -516,10 +516,10 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 
 	result := &evmtypes.ExecutionResult{
 		TxGasUsage: mdgas.TxGasUsage{
-			ReceiptGasUsed:        st.txnGasUsed,
 			BlockExecutionGasUsed: st.blockExecutionGasUsed,
 			BlockStateGasUsed:     st.blockStateGasUsed,
 		},
+		ReceiptGasUsed:      st.txnGasUsed,
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
 		ReturnData:          ret,
@@ -790,11 +790,11 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 
 	result = &evmtypes.ExecutionResult{
 		TxGasUsage: mdgas.TxGasUsage{
-			ReceiptGasUsed:        st.txnGasUsed,
 			BlockExecutionGasUsed: st.blockExecutionGasUsed,
 			BlockStateGasUsed:     st.blockStateGasUsed,
 			GasRefund:             refund,
 		},
+		ReceiptGasUsed:      st.txnGasUsed,
 		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
 		Err:                 vmerr,
 		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),

@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -149,9 +148,7 @@ func TestCreateReceiptTxIndex(t *testing.T) {
 	result := &TxResult{
 		Task: txTask,
 		ExecutionResult: evmtypes.ExecutionResult{
-			TxGasUsage: mdgas.TxGasUsage{
-				ReceiptGasUsed: receiptGasUsed,
-			},
+			ReceiptGasUsed: receiptGasUsed,
 		},
 		Logs: []*types.Log{{}},
 	}

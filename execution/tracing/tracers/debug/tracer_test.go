@@ -32,7 +32,7 @@ import (
 )
 
 func TestTxEndV2Recording(t *testing.T) {
-	usage := &mdgas.TxGasUsage{ReceiptGasUsed: 100, BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
+	usage := &mdgas.TxGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
 	var calls int
 	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
 		OnTxEndV2: func(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
@@ -47,7 +47,7 @@ func TestTxEndV2Recording(t *testing.T) {
 	*usage = mdgas.TxGasUsage{}
 	encoded, err := json.Marshal(recorder.traces)
 	require.NoError(t, err)
-	require.JSONEq(t, `{"traces":[{"onTxEndV2":{"gasUsed":{"ReceiptGasUsed":100,"BlockExecutionGasUsed":40,"BlockStateGasUsed":70,"GasRefund":10}}}]}`, string(encoded))
+	require.JSONEq(t, `{"traces":[{"onTxEndV2":{"gasUsed":{"BlockExecutionGasUsed":40,"BlockStateGasUsed":70,"GasRefund":10}}}]}`, string(encoded))
 }
 
 func TestTxEndV2RecordingWithoutReceipt(t *testing.T) {

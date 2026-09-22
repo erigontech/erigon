@@ -228,10 +228,9 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 		Task: task,
 		ExecutionResult: evmtypes.ExecutionResult{
 			TxGasUsage: mdgas.TxGasUsage{
-				ReceiptGasUsed:        21000,
 				BlockExecutionGasUsed: 21000,
 			},
-
+			ReceiptGasUsed:       21000,
 			FeeTipped:            s.feeTipped,
 			FeeBurnt:             s.feeBurnt,
 			BurntContractAddress: s.burntAddr,

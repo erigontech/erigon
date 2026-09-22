@@ -50,6 +50,7 @@ import (
 func TestTraceTxCompletionV2(t *testing.T) {
 	name := "testTxCompletionV2"
 	var received *mdgas.TxGasUsage
+	var receivedReceipt *types.Receipt
 	var completionErr error
 	var calls int
 	tracers.RegisterLookup(false, func(code string, _ *tracers.Context, _ json.RawMessage) (*tracers.Tracer, error) {
@@ -59,6 +60,7 @@ func TestTraceTxCompletionV2(t *testing.T) {
 		return &tracers.Tracer{
 			Hooks: &tracing.Hooks{OnTxEndV2: func(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
 				received = gasUsed
+				receivedReceipt = receipt
 				completionErr = err
 				calls++
 			}},
@@ -70,6 +72,7 @@ func TestTraceTxCompletionV2(t *testing.T) {
 		t.Run(fmt.Sprintf("gas=%d", gasLimit), func(t *testing.T) {
 			calls = 0
 			received = nil
+			receivedReceipt = nil
 			completionErr = nil
 			sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
 			recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
@@ -89,12 +92,14 @@ func TestTraceTxCompletionV2(t *testing.T) {
 				require.Error(t, err)
 				require.ErrorIs(t, err, completionErr)
 				require.Nil(t, received)
+				require.Nil(t, receivedReceipt)
 				return
 			}
 			require.NoError(t, err)
 			require.NoError(t, completionErr)
 			require.NotNil(t, received)
-			require.Equal(t, gasUsed, received.ReceiptGasUsed)
+			require.NotNil(t, receivedReceipt)
+			require.Equal(t, gasUsed, receivedReceipt.GasUsed)
 			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
 			require.Equal(t, gasUsed, received.BlockExecutionGasUsed+received.BlockStateGasUsed)
 			require.Zero(t, received.GasRefund)

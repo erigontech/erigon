@@ -32,7 +32,7 @@ import (
 
 func TestMuxForwardsTxEndV2(t *testing.T) {
 	receipt := &types.Receipt{GasUsed: 100}
-	usage := &mdgas.TxGasUsage{ReceiptGasUsed: 100, BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
+	usage := &mdgas.TxGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
 	var calls int
 	var legacyCalls int
 	mux := newTestMuxTracer([]string{"v2", "v1", "nil"}, []*tracers.Tracer{

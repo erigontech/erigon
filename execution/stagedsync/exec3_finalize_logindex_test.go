@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
-	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -121,9 +120,7 @@ func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 			version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: txTask.TxNum},
 		},
 		ExecutionResult: evmtypes.ExecutionResult{
-			TxGasUsage: mdgas.TxGasUsage{
-				ReceiptGasUsed: 21000,
-			},
+			ReceiptGasUsed: 21000,
 		},
 	}
 

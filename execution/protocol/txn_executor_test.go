@@ -753,14 +753,15 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 				return
 			}
 			require.Equal(t, &mdgas.TxGasUsage{
-				ReceiptGasUsed: gasUsed.Receipt, BlockExecutionGasUsed: gasUsed.BlockExecution,
-				BlockStateGasUsed: params.StateGasPerStorageSet,
+				BlockExecutionGasUsed: gasUsed.BlockExecution,
+				BlockStateGasUsed:     params.StateGasPerStorageSet,
 			}, received)
 			require.Equal(t, receipt, receivedReceipt)
 			if test.noReceipts {
 				require.Nil(t, receipt)
 			} else {
 				require.NotNil(t, receipt)
+				require.Equal(t, gasUsed.Receipt, receipt.GasUsed)
 			}
 		})
 	}
