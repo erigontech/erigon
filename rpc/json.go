@@ -42,7 +42,7 @@ const (
 	unsubscribeMethodSuffix  = "_unsubscribe"
 	notificationMethodSuffix = "_subscription"
 
-	defaultWriteTimeout = 10 * time.Minute // used if context has no deadline
+	defaultWriteTimeout = 10 * time.Minute
 )
 
 var null = json.RawMessage("null")
@@ -289,7 +289,7 @@ type jsonCodec struct {
 	encMu        sync.Mutex        // guards the encoder
 	encode       func(v any) error // encoder to allow multiple transports
 	conn         deadlineCloser
-	writeTimeout time.Duration // used if context has no deadline
+	writeTimeout time.Duration // used if the context has no deadline, counted once the write holds the connection
 }
 
 // newFuncCodec creates a codec that uses the given functions to read and write. If conn
@@ -416,14 +416,13 @@ func (c *jsonCodec) readMessage() (json.RawMessage, error) {
 }
 
 func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
+	c.encMu.Lock()
+	defer c.encMu.Unlock()
+
 	deadline, ok := ctx.Deadline()
 	if !ok {
 		deadline = time.Now().Add(c.writeTimeout)
 	}
-
-	c.encMu.Lock()
-	defer c.encMu.Unlock()
-
 	if err := c.conn.SetWriteDeadline(deadline); err != nil {
 		return err
 	}

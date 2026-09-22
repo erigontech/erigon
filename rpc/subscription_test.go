@@ -307,8 +307,8 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := &captureWriter{}
-		n := &RemoteNotifier{h: &handler{conn: w}, namespace: namespace, sub: &Subscription{ID: "0x9a"}, activated: true}
-		if err := n.send(n.sub, result); err != nil {
+		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix(namespace, "0x9a"), activated: true}
+		if err := n.send(result); err != nil {
 			t.Fatal(err)
 		}
 		if got := w.got; !bytes.Equal(got, want) {
@@ -338,9 +338,9 @@ func (discardWriter) remoteAddr() string                   { return "" }
 // allocate its size: at 2000 subscribers a block's receipts would be allocated 2000 times.
 func TestNotifySendDoesNotAllocateResult(t *testing.T) {
 	result := json.RawMessage(`"` + strings.Repeat("x", 160*1024) + `"`)
-	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, namespace: "eth", sub: &Subscription{ID: "0x9a"}, activated: true}
+	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, prefix: notificationPrefix("eth", "0x9a"), activated: true}
 	send := func() {
-		if err := n.send(n.sub, result); err != nil {
+		if err := n.send(result); err != nil {
 			t.Fatal(err)
 		}
 	}

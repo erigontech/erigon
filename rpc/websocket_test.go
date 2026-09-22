@@ -20,13 +20,19 @@
 package rpc
 
 import (
+	"bufio"
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -630,5 +636,153 @@ func TestWebsocketBatchUsesServerConcurrency(t *testing.T) {
 	}
 	if peak := svc.peak.Load(); peak > 2 {
 		t.Fatalf("websocket batch ran %d calls at once, server allows 2", peak)
+	}
+}
+
+// A response past wsStreamThreshold leaves in several frames as it is encoded, and the client
+// reads them back as one message; a smaller one stays one frame.
+func TestWebsocketStreamsLargeResponse(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer httpsrv.Close()
+	host := strings.TrimPrefix(httpsrv.URL, "http://")
+
+	item := strings.Repeat("x", 1000)
+	for _, tc := range []struct {
+		n        int
+		streamed bool
+	}{{300, false}, {3000, true}} {
+		frames, msg := wsRawCall(t, host, fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"test_streamPaused","params":["%s",%d,0]}`, item, tc.n))
+		if streamed := frames > 1; streamed != tc.streamed {
+			t.Fatalf("a %d-byte response came in %d frame(s), streamed=%v, want %v", len(msg), frames, streamed, tc.streamed)
+		}
+		var resp struct{ Result []string }
+		if err := json.Unmarshal(msg, &resp); err != nil {
+			t.Fatalf("reassembled message is not JSON: %v", err)
+		}
+		if len(resp.Result) != tc.n || resp.Result[0] != item {
+			t.Fatalf("got %d items, want %d", len(resp.Result), tc.n)
+		}
+	}
+}
+
+// wsRawCall sends one request over a hand-made websocket connection and returns how many
+// frames the response came in, with their payloads joined.
+func wsRawCall(t *testing.T, host, req string) (int, []byte) {
+	t.Helper()
+	conn, err := net.Dial("tcp", host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_, err = conn.Write([]byte("GET / HTTP/1.1\r\nHost: " + host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n" +
+		"Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := bufio.NewReader(conn)
+	for {
+		line, err := r.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	// A client frame is masked; a zero mask leaves the payload as it is.
+	frame := []byte{0x81, 0x80 | 126, byte(len(req) >> 8), byte(len(req)), 0, 0, 0, 0}
+	if _, err := conn.Write(append(frame, req...)); err != nil {
+		t.Fatal(err)
+	}
+	var msg []byte
+	for frames := 1; ; frames++ {
+		var h [2]byte
+		if _, err := io.ReadFull(r, h[:]); err != nil {
+			t.Fatal(err)
+		}
+		size := uint64(h[1] & 0x7f)
+		switch size {
+		case 126:
+			var ext [2]byte
+			if _, err := io.ReadFull(r, ext[:]); err != nil {
+				t.Fatal(err)
+			}
+			size = uint64(binary.BigEndian.Uint16(ext[:]))
+		case 127:
+			var ext [8]byte
+			if _, err := io.ReadFull(r, ext[:]); err != nil {
+				t.Fatal(err)
+			}
+			size = binary.BigEndian.Uint64(ext[:])
+		}
+		payload := make([]byte, size)
+		if _, err := io.ReadFull(r, payload); err != nil {
+			t.Fatal(err)
+		}
+		msg = append(msg, payload...)
+		if h[0]&0x80 != 0 {
+			return frames, msg
+		}
+	}
+}
+
+// A streamed response that pauses longer than the write timeout still completes: the timeout
+// bounds each write, not the whole generation. Calls answered while it holds the connection
+// must not find their own timeout spent and take the connection down.
+func TestWebsocketStreamOutlastsWriteTimeout(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		codec := NewWebsocketCodec(conn, r.Host, r.Header, r.RemoteAddr).(*websocketCodec)
+		codec.writeTimeout = 100 * time.Millisecond
+		srv.ServeCodecWithContext(r.Context(), codec, 0)
+	}))
+	defer httpsrv.Close()
+
+	client, err := DialWebsocket(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", logger)
+	if err != nil {
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer client.Close()
+
+	item := strings.Repeat("x", 1000)
+	streamed := make(chan error, 1)
+	go func() {
+		var got []string
+		err := client.Call(&got, "test_streamPaused", item, 3000, 300)
+		if err == nil && (len(got) != 3000 || got[0] != item) {
+			err = fmt.Errorf("got %d items", len(got))
+		}
+		streamed <- err
+	}()
+	time.Sleep(100 * time.Millisecond) // the stream has passed the threshold and is paused
+
+	var wg sync.WaitGroup
+	errs := make(chan error, 10)
+	for range 10 {
+		wg.Go(func() {
+			var res echoResult
+			errs <- client.Call(&res, "test_echo", "x", 1)
+		})
+	}
+	if err := <-streamed; err != nil {
+		t.Fatalf("streamed call: %v", err)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("call queued behind the stream: %v", err)
+		}
 	}
 }

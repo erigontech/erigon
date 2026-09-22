@@ -21,10 +21,12 @@ package rpc
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"net"
 	"net/http"
@@ -38,6 +40,7 @@ import (
 	mapset "github.com/deckarep/golang-set/v2"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -327,6 +330,103 @@ func (a *wsConnAdapter) encode(v any) error {
 		// A write cut off by the socket deadline can leave half a frame. coder closes the
 		// connection when a context expires; do the same.
 		_ = a.conn.CloseNow()
+	}
+	return err
+}
+
+// messageWriter returns a writer for the next message. Nothing is sent until the first Write;
+// finish sends what is left and completes the message.
+func (wc *websocketCodec) messageWriter(ctx context.Context) *wsMessage {
+	return &wsMessage{wc: wc, ctx: ctx}
+}
+
+// wsStreamThreshold is how much of a response is gathered before any of it goes out. A smaller
+// response stays one frame, as framing it would cost more than holding it; a larger one leaves
+// in frames of about this size, so the server never holds it whole. Half of pool.MaxBufferCap,
+// so the gathering buffer still goes back to the pool.
+const wsStreamThreshold = pool.MaxBufferCap / 2
+
+// wsMessage sends one response. It holds the stream's flushes until they reach
+// wsStreamThreshold; past that it opens a message writer and holds the connection's write
+// lock until finish. The write timeout bounds each frame, not the whole message, whose
+// generation is bounded by the call itself.
+type wsMessage struct {
+	wc    *websocketCodec
+	ctx   context.Context
+	w     io.WriteCloser // open once the response outgrew wsStreamThreshold
+	stall *time.Timer    // closes the connection when one frame's write outlasts the timeout
+	buf   *bytes.Buffer
+}
+
+func (m *wsMessage) Write(p []byte) (int, error) {
+	if m.buf == nil {
+		m.buf = pool.GetBuffer()
+	}
+	if m.buf.Len()+len(p) < wsStreamThreshold {
+		return m.buf.Write(p)
+	}
+	if m.w == nil {
+		if err := m.open(); err != nil {
+			return 0, err
+		}
+	}
+	if m.buf.Len() > 0 {
+		if err := m.frame(m.buf.Bytes()); err != nil {
+			return 0, err
+		}
+		m.buf.Reset()
+	}
+	if err := m.frame(p); err != nil {
+		return 0, err
+	}
+	return len(p), nil
+}
+
+func (m *wsMessage) open() error {
+	m.wc.encMu.Lock()
+	w, err := m.wc.conn.Writer(m.ctx, websocket.MessageText)
+	if err != nil {
+		m.wc.encMu.Unlock()
+		return err
+	}
+	m.w = w
+	m.stall = time.AfterFunc(math.MaxInt64, func() { _ = m.wc.conn.CloseNow() })
+	return nil
+}
+
+func (m *wsMessage) frame(p []byte) error {
+	m.stall.Reset(m.wc.writeTimeout)
+	_, err := m.w.Write(p)
+	m.stall.Stop()
+	return err
+}
+
+func (m *wsMessage) finish(rest []byte, encodeErr error) error {
+	if m.buf != nil {
+		defer pool.PutBuffer(m.buf)
+		if encodeErr == nil {
+			m.buf.Write(rest)
+			rest = m.buf.Bytes()
+		}
+	}
+	if m.w == nil {
+		if encodeErr != nil {
+			return encodeErr
+		}
+		return m.wc.WriteJSON(m.ctx, rawResponse(rest))
+	}
+	defer m.wc.encMu.Unlock()
+	err := encodeErr
+	if err == nil {
+		if err = m.frame(rest); err == nil {
+			m.stall.Reset(m.wc.writeTimeout)
+			err = m.w.Close()
+			m.stall.Stop()
+		}
+	}
+	if err != nil {
+		// Part of the message is already out: without its last frame the connection is unusable.
+		_ = m.wc.conn.CloseNow()
 	}
 	return err
 }
