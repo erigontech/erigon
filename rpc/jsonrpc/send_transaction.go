@@ -91,13 +91,17 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 		reqTimeout := time.Duration(*timeoutMs) * time.Millisecond
 		timeout = min(reqTimeout, api.RpcTxSyncMaxTimeout)
 	}
-	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
-
 	hash, err := api.SendRawTransaction(ctx, encodedTx)
 	if err != nil {
 		return nil, err
 	}
+
+	return api.waitForReceipt(ctx, hash, timeout)
+}
+
+func (api *APIImpl) waitForReceipt(ctx context.Context, hash common.Hash, timeout time.Duration) (*ethutils.RPCReceipt, error) {
+	timeoutCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 
 	// Subscribe to receive the receipt for the submitted transaction using the transaction hash.
 	criteria := filters.ReceiptsFilterCriteria{
@@ -109,9 +113,14 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 	}
 	defer api.filters.UnsubscribeReceipts(id)
 
-	// Theoretically, we should subscribe *before* submitting the transaction, but then we couldn't filter by hash.
-	// Hence, we add this fast-path to be sure we won't miss the receipt in all cases.
-	if receipt, err := api.GetTransactionReceipt(ctx, hash); err != nil && receipt != nil {
+	// The filter update reaches the server asynchronously, so a receipt produced before it lands is never
+	// delivered on the channel. Look the receipt up once to cover a transaction mined by then.
+	// An exhausted budget is the timeout itself and is reported as such below; any other lookup failure is real.
+	receipt, err := api.GetTransactionReceipt(timeoutCtx, hash)
+	if err != nil && !errors.Is(err, context.DeadlineExceeded) {
+		return nil, err
+	}
+	if receipt != nil {
 		return receipt, nil
 	}
 

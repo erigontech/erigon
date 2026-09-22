@@ -31,14 +31,6 @@ func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
 	for i := range logs {
 		logs[i] = &RPCLog{Log: Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}}
 	}
-	b.Run("fast", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			if _, err := logs.MarshalFastJSON(); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
 	b.Run("stream", func(b *testing.B) {
 		b.ReportAllocs()
 		rec := httptest.NewRecorder()

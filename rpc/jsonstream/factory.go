@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"bytes"
 	"io"
 	"sync"
 
@@ -81,4 +82,17 @@ func Put(s Stream) {
 	}
 	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection
 	streamPool.Put(ss)
+}
+
+// Marshal encodes v into a byte slice the caller owns.
+func Marshal(v interface{ MarshalFastJSONTo(*StackStream) error }) ([]byte, error) {
+	s := Get(nil)
+	defer Put(s)
+	if err := v.MarshalFastJSONTo(s); err != nil {
+		return nil, err
+	}
+	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
+		return nil, err
+	}
+	return bytes.Clone(s.Buffer()), nil
 }

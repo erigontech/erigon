@@ -67,7 +67,7 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 		block.Hash = blk.Hash.Hex()
 	}
 	if blk.Miner != nil {
-		block.Miner.Address = strings.ToLower(blk.Miner.Hex())
+		block.Miner.Address = hexutil.Encode(blk.Miner[:])
 	}
 	if blk.Nonce != nil {
 		block.Nonce = hexutil.Encode(blk.Nonce[:])
@@ -119,15 +119,18 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	}
 
 	if block.WithdrawalsRoot != nil {
-		withdrawals, _ := res["withdrawals"].([]map[string]any)
+		withdrawals, ok := res["withdrawals"].([]jsonrpc.GraphQLWithdrawal)
+		if !ok {
+			return nil, fmt.Errorf("unexpected withdrawals type %T", res["withdrawals"])
+		}
 		block.Withdrawals = make([]*model.Withdrawal, 0, len(withdrawals))
 		for _, withdrawal := range withdrawals {
-			w := &model.Withdrawal{}
-			w.Index = *convertDataToUint64P(withdrawal, "index")
-			w.Validator = *convertDataToUint64P(withdrawal, "validator")
-			w.Address = strings.ToLower(*convertDataToStringP(withdrawal, "address"))
-			w.Amount = *convertDataToStringP(withdrawal, "amount")
-			block.Withdrawals = append(block.Withdrawals, w)
+			block.Withdrawals = append(block.Withdrawals, &model.Withdrawal{
+				Index:     uint64(withdrawal.Index),
+				Validator: uint64(withdrawal.Validator),
+				Address:   hexutil.Encode(withdrawal.Address[:]),
+				Amount:    withdrawal.Amount.String(),
+			})
 		}
 	}
 
@@ -177,7 +180,7 @@ func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.Gr
 			Data:  hexutil.Encode(rlog.Data),
 		}
 		tlog.Account = model.NewAccountAtBlock(block.Number)
-		tlog.Account.Address = strings.ToLower(rlog.Address.String())
+		tlog.Account.Address = hexutil.Encode(rlog.Address[:])
 		tlog.Topics = make([]string, 0, len(rlog.Topics))
 		for _, rtopic := range rlog.Topics {
 			tlog.Topics = append(tlog.Topics, rtopic.String())
@@ -186,16 +189,18 @@ func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.Gr
 	}
 
 	trans.From = model.NewAccountAtBlock(block.Number)
-	trans.From.Address = strings.ToLower(receipt.From.String())
+	if receipt.From != nil {
+		trans.From.Address = hexutil.Encode(receipt.From[:])
+	}
 
 	if receipt.To != nil {
 		trans.To = model.NewAccountAtBlock(block.Number)
-		trans.To.Address = strings.ToLower(receipt.To.String())
+		trans.To.Address = hexutil.Encode(receipt.To[:])
 	}
 
 	if receipt.ContractAddress != nil {
 		trans.CreatedContract = model.NewAccountAtBlock(block.Number)
-		trans.CreatedContract.Address = strings.ToLower(receipt.ContractAddress.String())
+		trans.CreatedContract.Address = hexutil.Encode(receipt.ContractAddress[:])
 	}
 
 	trans.AccessList = make([]*model.AccessTuple, len(receipt.AccessList))
@@ -205,7 +210,7 @@ func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.Gr
 			keys[j] = k.Hex()
 		}
 		trans.AccessList[i] = &model.AccessTuple{
-			Address:     strings.ToLower(entry.Address.String()),
+			Address:     hexutil.Encode(entry.Address[:]),
 			StorageKeys: keys,
 		}
 	}
@@ -247,7 +252,7 @@ func rpcLogsToModel(logs types.RPCLogs) []*model.Log {
 			Data:  hexutil.Encode(l.Data),
 		}
 		ml.Account = &model.Account{
-			Address:  strings.ToLower(l.Address.Hex()),
+			Address:  hexutil.Encode(l.Address[:]),
 			BlockNum: uint64(l.BlockNumber),
 		}
 		ml.Topics = make([]string, len(l.Topics))

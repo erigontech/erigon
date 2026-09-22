@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -42,6 +43,9 @@ type API struct {
 	Version   string // api version for DApp's
 	Service   any    // receiver instance which holds the methods
 	Public    bool   // indication if the methods must be considered safe for public use
+
+	// Iface, when set, keeps exported methods of Service that it does not declare off the wire.
+	Iface reflect.Type
 }
 
 // Error wraps RPC errors, which contain an error code in addition to the message.

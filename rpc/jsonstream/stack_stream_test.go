@@ -46,7 +46,6 @@ func TestStackStream_BasicOperations(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("name")
 	ss.WriteString("John")
-	ss.WriteMore()
 	ss.WriteObjectField("age")
 	ss.WriteInt(30)
 	ss.WriteObjectEnd()
@@ -64,17 +63,14 @@ func TestStackStream_NestedStructures(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("name")
 	ss.WriteString("John")
-	ss.WriteMore()
 	ss.WriteObjectField("address")
 	ss.WriteObjectStart()
 	ss.WriteObjectField("city")
 	ss.WriteString("New York")
-	ss.WriteMore()
 	ss.WriteObjectField("zip")
 	ss.WriteString("10001")
 	ss.WriteObjectEnd()
 	ss.WriteObjectEnd()
-	ss.WriteMore()
 	ss.WriteObjectField("active")
 	ss.WriteTrue()
 	ss.WriteObjectEnd()
@@ -89,9 +85,7 @@ func TestStackStream_ArrayOperations(t *testing.T) {
 	// Write an array
 	ss.WriteArrayStart()
 	ss.WriteInt(1)
-	ss.WriteMore()
 	ss.WriteInt(2)
-	ss.WriteMore()
 	ss.WriteInt(3)
 	ss.WriteArrayEnd()
 
@@ -106,16 +100,12 @@ func TestStackStream_MixedStructures(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("name")
 	ss.WriteString("John")
-	ss.WriteMore()
 	ss.WriteObjectField("scores")
 	ss.WriteArrayStart()
 	ss.WriteInt(85)
-	ss.WriteMore()
 	ss.WriteInt(90)
-	ss.WriteMore()
 	ss.WriteInt(95)
 	ss.WriteArrayEnd()
-	ss.WriteMore()
 	ss.WriteObjectField("details")
 	ss.WriteObjectStart()
 	ss.WriteObjectField("active")
@@ -134,7 +124,6 @@ func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("name")
 	ss.WriteString("John")
-	ss.WriteMore()
 	ss.WriteObjectField("age") // Missing value
 
 	// Incomplete JSON at this point
@@ -157,13 +146,9 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 	// Start an array but don't finish it
 	ss.WriteArrayStart()
 	ss.WriteInt(1)
-	ss.WriteMore()
 	ss.WriteInt(2)
-	ss.WriteMore() // Missing final value
 
 	// Incomplete JSON at this point
-	// WriteMore is a no-op: the separator is written with the value that follows, so a
-	// value that never arrives leaves no dangling comma to repair.
 	assert.Equal(t, `[1,2`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
 	assert.Equal(t, 1, ss.Depth()) // Array
@@ -186,12 +171,10 @@ func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("name")
 	ss.WriteString("John")
-	ss.WriteMore()
 	ss.WriteObjectField("address")
 	ss.WriteObjectStart()
 	ss.WriteObjectField("city")
 	ss.WriteString("New York")
-	ss.WriteMore()
 	ss.WriteObjectField("zip") // Missing value
 	// Several unclosed objects
 
@@ -219,12 +202,10 @@ func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("name")
 	ss.WriteString("John")
-	ss.WriteMore()
 	ss.WriteObjectField("address")
 	ss.WriteObjectStart()
 	ss.WriteObjectField("city")
 	ss.WriteString("New York")
-	ss.WriteMore()
 	ss.WriteObjectField("zip") // Missing value
 	// Several unclosed objects
 
@@ -249,7 +230,6 @@ func TestStackStream_BufferAsString(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("status")
 	ss.WriteString("pending")
-	ss.WriteMore()
 	ss.WriteObjectField("data") // Missing value
 
 	// Get buffer as a string (should auto-close)
@@ -278,7 +258,6 @@ func TestStackStream_Reset(t *testing.T) {
 	// Write new data
 	ss.WriteArrayStart()
 	ss.WriteInt(1)
-	ss.WriteMore()
 	ss.WriteInt(2)
 	ss.WriteArrayEnd()
 
@@ -315,7 +294,6 @@ func TestStackStream_SequentialOperations(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("name")
 	ss.WriteString("John")
-	ss.WriteMore()
 	ss.WriteObjectField("age")
 	ss.WriteInt(30)
 	ss.WriteObjectEnd()
@@ -386,17 +364,6 @@ func TestStackStream_NestedIncompleteStructures(t *testing.T) {
 				ss.WriteObjectField("field")
 			},
 			expected: `{"array":[{"field":null}]}`,
-		},
-		{
-			name: "array with a redundant WriteMore after each element",
-			buildStructure: func(ss *StackStream) {
-				ss.WriteArrayStart()
-				ss.WriteInt(1)
-				ss.WriteMore()
-				ss.WriteInt(2)
-				ss.WriteMore()
-			},
-			expected: `[1,2]`,
 		},
 	}
 
@@ -476,7 +443,6 @@ func TestStackStream_EmptyStructures(t *testing.T) {
 	ss.WriteObjectField("emptyObj")
 	ss.WriteObjectStart()
 	ss.WriteObjectEnd()
-	ss.WriteMore()
 	ss.WriteObjectField("emptyArr")
 	ss.WriteArrayStart()
 	ss.WriteArrayEnd()
@@ -493,52 +459,36 @@ func TestStackStream_AllDataTypes(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("nil")
 	ss.WriteNil()
-	ss.WriteMore()
 	ss.WriteObjectField("bool_true")
 	ss.WriteTrue()
-	ss.WriteMore()
 	ss.WriteObjectField("bool_false")
 	ss.WriteFalse()
-	ss.WriteMore()
 	ss.WriteObjectField("bool_var")
 	ss.WriteBool(true)
-	ss.WriteMore()
 	ss.WriteObjectField("int")
 	ss.WriteInt(-42)
-	ss.WriteMore()
 	ss.WriteObjectField("int8")
 	ss.WriteInt8(127)
-	ss.WriteMore()
 	ss.WriteObjectField("int16")
 	ss.WriteInt16(-32000)
-	ss.WriteMore()
 	ss.WriteObjectField("int32")
 	ss.WriteInt32(2147483647)
-	ss.WriteMore()
 	ss.WriteObjectField("int64")
 	ss.WriteInt64(-9223372036854775807)
-	ss.WriteMore()
 	ss.WriteObjectField("uint")
 	ss.WriteUint(42)
-	ss.WriteMore()
 	ss.WriteObjectField("uint8")
 	ss.WriteUint8(255)
-	ss.WriteMore()
 	ss.WriteObjectField("uint16")
 	ss.WriteUint16(65535)
-	ss.WriteMore()
 	ss.WriteObjectField("uint32")
 	ss.WriteUint32(4294967295)
-	ss.WriteMore()
 	ss.WriteObjectField("uint64")
 	ss.WriteUint64(18446744073709551615)
-	ss.WriteMore()
 	ss.WriteObjectField("float32")
 	ss.WriteFloat32(3.14159)
-	ss.WriteMore()
 	ss.WriteObjectField("float64")
 	ss.WriteFloat64(2.7182818284590452353602874713527)
-	ss.WriteMore()
 	ss.WriteObjectField("string")
 	ss.WriteString("Hello, World!")
 	ss.WriteObjectEnd()
@@ -572,34 +522,24 @@ func TestStackStream_BoundaryValues(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("int8_min")
 	ss.WriteInt8(math.MinInt8)
-	ss.WriteMore()
 	ss.WriteObjectField("int8_max")
 	ss.WriteInt8(math.MaxInt8)
-	ss.WriteMore()
 	ss.WriteObjectField("int16_min")
 	ss.WriteInt16(math.MinInt16)
-	ss.WriteMore()
 	ss.WriteObjectField("int16_max")
 	ss.WriteInt16(math.MaxInt16)
-	ss.WriteMore()
 	ss.WriteObjectField("int32_min")
 	ss.WriteInt32(math.MinInt32)
-	ss.WriteMore()
 	ss.WriteObjectField("int32_max")
 	ss.WriteInt32(math.MaxInt32)
-	ss.WriteMore()
 	ss.WriteObjectField("int64_min")
 	ss.WriteInt64(math.MinInt64)
-	ss.WriteMore()
 	ss.WriteObjectField("int64_max")
 	ss.WriteInt64(math.MaxInt64)
-	ss.WriteMore()
 	ss.WriteObjectField("uint8_max")
 	ss.WriteUint8(math.MaxUint8)
-	ss.WriteMore()
 	ss.WriteObjectField("uint16_max")
 	ss.WriteUint16(math.MaxUint16)
-	ss.WriteMore()
 	ss.WriteObjectField("uint32_max")
 	ss.WriteUint32(math.MaxUint32)
 	ss.WriteObjectEnd()
@@ -735,7 +675,6 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 	ss.WriteObjectStart()
 	ss.WriteObjectField("raw")
 	ss.WriteRaw("42")
-	ss.WriteMore()
 	ss.WriteObjectField("normal")
 	ss.WriteInt(42)
 	ss.WriteObjectEnd()
@@ -747,7 +686,6 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 	ss.Reset(nil)
 	ss.WriteArrayStart()
 	ss.WriteRawBytes([]byte(`"hello"`))
-	ss.WriteMore()
 	ss.WriteRawBytes([]byte(`123`))
 	ss.WriteArrayEnd()
 
@@ -770,7 +708,6 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 	ss.Reset(nil)
 	ss.WriteArrayStart()
 	ss.WriteRawBytes([]byte(`1`))
-	ss.WriteMore()
 	ss.WriteRawBytes([]byte(`2`))
 	assert.Equal(t, 1, ss.Depth())
 	assert.NoError(t, ss.ClosePending(0))
@@ -795,15 +732,6 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 			expected: `{"field":null}`,
 		},
 		{
-			name: "array with a redundant WriteMore after its element",
-			buildStructure: func(ss *StackStream) {
-				ss.WriteArrayStart()
-				ss.WriteInt(1)
-				ss.WriteMore()
-			},
-			expected: `[1]`,
-		},
-		{
 			name: "nested object with missing field in inner object",
 			buildStructure: func(ss *StackStream) {
 				ss.WriteObjectStart()
@@ -812,19 +740,6 @@ func TestStackStream_IncompleteStructuresWithFlush(t *testing.T) {
 				ss.WriteObjectField("inner") // Missing value for the inner field
 			},
 			expected: `{"outer":{"inner":null}}`,
-		},
-		{
-			name: "object with a redundant WriteMore after each field",
-			buildStructure: func(ss *StackStream) {
-				ss.WriteObjectStart()
-				ss.WriteObjectField("first")
-				ss.WriteString("value")
-				ss.WriteMore()
-				ss.WriteObjectField("second")
-				ss.WriteInt(42)
-				ss.WriteMore()
-			},
-			expected: `{"first":"value","second":42}`,
 		},
 		{
 			name: "multiple nested incomplete structures",
@@ -923,7 +838,6 @@ func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 		assert.Equal(t, 2, ss.Depth()) // stack preserved
 
 		// Can still write inside the tx object
-		ss.WriteMore()
 		ss.WriteObjectField("error")
 		ss.WriteString("oops")
 		ss.WriteObjectEnd()
@@ -951,7 +865,6 @@ func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
 		assert.Equal(t, txDepth, ss.Depth()) // back to tx object level
 
 		// The tx object is still open; write the error field and close it
-		ss.WriteMore()
 		ss.WriteObjectField("error")
 		ss.WriteString("trace failed")
 		ss.WriteObjectEnd()
@@ -1033,9 +946,6 @@ func TestBufferBoundedForEveryWriter(t *testing.T) {
 
 			peak := 0
 			for i := range 200_000 {
-				if i > 0 {
-					s.WriteMore()
-				}
 				writeValue(s, i)
 				if n := len(s.Buffer()); n > peak {
 					peak = n
@@ -1059,12 +969,6 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 		write func(s *StackStream)
 		want  string
 	}{
-		{"redundant WriteMore in an array", func(s *StackStream) {
-			s.WriteArrayStart()
-			s.WriteInt(1)
-			s.WriteMore()
-			s.WriteArrayEnd()
-		}, `[1]`},
 		{"field with no value", func(s *StackStream) {
 			s.WriteObjectStart()
 			s.WriteObjectField("a")
@@ -1144,13 +1048,12 @@ func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
 	}
 }
 
-// A separator and a field name carry no value, so the wrapper leaves them alone:
-// opening the field for one emits `"result":` with nothing able to follow it.
+// A field name carries no value, so the wrapper leaves it alone: opening the field
+// for one emits `"result":` with nothing able to follow it.
 func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = false
 	for name, write := range map[string]func(s Stream){
-		"WriteMore":        func(s Stream) { s.WriteMore() },
 		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -1260,7 +1163,6 @@ func TestWriteHex(t *testing.T) {
 				s.WriteObjectField("result")
 				s.WriteArrayStart()
 				s.WriteHex(b)
-				s.WriteMore()
 				s.WriteHex(b)
 				s.WriteArrayEnd()
 				s.WriteObjectEnd()
@@ -1381,7 +1283,7 @@ func TestWriteRawBytesWriteThroughError(t *testing.T) {
 }
 
 // TestStackStream_SeparatorsAreAutomatic pins the contract: the stream writes the comma a
-// value needs, so a caller that never calls WriteMore still produces valid JSON.
+// value needs.
 func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
@@ -1439,30 +1341,6 @@ func TestStackStream_SeparatorsAreAutomatic(t *testing.T) {
 	}
 }
 
-// TestStackStream_WriteMoreIsNoop pins that WriteMore writes nothing, however often a
-// caller written against the old manual API calls it.
-func TestStackStream_WriteMoreIsNoop(t *testing.T) {
-	withMore := newStackStream(nil, InitialBufferSize)
-	withMore.WriteArrayStart()
-	withMore.WriteInt(1)
-	withMore.WriteMore()
-	withMore.WriteMore()
-	withMore.WriteInt(2)
-	withMore.WriteMore()
-	withMore.WriteArrayEnd()
-
-	without := newStackStream(nil, InitialBufferSize)
-	without.WriteArrayStart()
-	without.WriteInt(1)
-	without.WriteInt(2)
-	without.WriteArrayEnd()
-
-	require.Equal(t, `[1,2]`, string(without.Buffer()))
-	require.Equal(t, string(without.Buffer()), string(withMore.Buffer()),
-		"WriteMore must not change the bytes")
-	require.Equal(t, without.Depth(), withMore.Depth(), "WriteMore must not change the stack")
-}
-
 type failingAppender struct{}
 
 func (failingAppender) AppendText(dst []byte) ([]byte, error) {
@@ -1512,7 +1390,6 @@ func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
 	for name, write := range map[string]func(s Stream){
-		"WriteMore":        func(s Stream) { s.WriteMore() },
 		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
 	} {
 		t.Run(name, func(t *testing.T) {

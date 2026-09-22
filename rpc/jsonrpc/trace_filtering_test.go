@@ -101,7 +101,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Set up the state reader at the parent block boundary (= pre-block-6 state).
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, parentNrOrHash, 0,
-		api.filters, api.stateCache, api._txNumReader)
+		api.stateCache, api._txNumReader)
 	require.NoError(t, err)
 
 	hsr, ok := stateReader.(state.HistoricalStateReader)

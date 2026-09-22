@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
@@ -115,4 +117,61 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		require.NoError(err)
 		require.Equal(expectedTxValue, jsonTx.Value.Uint64())
 	}
+}
+
+// Pins the fast path: a txn already mined when the subscription is installed is answered from the receipt
+// lookup instead of waiting for the timeout.
+func TestWaitForReceiptOfAlreadyMinedTxn(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	var txnHash common.Hash
+	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewTransaction(0, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(err)
+		b.AddTx(txn)
+		txnHash = txn.Hash()
+	})
+	require.NoError(err)
+	require.NoError(m.InsertChain(chain))
+
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	receipt, err := api.waitForReceipt(ctx, txnHash, 500*time.Millisecond)
+	require.NoError(err)
+	require.NotNil(receipt)
+	require.Equal(txnHash, receipt.TransactionHash)
+}
+
+// Pins that a failed receipt lookup surfaces as itself instead of being renamed into a sync timeout.
+func TestWaitForReceiptSurfacesLookupError(t *testing.T) {
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := api.waitForReceipt(ctx, common.Hash{1}, 500*time.Millisecond)
+	require.ErrorIs(err, context.Canceled)
+}
+
+// Pins that an exhausted timeout budget is still answered with the sync timeout error, not with the
+// context error the lookup fails with.
+func TestWaitForReceiptOfExhaustedTimeout(t *testing.T) {
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	_, err := api.waitForReceipt(t.Context(), common.Hash{1}, time.Nanosecond)
+	var timeoutErr *rpc.TxSyncTimeoutError
+	require.ErrorAs(err, &timeoutErr)
 }

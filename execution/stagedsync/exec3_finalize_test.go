@@ -439,23 +439,8 @@ func senderIsCoinbaseScenario(t *testing.T, value uint64, preBlockCoinbaseBal ui
 	var rules *chain.Rules
 	var header *types.Header
 	if london {
-		// London-enabled config + rules — fresh construction (cannot
-		// dereference-copy chain.Config; it embeds sync.Once via noCopy).
-		config = &chain.Config{
-			ChainID:               uint256.NewInt(1337),
-			Rules:                 chain.EtHashRules,
-			HomesteadBlock:        common.NewUint64(0),
-			TangerineWhistleBlock: common.NewUint64(0),
-			SpuriousDragonBlock:   common.NewUint64(0),
-			ByzantiumBlock:        common.NewUint64(0),
-			ConstantinopleBlock:   common.NewUint64(0),
-			PetersburgBlock:       common.NewUint64(0),
-			IstanbulBlock:         common.NewUint64(0),
-			MuirGlacierBlock:      common.NewUint64(0),
-			BerlinBlock:           common.NewUint64(0),
-			LondonBlock:           common.NewUint64(0),
-			Ethash:                new(chain.EthashConfig),
-		}
+		config = chain.TestChainBerlinConfig.Copy()
+		config.LondonBlock = common.NewUint64(0)
 		rules = &chain.Rules{IsSpuriousDragon: true, IsLondon: true}
 		header = &types.Header{
 			Number:   *uint256.NewInt(1),

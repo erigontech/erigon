@@ -867,22 +867,15 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 
 func (evm *EVM) captureBegin(depth int, typ OpCode, from accounts.Address, to accounts.Address, precompile bool, input []byte, startGas mdgas.MdGas, value uint256.Int, code []byte) {
 	tracer := evm.Config().Tracer
-
-	if tracer.HasEnterHook() {
-		tracer.EmitEnter(depth, byte(typ), from, to, precompile, input, startGas, value, code)
-	}
-	if tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(mdgas.MdGas{}, startGas, tracing.GasChangeCallInitialBalance)
-	}
+	tracer.EmitEnter(depth, byte(typ), from, to, precompile, input, startGas, value, code)
+	tracer.EmitGasChange(mdgas.MdGas{}, startGas, tracing.GasChangeCallInitialBalance)
 }
 
 func (evm *EVM) captureEnd(depth int, leftOverGas mdgas.MdGas, gasUsed mdgas.MdGasUsage, ret []byte, err error) {
 	tracer := evm.Config().Tracer
-
 	if tracer.HasGasChangeHook() && leftOverGas != (mdgas.MdGas{}) {
 		tracer.EmitGasChange(leftOverGas, mdgas.MdGas{}, tracing.GasChangeCallLeftOverReturned)
 	}
-
 	var reverted bool
 	if err != nil {
 		reverted = true
@@ -890,8 +883,5 @@ func (evm *EVM) captureEnd(depth int, leftOverGas mdgas.MdGas, gasUsed mdgas.MdG
 	if !evm.chainRules.IsHomestead && errors.Is(err, ErrCodeStoreOutOfGas) {
 		reverted = false
 	}
-
-	if tracer.HasExitHook() {
-		tracer.EmitExit(depth, ret, gasUsed, VMErrorFromErr(err), reverted)
-	}
+	tracer.EmitExit(depth, ret, gasUsed, VMErrorFromErr(err), reverted)
 }
