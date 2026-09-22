@@ -510,7 +510,7 @@ func (t *Tracer) flushToFile(filePath string) error {
 	dir := path.Dir(filePath)
 	info, err := os.Stat(dir)
 	if os.IsNotExist(err) {
-		err := os.MkdirAll(dir, 0755)
+		err := os.MkdirAll(dir, 0o755)
 		if err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
@@ -518,7 +518,7 @@ func (t *Tracer) flushToFile(filePath string) error {
 		return fmt.Errorf("%s exists but is not a directory or encountered an error: %w", dir, err)
 	}
 
-	err = os.WriteFile(filePath, b, 0644)
+	err = os.WriteFile(filePath, b, 0o644)
 	if err != nil {
 		return err
 	}

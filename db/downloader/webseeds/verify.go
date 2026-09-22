@@ -217,7 +217,8 @@ func (me *webseedChecker) checkPreverifiedItem(
 	done, err = me.matchHashes(&info, resp, stateItem)
 	if err == nil {
 		stateItem.DataMatchesTorrent = true
-		me.logger.Info("snapshot matches",
+		me.logger.Info(
+			"snapshot matches",
 			"url", dataUrl,
 			//"name", item.Name,
 			"contentLength", resp.ContentLength,

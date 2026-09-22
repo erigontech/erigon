@@ -189,7 +189,7 @@ func (t *Trie) GetAccountCodeSize(key []byte) (value int, gotValue bool) {
 }
 
 func (t *Trie) getAccount(origNode Node, key []byte, pos int) (value *AccountNode, gotValue bool) {
-	switch n := (origNode).(type) {
+	switch n := origNode.(type) {
 	case nil:
 		return nil, true
 	case *ShortNode:
@@ -227,7 +227,7 @@ func (t *Trie) getAccount(origNode Node, key []byte, pos int) (value *AccountNod
 }
 
 func (t *Trie) get(origNode Node, key []byte, pos int) (value []byte, gotValue bool) {
-	switch n := (origNode).(type) {
+	switch n := origNode.(type) {
 	case nil:
 		return nil, true
 	case ValueNode:
@@ -268,7 +268,7 @@ func (t *Trie) get(origNode Node, key []byte, pos int) (value []byte, gotValue b
 }
 
 func (t *Trie) getPath(origNode Node, parents [][]byte, key []byte, pos int) ([]byte, [][]byte, bool) {
-	switch n := (origNode).(type) {
+	switch n := origNode.(type) {
 	case nil:
 		return nil, parents, true
 	case ValueNode:
@@ -332,7 +332,7 @@ func (t *Trie) Update(key, value []byte) {
 }
 
 func (t *Trie) UpdateAccount(key []byte, acc *accounts.Account) {
-	//make account copy. There are some pointer into big.Int
+	// make account copy. There are some pointer into big.Int
 	value := new(accounts.Account)
 	value.Copy(acc)
 
@@ -442,8 +442,10 @@ func (t *Trie) FindSubTriesToLoad(rl RetainDecider) (prefixes [][]byte, fixedbit
 	return findSubTriesToLoad(t.RootNode, nil, nil, rl, nil, 0, nil, nil, nil)
 }
 
-var bytes8 [8]byte
-var bytes16 [16]byte
+var (
+	bytes8  [8]byte
+	bytes16 [16]byte
+)
 
 func findSubTriesToLoad(nd Node, nibblePath []byte, hook []byte, rl RetainDecider, dbPrefix []byte, bits int, prefixes [][]byte, fixedbits []int, hooks [][]byte) (newPrefixes [][]byte, newFixedBits []int, newHooks [][]byte) {
 	switch n := nd.(type) {
@@ -648,7 +650,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 				branch.child1 = c2
 				branch.child2 = c1
 			}
-			branch.mask = (1 << (n.Key[matchlen])) | (1 << (key[pos+matchlen]))
+			branch.mask = (1 << n.Key[matchlen]) | (1 << key[pos+matchlen])
 
 			// Replace this shortNode with the branch if it occurs at index 0.
 			if matchlen == 0 {
@@ -724,7 +726,7 @@ func (t *Trie) insertRecursive(origNode Node, key []byte, pos int, value Node) (
 
 // non-recursive version of get and returns: node and parent node
 func (t *Trie) getNode(hex []byte, doTouch bool) (Node, Node, bool, uint64) {
-	var nd = t.RootNode
+	nd := t.RootNode
 	var parent Node
 	pos := 0
 	var account bool
@@ -1106,7 +1108,6 @@ func (t *Trie) DeleteSubtree(keyPrefix []byte) {
 	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 
 	_, t.RootNode = t.delete(t.RootNode, hexPrefix, true)
-
 }
 
 func concat(s1 []byte, s2 ...byte) []byte {

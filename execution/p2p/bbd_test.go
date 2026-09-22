@@ -83,7 +83,8 @@ func TestBackwardBlockDownloader_GapBehindCurrentHead_FailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	feed, err := bbd.DownloadBlocksBackwards(ctx, initialHeader.Hash(), stubBbdHeaderReader{},
+	feed, err := bbd.DownloadBlocksBackwards(
+		ctx, initialHeader.Hash(), stubBbdHeaderReader{},
 		WithChainLengthLimit(96),
 		WithChainLengthCurrentHead(100),
 	)
@@ -210,7 +211,8 @@ func TestBackwardBlockDownloader_GapAheadOfCurrentHead_FailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	feed, err := bbd.DownloadBlocksBackwards(ctx, initialHeader.Hash(), stubBbdHeaderReader{},
+	feed, err := bbd.DownloadBlocksBackwards(
+		ctx, initialHeader.Hash(), stubBbdHeaderReader{},
 		WithChainLengthLimit(96),
 		WithChainLengthCurrentHead(500),
 	)
