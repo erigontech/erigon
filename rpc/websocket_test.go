@@ -448,6 +448,75 @@ func TestWebsocketServerGracefulClose(t *testing.T) {
 	}
 }
 
+// A peer that stops reading must not hold a writer forever: once the socket buffers fill, a
+// write fails at the codec's write timeout, and the connection is closed rather than left
+// with half a frame on the wire.
+func TestWebsocketWriteTimeoutClosesStalledConn(t *testing.T) {
+	t.Parallel()
+
+	codecs := make(chan *websocketCodec, 1)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, nil)
+		if err != nil {
+			return
+		}
+		if hw.conn == nil {
+			t.Error("the hijacked socket was not recorded")
+		}
+		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		defer wc.Close()
+		codecs <- wc
+		// A hijacked request's context never ends, so wait for the connection itself.
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	conn.SetReadLimit(-1)
+
+	wc := <-codecs
+	wc.writeTimeout = 200 * time.Millisecond
+	payload := rawResponse(`"` + strings.Repeat("x", 1<<20) + `"`)
+	failed := make(chan struct{})
+	go func() {
+		for wc.WriteJSON(context.Background(), payload) == nil {
+		}
+		close(failed)
+	}()
+	select {
+	case <-failed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("writes to a peer that does not read never failed")
+	}
+
+	closed := make(chan struct{})
+	go func() {
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				close(closed)
+				return
+			}
+		}
+	}()
+	select {
+	case <-closed:
+	case <-time.After(10 * time.Second):
+		t.Fatal("the connection with the cut-off write was not closed")
+	}
+}
+
 func TestWebsocketPingNotRearmedAfterClose(t *testing.T) {
 	t.Parallel()
 	logger := log.New()
