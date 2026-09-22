@@ -17,7 +17,9 @@
 package sentinel
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -31,6 +33,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/p2p/discover"
 )
 
@@ -47,20 +50,25 @@ func (s stubP2P) UpdateENRSyncNets(subnetIndex int, on bool)   {}
 func testSentinel(t *testing.T, h host.Host) *Sentinel {
 	t.Helper()
 	return &Sentinel{
-		peers: peers.NewPool(h),
-		p2p:   stubP2P{host: h},
-		cfg:   &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}},
+		peers:  peers.NewPool(h),
+		p2p:    stubP2P{host: h},
+		cfg:    &SentinelConfig{P2PConfig: p2p.P2PConfig{MaxPeerCount: 100}},
+		logger: log.New(),
 	}
 }
 
 // connectedPair returns a host acting as the local node and a peer connected to it.
 func connectedPair(t *testing.T) (host.Host, host.Host) {
+	return connectedPairWithListenAddr(t, "/ip4/127.0.0.1/tcp/0")
+}
+
+func connectedPairWithListenAddr(t *testing.T, listenAddr string) (host.Host, host.Host) {
 	t.Helper()
 	local, err := libp2p.New(libp2p.NoListenAddrs)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = local.Close() })
 
-	remote, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	remote, err := libp2p.New(libp2p.ListenAddrStrings(listenAddr))
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = remote.Close() })
 
@@ -109,6 +117,39 @@ func TestOnConnectionClosesABannedPeer(t *testing.T) {
 	s.onConnection(local.Network(), conns[0])
 
 	waitDisconnected(t, local, remote.ID())
+}
+
+func TestOnConnectionLogsActualTransport(t *testing.T) {
+	tests := []struct {
+		name       string
+		listenAddr string
+		transport  string
+	}{
+		{name: "TCP", listenAddr: "/ip4/127.0.0.1/tcp/0", transport: "tcp"},
+		{name: "QUIC", listenAddr: "/ip4/127.0.0.1/udp/0/quic-v1", transport: "quic"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			local, remote := connectedPairWithListenAddr(t, tt.listenAddr)
+			s := testSentinel(t, local)
+			s.peers.SetBanStatus(remote.ID(), true)
+			var output bytes.Buffer
+			s.logger = log.New()
+			s.logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+
+			conns := local.Network().ConnsToPeer(remote.ID())
+			require.NotEmpty(t, conns)
+			conn := conns[0]
+			s.onConnection(local.Network(), conn)
+
+			logs := output.String()
+			require.Contains(t, logs, fmt.Sprintf("peer=%s", remote.ID()))
+			require.Contains(t, logs, "direction=Outbound")
+			require.Contains(t, logs, fmt.Sprintf("addr=%s", conn.RemoteMultiaddr()))
+			require.Contains(t, logs, fmt.Sprintf("transport=%s", tt.transport))
+			waitDisconnected(t, local, remote.ID())
+		})
+	}
 }
 
 // Three handshake failures ban the peer, and the ban must then be honoured: the storm this
