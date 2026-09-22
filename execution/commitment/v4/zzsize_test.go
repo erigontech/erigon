@@ -237,7 +237,7 @@ func BenchmarkZZStorageLeafRefDirect(b *testing.B) {
 }
 
 func benchUpdates2(t *testing.T, entries []parityUpdate) *commitment.Updates {
-	u := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
 	for _, e := range entries {
 		u.TouchPlainKeyDirect(string(e.key), e.update)
 	}

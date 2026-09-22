@@ -31,8 +31,8 @@ func incrRoots(t *testing.T, batch1, batch2 int, seed int64) (v4r, hr []byte, er
 		}
 		return out
 	}
-	mk := func(es []parityUpdate) *commitment.Updates {
-		u := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	mk := func(mode commitment.Mode, es []parityUpdate) *commitment.Updates {
+		u := commitment.NewUpdates(mode, t.TempDir(), commitment.KeyToHexNibbleHash)
 		for _, e := range es {
 			u.TouchPlainKeyDirect(string(e.key), e.update)
 		}
@@ -45,18 +45,18 @@ func incrRoots(t *testing.T, batch1, batch2 int, seed int64) (v4r, hr []byte, er
 	hph := commitment.NewHexPatriciaHashed(length.Addr, ch, commitment.DefaultTrieConfig())
 	defer hph.Release()
 	ctx := context.Background()
-	if _, err = tr.Process(ctx, mk(build(0, batch1, true)), "", nil, commitment.WarmupConfig{}); err != nil {
+	if _, err = tr.Process(ctx, mk(commitment.ModeCollect, build(0, batch1, true)), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
 	zzSeed(ch, build(0, batch1, true))
-	if _, err = hph.Process(ctx, mk(build(0, batch1, true)), "", nil, commitment.WarmupConfig{}); err != nil {
+	if _, err = hph.Process(ctx, mk(commitment.ModeUpdate, build(0, batch1, true)), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
-	if v4r, err = tr.Process(ctx, mk(build(batch1, batch1+batch2, false)), "", nil, commitment.WarmupConfig{}); err != nil {
+	if v4r, err = tr.Process(ctx, mk(commitment.ModeCollect, build(batch1, batch1+batch2, false)), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
 	zzSeed(ch, build(batch1, batch1+batch2, false))
-	hr, err = hph.Process(ctx, mk(build(batch1, batch1+batch2, false)), "", nil, commitment.WarmupConfig{})
+	hr, err = hph.Process(ctx, mk(commitment.ModeUpdate, build(batch1, batch1+batch2, false)), "", nil, commitment.WarmupConfig{})
 	return v4r, hr, err
 }
 

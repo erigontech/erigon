@@ -31,8 +31,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func benchUpdates(b *testing.B, mode commitment.Mode, entries []parityUpdate) *commitment.Updates {
-	u := commitment.NewUpdates(mode, b.TempDir(), commitment.KeyToHexNibbleHash)
+func benchUpdatesIn(dir string, mode commitment.Mode, entries []parityUpdate) *commitment.Updates {
+	u := commitment.NewUpdates(mode, dir, commitment.KeyToHexNibbleHash)
 	for _, e := range entries {
 		u.TouchPlainKeyDirect(string(e.key), e.update)
 	}
@@ -117,14 +117,15 @@ func BenchmarkFoldV4VsHPH(b *testing.B) {
 			entries := benchEntries(shape, n)
 
 			b.Run(fmt.Sprintf("%s/%d/v4", shape, n), func(b *testing.B) {
+				dir := b.TempDir()
 				for range b.N {
 					b.StopTimer()
 					c := newShardedContext()
 					tr := &Trie{}
 					tr.ResetContext(c)
 					tr.SetTrieContextFactory(c.factory)
-					u := benchUpdates(b, commitment.ModeUpdate, entries)
 					b.StartTimer()
+					u := benchUpdatesIn(dir, commitment.ModeCollect, entries)
 					if _, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{}); err != nil {
 						b.Fatal(err)
 					}
@@ -135,12 +136,13 @@ func BenchmarkFoldV4VsHPH(b *testing.B) {
 			})
 
 			b.Run(fmt.Sprintf("%s/%d/hph", shape, n), func(b *testing.B) {
+				dir := b.TempDir()
 				for range b.N {
 					b.StopTimer()
 					c := newShardedContext()
 					tr := commitment.NewHexPatriciaHashed(length.Addr, c, commitment.DefaultTrieConfig())
-					u := benchUpdates(b, commitment.ModeUpdate, entries)
 					b.StartTimer()
+					u := benchUpdatesIn(dir, commitment.ModeUpdate, entries)
 					if _, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{}); err != nil {
 						b.Fatal(err)
 					}
@@ -151,12 +153,13 @@ func BenchmarkFoldV4VsHPH(b *testing.B) {
 			})
 
 			b.Run(fmt.Sprintf("%s/%d/parallel", shape, n), func(b *testing.B) {
+				dir := b.TempDir()
 				for range b.N {
 					b.StopTimer()
 					c := newShardedContext()
 					tr := commitment.NewParallelPatriciaHashed(c.factory, length.Addr, commitment.DefaultTrieConfig())
-					u := benchUpdates(b, commitment.ModeParallel, entries)
 					b.StartTimer()
+					u := benchUpdatesIn(dir, commitment.ModeParallel, entries)
 					if _, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{}); err != nil {
 						b.Fatal(err)
 					}
@@ -224,14 +227,15 @@ func BenchmarkV4Workers(b *testing.B) {
 		entries := benchEntries(shape, 100000)
 		for _, w := range []int{1, 2, 4, 8, 18, 36} {
 			b.Run(fmt.Sprintf("%s/%d", shape, w), func(b *testing.B) {
+				dir := b.TempDir()
 				for range b.N {
 					b.StopTimer()
 					c := newShardedContext()
 					tr := &Trie{scheduleWorkers: w}
 					tr.ResetContext(c)
 					tr.SetTrieContextFactory(c.factory)
-					u := benchUpdates(b, commitment.ModeUpdate, entries)
 					b.StartTimer()
+					u := benchUpdatesIn(dir, commitment.ModeCollect, entries)
 					if _, err := tr.Process(ctxb, u, "", nil, commitment.WarmupConfig{}); err != nil {
 						b.Fatal(err)
 					}

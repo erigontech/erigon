@@ -76,7 +76,7 @@ func TestSchedulePoliciesPreserveRoot(t *testing.T) {
 		ctx := newParityContext()
 		trie := &Trie{scheduleOrder: order, scheduleWorkers: 2}
 		trie.ResetContext(ctx)
-		root, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{})
+		root, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
 		require.NoError(t, err)
 		roots = append(roots, root)
 		trie.Release()
@@ -97,7 +97,7 @@ func TestScheduleWorkerBoundDuringTrieProcess(t *testing.T) {
 	stats := new(scheduleStats)
 	trie := &Trie{scheduleOrder: orderLongestFirst, scheduleWorkers: 2, scheduleStats: stats}
 	trie.ResetContext(newParityContext())
-	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{})
+	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	require.LessOrEqual(t, stats.max.Load(), int64(2))
 	require.Equal(t, int64(0), stats.inFlight.Load())
@@ -113,14 +113,14 @@ func TestScheduledFieldUpdatePreservesStorageRoot(t *testing.T) {
 		{key: address, update: accountParityUpdate(3)},
 		{key: append(append([]byte(nil), address...), paritySlot(3)...), update: storageParityUpdate(3)},
 	}
-	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, initial), "", nil, commitment.WarmupConfig{})
+	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, initial), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	path := commitment.KeyToHexNibbleHash(address)
 	_, _, _, before, err := decodeAccountLeaf(accountLeafFromParityContext(t, ctx, path))
 	require.NoError(t, err)
 
 	partial := &commitment.Update{Flags: commitment.BalanceUpdate, Balance: *uint256.NewInt(99)}
-	_, err = trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, []parityUpdate{{key: address, update: partial}}), "", nil, commitment.WarmupConfig{})
+	_, err = trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, []parityUpdate{{key: address, update: partial}}), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	_, _, _, after, err := decodeAccountLeaf(accountLeafFromParityContext(t, ctx, path))
 	require.NoError(t, err)
