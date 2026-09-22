@@ -172,7 +172,6 @@ func (h *handler) isRpcMethodNeedsCheck(method string) bool {
 // sender's next nonce in the txpool. A batch holding one runs its calls one by one, in order.
 var inOrderMethods = map[string]struct{}{
 	"eth_sendRawTransaction":     {},
-	"eth_sendRawTransactionSync": {},
 	"graphql_sendRawTransaction": {},
 	"eth_uninstallFilter":        {},
 	"eth_getFilterChanges":       {},
@@ -185,6 +184,7 @@ var inOrderMethods = map[string]struct{}{
 	"debug_setMemoryLimit":       {},
 	"eth_submitWork":             {},
 	"eth_submitHashrate":         {},
+	"testing_commitBlockV1":      {},
 }
 
 // hasInOrderCall also counts subscribe calls: each adds to the batch's notifiers, which two
