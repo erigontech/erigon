@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"encoding"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"slices"
@@ -94,13 +95,52 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 	s.afterValue()
 }
 
+// hexChunk is how much input one chunk of a large hex value encodes: its hex stays well under
+// FlushThreshold, so the value streams through a buffer of about that size.
+const hexChunk = FlushThreshold / 4
+
 func (s *StackStream) WriteHex(b []byte) {
+	if s.out != nil && len(b) > hexChunk {
+		s.writeHexChunked(b)
+		return
+	}
 	s.beforeValue()
 	buf := s.stream.Buffer()
 	start := len(buf)
 	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
 	s.commit(buf, start)
 	s.afterValue()
+}
+
+func (s *StackStream) writeHexChunked(b []byte) {
+	s.beforeValue()
+	s.stream.SetBuffer(append(s.stream.Buffer(), `"0x`...))
+	s.appendChunks((len(b)+hexChunk-1)/hexChunk, func(buf []byte, i int) []byte {
+		return hex.AppendEncode(buf, b[i*hexChunk:min((i+1)*hexChunk, len(b))])
+	})
+	s.stream.SetBuffer(append(s.stream.Buffer(), '"'))
+	s.afterValue()
+}
+
+// appendChunks appends a value in n parts, handing the buffer to the writer whenever it passes
+// FlushThreshold, so the value never needs a buffer of its own size.
+func (s *StackStream) appendChunks(n int, part func(buf []byte, i int) []byte) {
+	for i := range n {
+		s.stream.SetBuffer(part(s.stream.Buffer(), i))
+		flushIfFull(s.stream)
+	}
+}
+
+// appendArrayChunked is appendChunks for an array, one element per part.
+func (s *StackStream) appendArrayChunked(n int, elem func(buf []byte, i int) []byte) {
+	s.stream.SetBuffer(append(s.stream.Buffer(), '['))
+	s.appendChunks(n, func(buf []byte, i int) []byte {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		return elem(buf, i)
+	})
+	s.stream.SetBuffer(append(s.stream.Buffer(), ']'))
 }
 
 // HexesField writes fixed-size values as one array field: one buffer growth for the whole
@@ -112,7 +152,13 @@ func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items
 		return
 	}
 	s.beforeValue()
-	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
+	size := 2 + len(items)*(hexutil.QuotedLen(length.Hash)+1)
+	if s.out != nil && size > FlushThreshold {
+		s.appendArrayChunked(len(items), func(buf []byte, i int) []byte { return hexutil.AppendQuoted(buf, items[i][:]) })
+		s.afterValue()
+		return
+	}
+	buf := slices.Grow(s.stream.Buffer(), size)
 	buf = append(buf, '[')
 	for i := range items {
 		if i > 0 {
@@ -131,6 +177,11 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 	size := 2 + len(items)
 	for i := range items {
 		size += hexutil.QuotedLen(len(items[i]))
+	}
+	if s.out != nil && size > FlushThreshold {
+		s.appendArrayChunked(len(items), func(buf []byte, i int) []byte { return hexutil.AppendQuoted(buf, items[i]) })
+		s.afterValue()
+		return
 	}
 	buf := slices.Grow(s.stream.Buffer(), size)
 	buf = append(buf, '[')
