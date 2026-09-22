@@ -53,5 +53,5 @@ func (c *BranchCache) PublishMetrics() {
 	if delta := misses - c.lastPublishedPinnedMisses.Swap(misses); delta > 0 {
 		mxPinnedMisses.AddUint64(delta)
 	}
-	mxPinnedEntries.SetUint64(uint64(c.pinnedEntries.Load()))
+	mxPinnedEntries.SetUint64(uint64(c.PinnedCount()))
 }

@@ -209,6 +209,12 @@ func (hr *HistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.
 	return &a, nil
 }
 
+func (hr *HistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	hr.addr = address.Value()
+	enc, ok, err := hr.getAsOf(kv.AccountsDomain, hr.addr[:])
+	return ok && len(enc) > 0, err
+}
+
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
 func (hr *HistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
@@ -233,7 +239,7 @@ func (hr *HistoryReaderV3) ReadAccountStorage(address accounts.Address, key acco
 
 func (hr *HistoryReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	//  must pass key2=Nil here: because Erigon4 does concatinate key1+key2 under the hood
-	//code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
+	// code, _, err := hr.ttx.GetAsOf(kv.CodeDomain, address.Bytes(), codeHash.Bytes(), hr.txNum)
 	hr.addr = address.Value()
 	code, _, err := hr.getAsOf(kv.CodeDomain, hr.addr[:])
 	if hr.trace {

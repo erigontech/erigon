@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -87,8 +86,7 @@ func eip2780TestAuthorization() (types.Authorization, accounts.Address) {
 
 func eip2780TestConfig(t *testing.T) *chain.Config {
 	t.Helper()
-	cfg := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	cfg := chain.AllProtocolChanges.Copy()
 	cfg.ChainID = uint256.NewInt(7088110746)
 	return cfg
 }
@@ -513,7 +511,8 @@ func TestEIP2780RecipientStartsWarm(t *testing.T) {
 	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
 	require.NoError(t, err)
 	require.NoError(t, result.Err)
-	require.Equal(t,
+	require.Equal(
+		t,
 		params.TxBaseEIP2780+params.ColdAccountAccessEIP2780+vm.GasQuickStep+params.WarmStorageReadCostEIP2929,
 		result.BlockExecutionGasUsed,
 	)

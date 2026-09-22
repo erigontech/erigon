@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/p2p"
 	"github.com/erigontech/erigon/cl/p2p/mock_services"
+	"github.com/erigontech/erigon/cl/sentinel/peers"
 	libp2p "github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -106,7 +107,7 @@ func TestListenForPeersDialsDirectPeersWithoutDiscovery(t *testing.T) {
 			NetworkConfig: &clparams.NetworkConfig{StaticPeers: []string{unsupportedPeer, directPeer}},
 			NoDiscovery:   true,
 		}},
-		peers:      testPeerPool(),
+		peers:      peers.NewPool(local),
 		p2p:        p2pManager,
 		connectSem: semaphore.NewWeighted(goRoutinesOpeningPeerConnections),
 	}

@@ -92,21 +92,21 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				}
 				if id == 4 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyArray()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
 				if id == 5 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyObject()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
 				if id == 6 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyArray()
 					// intentionally leave the result object open: the tracer erroring out
 					// mid-write must not leave the response's "result" object unclosed.

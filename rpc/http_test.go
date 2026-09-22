@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -478,6 +479,70 @@ func TestReadAllBodyError(t *testing.T) {
 type errReader struct{}
 
 func (*errReader) Read([]byte) (int, error) { return 0, io.ErrClosedPipe }
+
+// barrierService holds every call until n of them are in flight, so a batch whose items
+// stopped running concurrently cannot complete.
+type barrierService struct {
+	n       int
+	release chan struct{}
+
+	mu      sync.Mutex
+	arrived int
+}
+
+func (b *barrierService) Wait(ctx context.Context) (int, error) {
+	b.mu.Lock()
+	b.arrived++
+	arrived := b.arrived
+	if arrived == b.n {
+		close(b.release)
+	}
+	b.mu.Unlock()
+
+	select {
+	case <-b.release:
+		return arrived, nil
+	case <-ctx.Done():
+		return 0, ctx.Err()
+	}
+}
+
+// An HTTP batch runs its items on their own goroutines even though the request itself is
+// answered on the serving goroutine.
+func TestHTTPBatchRunsItemsConcurrently(t *testing.T) {
+	const n = 4
+	srv := NewServer(n, false /* traceRequests */, false /* debugSingleRequest */, false /* disableStreaming */, log.New(), 100)
+	defer srv.Stop()
+	require.NoError(t, srv.RegisterName("barrier", &barrierService{n: n, release: make(chan struct{})}))
+	ts := httptest.NewServer(srv)
+	defer ts.Close()
+
+	items := make([]string, n)
+	for i := range items {
+		items[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"barrier_wait"}`, i+1)
+	}
+
+	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, ts.URL, strings.NewReader("["+strings.Join(items, ",")+"]"))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	raw, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+
+	var answers []struct {
+		ID    int             `json:"id"`
+		Error json.RawMessage `json:"error"`
+	}
+	require.NoError(t, json.Unmarshal(raw, &answers))
+	require.Len(t, answers, n)
+	for _, a := range answers {
+		require.Nil(t, a.Error, "item %d did not reach the barrier, so batch items ran one after another", a.ID)
+	}
+}
 
 func TestHTTPContentLengthForBufferedResponse(t *testing.T) {
 	logger := log.New()

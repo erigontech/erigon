@@ -23,7 +23,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -829,7 +828,7 @@ func TestGatesTakeNoEmptyBlockExemption(t *testing.T) {
 // byzantiumChainConfig moves Byzantium and every later fork to at, so the blocks
 // below it carry a post state the receipt cache does not store.
 func byzantiumChainConfig(at uint64) *chain.Config {
-	cfg := pruneGatingChainConfig()
+	cfg := chain.TestChainBerlinConfig.Copy()
 	for _, fork := range []**uint64{
 		&cfg.ByzantiumBlock, &cfg.ConstantinopleBlock, &cfg.PetersburgBlock,
 		&cfg.IstanbulBlock, &cfg.MuirGlacierBlock, &cfg.BerlinBlock,
@@ -842,28 +841,9 @@ func byzantiumChainConfig(at uint64) *chain.Config {
 // mergeHeightChainConfig declares a merge point, which is what turns
 // KeepPostMergeBlocksPruneMode from a no-op into chain history expiry.
 func mergeHeightChainConfig(height uint64) *chain.Config {
-	cfg := pruneGatingChainConfig()
+	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.MergeHeight = &height
 	return cfg
-}
-
-// pruneGatingChainConfig mirrors TestChainBerlinConfig, which cannot be copied
-// because chain.Config carries a sync.Once.
-func pruneGatingChainConfig() *chain.Config {
-	return &chain.Config{
-		ChainID:               uint256.NewInt(1337),
-		Rules:                 chain.EtHashRules,
-		HomesteadBlock:        common.NewUint64(0),
-		TangerineWhistleBlock: common.NewUint64(0),
-		SpuriousDragonBlock:   common.NewUint64(0),
-		ByzantiumBlock:        common.NewUint64(0),
-		ConstantinopleBlock:   common.NewUint64(0),
-		PetersburgBlock:       common.NewUint64(0),
-		IstanbulBlock:         common.NewUint64(0),
-		MuirGlacierBlock:      common.NewUint64(0),
-		BerlinBlock:           common.NewUint64(0),
-		Ethash:                new(chain.EthashConfig),
-	}
 }
 
 // TestCapabilitiesAgreeWithGates pins eth_capabilities against the gates it
@@ -1110,7 +1090,7 @@ func rangeFilter(begin, end uint64) filters.FilterCriteria {
 // noByzantiumChainConfig declares a chain that never reaches Byzantium, so every
 // receipt on it carries a post state the cache does not store.
 func noByzantiumChainConfig() *chain.Config {
-	cfg := pruneGatingChainConfig()
+	cfg := chain.TestChainBerlinConfig.Copy()
 	for _, fork := range []**uint64{
 		&cfg.ByzantiumBlock, &cfg.ConstantinopleBlock, &cfg.PetersburgBlock,
 		&cfg.IstanbulBlock, &cfg.MuirGlacierBlock, &cfg.BerlinBlock,
@@ -1136,6 +1116,11 @@ func TestBlocksGateDoesNotSettleExpiryBeforeBlocksArrive(t *testing.T) {
 		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
 	})
 	ctx := t.Context()
+
+	// A walk that answered nothing is held for a TTL of its own, which is what keeps a
+	// datadir without block data from being walked on every request. This test is about
+	// what the walk reads, so it takes one per call.
+	apis.eth._preMergeUnsettledTTL = 0
 
 	canonicalHash := func(num uint64) common.Hash {
 		tx, err := apis.eth.db.BeginTemporalRo(ctx)

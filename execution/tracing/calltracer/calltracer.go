@@ -19,6 +19,7 @@ package calltracer
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -51,6 +52,12 @@ func (ct *CallTracer) Tracer() *tracers.Tracer {
 			hooks.OnEnter = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
 				ct.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
 				ct.hooks.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+			}
+		}
+		if ct.hooks.OnEnterV2 != nil {
+			hooks.OnEnterV2 = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+				ct.OnEnter(depth, typ, from, to, precompile, input, gas.Execution, value, code)
+				ct.hooks.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
 			}
 		}
 	}

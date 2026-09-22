@@ -396,6 +396,7 @@ func opOrigin(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	return pc, nil, nil
 }
+
 func opCaller(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if caller := scope.Contract.Caller(); caller.IsNil() {
 		scope.Stack.pushRef().Clear()
@@ -794,13 +795,15 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 		if usedBitmap {
 			if evm.config.TraceJumpDest {
-				log.Debug("Code Bitmap used for detecting invalid jump",
+				log.Debug(
+					"Code Bitmap used for detecting invalid jump",
 					"tx", fmt.Sprintf("0x%x", evm.TxHash),
 					"block_num", evm.Context.BlockNumber,
 				)
 			} else {
 				// This is "cheaper" version because it does not require calculation of txHash for each transaction
-				log.Debug("Code Bitmap used for detecting invalid jump",
+				log.Debug(
+					"Code Bitmap used for detecting invalid jump",
 					"block_num", evm.Context.BlockNumber,
 				)
 			}
@@ -825,13 +828,15 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
 			if usedBitmap {
 				if evm.config.TraceJumpDest {
-					log.Warn("Code Bitmap used for detecting invalid jump",
+					log.Warn(
+						"Code Bitmap used for detecting invalid jump",
 						"tx", fmt.Sprintf("0x%x", evm.TxHash),
 						"block_num", evm.Context.BlockNumber,
 					)
 				} else {
 					// This is "cheaper" version because it does not require calculation of txHash for each transaction
-					log.Warn("Code Bitmap used for detecting invalid jump",
+					log.Warn(
+						"Code Bitmap used for detecting invalid jump",
 						"block_num", evm.Context.BlockNumber,
 					)
 				}
@@ -1005,6 +1010,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	}
 	gas := scope.Gas()
 	returnGas := gas
+	var childGasUsed mdgas.MdGasUsage
 	var preparation createPreparation
 	var suberr error
 	if evm.chainRules.IsAmsterdam {
@@ -1015,42 +1021,51 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	}
 	forwarded := false
 	if suberr == nil {
-		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeIgnored) {
+		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallNewAccount) {
 			return pc, nil, ErrOutOfGas
 		}
 		gas = scope.Gas()
 		if evm.chainRules.IsTangerineWhistle {
 			gas.Execution -= gas.Execution / 64
 		}
-		gasChangeReason := tracing.GasChangeCallContractCreation
-		if typ == CREATE2 {
-			gasChangeReason = tracing.GasChangeCallContractCreation2
+		tracer := evm.config.Tracer
+		gasTracing := tracer.HasGasChangeHook()
+		var old mdgas.MdGas
+		if gasTracing {
+			old = scope.Gas()
 		}
-		scope.useGas(gas.Execution, evm.Config().Tracer, gasChangeReason)
+		scope.gas -= gas.Execution
 		scope.stateGas = 0
+		if gasTracing {
+			gasChangeReason := tracing.GasChangeCallContractCreation
+			if typ == CREATE2 {
+				gasChangeReason = tracing.GasChangeCallContractCreation2
+			}
+			tracer.EmitGasChange(old, scope.Gas(), gasChangeReason)
+		}
 		returnGas = gas
 		forwarded = true
 		if !evm.chainRules.IsAmsterdam {
 			preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
 			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
+				childGasUsed.Execution = returnGas.Execution
 				returnGas = mdgas.MdGas{}
 			}
 		}
 	}
 	var res []byte
 	var addr accounts.Address
-	var childGasUsed mdgas.MdGasUsage
 	if suberr == nil {
 		res, addr, returnGas, childGasUsed, suberr = evm.createPrepared(scope.Contract.Address(), codeAndHash, gas, value, address, typ, preparation)
 	} else if forwarded && evm.Config().Tracer != nil {
 		evm.captureBegin(evm.depth, typ, scope.Contract.Address(), address, false, codeAndHash.code, gas, value, nil)
-		evm.captureEnd(evm.depth, typ, gas, returnGas, nil, suberr)
+		evm.captureEnd(evm.depth, returnGas, childGasUsed, nil, suberr)
 	}
 	scope.Contract.selfBalanceCached = false
 	if forwarded {
 		scope.restoreChildGas(returnGas, evm.config.Tracer)
 		if suberr != nil && preparation.chargeNewAccount {
-			scope.refillStateGas(params.StateGasNewAccount)
+			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeRefundAccountCreation)
 		} else if suberr == nil {
 			scope.mergeChildStateGas(childGasUsed.StateSpill, evm.config.Tracer)
 		}
@@ -1116,7 +1131,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		gas.Execution += params.CallStipend
 	}
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 	ret, returnGas, childGasUsage, err := evm.Call(scope.Contract.Address(), toAddr, args, gas, *value, false /* bailout */)
 	res := stack.pushRef()
 	if err != nil {
@@ -1133,7 +1148,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		if err == nil {
 			scope.mergeChildStateGas(childGasUsage.StateSpill, evm.config.Tracer)
 		} else if scope.newAccountCharged {
-			scope.refillStateGas(params.StateGasNewAccount)
+			scope.refillStateGas(params.StateGasNewAccount, evm.config.Tracer, tracing.GasChangeRefundAccountCreation)
 		}
 	}
 	scope.Contract.selfBalanceCached = false
@@ -1168,7 +1183,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 		gas.Execution += params.CallStipend
 	}
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.CallCode(scope.Contract.Address(), toAddr, args, gas, *value)
 	res := stack.pushRef()
@@ -1203,7 +1218,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.DelegateCall(scope.Contract.addr, scope.Contract.caller, toAddr, args, scope.Contract.value, gas)
 	res := stack.pushRef()
@@ -1248,7 +1263,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	// Get arguments from the memory.
 	args := scope.Memory.GetPtr(inOffset, inSize)
 
-	scope.stateGas = 0 // pass reservoir to child via callGas; restoreChildGas returns it
+	scope.forwardStateGas(evm.config.Tracer)
 
 	ret, returnGas, childGasUsage, err := evm.StaticCall(scope.Contract.Address(), toAddr, args, gas)
 	res := stack.pushRef()
@@ -1320,12 +1335,8 @@ func opSelfdestruct(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 		return pc, nil, err
 	}
 	tracer := evm.Config().Tracer
-	if tracer != nil && tracer.OnEnter != nil {
-		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
-	}
-	if tracer != nil && tracer.OnExit != nil {
-		tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
-	}
+	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 
@@ -1391,12 +1402,8 @@ func opSelfdestruct6780(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte
 		ibs.AddLog(misc.EthTransferLog(self.Value(), beneficiaryAddr.Value(), balance))
 	}
 	tracer := evm.Config().Tracer
-	if tracer != nil && tracer.OnEnter != nil {
-		tracer.OnEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, 0, balance, nil)
-	}
-	if tracer != nil && tracer.OnExit != nil {
-		tracer.OnExit(evm.depth, []byte{}, 0, nil, false)
-	}
+	tracer.EmitEnter(evm.depth, byte(SELFDESTRUCT), scope.Contract.Address(), beneficiaryAddr, false, []byte{}, mdgas.MdGas{}, balance, nil)
+	tracer.EmitExit(evm.depth, []byte{}, mdgas.MdGasUsage{}, nil, false)
 	return pc, nil, errStopToken
 }
 

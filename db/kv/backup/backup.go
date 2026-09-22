@@ -133,7 +133,7 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	}
 	// 0700: the copy holds the db's contents for the whole run, before the
 	// original's mode is applied to it.
-	if err := os.MkdirAll(tmpDir, 0700); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return err
 	}
 	defer dir.RemoveAll(tmpDir) //nolint:errcheck
@@ -412,7 +412,8 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 			}
 			now := time.Now()
 			secs := now.Sub(lastLog).Seconds()
-			log.Info("[clear]", "table", table,
+			log.Info(
+				"[clear]", "table", table,
 				"speed", common.ByteCount(uint64(float64(lastSize-remaining)/secs))+"/s",
 				"keys", common.PrettyCounter(uint64(float64(deleted-lastDeleted)/secs))+"/s",
 				"remaining", common.ByteCount(remaining),
