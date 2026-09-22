@@ -493,7 +493,7 @@ func generateDomainFiles(t *testing.T, name string, dirs datadir.Dirs, ranges []
 		accessors := statecfg.AccessorHashMap
 		schema = NewE3SnapSchemaBuilder(accessors, stepSize).
 			Data(dirs.SnapHistory, name, DataExtensionV, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, ver).
+			Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
 			Build()
 		return name, schema
 	})
@@ -552,7 +552,7 @@ func generateCommitmentHistoryAndIndexFiles(t *testing.T, dirs datadir.Dirs, ran
 	histRepo := setupAggSnapRepo(t, dirs, func(stepSize uint64, dirs datadir.Dirs) (string, SnapNameSchema) {
 		schema := NewE3SnapSchemaBuilder(statecfg.AccessorHashMap, stepSize).
 			Data(dirs.SnapHistory, "commitment", DataExtensionV, seg.CompressNone, ver).
-			Accessor(dirs.SnapAccessors, ver).
+			Accessor(dirs.SnapAccessors, version.Versions{Current: version.V2_0, MinSupported: version.V2_0}).
 			Build()
 		return "commitment", schema
 	})

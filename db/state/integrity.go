@@ -18,6 +18,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -248,5 +249,100 @@ func (iit *InvertedIndexRoTx) IntegrityInvertedIndexAllValuesAreInRange(ctx cont
 		return err
 	}
 
+	return nil
+}
+
+// IntegrityHistoryValueIndex re-derives every .v offset the way buildVI does and
+// compares it with what the .vi answers. It also covers a v1 .vi, which is asked
+// the same question by txNum+key.
+func (at *AggregatorRoTx) IntegrityHistoryValueIndex(ctx context.Context, domain kv.Domain, failFast bool, fromStep uint64) error {
+	return at.d[domain].ht.IntegrityHistoryValueIndex(ctx, failFast, fromStep)
+}
+
+func (ht *HistoryRoTx) IntegrityHistoryValueIndex(ctx context.Context, failFast bool, fromStep uint64) error {
+	fromTxNum := fromStep * ht.h.stepSize
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(estimate.AlmostAllCPUs())
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	for _, efItem := range ht.iit.files {
+		if efItem.src.decompressor == nil || efItem.endTxNum <= fromTxNum {
+			continue
+		}
+		g.Go(func() error {
+			err := ht.checkValueIndexOfFile(ctx, efItem, logEvery)
+			if err != nil && !failFast {
+				log.Warn(err.Error())
+				return nil
+			}
+			return err
+		})
+	}
+	return g.Wait()
+}
+
+func (ht *HistoryRoTx) checkValueIndexOfFile(ctx context.Context, efItem visibleFile, logEvery *time.Ticker) error {
+	vItem, ok := ht.pairedFile(efItem)
+	if !ok {
+		return fmt.Errorf("[integrity] no .v file paired with %s", efItem.src.decompressor.FileName())
+	}
+	vi := vItem.src.vi
+	if vi.Empty() {
+		return nil
+	}
+	hist := vItem.src.decompressor
+	pageSize := uint64(hist.CompressedPageValuesCount())
+	if hist.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+		pageSize = uint64(ht.h.HistoryValuesOnCompressedPage)
+	}
+	if pageSize == 0 {
+		pageSize = 1
+	}
+
+	efReader := ht.iit.dataReader(efItem.src.decompressor)
+	efReader.Reset(0)
+	histReader := ht.dataReader(hist)
+	histReader.Reset(0)
+
+	var key, encodedSeq []byte
+	var seq multiencseq.SequenceReader
+	var it multiencseq.SequenceIterator
+	var valOffset, value uint64
+	for keyOrdinal := uint64(0); efReader.HasNext(); keyOrdinal++ {
+		key, _ = efReader.Next(key[:0])
+		encodedSeq, _ = efReader.Next(encodedSeq[:0])
+		seq.Reset(efItem.startTxNum, encodedSeq)
+		it.Reset(&seq, 0)
+		for rank := uint64(0); it.HasNext(); rank++ {
+			txNum, err := it.Next()
+			if err != nil {
+				return err
+			}
+			got, ok := vi.Lookup(keyOrdinal, rank, txNum, key)
+			if !ok {
+				return fmt.Errorf("[integrity] %s: no offset for key %x at txNum %d (run %d, item %d)",
+					vi.FilePath(), common.Shorten(key, 8), txNum, keyOrdinal, rank)
+			}
+			if got != valOffset {
+				return fmt.Errorf("[integrity] %s: key %x at txNum %d resolves to offset %d, .v holds it at %d",
+					vi.FilePath(), common.Shorten(key, 8), txNum, got, valOffset)
+			}
+			value++
+			if value%pageSize == 0 {
+				valOffset, _ = histReader.Skip()
+			}
+		}
+		if keyOrdinal%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-logEvery.C:
+				log.Info(fmt.Sprintf("[integrity] HistoryVi: %s, prefix=%x", vi.FilePath(), common.Shorten(key, 8)))
+			default:
+			}
+		}
+	}
 	return nil
 }

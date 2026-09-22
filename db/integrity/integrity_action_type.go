@@ -121,6 +121,12 @@ const (
 	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
 	CaplinStateRoots Check = "CaplinStateRoots"
 
+	// HistoryVi validates history value index files (.vi). Re-derives every value's
+	// offset in the .v file by walking the paired .ef and .v the way the index was
+	// built, and compares it with what the .vi answers. Catches an .vi that does not
+	// belong to its .v as well as a corrupt one.
+	HistoryVi Check = "HistoryVi"
+
 	// CaplinBlobSidecars validates frozen blob sidecars against canonical beacon blocks and their cryptographic proofs.
 	CaplinBlobSidecars Check = "CaplinBlobSidecars"
 
@@ -135,7 +141,7 @@ const (
 var FastChecks = []Check{
 	Publishable, HeaderNoGaps, BlocksTxnID, Blocks, CaplinStateRoots,
 	ReceiptsNoDups, RCacheNoDups, ReceiptRootIntegrity, InvertedIndex, CommitmentRoot, CommitmentKvi,
-	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
+	HistoryNoSystemTxs, CommitmentHistVal, HistoryVi, StateRootVerifyByHistory,
 }
 
 var SlowChecks = []Check{CaplinBlobSidecars, StateVerify}

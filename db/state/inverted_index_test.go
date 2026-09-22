@@ -1294,3 +1294,30 @@ func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
 		require.Zerof(t, n, "table %s must stay empty", table)
 	}
 }
+
+// A cached miss is stored as found=0. txNum=0 also satisfies txNum<=found, so
+// testing the hit first hands the caller an all-zero seek result - which a
+// positional value index resolves to some other key's value.
+func TestSeekInFilesCacheMissAtTxNumZero(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	t.Parallel()
+
+	db, h, txs := filledHistory(t, false, log.New())
+	collateAndMergeHistory(t, db, h, txs, true)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	hc := h.beginForTests()
+	defer hc.Close()
+
+	absent := []byte("no-such-key-at-all")
+	v1, ok1, err := hc.HistorySeek(absent, 0, tx)
+	require.NoError(t, err)
+	v2, ok2, err := hc.HistorySeek(absent, 0, tx) // served from the seek cache
+	require.NoError(t, err)
+	require.Equal(t, ok1, ok2)
+	require.Equal(t, v1, v2)
+}

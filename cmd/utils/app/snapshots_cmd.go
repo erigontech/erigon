@@ -1667,6 +1667,8 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return integrity.SnapBlocksRead(ctx, db, blockReader, 0, 0, failFast)
 		case integrity.InvertedIndex:
 			return integrity.E3EfFiles(ctx, db, failFast, fromStep)
+		case integrity.HistoryVi:
+			return integrity.HistoryValueIndexFiles(ctx, db, failFast, fromStep, logger)
 		case integrity.HistoryNoSystemTxs:
 			return integrity.HistoryCheckNoSystemTxs(ctx, db, blockReader)
 		case integrity.StateProgress:
