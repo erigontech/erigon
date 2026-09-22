@@ -24,7 +24,6 @@ import (
 	"container/list"
 	"context"
 	crand "crypto/rand"
-	"encoding"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -33,6 +32,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -222,9 +222,8 @@ func writeNotificationResult(s *jsonstream.StackStream, data any) error {
 		}
 		return s.Err()
 	}
-	// As in writeResponse: a TextAppender's JSON is taken to be its quoted text.
-	if ta, ok := data.(encoding.TextAppender); ok && !isNilPointer(data) {
-		s.WriteQuotedText(ta)
+	if h, ok := data.(common.Hash); ok { // pending-tx hashes, sent to every subscriber
+		s.WriteHex(h[:])
 		return s.Err()
 	}
 	enc, err := json.Marshal(data)
