@@ -18,9 +18,11 @@ package types
 
 import (
 	"encoding/json"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
@@ -35,6 +37,21 @@ func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
 			if _, err := logs.MarshalFastJSON(); err != nil {
 				b.Fatal(err)
 			}
+		}
+	})
+	b.Run("stream", func(b *testing.B) {
+		b.ReportAllocs()
+		rec := httptest.NewRecorder()
+		for b.Loop() {
+			rec.Body.Reset()
+			s := jsonstream.Get(rec)
+			if err := logs.MarshalFastJSONTo(s); err != nil {
+				b.Fatal(err)
+			}
+			if err := s.Flush(); err != nil {
+				b.Fatal(err)
+			}
+			jsonstream.Put(s)
 		}
 	})
 	b.Run("reflect", func(b *testing.B) {
