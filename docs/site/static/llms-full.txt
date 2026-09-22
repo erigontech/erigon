@@ -780,7 +780,7 @@ erigon.exe [options]
 **Note**: When you first start Erigon, Windows Firewall may prompt you to allow internet access. Select "YES" to proceed.
 :::
 
-Window Subsystem for Linux (WSL)
+Windows Subsystem for Linux (WSL)
 
 WSL enables you to run a complete GNU/Linux environment natively within Windows, offering Linux compatibility without the performance and resource overhead of traditional virtual machines.
 
@@ -3802,6 +3802,10 @@ openssl ecparam -name prime256v1 -genkey -noout -out RPC-key.pem
 Now create the Certificate Signing Request for the Erigon key pair, and from this request, produce the certificate (signed by the CA) that proves that this key is now part of the “cluster of trust”:
 
 ```bash
+openssl req -new -key erigon-key.pem -out erigon.csr
+```
+
+```bash
 openssl x509 -req -in erigon.csr -CA CA-cert.pem -CAkey CA-key.pem -CAcreateserial -out erigon.crt -days 3650 -sha256
 ```
 
@@ -4608,7 +4612,13 @@ make rpcdaemon
 ./build/bin/erigon --txpool.disable --private.api.addr=localhost:9090 --datadir=<your datadir> --http=false
 ```
 
-If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0` or TxPool will listen on localhost by default.
+If the components run on different devices, `localhost` is no longer the right address on either side.
+
+On the Erigon host, bind the internal gRPC endpoint to an interface the other components can reach — `--private.api.addr=<erigon_lan_ip>:9090` — since it defaults to `127.0.0.1:9090`. Bind it to a private interface, never `0.0.0.0`: the endpoint serves the remote database interface and is not authenticated by default, so it must not be reachable from a public network.
+
+On each of the other hosts, point the same flag at Erigon rather than at themselves: the `txpool` and `rpcdaemon` commands below use `--private.api.addr` as the address they dial, so `localhost:9090` has to become `<erigon_lan_ip>:9090`. `--sentry.api.addr` and `--txpool.api.addr` point in whichever direction the binary reading them needs: the `sentry` command binds `--sentry.api.addr` and `txpool` dials it, and the `txpool` command binds `--txpool.api.addr` and `rpcdaemon` dials it. Bind each one to a reachable private address on the host that serves it, and give the hosts that connect that same address.
+
+`--datadir` does not follow that pattern, and on `rpcdaemon` it is the one flag to drop. For `sentry` and `txpool` it names their *own* working directory on their own host — `txpool` keeps its database in `<datadir>/txpool` — so it stays. On `rpcdaemon` it means the opposite: it is the same-machine optimisation that makes the daemon read Erigon's `chaindata/` and snapshots directly instead of over gRPC (`RemoteServices` in `cmd/rpcdaemon/cli/config.go`, which logs *"if you run RPCDaemon on same machine with Erigon add --datadir option"*). Pointed at a host that has no Erigon datadir it fails on the missing salt files rather than falling back to the remote connection, so a remote `rpcdaemon` runs with `--private.api.addr` alone.
 
 ```sh
 ./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=<your datadir>
@@ -4626,7 +4636,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 
 * `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
 * `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
-* `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
+* `--datadir=<your datadir>`: The working directory of the process reading it, not a single shared path. For Erigon it is the node's own datadir; for `sentry` and `txpool` it is where that component keeps its own files (`txpool` uses `<datadir>/txpool`); for `rpcdaemon` it additionally selects direct local access to Erigon's databases and is therefore only valid when the daemon runs on the Erigon host.
 * `--http=false`: This flag disables the HTTP API server in Erigon (default: `true`). When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
 * `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the Sentry API. The Sentry API is used for communication between the TxPool and the Sentry.
 * `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the TxPool API (default: use value of `--private.api.addr`). The TxPool API is used for communication between the TxPool and other Erigon components.
@@ -5857,7 +5867,7 @@ For API usage refer to the below official resources:
 
 ### Network Information Usage
 
-* `net_version` is commonly used by applications to verify they're connected to the correct .Ethereum network.
+* `net_version` is commonly used by applications to verify they're connected to the correct Ethereum network.
 * `net_peerCount` helps monitor node connectivity and network health.
 * `net_listening` provides a basic connectivity check for the node's network interface.
 
@@ -8540,10 +8550,10 @@ Open an issue in the repository to suggest corrections, flag outdated content, o
 
 ### Submitting a pull request
 
-1. Create a new branch from `release/3.4`.
+1. Create a new branch from the branch the documentation is published from — the one named by the `DOCS_DEPLOY_BRANCH` repository variable, which is not necessarily the newest release branch. If you cannot read repository variables, ask in the pull request which branch to target.
 2. Edit or add `.md` / `.mdx` files under `docs/site/docs/`.
 3. Verify your changes render correctly in the local dev server.
-4. Open a pull request against `release/3.4` with a clear description of what changed and why.
+4. Open a pull request against that same branch, with a clear description of what changed and why.
 
 ---
 

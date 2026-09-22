@@ -71,7 +71,7 @@ Open an issue in the repository to suggest corrections, flag outdated content, o
 
 ### Submitting a pull request
 
-1. Create a new branch from `release/3.4`.
+1. Create a new branch from the branch the documentation is published from — the one named by the `DOCS_DEPLOY_BRANCH` repository variable, which is not necessarily the newest release branch. If you cannot read repository variables, ask in the pull request which branch to target.
 2. Edit or add `.md` / `.mdx` files under `docs/site/docs/`.
 3. Verify your changes render correctly in the local dev server.
-4. Open a pull request against `release/3.4` with a clear description of what changed and why.
+4. Open a pull request against that same branch, with a clear description of what changed and why.
