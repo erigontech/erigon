@@ -92,20 +92,6 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 }
 
 // MarshalFastJSONTo writes the same bytes as encoding/json.
-func (obj *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if obj == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteObjectStart()
-	s.Field("index").WriteQuotedText(&obj.Index)
-	s.Field("validatorIndex").WriteQuotedText(&obj.Validator)
-	s.Field("address").WriteHex(obj.Address[:])
-	s.Field("amount").WriteQuotedText(&obj.Amount)
-	s.WriteObjectEnd()
-	return nil
-}
-
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
