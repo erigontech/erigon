@@ -2132,6 +2132,12 @@ func (result *execResult) finalizeSystemTx(
 	ibs.SetTrace(txTask.Trace)
 
 	writes := ibs.FinalizedWrites(txTask.Rules())
+	// FinalizedWrites composes pre-tx state to decide EIP-161 removals and can hit a
+	// read failure; surface it operationally like the other finalize paths rather
+	// than committing a write-set built on a failed read.
+	if stateErr := ibs.StateReadError(); stateErr != nil {
+		return nil, state.ReadSet{}, nil, fmt.Errorf("finalize system tx block %d: state read: %w", blockNum, stateErr)
+	}
 	return nil, ibs.VersionedReads(), writes, nil
 }
 
