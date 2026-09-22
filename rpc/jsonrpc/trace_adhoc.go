@@ -248,6 +248,18 @@ func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.Bl
 	return traceConfig.BlockOverrides.Override(blockCtx)
 }
 
+// checkOverriddenSigner recovers txn's sender with the overridden block's signer: a stored sender
+// was derived with the real block's signer, which may accept a txn the overridden one rejects.
+// Only a number or time override changes the signer.
+func checkOverriddenSigner(traceConfig *config.TraceConfig, signer *types.Signer, txn types.Transaction) error {
+	if traceConfig == nil || traceConfig.BlockOverrides == nil ||
+		(traceConfig.BlockOverrides.Number == nil && traceConfig.BlockOverrides.Time == nil) {
+		return nil
+	}
+	_, err := signer.Sender(txn)
+	return err
+}
+
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
 	if traceConfig != nil && traceConfig.Tracer != nil && *traceConfig.Tracer != "" {
 		return OeTracerConfig{}, errors.New("trace_* does not support custom tracers; use debug_* (e.g. debug_traceTransaction) for named or JS tracers")
