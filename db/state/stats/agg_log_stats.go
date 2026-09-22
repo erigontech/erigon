@@ -13,7 +13,7 @@ import (
 )
 
 func LogStats(at *state.AggregatorRoTx, tx kv.Tx, logger log.Logger, tx2block func(endTxNumMinimax uint64) (uint64, error)) {
-	maxTxNum := at.TxNumsInFiles(kv.StateDomains...)
+	maxTxNum := at.TxNumsInFiles(kv.StateDomains(at.Agg().CanonicalCommitmentDomain())...)
 	if maxTxNum == 0 {
 		return
 	}

@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -120,6 +121,11 @@ func testDelegationCodeHash() accounts.CodeHash {
 
 func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
 	t.Helper()
+	return newTestPoolWithFundedSenderOn(t, chain.AllProtocolChanges, codeHash)
+}
+
+func newTestPoolWithFundedSenderOn(t *testing.T, cfg *chain.Config, codeHash accounts.CodeHash) (context.Context, *TxPool, kv.RwDB, kv.TemporalRwDB, common.Address) {
+	t.Helper()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -133,7 +139,7 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 		coreDB,
 		txpoolcfg.DefaultConfig,
 		kvcache.New(kvcache.DefaultCoherentConfig),
-		chain.AllProtocolChanges,
+		cfg,
 		nil,
 		nil,
 		func() {},
@@ -2648,6 +2654,65 @@ func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
 	asrt.EqualValues(pending, pendingSubCounter.GetValue(), "pending gauge stale after OnNewBlock")
 	asrt.EqualValues(baseFee, basefeeSubCounter.GetValue(), "baseFee gauge stale after OnNewBlock")
 	asrt.EqualValues(queued, queuedSubCounter.GetValue(), "queued gauge stale after OnNewBlock")
+}
+
+// amsterdamConfig returns a deep copy of AllProtocolChanges with Amsterdam at genesis.
+// chain.Config holds a sync.Once and a memoized map, so it must not be copied by value.
+func amsterdamConfig(t *testing.T) *chain.Config {
+	t.Helper()
+	cfg := chain.AllProtocolChanges.Copy()
+	zero := uint64(0)
+	cfg.AmsterdamTime = &zero
+	cfg.EIP8038Revised = false
+	return cfg
+}
+
+// The executor charges the revised EIP-8038 schedule whenever the binary tree is scheduled,
+// so a pool reading only the explicit key rejects transactions the executor would accept.
+// Asserted through validateTx rather than through the predicate: the predicate was already
+// right, and the defect was that neither CalcIntrinsicGas call site passed it.
+func TestPoolEIP8038RevisedFollowsBinaryTrie(t *testing.T) {
+	t.Parallel()
+
+	newPool := func(t *testing.T, cfg *chain.Config) *TxPool {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		pool, err := New(ctx, make(chan Announcements, 1), mdbxtest.NewTestPoolDB(t),
+			temporaltest.NewTestDB(t, datadir.New(t.TempDir())), txpoolcfg.DefaultConfig,
+			kvcache.New(kvcache.DefaultCoherentConfig), cfg, nil, nil, func() {}, nil, nil,
+			log.New(), WithFeeCalculator(nil))
+		require.NoError(t, err)
+		return pool
+	}
+
+	base := amsterdamConfig(t)
+
+	withTree := amsterdamConfig(t)
+	later := uint64(100)
+	withTree.BinaryTrieTime = &later
+	require.True(t, newPool(t, withTree).isEIP8038Revised())
+
+	require.False(t, newPool(t, base).isEIP8038Revised(), "Amsterdam alone keeps the pinned-corpus schedule")
+
+	explicit := amsterdamConfig(t)
+	explicit.EIP8038Revised = true
+	require.True(t, newPool(t, explicit).isEIP8038Revised())
+
+}
+
+func TestPoolAndExecutorAgreeOnEIP8038RevisedAtBothSidesOfBinaryTrie(t *testing.T) {
+	t.Parallel()
+
+	binaryTrieTime := uint64(200)
+	config := amsterdamConfig(t)
+	config.BinaryTrieTime = &binaryTrieTime
+	pool := &TxPool{chainConfig: config}
+
+	for _, blockTime := range []uint64{150, 250} {
+		rules := (&evmtypes.BlockContext{Time: blockTime}).Rules(config)
+		require.Equal(t, rules.EIP8038Revised, pool.isEIP8038Revised())
+	}
 }
 
 // probeFeeCalculator runs fn from the middle of fromDB, where CurrentFees is called.

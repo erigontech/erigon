@@ -44,10 +44,10 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		var coldAccess, writeCreate, writeExisting, clearRefund, stateCreate uint64
 		if rules.IsAmsterdam {
-			coldAccess = params.ColdStorageAccessCostEIP8038
+			coldAccess = coldStorageAccessCost(rules)
 			writeCreate = params.StorageWriteCostEIP8038
 			writeExisting = params.StorageWriteCostEIP8038
-			clearRefund = params.SstoreClearsScheduleRefundEIP8038
+			clearRefund = sstoreClearsRefund(rules)
 			stateCreate = params.StateGasPerStorageSet
 		} else {
 			coldAccess = params.SstoreColdAccessEIP2929
@@ -267,7 +267,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		evm.IntraBlockState().MarkAddressAccess(address, false)
 		if empty && !balance.IsZero() {
 			if evm.chainRules.IsAmsterdam {
-				gas.Execution += params.AccountWriteCostEIP8038
+				gas.Execution += accountWriteCost(evm.chainRules)
 				gas.State = params.StateGasNewAccount
 			} else {
 				gas.Execution += params.CreateBySelfdestructGas

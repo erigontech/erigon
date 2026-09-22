@@ -66,3 +66,68 @@ func TestKeepCommitmentMergeOnlyNothingToDo(t *testing.T) {
 	keepCommitmentMergeOnly(r)
 	require.False(t, r.any(), "with no commitment range there is nothing left to merge")
 }
+
+func TestRebuildShardSteps(t *testing.T) {
+	t.Parallel()
+
+	const gb = uint64(1) << 30
+	// The range the live mainnet rebuild walks: 8192 steps, 1.79G keys.
+	const mainnetKeysPerStep = 218706
+
+	for _, tc := range []struct {
+		name                      string
+		totalMemory               uint64
+		stepsInRange, keysPerStep uint64
+		want                      uint64
+	}{
+		{"snap-arb1 mainnet", 125 * gb, 8192, mainnetKeysPerStep, 128},
+		{"same box, denser range halves it", 125 * gb, 8192, 2 * mainnetKeysPerStep, 64},
+		{"4x the RAM, 4x the shard", 500 * gb, 8192, mainnetKeysPerStep, 512},
+		{"huge box is bounded by the range, not a constant", 64000 * gb, 8192, mainnetKeysPerStep, 8192},
+		{"sparse range takes the whole thing", 125 * gb, 1024, 8, 1024},
+		{"tiny box still makes progress", 1 * gb, 8192, mainnetKeysPerStep, 1},
+		{"unknown density falls back to the range", 125 * gb, 256, 0, 256},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, rebuildShardSteps(tc.totalMemory, tc.stepsInRange, tc.keysPerStep))
+		})
+	}
+}
+
+// No constant ceiling: a wide enough range must keep getting bigger shards on a
+// bigger box, or it lands back in the many-shard regime the sharding exists to avoid.
+func TestRebuildShardStepsHasNoConstantCeiling(t *testing.T) {
+	t.Parallel()
+
+	const gb = uint64(1) << 30
+	small := rebuildShardSteps(128*gb, 1<<20, 1000)
+	large := rebuildShardSteps(8192*gb, 1<<20, 1000)
+	require.Greater(t, large, small, "more RAM must buy a bigger shard")
+	require.Greater(t, large, uint64(512), "must not stall at the old constant cap")
+}
+
+func TestRebuildShardStepsNeverExceedsRange(t *testing.T) {
+	t.Parallel()
+
+	const gb = uint64(1) << 30
+	for _, stepsInRange := range []uint64{1, 2, 64, 256, 8192} {
+		got := rebuildShardSteps(1<<50, stepsInRange, 1)
+		require.LessOrEqual(t, got, stepsInRange, "a shard may never outgrow its range")
+		require.Positive(t, got)
+	}
+}
+
+// Shard boundaries feed the merge ranges, which are power-of-two aligned.
+func TestRebuildShardStepsIsPowerOfTwo(t *testing.T) {
+	t.Parallel()
+
+	const gb = uint64(1) << 30
+	for mem := uint64(1); mem <= 4096; mem *= 3 {
+		for _, kps := range []uint64{1, 997, 218706, 5_000_000} {
+			got := rebuildShardSteps(mem*gb, 8192, kps)
+			require.Positive(t, got)
+			require.Zerof(t, got&(got-1), "shard steps %d is not a power of two (mem=%dG kps=%d)", got, mem, kps)
+		}
+	}
+}

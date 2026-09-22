@@ -648,7 +648,7 @@ func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 		return 0
 	}
 	defer roTx.Rollback()
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+	v, _, err := roTx.GetLatest(canonicalCommitmentDomain(roTx), commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 	if err != nil || len(v) < 16 {
 		return 0
 	}

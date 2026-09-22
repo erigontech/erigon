@@ -1179,6 +1179,12 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 	if reset {
 		aggOpts = aggOpts.SkipFilesDBGapCheck()
 	}
+	// A staged rebuild output holds the source's state files and no commitment,
+	// and is opened against the source's DB. Neither the commitment alignment nor
+	// a files-vs-DB comparison across two datadirs says anything here.
+	if rebuildOutputDatadir != "" {
+		aggOpts = aggOpts.SkipFilesDBGapCheck().DisableInterDomainDeps()
+	}
 	agg := aggOpts.MustOpen(ctx)
 	agg.SetProduceMod(snapCfg.ProduceE3)
 	return temporal.New(db, agg, _allSnapshotsSingleton)

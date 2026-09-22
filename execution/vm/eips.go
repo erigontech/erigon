@@ -391,3 +391,9 @@ func enable8038(jt *JumpTable) {
 	jt[CREATE].constantGas = params.CreateAccessEIP8038
 	jt[CREATE2].constantGas = params.CreateAccessEIP8038
 }
+
+// enable8038Revised repoints the opcodes whose EIP-8038 cost the revision moved.
+func enable8038Revised(jt *JumpTable) {
+	jt[CREATE].constantGas = params.CreateAccessEIP8038Revised
+	jt[CREATE2].constantGas = params.CreateAccessEIP8038Revised
+}

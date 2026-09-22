@@ -21,7 +21,27 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
+
+// PreTransactionGasCost is the only caller that charges the AA per-auth cost, so
+// a rule the intrinsic-gas switch reads and this call does not pass is a branch
+// nothing can reach.
+func TestAAPreTransactionGasCostChargesRevisedPerAuth(t *testing.T) {
+	tx := &AccountAbstractionTransaction{Authorizations: make([]Authorization, 2)}
+	rules := &chain.Rules{IsHomestead: true, IsIstanbul: true, IsPrague: true, IsAmsterdam: true}
+
+	unrevised, err := tx.PreTransactionGasCost(rules, false)
+	require.NoError(t, err)
+
+	rules.EIP8038Revised = true
+	revised, err := tx.PreTransactionGasCost(rules, false)
+	require.NoError(t, err)
+
+	require.Equal(t, 2*(params.AccountWriteCostEIP8038Revised-params.AccountWriteCostEIP8038), revised-unrevised)
+}
 
 // TestAATxnAsMessageCarriesNoBlobHashes pins that an AA message is not mistaken
 // for a blob-carrying one: EIP-4844 validation keys off a non-nil blob hash

@@ -701,3 +701,29 @@ func TestForkWalk_UpdatedAccountDropsItsDeletedSlotsTouchBit(t *testing.T) {
 		Build()
 	requireForkParityAcrossGrains(t, k0, u0, k1, u1)
 }
+
+func TestForkWalkCheckoutInheritsTheWalkSink(t *testing.T) {
+	ctx := context.Background()
+	pool := newCtxLeasePool(ctx, func(context.Context) (PatriciaContext, func()) {
+		return &panicOnAccountContext{}, nil
+	}, 1)
+	defer pool.close()
+
+	parent := NewMetrics("")
+	parent.SetMetricsEnabled(false)
+	fw := &forkWalk{
+		leases:        pool,
+		accountKeyLen: length.Addr,
+		cfg:           DefaultTrieConfig(),
+		metrics:       parent,
+		grain:         ForkGrainNever,
+	}
+
+	l, err := pool.acquire(ctx)
+	require.NoError(t, err)
+	wk := &walker{lease: l}
+	fw.checkout(wk, nil)
+	defer wk.trie.Release()
+
+	require.Same(t, parent.sink, wk.trie.metrics.sink, "a fork worker publishes to the walk's sink, not the global one")
+}

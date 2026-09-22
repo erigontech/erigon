@@ -33,6 +33,7 @@ var (
 	mxPrunableDSto         = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="storage"}`)
 	mxPrunableDCode        = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="code"}`)
 	mxPrunableDComm        = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment"}`)
+	mxPrunableDCommBin     = metrics.GetOrCreateGauge(`domain_prunable{type="domain",table="commitment_bin"}`)
 	mxPrunableHAcc         = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="account"}`)
 	mxPrunableHSto         = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="storage"}`)
 	mxPrunableHCode        = metrics.GetOrCreateGauge(`domain_prunable{type="history",table="code"}`)
@@ -103,6 +104,14 @@ var (
 			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="commitment"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="commitment"}`),
 			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="commitment"}`),
+		},
+		kv.CommitmentBinDomain: {
+			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L1",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L2",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L3",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="L4",domain="commitment-bin"}`),
+			metrics.GetOrCreateSummary(`kv_get{level="recent",domain="commitment-bin"}`),
 		},
 		kv.ReceiptDomain: {
 			metrics.GetOrCreateSummary(`kv_get{level="L0",domain="receipt"}`),

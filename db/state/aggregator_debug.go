@@ -47,6 +47,9 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 	ac.visible = a.visible.Load()
 	ac.visible.refcnt.Add(1)
 	for i, d := range a.d {
+		if d == nil {
+			continue
+		}
 		ac.domain[i] = d.DebugBeginDirtyFilesRo()
 	}
 
@@ -59,6 +62,9 @@ func (a *Aggregator) DebugBeginDirtyFilesRo() *aggDirtyFilesRoTx {
 
 func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
 	for _, d := range ac.domain {
+		if d == nil {
+			continue
+		}
 		for _, f := range d.files {
 			f.MadvNormal()
 		}
@@ -81,6 +87,9 @@ func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
 }
 func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
 	for _, d := range ac.domain {
+		if d == nil {
+			continue
+		}
 		for _, f := range d.files {
 			f.DisableReadAhead()
 		}
@@ -109,6 +118,9 @@ func (ac *aggDirtyFilesRoTx) FilesWithMissedAccessors() (mf *MissedAccessorAggFi
 	domainDL := readDirNames(ac.agg.dirs.SnapDomain)
 	accessorDL := readDirNames(ac.agg.dirs.SnapAccessors)
 	for _, d := range ac.domain {
+		if d == nil {
+			continue
+		}
 		mf.domain[d.d.Name] = d.filesWithMissedAccessors(domainDL, accessorDL)
 	}
 	for _, ii := range ac.ii {
@@ -127,6 +139,9 @@ func (ac *aggDirtyFilesRoTx) dropCovered(mf *MissedAccessorAggFiles) {
 		}
 	}
 	for _, d := range ac.domain {
+		if d == nil {
+			continue
+		}
 		df := mf.domain[d.d.Name]
 		drop(df.files, d.files, d.d.Accessors)
 		drop(df.history.files, d.history.files, d.history.h.Accessors)
@@ -146,6 +161,9 @@ func (ac *aggDirtyFilesRoTx) Close() {
 	}
 	agg := ac.agg
 	for _, d := range ac.domain {
+		if d == nil {
+			continue
+		}
 		d.Close()
 	}
 

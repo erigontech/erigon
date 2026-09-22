@@ -851,7 +851,8 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	if auths == nil {
 		return gasRemaining, gasUsed, nil
 	}
-	isAmsterdam := st.evm.ChainRules().IsAmsterdam
+	rules := st.evm.ChainRules()
+	isAmsterdam := rules.IsAmsterdam
 	writtenAccounts := map[accounts.Address]struct{}{st.msg.From(): {}}
 	if !st.msg.Value().IsZero() {
 		writtenAccounts[st.msg.To()] = struct{}{}
@@ -915,7 +916,11 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 				return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 			}
 			if _, written := writtenAccounts[authority]; !written {
-				if !consumeGas(&gasRemaining, &gasUsed, params.AccountWriteCostEIP8038, mdgas.ExecutionGas, st.evm.Config().Tracer, tracing.GasChangeTxAuthorization) {
+				accountWrite := params.AccountWriteCostEIP8038
+				if rules.EIP8038Revised {
+					accountWrite = params.AccountWriteCostEIP8038Revised
+				}
+				if !consumeGas(&gasRemaining, &gasUsed, accountWrite, mdgas.ExecutionGas, st.evm.Config().Tracer, tracing.GasChangeTxAuthorization) {
 					return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 				}
 				writtenAccounts[authority] = struct{}{}
@@ -984,5 +989,6 @@ func (st *TxnExecutor) calcIntrinsicGas(contractCreation bool, auths []types.Aut
 		IsEIP7976:          rules.IsAmsterdam,
 		IsEIP7981:          rules.IsAmsterdam,
 		IsEIP2780:          rules.IsAmsterdam,
+		IsEIP8038Revised:   rules.EIP8038Revised,
 	})
 }

@@ -24,6 +24,7 @@ type CsvMetrics interface {
 }
 
 type Metrics struct {
+	sink                     *metricsSink
 	Accounts                 *AccountMetrics
 	Branches                 *BranchMetrics
 	updates                  atomic.Uint64
@@ -99,12 +100,28 @@ func (m MetricValues) RUnlock() {
 
 func NewMetrics(csvPrefix string) *Metrics {
 	metrics := &Metrics{
+		sink:                     defaultMetricsSink,
 		Accounts:                 NewAccounts(),
 		Branches:                 NewBranches(),
 		collectCommitmentMetrics: dbg.KVReadLevelledMetrics,
 	}
 	metrics.SetCsvMetrics(csvPrefix)
 	return metrics
+}
+
+func (m *Metrics) setSink(sink *metricsSink) {
+	if sink == nil {
+		sink = defaultMetricsSink
+	}
+	m.sink = sink
+}
+
+func (m *Metrics) SetMetricsEnabled(enabled bool) {
+	if enabled {
+		m.setSink(defaultMetricsSink)
+		return
+	}
+	m.setSink(disabledMetricsSink)
 }
 
 var csvMetricsEnvPrefix = sync.OnceValue(func() string {

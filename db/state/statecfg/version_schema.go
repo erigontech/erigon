@@ -35,6 +35,14 @@ func InitSchemas() {
 			".vi":  Schema.CommitmentDomain.Hist.FileVersion.AccessorVI.MinSupported,
 			".v":   Schema.CommitmentDomain.Hist.FileVersion.DataV.MinSupported,
 		},
+		"commitment-bin": {
+			".kv":  Schema.CommitmentBinDomain.FileVersion.DataKV.MinSupported,
+			".kvi": Schema.CommitmentBinDomain.FileVersion.AccessorKVI.MinSupported,
+			".efi": Schema.CommitmentBinDomain.Hist.IiCfg.FileVersion.AccessorEFI.MinSupported,
+			".ef":  Schema.CommitmentBinDomain.Hist.IiCfg.FileVersion.DataEF.MinSupported,
+			".vi":  Schema.CommitmentBinDomain.Hist.FileVersion.AccessorVI.MinSupported,
+			".v":   Schema.CommitmentBinDomain.Hist.FileVersion.DataV.MinSupported,
+		},
 		"storage": {
 			".kv":  Schema.StorageDomain.FileVersion.DataKV.MinSupported,
 			".bt":  Schema.StorageDomain.FileVersion.AccessorBT.MinSupported,

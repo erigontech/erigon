@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -1500,4 +1501,13 @@ func Test_removeAccessorsForRebuild(t *testing.T) {
 		confirmExist(t, f)
 	}
 	confirmExist(t, dataTorrent)
+}
+
+func TestCommitmentStateTypesFullyRemovedPerDomain(t *testing.T) {
+	hex := snaptype.FileInfo{Path: "v1.0-commitment.0-1.kv", TypeString: kv.CommitmentDomain.String()}
+	bin := snaptype.FileInfo{Path: "v1.0-commitment-bin.0-1.kv", TypeString: kv.CommitmentBinDomain.String()}
+	files := []commitmentStateFile{{file: hex}, {file: bin}}
+	require.Equal(t, []string{kv.CommitmentBinDomain.String()}, commitmentStateTypesFullyRemoved(files, map[string]snaptype.FileInfo{bin.Path: bin}))
+	require.Empty(t, commitmentStateTypesFullyRemoved(files, map[string]snaptype.FileInfo{}))
+	require.Equal(t, []string{kv.CommitmentDomain.String(), kv.CommitmentBinDomain.String()}, commitmentStateTypesFullyRemoved(files, map[string]snaptype.FileInfo{hex.Path: hex, bin.Path: bin}))
 }

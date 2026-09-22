@@ -87,7 +87,7 @@ func (at *AggregatorRoTx) Retire(ctx context.Context, cutoffs kv.RetireCutoffs) 
 	var deleted []string
 	var aged []agedFiles
 	for _, dt := range at.d {
-		if !dt.d.Enabled || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
+		if dt == nil || !dt.d.Enabled || dt.d.SnapshotsDisabled || dt.d.HistoryDisabled {
 			continue
 		}
 		cutoffTxNum := cutoffs.Default

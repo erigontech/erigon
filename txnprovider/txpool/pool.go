@@ -799,6 +799,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	isEIP3860 := p.isShanghai()
 	isEIP7623 := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
+	isEIP8038Revised := p.isEIP8038Revised()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -881,6 +882,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP2780:          isAmsterdam,
+			IsEIP8038Revised:   isEIP8038Revised,
 			IsAATxn:            isAATxn,
 		})
 		intrinsicGas := intrinsicGasResult.ExecutionGas
@@ -1084,6 +1086,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7976:          isAmsterdam,
 		IsEIP7981:          isAmsterdam,
 		IsEIP2780:          isAmsterdam,
+		IsEIP8038Revised:   p.isEIP8038Revised(),
 		IsAATxn:            isAATxn,
 	})
 	gas := intrinsicGasResult.ExecutionGas
@@ -1320,6 +1323,12 @@ func (p *TxPool) isOsaka() bool {
 
 func (p *TxPool) isAmsterdam() bool {
 	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
+}
+
+// isEIP8038Revised must agree with evmtypes.BlockContext.Rules: a pool charging the
+// other EIP-8038 schedule rejects transactions its own executor would accept.
+func (p *TxPool) isEIP8038Revised() bool {
+	return p.chainConfig.EIP8038Revised || p.chainConfig.IsBinaryTrieScheduled()
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {

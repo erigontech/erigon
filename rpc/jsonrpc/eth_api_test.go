@@ -51,7 +51,15 @@ import (
 )
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *BaseAPI {
-	return NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	if statecfg.ExperimentalBinCommitment && !statecfg.ExperimentalHexBinCommitment {
+		config := m.ChainConfig.Copy()
+		binaryTrieTime := uint64(0)
+		config.BinaryTrieTime = &binaryTrieTime
+		base._chainConfig.Store(config)
+		base._genesis.Store(m.Genesis)
+	}
+	return base
 }
 
 func newBaseApiWithLimits(m *execmoduletester.ExecModuleTester, rangeLimit, maxResults, logQueryLimit int) *BaseAPI {

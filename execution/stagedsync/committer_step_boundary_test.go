@@ -69,12 +69,85 @@ type latestMetricsCaptureTx struct {
 	nonNilMetrics bool
 }
 
+type domainStepFrontierTx struct {
+	kv.TemporalTx
+	frontiers map[kv.Domain]kv.Step
+}
+
+func (tx *domainStepFrontierTx) StepsInFiles(domains ...kv.Domain) kv.Step {
+	if len(domains) == 0 {
+		return 0
+	}
+	return tx.frontiers[domains[0]]
+}
+
 func (tx *latestMetricsCaptureTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	metrics, _ := opts.Metrics()
 	if dm, ok := metrics.(*kvmetrics.DomainMetrics); ok {
 		tx.nonNilMetrics = dm != nil
 	}
 	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestSharedDomainsStepEdgeUsesDomainFrontier(t *testing.T) {
+	_, tx, doms := setupStepTest(t)
+	frontierTx := &domainStepFrontierTx{
+		TemporalTx: tx,
+		frontiers: map[kv.Domain]kv.Step{
+			kv.CommitmentDomain:    0,
+			kv.CommitmentBinDomain: 1,
+		},
+	}
+
+	require.True(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentDomain, 15))
+	require.False(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentBinDomain, 15))
+	require.False(t, doms.IsUnfrozenStepEdge(frontierTx, kv.CommitmentDomain, 14))
+}
+
+func TestHandleMessage_StepBoundaryCheckpointBothCommitmentDomains(t *testing.T) {
+	ctx := context.Background()
+	db, tx, doms := dualCalculatorTest(t)
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", log.New(), false, 1<<62, in, nil, out)
+	require.NoError(t, err)
+
+	addr := accounts.InternAddress(common.Address{0x42})
+	addrBytes := addr.Value()
+	for txNum := uint64(1); txNum <= 20; txNum++ {
+		balance := *uint256.NewInt(txNum * 1000)
+		account := accounts.Account{Nonce: txNum, Balance: balance, CodeHash: accounts.EmptyCodeHash}
+		encoded := accounts.SerialiseV3(&account)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes[:], encoded, txNum, nil))
+		blockNum := uint64(1)
+		if txNum > 10 {
+			blockNum = 2
+		}
+		cc.handleMessage(ctx, &txResult{
+			blockNum: blockNum,
+			txNum:    txNum,
+			rules:    &chain.Rules{},
+			writes:   nonceBalanceWrites(addr, txNum, balance),
+		})
+	}
+	cc.Stop()
+
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		stateBlob, _, err := doms.GetLatest(domain, tx, commitmentdb.KeyCommitmentState)
+		require.NoError(t, err)
+		gotTxNum, gotBlockNum := commitmentdb.DecodeTxBlockNums(stateBlob)
+		require.Equal(t, uint64(15), gotTxNum, "domain %s checkpoint", domain)
+		require.Equal(t, uint64(2), gotBlockNum, "domain %s checkpoint", domain)
+	}
+
+	accountAtEdge, ok, err := doms.GetAsOf(kv.AccountsDomain, addrBytes[:], 16)
+	require.NoError(t, err)
+	require.True(t, ok)
+	var expected accounts.Account
+	expected.Nonce = 15
+	expected.Balance = *uint256.NewInt(15 * 1000)
+	expected.CodeHash = accounts.EmptyCodeHash
+	require.Equal(t, accounts.SerialiseV3(&expected), accountAtEdge)
 }
 
 // TestHandleMessage_StepBoundaryCheckpointMidBlock pins the parallel-exec
@@ -637,7 +710,7 @@ func TestAsOfStateReaderCloneForWorkerDoesNotBoxNilMetrics(t *testing.T) {
 	require.NotNil(t, doms.Collector())
 	doms.StartRequestMetrics(kvmetrics.SourceCommitment)
 	captureTx := &latestMetricsCaptureTx{TemporalTx: tx}
-	reader := (&asOfStateReader{sd: doms, roTx: captureTx}).CloneForWorker(context.Background(), captureTx)
+	reader := (&asOfStateReader{sd: doms, roTx: captureTx, commitmentDomain: kv.CommitmentDomain}).CloneForWorker(context.Background(), captureTx)
 	_, _, err := reader.Read(kv.CommitmentDomain, []byte{0xaa, 0xbb}, doms.StepSize())
 	require.NoError(t, err)
 	require.True(t, captureTx.nonNilMetrics)

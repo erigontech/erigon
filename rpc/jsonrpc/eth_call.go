@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -499,8 +500,18 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if header == nil {
 		return nil, fmt.Errorf("header not found for block %d", blockNumber)
 	}
+	chainConfig, err := api.chainConfig(ctx, roTx)
+	if err != nil {
+		return nil, err
+	}
+	if chainConfig.IsBinaryTrie(header.Time) {
+		return nil, execctx.ErrBinCommitmentUnsupported
+	}
 
-	domains, err := newSnapshotCommitmentDomains(ctx, roTx, logger)
+	if !isLatest {
+		roTx = commitmentReconstructionView(roTx)
+	}
+	domains, err := execctx.NewSharedDomains(ctx, roTx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithHexCommitmentOnly())
 	if err != nil {
 		return nil, err
 	}
@@ -718,6 +729,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	if err != nil {
 		return nil, fmt.Errorf("error loading chain config: %w", err)
 	}
+	if chainConfig.IsBinaryTrie(block.Time()) {
+		return nil, execctx.ErrBinCommitmentUnsupported
+	}
 	engine := api.engine()
 	fullEngine, ok := engine.(rules.Engine)
 	if !ok {
@@ -770,7 +784,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		it.Close()
 	}
 
-	domains, err := newSnapshotCommitmentDomains(ctx, tx, logger)
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithHexCommitmentOnly())
 	if err != nil {
 		return nil, err
 	}
@@ -779,7 +793,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, nil, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNr, parentNum,
-		block.Root(), accessed, witnessModeLegacy)
+		block.Root(), accessed, witnessModeLegacy, false /* binTrie: WithHexCommitmentOnly refuses bin above */)
 	if err != nil {
 		return nil, err
 	}

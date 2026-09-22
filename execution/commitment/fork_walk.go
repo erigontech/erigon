@@ -351,6 +351,7 @@ func (fw *forkWalk) checkout(wk *walker, path []byte) {
 	w.branchEncoder.setDeferUpdates(true)
 	w.SetLeaveDeferredForCaller(true)
 	w.metrics.Reset()
+	w.metrics.setSink(fw.metrics.sink)
 	if fw.traceW != nil {
 		w.SetTraceWriter(tracePrefix(fw.traceW, fmt.Sprintf("[%x] ", path)))
 	}

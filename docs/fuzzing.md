@@ -32,6 +32,7 @@ Two things run these fuzzers:
 | `db/seg` | `FuzzCompress`, `FuzzDecompressMatch` |
 | `db/seg/patricia` | `FuzzPatricia`, `FuzzLongestMatch` |
 | `execution/abi` | `FuzzABI` |
+| `execution/commitment` | `FuzzPBinBitPathCodec`, `FuzzPBinProcessMatchesOracle` |
 | `execution/commitment/nibbles` | `FuzzHexCompactRoundtrip` |
 | `execution/types` | `FuzzRLP` |
 | `execution/vm` | `FuzzPrecompiledContracts` |

@@ -1064,7 +1064,7 @@ func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
 
 	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
 	require.True(t, ok)
-	branchCache := provider.BranchCache()
+	branchCache := provider.BranchCache(kv.CommitmentDomain)
 	require.NotNil(t, branchCache)
 	branchCache.Clear()
 	t.Cleanup(branchCache.Clear)
@@ -1536,6 +1536,17 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 // bank account keyed by a fixed, well-known private key, under cfg.
 func fundedBankGenesis(t testing.TB, cfg *chain.Config) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
 	t.Helper()
+	var gasLimit uint64
+	if cfg.AmsterdamTime != nil {
+		// EIP-2780 account-creating transfers cost 204600 (incl. 183600 NEW_ACCOUNT
+		// state gas); MPT-filler blocks need the larger budget.
+		gasLimit = 60_000_000
+	}
+	return fundedBankGenesisWithGasLimit(t, cfg, gasLimit)
+}
+
+func fundedBankGenesisWithGasLimit(t testing.TB, cfg *chain.Config, gasLimit uint64) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
+	t.Helper()
 
 	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
@@ -1549,10 +1560,8 @@ func fundedBankGenesis(t testing.TB, cfg *chain.Config) (m *execmoduletester.Exe
 		Config: chainConfig,
 		Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
 	}
-	if cfg.AmsterdamTime != nil {
-		// EIP-2780 account-creating transfers cost 204600 (incl. 183600 NEW_ACCOUNT
-		// state gas); MPT-filler blocks need the larger budget.
-		gspec.GasLimit = 60_000_000
+	if gasLimit > 0 {
+		gspec.GasLimit = gasLimit
 	}
 
 	m = execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(bankKey))

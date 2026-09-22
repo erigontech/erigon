@@ -1139,6 +1139,23 @@ var (
 		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",
 		Value: statecfg.DefaultParallelCommitment,
 	}
+	// ExperimentalBinCommitmentFlag selects the EIP-8297 binary commitment trie.
+	// A whole-datadir property: honoured on a fresh datadir, persisted to
+	// erigondb.toml there, and adopted from it on later starts.
+	ExperimentalBinCommitmentFlag = cli.BoolFlag{
+		Name:  "experimental.bin-commitment",
+		Usage: "EXPERIMENTAL: enables the EIP-8297 binary commitment trie. Takes effect on a fresh datadir only and is persisted there.",
+		Value: false,
+	}
+	// ExperimentalBinCommitmentHashFlag picks H for the binary trie. Persisted and
+	// adopted like the variant itself: roots do not survive a change.
+	ExperimentalBinCommitmentHashFlag = cli.StringFlag{
+		Name:  "experimental.bin-commitment.hash",
+		Usage: "EXPERIMENTAL: hash for the EIP-8297 binary commitment trie: \"keccak\" (default) or \"blake3\". blake3 matches the execution-specs reference and the other clients on the binary-trie testnets. Takes effect on a fresh datadir only and is persisted there.",
+		// Empty, not "keccak": an unset flag must stay distinguishable from an
+		// explicit one, which a hex datadir refuses.
+		Value: "",
+	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -2018,6 +2035,24 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.Ethstats = ctx.String(EthStatsURLFlag.Name)
 
 	setParallelCommitment(ctx)
+
+	if ctx.Bool(ExperimentalBinCommitmentFlag.Name) {
+		cfg.ExperimentalBinCommitment = true
+		// The variant has to be process-wide before any genesis is computed here:
+		// dev mode derives the beacon Eth1Data from the EL genesis hash while still
+		// setting up the config, long before the backend applies the flag.
+		statecfg.ExperimentalBinCommitment = true
+	}
+
+	if h := ctx.String(ExperimentalBinCommitmentHashFlag.Name); h != "" {
+		if err := commitment.SetPBinHashSuite(h); err != nil {
+			Fatalf("%v", err)
+		}
+		// Genesis is computed here too, so the suite has to be live before the
+		// datadir reconciles it.
+		cfg.BinCommitmentHash = h
+		statecfg.BinCommitmentHash = h
+	}
 
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
