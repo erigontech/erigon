@@ -407,7 +407,7 @@ func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, nu
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	txCount := uint64(b.Transactions().Len())
+	txCount := hexutil.Uint64(b.Transactions().Len())
 	response.TransactionCount = &txCount
 
 	if number == rpc.PendingBlockNumber {

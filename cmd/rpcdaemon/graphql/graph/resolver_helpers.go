@@ -97,7 +97,7 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 		block.ExcessBlobGas = ptr(uint64(*blk.ExcessBlobGas))
 	}
 	if blk.TransactionCount != nil {
-		block.TransactionCount = ptr(*blk.TransactionCount)
+		block.TransactionCount = ptr(uint64(*blk.TransactionCount))
 	}
 
 	uncles := blk.Uncles

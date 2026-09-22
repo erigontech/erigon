@@ -165,7 +165,7 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		jsonstream.ArrayValue(s, *b.Withdrawals, writeWithdrawalElem)
 	}
 	if b.TransactionCount != nil {
-		s.Field("transactionCount").Uint(*b.TransactionCount)
+		jsonstream.Text(s, "transactionCount", b.TransactionCount)
 	}
 	if b.TotalDifficulty != nil {
 		jsonstream.Text(s, "totalDifficulty", b.TotalDifficulty)

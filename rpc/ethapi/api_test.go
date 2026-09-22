@@ -415,7 +415,7 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 	withTx := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{}, nil)
 	empty := types.NewBlock(header, nil, nil, nil, nil, nil)
 
-	count := uint64(1)
+	count := hexutil.Uint64(1)
 	for _, tc := range []struct {
 		name string
 		b    *RPCBlock
