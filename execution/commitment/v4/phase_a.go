@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/bits"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -175,6 +174,10 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	root.plane = planeStorage
 	markStorageRoot(root)
 	before := g.reachableRecordKeys(root)
+	if err := g.materializeRootExtension(ctx, root); err != nil {
+		return [32]byte{}, err
+	}
+	markStorageRoot(root)
 
 	for _, entry := range task.entries {
 		if len(entry.path) != 64 {
@@ -182,20 +185,6 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		}
 		if entry.update == nil || entry.update.Flags == 0 {
 			continue
-		}
-		if len(root.path) != 0 && !bytes.HasPrefix(entry.path, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
-			nib := bits.TrailingZeros16(root.childMask)
-			if root.child(nib) == nil && len(root.childHashAt(nib)) == 32 {
-				child, err := unfold(ctx, root.path, planeStorage, task.addrHash[:])
-				if err != nil {
-					return [32]byte{}, err
-				}
-				if child == nil {
-					return [32]byte{}, errPhaseAStorage
-				}
-				child.plane = planeStorage
-				root.setChild(nib, child)
-			}
 		}
 		if len(root.path) == 0 || bytes.HasPrefix(entry.path, root.path) {
 			if err := g.ensurePath(ctx, root, entry.path); err != nil {

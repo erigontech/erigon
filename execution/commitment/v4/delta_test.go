@@ -130,3 +130,32 @@ func linkedNodeCount(n *node) int {
 	}
 	return count
 }
+
+func TestPersistGraphKeepsRecordsThatOnlyMovedDeeper(t *testing.T) {
+	ctx := newMockContext()
+	var addr [32]byte
+	addr[0] = 0x7e
+	g := storageGraph(addr[:])
+
+	deepPath := []byte{0x0c, 0x06}
+	deepKey := StorageNodeKey(addr, deepPath, nil)
+	deepData := []byte{0xde, 0xad, 0xbe, 0xef}
+	ctx.branches[string(deepKey)] = deepData
+	siblingKey := StorageNodeKey(addr, []byte{0x02}, nil)
+	ctx.branches[string(siblingKey)] = []byte{0xca, 0xfe}
+
+	root := fork(nil)
+	root.plane = planeStorage
+	root.storageRoot = true
+	root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
+	root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
+	before := g.reachableRecordKeys(root)
+	require.Contains(t, before, string(deepKey))
+
+	diverging := append([]byte{0x0c, 0x07}, bytes.Repeat([]byte{0x05}, 62)...)
+	require.NoError(t, insert(root, diverging, []byte{0x01}))
+	require.NoError(t, g.persistGraph(ctx, root, before))
+
+	require.Equal(t, deepData, ctx.branches[string(deepKey)], "record that only moved from depth 1 to depth 2 must not be tombstoned")
+	require.Equal(t, []byte{0xca, 0xfe}, ctx.branches[string(siblingKey)])
+}

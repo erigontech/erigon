@@ -72,8 +72,7 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 	if oldChild != nil && !bytes.Equal(oldChild.path, n.path) {
 		return ErrRootShape
 	}
-	oldPath := append(append([]byte(nil), n.path...), byte(oldNib))
-	oldPath = append(oldPath, n.childExtAt(oldNib)...)
+	oldPath := append([]byte(nil), n.path...)
 	oldHash := n.childHashAt(oldNib)
 	if oldChild != nil {
 		hash, err := fold(oldChild, len(oldChild.path))

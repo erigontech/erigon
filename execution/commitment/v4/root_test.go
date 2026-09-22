@@ -50,9 +50,11 @@ func TestRootExtensionInsertDivergenceKeepsChildBody(t *testing.T) {
 	for _, plane := range []byte{planeAccount, planeStorage} {
 		t.Run(fmtPlane(plane), func(t *testing.T) {
 			hash := bytes.Repeat([]byte{0xa5}, 32)
-			n := fork([]byte{1, 2, 3})
+			childRecordPath := []byte{1, 2, 3}
+			n := fork(childRecordPath)
 			n.plane = plane
-			n.setStoredChild(4, hash, []byte{5, 6})
+			n.setStoredChild(int(childRecordPath[0]), hash, nil)
+			require.NoError(t, Validate(encodeRecord(n, 0, nil), 0))
 			incoming := append([]byte{1, 9}, bytes.Repeat([]byte{7}, 62)...)
 
 			require.NoError(t, insertRoot(n, incoming, []byte{0x42}))
@@ -62,8 +64,10 @@ func TestRootExtensionInsertDivergenceKeepsChildBody(t *testing.T) {
 			require.NotNil(t, branch)
 			require.Equal(t, []byte{1}, branch.path)
 			require.Equal(t, hash, branch.childHashAt(2))
-			require.Equal(t, []byte{3, 4, 5, 6}, branch.childExtAt(2))
+			require.Equal(t, []byte{3}, branch.childExtAt(2))
 			require.Equal(t, []byte{0x42}, branch.leafValueAt(9))
+			rebuilt := append(append([]byte(nil), branch.path...), 2)
+			require.Equal(t, childRecordPath, append(rebuilt, branch.childExtAt(2)...))
 		})
 	}
 }

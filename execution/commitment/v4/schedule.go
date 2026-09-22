@@ -154,6 +154,9 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	root.plane = planeAccount
 	g := accountGraph()
 	before := g.reachableRecordKeys(root)
+	if err := g.materializeRootExtension(rawCtx, root); err != nil {
+		return [32]byte{}, err
+	}
 	plans, err := makeAccountPlans(rawCtx, g, root, accounts)
 	if err != nil {
 		return [32]byte{}, err

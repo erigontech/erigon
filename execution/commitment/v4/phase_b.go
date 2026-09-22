@@ -112,6 +112,9 @@ func accountUpdate(value []byte, found bool, update *commitment.Update) (*commit
 }
 
 func accountLeafAt(n *node, path []byte) ([]byte, bool) {
+	if child := rootExtensionChild(n); child != nil {
+		n = child
+	}
 	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) || len(n.path) >= len(path) {
 		return nil, false
 	}
@@ -130,6 +133,9 @@ func accountLeafAt(n *node, path []byte) ([]byte, bool) {
 }
 
 func storedAccountPath(n *node, path []byte) bool {
+	if child := rootExtensionChild(n); child != nil {
+		n = child
+	}
 	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) || len(n.path) >= len(path) {
 		return false
 	}
