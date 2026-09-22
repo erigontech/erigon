@@ -35,11 +35,11 @@ func writeBlobsBundle(s *jsonstream.StackStream, b *BlobsBundle) {
 		return
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("commitments")
+	s.Field("commitments")
 	jsonstream.ArrayValue(s, b.Commitments, writeHex)
-	jsonstream.Field(s, "proofs")
+	s.Field("proofs")
 	jsonstream.ArrayValue(s, b.Proofs, writeHex)
-	jsonstream.Field(s, "blobs")
+	s.Field("blobs")
 	jsonstream.ArrayValue(s, b.Blobs, writeHex)
 	s.WriteObjectEnd()
 }
@@ -61,13 +61,13 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error 
 		return err
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("executionPayload").WriteRawBytes(executionPayload)
-	jsonstream.Field(s, "blockValue").WriteRawBytes(blockValue)
-	jsonstream.Field(s, "blobsBundle")
+	s.Field("executionPayload").WriteRawBytes(executionPayload)
+	s.Field("blockValue").WriteRawBytes(blockValue)
+	s.Field("blobsBundle")
 	writeBlobsBundle(s, r.BlobsBundle)
-	jsonstream.Field(s, "executionRequests")
+	s.Field("executionRequests")
 	jsonstream.ArrayValue(s, r.ExecutionRequests, writeHex)
-	jsonstream.Field(s, "shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
+	s.Field("shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
 	s.WriteObjectEnd()
 	return nil
 }
