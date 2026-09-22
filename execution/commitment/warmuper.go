@@ -47,6 +47,7 @@ type WarmupConfig struct {
 }
 
 const WarmupMaxDepth = 128
+const warmupKeyScratchLen = maxCompactKeyLen + 1
 
 type WarmupStats struct {
 	KeysProcessed uint64
@@ -157,7 +158,7 @@ func (w *Warmuper) Start() {
 
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
-	var compactBuf [maxCompactKeyLen]byte
+	var compactBuf [warmupKeyScratchLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
 		prefix, ok := w.key(hashedKey, depth, compactBuf[:])
 		if !ok {

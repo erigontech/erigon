@@ -53,6 +53,7 @@ func NewRecord(data []byte, depth int) Record {
 type layout struct {
 	child, leaf, ext, emb uint16
 	slotOff               int
+	selfExtLen            int
 	ok                    bool
 }
 
@@ -381,7 +382,8 @@ func (r Record) layout() (l layout) {
 		if len(r.data) < off+1 {
 			return layout{}
 		}
-		off += 1 + packedLen(int(r.data[off]))
+		l.selfExtLen = int(r.data[off])
+		off += 1 + packedLen(l.selfExtLen)
 	}
 	if len(r.data) < off+4 {
 		return layout{}

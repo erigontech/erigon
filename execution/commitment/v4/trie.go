@@ -148,8 +148,17 @@ func (t *Trie) Process(
 		return nil, errors.New("commitment v4: Process requires ModeUpdate updates")
 	}
 
+	var warmuper *commitment.Warmuper
+	if warmup.Enabled {
+		warmup.Key = warmupKeyV4
+		warmup.Step = warmupStepV4
+		warmuper = commitment.NewWarmuper(ctx, warmup)
+		warmuper.Start()
+		defer warmuper.CloseAndWait()
+	}
+
 	p := newPartitioner()
-	if err := updates.HashSort(ctx, nil, p.add); err != nil {
+	if err := updates.HashSort(ctx, warmuper, p.add); err != nil {
 		return nil, err
 	}
 	storage, accounts := p.done()

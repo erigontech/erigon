@@ -371,32 +371,32 @@ the worker pool, the `CtxFactory`, the epoch/coherence model, the put stripes, a
 - Modify: `execution/commitment/v4/key.go`
 - Modify: `execution/commitment/v4/unfold.go`
 
-- [ ] write the failing test first: a v4 fixture trie where a descent from depth 0 reaches the account leaf,
+- [x] write the failing test first: a v4 fixture trie where a descent from depth 0 reaches the account leaf,
       asserting the exact sequence of keys the pair produces
-- [ ] create `v4/warmup.go` (2026 license header) with the key function implementing the plane crossing
+- [x] create `v4/warmup.go` (2026 license header) with the key function implementing the plane crossing
       gated on `len(hashedKey) > 64`, never on `depth` alone, writing into the caller's `dst`
-- [ ] implement the step function per Technical Details: `tree()` as the descent predicate, plane-local
+- [x] implement the step function per Technical Details: `tree()` as the descent predicate, plane-local
       depth into `NewRecord`, and the self-extension branch point derived from `layout()` — never from a
       direct `record[1]` read
-- [ ] return `64` from the step function instead of `stop` when a 128-nibble key finishes the account plane,
+- [x] return `64` from the step function instead of `stop` when a 128-nibble key finishes the account plane,
       so the restart stays v4-local and never reaches HPH's 128-nibble keys
-- [ ] in `v4/trie.go:132-160`, build the Warmuper behind an `if warmup.Enabled` gate mirroring
+- [x] in `v4/trie.go:132-160`, build the Warmuper behind an `if warmup.Enabled` gate mirroring
       `hex_patricia_hashed.go:2623` — without it every `WarmupConfig{}` in the v4 test files trips Task 2's
       nil check — and pass it to `updates.HashSort` in place of `nil`
-- [ ] defer `CloseAndWait` to the end of `Process`, after `runScheduledPhases`, not before it
-- [ ] give `nodeKey` (`key.go:99`) a pack scratch so `packPath(path, nil)` at `:105` stops allocating, and
+- [x] defer `CloseAndWait` to the end of `Process`, after `runScheduledPhases`, not before it
+- [x] give `nodeKey` (`key.go:99`) a pack scratch so `packPath(path, nil)` at `:105` stops allocating, and
       thread the buffer from `unfold.go:53,60` — both halves, or the key allocation survives
-- [ ] write the plane-crossing test: a storage key produces account-plane keys below 64 and storage-plane
+- [x] write the plane-crossing test: a storage key produces account-plane keys below 64 and storage-plane
       keys at or above it; a 64-nibble account key reaching `depth == 64` produces **no** storage key; a
       second slot of the same contract with `startDepth >= 64` skips the account plane entirely
-- [ ] write the self-extension test: a root record with `hdrHasSelfExt` descends to the correct child, with
+- [x] write the self-extension test: a root record with `hdrHasSelfExt` descends to the correct child, with
       a sibling nibble asserted *not* followed, and a 1-byte record returns `stop` without panicking
-- [ ] write the key scratch-reuse test: consecutive calls with a carried buffer match fresh allocations,
+- [x] write the key scratch-reuse test: consecutive calls with a carried buffer match fresh allocations,
       including the odd-length path where the trailing half-byte must be zeroed, and assert zero allocs
       with `testing.AllocsPerRun`
-- [ ] run `TestLegacyVsHexRoot` and `TestIncrementalRootsAgree` — the root must be identical with warmup on
+- [x] run `TestLegacyVsHexRoot` and `TestIncrementalRootsAgree` — the root must be identical with warmup on
       and off
-- [ ] run `go test ./execution/commitment/...` — all green before Task 4
+- [x] run `go test ./execution/commitment/...` — all green before Task 4
 
 ### Task 4: Count records found, so a dead descent cannot pass
 

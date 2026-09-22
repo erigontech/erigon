@@ -34,11 +34,11 @@ var (
 )
 
 func AccountNodeKey(path []byte, dst []byte) []byte {
-	return nodeKey(tagAccountNode, nil, path, dst)
+	return nodeKey(tagAccountNode, nil, path, dst, nil)
 }
 
 func StorageNodeKey(addrHash [32]byte, path []byte, dst []byte) []byte {
-	return nodeKey(tagStorageNode, addrHash[:], path, dst)
+	return nodeKey(tagStorageNode, addrHash[:], path, dst, nil)
 }
 
 func AccountRootKey() []byte {
@@ -96,12 +96,12 @@ func AssertV1Keyed(domainKeyVersion bool) error {
 	return nil
 }
 
-func nodeKey(tag byte, addrHash, path, dst []byte) []byte {
+func nodeKey(tag byte, addrHash, path, dst, packDst []byte) []byte {
 	if len(path) > 64 {
 		panic("commitment v4: path exceeds 64 nibbles")
 	}
 	dst = append(dst, tag)
 	dst = append(dst, addrHash...)
-	dst = append(dst, packPath(path, nil)...)
+	dst = append(dst, packPath(path, packDst)...)
 	return append(dst, byte(len(path)))
 }

@@ -40,7 +40,7 @@ func storageGraph(addrHash []byte) graph {
 }
 
 func (g graph) nodeKey(path []byte) []byte {
-	return nodeKey(g.plane, g.addrHash, path, nil)
+	return nodeKey(g.plane, g.addrHash, path, nil, nil)
 }
 
 func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, error) {

@@ -45,19 +45,21 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		}
 	}
 
+	var keyBuf [66]byte
+	var packBuf [32]byte
 	var key []byte
 	if plane == planeAccount {
 		if len(addrHash) != 0 {
 			return nil, ErrUnfoldAddress
 		}
-		key = AccountNodeKey(path, nil)
+		key = nodeKey(tagAccountNode, nil, path, keyBuf[:0], packBuf[:0])
 	} else {
 		if len(addrHash) != 32 {
 			return nil, ErrUnfoldAddress
 		}
 		var address [32]byte
 		copy(address[:], addrHash)
-		key = StorageNodeKey(address, path, nil)
+		key = nodeKey(tagStorageNode, address[:], path, keyBuf[:0], packBuf[:0])
 	}
 
 	data, _, err := ctx.Branch(key)

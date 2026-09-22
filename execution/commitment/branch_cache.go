@@ -42,10 +42,12 @@ func isCommitmentStateKey(prefix []byte) bool {
 // BranchCache: writer stripes only make stamped publications atomic with
 // Clear; callers must still ensure one logical mutation per prefix.
 type BranchCache struct {
-	root atomic.Pointer[branchCacheEntry]
+	root   atomic.Pointer[branchCacheEntry]
+	v4Root atomic.Pointer[branchCacheEntry]
 
 	// accountTrunk: nibble depths 1-4; depth 5+ spills to the LRU tail.
-	accountTrunk *trunk
+	accountTrunk   *trunk
+	v4AccountTrunk *trunk
 
 	pinned        atomic.Pointer[maphash.Map[*trunk]]
 	pinnedMu      sync.Mutex
@@ -233,10 +235,11 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 	}
 	maxDepth := adaptiveTrunkDepth(activeBranchCaches.Add(1))
 	bc := &BranchCache{
-		tailCap:       uint32(tailCapacity),
-		maxDepth:      maxDepth,
-		accountTrunk:  newAccountTrunk(maxDepth),
-		trunkDisabled: os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
+		tailCap:        uint32(tailCapacity),
+		maxDepth:       maxDepth,
+		accountTrunk:   newAccountTrunk(maxDepth),
+		v4AccountTrunk: newAccountTrunk(maxDepth),
+		trunkDisabled:  os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
 	}
 	log.Debug("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
 	return bc
@@ -283,10 +286,10 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 		case 0x40:
 			var path [4]byte
 			depth, ok := v4KeyPath(prefix, 1, &path)
-			if !ok {
+			if !ok || depth == 0 {
 				return nil
 			}
-			return c.accountTrunk.slot(&path, depth, forWrite)
+			return c.v4AccountTrunk.slot(&path, depth, forWrite)
 		case 0x41, 0x42:
 			return nil
 		}
@@ -340,6 +343,11 @@ func v4KeyPath(prefix []byte, start int, path *[4]byte) (depth int, ok bool) {
 
 // storageRoute: ok=false means non-storage, caller falls through to the tail.
 func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) (st *trunk, n int, ok bool) {
+	p := c.pinned.Load()
+	if !create && p == nil {
+		return nil, 0, false
+	}
+	var mapKey [33]byte
 	var packed []byte
 	if len(prefix) > 0 && prefix[0] == 0x41 {
 		var valid bool
@@ -347,7 +355,8 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) 
 		if !valid || len(prefix) < 33 {
 			return nil, 0, false
 		}
-		packed = prefix[1:33]
+		mapKey[0] = 0x41
+		copy(mapKey[1:], prefix[1:33])
 	} else {
 		if len(prefix) > 0 && (prefix[0] == 0x40 || prefix[0] == 0x42) {
 			return nil, 0, false
@@ -359,13 +368,10 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) 
 		if !valid {
 			return nil, 0, false
 		}
-		packed = acctHash[:]
+		copy(mapKey[1:], acctHash[:])
 		n = storageNibbles(prefix, nibBuf)
 	}
-	p := c.pinned.Load()
-	if !create && p == nil {
-		return nil, 0, false
-	}
+	packed = mapKey[:]
 	if p != nil {
 		if st, found := p.Get(packed); found {
 			return st, n, true
@@ -433,8 +439,7 @@ func storageNibbles(prefix []byte, nib *[4]byte) (n int) {
 
 // clearTrunk stores nil per-slot rather than swapping the pointer, since
 // lock-free readers deref c.accountTrunk concurrently.
-func (c *BranchCache) clearTrunk() {
-	t := c.accountTrunk
+func clearTrunk(t *trunk) {
 	t.d0.Store(nil)
 	for i := range t.d1 {
 		t.d1[i].Store(nil)
@@ -471,12 +476,26 @@ func (c *BranchCache) SetMissCallback(cb MissCallback) {
 }
 
 func isRootPrefix(prefix []byte) bool {
-	return (len(prefix) == 1 && prefix[0] == 0x00) || (len(prefix) == 2 && prefix[0] == 0x40 && prefix[1] == 0)
+	return len(prefix) == 1 && prefix[0] == 0x00
+}
+
+func isV4AccountRoot(prefix []byte) bool {
+	return len(prefix) == 2 && prefix[0] == 0x40 && prefix[1] == 0
 }
 
 func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	if isRootPrefix(prefix) {
 		entry := c.root.Load()
+		if entry == nil {
+			c.rootMisses.Add(1)
+			c.fireOnMiss(prefix)
+			return nil, false
+		}
+		c.rootHits.Add(1)
+		return entry, true
+	}
+	if isV4AccountRoot(prefix) {
+		entry := c.v4Root.Load()
 		if entry == nil {
 			c.rootMisses.Add(1)
 			c.fireOnMiss(prefix)
@@ -529,6 +548,10 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 		c.root.Store(entry)
 		return
 	}
+	if isV4AccountRoot(prefix) {
+		c.v4Root.Store(entry)
+		return
+	}
 	if slot := c.trunkSlot(prefix, true); slot != nil {
 		slot.Store(entry)
 		return
@@ -563,11 +586,11 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	defer stripe.Unlock()
 
 	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
+	if isV4AccountRoot(prefix) {
+		c.v4Root.Store(entry)
+		return
+	}
 	if len(prefix) > 0 && prefix[0] == 0x40 {
-		if isRootPrefix(prefix) {
-			c.root.Store(entry)
-			return
-		}
 		if slot := c.trunkSlot(prefix, true); slot != nil {
 			slot.Swap(entry)
 			return
@@ -640,6 +663,10 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 		c.root.Store(nil)
 		return
 	}
+	if isV4AccountRoot(prefix) {
+		c.v4Root.Store(nil)
+		return
+	}
 	if slot := c.trunkSlot(prefix, false); slot != nil {
 		slot.Store(nil)
 		return
@@ -671,7 +698,9 @@ func (c *BranchCache) Clear() {
 	defer c.unlockAllPutStripes()
 
 	c.root.Store(nil)
-	c.clearTrunk()
+	c.v4Root.Store(nil)
+	clearTrunk(c.accountTrunk)
+	clearTrunk(c.v4AccountTrunk)
 	c.pinned.Store(nil)
 	c.pinnedEntries.Store(0)
 	if tail := c.tail.Load(); tail != nil {

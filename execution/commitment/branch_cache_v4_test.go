@@ -79,13 +79,13 @@ func TestBranchCacheV4RoutingTiers(t *testing.T) {
 					if tc.tag == 0x40 {
 						switch {
 						case depth == 0:
-							require.NotNil(t, c.root.Load())
+							require.NotNil(t, c.v4Root.Load())
 						case depth <= 4 && depth <= int(c.maxDepth):
 							var packed [4]byte
 							for i := 0; i < len(path) && i < len(packed); i++ {
 								packed[i] = path[i]
 							}
-							slot := c.accountTrunk.slot(&packed, depth, false)
+							slot := c.v4AccountTrunk.slot(&packed, depth, false)
 							require.NotNil(t, slot)
 							if slot != nil {
 								require.NotNil(t, slot.Load())
@@ -101,7 +101,8 @@ func TestBranchCacheV4RoutingTiers(t *testing.T) {
 
 					pinned := c.pinned.Load()
 					require.NotNil(t, pinned)
-					trunk, ok := pinned.Get(addrHash)
+					mapKey := append([]byte{tc.tag}, addrHash...)
+					trunk, ok := pinned.Get(mapKey)
 					require.True(t, ok)
 					var packed [4]byte
 					for i := 0; i < len(path) && i < len(packed); i++ {
@@ -175,18 +176,61 @@ func TestBranchCacheV4RoutingCollision(t *testing.T) {
 }
 
 func TestBranchCacheV4DispatchPrecondition(t *testing.T) {
-	for depth := range 65 {
-		path := make([]byte, depth)
-		for first := range 16 {
-			if len(path) > 0 {
-				path[0] = byte(first)
-			}
-			compact := nibbles.HexToCompact(path)
-			require.NotEqual(t, byte(0x40), compact[0])
-			require.NotEqual(t, byte(0x41), compact[0])
-			require.NotEqual(t, byte(0x42), compact[0])
+	t.Run("root", func(t *testing.T) {
+		c := NewBranchCache(100)
+		defer c.Close()
+
+		v1Key := nibbles.HexToCompact(nil)
+		v4Key := makeV4CacheKey(0x40, nil, nil)
+		c.Put(v1Key, []byte("v1-root"), 0, 0)
+		c.Put(v4Key, []byte("v4-root"), 0, 0)
+
+		got, _, ok := c.Get(v1Key)
+		require.True(t, ok)
+		require.Equal(t, []byte("v1-root"), got)
+		got, _, ok = c.Get(v4Key)
+		require.True(t, ok)
+		require.Equal(t, []byte("v4-root"), got)
+	})
+
+	t.Run("account-trunk", func(t *testing.T) {
+		c := NewBranchCache(100)
+		defer c.Close()
+
+		path := []byte{0xa, 0xb}
+		v1Key := nibbles.HexToCompact(path)
+		v4Key := makeV4CacheKey(0x40, nil, path)
+		c.Put(v1Key, []byte("v1-account"), 0, 0)
+		c.Put(v4Key, []byte("v4-account"), 0, 0)
+
+		got, _, ok := c.Get(v1Key)
+		require.True(t, ok)
+		require.Equal(t, []byte("v1-account"), got)
+		got, _, ok = c.Get(v4Key)
+		require.True(t, ok)
+		require.Equal(t, []byte("v4-account"), got)
+	})
+
+	t.Run("storage-trunk", func(t *testing.T) {
+		c := NewBranchCache(100)
+		defer c.Close()
+
+		addrHash := bytes.Repeat([]byte{0x37}, 32)
+		path := []byte{0xa, 0xb}
+		v1Nibbles := make([]byte, 0, 66)
+		for _, b := range addrHash {
+			v1Nibbles = append(v1Nibbles, b>>4, b&0x0f)
 		}
-	}
-	require.True(t, IsCommitmentStateKey([]byte{0x42}))
-	require.False(t, IsCommitmentStateKey([]byte{0x42, 0x00}))
+		v1Key := nibbles.HexToCompact(append(v1Nibbles, path...))
+		v4Key := makeV4CacheKey(0x41, addrHash, path)
+		c.PinEntry(v1Key, []byte("v1-storage"), 0, 0)
+		c.PinEntry(v4Key, []byte("v4-storage"), 0, 0)
+
+		got, _, ok := c.Get(v1Key)
+		require.True(t, ok)
+		require.Equal(t, []byte("v1-storage"), got)
+		got, _, ok = c.Get(v4Key)
+		require.True(t, ok)
+		require.Equal(t, []byte("v4-storage"), got)
+	})
 }
