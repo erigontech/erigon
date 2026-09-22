@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -597,8 +596,7 @@ func TestSimulateV1BaseFeeOverrideReachesEVM(t *testing.T) {
 // the burnt contract of a chain that has one (AuRa/Gnosis).
 func TestSimulateV1BaseFeeOverrideDoesNotFundBurntContract(t *testing.T) {
 	burntAddr := common.HexToAddress("0x00000000000000000000000000000000b0b0b0b0")
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	chainConfig := chain.AllProtocolChanges.Copy()
 	chainConfig.BurntContract = map[string]common.Address{"0": burntAddr}
 
 	m, _, bankAddr := fundedBankGenesis(t, chainConfig)
