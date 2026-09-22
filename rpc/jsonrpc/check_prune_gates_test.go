@@ -1137,6 +1137,11 @@ func TestBlocksGateDoesNotSettleExpiryBeforeBlocksArrive(t *testing.T) {
 	})
 	ctx := t.Context()
 
+	// A walk that answered nothing is held for a TTL of its own, which is what keeps a
+	// datadir without block data from being walked on every request. This test is about
+	// what the walk reads, so it takes one per call.
+	apis.eth._preMergeUnsettledTTL = 0
+
 	canonicalHash := func(num uint64) common.Hash {
 		tx, err := apis.eth.db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
