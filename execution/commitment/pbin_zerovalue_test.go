@@ -296,3 +296,38 @@ func pbinLiveRecordKeys(ms *MockState) []string {
 	sort.Strings(keys)
 	return keys
 }
+
+func TestPBinRecreateAfterRemovalInheritsNoStorage(t *testing.T) {
+	t.Parallel()
+
+	addr, bystander := pbinOracleAddr(51), pbinOracleAddr(52)
+	codeX := bytes.Repeat([]byte{0x01}, 31*3)
+	codeY := bytes.Repeat([]byte{0x02}, 31*2)
+
+	lived := new(pbinTestCorpus).
+		accountWithCodeBytes(addr, 1, 10, codeX).
+		storage(addr, pbinOracleSlot(2), 0x0A).
+		storage(addr, pbinOracleSlot(0x400), 0x0B).
+		account(bystander, 1, 2, empty.CodeHash)
+	removed := new(pbinTestCorpus).remove(addr)
+	recreated := new(pbinTestCorpus).
+		accountWithCodeBytes(addr, 1, 0, codeY).
+		storage(addr, pbinOracleSlot(3), 0x0C)
+
+	_, _, root := pbinTestBatches(t, lived, removed, recreated)
+
+	want := new(pbinTestCorpus).
+		accountWithCodeBytes(addr, 1, 0, codeY).
+		storage(addr, pbinOracleSlot(3), 0x0C).
+		account(bystander, 1, 2, empty.CodeHash).
+		entries(t)
+	for i, chunk := range pbinChunkifyCode(codeX) {
+		want = append(want, pbinOracleEntry{key: pbinTreeKeyCodeChunk(keccak.Sum256(codeX), i), value: chunk[:]})
+	}
+	wantRoot := pbinOracleRoot(want)
+	require.Equal(t, wantRoot[:], root,
+		"the re-occupied account inherits neither storage home, and only the old code chunks stay")
+
+	_, _, kept := pbinTestBatches(t, lived, recreated)
+	require.NotEqual(t, kept, root, "a recreate that skipped the removal must not reach the same root")
+}
