@@ -252,3 +252,36 @@ func TestMarshalSubscribeReceiptFullLogs(t *testing.T) {
 		BlockTimestamp: 99,
 	}}, r.Logs)
 }
+
+// effectiveGasPrice is the base fee plus the tip, which only the backend can compute. A backend
+// that does not send it yet leaves the base fee as the best approximation available.
+func TestMarshalSubscribeReceiptEffectiveGasPrice(t *testing.T) {
+	for name, tc := range map[string]struct {
+		baseFee, effectiveGasPrice *uint256.Int
+		want                       *uint256.Int
+	}{
+		"effective gas price": {uint256.NewInt(7), uint256.NewInt(9), uint256.NewInt(9)},
+		"base fee only":       {uint256.NewInt(7), nil, uint256.NewInt(7)},
+		"neither":             {nil, nil, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reply := &remoteproto.SubscribeReceiptsReply{
+				BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+				TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+			}
+			if tc.baseFee != nil {
+				reply.BaseFee = gointerfaces.ConvertUint256IntToH256(tc.baseFee)
+			}
+			if tc.effectiveGasPrice != nil {
+				reply.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(tc.effectiveGasPrice)
+			}
+			got := MarshalSubscribeReceipt(reply).EffectiveGasPrice
+			if tc.want == nil {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, (*uint256.Int)(got))
+		})
+	}
+}
