@@ -41,7 +41,7 @@ func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(bundle)
 			require.NoError(t, err)
-			got, err := bundle.MarshalFastJSON()
+			got, err := jsonstream.Marshal(bundle)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})
@@ -87,7 +87,7 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(r)
 			require.NoError(t, err)
-			got, err := r.MarshalFastJSON()
+			got, err := jsonstream.Marshal(r)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})
