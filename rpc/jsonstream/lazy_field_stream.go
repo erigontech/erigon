@@ -74,7 +74,7 @@ func (s *LazyFieldStream) ensure() {
 		if s.prependSeparator {
 			s.inner.markSeparatorPending()
 		}
-		s.owner = s.inner.WriteObjectField(s.field)
+		s.owner = s.inner.Field(s.field)
 		s.openDepth = uint(s.inner.Depth() - 1)
 	}
 }
@@ -106,16 +106,8 @@ func (s *LazyFieldStream) WriteNil()              { s.ensure(); s.inner.WriteNil
 func (s *LazyFieldStream) WriteTrue()             { s.ensure(); s.inner.WriteTrue() }
 func (s *LazyFieldStream) WriteFalse()            { s.ensure(); s.inner.WriteFalse() }
 func (s *LazyFieldStream) WriteBool(v bool)       { s.ensure(); s.inner.WriteBool(v) }
-func (s *LazyFieldStream) WriteInt(v int)         { s.ensure(); s.inner.WriteInt(v) }
-func (s *LazyFieldStream) WriteInt8(v int8)       { s.ensure(); s.inner.WriteInt8(v) }
-func (s *LazyFieldStream) WriteInt16(v int16)     { s.ensure(); s.inner.WriteInt16(v) }
-func (s *LazyFieldStream) WriteInt32(v int32)     { s.ensure(); s.inner.WriteInt32(v) }
-func (s *LazyFieldStream) WriteInt64(v int64)     { s.ensure(); s.inner.WriteInt64(v) }
-func (s *LazyFieldStream) WriteUint(v uint)       { s.ensure(); s.inner.WriteUint(v) }
-func (s *LazyFieldStream) WriteUint8(v uint8)     { s.ensure(); s.inner.WriteUint8(v) }
-func (s *LazyFieldStream) WriteUint16(v uint16)   { s.ensure(); s.inner.WriteUint16(v) }
-func (s *LazyFieldStream) WriteUint32(v uint32)   { s.ensure(); s.inner.WriteUint32(v) }
-func (s *LazyFieldStream) WriteUint64(v uint64)   { s.ensure(); s.inner.WriteUint64(v) }
+func (s *LazyFieldStream) Int(v int64)            { s.ensure(); s.inner.Int(v) }
+func (s *LazyFieldStream) Uint(v uint64)          { s.ensure(); s.inner.Uint(v) }
 func (s *LazyFieldStream) WriteFloat32(v float32) { s.ensure(); s.inner.WriteFloat32(v) }
 func (s *LazyFieldStream) WriteFloat64(v float64) { s.ensure(); s.inner.WriteFloat64(v) }
 func (s *LazyFieldStream) WriteString(v string)   { s.ensure(); s.inner.WriteString(v) }
@@ -141,9 +133,9 @@ func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 // A field name carries no value bytes, so opening the field for it would emit
 // `"result":` with nothing to follow it. It belongs to a container a value write
 // already opened.
-func (s *LazyFieldStream) WriteObjectField(name string) *StackStream {
+func (s *LazyFieldStream) Field(name string) *StackStream {
 	s.assertOpened()
-	return s.inner.WriteObjectField(name)
+	return s.inner.Field(name)
 }
 
 func (s *LazyFieldStream) assertOpened() {
