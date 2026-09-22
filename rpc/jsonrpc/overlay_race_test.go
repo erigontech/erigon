@@ -29,7 +29,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -141,10 +140,9 @@ type overlayAheadHarness struct {
 func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarness {
 	t.Helper()
 
-	var cfg chain.Config
-	require.NoError(t, copier.CopyWithOption(&cfg, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
+	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.LondonBlock = common.NewUint64(0)
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(&cfg))
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(cfg))
 
 	c := insertOverlayRaceChain(t, m)
 	base, doms, events, overlayRoTx := newPublishedOverlayTestBase(t, m)
