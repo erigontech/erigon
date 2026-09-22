@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"time"
 
@@ -395,7 +396,7 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		return false
 	}
 	witnessCacheBuildDuration.ObserveDuration(start)
-	enc, err := result.MarshalFastJSON()
+	enc, err := json.Marshal(result)
 	if err != nil {
 		witnessCacheBuildFailOtherCounter.Inc()
 		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
@@ -485,7 +486,7 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		return false
 	}
 	witnessCacheBuildDuration.ObserveDuration(start)
-	enc, err := result.MarshalFastJSON()
+	enc, err := json.Marshal(result)
 	if err != nil {
 		witnessCacheBuildFailOtherCounter.Inc()
 		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
