@@ -77,11 +77,9 @@ type BatchElem struct {
 
 // Client represents a connection to an RPC server.
 type Client struct {
-	idgen           func() ID // for subscriptions
-	isHTTP          bool
-	services        *serviceRegistry
-	methodAllowList AllowList
-	batchLimit      int // batch size limit
+	isHTTP     bool
+	services   *serviceRegistry
+	newHandler func(ctx context.Context, conn jsonWriter) *handler
 
 	idCounter atomic.Uint32
 
@@ -118,7 +116,7 @@ type clientConn struct {
 func (c *Client) newClientConn(conn ServerCodec, connCtx context.Context) *clientConn {
 	ctx := context.WithValue(connCtx, clientContextKey{}, c)
 	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
-	handler := newHandler(ctx, conn, c.idgen, c.services, c.batchLimit, c.methodAllowList, 50, false /* traceRequests */, c.logger, 0)
+	handler := c.newHandler(ctx, conn)
 	return &clientConn{conn, handler}
 }
 
@@ -212,16 +210,21 @@ func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger
 }
 
 func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
-	return initClientWithBaseCtx(context.Background(), conn, idgen, services, batchLimit, logger)
+	c := initClientWithBaseCtx(context.Background(), conn, services, logger, func(ctx context.Context, conn jsonWriter) *handler {
+		return newHandler(ctx, conn, idgen, services, batchLimit, nil, 50, false /* traceRequests */, logger, 0)
+	})
+	if !c.isHTTP {
+		go c.read(conn)
+	}
+	return c
 }
 
-func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
+func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, services *serviceRegistry, logger log.Logger, newHandler func(context.Context, jsonWriter) *handler) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
-		idgen:       idgen,
 		isHTTP:      isHTTP,
 		services:    services,
-		batchLimit:  batchLimit,
+		newHandler:  newHandler,
 		writeConn:   conn,
 		close:       make(chan struct{}),
 		closing:     make(chan struct{}),
@@ -596,9 +599,6 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 		}
 		close(c.didClose)
 	}()
-
-	// Spawn the initial read loop.
-	go c.read(codec)
 
 	for {
 		select {

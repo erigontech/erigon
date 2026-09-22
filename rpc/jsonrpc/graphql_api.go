@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
@@ -61,6 +62,11 @@ type GraphQLReceipt struct {
 	MaxPriorityFeePerGas *uint256.Int     `json:"maxPriorityFeePerGas,omitempty"`
 	MaxFeePerBlobGas     *hexutil.U256    `json:"maxFeePerBlobGas,omitempty"`
 	AccessList           types.AccessList `json:"accessList"`
+}
+
+// MarshalFastJSONTo shadows the promoted RPCReceipt method, which would drop the transaction fields.
+func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	return writeReflected(s, r)
 }
 
 func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *GraphQLReceipt {
