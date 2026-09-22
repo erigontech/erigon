@@ -124,7 +124,7 @@ func (l *JsonStreamLogger) writePrologueOnce() {
 	}
 	l.firstCapture = false
 	l.stream.WriteObjectStart()
-	l.stream.WriteObjectField("structLogs")
+	l.stream.Field("structLogs")
 	l.stream.WriteArrayStart()
 }
 
@@ -177,28 +177,28 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	}
 	// create a new snapshot of the EVM.
 	l.stream.WriteObjectStart()
-	l.stream.WriteObjectField("pc")
-	l.stream.WriteUint64(pc)
-	l.stream.WriteObjectField("op")
+	l.stream.Field("pc")
+	l.stream.Uint(pc)
+	l.stream.Field("op")
 	l.stream.WriteString(op.String())
-	l.stream.WriteObjectField("gas")
-	l.stream.WriteUint64(gas)
-	l.stream.WriteObjectField("gasCost")
-	l.stream.WriteUint64(cost)
-	l.stream.WriteObjectField("depth")
-	l.stream.WriteInt(depth)
+	l.stream.Field("gas")
+	l.stream.Uint(gas)
+	l.stream.Field("gasCost")
+	l.stream.Uint(cost)
+	l.stream.Field("depth")
+	l.stream.Int(int64(depth))
 	refund := l.env.IntraBlockState.GetRefund()
 	if refund != 0 {
-		l.stream.WriteObjectField("refund")
-		l.stream.WriteUint64(refund)
+		l.stream.Field("refund")
+		l.stream.Uint(refund)
 	}
 
 	if err != nil {
-		l.stream.WriteObjectField("error")
+		l.stream.Field("error")
 		l.stream.WriteString(err.Error())
 	}
 	if !l.cfg.DisableStack {
-		l.stream.WriteObjectField("stack")
+		l.stream.Field("stack")
 		l.stream.WriteArrayStart()
 		for i := range stack {
 			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
@@ -206,7 +206,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableMemory && len(memory) > 0 {
-		l.stream.WriteObjectField("memory")
+		l.stream.Field("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
 			end := min(i+32, len(memory))
@@ -215,11 +215,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
-		l.stream.WriteObjectField("returnData")
+		l.stream.Field("returnData")
 		l.stream.WriteHex(rData)
 	}
 	if outputStorage {
-		l.stream.WriteObjectField("storage")
+		l.stream.Field("storage")
 		l.stream.WriteObjectStart()
 		// Sorted by location for easier comparison with geth
 		s := l.storage[contractAddr]
@@ -228,7 +228,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		for i := range l.locations {
 			loc := &l.locations[i]
 			value := s[*loc]
-			l.stream.WriteObjectField(l.hexWithPrefix(loc))
+			l.stream.Field(l.hexWithPrefix(loc))
 			l.writeWord(value[:])
 		}
 		l.stream.WriteObjectEnd()
