@@ -69,15 +69,15 @@ func nthSetNibble(bitmap uint16, n int) byte {
 	panic("bitmap has fewer set bits than requested")
 }
 
-type presortCase struct {
+type touchCase struct {
 	hashedKey []byte
 	plainKey  []byte
 	update    *Update
 }
 
-func randomPresortCases(seed int64, n, dupEvery int) []presortCase {
+func randomTouchCases(seed int64, n, dupEvery int) []touchCase {
 	rnd := rand.New(rand.NewSource(seed))
-	cases := make([]presortCase, 0, n)
+	cases := make([]touchCase, 0, n)
 	for i := range n {
 		hk := make([]byte, 64)
 		for j := range hk {
@@ -91,9 +91,9 @@ func randomPresortCases(seed int64, n, dupEvery int) []presortCase {
 		if i%3 != 0 {
 			upd = &Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(uint64(i) + 1)}
 		}
-		cases = append(cases, presortCase{hashedKey: hk, plainKey: pk, update: upd})
+		cases = append(cases, touchCase{hashedKey: hk, plainKey: pk, update: upd})
 		if dupEvery > 0 && i%dupEvery == 0 {
-			cases = append(cases, presortCase{
+			cases = append(cases, touchCase{
 				hashedKey: slices.Clone(hk),
 				plainKey:  pk,
 				update:    &Update{Flags: NonceUpdate, Nonce: uint64(i) + 1},
@@ -103,7 +103,7 @@ func randomPresortCases(seed int64, n, dupEvery int) []presortCase {
 	return cases
 }
 
-func buildReferenceTrie(cases []presortCase) *prefixTrie {
+func buildReferenceTrie(cases []touchCase) *prefixTrie {
 	tr := newPrefixTrie()
 	for _, c := range cases {
 		var upd *Update
@@ -116,7 +116,7 @@ func buildReferenceTrie(cases []presortCase) *prefixTrie {
 	return tr
 }
 
-func buildPresorted(cases []presortCase, chunkKeys int) (*parallelUpdate, bool) {
+func buildChunked(cases []touchCase, chunkKeys int) (*parallelUpdate, bool) {
 	pu := newParallelUpdate()
 	if chunkKeys > 0 {
 		pu.chunkKeys = chunkKeys
@@ -134,26 +134,26 @@ func buildPresorted(cases []presortCase, chunkKeys int) (*parallelUpdate, bool) 
 	return pu, backgrounded
 }
 
-func TestPresort_MatchesInsertionOrderTrie(t *testing.T) {
+func TestChunkBuild_MatchesInsertionOrderTrie(t *testing.T) {
 	t.Parallel()
 
 	for _, n := range []int{1, 2, 17, 5000} {
-		cases := randomPresortCases(int64(n)*7919+3, n, 4)
+		cases := randomTouchCases(int64(n)*7919+3, n, 4)
 		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
-		pu, backgrounded := buildPresorted(cases, 1<<20)
+		pu, backgrounded := buildChunked(cases, 1<<20)
 		require.False(t, backgrounded, "n=%d must stay under the hand-off threshold", n)
 		require.Equal(t, want, flattenPrefixTrie(t, pu.trie),
 			"presorted build must match insertion-order build for n=%d", n)
 	}
 }
 
-func TestPresort_BackgroundBuildKeepsMergeOrder(t *testing.T) {
+func TestChunkBuild_BackgroundBuildKeepsMergeOrder(t *testing.T) {
 	t.Parallel()
 
 	for _, n := range []int{1, 2, 17, 3000} {
-		cases := randomPresortCases(int64(n)*4242+1, n, 3)
+		cases := randomTouchCases(int64(n)*4242+1, n, 3)
 		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
-		pu, backgrounded := buildPresorted(cases, 8)
+		pu, backgrounded := buildChunked(cases, 8)
 		require.Equal(t, n > 8, backgrounded, "n=%d must cross the hand-off threshold", n)
 		require.Nil(t, pu.buildCh, "Build must reap the builder goroutine")
 		require.Equal(t, want, flattenPrefixTrie(t, pu.trie),
@@ -161,20 +161,20 @@ func TestPresort_BackgroundBuildKeepsMergeOrder(t *testing.T) {
 	}
 }
 
-func TestPresort_BuffersReturnToThePoolAcrossBatches(t *testing.T) {
+func TestChunkBuild_BuffersReturnToThePoolAcrossBatches(t *testing.T) {
 	t.Parallel()
 
-	cases := randomPresortCases(777, 200, 0)
-	pu, backgrounded := buildPresorted(cases, 8)
+	cases := randomTouchCases(777, 200, 0)
+	pu, backgrounded := buildChunked(cases, 8)
 	require.True(t, backgrounded)
-	require.Len(t, pu.pool, presortBuffers, "every chunk buffer must come back to the pool")
+	require.Len(t, pu.pool, touchChunkBuffers, "every chunk buffer must come back to the pool")
 
 	pu.Reset()
 	for _, c := range cases {
 		pu.Collect(c.hashedKey, c.plainKey, nil)
 	}
 	pu.Build()
-	require.Len(t, pu.pool, presortBuffers, "a second batch must reuse the pooled buffers")
+	require.Len(t, pu.pool, touchChunkBuffers, "a second batch must reuse the pooled buffers")
 	for _, p := range pu.pool {
 		require.GreaterOrEqual(t, cap(p.entries), pu.chunkKeys,
 			"a pooled chunk buffer must keep its capacity, or every chunk re-grows it")
@@ -182,7 +182,7 @@ func TestPresort_BuffersReturnToThePoolAcrossBatches(t *testing.T) {
 	require.EqualValues(t, len(cases), pu.trie.root.subtreeCount)
 }
 
-func TestPresort_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {
+func TestChunkBuild_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {
 	t.Parallel()
 
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)

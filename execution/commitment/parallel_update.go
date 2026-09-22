@@ -44,18 +44,18 @@ func (a *plainKeyArena) intern(b []byte) []byte {
 
 func (a *plainKeyArena) reset() { a.buf = a.buf[:0] }
 
-const presortChunkKeys = 8192
+const touchChunkKeys = 8192
 
-const presortBuffers = 2
+const touchChunkBuffers = 2
 
 type parallelUpdate struct {
 	trie *prefixTrie
 
-	pending   *presorter
+	pending   *touchChunk
 	chunkKeys int
-	buildCh   chan *presorter
-	freeCh    chan *presorter
-	pool      []*presorter
+	buildCh   chan *touchChunk
+	freeCh    chan *touchChunk
+	pool      []*touchChunk
 	inflight  sync.WaitGroup
 
 	deferredMu       sync.Mutex
@@ -67,8 +67,8 @@ type parallelUpdate struct {
 func newParallelUpdate() *parallelUpdate {
 	return &parallelUpdate{
 		trie:      newPrefixTrie(),
-		pending:   new(presorter),
-		chunkKeys: presortChunkKeys,
+		pending:   new(touchChunk),
+		chunkKeys: touchChunkKeys,
 	}
 }
 
@@ -81,19 +81,19 @@ func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
 }
 
 func (pu *parallelUpdate) startBuilder() {
-	pu.buildCh = make(chan *presorter, presortBuffers)
-	pu.freeCh = make(chan *presorter, presortBuffers)
-	for range presortBuffers {
+	pu.buildCh = make(chan *touchChunk, touchChunkBuffers)
+	pu.freeCh = make(chan *touchChunk, touchChunkBuffers)
+	for range touchChunkBuffers {
 		if n := len(pu.pool); n > 0 {
 			pu.freeCh <- pu.pool[n-1]
 			pu.pool = pu.pool[:n-1]
 		} else {
-			pu.freeCh <- &presorter{entries: make([]presortEntry, 0, pu.chunkKeys)}
+			pu.freeCh <- &touchChunk{entries: make([]touchEntry, 0, pu.chunkKeys)}
 		}
 	}
-	go func(build <-chan *presorter, free chan<- *presorter) {
+	go func(build <-chan *touchChunk, free chan<- *touchChunk) {
 		for p := range build {
-			pu.insertSorted(p)
+			pu.insertChunk(p)
 			p.reset()
 			free <- p
 			pu.inflight.Done()
@@ -106,7 +106,7 @@ func (pu *parallelUpdate) stopBuilder() {
 		return
 	}
 	close(pu.buildCh)
-	for range presortBuffers {
+	for range touchChunkBuffers {
 		select {
 		case p := <-pu.freeCh:
 			pu.pool = append(pu.pool, p)
@@ -129,8 +129,7 @@ func (pu *parallelUpdate) handOff() {
 	pu.pending = <-pu.freeCh
 }
 
-func (pu *parallelUpdate) insertSorted(p *presorter) {
-	p.sort()
+func (pu *parallelUpdate) insertChunk(p *touchChunk) {
 	for i := range p.entries {
 		pu.trie.Insert(p.entries[i].hashedKey, p.entries[i].plainKey, p.entries[i].update)
 	}
@@ -141,7 +140,7 @@ func (pu *parallelUpdate) Build() {
 		if pu.buildCh != nil {
 			pu.handOff()
 		} else if pu.trie != nil {
-			pu.insertSorted(pu.pending)
+			pu.insertChunk(pu.pending)
 			pu.pending.reset()
 		} else {
 			pu.pending.reset()

@@ -16,51 +16,27 @@
 
 package commitment
 
-import (
-	"bytes"
-	"cmp"
-	"slices"
-)
-
-type presortEntry struct {
+type touchEntry struct {
 	hashedKey []byte
 	plainKey  []byte
 	update    *Update
-	seq       uint32
 }
 
-type presorter struct {
-	entries []presortEntry
-	seq     uint32
+type touchChunk struct {
+	entries []touchEntry
 }
 
-func (p *presorter) collect(hashedKey, plainKey []byte, update *Update) {
-	p.entries = append(p.entries, presortEntry{
+func (c *touchChunk) collect(hashedKey, plainKey []byte, update *Update) {
+	c.entries = append(c.entries, touchEntry{
 		hashedKey: hashedKey,
 		plainKey:  plainKey,
 		update:    update,
-		seq:       p.seq,
 	})
-	p.seq++
 }
 
-func (p *presorter) count() int { return len(p.entries) }
+func (c *touchChunk) count() int { return len(c.entries) }
 
-func presortLess(a, b presortEntry) int {
-	if c := bytes.Compare(a.hashedKey, b.hashedKey); c != 0 {
-		return c
-	}
-	return cmp.Compare(a.seq, b.seq)
-}
-
-func (p *presorter) sort() {
-	if len(p.entries) > 1 {
-		slices.SortFunc(p.entries, presortLess)
-	}
-}
-
-func (p *presorter) reset() {
-	clear(p.entries)
-	p.entries = p.entries[:0]
-	p.seq = 0
+func (c *touchChunk) reset() {
+	clear(c.entries)
+	c.entries = c.entries[:0]
 }
