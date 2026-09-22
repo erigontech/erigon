@@ -28,6 +28,8 @@ type Stream interface {
 
 	Buffer() []byte
 	Reset(out io.Writer)
+	// markSeparatorPending states that a sibling value precedes what is written next.
+	markSeparatorPending()
 	// WriteRawBytes and WriteRaw write already-encoded JSON. Nothing is escaped
 	// or validated, so the caller owns that: a value that is not yet valid JSON
 	// — any unencoded string — must go through WriteString.

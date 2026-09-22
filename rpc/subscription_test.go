@@ -331,6 +331,21 @@ func TestNotifyStreamsTheNotification(t *testing.T) {
 	}
 }
 
+// A notification buffered before activation carries a result too.
+func TestBufferedNotificationOfEmptyMarshallerCarriesNull(t *testing.T) {
+	w := &captureWriter{}
+	n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}}
+	if err := n.Notify("0x9a", emptyStreamed{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := n.activate(); err != nil {
+		t.Fatal(err)
+	}
+	if want := `{"jsonrpc":"2.0","method":"eth_subscription","params":{"subscription":"0x9a","result":null}}`; string(w.got) != want {
+		t.Fatalf("notification = %s, want %s", w.got, want)
+	}
+}
+
 // captureWriter keeps a copy of what it is given: a notification's buffer is reused once the
 // write returns.
 type captureWriter struct{ got []byte }

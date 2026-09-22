@@ -150,6 +150,23 @@ func TestSharedJSONEncodesTheValue(t *testing.T) {
 	require.Same(t, h, s.LocalValue())
 }
 
+// fastOnly encodes differently through its fast marshaller than through reflection, so the output
+// shows which one ran.
+type fastOnly struct{}
+
+func (fastOnly) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	w.WriteRaw(`"fast"`)
+	return nil
+}
+
+// An event whose value has a fast marshaller is encoded with it, not with reflection.
+func TestSharedJSONUsesTheFastMarshaller(t *testing.T) {
+	s := sharedJSON[int]{&rpchelper.Shared[int]{Value: 1}, func(int) any { return fastOnly{} }}
+	got, err := jsonstream.Marshal(s)
+	require.NoError(t, err)
+	require.Equal(t, `"fast"`, string(got))
+}
+
 // newHeads through the rpc package's notifier, as a websocket client receives it.
 func TestEthSubscribeNewHeadsOverWebsocket(t *testing.T) {
 	m := execmoduletester.New(t)
