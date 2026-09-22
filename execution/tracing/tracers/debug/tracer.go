@@ -127,7 +127,7 @@ func (t *Tracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage
 		},
 	})
 
-	if t.flushMode != FlushModeTxn || receipt == nil {
+	if t.flushMode != FlushModeTxn {
 		return
 	}
 

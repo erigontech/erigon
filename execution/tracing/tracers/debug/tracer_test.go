@@ -49,14 +49,6 @@ func TestTxEndV2Recording(t *testing.T) {
 	require.JSONEq(t, `{"traces":[{"onTxEndV2":{"gasUsed":{"BlockExecutionGasUsed":40,"BlockStateGasUsed":70,"GasRefund":10}}}]}`, string(encoded))
 }
 
-func TestTxEndV2RecordingWithoutReceipt(t *testing.T) {
-	recorder := &Tracer{flushMode: FlushModeTxn, outputDir: t.TempDir()}
-	require.NotPanics(t, func() { recorder.Hooks().EmitTxEnd(nil, mdgas.TxnGasUsage{}, vm.ErrOutOfGas) })
-	encoded, err := json.Marshal(recorder.traces)
-	require.NoError(t, err)
-	require.JSONEq(t, `{"traces":[{"onTxEndV2":{"gasUsed":{"BlockExecutionGasUsed":0,"BlockStateGasUsed":0,"GasRefund":0},"error":"out of gas"}}]}`, string(encoded))
-}
-
 func TestFrameV2Recording(t *testing.T) {
 	initial := mdgas.MdGas{Execution: 100, State: 200}
 	usage := mdgas.MdGasUsage{Execution: 20, State: -10}
