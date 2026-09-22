@@ -227,6 +227,18 @@ func TestWarmupV4StepUsesPlaneDepthAndExtensionLength(t *testing.T) {
 	nextDepth, stop := warmupStepV4(record, hashedKey, 64)
 	require.False(t, stop)
 	require.Equal(t, 67, nextDepth)
+
+	leafRecord := recordFixture(0, 0, 1<<4, 1<<4, 0, 0, nil, nil, nil,
+		map[int]leafFixture{4: {suffix: bytes.Repeat([]byte{0x0c}, 31), value: []byte{9}}})
+	nextDepth, stop = warmupStepV4(leafRecord, hashedKey, 64)
+	require.True(t, stop, "a storage-plane leaf must end the descent, not restart it")
+	require.NotEqual(t, 64, nextDepth, "restarting at 64 from the storage plane rewinds and re-reads the same record")
+
+	storageKey := make([]byte, 128)
+	storageKey[0] = 4
+	nextDepth, stop = warmupStepV4(leafRecord, storageKey, 0)
+	require.False(t, stop, "an account-plane leaf on a 128-nibble key must cross to the storage plane")
+	require.Equal(t, 64, nextDepth)
 }
 
 func TestWarmupV4KeyShapes(t *testing.T) {
@@ -371,13 +383,18 @@ func TestWarmupV4StorageDescentReachesBeyondRoot(t *testing.T) {
 	for _, storageKey := range storageKeys {
 		next.TouchPlainKeyDirect(string(storageKey), phaseAStorageUpdate([]byte{2}))
 	}
-	_, err = trie.Process(context.Background(), next, "", nil, commitment.WarmupConfig{
-		Enabled:    true,
+	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
 		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return traceCtx, nil },
 		NumWorkers: 4,
 		MaxDepth:   commitment.WarmupMaxDepth,
+		Key:        warmupKeyV4,
+		Step:       warmupStepV4,
 	})
+	w.Start()
+	_, _, _, err = partitionUpdates(context.Background(), next, 4, w)
 	require.NoError(t, err)
+	require.NoError(t, w.WaitBufferFree(0))
+	w.CloseAndWait()
 
 	maxStorageDepth := 0
 	storageRootReads := 0
