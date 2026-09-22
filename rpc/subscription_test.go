@@ -134,6 +134,41 @@ func TestSubscriptions(t *testing.T) {
 	}
 }
 
+// Every subscribe call of a batch must take effect, though they all add to the notifiers the
+// batch shares.
+func TestBatchSubscriptionsAllNotify(t *testing.T) {
+	logger := log.New()
+	server := NewServer(50, false /* traceRequests */, false /* debugSingleRequests */, true, logger, 100)
+	if err := server.RegisterName("nftest", new(notificationTestService)); err != nil {
+		t.Fatal(err)
+	}
+	clientConn, serverConn := net.Pipe()
+	go server.ServeCodec(NewCodec(serverConn), 0)
+	defer server.Stop()
+
+	const subs = 16
+	batch := make([]map[string]any, subs)
+	for i := range batch {
+		batch[i] = map[string]any{"jsonrpc": "2.0", "id": i, "method": "nftest_subscribe", "params": []any{"someSubscription", 1, i}}
+	}
+	if err := json.NewEncoder(clientConn).Encode(batch); err != nil {
+		t.Fatal(err)
+	}
+	if err := clientConn.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	in := json.NewDecoder(clientConn)
+	for notified := 0; notified < subs; {
+		var msg json.RawMessage
+		if err := in.Decode(&msg); err != nil {
+			t.Fatalf("%d of %d subscriptions notified: %v", notified, subs, err)
+		}
+		if msg[0] != '[' {
+			notified++
+		}
+	}
+}
+
 // This test checks that unsubscribing works.
 func TestServerUnsubscribe(t *testing.T) {
 	logger := log.New()
