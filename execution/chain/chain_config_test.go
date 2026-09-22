@@ -342,3 +342,17 @@ func TestForkTimestampsCoversEveryTimeField(t *testing.T) {
 		require.True(t, listed[name], "%s is time-based but missing from forkTimestamps()", name)
 	}
 }
+
+// A shared config is read from many goroutines and copied by value while it is, so reading
+// the blob schedule must not write to it.
+func TestGetBlobConfigDoesNotWriteConfig(t *testing.T) {
+	c := AllProtocolChanges.Copy()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		c.GetBlobConfig(0)
+	}()
+	cp := *c
+	<-done
+	require.Equal(t, c.GetBlobConfig(0), cp.GetBlobConfig(0))
+}
