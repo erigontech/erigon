@@ -278,6 +278,19 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 	if c.trunkDisabled {
 		return nil
 	}
+	if len(prefix) > 0 {
+		switch prefix[0] {
+		case 0x40:
+			var path [4]byte
+			depth, ok := v4KeyPath(prefix, 1, &path)
+			if !ok {
+				return nil
+			}
+			return c.accountTrunk.slot(&path, depth, forWrite)
+		case 0x41, 0x42:
+			return nil
+		}
+	}
 	switch len(prefix) {
 	case 1:
 		if prefix[0]&0x10 != 0 { // 1 nibble
@@ -306,30 +319,63 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 	return nil
 }
 
+func v4KeyPath(prefix []byte, start int, path *[4]byte) (depth int, ok bool) {
+	if len(prefix) <= start {
+		return 0, false
+	}
+	depth = int(prefix[len(prefix)-1])
+	if depth > 64 || len(prefix)-start-1 != (depth+1)/2 {
+		return 0, false
+	}
+	for i := 0; i < depth && i < len(path); i++ {
+		b := prefix[start+i/2]
+		if i&1 == 0 {
+			path[i] = b >> 4
+		} else {
+			path[i] = b & 0x0f
+		}
+	}
+	return depth, true
+}
+
 // storageRoute: ok=false means non-storage, caller falls through to the tail.
 func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) (st *trunk, n int, ok bool) {
-	if len(prefix) < 33 || prefix[0]&0x20 != 0 {
-		return nil, 0, false
+	var packed []byte
+	if len(prefix) > 0 && prefix[0] == 0x41 {
+		var valid bool
+		n, valid = v4KeyPath(prefix, 33, nibBuf)
+		if !valid || len(prefix) < 33 {
+			return nil, 0, false
+		}
+		packed = prefix[1:33]
+	} else {
+		if len(prefix) > 0 && (prefix[0] == 0x40 || prefix[0] == 0x42) {
+			return nil, 0, false
+		}
+		if len(prefix) < 33 || prefix[0]&0x20 != 0 {
+			return nil, 0, false
+		}
+		acctHash, valid := ContractHashFromPrefix(prefix)
+		if !valid {
+			return nil, 0, false
+		}
+		packed = acctHash[:]
+		n = storageNibbles(prefix, nibBuf)
 	}
 	p := c.pinned.Load()
 	if !create && p == nil {
 		return nil, 0, false
 	}
-	acctHash, ok := ContractHashFromPrefix(prefix)
-	if !ok {
-		return nil, 0, false
-	}
-	packed := acctHash[:]
 	if p != nil {
 		if st, found := p.Get(packed); found {
-			return st, storageNibbles(prefix, nibBuf), true
+			return st, n, true
 		}
 	}
 	if !create {
 		return nil, 0, false
 	}
 	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(c.maxDepth))
-	return st, storageNibbles(prefix, nibBuf), true
+	return st, n, true
 }
 
 func (c *BranchCache) pinnedForWrite() *maphash.Map[*trunk] {
@@ -425,7 +471,7 @@ func (c *BranchCache) SetMissCallback(cb MissCallback) {
 }
 
 func isRootPrefix(prefix []byte) bool {
-	return len(prefix) == 1 && prefix[0] == 0x00
+	return (len(prefix) == 1 && prefix[0] == 0x00) || (len(prefix) == 2 && prefix[0] == 0x40 && prefix[1] == 0)
 }
 
 func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
@@ -517,6 +563,16 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	defer stripe.Unlock()
 
 	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
+	if len(prefix) > 0 && prefix[0] == 0x40 {
+		if isRootPrefix(prefix) {
+			c.root.Store(entry)
+			return
+		}
+		if slot := c.trunkSlot(prefix, true); slot != nil {
+			slot.Swap(entry)
+			return
+		}
+	}
 	var nibBuf [4]byte
 	st, n, ok := c.storageRoute(prefix, true, &nibBuf)
 	if !ok {

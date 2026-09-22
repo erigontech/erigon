@@ -314,26 +314,26 @@ the worker pool, the `CtxFactory`, the epoch/coherence model, the put stripes, a
 
 - [ ] capture the Task 5 baseline arm first, before any edit: per-tier `BranchCache.Stats()` (`:639`) and
       `warmuper.Stats()` on a v4 run at this HEAD — it is unrecoverable once Task 1 lands
-- [ ] write the failing tier table test in `branch_cache_v4_test.go`: for each v4 key shape (account root
+- [x] write the failing tier table test in `branch_cache_v4_test.go`: for each v4 key shape (account root
       `40 00`, account depths 1-6, storage root `41||H||00`, storage depths 1-6) assert the entry lands in
       the intended tier and reads back byte-identical
-- [ ] write the `PinEntry` reachability test: pin a v4 account key, then `Get` it — today it lands in the
+- [x] write the `PinEntry` reachability test: pin a v4 account key, then `Get` it — today it lands in the
       tail while `lookup:442-450` stops at a trunk miss without falling through, so it is unreachable
-- [ ] write the collision test: generate distinct v4 keys across depths 0-6 in both planes, `Put` a
+- [x] write the collision test: generate distinct v4 keys across depths 0-6 in both planes, `Put` a
       distinct value in each, assert every `Get` returns its own value — a trunk slot stores no key, so a
       collision is a silently wrong record
-- [ ] write the dispatch-precondition assertion: no compact prefix produced by `nibbles.HexToCompact` can
+- [x] write the dispatch-precondition assertion: no compact prefix produced by `nibbles.HexToCompact` can
       begin `0x40`/`0x41`/`0x42` (`nibbles.go:55-58` sets only `0x20`/`0x10`), alongside the assertion that
       `IsCommitmentStateKey` (`commitment.go:167`) already excludes `0x42`
-- [ ] confirm the tests are red for the right reason — name the assertion and the observed tier, not the
+- [x] confirm the tests are red for the right reason — name the assertion and the observed tier, not the
       exit code
-- [ ] add a tag discriminator in `branch_cache.go` dispatching `0x40`/`0x41` to the new routing and
+- [x] add a tag discriminator in `branch_cache.go` dispatching `0x40`/`0x41` to the new routing and
       everything else to the existing compact path
-- [ ] route all three entry points through it: `lookup:431`, `store` (via `Put:563`) and `PinEntry:508`
-- [ ] extend `isRootPrefix` (`:427`) to accept `40 00` so the v4 account root reaches the `root` tier
-- [ ] mutation-verify each guard: copy `branch_cache.go` to the scratchpad, revert the whole dispatch,
+- [x] route all three entry points through it: `lookup:431`, `store` (via `Put:563`) and `PinEntry:508`
+- [x] extend `isRootPrefix` (`:427`) to accept `40 00` so the v4 account root reaches the `root` tier
+- [x] mutation-verify each guard: copy `branch_cache.go` to the scratchpad, revert the whole dispatch,
       run the whole package, name the `file:line` that went red, copy the file back
-- [ ] run `go test ./execution/commitment/... ./db/state/...` — all green before Task 2
+- [x] run `go test ./execution/commitment/... ./db/state/...` — all green before Task 2
 
 ### Task 2: Lift key-building and record-stepping out of the warmupper
 
