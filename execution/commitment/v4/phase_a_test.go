@@ -175,3 +175,16 @@ func TestPhaseAStorageTwoToOneTombstonesOrphanedChild(t *testing.T) {
 	require.Empty(t, ctx.branches[string(StorageNodeKey(address, []byte{2}, nil))])
 	require.True(t, NewRecord(ctx.branches[string(StorageRootKey(address))], 0).isLeafRoot())
 }
+
+func TestPartitionRejectsUnsortedInput(t *testing.T) {
+	p := newPartitioner()
+	update := &commitment.Update{Flags: commitment.BalanceUpdate}
+	require.NoError(t, p.add(bytes.Repeat([]byte{5}, 64), nil, update))
+	require.ErrorIs(t, p.add(bytes.Repeat([]byte{4}, 64), nil, update), errPhaseAOrder)
+
+	q := newPartitioner()
+	account := bytes.Repeat([]byte{7}, 64)
+	require.NoError(t, q.add(account, nil, update))
+	require.NoError(t, q.add(append(bytes.Clone(account), bytes.Repeat([]byte{9}, 64)...), nil, update))
+	require.ErrorIs(t, q.add(append(bytes.Clone(account), bytes.Repeat([]byte{8}, 64)...), nil, update), errPhaseAOrder)
+}

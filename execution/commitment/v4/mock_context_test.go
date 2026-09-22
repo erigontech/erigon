@@ -18,6 +18,7 @@ package v4
 
 import (
 	"bytes"
+	"slices"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -74,8 +75,12 @@ type phaseAInput struct {
 }
 
 func partition(stream []phaseAInput) ([]storageTask, []accountEntry) {
+	sorted := slices.Clone(stream)
+	slices.SortStableFunc(sorted, func(a, b phaseAInput) int {
+		return bytes.Compare(a.hashedKey, b.hashedKey)
+	})
 	p := newPartitioner()
-	for _, item := range stream {
+	for _, item := range sorted {
 		if err := p.add(item.hashedKey, item.plainKey, item.update); err != nil {
 			panic(err)
 		}
