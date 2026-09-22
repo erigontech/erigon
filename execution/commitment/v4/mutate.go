@@ -75,7 +75,7 @@ func removeAt(n *node, path []byte) (removalState, error) {
 
 	if n.leafMask&bit != 0 {
 		if !leafPathMatches(n, nib, path) {
-			return removalState{}, ErrRemovePath
+			return removalState{}, ErrRemoveNotFound
 		}
 		n.clear(nib)
 		return collapsedState(n), nil

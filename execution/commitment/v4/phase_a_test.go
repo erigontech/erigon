@@ -100,6 +100,27 @@ func TestPhaseAIgnoresAbsentStorageDelete(t *testing.T) {
 	require.Empty(t, ctx.branches[string(StorageRootKey(address))])
 }
 
+func TestPhaseAIgnoresStorageDeleteCollidingWithAnotherLeaf(t *testing.T) {
+	ctx := newMockContext()
+	var address [32]byte
+	address[0] = 0x42
+	kept := append([]byte{0}, bytes.Repeat([]byte{5}, 63)...)
+	sibling := append([]byte{1}, bytes.Repeat([]byte{2}, 63)...)
+	absent := append([]byte{1}, bytes.Repeat([]byte{3}, 63)...)
+
+	seeded, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
+		{path: kept, update: phaseAStorageUpdate([]byte{1})},
+		{path: sibling, update: phaseAStorageUpdate([]byte{2})},
+	}})
+	require.NoError(t, err)
+
+	after, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
+		{path: absent, update: &commitment.Update{Flags: commitment.DeleteUpdate}},
+	}})
+	require.NoError(t, err)
+	require.Equal(t, seeded, after)
+}
+
 func TestPhaseAStorageOnlyUpdateKeepsAccountEntrySeparate(t *testing.T) {
 	account := bytes.Repeat([]byte{0x9}, 64)
 	path := append(append([]byte(nil), account...), bytes.Repeat([]byte{0x2}, 64)...)
