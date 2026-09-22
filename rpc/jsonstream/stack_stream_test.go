@@ -1581,6 +1581,9 @@ func TestLargeHexWritesInChunks(t *testing.T) {
 				for i := range hs {
 					d.Hashes[i] = hs[i][:]
 				}
+				if size > 0 { // one element as large as the blob, then small ones
+					d.Nodes = append(d.Nodes, blob(size))
+				}
 				for i := 0; i < size/512; i++ {
 					d.Nodes = append(d.Nodes, blob(300+i))
 				}
