@@ -85,9 +85,9 @@ func (obj *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	}
 	s.WriteObjectStart()
 	s.WriteObjectField("index").WriteQuotedText(&obj.Index)
-	jsonstream.Field(s, "validatorIndex").WriteQuotedText(&obj.Validator)
-	jsonstream.Field(s, "address").WriteHex(obj.Address[:])
-	jsonstream.Field(s, "amount").WriteQuotedText(&obj.Amount)
+	s.WriteObjectField("validatorIndex").WriteQuotedText(&obj.Validator)
+	s.WriteObjectField("address").WriteHex(obj.Address[:])
+	s.WriteObjectField("amount").WriteQuotedText(&obj.Amount)
 	s.WriteObjectEnd()
 	return nil
 }
