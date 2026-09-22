@@ -293,6 +293,14 @@ func incrSlot(addr []byte, j int) []byte {
 	return append(key, slot...)
 }
 
+func plainAccount(i int) *commitment.Update {
+	u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
+	u.Nonce = uint64(i + 1)
+	u.Balance = *uint256.NewInt(uint64(i + 1))
+	u.CodeHash = empty.CodeHash
+	return u
+}
+
 func incrAccountUpdate(rng *rand.Rand) *commitment.Update {
 	u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
 	u.Nonce = uint64(rng.Intn(1 << 20))
@@ -389,11 +397,7 @@ func TestParityRootExtensionSplitsAgainstStoredChild(t *testing.T) {
 			build := func(ids []int) []parityUpdate {
 				entries := make([]parityUpdate, 0, len(ids))
 				for _, i := range ids {
-					u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
-					u.Nonce = uint64(i + 1)
-					u.Balance = *uint256.NewInt(uint64(i + 1))
-					u.CodeHash = empty.CodeHash
-					entries = append(entries, parityUpdate{key: incrAddress(i), update: u})
+					entries = append(entries, parityUpdate{key: incrAddress(i), update: plainAccount(i)})
 				}
 				return entries
 			}
@@ -404,13 +408,6 @@ func TestParityRootExtensionSplitsAgainstStoredChild(t *testing.T) {
 }
 
 func TestParityAccountRootExtensionWithStoredChild(t *testing.T) {
-	acct := func(i int) *commitment.Update {
-		u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
-		u.Nonce = uint64(i + 1)
-		u.Balance = *uint256.NewInt(uint64(i + 1))
-		u.CodeHash = empty.CodeHash
-		return u
-	}
 	storageOf := func(i, slot, value int) parityUpdate {
 		u := &commitment.Update{Flags: commitment.StorageUpdate, StorageLen: 1}
 		u.Storage[0] = byte(value)
@@ -419,40 +416,33 @@ func TestParityAccountRootExtensionWithStoredChild(t *testing.T) {
 
 	t.Run("insert_under_shared_prefix", func(t *testing.T) {
 		w := newIncrWorld(t)
-		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}})
-		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
-		w.mustBlock(2, []parityUpdate{{key: incrAddress(15), update: acct(15)}})
+		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: plainAccount(5)}})
+		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: plainAccount(8)}})
+		w.mustBlock(2, []parityUpdate{{key: incrAddress(15), update: plainAccount(15)}})
 	})
 
 	t.Run("update_keeps_storage_root", func(t *testing.T) {
 		w := newIncrWorld(t)
-		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}, storageOf(5, 1, 0x11), storageOf(5, 2, 0x22)})
-		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
-		w.mustBlock(2, []parityUpdate{{key: incrAddress(5), update: acct(50)}})
+		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: plainAccount(5)}, storageOf(5, 1, 0x11), storageOf(5, 2, 0x22)})
+		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: plainAccount(8)}})
+		w.mustBlock(2, []parityUpdate{{key: incrAddress(5), update: plainAccount(50)}})
 	})
 
 	t.Run("delete_under_shared_prefix", func(t *testing.T) {
 		w := newIncrWorld(t)
-		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}})
-		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
-		w.mustBlock(2, []parityUpdate{{key: incrAddress(15), update: acct(15)}, {key: incrAddress(31), update: acct(31)}})
+		w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: plainAccount(5)}})
+		w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: plainAccount(8)}})
+		w.mustBlock(2, []parityUpdate{{key: incrAddress(15), update: plainAccount(15)}, {key: incrAddress(31), update: plainAccount(31)}})
 		w.mustBlock(3, []parityUpdate{{key: incrAddress(5), update: &commitment.Update{Flags: commitment.DeleteUpdate}}})
 	})
 }
 
 func TestParityDeleteCollapsesBranchBelowRoot(t *testing.T) {
-	acct := func(i int) *commitment.Update {
-		u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
-		u.Nonce = uint64(i + 1)
-		u.Balance = *uint256.NewInt(uint64(i + 1))
-		u.CodeHash = empty.CodeHash
-		return u
-	}
 	w := newIncrWorld(t)
-	w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: acct(5)}})
-	w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: acct(8)}})
+	w.mustBlock(0, []parityUpdate{{key: incrAddress(5), update: plainAccount(5)}})
+	w.mustBlock(1, []parityUpdate{{key: incrAddress(8), update: plainAccount(8)}})
 	w.mustBlock(2, []parityUpdate{
-		{key: incrAddress(15), update: acct(15)},
+		{key: incrAddress(15), update: plainAccount(15)},
 		{key: incrAddress(8), update: &commitment.Update{Flags: commitment.DeleteUpdate}},
 	})
 }
