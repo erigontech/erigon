@@ -1025,3 +1025,44 @@ func TestMinimumBlockAvailableTakesTheHighestTypeMinimum(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1000), minimum)
 }
+
+// A transaction of a block that is still in the DB carries the sender stored for it, so the
+// RPC does not recover it from the signature; without stored senders it has none.
+func TestTxnByIdxInBlockCarriesStoredSender(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	raw, err := types.MarshalTransactionsBinary(types.Transactions{
+		types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+		types.NewTransaction(1, common.Address{1}, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+	})
+	require.NoError(t, err)
+	senders := []common.Address{{0xa}, {0xb}}
+	for num, hash := range map[uint64]common.Hash{1: {1}, 2: {2}} {
+		_, err = rawdb.WriteRawBody(rwTx, hash, num, &types.RawBody{Transactions: raw})
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hash, num))
+	}
+	require.NoError(t, rawdb.WriteSenders(rwTx, common.Hash{1}, 1, senders))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for i, want := range senders {
+		txn, ok, err := blockReader.TxnByIdxInBlock(t.Context(), tx, 1, i)
+		require.NoError(t, err)
+		require.True(t, ok)
+		got, ok := txn.GetSender()
+		require.True(t, ok, "txn %d has no sender", i)
+		require.Equal(t, want, got.Value())
+	}
+	txn, ok, err := blockReader.TxnByIdxInBlock(t.Context(), tx, 2, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, ok = txn.GetSender()
+	require.False(t, ok, "block 2 has no stored senders")
+}
