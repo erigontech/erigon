@@ -33,7 +33,7 @@ import (
 
 func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression bool) *Decompressor {
 	t.Helper()
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger, require := log.New(), require.New(t)
 	tmpDir := t.TempDir()
 	file := filepath.Join(tmpDir, "compressed1")
@@ -59,7 +59,7 @@ func prepareLoremDictOnPagedWriter(t *testing.T, pageSize int, pageCompression b
 }
 
 func TestPagedReader(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, false)
@@ -151,7 +151,7 @@ func TestPage(t *testing.T) {
 }
 
 func TestPagedReaderWithCompression(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 
 	require := require.New(t)
 	d := prepareLoremDictOnPagedWriter(t, 2, true) // Enable page-level compression
@@ -180,11 +180,20 @@ func TestPagedWriterCRC32Sequential(t *testing.T) {
 
 	// Add test data
 	testData := []struct{ k, v string }{
-		{"k1", "v1"}, {"k2", "v2"}, {"k3", "v3"},
-		{"k4", "v4"}, {"k5", "v5"}, {"k6", "v6"},
-		{"k7", "v7"}, {"k8", "v8"}, {"k9", "v9"},
-		{"k10", "v10"}, {"k11", "v11"}, {"k12", "v12"},
-		{"k13", "longer_value_here"}, {"k14", "another_longer_value"},
+		{"k1", "v1"},
+		{"k2", "v2"},
+		{"k3", "v3"},
+		{"k4", "v4"},
+		{"k5", "v5"},
+		{"k6", "v6"},
+		{"k7", "v7"},
+		{"k8", "v8"},
+		{"k9", "v9"},
+		{"k10", "v10"},
+		{"k11", "v11"},
+		{"k12", "v12"},
+		{"k13", "longer_value_here"},
+		{"k14", "another_longer_value"},
 		{"k15", ""}, // empty value
 		{"key_with_spaces", "value with spaces"},
 		{"unicode_key_αβγ", "unicode_value_δεζ"},
@@ -297,9 +306,15 @@ func TestPageLayoutConsistency(t *testing.T) {
 	pw := NewPagedWriter(t.Context(), mock, false, 1)
 
 	testPairs := []struct{ k, v string }{
-		{"alpha", "one"}, {"beta", "two"}, {"gamma", "three"},
-		{"delta", "four"}, {"epsilon", "five"}, {"zeta", "six"},
-		{"eta", "seven"}, {"theta", "eight"}, {"iota", "nine"},
+		{"alpha", "one"},
+		{"beta", "two"},
+		{"gamma", "three"},
+		{"delta", "four"},
+		{"epsilon", "five"},
+		{"zeta", "six"},
+		{"eta", "seven"},
+		{"theta", "eight"},
+		{"iota", "nine"},
 	}
 	for _, kv := range testPairs {
 		require.NoError(t, pw.Add([]byte(kv.k), []byte(kv.v)))
@@ -378,9 +393,14 @@ func TestPagedReaderSortedKeyOrder(t *testing.T) {
 
 	// Keys written in strictly increasing lexicographic order.
 	sortedPairs := []struct{ k, v string }{
-		{"a", "v1"}, {"b", "v2"}, {"c", "v3"},
-		{"d", "v4"}, {"e", "v5"}, {"f", "v6"},
-		{"g", "v7"}, {"h", "v8"},
+		{"a", "v1"},
+		{"b", "v2"},
+		{"c", "v3"},
+		{"d", "v4"},
+		{"e", "v5"},
+		{"f", "v6"},
+		{"g", "v7"},
+		{"h", "v8"},
 	}
 
 	tmpDir := t.TempDir()
@@ -614,7 +634,7 @@ func TestReaderBinarySearch(t *testing.T) {
 // seek: every production caller builds a fresh reader per lookup, so this path is only ever
 // entered on a cold page.
 func TestPagedReaderResetSeeksToPage(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "")
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "")
 	require := require.New(t)
 	const pageSize = 2
 	d := prepareLoremDictOnPagedWriter(t, pageSize, true)

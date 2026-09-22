@@ -67,8 +67,10 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
-var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+var (
+	caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
+	errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+)
 
 type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
@@ -706,7 +708,6 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		}
 		return assembled.Busy, nil
 	})
-
 	if err != nil {
 		return nil, err
 	}

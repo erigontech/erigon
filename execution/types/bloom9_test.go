@@ -62,7 +62,7 @@ func TestBloom(t *testing.T) {
 // TestBloomExtensively does some more thorough tests
 func TestBloomExtensively(t *testing.T) {
 	t.Parallel()
-	var exp = common.HexToHash("c8d3ca65cdb4874300a9e39475508f23ed6da09fdbc487f89a2dcf50b09eb263")
+	exp := common.HexToHash("c8d3ca65cdb4874300a9e39475508f23ed6da09fdbc487f89a2dcf50b09eb263")
 	var b Bloom
 	// Add 100 "random" things
 	for i := range 100 {

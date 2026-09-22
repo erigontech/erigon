@@ -695,7 +695,6 @@ func (d *Downloader) VerifyData(
 	whiteList []string,
 	failFast bool,
 ) error {
-
 	var totalBytes int64
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
@@ -737,7 +736,8 @@ func (d *Downloader) VerifyData(
 					case <-ctx.Done():
 						return
 					case <-logEvery.C:
-						d.log(log.LvlInfo, "Verify",
+						d.log(
+							log.LvlInfo, "Verify",
 							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
 							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
 							"sz_gib", completedBytes.Load()>>30,
@@ -776,7 +776,8 @@ func (d *Downloader) VerifyData(
 				case <-ctx.Done():
 					return
 				case <-logEvery.C:
-					d.log(log.LvlInfo, "Verify",
+					d.log(
+						log.LvlInfo, "Verify",
 						"progress", fmt.Sprintf("%.2f%%", 100*float64(verifiedBytes.Load())/float64(totalBytes)),
 						"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
 						// GB not GiB?
@@ -1340,7 +1341,6 @@ func (d *Downloader) addedFirstDownloader(
 	} else {
 		return func() { d.afterAddForDownloadHadMetainfo(t) }
 	}
-
 }
 
 func (d *Downloader) addTorrentFromMetainfo(
@@ -1661,7 +1661,8 @@ func newTorrentClient(
 // parameters.
 func (d *Downloader) logConfig() {
 	cfg := d.cfg.ClientConfig
-	d.log(log.LvlInfo,
+	d.log(
+		log.LvlInfo,
 		"Torrent config",
 		"ipv6-enabled", !cfg.DisableIPv6,
 		"ipv4-enabled", !cfg.DisableIPv4,

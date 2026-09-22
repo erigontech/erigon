@@ -34,7 +34,7 @@ type AggOpts struct { //nolint:gocritic
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return AggOpts{ //Defaults
+	return AggOpts{ // Defaults
 		logger:          log.Root(),
 		dirs:            dirs,
 		genSaltIfNeed:   false,
@@ -48,7 +48,7 @@ func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:gocritic
-	//TODO: rename `OpenFolder` to `ReopenFolder`
+	// TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
 			panic(err)
@@ -97,6 +97,7 @@ func (opts AggOpts) MustOpen(ctx context.Context) *Aggregator { //nolint:gocriti
 // Setters
 
 func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
+
 func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 	opts.stepsInFrozenFile = steps
 	return opts
@@ -119,6 +120,7 @@ func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
 }
+
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
 	return opts
@@ -200,7 +202,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -237,7 +239,6 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}

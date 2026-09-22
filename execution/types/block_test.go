@@ -62,7 +62,6 @@ func TestBlockDecodingNestedRLPExtra(t *testing.T) {
 	check("Time", block.Time(), uint64(1426516743))
 
 	ourBlockEnc, err := rlp.EncodeToBytes(&block)
-
 	if err != nil {
 		t.Fatal("encode error: ", err)
 	}

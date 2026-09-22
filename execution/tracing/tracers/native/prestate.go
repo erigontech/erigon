@@ -409,6 +409,6 @@ func (t *prestateTracer) lookupStorage(addr accounts.Address, key common.Hash) {
 	if _, ok := t.pre[addr].Storage[key]; ok {
 		return
 	}
-	var val, _ = t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
+	val, _ := t.env.IntraBlockState.GetState(addr, accounts.InternKey(key))
 	t.pre[addr].Storage[key] = val.Bytes32()
 }
