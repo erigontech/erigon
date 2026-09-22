@@ -18,8 +18,7 @@ package jsonstream
 
 import "encoding"
 
-// Field writes the separator a following field needs, then the field name. An object's
-// first field must use WriteObjectField directly.
+// Field writes a field name; the stream adds the separator.
 func Field(s *StackStream, name string) *StackStream {
 	return s.WriteObjectField(name)
 }
