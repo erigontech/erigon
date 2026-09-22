@@ -460,13 +460,21 @@ const systemTxsPerBlock = 2
 // history for blocks that have been pruned away giving nonce too low errors
 // etc. as red herrings
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available")
+	return api.checkPruneHistoryFrom(&chainHead{tx: tx}, block)
+}
+
+func (api *BaseAPI) checkPruneHistoryFrom(head *chainHead, block uint64) error {
+	return api.checkPruneField(head, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available")
 }
 
 // checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
 // that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
 func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
-	expiry, oldest, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	return api.checkPruneBlocksFrom(ctx, &chainHead{tx: tx}, block)
+}
+
+func (api *BaseAPI) checkPruneBlocksFrom(ctx context.Context, head *chainHead, block uint64) error {
+	expiry, oldest, err := api.blocksFollowChainHistoryExpiry(ctx, head.tx)
 	if err != nil {
 		return err
 	}
@@ -476,7 +484,7 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 		}
 		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *oldest)
 	}
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+	return api.checkPruneField(head, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
 }
 
 // blocksFollowChainHistoryExpiry reports whether block retention is the chain's
@@ -711,8 +719,27 @@ func (api *BaseAPI) readsUserTransaction(ctx context.Context, tx kv.Tx, blockNum
 	return ok && txn != nil, true, nil
 }
 
-func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
-	p, err := api.pruneMode(tx)
+// chainHead reads the head block number at most once per availability check: every prune
+// window is measured back from it, and one check can span several windows.
+type chainHead struct {
+	tx   kv.Tx
+	num  uint64
+	read bool
+}
+
+func (h *chainHead) number() (uint64, error) {
+	if !h.read {
+		n, err := rpchelper.GetLatestBlockNumber(h.tx)
+		if err != nil {
+			return 0, err
+		}
+		h.num, h.read = n, true
+	}
+	return h.num, nil
+}
+
+func (api *BaseAPI) checkPruneField(head *chainHead, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
+	p, err := api.pruneMode(head.tx)
 	if err != nil {
 		return err
 	}
@@ -723,7 +750,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	if !amount.Enabled() {
 		return nil
 	}
-	latest, err := rpchelper.GetLatestBlockNumber(tx)
+	latest, err := head.number()
 	if err != nil {
 		return err
 	}
@@ -737,14 +764,18 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 // Byzantium those carry a post state the cache does not store, so the block has to be
 // re-executed and reaches only as far back as state history.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	computed, err := api.postStateCalculated(ctx, tx, block)
+	return api.checkReceiptsAvailableFrom(ctx, &chainHead{tx: tx}, block)
+}
+
+func (api *BaseAPI) checkReceiptsAvailableFrom(ctx context.Context, head *chainHead, block uint64) error {
+	computed, err := api.postStateCalculated(ctx, head.tx, block)
 	if err != nil {
 		return err
 	}
 	if computed {
-		return api.checkPruneHistory(ctx, tx, block)
+		return api.checkPruneHistoryFrom(head, block)
 	}
-	return api.checkReceiptSourceAvailable(ctx, tx, block)
+	return api.checkReceiptSourceAvailable(ctx, head, block)
 }
 
 // checkReceiptSourceAvailable gates on where the receipts come from, whatever fields
@@ -753,15 +784,15 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 // cache says it exists on disk, not how much of it is kept: RCacheDomain is retired on
 // its own --prune.receipts.distance window when one is set, and alongside history
 // otherwise.
-func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
+func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, head *chainHead, block uint64) error {
+	persisted, err := kvcfg.PersistReceipts.Enabled(head.tx)
 	if err != nil {
 		return err
 	}
 	if !persisted || !receipts.PersistedReceiptsServed() {
-		return api.checkPruneHistory(ctx, tx, block)
+		return api.checkPruneHistoryFrom(head, block)
 	}
-	p, err := api.pruneMode(tx)
+	p, err := api.pruneMode(head.tx)
 	if err != nil || p == nil {
 		return err
 	}
@@ -769,13 +800,13 @@ func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, b
 	case amount == prune.KeepAllReceiptsPruneMode:
 		return nil
 	case !amount.Enabled():
-		return api.checkPruneHistory(ctx, tx, block)
+		return api.checkPruneHistoryFrom(head, block)
 	default:
-		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
+		err := api.checkPruneField(head, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
 		if err == nil || !errors.Is(err, state.PrunedError) {
 			return err
 		}
-		return api.checkPruneHistory(ctx, tx, block)
+		return api.checkPruneHistoryFrom(head, block)
 	}
 }
 
@@ -800,10 +831,11 @@ func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uin
 // is derived from the block's transaction, and the result is sized by the transaction
 // count. The blocks boundary therefore applies on top of receipt availability.
 func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+	head := &chainHead{tx: tx}
+	if err := api.checkPruneBlocksFrom(ctx, head, block); err != nil {
 		return err
 	}
-	return api.checkReceiptsAvailable(ctx, tx, block)
+	return api.checkReceiptsAvailableFrom(ctx, head, block)
 }
 
 // checkLogsAvailable gates a log query on the data it reads: the receipts of the
@@ -813,25 +845,27 @@ func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, b
 // this takes the receipt source rather than the full-receipt gate. Every leg is a
 // lower bound, so checking the first block of the range covers all of it.
 func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
-	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+	head := &chainHead{tx: tx}
+	if err := api.checkPruneBlocksFrom(ctx, head, block); err != nil {
 		return err
 	}
-	if err := api.checkReceiptSourceAvailable(ctx, tx, block); err != nil {
+	if err := api.checkReceiptSourceAvailable(ctx, head, block); err != nil {
 		return err
 	}
 	if !usesLogIndex(crit) {
 		return nil
 	}
-	return api.checkPruneHistory(ctx, tx, block)
+	return api.checkPruneHistoryFrom(head, block)
 }
 
 // checkBlockHistoryAvailable gates endpoints that re-execute a block: they read its
 // transactions from the body and start from the state history preceding it.
 func (api *BaseAPI) checkBlockHistoryAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+	head := &chainHead{tx: tx}
+	if err := api.checkPruneBlocksFrom(ctx, head, block); err != nil {
 		return err
 	}
-	return api.checkPruneHistory(ctx, tx, block)
+	return api.checkPruneHistoryFrom(head, block)
 }
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
