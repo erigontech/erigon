@@ -2245,8 +2245,7 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	chainConfig := chain.TestChainOsakaConfig.Copy()
 	historyAddr := params.HistoryStorageAddress.Value()
 	gspec := &types.Genesis{
 		Config: chainConfig,
