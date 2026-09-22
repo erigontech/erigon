@@ -119,19 +119,6 @@ type fastJSONMarshalerTo interface {
 	MarshalFastJSONTo(s *jsonstream.StackStream) error
 }
 
-// marshalFastJSONTo encodes fm into a byte slice the caller owns.
-func marshalFastJSONTo(fm fastJSONMarshalerTo) ([]byte, error) {
-	s := jsonstream.Get(nil)
-	defer jsonstream.Put(s)
-	if err := fm.MarshalFastJSONTo(s); err != nil {
-		return nil, err
-	}
-	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
-		return nil, err
-	}
-	return bytes.Clone(s.Buffer()), nil
-}
-
 // writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {

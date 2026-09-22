@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -199,8 +200,13 @@ type sharedJSON[T any] struct {
 	value func(T) any
 }
 
-func (s sharedJSON[T]) MarshalFastJSON() ([]byte, error) {
-	return s.ev.Encode(func(v T) ([]byte, error) { return json.Marshal(s.value(v)) })
+func (s sharedJSON[T]) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	enc, err := s.ev.Encode(func(v T) ([]byte, error) { return json.Marshal(s.value(v)) })
+	if err != nil {
+		return err
+	}
+	w.WriteRawBytes(enc)
+	return nil
 }
 
 func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }

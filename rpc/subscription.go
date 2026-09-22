@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	crand "crypto/rand"
@@ -30,6 +31,8 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var (
@@ -153,6 +156,7 @@ func (n *LocalNotifier) Closed() <-chan any {
 type RemoteNotifier struct {
 	h         *handler
 	namespace string
+	prefix    []byte // the notification up to its result
 
 	mu           sync.Mutex
 	sub          *Subscription
@@ -175,34 +179,13 @@ func (n *RemoteNotifier) CreateSubscription() *Subscription {
 		panic("can't create subscription after subscribe call has returned")
 	}
 	n.sub = &Subscription{ID: n.h.idgen(), namespace: n.namespace, err: make(chan error, 1)}
+	n.prefix = notificationPrefix(n.namespace, n.sub.ID)
 	return n.sub
 }
 
 // Notify sends a notification to the client with the given data as payload.
 // If an error occurs the RPC connection is closed and the error is returned.
 func (n *RemoteNotifier) Notify(id ID, data any) error {
-	var (
-		enc []byte
-		err error
-	)
-	if isNilPointer(data) {
-		enc, err = json.Marshal(data)
-	} else if fm, ok := data.(fastJSONResult); ok {
-		// A notification needs the bytes, so a value that can size its own buffer beats
-		// streaming into a pooled one and cloning it back out.
-		enc, err = fm.MarshalFastJSON()
-	} else if fm, ok := data.(fastJSONMarshalerTo); ok {
-		enc, err = marshalFastJSONTo(fm)
-	} else {
-		enc, err = json.Marshal(data)
-	}
-	if err != nil {
-		return err
-	}
-	if len(enc) == 0 {
-		enc = null
-	}
-
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -211,10 +194,34 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 	} else if n.sub.ID != id {
 		panic("Notify with wrong ID")
 	}
-	if n.activated {
-		return n.send(n.sub, enc)
+	// The whole notification is encoded into one pooled stream: a result of its own would be
+	// allocated and copied once per subscriber.
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	s.WriteRawBytes(n.prefix)
+	if err := writeNotificationResult(s, data); err != nil {
+		return err
 	}
-	n.buffer = append(n.buffer, enc)
+	if !n.activated {
+		n.buffer = append(n.buffer, bytes.Clone(s.Buffer()[len(n.prefix):]))
+		return nil
+	}
+	s.WriteRaw("}}")
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(s.Buffer()))
+}
+
+func writeNotificationResult(s *jsonstream.StackStream, data any) error {
+	if fm, ok := data.(fastJSONMarshalerTo); ok && !isNilPointer(data) {
+		if err := fm.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+		return s.Err()
+	}
+	enc, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(enc)
 	return nil
 }
 
@@ -257,10 +264,15 @@ func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
 // notification wraps result, which is already encoded, in the subscription message without
 // parsing it again: every subscriber would otherwise re-check the same payload.
 func notification(namespace string, id ID, result json.RawMessage) []byte {
+	return slices.Concat(notificationPrefix(namespace, id), result, []byte("}}"))
+}
+
+// notificationPrefix is the part of a notification before its result, fixed for a subscription.
+func notificationPrefix(namespace string, id ID) []byte {
 	method, _ := json.Marshal(namespace + notificationMethodSuffix) //nolint:errchkjson
 	quotedID, _ := json.Marshal(string(id))                         //nolint:errchkjson
 	return slices.Concat([]byte(`{"jsonrpc":"`+vsn+`","method":`), method, []byte(`,"params":{"subscription":`),
-		quotedID, []byte(`,"result":`), result, []byte("}}"))
+		quotedID, []byte(`,"result":`))
 }
 
 // A Subscription is created by a notifier and tied to that notifier. The client can use

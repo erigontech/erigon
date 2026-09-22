@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -132,14 +133,16 @@ func TestEthSubscribeReceipts(t *testing.T) {
 // sharedJSON reaches rpc through interfaces that package keeps unexported; these mirror them, so a
 // pointer receiver or a renamed method fails here instead of sending {} to every subscriber.
 var (
-	_ interface{ MarshalFastJSON() ([]byte, error) } = sharedJSON[*types.Header]{}
-	_ interface{ LocalValue() any }                  = sharedJSON[*types.Header]{}
+	_ interface {
+		MarshalFastJSONTo(*jsonstream.StackStream) error
+	} = sharedJSON[*types.Header]{}
+	_ interface{ LocalValue() any } = sharedJSON[*types.Header]{}
 )
 
 func TestSharedJSONEncodesTheValue(t *testing.T) {
 	h := &types.Header{Number: *uint256.NewInt(7)}
 	s := sharedJSON[*types.Header]{&rpchelper.Shared[*types.Header]{Value: h}, headerValue}
-	got, err := s.MarshalFastJSON()
+	got, err := jsonstream.Marshal(s)
 	require.NoError(t, err)
 	want, err := json.Marshal(h)
 	require.NoError(t, err)
