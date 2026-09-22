@@ -1385,7 +1385,7 @@ func TestClosePendingToRootClearsSeparator(t *testing.T) {
 
 // A field name or separator written before the lazy field opened would put its value in the
 // enclosing object, silently dropping the field. Asserts catch a marshaller that starts with
-// jsonstream.Field instead of a value write.
+// Stream.Field instead of a value write.
 func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
