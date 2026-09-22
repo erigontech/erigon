@@ -51,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonrpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -419,11 +420,13 @@ func TestGetBlobsV4FastJSON(t *testing.T) {
 	server := &EngineServer{logger: log.New(), blobGetter: blobGetterMap{hash: bundle}}
 	result, err := server.GetBlobsV4(t.Context(), []common.Hash{hash, {}}, hexutil.MustDecodeHex("0x01000000000000000100000000000080"))
 	require.NoError(t, err)
-	marshaler, ok := any(result).(interface{ MarshalFastJSON() ([]byte, error) })
+	marshaler, ok := any(result).(interface {
+		MarshalFastJSONTo(*jsonstream.StackStream) error
+	})
 	require.True(t, ok, "GetBlobsV4 must return a fast JSON result")
 	want, err := json.Marshal(result)
 	require.NoError(t, err)
-	got, err := marshaler.MarshalFastJSON()
+	got, err := jsonstream.Marshal(marshaler)
 	require.NoError(t, err)
 	require.Equal(t, string(want), string(got))
 }
