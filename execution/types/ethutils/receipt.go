@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -39,7 +38,7 @@ type RPCReceipt struct {
 	BlockNumber       hexutil.Uint64  `json:"blockNumber"`
 	TransactionHash   common.Hash     `json:"transactionHash"`
 	TransactionIndex  hexutil.Uint64  `json:"transactionIndex"`
-	From              common.Address  `json:"from"`
+	From              *common.Address `json:"from"`
 	To                *common.Address `json:"to"`
 	Type              hexutil.Uint    `json:"type"`
 	GasUsed           hexutil.Uint64  `json:"gasUsed"`
@@ -74,10 +73,12 @@ func MarshalReceipt(
 		chainId = txn.GetChainID()
 	}
 
-	var from accounts.Address
+	var from *common.Address
 	if signed {
 		signer := types.LatestSignerForChainID(chainId)
-		from, _ = txn.Sender(*signer)
+		sender, _ := txn.Sender(*signer)
+		address := sender.Value()
+		from = &address
 	}
 
 	logsBloom := receipt.LogsBloom()
@@ -107,7 +108,7 @@ func MarshalReceipt(
 		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
 		TransactionHash:   txnHash,
 		TransactionIndex:  hexutil.Uint64(receipt.TransactionIndex),
-		From:              from.Value(),
+		From:              from,
 		To:                txn.GetTo(),
 		Type:              hexutil.Uint(txn.Type()),
 		GasUsed:           hexutil.Uint64(receipt.GasUsed),
@@ -190,7 +191,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		BlockNumber:       hexutil.Uint64(protoReceipt.BlockNumber),
 		TransactionHash:   txHash,
 		TransactionIndex:  hexutil.Uint64(protoReceipt.TransactionIndex),
-		From:              common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.From)),
+		From:              addressOrNil(protoReceipt.From),
 		To:                nonZeroAddress(protoReceipt.To),
 		Type:              hexutil.Uint(protoReceipt.Type),
 		GasUsed:           hexutil.Uint64(protoReceipt.GasUsed),
@@ -224,15 +225,20 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 	return result
 }
 
-func nonZeroAddress(h160 *typesproto.H160) *common.Address {
+func addressOrNil(h160 *typesproto.H160) *common.Address {
 	if h160 == nil {
 		return nil
 	}
 	addr := common.Address(gointerfaces.ConvertH160toAddress(h160))
-	if addr == (common.Address{}) {
+	return &addr
+}
+
+func nonZeroAddress(h160 *typesproto.H160) *common.Address {
+	addr := addressOrNil(h160)
+	if addr == nil || *addr == (common.Address{}) {
 		return nil
 	}
-	return &addr
+	return addr
 }
 
 func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.Transactions, cc *chain.Config, header *types.Header, logger log.Logger) {

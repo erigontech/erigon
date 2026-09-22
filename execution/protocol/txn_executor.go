@@ -677,8 +677,8 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			typ = vm.CREATE
 			destination = createAddress
 		}
-		st.handleRuntimeFailure(typ, destination, runtimeGas, vmerr)
-		gasUsed.consumeAllExecutionGas(runtimeGas.Execution)
+		frameGasUsed := st.handleRuntimeFailure(typ, destination, runtimeGas, vmerr)
+		gasUsed = runtimeGasAccounting{frame: frameGasUsed}
 	} else {
 		frameGas := st.gasRemaining
 		if contractCreation {
@@ -824,8 +824,8 @@ func validateSetCodePrerequisites(auths []types.Authorization, contractCreation,
 	return nil
 }
 
-func (st *TxnExecutor) handleRuntimeFailure(typ vm.OpCode, destination accounts.Address, startGas mdgas.MdGas, err error) {
-	HandleRuntimeFailure(st.evm, typ, st.msg.From(), destination, st.data, startGas, &st.gasRemaining, st.value, err)
+func (st *TxnExecutor) handleRuntimeFailure(typ vm.OpCode, destination accounts.Address, startGas mdgas.MdGas, err error) mdgas.MdGasUsage {
+	return HandleRuntimeFailure(st.evm, typ, st.msg.From(), destination, st.data, startGas, &st.gasRemaining, st.value, err)
 }
 
 func (st *TxnExecutor) handleRuntimeCall(gasRemaining mdgas.MdGas) (mdgas.MdGas, mdgas.MdGasUsage, error) {

@@ -24,8 +24,49 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
+
+func TestFrameGasUsageRevert(t *testing.T) {
+	for _, typ := range []OpCode{CALLCODE, CREATE} {
+		for _, tc := range []struct {
+			name      string
+			ending    []byte
+			execution uint64
+		}{
+			{name: "revert", ending: []byte{byte(PUSH0), byte(PUSH0), byte(REVERT)}, execution: 12_110},
+			{name: "exceptional halt", ending: []byte{byte(INVALID)}, execution: 200_000},
+		} {
+			t.Run(typ.String()+"/"+tc.name, func(t *testing.T) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{})
+				initial := mdgas.MdGas{Execution: 200_000, State: params.StateGasPerStorageSet / 2}
+				code := append([]byte{byte(PUSH1), 1, byte(PUSH1), 0, byte(SSTORE)}, tc.ending...)
+				var remaining mdgas.MdGas
+				var used mdgas.MdGasUsage
+				var err error
+				if typ == CREATE {
+					_, _, remaining, used, err = evm.Create(accounts.ZeroAddress, code, initial, uint256.Int{}, nil, false)
+				} else {
+					address := accounts.InternAddress(common.HexToAddress("0x1000"))
+					require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
+					_, remaining, used, err = evm.CallCode(accounts.ZeroAddress, address, nil, initial, uint256.Int{})
+				}
+				require.Error(t, err)
+				require.Equal(t, mdgas.MdGas{Execution: initial.Execution - tc.execution, State: initial.State}, remaining)
+				require.Equal(t, mdgas.MdGasUsage{Execution: tc.execution}, used)
+			})
+		}
+	}
+}
 
 // TestDeriveFrameExecutionGasUsed covers the EIP-8037 cases where the formula
 // Execution = (inputTotal − gasRemainingTotal) − stateGasUsed must hold,
