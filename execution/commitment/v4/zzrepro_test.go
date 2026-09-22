@@ -50,7 +50,7 @@ func TestZZOneAccountManySlots(t *testing.T) {
 
 func TestZZSeedSweepTwoSlots(t *testing.T) {
 	fails := 0
-	for seed := int64(0); seed < 200; seed++ {
+	for seed := range int64(200) {
 		if err := oneAccountNSlots(t, 2, seed); err != nil {
 			fails++
 		}
