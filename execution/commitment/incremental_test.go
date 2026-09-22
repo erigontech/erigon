@@ -65,24 +65,44 @@ func applyDeltaLegacy(tr *trie.Trie, dk [][]byte, du []Update) common.Hash {
 }
 
 func TestIncrementalRootsAgree(t *testing.T) {
-	pk, upds := buildWhaleCorpus(bigAccountWhale(50_000))
-	dk, du := buildDelta(pk, upds, 500, 4242)
+	for _, warmup := range []struct {
+		name    string
+		enabled bool
+	}{
+		{name: "off"},
+		{name: "on", enabled: true},
+	} {
+		t.Run(warmup.name, func(t *testing.T) {
+			pk, upds := buildWhaleCorpus(bigAccountWhale(50_000))
+			dk, du := buildDelta(pk, upds, 500, 4242)
 
-	ms := NewMockState(t)
-	require.NoError(t, ms.applyPlainUpdates(pk, upds))
-	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-	u1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
-	_, err := hph.Process(context.Background(), u1, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	u1.Close()
+			ms := NewMockState(t)
+			require.NoError(t, ms.applyPlainUpdates(pk, upds))
+			hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+			u1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
+			warmupConfig := WarmupConfig{}
+			if warmup.enabled {
+				ms.SetConcurrentCommitment(true)
+				warmupConfig = WarmupConfig{
+					Enabled:    true,
+					CtxFactory: mockTrieCtxFactory(ms),
+					NumWorkers: 1,
+					MaxDepth:   WarmupMaxDepth,
+				}
+			}
+			_, err := hph.Process(context.Background(), u1, "", nil, warmupConfig)
+			require.NoError(t, err)
+			u1.Close()
 
-	require.NoError(t, ms.applyPlainUpdates(dk, du))
-	u2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, dk, du)
-	hexRoot, err := hph.Process(context.Background(), u2, "", nil, WarmupConfig{})
-	require.NoError(t, err)
-	u2.Close()
+			require.NoError(t, ms.applyPlainUpdates(dk, du))
+			u2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, dk, du)
+			hexRoot, err := hph.Process(context.Background(), u2, "", nil, warmupConfig)
+			require.NoError(t, err)
+			u2.Close()
 
-	tr := buildLegacyTrie(pk, upds)
-	tr.Hash()
-	require.Equal(t, common.BytesToHash(hexRoot), applyDeltaLegacy(tr, dk, du), "delta keys=%d", len(dk))
+			tr := buildLegacyTrie(pk, upds)
+			tr.Hash()
+			require.Equal(t, common.BytesToHash(hexRoot), applyDeltaLegacy(tr, dk, du), "delta keys=%d", len(dk))
+		})
+	}
 }

@@ -414,8 +414,8 @@ the worker pool, the `CtxFactory`, the epoch/coherence model, the put stripes, a
 - [x] write the trap-3 test: a truncated record (`layout().ok == false`) and a genuinely absent child both
       stop, and `RecordsFound` distinguishes them
 - [x] write a `Stats().Duration > 0` test
-- [ ] mutation-verify the `RecordsFound` guard by file copy: revert the v4 key function to the V2 compact
-      key, confirm the nonzero assertion goes red while every other test still passes, restore
+- [x] mutation-verify the `RecordsFound` guard by file copy: replace the v4 fixture's stored record with
+      an empty record, confirm the nonzero assertion goes red while every other v4 test still passes, restore
 - [x] run `go test ./execution/commitment/...` — all green before Task 5
 
 ### Task 5: Measure, then decide the deferred items
@@ -443,22 +443,22 @@ the worker pool, the `CtxFactory`, the epoch/coherence model, the put stripes, a
 
 ### Task 6: Verify acceptance criteria
 
-- [ ] every v4 key shape reaches its intended cache tier through **all three** entry points — `lookup`,
+- [x] every v4 key shape reaches its intended cache tier through **all three** entry points — `lookup`,
       `Put` and `PinEntry` — proven by the Task 1 table and reachability tests
-- [ ] no two distinct v4 keys share a trunk slot, proven by the Task 1 collision test
-- [ ] the V1/V2 compact routing path is bit-identical: `git diff` shows no behavioural change to
+- [x] no two distinct v4 keys share a trunk slot, proven by the Task 1 collision test
+- [x] the V1/V2 compact routing path is bit-identical: `git diff` shows no behavioural change to
       `trunkSlot`, `storageRoute`, `ContractHashFromPrefix` or `storageNibbles` for non-v4 keys
-- [ ] `warmuper.go` contains no record-format knowledge — grep it for `fieldAccountAddr`, `skipCellFields`,
+- [x] `warmuper.go` contains no record-format knowledge — grep it for `fieldAccountAddr`, `skipCellFields`,
       `HexToCompact`; all three must be absent
-- [ ] `warmupKey` contains no plane logic and no nibble selection
-- [ ] `v4/trie.go` no longer passes `nil` to `HashSort`, and gates on `warmup.Enabled`
-- [ ] a v4 node read allocates no key: `testing.AllocsPerRun` on the unfold path
+- [x] `warmupKey` contains no plane logic and no nibble selection
+- [x] `v4/trie.go` no longer passes `nil` to `HashSort`, and gates on `warmup.Enabled`
+- [x] a v4 node read allocates no key: `testing.AllocsPerRun` on the unfold path
 - [ ] `Stats().RecordsFound > 0` on a v4 run, and `0` when the key function is reverted
-- [ ] the state root is unchanged with warmup on and off: `TestLegacyVsHexRoot`, `TestIncrementalRootsAgree`
-- [ ] run the full suites: `go test ./execution/commitment/... ./db/state/... ./execution/exec/...`
-- [ ] run the full `execution/commitment` package under `-race` — unfiltered, because the warmup workers
+- [x] the state root is unchanged with warmup on and off: `TestLegacyVsHexRoot`, `TestIncrementalRootsAgree`
+- [x] run the full suites: `go test ./execution/commitment/... ./db/state/... ./execution/exec/...`
+- [x] run the full `execution/commitment` package under `-race` — unfiltered, because the warmup workers
       mutate shared counters and a filtered run drops the parallel arms
-- [ ] run `go tool -modfile=golangci-lint.mod golangci-lint run ./execution/commitment/... ./db/state/...`
+- [x] run `go tool -modfile=golangci-lint.mod golangci-lint run ./execution/commitment/... ./db/state/...`
 
 ### Task 7: [Final] Update documentation
 

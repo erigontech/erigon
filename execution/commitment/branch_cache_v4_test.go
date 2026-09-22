@@ -233,4 +233,19 @@ func TestBranchCacheV4DispatchPrecondition(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, []byte("v4-storage"), got)
 	})
+
+	for depth := range 65 {
+		path := make([]byte, depth)
+		for first := range 16 {
+			if len(path) > 0 {
+				path[0] = byte(first)
+			}
+			compact := nibbles.HexToCompact(path)
+			require.NotEqual(t, byte(0x40), compact[0])
+			require.NotEqual(t, byte(0x41), compact[0])
+			require.NotEqual(t, byte(0x42), compact[0])
+		}
+	}
+	require.True(t, IsCommitmentStateKey([]byte{0x42}))
+	require.False(t, IsCommitmentStateKey([]byte{0x42, 0x00}))
 }

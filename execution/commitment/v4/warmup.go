@@ -73,7 +73,7 @@ func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 
 	bit := uint16(1) << hashedKey[branchPoint]
 	if l.tree()&bit == 0 {
-		if len(hashedKey) > 64 && planeDepth < 64 && l.leaf&bit != 0 && l.emb&bit == 0 {
+		if len(hashedKey) > 64 && depth < 64 && l.leaf&bit != 0 {
 			return 64, false
 		}
 		return 0, true
@@ -90,9 +90,6 @@ func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 	nextDepth = branchPoint + 1 + extLen
 	if nextDepth > len(hashedKey) {
 		return 0, true
-	}
-	if len(hashedKey) > 64 && planeDepth < 64 && nextDepth == 64 {
-		return 64, false
 	}
 	return nextDepth, false
 }

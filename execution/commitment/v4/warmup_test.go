@@ -19,14 +19,39 @@ package v4
 import (
 	"bytes"
 	"context"
+	"sync"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
+
+type warmupTraceContext struct {
+	commitment.PatriciaContext
+	mu   sync.Mutex
+	keys [][]byte
+}
+
+func (c *warmupTraceContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	c.mu.Lock()
+	c.keys = append(c.keys, bytes.Clone(key))
+	c.mu.Unlock()
+	return c.PatriciaContext.Branch(key)
+}
+
+func (c *warmupTraceContext) branchKeys() [][]byte {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	keys := make([][]byte, len(c.keys))
+	for i, key := range c.keys {
+		keys[i] = bytes.Clone(key)
+	}
+	return keys
+}
 
 func TestTrieProcessStartsWarmuperWhenEnabled(t *testing.T) {
 	trie, updates := NewTrie(t.TempDir(), commitment.TrieConfig{})
@@ -214,4 +239,103 @@ func TestWarmupV4RecordsFoundDistinguishesMissingRecord(t *testing.T) {
 
 	require.Greater(t, read([]byte{0}), uint64(0))
 	require.Zero(t, read(nil))
+}
+
+func TestWarmupV4ReadsStoragePlaneRecord(t *testing.T) {
+	hashedKey := make([]byte, 128)
+	hashedKey[0] = 2
+	hashedKey[1] = 3
+	hashedKey[64] = 4
+	hashedKey[65] = 5
+	addrHash := hashAddressPath(hashedKey[:64])
+	ctx := newMockContext()
+	ctx.branches[string(AccountNodeKey(nil, nil))] = recordFixture(0, 0, 1<<2, 0, 0, 0, nil, nil, nil, nil)
+	ctx.branches[string(AccountNodeKey([]byte{2}, nil))] = recordFixture(0, 1, 1<<3, 1<<3, 0, 0, nil, nil, nil, nil)
+	ctx.branches[string(StorageNodeKey(addrHash, nil, nil))] = recordFixture(0, 0, 1<<4, 0, 0, 0, nil, nil, nil, nil)
+	ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = recordFixture(0, 1, 0, 1<<5, 0, 0, nil, nil, nil, nil)
+	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
+		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return ctx, nil },
+		NumWorkers: 1,
+		MaxDepth:   commitment.WarmupMaxDepth,
+		Key:        warmupKeyV4,
+		Step:       warmupStepV4,
+	})
+	w.Start()
+	w.WarmKey(hashedKey, 0, 0)
+	require.NoError(t, w.WaitBufferFree(0))
+	w.CloseAndWait()
+
+	var storageKeys [][]byte
+	for _, key := range ctx.branchCalls {
+		if len(key) != 0 && key[0] == tagStorageNode {
+			storageKeys = append(storageKeys, key)
+		}
+	}
+	require.NotEmpty(t, storageKeys)
+}
+
+func TestWarmupV4StorageDescentReachesBeyondRoot(t *testing.T) {
+	trie, initial := NewTrie(t.TempDir(), commitment.TrieConfig{})
+	trieCtx := newMockContext()
+	safeCtx := &lockedPatriciaContext{ctx: trieCtx}
+	trie.ResetContext(safeCtx)
+
+	address := bytes.Repeat([]byte{0x11}, 20)
+	storageKeys := make([][]byte, 0, 2)
+	seen := make(map[byte]struct{})
+	var firstNibble byte
+	for i := byte(0); len(storageKeys) < 2; i++ {
+		slot := make([]byte, 32)
+		slot[31] = i
+		plainKey := append(append([]byte(nil), address...), slot...)
+		hashedKey := commitment.KeyToHexNibbleHash(plainKey)
+		if len(storageKeys) == 0 {
+			firstNibble = hashedKey[64]
+		} else if hashedKey[64] != firstNibble {
+			continue
+		}
+		if _, ok := seen[hashedKey[65]]; ok {
+			continue
+		}
+		seen[hashedKey[65]] = struct{}{}
+		storageKeys = append(storageKeys, plainKey)
+	}
+	account := fullAccountUpdate(1, 2, common.Hash{})
+	initial.TouchPlainKeyDirect(string(address), &account)
+	for _, storageKey := range storageKeys {
+		initial.TouchPlainKeyDirect(string(storageKey), phaseAStorageUpdate([]byte{1}))
+	}
+	_, err := trie.Process(context.Background(), initial, "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+
+	traceCtx := &warmupTraceContext{PatriciaContext: safeCtx}
+	next := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	next.TouchPlainKeyDirect(string(address), &account)
+	for _, storageKey := range storageKeys {
+		next.TouchPlainKeyDirect(string(storageKey), phaseAStorageUpdate([]byte{2}))
+	}
+	_, err = trie.Process(context.Background(), next, "", nil, commitment.WarmupConfig{
+		Enabled:    true,
+		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return traceCtx, nil },
+		NumWorkers: 1,
+		MaxDepth:   commitment.WarmupMaxDepth,
+	})
+	require.NoError(t, err)
+
+	maxStorageDepth := 0
+	storageRootReads := 0
+	traceKeys := traceCtx.branchKeys()
+	for _, key := range traceKeys {
+		if len(key) == 0 || key[0] != tagStorageNode {
+			continue
+		}
+		if key[len(key)-1] == 0 {
+			storageRootReads++
+		}
+		if depth := 64 + int(key[len(key)-1]); depth > maxStorageDepth {
+			maxStorageDepth = depth
+		}
+	}
+	require.Greater(t, maxStorageDepth, 64)
+	require.Equal(t, 1, storageRootReads)
 }

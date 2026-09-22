@@ -72,18 +72,38 @@ func TestLegacyVsHexRoot(t *testing.T) {
 		{"mixed", whaleOpts{seed: 99, smallBefore: 200, smallBeforeSlots: 7, bigSlots: 20_000, extraWhales: []int{3_000}, smallAfter: 200, smallAfterSlots: 3, tailAccounts: 5_000}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			pk, upds := buildWhaleCorpus(c.opts)
+			for _, warmup := range []struct {
+				name    string
+				enabled bool
+			}{
+				{name: "off"},
+				{name: "on", enabled: true},
+			} {
+				t.Run(warmup.name, func(t *testing.T) {
+					pk, upds := buildWhaleCorpus(c.opts)
 
-			ms := NewMockState(t)
-			require.NoError(t, ms.applyPlainUpdates(pk, upds))
-			hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-			u := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
-			hexRoot, err := hph.Process(context.Background(), u, "", nil, WarmupConfig{})
-			require.NoError(t, err)
-			u.Close()
+					ms := NewMockState(t)
+					require.NoError(t, ms.applyPlainUpdates(pk, upds))
+					hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+					u := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, pk, upds)
+					warmupConfig := WarmupConfig{}
+					if warmup.enabled {
+						ms.SetConcurrentCommitment(true)
+						warmupConfig = WarmupConfig{
+							Enabled:    true,
+							CtxFactory: mockTrieCtxFactory(ms),
+							NumWorkers: 1,
+							MaxDepth:   WarmupMaxDepth,
+						}
+					}
+					hexRoot, err := hph.Process(context.Background(), u, "", nil, warmupConfig)
+					require.NoError(t, err)
+					u.Close()
 
-			require.Equal(t, common.BytesToHash(hexRoot), buildLegacyTrie(pk, upds).Hash(),
-				"keys=%d", len(pk))
+					require.Equal(t, common.BytesToHash(hexRoot), buildLegacyTrie(pk, upds).Hash(),
+						"keys=%d", len(pk))
+				})
+			}
 		})
 	}
 }
