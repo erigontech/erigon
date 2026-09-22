@@ -327,7 +327,7 @@ type OtsFullBlock struct {
 	StateRoot    string      `json:"stateRoot"`
 	Timestamp    string      `json:"timestamp"`
 
-	TransactionCount uint64           `json:"transactionCount"`
+	TransactionCount hexutil.Uint64   `json:"transactionCount"`
 	Transactions     []OtsTransaction `json:"transactions"`
 	TxRoot           common.Hash      `json:"transactionsRoot"`
 	Uncles           []string         `json:"uncles"`
