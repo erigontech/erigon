@@ -86,6 +86,9 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 		return nil
 	}
 	if child := n.children[nib]; child != nil {
+		if !bytes.HasPrefix(path, child.path) {
+			return nil
+		}
 		return g.ensurePath(ctx, child, path)
 	}
 	if len(n.childHash[nib]) != 32 {
