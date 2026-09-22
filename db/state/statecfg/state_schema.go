@@ -200,6 +200,10 @@ const DefaultParallelCommitment = true
 
 var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
 
+const DefaultCommitmentV4 = false
+
+var ExperimentalCommitmentV4 = dbg.EnvBool("COMMITMENT_V4", DefaultCommitmentV4)
+
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{
 		Name: kv.AccountsDomain, ValuesTable: kv.TblAccountVals,

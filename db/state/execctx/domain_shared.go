@@ -342,6 +342,9 @@ type cacheUnwindState struct {
 // entry points instead of leaving Variant unset and relying on an implicit
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
+	if statecfg.ExperimentalCommitmentV4 {
+		return commitment.VariantCommitmentV4
+	}
 	if statecfg.ExperimentalParallelCommitment {
 		return commitment.VariantParallelHexPatricia
 	}

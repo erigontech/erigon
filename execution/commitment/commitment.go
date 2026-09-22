@@ -1181,6 +1181,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
+	case "v4":
+		trieVariant = VariantCommitmentV4
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":
