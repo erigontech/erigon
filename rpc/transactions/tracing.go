@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -140,12 +141,12 @@ func TraceTx(
 		result, err := protocol.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.HasTxEndHook() {
-				tracer.EmitTxEnd(nil, nil, err)
+				tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 			}
 
 			return result, err
 		} else if tracer != nil && tracer.HasTxEndHook() {
-			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, &result.TxGasUsage, nil)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 		}
 
 		gasUsed = result.ReceiptGasUsed

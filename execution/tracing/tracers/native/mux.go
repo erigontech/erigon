@@ -130,9 +130,9 @@ func (t *muxTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from
 	}
 }
 
-func (t *muxTracer) OnTxEndV2(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
+func (t *muxTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	for _, child := range t.tracers {
-		child.Hooks.EmitTxEnd(receipt, gasUsed, err)
+		child.Hooks.EmitTxEnd(receipt, txnGasUsage, err)
 	}
 }
 

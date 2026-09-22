@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -1186,12 +1187,12 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
 		if vmConfig.Tracer.HasTxEndHook() {
-			vmConfig.Tracer.EmitTxEnd(nil, nil, err)
+			vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		}
 		return nil, err
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
-		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 	}
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1465,13 +1466,13 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.Hooks.HasTxEndHook() {
-				tracer.Hooks.EmitTxEnd(nil, nil, err)
+				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 			}
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
 
 		if tracer != nil && tracer.Hooks.HasTxEndHook() {
-			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)
@@ -1770,12 +1771,12 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
 		if vmConfig.Tracer.HasTxEndHook() {
-			vmConfig.Tracer.EmitTxEnd(nil, nil, err)
+			vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		}
 		return nil, err
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
-		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 	}
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)

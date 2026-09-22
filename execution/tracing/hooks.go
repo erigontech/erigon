@@ -95,8 +95,8 @@ type (
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
 
-	// TxEndHookV2 takes precedence over TxEndHook. Gas usage is nil without transaction settlement.
-	TxEndHookV2 = func(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error)
+	// TxEndHookV2 takes precedence over TxEndHook. Usage is zero when settlement is unavailable.
+	TxEndHookV2 = func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error)
 
 	// EnterHook is invoked when the processing of a message starts.
 	EnterHook = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte)
@@ -235,12 +235,12 @@ func (h *Hooks) HasTxEndHook() bool {
 	return h != nil && (h.OnTxEndV2 != nil || h.OnTxEnd != nil)
 }
 
-func (h *Hooks) EmitTxEnd(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
+func (h *Hooks) EmitTxEnd(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if h == nil {
 		return
 	}
 	if h.OnTxEndV2 != nil {
-		h.OnTxEndV2(receipt, gasUsed, err)
+		h.OnTxEndV2(receipt, txnGasUsage, err)
 	} else if h.OnTxEnd != nil {
 		h.OnTxEnd(receipt, err)
 	}

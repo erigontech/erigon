@@ -79,7 +79,7 @@ func (t *noopTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage
 func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 }
 
-func (*noopTracer) OnTxEndV2(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {}
+func (*noopTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {}
 
 func (*noopTracer) OnBalanceChange(a accounts.Address, prev, new uint256.Int, reason tracing.BalanceChangeReason) {
 }

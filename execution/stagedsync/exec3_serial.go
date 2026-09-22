@@ -494,7 +494,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 
 				blockReceipts = append(blockReceipts, receipt)
 				if hooks := result.TracingHooks(); hooks.HasTxEndHook() {
-					hooks.EmitTxEnd(receipt, &result.ExecutionResult.TxGasUsage, result.Err)
+					hooks.EmitTxEnd(receipt, result.ExecutionResult.TxnGasUsage, result.Err)
 				}
 			default:
 				se.onBlockStart(ctx, block)

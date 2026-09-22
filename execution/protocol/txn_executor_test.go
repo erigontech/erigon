@@ -433,7 +433,7 @@ func TestEIP2780AuthorizationOutOfGasProducesCallTrace(t *testing.T) {
 			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
 			require.NoError(t, err)
 			require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
-			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, &result.TxGasUsage, nil)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 
 			trace, err := tracer.GetResult()
 			require.NoError(t, err)
@@ -488,7 +488,7 @@ func TestEIP2780TopLevelCallTraceStartsBeforeStateChanges(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
-			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, &result.TxGasUsage, nil)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 
 			trace, err := tracer.GetResult()
 			require.NoError(t, err)
@@ -726,14 +726,14 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			}, tracing.CodeChangeUnspecified))
 			txn := &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 200_000, To: &recipient}}
 			txn.SetSender(sender)
-			var received *mdgas.TxGasUsage
+			var received mdgas.TxnGasUsage
 			var receivedReceipt *types.Receipt
 			var completionErr error
 			var calls int
 			cfg := vm.Config{NoBaseFee: true, NoReceipts: test.noReceipts, Tracer: &tracing.Hooks{
-				OnTxEndV2: func(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
+				OnTxEndV2: func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 					completionErr = err
-					received = gasUsed
+					received = txnGasUsage
 					receivedReceipt = receipt
 					calls++
 				},
@@ -746,13 +746,12 @@ func TestApplyTransactionTxEndV2(t *testing.T) {
 			require.ErrorIs(t, err, test.writerErr)
 			require.Equal(t, 1, calls)
 			require.ErrorIs(t, completionErr, test.writerErr)
-			require.NotNil(t, received)
 			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
 			if test.writerErr != nil {
 				require.Nil(t, receivedReceipt)
 				return
 			}
-			require.Equal(t, &mdgas.TxGasUsage{
+			require.Equal(t, mdgas.TxnGasUsage{
 				BlockExecutionGasUsed: gasUsed.BlockExecution,
 				BlockStateGasUsed:     params.StateGasPerStorageSet,
 			}, received)

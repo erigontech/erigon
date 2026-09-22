@@ -58,8 +58,8 @@ type MdGasUsage struct {
 	StateSpill uint64
 }
 
-// TxGasUsage contains the settled transaction gas accounting.
-type TxGasUsage struct {
+// TxnGasUsage contains the settled transaction gas accounting.
+type TxnGasUsage struct {
 	BlockExecutionGasUsed uint64 // Execution contribution to block gas
 	BlockStateGasUsed     uint64 // State contribution to block gas
 	GasRefund             uint64 // Capped refund before applying the calldata floor

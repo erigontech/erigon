@@ -67,7 +67,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 	ret, endGas, _, err := env.Run(contract, startGas, []byte{}, false)
 	tracer.OnExit(0, ret, startGas.Total()-endGas.Total(), err, true)
 	// Rest gas assumes no refund
-	tracer.EmitTxEnd(&types.Receipt{GasUsed: gasLimit - endGas.Total()}, nil, nil)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: gasLimit - endGas.Total()}, mdgas.TxnGasUsage{}, nil)
 	if err != nil {
 		return nil, err
 	}

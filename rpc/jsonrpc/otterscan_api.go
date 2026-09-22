@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -180,13 +181,13 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	result, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
 	if err != nil {
 		if tracer != nil && tracer.Hooks.HasTxEndHook() {
-			tracer.Hooks.EmitTxEnd(nil, nil, err)
+			tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		}
 		return nil, fmt.Errorf("tracing failed: %w", err)
 	}
 
 	if tracer != nil && tracer.Hooks.HasTxEndHook() {
-		tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, &result.TxGasUsage, nil)
+		tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 	}
 	return result, nil
 }

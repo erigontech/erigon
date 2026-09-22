@@ -227,7 +227,7 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 	txResult := &exec.TxResult{
 		Task: task,
 		ExecutionResult: evmtypes.ExecutionResult{
-			TxGasUsage: mdgas.TxGasUsage{
+			TxnGasUsage: mdgas.TxnGasUsage{
 				BlockExecutionGasUsed: 21000,
 			},
 			ReceiptGasUsed:       21000,

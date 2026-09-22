@@ -78,11 +78,11 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		}
 		if cfg.Tracer.HasTxEndHook() {
 			defer func() {
-				var gasUsed *mdgas.TxGasUsage
+				var txnGasUsage mdgas.TxnGasUsage
 				if result != nil {
-					gasUsed = &result.TxGasUsage
+					txnGasUsage = result.TxnGasUsage
 				}
-				cfg.Tracer.EmitTxEnd(receipt, gasUsed, err)
+				cfg.Tracer.EmitTxEnd(receipt, txnGasUsage, err)
 			}()
 		}
 	}

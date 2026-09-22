@@ -71,7 +71,7 @@ type TxContext struct {
 // ExecutionResult includes all output after executing given evm
 // message no matter the execution itself is successful or not.
 type ExecutionResult struct {
-	mdgas.TxGasUsage
+	mdgas.TxnGasUsage
 	ReceiptGasUsed       uint64 // Gas paid after refunds and the calldata floor
 	MaxGasUsed           uint64 // Gas used by the transaction before refunds
 	Err                  error  // Any error encountered during the execution(listed in core/vm/errors.go)

@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -527,18 +528,18 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if timer != nil && evm.Cancelled() {
 			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 			if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
-				ot.Tracer().EmitTxEnd(nil, nil, timeoutErr)
+				ot.Tracer().EmitTxEnd(nil, mdgas.TxnGasUsage{}, timeoutErr)
 			}
 			return nil, timeoutErr
 		}
 		if execErr != nil {
 			if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
-				ot.Tracer().EmitTxEnd(nil, nil, execErr)
+				ot.Tracer().EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 			}
 			return nil, execErr
 		}
 		if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
-			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if err := ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -964,13 +965,13 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
 				if execErr != nil {
 					if tracer.Hooks.HasTxEndHook() {
-						tracer.Hooks.EmitTxEnd(nil, nil, execErr)
+						tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 					}
 					return fmt.Errorf("txIndex %d: %w", job.txIndex, execErr)
 				}
 
 				if tracer.Hooks.HasTxEndHook() {
-					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
+					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 				}
 
 				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
