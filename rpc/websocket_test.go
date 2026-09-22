@@ -591,16 +591,6 @@ func TestWebsocketIdlePing(t *testing.T) {
 	}
 }
 
-type writeCountingListener struct {
-	net.Listener
-	writes *atomic.Int64
-}
-
-func (l writeCountingListener) Accept() (net.Conn, error) {
-	c, err := l.Listener.Accept()
-	return writeCountingConn{c, l.writes}, err
-}
-
 type writeCountingConn struct {
 	net.Conn
 	writes *atomic.Int64
@@ -616,12 +606,13 @@ func TestWebsocketCoalescedMessagesLeaveInOneWrite(t *testing.T) {
 
 	var writes atomic.Int64
 	codecs := make(chan *websocketCodec, 1)
-	httpsrv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hw := &hijackRecorder{ResponseWriter: w}
 		conn, err := websocket.Accept(hw, r, nil)
 		if err != nil {
 			return
 		}
+		hw.conn.Conn = writeCountingConn{hw.conn.Conn, &writes}
 		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
 		defer wc.Close()
 		codecs <- wc
@@ -631,8 +622,6 @@ func TestWebsocketCoalescedMessagesLeaveInOneWrite(t *testing.T) {
 			}
 		}
 	}))
-	httpsrv.Listener = writeCountingListener{httpsrv.Listener, &writes}
-	httpsrv.Start()
 	defer httpsrv.Close()
 
 	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
