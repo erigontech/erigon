@@ -327,6 +327,7 @@ func NewWebsocketCodec(conn *websocket.Conn, host string, req http.Header, remot
 			RemoteAddr: remoteAddr,
 		},
 	}
+	wc.writeTimeout = wsPingInterval
 	// Fill in connection details.
 	wc.info.HTTP.Host = host
 	if req != nil {
@@ -350,11 +351,6 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 }
 
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
-	if _, ok := ctx.Deadline(); !ok {
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, wsPingInterval)
-		defer cancel()
-	}
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		wc.resetPing()

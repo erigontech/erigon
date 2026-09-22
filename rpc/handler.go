@@ -581,13 +581,14 @@ func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 
 // handleCall processes method calls.
 func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) (*jsonrpcMessage, error) {
-	if msg.isSubscribe() {
+	allowed := h.isMethodAllowedByGranularControl(msg.Method)
+	if msg.isSubscribe() && allowed {
 		return h.handleSubscribe(cp, msg, stream)
 	}
 	var callb *callback
 	if msg.isUnsubscribe() {
 		callb = h.unsubscribeCb
-	} else if h.isMethodAllowedByGranularControl(msg.Method) {
+	} else if allowed {
 		callb = h.reg.callback(msg.Method)
 	}
 	if callb == nil {
