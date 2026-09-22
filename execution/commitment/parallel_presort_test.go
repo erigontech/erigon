@@ -175,6 +175,10 @@ func TestPresort_BuffersReturnToThePoolAcrossBatches(t *testing.T) {
 	}
 	pu.Build()
 	require.Len(t, pu.pool, presortBuffers, "a second batch must reuse the pooled buffers")
+	for _, p := range pu.pool {
+		require.GreaterOrEqual(t, cap(p.entries), pu.chunkKeys,
+			"a pooled chunk buffer must keep its capacity, or every chunk re-grows it")
+	}
 	require.EqualValues(t, len(cases), pu.trie.root.subtreeCount)
 }
 
@@ -197,20 +201,4 @@ func TestPresort_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {
 	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount,
 		"a reused caller buffer must not collapse two keys into one")
 	require.Len(t, ut.parallel.trie.root.children, 2)
-}
-
-func TestPresort_BucketOfIsOrderPreserving(t *testing.T) {
-	t.Parallel()
-
-	prev := -1
-	for hi := range 16 {
-		require.Equal(t, hi<<4, presortBucketOf([]byte{byte(hi)}), "a one-nibble key sorts before its extensions")
-		for lo := range 16 {
-			b := presortBucketOf([]byte{byte(hi), byte(lo), 0x0a})
-			require.Greater(t, b, prev, "bucket index must rise with the first two nibbles")
-			prev = b
-		}
-	}
-	require.Equal(t, 0, presortBucketOf(nil))
-	require.Equal(t, presortBuckets-1, prev)
 }

@@ -75,7 +75,7 @@ func newParallelUpdate() *parallelUpdate {
 // Collect is not safe for concurrent calls; the caller must serialize them.
 func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
 	pu.pending.collect(hashedKey, plainKey, update)
-	if pu.pending.count >= pu.chunkKeys {
+	if pu.pending.count() >= pu.chunkKeys {
 		pu.handOff()
 	}
 }
@@ -88,7 +88,7 @@ func (pu *parallelUpdate) startBuilder() {
 			pu.freeCh <- pu.pool[n-1]
 			pu.pool = pu.pool[:n-1]
 		} else {
-			pu.freeCh <- new(presorter)
+			pu.freeCh <- &presorter{entries: make([]presortEntry, 0, pu.chunkKeys)}
 		}
 	}
 	go func(build <-chan *presorter, free chan<- *presorter) {
@@ -130,17 +130,14 @@ func (pu *parallelUpdate) handOff() {
 }
 
 func (pu *parallelUpdate) insertSorted(p *presorter) {
-	p.sortBuckets()
-	for i := range p.buckets {
-		b := p.buckets[i]
-		for j := range b {
-			pu.trie.Insert(b[j].hashedKey, b[j].plainKey, b[j].update)
-		}
+	p.sort()
+	for i := range p.entries {
+		pu.trie.Insert(p.entries[i].hashedKey, p.entries[i].plainKey, p.entries[i].update)
 	}
 }
 
 func (pu *parallelUpdate) Build() {
-	if pu.pending.count > 0 {
+	if pu.pending.count() > 0 {
 		if pu.buildCh != nil {
 			pu.handOff()
 		} else if pu.trie != nil {
