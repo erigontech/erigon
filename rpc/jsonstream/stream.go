@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"encoding"
 	"io"
 )
 
@@ -66,10 +67,12 @@ type Stream interface {
 	WriteArrayStart()
 	WriteArrayEnd()
 	WriteMore()
-	WriteObjectField(fieldName string)
+	WriteObjectField(fieldName string) *StackStream
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)
+	// WriteQuotedText writes v.AppendText's output as a JSON string, with no escape scan.
+	WriteQuotedText(v encoding.TextAppender)
 
 	// Utility methods
 
@@ -80,7 +83,10 @@ type Stream interface {
 
 	ClosePending(targetDepth uint) error
 	// Depth counts the entries ClosePending would unwind, which is not the
-	// container nesting: a field name or a comma still waiting for its value
-	// counts too. Pass it back as targetDepth to return to this point.
+	// container nesting: a field name still waiting for its value counts too.
+	// Pass it back as targetDepth to return to this point.
 	Depth() int
+	// Err reports a write error the stream latched. Flush does not surface it on a writerless
+	// stream, so a caller that reads Buffer() instead of flushing must ask for it.
+	Err() error
 }

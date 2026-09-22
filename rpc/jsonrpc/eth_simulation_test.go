@@ -20,6 +20,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -558,6 +560,75 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	assert.Nil(t, call.Error)
 	assert.NotZero(t, uint64(call.MaxUsedGas))
 	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
+}
+
+// A base fee override must reach the BASEFEE opcode in non-validation mode too,
+// where the call carries no gas price of its own.
+func TestSimulateV1BaseFeeOverrideReachesEVM(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	baseFeeCode := hexutil.Bytes(runtimeReturningOpcode(opBasefee))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			BlockOverrides: &ethapi.BlockOverrides{BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(7))},
+			StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &baseFeeCode},
+			},
+			Calls: []ethapi.CallArgs{{From: &bankAddr, To: &contractAddr, Gas: &gas}},
+		}},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls, ok := result[0].Calls.([]CallResult)
+	require.True(t, ok, "expected typed call results")
+	require.Len(t, calls, 1)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
+	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000007", calls[0].ReturnData)
+}
+
+// A non-validating call pays no fee, so an overridden base fee must not credit
+// the burnt contract of a chain that has one (AuRa/Gnosis).
+func TestSimulateV1BaseFeeOverrideDoesNotFundBurntContract(t *testing.T) {
+	burntAddr := common.HexToAddress("0x00000000000000000000000000000000b0b0b0b0")
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.BurntContract = map[string]common.Address{"0": burntAddr}
+
+	m, _, bankAddr := fundedBankGenesis(t, chainConfig)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	baseFeeCode := hexutil.Bytes(runtimeReturningOpcode(opBasefee))
+	balanceCode := hexutil.Bytes(runtimeReturningOpcode(byte(vm.SELFBALANCE)))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			BlockOverrides: &ethapi.BlockOverrides{BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(7))},
+			StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &baseFeeCode},
+				accounts.InternAddress(burntAddr):    {Code: &balanceCode},
+			},
+			Calls: []ethapi.CallArgs{
+				{From: &bankAddr, To: &contractAddr, Gas: &gas},
+				{From: &bankAddr, To: &burntAddr, Gas: &gas},
+			},
+		}},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls, ok := result[0].Calls.([]CallResult)
+	require.True(t, ok, "expected typed call results")
+	require.Len(t, calls, 2)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[1].Status))
+	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000000", calls[1].ReturnData)
 }
 
 func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {

@@ -27,13 +27,13 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -217,8 +217,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	tx, err := types.DecodeTransaction(common.FromHex(rawTx))
 	require.NoError(t, err)
 	require.Equal(t, common.HexToHash("0x13946ef4324d802e4b496a73d1f9b3789b21557de59d6f025e96435a2dbc9be4"), tx.Hash())
-	var cfg chain.Config
-	require.NoError(t, copier.CopyWithOption(&cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	cfg := chain.AllProtocolChanges.Copy()
 	cfg.ChainName = "trace-create2-overflow"
 	cfg.ChainID = uint256.NewInt(7052886157)
 	gasLimit := uint64(0xb532b80)
@@ -226,7 +225,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	excessBlobGas := uint64(0)
 	parentBeaconBlockRoot := common.HexToHash("0x194bddd170136ba17081d9d3a0791e76b21e73f1e8bc483fe36e8c9adade96ff")
 	gspec := &types.Genesis{
-		Config:                &cfg,
+		Config:                cfg,
 		Timestamp:             0x6a476e64 - 10,
 		GasLimit:              gasLimit,
 		GasUsed:               gasLimit / 2,
@@ -1430,11 +1429,14 @@ func TestGetRawReceipts(t *testing.T) {
 }
 
 func TestExecutionWitness(t *testing.T) {
+	previousAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true // stateless verification of every witness runs only under assert
 	// Enable historical commitment schema so the test aggregator maintains per-block history.
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
 		statecfg.Schema = previousSchema
+		dbg.AssertEnabled = previousAssert
 	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -1696,7 +1698,7 @@ func TestSetHead(t *testing.T) {
 	require.Greater(t, head, uint64(1), "test chain must have at least 2 blocks")
 
 	makeAPIWithBase := func(m *execmoduletester.ExecModuleTester, base *BaseAPI, mock *mockEthBackend) *DebugAPIImpl {
-		backendServer := privateapi.NewEthBackendServer(m.Ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
+		backendServer := privateapi.NewEthBackendServer(m.Ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), m.ChainConfig)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 		return NewPrivateDebugAPI(base, m.DB, backend, &rpccfg.DebugApiConfig{})

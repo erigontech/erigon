@@ -783,6 +783,10 @@ func (s *simulator) simulateCall(
 	}
 	msg.SetCheckGas(false) // EIP-7825 gas cap does not apply to simulated calls (matches Geth SkipTransactionChecks)
 	msg.SetCheckNonce(s.validation)
+	// A call that pays no fee must not fund the burnt contract of a chain that has one.
+	if !s.validation && msg.FeeCap().IsZero() {
+		msg.SetIsFree(true)
+	}
 	txCtx := protocol.NewEVMTxContext(msg)
 	txn, err := call.ToTransaction(s.gasPool.Gas(), &blockCtx.BaseFee)
 	if err != nil {

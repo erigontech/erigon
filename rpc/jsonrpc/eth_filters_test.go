@@ -20,6 +20,7 @@ import (
 	"errors"
 	"math/big"
 	"math/rand"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -116,7 +117,7 @@ func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
 			"newPendingTransactionsWithBody": func() (*rpc.Subscription, error) { return api.NewPendingTransactionsWithBody(ctx) },
 			"logs":                           func() (*rpc.Subscription, error) { return api.Logs(ctx, filters.FilterCriteria{}) },
 			"transactionReceipts": func() (*rpc.Subscription, error) {
-				return api.TransactionReceipts(ctx, filters.ReceiptsFilterCriteria{})
+				return api.TransactionReceipts(ctx, nil)
 			},
 		}
 		for name, subscribe := range subscriptions {
@@ -478,7 +479,7 @@ func TestNewPendingTransactionIncludesFrom(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rpcTx := newRPCPendingTransaction(tx, nil, nil)
+	rpcTx := newRPCPendingTransaction(tx)
 	require.Equal(t, m.Address, rpcTx.From)
 }
 
@@ -534,4 +535,25 @@ func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {
 	// Use a bogus id that does not correspond to any subscription
 	_, err := api.GetFilterChanges(ctx, "0xdeadbeefcafebabe")
 	assert.ErrorIs(err, rpc.ErrFilterNotFound)
+}
+
+// geth and reth take the transactionReceipts filter as optional.
+func TestEthSubscribeTransactionReceiptsWithoutFilter(t *testing.T) {
+	m := execmoduletester.New(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m), m.DB, nil, nil)
+
+	server := rpc.NewServer(50, false, false, true, m.Log, 100)
+	require.NoError(t, server.RegisterName("eth", api))
+	defer server.Stop()
+	httpsrv := httptest.NewServer(server.WebsocketHandler([]string{"*"}, nil, false, m.Log))
+	defer httpsrv.Close()
+
+	client, err := rpc.DialWebsocket(ctx, "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", m.Log)
+	require.NoError(t, err)
+	defer client.Close()
+	sub, err := client.EthSubscribe(ctx, make(chan any), "transactionReceipts")
+	require.NoError(t, err)
+	sub.Unsubscribe()
 }

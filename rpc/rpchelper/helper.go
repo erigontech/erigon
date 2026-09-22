@@ -279,6 +279,20 @@ func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*acc
 	return hr.reader.ReadAccountData(address)
 }
 
+// HasAccount answers from the cached encoding's length, so a historical existence check
+// costs no DeserialiseV3 either.
+func (hr *cachedHistoryReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	addressValue := address.Value()
+	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
+	if err != nil {
+		return false, err
+	}
+	if ok {
+		return len(enc) > 0, nil
+	}
+	return hr.reader.HasAccount(address)
+}
+
 // ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
 // Used to get `prev` account balance
 func (hr *cachedHistoryReaderV3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {

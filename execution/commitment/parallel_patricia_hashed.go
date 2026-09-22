@@ -25,7 +25,11 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/errgroup"
 )
+
+const deferredWritesPerWorker = 4096
 
 var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
 
@@ -312,17 +316,50 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		}
 	}()
 
-	applyCtx, cleanup := p.trieCtxFactory(ctx)
-	if cleanup != nil {
-		defer cleanup()
-	}
-	if applyCtx == nil {
-		return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
-	}
-
 	// This path calls PutBranch directly rather than through a BranchEncoder,
 	// so it is the only place the parallel engine's branch writes get counted.
-	if _, err := ApplyDeferredBranchUpdates(deferred, p.numWorkers, applyCtx.PutBranch, p.metrics); err != nil {
+	workers := min(max(p.numWorkers, 1), 1+len(deferred)/deferredWritesPerWorker)
+	var claimed, written, bytesOut atomic.Int64
+	var g errgroup.Group
+	for range workers {
+		g.Go(func() error {
+			var n, size int64
+			defer func() {
+				written.Add(n)
+				bytesOut.Add(size)
+			}()
+			wctx, cleanup := p.trieCtxFactory(ctx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if wctx == nil {
+				return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
+			}
+			merger := workerMergerPool.Get().(*BranchMerger)
+			defer workerMergerPool.Put(merger)
+			for {
+				i := int(claimed.Add(1)) - 1
+				if i >= len(deferred) {
+					return nil
+				}
+				upd := deferred[i]
+				if err := mergeDeferredUpdate(upd, merger); err != nil {
+					return err
+				}
+				if upd.encoded == nil {
+					continue
+				}
+				if err := wctx.PutBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+					return err
+				}
+				n++
+				size += int64(len(upd.encoded))
+			}
+		})
+	}
+	err := g.Wait()
+	publishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
+	if err != nil {
 		return fmt.Errorf("apply deferred branch updates: %w", err)
 	}
 	return nil

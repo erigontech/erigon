@@ -39,8 +39,9 @@ import (
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
-// handler is not safe for concurrent use. Message handling never blocks indefinitely
-// because RPCs are processed on background goroutines launched by handler.
+// handler is not safe for concurrent use. On a connection, message handling never blocks
+// indefinitely because RPCs are processed on background goroutines launched by handler;
+// with inlineCalls they run on the caller's goroutine, which a single HTTP request owns.
 //
 // The entry points for incoming messages are:
 //
@@ -70,6 +71,7 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
+	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
 	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -194,7 +196,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		return
 	}
 
-	// Process calls on a goroutine because they may block indefinitely:
+	// Calls may block indefinitely, so they go to a goroutine unless the caller waits anyway:
 	h.startCallProc(func(cp *callProc) {
 		// Batch items below run concurrently and write into private per-item buffers.
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
@@ -438,13 +440,18 @@ func (h *handler) cancelServerSubscriptions(err error) {
 	}
 }
 
-// startCallProc runs fn in a new goroutine and starts tracking it in the h.calls wait group.
+// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
 func (h *handler) startCallProc(fn func(*callProc)) {
-	h.callWG.Go(func() {
+	run := func() {
 		ctx, cancel := context.WithCancel(h.rootCtx)
 		defer cancel()
 		fn(&callProc{ctx: ctx})
-	})
+	}
+	if h.inlineCalls {
+		run()
+		return
+	}
+	h.callWG.Go(run)
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a
@@ -576,13 +583,14 @@ func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 
 // handleCall processes method calls.
 func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) (*jsonrpcMessage, error) {
-	if msg.isSubscribe() {
+	allowed := h.isMethodAllowedByGranularControl(msg.Method)
+	if msg.isSubscribe() && allowed {
 		return h.handleSubscribe(cp, msg, stream)
 	}
 	var callb *callback
 	if msg.isUnsubscribe() {
 		callb = h.unsubscribeCb
-	} else if h.isMethodAllowedByGranularControl(msg.Method) {
+	} else if allowed {
 		callb = h.reg.callback(msg.Method)
 	}
 	if callb == nil {
@@ -666,7 +674,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		return nil, msg.writeResponse(stream, result)
 	}
 
-	return nil, writeLazyResponse(stream, msg.ID, func(rs jsonstream.Stream) error {
+	return nil, writeLazyResponse(stream, msg.ID, func(rs *jsonstream.LazyFieldStream) error {
 		if _, err := callb.call(ctx, msg.Method, args, rs); err != nil {
 			return remapDBOverload(ctx, err)
 		}
