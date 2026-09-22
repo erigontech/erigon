@@ -339,7 +339,7 @@ func TestUnwind(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	//check that at unwind disabled stage not appear
+	// check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[2], s[1], s[0]}
 	_ = state.UnwindTo(100, UnwindReason{}, tx)
@@ -352,7 +352,6 @@ func TestUnwind(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedFlow, flow)
-
 }
 
 func TestUnwindEmptyUnwinder(t *testing.T) {

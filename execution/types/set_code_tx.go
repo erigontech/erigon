@@ -211,7 +211,8 @@ func (tx *SetCodeTransaction) SigningHash(chainID *uint256.Int) common.Hash {
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
 			AuthList:   tx.Authorizations,
-		})
+		},
+	)
 }
 
 func (tx *SetCodeTransaction) EncodeRLP(w io.Writer) error {
@@ -364,7 +365,6 @@ func (tx *SetCodeTransaction) encodePayload(w io.Writer, b []byte, payloadSize, 
 		return err
 	}
 	return nil
-
 }
 
 // ParseDelegation tries to parse the address from a delegation slice.

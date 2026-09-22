@@ -70,12 +70,20 @@ type callback struct {
 	timerFailure metrics.Summary // pre-cached failure timer
 }
 
-func (r *serviceRegistry) registerName(name string, rcvr any) error {
+func (r *serviceRegistry) registerName(name string, rcvr any, iface reflect.Type) error {
 	rcvrVal := reflect.ValueOf(rcvr)
 	if name == "" {
 		return fmt.Errorf("no service name for type %s", rcvrVal.Type().String())
 	}
-	callbacks := suitableCallbacks(rcvrVal, r.logger)
+	if iface != nil {
+		if iface.Kind() != reflect.Interface {
+			return fmt.Errorf("Iface for service %s is %s, not an interface", rcvrVal.Type(), iface)
+		}
+		if !rcvrVal.Type().Implements(iface) {
+			return fmt.Errorf("service %s does not implement %s", rcvrVal.Type(), iface)
+		}
+	}
+	callbacks := suitableCallbacks(rcvrVal, iface, r.logger)
 	if len(callbacks) == 0 {
 		return fmt.Errorf("service %T doesn't have any suitable methods/subscriptions to expose", rcvr)
 	}
@@ -130,12 +138,15 @@ func (r *serviceRegistry) subscription(service, name string) *callback {
 // suitableCallbacks iterates over the methods of the given type. It determines if a method
 // satisfies the criteria for a RPC callback or a subscription callback and adds it to the
 // collection of callbacks. See server documentation for a summary of these criteria.
-func suitableCallbacks(receiver reflect.Value, logger log.Logger) map[string]*callback {
+func suitableCallbacks(receiver reflect.Value, iface reflect.Type, logger log.Logger) map[string]*callback {
 	typ := receiver.Type()
 	callbacks := make(map[string]*callback)
 	for method := range typ.Methods() {
 		if method.PkgPath != "" {
 			continue // method not exported
+		}
+		if !servedByIface(iface, method.Name) {
+			continue // not part of the served interface
 		}
 		name := formatName(method.Name)
 		cb := newCallback(receiver, method.Func, name, logger)
@@ -280,6 +291,15 @@ func isPubSub(methodType reflect.Type) bool {
 	return isContextType(methodType.In(1)) &&
 		isSubscriptionType(methodType.Out(0)) &&
 		isErrorType(methodType.Out(1))
+}
+
+// servedByIface reports whether an Iface restriction admits a method. A nil iface admits all.
+func servedByIface(iface reflect.Type, method string) bool {
+	if iface == nil {
+		return true
+	}
+	_, declared := iface.MethodByName(method)
+	return declared
 }
 
 // formatName converts to first character of name to lowercase.

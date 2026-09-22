@@ -183,7 +183,15 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					log.Warn(closedWarn)
 					return
 				}
-				notify(emit, item)
+				err := rpc.CoalesceNotifications(notifier, func() {
+					notify(emit, item)
+					for range len(ch) {
+						notify(emit, <-ch)
+					}
+				})
+				if err != nil {
+					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
+				}
 			case <-rpcSub.Err():
 				return
 			}

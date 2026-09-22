@@ -286,7 +286,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	rpcSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 	defer rpcSrv.Stop()
 	for _, api := range apiList {
-		if err := rpcSrv.RegisterName(api.Namespace, api.Service); err != nil {
+		if err := rpcSrv.RegisterAPI(api); err != nil {
 			return fmt.Errorf("failed to register %s API: %w", api.Namespace, err)
 		}
 	}

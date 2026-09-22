@@ -38,13 +38,17 @@ const (
 	LEN_48 = 48 // KZGCommitment & KZGProof sizes
 )
 
-type KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
-type KZGProof [LEN_48]byte
-type Blob [params.BlobSize]byte
+type (
+	KZGCommitment [LEN_48]byte // Compressed BLS12-381 G1 element
+	KZGProof      [LEN_48]byte
+	Blob          [params.BlobSize]byte
+)
 
-type BlobKzgs []KZGCommitment
-type KZGProofs []KZGProof
-type Blobs []Blob
+type (
+	BlobKzgs  []KZGCommitment
+	KZGProofs []KZGProof
+	Blobs     []Blob
+)
 
 type BlobTxWrapper struct {
 	Tx             BlobTx
@@ -224,6 +228,7 @@ func toBlobs(_blobs Blobs) []*goethkzg.Blob {
 	}
 	return blobs
 }
+
 func toComms(_comms BlobKzgs) []goethkzg.KZGCommitment {
 	comms := make([]goethkzg.KZGCommitment, len(_comms))
 	for i, _comm := range _comms {
@@ -231,6 +236,7 @@ func toComms(_comms BlobKzgs) []goethkzg.KZGCommitment {
 	}
 	return comms
 }
+
 func toProofs(_proofs KZGProofs) []goethkzg.KZGProof {
 	proofs := make([]goethkzg.KZGProof, len(_proofs))
 	for i, _proof := range _proofs {
@@ -381,6 +387,7 @@ func (txw *BlobTxWrapper) DecodeRLP(s *rlp.Stream) error {
 func (txw *BlobTxWrapper) EncodingSize() int {
 	return txw.Tx.EncodingSize()
 }
+
 func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	l, _, _ := txw.Tx.payloadSize()
 	payloadSize += l + rlp.ListPrefixLen(l)
@@ -395,6 +402,7 @@ func (txw *BlobTxWrapper) payloadSize() (payloadSize int) {
 	payloadSize += l + rlp.ListPrefixLen(l)
 	return
 }
+
 func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 	b := rlp.NewEncodingBuf()
 	defer b.Release()
@@ -471,6 +479,7 @@ func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
 func (txw *BlobTxWrapper) MarshalBinary(w io.Writer) error {
 	return txw.Tx.MarshalBinary(w)
 }
+
 func (txw *BlobTxWrapper) EncodeRLP(w io.Writer) error {
 	return txw.Tx.EncodeRLP(w)
 }

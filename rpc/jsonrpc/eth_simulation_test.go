@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -711,6 +712,45 @@ func TestValidateSimulationRequest(t *testing.T) {
 			if customErr.Message != tc.wantError {
 				t.Fatalf("unexpected error message: want %q, got %q", tc.wantError, customErr.Message)
 			}
+		})
+	}
+}
+
+// ─── computeSimulatedStateRoot tests ─────────────────────────────
+
+// observedFrozenBlocks answers the frozen-blocks sentinel and nothing else: the embedded
+// interface is nil, so any further reader call panics the test.
+type observedFrozenBlocks struct {
+	dbservices.FullBlockReader
+	frozen   uint64
+	observed bool
+}
+
+func (r observedFrozenBlocks) FrozenBlocksObserved() (uint64, bool) { return r.frozen, r.observed }
+
+func TestComputeSimulatedStateRootWithoutCommitmentHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		frozen   uint64
+		observed bool
+	}{
+		{name: "blocks are frozen", frozen: 1000, observed: true},
+		{name: "frozen count not observed yet", frozen: 0, observed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("state-history commitment was computed on a frozen chain: %v", r)
+				}
+			}()
+			sim := &simulator{blockReader: observedFrozenBlocks{frozen: tc.frozen, observed: tc.observed}}
+			block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+
+			err := sim.computeSimulatedStateRoot(context.Background(), nil, nil, &SimulatedBlock{}, block,
+				&types.Header{Number: *uint256.NewInt(0)}, 0, 0, nil, nil, false)
+
+			require.NoError(t, err)
+			require.Equal(t, common.Hash{}, block.Root())
 		})
 	}
 }
