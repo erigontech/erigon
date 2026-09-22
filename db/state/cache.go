@@ -3,12 +3,15 @@ package state
 import (
 	"fmt"
 	"sync"
+	"unsafe"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/elastic/go-freelru"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/cache"
 )
 
 func u32noHash(u uint32) uint32        { return u }            //nolint
@@ -18,74 +21,29 @@ func u192noHash(u u192) uint32         { return uint32(u.hi) } //nolint
 type u128 struct{ hi, lo uint64 }      //nolint
 type u192 struct{ hi, lo, ext uint64 } //nolint
 
-type DomainGetFromFileCache struct {
-	*freelru.LRU[uint64, domainGetFromFileCacheItem]
-	enabled, trace bool
-	limit          uint32
-}
-
 // nolint
 type domainGetFromFileCacheItem struct {
-	lvl uint8
-	v   []byte
+	found bool
+	lvl   uint8
+	lo    uint64
+	v     []byte
 }
 
-var (
-	domainGetFromFileCacheLimit   = uint32(dbg.EnvInt("D_LRU", 10_000))
-	domainGetFromFileCacheTrace   = dbg.EnvBool("D_LRU_TRACE", false)
-	domainGetFromFileCacheEnabled = dbg.EnvBool("D_LRU_ENABLED", true)
-)
+var domainGetFromFileCacheSize = dbg.EnvDataSize("D_LRU_SIZE", 320*datasize.MB) / datasize.ByteSize(kv.DomainLen-1)
 
-func NewDomainGetFromFileCache(limit uint32) *DomainGetFromFileCache {
-	c, err := freelru.New[uint64, domainGetFromFileCacheItem](limit, u64noHash)
-	if err != nil {
-		panic(err)
-	}
-	return &DomainGetFromFileCache{LRU: c, enabled: domainGetFromFileCacheEnabled, trace: domainGetFromFileCacheTrace, limit: limit}
-}
-
-func (c *DomainGetFromFileCache) SetTrace(v bool) { c.trace = v }
-func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
-	if c == nil {
-		return
-	}
-	if !c.enabled || !c.trace {
-		return
-	}
-	m := c.Metrics()
-	if m.Hits > 0 {
-		log.Warn("[dbg] DomainGetFromFileCache", "a", dt.String(), "ratio", fmt.Sprintf("%.2f", float64(m.Hits)/float64(m.Hits+m.Misses)), "hit", m.Hits, "Collisions", m.Collisions, "Evictions", m.Evictions, "Inserts", m.Inserts, "limit", c.limit)
-	}
-}
-
+// newDomainVisible gives each visible files set one cache shared by all its txs: a value may point into a file of the set,
+// and those files stay open while any tx can reach the set.
 func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	d := &domainVisible{
 		name:  name,
 		files: files,
 	}
-	limit := domainGetFromFileCacheLimit
-	if name == kv.CodeDomain {
-		limit /= 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
+	if domainGetFromFileCacheSize > 0 && name != kv.CommitmentDomain {
+		d.cache = cache.NewByteLRU(domainGetFromFileCacheSize, func(_ uint64, it domainGetFromFileCacheItem) int64 {
+			return int64(len(it.v)) + cache.ByteLRUEntryOverheadBytes + int64(unsafe.Sizeof(it))
+		})
 	}
-	if limit == 0 {
-		domainGetFromFileCacheEnabled = false
-	}
-	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
 	return d
-}
-
-func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
-	if !domainGetFromFileCacheEnabled {
-		return nil
-	}
-	return v.caches.Get().(*DomainGetFromFileCache)
-}
-func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
-	if c == nil {
-		return
-	}
-	c.LogStats(v.name)
-	v.caches.Put(c)
 }
 
 var (

@@ -1083,6 +1083,95 @@ func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
 	require.Equal(t, kv.Step(1), step)
 }
 
+func testDomainKeyInFiles(t *testing.T) (*Domain, []byte, []byte) {
+	t.Helper()
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter()
+	key, v0, v1 := []byte("key"), []byte("step-0"), []byte("step-1")
+	require.NoError(t, writer.PutWithPrev(key, v0, 5, nil))
+	require.NoError(t, writer.PutWithPrev(key, v1, 20, v0))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 1, tx, background.NewProgressSet()))
+	return d, key, v1
+}
+
+func TestDomain_LatestFromFilesCacheServesOtherTxs(t *testing.T) {
+	t.Parallel()
+	d, key, want := testDomainKeyInFiles(t)
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+
+	first := d.beginFilesRo(dv, hv, iv)
+	got, found, _, _, err := first.getLatestFromFiles(key, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, want, got)
+	first.Close()
+
+	second := d.beginFilesRo(dv, hv, iv)
+	defer second.Close()
+	hi, lo := second.ht.iit.hashKey(key)
+	cached, ok := second.visible.cache.Get(hi)
+	require.True(t, ok, "a value one tx read from files must serve the next tx")
+	require.Equal(t, lo, cached.lo)
+	require.Equal(t, want, cached.v)
+
+	cached.v = []byte("served-from-cache")
+	second.visible.cache.Add(hi, cached)
+	got, found, _, _, err = second.getLatestFromFiles(key, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, cached.v, got, "a lookup must be served from the cache")
+}
+
+func TestDomain_LatestFromFilesCacheKeepsMissesMissing(t *testing.T) {
+	t.Parallel()
+	d, _, _ := testDomainKeyInFiles(t)
+	dv, hv, iv := d.calcVisibleFiles(d.dirtyFilesEndTxNumMinimax())
+	absent := []byte("absent")
+
+	first := d.beginFilesRo(dv, hv, iv)
+	_, found, _, _, err := first.getLatestFromFiles(absent, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	require.False(t, found)
+	first.Close()
+
+	second := d.beginFilesRo(dv, hv, iv)
+	defer second.Close()
+	hi, lo := second.ht.iit.hashKey(absent)
+	cached, ok := second.visible.cache.Get(hi)
+	require.True(t, ok, "a miss must be cached")
+	require.Equal(t, lo, cached.lo)
+	require.False(t, cached.found)
+	_, found, _, _, err = second.getLatestFromFiles(absent, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	require.False(t, found, "a miss one tx cached must stay a miss for the next tx")
+	_, found, err = second.getLatestFromFilesValSize(absent, 0)
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+func TestDomain_LatestFromFilesCacheRejectsHashCollision(t *testing.T) {
+	t.Parallel()
+	d, key, want := testDomainKeyInFiles(t)
+
+	dt := d.beginForTests()
+	defer dt.Close()
+	hi, lo := dt.ht.iit.hashKey(key)
+	dt.visible.cache.Add(hi, domainGetFromFileCacheItem{lo: lo + 1, v: []byte("other key")})
+
+	got, found, _, _, err := dt.getLatestFromFiles(key, nil, kv.NoStepBound)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, want, got, "an entry for another key with the same 64-bit hash must not be served")
+}
+
 func TestDomain_GetLatestMaxStepSelectsNewestDBValue(t *testing.T) {
 	t.Parallel()
 	db, d := testDbAndDomain(t, log.New())

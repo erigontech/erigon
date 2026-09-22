@@ -26,7 +26,6 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
-	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -52,6 +51,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/metrics"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -101,9 +101,9 @@ type Domain struct {
 }
 
 type domainVisible struct {
-	files  visibleFiles
-	name   kv.Domain
-	caches *sync.Pool
+	files visibleFiles
+	name  kv.Domain
+	cache *cache.ByteLRU[domainGetFromFileCacheItem] // nil when disabled
 }
 
 func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*Domain, error) {
@@ -614,8 +614,6 @@ type DomainRoTx struct {
 
 	valsC      kv.Cursor
 	valCViewID uint64 // to make sure that valsC reading from the same view with given kv.Tx
-
-	getFromFileCache *DomainGetFromFileCache
 }
 
 func domainReadMetric(name kv.Domain, level int) metrics.Summary {
@@ -1492,20 +1490,15 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && !bounded && buf == nil
+	useCache := dt.visible.cache != nil && !bounded && buf == nil
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
-	getFromFileCache := dt.getFromFileCache
-
-	if useCache && getFromFileCache == nil {
-		if dt.getFromFileCache == nil {
-			dt.getFromFileCache = dt.visible.newGetFromFileCache()
-		}
-		getFromFileCache = dt.getFromFileCache
-	}
-	if getFromFileCache != nil && useCache {
-		if cv, ok := getFromFileCache.Get(hi); ok {
+	if useCache {
+		if cv, ok := dt.visible.cache.Get(hi); ok && cv.lo == lo {
+			if !cv.found {
+				return nil, false, 0, 0, nil
+			}
 			return cv.v, true, dt.files[cv.lvl].startTxNum, dt.files[cv.lvl].endTxNum, nil
 		}
 	}
@@ -1548,8 +1541,8 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 			fmt.Printf("GetLatest(%s, %x) -> found in file %s\n", dt.name.String(), k, f.src.decompressor.FileName())
 		}
 
-		if dt.getFromFileCache != nil && useCache {
-			dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: uint8(i), v: v})
+		if useCache {
+			dt.visible.cache.Add(hi, domainGetFromFileCacheItem{found: true, lvl: uint8(i), lo: lo, v: v})
 		}
 		return v, true, f.startTxNum, f.endTxNum, nil
 	}
@@ -1557,8 +1550,8 @@ func (dt *DomainRoTx) lookupLatestFromFiles(k, buf []byte, maxTxNum uint64, boun
 		fmt.Printf("GetLatest(%s, %x) -> not found in %d files\n", dt.name.String(), k, len(dt.files))
 	}
 
-	if dt.getFromFileCache != nil && useCache {
-		dt.getFromFileCache.Add(hi, domainGetFromFileCacheItem{lvl: 0, v: nil})
+	if useCache {
+		dt.visible.cache.Add(hi, domainGetFromFileCacheItem{lo: lo})
 	}
 	return nil, false, 0, 0, nil
 }
@@ -1571,12 +1564,12 @@ func (dt *DomainRoTx) getLatestFromFilesValSize(k []byte, maxTxNum uint64) (size
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	useCache := dt.visible.cache != nil && maxTxNum == math.MaxUint64
 	hi, lo := dt.ht.iit.hashKey(k)
 
-	if useCache && dt.getFromFileCache != nil {
-		if cv, ok := dt.getFromFileCache.Get(hi); ok {
-			return len(cv.v), true, nil
+	if useCache {
+		if cv, ok := dt.visible.cache.Get(hi); ok && cv.lo == lo {
+			return len(cv.v), cv.found, nil
 		}
 	}
 	for i, f := range slices.Backward(dt.files) {
@@ -1674,8 +1667,6 @@ func (dt *DomainRoTx) Close() {
 	}
 	dt.mapReaders = nil
 	dt.ht.Close()
-
-	dt.visible.returnGetFromFileCache(dt.getFromFileCache)
 }
 
 // reusableReader - for short read-and-forget operations. Must Reset this reader before use
