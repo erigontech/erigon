@@ -160,7 +160,11 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNum-1)), 0, api.stateCache, api._txNumReader)
+	cacheView, err := api.stateCache.View(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, tx, blockNum, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -325,7 +329,12 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 				}
 
 				// try to recompute the state
-				stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber-1)), 0, api.stateCache, api._txNumReader)
+				cacheView, err := api.stateCache.View(ctx, tx)
+				if err != nil {
+					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
+					continue
+				}
+				stateReader, err := rpchelper.CreateHistoryCachedStateReader(ctx, cacheView, tx, uint64(blockNumber), 0, api._txNumReader)
 				if err != nil {
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
