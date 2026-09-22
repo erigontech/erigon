@@ -8,6 +8,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/erigontech/secp256k1"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -34,6 +35,8 @@ type BlockReadAheader struct {
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
+
+	recoveries *lru.Cache[common.Hash, *SendersRecovery]
 
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
@@ -66,7 +69,12 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
+	recoveries, err := lru.New[common.Hash, *SendersRecovery](4)
+	if err != nil {
+		panic(err)
+	}
 	return &BlockReadAheader{
+		recoveries: recoveries,
 		headers:    headers,
 		bodies:     bodies,
 		senders:    senders,
@@ -213,6 +221,54 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 		return
 	}
 	bra.senders.Add(blockHash, bytes.Clone(senders))
+}
+
+type SendersRecovery struct {
+	done    chan struct{}
+	senders []byte
+	err     error
+}
+
+func StartSendersRecovery(signer *types.Signer, txns types.Transactions) *SendersRecovery {
+	r := &SendersRecovery{done: make(chan struct{}), senders: make([]byte, len(txns)*length.Addr)}
+	go func() {
+		defer close(r.done)
+		var next atomic.Int64
+		var group errgroup.Group
+		for w := range min(secp256k1.NumOfContexts(), len(txns)) {
+			cryptoContext := secp256k1.ContextForThread(w)
+			group.Go(func() error {
+				for i := int(next.Add(1) - 1); i < len(txns); i = int(next.Add(1) - 1) {
+					from, err := signer.SenderWithContext(cryptoContext, txns[i])
+					if err != nil {
+						return err
+					}
+					fromValue := from.Value()
+					copy(r.senders[i*length.Addr:], fromValue[:])
+				}
+				return nil
+			})
+		}
+		r.err = group.Wait()
+	}()
+	return r
+}
+
+func (bra *BlockReadAheader) AddSendersRecovery(blockHash common.Hash, r *SendersRecovery) {
+	bra.recoveries.Add(blockHash, r)
+}
+
+func (bra *BlockReadAheader) RecoveredSenders(ctx context.Context, blockHash common.Hash) ([]byte, bool) {
+	r, ok := bra.recoveries.Get(blockHash)
+	if !ok {
+		return nil, false
+	}
+	select {
+	case <-r.done:
+	case <-ctx.Done():
+		return nil, false
+	}
+	return r.senders, r.err == nil
 }
 
 func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *types.BlockAccessListSidecar) {
