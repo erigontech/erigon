@@ -21,7 +21,6 @@ import (
 	"cmp"
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -316,7 +315,7 @@ func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, s
 
 func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v []byte, ok bool, err error) {
 	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
-		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
+		return nil, false, kv.ErrInMemHistoryDisabled
 	}
 	sd.latestStateLocks[domain].RLock()
 	defer sd.latestStateLocks[domain].RUnlock()
