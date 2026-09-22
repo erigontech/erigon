@@ -45,7 +45,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([]t
 	}
 	defer tx.Rollback()
 
-	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), tx, api._blockReader, nil)
+	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil
@@ -397,7 +397,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		}
 	}
 
-	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api._blockReader, api.filters)
+	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(cannonicalBlockHash, true), tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}

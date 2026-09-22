@@ -365,7 +365,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 		return api.pendingBlock(), nil, nil
 	}
 
-	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
+	n, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil, nil // not error, see also other cases https://github.com/erigontech/erigon/issues/1645
@@ -397,7 +397,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 			return nil, err
 		}
 	} else {
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
+		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				return nil, nil

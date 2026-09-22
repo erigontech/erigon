@@ -195,7 +195,7 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(hash, false)
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -278,7 +278,7 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 		return api.pendingBlock(), nil, nil
 	}
 
-	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, nil)
+	blockHeight, blockHash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -304,14 +304,14 @@ const zeroStorageHash = "0x00000000000000000000000000000000000000000000000000000
 
 // GetAccountInfo returns the balance (hex), nonce, and bytecode for an account at the given block.
 func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return "", 0, "", err
 	}
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -320,12 +320,11 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 		return "", 0, "", err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, -1, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		return "", 0, "", err
 	}
@@ -360,14 +359,14 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, &rpc.InvalidParamsError{Message: hexutil.ErrTooBigHexString.Error()}
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return "", err
 	}
 	defer tx.Rollback()
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
-	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNum, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return zeroStorageHash, err
 	}
@@ -376,12 +375,11 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
-	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum, latest, -1, api.stateCache, api._txNumReader)
+	reader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, tx, blockNum, latest, -1, api.stateCache, api._txNumReader)
 	if err != nil {
 		return zeroStorageHash, err
 	}
@@ -455,7 +453,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, blockNrOrHash, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
