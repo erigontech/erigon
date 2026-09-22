@@ -350,7 +350,10 @@ func TestNotifyHashSkipsReflection(t *testing.T) {
 	if err := n.Notify("0x9a", h); err != nil {
 		t.Fatal(err)
 	}
-	want, _ := json.Marshal(h)
+	want, err := json.Marshal(h)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got := string(w.got); !strings.Contains(got, `"result":`+string(want)+"}}") {
 		t.Fatalf("notification = %s, want result %s", got, want)
 	}
