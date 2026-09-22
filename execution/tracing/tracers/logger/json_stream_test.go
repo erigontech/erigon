@@ -585,12 +585,13 @@ func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
 	}
 }
 
-// TestHexQuotedMatchesUint256Hex pins the stack encoding against uint256.Hex,
+// TestWriteQuantitiesMatchesUint256Hex pins the stack encoding against uint256.Hex,
 // which the RPC output has to stay byte-identical to. The interesting cases are
 // the nibble boundaries: Hex counts nibbles, not bytes, so 0xf is one digit and
 // 0x10 is two.
-func TestHexQuotedMatchesUint256Hex(t *testing.T) {
-	l := &JsonStreamLogger{}
+func TestWriteQuantitiesMatchesUint256Hex(t *testing.T) {
+	var vals []uint256.Int
+	var want []string
 	for _, str := range []string{
 		"0", "1", "f", "10", "ff", "100",
 		"1234567890abcdef",
@@ -599,6 +600,12 @@ func TestHexQuotedMatchesUint256Hex(t *testing.T) {
 		"8000000000000000000000000000000000000000000000000000000000000000",
 	} {
 		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
-		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
+		vals = append(vals, *v)
+		want = append(want, `"`+v.Hex()+`"`)
 	}
+	var out bytes.Buffer
+	s := jsonstream.New(&out)
+	s.WriteQuantities(vals)
+	require.NoError(t, s.Flush())
+	require.Equal(t, "["+strings.Join(want, ",")+"]", out.String())
 }

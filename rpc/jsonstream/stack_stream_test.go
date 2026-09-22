@@ -23,12 +23,14 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"slices"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -1499,4 +1501,72 @@ func TestLargeHexWritesInChunks(t *testing.T) {
 			})
 		}
 	}
+}
+
+// TestBulkHexArraysMatchPerElementWrites pins WriteHexWords and WriteQuantities to the
+// per-element writes they replace, on the small path and past FlushThreshold.
+func TestBulkHexArraysMatchPerElementWrites(t *testing.T) {
+	encode := func(t *testing.T, write func(Stream)) (string, int) {
+		var out countingWriter
+		s := New(&out)
+		write(s)
+		require.NoError(t, s.Flush())
+		return out.String(), out.writes
+	}
+	for name, mem := range map[string][]byte{
+		"empty":        {},
+		"one word":     bytes.Repeat([]byte{0xab}, 32),
+		"partial last": append(bytes.Repeat([]byte{0x01}, 64), 0xaa, 0xbb),
+		"past flush":   bytes.Repeat([]byte{0xcd}, 3*FlushThreshold+7),
+	} {
+		t.Run("words/"+name, func(t *testing.T) {
+			want, _ := encode(t, func(s Stream) {
+				s.WriteArrayStart()
+				for i := 0; i < len(mem); i += 32 {
+					var w [32]byte
+					copy(w[:], mem[i:min(i+32, len(mem))])
+					s.WriteHex(w[:])
+				}
+				s.WriteArrayEnd()
+			})
+			got, writes := encode(t, func(s Stream) { s.WriteHexWords(mem) })
+			require.Equal(t, want, got)
+			if len(mem) > FlushThreshold {
+				require.Greater(t, writes, 1, "a large memory array must reach the writer in chunks")
+			}
+		})
+	}
+
+	maxU := *new(uint256.Int).SetAllOne()
+	for name, vs := range map[string][]uint256.Int{
+		"nil":        nil,
+		"zero, max":  {{}, maxU},
+		"past flush": slices.Repeat([]uint256.Int{maxU, *uint256.NewInt(0x10)}, 1024),
+	} {
+		t.Run("quantities/"+name, func(t *testing.T) {
+			want, _ := encode(t, func(s Stream) {
+				s.WriteArrayStart()
+				for i := range vs {
+					s.WriteQuotedText(hexutil.U256(vs[i]))
+				}
+				s.WriteArrayEnd()
+			})
+			got, _ := encode(t, func(s Stream) { s.WriteQuantities(vs) })
+			require.Equal(t, want, got)
+		})
+	}
+
+	s := New(nil)
+	s.WriteHexWords([]byte{1})
+	require.Equal(t, `["0x0100000000000000000000000000000000000000000000000000000000000000"]`, string(s.Buffer()))
+}
+
+type countingWriter struct {
+	bytes.Buffer
+	writes int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	return w.Buffer.Write(p)
 }

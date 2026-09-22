@@ -20,6 +20,8 @@ import (
 	"encoding"
 	"io"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common/dbg"
 )
 
@@ -122,10 +124,13 @@ func (s *LazyFieldStream) WriteString(v string)   { s.ensure(); s.inner.WriteStr
 func (s *LazyFieldStream) WriteRaw(v string)      { s.ensure(); s.inner.WriteRaw(v) }
 func (s *LazyFieldStream) WriteRawBytes(v []byte) { s.ensure(); s.inner.WriteRawBytes(v) }
 func (s *LazyFieldStream) WriteHex(v []byte)      { s.ensure(); s.inner.WriteHex(v) }
+func (s *LazyFieldStream) WriteHexWords(v []byte) { s.ensure(); s.inner.WriteHexWords(v) }
 func (s *LazyFieldStream) WriteObjectStart()      { s.ensure(); s.inner.WriteObjectStart() }
 func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArrayStart() }
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
+
+func (s *LazyFieldStream) WriteQuantities(v []uint256.Int) { s.ensure(); s.inner.WriteQuantities(v) }
 
 // Open writes the field this stream is holding and returns the stream that owns the buffer.
 func (s *LazyFieldStream) Open() *StackStream {

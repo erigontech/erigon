@@ -24,6 +24,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/holiman/uint256"
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -198,6 +199,56 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 	}
 	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
+}
+
+// WriteHexWords writes b as an array of 32-byte hex words, the last one zero-padded: the EVM
+// memory layout of a struct log.
+func (s *StackStream) WriteHexWords(b []byte) {
+	s.beforeValue()
+	n := (len(b) + length.Hash - 1) / length.Hash
+	word := func(buf []byte, i int) []byte {
+		w := b[i*length.Hash : min((i+1)*length.Hash, len(b))]
+		if len(w) < length.Hash {
+			var padded [length.Hash]byte
+			copy(padded[:], w)
+			return hexutil.AppendQuoted(buf, padded[:])
+		}
+		return hexutil.AppendQuoted(buf, w)
+	}
+	s.appendArray(n, hexutil.QuotedLen(length.Hash), word)
+	s.afterValue()
+}
+
+// WriteQuantities writes vs as an array of minimal hex quantities.
+func (s *StackStream) WriteQuantities(vs []uint256.Int) {
+	s.beforeValue()
+	quantity := func(buf []byte, i int) []byte {
+		buf, _ = hexutil.U256(vs[i]).AppendText(append(buf, '"'))
+		return append(buf, '"')
+	}
+	s.appendArray(len(vs), hexutil.QuotedLen(length.Hash), quantity)
+	s.afterValue()
+}
+
+// appendArray appends n elements of at most maxLen bytes each: in one buffer growth when the
+// array fits under FlushThreshold, otherwise handing the buffer to the writer as it fills.
+func (s *StackStream) appendArray(n, maxLen int, elem func(buf []byte, i int) []byte) {
+	if size := 2 + n*(maxLen+1); s.out == nil || size <= FlushThreshold {
+		s.stream.SetBuffer(slices.Grow(s.stream.Buffer(), size))
+	}
+	buf := append(s.stream.Buffer(), '[')
+	for i := range n {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		buf = elem(buf, i)
+		if s.out != nil && len(buf) >= FlushThreshold {
+			s.stream.SetBuffer(buf)
+			flushIfFull(s.stream)
+			buf = s.stream.Buffer()
+		}
+	}
+	s.stream.SetBuffer(append(buf, ']'))
 }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is

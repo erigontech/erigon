@@ -93,14 +93,12 @@ func BenchmarkStackValueWrite(b *testing.B) {
 			_ = s.Flush()
 		}
 	})
-	b.Run("WriteRaw_hexQuoted", func(b *testing.B) {
-		l := &JsonStreamLogger{stream: jsonstream.New(io.Discard)}
+	b.Run("WriteQuantities", func(b *testing.B) {
+		s := jsonstream.New(io.Discard)
 		b.ReportAllocs()
 		for b.Loop() {
-			for i := range vals {
-				l.stream.WriteRaw(l.hexQuoted(&vals[i]))
-			}
-			_ = l.stream.Flush()
+			s.WriteQuantities(vals)
+			_ = s.Flush()
 		}
 	})
 }

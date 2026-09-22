@@ -25,7 +25,6 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -94,13 +93,6 @@ func (l *JsonStreamLogger) hexWithPrefix(h *common.Hash) string {
 	l.hexEncodeBuf[1] = 'x'
 	n := hex.Encode(l.hexEncodeBuf[2:], h[:])
 	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
-}
-
-// hexQuoted encodes v as a complete JSON string, quotes included, for WriteRaw.
-func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
-	l.hexEncodeBuf[0] = '"'
-	b, _ := hexutil.U256(*v).AppendText(l.hexEncodeBuf[:1])
-	return common.ToStringZeroCopy(append(b, '"'))
 }
 
 // writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes. It goes through
@@ -199,20 +191,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	}
 	if !l.cfg.DisableStack {
 		l.stream.WriteObjectField("stack")
-		l.stream.WriteArrayStart()
-		for i := range stack {
-			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
-		}
-		l.stream.WriteArrayEnd()
+		l.stream.WriteQuantities(stack)
 	}
 	if l.cfg.EnableMemory && len(memory) > 0 {
 		l.stream.WriteObjectField("memory")
-		l.stream.WriteArrayStart()
-		for i := 0; i < len(memory); i += 32 {
-			end := min(i+32, len(memory))
-			l.writeWord(memory[i:end])
-		}
-		l.stream.WriteArrayEnd()
+		l.stream.WriteHexWords(memory)
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
 		l.stream.WriteObjectField("returnData")

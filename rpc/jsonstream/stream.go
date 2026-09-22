@@ -19,6 +19,8 @@ package jsonstream
 import (
 	"encoding"
 	"io"
+
+	"github.com/holiman/uint256"
 )
 
 // Stream is an interface that defines the common functionality between
@@ -74,6 +76,10 @@ type Stream interface {
 	WriteHex(b []byte)
 	// WriteQuotedText writes v.AppendText's output as a JSON string, with no escape scan.
 	WriteQuotedText(v encoding.TextAppender)
+	// WriteHexWords writes b as an array of 32-byte hex words, the last one zero-padded.
+	WriteHexWords(b []byte)
+	// WriteQuantities writes vs as an array of minimal hex quantities.
+	WriteQuantities(vs []uint256.Int)
 
 	// Utility methods
 
