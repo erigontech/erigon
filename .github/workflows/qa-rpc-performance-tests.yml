@@ -108,6 +108,7 @@ jobs:
       ERIGON_TESTBED_AREA: /opt/erigon-testbed
       ERIGON_QA_PATH: /home/qarunner/erigon-qa
       GETH_INSTALL_DIR: /opt/go-ethereum
+      GETH_PROCESS_NAME: geth
       CLIENT: ${{ matrix.client }}
 
     steps:
@@ -136,6 +137,13 @@ jobs:
           fetch-depth: "0"
           filter: blob:none
 
+      - name: Checkout workflow scripts
+        if: matrix.client == 'geth' && needs.setup.outputs.run_geth == 'true'
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
+
       - name: Checkout RPC Tests Repository
         if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
         env:
@@ -145,6 +153,17 @@ jobs:
           git -c advice.detachedHead=false clone --depth 1 --branch v2.4.0 https://github.com/erigontech/rpc-tests "$RUNNER_WS/rpc-tests"
           cd "$RUNNER_WS/rpc-tests"
           make rpc_perf
+
+      - name: Ensure vegeta CLI
+        if: matrix.client == 'erigon' || needs.setup.outputs.run_geth == 'true'
+        run: |
+          # rpc_perf embeds vegeta as a library; the CLI is needed to decode its result files.
+          if command -v vegeta > /dev/null; then
+            echo "VEGETA_BIN=$(command -v vegeta)" >> "$GITHUB_ENV"
+          else
+            GOBIN="$RUNNER_TEMP/vegeta-bin" go install github.com/tsenart/vegeta/v12@v12.13.0
+            echo "VEGETA_BIN=$RUNNER_TEMP/vegeta-bin/vegeta" >> "$GITHUB_ENV"
+          fi
 
       - name: Set up job-scoped build temp dir
         if: matrix.client == 'erigon'
@@ -295,6 +314,12 @@ jobs:
           rm -rf $bin_past_test_dir  # we want only the latest binary files
           mkdir -p $bin_past_test_dir
           
+          if [ "$CLIENT" == "erigon" ]; then
+            process_name=rpcdaemon
+          else
+            process_name=$GETH_PROCESS_NAME
+          fi
+
           run_perf () {
             workspace=$1
             network=$2
@@ -321,10 +346,21 @@ jobs:
                                       --test-report \
                                       --json-report $result_dir/$result_file \
                                       --testing-client $client \
-                                      --process-name rpcdaemon
+                                      --process-name "$process_name"
           
             # Capture test runner script exit status
             perf_exit_status=$?
+
+            # HTTP 200 says nothing about the JSON-RPC answer: classify the response bodies
+            mkdir -p "$past_test_dir/responses"
+            python3 "$GITHUB_WORKSPACE/.github/workflows/scripts/rpc_perf_response_check.py" classify \
+              --bin-dir "$workspace/rpc-tests/perf/reports/bin" \
+              --client "$client" \
+              --method "$method" \
+              --repetition 1 \
+              --vegeta "$VEGETA_BIN" \
+              --output "$past_test_dir/responses/$client-$method-responses.json" \
+              || echo "::warning::response classification failed for $client $method"
                     
             # Detect the pre-built db version
             if [ "$client" == "erigon" ]; then
@@ -512,3 +548,30 @@ jobs:
               echo "Skipping cleanup: BUILD_TMP='${BUILD_TMP:-}' is empty or unexpected"
               ;;
           esac
+
+  check-responses:
+    name: Check Geth vs Erigon responses
+    needs: [setup, test]
+    if: always() && needs.setup.outputs.run_geth == 'true'
+    runs-on: [self-hosted, qa]
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout workflow scripts
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          sparse-checkout: .github/workflows/scripts
+
+      - name: Download test results
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: test-results-${{ env.CHAIN }}-*
+          path: ${{ runner.temp }}/rpc-perf-results
+
+      - name: Compare response classifications
+        run: |
+          python3 .github/workflows/scripts/rpc_perf_response_check.py compare \
+            --input-dir "$RUNNER_TEMP/rpc-perf-results" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
