@@ -146,6 +146,8 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
 // for hex quantities, which never need escaping.
+func (s *StackStream) Open() *StackStream { return s }
+
 func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
 	s.beforeValue()
 	start := len(s.stream.Buffer())
