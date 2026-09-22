@@ -95,15 +95,22 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 		return ErrRootShape
 	}
 
-	root := fork(nil)
-	root.plane = n.plane
+	branch := fork(oldPath[:common])
+	branch.plane = n.plane
 	if oldChild != nil {
-		root.setChild(oldNib, oldChild)
+		branch.setChild(oldNib, oldChild)
 	} else {
-		root.setStoredChild(oldNib, oldHash, oldExtension)
+		branch.setStoredChild(oldNib, oldHash, oldExtension)
 	}
 	var packScratch [32]byte
-	root.setLeaf(newNib, packPath(path[1:], packScratch[:0]), value)
+	branch.setLeaf(newNib, packPath(path[common+1:], packScratch[:0]), value)
+	if common == 0 {
+		*n = *branch
+		return nil
+	}
+	root := fork(oldPath[:common])
+	root.plane = n.plane
+	root.setChild(int(oldPath[0]), branch)
 	*n = *root
 	return nil
 }

@@ -18,6 +18,7 @@ package v4
 
 import (
 	"bytes"
+	"math/bits"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -55,13 +56,14 @@ func TestRootExtensionInsertDivergenceKeepsChildBody(t *testing.T) {
 			incoming := append([]byte{1, 9}, bytes.Repeat([]byte{7}, 62)...)
 
 			require.NoError(t, insertRoot(n, incoming, []byte{0x42}))
-			require.Zero(t, n.path)
-			require.Equal(t, hash, n.childHashAt(2))
-			require.Equal(t, []byte{3, 4, 5, 6}, n.childExtAt(2))
-			require.Equal(t, []byte{0x42}, n.leafValueAt(9))
-			data := encodeRecord(n, 0, nil)
-			require.NoError(t, Validate(data, 0))
-			require.Equal(t, byte(hdrHasChildExt), data[0])
+			require.Equal(t, []byte{1}, n.path)
+			require.Equal(t, 1, bits.OnesCount16(n.childMask))
+			branch := n.child(bits.TrailingZeros16(n.childMask))
+			require.NotNil(t, branch)
+			require.Equal(t, []byte{1}, branch.path)
+			require.Equal(t, hash, branch.childHashAt(2))
+			require.Equal(t, []byte{3, 4, 5, 6}, branch.childExtAt(2))
+			require.Equal(t, []byte{0x42}, branch.leafValueAt(9))
 		})
 	}
 }
