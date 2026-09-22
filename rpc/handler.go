@@ -183,11 +183,15 @@ var inOrderMethods = map[string]struct{}{
 	"debug_setHead":              {},
 	"debug_setGCPercent":         {},
 	"debug_setMemoryLimit":       {},
+	"eth_submitWork":             {},
+	"eth_submitHashrate":         {},
 }
 
+// hasInOrderCall also counts subscribe calls: each adds to the batch's notifiers, which two
+// goroutines must not append to at once.
 func hasInOrderCall(calls []*jsonrpcMessage) bool {
 	for _, msg := range calls {
-		if _, ok := inOrderMethods[msg.Method]; ok || strings.HasPrefix(msg.Method, "engine_") {
+		if _, ok := inOrderMethods[msg.Method]; ok || msg.isSubscribe() || strings.HasPrefix(msg.Method, "engine_") {
 			return true
 		}
 	}
