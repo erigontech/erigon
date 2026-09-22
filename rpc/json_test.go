@@ -755,3 +755,15 @@ func TestCodecCoalescedMessagesLeaveInOneWrite(t *testing.T) {
 	require.Equal(t, int64(1), writes.Load(), "3 coalesced messages, socket writes")
 	require.Equal(t, "0\n1\n2\n", <-read)
 }
+
+func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{`"eth_chainId`, `"eth_chainId"`, `"a\"b"`, `null`, `"é"`, `"`} {
+		var want, got string = "prev", "prev"
+		if json.Unmarshal([]byte(in), &want) != nil {
+			want = ""
+		}
+		decodeStringField([]byte(in), &got)
+		require.Equal(t, want, got, in)
+	}
+}

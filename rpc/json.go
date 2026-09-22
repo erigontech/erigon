@@ -507,11 +507,11 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 	})
 }
 
-// decodeStringField sets dst to a JSON string's text as encoding/json would, which unescapes it
-// and replaces invalid UTF-8. Plain printable ASCII is its own text, so it skips the decoder. A
-// value that does not decode zeroes dst, so a repeated key cannot leave an earlier value standing.
+// decodeStringField sets dst as json.Unmarshal would: it unescapes the string and replaces invalid
+// UTF-8, and a null leaves dst as it is. Plain printable ASCII is its own text, so it skips the
+// decoder. A value that does not decode zeroes dst.
 func decodeStringField(value []byte, dst *string) {
-	if len(value) >= 2 && value[0] == '"' {
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
 		text := value[1 : len(value)-1]
 		plain := true
 		for _, c := range text {
