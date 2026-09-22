@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -307,8 +308,8 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 			t.Fatal(err)
 		}
 		w := &captureWriter{}
-		n := &RemoteNotifier{h: &handler{conn: w}, namespace: namespace, sub: &Subscription{ID: "0x9a"}, activated: true}
-		if err := n.send(n.sub, result); err != nil {
+		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix(namespace, "0x9a"), activated: true}
+		if err := n.send(result); err != nil {
 			t.Fatal(err)
 		}
 		if got := w.got; !bytes.Equal(got, want) {
@@ -338,9 +339,9 @@ func (discardWriter) remoteAddr() string                   { return "" }
 // allocate its size: at 2000 subscribers a block's receipts would be allocated 2000 times.
 func TestNotifySendDoesNotAllocateResult(t *testing.T) {
 	result := json.RawMessage(`"` + strings.Repeat("x", 160*1024) + `"`)
-	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, namespace: "eth", sub: &Subscription{ID: "0x9a"}, activated: true}
+	n := &RemoteNotifier{h: &handler{conn: discardWriter{}}, prefix: notificationPrefix("eth", "0x9a"), activated: true}
 	send := func() {
-		if err := n.send(n.sub, result); err != nil {
+		if err := n.send(result); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -352,7 +353,8 @@ func TestNotifySendDoesNotAllocateResult(t *testing.T) {
 		send()
 	}
 	runtime.ReadMemStats(&m1)
-	if perSend := (m1.TotalAlloc - m0.TotalAlloc) / runs; perSend > uint64(len(result))/10 {
+	perSend := (m1.TotalAlloc - m0.TotalAlloc) / runs
+	if !race.Enabled && perSend > uint64(len(result))/10 { // the race detector drops sync.Pool puts at random
 		t.Fatalf("a send allocates %d bytes for a %d-byte result", perSend, len(result))
 	}
 }

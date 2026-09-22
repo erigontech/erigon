@@ -172,7 +172,7 @@ type RemoteNotifier struct {
 	buffer       []json.RawMessage
 	callReturned bool
 	activated    bool
-	prefix       []byte // the notification up to its result, set on the first send
+	prefix       []byte // the notification up to its result
 }
 
 // CreateSubscription returns a new subscription that is coupled to the
@@ -189,6 +189,7 @@ func (n *RemoteNotifier) CreateSubscription() *Subscription {
 		panic("can't create subscription after subscribe call has returned")
 	}
 	n.sub = &Subscription{ID: n.h.idgen(), namespace: n.namespace, err: make(chan error, 1)}
+	n.prefix = notificationPrefix(n.namespace, n.sub.ID)
 	return n.sub
 }
 
@@ -226,7 +227,7 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 		panic("Notify with wrong ID")
 	}
 	if n.activated {
-		return n.send(n.sub, enc)
+		return n.send(enc)
 	}
 	n.buffer = append(n.buffer, enc)
 	return nil
@@ -256,7 +257,7 @@ func (n *RemoteNotifier) activate() error {
 	defer n.mu.Unlock()
 
 	for _, data := range n.buffer {
-		if err := n.send(n.sub, data); err != nil {
+		if err := n.send(data); err != nil {
 			return err
 		}
 	}
@@ -264,21 +265,16 @@ func (n *RemoteNotifier) activate() error {
 	return nil
 }
 
-func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
-	if n.prefix == nil {
-		n.prefix = notificationPrefix(n.namespace, sub.ID)
-	}
+func (n *RemoteNotifier) send(data json.RawMessage) error {
 	// A pooled buffer, not a fresh one: every subscriber of an event gets the same result, and a
 	// buffer per send would allocate its size once per subscriber.
 	buf := pool.GetBuffer()
 	defer pool.PutBuffer(buf)
 	buf.Write(n.prefix)
 	buf.Write(data)
-	buf.Write(notificationSuffix)
+	buf.WriteString("}}")
 	return n.h.conn.WriteJSON(context.Background(), rawResponse(buf.Bytes()))
 }
-
-var notificationSuffix = []byte("}}")
 
 // notificationPrefix is the part of a notification before its result, fixed for a subscription.
 func notificationPrefix(namespace string, id ID) []byte {
