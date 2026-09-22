@@ -172,6 +172,7 @@ func (h *handler) isRpcMethodNeedsCheck(method string) bool {
 // sender's next nonce in the txpool. A batch holding one runs its calls one by one, in order.
 var inOrderMethods = map[string]struct{}{
 	"eth_sendRawTransaction":     {},
+	"eth_sendRawTransactionSync": {},
 	"graphql_sendRawTransaction": {},
 	"eth_uninstallFilter":        {},
 	"eth_getFilterChanges":       {},
@@ -187,11 +188,11 @@ var inOrderMethods = map[string]struct{}{
 	"testing_commitBlockV1":      {},
 }
 
-// hasInOrderCall also counts subscribe calls: each adds to the batch's notifiers, which two
-// goroutines must not append to at once.
+// hasInOrderCall also counts subscribe calls, each of which adds to the batch's notifiers that
+// two goroutines must not append to at once, and unsubscribe calls.
 func hasInOrderCall(calls []*jsonrpcMessage) bool {
 	for _, msg := range calls {
-		if _, ok := inOrderMethods[msg.Method]; ok || msg.isSubscribe() || strings.HasPrefix(msg.Method, "engine_") {
+		if _, ok := inOrderMethods[msg.Method]; ok || msg.isSubscribe() || msg.isUnsubscribe() || strings.HasPrefix(msg.Method, "engine_") {
 			return true
 		}
 	}
