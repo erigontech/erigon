@@ -421,7 +421,8 @@ func (c *jsonCodec) coalesce(send func()) (err error) {
 	}
 	c.held.hold()
 	defer func() {
-		// encode sets and clears the socket deadline under encMu, so the release must hold it too.
+		// Writes set the socket deadline under encMu, so the release holds it too: a concurrent write
+		// would re-arm the deadline mid-flush.
 		c.encMu.Lock()
 		defer c.encMu.Unlock()
 		if err = c.held.release(time.Now().Add(c.writeTimeout)); err != nil {

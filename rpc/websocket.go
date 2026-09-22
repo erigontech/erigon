@@ -296,6 +296,14 @@ func (c *heldConn) Write(p []byte) (int, error) {
 	if c.batches == 0 {
 		return c.Conn.Write(p)
 	}
+	if len(p) >= heldWriteLimit { // holding it saves no socket write, only copies it
+		if c.held != nil {
+			if err := c.flushLocked(); err != nil {
+				return 0, err
+			}
+		}
+		return c.Conn.Write(p)
+	}
 	if c.held == nil {
 		c.held = pool.GetBuffer()
 	}

@@ -190,7 +190,7 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					}
 				})
 				if err != nil {
-					log.Warn("[rpc] error while notifying subscription", "err", err)
+					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
 				}
 			case <-rpcSub.Err():
 				return
