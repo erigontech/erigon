@@ -51,7 +51,7 @@ func (bs ExecutionPayloadBodiesV2) MarshalFastJSONTo(s *jsonstream.StackStream) 
 		}
 		s.WriteObjectStart()
 		writeBodyFields(s, (*b).Transactions, (*b).Withdrawals)
-		s.WriteObjectField("blockAccessList")
+		s.Field("blockAccessList")
 		if bal := (*b).BlockAccessList; bal == nil {
 			s.WriteNil()
 		} else {
@@ -64,9 +64,9 @@ func (bs ExecutionPayloadBodiesV2) MarshalFastJSONTo(s *jsonstream.StackStream) 
 
 // writeBodyFields writes the fields both body versions share, in their declaration order.
 func writeBodyFields(s *jsonstream.StackStream, txs []hexutil.Bytes, withdrawals []*types.Withdrawal) {
-	s.WriteObjectField("transactions")
+	s.Field("transactions")
 	jsonstream.ArrayValue(s, txs, func(s *jsonstream.StackStream, txn *hexutil.Bytes) { s.WriteHex(*txn) })
-	s.WriteObjectField("withdrawals")
+	s.Field("withdrawals")
 	jsonstream.ArrayValue(s, withdrawals, func(s *jsonstream.StackStream, wp **types.Withdrawal) {
 		w := *wp
 		if w == nil {
@@ -74,10 +74,10 @@ func writeBodyFields(s *jsonstream.StackStream, txs []hexutil.Bytes, withdrawals
 			return
 		}
 		s.WriteObjectStart()
-		s.WriteObjectField("index").WriteQuotedText(&w.Index)
-		s.WriteObjectField("validatorIndex").WriteQuotedText(&w.Validator)
-		s.WriteObjectField("address").WriteHex(w.Address[:])
-		s.WriteObjectField("amount").WriteQuotedText(&w.Amount)
+		s.Field("index").WriteQuotedText(&w.Index)
+		s.Field("validatorIndex").WriteQuotedText(&w.Validator)
+		s.Field("address").WriteHex(w.Address[:])
+		s.Field("amount").WriteQuotedText(&w.Amount)
 		s.WriteObjectEnd()
 	})
 }
