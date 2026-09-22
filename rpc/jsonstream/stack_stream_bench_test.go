@@ -27,9 +27,9 @@ func BenchmarkStreamAcquire(b *testing.B) {
 	result := strings.Repeat("0xabcdef", 512)
 	write := func(s Stream) {
 		s.WriteObjectStart()
-		s.WriteObjectField("jsonrpc")
+		s.Field("jsonrpc")
 		s.WriteString("2.0")
-		s.WriteObjectField("result")
+		s.Field("result")
 		s.WriteString(result)
 		s.WriteObjectEnd()
 	}
@@ -60,7 +60,7 @@ func BenchmarkWriteRawBytesLargeResult(b *testing.B) {
 	for b.Loop() {
 		s := Get(io.Discard)
 		s.WriteObjectStart()
-		s.WriteObjectField("result")
+		s.Field("result")
 		s.WriteRawBytes(payload)
 		s.WriteObjectEnd()
 		_ = s.Flush()
