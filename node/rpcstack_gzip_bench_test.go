@@ -428,16 +428,11 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					stream := jsonstream.New(w)
 					stream.WriteArrayStart()
 					for i := range entries {
-						if i > 0 {
-							stream.WriteMore()
-						}
 						stream.WriteObjectStart()
 						stream.WriteObjectField("pc")
 						stream.WriteInt(i)
-						stream.WriteMore()
 						stream.WriteObjectField("op")
 						stream.WriteString("SSTORE")
-						stream.WriteMore()
 						stream.WriteObjectField("stack")
 						stream.WriteString(stackWords[i%len(stackWords)])
 						stream.WriteObjectEnd()

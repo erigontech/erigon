@@ -186,14 +186,10 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 		if err != nil {
 			inner.CloseIfOpen()
-			stream.WriteMore()
 			rpc.HandleError(err, stream)
 		}
 
 		stream.WriteObjectEnd()
-		if txnIndex != len(txns)-1 {
-			stream.WriteMore()
-		}
 
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
@@ -494,7 +490,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	stream.WriteArrayStart()
-	for bundleIndex, bundle := range bundles {
+	for _, bundle := range bundles {
 		stream.WriteArrayStart()
 		// first change block context
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
@@ -524,15 +520,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 
-			if txnIndex < len(bundle.Transactions)-1 {
-				stream.WriteMore()
-			}
 		}
 		stream.WriteArrayEnd()
 
-		if bundleIndex < len(bundles)-1 {
-			stream.WriteMore()
-		}
 		blockCtx.BlockNumber++
 		blockCtx.Time++
 	}

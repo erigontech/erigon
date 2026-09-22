@@ -189,11 +189,8 @@ func writeWithdrawalElem(s *jsonstream.StackStream, wd **types.Withdrawal) {
 	}
 	s.WriteObjectStart()
 	s.WriteObjectField("index").WriteQuotedText(&(*wd).Index)
-	s.WriteMore()
 	s.WriteObjectField("validatorIndex").WriteQuotedText(&(*wd).Validator)
-	s.WriteMore()
 	s.WriteObjectField("address").WriteHex((*wd).Address[:])
-	s.WriteMore()
 	s.WriteObjectField("amount").WriteQuotedText(&(*wd).Amount)
 	s.WriteObjectEnd()
 }

@@ -241,10 +241,6 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 	}
 }
 
-type fastJSONPayload struct{}
-
-func (fastJSONPayload) MarshalFastJSON() ([]byte, error) { return []byte(`"fast"`), nil }
-
 type streamedPayload struct{}
 
 func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
@@ -252,13 +248,11 @@ func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	return nil
 }
 
-// bothFastJSON implements both fast-JSON interfaces with value receivers, so a typed nil panics
-// unless Notify sends it down the reflection path.
-type bothFastJSON struct{ data []byte }
+// valueFastJSON has a value receiver, so a typed nil panics unless Notify sends it down the
+// reflection path.
+type valueFastJSON struct{ data []byte }
 
-func (b bothFastJSON) MarshalFastJSON() ([]byte, error) { return json.Marshal(b.data) }
-
-func (b bothFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+func (b valueFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteHex(b.data)
 	return nil
 }
@@ -266,7 +260,7 @@ func (b bothFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 func TestNotifyUsesFastJSON(t *testing.T) {
 	t.Parallel()
 
-	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null", &bothFastJSON{data: []byte{0xab}}: `"qw=="`} {
+	for payload, want := range map[any]string{streamedPayload{}: `"0xab"`, (*valueFastJSON)(nil): "null", &valueFastJSON{data: []byte{0xab}}: `"0xab"`} {
 		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
 		if err := n.Notify("0x1", payload); err != nil {
 			t.Fatal(err)
@@ -314,6 +308,25 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 		}
 		if got := w.got; !bytes.Equal(got, want) {
 			t.Fatalf("notification = %s, want %s", got, want)
+		}
+	}
+}
+
+// An activated notifier streams the whole notification: the prefix, the result and "}}".
+// emptyStreamed writes nothing; a notification still carries a result, as a response does.
+type emptyStreamed struct{}
+
+func (emptyStreamed) MarshalFastJSONTo(*jsonstream.StackStream) error { return nil }
+
+func TestNotifyStreamsTheNotification(t *testing.T) {
+	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`, emptyStreamed{}: `null`} {
+		w := &captureWriter{}
+		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
+		if err := n.Notify("0x9a", payload); err != nil {
+			t.Fatal(err)
+		}
+		if want := string(notificationPrefix("eth", "0x9a")) + result + "}}"; string(w.got) != want {
+			t.Fatalf("%T: notification = %s, want %s", payload, w.got, want)
 		}
 	}
 }

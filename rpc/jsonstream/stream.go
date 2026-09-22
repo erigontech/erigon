@@ -66,7 +66,6 @@ type Stream interface {
 	WriteObjectEnd()
 	WriteArrayStart()
 	WriteArrayEnd()
-	WriteMore()
 	WriteObjectField(fieldName string) *StackStream
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.

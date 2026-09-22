@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"bytes"
 	"container/list"
 	"context"
 	crand "crypto/rand"
@@ -32,6 +33,7 @@ import (
 	"sync"
 
 	"github.com/erigontech/erigon/common/pool"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var (
@@ -166,13 +168,13 @@ func (n *LocalNotifier) Closed() <-chan any {
 type RemoteNotifier struct {
 	h         *handler
 	namespace string
+	prefix    []byte // the notification up to its result
 
 	mu           sync.Mutex
 	sub          *Subscription
 	buffer       []json.RawMessage
 	callReturned bool
 	activated    bool
-	prefix       []byte // the notification up to its result
 }
 
 // CreateSubscription returns a new subscription that is coupled to the
@@ -196,28 +198,6 @@ func (n *RemoteNotifier) CreateSubscription() *Subscription {
 // Notify sends a notification to the client with the given data as payload.
 // If an error occurs the RPC connection is closed and the error is returned.
 func (n *RemoteNotifier) Notify(id ID, data any) error {
-	var (
-		enc []byte
-		err error
-	)
-	if isNilPointer(data) {
-		enc, err = json.Marshal(data)
-	} else if fm, ok := data.(fastJSONResult); ok {
-		// A notification needs the bytes, so a value that can size its own buffer beats
-		// streaming into a pooled one and cloning it back out.
-		enc, err = fm.MarshalFastJSON()
-	} else if fm, ok := data.(fastJSONMarshalerTo); ok {
-		enc, err = marshalFastJSONTo(fm)
-	} else {
-		enc, err = json.Marshal(data)
-	}
-	if err != nil {
-		return err
-	}
-	if len(enc) == 0 {
-		enc = null
-	}
-
 	n.mu.Lock()
 	defer n.mu.Unlock()
 
@@ -226,10 +206,37 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 	} else if n.sub.ID != id {
 		panic("Notify with wrong ID")
 	}
-	if n.activated {
-		return n.send(enc)
+	// The whole notification is encoded into one pooled stream: a result of its own would be
+	// allocated and copied once per subscriber.
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	s.WriteRawBytes(n.prefix)
+	if err := writeNotificationResult(s, data); err != nil {
+		return err
 	}
-	n.buffer = append(n.buffer, enc)
+	if len(s.Buffer()) == len(n.prefix) {
+		s.WriteNil() // a notification carries a result even when the marshaller wrote none, as a response does
+	}
+	if !n.activated {
+		n.buffer = append(n.buffer, bytes.Clone(s.Buffer()[len(n.prefix):]))
+		return nil
+	}
+	s.WriteRaw("}}")
+	return n.h.conn.WriteJSON(context.Background(), rawResponse(s.Buffer()))
+}
+
+func writeNotificationResult(s *jsonstream.StackStream, data any) error {
+	if fm, ok := data.(fastJSONMarshalerTo); ok && !isNilPointer(data) {
+		if err := fm.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+		return s.Err()
+	}
+	enc, err := json.Marshal(data)
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(enc)
 	return nil
 }
 
