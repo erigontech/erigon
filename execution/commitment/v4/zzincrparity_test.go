@@ -138,7 +138,9 @@ func walkRecords(ctx *parityContext, plane byte, addrHash [32]byte) (leaves map[
 	visit = func(path []byte) {
 		data, _, _ := ctx.Branch(key(path))
 		if len(data) == 0 {
-			issues = append(issues, fmt.Sprintf("missing record at path %x", path))
+			if len(path) != 0 {
+				issues = append(issues, fmt.Sprintf("missing record at path %x", path))
+			}
 			return
 		}
 		depth := len(path)
@@ -250,7 +252,7 @@ func (w *incrWorld) rebuildFromScratch() []byte {
 		entries = append(entries, parityUpdate{key: []byte(k), update: v.Copy()})
 	}
 	if len(entries) == 0 {
-		return nil
+		return bytes.Clone(empty.RootHash[:])
 	}
 	fresh := newIncrWorld(w.t)
 	fresh.apply(entries)
@@ -445,4 +447,54 @@ func TestParityDeleteCollapsesBranchBelowRoot(t *testing.T) {
 		{key: incrAddress(15), update: plainAccount(15)},
 		{key: incrAddress(8), update: &commitment.Update{Flags: commitment.DeleteUpdate}},
 	})
+}
+
+func runRootCollapseStress(t *testing.T, seed int64, blocks, addrs int) {
+	rng := rand.New(rand.NewSource(seed))
+	w := newIncrWorld(t)
+	live := make(map[int]struct{})
+	for n := range blocks {
+		entries := make([]parityUpdate, 0, 4)
+		touched := make(map[int]struct{})
+		for i := range addrs {
+			if _, ok := live[i]; ok {
+				continue
+			}
+			if rng.Intn(2) == 0 {
+				live[i] = struct{}{}
+				touched[i] = struct{}{}
+				entries = append(entries, parityUpdate{key: incrAddress(i), update: plainAccount(i*31 + n)})
+			}
+		}
+		for i := range addrs {
+			if _, ok := live[i]; !ok {
+				continue
+			}
+			if _, busy := touched[i]; busy {
+				continue
+			}
+			if rng.Intn(3) != 0 {
+				continue
+			}
+			delete(live, i)
+			touched[i] = struct{}{}
+			entries = append(entries, parityUpdate{key: incrAddress(i), update: &commitment.Update{Flags: commitment.DeleteUpdate}})
+		}
+		if len(entries) == 0 {
+			continue
+		}
+		if !w.block(n, entries) {
+			return
+		}
+	}
+}
+
+func TestParityAccountRootCollapsesMidBlock(t *testing.T) {
+	for _, addrs := range []int{2, 3, 5, 8} {
+		t.Run(fmt.Sprintf("a%d", addrs), func(t *testing.T) {
+			for seed := int64(1); seed <= 30; seed++ {
+				t.Run(fmt.Sprint(seed), func(t *testing.T) { runRootCollapseStress(t, seed, 120, addrs) })
+			}
+		})
+	}
 }
