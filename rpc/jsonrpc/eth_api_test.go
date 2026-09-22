@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func newBaseApiForTest(m *execmoduletester.ExecModuleTester) *BaseAPI {
@@ -102,6 +104,29 @@ func TestNewBaseApiEvmCallTimeout(t *testing.T) {
 		base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, nil)
 		assert.Equal(t, rpccfg.DefaultEvmCallTimeout, base.evmCallTimeout)
 	})
+}
+
+// While this node builds a block, "pending" names a block that is not executed, so a state read at
+// it must use the latest executed state instead of failing with "block N is not executed".
+func TestStateReadAtPendingWhileBlockIsBuilt(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ff := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m), m.DB, nil, nil)
+	addr := common.HexToAddress("0x71562b71999873DB5b286dF957af199Ec94617F7")
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	want, err := api.GetBalance(t.Context(), addr, &latest)
+	require.NoError(t, err)
+
+	head, err := api.BlockNumber(t.Context())
+	require.NoError(t, err)
+	building, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(uint64(head) + 1)}, nil))
+	require.NoError(t, err)
+	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: building})
+
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+	got, err := api.GetBalance(t.Context(), addr, &pending)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
 }
 
 func TestGetBalanceChangesInBlock(t *testing.T) {

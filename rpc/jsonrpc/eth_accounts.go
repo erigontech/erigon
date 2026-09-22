@@ -37,10 +37,20 @@ import (
 // all addresses in a single eth_getStorageValues request.
 const maxGetStorageSlots = 1024
 
+// pendingStateAtLatest maps "pending" to the latest executed block: a block this node is still
+// building has not been executed, so there is no state for it yet.
+func pendingStateAtLatest(blockNrOrHash rpc.BlockNumberOrHash) rpc.BlockNumberOrHash {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		return rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber)
+	}
+	return blockNrOrHash
+}
+
 // stateReaderAt opens a temporal read transaction, resolves the canonical block number,
 // checks prune history and block execution, and creates a state reader.
 // The caller must defer tx.Rollback() on the returned tx.
 func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (kv.TemporalTx, state.StateReader, error) {
+	blockNrOrHash = pendingStateAtLatest(blockNrOrHash)
 	tx, err := api.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
 		return nil, nil, err
@@ -165,6 +175,7 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 	}
 	defer tx.Rollback()
 
+	blockNrOrHash = pendingStateAtLatest(blockNrOrHash)
 	blockNrOrHash.RequireCanonical = true
 	blockNumber, _, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
