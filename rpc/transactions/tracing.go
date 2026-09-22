@@ -139,13 +139,13 @@ func TraceTx(
 		}
 		result, err := protocol.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
 		if err != nil {
-			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(nil, err)
+			if tracer != nil && tracer.HasTxEndHook() {
+				tracer.EmitTxEnd(nil, nil, err)
 			}
 
 			return result, err
-		} else if tracer != nil && tracer.OnTxEnd != nil {
-			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+		} else if tracer != nil && tracer.HasTxEndHook() {
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, &result.TxGasUsage, nil)
 		}
 
 		gasUsed = result.ReceiptGasUsed

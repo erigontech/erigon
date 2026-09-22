@@ -1709,8 +1709,10 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 					execTask: eTask,
 					version:  state.Version{BlockNum: tc.blockNum, TxIndex: 0, Incarnation: 0, TxNum: 1},
 				},
-				TxIn:            reads,
-				ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 10000},
+				TxIn: reads,
+				ExecutionResult: evmtypes.ExecutionResult{
+					ReceiptGasUsed: 10000,
+				},
 			}
 			_, err := be.nextResult(context.Background(), pe, txResult, roTx)
 			require.NoError(t, err)
@@ -1932,7 +1934,9 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 			execTask: eTask,
 			version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 1},
 		},
-		ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 21000,
+		},
 	}
 
 	res, err := be.nextResult(context.Background(), pe, txResult, roTx)

@@ -26,9 +26,37 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
+
+func TestTxEndV2Recording(t *testing.T) {
+	usage := &mdgas.TxGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
+	var calls int
+	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
+		OnTxEndV2: func(receipt *types.Receipt, gasUsed *mdgas.TxGasUsage, err error) {
+			require.Nil(t, receipt)
+			require.Equal(t, usage, gasUsed)
+			require.NoError(t, err)
+			calls++
+		},
+	}}}
+	recorder.Hooks().EmitTxEnd(nil, usage, nil)
+	require.Equal(t, 1, calls)
+	*usage = mdgas.TxGasUsage{}
+	encoded, err := json.Marshal(recorder.traces)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"traces":[{"onTxEndV2":{"gasUsed":{"BlockExecutionGasUsed":40,"BlockStateGasUsed":70,"GasRefund":10}}}]}`, string(encoded))
+}
+
+func TestTxEndV2RecordingWithoutReceipt(t *testing.T) {
+	recorder := &Tracer{flushMode: FlushModeTxn, outputDir: t.TempDir()}
+	require.NotPanics(t, func() { recorder.Hooks().EmitTxEnd(nil, nil, vm.ErrOutOfGas) })
+	encoded, err := json.Marshal(recorder.traces)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"traces":[{"onTxEndV2":{"error":"out of gas"}}]}`, string(encoded))
+}
 
 func TestFrameV2Recording(t *testing.T) {
 	initial := mdgas.MdGas{Execution: 100, State: 200}

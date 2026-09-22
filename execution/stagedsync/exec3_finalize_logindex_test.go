@@ -119,7 +119,9 @@ func TestParallelBlockEndLogsReachLogIndex(t *testing.T) {
 			execTask: eTask,
 			version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: txTask.TxNum},
 		},
-		ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
+		ExecutionResult: evmtypes.ExecutionResult{
+			ReceiptGasUsed: 21000,
+		},
 	}
 
 	res, err := be.nextResult(t.Context(), pe, txResult, rwTx)

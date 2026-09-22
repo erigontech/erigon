@@ -453,8 +453,8 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		hooks := result.TracingHooks()
 		if result.Err != nil {
-			if hooks != nil && hooks.OnTxEnd != nil {
-				hooks.OnTxEnd(nil, result.Err)
+			if hooks.HasTxEndHook() {
+				hooks.EmitTxEnd(nil, nil, result.Err)
 			}
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
 		}
@@ -468,8 +468,8 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		receipt, err := result.CreateNextReceipt(prev)
 
-		if hooks != nil && hooks.OnTxEnd != nil {
-			hooks.OnTxEnd(receipt, err)
+		if hooks.HasTxEndHook() {
+			hooks.EmitTxEnd(receipt, &result.ExecutionResult.TxGasUsage, err)
 		}
 
 		if err != nil {

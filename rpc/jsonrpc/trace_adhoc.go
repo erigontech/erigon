@@ -1186,13 +1186,13 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
-			vmConfig.Tracer.OnTxEnd(nil, err)
+		if vmConfig.Tracer.HasTxEndHook() {
+			vmConfig.Tracer.EmitTxEnd(nil, nil, err)
 		}
 		return nil, err
 	}
-	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
-		vmConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+	if vmConfig.Tracer.HasTxEndHook() {
+		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
 	}
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1465,14 +1465,14 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
 		if err != nil {
-			if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-				tracer.Hooks.OnTxEnd(nil, err)
+			if tracer != nil && tracer.Hooks.HasTxEndHook() {
+				tracer.Hooks.EmitTxEnd(nil, nil, err)
 			}
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
 
-		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+		if tracer != nil && tracer.Hooks.HasTxEndHook() {
+			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)
@@ -1770,13 +1770,13 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
-			vmConfig.Tracer.OnTxEnd(nil, err)
+		if vmConfig.Tracer.HasTxEndHook() {
+			vmConfig.Tracer.EmitTxEnd(nil, nil, err)
 		}
 		return nil, err
 	}
-	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
-		vmConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+	if vmConfig.Tracer.HasTxEndHook() {
+		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, &execResult.TxGasUsage, nil)
 	}
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)

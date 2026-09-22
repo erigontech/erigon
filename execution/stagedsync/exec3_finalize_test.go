@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -226,11 +227,13 @@ func (s *testFinalizeScenario) buildExecResult() *execResult {
 	txResult := &exec.TxResult{
 		Task: task,
 		ExecutionResult: evmtypes.ExecutionResult{
-			FeeTipped:             s.feeTipped,
-			FeeBurnt:              s.feeBurnt,
-			BurntContractAddress:  s.burntAddr,
-			ReceiptGasUsed:        21000,
-			BlockExecutionGasUsed: 21000,
+			TxGasUsage: mdgas.TxGasUsage{
+				BlockExecutionGasUsed: 21000,
+			},
+			ReceiptGasUsed:       21000,
+			FeeTipped:            s.feeTipped,
+			FeeBurnt:             s.feeBurnt,
+			BurntContractAddress: s.burntAddr,
 		},
 		Coinbase: s.coinbase,
 	}
