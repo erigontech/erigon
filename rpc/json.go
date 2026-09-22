@@ -290,6 +290,7 @@ type jsonCodec struct {
 	encode       func(v any) error // encoder to allow multiple transports
 	conn         deadlineCloser
 	writeTimeout time.Duration // used if the context has no deadline, counted once the write holds the connection
+	held         *heldConn     // the socket, when the transport can hold writes back; nil otherwise
 }
 
 // newFuncCodec creates a codec that uses the given functions to read and write. If conn
@@ -335,7 +336,9 @@ func (b rawBatch) writeTo(s jsonstream.Stream) {
 func NewCodec(conn Conn) ServerCodec {
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	return newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c := newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c.held, _ = conn.(*heldConn)
+	return c
 }
 
 // newJSONEncoder returns the writer side every JSON transport shares.
@@ -427,6 +430,25 @@ func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 		return err
 	}
 	return c.encode(v)
+}
+
+// coalesce runs send with the socket held, so the messages it writes leave in one socket write.
+func (c *jsonCodec) coalesce(send func()) (err error) {
+	if c.held == nil {
+		send()
+		return nil
+	}
+	c.held.hold()
+	defer func() {
+		// encode sets and clears the socket deadline under encMu, so the release must hold it too.
+		c.encMu.Lock()
+		defer c.encMu.Unlock()
+		if err = c.held.release(time.Now().Add(c.writeTimeout)); err != nil {
+			_ = c.held.Conn.Close()
+		}
+	}()
+	send()
+	return nil
 }
 
 func (c *jsonCodec) Close() {
