@@ -533,14 +533,20 @@ func testCommitmentCalculatorBALDualFold(t *testing.T, code []byte, withStorage 
 }
 
 func TestCommitmentCalculatorComputeDualMainline(t *testing.T) {
-	db, _, doms := dualCalculatorTest(t)
+	db, tx, doms := dualCalculatorTest(t)
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(roTx.Rollback)
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}
 	addr := accounts.InternAddress(common.Address{3})
+	plainKey := addr.Value()
+	account := accounts.Account{Nonce: 3, CodeHash: accounts.InternCodeHash(empty.CodeHash)}
+	require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, plainKey[:], accounts.SerialiseV3(&account), 1, nil))
 	cs := newCalcState(asOfReader, log.New(), "test")
-	cs.accounts[addr] = &calcAccountState{Nonce: 3, CodeHash: empty.CodeHash, dirty: true}
+	cs.ApplyWrites(newWS().
+		nonce(addr, state.Version{}, 3).
+		codeHash(addr, state.Version{}, accounts.InternCodeHash(empty.CodeHash)).
+		build(), false)
 	cc := &commitmentCalculator{
 		doms:       doms,
 		db:         db,
@@ -561,6 +567,8 @@ func TestCommitmentCalculatorComputeDualMainline(t *testing.T) {
 	require.NoError(t, err)
 	binRoot, err := doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
 	require.NoError(t, err)
+	require.NotEqual(t, empty.RootHash[:], hexRoot, "the hex arm folded no update")
+	require.NotEqual(t, make([]byte, 32), binRoot, "the bin arm folded no update")
 	require.NotEqual(t, hexRoot, binRoot)
 }
 
