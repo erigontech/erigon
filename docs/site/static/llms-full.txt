@@ -109,51 +109,57 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](../fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](../fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. Each figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
 
 ### Ethereum mainnet
 
 | Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
-| Archive | 2.03 TB | 4 TB | 32 GB | 64 GB |
-| Full (Default) | 419.04 GB | 2 TB | 16 GB | 32 GB |
-| Minimal | 478.40 GB | 1 TB | 16 GB | 64 GB |
+| Archive | 2.25 TB | 4 TB | 32 GB | 64 GB |
+| Full (Default) | 534.94 GB | 2 TB | 16 GB | 32 GB |
+| Minimal | 510.82 GB | 1 TB | 16 GB | 64 GB |
 
-_Current Disk Usage measured as of 2026-07-19; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-09-17, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 ### Gnosis Chain
 
 | **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
-| Archive        | 673.59 GB | 1 TB                        | 16 GB              | 32 GB                 |
-| Full (Default) | 220.10 GB    | 1 TB                        | 8 GB               | 16 GB                 |
-| Minimal        | 304.67 GB | 500 GB                      | 8 GB               | 16 GB                 |
+| Archive        | 803.35 GB | 1 TB                        | 16 GB              | 32 GB                 |
+| Full (Default) | 314.35 GB    | 1 TB                        | 8 GB               | 16 GB                 |
+| Minimal        | 311.75 GB | 500 GB                      | 8 GB               | 16 GB                 |
 
-_Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-09-19, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 ### Sepolia
 
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | 1.10 TB |
+| Archive        | 1.12 TB |
+| Full (Default) | 301.82 GB |
+| Minimal        | 272.59 GB |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+_Current Disk Usage measured as of 2026-09-18, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 ### Hoodi
 
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | 133.73 GB |
+| Archive        | 132.92 GB |
+| Full (Default) | 62.86 GB |
+| Minimal        | 58.89 GB |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+_Current Disk Usage measured as of 2026-09-20, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 ### Chiado
 
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
-| Archive        | 29.64 GB |
+| Archive        | 29.98 GB |
+| Full (Default) | 16.07 GB |
+| Minimal        | 16.00 GB |
 
-_Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network._
+_Current Disk Usage measured as of 2026-09-20, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 :::tip
 See also how you can [optimize storage](../fundamentals/optimizing-storage).
@@ -172,13 +178,17 @@ Your internet bandwidth is also an important factor, particularly for sync speed
 
 Approximate times to sync from scratch to the tip of the chain.
 
-| Chain    | Archive | Full (Default) | Minimal |
-| -------- | ------- | -------------- | ------- |
-| Ethereum | ~8 h    | ~4–6 h         | ~2 h    |
-| Gnosis   | ~2 h    | ~1–2 h         | ~30 m   |
+| Chain    | Archive  | Full (Default) | Minimal  |
+| -------- | -------- | -------------- | -------- |
+| Ethereum | ~14 h 20 m | ~5 h 40 m    | ~5 h 20 m |
+| Gnosis   | ~5 h 15 m  | ~2 h 50 m    | ~2 h 50 m |
 
 :::info
-These figures are indicative and are **not measured by CI** — read them as an order of magnitude, not a target. Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result more than CPU does: expect proportionally faster syncs on a well-connected host and slower ones on a constrained link.
+Measured on Erigon 3.6.1 in September 2026, syncing each node from an empty datadir on one machine (16-core Intel Core Ultra 9 185H, 93 GB RAM, NVMe SSD on ext4), one node at a time. Time is measured from process start to the first report of a head at the chain tip.
+
+**The download rate was capped at 400 Mbps, and that cap — not the hardware — is what set these times.** Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result far more than CPU does. Note that 400 Mbps is eight times the 50 Mbps recommended above for a staking node: on a link at that recommended speed, expect these times to be several times longer, with block execution rather than download eventually setting the floor. Treat them as an order of magnitude, not a target — they are a single sample per configuration, with no variance estimate, and sync time also depends on peer quality and chain activity on the day.
+
+Note that full and minimal land within a few percent of each other on both chains. The gap between them is small; the gap to archive is about 1.9× on Gnosis and 2.5× on Ethereum.
 :::
 
 ---
