@@ -241,6 +241,14 @@ func ExecuteTraceTx(
 		stream.WriteArrayEnd()
 		stream.WriteObjectField("gas")
 		stream.WriteUint64(result.ReceiptGasUsed)
+		if evm.ChainRules().IsAmsterdam {
+			stream.WriteObjectField("regularGasUsed")
+			stream.WriteUint64(result.BlockExecutionGasUsed)
+			stream.WriteObjectField("stateGasUsed")
+			stream.WriteUint64(result.BlockStateGasUsed)
+			stream.WriteObjectField("gasRefund")
+			stream.WriteUint64(result.GasRefund)
+		}
 		stream.WriteObjectField("failed")
 		stream.WriteBool(result.Failed())
 		// If the result contains a revert reason, return it.

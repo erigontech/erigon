@@ -125,7 +125,7 @@ func (l *StructLogger) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		OnTxStart:           l.OnTxStart,
 		OnSystemCallStartV2: l.OnSystemCallStartV2,
-		OnTxEnd:             l.OnTxEnd,
+		OnTxEndV2:           l.OnTxEndV2,
 		OnExitV2:            l.OnExitV2,
 		OnOpcodeV2:          l.OnOpcodeV2,
 		Flush:               l.Flush,
@@ -148,7 +148,7 @@ func (l *StructLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-func (l *StructLogger) OnTxEnd(receipt *types.Receipt, err error) {
+func (l *StructLogger) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if err != nil {
 		// Don't override vm error
 		if l.err == nil {

@@ -139,7 +139,7 @@ func newFlatCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: ft.OnTxStart,
-			OnTxEnd:   ft.OnTxEnd,
+			OnTxEndV2: ft.OnTxEndV2,
 			OnEnterV2: ft.OnEnterV2,
 			OnExitV2:  ft.OnExitV2,
 		},
@@ -205,11 +205,11 @@ func (t *flatCallTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.activePrecompiles = vm.ActivePrecompiles(env.Rules)
 }
 
-func (t *flatCallTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *flatCallTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.tracer.OnTxEnd(receipt, err)
+	t.tracer.OnTxEndV2(receipt, txnGasUsage, err)
 }
 
 // GetResult returns an empty json object.

@@ -208,6 +208,11 @@
 			input: toHex(ctx.input),
 			output: toHex(ctx.output),
 		};
+		if (ctx.regularGasUsed !== undefined) {
+			result.regularGasUsed = '0x' + bigInt(ctx.regularGasUsed).toString(16);
+			result.stateGasUsed = '0x' + bigInt(ctx.stateGasUsed).toString(16);
+			result.gasRefund = '0x' + bigInt(ctx.gasRefund).toString(16);
+		}
 		if (this.callstack[0].calls !== undefined) {
 			result.calls = this.callstack[0].calls;
 		}
@@ -233,6 +238,9 @@
 			value: call.value,
 			gas: call.gas,
 			gasUsed: call.gasUsed,
+			regularGasUsed: call.regularGasUsed,
+			stateGasUsed: call.stateGasUsed,
+			gasRefund: call.gasRefund,
 			input: call.input,
 			output: call.output,
 			error: call.error,

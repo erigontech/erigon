@@ -152,7 +152,7 @@ func TestPrestateTracerOnTxEndExcludesAccountEmptyBeforeStorageTouched(t *testin
 	tr.lookupAccount(addr)
 	tr.lookupStorage(addr, common.HexToHash("0x01"))
 
-	tr.OnTxEnd(nil, nil)
+	tr.OnTxEndV2(nil, mdgas.TxnGasUsage{}, nil)
 
 	_, ok := tr.pre[addr]
 	require.False(t, ok, "account empty before the tx must be excluded even though its storage was read during the tx")

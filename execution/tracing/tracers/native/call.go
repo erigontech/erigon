@@ -51,19 +51,22 @@ type callLog struct {
 }
 
 type callFrame struct {
-	Type     vm.OpCode       `json:"-"`
-	From     common.Address  `json:"from"`
-	Gas      hexutil.Uint64  `json:"gas"`
-	GasUsed  hexutil.Uint64  `json:"gasUsed"`
-	To       *common.Address `json:"to,omitempty"`
-	Input    hexutil.Bytes   `json:"input"`
-	Output   hexutil.Bytes   `json:"output,omitempty"`
-	Error    string          `json:"error,omitempty"`
-	Revertal string          `json:"revertReason,omitempty"`
-	Calls    []callFrame     `json:"calls,omitempty"`
-	Logs     []callLog       `json:"logs,omitempty"`
-	Value    *hexutil.U256   `json:"value,omitempty"`
-	TypeStr  string          `json:"type"`
+	Type           vm.OpCode       `json:"-"`
+	From           common.Address  `json:"from"`
+	Gas            hexutil.Uint64  `json:"gas"`
+	GasUsed        hexutil.Uint64  `json:"gasUsed"`
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty"`
+	StateGasUsed   *hexutil.Uint64 `json:"stateGasUsed,omitempty"`
+	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty"`
+	To             *common.Address `json:"to,omitempty"`
+	Input          hexutil.Bytes   `json:"input"`
+	Output         hexutil.Bytes   `json:"output,omitempty"`
+	Error          string          `json:"error,omitempty"`
+	Revertal       string          `json:"revertReason,omitempty"`
+	Calls          []callFrame     `json:"calls,omitempty"`
+	Logs           []callLog       `json:"logs,omitempty"`
+	Value          *hexutil.U256   `json:"value,omitempty"`
+	TypeStr        string          `json:"type"`
 }
 
 // setType keeps the opcode and its wire spelling in step.
@@ -101,6 +104,7 @@ type callTracer struct {
 	callstack   []callFrame
 	config      callTracerConfig
 	gasLimit    uint64
+	isAmsterdam bool
 	depth       int
 	interrupt   atomic.Bool           // Atomic flag to signal execution interruption
 	reason      atomic.Pointer[error] // Reason for the interruption, populated by Stop
@@ -134,7 +138,7 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: t.OnTxStart,
-			OnTxEnd:   t.OnTxEnd,
+			OnTxEndV2: t.OnTxEndV2,
 			OnEnterV2: t.OnEnterV2,
 			OnExitV2:  t.OnExitV2,
 			OnLog:     t.OnLog,
@@ -225,9 +229,10 @@ func (t *callTracer) captureEnd(output []byte, err error) {
 
 func (t *callTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
 	t.gasLimit = tx.GetGasLimit()
+	t.isAmsterdam = env.Rules.IsAmsterdam
 }
 
-func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *callTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	// Error happened during tx validation.
 	if err != nil {
 		return
@@ -240,6 +245,11 @@ func (t *callTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	}
 
 	t.callstack[0].GasUsed = hexutil.Uint64(receipt.GasUsed)
+	if t.isAmsterdam {
+		t.callstack[0].RegularGasUsed = toHexUint64Ptr(txnGasUsage.BlockExecutionGasUsed)
+		t.callstack[0].StateGasUsed = toHexUint64Ptr(txnGasUsage.BlockStateGasUsed)
+		t.callstack[0].GasRefund = toHexUint64Ptr(txnGasUsage.GasRefund)
+	}
 	if t.config.WithLog {
 		// Logs are not emitted when the call fails
 		clearFailedLogs(&t.callstack[0], false)

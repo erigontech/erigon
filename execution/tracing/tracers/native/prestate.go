@@ -108,7 +108,7 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
 			OnSystemCallStartV2: t.OnSystemCallStartV2,
-			OnTxEnd:             t.OnTxEnd,
+			OnTxEndV2:           t.OnTxEndV2,
 			OnOpcodeV2:          t.OnOpcodeV2,
 			OnExitV2:            t.OnExitV2,
 		},
@@ -242,7 +242,7 @@ func (t *prestateTracer) OnSystemCallStartV2(env *tracing.VMContext) {
 	t.lookupAccount(env.Coinbase)
 }
 
-func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *prestateTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if err != nil {
 		return
 	}

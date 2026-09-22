@@ -215,7 +215,7 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 		Hooks: &tracing.Hooks{
 			OnTxStart:           t.OnTxStart,
 			OnSystemCallStartV2: t.OnSystemCallStartV2,
-			OnTxEnd:             t.OnTxEnd,
+			OnTxEndV2:           t.OnTxEndV2,
 			OnEnterV2:           t.OnEnterV2,
 			OnExitV2:            t.OnExitV2,
 			OnOpcodeV2:          t.OnOpcodeV2,
@@ -262,9 +262,9 @@ func (t *jsTracer) onExecutionStart(env *tracing.VMContext, gasLimit uint64) {
 	t.ctx["coinbase"] = t.vm.ToValue(coinbase)
 }
 
-// OnTxEnd implements the Tracer interface and is invoked at the end of
+// OnTxEndV2 implements the Tracer interface and is invoked at the end of
 // transaction processing.
-func (t *jsTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *jsTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if err != nil {
 		// Don't override vm error
 		if _, ok := t.ctx["error"]; !ok {
@@ -273,6 +273,11 @@ func (t *jsTracer) OnTxEnd(receipt *types.Receipt, err error) {
 		return
 	}
 	t.ctx["gasUsed"] = t.vm.ToValue(receipt.GasUsed)
+	if t.env.Rules.IsAmsterdam {
+		t.ctx["regularGasUsed"] = t.vm.ToValue(txnGasUsage.BlockExecutionGasUsed)
+		t.ctx["stateGasUsed"] = t.vm.ToValue(txnGasUsage.BlockStateGasUsed)
+		t.ctx["gasRefund"] = t.vm.ToValue(txnGasUsage.GasRefund)
+	}
 }
 
 // onStart implements the Tracer interface to initialize the tracing operation.
