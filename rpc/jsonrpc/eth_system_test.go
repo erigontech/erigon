@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -728,14 +729,14 @@ func TestFeeHistoryResultFastJSONMatchesEncodingJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(res)
 			require.NoError(t, err)
-			got, err := res.MarshalFastJSON()
+			got, err := jsonstream.Marshal(res)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})
 	}
 	for _, bad := range []float64{math.NaN(), math.Inf(1)} {
 		_, wantErr := json.Marshal(&feeHistoryResult{GasUsedRatio: []float64{bad}})
-		_, gotErr := (&feeHistoryResult{GasUsedRatio: []float64{bad}}).MarshalFastJSON()
+		_, gotErr := jsonstream.Marshal(&feeHistoryResult{GasUsedRatio: []float64{bad}})
 		require.Error(t, wantErr)
 		require.EqualError(t, gotErr, wantErr.Error())
 	}

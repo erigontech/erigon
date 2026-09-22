@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -426,9 +427,9 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 	cached, ok := api.witnessCache.Get(hash)
 	require.True(t, ok, "head-capture build must populate the cache")
 
-	wantBytes, err := want.MarshalFastJSON()
+	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
-	gotBytes, err := cached.MarshalFastJSON()
+	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "head-capture witness must match the durable on-demand build")
 }
@@ -498,11 +499,11 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 	require.NoError(t, err)
 
-	// Compare the served form (rpc.fastJSONResult path): the cache stores a shell
-	// carrying only pre-marshaled bytes, so MarshalFastJSON is what a hit serves.
-	wantBytes, err := want.MarshalFastJSON()
+	// Compare the served form: the cache stores a shell carrying only pre-marshaled
+	// bytes, so MarshalFastJSONTo is what a hit serves.
+	wantBytes, err := jsonstream.Marshal(want)
 	require.NoError(t, err)
-	gotBytes, err := cached.MarshalFastJSON()
+	gotBytes, err := jsonstream.Marshal(cached)
 	require.NoError(t, err)
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
 }
