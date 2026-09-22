@@ -50,21 +50,27 @@ type removalState struct {
 }
 
 func remove(n *node, path []byte) error {
-	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) {
-		return ErrRemovePath
+	if n == nil || len(path) != 64 {
+		return fmt.Errorf("%w: node %v path length %d", ErrRemovePath, n != nil, len(path))
 	}
 	for _, nib := range path {
 		if nib > 0x0f {
-			return ErrRemovePath
+			return fmt.Errorf("%w: nibble %d", ErrRemovePath, nib)
 		}
+	}
+	if !bytes.HasPrefix(path, n.path) {
+		return ErrRemoveNotFound
 	}
 	_, err := removeAt(n, path)
 	return err
 }
 
 func removeAt(n *node, path []byte) (removalState, error) {
-	if n == nil || len(n.path) >= len(path) || !bytes.HasPrefix(path, n.path) {
-		return removalState{}, ErrRemovePath
+	if n == nil || len(n.path) >= len(path) {
+		return removalState{}, fmt.Errorf("%w: node depth %d, path length %d", ErrRemovePath, len(n.path), len(path))
+	}
+	if !bytes.HasPrefix(path, n.path) {
+		return removalState{}, ErrRemoveNotFound
 	}
 	depth := len(n.path)
 	nib := int(path[depth])

@@ -123,6 +123,22 @@ func TestRemoveDoesNotReadBranchRecords(t *testing.T) {
 	require.Zero(t, ctx.storageCalls)
 }
 
+func TestRemoveTreatsDivergedPathsAsNotFound(t *testing.T) {
+	ext := fork([]byte{1, 2, 3})
+	kept := appendPath(ext.path, 4, bytes.Repeat([]byte{5}, 60))
+	ext.setLeaf(4, packPath(kept[4:], nil), []byte{1})
+	diverged := appendPath([]byte{1, 2, 9}, 4, bytes.Repeat([]byte{5}, 60))
+	require.ErrorIs(t, remove(ext, diverged), ErrRemoveNotFound)
+
+	root := fork(nil)
+	branch := fork([]byte{7, 8, 8})
+	branchLeaf := appendPath(branch.path, 1, bytes.Repeat([]byte{2}, 60))
+	branch.setLeaf(1, packPath(branchLeaf[4:], nil), []byte{3})
+	root.setChild(7, branch)
+	pastBranch := appendPath([]byte{7, 8, 9}, 1, bytes.Repeat([]byte{2}, 60))
+	require.ErrorIs(t, remove(root, pastBranch), ErrRemoveNotFound)
+}
+
 func TestRemoveRejectsInvalidAndStoredPaths(t *testing.T) {
 	n := fork(nil)
 	path := appendPath(nil, 1, bytes.Repeat([]byte{2}, 63))
