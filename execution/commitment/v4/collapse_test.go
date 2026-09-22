@@ -53,11 +53,11 @@ func TestRemovePromotesSoleLeafSurvivor(t *testing.T) {
 
 	require.NoError(t, remove(parent, removed))
 	require.NotZero(t, parent.leafMask&(1<<0))
-	require.Nil(t, parent.children[0])
-	require.Equal(t, packPath(survivor[len(parent.path)+1:], nil), parent.leafSuffix[0])
-	require.Equal(t, []byte{2}, parent.leafValue[0])
+	require.Nil(t, parent.child(0))
+	require.Equal(t, packPath(survivor[len(parent.path)+1:], nil), parent.leafSuffixAt(0))
+	require.Equal(t, []byte{2}, parent.leafValueAt(0))
 	full := append(append([]byte(nil), parent.path...), byte(0))
-	full = append(full, unpackPath(parent.leafSuffix[0], 62, nil)...)
+	full = append(full, unpackPath(parent.leafSuffixAt(0), 62, nil)...)
 	require.Equal(t, survivor, full)
 }
 
@@ -71,10 +71,10 @@ func TestRemoveD6CollapseKeepsPreExtensionHash(t *testing.T) {
 	require.NoError(t, remove(parent, removed))
 	require.Equal(t, uint16(1), parent.childMask)
 	require.Zero(t, parent.leafMask)
-	require.Equal(t, hash, parent.childHash[0])
-	require.Equal(t, []byte{1, 2}, parent.childExt[0])
+	require.Equal(t, hash, parent.childHashAt(0))
+	require.Equal(t, []byte{1, 2}, parent.childExtAt(0))
 	path := append(append([]byte(nil), parent.path...), byte(0))
-	path = append(path, parent.childExt[0]...)
+	path = append(path, parent.childExtAt(0)...)
 	require.Equal(t, []byte{7, 0, 1, 2}, path)
 }
 
@@ -86,8 +86,8 @@ func TestRemoveCollapseSoleBranchWithoutExtension(t *testing.T) {
 	parent.setLeaf(1, packPath(removed[len(parent.path)+1:], nil), []byte{9})
 
 	require.NoError(t, remove(parent, removed))
-	require.Equal(t, hash, parent.childHash[0])
-	require.Empty(t, parent.childExt[0])
+	require.Equal(t, hash, parent.childHashAt(0))
+	require.Empty(t, parent.childExtAt(0))
 	require.Zero(t, parent.leafMask)
 }
 
@@ -101,11 +101,11 @@ func TestRemoveConcatenatesNestedExtensions(t *testing.T) {
 	parent.setChild(0, child)
 
 	require.NoError(t, remove(parent, removed))
-	require.Nil(t, parent.children[0])
-	require.Equal(t, hash, parent.childHash[0])
-	require.Equal(t, []byte{1, 2, 3, 4, 5}, parent.childExt[0])
+	require.Nil(t, parent.child(0))
+	require.Equal(t, hash, parent.childHashAt(0))
+	require.Equal(t, []byte{1, 2, 3, 4, 5}, parent.childExtAt(0))
 	path := append(append([]byte(nil), parent.path...), byte(0))
-	path = append(path, parent.childExt[0]...)
+	path = append(path, parent.childExtAt(0)...)
 	require.Equal(t, []byte{7, 0, 1, 2, 3, 4, 5}, path)
 }
 

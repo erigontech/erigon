@@ -10,7 +10,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-
 func zzSeed(ctx *parityContext, es []parityUpdate) {
 	for _, e := range es {
 		if e.update == nil {

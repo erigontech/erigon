@@ -31,41 +31,41 @@ func TestNodeMutationsKeepMasksConsistent(t *testing.T) {
 
 	n.setLeaf(3, []byte{4, 5}, []byte{6})
 	assertNodeSlot(t, n, 3, true, true)
-	require.Equal(t, []byte{4, 5}, n.leafSuffix[3])
-	require.Equal(t, []byte{6}, n.leafValue[3])
+	require.Equal(t, []byte{4, 5}, n.leafSuffixAt(3))
+	require.Equal(t, []byte{6}, n.leafValueAt(3))
 
 	child := fork([]byte{1, 2, 3})
 	n.setChild(3, child)
 	assertNodeSlot(t, n, 3, true, false)
-	require.Same(t, child, n.children[3])
-	require.Nil(t, n.childHash[3])
-	require.Nil(t, n.childExt[3])
-	require.Nil(t, n.leafSuffix[3])
-	require.Nil(t, n.leafValue[3])
+	require.Same(t, child, n.child(3))
+	require.Nil(t, n.childHashAt(3))
+	require.Nil(t, n.childExtAt(3))
+	require.Nil(t, n.leafSuffixAt(3))
+	require.Nil(t, n.leafValueAt(3))
 
 	hash := bytes.Repeat([]byte{0xab}, 32)
 	ext := []byte{7, 8}
 	n.setStoredChild(3, hash, ext)
 	assertNodeSlot(t, n, 3, true, false)
-	require.Nil(t, n.children[3])
-	require.Equal(t, hash, n.childHash[3])
-	require.Equal(t, ext, n.childExt[3])
+	require.Nil(t, n.child(3))
+	require.Equal(t, hash, n.childHashAt(3))
+	require.Equal(t, ext, n.childExtAt(3))
 
 	n.setLeaf(3, []byte{9}, []byte{10, 11})
 	assertNodeSlot(t, n, 3, true, true)
-	require.Nil(t, n.children[3])
-	require.Nil(t, n.childHash[3])
-	require.Nil(t, n.childExt[3])
-	require.Equal(t, []byte{9}, n.leafSuffix[3])
-	require.Equal(t, []byte{10, 11}, n.leafValue[3])
+	require.Nil(t, n.child(3))
+	require.Nil(t, n.childHashAt(3))
+	require.Nil(t, n.childExtAt(3))
+	require.Equal(t, []byte{9}, n.leafSuffixAt(3))
+	require.Equal(t, []byte{10, 11}, n.leafValueAt(3))
 
 	n.clear(3)
 	assertNodeSlot(t, n, 3, false, false)
-	require.Nil(t, n.children[3])
-	require.Nil(t, n.childHash[3])
-	require.Nil(t, n.childExt[3])
-	require.Nil(t, n.leafSuffix[3])
-	require.Nil(t, n.leafValue[3])
+	require.Nil(t, n.child(3))
+	require.Nil(t, n.childHashAt(3))
+	require.Nil(t, n.childExtAt(3))
+	require.Nil(t, n.leafSuffixAt(3))
+	require.Nil(t, n.leafValueAt(3))
 }
 
 func TestNodeMutationsCoverEveryNibble(t *testing.T) {
@@ -94,14 +94,14 @@ func TestNodeStoredChildAndJoinCopyReferences(t *testing.T) {
 	hash := bytes.Repeat([]byte{1}, 32)
 	ext := []byte{2, 3, 4}
 	join(n, 5, hash)
-	require.Equal(t, hash, n.childHash[5])
-	require.Nil(t, n.childExt[5])
+	require.Equal(t, hash, n.childHashAt(5))
+	require.Nil(t, n.childExtAt(5))
 
 	n.setStoredChild(5, hash, ext)
 	hash[0] = 9
 	ext[0] = 8
-	require.Equal(t, byte(1), n.childHash[5][0])
-	require.Equal(t, byte(2), n.childExt[5][0])
+	require.Equal(t, byte(1), n.childHashAt(5)[0])
+	require.Equal(t, byte(2), n.childExtAt(5)[0])
 }
 
 func TestForkReturnsSharedNodePointer(t *testing.T) {

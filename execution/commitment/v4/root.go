@@ -51,7 +51,7 @@ func insertRoot(n *node, path, value []byte) error {
 		}
 		if bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
 			nib := bits.TrailingZeros16(n.childMask)
-			if child := n.children[nib]; child != nil && bytes.Equal(child.path, n.path) {
+			if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
 				return insert(child, path, value)
 			}
 		}
@@ -67,13 +67,13 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 		return ErrRootShape
 	}
 	oldNib := bits.TrailingZeros16(n.childMask)
-	oldChild := n.children[oldNib]
+	oldChild := n.child(oldNib)
 	if oldChild != nil && !bytes.Equal(oldChild.path, n.path) {
 		return ErrRootShape
 	}
 	oldPath := append(append([]byte(nil), n.path...), byte(oldNib))
-	oldPath = append(oldPath, n.childExt[oldNib]...)
-	oldHash := n.childHash[oldNib]
+	oldPath = append(oldPath, n.childExtAt(oldNib)...)
+	oldHash := n.childHashAt(oldNib)
 	if oldChild != nil {
 		hash, err := fold(oldChild, len(oldChild.path))
 		if err != nil {
@@ -108,14 +108,14 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 
 func insertLeafRoot(n *node, path, value []byte) error {
 	oldNib := bits.TrailingZeros16(n.childMask)
-	oldPath := append([]byte{byte(oldNib)}, unpackPath(n.leafSuffix[oldNib], 63, nil)...)
+	oldPath := append([]byte{byte(oldNib)}, unpackPath(n.leafSuffixAt(oldNib), 63, nil)...)
 	if bytes.Equal(oldPath, path) {
 		n.setLeaf(oldNib, packPath(path[1:], nil), value)
 		return nil
 	}
 	if oldNib != int(path[0]) {
-		oldValue := append([]byte(nil), n.leafValue[oldNib]...)
-		oldSuffix := append([]byte(nil), n.leafSuffix[oldNib]...)
+		oldValue := append([]byte(nil), n.leafValueAt(oldNib)...)
+		oldSuffix := append([]byte(nil), n.leafSuffixAt(oldNib)...)
 		n.path = nil
 		n.clear(oldNib)
 		n.setLeaf(oldNib, oldSuffix, oldValue)
@@ -128,7 +128,7 @@ func insertLeafRoot(n *node, path, value []byte) error {
 	}
 	branch := fork(oldPath[:common])
 	branch.plane = n.plane
-	branch.setLeaf(int(oldPath[common]), packPath(oldPath[common+1:], nil), n.leafValue[oldNib])
+	branch.setLeaf(int(oldPath[common]), packPath(oldPath[common+1:], nil), n.leafValueAt(oldNib))
 	branch.setLeaf(int(path[common]), packPath(path[common+1:], nil), value)
 	root := fork(oldPath[:common])
 	root.plane = n.plane
@@ -143,7 +143,7 @@ func removeRoot(n *node, path []byte) error {
 	}
 	if len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
 		nib := bits.TrailingZeros16(n.childMask)
-		if child := n.children[nib]; child != nil && bytes.Equal(child.path, n.path) {
+		if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
 			if err := remove(child, path); err != nil {
 				return err
 			}
@@ -155,8 +155,8 @@ func removeRoot(n *node, path []byte) error {
 			if bits.OnesCount16(child.childMask) == 1 && child.leafMask == child.childMask {
 				leafNib := bits.TrailingZeros16(child.childMask)
 				fullPath := append(append([]byte(nil), child.path...), byte(leafNib))
-				fullPath = append(fullPath, unpackPath(child.leafSuffix[leafNib], 64-len(child.path)-1, nil)...)
-				value := append([]byte(nil), child.leafValue[leafNib]...)
+				fullPath = append(fullPath, unpackPath(child.leafSuffixAt(leafNib), 64-len(child.path)-1, nil)...)
+				value := append([]byte(nil), child.leafValueAt(leafNib)...)
 				n.path = nil
 				n.clear(nib)
 				n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), value)
@@ -175,22 +175,22 @@ func promoteRootExtension(n *node) error {
 		return nil
 	}
 	nib := bits.TrailingZeros16(n.childMask)
-	if child := n.children[nib]; child != nil {
+	if child := n.child(nib); child != nil {
 		if len(child.path) == 0 || child.path[0] != byte(nib) {
 			return ErrRootShape
 		}
 		n.path = append(n.path[:0], child.path...)
 	} else {
-		if len(n.childHash[nib]) != 32 {
+		if len(n.childHashAt(nib)) != 32 {
 			return ErrRootShape
 		}
 		n.path = append(n.path[:0], byte(nib))
-		n.path = append(n.path, n.childExt[nib]...)
+		n.path = append(n.path, n.childExtAt(nib)...)
 	}
 	if len(n.path) == 0 || len(n.path) > 63 {
 		return ErrRootShape
 	}
-	n.childExt[nib] = nil
+	n.clearChildExt(nib)
 	return nil
 }
 
@@ -214,22 +214,22 @@ func collapseRoot(n *node) error {
 	bit := uint16(1) << nib
 	if n.leafMask&bit != 0 {
 		fullPath := append(append([]byte(nil), n.path...), byte(nib))
-		fullPath = append(fullPath, unpackPath(n.leafSuffix[nib], 64-len(n.path)-1, nil)...)
-		value := append([]byte(nil), n.leafValue[nib]...)
+		fullPath = append(fullPath, unpackPath(n.leafSuffixAt(nib), 64-len(n.path)-1, nil)...)
+		value := append([]byte(nil), n.leafValueAt(nib)...)
 		n.path = nil
 		n.clear(nib)
 		n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), value)
 		return nil
 	}
-	if len(n.childHash[nib]) != 32 && n.children[nib] == nil {
+	if len(n.childHashAt(nib)) != 32 && n.child(nib) == nil {
 		return ErrRootShape
 	}
-	if n.children[nib] != nil {
+	if n.child(nib) != nil {
 		return ErrRootShape
 	}
 	ext := append(append([]byte(nil), n.path...), byte(nib))
-	ext = append(ext, n.childExt[nib]...)
+	ext = append(ext, n.childExtAt(nib)...)
 	n.path = ext
-	n.childExt[nib] = nil
+	n.clearChildExt(nib)
 	return nil
 }

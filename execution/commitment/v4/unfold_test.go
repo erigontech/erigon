@@ -39,9 +39,9 @@ func TestUnfoldReadsOneExactRecordWithoutStateReads(t *testing.T) {
 	require.Equal(t, 0, ctx.accountCalls)
 	require.Equal(t, 0, ctx.storageCalls)
 	require.Equal(t, path, got.path)
-	require.Equal(t, hash, got.childHash[2])
-	require.Equal(t, []byte{4, 5, 6}, got.childExt[2])
-	require.Equal(t, []byte{0x42}, got.leafValue[7])
+	require.Equal(t, hash, got.childHashAt(2))
+	require.Equal(t, []byte{4, 5, 6}, got.childExtAt(2))
+	require.Equal(t, []byte{0x42}, got.leafValueAt(7))
 }
 
 func TestUnfoldStorageUsesAddressQualifiedKey(t *testing.T) {
@@ -58,7 +58,7 @@ func TestUnfoldStorageUsesAddressQualifiedKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{StorageNodeKey(addrHash, path, nil)}, ctx.branchCalls)
 	require.Equal(t, path, got.path)
-	require.Equal(t, hash, got.childHash[6])
+	require.Equal(t, hash, got.childHashAt(6))
 }
 
 func TestUnfoldRootForms(t *testing.T) {
@@ -71,8 +71,8 @@ func TestUnfoldRootForms(t *testing.T) {
 
 		got, err := unfold(ctx, nil, planeAccount, nil)
 		require.NoError(t, err)
-		require.Equal(t, []byte{0x01, 0x02}, got.leafValue[3])
-		require.Equal(t, packPath(fullPath[1:], nil), got.leafSuffix[3])
+		require.Equal(t, []byte{0x01, 0x02}, got.leafValueAt(3))
+		require.Equal(t, packPath(fullPath[1:], nil), got.leafSuffixAt(3))
 	})
 
 	t.Run("extension root", func(t *testing.T) {
@@ -86,7 +86,7 @@ func TestUnfoldRootForms(t *testing.T) {
 		got, err := unfold(ctx, nil, planeAccount, nil)
 		require.NoError(t, err)
 		require.Equal(t, ext, got.path)
-		require.Equal(t, hash, got.childHash[4])
+		require.Equal(t, hash, got.childHashAt(4))
 	})
 }
 

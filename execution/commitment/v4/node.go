@@ -16,21 +16,29 @@
 
 package v4
 
-import "fmt"
+import (
+	"fmt"
+	"math/bits"
+	"slices"
+)
+
+type childSlot struct {
+	hash   [32]byte
+	node   *node
+	ext    []byte
+	suffix []byte
+	value  []byte
+}
 
 type node struct {
 	path        []byte
+	slots       []childSlot
 	plane       byte
 	storageRoot bool
 
 	childMask uint16
 	leafMask  uint16
-
-	children   [16]*node
-	childHash  [16][]byte
-	childExt   [16][]byte
-	leafSuffix [16][]byte
-	leafValue  [16][]byte
+	hashMask  uint16
 }
 
 func fork(prefix []byte) *node {
@@ -49,58 +57,139 @@ func join(parent *node, nib int, ref []byte) {
 	parent.setStoredChild(nib, ref, nil)
 }
 
-func (n *node) setLeaf(nib int, suffix, value []byte) {
+const slotsInitialCap = 4
+
+func (n *node) slotIndex(nib int) int {
+	return bits.OnesCount16(n.childMask & (uint16(1)<<nib - 1))
+}
+
+func (n *node) slot(nib int) *childSlot {
+	n.checkNibble(nib)
+	if n.childMask&(uint16(1)<<nib) == 0 {
+		return nil
+	}
+	return &n.slots[n.slotIndex(nib)]
+}
+
+func (n *node) child(nib int) *node {
+	if s := n.slot(nib); s != nil {
+		return s.node
+	}
+	return nil
+}
+
+func (n *node) childHashAt(nib int) []byte {
+	n.checkNibble(nib)
+	if n.hashMask&(uint16(1)<<nib) == 0 {
+		return nil
+	}
+	return n.slots[n.slotIndex(nib)].hash[:]
+}
+
+func (n *node) childExtAt(nib int) []byte {
+	if s := n.slot(nib); s != nil {
+		return s.ext
+	}
+	return nil
+}
+
+func (n *node) leafSuffixAt(nib int) []byte {
+	if s := n.slot(nib); s != nil {
+		return s.suffix
+	}
+	return nil
+}
+
+func (n *node) leafValueAt(nib int) []byte {
+	if s := n.slot(nib); s != nil {
+		return s.value
+	}
+	return nil
+}
+
+func (n *node) ensureSlot(nib int) *childSlot {
 	n.checkNibble(nib)
 	bit := uint16(1) << nib
-	n.childMask |= bit
+	index := n.slotIndex(nib)
+	if n.childMask&bit == 0 {
+		if n.slots == nil {
+			n.slots = make([]childSlot, 0, slotsInitialCap)
+		}
+		n.slots = slices.Insert(n.slots, index, childSlot{})
+		n.childMask |= bit
+	}
+	return &n.slots[index]
+}
+
+func (n *node) setLeaf(nib int, suffix, value []byte) {
+	s := n.ensureSlot(nib)
+	bit := uint16(1) << nib
 	n.leafMask |= bit
-	n.children[nib] = nil
-	n.childHash[nib] = nil
-	n.childExt[nib] = nil
-	n.leafSuffix[nib] = appendCopy(n.leafSuffix[nib], suffix)
-	n.leafValue[nib] = appendCopy(n.leafValue[nib], value)
+	n.hashMask &^= bit
+	s.node = nil
+	s.hash = [32]byte{}
+	s.ext = nil
+	s.suffix = appendCopy(s.suffix, suffix)
+	s.value = appendCopy(s.value, value)
 }
 
 func (n *node) setChild(nib int, child *node) {
-	n.checkNibble(nib)
+	s := n.ensureSlot(nib)
 	bit := uint16(1) << nib
-	n.childMask |= bit
 	n.leafMask &^= bit
+	n.hashMask &^= bit
 	if child != nil && n.plane != 0 {
 		child.plane = n.plane
 	}
-	n.children[nib] = child
-	n.childHash[nib] = nil
-	n.childExt[nib] = nil
-	n.leafSuffix[nib] = nil
-	n.leafValue[nib] = nil
+	s.node = child
+	s.hash = [32]byte{}
+	s.ext = nil
+	s.suffix = nil
+	s.value = nil
 }
 
 func (n *node) setStoredChild(nib int, hash []byte, ext []byte) {
-	n.checkNibble(nib)
 	if len(hash) != 32 {
 		panic(fmt.Sprintf("commitment v4: child hash has length %d", len(hash)))
 	}
+	s := n.ensureSlot(nib)
 	bit := uint16(1) << nib
-	n.childMask |= bit
 	n.leafMask &^= bit
-	n.children[nib] = nil
-	n.childHash[nib] = appendCopy(n.childHash[nib], hash)
-	n.childExt[nib] = appendCopy(n.childExt[nib], ext)
-	n.leafSuffix[nib] = nil
-	n.leafValue[nib] = nil
+	n.hashMask |= bit
+	s.node = nil
+	copy(s.hash[:], hash)
+	s.ext = appendCopy(s.ext, ext)
+	s.suffix = nil
+	s.value = nil
+}
+
+func (n *node) setChildHashExt(nib int, hash []byte, ext []byte) {
+	if len(hash) != 32 {
+		panic(fmt.Sprintf("commitment v4: child hash has length %d", len(hash)))
+	}
+	s := n.ensureSlot(nib)
+	n.hashMask |= uint16(1) << nib
+	copy(s.hash[:], hash)
+	s.ext = appendCopy(s.ext, ext)
+}
+
+func (n *node) clearChildExt(nib int) {
+	if s := n.slot(nib); s != nil {
+		s.ext = nil
+	}
 }
 
 func (n *node) clear(nib int) {
 	n.checkNibble(nib)
 	bit := uint16(1) << nib
+	if n.childMask&bit == 0 {
+		return
+	}
+	index := n.slotIndex(nib)
+	n.slots = slices.Delete(n.slots, index, index+1)
 	n.childMask &^= bit
 	n.leafMask &^= bit
-	n.children[nib] = nil
-	n.childHash[nib] = nil
-	n.childExt[nib] = nil
-	n.leafSuffix[nib] = nil
-	n.leafValue[nib] = nil
+	n.hashMask &^= bit
 }
 
 func (n *node) checkNibble(nib int) {

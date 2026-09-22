@@ -81,7 +81,7 @@ func removeAt(n *node, path []byte) (removalState, error) {
 		return collapsedState(n), nil
 	}
 
-	child := n.children[nib]
+	child := n.child(nib)
 	if child == nil {
 		return removalState{}, ErrRemoveStoredChild
 	}
@@ -101,7 +101,7 @@ func removeAt(n *node, path []byte) (removalState, error) {
 }
 
 func leafPathMatches(n *node, nib int, path []byte) bool {
-	return len(path) > len(n.path) && packedMatches(n.leafSuffix[nib], path[len(n.path)+1:])
+	return len(path) > len(n.path) && packedMatches(n.leafSuffixAt(nib), path[len(n.path)+1:])
 }
 
 func collapsedState(n *node) removalState {
@@ -117,10 +117,10 @@ func collapsedState(n *node) removalState {
 	bit := uint16(1) << nib
 	if n.leafMask&bit != 0 {
 		path := append(append([]byte(nil), n.path...), byte(nib))
-		path = append(path, unpackPath(n.leafSuffix[nib], 64-len(n.path)-1, nil)...)
-		return removalState{kind: removalLeaf, path: path, value: append([]byte(nil), n.leafValue[nib]...)}
+		path = append(path, unpackPath(n.leafSuffixAt(nib), 64-len(n.path)-1, nil)...)
+		return removalState{kind: removalLeaf, path: path, value: append([]byte(nil), n.leafValueAt(nib)...)}
 	}
-	if child := n.children[nib]; child != nil {
+	if child := n.child(nib); child != nil {
 		state := collapsedState(child)
 		switch state.kind {
 		case removalEmpty:
@@ -137,8 +137,8 @@ func collapsedState(n *node) removalState {
 		}
 	}
 	path := append(append([]byte(nil), n.path...), byte(nib))
-	path = append(path, n.childExt[nib]...)
-	return removalState{kind: removalBranch, path: path, hash: append([]byte(nil), n.childHash[nib]...)}
+	path = append(path, n.childExtAt(nib)...)
+	return removalState{kind: removalBranch, path: path, hash: append([]byte(nil), n.childHashAt(nib)...)}
 }
 
 func setLeafPath(n *node, nib int, path, value []byte) {
@@ -182,10 +182,10 @@ func insert(n *node, path, value []byte) error {
 	if n.leafMask&bit != 0 {
 		return splitLeaf(n, targetNib, path, wantSuffix, value)
 	}
-	if child := n.children[targetNib]; child != nil {
+	if child := n.child(targetNib); child != nil {
 		return splitChild(n, targetNib, child, path, value)
 	}
-	if len(n.childHash[targetNib]) == 32 {
+	if len(n.childHashAt(targetNib)) == 32 {
 		return splitStoredChild(n, targetNib, path, value)
 	}
 	return ErrInsertPath
@@ -194,7 +194,7 @@ func insert(n *node, path, value []byte) error {
 func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 	depth := len(parent.path)
 	oldSuffixCount := 64 - depth - 1
-	oldSuffix := unpackPath(parent.leafSuffix[nib], oldSuffixCount, nil)
+	oldSuffix := unpackPath(parent.leafSuffixAt(nib), oldSuffixCount, nil)
 	oldPath := make([]byte, 0, 64)
 	oldPath = append(oldPath, parent.path...)
 	oldPath = append(oldPath, byte(nib))
@@ -211,7 +211,7 @@ func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 	branch := fork(oldPath[:common])
 	oldNib := int(oldPath[common])
 	newNib := int(path[common])
-	branch.setLeaf(oldNib, packPath(oldPath[common+1:], nil), parent.leafValue[nib])
+	branch.setLeaf(oldNib, packPath(oldPath[common+1:], nil), parent.leafValueAt(nib))
 	branch.setLeaf(newNib, packPath(path[common+1:], nil), value)
 	parent.setChild(nib, branch)
 	return nil
@@ -236,10 +236,10 @@ func splitChild(parent *node, nib int, child *node, path, value []byte) error {
 }
 
 func splitStoredChild(parent *node, nib int, path, value []byte) error {
-	childPath := make([]byte, 0, len(parent.path)+1+len(parent.childExt[nib]))
+	childPath := make([]byte, 0, len(parent.path)+1+len(parent.childExtAt(nib)))
 	childPath = append(childPath, parent.path...)
 	childPath = append(childPath, byte(nib))
-	childPath = append(childPath, parent.childExt[nib]...)
+	childPath = append(childPath, parent.childExtAt(nib)...)
 	common := nibbles.CommonPrefixLen(childPath, path)
 	if common == len(childPath) {
 		return ErrInsertStoredChild
@@ -252,7 +252,7 @@ func splitStoredChild(parent *node, nib int, path, value []byte) error {
 	oldNib := int(childPath[common])
 	newNib := int(path[common])
 	remainingExt := childPath[common+1:]
-	branch.setStoredChild(oldNib, parent.childHash[nib], remainingExt)
+	branch.setStoredChild(oldNib, parent.childHashAt(nib), remainingExt)
 	branch.setLeaf(newNib, packPath(path[common+1:], nil), value)
 	parent.setChild(nib, branch)
 	return nil

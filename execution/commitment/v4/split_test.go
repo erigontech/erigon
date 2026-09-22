@@ -39,7 +39,7 @@ func TestInsertLeafAtEveryDepthInBothPlanes(t *testing.T) {
 				bit := uint16(1) << 4
 				require.NotZero(t, n.childMask&bit, "depth %d", depth)
 				require.Zero(t, n.leafMask&bit, "depth %d", depth)
-				branch := n.children[4]
+				branch := n.child(4)
 				require.NotNil(t, branch, "depth %d", depth)
 				require.Equal(t, prefix, branch.path[:depth])
 				require.Equal(t, byte(4), branch.path[depth])
@@ -64,7 +64,7 @@ func TestInsertCreatesExpectedExtensionLengths(t *testing.T) {
 			n.setLeaf(6, packPath(oldPath[8:], nil), []byte{1})
 
 			require.NoError(t, insert(n, newPath, []byte{2}))
-			branch := n.children[6]
+			branch := n.child(6)
 			require.NotNil(t, branch)
 			require.Equal(t, append(append([]byte(nil), prefix...), byte(6)), branch.path[:8])
 			require.Len(t, branch.path, 8+extensionLen)
@@ -82,12 +82,12 @@ func TestInsertRecomputesPushedLeafSuffixFromFullPath(t *testing.T) {
 	n.setLeaf(2, packPath(oldPath[6:], nil), []byte{0xaa})
 
 	require.NoError(t, insert(n, newPath, []byte{0xbb}))
-	branch := n.children[2]
+	branch := n.child(2)
 	require.NotNil(t, branch)
-	require.Equal(t, packPath(oldPath[len(branch.path)+1:], nil), branch.leafSuffix[int(oldPath[len(branch.path)])])
-	require.Equal(t, packPath(newPath[len(branch.path)+1:], nil), branch.leafSuffix[int(newPath[len(branch.path)])])
-	require.Equal(t, []byte{0xaa}, branch.leafValue[int(oldPath[len(branch.path)])])
-	require.Equal(t, []byte{0xbb}, branch.leafValue[int(newPath[len(branch.path)])])
+	require.Equal(t, packPath(oldPath[len(branch.path)+1:], nil), branch.leafSuffixAt(int(oldPath[len(branch.path)])))
+	require.Equal(t, packPath(newPath[len(branch.path)+1:], nil), branch.leafSuffixAt(int(newPath[len(branch.path)])))
+	require.Equal(t, []byte{0xaa}, branch.leafValueAt(int(oldPath[len(branch.path)])))
+	require.Equal(t, []byte{0xbb}, branch.leafValueAt(int(newPath[len(branch.path)])))
 }
 
 func TestInsertUsesNoStateReads(t *testing.T) {

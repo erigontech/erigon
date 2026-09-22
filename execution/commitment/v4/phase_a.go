@@ -181,7 +181,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		}
 		if len(root.path) != 0 && !bytes.HasPrefix(entry.path, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
 			nib := bits.TrailingZeros16(root.childMask)
-			if root.children[nib] == nil && len(root.childHash[nib]) == 32 {
+			if root.child(nib) == nil && len(root.childHashAt(nib)) == 32 {
 				child, err := unfold(ctx, root.path, planeStorage, task.addrHash[:])
 				if err != nil {
 					return [32]byte{}, err
@@ -232,7 +232,7 @@ func markStorageRoot(root *node) {
 		if root.childMask&(uint16(1)<<nib) == 0 || root.leafMask&(uint16(1)<<nib) != 0 {
 			continue
 		}
-		markStorageRoot(root.children[nib])
+		markStorageRoot(root.child(nib))
 	}
 }
 
