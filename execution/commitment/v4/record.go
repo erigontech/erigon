@@ -439,7 +439,7 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 	extMask := uint16(0)
 	for nib := range 16 {
 		bit := uint16(1) << nib
-		if n.childMask&bit != 0 && n.leafMask&bit == 0 && len(n.childExt[nib]) != 0 {
+		if n.childMask&bit != 0 && n.leafMask&bit == 0 && len(n.childExtAt(nib)) != 0 {
 			extMask |= bit
 		}
 	}
@@ -488,7 +488,7 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 		if treeMask&bit == 0 {
 			continue
 		}
-		hash := n.childHash[nib]
+		hash := n.childHashAt(nib)
 		if len(hash) != 32 {
 			panic(fmt.Sprintf("commitment v4: child %d has no stored hash", nib))
 		}
@@ -501,7 +501,7 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 		if extMask&bit == 0 {
 			continue
 		}
-		ext := n.childExt[nib]
+		ext := n.childExtAt(nib)
 		if len(ext) > 255 {
 			panic(fmt.Sprintf("commitment v4: child extension %d is too long", nib))
 		}
@@ -516,11 +516,11 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 		if leafMask&bit == 0 {
 			continue
 		}
-		suffix := n.leafSuffix[nib]
+		suffix := n.leafSuffixAt(nib)
 		if len(suffix) != suffixLen {
 			panic(fmt.Sprintf("commitment v4: leaf %d has suffix length %d, want %d", nib, len(suffix), suffixLen))
 		}
-		value := n.leafValue[nib]
+		value := n.leafValueAt(nib)
 		if len(value) > 255 {
 			panic(fmt.Sprintf("commitment v4: leaf %d value is too long", nib))
 		}
@@ -533,11 +533,11 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 
 func encodeLeafRoot(n *node, dst []byte) []byte {
 	nib := bits.TrailingZeros16(n.childMask)
-	suffix := n.leafSuffix[nib]
+	suffix := n.leafSuffixAt(nib)
 	if len(n.path) != 0 || len(suffix) != packedLen(63) {
 		panic("commitment v4: invalid leaf root path")
 	}
-	value := n.leafValue[nib]
+	value := n.leafValueAt(nib)
 	if len(value) > 255 {
 		panic("commitment v4: leaf root value is too long")
 	}

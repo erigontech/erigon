@@ -19,8 +19,8 @@ package v4
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"math/bits"
-	"slices"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -30,6 +30,7 @@ var (
 	errPhaseAKey     = errors.New("commitment v4: invalid phase A key")
 	errPhaseAUpdate  = errors.New("commitment v4: invalid phase A update")
 	errPhaseAStorage = errors.New("commitment v4: invalid storage task")
+	errPhaseAOrder   = errors.New("commitment v4: phase A input is not sorted by hashed key")
 )
 
 type storageEntry struct {
@@ -51,20 +52,15 @@ type accountEntry struct {
 }
 
 type partitioner struct {
-	storage          []storageTask
-	accounts         []accountEntry
-	storageByAddress map[string]int
-	accountByHash    map[string]int
-	wiped            map[[32]byte]struct{}
-	seen             int
+	storage      []storageTask
+	accounts     []accountEntry
+	prev         []byte
+	storageIndex int
+	seen         int
 }
 
 func newPartitioner() *partitioner {
-	return &partitioner{
-		storageByAddress: make(map[string]int),
-		accountByHash:    make(map[string]int),
-		wiped:            make(map[[32]byte]struct{}),
-	}
+	return &partitioner{storageIndex: -1}
 }
 
 func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update) error {
@@ -72,40 +68,32 @@ func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update)
 	if len(hashedKey) != 64 && len(hashedKey) != 128 {
 		return nil
 	}
-	accountHash := append([]byte(nil), hashedKey[:64]...)
-	accountKey := string(accountHash)
-	accountIndex, ok := p.accountByHash[accountKey]
-	if !ok {
-		accountIndex = len(p.accounts)
-		p.accountByHash[accountKey] = accountIndex
+	if p.prev != nil && bytes.Compare(hashedKey, p.prev) < 0 {
+		return fmt.Errorf("%w: %x after %x", errPhaseAOrder, hashedKey, p.prev)
+	}
+	p.prev = append(p.prev[:0], hashedKey...)
+
+	accountHash := hashedKey[:64]
+	if len(p.accounts) == 0 || !bytes.Equal(p.accounts[len(p.accounts)-1].hashedKey, accountHash) {
 		p.accounts = append(p.accounts, accountEntry{
-			hashedKey: accountHash,
+			hashedKey: append([]byte(nil), accountHash...),
 			plainKey:  clonePrefix(plainKey, 20),
 		})
+		p.storageIndex = -1
 	}
+	current := &p.accounts[len(p.accounts)-1]
 
 	if len(hashedKey) == 64 {
-		p.accounts[accountIndex].update = cloneUpdate(update)
-		addrHash := hashAddressPath(accountHash)
-		if update != nil && update.Deleted() {
-			p.wiped[addrHash] = struct{}{}
-		} else {
-			delete(p.wiped, addrHash)
-		}
+		current.update = cloneUpdate(update)
 		return nil
 	}
 
-	addrHash := hashAddressPath(accountHash)
-	delete(p.wiped, addrHash)
-	storageKey := string(addrHash[:])
-	storageIndex, ok := p.storageByAddress[storageKey]
-	if !ok {
-		storageIndex = len(p.storage)
-		p.storageByAddress[storageKey] = storageIndex
-		p.storage = append(p.storage, storageTask{addrHash: addrHash})
+	if p.storageIndex < 0 {
+		p.storageIndex = len(p.storage)
+		p.storage = append(p.storage, storageTask{addrHash: hashAddressPath(current.hashedKey)})
 	}
-	p.accounts[accountIndex].storageDirty = true
-	p.storage[storageIndex].entries = append(p.storage[storageIndex].entries, storageEntry{
+	current.storageDirty = true
+	p.storage[p.storageIndex].entries = append(p.storage[p.storageIndex].entries, storageEntry{
 		path:   append([]byte(nil), hashedKey[64:]...),
 		update: cloneUpdate(update),
 	})
@@ -114,15 +102,12 @@ func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update)
 
 func (p *partitioner) done() (storage []storageTask, accounts []accountEntry) {
 	storage, accounts = p.storage, p.accounts
-	for addrHash := range p.wiped {
-		storage = append(storage, storageTask{addrHash: addrHash, wipe: true})
+	for i := range accounts {
+		if accounts[i].storageDirty || accounts[i].update == nil || !accounts[i].update.Deleted() {
+			continue
+		}
+		storage = append(storage, storageTask{addrHash: hashAddressPath(accounts[i].hashedKey), wipe: true})
 	}
-	slices.SortStableFunc(accounts, func(a, b accountEntry) int {
-		return bytes.Compare(a.hashedKey, b.hashedKey)
-	})
-	slices.SortStableFunc(storage, func(a, b storageTask) int {
-		return bytes.Compare(a.addrHash[:], b.addrHash[:])
-	})
 	return storage, accounts
 }
 
@@ -161,7 +146,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	}
 
 	g := storageGraph(task.addrHash[:])
-	root, err := unfold(ctx, nil, planeStorage, task.addrHash[:], g.scratch)
+	root, err := unfold(ctx, nil, planeStorage, task.addrHash[:])
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -181,8 +166,8 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		}
 		if len(root.path) != 0 && !bytes.HasPrefix(entry.path, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
 			nib := bits.TrailingZeros16(root.childMask)
-			if root.children[nib] == nil && len(root.childHash[nib]) == 32 {
-				child, err := unfold(ctx, root.path, planeStorage, task.addrHash[:], g.scratch)
+			if root.child(nib) == nil && len(root.childHashAt(nib)) == 32 {
+				child, err := unfold(ctx, root.path, planeStorage, task.addrHash[:])
 				if err != nil {
 					return [32]byte{}, err
 				}
@@ -232,7 +217,7 @@ func markStorageRoot(root *node) {
 		if root.childMask&(uint16(1)<<nib) == 0 || root.leafMask&(uint16(1)<<nib) != 0 {
 			continue
 		}
-		markStorageRoot(root.children[nib])
+		markStorageRoot(root.child(nib))
 	}
 }
 

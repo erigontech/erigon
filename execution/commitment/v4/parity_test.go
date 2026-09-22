@@ -90,6 +90,8 @@ func (p *parityContext) Storage(key []byte) (*commitment.Update, error) {
 	return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
 }
 
+func (p *parityContext) factory(context.Context) (commitment.PatriciaContext, func()) { return p, nil }
+
 var _ commitment.PatriciaContext = (*parityContext)(nil)
 
 func accountParityUpdate(i int) *commitment.Update {
@@ -149,6 +151,7 @@ func parityRoots(t *testing.T, initial, entries []parityUpdate) ([3][]byte, *par
 
 	v4 := &Trie{}
 	v4.ResetContext(ctxV4)
+	v4.SetTrieContextFactory(ctxV4.factory)
 	hph := commitment.NewHexPatriciaHashed(length.Addr, ctxHPH, commitment.DefaultTrieConfig())
 	parallel := commitment.NewParallelPatriciaHashed(func(context.Context) (commitment.PatriciaContext, func()) {
 		return ctxParallel, nil
@@ -162,7 +165,7 @@ func parityRoots(t *testing.T, initial, entries []parityUpdate) ([3][]byte, *par
 	if err := processParityBatch(t, v4, hph, parallel, initial); err != nil {
 		t.Fatal(err)
 	}
-	rootV4, err := v4.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{})
+	rootV4, err := v4.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	rootHPH, err := hph.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
@@ -181,7 +184,7 @@ func processParityBatch(t *testing.T, v4 *Trie, hph *commitment.HexPatriciaHashe
 		return nil
 	}
 	ctx := context.Background()
-	if _, err := v4.Process(ctx, makeParityUpdates(t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{}); err != nil {
+	if _, err := v4.Process(ctx, makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{}); err != nil {
 		return err
 	}
 	if _, err := hph.Process(ctx, makeParityUpdates(t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{}); err != nil {

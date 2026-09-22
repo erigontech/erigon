@@ -34,6 +34,7 @@ var (
 
 type Trie struct {
 	ctx             commitment.PatriciaContext
+	ctxFactory      commitment.TrieContextFactory
 	root            []byte
 	traceW          io.Writer
 	scheduleOrder   scheduleOrder
@@ -68,7 +69,7 @@ func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commit
 	if err := AssertV1Keyed(cfg.NibblesV2); err != nil {
 		panic(err)
 	}
-	return &Trie{}, commitment.NewUpdates(commitment.ModeUpdate, tmpdir, commitment.KeyToHexNibbleHash)
+	return &Trie{}, commitment.NewUpdates(commitment.ModeCollect, tmpdir, commitment.KeyToHexNibbleHash)
 }
 
 func init() {
@@ -102,6 +103,12 @@ func (*Trie) StateKey() []byte {
 func (t *Trie) Reset() {
 	if t != nil {
 		t.root = nil
+	}
+}
+
+func (t *Trie) SetTrieContextFactory(f commitment.TrieContextFactory) {
+	if t != nil {
+		t.ctxFactory = f
 	}
 }
 
@@ -144,8 +151,8 @@ func (t *Trie) Process(
 	if updates == nil {
 		return nil, errors.New("commitment v4: nil updates")
 	}
-	if updates.Mode() != commitment.ModeUpdate {
-		return nil, errors.New("commitment v4: Process requires ModeUpdate updates")
+	if updates.Mode() != commitment.ModeCollect {
+		return nil, errors.New("commitment v4: Process requires ModeCollect updates")
 	}
 
 	var warmuper *commitment.Warmuper
@@ -157,21 +164,22 @@ func (t *Trie) Process(
 		defer warmuper.CloseAndWait()
 	}
 
-	p := newPartitioner()
-	if err := updates.HashSort(ctx, warmuper, p.add); err != nil {
+	storage, accounts, seen, err := partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper)
+	if err != nil {
 		return nil, err
 	}
-	storage, accounts := p.done()
 	processCtx := t.ctx
+	factory := t.ctxFactory
 	var deferredCtx *deferredPatriciaContext
 	if t.deferUpdates {
+		factory = nil
 		if len(t.deferred) != 0 {
 			return nil, errors.New("commitment v4: deferred updates were not taken")
 		}
 		deferredCtx = &deferredPatriciaContext{PatriciaContext: t.ctx}
 		processCtx = deferredCtx
 	}
-	root, err := runScheduledPhases(ctx, processCtx, storage, accounts, t.scheduleOrder, t.scheduleWorkers, t.scheduleStats)
+	root, err := runScheduledPhases(ctx, processCtx, factory, storage, accounts, t.scheduleOrder, t.scheduleWorkers, t.scheduleStats)
 	if err != nil {
 		return nil, err
 	}
@@ -180,7 +188,7 @@ func (t *Trie) Process(
 	}
 	t.root = append(t.root[:0], root[:]...)
 	if onProgress != nil {
-		onProgress(&commitment.CommitProgress{KeyIndex: uint64(p.seen), UpdateCount: uint64(p.seen)})
+		onProgress(&commitment.CommitProgress{KeyIndex: uint64(seen), UpdateCount: uint64(seen)})
 	}
 	return bytes.Clone(t.root), nil
 }

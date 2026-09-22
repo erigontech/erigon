@@ -37,7 +37,7 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 	}
 
 	g := accountGraph()
-	root, err := unfold(ctx, nil, planeAccount, nil, g.scratch)
+	root, err := unfold(ctx, nil, planeAccount, nil)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -134,7 +134,7 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 
 func materializeAccountRootChild(ctx commitment.PatriciaContext, root *node) error {
 	nib := bits.TrailingZeros16(root.childMask)
-	child := root.children[nib]
+	child := root.child(nib)
 	if child == nil {
 		return nil
 	}
@@ -164,9 +164,9 @@ func persistDetachedAccountSubtree(ctx commitment.PatriciaContext, root *node) (
 			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
 				continue
 			}
-			child := n.children[nib]
+			child := n.child(nib)
 			if child == nil {
-				if len(n.childHash[nib]) != 32 {
+				if len(n.childHashAt(nib)) != 32 {
 					return [32]byte{}, errPhaseBRecord
 				}
 				continue
@@ -175,8 +175,7 @@ func persistDetachedAccountSubtree(ctx commitment.PatriciaContext, root *node) (
 			if err != nil {
 				return [32]byte{}, err
 			}
-			n.childHash[nib] = appendCopy(n.childHash[nib], childHash[:])
-			n.childExt[nib] = appendCopy(n.childExt[nib], child.path[len(n.path)+1:])
+			n.setChildHashExt(nib, childHash[:], child.path[len(n.path)+1:])
 		}
 		hash, delta, err := foldAndEncodeRecord(ctx, n, len(n.path), AccountNodeKey(n.path, nil))
 		if err != nil {
@@ -223,12 +222,12 @@ func accountLeafAt(n *node, path []byte) ([]byte, bool) {
 		return nil, false
 	}
 	if n.leafMask&bit != 0 {
-		if !packedMatches(n.leafSuffix[nib], path[len(n.path)+1:]) {
+		if !packedMatches(n.leafSuffixAt(nib), path[len(n.path)+1:]) {
 			return nil, false
 		}
-		return append([]byte(nil), n.leafValue[nib]...), true
+		return append([]byte(nil), n.leafValueAt(nib)...), true
 	}
-	return accountLeafAt(n.children[nib], path)
+	return accountLeafAt(n.child(nib), path)
 }
 
 func storedAccountPath(n *node, path []byte) bool {
@@ -240,13 +239,13 @@ func storedAccountPath(n *node, path []byte) bool {
 	if n.childMask&bit == 0 || n.leafMask&bit != 0 {
 		return false
 	}
-	if child := n.children[nib]; child != nil {
+	if child := n.child(nib); child != nil {
 		return storedAccountPath(child, path)
 	}
-	if len(n.childHash[nib]) != 32 {
+	if len(n.childHashAt(nib)) != 32 {
 		return false
 	}
 	childPath := append(append([]byte(nil), n.path...), byte(nib))
-	childPath = append(childPath, n.childExt[nib]...)
+	childPath = append(childPath, n.childExtAt(nib)...)
 	return bytes.HasPrefix(path, childPath)
 }

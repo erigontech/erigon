@@ -17,6 +17,7 @@
 package v4
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -62,6 +63,7 @@ func enumerateStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) 
 }
 
 func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, path, data []byte, depth int, keys *[][]byte, seen map[string]struct{}) error {
+	data = bytes.Clone(data)
 	if err := Validate(data, depth); err != nil {
 		return err
 	}

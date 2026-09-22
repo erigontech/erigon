@@ -30,18 +30,18 @@ import (
 func TestInitializeTrieAndUpdatesV4(t *testing.T) {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV4
-	trie, updates := commitment.InitializeTrieAndUpdates(commitment.ModeUpdate, t.TempDir(), cfg)
+	trie, updates := commitment.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
 
 	require.IsType(t, &Trie{}, trie)
-	require.Equal(t, commitment.ModeUpdate, updates.Mode())
+	require.Equal(t, commitment.ModeCollect, updates.Mode())
 	require.Equal(t, commitment.VariantCommitmentV4, trie.Variant())
 }
 
 func TestInitializeTrieAndUpdatesV4RejectsUnsupportedModes(t *testing.T) {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV4
-	for _, mode := range []commitment.Mode{commitment.ModeDirect, commitment.ModeParallel} {
-		require.PanicsWithValue(t, "commitment v4 requires ModeUpdate, got "+mode.String()+" mode", func() {
+	for _, mode := range []commitment.Mode{commitment.ModeDirect, commitment.ModeParallel, commitment.ModeUpdate} {
+		require.PanicsWithValue(t, "commitment v4 requires ModeCollect, got "+mode.String()+" mode", func() {
 			commitment.InitializeTrieAndUpdates(mode, t.TempDir(), cfg)
 		})
 	}
@@ -52,7 +52,7 @@ func TestInitializeTrieAndUpdatesV4RejectsV2Keys(t *testing.T) {
 	cfg.Variant = commitment.VariantCommitmentV4
 	cfg.NibblesV2 = true
 	require.PanicsWithValue(t, ErrV4RequiresV1Keyed, func() {
-		commitment.InitializeTrieAndUpdates(commitment.ModeUpdate, t.TempDir(), cfg)
+		commitment.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
 	})
 }
 
@@ -85,7 +85,7 @@ func TestTrieDeferredUpdatesWaitForApply(t *testing.T) {
 	trie.ResetContext(ctx)
 	trie.SetDeferCommitmentUpdates(true)
 
-	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
 	address := bytes.Repeat([]byte{0x11}, 20)
 	account := fullAccountUpdate(3, 5, common.HexToHash("0x1234"))
 	updates.TouchPlainKeyDirect(string(address), &account)
@@ -106,5 +106,5 @@ func TestTrieProcessRejectsWrongUpdateMode(t *testing.T) {
 	updates := commitment.NewUpdates(commitment.ModeDirect, t.TempDir(), commitment.KeyToHexNibbleHash)
 
 	_, err := trie.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
-	require.EqualError(t, err, "commitment v4: Process requires ModeUpdate updates")
+	require.EqualError(t, err, "commitment v4: Process requires ModeCollect updates")
 }

@@ -57,8 +57,8 @@ func oneSlotPerAccount(t *testing.T, n1, n2 int, seed int64, mode string) (m1, m
 		}
 		return out
 	}
-	mk := func(es []parityUpdate) *commitment.Updates {
-		u := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	mk := func(mode commitment.Mode, es []parityUpdate) *commitment.Updates {
+		u := commitment.NewUpdates(mode, t.TempDir(), commitment.KeyToHexNibbleHash)
 		for _, e := range es {
 			u.TouchPlainKeyDirect(string(e.key), e.update)
 		}
@@ -73,12 +73,12 @@ func oneSlotPerAccount(t *testing.T, n1, n2 int, seed int64, mode string) (m1, m
 	ctx := context.Background()
 
 	b1 := build(0, n1, 0)
-	v1, err := tr.Process(ctx, mk(b1), "", nil, commitment.WarmupConfig{})
+	v1, err := tr.Process(ctx, mk(commitment.ModeCollect, b1), "", nil, commitment.WarmupConfig{})
 	if err != nil {
 		return false, false, err
 	}
 	zzSeed(ch, b1)
-	h1, err := hph.Process(ctx, mk(b1), "", nil, commitment.WarmupConfig{})
+	h1, err := hph.Process(ctx, mk(commitment.ModeUpdate, b1), "", nil, commitment.WarmupConfig{})
 	if err != nil {
 		return false, false, err
 	}
@@ -90,12 +90,12 @@ func oneSlotPerAccount(t *testing.T, n1, n2 int, seed int64, mode string) (m1, m
 	} else {
 		b2 = build(0, n2, 1)
 	}
-	v2, err := tr.Process(ctx, mk(b2), "", nil, commitment.WarmupConfig{})
+	v2, err := tr.Process(ctx, mk(commitment.ModeCollect, b2), "", nil, commitment.WarmupConfig{})
 	if err != nil {
 		return m1, false, err
 	}
 	zzSeed(ch, b2)
-	h2, err := hph.Process(ctx, mk(b2), "", nil, commitment.WarmupConfig{})
+	h2, err := hph.Process(ctx, mk(commitment.ModeUpdate, b2), "", nil, commitment.WarmupConfig{})
 	if err != nil {
 		return m1, false, err
 	}

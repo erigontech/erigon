@@ -252,7 +252,7 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 		ctx.pendingCfg = cfg
 	}
 	if variant == commitment.VariantCommitmentV4 {
-		mode = commitment.ModeUpdate
+		mode = commitment.ModeCollect
 	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx

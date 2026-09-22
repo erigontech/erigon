@@ -125,8 +125,8 @@ func linkedNodeCount(n *node) int {
 		return 0
 	}
 	count := 1
-	for _, child := range n.children {
-		count += linkedNodeCount(child)
+	for i := range n.slots {
+		count += linkedNodeCount(n.slots[i].node)
 	}
 	return count
 }

@@ -38,8 +38,8 @@ type warmupTraceContext struct {
 
 func (c *warmupTraceContext) Branch(key []byte) ([]byte, kv.Step, error) {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.keys = append(c.keys, bytes.Clone(key))
-	c.mu.Unlock()
 	return c.PatriciaContext.Branch(key)
 }
 
@@ -51,6 +51,44 @@ func (c *warmupTraceContext) branchKeys() [][]byte {
 		keys[i] = bytes.Clone(key)
 	}
 	return keys
+}
+
+type warmupSafeContext struct {
+	ctx commitment.PatriciaContext
+	mu  sync.Mutex
+}
+
+func (c *warmupSafeContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	data, step, err := c.ctx.Branch(key)
+	return bytes.Clone(data), step, err
+}
+
+func (c *warmupSafeContext) PutBranch(key, data, prev []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.ctx.PutBranch(key, data, prev)
+}
+
+func (c *warmupSafeContext) Account(key []byte) (*commitment.Update, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	update, err := c.ctx.Account(key)
+	if update == nil {
+		return nil, err
+	}
+	return update.Copy(), err
+}
+
+func (c *warmupSafeContext) Storage(key []byte) (*commitment.Update, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	update, err := c.ctx.Storage(key)
+	if update == nil {
+		return nil, err
+	}
+	return update.Copy(), err
 }
 
 func TestTrieProcessStartsWarmuperWhenEnabled(t *testing.T) {
@@ -76,6 +114,29 @@ func TestTrieProcessStartsWarmuperWhenEnabled(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, int32(1), factoryCalls.Load())
+}
+
+func TestPartitionUpdatesDrivesWarmuper(t *testing.T) {
+	updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+	address := make([]byte, 20)
+	address[0] = 1
+	update := fullAccountUpdate(1, 2, common.Hash{})
+	updates.TouchPlainKeyDirect(string(address), &update)
+
+	warmupCtx := newMockContext()
+	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
+		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return warmupCtx, nil },
+		NumWorkers: 1,
+		MaxDepth:   commitment.WarmupMaxDepth,
+		Key:        warmupKeyV4,
+		Step:       warmupStepV4,
+	})
+	w.Start()
+	_, _, _, err := partitionUpdates(context.Background(), updates, 1, w)
+	require.NoError(t, err)
+	require.NoError(t, w.WaitBufferFree(0))
+	w.CloseAndWait()
+	require.NotEmpty(t, warmupCtx.branchCalls)
 }
 
 func TestWarmupV4KeyAndStepAccountDescent(t *testing.T) {
@@ -168,7 +229,7 @@ func TestWarmupV4StepUsesPlaneDepthAndExtensionLength(t *testing.T) {
 	require.Equal(t, 67, nextDepth)
 }
 
-func TestWarmupV4KeyScratchReuse(t *testing.T) {
+func TestWarmupV4KeyShapes(t *testing.T) {
 	hashedKey := bytes.Repeat([]byte{0x0b}, 128)
 	var scratch [66]byte
 	for _, depth := range []int{1, 2, 63, 64, 65, 128} {
@@ -186,10 +247,6 @@ func TestWarmupV4KeyScratchReuse(t *testing.T) {
 		}
 	}
 
-	allocs := testing.AllocsPerRun(100, func() {
-		_, _ = warmupKeyV4(hashedKey, 65, scratch[:])
-	})
-	require.Zero(t, allocs)
 }
 
 func TestWarmupV4RecordsFound(t *testing.T) {
@@ -277,7 +334,7 @@ func TestWarmupV4ReadsStoragePlaneRecord(t *testing.T) {
 func TestWarmupV4StorageDescentReachesBeyondRoot(t *testing.T) {
 	trie, initial := NewTrie(t.TempDir(), commitment.TrieConfig{})
 	trieCtx := newMockContext()
-	safeCtx := &lockedPatriciaContext{ctx: trieCtx}
+	safeCtx := &warmupSafeContext{ctx: trieCtx}
 	trie.ResetContext(safeCtx)
 
 	address := bytes.Repeat([]byte{0x11}, 20)
@@ -309,7 +366,7 @@ func TestWarmupV4StorageDescentReachesBeyondRoot(t *testing.T) {
 	require.NoError(t, err)
 
 	traceCtx := &warmupTraceContext{PatriciaContext: safeCtx}
-	next := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	next := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
 	next.TouchPlainKeyDirect(string(address), &account)
 	for _, storageKey := range storageKeys {
 		next.TouchPlainKeyDirect(string(storageKey), phaseAStorageUpdate([]byte{2}))

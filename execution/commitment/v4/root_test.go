@@ -56,9 +56,9 @@ func TestRootExtensionInsertDivergenceKeepsChildBody(t *testing.T) {
 
 			require.NoError(t, insertRoot(n, incoming, []byte{0x42}))
 			require.Zero(t, n.path)
-			require.Equal(t, hash, n.childHash[2])
-			require.Equal(t, []byte{3, 4, 5, 6}, n.childExt[2])
-			require.Equal(t, []byte{0x42}, n.leafValue[9])
+			require.Equal(t, hash, n.childHashAt(2))
+			require.Equal(t, []byte{3, 4, 5, 6}, n.childExtAt(2))
+			require.Equal(t, []byte{0x42}, n.leafValueAt(9))
 			data := encodeRecord(n, 0, nil)
 			require.NoError(t, Validate(data, 0))
 			require.Equal(t, byte(hdrHasChildExt), data[0])
@@ -78,8 +78,8 @@ func TestRootCollapseRewritesOnlyTheRoot(t *testing.T) {
 
 			require.NoError(t, removeRoot(n, removed))
 			require.Equal(t, []byte{3, 4, 5}, n.path)
-			require.Equal(t, hash, n.childHash[3])
-			require.Empty(t, n.childExt[3])
+			require.Equal(t, hash, n.childHashAt(3))
+			require.Empty(t, n.childExtAt(3))
 			data := encodeRecord(n, 0, nil)
 			require.NoError(t, Validate(data, 0))
 			require.Equal(t, []byte{3, 4, 5}, unpackPath(NewRecord(data, 0).SelfExt()[1:], 3, nil))

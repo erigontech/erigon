@@ -181,8 +181,8 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		if NewCommitmentV4Trie == nil {
 			panic("commitment v4 selected without importing execution/commitment/v4")
 		}
-		if mode != ModeUpdate {
-			panic(fmt.Sprintf("commitment v4 requires ModeUpdate, got %s mode", mode))
+		if mode != ModeCollect {
+			panic(fmt.Sprintf("commitment v4 requires ModeCollect, got %s mode", mode))
 		}
 		return NewCommitmentV4Trie(tmpdir, cfg)
 	case VariantParallelHexPatricia:
@@ -1342,6 +1342,7 @@ const (
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
 	ModeParallel Mode = 3
+	ModeCollect  Mode = 4
 )
 
 func (m Mode) String() string {
@@ -1354,6 +1355,8 @@ func (m Mode) String() string {
 		return "update"
 	case ModeParallel:
 		return "parallel"
+	case ModeCollect:
+		return "collect"
 	default:
 		return "unknown"
 	}
@@ -1442,6 +1445,8 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
 		t.parallel = newParallelUpdate()
+	case ModeCollect:
+		t.treeIdx = make(map[string]*KeyUpdate)
 	}
 	return t
 }
@@ -1464,6 +1469,10 @@ func (t *Updates) SetMode(m Mode) {
 		}
 		if t.parallel == nil {
 			t.parallel = newParallelUpdate()
+		}
+	case ModeCollect:
+		if t.treeIdx == nil {
+			t.treeIdx = make(map[string]*KeyUpdate)
 		}
 	}
 	t.Reset()
@@ -1532,6 +1541,8 @@ func (t *Updates) Size() (updates uint64) {
 		return uint64(len(t.keys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
+	case ModeCollect:
+		return uint64(len(t.treeIdx))
 	default:
 		return 0
 	}
@@ -1566,6 +1577,13 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		ik := t.parallel.internKey(keyBytes)
 		t.keys[key] = struct{}{}
 		t.parallel.Insert(hashedKey, ik, nil)
+	case ModeCollect:
+		existing, ok := t.treeIdx[key]
+		if !ok {
+			existing = &KeyUpdate{plainKey: key, update: new(Update)}
+			t.treeIdx[key] = existing
+		}
+		fn(existing, val)
 	default:
 	}
 }
@@ -1578,29 +1596,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
-			if update.Flags&DeleteUpdate != 0 {
-				existing.update.Flags = DeleteUpdate
-				existing.update.CodeHash = empty.CodeHash
-			} else {
-				existing.update.Flags &^= DeleteUpdate
-				if update.Flags&BalanceUpdate != 0 {
-					existing.update.Balance.Set(&update.Balance)
-					existing.update.Flags |= BalanceUpdate
-				}
-				if update.Flags&NonceUpdate != 0 {
-					existing.update.Nonce = update.Nonce
-					existing.update.Flags |= NonceUpdate
-				}
-				if update.Flags&CodeUpdate != 0 {
-					existing.update.CodeHash = update.CodeHash
-					existing.update.Flags |= CodeUpdate
-				}
-				if update.Flags&StorageUpdate != 0 {
-					existing.update.Storage = update.Storage
-					existing.update.StorageLen = update.StorageLen
-					existing.update.Flags |= StorageUpdate
-				}
-			}
+			mergeUpdateInto(existing.update, update)
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
@@ -1627,8 +1623,56 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			t.keys[key] = struct{}{}
 		}
 		t.parallel.Insert(hashedKey, ik, u)
+	case ModeCollect:
+		existing, ok := t.treeIdx[key]
+		if !ok {
+			existing = &KeyUpdate{plainKey: key, update: new(Update)}
+			t.treeIdx[key] = existing
+			*existing.update = *update
+			return
+		}
+		mergeUpdateInto(existing.update, update)
 	default:
 	}
+}
+
+func mergeUpdateInto(existing, update *Update) {
+	if update.Flags&DeleteUpdate != 0 {
+		existing.Flags = DeleteUpdate
+		existing.CodeHash = empty.CodeHash
+		return
+	}
+	existing.Flags &^= DeleteUpdate
+	if update.Flags&BalanceUpdate != 0 {
+		existing.Balance.Set(&update.Balance)
+		existing.Flags |= BalanceUpdate
+	}
+	if update.Flags&NonceUpdate != 0 {
+		existing.Nonce = update.Nonce
+		existing.Flags |= NonceUpdate
+	}
+	if update.Flags&CodeUpdate != 0 {
+		existing.CodeHash = update.CodeHash
+		existing.Flags |= CodeUpdate
+	}
+	if update.Flags&StorageUpdate != 0 {
+		existing.Storage = update.Storage
+		existing.StorageLen = update.StorageLen
+		existing.Flags |= StorageUpdate
+	}
+}
+
+func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
+	if t.mode != ModeCollect {
+		return fmt.Errorf("commitment: Drain requires ModeCollect, got %s", t.mode)
+	}
+	for key, item := range t.treeIdx {
+		if err := fn(key, item.update); err != nil {
+			return err
+		}
+	}
+	clear(t.treeIdx)
+	return nil
 }
 
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
@@ -1928,6 +1972,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			}
 		}
 		t.tree.Clear(true)
+
+	case ModeCollect:
+		return errors.New("commitment: ModeCollect has no HashSort; use Drain")
 
 	default:
 		return nil

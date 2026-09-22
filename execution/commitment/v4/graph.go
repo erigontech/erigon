@@ -29,23 +29,22 @@ type graph struct {
 	addrHash []byte
 	errKey   error
 	errNode  error
-	scratch  *unfoldScratch
 }
 
 func accountGraph() graph {
-	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord, scratch: &unfoldScratch{}}
+	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord}
 }
 
 func storageGraph(addrHash []byte) graph {
-	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage, scratch: &unfoldScratch{}}
+	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage}
 }
 
 func (g graph) nodeKey(path []byte) []byte {
-	return nodeKey(g.plane, g.addrHash, path, nil, nil)
+	return nodeKey(g.plane, g.addrHash, path, nil)
 }
 
 func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, error) {
-	child, err := unfold(ctx, path, g.plane, g.addrHash, g.scratch)
+	child, err := unfold(ctx, path, g.plane, g.addrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -70,10 +69,10 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	bit := uint16(1) << nib
 	if len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
 		nib = bits.TrailingZeros16(n.childMask)
-		if child := n.children[nib]; child != nil && bytes.Equal(child.path, n.path) {
+		if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
 			return g.ensurePath(ctx, child, path)
 		}
-		if len(n.childHash[nib]) != 32 {
+		if len(n.childHashAt(nib)) != 32 {
 			return g.errNode
 		}
 		child, err := g.unfoldChild(ctx, n.path)
@@ -86,17 +85,17 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	if n.childMask&bit == 0 || n.leafMask&bit != 0 {
 		return nil
 	}
-	if child := n.children[nib]; child != nil {
+	if child := n.child(nib); child != nil {
 		if !bytes.HasPrefix(path, child.path) {
 			return nil
 		}
 		return g.ensurePath(ctx, child, path)
 	}
-	if len(n.childHash[nib]) != 32 {
+	if len(n.childHashAt(nib)) != 32 {
 		return g.errNode
 	}
 	childPath := append(append([]byte(nil), n.path...), byte(nib))
-	childPath = append(childPath, n.childExt[nib]...)
+	childPath = append(childPath, n.childExtAt(nib)...)
 	if !bytes.HasPrefix(path, childPath) {
 		return nil
 	}
@@ -125,16 +124,16 @@ func (g graph) reachableRecordKeys(root *node) map[string]struct{} {
 			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
 				continue
 			}
-			if child := n.children[nib]; child != nil {
+			if child := n.child(nib); child != nil {
 				visit(child, false)
 				continue
 			}
-			if len(n.childHash[nib]) == 32 {
+			if len(n.childHashAt(nib)) == 32 {
 				childPath := append([]byte(nil), n.path...)
 				if isRoot && len(n.path) == 0 {
 					childPath = append(childPath, byte(nib))
 				}
-				childPath = append(childPath, n.childExt[nib]...)
+				childPath = append(childPath, n.childExtAt(nib)...)
 				keys[string(g.nodeKey(childPath))] = struct{}{}
 			}
 		}
@@ -161,9 +160,9 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, before m
 			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
 				continue
 			}
-			child := n.children[nib]
+			child := n.child(nib)
 			if child == nil {
-				if len(n.childHash[nib]) != 32 {
+				if len(n.childHashAt(nib)) != 32 {
 					return [32]byte{}, g.errNode
 				}
 				continue
@@ -172,13 +171,11 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, before m
 			if err != nil {
 				return [32]byte{}, err
 			}
-			n.childHash[nib] = appendCopy(n.childHash[nib], childHash[:])
 			var ext []byte
 			if !(n == root && len(n.path) != 0 && bytes.Equal(child.path, n.path)) {
 				ext = child.path[len(n.path)+1:]
 			}
-			n.childExt[nib] = appendCopy(n.childExt[nib], ext)
-			n.children[nib] = nil
+			n.setStoredChild(nib, childHash[:], ext)
 		}
 		path := n.path
 		depth := len(path)

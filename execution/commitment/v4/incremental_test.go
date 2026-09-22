@@ -50,9 +50,9 @@ func TestIncrementalReloadAndBulkParity(t *testing.T) {
 
 	for batchIndex, batch := range batches {
 		setIncrementalState(ctxHPH, batch)
-		rootV4, err := v4.Process(context.Background(), incrementalUpdates(t, batch), "", nil, commitment.WarmupConfig{})
+		rootV4, err := v4.Process(context.Background(), incrementalUpdates(t, commitment.ModeCollect, batch), "", nil, commitment.WarmupConfig{})
 		require.NoErrorf(t, err, "v4 batch %d", batchIndex+1)
-		rootHPH, err := hph.Process(context.Background(), incrementalUpdates(t, batch), "", nil, commitment.WarmupConfig{})
+		rootHPH, err := hph.Process(context.Background(), incrementalUpdates(t, commitment.ModeUpdate, batch), "", nil, commitment.WarmupConfig{})
 		require.NoError(t, err)
 		require.Equal(t, rootHPH, rootV4, "batch %d", batchIndex+1)
 		require.Zero(t, ctxV4.accountCalls)
@@ -66,7 +66,7 @@ func TestIncrementalReloadAndBulkParity(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(batchIndex+1), blockNum)
 		require.Equal(t, uint64(batchIndex+1), txNum)
-		reloadedRoot, err := reloaded.Process(context.Background(), commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash), "", nil, commitment.WarmupConfig{})
+		reloadedRoot, err := reloaded.Process(context.Background(), commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash), "", nil, commitment.WarmupConfig{})
 		require.NoError(t, err)
 		require.Equal(t, rootV4, reloadedRoot, "reloaded batch %d", batchIndex+1)
 		require.Zero(t, ctxV4.accountCalls)
@@ -78,7 +78,7 @@ func TestIncrementalReloadAndBulkParity(t *testing.T) {
 	bulkContext := newParityContext()
 	bulk := &Trie{}
 	bulk.ResetContext(bulkContext)
-	_, err := bulk.Process(context.Background(), incrementalUpdates(t, final), "", nil, commitment.WarmupConfig{})
+	_, err := bulk.Process(context.Background(), incrementalUpdates(t, commitment.ModeCollect, final), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	require.Equal(t, incrementalRecords, liveBranches(bulkContext))
 	require.Equal(t, mustRoot(t, v4), mustRoot(t, bulk))
@@ -98,10 +98,10 @@ func TestIncrementalUnwindAndReexecute(t *testing.T) {
 	})
 
 	setIncrementalState(ctxHPH, final)
-	rootV4, err := v4.Process(context.Background(), incrementalUpdates(t, final), "", nil, commitment.WarmupConfig{})
+	rootV4, err := v4.Process(context.Background(), incrementalUpdates(t, commitment.ModeCollect, final), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	initialRoot := bytes.Clone(rootV4)
-	rootHPH, err := hph.Process(context.Background(), incrementalUpdates(t, final), "", nil, commitment.WarmupConfig{})
+	rootHPH, err := hph.Process(context.Background(), incrementalUpdates(t, commitment.ModeUpdate, final), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	require.Equal(t, rootHPH, rootV4)
 
@@ -113,17 +113,17 @@ func TestIncrementalUnwindAndReexecute(t *testing.T) {
 		deletes = append(deletes, incrementalOp{key: op.key, update: incrementalDeleteUpdate()})
 	}
 	setIncrementalState(ctxHPH, deletes)
-	rootV4, err = v4.Process(context.Background(), incrementalUpdates(t, deletes), "", nil, commitment.WarmupConfig{})
+	rootV4, err = v4.Process(context.Background(), incrementalUpdates(t, commitment.ModeCollect, deletes), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
-	rootHPH, err = hph.Process(context.Background(), incrementalUpdates(t, deletes), "", nil, commitment.WarmupConfig{})
+	rootHPH, err = hph.Process(context.Background(), incrementalUpdates(t, commitment.ModeUpdate, deletes), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	require.Equal(t, rootHPH, rootV4)
 	require.Equal(t, empty.RootHash, common.BytesToHash(rootV4))
 
 	setIncrementalState(ctxHPH, final)
-	rootV4, err = v4.Process(context.Background(), incrementalUpdates(t, final), "", nil, commitment.WarmupConfig{})
+	rootV4, err = v4.Process(context.Background(), incrementalUpdates(t, commitment.ModeCollect, final), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
-	rootHPH, err = hph.Process(context.Background(), incrementalUpdates(t, final), "", nil, commitment.WarmupConfig{})
+	rootHPH, err = hph.Process(context.Background(), incrementalUpdates(t, commitment.ModeUpdate, final), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 	require.Equal(t, rootHPH, rootV4)
 	require.Equal(t, initialRoot, rootV4)
@@ -164,9 +164,9 @@ func incrementalBatches() ([][]incrementalOp, []incrementalOp) {
 	return [][]incrementalOp{batch1, batch2, batch3}, final
 }
 
-func incrementalUpdates(t *testing.T, ops []incrementalOp) *commitment.Updates {
+func incrementalUpdates(t *testing.T, mode commitment.Mode, ops []incrementalOp) *commitment.Updates {
 	t.Helper()
-	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	updates := commitment.NewUpdates(mode, t.TempDir(), commitment.KeyToHexNibbleHash)
 	for _, op := range ops {
 		if op.read {
 			updates.TouchPlainKey(string(op.key), nil, func(*commitment.KeyUpdate, []byte) {})

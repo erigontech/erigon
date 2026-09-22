@@ -26,7 +26,7 @@ func oneAccountNSlots(t *testing.T, n int, seed int64) error {
 	tr := &Trie{}
 	tr.ResetContext(c)
 	defer tr.Release()
-	u := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
+	u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
 	for _, e := range entries {
 		u.TouchPlainKeyDirect(string(e.key), e.update)
 	}

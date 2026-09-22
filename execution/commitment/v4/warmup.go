@@ -21,13 +21,12 @@ func warmupKeyV4(hashedKey []byte, depth int, dst []byte) ([]byte, bool) {
 		return nil, false
 	}
 
-	var packScratch [32]byte
 	if len(hashedKey) > 64 && depth >= 64 {
 		var addrHash [32]byte
-		copy(addrHash[:], packPath(hashedKey[:64], packScratch[:0]))
-		return nodeKey(tagStorageNode, addrHash[:], hashedKey[64:depth], dst[:0], packScratch[:0]), true
+		copy(addrHash[:], packPath(hashedKey[:64], nil))
+		return nodeKey(tagStorageNode, addrHash[:], hashedKey[64:depth], dst[:0]), true
 	}
-	return nodeKey(tagAccountNode, nil, hashedKey[:depth], dst[:0], packScratch[:0]), true
+	return nodeKey(tagAccountNode, nil, hashedKey[:depth], dst[:0]), true
 }
 
 func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) {
