@@ -169,6 +169,14 @@ var messageCorpus = []string{
 	// empty and odd values
 	`{"method":"","id":1}`,
 	`{"":1,"method":"m"}`,
+	// string fields that are not plain ASCII text, or not strings at all
+	`{"method":"a","method":null,"id":1}`,
+	`{"jsonrpc":"2.0","jsonrpc":null}`,
+	`{"method":5,"id":1}`,
+	`{"jsonrpc":2.0,"method":["m"]}`,
+	`{"method":"caf\u00e9","id":1}`,
+	"{\"method\":\"caf\u00e9\",\"id\":1}",
+	"{\"method\":\"\xff\",\"id\":1}",
 	// not an object at all
 	`1`,
 	`"str"`,

@@ -490,18 +490,11 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 		}
 		switch string(key) {
 		case "jsonrpc":
-			// The decoded fields go through encoding/json, which unescapes the
-			// strings. A value that does not decode zeroes the field, so a
-			// repeated key cannot leave an earlier value standing.
-			if json.Unmarshal(value, &msg.Version) != nil {
-				msg.Version = ""
-			}
+			decodeStringField(value, &msg.Version)
 		case "id":
 			msg.ID = value
 		case "method":
-			if json.Unmarshal(value, &msg.Method) != nil {
-				msg.Method = ""
-			}
+			decodeStringField(value, &msg.Method)
 		case "params":
 			msg.Params = value
 		case "error":
@@ -512,6 +505,29 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 			msg.Result = value
 		}
 	})
+}
+
+// decodeStringField sets dst to a JSON string's text as encoding/json would, which unescapes it
+// and replaces invalid UTF-8. Plain printable ASCII is its own text, so it skips the decoder. A
+// value that does not decode zeroes dst, so a repeated key cannot leave an earlier value standing.
+func decodeStringField(value []byte, dst *string) {
+	if len(value) >= 2 && value[0] == '"' {
+		text := value[1 : len(value)-1]
+		plain := true
+		for _, c := range text {
+			if c < 0x20 || c >= 0x80 || c == '\\' {
+				plain = false
+				break
+			}
+		}
+		if plain {
+			*dst = string(text)
+			return
+		}
+	}
+	if json.Unmarshal(value, dst) != nil {
+		*dst = ""
+	}
 }
 
 // isBatch returns true when the first non-whitespace characters is '['
