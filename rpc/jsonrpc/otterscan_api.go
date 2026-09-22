@@ -288,7 +288,7 @@ func delegateGetBlockByNumber(tx kv.Tx, b *types.Block, number rpc.BlockNumber, 
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	txCount := hexutil.Uint64(b.Transactions().Len())
+	txCount := uint64(b.Transactions().Len())
 	response.TransactionCount = &txCount
 
 	if number == rpc.PendingBlockNumber {

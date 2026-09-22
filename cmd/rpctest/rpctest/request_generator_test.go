@@ -650,8 +650,8 @@ func logMatchesFilter(l *Log, addresses []common.Address, topics [][]common.Hash
 	return true
 }
 
-func TestOtsFullBlockDecodesHexTransactionCount(t *testing.T) {
+func TestOtsFullBlockDecodesTransactionCount(t *testing.T) {
 	var b OtsFullBlock
-	require.NoError(t, json.Unmarshal([]byte(`{"transactionCount":"0x5"}`), &b))
-	require.Equal(t, hexutil.Uint64(5), b.TransactionCount)
+	require.NoError(t, json.Unmarshal([]byte(`{"transactionCount":5}`), &b))
+	require.Equal(t, uint64(5), b.TransactionCount)
 }

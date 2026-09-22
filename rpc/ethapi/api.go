@@ -429,9 +429,9 @@ type RPCBlock struct {
 	Uncles       []common.Hash      `json:"uncles"`
 	Withdrawals  *types.Withdrawals `json:"withdrawals,omitempty"`
 
-	TransactionCount *hexutil.Uint64 `json:"transactionCount,omitempty"`
-	TotalDifficulty  *hexutil.U256   `json:"totalDifficulty,omitempty"`
-	Calls            []CallResult    `json:"calls,omitzero"`
+	TransactionCount *uint64       `json:"transactionCount,omitempty"`
+	TotalDifficulty  *hexutil.U256 `json:"totalDifficulty,omitempty"`
+	Calls            []CallResult  `json:"calls,omitzero"`
 }
 
 // CallResult represents the result of a single call in the simulation.

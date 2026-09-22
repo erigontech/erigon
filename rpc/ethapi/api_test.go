@@ -415,7 +415,7 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 	withTx := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{}, nil)
 	empty := types.NewBlock(header, nil, nil, nil, nil, nil)
 
-	count := hexutil.Uint64(1)
+	count := uint64(1)
 	for _, tc := range []struct {
 		name string
 		b    *RPCBlock
@@ -541,4 +541,10 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 			require.Equal(t, string(want), fastJSON(t, txn))
 		})
 	}
+}
+
+// ots_getBlockDetails and ots_getBlockTransactions write transactionCount as a JSON number.
+func TestRPCBlockTransactionCountIsANumber(t *testing.T) {
+	n := uint64(15)
+	require.Contains(t, fastJSON(t, &RPCBlock{TransactionCount: &n}), `"transactionCount":15`)
 }
