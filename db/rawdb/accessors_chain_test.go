@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -382,6 +383,21 @@ func TestTxnByIdxInBlock(t *testing.T) {
 }
 
 // Tests block header storage and retrieval operations.
+// A header read by its hash keeps that hash, so Hash() does not hash the RLP again. The header is
+// stored under a key that is not its RLP hash here, which only a kept hash can return.
+func TestReadHeaderKeepsStoredHash(t *testing.T) {
+	_, tx := mdbxtest.NewTestTx(t)
+	header := &types.Header{Number: *uint256.NewInt(42), Extra: []byte("test header")}
+	enc, err := rlp.EncodeToBytes(header)
+	require.NoError(t, err)
+	storedUnder := common.Hash{0xab}
+	require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(42, storedUnder), enc))
+
+	read := rawdb.ReadHeader(tx, storedUnder, 42)
+	require.NotNil(t, read)
+	require.Equal(t, storedUnder, read.Hash())
+}
+
 func TestHeaderStorage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
