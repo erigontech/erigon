@@ -3005,8 +3005,7 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3106,8 +3105,7 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("c87f65ff3f271bf5dc8643484f66b200109caffe4bf98c4cb393dc35740b28c0")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3206,8 +3204,7 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	auraCfg := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(auraCfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	auraCfg := chain.AllProtocolChanges.Copy()
 	auraCfg.CancunTime = nil
 	auraCfg.PragueTime = nil
 	auraCfg.OsakaTime = nil
@@ -3285,8 +3282,7 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3380,8 +3376,7 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
