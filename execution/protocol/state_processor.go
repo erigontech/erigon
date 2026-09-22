@@ -56,7 +56,8 @@ func SetGasUsed(h *types.Header, gu *GasUsed) {
 // indicating the block was invalid.
 func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
-	evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+	evm *vm.EVM, cfg vm.Config,
+) (*types.Receipt, error) {
 	var (
 		receipt *types.Receipt
 		err     error

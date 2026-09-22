@@ -1146,7 +1146,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
-	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
+	b.header.mutable = false // Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
 
@@ -1155,6 +1155,13 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 	b := NewBlock(header, txs, uncles, receipts, withdrawals, bal)
 	b.header.mutable = true
 	return b
+}
+
+// NewHeaderFromStorage caches hash, the key the header was read under, so Hash() does not hash
+// the RLP again.
+func NewHeaderFromStorage(hash common.Hash, header *Header) *Header {
+	header.hash.Store(&hash)
+	return header
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
@@ -1404,6 +1411,7 @@ func (b *Block) Body() *Body {
 	bd.SendersFromTxs()
 	return bd
 }
+
 func (b *Block) SendersToTxs(senders []common.Address) {
 	if len(senders) == 0 {
 		return

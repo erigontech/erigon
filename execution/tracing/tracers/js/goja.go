@@ -57,9 +57,11 @@ func init() {
 // hex strings into big ints.
 var bigIntProgram = goja.MustCompile("bigInt", bigIntegerJS, false)
 
-type toBigFn = func(vm *goja.Runtime, val string) (goja.Value, error)
-type toBufFn = func(vm *goja.Runtime, val []byte) (goja.Value, error)
-type fromBufFn = func(vm *goja.Runtime, buf goja.Value, allowString bool) ([]byte, error)
+type (
+	toBigFn   = func(vm *goja.Runtime, val string) (goja.Value, error)
+	toBufFn   = func(vm *goja.Runtime, val []byte) (goja.Value, error)
+	fromBufFn = func(vm *goja.Runtime, buf goja.Value, allowString bool) ([]byte, error)
+)
 
 func toBuf(vm *goja.Runtime, bufType goja.Value, val []byte) (goja.Value, error) {
 	// bufType is usually Uint8Array. This is equivalent to `new Uint8Array(val)` in JS.
@@ -780,7 +782,7 @@ func (do *dbObj) GetState(addrSlice goja.Value, hashSlice goja.Value) goja.Value
 		return nil
 	}
 	hash := accounts.InternKey(common.BytesToHash(h))
-	var outValue, _ = do.ibs.GetState(addr, hash)
+	outValue, _ := do.ibs.GetState(addr, hash)
 	res, err := do.toBuf(do.vm, outValue.PaddedBytes(32))
 	if err != nil {
 		do.vm.Interrupt(err)

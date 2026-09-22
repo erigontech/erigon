@@ -70,7 +70,7 @@ type History struct {
 }
 
 func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs datadir.Dirs, logger log.Logger) (*History, error) {
-	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
+	// if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	if cfg.Accessors == 0 {
 		cfg.Accessors = statecfg.AccessorHashMap
 	}
@@ -100,9 +100,11 @@ func NewHistory(cfg statecfg.HistCfg, stepSize, stepsInFrozenFile uint64, dirs d
 func (h *History) vFileName(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("%s-%s.%d-%d.v", h.FileVersion.DataV.String(), h.FilenameBase, fromStep, toStep)
 }
+
 func (h *History) vNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(h.dirs.SnapHistory, h.vFileName(fromStep, toStep))
 }
+
 func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.FileVersion.AccessorVI.String(), h.FilenameBase, fromStep, toStep))
 }
@@ -110,6 +112,7 @@ func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
 }
+
 func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
 }
@@ -500,7 +503,6 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 }
 
 func (w *historyBufferedWriter) init() {
-
 }
 
 func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
@@ -905,6 +907,7 @@ func (h *History) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(f.MakeGetter(), h.Compression)
 }
+
 func (h *History) dataWriter(ctx context.Context, f *seg.Compressor) *seg.PagedWriter {
 	if !strings.Contains(f.FileName(), ".v") {
 		panic("assert: miss-use " + f.FileName())
@@ -970,12 +973,10 @@ func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
 
 func (h *History) initFilesRo(ht *HistoryRoTx, iit *InvertedIndexRoTx, files visibleFiles, iv *iiVisible) {
 	h.InvertedIndex.initFilesRo(iit, iv)
-	*ht = HistoryRoTx{
-		h:        h,
-		iit:      iit,
-		files:    files,
-		stepSize: h.stepSize,
-	}
+	ht.h = h
+	ht.iit = iit
+	ht.files = files
+	ht.stepSize = h.stepSize
 }
 
 func (ht *HistoryRoTx) statelessGetter(i int) *seg.Reader {
@@ -1005,7 +1006,7 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		ht.readers = make([]*recsplit.IndexReader, len(ht.files))
 	}
 	{
-		//assert
+		// assert
 		for _, f := range ht.files {
 			if f.src.index == nil {
 				panic("assert: file has nil index " + f.src.decompressor.FileName())
@@ -1045,7 +1046,7 @@ func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo u
 	minTxDB := ht.h.minTxNumInDB(tx)
 	delta := 0.0
 	if txTo > minTxDB {
-		delta = float64(txTo-minTxDB) / float64(ht.stepSize) //TODO: why this is happening?
+		delta = float64(txTo-minTxDB) / float64(ht.stepSize) // TODO: why this is happening?
 	}
 
 	switch ht.h.FilenameBase {
@@ -1240,6 +1241,7 @@ func (ht *HistoryRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	}
 	return ht.valsC, nil
 }
+
 func (ht *HistoryRoTx) valsCursorDup(tx kv.Tx) (c kv.CursorDupSort, err error) {
 	if ht.valsCDup != nil {
 		return ht.valsCDup, nil
@@ -1299,7 +1301,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 		ctx:        ctx, logger: ht.h.logger,
 	}
 	if err := hi.init(ht.iit.files); err != nil {
-		hi.Close() //it's responsibility of constructor (our) to close resource on error
+		hi.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 
@@ -1316,7 +1318,7 @@ func (ht *HistoryRoTx) RangeAsOf(ctx context.Context, startTxNum uint64, from, t
 	}
 	binary.BigEndian.PutUint64(dbit.startTxKey[:], dbStartTxNum)
 	if err := dbit.advance(); err != nil {
-		dbit.Close() //it's responsibility of constructor (our) to close resource on error
+		dbit.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 
@@ -1370,7 +1372,7 @@ func (ht *HistoryRoTx) iterateChangedFrozen(fromTxNum, toTxNum int, asc order.By
 		}
 	}
 	if err := s.advance(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -1399,7 +1401,7 @@ func (ht *HistoryRoTx) iterateChangedRecent(fromTxNum, toTxNum int, asc order.By
 		binary.BigEndian.PutUint64(s.startTxKey[:], uint64(dbFrom))
 	}
 	if err := s.advance(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -1610,5 +1612,4 @@ func (ht *HistoryRoTx) DebugHistoryTraceKey(ctx context.Context, key []byte, fro
 		return nil, err
 	}
 	return stream.Union2(&files, &db, order.Asc, kv.Unlim), nil
-
 }

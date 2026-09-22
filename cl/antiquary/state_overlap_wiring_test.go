@@ -148,7 +148,8 @@ func overlapStateSnapshots(t *testing.T) (*snapshotsync.CaplinStateSnapshots, da
 		Compression:     map[string]bool{},
 	}
 	stateSn := snapshotsync.NewCaplinStateSnapshots(
-		ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger)
+		ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger,
+	)
 	t.Cleanup(stateSn.Close)
 	require.NoError(t, stateSn.OpenFolder())
 	return stateSn, dirs, subSeg

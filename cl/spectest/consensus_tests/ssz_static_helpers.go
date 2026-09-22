@@ -20,9 +20,11 @@ func (*depositMessage) EncodingSizeSSZ() int     { return 88 }
 func (d *depositMessage) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, d.Pubkey[:], d.WithdrawalCredentials[:], d.Amount)
 }
+
 func (d *depositMessage) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, d.Pubkey[:], d.WithdrawalCredentials[:], &d.Amount)
 }
+
 func (d *depositMessage) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(d.Pubkey[:], d.WithdrawalCredentials[:], d.Amount)
 }
@@ -39,9 +41,11 @@ func (*validatorEth1Block) EncodingSizeSSZ() int     { return 48 }
 func (b *validatorEth1Block) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, b.Timestamp, b.DepositRoot[:], b.DepositCount)
 }
+
 func (b *validatorEth1Block) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, &b.Timestamp, b.DepositRoot[:], &b.DepositCount)
 }
+
 func (b *validatorEth1Block) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.Timestamp, b.DepositRoot[:], b.DepositCount)
 }
@@ -57,9 +61,11 @@ func (*forkData) EncodingSizeSSZ() int     { return 36 }
 func (d *forkData) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, d.CurrentVersion[:], d.GenesisValidatorsRoot[:])
 }
+
 func (d *forkData) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, d.CurrentVersion[:], d.GenesisValidatorsRoot[:])
 }
+
 func (d *forkData) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(d.CurrentVersion[:], d.GenesisValidatorsRoot[:])
 }
@@ -76,9 +82,11 @@ func (*powBlock) EncodingSizeSSZ() int     { return 96 }
 func (b *powBlock) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, b.BlockHash[:], b.ParentHash[:], b.TotalDifficulty[:])
 }
+
 func (b *powBlock) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, b.BlockHash[:], b.ParentHash[:], b.TotalDifficulty[:])
 }
+
 func (b *powBlock) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.BlockHash[:], b.ParentHash[:], b.TotalDifficulty[:])
 }
@@ -94,9 +102,11 @@ func (*signingData) EncodingSizeSSZ() int     { return 64 }
 func (d *signingData) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, d.ObjectRoot[:], d.Domain[:])
 }
+
 func (d *signingData) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, d.ObjectRoot[:], d.Domain[:])
 }
+
 func (d *signingData) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(d.ObjectRoot[:], d.Domain[:])
 }
@@ -114,25 +124,30 @@ func (*partialDataColumnGroupID) Static() bool { return true }
 func (g *partialDataColumnGroupID) SetVersion(version clparams.StateVersion) {
 	g.version = version
 }
+
 func (g *partialDataColumnGroupID) schema() []any {
 	if g.version >= clparams.GloasVersion {
 		return []any{g.BeaconBlockRoot[:], &g.Slot}
 	}
 	return []any{g.BeaconBlockRoot[:]}
 }
+
 func (g *partialDataColumnGroupID) EncodingSizeSSZ() int {
 	if g.version >= clparams.GloasVersion {
 		return 40
 	}
 	return 32
 }
+
 func (g *partialDataColumnGroupID) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, g.schema()...)
 }
+
 func (g *partialDataColumnGroupID) DecodeSSZ(buf []byte, version int) error {
 	g.version = clparams.StateVersion(version)
 	return ssz2.UnmarshalSSZ(buf, version, g.schema()...)
 }
+
 func (g *partialDataColumnGroupID) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(g.schema()...)
 }

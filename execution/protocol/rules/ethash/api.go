@@ -72,7 +72,7 @@ func (api *API) SubmitWork(nonce types.BlockNonce, hash, digest common.Hash) boo
 		return false
 	}
 
-	var errc = make(chan error, 1)
+	errc := make(chan error, 1)
 	select {
 	case api.ethash.remote.submitWorkCh <- &mineResult{
 		nonce:     nonce,
@@ -98,7 +98,7 @@ func (api *API) SubmitHashRate(rate hexutil.Uint64, id common.Hash) bool {
 		return false
 	}
 
-	var done = make(chan struct{}, 1)
+	done := make(chan struct{}, 1)
 	select {
 	case api.ethash.remote.submitRateCh <- &hashrate{done: done, rate: uint64(rate), id: id}:
 	case <-api.ethash.remote.exitCh:
