@@ -255,12 +255,12 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
-	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
+	view, tx, err := api.filters.BeginRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	blockNum, err := rpchelper.GetLatestBlockNumber(tx)
+	blockNum, err := rpchelper.GetLatestBlockNumber(view)
 	if err != nil {
 		return 0, err
 	}

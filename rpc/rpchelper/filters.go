@@ -1181,6 +1181,28 @@ func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
 	return sd.BlockOverlay(), seq
 }
 
+// BeginRoWithOverlay is BeginTemporalRoWithOverlay for reads of plain tables only: it skips the
+// files view a temporal tx opens for the domains. It returns the view to read and the raw tx for
+// the caller to roll back.
+func (ff *Filters) BeginRoWithOverlay(ctx context.Context, db kv.RoDB) (view kv.Tx, raw kv.Tx, err error) {
+	const maxAttempts = 5
+	for attempt := 1; ; attempt++ {
+		overlay, seq := ff.OverlaySnapshot()
+		tx, err := db.BeginRo(ctx) //nolint:gocritic
+		if err != nil {
+			return nil, nil, err
+		}
+		_, current := ff.OverlaySnapshot()
+		if current == seq && overlay != nil {
+			return overlay.NewReadView(tx), tx, nil
+		}
+		if current == seq || attempt == maxAttempts {
+			return tx, tx, nil
+		}
+		tx.Rollback()
+	}
+}
+
 // BeginTemporalRoWithOverlay opens a read tx and pins it to the block overlay
 // published at that moment, as one consistent pair: a commit or (un)publish
 // landing between the overlay capture and the tx open can leave a head block

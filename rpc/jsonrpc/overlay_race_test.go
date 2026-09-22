@@ -2002,7 +2002,18 @@ func (db *beginHookDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, erro
 	return tx, nil
 }
 
-// newCycleHookDB returns a DB whose first BeginTemporalRo runs the
+func (db *beginHookDB) BeginRo(ctx context.Context) (kv.Tx, error) {
+	tx, err := db.TemporalRoDB.BeginRo(ctx) //nolint:gocritic
+	if err != nil {
+		return nil, err
+	}
+	if hookErr := db.hook(); hookErr != nil {
+		db.t.Errorf("begin hook: %v", hookErr)
+	}
+	return tx, nil
+}
+
+// newCycleHookDB returns a DB whose first BeginTemporalRo or BeginRo runs the
 // publish/commit/unpublish cycle (optionally skipping the initial publish):
 // the window closing while a request acquires its tx.
 func newCycleHookDB(h *overlayAheadHarness, publishFirst bool) *beginHookDB {
