@@ -253,6 +253,7 @@ func (p *ParallelPatriciaHashed) Process(
 	defer func() { observeRound(p.metrics, roundStart) }()
 
 	pu := updates.parallel
+	pu.Build()
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
 		// A consumed (or never-touched) collection must return the carried root; folding
 		// an empty base would publish the empty-trie root instead.

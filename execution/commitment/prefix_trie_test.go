@@ -400,7 +400,7 @@ func TestParallelUpdateLifecycle(t *testing.T) {
 
 	t.Run("close", func(t *testing.T) {
 		pu := newParallelUpdate()
-		pu.Insert(nibs(0x01, 0x02), nil, nil)
+		pu.Collect(nibs(0x01, 0x02), nil, nil)
 		pu.deferredCombined = append(pu.deferredCombined, &DeferredBranchUpdate{})
 
 		pu.Close()
@@ -413,9 +413,10 @@ func TestParallelUpdateLifecycle(t *testing.T) {
 func TestParallelUpdateInsertDelegates(t *testing.T) {
 	pu := newParallelUpdate()
 
-	pu.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
-	pu.Insert(nibs(0x01, 0x02, 0x04), nil, nil)
-	pu.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
+	pu.Collect(nibs(0x01, 0x02, 0x03), nil, nil)
+	pu.Collect(nibs(0x01, 0x02, 0x04), nil, nil)
+	pu.Collect(nibs(0x05, 0x06, 0x07), nil, nil)
+	pu.Build()
 
 	expected := newPrefixTrie()
 	expected.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
@@ -431,9 +432,10 @@ func TestParallelUpdateInsertDelegates(t *testing.T) {
 func TestParallelUpdateResetClearsAllState(t *testing.T) {
 	pu := newParallelUpdate()
 
-	pu.Insert(nibs(0x01, 0x02, 0x03), nil, nil)
-	pu.Insert(nibs(0x05, 0x06, 0x07), nil, nil)
+	pu.Collect(nibs(0x01, 0x02, 0x03), nil, nil)
+	pu.Collect(nibs(0x05, 0x06, 0x07), nil, nil)
 	pu.deferredCombined = append(pu.deferredCombined, &DeferredBranchUpdate{})
+	pu.Build()
 
 	require.Equal(t, uint32(2), pu.trie.root.subtreeCount)
 	require.Len(t, pu.deferredCombined, 1)
@@ -444,7 +446,8 @@ func TestParallelUpdateResetClearsAllState(t *testing.T) {
 	assert.Equal(t, 1, pu.trie.arena.nodeCount(), "arena must be reset to a single root node")
 	assert.Empty(t, pu.deferredCombined, "deferredCombined must be cleared")
 
-	pu.Insert(nibs(0x0A, 0x0B), nil, nil)
+	pu.Collect(nibs(0x0A, 0x0B), nil, nil)
+	pu.Build()
 	assert.Equal(t, uint32(1), pu.trie.root.subtreeCount)
 }
 

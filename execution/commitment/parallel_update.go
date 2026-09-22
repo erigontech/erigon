@@ -47,6 +47,9 @@ func (a *plainKeyArena) reset() { a.buf = a.buf[:0] }
 type parallelUpdate struct {
 	trie *prefixTrie
 
+	pending  presorter
+	memLimit int
+
 	deferredMu       sync.Mutex
 	deferredCombined []*DeferredBranchUpdate
 
@@ -55,13 +58,36 @@ type parallelUpdate struct {
 
 func newParallelUpdate() *parallelUpdate {
 	return &parallelUpdate{
-		trie: newPrefixTrie(),
+		trie:     newPrefixTrie(),
+		memLimit: defaultDirectMemLimit,
 	}
 }
 
-// Insert is not safe for concurrent calls; the caller must serialize them.
-func (pu *parallelUpdate) Insert(hashedKey, plainKey []byte, update *Update) {
-	pu.trie.Insert(hashedKey, plainKey, update)
+// Collect is not safe for concurrent calls; the caller must serialize them.
+func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
+	pu.pending.collect(hashedKey, plainKey, update)
+	if pu.pending.bytes >= pu.memLimit {
+		pu.Build()
+	}
+}
+
+func (pu *parallelUpdate) Build() {
+	if pu.pending.count == 0 {
+		return
+	}
+	if pu.trie == nil {
+		pu.pending.reset()
+		return
+	}
+	pu.pending.sortBuckets()
+	for i := range pu.pending.buckets {
+		b := pu.pending.buckets[i]
+		for j := range b {
+			pu.trie.Insert(b[j].hashedKey, b[j].plainKey, b[j].update)
+		}
+		pu.pending.releaseBucket(i)
+	}
+	pu.pending.count, pu.pending.bytes, pu.pending.seq = 0, 0, 0
 }
 
 func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
@@ -78,6 +104,7 @@ func (pu *parallelUpdate) drainDeferred() {
 }
 
 func (pu *parallelUpdate) Reset() {
+	pu.pending.reset()
 	if pu.trie != nil {
 		pu.trie.Reset()
 	}
@@ -86,6 +113,7 @@ func (pu *parallelUpdate) Reset() {
 }
 
 func (pu *parallelUpdate) Close() {
+	pu.pending.reset()
 	pu.trie = nil
 	pu.drainDeferred()
 	pu.keyArena.reset()
