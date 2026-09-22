@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -352,7 +353,8 @@ func TestNotifySendDoesNotAllocateResult(t *testing.T) {
 		send()
 	}
 	runtime.ReadMemStats(&m1)
-	if perSend := (m1.TotalAlloc - m0.TotalAlloc) / runs; perSend > uint64(len(result))/10 {
+	perSend := (m1.TotalAlloc - m0.TotalAlloc) / runs
+	if !race.Enabled && perSend > uint64(len(result))/10 { // the race detector drops sync.Pool puts at random
 		t.Fatalf("a send allocates %d bytes for a %d-byte result", perSend, len(result))
 	}
 }
