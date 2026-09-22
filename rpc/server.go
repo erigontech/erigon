@@ -98,7 +98,14 @@ func (s *Server) SetBatchLimit(limit int) {
 // subscription an error is returned. Otherwise a new service is created and added to the
 // service collection this server provides to clients.
 func (s *Server) RegisterName(name string, receiver any) error {
-	return s.services.registerName(name, receiver)
+	return s.services.registerName(name, receiver, nil)
+}
+
+// RegisterAPI registers api.Service under api.Namespace, limited to api.Iface when set.
+// It fails when api.Service does not implement api.Iface, so a renamed or mistyped method
+// is not withheld silently.
+func (s *Server) RegisterAPI(api API) error {
+	return s.services.registerName(api.Namespace, api.Service, api.Iface)
 }
 
 // ServeCodec reads incoming requests from codec, calls the appropriate callback and writes
@@ -125,9 +132,19 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClientWithBaseCtx(connCtx, codec, &s.services, s.logger, s.newConnHandler)
-	c.read(codec)
-	c.Close()
+	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
+	for {
+		msgs, batch, err := readBatch(codec, s.logger)
+		if err != nil {
+			h.close(err, nil)
+			return
+		}
+		if batch {
+			h.handleBatch(msgs)
+		} else {
+			h.handleMsg(msgs[0], nil)
+		}
+	}
 }
 
 // newConnHandler builds the handler of one connection, so every transport applies the
@@ -137,8 +154,7 @@ func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
-// is used to serve HTTP connections. Subscriptions and reverse calls are not allowed in
-// this mode.
+// is used to serve HTTP connections. Subscriptions are not allowed in this mode.
 func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream jsonstream.Stream) *jsonrpcMessage {
 	// Don't serve if server is stopped.
 	if !s.run.Load() {

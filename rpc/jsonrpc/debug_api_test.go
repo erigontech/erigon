@@ -575,7 +575,6 @@ func TestTxResultFieldStreamLazy(t *testing.T) {
 		lazy := jsonstream.NewLazyFieldStream(inner, "result", true)
 		lazy.WriteArrayStart()
 		lazy.WriteString("a")
-		lazy.WriteMore()
 		lazy.WriteString("b")
 		lazy.WriteArrayEnd()
 		require.NoError(t, inner.Flush())
@@ -640,7 +639,6 @@ func TestTraceBlockErrorAfterWrite(t *testing.T) {
 	inner.WriteString("0xabcd")
 	// Replicate the traceBlock error handler.
 	inner.CloseIfOpen()
-	s.WriteMore()
 	s.WriteObjectField("error")
 	s.WriteString("partial write error")
 	s.WriteObjectEnd()

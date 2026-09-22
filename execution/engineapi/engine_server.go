@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -135,6 +136,16 @@ func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfi
 	e.beaconCfg.Store(beaconCfg)
 }
 
+func (e *EngineServer) engineAPI() rpc.API {
+	return rpc.API{
+		Namespace: "engine",
+		Public:    true,
+		Service:   engineRPC(e),
+		Iface:     reflect.TypeFor[engineRPC](),
+		Version:   "1.0",
+	}
+}
+
 func (e *EngineServer) Start(
 	ctx context.Context,
 	httpConfig *httpcfg.HttpCfg,
@@ -163,17 +174,13 @@ func (e *EngineServer) Start(
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{
-		{
+	 {
 			Namespace: "eth",
 			Public:    true,
 			Service:   jsonrpc.EthAPI(ethImpl),
 			Version:   "1.0",
-		}, {
-			Namespace: "engine",
-			Public:    true,
-			Service:   EngineAPI(e),
-			Version:   "1.0",
 		},
+		e.engineAPI(),
 	}
 
 	eg.Go(func() error {

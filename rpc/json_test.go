@@ -18,12 +18,16 @@ package rpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -716,4 +720,30 @@ func TestResponseLatchedErrorKeepsValidJSON(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32000,"message":"append failed"}}`, string(s.Buffer()))
 	require.True(t, json.Valid(s.Buffer()))
+}
+
+// An IPC connection coalesces notifications like a websocket one does.
+func TestCodecCoalescedMessagesLeaveInOneWrite(t *testing.T) {
+	t.Parallel()
+	server, client := net.Pipe()
+	defer client.Close()
+	var writes atomic.Int64
+	codec := NewCodec(&heldConn{Conn: writeCountingConn{server, &writes}}).(*jsonCodec)
+	defer codec.Close()
+	read := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(io.LimitReader(client, int64(len("0\n1\n2\n"))))
+		read <- string(b)
+	}()
+
+	err := codec.coalesce(func() {
+		for i := range 3 {
+			if err := codec.WriteJSON(context.Background(), rawResponse(strconv.Itoa(i))); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), writes.Load(), "3 coalesced messages, socket writes")
+	require.Equal(t, "0\n1\n2\n", <-read)
 }

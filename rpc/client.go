@@ -77,9 +77,7 @@ type BatchElem struct {
 
 // Client represents a connection to an RPC server.
 type Client struct {
-	isHTTP     bool
-	services   *serviceRegistry
-	newHandler func(ctx context.Context, conn jsonWriter) *handler
+	isHTTP bool
 
 	idCounter atomic.Uint32
 
@@ -106,17 +104,14 @@ type Client struct {
 
 type reconnectFunc func(ctx context.Context) (ServerCodec, error)
 
-type clientContextKey struct{}
-
 type clientConn struct {
 	codec   ServerCodec
 	handler *handler
 }
 
-func (c *Client) newClientConn(conn ServerCodec, connCtx context.Context) *clientConn {
-	ctx := context.WithValue(connCtx, clientContextKey{}, c)
-	ctx = context.WithValue(ctx, peerInfoContextKey{}, conn.peerInfo())
-	handler := c.newHandler(ctx, conn)
+func (c *Client) newClientConn(conn ServerCodec) *clientConn {
+	ctx := context.WithValue(context.Background(), peerInfoContextKey{}, conn.peerInfo())
+	handler := newHandler(ctx, conn, randomIDGenerator(), &serviceRegistry{logger: c.logger}, 0, nil, 50, false /* traceRequests */, c.logger, 0)
 	return &clientConn{conn, handler}
 }
 
@@ -189,42 +184,20 @@ func DialContext(ctx context.Context, rawurl string, logger log.Logger) (*Client
 	}
 }
 
-// Client retrieves the client from the context, if any. This can be used to perform
-// 'reverse calls' in a handler method.
-func ClientFromContext(ctx context.Context, logger log.Logger) (*Client, bool) {
-	client, ok := ctx.Value(clientContextKey{}).(*Client)
-	if ok {
-		client.logger = logger
-	}
-	return client, ok
-}
-
 func newClient(initctx context.Context, connect reconnectFunc, logger log.Logger) (*Client, error) {
 	conn, err := connect(initctx)
 	if err != nil {
 		return nil, err
 	}
-	c := initClient(conn, randomIDGenerator(), &serviceRegistry{logger: logger}, 0, logger)
+	c := initClient(conn, logger)
 	c.reconnectFunc = connect
 	return c, nil
 }
 
-func initClient(conn ServerCodec, idgen func() ID, services *serviceRegistry, batchLimit int, logger log.Logger) *Client {
-	c := initClientWithBaseCtx(context.Background(), conn, services, logger, func(ctx context.Context, conn jsonWriter) *handler {
-		return newHandler(ctx, conn, idgen, services, batchLimit, nil, 50, false /* traceRequests */, logger, 0)
-	})
-	if !c.isHTTP {
-		go c.read(conn)
-	}
-	return c
-}
-
-func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, services *serviceRegistry, logger log.Logger, newHandler func(context.Context, jsonWriter) *handler) *Client {
+func initClient(conn ServerCodec, logger log.Logger) *Client {
 	_, isHTTP := conn.(*httpConn)
 	c := &Client{
 		isHTTP:      isHTTP,
-		services:    services,
-		newHandler:  newHandler,
 		writeConn:   conn,
 		close:       make(chan struct{}),
 		closing:     make(chan struct{}),
@@ -238,17 +211,10 @@ func initClientWithBaseCtx(baseCtx context.Context, conn ServerCodec, services *
 		logger:      logger,
 	}
 	if !isHTTP {
-		go c.dispatch(conn, baseCtx)
+		go c.dispatch(conn)
+		go c.read(conn)
 	}
 	return c
-}
-
-// RegisterName creates a service for the given receiver type under the given name. When no
-// methods on the given receiver match the criteria to be either a RPC method or a
-// subscription an error is returned. Otherwise a new service is created and added to the
-// service collection this client provides to the server.
-func (c *Client) RegisterName(name string, receiver any) error {
-	return c.services.registerName(name, receiver)
 }
 
 func (c *Client) nextID() json.RawMessage {
@@ -584,11 +550,11 @@ func (c *Client) reconnect(ctx context.Context) error {
 // dispatch is the main loop of the client.
 // It sends read messages to waiting calls to Call and BatchCall
 // and subscription notifications to registered subscriptions.
-func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
+func (c *Client) dispatch(codec ServerCodec) {
 	var (
 		lastOp      *requestOp  // tracks last send operation
 		reqInitLock = c.reqInit // nil while the send lock is held
-		conn        = c.newClientConn(codec, connCtx)
+		conn        = c.newClientConn(codec)
 		reading     = true
 	)
 	defer func() {
@@ -637,7 +603,7 @@ func (c *Client) dispatch(codec ServerCodec, connCtx context.Context) {
 			}
 			go c.read(newcodec)
 			reading = true
-			conn = c.newClientConn(newcodec, connCtx)
+			conn = c.newClientConn(newcodec)
 			// Re-register the in-flight request on the new handler because that's where it will be sent.
 			// lastOp is nil if a fatal read error already cancelled the op — nothing to transfer then.
 			if lastOp != nil {
@@ -683,16 +649,22 @@ func (c *Client) drainRead() {
 // read decodes RPC messages from a codec, feeding them into dispatch.
 func (c *Client) read(codec ServerCodec) {
 	for {
-		msgs, batch, err := codec.ReadBatch()
-		if _, ok := errors.AsType[*json.SyntaxError](err); ok {
-			if writeErr := codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()})); writeErr != nil {
-				c.logger.Trace("RPC client failed to write parse error response", "err", writeErr)
-			}
-		}
+		msgs, batch, err := readBatch(codec, c.logger)
 		if err != nil {
 			c.readErr <- err
 			return
 		}
 		c.readOp <- readOp{msgs, batch}
 	}
+}
+
+// readBatch reads the next message or batch, answering a JSON syntax error before returning it.
+func readBatch(codec ServerCodec, logger log.Logger) ([]*jsonrpcMessage, bool, error) {
+	msgs, batch, err := codec.ReadBatch()
+	if _, ok := errors.AsType[*json.SyntaxError](err); ok {
+		if writeErr := codec.WriteJSON(context.Background(), errorMessage(&parseError{err.Error()})); writeErr != nil {
+			logger.Trace("RPC failed to write parse error response", "err", writeErr)
+		}
+	}
+	return msgs, batch, err
 }

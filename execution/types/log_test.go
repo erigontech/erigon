@@ -518,9 +518,8 @@ func TestFilterWithTopicMapMaxLogsCountsNonMatching(t *testing.T) {
 	require.Len(t, other.FilterWithTopicMap(addrMap, topicMap, 1), 1)
 }
 
-// MarshalFastJSON replaces json.Marshal for these results, so it must match it byte for byte and
-// allocate once. Malloc size-class slack can hide a short fastJSONLen from the allocation count,
-// so the bound is checked directly as well.
+// MarshalFastJSONTo replaces json.Marshal for these results, so it must match it byte for byte,
+// maximal values included.
 func TestRPCLogsMarshalFastJSON(t *testing.T) {
 	maxed := func(topics []common.Hash, data []byte, removed bool) *RPCLog {
 		return &RPCLog{
@@ -554,20 +553,16 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(logs)
 			require.NoError(t, err)
-			got, err := logs.MarshalFastJSON()
+			got, err := jsonstream.Marshal(logs)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
-			if n := testing.AllocsPerRun(10, func() { _, _ = logs.MarshalFastJSON() }); n != 1 {
-				t.Fatalf("MarshalFastJSON allocated %v times, want 1", n)
-			}
 
 			for _, l := range logs {
 				want, err := json.Marshal(l)
 				require.NoError(t, err)
-				got, err := l.MarshalFastJSON()
+				got, err := jsonstream.Marshal(l)
 				require.NoError(t, err)
 				require.Equal(t, string(want), string(got))
-				require.LessOrEqual(t, len(got), l.fastJSONLen())
 			}
 		})
 	}
