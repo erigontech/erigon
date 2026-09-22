@@ -911,7 +911,10 @@ func TestHeaderHelpersDoNotReselectOverlay(t *testing.T) {
 	}
 }
 
-func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
+// TestGetBlockNumberReadsOnlyThePassedView pins tx to one overlay generation,
+// publishes a different one, and asserts the resolver still answers from the
+// generation the caller handed it.
+func TestGetBlockNumberReadsOnlyThePassedView(t *testing.T) {
 	base, m, firstHeader, events := newOverlayAheadTestAPIWithEvents(t)
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -940,7 +943,6 @@ func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
 		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(firstHeader.Number.Uint64())),
 		pinnedTx,
 		m.BlockReader,
-		base.filters,
 	)
 	require.NoError(t, err)
 	require.Equal(t, firstHeader.Hash(), hash)

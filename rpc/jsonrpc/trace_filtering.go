@@ -191,7 +191,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -454,8 +454,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if first {
 			stream.WriteArrayStart()
 			first = false
-		} else {
-			stream.WriteMore()
 		}
 		stream.WriteRawBytes(b)
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
@@ -635,6 +633,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue // guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
+		if err := checkOverriddenSigner(traceConfig, lastSigner, txn); err != nil {
+			return err
+		}
 		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)
 		if err != nil {
 			return err
@@ -1058,6 +1059,9 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	txnHash := txn.Hash()
+	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
+	}
 	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 	if err != nil {
 		return nil, fmt.Errorf("convert txn into msg: %w", err)

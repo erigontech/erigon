@@ -102,11 +102,9 @@ func HandleError(err error, stream jsonstream.Stream) {
 		} else {
 			stream.WriteInt(ErrCodeDefault)
 		}
-		stream.WriteMore()
 		stream.WriteObjectField("message")
 		stream.WriteString(err.Error())
 		if de, ok := errors.AsType[DataError](err); ok {
-			stream.WriteMore()
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
 			if derr == nil {
