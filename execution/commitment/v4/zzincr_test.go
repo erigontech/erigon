@@ -48,12 +48,14 @@ func incrRoots(t *testing.T, batch1, batch2 int, seed int64) (v4r, hr []byte, er
 	if _, err = tr.Process(ctx, mk(build(0, batch1, true)), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
+	zzSeed(ch, build(0, batch1, true))
 	if _, err = hph.Process(ctx, mk(build(0, batch1, true)), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
 	if v4r, err = tr.Process(ctx, mk(build(batch1, batch1+batch2, false)), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
+	zzSeed(ch, build(batch1, batch1+batch2, false))
 	hr, err = hph.Process(ctx, mk(build(batch1, batch1+batch2, false)), "", nil, commitment.WarmupConfig{})
 	return v4r, hr, err
 }

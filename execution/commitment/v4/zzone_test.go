@@ -10,6 +10,28 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
+
+func zzSeed(ctx *parityContext, es []parityUpdate) {
+	for _, e := range es {
+		if e.update == nil {
+			continue
+		}
+		if e.update.Deleted() {
+			if len(e.key) == 20 {
+				delete(ctx.accounts, string(e.key))
+			} else {
+				delete(ctx.storage, string(e.key))
+			}
+			continue
+		}
+		if e.update.Flags&commitment.StorageUpdate != 0 {
+			ctx.storage[string(e.key)] = e.update.Copy()
+		} else if len(e.key) == 20 {
+			ctx.accounts[string(e.key)] = e.update.Copy()
+		}
+	}
+}
+
 func oneSlotPerAccount(t *testing.T, n1, n2 int, seed int64, mode string) (m1, m2 bool, err error) {
 	rnd := rand.New(rand.NewSource(seed))
 	total := n1 + n2
@@ -56,6 +78,7 @@ func oneSlotPerAccount(t *testing.T, n1, n2 int, seed int64, mode string) (m1, m
 	if err != nil {
 		return false, false, err
 	}
+	zzSeed(ch, b1)
 	h1, err := hph.Process(ctx, mk(b1), "", nil, commitment.WarmupConfig{})
 	if err != nil {
 		return false, false, err
@@ -72,6 +95,7 @@ func oneSlotPerAccount(t *testing.T, n1, n2 int, seed int64, mode string) (m1, m
 	if err != nil {
 		return m1, false, err
 	}
+	zzSeed(ch, b2)
 	h2, err := hph.Process(ctx, mk(b2), "", nil, commitment.WarmupConfig{})
 	if err != nil {
 		return m1, false, err
