@@ -347,12 +347,7 @@ func TestForkTimestampsCoversEveryTimeField(t *testing.T) {
 // the blob schedule must not write to it.
 func TestGetBlobConfigDoesNotWriteConfig(t *testing.T) {
 	c := AllProtocolChanges.Copy()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		c.GetBlobConfig(0)
-	}()
-	cp := *c
-	<-done
-	require.Equal(t, c.GetBlobConfig(0), cp.GetBlobConfig(0))
+	before := *c
+	c.GetBlobConfig(0)
+	require.Equal(t, before, *c)
 }
