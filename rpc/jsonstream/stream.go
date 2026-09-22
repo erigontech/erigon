@@ -58,7 +58,7 @@ type Stream interface {
 	WriteUint64(val uint64)
 	WriteFloat32(val float32)
 	WriteFloat64(val float64)
-	// WriteString and WriteObjectField must consume val before returning:
+	// WriteString and Field must consume val before returning:
 	// callers pass views over reusable buffers.
 	WriteString(val string)
 
@@ -68,7 +68,7 @@ type Stream interface {
 	WriteObjectEnd()
 	WriteArrayStart()
 	WriteArrayEnd()
-	WriteObjectField(fieldName string) *StackStream
+	Field(fieldName string) *StackStream
 
 	// WriteHex writes b as a 0x-prefixed hex string, encoded straight into the stream's buffer.
 	WriteHex(b []byte)

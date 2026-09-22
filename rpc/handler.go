@@ -94,18 +94,18 @@ type callProc struct {
 
 func HandleError(err error, stream jsonstream.Stream) {
 	if err != nil {
-		stream.WriteObjectField("error")
+		stream.Field("error")
 		stream.WriteObjectStart()
-		stream.WriteObjectField("code")
+		stream.Field("code")
 		if ec, ok := errors.AsType[Error](err); ok {
 			stream.WriteInt(ec.ErrorCode())
 		} else {
 			stream.WriteInt(ErrCodeDefault)
 		}
-		stream.WriteObjectField("message")
+		stream.Field("message")
 		stream.WriteString(err.Error())
 		if de, ok := errors.AsType[DataError](err); ok {
-			stream.WriteObjectField("data")
+			stream.Field("data")
 			data, derr := json.Marshal(de.ErrorData())
 			if derr == nil {
 				stream.WriteRawBytes(data)

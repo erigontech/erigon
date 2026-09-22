@@ -416,9 +416,9 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
 	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
+	stream.Field("jsonrpc")
 	stream.WriteString("2.0")
-	stream.WriteObjectField("id")
+	stream.Field("id")
 	stream.WriteInt(1)
 	result := jsonstream.NewLazyFieldStream(stream, "result", false)
 

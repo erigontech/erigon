@@ -74,7 +74,7 @@ func (s *LazyFieldStream) ensure() {
 		if s.prependSeparator {
 			s.inner.markSeparatorPending()
 		}
-		s.owner = s.inner.WriteObjectField(s.field)
+		s.owner = s.inner.Field(s.field)
 		s.openDepth = uint(s.inner.Depth() - 1)
 	}
 }
@@ -141,9 +141,9 @@ func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
 // A field name carries no value bytes, so opening the field for it would emit
 // `"result":` with nothing to follow it. It belongs to a container a value write
 // already opened.
-func (s *LazyFieldStream) WriteObjectField(name string) *StackStream {
+func (s *LazyFieldStream) Field(name string) *StackStream {
 	s.assertOpened()
-	return s.inner.WriteObjectField(name)
+	return s.inner.Field(name)
 }
 
 func (s *LazyFieldStream) assertOpened() {

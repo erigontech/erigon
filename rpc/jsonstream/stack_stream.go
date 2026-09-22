@@ -106,7 +106,7 @@ func (s *StackStream) WriteHex(b []byte) {
 // HexesField writes fixed-size values as one array field: one buffer growth for the whole
 // array, where a value write per element grows once per element. A nil slice is null.
 func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
-	Field(s, name)
+	s.Field(name)
 	if items == nil {
 		s.WriteNil()
 		return
@@ -364,8 +364,8 @@ func (s *StackStream) WriteArrayEnd() {
 	s.afterValue()
 }
 
-// WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
+// Field writes a field name for an object and adds it to the stack.
+func (s *StackStream) Field(fieldName string) *StackStream {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, fieldName)
 	s.push(ItemField)

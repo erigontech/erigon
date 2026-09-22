@@ -18,11 +18,6 @@ package jsonstream
 
 import "encoding"
 
-// Field writes a field name; the stream adds the separator.
-func Field(s *StackStream, name string) *StackStream {
-	return s.WriteObjectField(name)
-}
-
 type textPtr[T any] interface {
 	*T
 	encoding.TextAppender
@@ -30,7 +25,7 @@ type textPtr[T any] interface {
 
 // Text writes v's text as a JSON string field, or null when v is nil.
 func Text[T any, P textPtr[T]](s *StackStream, name string, v P) {
-	Field(s, name)
+	s.Field(name)
 	if v == nil {
 		s.WriteNil()
 		return
