@@ -28,10 +28,10 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
-	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -106,10 +106,6 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
-func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
-	return dbg.ReadAheadWait && isValidatingBlocks
-}
-
 // execRange is the resolved block/txNum window the executor runs over. The
 // stage wrapper resolves it (SeekCommitment + restoreTxNum) and passes it in;
 // the exec core does not touch the stage's DB metadata to derive it.
@@ -122,33 +118,22 @@ type execRange struct {
 }
 
 // execV3Outcome carries what the stage wrapper needs after the parallel
-// executor returns. applyTx is the caller-owned stage transaction; parallel
-// execution does not replace it. verdict carries the invalid-block verdict of
-// a healthy run, while exhausted carries its resumable batch boundary. At most
-// one of {error, verdict, exhausted} is set. The error return carries an
-// operational executor failure or cancellation, never a block verdict or
-// batch boundary.
+// executor returns. applyTx is the live post-exec tx (parallel exec may have
+// rolled the stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx
+// stale); the failed* fields name the block implicated in a bad-block unwind.
 type execV3Outcome struct {
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64
-	verdict               *blockVerdict
-	exhausted             *ErrLoopExhausted
+	failedBlock           uint64
+	failedHash            common.Hash
 }
 
-func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) {
-	if err != nil {
-		out.exhausted = nil
-	}
-	return out, err
-}
-
-// execV3 runs the parallel executor over the resolved window rng. It is
+// ExecV3 runs the parallel executor over the resolved window rng. It is
 // stage-agnostic: the caller owns SeekCommitment/restoreTxNum (upstream) and
 // stage-progress update / bad-block unwind (downstream, via the returned
 // outcome). This lets both SpawnExecuteBlocksStage and an ephemeral single-block
-// replay drive the same execution path. Unexported: it takes package-internal
-// types (execRange, blockSource) and has no external callers.
-func execV3(ctx context.Context,
+// replay drive the same execution path.
+func ExecV3(ctx context.Context,
 	cfg ExecuteBlockCfg,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
 	syncMode stages.Mode, initialCycle bool, logPrefix string,
@@ -192,29 +177,19 @@ func execV3(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
-	// Thread the cfg's exec-only flag into the domains so IsUnfrozenStepEdge uses
-	// it rather than reading dbg.DiscardCommitment() independently (single source).
-	doms.SetDiscardCommitment(cfg.discardCommitment)
-
-	// Exec-only mode (discardCommitment) runs no trie work, so skip the trie
-	// setup entirely: EnableParaTrieDB after the witness seed's DomainPut touches
-	// would panic on the dropped sequential-buffer keys (ERIGON_COMMITMENT_PARALLEL).
-	if !cfg.discardCommitment {
+	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup
+	// entirely: EnableParaTrieDB after the witness seed's DomainPut touches would
+	// panic on the dropped sequential-buffer keys.
+	if !dbg.DiscardCommitment() {
 		doms.EnableParaTrieDB(cfg.db)
 		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
-		// Enable deferred commitment updates for fork validation and parallel initial sync.
-		// Deferred updates batch commitment calculations to block boundaries rather than
-		// per-transaction, significantly reducing re-org validation overhead.
-		// For the parallel path during initial sync, Flush() now includes pending updates,
-		// so they are no longer silently discarded between StageLoopIteration cycles.
+		// Deferred commitment updates batch commitment to block boundaries rather than
+		// per-transaction, cutting re-org validation overhead.
 		if isForkValidation || isApplyingBlocks {
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
-	}
-	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
-		cfg.readAheader.WaitForWarmup(ctx)
 	}
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
@@ -237,12 +212,10 @@ func execV3(ctx context.Context,
 			logPrefix:         logPrefix,
 			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, logPrefix, logger),
 			enableChaosMonkey: initialCycle,
-			chaosFaults:       chaos_monkey.FaultsFromContext(ctx),
 			hooks:             hooks,
 			blockSrc:          blockSrc,
 		},
 		workerCount: cfg.syncCfg.ExecWorkerCount,
-		syscallEVM:  protocol.NewSysCallEVM(cfg.chainConfig, *cfg.vmConfig),
 	}
 	pe.lastCommittedTxNum.Store(inputTxNum)
 	// blockNum is the next block to execute (from doms.BlockNum()), so the last
@@ -263,42 +236,18 @@ func execV3(ctx context.Context,
 	out = execV3Outcome{
 		applyTx:               applyTx,
 		lastCommittedBlockNum: pe.lastCommittedBlockNum.Load(),
-		verdict:               pe.verdict,
-		exhausted:             pe.exhausted,
-	}
-
-	// The finalize tail (commitment persist guard + txpool notification) runs
-	// only for healthy or resumable batches — a failed or invalid batch left
-	// nothing durable to persist or report.
-	if execErr != nil {
-		return out, execErr
-	}
-	if out.verdict != nil {
-		haltOnBadBlockDebug(cfg, logPrefix, out.verdict.err, logger)
-		return out, nil
+		failedBlock:           pe.failedBlock,
+		failedHash:            pe.failedHash,
 	}
 
 	execErr = execV3Finalize(ctx, execErr, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
-	return finalizeExecV3Outcome(out, execErr)
+	return out, execErr
 }
 
-// haltOnBadBlockDebug freezes the process on an invalid block when both the
-// BAD_BLOCK_HALT env flag and cfg.badBlockHalt are set: the debug switch's
-// whole purpose is to keep the datadir at the pre-block state, and returning
-// would run deferred rollback/commit paths that overwrite it. Fork validation
-// alone (cfg.badBlockHalt without the env flag) must not exit — it needs the
-// verdict to propagate for in-memory validation.
-func haltOnBadBlockDebug(cfg ExecuteBlockCfg, logPrefix string, cause error, logger log.Logger) {
-	if cfg.badBlockHalt && dbg.BadBlockHalt {
-		logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", logPrefix), "err", cause)
-		os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
-	}
-}
-
-// execV3Serial runs the legacy serial executor. It stays welded to the stage
-// (execStage/u) — serial is scheduled for removal and does not need the
-// stage-agnostic split ExecV3 has. The stage wrapper calls it directly.
+// execV3Serial runs the serial executor. It stays welded to the stage
+// (execStage/u) rather than taking the stage-agnostic split ExecV3 has, and the
+// stage wrapper calls it directly.
 func execV3Serial(ctx context.Context,
 	execStage *StageState, u Unwinder, cfg ExecuteBlockCfg,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
@@ -344,15 +293,15 @@ func execV3Serial(ctx context.Context,
 	startBlockNum := blockNum
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
-	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
-	doms.SetDeferCommitmentUpdates(false)
-	if isForkValidation {
-		doms.SetDeferCommitmentUpdates(true)
-	}
-	defer doms.SetDeferCommitmentUpdates(false)
-	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
-		cfg.readAheader.WaitForWarmup(ctx)
+	// Exec-only mode (DiscardCommitment) runs no trie work, so skip the trie setup.
+	if !dbg.DiscardCommitment() {
+		doms.EnableParaTrieDB(cfg.db)
+		doms.EnableTrieWarmup(true)
+		doms.SetDeferCommitmentUpdates(false)
+		if isForkValidation {
+			doms.SetDeferCommitmentUpdates(true)
+		}
+		defer doms.SetDeferCommitmentUpdates(false)
 	}
 	if !initialCycle && isApplyingBlocks {
 		var clean func()
@@ -391,7 +340,7 @@ func execV3Serial(ctx context.Context,
 	if u != nil && !u.HasUnwindPoint() {
 		if lastHeader != nil {
 			switch {
-			case execErr == nil || IsOnlyLoopExhausted(execErr):
+			case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
 				_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, false, logger, u)
 				if err != nil {
 					return err
@@ -425,7 +374,7 @@ func execV3Serial(ctx context.Context,
 				switch {
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					return fmt.Errorf("can't handle incorrect root err: %w", execErr)
-				case IsOnlyLoopExhausted(execErr):
+				case errors.Is(execErr, &ErrLoopExhausted{}):
 					break
 				default:
 					return execErr
@@ -451,18 +400,29 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 	// propagate the error so the caller can unwind. The step-frozen check only
 	// makes sense when execution succeeded and we need to persist the commitment.
 	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
-		haltOnBadBlockDebug(cfg, logPrefix, execErr, logger)
+		// Intentional os.Exit under BAD_BLOCK_HALT (both the env flag dbg.BadBlockHalt
+		// and cfg.badBlockHalt): a debug switch whose whole purpose is to freeze
+		// process state at the bad block. Returning would run deferred
+		// rollback/commit/flush and overwrite the state we want to inspect.
+		// cfg.badBlockHalt alone (fork validation) must NOT exit — it needs the
+		// error to propagate for in-memory validation.
+		if cfg.badBlockHalt && dbg.BadBlockHalt {
+			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", logPrefix), "err", execErr)
+			os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
+		}
 		return execErr
 	}
 
 	lastCommittedStep := kv.Step(lastCommittedTxNum / doms.StepSize())
+	// applyTx may be stale after parallel execution (the underlying mdbx tx
+	// was invalidated by Flush/CommitAndBegin). Use a fresh roTx for the check.
 	var lastFrozenStep kv.Step
 	if stepCheckTx, stepErr := cfg.db.BeginTemporalRo(ctx); stepErr == nil {
 		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(kv.CommitmentDomain))
 		stepCheckTx.Rollback()
 	}
 
-	if lastCommittedStep > 0 && lastCommittedStep < lastFrozenStep && !cfg.discardCommitment {
+	if lastCommittedStep > 0 && lastCommittedStep < lastFrozenStep && !dbg.DiscardCommitment() {
 		logger.Warn("["+logPrefix+"] can't persist commitment: txn step frozen",
 			"block", lastCommittedBlockNum, "txNum", lastCommittedTxNum, "step", lastCommittedStep,
 			"lastFrozenStep", lastFrozenStep, "lastFrozenTxNum", ((lastFrozenStep+1)*kv.Step(doms.StepSize()))-1)
@@ -508,7 +468,7 @@ type txExecutor struct {
 	lastCommittedTxNum    atomic.Uint64
 	committedGas          atomic.Int64
 
-	execLoopGroup *commonerrors.Group
+	execLoopGroup *errgroup.Group
 
 	execRequests chan *execRequest
 	execCount    atomic.Int64
@@ -518,7 +478,10 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
-	chaosFaults       chaos_monkey.Faults
+	// chaosFaults carries deterministic bug-injection faults from the run context
+	// (chaos_monkey.WithFaults). Only active when enableChaosMonkey is set. Populated
+	// once per batch in execImpl.
+	chaosFaults chaos_monkey.Faults
 }
 
 // A wrong root under fork validation means a payload the CL offered was rejected,
@@ -536,6 +499,13 @@ func (te *txExecutor) readState() *state.StateV3Buffered {
 }
 
 func (te *txExecutor) domains() *execctx.SharedDomains {
+	return te.doms
+}
+
+// domainsRead returns the shared domain as a read-only view. The parallel
+// executor's exec flow reads state through this (never the writable *SharedDomains)
+// so exec-side state writes do not compile — state writes are the apply loop's job.
+func (te *txExecutor) domainsRead() execctx.DomainReader {
 	return te.doms
 }
 
@@ -565,12 +535,9 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // (executed in an earlier batch) so Finalize and the notification cache can see
 // the block's full receipt set.
 //
-// Best-effort. At a mid-block step boundary the committed domain latest is the
-// step-edge value, not the block-start pre-state, so the prefix is not always
-// reconstructable (and minimal nodes retain no receipts at all). Callers MUST
-// treat a failure as non-fatal: the node still resumes from a mid-step boundary
-// and the block's own receipts and cumulative gas stay correct — only the prior
-// receipts are absent (block then left not receipts-complete).
+// At a mid-block step boundary the committed domain latest is the step-edge
+// value, not the block-start pre-state, so the prefix cannot always be
+// reconstructed. Callers MUST treat a failure as non-fatal.
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
 	defer priorIbs.Close()
@@ -585,7 +552,7 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 	return priorReceipts, nil
 }
 
-func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
+func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHash common.Hash) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			te.logger.Warn("hook panicked", "panic", rec, "stack", dbg.Stack())
@@ -596,8 +563,6 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 		return
 	}
 
-	blockNum := block.NumberU64()
-	blockHash := block.Hash()
 	if blockHash == (common.Hash{}) {
 		te.logger.Warn("hooks ignored: zero block hash")
 		return
@@ -605,26 +570,40 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 
 	if blockNum == 0 {
 		if te.hooks.OnGenesisBlock != nil {
-			te.hooks.OnGenesisBlock(block, te.cfg.genesis.Alloc)
+			var b *types.Block
+			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
+				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+				return err
+			}); err != nil {
+				te.logger.Warn("hook: OnGenesisBlock: abandoned", "err", err)
+				return
+			}
+			te.hooks.OnGenesisBlock(b, te.cfg.genesis.Alloc)
 		}
 	} else {
 		if te.hooks.OnBlockStart != nil {
+			var b *types.Block
 			var td *uint256.Int
 			var finalized *types.Header
 			var safe *types.Header
 
 			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-				chainReader := exec.NewChainReader(te.cfg.chainConfig, tx, te.cfg.blockReader, te.logger)
-				td = chainReader.GetTd(block.ParentHash(), blockNum-1)
+				b, _, err = te.cfg.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+				if err != nil {
+					return err
+				}
+				chainReader := exec.NewChainReader(te.cfg.chainConfig, te.applyTx, te.cfg.blockReader, te.logger)
+				td = chainReader.GetTd(b.ParentHash(), b.NumberU64()-1)
 				finalized = chainReader.CurrentFinalizedHeader()
 				safe = chainReader.CurrentSafeHeader()
 				return nil
 			}); err != nil {
 				te.logger.Warn("hook: OnBlockStart: abandoned", "err", err)
+				return
 			}
 
 			te.hooks.OnBlockStart(tracing.BlockEvent{
-				Block:     block,
+				Block:     b,
 				TD:        td,
 				Finalized: finalized,
 				Safe:      safe,
@@ -633,42 +612,35 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}
 }
 
-func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {
-	bal := block.BlockAccessList()
-	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
-		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
+func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
+	if sidecar := block.BlockAccessListSidecar(); sidecar != nil {
+		data, err := sidecar.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > 0 {
+			return data, nil
+		}
 	}
-	return bal, nil
+	if block.HeaderNoCopy().HasNonEmptyBAL() {
+		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+	}
+	return nil, nil
 }
 
-// recoveredPanicError formats a panic value with %v on purpose: a panic is
-// always an operational failure — never a block verdict, a resumable boundary,
-// or routine cancellation — so the recovered value must not keep a sentinel
-// identity that classifiers match.
-func recoveredPanicError(operation string, recovered any) error {
-	return fmt.Errorf("%s panic: %v", operation, recovered)
-}
-
-func (te *txExecutor) randomConsensusChaosEnabled() bool {
-	return te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey
-}
-
-func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
+func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, consumers *resultStream, blockRequests chan *blockRequest) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
 	}
 
 	te.execLoopGroup.Go(func() (err error) {
-		// Do NOT close channels here. The exec loop closes them
-		// after processing all blocks (via pe.commitResultsCh/applyResultsCh
-		// deferred close, or via the ctx.Done drain path).
-		// Closing here would race with the exec loop sending results.
+		// Do NOT close channels here. The exec loop closes them after processing
+		// all blocks (via pe.consumers' deferred close, or the ctx.Done drain
+		// path). Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = recoveredPanicError("exec blocks", rec)
-				return
-			}
-			if err != nil {
+				err = fmt.Errorf("exec blocks panic: %s", rec)
+			} else if err != nil && !errors.Is(err, context.Canceled) {
 				err = fmt.Errorf("exec blocks error: %w", err)
 			} else {
 				te.logger.Debug("[" + te.logPrefix + "] exec blocks exit")
@@ -743,35 +715,17 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			go warmTxsHashes(b)
 
-			blockBAL := dbBAL
-			header := b.HeaderNoCopy()
-			executionBAL := blockBAL
-			if dbg.IgnoreBAL {
-				executionBAL = nil
-			}
-			if executionBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL() {
-				te.logger.Debug("executing block without a BAL", "blockNum", blockNum)
-			}
-			if dbg.TraceBALFeed {
-				if executionBAL != nil {
-					fmt.Printf("BAL-FEED blk=%d accounts=%d\n", blockNum, len(executionBAL))
-				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL() {
-					fmt.Printf("BAL-MISSING blk=%d\n", blockNum)
-				}
-			}
-
 			txs := b.Transactions()
+			header := b.HeaderNoCopy()
 
 			// BlockContext: workers override GetHash with their own per-worker
-			// function (installWorkerGetHash) using their own roTx; this
-			// placeholder resolves ancestor headers via the block source.
+			// function (installWorkerGetHash) using their own roTx. The
+			// placeholder here uses execRoTx for the serial path fallback.
 			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
 				return src.header(ctx, hash, number)
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
-			// Per-block committed state cache for parallel workers' GetCommittedState.
-			blockStateCache := state.NewBlockStateCache()
 
 			blockStartTxNum := inputTxNum
 			for txIndex := -1; txIndex <= len(txs); txIndex++ {
@@ -796,7 +750,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					Trace:            dbg.TraceTx(blockNum, txIndex),
 					Hooks:            te.hooks,
 					Logger:           te.logger,
-					BlockStateCache:  blockStateCache,
 				}
 
 				txTasks = append(txTasks, txTask)
@@ -808,7 +761,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// if we're in the initialCycle before we consider the blockLimit we need to make sure we keep executing
 			// until we reach a transaction whose commitment which is writable to the db, otherwise the update will get lost
 			var exhausted *ErrLoopExhausted
-			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, te.cfg.discardCommitment, blockLimit, blockNum, startBlockNum, maxBlockNum) {
+			if shouldMarkExhaustedAtBlock(initialCycle, lastExecutedStep, lastFrozenStep, dbg.DiscardCommitment(), blockLimit, blockNum, startBlockNum, maxBlockNum) {
 				exhausted = &ErrLoopExhausted{From: startBlockNum, To: blockNum, Reason: "block limit reached"}
 			}
 			// Heads-up to the commitment calculator, ahead of the block's
@@ -824,22 +777,16 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					firstTxNum: blockStartTxNum,
 					lastTxNum:  inputTxNum - 1,
 					blockTime:  header.Time,
-					bal:        executionBAL,
+					bal:        dbBAL,
 				}:
 				case <-ctx.Done():
 					return ctx.Err()
 				}
 			}
 			select {
-			case te.execRequests <- &execRequest{
-				block:         b,
-				gasPool:       protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				accessList:    executionBAL,
-				tasks:         txTasks,
-				applyResults:  applyResults,
-				commitResults: commitResults,
-				exhausted:     exhausted,
-			}:
+			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
+				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
+				dbBAL, txTasks, consumers, false, exhausted}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}
@@ -884,7 +831,7 @@ func handleIncorrectRootHashError(blockNumber uint64, blockHash common.Hash, app
 	if !ok {
 		return fmt.Errorf("%w: requested=%d, minAllowed=%d", ErrTooDeepUnwind, unwindTo, allowedUnwindTo)
 	}
-	logger.Warn("Unwinding due to incorrect root hash", "to", unwindTo)
+	logger.Warn("Unwinding due to incorrect root hash", "to", allowedUnwindTo)
 	if u != nil {
 		if err := u.UnwindTo(allowedUnwindTo, BadBlock(blockHash, ErrInvalidStateRootHash), applyTx); err != nil {
 			return err
@@ -898,7 +845,7 @@ type FlushAndComputeCommitmentTimes struct {
 	ComputeCommitment time.Duration
 }
 
-// computeAndCheckCommitmentV3 records execution progress and checks the commitment.
+// computeAndCheckCommitmentV3 - does write state to db and then check commitment
 func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
@@ -907,14 +854,15 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
-	// TODO: route stage updates through block overlay once serial path initialises one
 	if !parallel {
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
 		}
+		// The state version is bumped once by the SharedDomains flush on Commit for
+		// both executors; a second bump here double-counted it on the serial path.
 	}
 
-	if cfg.discardCommitment {
+	if dbg.DiscardCommitment() {
 		return true, times, nil
 	}
 
@@ -922,8 +870,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	// header.Number to applyTx in this batch and a fresh RO snapshot would
 	// miss it, silently falling back to the previous block's max txNum via
 	// c.Last(). Pairing that stale txNum with header.Number in
-	// KeyCommitmentState makes the next iter's SeekCommitment loop back —
-	// see issue #21171.
+	// KeyCommitmentState makes the next iter's SeekCommitment loop back.
 	txNumsReader := cfg.blockReader.TxnumReader()
 	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
 	if err != nil {
@@ -945,28 +892,12 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 
 }
 
-// shouldMarkExhaustedAtBlock decides whether the per-cycle block-limit
-// has been crossed at the current block — which causes executeBlocks to
-// stamp the dispatched blockResult with `Exhausted` and break out of
-// its loop. The exec loop sees the Exhausted flag, fires its
-// partial-batch flush, and the apply loop records the resumable boundary
-// so the stage returns ErrLoopExhausted and the sync loop resumes from
-// the next block.
-//
-// Two gates protect the initial cycle:
-//  1. !initialCycle — later cycles enforce blockLimit unconditionally.
-//  2. On initialCycle, only enforce when we have at least one frozen
-//     step worth of work AND we're not in DiscardCommitment debug mode
-//     (otherwise the partial-batch flush would lose the commitment
-//     that's still pending in sd.mem). See exec3.go's call site for
-//     the historical reasoning.
-//
-// blockNum != maxBlockNum guards against marking the goal block as
-// exhausted — the goal block already triggers a clean stopReachedMax
-// exit and shouldn't be relabeled as "more work pending".
-//
-// Pure function so the precedence is unit-testable. See
-// TestShouldMarkExhaustedAtBlock.
+// shouldMarkExhaustedAtBlock reports whether the per-cycle block-limit has been
+// crossed, marking the batch exhausted so the stage loop resumes from the next
+// block. On the initial cycle it holds off until at least one frozen step of
+// work exists and DiscardCommitment is off, else the partial-batch flush would
+// lose the commitment still pending in sd.mem. The goal block is never marked
+// exhausted — it already exits cleanly via stopReachedMax.
 func shouldMarkExhaustedAtBlock(initialCycle bool, lastExecutedStep, lastFrozenStep kv.Step, discardCommitment bool, blockLimit, blockNum, startBlockNum, maxBlockNum uint64) bool {
 	if initialCycle {
 		if !(lastExecutedStep > 0 && lastExecutedStep > lastFrozenStep && !discardCommitment) {

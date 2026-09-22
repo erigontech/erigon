@@ -17,33 +17,24 @@
 package state
 
 import (
+	"errors"
 	"testing"
 
-	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/stretchr/testify/require"
 )
 
-// BenchmarkNoMaterializeTx models a parallel-exec transaction: reset, then read
-// the account fields of a set of distinct accounts.
-func BenchmarkNoMaterializeTx(b *testing.B) {
-	acc := accounts.NewAccount()
-	acc.Nonce = 3
-	acc.Balance.SetUint64(77)
+// ResetVersionedIO rebinds the per-tx read/write sets for the next tx; a
+// state-read error recorded for one tx must not stick to the next. A sticky
+// error would fail a later tx that read cleanly, and (with the EIP-161 removal
+// bail) would suppress a legitimate empty-account deletion.
+func TestResetVersionedIO_ClearsStateReadError(t *testing.T) {
+	t.Parallel()
 
-	addrs := make([]accounts.Address, 64)
-	for i := range addrs {
-		addrs[i] = accounts.InternAddress([20]byte{0xAB, byte(i), byte(i >> 8)})
-	}
+	ibs := New(NewNoopReader())
+	ibs.recordStateReadError(errors.New("transient read failure"))
+	require.Error(t, ibs.StateReadError(), "precondition: error recorded")
 
-	ibs, vm := newNoMaterializeIBS(&anyAccountReader{acc: &acc})
-	defer ibs.Close()
+	ibs.ResetVersionedIO()
 
-	b.ReportAllocs()
-	for b.Loop() {
-		startNoMaterializeTx(ibs, vm, 0)
-		for _, a := range addrs {
-			_, _ = ibs.GetBalance(a)
-			_, _ = ibs.GetNonce(a)
-			_, _ = ibs.GetCodeHash(a)
-		}
-	}
+	require.NoError(t, ibs.StateReadError(), "ResetVersionedIO must clear the per-tx state-read error")
 }
