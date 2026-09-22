@@ -89,6 +89,13 @@ func removeAt(n *node, path []byte) (removalState, error) {
 
 	child := n.child(nib)
 	if child == nil {
+		var childScratch [64]byte
+		childPath := append(childScratch[:0], n.path...)
+		childPath = append(childPath, byte(nib))
+		childPath = append(childPath, n.childExtAt(nib)...)
+		if !bytes.HasPrefix(path, childPath) {
+			return removalState{}, ErrRemoveNotFound
+		}
 		return removalState{}, ErrRemoveStoredChild
 	}
 	state, err := removeAt(child, path)

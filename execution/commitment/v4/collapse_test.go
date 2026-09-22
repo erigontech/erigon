@@ -139,10 +139,21 @@ func TestRemoveTreatsDivergedPathsAsNotFound(t *testing.T) {
 	require.ErrorIs(t, remove(root, pastBranch), ErrRemoveNotFound)
 }
 
+func TestRemoveBelowDivergedStoredChildIsNotFound(t *testing.T) {
+	n := fork(nil)
+	n.setStoredChild(1, bytes.Repeat([]byte{3}, 32), []byte{4, 5})
+
+	diverged := appendPath(nil, 1, append([]byte{9, 9}, bytes.Repeat([]byte{2}, 61)...))
+	require.ErrorIs(t, remove(n, diverged), ErrRemoveNotFound)
+
+	under := appendPath(nil, 1, append([]byte{4, 5}, bytes.Repeat([]byte{2}, 61)...))
+	require.ErrorIs(t, remove(n, under), ErrRemoveStoredChild)
+}
+
 func TestRemoveRejectsInvalidAndStoredPaths(t *testing.T) {
 	n := fork(nil)
 	path := appendPath(nil, 1, bytes.Repeat([]byte{2}, 63))
-	n.setStoredChild(1, bytes.Repeat([]byte{3}, 32), []byte{4})
+	n.setStoredChild(1, bytes.Repeat([]byte{3}, 32), []byte{2})
 
 	require.ErrorIs(t, remove(n, []byte{1}), ErrRemovePath)
 	require.ErrorIs(t, remove(n, path), ErrRemoveStoredChild)
