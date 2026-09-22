@@ -540,6 +540,31 @@ jobs:
           cur_count="$(echo $cur_list | wc -w)"
           tgt_count="$(echo $tgt_list | wc -w)"
 
+          # ...and only when both inventories can bear a count at all. `wc -w`
+          # counts tokens, not archives: a single repeated entry inflates the
+          # target's total and buys a waiver for a version that nothing
+          # replaced — `["v3.8","v3.7","v3.6","v3.6"]` against a publishing
+          # branch holding v3.8..v3.5 makes the counts equal and drops v3.5
+          # silently. A token that is not a `vX.Y` label cannot be ordered
+          # against `tgt_oldest` either, so it must not weigh on the total that
+          # exempts its neighbours. Both lists are validated here, before the
+          # count is allowed to exempt anything, and a failure withholds the
+          # waiver rather than the run: every absent version falls through to
+          # `missing` and is reported.
+          inventory_ok=1
+          for list in "$cur_list" "$tgt_list"; do
+            n="$(echo $list | wc -w)"
+            u="$(printf '%s\n' $list | sort -u | wc -l)"
+            [ "$n" -eq "$u" ] || inventory_ok=0
+            for v in $list; do
+              printf '%s' "$v" | grep -qE '^v[0-9]+\.[0-9]+$' || inventory_ok=0
+            done
+          done
+          if [ "$inventory_ok" -ne 1 ]; then
+            echo "::warning::versions.json on ${CURRENT_BRANCH} or ${TARGET_BRANCH} repeats an entry or holds a label that is not vX.Y."
+            echo "The archive-cap waiver is withheld: every version missing from ${TARGET_BRANCH} will be reported below."
+          fi
+
           missing=""
           pruned=""
           for v in $cur_list; do
@@ -552,7 +577,7 @@ jobs:
             # ordering is meaningless is fail-open in the one gate that exists to
             # catch a lost version. Anything unrecognised falls through to
             # missing and stops the cutover.
-            if [ -n "$tgt_oldest" ] && [ "$tgt_count" -ge "$cur_count" ] \
+            if [ -n "$tgt_oldest" ] && [ "$inventory_ok" -eq 1 ] && [ "$tgt_count" -ge "$cur_count" ] \
                && printf '%s' "$v" | grep -qE '^v[0-9]+\.[0-9]+$' \
                && printf '%s' "$tgt_oldest" | grep -qE '^v[0-9]+\.[0-9]+$' \
                && [ "$(printf '%s\n%s\n' "$v" "$tgt_oldest" | sort -V | head -n1)" = "$v" ]; then
