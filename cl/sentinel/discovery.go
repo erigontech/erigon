@@ -561,6 +561,16 @@ func (s *Sentinel) listenForPeers() {
 
 func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 	peerId := conn.RemotePeer()
+	addr := conn.RemoteMultiaddr()
+	transport := conn.ConnState().Transport
+	if transport == "quic-v1" {
+		transport = "quic"
+	}
+	s.logger.Trace("[Sentinel] Peer connected",
+		"peer", peerId,
+		"direction", conn.Stat().Direction,
+		"addr", addr,
+		"transport", transport)
 	go s.handleNewConnection(peerId, func() (bool, error) {
 		return s.handshaker.ValidatePeer(s.ctx, peerId)
 	})

@@ -186,6 +186,15 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	if err := p.setupENR(); err != nil {
 		return nil, err
 	}
+	enrQUIC := "unavailable"
+	if endpoint, ok := p.udpv5.LocalNode().Node().QUICEndpoint(); ok {
+		enrQUIC = endpoint.String()
+	}
+	logger.Info("[Caplin] P2P networking started",
+		"tcp_port", cfg.TCPPort,
+		"quic_port", cfg.QUICPort,
+		"enr_quic", enrQUIC,
+		"advertised_addrs", host.Addrs())
 	go p.updateENR()
 	go p.peerMonitor(p2pCtx)
 	initialized = true

@@ -17,14 +17,17 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"syscall"
 	"testing"
 
 	"github.com/libp2p/go-libp2p"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -32,6 +35,23 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+type synchronizedBuffer struct {
+	mu sync.Mutex
+	bytes.Buffer
+}
+
+func (b *synchronizedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.Write(p)
+}
+
+func (b *synchronizedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.Buffer.String()
+}
 
 func TestHostTCPPortReturnsBoundPort(t *testing.T) {
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -53,6 +73,58 @@ func TestHostQUICPortReturnsBoundPort(t *testing.T) {
 	defer host.Close()
 
 	require.NotZero(t, hostQUICPort(host))
+}
+
+func TestNewP2PManagerLogsBoundAndAdvertisedQUIC(t *testing.T) {
+	networkConfig, beaconConfig, _, err := clparams.GetConfigsByNetworkName("mainnet")
+	require.NoError(t, err)
+	networkConfigCopy := *networkConfig
+	networkConfigCopy.BootNodes = nil
+	cfg := &P2PConfig{
+		NetworkConfig: &networkConfigCopy,
+		BeaconConfig:  beaconConfig,
+		IpAddr:        "127.0.0.1",
+		TmpDir:        t.TempDir(),
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconConfig)
+	var output synchronizedBuffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+
+	ctx, cancel := context.WithCancel(t.Context())
+	manager, err := NewP2Pmanager(ctx, cfg, logger, clock)
+	require.NoError(t, err)
+	listener := manager.UDPv5Listener()
+	localNodeDB := listener.LocalNode().Database()
+	t.Cleanup(func() {
+		cancel()
+		require.NoError(t, manager.Host().Close())
+		listener.Close()
+		localNodeDB.Close()
+	})
+
+	logs := output.String()
+	var advertisedTCP, advertisedQUIC string
+	for _, addr := range manager.Host().Addrs() {
+		if advertisedTCP == "" {
+			if _, err := addr.ValueForProtocol(multiaddr.P_TCP); err == nil {
+				advertisedTCP = addr.String()
+			}
+		}
+		if advertisedQUIC == "" {
+			if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+				advertisedQUIC = addr.String()
+			}
+		}
+	}
+	require.NotEmpty(t, advertisedTCP)
+	require.NotEmpty(t, advertisedQUIC)
+	require.Contains(t, logs, "[Caplin] P2P networking started")
+	require.Contains(t, logs, fmt.Sprintf("tcp_port=%d", cfg.TCPPort))
+	require.Contains(t, logs, fmt.Sprintf("quic_port=%d", cfg.QUICPort))
+	require.Contains(t, logs, fmt.Sprintf("enr_quic=127.0.0.1:%d", cfg.QUICPort))
+	require.Contains(t, logs, advertisedTCP)
+	require.Contains(t, logs, advertisedQUIC)
 }
 
 func TestNewP2PManagerRejectsSharedDiscoveryAndQUICPort(t *testing.T) {
