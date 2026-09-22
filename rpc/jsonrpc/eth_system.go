@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -281,7 +282,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	currentBlock := reply.CurrentBlock
 
 	return map[string]any{
-		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
+		"startingBlock": hexutil.Uint64(startingBlock(reply)),
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
 		"stages":        stagesFromReply(reply.Stages),
@@ -365,8 +366,17 @@ type feeHistoryResult struct {
 	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
 }
 
-// MarshalFastJSON encodes r byte-identically to encoding/json, without a reflective call per element.
-func (r *feeHistoryResult) MarshalFastJSON() ([]byte, error) {
+// MarshalFastJSONTo writes r byte-identically to encoding/json, without a reflective call per element.
+func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	b, err := r.marshalJSON()
+	if err != nil {
+		return err
+	}
+	s.WriteRawBytes(b)
+	return nil
+}
+
+func (r *feeHistoryResult) marshalJSON() ([]byte, error) {
 	if r == nil {
 		return []byte("null"), nil
 	}

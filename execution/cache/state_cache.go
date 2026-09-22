@@ -340,12 +340,7 @@ func prepareStateUpdate(update StateUpdate) preparedStateUpdate {
 		txNum:  update.TxNum,
 	}
 	if update.Domain == kv.CodeDomain && len(update.Value) > 0 {
-		// GetCodeByHash is called with a 32-byte keccak; anything else would
-		// file the entry under an address no reader queries.
-		prepared.codeHash = update.CodeHash
-		if len(prepared.codeHash) != len(common.Hash{}) {
-			prepared.codeHash = crypto.Keccak256(prepared.value)
-		}
+		prepared.codeHash = crypto.Keccak256(prepared.value)
 	}
 	return prepared
 }

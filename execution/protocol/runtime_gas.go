@@ -44,10 +44,6 @@ func (g runtimeGasAccounting) total() mdgas.MdGasUsage {
 	}
 }
 
-func (g *runtimeGasAccounting) consumeAllExecutionGas(execution uint64) {
-	*g = runtimeGasAccounting{frame: mdgas.MdGasUsage{Execution: execution}}
-}
-
 func (g *runtimeGasAccounting) refillTopLevelState(gasRemaining *mdgas.MdGas, restoreState bool, vmerr error, tracer *tracing.Hooks) {
 	RefillTopLevelGas(gasRemaining, &g.topLevel, restoreState, vmerr, tracer)
 }
@@ -159,12 +155,12 @@ func refillGas(remaining *mdgas.MdGas, used *mdgas.MdGasUsage, amount uint64, ty
 	tracer.EmitGasChange(old, *remaining, reason)
 }
 
-func HandleRuntimeFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts.Address, input []byte, startGas mdgas.MdGas, gasRemaining *mdgas.MdGas, value uint256.Int, err error) {
+func HandleRuntimeFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts.Address, input []byte, startGas mdgas.MdGas, gasRemaining *mdgas.MdGas, value uint256.Int, err error) mdgas.MdGasUsage {
 	tracer := evm.Config().Tracer
 	gasTracing := tracer.HasGasChangeHook()
-	if tracer != nil && tracer.OnEnter != nil {
+	if tracer.HasEnterHook() {
 		precompile := typ == vm.CALL && slices.Contains(vm.ActivePrecompiles(evm.ChainRules()), recipient)
-		tracer.OnEnter(0, byte(typ), sender, recipient, precompile, input, startGas.Execution, value, nil)
+		tracer.EmitEnter(0, byte(typ), sender, recipient, precompile, input, startGas, value, nil)
 	}
 	var old mdgas.MdGas
 	if gasTracing {
@@ -172,13 +168,13 @@ func HandleRuntimeFailure(evm *vm.EVM, typ vm.OpCode, sender, recipient accounts
 		tracer.EmitGasChange(mdgas.MdGas{}, old, tracing.GasChangeCallInitialBalance)
 	}
 	*gasRemaining = mdgas.MdGas{State: startGas.State}
+	gasUsed := mdgas.MdGasUsage{Execution: startGas.Execution}
 	if gasTracing {
 		tracer.EmitGasChange(old, *gasRemaining, tracing.GasChangeCallFailedExecution)
 		if *gasRemaining != (mdgas.MdGas{}) {
 			tracer.EmitGasChange(*gasRemaining, mdgas.MdGas{}, tracing.GasChangeCallLeftOverReturned)
 		}
 	}
-	if tracer != nil && tracer.OnExit != nil {
-		tracer.OnExit(0, nil, startGas.Execution, vm.VMErrorFromErr(err), true)
-	}
+	tracer.EmitExit(0, nil, gasUsed, vm.VMErrorFromErr(err), true)
+	return gasUsed
 }

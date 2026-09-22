@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"reflect"
@@ -27,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/require"
@@ -567,6 +569,52 @@ func TestRPCLogsMarshalFastJSON(t *testing.T) {
 				require.Equal(t, string(want), string(got))
 				require.LessOrEqual(t, len(got), l.fastJSONLen())
 			}
+		})
+	}
+}
+
+func TestRPCLogsMarshalFastJSONTo(t *testing.T) {
+	full := &RPCLog{
+		Log: Log{
+			Address:     common.HexToAddress("0x1234567890123456789012345678901234567890"),
+			Topics:      []common.Hash{common.HexToHash("0xaa"), common.HexToHash("0xbb")},
+			Data:        hexutil.Bytes{0xde, 0xad, 0xbe, 0xef},
+			BlockNumber: 0x1234,
+			TxHash:      common.HexToHash("0xcc"),
+			TxIndex:     7,
+			BlockHash:   common.HexToHash("0xdd"),
+			Index:       3,
+			Removed:     true,
+		},
+		BlockTimestamp: 0x64,
+	}
+	for name, logs := range map[string]RPCLogs{
+		"nil":          nil,
+		"empty":        {},
+		"zero log":     {{}},
+		"nil element":  {nil},
+		"nil topics":   {{Log: Log{Data: hexutil.Bytes{}}}},
+		"empty topics": {{Log: Log{Topics: []common.Hash{}}}},
+		"full":         {full},
+		"several":      {full, {}, full},
+		"large": func() RPCLogs {
+			out := make(RPCLogs, 2*jsonstream.FlushThreshold/128)
+			for i := range out {
+				out[i] = full
+			}
+			return out
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(logs)
+			require.NoError(t, err)
+			var sink bytes.Buffer
+			s := jsonstream.Get(&sink)
+			defer jsonstream.Put(s)
+			require.NoError(t, logs.MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+			require.NoError(t, s.Err())
+			require.Equal(t, string(want), sink.String())
 		})
 	}
 }

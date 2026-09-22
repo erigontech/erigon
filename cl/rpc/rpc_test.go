@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/goleak"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -726,4 +727,19 @@ func TestSendBeaconBlocksByRangeReqRejectsDanglingResponseCodeWithoutPartialResu
 	require.Error(t, err)
 	require.Nil(t, blocks)
 	require.Equal(t, "malicious-peer", pid)
+}
+
+// TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds pins that a client's peer refresh loop
+// stops once its ctx is cancelled: four clients, none left. A genesis of now keeps the clock at
+// Phase0, so the loop's first run returns before it asks the sentinel for anything.
+func TestNewBeaconRpcP2PStopsPeerGoroutinesWhenContextEnds(t *testing.T) {
+	defer goleak.VerifyNone(t, goleak.IgnoreCurrent())
+
+	cfg := clparams.MainnetBeaconConfig
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	for range 4 {
+		NewBeaconRpcP2P(ctx, &emptyColumnResponseSentinel{}, &cfg, clock, nil)
+	}
+	cancel()
 }

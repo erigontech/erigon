@@ -46,10 +46,10 @@ func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, er
 		Hooks: &tracing.Hooks{
 			OnTxStart:       t.OnTxStart,
 			OnTxEnd:         t.OnTxEnd,
-			OnEnter:         t.OnEnter,
-			OnExit:          t.OnExit,
-			OnOpcode:        t.OnOpcode,
-			OnFault:         t.OnFault,
+			OnEnterV2:       t.OnEnterV2,
+			OnExitV2:        t.OnExitV2,
+			OnOpcodeV2:      t.OnOpcodeV2,
+			OnFaultV2:       t.OnFaultV2,
 			OnGasChangeV2:   t.OnGasChangeV2,
 			OnBalanceChange: t.OnBalanceChange,
 			OnNonceChange:   t.OnNonceChange,
@@ -62,18 +62,18 @@ func newNoopTracer(ctx *tracers.Context, _ json.RawMessage) (*tracers.Tracer, er
 	}, nil
 }
 
-func (t *noopTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *noopTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 }
 
-func (t *noopTracer) OnFault(pc uint64, op byte, gas, cost uint64, _ tracing.OpContext, depth int, err error) {
+func (t *noopTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
 }
 
 func (t *noopTracer) OnGasChangeV2(old, new mdgas.MdGas, reason tracing.GasChangeReason) {}
 
-func (t *noopTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *noopTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 }
 
-func (t *noopTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *noopTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 }
 
 func (*noopTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction, from accounts.Address) {
