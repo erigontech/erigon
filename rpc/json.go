@@ -154,10 +154,10 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 // for the caller's metrics and logs.
 func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(*jsonstream.LazyFieldStream) error) error {
 	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
+	stream.Field("jsonrpc")
 	stream.WriteString(vsn)
 	if id != nil {
-		stream.WriteObjectField("id")
+		stream.Field("id")
 		stream.WriteRawBytes(id)
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)

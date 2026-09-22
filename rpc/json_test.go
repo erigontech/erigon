@@ -703,7 +703,7 @@ type failingMidWrite struct{}
 
 func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteObjectStart()
-	w.WriteObjectField("balance")
+	w.Field("balance")
 	w.WriteQuotedText(failingAppender{})
 	w.WriteObjectEnd()
 	return nil
