@@ -69,5 +69,4 @@ func BenchmarkName(b *testing.B) {
 			GetFromPage(k, bts, nil, false)
 		}
 	})
-
 }

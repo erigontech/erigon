@@ -94,7 +94,8 @@ func enqueueTestPendingJob[K comparable, M any](queue *pendingJobQueue[K, M], ke
 }
 
 func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQueueOptions) *pendingJobQueue[int, string] {
-	return newPendingJobQueue(ctx, options,
+	return newPendingJobQueue(
+		ctx, options,
 		func(context.Context, int, string) pendingJobDecision {
 			return pendingJobKeep
 		},
@@ -279,12 +280,13 @@ func TestPendingJobQueueCancellationStillRunsPostRemovalCallback(t *testing.T) {
 	defer cancel()
 	var queue *pendingJobQueue[int, string]
 	callbackCalls := 0
-	queue = newPendingJobQueue(canceledPendingQueueContext(t), pendingJobQueueOptions{
-		name:          t.Name(),
-		capacity:      1,
-		expiry:        time.Minute,
-		checkInterval: time.Millisecond,
-	},
+	queue = newPendingJobQueue(
+		canceledPendingQueueContext(t), pendingJobQueueOptions{
+			name:          t.Name(),
+			capacity:      1,
+			expiry:        time.Minute,
+			checkInterval: time.Millisecond,
+		},
 		func(context.Context, int, string) pendingJobDecision {
 			cancel()
 			return pendingJobRemoveThenProcess
@@ -393,12 +395,13 @@ func TestPendingJobQueueExpiryRemovesBeforeCallback(t *testing.T) {
 	var queue *pendingJobQueue[int, string]
 	callbackSawStoredJob := false
 	var enqueueErr error
-	queue = newPendingJobQueue(canceledPendingQueueContext(t), pendingJobQueueOptions{
-		name:          t.Name(),
-		capacity:      1,
-		expiry:        time.Minute,
-		checkInterval: time.Millisecond,
-	},
+	queue = newPendingJobQueue(
+		canceledPendingQueueContext(t), pendingJobQueueOptions{
+			name:          t.Name(),
+			capacity:      1,
+			expiry:        time.Minute,
+			checkInterval: time.Millisecond,
+		},
 		func(context.Context, int, string) pendingJobDecision {
 			return pendingJobKeep
 		},
@@ -568,12 +571,13 @@ func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {
 	var queue *pendingJobQueue[int, string]
 	afterRemoveCalled := false
 
-	queue = newPendingJobQueue(canceledPendingQueueContext(t), pendingJobQueueOptions{
-		name:          t.Name(),
-		capacity:      1,
-		expiry:        time.Minute,
-		checkInterval: time.Millisecond,
-	},
+	queue = newPendingJobQueue(
+		canceledPendingQueueContext(t), pendingJobQueueOptions{
+			name:          t.Name(),
+			capacity:      1,
+			expiry:        time.Minute,
+			checkInterval: time.Millisecond,
+		},
 		func(context.Context, int, string) pendingJobDecision {
 			return pendingJobRemoveThenProcess
 		},

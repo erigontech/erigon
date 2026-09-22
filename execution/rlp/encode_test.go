@@ -496,8 +496,10 @@ func TestEncodeUint256Random(t *testing.T) {
 	}
 }
 
-type ptrTestAddr [20]byte
-type ptrTestHash [32]byte
+type (
+	ptrTestAddr [20]byte
+	ptrTestHash [32]byte
+)
 
 type ptrTestInner struct {
 	Address ptrTestAddr

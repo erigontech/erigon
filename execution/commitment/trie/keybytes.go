@@ -56,7 +56,7 @@ func (x *Keybytes) ToCompact() []byte {
 		l++
 	}
 
-	var compact = make([]byte, l)
+	compact := make([]byte, l)
 
 	if x.Terminating {
 		compact[0] = 0x20
