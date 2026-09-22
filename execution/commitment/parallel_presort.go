@@ -23,7 +23,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"unsafe"
 )
 
 const presortBuckets = 256
@@ -39,12 +38,9 @@ type presortEntry struct {
 	seq       uint32
 }
 
-const presortEntrySize = int(unsafe.Sizeof(presortEntry{}))
-
 type presorter struct {
 	buckets [presortBuckets][]presortEntry
 	count   int
-	bytes   int
 	seq     uint32
 }
 
@@ -69,7 +65,6 @@ func (p *presorter) collect(hashedKey, plainKey []byte, update *Update) {
 	})
 	p.seq++
 	p.count++
-	p.bytes += presortEntrySize + len(hashedKey)
 }
 
 func presortLess(a, b presortEntry) int {
@@ -80,7 +75,7 @@ func presortLess(a, b presortEntry) int {
 }
 
 func (p *presorter) sortBuckets() {
-	nw := min(runtime.GOMAXPROCS(0), presortBuckets)
+	nw := min(runtime.GOMAXPROCS(0), presortBuckets, 1+p.count/presortParallelMin)
 	if nw <= 1 || p.count < presortParallelMin {
 		for i := range p.buckets {
 			if len(p.buckets[i]) > 1 {
@@ -122,5 +117,5 @@ func (p *presorter) reset() {
 	for i := range p.buckets {
 		p.releaseBucket(i)
 	}
-	p.count, p.bytes, p.seq = 0, 0, 0
+	p.count, p.seq = 0, 0
 }

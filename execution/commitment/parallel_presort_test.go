@@ -116,10 +116,10 @@ func buildReferenceTrie(cases []presortCase) *prefixTrie {
 	return tr
 }
 
-func buildPresortedTrie(cases []presortCase, memLimit int) *prefixTrie {
+func buildPresortedTrie(cases []presortCase, chunkKeys int) (*prefixTrie, bool) {
 	pu := newParallelUpdate()
-	if memLimit > 0 {
-		pu.memLimit = memLimit
+	if chunkKeys > 0 {
+		pu.chunkKeys = chunkKeys
 	}
 	for _, c := range cases {
 		var upd *Update
@@ -130,7 +130,12 @@ func buildPresortedTrie(cases []presortCase, memLimit int) *prefixTrie {
 		pu.Collect(c.hashedKey, c.plainKey, upd)
 	}
 	pu.Build()
-	return pu.trie
+	tr, backgrounded := pu.trie, pu.buildCh != nil
+	if backgrounded {
+		close(pu.buildCh)
+		pu.buildCh = nil
+	}
+	return tr, backgrounded
 }
 
 func TestPresort_MatchesInsertionOrderTrie(t *testing.T) {
@@ -139,18 +144,24 @@ func TestPresort_MatchesInsertionOrderTrie(t *testing.T) {
 	for _, n := range []int{1, 2, 17, 5000} {
 		cases := randomPresortCases(int64(n)*7919+3, n, 4)
 		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
-		got := flattenPrefixTrie(t, buildPresortedTrie(cases, 0))
-		require.Equal(t, want, got, "presorted build must match insertion-order build for n=%d", n)
+		got, backgrounded := buildPresortedTrie(cases, 1<<20)
+		require.False(t, backgrounded, "n=%d must stay under the hand-off threshold", n)
+		require.Equal(t, want, flattenPrefixTrie(t, got),
+			"presorted build must match insertion-order build for n=%d", n)
 	}
 }
 
-func TestPresort_MidBatchFlushKeepsMergeOrder(t *testing.T) {
+func TestPresort_BackgroundBuildKeepsMergeOrder(t *testing.T) {
 	t.Parallel()
 
-	cases := randomPresortCases(4242, 3000, 3)
-	want := flattenPrefixTrie(t, buildReferenceTrie(cases))
-	got := flattenPrefixTrie(t, buildPresortedTrie(cases, 8*presortEntrySize))
-	require.Equal(t, want, got, "a memory-limited flush must not change the merge order")
+	for _, n := range []int{1, 2, 17, 3000} {
+		cases := randomPresortCases(int64(n)*4242+1, n, 3)
+		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
+		got, backgrounded := buildPresortedTrie(cases, 8)
+		require.Equal(t, n > 8, backgrounded, "n=%d must cross the hand-off threshold", n)
+		require.Equal(t, want, flattenPrefixTrie(t, got),
+			"chunks built in the background must not change the merge order for n=%d", n)
+	}
 }
 
 func TestPresort_TouchHashedKeyCopiesCallerBuffer(t *testing.T) {
