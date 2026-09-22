@@ -127,6 +127,8 @@ func TestStateReadAtPendingWhileBlockIsBuilt(t *testing.T) {
 	got, err := api.GetBalance(t.Context(), addr, &pending)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+	_, err = api.GetStorageValues(t.Context(), map[common.Address][]common.Hash{addr: {{}}}, &pending)
+	require.NoError(t, err)
 }
 
 func TestGetBalanceChangesInBlock(t *testing.T) {
