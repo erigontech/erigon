@@ -365,7 +365,7 @@ func (br *BlockRetire) BuildFilesInBackground(
 		defer stopOnClose()
 
 		if br.snBuildAllowed != nil {
-			//we are inside own goroutine - it's fine to block here
+			// we are inside own goroutine - it's fine to block here
 			if err := br.snBuildAllowed.Acquire(ctx, 1); err != nil {
 				if !errors.Is(err, context.Canceled) && !errors.Is(err, common.ErrStopped) {
 					br.logger.Warn("[snapshots] retire blocks", "err", err)
@@ -531,8 +531,10 @@ func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, sna
 	return lastTxNum, nil
 }
 
-type firstKeyGetter func(ctx context.Context) uint64
-type dumpFunc func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collector func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+type (
+	firstKeyGetter func(ctx context.Context) uint64
+	dumpFunc       func(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFrom, blockTo uint64, firstKey firstKeyGetter, collector func(v []byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error)
+)
 
 var BlockCompressCfg = seg.Cfg{
 	MinPatternScore: 1_000,
@@ -576,7 +578,6 @@ func dumpRange(ctx context.Context, f snaptype.FileInfo, dumper dumpFunc, firstK
 		}
 		return sn.AddWord(v)
 	}, workers, lvl, logger)
-
 	if err != nil {
 		return lastKeyValue, fmt.Errorf("dump %s: %w", f.Name(), err)
 	}
@@ -872,7 +873,8 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[snapshots] Dumping headers", "blockNum", blockNum,
+			logger.Log(
+				lvl, "[snapshots] Dumping headers", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
@@ -954,7 +956,8 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[snapshots] Wrote into file", "blockNum", blockNum,
+			logger.Log(
+				lvl, "[snapshots] Wrote into file", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:

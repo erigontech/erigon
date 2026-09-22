@@ -197,6 +197,7 @@ func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 	number := binary.BigEndian.Uint64(data)
 	return &number
 }
+
 func ReadBadHeaderNumber(db kv.Getter, hash common.Hash) (*uint64, error) {
 	data, err := db.GetOne(kv.BadHeaderNumber, hash[:])
 	if err != nil {
@@ -438,6 +439,7 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	}
 	return nil
 }
+
 func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, headerRlp []byte, skipIndexing bool) error {
 	if err := db.Put(kv.Headers, dbutils.HeaderKey(number, hash), headerRlp); err != nil {
 		return err
@@ -946,7 +948,7 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	if err != nil {
 		return deleted, err
 	}
-	if firstK == nil { //nothing to delete
+	if firstK == nil { // nothing to delete
 		return deleted, err
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
@@ -1013,7 +1015,7 @@ func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	if blockFrom < 1 { //protect genesis
+	if blockFrom < 1 { // protect genesis
 		blockFrom = 1
 	}
 	return tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
@@ -1100,12 +1102,14 @@ func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 		return tx.Delete(kv.Epoch, k)
 	})
 }
+
 func ReadEpoch(tx kv.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
 	k := make([]byte, dbutils.NumberLength+length.Hash)
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[dbutils.NumberLength:], blockHash[:])
 	return tx.GetOne(kv.Epoch, k)
 }
+
 func FindEpochBeforeOrEqualNumber(tx kv.Tx, n uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
 	c, err := tx.Cursor(kv.Epoch)
 	if err != nil {
@@ -1278,6 +1282,7 @@ func WriteDBSchemaVersion(tx kv.RwTx) error {
 	}
 	return nil
 }
+
 func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err error) {
 	existingVersion, err := tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
 	if err != nil {
@@ -1295,6 +1300,7 @@ func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err err
 	patch = binary.BigEndian.Uint32(existingVersion[8:])
 	return major, minor, patch, true, nil
 }
+
 func ReadDBCommitmentHistoryEnabled(tx kv.Tx) (bool, bool, error) {
 	commitmentHistoryEnabled, err := tx.GetOne(kv.DatabaseInfo, kv.CommitmentLayoutFlagKey)
 	if err != nil {
@@ -1314,6 +1320,7 @@ func ReadDBCommitmentHistoryEnabled(tx kv.Tx) (bool, bool, error) {
 	}
 	return false, false, fmt.Errorf("incorrect value of DB commitment history enabled flag: %x", commitmentHistoryEnabled)
 }
+
 func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	var value []byte
 	if enabled {

@@ -49,7 +49,6 @@ func (obj *Withdrawal) EncodingSize() int {
 }
 
 func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
-
 	encodingSize := obj.EncodingSize()
 
 	b := rlp.NewEncodingBuf()

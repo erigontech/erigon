@@ -94,7 +94,7 @@ var (
 		Enums.Salt,
 		"salt",
 		snaptype.Versions{
-			Current:      version.ZeroVersion, //2,
+			Current:      version.ZeroVersion, // 2,
 			MinSupported: version.ZeroVersion,
 		},
 		nil,
@@ -132,7 +132,8 @@ var (
 					return fmt.Errorf("HeadersIdx: %w", err)
 				}
 				return nil
-			}),
+			},
+		),
 	)
 
 	Bodies = snaptype.RegisterType(
@@ -166,7 +167,8 @@ var (
 					return fmt.Errorf("can't index %s: %w", info.Name(), err)
 				}
 				return nil
-			}),
+			},
+		),
 	)
 
 	Transactions = snaptype.RegisterType(
@@ -358,7 +360,8 @@ var (
 
 					return nil
 				}
-			}),
+			},
+		),
 	)
 	Domains = snaptype.RegisterType(
 		Enums.Domains,

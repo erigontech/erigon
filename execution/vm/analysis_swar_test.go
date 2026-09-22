@@ -89,8 +89,9 @@ func TestCodeBitmapSWAREquivalence(t *testing.T) {
 	}
 	edges := [][]byte{{}, {0x5b}, {0x60}, {0x7f}, {0x00}}
 	for n := range 48 {
-		edges = append(edges,
-			append([]byte{0x7f}, make([]byte, n)...),       // PUSH32 + n bytes
+		edges = append(
+			edges,
+			append([]byte{0x7f}, make([]byte, n)...), // PUSH32 + n bytes
 			append([]byte{0x5b, 0x7f}, make([]byte, n)...), // JUMPDEST, PUSH32, ...
 			append(make([]byte, n), 0x7f),                  // trailing PUSH32
 		)

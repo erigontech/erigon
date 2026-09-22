@@ -379,12 +379,15 @@ func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.KV, error) 
 	}
 	return m.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
 }
+
 func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	panic("please implement me")
 }
+
 func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
+
 func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
@@ -422,7 +425,7 @@ func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc or
 		return nil, err
 	}
 	if _, err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -446,6 +449,7 @@ func (s *rangeIter) Close() {
 		s.iterMem = nil
 	}
 }
+
 func (s *rangeIter) init() (*rangeIter, error) {
 	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
@@ -469,6 +473,7 @@ func (s *rangeIter) HasNext() bool {
 	}
 	return s.hasNextDb || s.hasNextMem
 }
+
 func (s *rangeIter) Next() (k, v []byte, err error) {
 	s.limit--
 	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
@@ -527,7 +532,7 @@ func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPr
 		return nil, err
 	}
 	if err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -576,6 +581,7 @@ func (s *rangeDupSortIter) HasNext() bool {
 	}
 	return s.hasNextDb || s.hasNextMem
 }
+
 func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	s.limit--
 	k = s.key
@@ -1089,9 +1095,11 @@ func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
 	}
 	return m.db.Debug().HistoryStartFrom(name)
 }
+
 func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
+
 func (m *MemoryMutation) Debug() kv.TemporalDebugTx {
 	if m.db == nil {
 		return nil
@@ -1380,9 +1388,11 @@ func (td temporaldb) ReadOnly() bool {
 func (td temporaldb) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return td.memoryMutation.memDb.Update(ctx, f)
 }
+
 func (td temporaldb) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return td.memoryMutation.memDb.UpdateNosync(ctx, f)
 }
+
 func (td temporaldb) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return td.memoryMutation.memDb.View(ctx, f)
 }

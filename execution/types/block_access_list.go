@@ -800,6 +800,7 @@ func encodeAccountChanges(list []AccountChanges, w io.Writer, b []byte) error {
 	}
 	return nil
 }
+
 func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 	size, err := s.List()
 	if err != nil {

@@ -72,6 +72,7 @@ func (n *FullNode) fstring(ind string) string {
 	}
 	return resp.String() + "\n" + ind + "]"
 }
+
 func (n *FullNode) print(w io.Writer) {
 	fmt.Fprintf(w, "f(")
 	for i, node := range &n.Children {
@@ -92,6 +93,7 @@ func (n *DuoNode) fstring(ind string) string {
 	resp.WriteString(fmt.Sprintf("\n%s] ", ind))
 	return resp.String()
 }
+
 func (n *DuoNode) print(w io.Writer) {
 	fmt.Fprintf(w, "d(")
 	i1, i2 := n.childrenIdx()
@@ -105,6 +107,7 @@ func (n *DuoNode) print(w io.Writer) {
 func (n *ShortNode) fstring(ind string) string {
 	return fmt.Sprintf("{%x: %v} ", n.Key, n.Val.fstring(ind+"  "))
 }
+
 func (n *ShortNode) print(w io.Writer) {
 	fmt.Fprintf(w, "s(%x:", n.Key)
 	n.Val.print(w)
@@ -114,6 +117,7 @@ func (n *ShortNode) print(w io.Writer) {
 func (n HashNode) fstring(ind string) string {
 	return fmt.Sprintf("<%x> ", n.hash)
 }
+
 func (n HashNode) print(w io.Writer) {
 	fmt.Fprintf(w, "h(%x)", n.hash)
 }
@@ -121,6 +125,7 @@ func (n HashNode) print(w io.Writer) {
 func (n ValueNode) fstring(ind string) string {
 	return fmt.Sprintf("%x ", []byte(n))
 }
+
 func (n ValueNode) print(w io.Writer) {
 	fmt.Fprintf(w, "v(%x)", []byte(n))
 }
@@ -128,6 +133,7 @@ func (n ValueNode) print(w io.Writer) {
 func (n CodeNode) fstring(ind string) string {
 	return fmt.Sprintf("code: %x ", []byte(n))
 }
+
 func (n CodeNode) print(w io.Writer) {
 	fmt.Fprintf(w, "code(%x)", []byte(n))
 }
