@@ -212,6 +212,7 @@ func initClient(conn ServerCodec, logger log.Logger) *Client {
 	}
 	if !isHTTP {
 		go c.dispatch(conn)
+		go c.read(conn)
 	}
 	return c
 }
@@ -564,9 +565,6 @@ func (c *Client) dispatch(codec ServerCodec) {
 		}
 		close(c.didClose)
 	}()
-
-	// Spawn the initial read loop.
-	go c.read(codec)
 
 	for {
 		select {
