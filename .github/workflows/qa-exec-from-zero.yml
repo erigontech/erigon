@@ -40,14 +40,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - chain: hoodi   # Chain name as specified on the erigon command line
-            tracking_time_seconds: 3600
-            total_time_seconds: 43200  # 12 hours
-            timeout_minutes: 840       # 14 hours
-        #  - chain: gnosis
-        #    tracking_time_seconds: 7200
-        #    total_time_seconds: 2937600  # 34 days
-        #    timeout_minutes: 50400       # 35 days, the workflow-run limit
+        #  - chain: hoodi   # Chain name as specified on the erigon command line
+        #    tracking_time_seconds: 3600
+        #    total_time_seconds: 43200  # 12 hours
+        #    timeout_minutes: 840       # 14 hours
+          - chain: gnosis
+            tracking_time_seconds: 7200
+            total_time_seconds: 2937600  # 34 days
+            timeout_minutes: 50400       # 35 days, the workflow-run limit
         #  - chain: mainnet
         #    tracking_time_seconds: 7200
         #    total_time_seconds: 2937600  # 34 days

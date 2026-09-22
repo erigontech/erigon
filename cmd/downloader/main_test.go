@@ -32,7 +32,7 @@ func TestTorrentHashesReturnsErrorOnUnreadableTorrent(t *testing.T) {
 	corrupt := filepath.Join(dirs.SnapDomain, "v1.1-accounts.0-64.kv.torrent")
 	require.NoError(t, os.WriteFile(corrupt, []byte("not a torrent"), 0o644))
 
-	rootCmd.SetArgs([]string{"torrent_hashes", "--datadir", dataDir, "--chain", "mainnet"})
+	rootCmd.SetArgs([]string{"torrent_hashes", "--datadir", dataDir, "--chain", "mainnet", "--log.dir.disable"})
 	err := rootCmd.ExecuteContext(t.Context())
 
 	require.ErrorContains(t, err, corrupt)
