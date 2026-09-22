@@ -88,8 +88,7 @@ func Process(tx kv.TemporalRwTx, h *types.Header, vio *state.VersionedIO, isEIP7
 	if err != nil {
 		return nil, fmt.Errorf("block %d: read stored block access list: %w", blockNum, err)
 	}
-	// A stored BAL sidecar may be absent — eth/71 backfill is best-effort and
-	// never blocks stage progress — so cross-check it only when present.
+	// A stored BAL sidecar may be absent, so cross-check it only when present.
 	var blockBal types.BlockAccessList
 	if blockBalBytes != nil {
 		blockBal, err = types.DecodeBlockAccessListBytes(blockBalBytes)

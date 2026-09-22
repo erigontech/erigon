@@ -31,28 +31,14 @@ import (
 
 var PrunedError = errors.New("old data not available due to pruning")
 
-// HistoryReaderV3 Implements StateReader and StateWriter.
+// HistoryReaderV3 implements StateReader and StateWriter. Reads chain from
+// most-recent to persisted: blockCache (in-flight per-field parallel-block
+// writes) → sd.GetAsOf (in-batch memory) → ttx.GetAsOf (DB history + snapshots).
 //
-// The read chain, from most-recent to persisted, is:
-//
-//	blockCache (in-flight parallel-block writes, per-field) →
-//	sd.GetAsOf (in-batch memory state) →
-//	ttx.GetAsOf (DB history + snapshot files).
-//
-// blockCache is populated by applyVersionedWrites in the parallel executor
-// for every committed tx in the current block. Those writes do NOT land in
-// sd.mem until Flush at block boundary, so a finalize-time IBS constructed
-// in historic mode (withdrawals, EIP-7002/7251 system calls on a
-// tip-adjacent historic block) would otherwise read the pre-block balance
-// and stomp a prior tx's in-block update. Consulting blockCache first fixes
-// that gap.
-//
-// sd is the SharedDomains for the batch. When non-nil, the reader checks
-// sd.GetAsOf before ttx.GetAsOf so prior-batch writes that haven't been
-// flushed to the history index yet are still visible.
-//
-// RPC and other consumers that want to read strictly persisted history
-// pass sd=nil via the legacy NewHistoryReaderV3 constructor.
+// blockCache holds writes that have not yet reached sd.mem until the block
+// boundary Flush, so a finalize-time IBS in historic mode would otherwise read
+// pre-block state and stomp a prior tx's in-block update. When sd is nil the
+// reader serves strictly persisted history.
 type HistoryReaderV3 struct {
 	ttx         kv.TemporalTx
 	sd          execctx.DomainReader
@@ -76,11 +62,9 @@ func NewHistoryReaderV3WithSharedDomains(ttx kv.TemporalTx, sd execctx.DomainRea
 }
 
 // getAsOf chains sd.GetAsOf (in-batch memory) before ttx.GetAsOf (DB history
-// + snapshot files). Callers requesting only persisted history construct the
-// reader with sd=nil via the legacy NewHistoryReaderV3 constructor. If sd.mem
-// has inMemHistoryReads disabled (e.g. the serial executor path), sd.GetAsOf
-// returns an error — we silently fall through to ttx so the same reader type
-// is usable in both modes.
+// + snapshots). When sd is nil, or sd.mem has inMemHistoryReads disabled and
+// returns an error, it falls through to ttx so the same reader type serves
+// both the in-batch and persisted-history modes.
 func (hr *HistoryReaderV3) getAsOf(domain kv.Domain, key []byte) (enc []byte, ok bool, err error) {
 	if hr.sd != nil {
 		enc, ok, err = hr.sd.GetAsOf(domain, key, hr.txNum)

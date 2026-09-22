@@ -219,10 +219,8 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			// Intentional os.Exit: STOP_AFTER_BLOCK is a debug switch used to
 			// capture state at exactly N blocks executed. The DB is left as it
 			// was *before* this block was applied so the next run reproduces
-			// the stop point with the same input. panic() (the prior implementation)
-			// unwinds defers and fires the very commit we're trying to skip.
-			// Mirrors the design documented in PR #19803 — debug only, never set
-			// in production.
+			// the stop point with the same input. panic() would unwind defers
+			// and fire the very commit we're trying to skip.
 			os.Exit(0)
 		}
 
