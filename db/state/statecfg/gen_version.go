@@ -31,9 +31,11 @@ type pair struct {
 	Min     Version `yaml:"min"`
 }
 
-type domainSection map[string]pair        // kv, bt, …
-type domainEntry map[string]domainSection // domain, hist, ii
-type yamlRoot map[string]domainEntry      // accounts, storage, …
+type (
+	domainSection map[string]pair          // kv, bt, …
+	domainEntry   map[string]domainSection // domain, hist, ii
+	yamlRoot      map[string]domainEntry   // accounts, storage, …
+)
 
 /* ---------- Generator ---------- */
 
@@ -64,9 +66,9 @@ func writeGoFile(path string, src []byte) error {
 	if err != nil {
 		// at least keep original if format failing
 		log.Warn("failed to format generated code", "err", err)
-		return os.WriteFile(path, src, 0644)
+		return os.WriteFile(path, src, 0o644)
 	}
-	return os.WriteFile(path, formatted, 0644)
+	return os.WriteFile(path, formatted, 0o644)
 }
 
 /* ---------- Helpers ---------- */

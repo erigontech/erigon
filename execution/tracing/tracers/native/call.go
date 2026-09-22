@@ -270,8 +270,10 @@ func (t *callTracer) OnLog(log *types.Log) {
 		return
 	}
 	frame := &t.callstack[len(t.callstack)-1]
-	frame.Logs = append(frame.Logs, callLog{Address: log.Address, Topics: log.Topics, Data: log.Data,
-		Index: hexutil.Uint64(log.Index), Position: hexutil.Uint(len(frame.Calls))})
+	frame.Logs = append(frame.Logs, callLog{
+		Address: log.Address, Topics: log.Topics, Data: log.Data,
+		Index: hexutil.Uint64(log.Index), Position: hexutil.Uint(len(frame.Calls)),
+	})
 }
 
 // GetResult returns the json-encoded nested list of call traces, and any

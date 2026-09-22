@@ -89,9 +89,7 @@ func testPrestateTracer(tracerName string, dirPath string, t *testing.T) {
 		t.Run(camel(strings.TrimSuffix(file.Name(), ".json")), func(t *testing.T) {
 			t.Parallel()
 
-			var (
-				test = new(testcase)
-			)
+			test := new(testcase)
 			// Call tracer test found, read if from disk
 			if blob, err := os.ReadFile(filepath.Join("testdata", dirPath, file.Name())); err != nil {
 				t.Fatalf("failed to read testcase: %v", err)

@@ -96,7 +96,7 @@ func (s *Step) optCalibrate() bool {
 	return true
 }
 
-type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
+type ReceivedStepHashes map[uint64]map[common.Address]common.Hash // BTreeMap<(u64, Address), H256>
 
 // nolint
 func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
@@ -211,7 +211,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 // / The block corresponding the parent hash must be stored already.
 // nolint
 func epochTransitionFor(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
-	//TODO: probably this version of func doesn't support non-canonical epoch transitions
+	// TODO: probably this version of func doesn't support non-canonical epoch transitions
 	h := chain.GetHeaderByHash(parentHash)
 	if h == nil {
 		return transition, false
@@ -671,7 +671,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 ) error {
 	blockNum := header.Number.Uint64()
 
-	//Check block gas limit from smart contract, if applicable
+	// Check block gas limit from smart contract, if applicable
 	err := c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 	if err != nil {
 		return err
@@ -695,7 +695,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 		if err != nil {
 			panic(err)
 		}
-		err = c.e.PutEpoch(header.ParentHash, 0, proof) //TODO: block 0 hardcoded - need fix it inside validators
+		err = c.e.PutEpoch(header.ParentHash, 0, proof) // TODO: block 0 hardcoded - need fix it inside validators
 		if err != nil {
 			panic(err)
 		}
@@ -862,7 +862,7 @@ func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, f
 // to construct transition proof. author == ec_recover(sig) known
 // since the blocks are in the DB.
 func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to common.Hash) (out []*types.Header) {
-	var header = from
+	header := from
 	for {
 		header = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 		if header == nil {
@@ -1211,7 +1211,8 @@ func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 
 func (c *AuRa) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 

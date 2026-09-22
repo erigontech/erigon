@@ -116,8 +116,10 @@ func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	c.publishedSD = provider
 }
 
-var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
-var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
+var (
+	_ kvcache.Cache     = (*Cache)(nil)     // compile-time interface check
+	_ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
+)
 
 func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
 	var sd *execctx.SharedDomains
@@ -162,6 +164,7 @@ func (c *CacheView) Get(k []byte) ([]byte, error) {
 	v, _, err := c.getter.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
+
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 	v, _, err := c.getter.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err

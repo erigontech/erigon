@@ -54,7 +54,7 @@ type StorageMode int
 const (
 	DefaultStorageMode StorageMode = iota
 	KeyStorageMode
-	PrefixValStorageMode //TODO: change name
+	PrefixValStorageMode // TODO: change name
 	StepValueStorageMode
 	StepKeyStorageMode
 	ValueOffset8StorageMode // txNum at val[8:16], used by TxLookup
@@ -222,7 +222,7 @@ func TableScanningPrune(
 		}
 	}
 
-	var keyCursorPosition = &StartPos{}
+	keyCursorPosition := &StartPos{}
 	if keysCursor != nil {
 		if prevStat.KeyProgress == InProgress {
 			keyCursorPosition.StartKey, keyCursorPosition.StartVal, err = keysCursor.Seek(prevStat.LastPrunedKey) //nolint:govet

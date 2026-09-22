@@ -49,6 +49,7 @@ func (m *postTxIBS) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error
 	}
 	return accounts.EmptyCodeHash, nil
 }
+
 func (m *postTxIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
@@ -278,8 +279,10 @@ func TestFlatCallFrameJSON(t *testing.T) {
 		{
 			name: "call",
 			build: func() *flatCallFrame {
-				f := &callFrame{From: from, To: &to, Gas: 0x1234, GasUsed: 0x100,
-					Input: hexutil.Bytes{0xaa, 0xbb}, Output: hexutil.Bytes{0xcc}, Value: &zero}
+				f := &callFrame{
+					From: from, To: &to, Gas: 0x1234, GasUsed: 0x100,
+					Input: hexutil.Bytes{0xaa, 0xbb}, Output: hexutil.Bytes{0xcc}, Value: &zero,
+				}
 				f.setType(vm.CALL)
 				return newFlatCall(f)
 			},
@@ -297,8 +300,10 @@ func TestFlatCallFrameJSON(t *testing.T) {
 		{
 			name: "create2 reports the deployed code and address",
 			build: func() *flatCallFrame {
-				f := &callFrame{From: from, To: &to, Gas: 0x10, GasUsed: 0x8,
-					Input: hexutil.Bytes{0x60, 0x80}, Output: hexutil.Bytes{0xfe}, Value: &zero}
+				f := &callFrame{
+					From: from, To: &to, Gas: 0x10, GasUsed: 0x8,
+					Input: hexutil.Bytes{0x60, 0x80}, Output: hexutil.Bytes{0xfe}, Value: &zero,
+				}
 				f.setType(vm.CREATE2)
 				return newFlatCreate(f)
 			},
