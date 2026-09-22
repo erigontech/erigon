@@ -197,7 +197,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	result, err := protocol.ApplyMessage(vmenv, msg, new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas()), true, false /* gasBailout */, engine)
 	if err != nil {
-		if tracer != nil && tracer.Hooks.HasTxEndHook() {
+		if tracer != nil {
 			tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		}
 		return nil, fmt.Errorf("tracing failed: %w", err)

@@ -525,13 +525,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		if timer != nil && evm.Cancelled() {
 			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
-			if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
+			if ot.Tracer() != nil {
 				ot.Tracer().EmitTxEnd(nil, mdgas.TxnGasUsage{}, timeoutErr)
 			}
 			return nil, timeoutErr
 		}
 		if execErr != nil {
-			if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
+			if ot.Tracer() != nil {
 				ot.Tracer().EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 			}
 			return nil, execErr
@@ -965,9 +965,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
 				if execErr != nil {
-					if tracer.Hooks.HasTxEndHook() {
-						tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
-					}
+					tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 					return fmt.Errorf("txIndex %d: %w", job.txIndex, execErr)
 				}
 

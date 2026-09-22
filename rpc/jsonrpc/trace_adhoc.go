@@ -1198,9 +1198,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if vmConfig.Tracer.HasTxEndHook() {
-			vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
-		}
+		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
@@ -1477,7 +1475,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
 		if err != nil {
-			if tracer != nil && tracer.Hooks.HasTxEndHook() {
+			if tracer != nil {
 				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 			}
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
@@ -1782,9 +1780,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if vmConfig.Tracer.HasTxEndHook() {
-			vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
-		}
+		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
