@@ -278,7 +278,7 @@ func (evm *EVM) Cancel() { evm.abort.Store(true) }
 // Cancelled returns true if Cancel has been called
 func (evm *EVM) Cancelled() bool { return evm.abort.Load() }
 
-func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, snapshot int, entryStateReservoir uint64, stateGasSpill uint64) {
+func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, gasUsed *mdgas.MdGasUsage, err error, snapshot int, entryStateReservoir uint64) {
 	evm.intraBlockState.RevertToSnapshot(snapshot, err)
 	tracer := evm.config.Tracer
 	gasTracing := tracer.HasGasChangeHook()
@@ -287,8 +287,10 @@ func (evm *EVM) handleFrameRevert(gasRemaining *mdgas.MdGas, err error, snapshot
 		if gasTracing {
 			old = *gasRemaining
 		}
-		gasRemaining.Execution += stateGasSpill
+		gasRemaining.Execution += gasUsed.StateSpill
 		gasRemaining.State = entryStateReservoir
+		gasUsed.State = 0
+		gasUsed.StateSpill = 0
 		if gasTracing && old != *gasRemaining {
 			tracer.EmitGasChange(old, *gasRemaining, tracing.GasChangeRefundRevertedState)
 		}
@@ -349,9 +351,6 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	depth := evm.depth
 	gasRemaining = gas
 	inputTotal := gas.Total()
-	defer func() {
-		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
-	}()
 
 	if (dbg.TraceTransactionIO && !dbg.TraceInstructions) && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		version := evm.intraBlockState.Version()
@@ -361,21 +360,27 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}()
 	}
 
+	gasTracing := evm.Config().Tracer != nil
+	defer func() {
+		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
+		if gasTracing {
+			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
+		}
+	}()
+
 	p, isPrecompile := evm.precompile(addr)
 	var code []byte
 	if !isPrecompile {
 		code, err = evm.intraBlockState.ResolveCode(addr)
 		if err != nil {
+			gasTracing = false
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 	}
 
 	// Invoke tracer hooks that signal entering/exiting a call frame
-	if evm.Config().Tracer != nil {
+	if gasTracing {
 		evm.captureBegin(depth, typ, caller, addr, isPrecompile, input, gas, value, code)
-		defer func(startGas mdgas.MdGas) {
-			evm.captureEnd(depth, typ, startGas, gasRemaining, ret, err)
-		}(gas)
 	}
 
 	// BAL: record address access even if call fails due to gas/call depth/insufficient balance
@@ -510,7 +515,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// above we revert to the snapshot and consume any gas remaining. Additionally
 	// when we're in Homestead this also counts for code storage gas errors.
 	if err != nil || evm.config.RestoreState {
-		evm.handleFrameRevert(&gasRemaining, err, snapshot, gas.State, gasUsed.StateSpill)
+		evm.handleFrameRevert(&gasRemaining, &gasUsed, err, snapshot, gas.State)
 	}
 
 	return ret, gasRemaining, gasUsed, err
@@ -655,15 +660,16 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 
 	depth := evm.depth
 	inputTotal := gas.Total()
+	gasTracing := evm.Config().Tracer != nil
 	defer func() {
 		gasUsed.Execution = deriveFrameExecutionGasUsed(inputTotal, gasRemaining.Total(), gasUsed.State)
+		if gasTracing {
+			evm.captureEnd(depth, gasRemaining, gasUsed, ret, err)
+		}
 	}()
 
-	if evm.Config().Tracer != nil {
+	if gasTracing {
 		evm.captureBegin(depth, typ, caller, address, false, codeAndHash.code, gas, value, nil)
-		defer func() {
-			evm.captureEnd(depth, typ, gas, gasRemaining, ret, err)
-		}()
 	}
 
 	if preparation == nil {
@@ -784,7 +790,7 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	// above, we revert to the snapshot and consume any gas remaining. Additionally,
 	// when we're in Homestead, this also counts for code storage gas errors.
 	if err != nil && (evm.chainRules.IsHomestead || err != ErrCodeStoreOutOfGas) { //nolint:errorlint // intentional bare sentinel check
-		evm.handleFrameRevert(&gasRemaining, err, snapshot, gas.State, gasUsed.StateSpill)
+		evm.handleFrameRevert(&gasRemaining, &gasUsed, err, snapshot, gas.State)
 	}
 
 	return ret, address, gasRemaining, gasUsed, err
@@ -861,22 +867,15 @@ func (evm *EVM) GetVMContext() *tracing.VMContext {
 
 func (evm *EVM) captureBegin(depth int, typ OpCode, from accounts.Address, to accounts.Address, precompile bool, input []byte, startGas mdgas.MdGas, value uint256.Int, code []byte) {
 	tracer := evm.Config().Tracer
-
-	if tracer.OnEnter != nil {
-		tracer.OnEnter(depth, byte(typ), from, to, precompile, input, startGas.Execution, value, code)
-	}
-	if tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(mdgas.MdGas{}, startGas, tracing.GasChangeCallInitialBalance)
-	}
+	tracer.EmitEnter(depth, byte(typ), from, to, precompile, input, startGas, value, code)
+	tracer.EmitGasChange(mdgas.MdGas{}, startGas, tracing.GasChangeCallInitialBalance)
 }
 
-func (evm *EVM) captureEnd(depth int, typ OpCode, startGas mdgas.MdGas, leftOverGas mdgas.MdGas, ret []byte, err error) {
+func (evm *EVM) captureEnd(depth int, leftOverGas mdgas.MdGas, gasUsed mdgas.MdGasUsage, ret []byte, err error) {
 	tracer := evm.Config().Tracer
-
 	if tracer.HasGasChangeHook() && leftOverGas != (mdgas.MdGas{}) {
 		tracer.EmitGasChange(leftOverGas, mdgas.MdGas{}, tracing.GasChangeCallLeftOverReturned)
 	}
-
 	var reverted bool
 	if err != nil {
 		reverted = true
@@ -884,8 +883,5 @@ func (evm *EVM) captureEnd(depth int, typ OpCode, startGas mdgas.MdGas, leftOver
 	if !evm.chainRules.IsHomestead && errors.Is(err, ErrCodeStoreOutOfGas) {
 		reverted = false
 	}
-
-	if tracer.OnExit != nil {
-		tracer.OnExit(depth, ret, startGas.Execution-leftOverGas.Execution, VMErrorFromErr(err), reverted)
-	}
+	tracer.EmitExit(depth, ret, gasUsed, VMErrorFromErr(err), reverted)
 }
