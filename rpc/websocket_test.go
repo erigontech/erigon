@@ -657,6 +657,28 @@ func TestWebsocketCoalescedMessagesLeaveInOneWrite(t *testing.T) {
 			t.Fatalf("message %d is %q", i, data)
 		}
 	}
+
+	msgs := []string{"0", strconv.Quote(strings.Repeat("x", 2*heldWriteLimit)), "2"}
+	conn.SetReadLimit(int64(4 * heldWriteLimit))
+	err = wc.coalesce(func() {
+		for _, m := range msgs {
+			if err := wc.WriteJSON(context.Background(), rawResponse(m)); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range msgs {
+		_, data, err := conn.Read(t.Context())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if string(data) != want {
+			t.Fatalf("message %d is %d bytes, want %d", i, len(data), len(want))
+		}
+	}
 }
 
 // peakService records the most calls it ran at once.
