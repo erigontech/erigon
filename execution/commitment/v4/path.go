@@ -30,9 +30,6 @@ func packPath(nibbles []byte, dst []byte) []byte {
 	} else {
 		dst = dst[:packed]
 	}
-	for i := range dst {
-		dst[i] = 0
-	}
 	for i, nibble := range nibbles {
 		if nibble > 0x0f {
 			panic("nibble out of range")

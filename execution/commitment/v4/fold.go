@@ -129,7 +129,7 @@ func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, err
 		}
 		var accScratch [accountRLPScratch]byte
 		payload = accountConsensusRLP(nonce, &balance, storageRoot, codeHash, accScratch[:0])
-		return append(out, leafRef(planeStorage, compact, payload, encScratch[:0])...), nil
+		return append(out, leafRef(compact, payload, encScratch[:0])...), nil
 	}
 	return append(out, storageLeafRef(compact, payload, encScratch[:0])...), nil
 }

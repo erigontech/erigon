@@ -32,14 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-type scheduleOrder uint8
-
-const (
-	orderLongestFirst scheduleOrder = iota
-	orderSequential
-	orderReversed
-)
-
 type scheduleStats struct {
 	inFlight atomic.Int64
 	max      atomic.Int64
@@ -76,19 +68,6 @@ type accountResult struct {
 	plan  accountPlan
 	value []byte
 	err   error
-}
-
-func orderedStorageTasks(tasks []storageTask, order scheduleOrder) []storageTask {
-	ordered := slices.Clone(tasks)
-	switch order {
-	case orderReversed:
-		slices.Reverse(ordered)
-	case orderLongestFirst:
-		slices.SortStableFunc(ordered, func(a, b storageTask) int {
-			return len(b.entries) - len(a.entries)
-		})
-	}
-	return ordered
 }
 
 const storageChunk = 16
@@ -144,7 +123,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	return g.Wait()
 }
 
-func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, order scheduleOrder, workers int, stats *scheduleStats) ([32]byte, error) {
+func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers int, stats *scheduleStats) ([32]byte, error) {
 	if rawCtx == nil {
 		return [32]byte{}, errors.New("commitment v4: nil scheduled context")
 	}
@@ -154,7 +133,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
-	storage = orderedStorageTasks(storage, order)
+	slices.SortStableFunc(storage, func(a, b storageTask) int { return len(b.entries) - len(a.entries) })
 
 	storageRoots := make([][32]byte, len(storage))
 	if err := runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, workers, stats); err != nil {

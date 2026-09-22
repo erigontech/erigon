@@ -40,15 +40,8 @@ const (
 	leafRefScratch = 3 + 34 + accountRLPScratch
 )
 
-func leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte {
-	payloadLen := rlp.StringLen(payload)
-	if plane == planeAccount {
-		payloadLen = len(payload)
-	} else if plane != planeStorage {
-		panic(fmt.Sprintf("commitment v4: unknown leaf plane 0x%02x", plane))
-	}
-
-	contentLen := rlp.StringLen(suffix) + payloadLen
+func leafRef(suffix []byte, payload []byte, dst []byte) []byte {
+	contentLen := rlp.StringLen(suffix) + rlp.StringLen(payload)
 	start := len(dst)
 	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
 	encoded := dst
@@ -57,12 +50,7 @@ func leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte {
 	pos += prefixLen
 	stringLen := rlp.EncodeStringToBuf(suffix, encoded[pos:])
 	pos += stringLen
-	if plane == planeAccount {
-		copy(encoded[pos:], payload)
-		pos += len(payload)
-	} else {
-		pos += rlp.EncodeStringToBuf(payload, encoded[pos:])
-	}
+	pos += rlp.EncodeStringToBuf(payload, encoded[pos:])
 	encoded = encoded[:pos]
 	if len(encoded)-start < 32 {
 		return encoded
@@ -72,20 +60,21 @@ func leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte {
 }
 
 func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
-	if len(payload) == 0 || len(payload) > length.Hash {
+	if len(payload) > length.Hash {
 		panic(fmt.Sprintf("commitment v4: storage leaf payload has length %d", len(payload)))
 	}
+	single := len(payload) == 1 && payload[0] < 0x80
 	innerLen := 1 + len(payload)
-	if len(payload) == 1 && payload[0] < 0x80 {
+	if single || len(payload) == 0 {
 		innerLen = 1
 	}
 	outerLen := 1 + innerLen
-	if innerLen == 1 && payload[0] < 0x80 {
+	if single {
 		outerLen = 1
 	}
 	contentLen := rlp.StringLen(suffix) + outerLen
 	start := len(dst)
-	dst = append(dst, make([]byte, rlp.ListLen(contentLen)+contentLen)...)
+	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
 	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
 	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
 	switch {
@@ -94,7 +83,10 @@ func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
 		pos++
 	case innerLen == 1:
 		dst[pos] = 0x81
-		dst[pos+1] = payload[0]
+		dst[pos+1] = 0x80
+		if len(payload) != 0 {
+			dst[pos+1] = payload[0]
+		}
 		pos += 2
 	default:
 		dst[pos] = byte(0x80 + outerLen - 1)

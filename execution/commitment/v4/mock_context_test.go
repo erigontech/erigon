@@ -20,9 +20,21 @@ import (
 	"bytes"
 	"slices"
 
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
+
+func fullAccountUpdate(nonce, balance uint64, codeHash common.Hash) commitment.Update {
+	return commitment.Update{
+		Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
+		Nonce:    nonce,
+		Balance:  *uint256.NewInt(balance),
+		CodeHash: codeHash,
+	}
+}
 
 type mockContext struct {
 	branches     map[string][]byte

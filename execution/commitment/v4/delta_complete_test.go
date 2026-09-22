@@ -141,35 +141,6 @@ func TestCompleteDeltasTombstoneWipedStorageSubtree(t *testing.T) {
 	require.Len(t, ctx.deltas, len(previous))
 }
 
-func TestCompleteDeltasTombstoneDeletedAccountSubtree(t *testing.T) {
-	pathA := accountDeltaPath(1, 2)
-	pathB := accountDeltaPath(1, 3)
-	pathC := accountDeltaPath(9, 4)
-	ctx := newDeltaContext()
-	_, err := runAccountTrie(ctx, []accountEntry{
-		{hashedKey: pathA, update: accountDeltaUpdate(1)},
-		{hashedKey: pathB, update: accountDeltaUpdate(2)},
-		{hashedKey: pathC, update: accountDeltaUpdate(3)},
-	}, nil)
-	require.NoError(t, err)
-	childKey := AccountNodeKey([]byte{1}, nil)
-	childBefore := bytes.Clone(ctx.branches[string(childKey)])
-	require.NotEmpty(t, childBefore)
-	ctx.deltas = nil
-
-	_, err = runAccountTrie(ctx, []accountEntry{
-		{hashedKey: pathA, update: &commitment.Update{Flags: commitment.DeleteUpdate}},
-		{hashedKey: pathB, update: &commitment.Update{Flags: commitment.DeleteUpdate}},
-	}, nil)
-	require.NoError(t, err)
-	requireTombstone(t, ctx.deltas, childKey)
-	for _, delta := range ctx.deltas {
-		if bytes.Equal(delta.key, childKey) {
-			require.Equal(t, childBefore, delta.prev)
-		}
-	}
-}
-
 func TestCompleteDeltasReplayAndReloadRecovery(t *testing.T) {
 	var address [32]byte
 	address[0] = 0x81

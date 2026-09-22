@@ -50,13 +50,6 @@ func fork(prefix []byte) *node {
 	return &node{path: append([]byte(nil), prefix...)}
 }
 
-func join(parent *node, nib int, ref []byte) {
-	if parent == nil {
-		panic("commitment v4: nil parent")
-	}
-	parent.setStoredChild(nib, ref, nil)
-}
-
 const slotsInitialCap = 4
 
 func (n *node) slotIndex(nib int) int {

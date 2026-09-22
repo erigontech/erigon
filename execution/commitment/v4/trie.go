@@ -36,8 +36,6 @@ type Trie struct {
 	ctx             commitment.PatriciaContext
 	ctxFactory      commitment.TrieContextFactory
 	root            []byte
-	traceW          io.Writer
-	scheduleOrder   scheduleOrder
 	scheduleWorkers int
 	scheduleStats   *scheduleStats
 	deferUpdates    bool
@@ -86,11 +84,7 @@ func (t *Trie) RootHash() ([]byte, error) {
 	return bytes.Clone(t.root), nil
 }
 
-func (t *Trie) SetTraceWriter(w io.Writer) {
-	if t != nil {
-		t.traceW = w
-	}
-}
+func (t *Trie) SetTraceWriter(io.Writer) {}
 
 func (t *Trie) Variant() commitment.TrieVariant {
 	return commitment.VariantCommitmentV4
@@ -179,7 +173,7 @@ func (t *Trie) Process(
 		deferredCtx = &deferredPatriciaContext{PatriciaContext: t.ctx}
 		processCtx = deferredCtx
 	}
-	root, err := runScheduledPhases(ctx, processCtx, factory, storage, accounts, t.scheduleOrder, t.scheduleWorkers, t.scheduleStats)
+	root, err := runScheduledPhases(ctx, processCtx, factory, storage, accounts, t.scheduleWorkers, t.scheduleStats)
 	if err != nil {
 		return nil, err
 	}
@@ -197,6 +191,5 @@ func (t *Trie) Release() {
 	if t != nil {
 		t.ctx = nil
 		t.root = nil
-		t.traceW = nil
 	}
 }

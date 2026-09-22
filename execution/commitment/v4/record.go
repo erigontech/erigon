@@ -86,34 +86,6 @@ func (r Record) LeafAt(nib int) (suffix, value []byte) { return r.leafAt(r.layou
 
 func (r Record) ExtAt(nib int) []byte { return r.extAt(r.layout(), nib) }
 
-func (r Record) EmbAt(nib int) []byte {
-	l := r.layout()
-	if nib < 0 || nib > 15 || !l.ok || l.emb&(uint16(1)<<nib) == 0 {
-		return nil
-	}
-	off, ok := r.skipExt(l)
-	if !ok {
-		return nil
-	}
-	for i := range 16 {
-		if l.emb&(uint16(1)<<i) == 0 {
-			continue
-		}
-		if len(r.data) <= off {
-			return nil
-		}
-		end := off + 1 + int(r.data[off])
-		if end > len(r.data) {
-			return nil
-		}
-		if i == nib {
-			return r.data[off+1 : end]
-		}
-		off = end
-	}
-	return nil
-}
-
 func (r Record) slotAt(l layout, nib int) []byte {
 	tree := l.tree()
 	if nib < 0 || nib > 15 || !l.ok || tree&(uint16(1)<<nib) == 0 {

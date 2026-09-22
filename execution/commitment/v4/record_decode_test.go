@@ -229,9 +229,6 @@ func TestRecordDecodeAccessors(t *testing.T) {
 	if got := r.ExtAt(0); !bytes.Equal(got, extension) {
 		t.Fatalf("extension: %x", got)
 	}
-	if got := r.EmbAt(2); !bytes.Equal(got, embedded) {
-		t.Fatalf("embedded: %x", got)
-	}
 	gotSuffix, gotValue := r.LeafAt(1)
 	if !bytes.Equal(gotSuffix, suffix) || !bytes.Equal(gotValue, []byte{0x11, 0x12}) {
 		t.Fatalf("leaf 1: suffix=%x value=%x", gotSuffix, gotValue)
@@ -274,7 +271,6 @@ func TestRecordDecodeNoAllocations(t *testing.T) {
 		_ = r.EmbMask()
 		_ = r.SlotAt(0)
 		_ = r.ExtAt(0)
-		_ = r.EmbAt(2)
 		_, _ = r.LeafAt(1)
 	}); allocations != 0 {
 		t.Fatalf("record accessors allocate: %f", allocations)

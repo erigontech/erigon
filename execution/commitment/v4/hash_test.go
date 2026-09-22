@@ -36,20 +36,17 @@ func mustDecodeHex(t *testing.T, value string) []byte {
 func TestLeafRefVectors(t *testing.T) {
 	key := nibbles.HexToCompact([]byte{1, 2})
 	payload := bytes.Repeat([]byte{0x11}, 32)
-	got := leafRef(planeStorage, key, payload, nil)
+	got := leafRef(key, payload, nil)
 	require.Equal(t, mustDecodeHex(t, "e2d0b037b975d0e18dfaad291e1c147eeab6f0547d7056bdf3ea0b4fbeeca973"), got)
 
-	inline := leafRef(planeStorage, key, []byte{1}, nil)
+	inline := leafRef(key, []byte{1}, nil)
 	require.Equal(t, []byte{0xc4, 0x82, 0x00, 0x12, 0x01}, inline)
-	accountPayload := []byte{0xc0}
-	accountInline := leafRef(planeAccount, key, accountPayload, nil)
-	require.Equal(t, []byte{0xc4, 0x82, 0x00, 0x12, 0xc0}, accountInline)
 }
 
 func TestLeafRefHashesAtBoundary(t *testing.T) {
 	key := nibbles.HexToCompact([]byte{1, 2})
-	below := leafRef(planeStorage, key, bytes.Repeat([]byte{0x22}, 26), nil)
-	at := leafRef(planeStorage, key, bytes.Repeat([]byte{0x22}, 27), nil)
+	below := leafRef(key, bytes.Repeat([]byte{0x22}, 26), nil)
+	at := leafRef(key, bytes.Repeat([]byte{0x22}, 27), nil)
 	require.Less(t, len(below), 32)
 	require.Len(t, at, 32)
 }

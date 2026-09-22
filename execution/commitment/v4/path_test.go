@@ -93,3 +93,24 @@ func TestPackedPathSortOrder(t *testing.T) {
 	require.Less(t, bytes.Compare(keys[1], keys[2]), 0)
 	require.Less(t, bytes.Compare(keys[2], keys[3]), 0)
 }
+
+func TestPackPathIntoDirtyBufferMatchesFreshBuffer(t *testing.T) {
+	for count := range 65 {
+		nibbles := make([]byte, count)
+		for i := range nibbles {
+			nibbles[i] = byte((i*7 + 3) & 0x0f)
+		}
+		want := packPath(nibbles, nil)
+
+		var scratch [32]byte
+		for i := range scratch {
+			scratch[i] = 0xff
+		}
+		got := packPath(nibbles, scratch[:0])
+		require.True(t, bytes.Equal(want, got), "count %d: want %x got %x", count, want, got)
+
+		reused := packPath(bytes.Repeat([]byte{0x0f}, 64), nil)
+		got = packPath(nibbles, reused[:0])
+		require.True(t, bytes.Equal(want, got), "count %d reused: want %x got %x", count, want, got)
+	}
+}

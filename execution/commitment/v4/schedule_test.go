@@ -17,7 +17,6 @@
 package v4
 
 import (
-	"bytes"
 	"context"
 	"sync"
 	"sync/atomic"
@@ -29,19 +28,6 @@ import (
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
-
-func TestOrderedStorageTasks(t *testing.T) {
-	tasks := []storageTask{
-		{entries: make([]storageEntry, 1)},
-		{entries: make([]storageEntry, 4)},
-		{entries: make([]storageEntry, 2)},
-	}
-
-	require.Equal(t, []int{1, 4, 2}, storageTaskLengths(orderedStorageTasks(tasks, orderSequential)))
-	require.Equal(t, []int{4, 2, 1}, storageTaskLengths(orderedStorageTasks(tasks, orderLongestFirst)))
-	require.Equal(t, []int{2, 4, 1}, storageTaskLengths(orderedStorageTasks(tasks, orderReversed)))
-	require.Equal(t, []int{1, 4, 2}, storageTaskLengths(tasks))
-}
 
 func TestScheduleStatsTrackPeakInFlight(t *testing.T) {
 	stats := new(scheduleStats)
@@ -62,30 +48,6 @@ func TestScheduleStatsTrackPeakInFlight(t *testing.T) {
 	require.Equal(t, int64(4), stats.max.Load())
 }
 
-func TestSchedulePoliciesPreserveRoot(t *testing.T) {
-	entries := make([]parityUpdate, 0, 48)
-	for i := range 16 {
-		address := parityAddress(i)
-		entries = append(entries, parityUpdate{key: address, update: accountParityUpdate(i)}, parityUpdate{
-			key:    append(append([]byte(nil), address...), paritySlot(i)...),
-			update: storageParityUpdate(i),
-		})
-	}
-
-	roots := make([][]byte, 0, 3)
-	for _, order := range []scheduleOrder{orderSequential, orderReversed, orderLongestFirst} {
-		ctx := newParityContext()
-		trie := &Trie{scheduleOrder: order, scheduleWorkers: 2}
-		trie.ResetContext(ctx)
-		root, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
-		require.NoError(t, err)
-		roots = append(roots, root)
-		trie.Release()
-	}
-	require.True(t, bytes.Equal(roots[0], roots[1]))
-	require.True(t, bytes.Equal(roots[0], roots[2]))
-}
-
 func TestScheduleWorkerBoundDuringTrieProcess(t *testing.T) {
 	entries := make([]parityUpdate, 0, 96)
 	for i := range 32 {
@@ -96,7 +58,7 @@ func TestScheduleWorkerBoundDuringTrieProcess(t *testing.T) {
 		})
 	}
 	stats := new(scheduleStats)
-	trie := &Trie{scheduleOrder: orderLongestFirst, scheduleWorkers: 2, scheduleStats: stats}
+	trie := &Trie{scheduleWorkers: 2, scheduleStats: stats}
 	trie.ResetContext(newParityContext())
 	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)

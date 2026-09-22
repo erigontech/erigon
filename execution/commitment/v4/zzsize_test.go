@@ -158,7 +158,7 @@ func BenchmarkZZStorageLeafRef(b *testing.B) {
 		payload := accountConsensusRLP(3, uint256.NewInt(12345), nil, nil, nil)
 		b.ReportAllocs()
 		for range b.N {
-			_ = leafRef(planeAccount, suffix, payload, buf[:0])
+			_ = leafRef(suffix, payload, buf[:0])
 		}
 	})
 }

@@ -89,14 +89,10 @@ func TestNodeMutationsCoverEveryNibble(t *testing.T) {
 	require.Zero(t, n.leafMask)
 }
 
-func TestNodeStoredChildAndJoinCopyReferences(t *testing.T) {
+func TestNodeStoredChildCopiesReferences(t *testing.T) {
 	n := fork(nil)
 	hash := bytes.Repeat([]byte{1}, 32)
 	ext := []byte{2, 3, 4}
-	join(n, 5, hash)
-	require.Equal(t, hash, n.childHashAt(5))
-	require.Nil(t, n.childExtAt(5))
-
 	n.setStoredChild(5, hash, ext)
 	hash[0] = 9
 	ext[0] = 8
@@ -120,7 +116,6 @@ func TestNodeRejectsInvalidReferences(t *testing.T) {
 	require.Panics(t, func() { n.setChild(16, nil) })
 	require.Panics(t, func() { n.setStoredChild(0, nil, nil) })
 	require.Panics(t, func() { n.setStoredChild(0, make([]byte, 31), nil) })
-	require.Panics(t, func() { join(nil, 0, make([]byte, 32)) })
 	require.Panics(t, func() { fork([]byte{16}) })
 }
 
