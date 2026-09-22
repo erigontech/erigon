@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -108,4 +109,65 @@ func TestRemoveOwnTmpFilesSweepsOnlyOwnTypes(t *testing.T) {
 	require.NoFileExists(t, own)
 	require.FileExists(t, foreign, "another collection's in-progress .tmp must survive")
 	require.FileExists(t, junk, "an unattributable .tmp must survive")
+}
+
+// The sweep exists to stop multi-GB .tmp files accumulating, so a removal it could not perform is
+// the one outcome callers must hear about. Reporting success would leave the caller believing the
+// disk was reclaimed.
+func TestRemoveOwnTmpFilesReportsRemovalFailure(t *testing.T) {
+	dir := t.TempDir()
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet},
+		dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenFolder())
+
+	own := filepath.Join(dir, "v1.0-000000-000500-headers.seg.123.tmp")
+	denied := errors.New("permission denied")
+
+	err := s.removeOwnTmpFiles([]string{own}, func(string) error { return denied })
+
+	require.ErrorIs(t, err, denied)
+}
+
+// One undeletable file must not strand the rest: the caller gets the error, but every other
+// leftover this collection owns is still reclaimed.
+func TestRemoveOwnTmpFilesContinuesPastFailure(t *testing.T) {
+	dir := t.TempDir()
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet},
+		dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenFolder())
+
+	stubborn := filepath.Join(dir, "v1.0-000000-000500-headers.seg.123.tmp")
+	removable := filepath.Join(dir, "v1.0-000500-001000-headers.seg.456.tmp")
+	denied := errors.New("permission denied")
+
+	var removed []string
+	err := s.removeOwnTmpFiles([]string{stubborn, removable}, func(p string) error {
+		if p == stubborn {
+			return denied
+		}
+		removed = append(removed, p)
+		return nil
+	})
+
+	require.ErrorIs(t, err, denied)
+	require.Equal(t, []string{removable}, removed, "a failure on one file must not stop the sweep")
+}
+
+// A .tmp can vanish between listing and removal — another process sweeping the shared snapshot
+// directory is exactly the situation this code already guards against. That is the sweep's goal
+// reached, not a failure, and surfacing it would fail merges through RemoveOverlaps.
+func TestRemoveOwnTmpFilesToleratesAlreadyGone(t *testing.T) {
+	dir := t.TempDir()
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet},
+		dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, log.New())
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenFolder())
+
+	own := filepath.Join(dir, "v1.0-000000-000500-headers.seg.123.tmp")
+
+	err := s.removeOwnTmpFiles([]string{own}, func(string) error { return os.ErrNotExist })
+
+	require.NoError(t, err)
 }

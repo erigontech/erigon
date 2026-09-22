@@ -1677,13 +1677,23 @@ func (s *BaseRoSnapshots) RemoveOwnTmpFiles() error {
 	if err != nil {
 		return err
 	}
+	return s.removeOwnTmpFiles(tmpFiles, dir.RemoveFile)
+}
+
+// removeOwnTmpFiles sweeps every owned file before returning, so one undeletable leftover does not
+// strand the rest. A file already gone is the goal reached, not a failure: the shared snapshot
+// directory has other sweepers.
+func (s *BaseRoSnapshots) removeOwnTmpFiles(tmpFiles []string, remove func(string) error) error {
+	var errs []error
 	for _, f := range tmpFiles {
 		if !s.ownsTmpFile(f) {
 			continue
 		}
-		_ = dir.RemoveFile(f)
+		if err := remove(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // ownsTmpFile reports whether a .tmp in the snapshot dir could have been produced by this
