@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -60,10 +61,10 @@ func TestTracerStopRace(t *testing.T) {
 				tr, err := tracers.New(s.name, &tracers.Context{}, json.RawMessage("{}"))
 				require.NoError(t, err)
 
-				if s.needsFrame && tr.OnEnter != nil {
+				if s.needsFrame && tr.HasEnterHook() {
 					// Push a single top-level call frame so GetResult doesn't
 					// short-circuit before reading the interruption reason.
-					tr.OnEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil, 0, uint256.Int{}, nil)
+					tr.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil, mdgas.MdGas{}, uint256.Int{}, nil)
 				}
 
 				start := make(chan struct{})

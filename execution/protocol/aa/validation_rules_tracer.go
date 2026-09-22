@@ -9,6 +9,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -95,10 +96,10 @@ func NewValidationRulesTracer(sender accounts.Address, senderHasCode bool) *Vali
 
 func (t *ValidationRulesTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnOpcode:        t.OnOpcode,
-		OnEnter:         t.OnEnter,
-		OnExit:          t.OnExit,
-		OnFault:         t.OnFault,
+		OnOpcodeV2:      t.OnOpcodeV2,
+		OnEnterV2:       t.OnEnterV2,
+		OnExitV2:        t.OnExitV2,
+		OnFaultV2:       t.OnFaultV2,
 		OnStorageChange: t.OnStorageChange,
 	}
 }
@@ -108,7 +109,7 @@ func (t *ValidationRulesTracer) isDelegatedAccount(code []byte) bool {
 	return len(code) >= 3 && bytes.Equal(code[:3], []byte{0xef, 0x01, 0x00})
 }
 
-func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (t *ValidationRulesTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if t.err != nil {
 		return
 	}
@@ -156,7 +157,7 @@ func (t *ValidationRulesTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, s
 	}
 }
 
-func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *ValidationRulesTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if t.err != nil {
 		return
 	}
@@ -174,7 +175,7 @@ func (t *ValidationRulesTracer) OnEnter(depth int, typ byte, from accounts.Addre
 	t.currentContract = to
 }
 
-func (t *ValidationRulesTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *ValidationRulesTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if t.err != nil {
 		return
 	}
@@ -182,7 +183,7 @@ func (t *ValidationRulesTracer) OnExit(depth int, output []byte, gasUsed uint64,
 	t.prevWasGas = false
 }
 
-func (t *ValidationRulesTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
+func (t *ValidationRulesTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
 	if t.err != nil {
 		return
 	}

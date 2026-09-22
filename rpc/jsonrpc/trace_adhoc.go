@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -345,16 +346,16 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
-			OnEnter:  ot.OnEnter,
-			OnExit:   ot.OnExit,
-			OnOpcode: ot.OnOpcode,
+			OnEnterV2:  ot.OnEnterV2,
+			OnExitV2:   ot.OnExitV2,
+			OnOpcodeV2: ot.OnOpcodeV2,
 		},
 		GetResult: ot.GetResult,
 		Stop:      ot.Stop,
 	}
 }
 
-func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas uint64, value *uint256.Int, code []byte) {
+func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas mdgas.MdGas, value *uint256.Int, code []byte) {
 	if ot.r.VmTrace != nil {
 		var vmTrace *VmTrace
 		if deep {
@@ -378,7 +379,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		if create {
 			vmTrace.Code = bytes.Clone(input)
 			if ot.lastVmOp != nil {
-				ot.lastVmOp.Cost += int(gas)
+				ot.lastVmOp.Cost += int(gas.Execution)
 			}
 		} else {
 			vmTrace.Code = code
@@ -390,8 +391,8 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 			return
 		}
 	}
-	if gas > 500000000 {
-		gas = 500000001 - (0x8000000000000000 - gas)
+	if gas.Execution > 500000000 {
+		gas.Execution = 500000001 - (0x8000000000000000 - gas.Execution)
 	}
 	trace := &ParityTrace{}
 	if create {
@@ -431,7 +432,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action := CreateTraceAction{}
 		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
-		action.Gas = hexutil.U256(*uint256.NewInt(gas))
+		action.Gas = hexutil.U256(*uint256.NewInt(gas.Execution))
 		action.Init = bytes.Clone(input)
 		action.Value = hexutil.U256(*value)
 		trace.Action = &action
@@ -457,7 +458,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		}
 		action.From = from.Value()
 		action.To = to.Value()
-		action.Gas = hexutil.U256(*uint256.NewInt(gas))
+		action.Gas = hexutil.U256(*uint256.NewInt(gas.Execution))
 		action.Input = bytes.Clone(input)
 		action.Value = hexutil.U256(*value)
 		trace.Action = &action
@@ -466,12 +467,12 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 	ot.traceStack = append(ot.traceStack, trace)
 }
 
-func (ot *OeTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ot *OeTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	isCreate := vm.OpCode(typ) == vm.CREATE || vm.OpCode(typ) == vm.CREATE2
 	ot.captureStartOrEnter(depth != 0 /* deep */, vm.OpCode(typ), from, to, precompile, isCreate, input, gas, &value, code)
 }
 
-func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, err error) {
+func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdGasUsage, err error) {
 	if ot.r.VmTrace != nil {
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
@@ -506,10 +507,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 			topTrace.Error = "Reverted"
 			switch topTrace.Type {
 			case CALL:
-				topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
+				topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
 				topTrace.Result.(*TraceResult).Output = bytes.Clone(output)
 			case CREATE:
-				topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
+				topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
 				topTrace.Result.(*CreateTraceResult).Code = bytes.Clone(output)
 			}
 		} else {
@@ -527,9 +528,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 		}
 		switch topTrace.Type {
 		case CALL:
-			topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
+			topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
 		case CREATE:
-			topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed))
+			topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
 		}
 	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
@@ -538,11 +539,11 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed uint64, e
 	}
 }
 
-func (ot *OeTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (ot *OeTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	ot.captureEndOrExit(depth != 0 /* deep */, output, gasUsed, err)
 }
 
-func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	st := scope.StackData()
 
@@ -600,7 +601,7 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			}
 		}
 		if ot.lastOffStack != nil {
-			ot.lastOffStack.Ex.Used = int(gas)
+			ot.lastOffStack.Ex.Used = int(gas.Execution)
 			if len(st) > 0 {
 				ot.lastOffStack.Ex.Push = []string{tracers.StackBack(st, 0).Hex()}
 			} else {
@@ -630,10 +631,10 @@ func (ot *OeTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing
 			ot.lastVmOp.Idx = fmt.Sprintf("%s%d", sb.String(), len(vmTrace.Ops)-1)
 		}
 		ot.lastOp = vm.OpCode(op)
-		ot.lastVmOp.Cost = int(cost)
+		ot.lastVmOp.Cost = int(cost.Execution)
 		ot.lastVmOp.Pc = int(pc)
 		ot.lastVmOp.Ex.Push = []string{}
-		ot.lastVmOp.Ex.Used = int(gas) - int(cost)
+		ot.lastVmOp.Ex.Used = int(gas.Execution) - int(cost.Execution)
 		if !ot.compat {
 			ot.lastVmOp.Op = vm.OpCode(op).String()
 		}

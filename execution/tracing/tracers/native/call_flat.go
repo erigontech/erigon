@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -139,20 +140,20 @@ func newFlatCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 		Hooks: &tracing.Hooks{
 			OnTxStart: ft.OnTxStart,
 			OnTxEnd:   ft.OnTxEnd,
-			OnEnter:   ft.OnEnter,
-			OnExit:    ft.OnExit,
+			OnEnterV2: ft.OnEnterV2,
+			OnExitV2:  ft.OnExitV2,
 		},
 		Stop:      ft.Stop,
 		GetResult: ft.GetResult,
 	}, nil
 }
 
-// OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+// OnEnterV2 is called when EVM enters a new scope (via call, create or selfdestruct).
+func (t *flatCallTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.tracer.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+	t.tracer.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
 
 	if depth == 0 {
 		return
@@ -164,12 +165,12 @@ func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to 
 	}
 }
 
-// OnExit is called when EVM exits a scope, even if the scope didn't execute any code.
-func (t *flatCallTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+// OnExitV2 is called when EVM exits a scope, even if the scope didn't execute any code.
+func (t *flatCallTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.tracer.OnExit(depth, output, gasUsed, err, reverted)
+	t.tracer.OnExitV2(depth, output, gasUsed, err, reverted)
 
 	if depth == 0 {
 		return

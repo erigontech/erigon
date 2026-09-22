@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -1428,7 +1429,7 @@ func TestOeTracerCoversInstructionSet(t *testing.T) {
 		t.Run(op.String(), func(t *testing.T) {
 			tracer := &OeTracer{r: &TraceCallResult{VmTrace: &VmTrace{}}}
 			for pc, o := range []vm.OpCode{vm.JUMPDEST, op, vm.JUMPDEST} {
-				tracer.OnOpcode(uint64(pc), byte(o), 1000, 0, scope, nil, 0, nil)
+				tracer.OnOpcodeV2(uint64(pc), byte(o), mdgas.MdGas{Execution: 1000}, mdgas.MdGas{}, scope, nil, 0, nil)
 			}
 			ex := tracer.r.VmTrace.Ops[1].Ex
 			require.Len(t, ex.Push, jt[op].NumPush())

@@ -68,9 +68,9 @@ func ValidateAATransaction(
 		return nil, 0, err
 	}
 
-	var originalEvmHook tracing.EnterHook
+	var originalEvmHook tracing.EnterHookV2
 	entryPointTracer := EntryPointTracer{}
-	if vmConfig.Tracer != nil && vmConfig.Tracer.OnEnter != nil {
+	if vmConfig.Tracer.HasEnterHook() {
 		entryPointTracer = EntryPointTracer{OnEnterSuper: originalEvmHook}
 	}
 	vmConfig.Tracer = entryPointTracer.Hooks()

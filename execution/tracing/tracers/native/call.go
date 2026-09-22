@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/abi"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -134,8 +135,8 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 		Hooks: &tracing.Hooks{
 			OnTxStart: t.OnTxStart,
 			OnTxEnd:   t.OnTxEnd,
-			OnEnter:   t.OnEnter,
-			OnExit:    t.OnExit,
+			OnEnterV2: t.OnEnterV2,
+			OnExitV2:  t.OnExitV2,
 			OnLog:     t.OnLog,
 		},
 		GetResult: t.GetResult,
@@ -143,7 +144,7 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 	}, nil
 }
 
-func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (t *callTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	t.depth = depth
 	t.precompiles = append(t.precompiles, precompile)
 	if t.config.OnlyTopCall && depth > 0 {
@@ -166,7 +167,7 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 		From:  from.Value(),
 		To:    toValue,
 		Input: bytes.Clone(input),
-		Gas:   hexutil.Uint64(gas),
+		Gas:   hexutil.Uint64(gas.Execution),
 	}
 
 	call.setType(vm.OpCode(typ))
@@ -180,9 +181,9 @@ func (t *callTracer) OnEnter(depth int, typ byte, from accounts.Address, to acco
 	t.callstack = append(t.callstack, call)
 }
 
-func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *callTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth == 0 {
-		t.captureEnd(output, gasUsed, err, reverted)
+		t.captureEnd(output, err)
 		return
 	}
 
@@ -210,12 +211,12 @@ func (t *callTracer) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	t.callstack = t.callstack[:size-1]
 	size -= 1
 
-	call.GasUsed = hexutil.Uint64(gasUsed)
+	call.GasUsed = hexutil.Uint64(gasUsed.Execution)
 	call.processOutput(output, err)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
 
-func (t *callTracer) captureEnd(output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *callTracer) captureEnd(output []byte, err error) {
 	if len(t.callstack) != 1 {
 		return
 	}

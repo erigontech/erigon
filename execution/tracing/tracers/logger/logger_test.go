@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
@@ -81,6 +82,11 @@ func TestStoreCapture(t *testing.T) {
 	if logger.storage[contract.Address()][index] != exp {
 		t.Errorf("expected %x, got %x", exp, logger.storage[contract.Address()][index])
 	}
+	encoded, err := json.Marshal(FormatLogs(logger.StructLogs()))
+	require.NoError(t, err)
+	var logs []map[string]any
+	require.NoError(t, json.Unmarshal(encoded, &logs))
+	require.EqualValues(t, params.StateGasPerStorageSet, logs[2]["stateGasReservoir"])
 }
 
 func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
@@ -89,7 +95,7 @@ func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	logger.OnSystemCallStartV2(&tracing.VMContext{IntraBlockState: &mockIBS{}})
 
 	scope := &mockOpContext{}
-	logger.OnOpcode(0, byte(vm.STOP), 100, 0, scope, nil, 0, nil)
+	logger.OnOpcodeV2(0, byte(vm.STOP), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGas{}, scope, nil, 0, nil)
 
 	var entry map[string]json.RawMessage
 	if err := json.Unmarshal(bytes.TrimSpace(buf.Bytes()), &entry); err != nil {
@@ -98,6 +104,9 @@ func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	if _, ok := entry["refund"]; !ok {
 		t.Fatal("expected json logger to emit opcode output after system call start")
 	}
+	var reservoir uint64
+	require.NoError(t, json.Unmarshal(entry["stateGasReservoir"], &reservoir))
+	require.EqualValues(t, 200, reservoir)
 }
 
 //func TestStoreCapture(t *testing.T) {

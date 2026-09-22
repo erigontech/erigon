@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	jsassets "github.com/erigontech/erigon/execution/tracing/tracers/js/internal/tracers"
@@ -215,10 +216,10 @@ func newJsTracer(code string, ctx *tracers.Context, cfg json.RawMessage) (*trace
 			OnTxStart:           t.OnTxStart,
 			OnSystemCallStartV2: t.OnSystemCallStartV2,
 			OnTxEnd:             t.OnTxEnd,
-			OnEnter:             t.OnEnter,
-			OnExit:              t.OnExit,
-			OnOpcode:            t.OnOpcode,
-			OnFault:             t.OnFault,
+			OnEnterV2:           t.OnEnterV2,
+			OnExitV2:            t.OnExitV2,
+			OnOpcodeV2:          t.OnOpcodeV2,
+			OnFaultV2:           t.OnFaultV2,
 		},
 		GetResult: t.GetResult,
 		Stop:      t.Stop,
@@ -275,7 +276,7 @@ func (t *jsTracer) OnTxEnd(receipt *types.Receipt, err error) {
 }
 
 // onStart implements the Tracer interface to initialize the tracing operation.
-func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bool, input []byte, gas uint64, value uint256.Int) {
+func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bool, input []byte, gas mdgas.MdGas, value uint256.Int) {
 	if t.err != nil {
 		return
 	}
@@ -297,8 +298,8 @@ func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bo
 	t.ctx["value"] = valueBig
 }
 
-// OnOpcode implements the Tracer interface to trace a single step of VM execution
-func (t *jsTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+// OnOpcodeV2 implements the Tracer interface to trace a single step of VM execution
+func (t *jsTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 	if !t.traceStep {
 		return
 	}
@@ -322,12 +323,13 @@ func (t *jsTracer) OnOpcode(pc uint64, op byte, gas, cost uint64, scope tracing.
 	}
 }
 
-// OnFault implements the Tracer interface to trace an execution fault
-func (t *jsTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.OpContext, depth int, err error) {
+// OnFaultV2 implements the Tracer interface to trace an execution fault
+func (t *jsTracer) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
 	if t.err != nil {
 		return
 	}
-	// Other log fields have been already set as part of the last CaptureState.
+	t.log.gas = gas
+	t.log.cost = cost
 	t.log.err = err
 	if _, err := t.fault(t.obj, t.logValue, t.dbValue); err != nil {
 		t.onError("fault", err)
@@ -335,15 +337,15 @@ func (t *jsTracer) OnFault(pc uint64, op byte, gas, cost uint64, scope tracing.O
 }
 
 // onEnd is called after the call finishes to finalize the tracing.
-func (t *jsTracer) onEnd(output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *jsTracer) onEnd(output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	t.ctx["output"] = t.vm.ToValue(output)
 	if err != nil {
 		t.ctx["error"] = t.vm.ToValue(err.Error())
 	}
 }
 
-// OnEnter is called when EVM enters a new scope (via call, create or selfdestruct).
-func (t *jsTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+// OnEnterV2 is called when EVM enters a new scope (via call, create or selfdestruct).
+func (t *jsTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if t.err != nil {
 		return
 	}
@@ -361,7 +363,7 @@ func (t *jsTracer) OnEnter(depth int, typ byte, from accounts.Address, to accoun
 	t.frame.from = from
 	t.frame.to = to
 	t.frame.input = bytes.Clone(input)
-	t.frame.gas = uint(gas)
+	t.frame.gas = uint(gas.Execution)
 	t.frame.value = nil
 	t.frame.value = value.ToBig()
 
@@ -370,9 +372,9 @@ func (t *jsTracer) OnEnter(depth int, typ byte, from accounts.Address, to accoun
 	}
 }
 
-// OnExit is called when EVM exits a scope, even if the scope didn't
+// OnExitV2 is called when EVM exits a scope, even if the scope didn't
 // execute any code.
-func (t *jsTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (t *jsTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if t.err != nil {
 		return
 	}
@@ -386,7 +388,7 @@ func (t *jsTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, r
 		return
 	}
 
-	t.frameResult.gasUsed = uint(gasUsed)
+	t.frameResult.gasUsed = uint(gasUsed.Execution)
 	t.frameResult.output = bytes.Clone(output)
 	t.frameResult.err = err
 
@@ -990,18 +992,19 @@ type steplog struct {
 	contract *contractObj
 
 	pc     uint64
-	gas    uint64
-	cost   uint64
+	gas    mdgas.MdGas
+	cost   mdgas.MdGas
 	depth  int
 	refund uint64
 	err    error
 }
 
-func (l *steplog) GetPC() uint64     { return l.pc }
-func (l *steplog) GetGas() uint64    { return l.gas }
-func (l *steplog) GetCost() uint64   { return l.cost }
-func (l *steplog) GetDepth() int     { return l.depth }
-func (l *steplog) GetRefund() uint64 { return l.refund }
+func (l *steplog) GetPC() uint64                { return l.pc }
+func (l *steplog) GetGas() uint64               { return l.gas.Execution }
+func (l *steplog) GetCost() uint64              { return l.cost.Execution }
+func (l *steplog) GetStateGasReservoir() uint64 { return l.gas.State }
+func (l *steplog) GetDepth() int                { return l.depth }
+func (l *steplog) GetRefund() uint64            { return l.refund }
 
 func (l *steplog) GetError() goja.Value {
 	if l.err != nil {
@@ -1016,6 +1019,7 @@ func (l *steplog) setupObject() *goja.Object {
 	_ = o.Set("getPC", l.vm.ToValue(l.GetPC))
 	_ = o.Set("getGas", l.vm.ToValue(l.GetGas))
 	_ = o.Set("getCost", l.vm.ToValue(l.GetCost))
+	_ = o.Set("getStateGasReservoir", l.vm.ToValue(l.GetStateGasReservoir))
 	_ = o.Set("getDepth", l.vm.ToValue(l.GetDepth))
 	_ = o.Set("getRefund", l.vm.ToValue(l.GetRefund))
 	_ = o.Set("getError", l.vm.ToValue(l.GetError))
