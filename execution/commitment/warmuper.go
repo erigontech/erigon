@@ -70,14 +70,16 @@ type Warmuper struct {
 
 	keysProcessed atomic.Uint64
 	recordsFound  atomic.Uint64
-	startTime     time.Time
+	startTime     atomic.Int64
+	duration      atomic.Int64
 
 	outstanding [arenaRingSize]atomic.Int64
 	mu          sync.Mutex
 	cond        *sync.Cond
 
-	started atomic.Bool
-	closed  atomic.Bool
+	started   atomic.Bool
+	closed    atomic.Bool
+	closeOnce sync.Once
 }
 
 type warmupWorkItem struct {
@@ -112,7 +114,7 @@ func (w *Warmuper) Start() {
 	if w.started.Swap(true) {
 		return
 	}
-	w.startTime = time.Now()
+	w.startTime.Store(time.Now().UnixNano())
 	if w.numWorkers <= 0 {
 		return
 	}
@@ -173,7 +175,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
 		}
-		if len(branchData) != 0 {
+		if err == nil && len(branchData) != 0 {
 			w.recordsFound.Add(1)
 		}
 
@@ -228,8 +230,10 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 
 func (w *Warmuper) Stats() WarmupStats {
 	duration := time.Duration(0)
-	if !w.startTime.IsZero() {
-		duration = time.Since(w.startTime)
+	if w.closed.Load() {
+		duration = time.Duration(w.duration.Load())
+	} else if startTime := w.startTime.Load(); startTime != 0 {
+		duration = time.Duration(time.Now().UnixNano() - startTime)
 	}
 	return WarmupStats{
 		KeysProcessed: w.keysProcessed.Load(),
@@ -260,10 +264,11 @@ func (w *Warmuper) CloseAndWait() {
 }
 
 func (w *Warmuper) Close() {
-	if w.closed.Swap(true) {
-		return
-	}
-	// w.work is never closed: that would race a concurrent WarmKey send into a
-	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
-	w.cancel()
+	w.closeOnce.Do(func() {
+		if startTime := w.startTime.Load(); startTime != 0 {
+			w.duration.Store(time.Now().UnixNano() - startTime)
+		}
+		w.closed.Store(true)
+		w.cancel()
+	})
 }

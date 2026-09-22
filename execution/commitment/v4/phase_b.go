@@ -36,8 +36,8 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 		return [32]byte{}, errors.New("commitment v4: nil phase B context")
 	}
 
-	scratch := &unfoldScratch{}
-	root, err := unfold(ctx, nil, planeAccount, nil, scratch)
+	g := accountGraph()
+	root, err := unfold(ctx, nil, planeAccount, nil, g.scratch)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -45,7 +45,6 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 		root = fork(nil)
 	}
 	root.plane = planeAccount
-	g := accountGraph()
 	before := g.reachableRecordKeys(root)
 
 	for _, entry := range entries {

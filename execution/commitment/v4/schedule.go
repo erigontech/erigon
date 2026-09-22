@@ -167,8 +167,8 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		results[task.addrHash] = storageRoots[i]
 	}
 
-	scratch := &unfoldScratch{}
-	root, err := unfold(safeCtx, nil, planeAccount, nil, scratch)
+	g := accountGraph()
+	root, err := unfold(safeCtx, nil, planeAccount, nil, g.scratch)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -176,7 +176,6 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		root = fork(nil)
 	}
 	root.plane = planeAccount
-	g := accountGraph()
 	before := g.reachableRecordKeys(root)
 	plans, err := makeAccountPlans(safeCtx, g, root, accounts)
 	if err != nil {

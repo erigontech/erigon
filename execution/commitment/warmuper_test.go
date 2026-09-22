@@ -19,6 +19,7 @@ package commitment
 import (
 	"context"
 	"encoding/hex"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -32,10 +33,11 @@ import (
 type warmupRecordContext struct {
 	noopPatriciaContext
 	record []byte
+	err    error
 }
 
 func (c *warmupRecordContext) Branch([]byte) ([]byte, kv.Step, error) {
-	return c.record, 0, nil
+	return c.record, 0, c.err
 }
 
 func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
@@ -375,7 +377,49 @@ func TestWarmuperStatsDurationStartsWithWarmuper(t *testing.T) {
 		Key:      HexPatriciaWarmupKey,
 		Step:     HexPatriciaWarmupStep,
 	})
+	require.Zero(t, w.Stats().Duration)
 	w.Start()
-	require.Greater(t, w.Stats().Duration, time.Duration(0))
 	w.CloseAndWait()
+	first := w.Stats().Duration
+	second := w.Stats().Duration
+	require.Equal(t, first, second)
+}
+
+func TestWarmuperStatsConcurrentWithStart(t *testing.T) {
+	for range 100 {
+		w := NewWarmuper(context.Background(), WarmupConfig{
+			MaxDepth: WarmupMaxDepth,
+			Key:      HexPatriciaWarmupKey,
+			Step:     HexPatriciaWarmupStep,
+		})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			w.Start()
+		}()
+		go func() {
+			defer wg.Done()
+			for range 1000 {
+				w.Stats()
+				runtime.Gosched()
+			}
+		}()
+		wg.Wait()
+	}
+}
+
+func TestWarmuperRecordsFoundIgnoresFailedRead(t *testing.T) {
+	w := &Warmuper{
+		maxDepth: WarmupMaxDepth,
+		key: func(_ []byte, _ int, dst []byte) ([]byte, bool) {
+			return dst[:0], true
+		},
+		step: func([]byte, []byte, int) (int, bool) {
+			return 0, true
+		},
+	}
+	ctx := &warmupRecordContext{record: []byte{1}, err: context.Canceled}
+	w.warmupKey(ctx, []byte{0}, 0)
+	require.Zero(t, w.Stats().RecordsFound)
 }
