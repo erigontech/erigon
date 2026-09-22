@@ -130,17 +130,15 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	// first write, never with half a result already streamed.
 	hashes, hashesOK := b.Transactions.([]common.Hash)
 	full, fullOK := b.Transactions.([]*RPCTransaction)
-	var rawTxs, txCount, calls []byte
+	var rawTxs []byte
 	var err error
 	if !hashesOK && !fullOK {
 		if rawTxs, err = marshalIfSet(b.Transactions); err != nil {
 			return err
 		}
 	}
-	if txCount, err = marshalIfSet(b.TransactionCount); err != nil {
-		return err
-	}
-	if calls, err = marshalIfSet(b.Calls); err != nil {
+	callErrs, err := marshalCallErrors(b.Calls)
+	if err != nil {
 		return err
 	}
 
@@ -166,18 +164,55 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		s.Field("withdrawals")
 		jsonstream.ArrayValue(s, *b.Withdrawals, writeWithdrawalElem)
 	}
-	if txCount != nil {
-		s.Field("transactionCount").WriteRawBytes(txCount)
+	if b.TransactionCount != nil {
+		jsonstream.Text(s, "transactionCount", b.TransactionCount)
 	}
 	if b.TotalDifficulty != nil {
 		jsonstream.Text(s, "totalDifficulty", b.TotalDifficulty)
 	}
-	if calls != nil {
-		s.Field("calls").WriteRawBytes(calls)
+	if b.Calls != nil {
+		s.Field("calls").WriteArrayStart()
+		for i := range b.Calls {
+			b.Calls[i].writeTo(s, callErrs[i])
+		}
+		s.WriteArrayEnd()
 	}
 	s.WriteObjectEnd()
 	return nil
 }
+
+// marshalCallErrors encodes the calls' errors up front, the one part of a call result that
+// needs the reflection encoder, so a failure is reported before the block's first write.
+func marshalCallErrors(calls []CallResult) ([][]byte, error) {
+	if calls == nil {
+		return nil, nil
+	}
+	errs := make([][]byte, len(calls))
+	for i := range calls {
+		var err error
+		if errs[i], err = marshalIfSet(calls[i].Error); err != nil {
+			return nil, err
+		}
+	}
+	return errs, nil
+}
+
+func (r *CallResult) writeTo(s *jsonstream.StackStream, callErr []byte) {
+	s.WriteObjectStart()
+	s.Field("returnData").WriteString(r.ReturnData)
+	s.Field("logs")
+	jsonstream.ArrayValue(s, r.Logs, writeLogElem)
+	jsonstream.Text(s, "gasUsed", &r.GasUsed)
+	jsonstream.Text(s, "maxUsedGas", &r.MaxUsedGas)
+	jsonstream.Text(s, "status", &r.Status)
+	if callErr != nil {
+		s.Field("error").WriteRawBytes(callErr)
+	}
+	s.WriteObjectEnd()
+}
+
+// writeLogElem never fails: RPCLog.MarshalFastJSONTo reports no error.
+func writeLogElem(s *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).MarshalFastJSONTo(s) }
 
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
 func writeTxElem(s *jsonstream.StackStream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }

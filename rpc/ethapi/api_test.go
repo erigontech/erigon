@@ -415,7 +415,7 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 	withTx := types.NewBlock(header, []types.Transaction{txn}, nil, nil, types.Withdrawals{}, nil)
 	empty := types.NewBlock(header, nil, nil, nil, nil, nil)
 
-	count := 1
+	count := hexutil.Uint64(1)
 	for _, tc := range []struct {
 		name string
 		b    *RPCBlock
@@ -456,8 +456,21 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 		}()},
 		{"otterscan shape", func() *RPCBlock {
 			b := RPCMarshalBlock(withTx, true, false)
-			b.TransactionCount = count
+			b.TransactionCount = &count
 			b.LogsBloom = nil
+			return b
+		}()},
+		{"simulate shape", func() *RPCBlock {
+			b := RPCMarshalBlock(withTx, true, false)
+			b.Calls = []CallResult{
+				{ReturnData: "0x01", Logs: []*types.RPCLog{{Log: types.Log{Topics: []common.Hash{{1}}, Data: []byte{2}}}}, GasUsed: 0x5208, MaxUsedGas: 0x5300, Status: 1},
+				{ReturnData: "0x", Logs: []*types.RPCLog{}, Error: map[string]any{"code": 3, "message": "execution reverted", "data": "0x<&>"}},
+			}
+			return b
+		}()},
+		{"simulate shape, no calls", func() *RPCBlock {
+			b := RPCMarshalBlock(empty, true, false)
+			b.Calls = []CallResult{}
 			return b
 		}()},
 		{"no transactions, full shape", RPCMarshalBlock(empty, true, true)},

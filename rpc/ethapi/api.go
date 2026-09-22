@@ -429,9 +429,19 @@ type RPCBlock struct {
 	Uncles       []common.Hash      `json:"uncles"`
 	Withdrawals  *types.Withdrawals `json:"withdrawals,omitempty"`
 
-	TransactionCount any           `json:"transactionCount,omitempty"`
-	TotalDifficulty  *hexutil.U256 `json:"totalDifficulty,omitempty"`
-	Calls            any           `json:"calls,omitempty"`
+	TransactionCount *hexutil.Uint64 `json:"transactionCount,omitempty"`
+	TotalDifficulty  *hexutil.U256   `json:"totalDifficulty,omitempty"`
+	Calls            []CallResult    `json:"calls,omitzero"`
+}
+
+// CallResult represents the result of a single call in the simulation.
+type CallResult struct {
+	ReturnData string          `json:"returnData"`
+	Logs       []*types.RPCLog `json:"logs"`
+	GasUsed    hexutil.Uint64  `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
+	Status     hexutil.Uint64  `json:"status"`
+	Error      any             `json:"error,omitempty"`
 }
 
 // MarkPending nils the fields a pending block does not have yet.

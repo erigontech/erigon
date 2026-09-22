@@ -50,7 +50,8 @@ func TestBuildBlockReadsMarshalledBlock(t *testing.T) {
 
 	marshalled := ethapi.RPCMarshalBlock(block, true, false)
 	marshalled.TotalDifficulty = (*hexutil.U256)(uint256.NewInt(99))
-	marshalled.TransactionCount = hexutil.Uint64(0)
+	var txCount hexutil.Uint64
+	marshalled.TransactionCount = &txCount
 
 	r := &queryResolver{}
 	got, err := r.buildBlock(map[string]any{
