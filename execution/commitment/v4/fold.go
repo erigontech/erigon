@@ -49,7 +49,8 @@ func fold(n *node, depth int) ([32]byte, error) {
 
 	if depth == 0 && len(n.path) == 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == n.childMask {
 		nib := bits.TrailingZeros16(n.childMask)
-		ref, err := foldLeaf(n, nib, 0, true)
+		var rootRef [32]byte
+		ref, err := foldLeaf(n, nib, 0, true, rootRef[:0])
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -74,6 +75,7 @@ func fold(n *node, depth int) ([32]byte, error) {
 	}
 
 	var refs [16][]byte
+	var refStore [16][32]byte
 	for nib := range 16 {
 		bit := uint16(1) << nib
 		if n.childMask&bit == 0 {
@@ -82,7 +84,7 @@ func fold(n *node, depth int) ([32]byte, error) {
 		var ref []byte
 		var err error
 		if n.leafMask&bit != 0 {
-			ref, err = foldLeaf(n, nib, len(n.path), false)
+			ref, err = foldLeaf(n, nib, len(n.path), false, refStore[nib][:0])
 		} else {
 			ref, err = foldBranchChild(n, nib, len(n.path))
 		}
@@ -99,31 +101,37 @@ func fold(n *node, depth int) ([32]byte, error) {
 	return branchHash, nil
 }
 
-func foldLeaf(n *node, nib, depth int, includeNib bool) ([]byte, error) {
+func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, error) {
 	suffixCount := 64 - depth - 1
 	if suffixCount < 0 || len(n.leafSuffixAt(nib)) != packedLen(suffixCount) {
 		return nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
 	}
-	key := make([]byte, 0, suffixCount)
+	var keyScratch [65]byte
+	key := keyScratch[:0]
 	if n.plane == planeStorage && (includeNib || !n.storageRoot) {
 		key = append(key, n.path...)
 		key = append(key, byte(nib))
 	} else if includeNib {
 		key = append(key, byte(nib))
 	}
-	key = append(key, unpackPath(n.leafSuffixAt(nib), suffixCount, nil)...)
+	start := len(key)
+	key = key[:start+suffixCount]
+	unpackPath(n.leafSuffixAt(nib), suffixCount, key[start:start+suffixCount:start+suffixCount])
 	key = append(key, nibbles.Terminator)
-	compact := nibbles.HexToCompact(key)
+	var compactScratch [34]byte
+	compact := nibbles.HexToCompactInto(compactScratch[:0], key)
+	var encScratch [leafRefScratch]byte
 	payload := n.leafValueAt(nib)
 	if n.plane == planeAccount {
 		nonce, balance, codeHash, storageRoot, err := decodeAccountLeaf(payload)
 		if err != nil {
 			return nil, fmt.Errorf("%w: account leaf %d: %w", errFoldNode, nib, err)
 		}
-		payload = accountConsensusRLP(nonce, &balance, storageRoot, codeHash, nil)
-		return leafRef(planeStorage, compact, payload, nil), nil
+		var accScratch [accountRLPScratch]byte
+		payload = accountConsensusRLP(nonce, &balance, storageRoot, codeHash, accScratch[:0])
+		return append(out, leafRef(planeStorage, compact, payload, encScratch[:0])...), nil
 	}
-	return storageLeafRef(compact, payload, nil), nil
+	return append(out, storageLeafRef(compact, payload, encScratch[:0])...), nil
 }
 
 func foldBranchChild(parent *node, nib, depth int) ([]byte, error) {

@@ -39,8 +39,8 @@ func storageGraph(addrHash []byte) graph {
 	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage}
 }
 
-func (g graph) nodeKey(path []byte) []byte {
-	return nodeKey(g.plane, g.addrHash, path, nil)
+func (g graph) nodeKey(path, dst []byte) []byte {
+	return nodeKey(g.plane, g.addrHash, path, dst)
 }
 
 func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, error) {
@@ -114,11 +114,13 @@ func (g graph) reachableRecordKeys(root *node) map[string]struct{} {
 		if n == nil {
 			return
 		}
+		var keyScratch [66]byte
+		var pathScratch [64]byte
 		path := n.path
 		if isRoot {
 			path = nil
 		}
-		keys[string(g.nodeKey(path))] = struct{}{}
+		keys[string(g.nodeKey(path, keyScratch[:0]))] = struct{}{}
 		for nib := range 16 {
 			bit := uint16(1) << nib
 			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
@@ -129,12 +131,12 @@ func (g graph) reachableRecordKeys(root *node) map[string]struct{} {
 				continue
 			}
 			if len(n.childHashAt(nib)) == 32 {
-				childPath := append([]byte(nil), n.path...)
+				childPath := append(pathScratch[:0], n.path...)
 				if isRoot && len(n.path) == 0 {
 					childPath = append(childPath, byte(nib))
 				}
 				childPath = append(childPath, n.childExtAt(nib)...)
-				keys[string(g.nodeKey(childPath))] = struct{}{}
+				keys[string(g.nodeKey(childPath, keyScratch[:0]))] = struct{}{}
 			}
 		}
 	}
@@ -183,7 +185,7 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, before m
 			path = nil
 			depth = 0
 		}
-		hash, delta, err := foldAndEncodeRecord(ctx, n, depth, g.nodeKey(path))
+		hash, delta, err := foldAndEncodeRecord(ctx, n, depth, g.nodeKey(path, nil))
 		if err != nil {
 			return [32]byte{}, err
 		}

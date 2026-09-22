@@ -41,7 +41,8 @@ func insertRoot(n *node, path, value []byte) error {
 
 	if n.childMask == 0 {
 		n.path = nil
-		n.setLeaf(int(path[0]), packPath(path[1:], nil), value)
+		var packScratch [32]byte
+		n.setLeaf(int(path[0]), packPath(path[1:], packScratch[:0]), value)
 		return nil
 	}
 	if len(n.path) != 0 {
@@ -101,25 +102,31 @@ func splitRootExtension(n *node, path, value []byte, common int) error {
 	} else {
 		root.setStoredChild(oldNib, oldHash, oldExtension)
 	}
-	root.setLeaf(newNib, packPath(path[1:], nil), value)
+	var packScratch [32]byte
+	root.setLeaf(newNib, packPath(path[1:], packScratch[:0]), value)
 	*n = *root
 	return nil
 }
 
 func insertLeafRoot(n *node, path, value []byte) error {
 	oldNib := bits.TrailingZeros16(n.childMask)
-	oldPath := append([]byte{byte(oldNib)}, unpackPath(n.leafSuffixAt(oldNib), 63, nil)...)
+	var pathScratch [64]byte
+	pathScratch[0] = byte(oldNib)
+	unpackPath(n.leafSuffixAt(oldNib), 63, pathScratch[1:1:64])
+	oldPath := pathScratch[:]
+	var packScratch [32]byte
 	if bytes.Equal(oldPath, path) {
-		n.setLeaf(oldNib, packPath(path[1:], nil), value)
+		n.setLeaf(oldNib, packPath(path[1:], packScratch[:0]), value)
 		return nil
 	}
 	if oldNib != int(path[0]) {
 		oldValue := append([]byte(nil), n.leafValueAt(oldNib)...)
-		oldSuffix := append([]byte(nil), n.leafSuffixAt(oldNib)...)
+		var suffixScratch [32]byte
+		oldSuffix := append(suffixScratch[:0], n.leafSuffixAt(oldNib)...)
 		n.path = nil
 		n.clear(oldNib)
 		n.setLeaf(oldNib, oldSuffix, oldValue)
-		n.setLeaf(int(path[0]), packPath(path[1:], nil), value)
+		n.setLeaf(int(path[0]), packPath(path[1:], packScratch[:0]), value)
 		return nil
 	}
 	common := nibbles.CommonPrefixLen(oldPath, path)
@@ -128,8 +135,8 @@ func insertLeafRoot(n *node, path, value []byte) error {
 	}
 	branch := fork(oldPath[:common])
 	branch.plane = n.plane
-	branch.setLeaf(int(oldPath[common]), packPath(oldPath[common+1:], nil), n.leafValueAt(oldNib))
-	branch.setLeaf(int(path[common]), packPath(path[common+1:], nil), value)
+	branch.setLeaf(int(oldPath[common]), packPath(oldPath[common+1:], packScratch[:0]), n.leafValueAt(oldNib))
+	branch.setLeaf(int(path[common]), packPath(path[common+1:], packScratch[:0]), value)
 	root := fork(oldPath[:common])
 	root.plane = n.plane
 	root.setChild(int(oldPath[common]), branch)

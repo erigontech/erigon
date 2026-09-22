@@ -17,11 +17,11 @@
 package v4
 
 import (
-	"bytes"
 	"fmt"
 
 	keccak "github.com/erigontech/fastkeccak"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
 )
@@ -32,6 +32,12 @@ const (
 
 	// widest RLP a branch can produce: list prefix + 16 hash refs + the empty value slot
 	refScratch = 3 + 16*33 + 1
+
+	// widest account body: list prefix + nonce + balance + storage root + code hash
+	accountRLPScratch = 3 + 9 + 33 + 33 + 33
+
+	// widest leaf RLP before hashing: list prefix + compact suffix + account body
+	leafRefScratch = 3 + 34 + accountRLPScratch
 )
 
 func leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte {
@@ -66,17 +72,36 @@ func leafRef(plane byte, suffix []byte, payload []byte, dst []byte) []byte {
 }
 
 func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
-	var encoded bytes.Buffer
-	var prefix [8]byte
-	if err := (rlp.RlpSerializableBytes(payload)).ToDoubleRLP(&encoded, prefix[:]); err != nil {
-		panic(err)
+	if len(payload) == 0 || len(payload) > length.Hash {
+		panic(fmt.Sprintf("commitment v4: storage leaf payload has length %d", len(payload)))
 	}
-	contentLen := rlp.StringLen(suffix) + encoded.Len()
+	innerLen := 1 + len(payload)
+	if len(payload) == 1 && payload[0] < 0x80 {
+		innerLen = 1
+	}
+	outerLen := 1 + innerLen
+	if innerLen == 1 && payload[0] < 0x80 {
+		outerLen = 1
+	}
+	contentLen := rlp.StringLen(suffix) + outerLen
 	start := len(dst)
-	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
+	dst = append(dst, make([]byte, rlp.ListLen(contentLen)+contentLen)...)
 	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
 	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
-	pos += copy(dst[pos:], encoded.Bytes())
+	switch {
+	case outerLen == 1:
+		dst[pos] = payload[0]
+		pos++
+	case innerLen == 1:
+		dst[pos] = 0x81
+		dst[pos+1] = payload[0]
+		pos += 2
+	default:
+		dst[pos] = byte(0x80 + outerLen - 1)
+		dst[pos+1] = byte(0x80 + len(payload))
+		pos += 2
+		pos += copy(dst[pos:], payload)
+	}
 	encodedBytes := dst[start:pos]
 	if len(encodedBytes) < 32 {
 		return encodedBytes

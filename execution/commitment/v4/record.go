@@ -506,7 +506,8 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 			panic(fmt.Sprintf("commitment v4: child extension %d is too long", nib))
 		}
 		out = append(out, byte(len(ext)))
-		out = append(out, packPath(ext, nil)...)
+		var extScratch [32]byte
+		out = append(out, packPath(ext, extScratch[:0])...)
 	}
 
 	suffixCount := 64 - depth - 1
@@ -541,10 +542,12 @@ func encodeLeafRoot(n *node, dst []byte) []byte {
 	if len(value) > 255 {
 		panic("commitment v4: leaf root value is too long")
 	}
-	fullPath := make([]byte, 0, 64)
-	fullPath = append(fullPath, byte(nib))
-	fullPath = append(fullPath, unpackPath(suffix, 63, nil)...)
-	key := packPath(fullPath, nil)
+	var pathScratch [64]byte
+	fullPath := pathScratch[:64]
+	fullPath[0] = byte(nib)
+	unpackPath(suffix, 63, fullPath[1:64:64])
+	var keyScratch [32]byte
+	key := packPath(fullPath, keyScratch[:0])
 	out := dst[:0]
 	out = append(out, hdrIsLeafRoot)
 	out = append(out, key...)

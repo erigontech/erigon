@@ -109,7 +109,8 @@ func runAccountTrie(ctx commitment.PatriciaContext, entries []accountEntry, root
 		if err != nil {
 			return [32]byte{}, err
 		}
-		value := encodeAccountLeaf(update, storageRoot, nil)
+		var valueScratch [accountLeafScratch]byte
+		value := encodeAccountLeaf(update, storageRoot, valueScratch[:0])
 		if len(root.path) != 0 && !bytes.HasPrefix(entry.hashedKey, root.path) && bits.OnesCount16(root.childMask) == 1 && root.leafMask == 0 {
 			if err := materializeAccountRootChild(ctx, root); err != nil {
 				return [32]byte{}, err

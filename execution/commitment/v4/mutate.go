@@ -146,7 +146,8 @@ func setLeafPath(n *node, nib int, path, value []byte) {
 	if len(path) != 64 || len(path) <= depth || path[depth] != byte(nib) || !bytes.HasPrefix(path, n.path) {
 		panic("commitment v4: invalid collapsed leaf path")
 	}
-	n.setLeaf(nib, packPath(path[depth+1:], nil), value)
+	var packScratch [32]byte
+	n.setLeaf(nib, packPath(path[depth+1:], packScratch[:0]), value)
 }
 
 func setBranchPath(n *node, nib int, path, hash []byte) {
@@ -172,7 +173,8 @@ func insert(n *node, path, value []byte) error {
 
 	depth := len(n.path)
 	targetNib := int(path[depth])
-	wantSuffix := packPath(path[depth+1:], nil)
+	var packScratch [32]byte
+	wantSuffix := packPath(path[depth+1:], packScratch[:0])
 
 	bit := uint16(1) << targetNib
 	if n.childMask&bit == 0 {
@@ -194,11 +196,11 @@ func insert(n *node, path, value []byte) error {
 func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 	depth := len(parent.path)
 	oldSuffixCount := 64 - depth - 1
-	oldSuffix := unpackPath(parent.leafSuffixAt(nib), oldSuffixCount, nil)
-	oldPath := make([]byte, 0, 64)
-	oldPath = append(oldPath, parent.path...)
+	var pathScratch [64]byte
+	oldPath := append(pathScratch[:0], parent.path...)
 	oldPath = append(oldPath, byte(nib))
-	oldPath = append(oldPath, oldSuffix...)
+	oldPath = oldPath[:len(oldPath)+oldSuffixCount]
+	unpackPath(parent.leafSuffixAt(nib), oldSuffixCount, oldPath[depth+1:])
 	common := nibbles.CommonPrefixLen(oldPath, path)
 	if common == len(oldPath) {
 		parent.setLeaf(nib, suffix, value)
@@ -211,8 +213,9 @@ func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 	branch := fork(oldPath[:common])
 	oldNib := int(oldPath[common])
 	newNib := int(path[common])
-	branch.setLeaf(oldNib, packPath(oldPath[common+1:], nil), parent.leafValueAt(nib))
-	branch.setLeaf(newNib, packPath(path[common+1:], nil), value)
+	var packScratch [32]byte
+	branch.setLeaf(oldNib, packPath(oldPath[common+1:], packScratch[:0]), parent.leafValueAt(nib))
+	branch.setLeaf(newNib, packPath(path[common+1:], packScratch[:0]), value)
 	parent.setChild(nib, branch)
 	return nil
 }
@@ -229,15 +232,16 @@ func splitChild(parent *node, nib int, child *node, path, value []byte) error {
 	branch := fork(child.path[:common])
 	oldNib := int(child.path[common])
 	newNib := int(path[common])
+	var packScratch [32]byte
 	branch.setChild(oldNib, child)
-	branch.setLeaf(newNib, packPath(path[common+1:], nil), value)
+	branch.setLeaf(newNib, packPath(path[common+1:], packScratch[:0]), value)
 	parent.setChild(nib, branch)
 	return nil
 }
 
 func splitStoredChild(parent *node, nib int, path, value []byte) error {
-	childPath := make([]byte, 0, len(parent.path)+1+len(parent.childExtAt(nib)))
-	childPath = append(childPath, parent.path...)
+	var childScratch [64]byte
+	childPath := append(childScratch[:0], parent.path...)
 	childPath = append(childPath, byte(nib))
 	childPath = append(childPath, parent.childExtAt(nib)...)
 	common := nibbles.CommonPrefixLen(childPath, path)
@@ -252,8 +256,9 @@ func splitStoredChild(parent *node, nib int, path, value []byte) error {
 	oldNib := int(childPath[common])
 	newNib := int(path[common])
 	remainingExt := childPath[common+1:]
+	var packScratch [32]byte
 	branch.setStoredChild(oldNib, parent.childHashAt(nib), remainingExt)
-	branch.setLeaf(newNib, packPath(path[common+1:], nil), value)
+	branch.setLeaf(newNib, packPath(path[common+1:], packScratch[:0]), value)
 	parent.setChild(nib, branch)
 	return nil
 }

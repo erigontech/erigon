@@ -19,6 +19,7 @@ package v4
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 const (
@@ -100,8 +101,12 @@ func nodeKey(tag byte, addrHash, path, dst []byte) []byte {
 	if len(path) > 64 {
 		panic("commitment v4: path exceeds 64 nibbles")
 	}
+	packed := packedLen(len(path))
+	dst = slices.Grow(dst, 2+len(addrHash)+packed)
 	dst = append(dst, tag)
 	dst = append(dst, addrHash...)
-	dst = append(dst, packPath(path, nil)...)
+	start := len(dst)
+	dst = dst[:start+packed]
+	packPath(path, dst[start:start+packed:start+packed])
 	return append(dst, byte(len(path)))
 }

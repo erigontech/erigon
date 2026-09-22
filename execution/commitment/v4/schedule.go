@@ -181,6 +181,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	}
 
 	accountResults := make([]accountResult, len(plans))
+	accountValues := make([]byte, accountLeafScratch*len(plans))
 	ag := new(errgroup.Group)
 	ag.SetLimit(workers)
 	for i := range plans {
@@ -217,7 +218,8 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 				accountResults[i].err = updateErr
 				return nil
 			}
-			accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], nil)
+			at := i * accountLeafScratch
+			accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
 			return nil
 		})
 	}

@@ -163,6 +163,26 @@ func BenchmarkZZStorageLeafRef(b *testing.B) {
 	})
 }
 
+func storageLeafRefBuffered(suffix []byte, payload []byte, dst []byte) []byte {
+	var encoded bytes.Buffer
+	var prefix [8]byte
+	if err := (rlp.RlpSerializableBytes(payload)).ToDoubleRLP(&encoded, prefix[:]); err != nil {
+		panic(err)
+	}
+	contentLen := rlp.StringLen(suffix) + encoded.Len()
+	start := len(dst)
+	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
+	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
+	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
+	pos += copy(dst[pos:], encoded.Bytes())
+	encodedBytes := dst[start:pos]
+	if len(encodedBytes) < 32 {
+		return encodedBytes
+	}
+	hash := keccak.Sum256(encodedBytes)
+	return append(dst[:start], hash[:]...)
+}
+
 func storageLeafRefDirect(suffix []byte, payload []byte, dst []byte) []byte {
 	innerLen := 1 + len(payload)
 	if len(payload) == 1 && payload[0] < 0x80 {
@@ -215,7 +235,7 @@ func TestZZStorageLeafRefDirectEquivalence(t *testing.T) {
 					v[0] = 1
 				}
 				rnd.Read(suffix)
-				want := storageLeafRef(suffix, v, nil)
+				want := storageLeafRefBuffered(suffix, v, nil)
 				got := storageLeafRefDirect(suffix, v, nil)
 				if !bytes.Equal(want, got) {
 					t.Fatalf("suffixLen=%d l=%d v=%x\n want %x\n got  %x", suffixLen, l, v, want, got)

@@ -43,6 +43,9 @@ var (
 	errAccountLeafTruncated = errors.New("commitment v4: truncated account leaf")
 )
 
+// widest account leaf body: flags + uvarint nonce + code hash + storage root + balance
+const accountLeafScratch = 1 + binary.MaxVarintLen64 + 3*length.Hash
+
 func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []byte {
 	if u == nil {
 		panic("commitment v4: nil account update")
@@ -146,7 +149,9 @@ func accountConsensusRLP(nonce uint64, balance *uint256.Int, storageRoot, codeHa
 	}
 	storageRoot = canonicalStorageRoot(storageRoot)
 	codeHash = canonicalCodeHash(codeHash)
-	balanceBytes := balance.Bytes()
+	var balanceBuf [length.Hash]byte
+	balanceBytes := balanceBuf[:balance.ByteLen()]
+	balance.WriteToSlice(balanceBytes)
 	contentLen := rlp.U64Len(nonce) + rlp.StringLen(balanceBytes) + 1 + length.Hash + 1 + length.Hash
 	start := len(dst)
 	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)

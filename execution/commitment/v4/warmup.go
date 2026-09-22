@@ -23,7 +23,7 @@ func warmupKeyV4(hashedKey []byte, depth int, dst []byte) ([]byte, bool) {
 
 	if len(hashedKey) > 64 && depth >= 64 {
 		var addrHash [32]byte
-		copy(addrHash[:], packPath(hashedKey[:64], nil))
+		packPath(hashedKey[:64], addrHash[:0])
 		return nodeKey(tagStorageNode, addrHash[:], hashedKey[64:depth], dst[:0]), true
 	}
 	return nodeKey(tagAccountNode, nil, hashedKey[:depth], dst[:0]), true
