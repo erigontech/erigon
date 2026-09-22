@@ -32,8 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"golang.org/x/sync/errgroup"
-
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -256,12 +254,20 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				answersWithNils[i] = h.answerBatchCall(cp, msg)
 			}
 		} else {
-			var g errgroup.Group
-			g.SetLimit(int(h.maxBatchConcurrency))
+			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
+			boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
+			defer close(boundedConcurrency)
+			wg := sync.WaitGroup{}
 			for i := range calls {
-				g.Go(func() error { answersWithNils[i] = h.answerBatchCall(cp, calls[i]); return nil })
+				boundedConcurrency <- struct{}{}
+				wg.Go(func() {
+					defer func() {
+						<-boundedConcurrency
+					}()
+					answersWithNils[i] = h.answerBatchCall(cp, calls[i])
+				})
 			}
-			_ = g.Wait()
+			wg.Wait()
 		}
 		h.addSubscriptions(cp.notifiers)
 		h.sendBatchAnswers(cp.ctx, answersWithNils)
