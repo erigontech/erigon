@@ -17,10 +17,13 @@
 package jsonrpc
 
 import (
+	"encoding/json"
 	"fmt"
+	"net/http/httptest"
 	"testing"
 
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func syntheticWitness(totalBytes, avgNode int) *ExecutionWitnessResult {
@@ -37,46 +40,42 @@ func syntheticWitness(totalBytes, avgNode int) *ExecutionWitnessResult {
 }
 
 // BenchmarkWitnessServeOnDemand is the serialization the rpc layer runs when it
-// serves a freshly built result: MarshalFastJSON marshals the struct fields.
+// serves a freshly built result: MarshalFastJSONTo marshals the struct fields.
 func BenchmarkWitnessServeOnDemand(b *testing.B) {
 	for _, mb := range []int{6, 15, 25} {
 		w := syntheticWitness(mb*1_000_000, 200)
-		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) {
-			b.ReportAllocs()
-			var out int
-			for b.Loop() {
-				buf, err := w.MarshalFastJSON()
-				if err != nil {
-					b.Fatal(err)
-				}
-				out = len(buf)
-			}
-			b.ReportMetric(float64(out)/1e6, "MB_json")
-		})
+		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) { serveWitness(b, w) })
 	}
 }
 
 // BenchmarkWitnessServeCacheHit is what a cache hit serves: the builder marshaled
-// the JSON once (off-path), so MarshalFastJSON on the stored shell returns those
+// the JSON once (off-path), so MarshalFastJSONTo on the stored shell writes those
 // bytes verbatim — no per-hit marshal.
 func BenchmarkWitnessServeCacheHit(b *testing.B) {
 	for _, mb := range []int{6, 15, 25} {
-		enc, err := syntheticWitness(mb*1_000_000, 200).MarshalFastJSON()
+		enc, err := json.Marshal(syntheticWitness(mb*1_000_000, 200))
 		if err != nil {
 			b.Fatal(err)
 		}
 		shell := &ExecutionWitnessResult{cachedJSON: enc}
-		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) {
-			b.ReportAllocs()
-			var out int
-			for b.Loop() {
-				buf, err := shell.MarshalFastJSON()
-				if err != nil {
-					b.Fatal(err)
-				}
-				out = len(buf)
-			}
-			b.ReportMetric(float64(out)/1e6, "MB_json")
-		})
+		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) { serveWitness(b, shell) })
 	}
+}
+
+// serveWitness writes w the way the rpc layer does: into a pooled stream over a writer.
+func serveWitness(b *testing.B, w *ExecutionWitnessResult) {
+	rec := httptest.NewRecorder()
+	b.ReportAllocs()
+	for b.Loop() {
+		rec.Body.Reset()
+		s := jsonstream.Get(rec)
+		if err := w.MarshalFastJSONTo(s); err != nil {
+			b.Fatal(err)
+		}
+		if err := s.Flush(); err != nil {
+			b.Fatal(err)
+		}
+		jsonstream.Put(s)
+	}
+	b.ReportMetric(float64(rec.Body.Len())/1e6, "MB_json")
 }

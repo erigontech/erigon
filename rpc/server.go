@@ -125,9 +125,19 @@ func (s *Server) ServeCodecWithContext(connCtx context.Context, codec ServerCode
 	s.codecs.Add(codec)
 	defer s.codecs.Remove(codec)
 
-	c := initClientWithBaseCtx(connCtx, codec, &s.services, s.logger, s.newConnHandler)
-	c.read(codec)
-	c.Close()
+	h := s.newConnHandler(context.WithValue(connCtx, peerInfoContextKey{}, codec.peerInfo()), codec)
+	for {
+		msgs, batch, err := readBatch(codec, s.logger)
+		if err != nil {
+			h.close(err, nil)
+			return
+		}
+		if batch {
+			h.handleBatch(msgs)
+		} else {
+			h.handleMsg(msgs[0], nil)
+		}
+	}
 }
 
 // newConnHandler builds the handler of one connection, so every transport applies the
@@ -137,8 +147,7 @@ func (s *Server) newConnHandler(ctx context.Context, conn jsonWriter) *handler {
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
-// is used to serve HTTP connections. Subscriptions and reverse calls are not allowed in
-// this mode.
+// is used to serve HTTP connections. Subscriptions are not allowed in this mode.
 func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stream jsonstream.Stream) *jsonrpcMessage {
 	// Don't serve if server is stopped.
 	if !s.run.Load() {
