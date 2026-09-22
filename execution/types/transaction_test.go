@@ -1156,6 +1156,9 @@ func TestTransactionHashFromEncoding(t *testing.T) {
 			got, err := TransactionHashFromEncoding(enc)
 			require.NoError(t, err)
 			require.Equal(t, txn.Hash(), got, "type %d, encoding %x", txn.Type(), enc[:1])
+			bin, err := BinaryFromStoredTxn(enc)
+			require.NoError(t, err)
+			require.Equal(t, binary.Bytes(), bin, "type %d, encoding %x", txn.Type(), enc[:1])
 		}
 	}
 }

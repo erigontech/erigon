@@ -1066,3 +1066,55 @@ func TestTxnByIdxInBlockCarriesStoredSender(t *testing.T) {
 		require.Equal(t, want, got.Value())
 	}
 }
+
+// A raw body skips the transaction decode, so it must carry the bytes the decoded body encodes
+// to, for every transaction type and for both stored forms: binary, and wrapped in an RLP string.
+func TestBodyWithRawTransactionsMatchesDecodedBody(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
+
+	to := common.Address{1}
+	dynFee := func() types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000, Data: []byte("abc")},
+			ChainID:  *uint256.NewInt(1),
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *uint256.NewInt(2),
+		}
+	}
+	txs := types.Transactions{
+		types.NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+		&types.AccessListTx{LegacyTx: types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1),
+			AccessList: types.AccessList{{Address: to, StorageKeys: []common.Hash{{0x01}}}}},
+		func() types.Transaction { txn := dynFee(); return &txn }(),
+		&types.BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
+		&types.SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []types.Authorization{{ChainID: *uint256.NewInt(1), Address: to, Nonce: 2}}},
+	}
+	binaryTxs, err := types.MarshalTransactionsBinary(txs)
+	require.NoError(t, err)
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	_, err = rawdb.WriteRawBody(rwTx, common.Hash{1}, 1, &types.RawBody{Transactions: binaryTxs})
+	require.NoError(t, err)
+	require.NoError(t, rawdb.WriteBody(rwTx, common.Hash{2}, 2, &types.Body{Transactions: txs, Withdrawals: []*types.Withdrawal{{Index: 7, Address: to, Amount: 9}}}))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for num, hash := range map[uint64]common.Hash{1: {1}, 2: {2}} {
+		decoded, err := blockReader.BodyWithTransactions(t.Context(), tx, hash, num)
+		require.NoError(t, err)
+		want, err := decoded.BinaryRawBody()
+		require.NoError(t, err)
+		got, err := blockReader.BodyWithRawTransactions(t.Context(), tx, hash, num)
+		require.NoError(t, err)
+		require.Equal(t, want, got, "block %d", num)
+		require.Equal(t, binaryTxs, got.Transactions, "block %d", num)
+	}
+	got, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{3}, 3)
+	require.NoError(t, err)
+	require.Nil(t, got)
+}

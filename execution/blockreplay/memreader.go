@@ -156,6 +156,12 @@ func (r *memBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter,
 	}
 	return nil, nil
 }
+func (r *memBlockReader) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.RawBody, error) {
+	if blockNum == r.num {
+		return r.block.Body().BinaryRawBody()
+	}
+	return nil, nil
+}
 func (r *memBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (rlp.RawValue, error) {
 	return nil, nil
 }

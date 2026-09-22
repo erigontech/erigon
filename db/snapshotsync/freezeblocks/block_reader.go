@@ -17,6 +17,7 @@
 package freezeblocks
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -352,6 +353,14 @@ func (r *RemoteBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash 
 		return false, nil
 	}
 	return expected == hash, nil
+}
+
+func (r *RemoteBlockReader) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.RawBody, error) {
+	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
+	if err != nil || body == nil {
+		return nil, err
+	}
+	return body.BinaryRawBody()
 }
 
 func (r *RemoteBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
@@ -844,6 +853,48 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 	return body, nil
 }
 
+// BodyWithRawTransactions is BodyWithTransactions with each transaction left in its binary
+// (canonical EIP-2718) encoding instead of decoded.
+func (r *BlockReader) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.RawBody, error) {
+	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
+	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		body, err := rawdb.ReadRawBody(tx, hash, blockHeight)
+		if err != nil || body != nil {
+			return body, err
+		}
+	}
+
+	seg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
+	if !ok {
+		return nil, nil
+	}
+	matches, err := r.frozenHashMatches(tx, hash, blockHeight)
+	if err != nil {
+		return nil, err
+	}
+	if !matches {
+		return rawdb.ReadRawBody(tx, hash, blockHeight)
+	}
+	body, baseTxnID, txCount, buf, err := r.bodyFromSnapshot(blockHeight, seg, nil)
+	if err != nil || body == nil {
+		return nil, err
+	}
+	txnSeg, ok := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
+	if !ok {
+		return nil, nil
+	}
+	txs := make([][]byte, txCount)
+	ok, err = frozenTxns(baseTxnID, txCount, txnSeg, buf, func(i uint32, _, stored []byte) error {
+		txn, err := types.BinaryFromStoredTxn(stored)
+		txs[i] = bytes.Clone(txn)
+		return err
+	})
+	if err != nil || !ok {
+		return nil, err
+	}
+	return &types.RawBody{Transactions: txs, Uncles: body.Uncles, Withdrawals: body.Withdrawals}, nil
+}
+
 func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (bodyRlp rlp.RawValue, err error) {
 	body, err := r.BodyWithTransactions(ctx, tx, hash, blockHeight)
 	if err != nil {
@@ -1201,6 +1252,27 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 }
 
 func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
+	txs = make([]types.Transaction, txCount)
+	senders = make([]common.Address, txCount)
+	ok, err := frozenTxns(baseTxnID, txCount, txsSeg, buf, func(i uint32, sender, txRlp []byte) error {
+		senders[i].SetBytes(sender)
+		var err error
+		if txs[i], err = types.DecodeTransaction(txRlp); err != nil {
+			return err
+		}
+		txs[i].SetSender(accounts.InternAddress(senders[i]))
+		return nil
+	})
+	if err != nil || !ok {
+		return nil, nil, err
+	}
+	return txs, senders, nil
+}
+
+// frozenTxns calls fn with the sender and the stored encoding of each of txCount frozen txns
+// from baseTxnID; both slices are only valid during the call. ok is false when the segment does
+// not hold them.
+func frozenTxns(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte, fn func(i uint32, sender, txn []byte) error) (ok bool, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.From(), txsSeg.To(), dbg.Stack()))
@@ -1210,41 +1282,33 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	idxTxnHash := txsSeg.Src().Index(snaptype2.Indexes.TxnHash)
 
 	if idxTxnHash == nil {
-		return nil, nil, nil
+		return false, nil
 	}
 	if baseTxnID < idxTxnHash.BaseDataID() {
-		return nil, nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", baseTxnID, idxTxnHash.BaseDataID(), txsSeg.Src().FileName())
+		return false, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", baseTxnID, idxTxnHash.BaseDataID(), txsSeg.Src().FileName())
 	}
-
-	txs = make([]types.Transaction, txCount)
-	senders = make([]common.Address, txCount)
 	if txCount == 0 {
-		return txs, senders, nil
+		return true, nil
 	}
 	txnOffset := idxTxnHash.OrdinalLookup(baseTxnID - idxTxnHash.BaseDataID())
 	if txsSeg.Src() == nil {
-		return nil, nil, nil
+		return false, nil
 	}
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
 	for i := range txCount {
 		if !gg.HasNext() {
-			return nil, nil, nil
+			return false, nil
 		}
 		buf, _ = gg.Next(buf[:0])
 		if len(buf) < 1+20 {
-			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
+			return false, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
 		}
-		senders[i].SetBytes(buf[1 : 1+20])
-		txRlp := buf[1+20:]
-		txs[i], err = types.DecodeTransaction(txRlp)
-		if err != nil {
-			return nil, nil, err
+		if err := fn(i, buf[1:1+20], buf[1+20:]); err != nil {
+			return false, err
 		}
-		txs[i].SetSender(accounts.InternAddress(senders[i]))
 	}
-
-	return txs, senders, nil
+	return true, nil
 }
 
 // txnRlpByID returns the sender and the stored encoding of a frozen transaction, or nils when it is missing.

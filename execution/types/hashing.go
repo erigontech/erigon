@@ -166,14 +166,11 @@ func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
 
 // TransactionHashFromEncoding returns the hash of a transaction in any encoding DecodeTransaction accepts.
 func TransactionHashFromEncoding(enc []byte) (common.Hash, error) {
-	if TypedTransactionMarshalledAsRlpString(enc) {
-		payload, _, err := rlp.SplitString(enc)
-		if err != nil {
-			return common.Hash{}, err
-		}
-		enc = payload
+	binary, err := BinaryFromStoredTxn(enc)
+	if err != nil {
+		return common.Hash{}, err
 	}
-	return crypto.Keccak256Hash(enc), nil
+	return crypto.Keccak256Hash(binary), nil
 }
 
 func RlpHash(x any) common.Hash {

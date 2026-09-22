@@ -1425,6 +1425,25 @@ func rlpFromBinaryTxn(binaryTxn []byte) []byte {
 	return wrapped
 }
 
+// BinaryFromStoredTxn is the inverse of rlpFromBinaryTxn: it returns the binary (canonical
+// EIP-2718) encoding of a stored transaction, a subslice of stored, without decoding it.
+func BinaryFromStoredTxn(stored []byte) ([]byte, error) {
+	if !TypedTransactionMarshalledAsRlpString(stored) {
+		return stored, nil
+	}
+	content, _, err := rlp.SplitString(stored)
+	return content, err
+}
+
+// BinaryRawBody is b with its transactions in their binary (canonical EIP-2718) encoding.
+func (b *Body) BinaryRawBody() (*RawBody, error) {
+	txs, err := MarshalTransactionsBinary(b.Transactions)
+	if err != nil {
+		return nil, err
+	}
+	return &RawBody{Transactions: txs, Uncles: b.Uncles, Withdrawals: b.Withdrawals}, nil
+}
+
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
