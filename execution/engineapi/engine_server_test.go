@@ -27,7 +27,6 @@ import (
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
@@ -100,14 +99,12 @@ func TestGetBlobsV1(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	address := crypto.PubkeyToAddress(key.PublicKey)
 
-	var chainConfig chain.Config
-	err := copier.CopyWithOption(&chainConfig, chain.AllProtocolChanges, copier.Option{DeepCopy: true})
-	require.NoError(t, err)
+	chainConfig := chain.AllProtocolChanges.Copy()
 	chainConfig.PragueTime = nil
 	chainConfig.OsakaTime = nil
 	chainConfig.AmsterdamTime = nil
 	gspec := &types.Genesis{
-		Config: &chainConfig,
+		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
 			address: {Balance: funds},
 		},

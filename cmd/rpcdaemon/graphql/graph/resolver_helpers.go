@@ -189,7 +189,9 @@ func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.Gr
 	}
 
 	trans.From = model.NewAccountAtBlock(block.Number)
-	trans.From.Address = hexutil.Encode(receipt.From[:])
+	if receipt.From != nil {
+		trans.From.Address = hexutil.Encode(receipt.From[:])
+	}
 
 	if receipt.To != nil {
 		trans.To = model.NewAccountAtBlock(block.Number)

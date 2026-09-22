@@ -28,7 +28,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/protobuf/proto"
 
@@ -121,11 +120,10 @@ func TestCapabilities(t *testing.T) {
 		t.Helper()
 		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr := crypto.PubkeyToAddress(key.PublicKey)
-		var cfgWithMerge chain.Config
-		require.NoError(t, copier.CopyWithOption(&cfgWithMerge, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
+		cfgWithMerge := chain.TestChainBerlinConfig.Copy()
 		cfgWithMerge.MergeHeight = &mergeAt
 		gspec := &types.Genesis{
-			Config: &cfgWithMerge,
+			Config: cfgWithMerge,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
