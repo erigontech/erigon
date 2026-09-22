@@ -1104,6 +1104,9 @@ func TestBodyWithRawTransactionsMatchesDecodedBody(t *testing.T) {
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
+	missing, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{3}, 3)
+	require.NoError(t, err)
+	require.Nil(t, missing)
 	for num, hash := range map[uint64]common.Hash{1: {1}, 2: {2}} {
 		decoded, err := blockReader.BodyWithTransactions(t.Context(), tx, hash, num)
 		require.NoError(t, err)
@@ -1114,7 +1117,4 @@ func TestBodyWithRawTransactionsMatchesDecodedBody(t *testing.T) {
 		require.Equal(t, want, got, "block %d", num)
 		require.Equal(t, binaryTxs, got.Transactions, "block %d", num)
 	}
-	got, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{3}, 3)
-	require.NoError(t, err)
-	require.Nil(t, got)
 }
