@@ -75,7 +75,7 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 | Full (Default) | {/* ds:mainnet:full */}534.94 GB{/* ds:end */} | 2 TB | 16 GB | 32 GB |
 | Minimal | {/* ds:mainnet:minimal */}510.82 GB{/* ds:end */} | 1 TB | 16 GB | 64 GB |
 
-_Current Disk Usage measured as of {/* ds-date:mainnet */}2026-09-17{/* ds:end */}; usage grows over time as the chain grows._
+_Current Disk Usage measured as of {/* ds-date:mainnet */}2026-09-17{/* ds:end */}, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 </TabItem>
 <TabItem value="gnosis-chain" label="Gnosis Chain">
@@ -85,7 +85,7 @@ _Current Disk Usage measured as of {/* ds-date:mainnet */}2026-09-17{/* ds:end *
 | Full (Default) | {/* ds:gnosis:full */}314.35 GB{/* ds:end */}    | 1 TB                        | 8 GB               | 16 GB                 |
 | Minimal        | {/* ds:gnosis:minimal */}311.75 GB{/* ds:end */} | 500 GB                      | 8 GB               | 16 GB                 |
 
-_Current Disk Usage measured as of {/* ds-date:gnosis */}2026-09-19{/* ds:end */}; usage grows over time as the chain grows._
+_Current Disk Usage measured as of {/* ds-date:gnosis */}2026-09-19{/* ds:end */}, the oldest of the measurements in this table; usage grows over time as the chain grows._
 </TabItem>
 <TabItem value="sepolia" label="Sepolia">
 | **Pruning Mode** | **Current Disk Usage** |
@@ -94,7 +94,7 @@ _Current Disk Usage measured as of {/* ds-date:gnosis */}2026-09-19{/* ds:end */
 | Full (Default) | {/* ds:sepolia:full */}301.82 GB{/* ds:end */} |
 | Minimal        | {/* ds:sepolia:minimal */}272.59 GB{/* ds:end */} |
 
-_Current Disk Usage measured as of {/* ds-date:sepolia */}2026-09-18{/* ds:end */}; usage grows over time as the chain grows._
+_Current Disk Usage measured as of {/* ds-date:sepolia */}2026-09-18{/* ds:end */}, the oldest of the measurements in this table; usage grows over time as the chain grows._
 </TabItem>
 <TabItem value="hoodi" label="Hoodi">
 | **Pruning Mode** | **Current Disk Usage** |
@@ -103,7 +103,7 @@ _Current Disk Usage measured as of {/* ds-date:sepolia */}2026-09-18{/* ds:end *
 | Full (Default) | {/* ds:hoodi:full */}62.86 GB{/* ds:end */} |
 | Minimal        | {/* ds:hoodi:minimal */}58.89 GB{/* ds:end */} |
 
-_Current Disk Usage measured as of {/* ds-date:hoodi */}2026-09-20{/* ds:end */}; usage grows over time as the chain grows._
+_Current Disk Usage measured as of {/* ds-date:hoodi */}2026-09-20{/* ds:end */}, the oldest of the measurements in this table; usage grows over time as the chain grows._
 </TabItem>
 <TabItem value="chiado" label="Chiado">
 | **Pruning Mode** | **Current Disk Usage** |
@@ -112,7 +112,7 @@ _Current Disk Usage measured as of {/* ds-date:hoodi */}2026-09-20{/* ds:end */}
 | Full (Default) | {/* ds:chiado:full */}16.07 GB{/* ds:end */} |
 | Minimal        | {/* ds:chiado:minimal */}16.00 GB{/* ds:end */} |
 
-_Current Disk Usage measured as of {/* ds-date:chiado */}2026-09-20{/* ds:end */}; usage grows over time as the chain grows._
+_Current Disk Usage measured as of {/* ds-date:chiado */}2026-09-20{/* ds:end */}, the oldest of the measurements in this table; usage grows over time as the chain grows._
 </TabItem>
 </Tabs>
 
@@ -143,5 +143,5 @@ Measured on Erigon 3.6.1 in September 2026, syncing each node from an empty data
 
 **The download rate was capped at 400 Mbps, and that cap — not the hardware — is what set these times.** Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result far more than CPU does. Note that 400 Mbps is eight times the 50 Mbps recommended above for a staking node: on a link at that recommended speed, expect these times to be several times longer, with block execution rather than download eventually setting the floor. Treat them as an order of magnitude, not a target — they are a single sample per configuration, with no variance estimate, and sync time also depends on peer quality and chain activity on the day.
 
-Note that full and minimal land within a few percent of each other on both chains. The gap between them is small; the gap to archive is 2–3×.
+Note that full and minimal land within a few percent of each other on both chains. The gap between them is small; the gap to archive is about 1.9× on Gnosis and 2.5× on Ethereum.
 :::

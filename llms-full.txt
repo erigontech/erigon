@@ -119,7 +119,7 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 | Full (Default) | 534.94 GB | 2 TB | 16 GB | 32 GB |
 | Minimal | 510.82 GB | 1 TB | 16 GB | 64 GB |
 
-_Current Disk Usage measured as of 2026-09-17; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-09-17, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 ### Gnosis Chain
 
@@ -129,7 +129,7 @@ _Current Disk Usage measured as of 2026-09-17; usage grows over time as the chai
 | Full (Default) | 314.35 GB    | 1 TB                        | 8 GB               | 16 GB                 |
 | Minimal        | 311.75 GB | 500 GB                      | 8 GB               | 16 GB                 |
 
-_Current Disk Usage measured as of 2026-09-19; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-09-19, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 ### Sepolia
 
@@ -139,7 +139,7 @@ _Current Disk Usage measured as of 2026-09-19; usage grows over time as the chai
 | Full (Default) | 301.82 GB |
 | Minimal        | 272.59 GB |
 
-_Current Disk Usage measured as of 2026-09-18; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-09-18, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 ### Hoodi
 
@@ -149,7 +149,7 @@ _Current Disk Usage measured as of 2026-09-18; usage grows over time as the chai
 | Full (Default) | 62.86 GB |
 | Minimal        | 58.89 GB |
 
-_Current Disk Usage measured as of 2026-09-20; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-09-20, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 ### Chiado
 
@@ -159,7 +159,7 @@ _Current Disk Usage measured as of 2026-09-20; usage grows over time as the chai
 | Full (Default) | 16.07 GB |
 | Minimal        | 16.00 GB |
 
-_Current Disk Usage measured as of 2026-09-20; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-09-20, the oldest of the measurements in this table; usage grows over time as the chain grows._
 
 :::tip
 See also how you can [optimize storage](../fundamentals/optimizing-storage).
@@ -188,7 +188,7 @@ Measured on Erigon 3.6.1 in September 2026, syncing each node from an empty data
 
 **The download rate was capped at 400 Mbps, and that cap — not the hardware — is what set these times.** Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](#bandwidth-requirements) influences the result far more than CPU does. Note that 400 Mbps is eight times the 50 Mbps recommended above for a staking node: on a link at that recommended speed, expect these times to be several times longer, with block execution rather than download eventually setting the floor. Treat them as an order of magnitude, not a target — they are a single sample per configuration, with no variance estimate, and sync time also depends on peer quality and chain activity on the day.
 
-Note that full and minimal land within a few percent of each other on both chains. The gap between them is small; the gap to archive is 2–3×.
+Note that full and minimal land within a few percent of each other on both chains. The gap between them is small; the gap to archive is about 1.9× on Gnosis and 2.5× on Ethereum.
 :::
 
 ---
