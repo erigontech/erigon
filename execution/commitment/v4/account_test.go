@@ -17,7 +17,6 @@
 package v4
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -97,12 +96,27 @@ func TestAccountConsensusRLPMatchesAccountRLP(t *testing.T) {
 	require.Equal(t, acc.RLP(), got)
 }
 
+func TestAccountLeafElidesDefaults(t *testing.T) {
+	require.Equal(t, []byte{0}, encodeAccountLeaf(&commitment.Update{}, nil, nil))
+	require.Equal(t, []byte{0}, encodeAccountLeaf(&commitment.Update{CodeHash: empty.CodeHash}, empty.RootHash[:], nil))
+	require.Equal(t, []byte{0}, encodeAccountLeaf(&commitment.Update{CodeHash: common.Hash{}}, make([]byte, length.Hash), nil))
+
+	nonceOnly := encodeAccountLeaf(&commitment.Update{Nonce: 1, CodeHash: empty.CodeHash}, nil, nil)
+	require.Equal(t, []byte{accountHasNonce, 1}, nonceOnly)
+
+	balanceOnly := encodeAccountLeaf(&commitment.Update{Balance: *uint256.NewInt(99), CodeHash: empty.CodeHash}, nil, nil)
+	require.Equal(t, []byte{0, 99}, balanceOnly)
+
+	full := encodeAccountLeaf(&commitment.Update{Nonce: 1, Balance: *uint256.NewInt(99), CodeHash: common.HexToHash("0x1234")}, nil, nil)
+	require.Len(t, full, 1+1+length.Hash+1)
+}
+
 func TestDecodeAccountLeafRejectsMalformedBodies(t *testing.T) {
-	u := &commitment.Update{Nonce: 1, Balance: *uint256.NewInt(2), CodeHash: common.HexToHash("0x1234")}
+	u := &commitment.Update{Nonce: 1, CodeHash: common.HexToHash("0x1234")}
 	encoded := encodeAccountLeaf(u, nil, nil)
 	for i := range encoded {
 		_, _, _, _, err := decodeAccountLeaf(encoded[:i])
-		require.Error(t, err)
+		require.Error(t, err, "truncation at %d", i)
 	}
 
 	_, _, _, _, err := decodeAccountLeaf([]byte{0x80, 0})
@@ -112,7 +126,12 @@ func TestDecodeAccountLeafRejectsMalformedBodies(t *testing.T) {
 	_, _, _, _, err = decodeAccountLeaf(invalidCode)
 	require.ErrorIs(t, err, errAccountLeafFlags)
 
-	trailing := append(bytes.Clone(encodeAccountLeaf(&commitment.Update{}, nil, nil)), 1)
-	_, _, _, _, err = decodeAccountLeaf(trailing)
-	require.ErrorIs(t, err, errAccountLeafTrailing)
+	_, _, _, _, err = decodeAccountLeaf([]byte{accountHasNonce, 0})
+	require.ErrorIs(t, err, errAccountLeafFlags)
+
+	_, _, _, _, err = decodeAccountLeaf(append([]byte{0}, make([]byte, length.Hash+1)...))
+	require.ErrorIs(t, err, errAccountLeafFlags)
+
+	_, _, _, _, err = decodeAccountLeaf([]byte{0, 0x00, 0x01})
+	require.ErrorIs(t, err, errAccountLeafFlags)
 }

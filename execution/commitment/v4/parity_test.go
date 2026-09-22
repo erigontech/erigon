@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -250,6 +251,16 @@ func TestParityCorrectnessCases(t *testing.T) {
 	parityRoots(t, nil, []parityUpdate{{key: address, update: accountParityUpdate(7)}, {key: slotA, update: storageParityUpdate(8)}})
 	parityRoots(t, nil, []parityUpdate{{key: address, update: accountParityUpdate(12)}, {key: slotB, update: storageParityUpdate(13)}})
 	parityRoots(t, nil, []parityUpdate{{key: address, update: &commitment.Update{Flags: commitment.DeleteUpdate}}})
+
+	zeroed := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, CodeHash: empty.CodeHash}
+	parityRoots(t, nil, []parityUpdate{{key: address, update: zeroed}})
+	parityRoots(t, nil, []parityUpdate{{key: address, update: zeroed}, {key: parityAddress(9), update: accountParityUpdate(9)}})
+
+	nonceOnly := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Nonce: 1, CodeHash: empty.CodeHash}
+	parityRoots(t, nil, []parityUpdate{{key: address, update: nonceOnly}})
+
+	balanceOnly := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Balance: *uint256.NewInt(5), CodeHash: empty.CodeHash}
+	parityRoots(t, nil, []parityUpdate{{key: address, update: balanceOnly}})
 }
 
 func parityFuzzAddress(i int) []byte {

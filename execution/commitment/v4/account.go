@@ -31,17 +31,16 @@ import (
 )
 
 const (
-	accountHasBalance  byte = 1 << 0
+	accountHasNonce    byte = 1 << 0
 	accountHasCodeHash byte = 1 << 1
 	accountHasStorage  byte = 1 << 2
-	accountKnownFlags       = accountHasBalance | accountHasCodeHash | accountHasStorage
+	accountKnownFlags       = accountHasNonce | accountHasCodeHash | accountHasStorage
 )
 
 var (
 	errAccountLeafEmpty     = errors.New("commitment v4: empty account leaf")
 	errAccountLeafFlags     = errors.New("commitment v4: invalid account leaf flags")
 	errAccountLeafTruncated = errors.New("commitment v4: truncated account leaf")
-	errAccountLeafTrailing  = errors.New("commitment v4: trailing account leaf data")
 )
 
 func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []byte {
@@ -53,8 +52,8 @@ func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []b
 	}
 
 	flags := byte(0)
-	if !u.Balance.IsZero() {
-		flags |= accountHasBalance
+	if u.Nonce != 0 {
+		flags |= accountHasNonce
 	}
 	codeHash := u.CodeHash
 	if codeHash == (common.Hash{}) || codeHash == empty.CodeHash {
@@ -67,19 +66,20 @@ func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []b
 	}
 
 	dst = append(dst, flags)
-	var nonceBuf [binary.MaxVarintLen64]byte
-	nonceLen := binary.PutUvarint(nonceBuf[:], u.Nonce)
-	dst = append(dst, nonceBuf[:nonceLen]...)
-	if flags&accountHasBalance != 0 {
-		balance := u.Balance.Bytes()
-		dst = append(dst, byte(len(balance)))
-		dst = append(dst, balance...)
+	if flags&accountHasNonce != 0 {
+		var nonceBuf [binary.MaxVarintLen64]byte
+		dst = append(dst, nonceBuf[:binary.PutUvarint(nonceBuf[:], u.Nonce)]...)
 	}
 	if flags&accountHasCodeHash != 0 {
 		dst = append(dst, codeHash[:]...)
 	}
 	if flags&accountHasStorage != 0 {
 		dst = append(dst, storageRoot...)
+	}
+	if balanceLen := u.Balance.ByteLen(); balanceLen != 0 {
+		at := len(dst)
+		dst = append(dst, make([]byte, balanceLen)...)
+		u.Balance.WriteToSlice(dst[at:])
 	}
 	return dst
 }
@@ -93,31 +93,18 @@ func decodeAccountLeaf(b []byte) (nonce uint64, balance uint256.Int, codeHash []
 		return 0, balance, nil, nil, fmt.Errorf("%w: 0x%02x", errAccountLeafFlags, flags)
 	}
 	pos := 1
-	var consumed int
-	nonce, consumed = binary.Uvarint(b[pos:])
-	if consumed <= 0 {
-		return 0, balance, nil, nil, fmt.Errorf("%w: nonce", errAccountLeafTruncated)
-	}
-	var nonceBuf [binary.MaxVarintLen64]byte
-	if binary.PutUvarint(nonceBuf[:], nonce) != consumed {
-		return 0, balance, nil, nil, fmt.Errorf("%w: non-canonical nonce", errAccountLeafFlags)
-	}
-	pos += consumed
 
-	if flags&accountHasBalance != 0 {
-		if pos >= len(b) {
-			return 0, balance, nil, nil, errAccountLeafTruncated
+	if flags&accountHasNonce != 0 {
+		var consumed int
+		nonce, consumed = binary.Uvarint(b[pos:])
+		if consumed <= 0 {
+			return 0, balance, nil, nil, fmt.Errorf("%w: nonce", errAccountLeafTruncated)
 		}
-		balanceLen := int(b[pos])
-		pos++
-		if balanceLen == 0 || balanceLen > 32 || pos+balanceLen > len(b) {
-			return 0, balance, nil, nil, fmt.Errorf("%w: balance", errAccountLeafFlags)
+		var nonceBuf [binary.MaxVarintLen64]byte
+		if nonce == 0 || binary.PutUvarint(nonceBuf[:], nonce) != consumed {
+			return 0, balance, nil, nil, fmt.Errorf("%w: non-canonical nonce", errAccountLeafFlags)
 		}
-		if b[pos] == 0 {
-			return 0, balance, nil, nil, fmt.Errorf("%w: non-canonical balance", errAccountLeafFlags)
-		}
-		balance.SetBytes(b[pos : pos+balanceLen])
-		pos += balanceLen
+		pos += consumed
 	}
 
 	if flags&accountHasCodeHash != 0 {
@@ -143,8 +130,12 @@ func decodeAccountLeaf(b []byte) (nonce uint64, balance uint256.Int, codeHash []
 	} else {
 		storageRoot = empty.RootHash[:]
 	}
-	if pos != len(b) {
-		return 0, balance, nil, nil, errAccountLeafTrailing
+
+	if rest := b[pos:]; len(rest) != 0 {
+		if len(rest) > length.Hash || rest[0] == 0 {
+			return 0, balance, nil, nil, fmt.Errorf("%w: balance", errAccountLeafFlags)
+		}
+		balance.SetBytes(rest)
 	}
 	return nonce, balance, codeHash, storageRoot, nil
 }
