@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -303,3 +304,28 @@ func TestNotificationMatchesMarshalledMessage(t *testing.T) {
 		}
 	}
 }
+
+// An activated notifier streams the whole notification; it must be the message notification builds.
+func TestNotifyStreamsTheNotification(t *testing.T) {
+	for payload, result := range map[any]string{streamedPayload{}: `"0xab"`, 7: `7`, (*valueFastJSON)(nil): `null`} {
+		w := &captureWriter{}
+		n := &RemoteNotifier{h: &handler{conn: w}, prefix: notificationPrefix("eth", "0x9a"), sub: &Subscription{ID: "0x9a"}, activated: true}
+		if err := n.Notify("0x9a", payload); err != nil {
+			t.Fatal(err)
+		}
+		if want := notification("eth", "0x9a", json.RawMessage(result)); !bytes.Equal(w.got, want) {
+			t.Fatalf("%T: notification = %s, want %s", payload, w.got, want)
+		}
+	}
+}
+
+// captureWriter keeps a copy of what it is given: the notification's buffer is reused once the
+// write returns.
+type captureWriter struct{ got []byte }
+
+func (w *captureWriter) WriteJSON(_ context.Context, v any) error {
+	w.got = bytes.Clone(v.(rawResponse))
+	return nil
+}
+func (*captureWriter) closed() <-chan any { return nil }
+func (*captureWriter) remoteAddr() string { return "" }
