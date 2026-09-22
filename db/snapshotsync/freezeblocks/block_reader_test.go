@@ -1052,6 +1052,11 @@ func TestTxnByIdxInBlockCarriesStoredSender(t *testing.T) {
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
+	txn, ok, err := blockReader.TxnByIdxInBlock(t.Context(), tx, 2, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, ok = txn.GetSender()
+	require.False(t, ok, "block 2 has no stored senders")
 	for i, want := range senders {
 		txn, ok, err := blockReader.TxnByIdxInBlock(t.Context(), tx, 1, i)
 		require.NoError(t, err)
@@ -1060,9 +1065,4 @@ func TestTxnByIdxInBlockCarriesStoredSender(t *testing.T) {
 		require.True(t, ok, "txn %d has no sender", i)
 		require.Equal(t, want, got.Value())
 	}
-	txn, ok, err := blockReader.TxnByIdxInBlock(t.Context(), tx, 2, 0)
-	require.NoError(t, err)
-	require.True(t, ok)
-	_, ok = txn.GetSender()
-	require.False(t, ok, "block 2 has no stored senders")
 }
