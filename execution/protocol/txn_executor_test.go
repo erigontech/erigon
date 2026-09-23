@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -87,8 +86,7 @@ func eip2780TestAuthorization() (types.Authorization, accounts.Address) {
 
 func eip2780TestConfig(t *testing.T) *chain.Config {
 	t.Helper()
-	cfg := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	cfg := chain.AllProtocolChanges.Copy()
 	cfg.ChainID = uint256.NewInt(7088110746)
 	return cfg
 }

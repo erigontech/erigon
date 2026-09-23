@@ -166,6 +166,13 @@ func (f *ForkChoiceStore) ValidateBlockForPublishing(block *cltypes.SignedBeacon
 	return nil
 }
 
+// invalidateCachedHead forces the next GetHead to recompute. A GetHead running while f.mu
+// was released caches a head that predates this block.
+func (f *ForkChoiceStore) invalidateCachedHead() {
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+}
+
 func (f *ForkChoiceStore) validateBlockAdmissionLocked(block *cltypes.SignedBeaconBlock, rejectEquivocation, requireEngineAcceptance bool) (common.Hash, clparams.StateVersion, error) {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
@@ -248,8 +255,7 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 	if err != nil {
 		return err
 	}
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.invalidateCachedHead()
 	currentSlotOnEntry := f.ethClock.GetCurrentSlot()
 
 	// Validate parent payload status path early (before expensive operations)
@@ -349,8 +355,33 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 					return invalidKzgCommitmentsError(err)
 				}
 			}
-			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			var admissionErr error
+			payloadStatus, publishedInvalidHash, err := f.newPayloadForBlockWhileYieldingForkChoiceLock(ctx, blockRoot, func() error {
+				_, _, admissionErr = f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload)
+				return admissionErr
+			}, func() (common.Hash, bool) {
+				var requestsHash common.Hash
+				if block.Version() >= clparams.ElectraVersion {
+					requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
+				}
+				executionHash, hashErr := block.Block.Body.ExecutionPayload.ComputeBlockHash(&block.Block.ParentRoot, requestsHash, nil)
+				return executionHash, hashErr == nil
+			}, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
+			if publishedInvalidHash != (common.Hash{}) {
+				// Only the caller that published the verdict may retract it, and only once
+				// its own durable write below has happened.
+				defer f.inFlightInvalidPayloads.Delete(publishedInvalidHash)
+			}
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
+			f.invalidateCachedHead()
+			// Report a stale block exactly as the post-EL recheck below does, so the same
+			// admission verdict does not answer gossip differently depending on timing.
+			if admissionErr != nil {
+				if errors.Is(admissionErr, errBlockAtFinalizedHorizon) {
+					return nil
+				}
+				return admissionErr
+			}
 			if validationErr := validatePayloadValidationResult(payloadStatus, err); validationErr != nil {
 				return validationErr
 			}
@@ -400,6 +431,15 @@ func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeac
 			}
 			if err != nil {
 				return fmt.Errorf("newPayload failed: %w", err)
+			}
+			// f.mu was released for the EL call, so every admission condition checked on
+			// entry can have gone stale: another caller may have inserted an equivocating
+			// header, and finality may have moved past this block.
+			if _, _, recheckErr := f.validateBlockAdmissionLocked(block, rejectEquivocation, newPayload); recheckErr != nil {
+				if errors.Is(recheckErr, errBlockAtFinalizedHorizon) {
+					return nil
+				}
+				return recheckErr
 			}
 		}
 	}

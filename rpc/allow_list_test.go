@@ -18,14 +18,15 @@ package rpc
 
 import (
 	"encoding/json"
+	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-)
 
-func TestAllowListMarshaling(t *testing.T) {
-}
+	"github.com/erigontech/erigon/common/log/v3"
+)
 
 func TestAllowListUnmarshaling(t *testing.T) {
 	allowListJSON := `[ "one", "two", "three" ]`
@@ -36,4 +37,39 @@ func TestAllowListUnmarshaling(t *testing.T) {
 
 	m := map[string]struct{}{"one": {}, "two": {}, "three": {}}
 	assert.Equal(t, allowList, AllowList(m))
+}
+
+func TestAllowListAppliesToEveryTransport(t *testing.T) {
+	t.Parallel()
+	logger := log.New()
+	srv := newTestServer(logger)
+	defer srv.Stop()
+	srv.SetAllowList(AllowList{"test_echo": {}})
+
+	httpsrv := httptest.NewServer(srv)
+	defer httpsrv.Close()
+	wssrv := httptest.NewServer(srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+	defer wssrv.Close()
+
+	for name, dial := range map[string]func() (*Client, error){
+		"http": func() (*Client, error) { return DialContext(t.Context(), httpsrv.URL, logger) },
+		"ws": func() (*Client, error) {
+			return DialContext(t.Context(), "ws:"+strings.TrimPrefix(wssrv.URL, "http:"), logger)
+		},
+		"codec": func() (*Client, error) { return DialInProc(srv, logger), nil }, // the path IPC takes
+	} {
+		t.Run(name, func(t *testing.T) {
+			client, err := dial()
+			require.NoError(t, err)
+			defer client.Close()
+
+			var res echoResult
+			require.NoError(t, client.Call(&res, "test_echo", "x", 1, &echoArgs{S: "y"}))
+			require.ErrorContains(t, client.Call(nil, "test_noArgsRets"), "does not exist/is not available")
+			if name != "http" { // subscriptions need a stream transport
+				_, err = client.Subscribe(t.Context(), "nftest", make(chan int), "someSubscription", 1, 1)
+				require.ErrorContains(t, err, "does not exist/is not available")
+			}
+		})
+	}
 }

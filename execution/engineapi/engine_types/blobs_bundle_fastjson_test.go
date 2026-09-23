@@ -25,6 +25,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
@@ -39,7 +41,7 @@ func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(bundle)
 			require.NoError(t, err)
-			got, err := bundle.MarshalFastJSON()
+			got, err := jsonstream.Marshal(bundle)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})
@@ -64,6 +66,26 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 			BlobsBundle: worstCaseBlobsBundle(),
 		},
 		"nil response": nil,
+		"zero payload": {ExecutionPayload: &ExecutionPayload{}},
+		"prague payload": {
+			ExecutionPayload: &ExecutionPayload{
+				LogsBloom:     make(hexutil.Bytes, 256),
+				ExtraData:     hexutil.Bytes{0xe0},
+				Transactions:  []hexutil.Bytes{},
+				Withdrawals:   []*types.Withdrawal{{Index: 1, Validator: 2, Address: common.HexToAddress("0xabc"), Amount: 3}, nil},
+				BlobGasUsed:   (*hexutil.Uint64)(new(uint64)),
+				ExcessBlobGas: func() *hexutil.Uint64 { v := hexutil.Uint64(0x20000); return &v }(),
+			},
+			ExecutionRequests: []hexutil.Bytes{},
+		},
+		"amsterdam payload": {
+			ExecutionPayload: &ExecutionPayload{
+				Withdrawals:     []*types.Withdrawal{},
+				SlotNumber:      func() *hexutil.Uint64 { v := hexutil.Uint64(9); return &v }(),
+				BlockAccessList: &hexutil.Bytes{0xc0},
+			},
+		},
+		"empty block access list": {ExecutionPayload: &ExecutionPayload{BlockAccessList: &hexutil.Bytes{}}},
 		"populated payload": {
 			ExecutionPayload: &ExecutionPayload{
 				ParentHash:    common.HexToHash("0xabc1"),
@@ -85,7 +107,7 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(r)
 			require.NoError(t, err)
-			got, err := r.MarshalFastJSON()
+			got, err := jsonstream.Marshal(r)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})

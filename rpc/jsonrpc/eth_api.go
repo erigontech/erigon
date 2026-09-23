@@ -84,7 +84,7 @@ type EthAPI interface {
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
-	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethutils.RPCReceipt, error)
+	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
 	GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error)
@@ -109,7 +109,7 @@ type EthAPI interface {
 	GetBalance(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.U256, error)
 	GetTransactionCount(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (*hexutil.Uint64, error)
 	GetStorageAt(ctx context.Context, address common.Address, index string, blockNrOrHash *rpc.BlockNumberOrHash) (common.Hash, error)
-	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (map[common.Address][]hexutil.Bytes, error)
+	GetStorageValues(ctx context.Context, requests map[common.Address][]common.Hash, blockNrOrHash *rpc.BlockNumberOrHash) (StorageValues, error)
 	GetCode(ctx context.Context, address common.Address, blockNrOrHash *rpc.BlockNumberOrHash) (hexutil.Bytes, error)
 
 	// System related (see ./eth_system.go)
@@ -160,6 +160,11 @@ type BaseAPI struct {
 	// _preMergeData is kept for a TTL rather than settled once: it reads live snapshot
 	// availability, which widens as segments arrive.
 	_preMergeData concurrent.CachedValue[preMergeBlockData]
+	// _preMergeUnsettled is what a probe answered without settling the question. It
+	// stands in for another walk over the same absent block data, for a TTL of its own:
+	// shorter than the verdict's, since the data it waits for can arrive at any time.
+	_preMergeUnsettled    atomic.Pointer[unsettledProbe]
+	_preMergeUnsettledTTL time.Duration
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -219,6 +224,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		logQueryLimit:     conf.LogQueryLimit,
 	}
 	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
+	api._preMergeUnsettledTTL = defaultUnsettledPreMergeTTL
 	return api
 }
 
@@ -273,12 +279,12 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 // an unknown selector from a known block that is unavailable in the committed
 // view. The probe never changes the selected transaction.
 func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if _, ok := errors.AsType[rpc.BlockNotFoundErr](err); !ok {
 		return blockNumber, err
 	}
 
-	overlayBlockNumber, _, _, overlayErr := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, api.filters.WithOverlay(tx), api._blockReader, nil)
+	overlayBlockNumber, _, _, overlayErr := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, api.filters.WithOverlay(tx), api._blockReader)
 	if overlayErr != nil {
 		return 0, overlayErr
 	}
@@ -400,33 +406,13 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 	return *number, nil
 }
 
-// headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
-func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
-	if err != nil {
-		return nil, false, err
-	}
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.HeaderNoCopy(), isLatest, nil
-		}
-	}
-
-	overlayTx := api.filters.WithOverlay(tx)
-	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
-	if err != nil {
-		return nil, false, err
-	}
-	return header, isLatest, nil
-}
-
 // canonicalHeaderByNumberOrHash resolves the selector and header through tx.
 // It never selects an overlay, so callers can keep dependent reads on one view.
 func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
 		return nil, false, nil
 	}
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, false, err
 	}
@@ -443,7 +429,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 		return nil, nil
 	}
 	overlayTx := api.filters.WithOverlay(tx)
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader, nil)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -470,6 +456,8 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 }
 
 const defaultPreMergeDataTTL = 30 * time.Second
+
+const defaultUnsettledPreMergeTTL = time.Second
 
 // systemTxsPerBlock is the pair of system entries every block carries in the txnum
 // sequence, which a stored TxCount includes.
@@ -532,6 +520,12 @@ type preMergeBlockData struct {
 	oldest uint64
 }
 
+// unsettledProbe is what a probe answered without settling the question, and when.
+type unsettledProbe struct {
+	data preMergeBlockData
+	at   time.Time
+}
+
 // holdsPreMergeBlockData reports whether the datadir holds full blocks below the merge
 // point, which tells a legacy archive from chain-history expiry where the stored prune
 // mode carries the same sentinel for both. Only a readable transaction of an early block
@@ -542,8 +536,15 @@ func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeH
 		if data, observed, fresh := api._preMergeData.Load(); observed && fresh {
 			return data, nil
 		}
+		if unsettled := api._preMergeUnsettled.Load(); unsettled != nil && time.Since(unsettled.at) < api._preMergeUnsettledTTL {
+			return unsettled.data, nil
+		}
 		data, ran, err := api._preMergeData.Produce(ctx, func() (preMergeBlockData, bool, error) {
-			return api.probePreMergeBlockData(ctx, tx, mergeHeight)
+			data, decided, err := api.probePreMergeBlockData(ctx, tx, mergeHeight)
+			if err == nil && !decided {
+				api._preMergeUnsettled.Store(&unsettledProbe{data: data, at: time.Now()})
+			}
+			return data, decided, err
 		})
 		switch {
 		case err == nil:

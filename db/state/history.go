@@ -973,12 +973,10 @@ func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
 
 func (h *History) initFilesRo(ht *HistoryRoTx, iit *InvertedIndexRoTx, files visibleFiles, iv *iiVisible) {
 	h.InvertedIndex.initFilesRo(iit, iv)
-	*ht = HistoryRoTx{
-		h:        h,
-		iit:      iit,
-		files:    files,
-		stepSize: h.stepSize,
-	}
+	ht.h = h
+	ht.iit = iit
+	ht.files = files
+	ht.stepSize = h.stepSize
 }
 
 func (ht *HistoryRoTx) statelessGetter(i int) *seg.Reader {

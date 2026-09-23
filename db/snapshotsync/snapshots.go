@@ -1666,16 +1666,40 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 
 	s.removeOrphanedIdx(supersededIdx)
 
-	// remove .tmp files
-	// TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
+	return s.RemoveOwnTmpFiles()
+}
+
+// RemoveOwnTmpFiles unlinks leftover .tmp files of this collection's own types, leaving those of
+// any other collection compressing into the same directory. Safe only while this collection has no
+// compression in flight, since its own in-progress .tmp is indistinguishable from a leftover.
+//
+// TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
+func (s *BaseRoSnapshots) RemoveOwnTmpFiles() error {
 	tmpFiles, err := snaptype.TmpFiles(s.dir)
 	if err != nil {
 		return err
 	}
 	for _, f := range tmpFiles {
+		if !s.ownsTmpFile(f) {
+			continue
+		}
 		_ = dir.RemoveFile(f)
 	}
 	return nil
+}
+
+// ownsTmpFile reports whether a .tmp in the snapshot dir could have been produced by this
+// collection. A name that does not parse is attributed to nobody and is left alone.
+//
+// Match on the resolved Type, not TypeString: TypeString is the raw name segment from the
+// filename, which for an index .tmp is the index's own name (e.g. "transactions-to-block"),
+// not its owning type's name (e.g. "transactions") — those two only coincide for segment files.
+func (s *BaseRoSnapshots) ownsTmpFile(path string) bool {
+	fileInfo, _, ok := snaptype.ParseFileName(s.dir, filepath.Base(path))
+	if !ok || fileInfo.Type == nil {
+		return false
+	}
+	return s.HasType(fileInfo.Type)
 }
 
 // removeOrphanedIdx unlinks the superseded index files neither a dirty segment nor a pinned

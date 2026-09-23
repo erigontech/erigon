@@ -17,6 +17,8 @@
 package state
 
 import (
+	"bytes"
+	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -26,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -66,6 +69,8 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	cache.PutCommittedStorage(addr, key, make([]byte, 32))
 	cache.PutCommittedAccount(addr, &acc)
 	cr := NewCachedReaderV3(execctx.NewTemporalTxStateGetter(fixedTemporalTx{val: make([]byte, 32)}), cache)
+	addrValue := addr.Value()
+	c3 := NewCachedReader3(stubCacheView{string(addrValue[:]): accEnc, storageCacheKey(addr, key): make([]byte, 32)}, nil)
 
 	for _, tc := range []struct {
 		name string
@@ -78,23 +83,95 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"ReaderV3.ReadAccountCodeSize", 0, func() { _, _ = r.ReadAccountCodeSize(addr) }},
 		{"ReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = r.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
 		{"ReaderV3.ReadAccountIncarnation", 0, func() { _, _ = r.ReadAccountIncarnation(addr) }},
+		{"ReaderV3.HasAccount", 0, func() { _, _ = r.HasAccount(addr) }}, // 0: answers from the encoded length
 
 		{"HistoryReaderV3.ReadAccountStorage", 0, func() { _, _, _ = hr.ReadAccountStorage(addr, key) }},
 		{"HistoryReaderV3.ReadAccountCode", 0, func() { _, _ = hr.ReadAccountCode(addr) }},
 		{"HistoryReaderV3.ReadAccountCodeSize", 0, func() { _, _ = hr.ReadAccountCodeSize(addr) }},
 		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},                 // 1: returns *accounts.Account
 		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
+		{"HistoryReaderV3.HasAccount", 0, func() { _, _ = hr.HasAccount(addr) }},                           // 0: answers from the encoded length
 
 		{"CachedReaderV3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = cr.ReadAccountStorage(addr, key) }},
 		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
 		{"CachedReaderV3.ReadAccountCode", 0, func() { _, _ = cr.ReadAccountCode(addr) }},
 		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
+
+		{"CachedReader3.ReadAccountData", 1, func() { _, _ = c3.ReadAccountData(addr) }}, // 1: returns *accounts.Account
+		{"CachedReader3.HasAccount", 0, func() { _, _ = c3.HasAccount(addr) }},           // 0: answers from the encoded length
+		{"CachedReader3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = c3.ReadAccountStorage(addr, key) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allocs := testing.AllocsPerRun(100, tc.fn)
 			require.Equal(t, tc.want, allocs, "%s: alloc count changed", tc.name)
 		})
 	}
+}
+
+// HasAccount must answer the same question ReadAccountData's nil check answered, both ways.
+func TestStateReader_HasAccount_Existence(t *testing.T) {
+	var acc accounts.Account
+	acc.Nonce = 1
+	accEnc := accounts.SerialiseV3(&acc)
+	present := accounts.InternAddress(common.Address{0x11})
+	absent := accounts.InternAddress(common.Address{0x22})
+	presentValue := present.Value()
+
+	for name, r := range map[string]StateReader{
+		"CachedReader3":   NewCachedReader3(stubCacheView{string(presentValue[:]): accEnc}, nil),
+		"ReaderV3":        NewReaderV3(execctx.NewTemporalTxStateGetter(addrTemporalTx{present: presentValue, val: accEnc})),
+		"HistoryReaderV3": NewHistoryReaderV3(addrHistTx{present: presentValue, val: accEnc}, 0),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, tc := range []struct {
+				addr accounts.Address
+				want bool
+			}{{present, true}, {absent, false}} {
+				got, err := HasAccount(r, tc.addr)
+				require.NoError(t, err)
+				require.Equal(t, tc.want, got)
+
+				data, err := r.ReadAccountData(tc.addr)
+				require.NoError(t, err)
+				require.Equal(t, tc.want, data != nil, "HasAccount must agree with ReadAccountData")
+			}
+		})
+	}
+}
+
+// addrTemporalTx answers only for one address, so an absent account reads empty.
+type addrTemporalTx struct {
+	kv.TemporalTx
+	present common.Address
+	val     []byte
+}
+
+func (g addrTemporalTx) GetLatest(_ kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	if bytes.Equal(k, g.present[:]) {
+		return g.val, 0, nil
+	}
+	return nil, 0, nil
+}
+
+func (g addrTemporalTx) GetLatestValSize(_ kv.Domain, k []byte) (int, bool, error) {
+	if bytes.Equal(k, g.present[:]) {
+		return len(g.val), true, nil
+	}
+	return 0, false, nil
+}
+func (g addrTemporalTx) StepsInFiles(...kv.Domain) kv.Step { return 0 }
+
+type addrHistTx struct {
+	kv.TemporalTx
+	present common.Address
+	val     []byte
+}
+
+func (m addrHistTx) GetAsOf(_ kv.Domain, key []byte, _ uint64) ([]byte, bool, error) {
+	if bytes.Equal(key, m.present[:]) {
+		return m.val, true, nil
+	}
+	return nil, false, nil
 }
 
 func cacheReadTestAccount() *accounts.Account {
@@ -177,4 +254,123 @@ func TestReturnReadListUnpinsWhatTheTxnRead(t *testing.T) {
 	for i, k := range tbl.Keys[:cap(tbl.Keys)] {
 		require.Empty(t, k, "Keys[%d] still pins a key", i)
 	}
+}
+
+// stubCacheView answers from a map keyed by the composite key.
+type stubCacheView map[string][]byte
+
+func storageCacheKey(a accounts.Address, k accounts.StorageKey) string {
+	av, kv := a.Value(), k.Value()
+	return string(av[:]) + string(kv[:])
+}
+
+func (s stubCacheView) Get(k []byte) ([]byte, error)     { return s[string(k)], nil }
+func (s stubCacheView) GetCode(k []byte) ([]byte, error) { return s[string(k)], nil }
+
+// The composite key a storage read builds lives on the reader, so consecutive reads of
+// different slots must not bleed into each other.
+func TestCachedReader3StorageKeyIsReused(t *testing.T) {
+	addr1 := accounts.InternAddress(common.HexToAddress("0x01"))
+	addr2 := accounts.InternAddress(common.HexToAddress("0x02"))
+	slot1 := accounts.InternKey(common.HexToHash("0x0a"))
+	slot2 := accounts.InternKey(common.HexToHash("0x0b"))
+
+	view := stubCacheView{
+		storageCacheKey(addr1, slot1): {0x11},
+		storageCacheKey(addr2, slot2): {0x22},
+	}
+	r := NewCachedReader3(view, nil)
+
+	for _, tc := range []struct {
+		addr accounts.Address
+		slot accounts.StorageKey
+		want uint64
+	}{
+		{addr1, slot1, 0x11},
+		{addr2, slot2, 0x22},
+		{addr1, slot2, 0},
+		{addr1, slot1, 0x11},
+	} {
+		v, _, err := r.ReadAccountStorage(tc.addr, tc.slot)
+		require.NoError(t, err)
+		require.Equal(t, tc.want, v.Uint64())
+	}
+}
+
+// stubPutDel records the composite keys it is handed, as a string, which is what the real
+// domains do when they keep one.
+type stubPutDel struct {
+	kv.TemporalPutDel
+	keys []string
+}
+
+func (s *stubPutDel) DomainPut(_ kv.Domain, k, _ []byte, _ uint64, _ []byte) error {
+	if s.keys == nil {
+		return nil
+	}
+	s.keys = append(s.keys, string(k))
+	return nil
+}
+
+func (s *stubPutDel) DomainDel(_ kv.Domain, k []byte, _ uint64, _ []byte) error {
+	s.keys = append(s.keys, string(k))
+	return nil
+}
+
+// The writer builds its storage key once and refills it, so writing different slots must
+// still address different keys and must not allocate.
+func TestWriterStorageKeyIsReused(t *testing.T) {
+	put := &stubPutDel{keys: make([]string, 0, 2)}
+	w := NewWriter(put, nil, 1)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	slot1 := accounts.InternKey(common.HexToHash("0x0a"))
+	slot2 := accounts.InternKey(common.HexToHash("0x0b"))
+
+	require.NoError(t, w.WriteAccountStorage(addr, 0, slot1, uint256.Int{}, *uint256.NewInt(1)))
+	require.NoError(t, w.WriteAccountStorage(addr, 0, slot2, uint256.Int{}, *uint256.NewInt(2)))
+	require.Len(t, put.keys, 2)
+	require.NotEqual(t, put.keys[0], put.keys[1], "each slot must address its own key")
+
+	// Writing slot1 again must address slot1, not whatever the buffer last held.
+	require.NoError(t, w.WriteAccountStorage(addr, 0, slot1, uint256.Int{}, *uint256.NewInt(3)))
+	require.Equal(t, put.keys[0], put.keys[2])
+
+	// One allocation remains and it is not the key: uint256.Int.Bytes() allocates the
+	// trimmed value, which escapes into DomainPut. Reinstating a per-call key makes it two.
+	quiet := NewWriter(&stubPutDel{}, nil, 1)
+	allocs := testing.AllocsPerRun(100, func() {
+		_ = quiet.WriteAccountStorage(addr, 0, slot1, uint256.Int{}, *uint256.NewInt(1))
+	})
+	require.Equal(t, float64(1), allocs, "the composite key must not allocate")
+}
+
+// WriteSet.Apply builds one storage key for the whole call rather than one per slot, so its
+// allocations must not scale twice per slot. The domains keep a string copy of each key, so
+// one allocation per slot is expected and stays; a reinstated per-slot make would double it.
+func TestWriteSetApplyKeyDoesNotScalePerSlot(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+
+	applyAllocs := func(slots int) float64 {
+		writes := &WriteSet{
+			storage: map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]{addr: {}},
+		}
+		for i := range slots {
+			key := accounts.InternKey(common.BigToHash(big.NewInt(int64(i + 1))))
+			writes.storage[addr][key] = &VersionedWrite[uint256.Int]{
+				WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath},
+				Val:         *uint256.NewInt(uint64(i + 1)),
+			}
+		}
+		return testing.AllocsPerRun(5, func() {
+			require.NoError(t, writes.Apply(domains, tx, 1, 1, nil, &chain.Rules{}, nil, false))
+		})
+	}
+
+	few, many := applyAllocs(2), applyAllocs(16)
+	perSlot := (many - few) / 14
+	// Measured 2.21 with the shared key and 3.21 with a per-slot make: the extra
+	// allocation is exactly the key, so the bound sits between the two.
+	require.Less(t, perSlot, 2.7,
+		"allocations per storage slot (%v) must not include a composite key", perSlot)
 }

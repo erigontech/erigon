@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // Withdrawal represents a validator withdrawal from the consensus layer.
@@ -37,6 +38,20 @@ type Withdrawal struct {
 	Validator hexutil.Uint64 `json:"validatorIndex"` // index of validator associated with withdrawal
 	Address   common.Address `json:"address"`        // target address for withdrawn ether
 	Amount    hexutil.Uint64 `json:"amount"`         // value of withdrawal in GWei
+}
+
+func (obj *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if obj == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteObjectStart()
+	jsonstream.Text(s, "index", &obj.Index)
+	jsonstream.Text(s, "validatorIndex", &obj.Validator)
+	s.Field("address").WriteHex(obj.Address[:])
+	jsonstream.Text(s, "amount", &obj.Amount)
+	s.WriteObjectEnd()
+	return nil
 }
 
 func (obj *Withdrawal) EncodingSize() int {

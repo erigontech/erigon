@@ -363,7 +363,7 @@ func ReadHeader(db kv.Getter, hash common.Hash, number uint64) *types.Header {
 		log.Error("Invalid block header RLP", "hash", hash, "number", number, "err", err)
 		return nil
 	}
-	return header
+	return types.NewHeaderFromStorage(hash, header)
 }
 
 func ReadCurrentBlockNumber(db kv.Getter) *uint64 {
@@ -496,9 +496,9 @@ func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdx
 
 // TxnRlpByIdxInBlock returns the stored encoding of the i-th transaction of a block, or nil when it does not exist.
 func TxnRlpByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) ([]byte, error) {
-	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
+	b, ok, err := ReadBodyOnlyTxnByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
 	// TxCount includes the two system txns; txn ids are global, so an unchecked index reads another block
-	if err != nil || b == nil || txIdxInBlock < 0 || txIdxInBlock >= int(b.TxCount)-2 {
+	if err != nil || !ok || txIdxInBlock < 0 || txIdxInBlock >= int(b.TxCount)-2 {
 		return nil, err
 	}
 	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
@@ -616,6 +616,15 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 		}
 	}
 	return
+}
+
+func ReadBodyOnlyTxnByKey(db kv.Getter, k []byte) (b types.BodyOnlyTxn, ok bool, err error) {
+	bodyRlp, err := db.GetOne(kv.BlockBody, k)
+	if err != nil || len(bodyRlp) == 0 {
+		return b, false, err
+	}
+	err = b.DecodeRLPBytes(bodyRlp)
+	return b, err == nil, err
 }
 
 func ReadBodyForStorageByKey(db kv.Getter, k []byte) (*types.BodyForStorage, error) {
@@ -794,16 +803,15 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) error {
 			break
 		}
 
-		data := ReadStorageBodyRLP(tx, h, blockNum)
-		if len(data) == 0 {
-			break
-		}
-		bodyForStorage := types.BodyForStorage{}
-		if err := rlp.DecodeBytes(data, &bodyForStorage); err != nil {
+		body, ok, err := ReadBodyOnlyTxnByKey(tx, dbutils.BlockBodyKey(blockNum, h))
+		if err != nil {
 			return err
 		}
+		if !ok {
+			break
+		}
 
-		nextBaseTxNum += int(bodyForStorage.TxCount)
+		nextBaseTxNum += int(body.TxCount)
 		err = rawdbv3.TxNums.Append(tx, blockNum, uint64(nextBaseTxNum-1))
 		if err != nil {
 			return err
@@ -933,7 +941,8 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
-	var b *types.BodyForStorage
+	var b types.BodyOnlyTxn
+	var ok bool
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
@@ -945,11 +954,11 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 			break
 		}
 
-		b, err = ReadBodyForStorageByKey(tx, k)
+		b, ok, err = ReadBodyOnlyTxnByKey(tx, k)
 		if err != nil {
 			return deleted, err
 		}
-		if b == nil {
+		if !ok {
 			log.Debug("PruneBlocks: block body not found", "height", n)
 		} else {
 			txIDBytes := make([]byte, 8)
@@ -998,11 +1007,11 @@ func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 		blockFrom = 1
 	}
 	return tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
-		b, err := ReadBodyForStorageByKey(tx, k)
+		b, ok, err := ReadBodyOnlyTxnByKey(tx, k)
 		if err != nil {
 			return err
 		}
-		if b != nil {
+		if ok {
 			txIDBytes := make([]byte, 8)
 			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)

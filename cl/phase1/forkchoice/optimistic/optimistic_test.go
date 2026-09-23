@@ -159,6 +159,17 @@ func (t *optimisticTestSuite) TestValidateBlock() {
 	}, node)
 }
 
+func (t *optimisticTestSuite) TestValidateBlockSweepsLowerNumberedRoots() {
+	err := t.opStore.AddOptimisticCandidate(mockBlock1Root, mockBlock1)
+	t.Require().NoError(err)
+
+	// mockBlock4Root was never added, so the ancestor walk stops at once and only the
+	// execution-block-number sweep can remove the candidate.
+	err = t.opStore.ValidateBlock(mockBlock4Root, mockBlock3_2)
+	t.Require().NoError(err)
+	t.Require().True(checkSyncMapLength(&t.opStore.optimisticRoots, 0))
+}
+
 func (t *optimisticTestSuite) TestInvalidateBlock() {
 	for _, blockWithRoot := range []struct {
 		root  common.Hash

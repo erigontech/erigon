@@ -20,9 +20,17 @@ import (
 	"crypto/ecdsa"
 	"fmt"
 	"math/big"
+	"net"
+	"strconv"
 	"testing"
 
+	"github.com/libp2p/go-libp2p"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/libp2p/go-libp2p/p2p/transport/tcp"
+	"github.com/multiformats/go-multiaddr"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 func MockPrivateKey(dec int64) *ecdsa.PrivateKey {
@@ -101,4 +109,183 @@ func TestMultiAddressBuilder(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, testCase.expected, multiAddr.String())
 	}
+}
+
+func TestAddressBuildersRejectOutOfRangePorts(t *testing.T) {
+	for _, build := range []func(string, uint) (multiaddr.Multiaddr, error){multiAddressBuilder, quicAddressBuilder} {
+		addr, err := build("127.0.0.1", 1<<16)
+		require.Error(t, err)
+		require.Nil(t, addr)
+	}
+}
+
+func TestBuildOptionsListenOnTCPAndQUIC(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	options, err := buildOptions(&P2PConfig{
+		IpAddr:   "127.0.0.1",
+		TCPPort:  0,
+		QUICPort: 0,
+	}, key)
+	require.NoError(t, err)
+	host, err := libp2p.New(options...)
+	require.NoError(t, err)
+	defer host.Close()
+
+	var hasTCP, hasQUIC bool
+	for _, addr := range host.Network().ListenAddresses() {
+		if _, err := addr.ValueForProtocol(multiaddr.P_TCP); err == nil {
+			hasTCP = true
+		}
+		if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+			hasQUIC = true
+		}
+	}
+	require.True(t, hasTCP)
+	require.True(t, hasQUIC)
+}
+
+func TestHostsConnectOverQUIC(t *testing.T) {
+	serverKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	serverOptions, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
+	require.NoError(t, err)
+	server, err := libp2p.New(serverOptions...)
+	require.NoError(t, err)
+	defer server.Close()
+
+	clientKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	clientOptions, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, clientKey)
+	require.NoError(t, err)
+	client, err := libp2p.New(clientOptions...)
+	require.NoError(t, err)
+	defer client.Close()
+
+	var quicAddr multiaddr.Multiaddr
+	for _, addr := range server.Addrs() {
+		if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+			quicAddr = addr
+			break
+		}
+	}
+	require.NotNil(t, quicAddr)
+	require.NoError(t, client.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{quicAddr}}))
+
+	connections := client.Network().ConnsToPeer(server.ID())
+	require.Len(t, connections, 1)
+	_, err = connections[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
+	require.NoError(t, err)
+}
+
+func TestHostFallsBackToTCPWhenQUICIsUnavailable(t *testing.T) {
+	serverKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	server, err := libp2p.New(
+		privKeyOption(serverKey),
+		libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"),
+		libp2p.Transport(tcp.NewTCPTransport),
+	)
+	require.NoError(t, err)
+	defer server.Close()
+
+	var tcpAddr multiaddr.Multiaddr
+	for _, addr := range server.Addrs() {
+		if _, err := addr.ValueForProtocol(multiaddr.P_TCP); err == nil {
+			tcpAddr = addr
+			break
+		}
+	}
+	require.NotNil(t, tcpAddr)
+	tcpPort, err := tcpAddr.ValueForProtocol(multiaddr.P_TCP)
+	require.NoError(t, err)
+	unreachableQUIC, err := multiaddr.NewMultiaddr("/ip4/127.0.0.1/udp/" + tcpPort + "/quic-v1")
+	require.NoError(t, err)
+
+	clientKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	clientOptions, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, clientKey)
+	require.NoError(t, err)
+	client, err := libp2p.New(clientOptions...)
+	require.NoError(t, err)
+	defer client.Close()
+
+	require.NoError(t, client.Connect(t.Context(), peer.AddrInfo{
+		ID:    server.ID(),
+		Addrs: []multiaddr.Multiaddr{unreachableQUIC, tcpAddr},
+	}))
+	connections := client.Network().ConnsToPeer(server.ID())
+	require.Len(t, connections, 1)
+	_, err = connections[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_TCP)
+	require.NoError(t, err)
+}
+
+func TestBuildOptionsAdvertiseExternalTCPAndQUICAddresses(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	cfg := &P2PConfig{
+		IpAddr:     "127.0.0.1",
+		ExternalIP: net.ParseIP("192.0.2.1"),
+	}
+	options, err := buildOptions(cfg, key)
+	require.NoError(t, err)
+	host, err := libp2p.New(options...)
+	require.NoError(t, err)
+	defer host.Close()
+
+	wantTCPPort := strconv.FormatUint(uint64(hostTCPPort(host)), 10)
+	wantQUICPort := strconv.FormatUint(uint64(hostQUICPort(host)), 10)
+	var hasTCP, hasQUIC bool
+	for _, addr := range host.Addrs() {
+		ip, err := addr.ValueForProtocol(multiaddr.P_IP4)
+		if err != nil || ip != "192.0.2.1" {
+			continue
+		}
+		if port, err := addr.ValueForProtocol(multiaddr.P_TCP); err == nil {
+			require.Equal(t, wantTCPPort, port)
+			hasTCP = true
+		}
+		if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+			port, err := addr.ValueForProtocol(multiaddr.P_UDP)
+			require.NoError(t, err)
+			require.Equal(t, wantQUICPort, port)
+			hasQUIC = true
+		}
+	}
+	require.True(t, hasTCP)
+	require.True(t, hasQUIC)
+}
+
+func TestBuildOptionsAdvertiseDNSWithBoundTCPAndQUICPorts(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	cfg := &P2PConfig{IpAddr: "127.0.0.1", HostDNS: "node.example"}
+	options, err := buildOptions(cfg, key)
+	require.NoError(t, err)
+	host, err := libp2p.New(options...)
+	require.NoError(t, err)
+	defer host.Close()
+
+	wantTCPPort := strconv.FormatUint(uint64(hostTCPPort(host)), 10)
+	wantQUICPort := strconv.FormatUint(uint64(hostQUICPort(host)), 10)
+	var hasTCP, hasQUIC bool
+	for _, addr := range host.Addrs() {
+		dns, err := addr.ValueForProtocol(multiaddr.P_DNS4)
+		if err != nil || dns != "node.example" {
+			continue
+		}
+		if port, err := addr.ValueForProtocol(multiaddr.P_TCP); err == nil {
+			require.Equal(t, wantTCPPort, port)
+			hasTCP = true
+		}
+		if _, err := addr.ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+			port, err := addr.ValueForProtocol(multiaddr.P_UDP)
+			require.NoError(t, err)
+			require.Equal(t, wantQUICPort, port)
+			hasQUIC = true
+		}
+	}
+	require.True(t, hasTCP)
+	require.True(t, hasQUIC)
 }

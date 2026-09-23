@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -605,8 +604,7 @@ func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
 
 func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	chainConfig := chain.TestChainOsakaConfig.Copy()
 	historyAddr := params.HistoryStorageAddress.Value()
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: chainConfig,
@@ -651,8 +649,7 @@ var sloadStub = []byte{0x5f, 0x35, 0x54, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
 
 func TestTraceCallExcludesNextBlockSystemCall(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	chainConfig := chain.TestChainOsakaConfig.Copy()
 	historyAddr := params.HistoryStorageAddress.Value()
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: chainConfig,

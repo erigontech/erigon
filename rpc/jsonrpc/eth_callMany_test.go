@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"strconv"
 	"testing"
@@ -31,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/datadir"
@@ -38,6 +40,9 @@ import (
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -65,11 +70,98 @@ func TestSetupEVMTimeoutCancelsEVMStoredAfterExpiry(t *testing.T) {
 	require.True(t, evm.Cancelled())
 }
 
+func newCallManyApisForTest(m *execmoduletester.ExecModuleTester) (*APIImpl, *DebugAPIImpl) {
+	baseApi := newBaseApiForTest(m)
+	return newEthApiForTest(baseApi, m.DB, nil, nil),
+		NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+}
+
+// A state context carrying neither a block number nor a block hash is what a caller
+// sends by omitting "blockNumber" or by misspelling it.
+func TestCallManyRejectsStateContextWithoutBlockSelector(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, debugApi := newCallManyApisForTest(m)
+	ctx := context.Background()
+	var invalidParams *rpc.InvalidParamsError
+
+	t.Run("eth_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, nil, StateContext{}, nil, nil)
+		require.ErrorAs(t, err, &invalidParams)
+	})
+
+	t.Run("debug_traceCallMany", func(t *testing.T) {
+		err := debugApi.TraceCallMany(ctx, nil, StateContext{}, nil, jsonstream.New(io.Discard))
+		require.ErrorAs(t, err, &invalidParams)
+	})
+}
+
+// The funded account spends most of its balance in block 1, so the call is only
+// covered if block 0 is answered from genesis state.
+func TestCallManyAtGenesisReadsGenesisState(t *testing.T) {
+	const (
+		genesisBalance = 1_000_000_000_000_000_000
+		spent          = 900_000_000_000_000_000
+		transferred    = 500_000_000_000_000_000
+	)
+
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config:     chain.TestChainBerlinConfig,
+			Alloc:      types.GenesisAlloc{testAddr: {Balance: big.NewInt(genesisBalance)}},
+			Difficulty: uint256.NewInt(1),
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(1, func(_ int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{1},
+			uint256.NewInt(spent), params.TxGas, nil, nil), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	to := common.Address{2}
+	args := ethapi.CallArgs{From: &testAddr, To: &to, Value: (*hexutil.U256)(uint256.NewInt(transferred))}
+	api, _ := newCallManyApisForTest(m)
+
+	res, err := api.CallMany(context.Background(), []Bundle{{Transactions: []ethapi.CallArgs{args}}},
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(0)}, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Len(t, res[0], 1)
+	require.NotContains(t, res[0][0], "error")
+}
+
+// A hash selector must answer for the same state as the number it resolves to.
+func TestCallManyHashSelectorMatchesNumber(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	api, _ := newCallManyApisForTest(m)
+	ctx := context.Background()
+
+	target := chain.Blocks[len(chain.Blocks)-1]
+	to := common.Address{3}
+	gas := hexutil.Uint64(21_000)
+	bundles := []Bundle{{Transactions: []ethapi.CallArgs{{
+		From: &m.Address, To: &to, Gas: &gas, Value: (*hexutil.U256)(uint256.NewInt(1)),
+	}}}}
+
+	byNumber, err := api.CallMany(ctx, bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(target.NumberU64()))}, nil, nil)
+	require.NoError(t, err)
+
+	byHash, err := api.CallMany(ctx, bundles,
+		StateContext{BlockNumber: rpc.BlockNumberOrHashWithHash(target.Hash(), false)}, nil, nil)
+	require.NoError(t, err)
+
+	require.Equal(t, byNumber, byHash)
+	require.NotContains(t, byNumber[0][0], "error")
+}
+
 func TestCallManyEmptyBundles(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	baseApi := newBaseApiForTest(m)
-	api := newEthApiForTest(baseApi, m.DB, nil, nil)
-	debugApi := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+	api, debugApi := newCallManyApisForTest(m)
 	ctx := context.Background()
 
 	txIndex := -1

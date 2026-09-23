@@ -1118,7 +1118,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	if config.MCPAddress != "" {
 		mcpSrv := rpc.NewServer(httpRpcCfg.RpcBatchConcurrency, httpRpcCfg.TraceRequests, httpRpcCfg.DebugSingleRequest, httpRpcCfg.RpcStreamingDisable, s.logger, httpRpcCfg.RPCSlowLogThreshold)
 		for _, api := range apisForNamespaces(allAPIs, mcpNamespaces) {
-			if err := mcpSrv.RegisterName(api.Namespace, api.Service); err != nil {
+			if err := mcpSrv.RegisterAPI(api); err != nil {
 				return err
 			}
 		}

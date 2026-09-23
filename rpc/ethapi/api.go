@@ -429,9 +429,19 @@ type RPCBlock struct {
 	Uncles       []common.Hash      `json:"uncles"`
 	Withdrawals  *types.Withdrawals `json:"withdrawals,omitempty"`
 
-	TransactionCount any           `json:"transactionCount,omitempty"`
+	TransactionCount *uint64       `json:"transactionCount,omitempty"`
 	TotalDifficulty  *hexutil.U256 `json:"totalDifficulty,omitempty"`
-	Calls            any           `json:"calls,omitempty"`
+	Calls            []CallResult  `json:"calls,omitzero"`
+}
+
+// CallResult represents the result of a single call in the simulation.
+type CallResult struct {
+	ReturnData string          `json:"returnData"`
+	Logs       []*types.RPCLog `json:"logs"`
+	GasUsed    hexutil.Uint64  `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
+	Status     hexutil.Uint64  `json:"status"`
+	Error      any             `json:"error,omitempty"`
 }
 
 // MarkPending nils the fields a pending block does not have yet.
@@ -478,9 +488,8 @@ func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 	return result
 }
 
-// The empty transaction lists, shared so a block without transactions allocates none.
-// Each mode keeps the element type its populated form has, because ots_getBlockTransactions
-// type-asserts this field. Zero capacity makes sharing them safe.
+// Each mode keeps the element type its populated form has, for callers that type-assert
+// Transactions.
 var (
 	noTxHashes any = []common.Hash{}
 	noFullTxs  any = []*RPCTransaction{}

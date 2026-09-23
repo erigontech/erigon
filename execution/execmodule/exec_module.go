@@ -226,9 +226,7 @@ type ExecModule struct {
 	publishedSD    func() *execctx.SharedDomains // fallback while an FCU commits
 
 	// stateCache is a cache for state data (accounts, storage, code)
-	stateCache *cache.StateCache
-	// codeStore is the persistent codehash-keyed code cache (in-mem + MDBX backing).
-	codeStore   *cache.CodeStore
+	stateCache  *cache.StateCache
 	readAheader *exec.BlockReadAheader
 
 	stateTransitionObserver StateTransitionObserver
@@ -273,10 +271,6 @@ func NewExecModule(
 ) *ExecModule {
 	domainCache := newDomainStateCache(stateCacheBudget)
 	execctx.GuardAggregatorForCache(db, domainCache)
-	var codeStore *cache.CodeStore
-	if dbg.UseCodeStore {
-		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
-	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth, syncCfg.SlowBlockThreshold)
 
 	em := &ExecModule{
@@ -300,7 +294,6 @@ func NewExecModule(
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
-		codeStore:               codeStore,
 		readAheader:             readAheader,
 		stopNode:                stopNode,
 	}
@@ -614,7 +607,6 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
-	doms.SetCodeStore(e.codeStore)
 	// Either unwind path may run, and both can run in one validation. Share one
 	// lazy suspension so it spans every staged-state read without penalising the
 	// common case where validation needs no unwind.
