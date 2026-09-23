@@ -889,8 +889,8 @@ func targetOf(br *blockResult) commitTarget {
 type computeMode struct {
 	label       string // error-message context, e.g. "step-boundary "
 	midBlock    bool
-	checkRoot   bool   // compare the computed root against target.stateRoot
-	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
+	checkRoot   bool // compare the computed root against target.stateRoot
+	publishRoot bool // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
 
 // handOffUpdates returns the filled buffer for the caller to compute against and
