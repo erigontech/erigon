@@ -63,3 +63,30 @@ func TestProcessPublishesCommitmentMetrics(t *testing.T) {
 	require.Positive(t, writes.GetValueUint64()-beforeWrites,
 		"commitment_branch_writes_total moved")
 }
+
+func TestDeferredProcessPublishesBranchWrites(t *testing.T) {
+	writeBytes := metrics.GetOrCreateCounter("commitment_branch_write_bytes_total")
+	writes := metrics.GetOrCreateCounter("commitment_branch_writes_total")
+
+	entries := benchEntries("storage", 64)
+	dir := t.TempDir()
+	c := newShardedContext()
+	tr := &Trie{}
+	tr.ResetContext(c)
+	tr.SetTrieContextFactory(c.factory)
+	tr.SetDeferCommitmentUpdates(true)
+	defer tr.Release()
+
+	beforeBytes := writeBytes.GetValueUint64()
+	beforeWrites := writes.GetValueUint64()
+
+	u := benchUpdatesIn(dir, commitment.ModeCollect, entries)
+	_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, tr.TakeDeferredUpdates())
+
+	require.Positive(t, writeBytes.GetValueUint64()-beforeBytes,
+		"deferred rounds still bill commitment_branch_write_bytes_total")
+	require.Positive(t, writes.GetValueUint64()-beforeWrites,
+		"deferred rounds still bill commitment_branch_writes_total")
+}

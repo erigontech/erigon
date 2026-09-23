@@ -49,9 +49,13 @@ func (c *meteredContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return data, step, err
 }
 
-func (c *meteredContext) PutBranch(prefix, data, prevData []byte) error {
+func (c *meteredContext) countWrite(n int) {
 	c.writes.Add(1)
-	c.writeBytes.Add(uint64(len(data)))
+	c.writeBytes.Add(uint64(n))
+}
+
+func (c *meteredContext) PutBranch(prefix, data, prevData []byte) error {
+	c.countWrite(len(data))
 	return c.PatriciaContext.PutBranch(prefix, data, prevData)
 }
 

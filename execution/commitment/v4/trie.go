@@ -45,11 +45,15 @@ type Trie struct {
 
 type deferredPatriciaContext struct {
 	commitment.PatriciaContext
+	meter  *meteredContext
 	mu     sync.Mutex
 	deltas []recordDelta
 }
 
 func (c *deferredPatriciaContext) PutBranch(key, data, prev []byte) error {
+	if c.meter != nil {
+		c.meter.countWrite(len(data))
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.deltas = append(c.deltas, recordDelta{key: key, data: data, prev: prev})
@@ -177,7 +181,7 @@ func (t *Trie) Process(
 		if len(t.deferred) != 0 {
 			return nil, errors.New("commitment v4: deferred updates were not taken")
 		}
-		deferredCtx = &deferredPatriciaContext{PatriciaContext: metered}
+		deferredCtx = &deferredPatriciaContext{PatriciaContext: metered, meter: metered}
 		processCtx = deferredCtx
 	}
 	root, err := runScheduledPhases(ctx, processCtx, factory, storage, accounts, t.scheduleWorkers, t.scheduleStats)
