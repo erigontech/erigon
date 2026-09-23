@@ -10,9 +10,8 @@ recovery during non-finality, and RPC correctness at the chain tip and on pruned
   account and storage tries. Use `--experimental.parallel-commitment=false` to select sequential commitment
   (#23831, #23972; closes #21137) — by @awskii
 - **Broad RPC performance improvements.** Faster `eth_getLogs`, `eth_feeHistory`, and `eth_getProof`, plus lower CPU and
-  memory costs for block, receipt, and trace responses. These improvements also benefit existing datadirs. Faster JSON
-  encoding and less copying reduce memory pressure for large HTTP and IPC batches (#23975, #24013, #24034, #23943,
-  #23969, #23960) — by @AskAlexSharov
+  memory costs for block and receipt responses. Faster JSON encoding and less copying reduce memory pressure for large
+  HTTP and IPC batches (#23975, #24013, #24034, #23943, #23969, #23960) — by @AskAlexSharov
 - **Persisted receipts enabled by default.** New datadirs retain receipts so receipt and log queries can avoid block
   re-execution within the retention window. This trades more disk space for lower RPC latency; existing datadirs keep
   their stored setting (#23774) — by @AskAlexSharov
@@ -30,6 +29,15 @@ recovery during non-finality, and RPC correctness at the chain tip and on pruned
 - **amd64 releases require x86-64-v2.** Docker images and tarballs now require CPU features including SSE4.2 and POPCNT.
   The separate `linux/amd64/v2` Docker platform and `amd64v2` tarball are removed; use the standard amd64 artifacts.
   Source builds require Go 1.26 or newer (#23877, #23735) — by @AskAlexSharov
+- **Polygon removal.** Polygon chain names, datadirs, and `--bor.*` / `--polygon.*` flags are no longer accepted; use
+  [0xPolygon/erigon](https://github.com/0xPolygon/erigon). Support ended in 3.1 (#23492, #23497, #23537) — by @awskii, @taratorio
+- **Removed startup flags.** Remove `--fcu.background.commit` and `--experimental.streaming-commitment` from startup
+  arguments; these flags now prevent startup (#23051, #23191) — by @AskAlexSharov, @awskii
+- **Required JSON-RPC arguments cannot be `null`.** A `null` required positional argument now returns `-32602` instead
+  of silently becoming a zero value, matching geth (#23668) — by @lupin012
+- **Caplin restart migration.** On upgrade, nodes with `--caplin.checkpoint-sync.disable` must re-sync Caplin from genesis
+  unless a locally saved finalized state exists; the old head-state snapshot is no longer used. Allow checkpoint sync
+  during the upgrade to avoid this replay (#22746) — by @awskii
 - **Polling log filters follow historical-query semantics.** `eth_getFilterLogs` queries the filter's stored criteria
   without draining `eth_getFilterChanges` or renewing the filter lifetime. It enforces `--rpc.blockrange.limit`,
   `--rpc.logs.maxresults`, and `--rpc.logs.querylimit`. Log filters and subscriptions reject more than four topic
@@ -70,6 +78,11 @@ recovery during non-finality, and RPC correctness at the chain tip and on pruned
 - `trace_callMany` preserves earlier simulated calls' state regardless of the requested trace types and no longer reads
   changes from the next real block. `eth_estimateGas` applies state overrides to balance and code checks as well as
   execution (#23121, #23951, #23655) — by @lupin012
+- Blob-fee handling now matches geth: `eth_estimateGas` reserves funds for blobs before calculating the gas allowance,
+  and `eth_call` does not charge the chain's blob base fee when blob fields are supplied without a nonzero blob fee cap
+  (#23949) — by @lupin012
+- `callTracer` omits `to` for failed `CREATE` and `CREATE2` calls instead of returning the zero address, matching geth
+  (#23765) — by @AskAlexSharov
 - HTTP responses support negotiated Zstandard compression. Fully buffered gzip responses use less CPU at the cost of
   slightly larger bodies (#23482, #22882) — by @AskAlexSharov, @lupin012
 
@@ -78,13 +91,16 @@ recovery during non-finality, and RPC correctness at the chain tip and on pruned
 - Reorgs can exceed the normal depth limit during non-finality. Changesets and block access lists are retained, and
   snapshot retirement waits for finality, preserving the data needed to recover (#23612) — by @taratorio
 - Caplin resumes from a suitable locally saved finalized state on restart, avoiding an unnecessary remote checkpoint
-  download and execution-history backfill (#22746) — by @awskii
+  download and execution-history backfill. `--caplin.resume-max-staleness-epochs` limits the state's age, capped by the
+  chain's sidecar-retention window (#22746) — by @awskii
 - Caplin no longer blocks state-backed validator duties during a head-state copy, reducing missed sync-committee duties
   under load. Proposed blocks now include eligible BLS-to-execution withdrawal-credential changes
   (#24199, #22827) — by @lystopad, @awskii
 - Blob-history backfill works with small peer sets, repairs gaps at snapshot boundaries, and only records complete,
   verified recoveries. Blob pruning now respects each chain's configured serving window, so it no longer discards
-  sidecars that backfill is trying to restore (#23138, #24191) — by @domiwei, @yperbasis
+  sidecars that backfill is trying to restore (#23138, #24191; backport of #24044) — by @domiwei
+- On Glamsterdam networks, `--caplin.builder.allow-private-urls` allows validator-configured builder URLs to resolve to
+  private or loopback addresses (#23548) — by @domiwei
 - A slow transaction-pool gRPC subscriber can no longer block transaction gossip to peers
   (#23730) — by @Sahil-4555
 
@@ -97,7 +113,8 @@ recovery during non-finality, and RPC correctness at the chain tip and on pruned
   four times the live data. `erigon db compact --datadir=<path>` provides manual compaction while the node is stopped
   (#23956, #23677) — by @AskAlexSharov
 - Embedded RPC supports HTTPS through `--https.enabled`, `--https.cert`, and `--https.key`, plus IPC through
-  `--socket.enabled` (#23108) — by @lupin012
+  `--socket.enabled`. Use `--http.url`, `--https.url`, and `--socket.url` to select TCP or Unix-socket endpoints
+  (#23108) — by @lupin012
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.6.1...v3.7.0
 
