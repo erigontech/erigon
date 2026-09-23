@@ -34,9 +34,11 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -242,6 +244,7 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 				calls:    syscalls,
 				failAt:   tc.failAt,
 			}
+			var completions int
 			txTask := &TxTask{
 				TxNum:   1,
 				TxIndex: 0,
@@ -251,6 +254,13 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 				},
 				Config: chain.TestChainBerlinConfig,
 				Engine: engine,
+				Hooks: &tracing.Hooks{
+					OnTxEndV2: func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+						require.Nil(t, receipt)
+						require.Zero(t, txnGasUsage)
+						completions++
+					},
+				},
 			}
 			result := &TxResult{Task: txTask}
 
@@ -264,6 +274,7 @@ func TestHistoricalBlockEndLogs(t *testing.T) {
 
 			_, _, err = p.processResults(consumer, cfg, rws, txTask.TxNum, roTx, false, logger)
 			require.NoError(t, err)
+			require.Equal(t, 1, completions)
 
 			if tc.failAt > 0 {
 				require.Error(t, result.Err)

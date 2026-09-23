@@ -24,11 +24,15 @@ import (
 
 // Slabs and ext chunks grow geometrically: a batch touching a handful of keys must
 // not pay for a peak-sized arena, because a fresh Updates is built per block.
-const prefixSlabMin = 256
-const prefixSlabMax = 16384
+const (
+	prefixSlabMin = 256
+	prefixSlabMax = 16384
+)
 
-const prefixExtChunkMin = 4 * 1024
-const prefixExtChunkMax = 64 * 1024
+const (
+	prefixExtChunkMin = 4 * 1024
+	prefixExtChunkMax = 64 * 1024
+)
 
 type prefixNode struct {
 	// ext is arena-backed: it stays valid only until the owning trie's Reset, which

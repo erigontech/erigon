@@ -196,6 +196,7 @@ type IntraBlockState struct {
 	codeReadCount       int64
 	version             int
 	dep                 int
+	stateReadErr        error
 
 	// Per-attempt memo of the shared-versionMap SelfDestruct probe. The probe
 	// (read_paths.go) fires on every versionedReadCore call but reads only
@@ -365,6 +366,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.codeReadDuration = 0
 	sdb.codeReadCount = 0
 	sdb.dep = UnknownDep
+	sdb.stateReadErr = nil
 }
 
 // Release Deprecated use Close
@@ -744,6 +746,7 @@ func (sdb *IntraBlockState) GetCodeSize(addr accounts.Address) (int, error) {
 		// ReadAccountCode there returns nil (EXTCODESIZE 0) and diverges from
 		// consensus.
 		size, err := sdb.stateReader.ReadAccountCodeSize(addr)
+		sdb.recordStateReadError(err)
 		if err != nil {
 			return 0, err
 		}
@@ -871,7 +874,6 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 	}
 	if stateObject != nil && !stateObject.deleted {
 		code, err := stateObject.Code()
-
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
@@ -998,7 +1000,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 					prev.Add(prev, &bi.increase)
 				}
 
-				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
+				sdb.tracingHooks.OnBalanceChange(addr, *prev, *new(uint256.Int).Add(prev, &amount), reason)
 			}
 
 			bi.increase = u256.Add(bi.increase, amount)
@@ -1273,7 +1275,6 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	}
 
 	readAccount, source, version, err := readAccount(sdb, addr)
-
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -1285,16 +1286,6 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
 		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
-			// A definitive absence consumed before the destruct must force a retry.
-			// A wiped MapRead can use an older AddressPath cell's version because
-			// self-destruct snapshots omit the account record.
-			if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
-				!(tr.Source == MapRead && tr.Version.TxIndex <= sdRes.DepIdx()) {
-				if sdRes.DepIdx() > sdb.dep {
-					sdb.dep = sdRes.DepIdx()
-				}
-				panic(ErrDependency)
-			}
 			destructTxIndex := sdRes.DepIdx()
 			// Only a genuine re-creation (a later CreateAccount, which writes
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
@@ -1314,6 +1305,16 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 				if preserved == nil {
 					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, StorageRead, UnknownVersion, nil
+				}
+				// A live reconstruction must not replace a consumed absence.
+				// A wiped MapRead can use an older AddressPath cell's version because
+				// self-destruct snapshots omit the account record.
+				if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
+					!(tr.Source == MapRead && tr.Version.TxIndex <= sdRes.DepIdx()) {
+					if sdRes.DepIdx() > sdb.dep {
+						sdb.dep = sdRes.DepIdx()
+					}
+					panic(ErrDependency)
 				}
 				// The EVM consumes this conclusion: reconcile the provisional
 				// nil probe with the preserved account so a later flush
@@ -1342,6 +1343,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 					sdb.accountReadCount++
 				}
 				sdb.stateReader.SetTrace(false, "")
+				sdb.recordStateReadError(err)
 				if err == nil {
 					if sdb.committedBase == nil {
 						sdb.committedBase = make(map[accounts.Address]*accounts.Account)
@@ -1988,6 +1990,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		sdb.accountReadCount++
 	}
 	sdb.stateReader.SetTrace(false, "")
+	sdb.recordStateReadError(err)
 
 	accountSource := StorageRead
 	// A DB-loaded record is pre-block state — older than any in-block cell.
@@ -2214,7 +2217,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 	} else {
 		readAccount, _, _, err := sdb.getVersionedAccount(addr, true)
-
 		if err != nil {
 			return err
 		}
@@ -2839,7 +2841,8 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst accounts.Address,
-	precompiles []accounts.Address, list types.AccessList) {
+	precompiles []accounts.Address, list types.AccessList,
+) {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules)
 	}
@@ -3365,6 +3368,16 @@ func (sdb *IntraBlockState) HadInvalidRead() bool {
 	return sdb.dep >= 0
 }
 
+func (sdb *IntraBlockState) StateReadError() error {
+	return sdb.stateReadErr
+}
+
+func (sdb *IntraBlockState) recordStateReadError(err error) {
+	if err != nil && sdb.stateReadErr == nil {
+		sdb.stateReadErr = err
+	}
+}
+
 func (sdb *IntraBlockState) DepTxIndex() int {
 	return sdb.dep
 }
@@ -3393,6 +3406,7 @@ func (sdb *IntraBlockState) ResetVersionedIO() {
 	sdb.versionedReads = ReadSet{}
 	sdb.versionedWrites.ReleaseAndReset()
 	sdb.dep = UnknownDep
+	sdb.stateReadErr = nil
 	sdb.recordAccess = false
 }
 

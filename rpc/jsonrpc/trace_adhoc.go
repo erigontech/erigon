@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -67,11 +68,11 @@ type TraceCallParam struct {
 	From                 *common.Address   `json:"from"`
 	To                   *common.Address   `json:"to"`
 	Gas                  *hexutil.Uint64   `json:"gas"`
-	GasPrice             *hexutil.Big      `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big      `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big      `json:"maxFeePerGas"`
-	MaxFeePerBlobGas     *hexutil.Big      `json:"maxFeePerBlobGas"`
-	Value                *hexutil.Big      `json:"value"`
+	GasPrice             *hexutil.U256     `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.U256     `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.U256     `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.U256     `json:"maxFeePerBlobGas"`
+	Value                *hexutil.U256     `json:"value"`
 	Data                 hexutil.Bytes     `json:"data"`
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
@@ -178,37 +179,24 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 		// If there's no basefee, then it must be a non-1559 execution
 		gasPrice = new(uint256.Int)
 		if args.GasPrice != nil {
-			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
-			if overflow {
-				return nil, errors.New("args.GasPrice higher than 2^256-1")
-			}
+			gasPrice.Set((*uint256.Int)(args.GasPrice))
 		}
 		gasFeeCap, gasTipCap = gasPrice, gasPrice
 	} else {
 		// A basefee is provided, necessitating 1559-type execution
 		if args.GasPrice != nil {
-			var overflow bool
 			// User specified the legacy gas field, convert to 1559 gas typing
-			gasPrice, overflow = uint256.FromBig(args.GasPrice.ToInt())
-			if overflow {
-				return nil, errors.New("args.GasPrice higher than 2^256-1")
-			}
+			gasPrice = new(uint256.Int).Set((*uint256.Int)(args.GasPrice))
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
 			// User specified 1559 gas fields (or none), use those
 			gasFeeCap = new(uint256.Int)
 			if args.MaxFeePerGas != nil {
-				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
-				if overflow {
-					return nil, errors.New("args.GasPrice higher than 2^256-1")
-				}
+				gasFeeCap.Set((*uint256.Int)(args.MaxFeePerGas))
 			}
 			gasTipCap = new(uint256.Int)
 			if args.MaxPriorityFeePerGas != nil {
-				overflow := gasTipCap.SetFromBig(args.MaxPriorityFeePerGas.ToInt())
-				if overflow {
-					return nil, errors.New("args.GasPrice higher than 2^256-1")
-				}
+				gasTipCap.Set((*uint256.Int)(args.MaxPriorityFeePerGas))
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
 			gasPrice = new(uint256.Int)
@@ -221,15 +209,12 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas = uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt())
+			maxFeePerBlobGas = new(uint256.Int).Set((*uint256.Int)(args.MaxFeePerBlobGas))
 		}
 	}
 	value := new(uint256.Int)
 	if args.Value != nil {
-		overflow := value.SetFromBig(args.Value.ToInt())
-		if overflow {
-			return nil, errors.New("args.Value higher than 2^256-1")
-		}
+		value.Set((*uint256.Int)(args.Value))
 	}
 	var data []byte
 	if args.Data != nil {
@@ -262,6 +247,18 @@ func overrideBlockContext(traceConfig *config.TraceConfig, blockCtx *evmtypes.Bl
 		return nil
 	}
 	return traceConfig.BlockOverrides.Override(blockCtx)
+}
+
+// checkOverriddenSigner recovers txn's sender with the overridden block's signer: a stored sender
+// was derived with the real block's signer, which may accept a txn the overridden one rejects.
+// Only a number or time override changes the signer.
+func checkOverriddenSigner(traceConfig *config.TraceConfig, signer *types.Signer, txn types.Transaction) error {
+	if traceConfig == nil || traceConfig.BlockOverrides == nil ||
+		(traceConfig.BlockOverrides.Number == nil && traceConfig.BlockOverrides.Time == nil) {
+		return nil
+	}
+	_, err := signer.Sender(txn)
+	return err
 }
 
 func parseOeTracerConfig(traceConfig *config.TraceConfig) (OeTracerConfig, error) {
@@ -959,7 +956,7 @@ func (api *TraceAPIImpl) ReplayBlockTransactions(ctx context.Context, blockNrOrH
 		return nil, err
 	}
 
-	blockNumber, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNumber, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1090,7 +1087,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, nil)
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1113,7 +1110,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1201,13 +1198,11 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
-			vmConfig.Tracer.OnTxEnd(nil, err)
-		}
+		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
 	}
-	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
-		vmConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+	if vmConfig.Tracer.HasTxEndHook() {
+		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 	}
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
@@ -1307,7 +1302,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if err := rejectPending(*parentNrOrHash); err != nil {
 		return nil, err
 	}
-	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, nil)
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1480,14 +1475,14 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
 		if err != nil {
-			if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-				tracer.Hooks.OnTxEnd(nil, err)
+			if tracer != nil {
+				tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 			}
 			return nil, nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 		}
 
-		if tracer != nil && tracer.Hooks.OnTxEnd != nil {
-			tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+		if tracer != nil && tracer.Hooks.HasTxEndHook() {
+			tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 
 		chainRules := blockCtx.Rules(chainConfig)
@@ -1690,7 +1685,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	var num = rpc.LatestBlockNumber
 	blockNrOrHash := rpc.BlockNumberOrHash{BlockNumber: &num}
 
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, nil)
+	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1785,13 +1780,11 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	}
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
 	if err != nil {
-		if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
-			vmConfig.Tracer.OnTxEnd(nil, err)
-		}
+		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
 	}
-	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxEnd != nil {
-		vmConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+	if vmConfig.Tracer.HasTxEndHook() {
+		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 	}
 
 	traceResult.Output = bytes.Clone(execResult.ReturnData)

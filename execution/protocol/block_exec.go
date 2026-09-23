@@ -42,9 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
-var (
-	blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
-)
+var blockExecutionTimer = metrics.GetOrCreateSummary("chain_execution_seconds")
 
 type SyncMode string
 

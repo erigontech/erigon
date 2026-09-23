@@ -18,7 +18,6 @@ package native
 
 import (
 	"encoding/json"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -49,6 +48,7 @@ func (m *postTxIBS) GetCodeHash(addr accounts.Address) (accounts.CodeHash, error
 	}
 	return accounts.EmptyCodeHash, nil
 }
+
 func (m *postTxIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
@@ -124,7 +124,7 @@ func TestPrestateTracerDiffModeDeletedAccount(t *testing.T) {
 
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true, DisableCode: true, DisableStorage: true})
 
-	tr.pre[deletedAddr] = &account{Balance: (*hexutil.Big)(big.NewInt(0))}
+	tr.pre[deletedAddr] = &account{Balance: new(hexutil.U256)}
 
 	tr.env = &tracing.VMContext{
 		IntraBlockState: &postTxIBS{deletedAddr: deletedAddr},
@@ -167,7 +167,7 @@ func TestPrestateTracerDiffModeCodelessUnchanged(t *testing.T) {
 
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true, DisableCode: true, DisableStorage: true})
 
-	tr.pre[addr] = &account{Balance: (*hexutil.Big)(big.NewInt(0))}
+	tr.pre[addr] = &account{Balance: new(hexutil.U256)}
 
 	tr.env = &tracing.VMContext{
 		IntraBlockState: &postTxIBS{deletedAddr: otherAddr},
@@ -189,7 +189,7 @@ func TestPrestateTracerDiffModeZeroStorageUnmodified(t *testing.T) {
 	tr := newTestPrestateTracer(prestateTracerConfig{DiffMode: true})
 
 	tr.pre[addr] = &account{
-		Balance: (*hexutil.Big)(big.NewInt(0)),
+		Balance: new(hexutil.U256),
 		Storage: map[common.Hash]common.Hash{
 			common.HexToHash("0x01"): {},
 		},
@@ -278,8 +278,10 @@ func TestFlatCallFrameJSON(t *testing.T) {
 		{
 			name: "call",
 			build: func() *flatCallFrame {
-				f := &callFrame{From: from, To: &to, Gas: 0x1234, GasUsed: 0x100,
-					Input: hexutil.Bytes{0xaa, 0xbb}, Output: hexutil.Bytes{0xcc}, Value: &zero}
+				f := &callFrame{
+					From: from, To: &to, Gas: 0x1234, GasUsed: 0x100,
+					Input: hexutil.Bytes{0xaa, 0xbb}, Output: hexutil.Bytes{0xcc}, Value: &zero,
+				}
 				f.setType(vm.CALL)
 				return newFlatCall(f)
 			},
@@ -297,8 +299,10 @@ func TestFlatCallFrameJSON(t *testing.T) {
 		{
 			name: "create2 reports the deployed code and address",
 			build: func() *flatCallFrame {
-				f := &callFrame{From: from, To: &to, Gas: 0x10, GasUsed: 0x8,
-					Input: hexutil.Bytes{0x60, 0x80}, Output: hexutil.Bytes{0xfe}, Value: &zero}
+				f := &callFrame{
+					From: from, To: &to, Gas: 0x10, GasUsed: 0x8,
+					Input: hexutil.Bytes{0x60, 0x80}, Output: hexutil.Bytes{0xfe}, Value: &zero,
+				}
 				f.setType(vm.CREATE2)
 				return newFlatCreate(f)
 			},

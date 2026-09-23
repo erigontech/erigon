@@ -32,6 +32,21 @@ const (
 	ProtocolWS   SubProtocol = "ws"
 )
 
+// Shared is one event handed to every subscriber. The first to encode it caches the bytes,
+// so the encoding runs once however many subscribers there are.
+type Shared[T any] struct {
+	Value T
+	once  sync.Once
+	enc   []byte
+	err   error
+}
+
+// Encode returns the bytes encode produced on the first call; callers must not modify them.
+func (s *Shared[T]) Encode(encode func(T) ([]byte, error)) ([]byte, error) {
+	s.once.Do(func() { s.enc, s.err = encode(s.Value) })
+	return s.enc, s.err
+}
+
 // a simple interface for subscriptions for rpc helper
 type Sub[T any] interface {
 	Send(T)

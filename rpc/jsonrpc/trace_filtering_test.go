@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -101,7 +103,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Set up the state reader at the parent block boundary (= pre-block-6 state).
 	stateReader, err := rpchelper.CreateStateReader(ctx, tx, api._blockReader, parentNrOrHash, 0,
-		api.filters, api.stateCache, api._txNumReader)
+		api.stateCache, api._txNumReader)
 	require.NoError(t, err)
 
 	hsr, ok := stateReader.(state.HistoricalStateReader)
@@ -535,4 +537,53 @@ func TestTraceGetUnknownTxReturnsNull(t *testing.T) {
 	trace, err := api.Get(context.Background(), common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), []hexutil.Uint64{0}, nil, nil)
 	require.NoError(t, err)
 	require.Nil(t, trace)
+}
+
+func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	for n := rpc.BlockNumber(1); n <= 10; n++ {
+		traces, err := api.Block(context.Background(), n, new(bool), &config.TraceConfig{})
+		require.NoError(t, err)
+		requireFastJSONMatchesReflection(t, fmt.Sprintf("block %d", n), traces)
+	}
+
+	hash := common.HexToHash("0xab")
+	num, pos := uint64(7), uint64(2)
+	addr := common.HexToAddress("0xc0de")
+	u := func(v uint64) hexutil.U256 { return hexutil.U256(*uint256.NewInt(v)) }
+	gasUsed := u(21000)
+	for name, ts := range map[string]ParityTraces{
+		"nil":   nil,
+		"empty": {},
+		"all kinds": {
+			{Action: &CallTraceAction{From: addr, CallType: "delegatecall", Gas: u(1), Input: hexutil.Bytes{1}, To: addr, Value: u(2)},
+				BlockHash: &hash, BlockNumber: &num, Result: &TraceResult{GasUsed: &gasUsed, Output: hexutil.Bytes{3}},
+				Subtraces: 2, TraceAddress: []int{}, TransactionHash: &hash, TransactionPosition: &pos, Type: "call"},
+			{Action: &CreateTraceAction{From: addr, CreationMethod: "create2", Gas: u(5)},
+				Result: &CreateTraceResult{Address: &addr, Code: hexutil.Bytes{0x60}, GasUsed: &gasUsed}, TraceAddress: []int{0, 1}, Type: "create"},
+			{Action: &CreateTraceAction{}, Error: "out of gas", Result: &CreateTraceResult{}, Type: "create"},
+			{Action: &SuicideTraceAction{Address: addr, RefundAddress: addr, Balance: u(9)}, TraceAddress: []int{3}, Type: "suicide"},
+			{Action: &RewardTraceAction{Author: addr, RewardType: "block", Value: u(2e18)}, BlockHash: &hash, BlockNumber: &num, Type: "reward"},
+			{Action: (*CallTraceAction)(nil), Result: (*TraceResult)(nil), Error: "Reverted", Type: "call"},
+			{},
+		},
+	} {
+		requireFastJSONMatchesReflection(t, name, ts)
+	}
+
+	stream := jsonstream.Get(nil)
+	defer jsonstream.Put(stream)
+	err := ParityTraces{{Action: CallTraceAction{}}}.MarshalFastJSONTo(stream)
+	require.ErrorContains(t, err, "has no JSON writer")
+	require.Empty(t, stream.Buffer(), "an unsupported action fails before the first write")
+}
+
+func requireFastJSONMatchesReflection(t *testing.T, name string, ts ParityTraces) {
+	t.Helper()
+	want, err := json.Marshal(ts)
+	require.NoError(t, err, name)
+	got, err := jsonstream.Marshal(ts)
+	require.NoError(t, err, name)
+	require.Equal(t, string(want), string(got), name)
 }

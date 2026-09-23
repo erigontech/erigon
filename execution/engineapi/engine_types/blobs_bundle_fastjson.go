@@ -17,100 +17,85 @@
 package engine_types
 
 import (
-	"encoding/json"
-
-	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// MarshalFastJSON serializes the getPayload blobs bundle into one pre-sized buffer (direct hex
-// encoding) instead of reflection, byte-identical to json.Marshal of the bundle.
-func (b *BlobsBundle) MarshalFastJSON() ([]byte, error) {
+// MarshalFastJSONTo streams the getPayload blobs bundle blob by blob, byte-identical to
+// json.Marshal of the bundle.
+func (b *BlobsBundle) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	writeBlobsBundle(s, b)
+	return nil
+}
+
+func writeBlobsBundle(s *jsonstream.StackStream, b *BlobsBundle) {
 	if b == nil {
-		return jsonNull(), nil
+		s.WriteNil()
+		return
 	}
-	size := len(`{"commitments":`) + hexArrayLen(b.Commitments) +
-		len(`,"proofs":`) + hexArrayLen(b.Proofs) +
-		len(`,"blobs":`) + hexArrayLen(b.Blobs) + len("}")
-	out := make([]byte, 0, size)
-	out = append(out, `{"commitments":`...)
-	out = appendHexArray(out, b.Commitments)
-	out = append(out, `,"proofs":`...)
-	out = appendHexArray(out, b.Proofs)
-	out = append(out, `,"blobs":`...)
-	out = appendHexArray(out, b.Blobs)
-	return append(out, '}'), nil
+	s.WriteObjectStart()
+	s.Field("commitments")
+	jsonstream.ArrayValue(s, b.Commitments, writeHex)
+	s.Field("proofs")
+	jsonstream.ArrayValue(s, b.Proofs, writeHex)
+	s.Field("blobs")
+	jsonstream.ArrayValue(s, b.Blobs, writeHex)
+	s.WriteObjectEnd()
 }
 
-func appendHexArray(dst []byte, arr []hexutil.Bytes) []byte {
-	if arr == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, '[')
-	for i, b := range arr {
-		if i > 0 {
-			dst = append(dst, ',')
-		}
-		dst = appendQuotedHex(dst, b)
-	}
-	return append(dst, ']')
-}
-
-func hexArrayLen(arr []hexutil.Bytes) int {
-	if arr == nil {
-		return len("null")
-	}
-	n := len("[]")
-	for i, b := range arr {
-		if i > 0 {
-			n++
-		}
-		n += quotedHexLen(len(b))
-	}
-	return n
-}
-
-// MarshalFastJSON assembles the getPayload envelope field-by-field, fast-marshaling the
-// (reflection-heavy) BlobsBundle and deferring to json.Marshal for the smaller fields.
-// Byte-identical to json.Marshal(r).
-func (r *GetPayloadResponse) MarshalFastJSON() ([]byte, error) {
+// MarshalFastJSONTo writes the getPayload envelope, byte-identical to json.Marshal(r).
+func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if r == nil {
-		return jsonNull(), nil
+		s.WriteNil()
+		return nil
 	}
-	executionPayload, err := json.Marshal(r.ExecutionPayload)
-	if err != nil {
-		return nil, err
-	}
-	blockValue, err := json.Marshal(r.BlockValue)
-	if err != nil {
-		return nil, err
-	}
-	blobsBundle, err := r.BlobsBundle.MarshalFastJSON()
-	if err != nil {
-		return nil, err
-	}
-	executionRequests, err := json.Marshal(r.ExecutionRequests)
-	if err != nil {
-		return nil, err
-	}
-	shouldOverrideBuilder, err := json.Marshal(r.ShouldOverrideBuilder)
-	if err != nil {
-		return nil, err
-	}
-	size := len(`{"executionPayload":`) + len(executionPayload) +
-		len(`,"blockValue":`) + len(blockValue) +
-		len(`,"blobsBundle":`) + len(blobsBundle) +
-		len(`,"executionRequests":`) + len(executionRequests) +
-		len(`,"shouldOverrideBuilder":`) + len(shouldOverrideBuilder) + len("}")
-	out := make([]byte, 0, size)
-	out = append(out, `{"executionPayload":`...)
-	out = append(out, executionPayload...)
-	out = append(out, `,"blockValue":`...)
-	out = append(out, blockValue...)
-	out = append(out, `,"blobsBundle":`...)
-	out = append(out, blobsBundle...)
-	out = append(out, `,"executionRequests":`...)
-	out = append(out, executionRequests...)
-	out = append(out, `,"shouldOverrideBuilder":`...)
-	out = append(out, shouldOverrideBuilder...)
-	return append(out, '}'), nil
+	s.WriteObjectStart()
+	s.Field("executionPayload")
+	r.ExecutionPayload.writeTo(s)
+	jsonstream.Text(s, "blockValue", r.BlockValue)
+	s.Field("blobsBundle")
+	writeBlobsBundle(s, r.BlobsBundle)
+	s.Field("executionRequests")
+	jsonstream.ArrayValue(s, r.ExecutionRequests, writeHex)
+	s.Field("shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
+	s.WriteObjectEnd()
+	return nil
 }
+
+// writeTo writes the payload in its struct's field order and encoding/json's forms.
+func (p *ExecutionPayload) writeTo(s *jsonstream.StackStream) {
+	if p == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.Field("parentHash").WriteHex(p.ParentHash[:])
+	s.Field("feeRecipient").WriteHex(p.FeeRecipient[:])
+	s.Field("stateRoot").WriteHex(p.StateRoot[:])
+	s.Field("receiptsRoot").WriteHex(p.ReceiptsRoot[:])
+	s.Field("logsBloom").WriteHex(p.LogsBloom)
+	s.Field("prevRandao").WriteHex(p.PrevRandao[:])
+	jsonstream.Text(s, "blockNumber", &p.BlockNumber)
+	jsonstream.Text(s, "gasLimit", &p.GasLimit)
+	jsonstream.Text(s, "gasUsed", &p.GasUsed)
+	jsonstream.Text(s, "timestamp", &p.Timestamp)
+	s.Field("extraData").WriteHex(p.ExtraData)
+	jsonstream.Text(s, "baseFeePerGas", p.BaseFeePerGas)
+	s.Field("blockHash").WriteHex(p.BlockHash[:])
+	s.Field("transactions")
+	jsonstream.ArrayValue(s, p.Transactions, writeHex)
+	s.Field("withdrawals")
+	jsonstream.ArrayValue(s, p.Withdrawals, writeWithdrawal)
+	jsonstream.Text(s, "blobGasUsed", p.BlobGasUsed)
+	jsonstream.Text(s, "excessBlobGas", p.ExcessBlobGas)
+	if p.SlotNumber != nil {
+		jsonstream.Text(s, "slotNumber", p.SlotNumber)
+	}
+	if p.BlockAccessList != nil {
+		s.Field("blockAccessList").WriteHex(*p.BlockAccessList)
+	}
+	s.WriteObjectEnd()
+}
+
+// writeWithdrawal never fails: Withdrawal.MarshalFastJSONTo reports no error.
+func writeWithdrawal(s *jsonstream.StackStream, w **types.Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }

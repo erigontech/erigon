@@ -22,12 +22,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -968,6 +968,18 @@ func TestReverseNonces(t *testing.T) {
 	defer tx.Rollback()
 	err = pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{})
 	require.NoError(err)
+	announced := func() (ids []byte) {
+		select {
+		case a := <-ch:
+			for i := 0; i < a.Len(); i++ {
+				_, _, hash := a.At(i)
+				ids = append(ids, hash[0])
+			}
+		default:
+		}
+		slices.Sort(ids)
+		return ids
+	}
 	// 1. Send high fee transaction with nonce gap
 	{
 		var txnSlots TxnSlots
@@ -981,15 +993,7 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	select {
-	case annoucements := <-ch:
-		for i := 0; i < annoucements.Len(); i++ {
-			_, _, hash := annoucements.At(i)
-			fmt.Printf("propagated hash %x\n", hash)
-		}
-	default:
-
-	}
+	assert.Empty(announced(), "a txn with a nonce gap is not pending")
 	// 2. Send low fee (below base fee) transaction without nonce gap
 	{
 		var txnSlots TxnSlots
@@ -1003,15 +1007,7 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	select {
-	case annoucements := <-ch:
-		for i := 0; i < annoucements.Len(); i++ {
-			_, _, hash := annoucements.At(i)
-			fmt.Printf("propagated hash %x\n", hash)
-		}
-	default:
-
-	}
+	assert.Empty(announced(), "a txn below the base fee is not pending")
 
 	{
 		var txnSlots TxnSlots
@@ -1025,15 +1021,7 @@ func TestReverseNonces(t *testing.T) {
 			assert.Equal(txpoolcfg.Success, reason, reason.String())
 		}
 	}
-	select {
-	case annoucements := <-ch:
-		for i := 0; i < annoucements.Len(); i++ {
-			_, _, hash := annoucements.At(i)
-			fmt.Printf("propagated hash %x\n", hash)
-		}
-	default:
-
-	}
+	assert.Equal([]byte{1, 3}, announced(), "both txns become pending once, together")
 }
 
 // When local transaction is send to the pool, but it cannot replace existing transaction,
@@ -1377,12 +1365,11 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	ch := make(chan Announcements, 1)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	cfg := txpoolcfg.DefaultConfig
-	var chainConfig chain.Config
-	require.NoError(t, copier.CopyWithOption(&chainConfig, testforks.Forks["Prague"], copier.Option{DeepCopy: true}))
+	chainConfig := testforks.Forks["Prague"].Copy()
 	chainConfig.ChainID = maxUint256
 	cache := kvcache.NewLatestBatchCache()
 	logger := log.New()
-	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, &chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
+	pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 	require.NoError(t, err)
 	pool.blockGasLimit.Store(30_000_000)
 	tx, err := coreDB.BeginTemporalRw(ctx)
@@ -2845,4 +2832,62 @@ func TestOnNewBlockFailureKeepsChainProgress(t *testing.T) {
 	}
 	require.ErrorIs(t, pool.OnNewBlock(ctx, change, TxnSlots{}, unwindBlobTxns, TxnSlots{}), readErr)
 	require.Equal(t, before, pool.lastSeenBlock.Load())
+}
+
+// A txn that falls back to baseFee when the base fee rises, and returns when it falls, is
+// announced once: when it first becomes pending.
+func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
+	ch := make(chan Announcements, 100)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	db := mdbxtest.NewTestPoolDB(t)
+	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	pool, err := New(ctx, ch, db, coreDB, txpoolcfg.DefaultConfig, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
+	require.NoError(t, err)
+
+	var addr [20]byte
+	addr[0] = 1
+	acc := accounts3.Account{Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+	change := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1_000_000,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch:         []*remoteproto.StateChange{{BlockHeight: 0, BlockHash: gointerfaces.ConvertHashToH256([32]byte{})}},
+	}
+	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
+		Action:  remoteproto.Action_UPSERT,
+		Address: gointerfaces.ConvertAddressToH160(addr),
+		Data:    accounts3.SerialiseV3(&acc),
+	})
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	var txnSlots TxnSlots
+	txnSlot := newTestTxnSlot(0, 0, 100_000, 2_000_000, 100_000)
+	txnSlot.IDHash[0] = 1
+	txnSlots.Append(txnSlot, addr[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txnSlots)
+	require.NoError(t, err)
+	require.Equal(t, txpoolcfg.Success, reasons[0], reasons[0].String())
+
+	announced := 0
+	drain := func() {
+		for {
+			select {
+			case a := <-ch:
+				announced += a.Len()
+			default:
+				return
+			}
+		}
+	}
+	drain()
+	require.Equal(t, 1, announced, "the txn becomes pending on add")
+
+	change.ChangeBatch[0].Changes = nil
+	for _, baseFee := range []uint64{3_000_000, 1_000_000, 3_000_000, 1_000_000} {
+		change.PendingBlockBaseFee = baseFee
+		require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+	}
+	drain()
+	require.Equal(t, 1, announced, "a return to pending is not a new pending txn")
 }

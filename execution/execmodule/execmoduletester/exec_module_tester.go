@@ -211,30 +211,35 @@ func (emt *ExecModuleTester) SetPeerBlockRange(context.Context, *sentryproto.Set
 func (emt *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
+
 func (emt *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
 	emt.sentMessagesMu.Lock()
 	defer emt.sentMessagesMu.Unlock()
@@ -264,12 +269,15 @@ func (emt *ExecModuleTester) Messages(req *sentryproto.MessagesRequest, stream s
 func (emt *ExecModuleTester) Peers(context.Context, *emptypb.Empty) (*sentryproto.PeersReply, error) {
 	return &sentryproto.PeersReply{}, nil
 }
+
 func (emt *ExecModuleTester) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
 	return &sentryproto.PeerCountReply{Count: 0}, nil
 }
+
 func (emt *ExecModuleTester) PeerById(context.Context, *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
 	return &sentryproto.PeerByIdReply{}, nil
 }
+
 func (emt *ExecModuleTester) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
 	return nil
 }
@@ -279,6 +287,12 @@ func (emt *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typespr
 }
 
 type Option func(*options)
+
+func WithParallelStateFlushing(enabled bool) Option {
+	return func(opts *options) {
+		opts.parallelStateFlushing = enabled
+	}
+}
 
 func WithStepSize(stepSize uint64) Option {
 	return func(opts *options) {
@@ -411,6 +425,7 @@ type options struct {
 	withTxPool                    bool
 	enableDomains                 []kv.Domain
 	fcuBackgroundPrune            bool
+	parallelStateFlushing         bool
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
 	slowBlockThreshold            *time.Duration
@@ -511,7 +526,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// claim the whole shared envelope.
 	cfg.StateCacheBudget = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
-	cfg.Sync.ParallelStateFlushing = false
+	cfg.Sync.ParallelStateFlushing = opt.parallelStateFlushing
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	if opt.alwaysGenerateChangesets != nil {
@@ -644,7 +659,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			func() {}, /* builderNotifyNewTxns */
 			logger,
 			nil,
-			//txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
+			// txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
@@ -814,6 +829,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		logger,
 		engine,
 		cfg.Sync,
+		cfg.ExperimentalBAL,
 		cfg.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		readAheader,
@@ -841,7 +857,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	})
 	mock.StreamWg.Wait()
 
-	//app expecting that genesis will always be in db
+	// app expecting that genesis will always be in db
 	c := &blockgen.ChainPack{
 		Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},
 		Blocks:   []*types.Block{mock.Genesis},

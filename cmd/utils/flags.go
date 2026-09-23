@@ -449,7 +449,7 @@ var (
 	}
 	DBReadConcurrencyFlag = cli.IntFlag{
 		Name:  "db.read.concurrency",
-		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead",
+		Usage: "Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. In Erigon a lower value is raised to a floor of the parallel-exec workers (each holds a long-lived read tx, so a lower ceiling would deadlock), GOMAXPROCS + 1 parallel-commitment readers when --experimental.parallel-commitment is on, the warmup and read-ahead readers, and a fixed reserve; rpcdaemon uses the value as given. To actually reduce read concurrency, lower --exec.workers instead",
 		Value: httpcfg.DefaultDBReadConcurrency(),
 	}
 	RpcMaxConcurrentRequestsFlag = cli.IntFlag{
@@ -497,7 +497,7 @@ var (
 	}
 	WitnessCacheBlocksFlag = cli.UintFlag{
 		Name:  "witness.cache.blocks",
-		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is held as its built result and encoded when served; memory use is roughly this count times the per-block witness size.",
 		Value: 0,
 	}
 	WitnessCacheHeadCaptureFlag = cli.BoolFlag{
@@ -903,7 +903,12 @@ var (
 	}
 	CaplinDiscoveryTCPPortFlag = cli.Uint64Flag{
 		Name:  "caplin.discovery.tcpport",
-		Usage: "TCP Port for Caplin DISCV5 protocol",
+		Usage: "TCP port for Caplin libp2p",
+		Value: 4001,
+	}
+	CaplinDiscoveryQUICPortFlag = cli.Uint64Flag{
+		Name:  "caplin.discovery.quicport",
+		Usage: "QUIC port for Caplin libp2p",
 		Value: 4001,
 	}
 	CaplinEnableUPNPlag = cli.BoolFlag{
@@ -992,12 +997,12 @@ var (
 	}
 	SentinelBootnodes = cli.StringSliceFlag{
 		Name:  "sentinel.bootnodes",
-		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP libp2p multiaddrs",
+		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP or QUIC libp2p multiaddrs",
 		Value: []string{},
 	}
 	SentinelStaticPeers = cli.StringSliceFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP or QUIC libp2p multiaddrs",
 		Value: []string{},
 	}
 
@@ -1932,6 +1937,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.CaplinConfig.CaplinDiscoveryAddr = ctx.String(CaplinDiscoveryAddrFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryPort = ctx.Uint64(CaplinDiscoveryPortFlag.Name)
 	cfg.CaplinConfig.CaplinDiscoveryTCPPort = ctx.Uint64(CaplinDiscoveryTCPPortFlag.Name)
+	cfg.CaplinConfig.CaplinDiscoveryQUICPort = ctx.Uint64(CaplinDiscoveryQUICPortFlag.Name)
 	if ctx.Bool(KeepExecutionProofsFlag.Name) {
 		cfg.KeepExecutionProofs = true
 	}

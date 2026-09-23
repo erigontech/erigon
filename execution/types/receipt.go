@@ -93,7 +93,7 @@ type receiptMarshaling struct {
 	Status            hexutil.Uint64
 	CumulativeGasUsed hexutil.Uint64
 	GasUsed           hexutil.Uint64
-	BlockNumber       *hexutil.Big
+	BlockNumber       *hexutil.U256
 	TransactionIndex  hexutil.Uint
 }
 
@@ -603,7 +603,7 @@ func (rs Receipts) AssertLogIndex(blockNum uint64) {
 		}
 		logIndex += len(r.Logs)
 
-		//no duplicates
+		// no duplicates
 		if len(r.Logs) <= 1 {
 			continue
 		}

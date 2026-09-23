@@ -17,14 +17,22 @@
 package ethutils
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
@@ -57,4 +65,193 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	receipt.Bloom = types.Bloom{}
 	fields = MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
 	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
+}
+
+// The backend leaves "from" unset when it cannot recover the sender. The zero
+// address is a valid address, so an unknown sender must marshal to null like
+// "to" and "contractAddress" do, not to 0x00..00.
+func TestMarshalSubscribeReceiptWithoutSender(t *testing.T) {
+	reply := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+		TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+	}
+	receipt := MarshalSubscribeReceipt(reply)
+	assert.Nil(t, receipt.From)
+
+	encoded, err := json.Marshal(receipt)
+	require.NoError(t, err)
+	assert.Contains(t, string(encoded), `"from":null`)
+}
+
+// A sender the backend did set must survive as an address, the zero one
+// included: only an unset "from" marshals to null.
+func TestMarshalSubscribeReceiptKeepsZeroSender(t *testing.T) {
+	reply := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+		TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+		From:            gointerfaces.ConvertAddressToH160(common.Address{}),
+	}
+	receipt := MarshalSubscribeReceipt(reply)
+	require.NotNil(t, receipt.From)
+	assert.Equal(t, common.Address{}, *receipt.From)
+}
+
+// The fast marshaller has to produce the bytes encoding/json produced, field order and
+// omitempty included, for both log shapes MarshalReceipt can put in Logs.
+func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	txn := dynamicFeeTx(&to)
+	txn.SetSender(accounts.InternAddress(common.HexToAddress("0xabcdef0123456789abcdef0123456789abcdef03")))
+	header := &types.Header{Number: *uint256.NewInt(7), Time: 1_750_000_000, BaseFee: uint256.NewInt(50)}
+
+	for _, tc := range []struct {
+		name               string
+		logs               int
+		withBlockTimestamp bool
+		nilLogs            bool
+	}{
+		{"no logs", 0, false, false},
+		{"two logs", 2, false, false},
+		{"two logs with timestamp", 2, true, false},
+		{"nil logs", 0, false, true},
+		{"nil logs with timestamp", 0, true, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			logs := make(types.Logs, tc.logs)
+			for i := range logs {
+				// Every derived field distinct, so a field written from the wrong source shows.
+				logs[i] = &types.Log{
+					Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64),
+					BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3, BlockHash: common.HexToHash("0xb10c"),
+					Index: hexutil.Uint(10 + i), Removed: i == 1,
+				}
+			}
+			if tc.nilLogs {
+				logs = nil
+			}
+			receipt := &types.Receipt{
+				Status:            types.ReceiptStatusSuccessful,
+				CumulativeGasUsed: 42_000,
+				Logs:              logs,
+				TxHash:            common.HexToHash("0xbeef"),
+				GasUsed:           21_000,
+				BlockHash:         common.HexToHash("0xb10c"),
+				BlockNumber:       uint256.NewInt(7),
+				TransactionIndex:  3,
+			}
+			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, tc.withBlockTimestamp)
+
+			requireFastJSONMatches(t, r)
+		})
+	}
+}
+
+// Every Logs shape against encoding/json. MarshalReceipt never builds a nil slice, so only a
+// direct construction reaches the typed-nil branches.
+func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	for name, logs := range map[string]any{
+		"nil types.Logs":    types.Logs(nil),
+		"nil []*Log":        []*types.Log(nil),
+		"nil []*RPCLog":     []*types.RPCLog(nil),
+		"untyped nil":       nil,
+		"nil in types.Logs": types.Logs{nil, {Address: to}},
+		"nil in []*Log":     []*types.Log{{Address: to}, nil},
+		"unknown shape":     []string{"a"},
+	} {
+		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
+	}
+}
+
+// The list is what eth_getBlockReceipts returns; the encoder only sees the top-level type.
+func TestRPCReceiptsMarshalFastJSONTo(t *testing.T) {
+	for name, rs := range map[string]RPCReceipts{
+		"nil":         nil,
+		"empty":       {},
+		"two":         {{TransactionHash: common.HexToHash("0x1")}, {TransactionHash: common.HexToHash("0x2")}},
+		"nil element": {nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			requireFastJSONMatches(t, rs)
+		})
+	}
+}
+
+// The optional fields decide whether a key is written at all, and To and
+// ContractAddress decide null vs a hex string.
+func TestRPCReceiptMarshalFastJSONToOptionalFields(t *testing.T) {
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	status := hexutil.Uint64(1)
+	price := hexutil.U256(*uint256.NewInt(7))
+	blobGas := hexutil.Uint64(131072)
+	bloom := types.Bloom{}
+	for _, tc := range []struct {
+		name string
+		r    RPCReceipt
+	}{
+		{"nil to and contract", RPCReceipt{}},
+		{"contract creation", RPCReceipt{ContractAddress: &addr}},
+		{"call", RPCReceipt{To: &addr}},
+		{"bloom", RPCReceipt{LogsBloom: &bloom}},
+		{"effective gas price", RPCReceipt{EffectiveGasPrice: &price}},
+		{"status", RPCReceipt{Status: &status}},
+		{"pre-byzantium root", RPCReceipt{Root: hexutil.Bytes{0x01, 0x02}}},
+		{"blob fields", RPCReceipt{BlobGasPrice: &price, BlobGasUsed: &blobGas}},
+		{"everything", RPCReceipt{
+			To: &addr, ContractAddress: &addr, LogsBloom: &bloom, EffectiveGasPrice: &price,
+			Status: &status, Root: hexutil.Bytes{0x03}, BlobGasPrice: &price, BlobGasUsed: &blobGas,
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := tc.r
+			r.Logs = types.Logs{}
+			requireFastJSONMatches(t, &r)
+		})
+	}
+}
+
+func requireFastJSONMatches(t *testing.T, v interface {
+	MarshalFastJSONTo(*jsonstream.StackStream) error
+},
+) {
+	t.Helper()
+	want, err := json.Marshal(v)
+	require.NoError(t, err)
+
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	require.NoError(t, v.MarshalFastJSONTo(s))
+	require.NoError(t, s.Flush())
+	require.Equal(t, string(want), string(s.Buffer()))
+}
+
+// Subscription receipts carry the same log objects as eth_getTransactionReceipt.
+func TestMarshalSubscribeReceiptFullLogs(t *testing.T) {
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	blockHash, txHash, topic := common.HexToHash("0xb1"), common.HexToHash("0xaa"), common.HexToHash("0x01")
+	r := MarshalSubscribeReceipt(&remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(blockHash),
+		TransactionHash: gointerfaces.ConvertHashToH256(txHash),
+		From:            gointerfaces.ConvertAddressToH160(addr),
+		Logs: []*remoteproto.SubscribeLogsReply{{
+			Address:          gointerfaces.ConvertAddressToH160(addr),
+			BlockHash:        gointerfaces.ConvertHashToH256(blockHash),
+			BlockNumber:      7,
+			Data:             []byte{0x2a},
+			LogIndex:         3,
+			Topics:           []*typesproto.H256{gointerfaces.ConvertHashToH256(topic)},
+			TransactionHash:  gointerfaces.ConvertHashToH256(txHash),
+			TransactionIndex: 2,
+			Removed:          true,
+			BlockTimestamp:   99,
+		}},
+	})
+	require.Equal(t, []*types.RPCLog{{
+		Log: types.Log{
+			Address: addr, Topics: []common.Hash{topic}, Data: []byte{0x2a}, BlockNumber: 7,
+			TxHash: txHash, TxIndex: 2, BlockHash: blockHash, Index: 3, Removed: true,
+		},
+		BlockTimestamp: 99,
+	}}, r.Logs)
 }

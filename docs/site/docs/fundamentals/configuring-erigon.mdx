@@ -97,7 +97,7 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
   * Default: `true`
-* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock and is silently raised to it. To genuinely reduce read concurrency, lower `--exec.workers` instead.
+* `--db.read.concurrency value`: Maximum number of concurrent open database read transactions (the MDBX read-transaction semaphore); when it is full, extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response instead. Raise it for nodes serving heavy parallel RPC. Lowering it does not reduce read concurrency: each parallel-execution worker holds a long-lived read transaction, so a value below the worker count would deadlock. Erigon raises a lower value, with a warning, to a floor that sums the exec workers, the parallel-commitment readers (GOMAXPROCS + 1, with `--experimental.parallel-commitment`), the BAL warmup readers, the block read-ahead workers and a fixed reserve; rpcdaemon uses the value as given. To genuinely reduce read concurrency, lower `--exec.workers` instead.
   * Default: scales with the host as `min(max(10, GOMAXPROCS * 64), 9000)` — kept well above the CPU count because reads are I/O-bound, and capped below Go's roughly 10,000 OS-thread limit.
 * `--database.verbosity value`: Enables internal database logs.
   * Default: `2`
@@ -544,8 +544,10 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `0.0.0.0`
 * `--caplin.discovery.port value`: The port for the Caplin DISCV5 protocol.
   * Default: `4000`
-* `--caplin.discovery.tcpport value`: The TCP port for the Caplin DISCV5 protocol.
-  * Default: `4001`
+* `--caplin.discovery.tcpport value`: The TCP port for Caplin libp2p.
+	* Default: `4001`
+* `--caplin.discovery.quicport value`: The QUIC UDP port for Caplin libp2p.
+	* Default: `4001`
 * `--caplin.checkpoint-sync-url value`: The checkpoint sync endpoint.
 * `--caplin.subscribe-all-topics`: Subscribes to all gossip topics.
   * Default: `false`

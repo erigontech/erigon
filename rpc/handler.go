@@ -39,8 +39,9 @@ import (
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
-// handler is not safe for concurrent use. Message handling never blocks indefinitely
-// because RPCs are processed on background goroutines launched by handler.
+// handler is not safe for concurrent use. On a connection, message handling never blocks
+// indefinitely because RPCs are processed on background goroutines launched by handler;
+// with inlineCalls they run on the caller's goroutine, which a single HTTP request owns.
 //
 // The entry points for incoming messages are:
 //
@@ -70,6 +71,7 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
+	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
 	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -92,20 +94,18 @@ type callProc struct {
 
 func HandleError(err error, stream jsonstream.Stream) {
 	if err != nil {
-		stream.WriteObjectField("error")
+		stream.Field("error")
 		stream.WriteObjectStart()
-		stream.WriteObjectField("code")
+		stream.Field("code")
 		if ec, ok := errors.AsType[Error](err); ok {
-			stream.WriteInt(ec.ErrorCode())
+			stream.Int(int64(ec.ErrorCode()))
 		} else {
-			stream.WriteInt(ErrCodeDefault)
+			stream.Int(int64(ErrCodeDefault))
 		}
-		stream.WriteMore()
-		stream.WriteObjectField("message")
+		stream.Field("message")
 		stream.WriteString(err.Error())
 		if de, ok := errors.AsType[DataError](err); ok {
-			stream.WriteMore()
-			stream.WriteObjectField("data")
+			stream.Field("data")
 			data, derr := json.Marshal(de.ErrorData())
 			if derr == nil {
 				stream.WriteRawBytes(data)
@@ -166,6 +166,60 @@ func (h *handler) isRpcMethodNeedsCheck(method string) bool {
 	return !slices.Contains(h.slowLogBlacklist, method)
 }
 
+// inOrderMethods change state that a later call of the same batch may depend on, such as a
+// sender's next nonce in the txpool. A batch holding one runs its calls one by one, in order.
+var inOrderMethods = map[string]struct{}{
+	"eth_sendRawTransaction":     {},
+	"eth_sendRawTransactionSync": {},
+	"graphql_sendRawTransaction": {},
+	"eth_uninstallFilter":        {},
+	"eth_getFilterChanges":       {},
+	"admin_addPeer":              {},
+	"admin_removePeer":           {},
+	"admin_addTrustedPeer":       {},
+	"admin_removeTrustedPeer":    {},
+	"debug_setHead":              {},
+	"debug_setGCPercent":         {},
+	"debug_setMemoryLimit":       {},
+	"eth_submitWork":             {},
+	"eth_submitHashrate":         {},
+	"testing_commitBlockV1":      {},
+}
+
+// hasInOrderCall also counts subscribe calls, each of which adds to the batch's notifiers that
+// two goroutines must not append to at once, and unsubscribe calls.
+func hasInOrderCall(calls []*jsonrpcMessage) bool {
+	for _, msg := range calls {
+		if _, ok := inOrderMethods[msg.Method]; ok || msg.isSubscribe() || msg.isUnsubscribe() || strings.HasPrefix(msg.Method, "engine_") {
+			return true
+		}
+	}
+	return false
+}
+
+// answerBatchCall runs one call of a batch and returns its answer, or nil when it needs none.
+func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage) []byte {
+	select {
+	case <-cp.ctx.Done():
+		return nil
+	default:
+	}
+
+	// A non-nil res is an error answer that still has to be written. On nil the answer
+	// is already in the stream, or the message needs none.
+	buf := bytes.NewBuffer(nil)
+	stream := jsonstream.Get(buf)
+	defer jsonstream.Put(stream)
+	if res := h.handleCallMsg(cp, msg, stream); res != nil {
+		res.writeTo(stream)
+	}
+	_ = stream.Flush()
+	if buf.Len() == 0 {
+		return nil
+	}
+	return buf.Bytes()
+}
+
 // handleBatch executes all messages in a batch and returns the responses.
 func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
@@ -194,43 +248,30 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 		return
 	}
 
-	// Process calls on a goroutine because they may block indefinitely:
+	// Calls may block indefinitely, so they go to a goroutine unless the caller waits anyway:
 	h.startCallProc(func(cp *callProc) {
-		// Batch items below run concurrently and write into private per-item buffers.
-		// All goroutines will place results right to this array. Because requests order must match reply orders.
+		// Answers go to their request's slot, because the reply order must match the request order.
 		answersWithNils := make([][]byte, len(calls))
-		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
-		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
-		defer close(boundedConcurrency)
-		wg := sync.WaitGroup{}
-		for i := range calls {
-			boundedConcurrency <- struct{}{}
-			wg.Go(func() {
-				defer func() {
-					<-boundedConcurrency
-				}()
-
-				select {
-				case <-cp.ctx.Done():
-					return
-				default:
-				}
-
-				// A non-nil res is an error answer that still has to be written. On nil the answer
-				// is already in the stream, or the message needs none.
-				buf := bytes.NewBuffer(nil)
-				stream := jsonstream.Get(buf)
-				defer jsonstream.Put(stream)
-				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
-					res.writeTo(stream)
-				}
-				_ = stream.Flush()
-				if buf.Len() > 0 {
-					answersWithNils[i] = buf.Bytes()
-				}
-			})
+		if hasInOrderCall(calls) {
+			for i, msg := range calls {
+				answersWithNils[i] = h.answerBatchCall(cp, msg)
+			}
+		} else {
+			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
+			boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
+			defer close(boundedConcurrency)
+			wg := sync.WaitGroup{}
+			for i := range calls {
+				boundedConcurrency <- struct{}{}
+				wg.Go(func() {
+					defer func() {
+						<-boundedConcurrency
+					}()
+					answersWithNils[i] = h.answerBatchCall(cp, calls[i])
+				})
+			}
+			wg.Wait()
 		}
-		wg.Wait()
 		h.addSubscriptions(cp.notifiers)
 		h.sendBatchAnswers(cp.ctx, answersWithNils)
 		for _, n := range cp.notifiers {
@@ -438,13 +479,18 @@ func (h *handler) cancelServerSubscriptions(err error) {
 	}
 }
 
-// startCallProc runs fn in a new goroutine and starts tracking it in the h.calls wait group.
+// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
 func (h *handler) startCallProc(fn func(*callProc)) {
-	h.callWG.Go(func() {
+	run := func() {
 		ctx, cancel := context.WithCancel(h.rootCtx)
 		defer cancel()
 		fn(&callProc{ctx: ctx})
-	})
+	}
+	if h.inlineCalls {
+		run()
+		return
+	}
+	h.callWG.Go(run)
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a
@@ -509,7 +555,7 @@ func (h *handler) handleResponse(msg *jsonrpcMessage) {
 func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
 	switch {
 	case msg.isNotification():
-		h.handleCall(ctx, msg, stream)
+		_, _ = h.handleCall(ctx, msg, stream)
 		if h.traceRequests {
 			h.logger.Info("[rpc] served", "method", msg.Method, "params", string(msg.Params))
 		}
@@ -531,7 +577,7 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 			start = time.Now()
 		}
 
-		resp := h.handleCall(ctx, msg, stream)
+		resp, answered := h.handleCall(ctx, msg, stream)
 
 		if doSlowLog {
 			requestDuration := time.Since(start)
@@ -540,11 +586,14 @@ func (h *handler) handleCallMsg(ctx *callProc, msg *jsonrpcMessage, stream jsons
 			}
 		}
 
-		if resp != nil && resp.Error != nil && !errors.Is(ctx.ctx.Err(), context.Canceled) {
-			if resp.Error.Data != nil {
+		if !errors.Is(ctx.ctx.Err(), context.Canceled) {
+			switch {
+			case answered != nil:
+				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID), "err", answered)
+			case resp != nil && resp.Error != nil && resp.Error.Data != nil:
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message, "errdata", resp.Error.Data)
-			} else {
+			case resp != nil && resp.Error != nil:
 				h.logger.Warn("[rpc] served", "method", msg.Method, "reqid", idForLog(msg.ID),
 					"err", resp.Error.Message)
 			}
@@ -572,62 +621,63 @@ func (h *handler) isMethodAllowedByGranularControl(method string) bool {
 }
 
 // handleCall processes method calls.
-func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
-	if msg.isSubscribe() {
+func (h *handler) handleCall(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) (*jsonrpcMessage, error) {
+	allowed := h.isMethodAllowedByGranularControl(msg.Method)
+	if msg.isSubscribe() && allowed {
 		return h.handleSubscribe(cp, msg, stream)
 	}
 	var callb *callback
 	if msg.isUnsubscribe() {
 		callb = h.unsubscribeCb
-	} else if h.isMethodAllowedByGranularControl(msg.Method) {
+	} else if allowed {
 		callb = h.reg.callback(msg.Method)
 	}
 	if callb == nil {
-		return msg.errorResponse(&methodNotFoundError{method: msg.Method})
+		return msg.errorResponse(&methodNotFoundError{method: msg.Method}), nil
 	}
 	args, err := parsePositionalArguments(msg.Params, callb.argTypes)
 	if err != nil {
-		return msg.errorResponse(&InvalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()}), nil
 	}
 	start := time.Now()
-	answer := h.runMethod(cp.ctx, msg, callb, args, stream)
+	answer, answered := h.runMethod(cp.ctx, msg, callb, args, stream)
 
 	// Collect the statistics for RPC calls if metrics is enabled.
 	// We only care about pure rpc call. Filter out subscription.
 	if callb != h.unsubscribeCb {
 		rpcRequestGauge.Inc()
-		if answer != nil && answer.Error != nil {
+		if answered != nil || (answer != nil && answer.Error != nil) {
 			failedReqeustGauge.Inc()
 			callb.timerFailure.ObserveDuration(start)
 		} else {
 			callb.timerSuccess.ObserveDuration(start)
 		}
 	}
-	return answer
+	return answer, answered
 }
 
 // handleSubscribe processes *_subscribe method calls.
-func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) *jsonrpcMessage {
+func (h *handler) handleSubscribe(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) (*jsonrpcMessage, error) {
 	if !h.allowSubscribe {
-		return msg.errorResponse(ErrNotificationsUnsupported)
+		return msg.errorResponse(ErrNotificationsUnsupported), nil
 	}
 
 	// Subscription method name is first argument.
 	name, err := parseSubscriptionName(msg.Params)
 	if err != nil {
-		return msg.errorResponse(&InvalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()}), nil
 	}
 	namespace := msg.namespace()
 	callb := h.reg.subscription(namespace, name)
 	if callb == nil {
-		return msg.errorResponse(&subscriptionNotFoundError{namespace, name})
+		return msg.errorResponse(&subscriptionNotFoundError{namespace, name}), nil
 	}
 
 	// Parse subscription name arg too, but remove it before calling the callback.
 	argTypes := append([]reflect.Type{stringType}, callb.argTypes...)
 	args, err := parsePositionalArguments(msg.Params, argTypes)
 	if err != nil {
-		return msg.errorResponse(&InvalidParamsError{err.Error()})
+		return msg.errorResponse(&InvalidParamsError{err.Error()}), nil
 	}
 	args = args[1:]
 
@@ -649,44 +699,26 @@ func remapDBOverload(ctx context.Context, err error) error {
 	return err
 }
 
-// runMethod runs the Go callback for an RPC method.
-func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream jsonstream.Stream) *jsonrpcMessage {
+// runMethod runs the Go callback for an RPC method. It returns either a response for the caller to
+// write, or the error it already answered with in the stream.
+func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *callback, args []reflect.Value, stream jsonstream.Stream) (*jsonrpcMessage, error) {
 	if !callb.streamable {
 		result, err := callb.call(ctx, msg.Method, args, stream)
 		if err != nil {
-			return msg.errorResponse(remapDBOverload(ctx, err))
+			return msg.errorResponse(remapDBOverload(ctx, err)), nil
 		}
 		if msg.isNotification() {
-			return nil
+			return nil, nil
 		}
-		return msg.writeResponse(stream, result)
+		return nil, msg.writeResponse(stream, result)
 	}
 
-	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
-	stream.WriteString("2.0")
-	stream.WriteMore()
-	if msg.ID != nil {
-		stream.WriteObjectField("id")
-		stream.WriteRawBytes(msg.ID)
-		stream.WriteMore()
-	}
-	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
-	_, err := callb.call(ctx, msg.Method, args, rs)
-	if err != nil {
-		err = remapDBOverload(ctx, err)
-		if rs.Written() {
-			rs.CloseIfOpen()
-			stream.WriteMore()
+	return nil, writeLazyResponse(stream, msg.ID, func(rs *jsonstream.LazyFieldStream) error {
+		if _, err := callb.call(ctx, msg.Method, args, rs); err != nil {
+			return remapDBOverload(ctx, err)
 		}
-		HandleError(err, stream)
-	} else if !rs.Written() {
-		// A response carries exactly one of result and error, so a callback that
-		// succeeded without writing still owes a result.
-		rs.WriteNil()
-	}
-	stream.WriteObjectEnd()
-	return nil
+		return nil
+	})
 }
 
 // writeTo writes a response built as a message, such as an error; success results go through

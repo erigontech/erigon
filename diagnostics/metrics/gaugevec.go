@@ -14,7 +14,6 @@ func (gv *GaugeVec) Collect(ch chan<- prometheus.Metric) {
 func (gv *GaugeVec) CurryWith(labels prometheus.Labels) (*GaugeVec, error) {
 	gv2, err := gv.GaugeVec.CurryWith(labels)
 	return &GaugeVec{gv2}, err
-
 }
 
 func (gv *GaugeVec) Delete(labels prometheus.Labels) bool {

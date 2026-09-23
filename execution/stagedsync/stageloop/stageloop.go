@@ -424,7 +424,8 @@ func NewPipelineStages(ctx context.Context,
 	}
 	_ = depositContract
 
-	return stagedsync.PipelineStages(ctx,
+	return stagedsync.PipelineStages(
+		ctx,
 		stagedsync.StageSnapshotsCfg(db, controlServer.ChainConfig, cfg.Sync, dirs, blockRetire, snapDownloader, blockReader, notifications, cfg.InternalCL && cfg.CaplinConfig.ArchiveBlocks, cfg.CaplinConfig.ArchiveBlobs, cfg.CaplinConfig.ArchiveStates, cfg.Prune, afterSnapshotDownload, cfg.Snapshot.ManifestReady),
 		stagedsync.StageBlockHashesCfg(dirs.Tmp, blockWriter),
 		stagedsync.StageSendersCfg(controlServer.ChainConfig, cfg.Sync, dbg.BadBlockHalt, dirs.Tmp, cfg.Prune, blockReader, readAheader),
@@ -447,7 +448,8 @@ func NewInMemoryExecution(
 ) *stagedsync.Sync {
 	return stagedsync.New(
 		cfg.Sync,
-		stagedsync.StateStages(ctx,
+		stagedsync.StateStages(
+			ctx,
 			stagedsync.StageHeadersCfg(blockReader),
 			stagedsync.StageBodiesCfg(blockReader, blockWriter),
 			stagedsync.StageBlockHashesCfg(cfg.Dirs.Tmp, blockWriter),
