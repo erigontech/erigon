@@ -1378,6 +1378,8 @@ type Updates struct {
 	directBytes    int
 	directMemLimit int
 
+	collected []collectedUpdate
+
 	batchSlab []KeyUpdate
 
 	arenas   [arenaRingSize][]byte
@@ -1389,6 +1391,11 @@ type Updates struct {
 }
 
 const arenaRingSize = 2
+
+type collectedUpdate struct {
+	plainKey string
+	update   Update
+}
 
 func (t *Updates) arenaAlloc(b []byte) []byte {
 	arena := t.arenas[t.curArena]
@@ -1544,7 +1551,7 @@ func (t *Updates) Size() (updates uint64) {
 	case ModeUpdate:
 		return uint64(t.tree.Len())
 	case ModeCollect:
-		return uint64(len(t.treeIdx))
+		return uint64(len(t.treeIdx) + len(t.collected))
 	default:
 		return 0
 	}
@@ -1588,6 +1595,14 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		fn(existing, val)
 	default:
 	}
+}
+
+func (t *Updates) TouchPlainKeyUnique(key string, update *Update) {
+	if t.mode != ModeCollect {
+		t.TouchPlainKeyDirect(key, update)
+		return
+	}
+	t.collected = append(t.collected, collectedUpdate{plainKey: key, update: *update})
 }
 
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
@@ -1668,6 +1683,12 @@ func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
 	if t.mode != ModeCollect {
 		return fmt.Errorf("commitment: Drain requires ModeCollect, got %s", t.mode)
 	}
+	for i := range t.collected {
+		if err := fn(t.collected[i].plainKey, &t.collected[i].update); err != nil {
+			return err
+		}
+	}
+	t.collected = t.collected[:0]
 	for key, item := range t.treeIdx {
 		if err := fn(key, item.update); err != nil {
 			return err
@@ -1757,6 +1778,7 @@ func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
 	}
+	t.collected = nil
 	if t.tree != nil {
 		t.tree.Clear(true)
 		t.tree = nil
@@ -2021,6 +2043,9 @@ func (t *Updates) Reset() {
 		if t.parallel != nil {
 			t.parallel.Reset()
 		}
+	case ModeCollect:
+		clear(t.treeIdx)
+		t.collected = t.collected[:0]
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]
