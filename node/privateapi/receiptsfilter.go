@@ -17,9 +17,12 @@
 package privateapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
+
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/notifications"
@@ -88,11 +91,12 @@ func (a *ReceiptsFilterAggregator) updateReceiptsFilter(filter *ReceiptsFilter, 
 
 	// Empty TransactionHashes slice (not nil) means subscribe to all
 	txHashes := filterReq.GetTransactionHashes()
-	if txHashes != nil && len(txHashes) == 0 {
+	switch {
+	case txHashes != nil && len(txHashes) == 0:
 		filter.allTxHashes = 1
-	} else if filterReq.GetAllTransactions() {
+	case filterReq.GetAllTransactions():
 		filter.allTxHashes = 1
-	} else {
+	default:
 		filter.allTxHashes = 0
 	}
 
@@ -130,7 +134,7 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateReceiptsFilter(filter, filterReq)
 	}
-	if recvErr != io.EOF {
+	if !errors.Is(recvErr, io.EOF) {
 		return fmt.Errorf("receiving receipts filter request: %w", recvErr)
 	}
 	return nil
@@ -138,10 +142,21 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 
 // distributeReceipts receives native receipt notifications, filters them, and converts
 // to protobuf only when sending over gRPC.
-func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.ReceiptNotification) error {
+func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.ReceiptNotification) {
 	a.receiptsFilterLock.Lock()
 	defer a.receiptsFilterLock.Unlock()
 	filtersToDelete := make(map[uint64]*ReceiptsFilter)
+	// Each stream's latest receipt is held back until the next one shows whether it ends its block.
+	held := make(map[uint64]*remoteproto.SubscribeReceiptsReply)
+	send := func(filterId uint64, reply *remoteproto.SubscribeReceiptsReply, lastInBlock bool) {
+		if lastInBlock {
+			reply = proto.CloneOf(reply) // the unflagged reply may also go to other streams
+			reply.LastInBlock = true
+		}
+		if err := a.receiptsFilters[filterId].sender.Send(reply); err != nil {
+			filtersToDelete[filterId] = a.receiptsFilters[filterId]
+		}
+	}
 	for _, rn := range receipts {
 		txHash := rn.Receipt.TxHash
 		if a.aggReceiptsFilter.allTxHashes == 0 {
@@ -150,39 +165,47 @@ func (a *ReceiptsFilterAggregator) distributeReceipts(receipts []*notifications.
 			}
 		}
 		// Lazy convert: only build protobuf when we actually need to send
-		var proto *remoteproto.SubscribeReceiptsReply
+		var reply *remoteproto.SubscribeReceiptsReply
 		for filterId, filter := range a.receiptsFilters {
 			if filter.allTxHashes == 0 {
 				if _, ok := filter.txHashes[txHash]; !ok {
 					continue
 				}
 			}
-			if proto == nil {
-				proto = receiptNotificationToProto(rn)
+			if reply == nil {
+				reply = receiptNotificationToProto(rn)
 			}
-			if err := filter.sender.Send(proto); err != nil {
-				filtersToDelete[filterId] = filter
+			if prev := held[filterId]; prev != nil {
+				send(filterId, prev, prev.BlockNumber != reply.BlockNumber)
 			}
+			held[filterId] = reply
 		}
+	}
+	for filterId, reply := range held {
+		send(filterId, reply, true)
 	}
 	for filterId, filter := range filtersToDelete {
 		a.subtractReceiptsFilters(filter)
 		delete(a.receiptsFilters, filterId)
 	}
-	return nil
 }
 
 // receiptNotificationToProto converts a native ReceiptNotification to protobuf for gRPC.
 func receiptNotificationToProto(rn *notifications.ReceiptNotification) *remoteproto.SubscribeReceiptsReply {
 	receipt := rn.Receipt
 	blockNum := receipt.BlockNumber.Uint64()
+	var blockTimestamp uint64
+	if rn.Header != nil {
+		blockTimestamp = rn.Header.Time
+	}
 
 	// Convert logs
 	protoLogs := make([]*remoteproto.SubscribeLogsReply, 0, len(receipt.Logs))
 	for _, l := range receipt.Logs {
 		protoLogs = append(protoLogs, logNotificationToProto(&notifications.LogNotification{
-			Log:     l,
-			Removed: rn.Removed,
+			Log:            l,
+			BlockTimestamp: blockTimestamp,
+			Removed:        rn.Removed,
 		}))
 	}
 

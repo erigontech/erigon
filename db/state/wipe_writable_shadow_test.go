@@ -768,7 +768,7 @@ func newWipeTestDB(tb testing.TB, stepSize uint64) (kv.TemporalRwDB, *dbstate.Ag
 // public TemporalGetter API. Returns nil when absent.
 func getLatestAccount(t *testing.T, tx kv.TemporalTx, addr [20]byte) []byte {
 	t.Helper()
-	v, _, err := tx.GetLatest(kv.AccountsDomain, addr[:])
+	v, _, err := tx.GetLatest(kv.AccountsDomain, addr[:], kv.GetLatestOptions{})
 	require.NoError(t, err)
 	return v
 }

@@ -104,9 +104,11 @@ type TxResult struct {
 	ExecutionResult   evmtypes.ExecutionResult
 	ValidationResults []AAValidationResult
 	Err               error
-	Coinbase          accounts.Address
-	TxIn              state.ReadSet
-	TxOut             *state.WriteSet
+	// Operational reports that Err is an execution infrastructure failure, not a block-validity verdict.
+	Operational bool
+	Coinbase    accounts.Address
+	TxIn        state.ReadSet
+	TxOut       *state.WriteSet
 
 	Receipt *types.Receipt
 	Logs    []*types.Log
@@ -509,10 +511,15 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			if genesis != nil {
-				_, ibs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
+				var genesisIbs *state.IntraBlockState
+				_, genesisIbs, err = genesiswrite.GenesisToBlock(genesis, dirs, txTask.Logger)
 				if err != nil {
 					panic(err)
 				}
+				// Deferred, not closed here: the result's read/write sets are taken
+				// from this state after the switch.
+				defer genesisIbs.Close()
+				ibs = genesisIbs
 			}
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{}
@@ -522,7 +529,9 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 		// Block initialisation
 		//fmt.Printf("txNum=%d, blockNum=%d, initialisation of the block\n", txTask.TxNum, txTask.BlockNum)
 		syscall := func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error) {
-			ret, err := protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
+			// Block initialisation runs between transactions, so the worker's EVM is
+			// free: reuse it instead of building one per system call.
+			ret, err := protocol.SysCallContractWithEVM(evm, contract, data, chainConfig, ibs, header, engine, constCall /* constCall */, evm.Config())
 			return ret, err
 		}
 		result.Err = engine.Initialize(chainConfig, chainReader, header, ibs, syscall, txTask.Logger, nil)
@@ -578,7 +587,11 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
-				if _, ok := applyErr.(protocol.ErrExecAbortError); !ok {
+				if _, ok := errors.AsType[*protocol.ErrExecPanic](applyErr); ok {
+					result.Operational = true
+					return evmtypes.ExecutionResult{}, applyErr
+				}
+				if _, ok := errors.AsType[protocol.ErrExecAbortError](applyErr); !ok {
 					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
 				}
 
@@ -601,6 +614,10 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.Logs = ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
 		}
 
+	}
+	if stateErr := ibs.StateReadError(); stateErr != nil && txTask.TxIndex >= 0 && !txTask.IsBlockEnd() {
+		result.Operational = true
+		result.Err = stateErr
 	}
 	// Prepare read set, write set and balanceIncrease set and send for serialisation
 	if result.Err == nil {
@@ -680,7 +697,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 		return &result
 	}
 
-	aaTxn = txTask.Tx().(*types.AccountAbstractionTransaction) // type cast checked earlier
 	validationRes := result.ValidationResults[0]
 	result.ValidationResults = result.ValidationResults[1:]
 

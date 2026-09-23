@@ -115,6 +115,12 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer e.semaphore.Release(1)
 
+	resumeReadAhead, err := e.suspendReadAhead(ctx)
+	if err != nil {
+		return fmt.Errorf("suspend read-ahead: %w", err)
+	}
+	defer resumeReadAhead()
+
 	// Gate state-domain build+merge before the write tx exists. The
 	// builders being waited on read the db behind the aggregator
 	// commit gate, and the gate's writer side blocks on a held write
@@ -123,16 +129,16 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// end by timing out. quiesceRetireIfPastTarget covers BlockRetire
 	// separately, once mode B is under way.
 	if e.unwinder != nil {
-		modeB, err := e.modeBApplies(ctx, targetBlock)
-		if err != nil {
-			return err
+		modeB, modeBErr := e.modeBApplies(ctx, targetBlock)
+		if modeBErr != nil {
+			return modeBErr
 		}
 		if modeB {
 			e.unwinder.BlockBuildFiles(true)
 			defer e.unwinder.BlockBuildFiles(false)
-			if err := e.unwinder.WaitForBuildAndMergeQuiescence(modeBBuildQuiescenceTimeout); err != nil {
+			if qErr := e.unwinder.WaitForBuildAndMergeQuiescence(modeBBuildQuiescenceTimeout); qErr != nil {
 				e.unwinder.AbortUnwind()
-				return fmt.Errorf("SetHead mode B: %w", err)
+				return fmt.Errorf("SetHead mode B: %w", qErr)
 			}
 		}
 	}
@@ -230,12 +236,6 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	// and the next FCU re-execution reads them and computes a stale state root
 	// (BadBlock). Mirrors ValidateChain/forkchoice.
 	sd.SetStateCache(e.stateCache)
-	sd.SetCodeStore(e.codeStore)
-
-	// Drain in-flight warmup before the unwind bumps the cache epoch, so a
-	// fire-and-forget warmup can't Put a dead-fork value stamped with the new
-	// epoch (cross-fork contamination).
-	e.drainReadAhead()
 
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
@@ -323,7 +323,11 @@ func (e *ExecModule) dispatchUnwindNotifications(ctx context.Context, currentHea
 	}
 	e.accum.Accumulator.StartChange(header, nil, true)
 	prev := targetBlock
-	return dispatcher.Dispatch(ctx, tx, e.accum.Accumulator, e.accum.RecentReceipts, currentHead, targetBlock, &prev)
+	stateVersion, err := rawdb.GetStateVersion(tx)
+	if err != nil {
+		return err
+	}
+	return dispatcher.Dispatch(ctx, tx, stateVersion, e.accum.Accumulator, e.accum.RecentReceipts, currentHead, targetBlock, &prev)
 }
 
 // publishUnwindCompleted broadcasts flow.UnwindCompleted to the storage

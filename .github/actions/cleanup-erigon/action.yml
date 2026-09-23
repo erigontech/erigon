@@ -1,6 +1,12 @@
 name: Cleanup Erigon
 description: Save build and module caches, and report uncached test packages
 
+inputs:
+  clean-fuzzcache:
+    description: "Set to 'false' to keep $GOCACHE/fuzz (for jobs that cache the fuzz corpus themselves)"
+    required: false
+    default: 'true'
+
 runs:
   using: composite
   steps:
@@ -28,6 +34,7 @@ runs:
       with:
         gocache: ${{ env.ERIGON_CI_GOCACHE_PATH }}
         key: ${{ env.ERIGON_CI_GOCACHE_KEY }}
+        clean-fuzzcache: ${{ inputs.clean-fuzzcache }}
 
     - name: Check for existing module cache entry
       id: modcache-probe

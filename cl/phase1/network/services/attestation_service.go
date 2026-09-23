@@ -204,6 +204,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	var (
 		domain      []byte
 		pubKey      common.Bytes48
+		vIndex      uint64
 		attestation *solid.Attestation // SingleAttestation will be transformed to Attestation struct with given member index in committee
 	)
 	if err := s.syncedDataManager.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -228,7 +229,6 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		if err != nil {
 			return err
 		}
-		var vIndex uint64
 		if clVersion <= clparams.DenebVersion {
 			// [REJECT] The number of aggregation bits matches the committee size -- i.e. len(aggregation_bits) == len(get_beacon_committee(state, attestation.data.slot, index)).
 			bits := att.Attestation.AggregationBits.Bytes()
@@ -282,24 +282,26 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 				return fmt.Errorf("attester is not a member of the committee. attester index %d committeeIndex %v", att.SingleAttestation.AttesterIndex, committeeIndex)
 			}
 			vIndex = att.SingleAttestation.AttesterIndex
-			attestation = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee), int(s.beaconCfg.MaxCommitteesPerSlot), s.beaconCfg)
+			var err error
+			attestation, err = att.SingleAttestation.ToAttestation(memIndexInCommittee, len(beaconCommittee), int(s.beaconCfg.MaxCommitteesPerSlot), s.beaconCfg)
+			if err != nil {
+				return fmt.Errorf("invalid committee index: %w", err)
+			}
 		}
 		// [IGNORE] There has been no other valid attestation seen on an attestation subnet that has an identical attestation.data.target.epoch and participating validator index.
-		// mark the validator as seen
 		epochLastTime, ok := s.validatorAttestationSeen.Get(vIndex)
 		if ok && epochLastTime == targetEpoch {
 			return fmt.Errorf("validator already seen in target epoch %w", ErrIgnore)
 		}
-		s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 
 		// [REJECT] The signature of attestation is valid.
 		pubKey, err = headState.ValidatorPublicKey(int(vIndex))
 		if err != nil {
-			return fmt.Errorf("unable to get public key: %v", err)
+			return fmt.Errorf("unable to get public key: %w", err)
 		}
 		domain, err = headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
 		if err != nil {
-			return fmt.Errorf("unable to get the domain: %v", err)
+			return fmt.Errorf("unable to get the domain: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -307,7 +309,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	signingRoot, err := computeSigningRoot(data, domain)
 	if err != nil {
-		return fmt.Errorf("unable to get signing root: %v", err)
+		return fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)
@@ -349,6 +351,9 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		F: func() {
 			start := time.Now()
 			defer monitor.ObserveAggregateAttestation(start)
+			// Claimed only now: a message dropped before its signature was
+			// verified must not consume the validator's slot for the epoch.
+			s.validatorAttestationSeen.Add(vIndex, targetEpoch)
 			if err = s.committeeSubscribe.AggregateAttestation(attestation); errors.Is(err, aggregation.ErrIsSuperset) {
 				return
 			} else if err != nil {

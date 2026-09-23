@@ -111,7 +111,7 @@ func bucketsConfig(_ kv.TableCfg) kv.TableCfg {
 // newMemoryDB creates a new in-memory node database without a persistent backend.
 func newMemoryDB(ctx context.Context, logger log.Logger, tmpDir string) (*DB, error) {
 	db, err := mdbx.New(dbcfg.SentryDB, logger).
-		InMem(nil, tmpDir).
+		InMem(tmpDir).
 		WithTableCfg(bucketsConfig).
 		PageSize(4 * datasize.KB).
 		MapSize(1 * datasize.GB).
@@ -570,7 +570,9 @@ func (db *DB) localSeq(id ID) uint64 {
 
 // storeLocalSeq stores the local record sequence counter.
 func (db *DB) storeLocalSeq(id ID, n uint64) {
-	db.storeUint64(localItemKey(id, dbLocalSeq), n)
+	if err := db.storeUint64(localItemKey(id, dbLocalSeq), n); err != nil {
+		log.Warn("[p2p] nodeDB.storeLocalSeq failed", "err", err)
+	}
 }
 
 // QuerySeeds retrieves random nodes to be used as potential seed nodes

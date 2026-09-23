@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 // The merge goroutine BuildFiles2 spawns must register on wg before the build
@@ -42,11 +43,11 @@ func TestAggregatorCloseWaitsForBackgroundMerge(t *testing.T) {
 	logger := log.New()
 	for range 64 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
-		require.NoError(t, agg.OpenFolder())
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
+		require.NoError(t, agg.OpenFolder(db))
 
-		require.NoError(t, agg.BuildFiles2(t.Context(), 0, 0, true))
+		require.NoError(t, agg.BuildFiles2(t.Context(), asTemporalRoDB(db), 0, 0, unboundedFinalityCtx, true))
 		agg.background.Wait()
 		agg.Close()
 		db.Close()
@@ -61,9 +62,9 @@ func TestAggregatorCloseVsConcurrentMergeLoop(t *testing.T) {
 	logger := log.New()
 	for range 4 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
-		require.NoError(t, agg.OpenFolder())
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
+		require.NoError(t, agg.OpenFolder(db))
 
 		start := make(chan struct{})
 		var loops sync.WaitGroup
@@ -87,9 +88,9 @@ func TestAggregatorCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
 	logger := log.New()
 	for range 4 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
-		require.NoError(t, agg.OpenFolder())
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
+		require.NoError(t, agg.OpenFolder(db))
 
 		start := make(chan struct{})
 		fins := make(chan chan struct{}, 8)
@@ -98,7 +99,7 @@ func TestAggregatorCloseVsConcurrentBuildFilesInBackground(t *testing.T) {
 			loops.Go(func() {
 				<-start
 				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
-				fins <- agg.BuildFilesInBackground(1_000_000)
+				fins <- agg.BuildFilesInBackground(asTemporalRoDB(db), 1_000_000, unboundedFinalityCtx)
 			})
 		}
 		close(start)
@@ -118,9 +119,9 @@ func TestAggregatorCloseVsConcurrentBuildFiles2(t *testing.T) {
 	logger := log.New()
 	for range 4 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
-		require.NoError(t, agg.OpenFolder())
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
+		require.NoError(t, agg.OpenFolder(db))
 
 		start := make(chan struct{})
 		var loops sync.WaitGroup
@@ -128,7 +129,7 @@ func TestAggregatorCloseVsConcurrentBuildFiles2(t *testing.T) {
 			loops.Go(func() {
 				<-start
 				time.Sleep(time.Duration(i) * 250 * time.Microsecond)
-				_ = agg.BuildFiles2(context.Background(), 0, 0, true)
+				_ = agg.BuildFiles2(context.Background(), asTemporalRoDB(db), 0, 0, unboundedFinalityCtx, true)
 			})
 		}
 		close(start)
@@ -144,9 +145,9 @@ func TestAggregatorConcurrentClose(t *testing.T) {
 	logger := log.New()
 	for range 4 {
 		dirs := datadir.New(t.TempDir())
-		db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
-		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
-		require.NoError(t, agg.OpenFolder())
+		db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+		agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
+		require.NoError(t, agg.OpenFolder(db))
 
 		start := make(chan struct{})
 		var closes sync.WaitGroup
@@ -171,10 +172,10 @@ func TestAggregatorCloseReleasesBranchCache(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	defer db.Close()
-	agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context(), db)
-	require.NoError(t, agg.OpenFolder())
+	agg := NewTest(dirs).StepSize(16).Logger(logger).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(db))
 
 	cd := agg.d[kv.CommitmentDomain]
 	require.NotNil(t, cd)
@@ -206,7 +207,7 @@ func TestAggregatorOpenFolderKeepsReaderFilesAlive(t *testing.T) {
 	}
 	// generate* helpers hardcode stepSize=10; keep the aggregator consistent.
 	const stepSize = uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 	dirs := agg.Dirs()
 
 	// All state domains must have matching coverage or the integrity checker hides
@@ -216,7 +217,7 @@ func TestAggregatorOpenFolderKeepsReaderFilesAlive(t *testing.T) {
 	generateStorageFile(t, dirs, ranges)
 	generateCodeFile(t, dirs, ranges)
 	generateCommitmentFile(t, dirs, ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	// Reader pins the current generation, which still references the newest file.
 	at := agg.BeginFilesRo()
@@ -225,7 +226,7 @@ func TestAggregatorOpenFolderKeepsReaderFilesAlive(t *testing.T) {
 	// An external actor removes the newest accounts file from disk (e.g. after an
 	// unwind or merge cleanup), then the folder is reopened while `at` is still live.
 	require.NoError(t, dir.RemoveFile(domainFileBySuffix(t, dirs.SnapDomain, "accounts.2-3.kv")))
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	var err error
 	require.NotPanics(t, func() {
@@ -245,7 +246,7 @@ func TestAggregatorOpenFolderReclaimKeepsRecreatedFile(t *testing.T) {
 		t.Skip("deletes a file that is still mmapped; not possible on Windows")
 	}
 	const stepSize = uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 	dirs := agg.Dirs()
 
 	ranges := []testFileRange{{0, 1}, {1, 2}, {2, 3}}
@@ -253,7 +254,7 @@ func TestAggregatorOpenFolderReclaimKeepsRecreatedFile(t *testing.T) {
 	generateStorageFile(t, dirs, ranges)
 	generateCodeFile(t, dirs, ranges)
 	generateCommitmentFile(t, dirs, ranges)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	at := agg.BeginFilesRo() // pins the generation that references accounts.2-3
 	defer func() {
@@ -265,7 +266,7 @@ func TestAggregatorOpenFolderReclaimKeepsRecreatedFile(t *testing.T) {
 	// External actor removes the newest accounts file; the folder reopens (retiring
 	// it), then the same file is recreated on disk before the reader drains.
 	require.NoError(t, dir.RemoveFile(domainFileBySuffix(t, dirs.SnapDomain, "accounts.2-3.kv")))
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 	generateAccountsFile(t, dirs, []testFileRange{{2, 3}})
 	recreated := domainFileBySuffix(t, dirs.SnapDomain, "accounts.2-3.kv")
 

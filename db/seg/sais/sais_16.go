@@ -56,7 +56,7 @@ func sais_16_32(text []uint16, textMax int, sa, tmp []int32) {
 }
 
 func freq_16_32(text []uint16, freq, bucket []int32) []int32 {
-	if freq != nil && freq[0] >= 0 {
+	if len(freq) > 0 && freq[0] >= 0 {
 		return freq
 	}
 	if freq == nil {

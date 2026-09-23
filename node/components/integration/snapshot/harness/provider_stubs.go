@@ -35,8 +35,8 @@ type mockAggregator struct{}
 var _ storagecomp.StateAggregator = mockAggregator{}
 
 func (mockAggregator) Files() []string   { return nil }
-func (mockAggregator) OpenFolder() error { return nil }
-func (mockAggregator) BuildMissedAccessors(context.Context, int, ...kv.BuildAccessorsOption) error {
+func (mockAggregator) OpenFolder(kv.RoDB) error { return nil }
+func (mockAggregator) BuildMissedAccessors(context.Context, kv.RoDB, int, ...kv.BuildAccessorsOption) error {
 	return nil
 }
 func (mockAggregator) LockCollation()   {}

@@ -1,9 +1,8 @@
 package temporal
 
 import (
-	"encoding/binary"
+	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -12,212 +11,18 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
-	t.Parallel()
-	ctx := t.Context()
-
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
-	dirs := datadir.New(t.TempDir())
-	stepSize := uint64(1)
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
-	defer agg.Close()
-
-	temporalDb, err := New(mdbxDb, agg, nil)
-	require.NoError(t, err)
-	defer temporalDb.Close()
-
-	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTtx1.Rollback()
-
-	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
-	require.NoError(t, err)
-	defer sd.Close()
-
-	acc1 := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	acc1slot1 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
-	storageK1 := append(append([]byte{}, acc1[:]...), acc1slot1[:]...)
-	acc2 := common.HexToAddress("0x1234567890123456789012345678901234567891")
-	acc2slot2 := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000002")
-	storageK2 := append(append([]byte{}, acc2[:]...), acc2slot2[:]...)
-
-	// --- check 1: non-existing storage ---
-	{
-		firstKey, firstVal, ok, err := rwTtx1.HasPrefix(kv.StorageDomain, acc1[:])
-		require.NoError(t, err)
-		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
-	}
-
-	// --- check 2: storage exists in DB - TemporalTx.HasPrefix should catch this ---
-	{
-		// write to storage
-		err = sd.DomainPut(kv.StorageDomain, rwTtx1, storageK1, []byte{1}, 1, nil)
-		require.NoError(t, err)
-		err = sd.Flush(ctx, rwTtx1)
-		require.NoError(t, err)
-		err = rwTtx1.Commit()
-		require.NoError(t, err)
-
-		// make sure it is indeed in db using a db tx
-		dbRoTx1, err := mdbxDb.BeginRo(ctx)
-		require.NoError(t, err)
-		defer dbRoTx1.Rollback()
-		c1, err := dbRoTx1.CursorDupSort(kv.TblStorageVals)
-		require.NoError(t, err)
-		defer c1.Close()
-		k, v, err := c1.Next()
-		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), k)
-		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
-		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
-		wantValueBytes = append(wantValueBytes, byte(1))       // value we wrote to the storage slot
-		require.Equal(t, wantValueBytes, v)
-		k, v, err = c1.Next()
-		require.NoError(t, err)
-		require.Nil(t, k)
-		require.Nil(t, v)
-
-		// all good
-		// now move on to temporal tx
-		roTtx1, err := temporalDb.BeginTemporalRo(ctx)
-		require.NoError(t, err)
-		defer roTtx1.Rollback()
-
-		// make sure there are no files yet and we are only hitting the DB
-		require.Equal(t, uint64(0), roTtx1.Debug().TxNumsInFiles(kv.StorageDomain))
-
-		// finally, verify TemporalTx.HasPrefix returns true
-		firstKey, firstVal, ok, err := roTtx1.HasPrefix(kv.StorageDomain, acc1[:])
-		require.NoError(t, err)
-		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
-		require.Equal(t, []byte{1}, firstVal)
-
-		// check some other non-existing storages for non-existence after write operation
-		firstKey, firstVal, ok, err = roTtx1.HasPrefix(kv.StorageDomain, acc2[:])
-		require.NoError(t, err)
-		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
-	}
-
-	// --- check 3: storage exists in files only - TemporalTx.HasPrefix should catch this
-	{
-		// move data to files and trigger prune (need one more step for prune so write to some other storage)
-		rwTtx2, err := temporalDb.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTtx2.Rollback()
-		err = sd.DomainPut(kv.StorageDomain, rwTtx2, storageK2, []byte{2}, 2, nil)
-		require.NoError(t, err)
-		err = sd.Flush(ctx, rwTtx2)
-		require.NoError(t, err)
-		err = rwTtx2.Commit()
-		require.NoError(t, err)
-
-		// build files
-		err = agg.BuildFiles(2)
-		require.NoError(t, err)
-		rwTtx3, err := temporalDb.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTtx3.Rollback()
-
-		// prune
-		haveMore, err := rwTtx3.PruneSmallBatches(ctx, time.Minute)
-		require.NoError(t, err)
-		require.False(t, haveMore)
-		err = rwTtx3.Commit()
-		require.NoError(t, err)
-
-		// double check acc1 storage data not in the mdbx DB
-		dbRoTx2, err := mdbxDb.BeginRo(ctx)
-		require.NoError(t, err)
-		defer dbRoTx2.Rollback()
-		c2, err := dbRoTx2.CursorDupSort(kv.TblStorageVals)
-		require.NoError(t, err)
-		defer c2.Close()
-		k, v, err := c2.Next() // acc2 storage from step 2 will be there
-		require.NoError(t, err)
-		require.Equal(t, append(append([]byte{}, acc2[:]...), acc2slot2[:]...), k)
-		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
-		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(2)) // step num
-		wantValueBytes = append(wantValueBytes, byte(2))       // value we wrote to the storage slot
-		require.Equal(t, wantValueBytes, v)
-		k, v, err = c2.Next() // acc1 storage from step 1 must not be there
-		require.NoError(t, err)
-		require.Nil(t, k)
-		require.Nil(t, v)
-
-		// double check files for 2 steps have been created
-		roTtx2, err := temporalDb.BeginTemporalRo(ctx)
-		require.NoError(t, err)
-		defer roTtx2.Rollback()
-		require.Equal(t, uint64(2), roTtx2.Debug().TxNumsInFiles(kv.StorageDomain))
-
-		// finally, verify TemporalTx.HasPrefix returns true
-		firstKey, firstVal, ok, err := roTtx2.HasPrefix(kv.StorageDomain, acc1[:])
-		require.NoError(t, err)
-		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
-		require.Equal(t, []byte{1}, firstVal)
-	}
-
-	// --- check 4: delete storage - TemporalTx.HasPrefix should catch this and say it does not exist
-	{
-		rwTtx4, err := temporalDb.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTtx4.Rollback()
-		err = sd.DomainDelPrefix(kv.StorageDomain, rwTtx4, acc1[:], 3)
-		require.NoError(t, err)
-		err = sd.Flush(ctx, rwTtx4)
-		require.NoError(t, err)
-		err = rwTtx4.Commit()
-		require.NoError(t, err)
-
-		roTtx3, err := temporalDb.BeginTemporalRo(ctx)
-		require.NoError(t, err)
-		defer roTtx3.Rollback()
-
-		firstKey, firstVal, ok, err := roTtx3.HasPrefix(kv.StorageDomain, acc1[:])
-		require.NoError(t, err)
-		require.False(t, ok)
-		require.Nil(t, firstKey)
-		require.Nil(t, firstVal)
-	}
-
-	// --- check 5: write to it again after deletion - TemporalTx.HasPrefix should catch
-	{
-		rwTtx5, err := temporalDb.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTtx5.Rollback()
-		err = sd.DomainPut(kv.StorageDomain, rwTtx5, storageK1, []byte{3}, 4, nil)
-		require.NoError(t, err)
-		err = sd.Flush(ctx, rwTtx5)
-		require.NoError(t, err)
-		err = rwTtx5.Commit()
-		require.NoError(t, err)
-
-		roTtx4, err := temporalDb.BeginTemporalRo(ctx)
-		require.NoError(t, err)
-		defer roTtx4.Rollback()
-
-		firstKey, firstVal, ok, err := roTtx4.HasPrefix(kv.StorageDomain, acc1[:])
-		require.NoError(t, err)
-		require.True(t, ok)
-		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), firstKey)
-		require.Equal(t, []byte{3}, firstVal)
-	}
-}
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 // TestTemporalTx_PinsBlockFilesView: with block snapshots wired at construction,
 // every temporal tx pins its own block-files view (the peer of aggtx); with none
@@ -227,9 +32,9 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	ctx := t.Context()
 
 	newDB := func(withBlocks bool) *DB {
-		mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+		mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		dirs := datadir.New(t.TempDir())
-		agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
+		agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx)
 		t.Cleanup(agg.Close)
 
 		var blockSnaps *blocksnapshots.RoSnapshots
@@ -257,14 +62,142 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	require.NotNil(t, roTx2.(*Tx).blocktx)
 }
 
+// DomainVisibleEnd's memo serves repeat readers lock-free while first loads
+// run under the memo mutex. Fresh txs each round make the two paths
+// interleave across goroutines; results must stay stable (run with -race).
+func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx)
+	defer agg.Close()
+	temporalDb, err := New(mdbxDb, agg, nil)
+	require.NoError(t, err)
+	defer temporalDb.Close()
+
+	acc := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	storageK := append(append([]byte{}, acc[:]...), slot[:]...)
+
+	rwTtx, err := temporalDb.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTtx.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx, log.Root())
+	require.NoError(t, err)
+	defer sd.Close()
+	require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx, storageK, []byte{1}, 1, nil))
+	require.NoError(t, sd.Flush(ctx, rwTtx))
+	require.NoError(t, rwTtx.Commit())
+
+	var expectedEnd [kv.DomainLen]uint64
+	var expectedOk [kv.DomainLen]bool
+	baseTtx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer baseTtx.Rollback()
+	for d := range kv.DomainLen {
+		expectedEnd[d], expectedOk[d] = baseTtx.Debug().DomainVisibleEnd(d)
+	}
+	baseTtx.Rollback()
+	require.Equal(t, uint64(2), expectedEnd[kv.StorageDomain])
+	require.True(t, expectedOk[kv.StorageDomain])
+
+	for range 25 {
+		require.NoError(t, temporalDb.ViewTemporal(ctx, func(roTtx kv.TemporalTx) error {
+			var wg sync.WaitGroup
+			for range 8 {
+				wg.Go(func() {
+					for range 4 {
+						for d := range kv.DomainLen {
+							end, ok := roTtx.Debug().DomainVisibleEnd(d)
+							if end != expectedEnd[d] || ok != expectedOk[d] {
+								t.Errorf("domain %v: got (%d, %t), want (%d, %t)", d, end, ok, expectedEnd[d], expectedOk[d])
+							}
+						}
+					}
+				})
+			}
+			wg.Wait()
+			return nil
+		}))
+	}
+}
+
+// A read-only temporal tx memoizes DomainVisibleEnd, while
+// ForceReopenUnderlyingFilesTx swaps in a fresh files view that can extend the
+// frontier — the memo must be re-derived after the swap.
+func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	dirs := datadir.New(t.TempDir())
+	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx)
+	defer agg.Close()
+	temporalDb, err := New(mdbxDb, agg, nil)
+	require.NoError(t, err)
+	defer temporalDb.Close()
+
+	acc := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	slot := common.HexToHash("0x0000000000000000000000000000000000000000000000000000000000000001")
+	storageK := append(append([]byte{}, acc[:]...), slot[:]...)
+
+	rwTtx1, err := temporalDb.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTtx1.Rollback()
+	sd, err := execctx.NewSharedDomains(ctx, rwTtx1, log.Root())
+	require.NoError(t, err)
+	defer sd.Close()
+	require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx1, storageK, []byte{1}, 1, nil))
+	require.NoError(t, sd.Flush(ctx, rwTtx1))
+	require.NoError(t, rwTtx1.Commit())
+
+	roTtx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTtx.Rollback()
+	end, ok := roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), end)
+
+	// Write past the RO tx's MVCC view and move the data into files, which are
+	// visible regardless of the DB read view.
+	for txNum := uint64(2); txNum <= 3; txNum++ {
+		func() {
+			rwTtx, err := temporalDb.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTtx.Rollback()
+			require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx, storageK, []byte{byte(txNum)}, txNum, nil))
+			require.NoError(t, sd.Flush(ctx, rwTtx))
+			require.NoError(t, rwTtx.Commit())
+		}()
+	}
+	require.NoError(t, temporalDb.BuildFiles(3, unboundedFinalityCtx))
+
+	freshRoTtx, err := temporalDb.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer freshRoTtx.Rollback()
+	filesEnd := freshRoTtx.Debug().TxNumsInFiles(kv.StorageDomain)
+	require.Greater(t, filesEnd, uint64(2), "the new files must extend past the memoized frontier")
+
+	end, ok = roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), end, "the pinned files view cannot see the new files before reopen")
+
+	roTtx.(*Tx).ForceReopenUnderlyingFilesTx()
+	end, ok = roTtx.Debug().DomainVisibleEnd(kv.StorageDomain)
+	require.True(t, ok)
+	require.Equal(t, filesEnd, end, "the frontier must reflect the fresh files view after reopen")
+}
+
 func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
-	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
+	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 	defer agg.Close()
 	temporalDb, err := New(mdbxDb, agg, nil)
 	require.NoError(t, err)

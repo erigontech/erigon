@@ -18,7 +18,6 @@ package eliasfano32
 
 import (
 	"bytes"
-	"fmt"
 	"math"
 	"math/bits"
 	"testing"
@@ -28,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream/streamtest"
 )
 
 // This is a very implementation-dependant test using mainnet production data.
@@ -492,6 +492,64 @@ func TestSearchUpperReverseNoSolution(t *testing.T) {
 	require.False(t, it.HasNext(), "no element <= 1 should be found when EF starts at 1_000_000")
 }
 
+// A jump lookup adds a per-superQ base to a per-q offset inside that block, and
+// both terms are nonzero only from index superQ+q on.
+const jumpTestCount = superQ + q + 2
+
+func requireFullJumpReach(t *testing.T, maxIdx uint64) {
+	t.Helper()
+	require.NotZero(t, maxIdx/superQ, "max read index %d never leaves the first superQ block", maxIdx)
+	require.NotZero(t, (maxIdx%superQ)/q, "max read index %d has a zero offset inside its superQ block", maxIdx)
+}
+
+func increasingSeq(n, stride uint64) []uint64 {
+	seq := make([]uint64, n)
+	var acc uint64
+	for i := range seq {
+		acc += 1 + (uint64(i)*stride)%251
+		seq[i] = acc
+	}
+	return seq
+}
+
+func TestEliasFanoGetAcrossSuperQJump(t *testing.T) {
+	keys := increasingSeq(jumpTestCount, 7)
+	requireFullJumpReach(t, uint64(len(keys)-1))
+
+	ef := NewEliasFano(uint64(len(keys)), keys[len(keys)-1])
+	for _, k := range keys {
+		ef.AddOffset(k)
+	}
+	ef.Build()
+
+	for i, want := range keys {
+		require.Equal(t, want, ef.Get(uint64(i)), "Get(%d)", i)
+	}
+}
+
+func TestDoubleEliasFanoGetAcrossSuperQJump(t *testing.T) {
+	cumKeys := increasingSeq(jumpTestCount+1, 7)
+	position := increasingSeq(jumpTestCount+1, 13)
+	numBuckets := uint64(len(cumKeys) - 1)
+	// Get3 reads cumKeys[bucket+1], so it stops one bucket short of Get2.
+	requireFullJumpReach(t, numBuckets-1)
+
+	var ef DoubleEliasFano
+	ef.Build(cumKeys, position)
+
+	for bucket := range numBuckets + 1 {
+		cumKey, bitPos := ef.Get2(bucket)
+		require.Equal(t, cumKeys[bucket], cumKey, "Get2(%d) cumKeys", bucket)
+		require.Equal(t, position[bucket], bitPos, "Get2(%d) position", bucket)
+	}
+	for bucket := range numBuckets {
+		cumKey, cumKeysNext, bitPos := ef.Get3(bucket)
+		require.Equal(t, cumKeys[bucket], cumKey, "Get3(%d) cumKeys", bucket)
+		require.Equal(t, cumKeys[bucket+1], cumKeysNext, "Get3(%d) cumKeysNext", bucket)
+		require.Equal(t, position[bucket], bitPos, "Get3(%d) position", bucket)
+	}
+}
+
 func TestEliasFano(t *testing.T) {
 	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}
 	count := uint64(len(offsets))
@@ -543,50 +601,6 @@ func TestEliasFano(t *testing.T) {
 	assert.False(t, ref.Has(1038))
 }
 
-func BenchmarkRead(b *testing.B) {
-	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}
-	count := uint64(len(offsets))
-	maxOffset := offsets[0]
-	for _, offset := range offsets {
-		if offset > maxOffset {
-			maxOffset = offset
-		}
-	}
-	ef := NewEliasFano(count, maxOffset)
-	for _, offset := range offsets {
-		ef.AddOffset(offset)
-	}
-	ef.Build()
-	buf := bytes.NewBuffer(nil)
-	require.NoError(b, ef.Write(buf))
-
-	b.Run("read", func(b *testing.B) {
-		for b.Loop() {
-			ReadEliasFano(buf.Bytes())
-		}
-	})
-
-	b.Run("reset", func(b *testing.B) {
-		ef := NewEliasFano(1, 1)
-		for b.Loop() {
-			ef.Reset(buf.Bytes())
-		}
-	})
-	b.Run("read.search", func(b *testing.B) {
-		for b.Loop() {
-			Seek(buf.Bytes(), 1)
-		}
-	})
-
-	b.Run("reset.search", func(b *testing.B) {
-		ef := NewEliasFano(1, 1)
-		for b.Loop() {
-			ef.Reset(buf.Bytes()).Seek(1)
-		}
-	})
-
-}
-
 func TestIterator(t *testing.T) {
 	offsets := []uint64{1, 4, 6, 8, 10, 14, 16, 19, 22, 34, 37, 39, 41, 43, 48, 51, 54, 58, 62}
 	count := uint64(len(offsets))
@@ -611,7 +625,7 @@ func TestIterator(t *testing.T) {
 			assert.Equal(t, offsets[i], v, "iter")
 			i++
 		}
-		stream.ExpectEqualU64(t, stream.ReverseArray(values), ef.ReverseIterator())
+		streamtest.ExpectEqualU64(t, stream.ReverseArray(values), ef.ReverseIterator())
 	})
 
 	t.Run("seek", func(t *testing.T) {
@@ -697,8 +711,8 @@ func TestIterator(t *testing.T) {
 		}
 		ef.Build()
 
-		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
-		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
+		streamtest.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		streamtest.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
 	})
 
 	t.Run("article-example2", func(t *testing.T) {
@@ -713,8 +727,8 @@ func TestIterator(t *testing.T) {
 		}
 		ef.Build()
 
-		stream.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
-		stream.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
+		streamtest.ExpectEqualU64(t, stream.Array(offsets), ef.Iterator())
+		streamtest.ExpectEqualU64(t, stream.ReverseArray(offsets), ef.ReverseIterator())
 	})
 
 	t.Run("1 element", func(t *testing.T) {
@@ -722,8 +736,8 @@ func TestIterator(t *testing.T) {
 		ef.AddOffset(7)
 		ef.Build()
 
-		stream.ExpectEqualU64(t, stream.Array([]uint64{7}), ef.Iterator())
-		stream.ExpectEqualU64(t, stream.ReverseArray([]uint64{7}), ef.ReverseIterator())
+		streamtest.ExpectEqualU64(t, stream.Array([]uint64{7}), ef.Iterator())
+		streamtest.ExpectEqualU64(t, stream.ReverseArray([]uint64{7}), ef.ReverseIterator())
 	})
 }
 
@@ -781,96 +795,6 @@ func checkSeekReverse(t *testing.T, j int, ef *EliasFano, vals []uint64) {
 	require.Equal(t, int(prevUpper), int(efi.upper))
 	require.Equal(t, int(prevItemsIterated), int(efi.itemsIterated))
 	require.Equal(t, bits.TrailingZeros64(prevUpperMask), bits.TrailingZeros64(efi.upperMask))
-}
-
-func BenchmarkEF(b *testing.B) {
-	count := uint64(1_000_000)
-	maxOffset := (count - 1) * 123
-	ef := NewEliasFano(count, maxOffset)
-	for offset := range count {
-		ef.AddOffset(offset * 123)
-	}
-	ef.Build()
-	b.Run("next to value 1_000_000", func(b *testing.B) {
-		for b.Loop() {
-			it := ef.Iterator()
-			for it.HasNext() {
-				n, err := it.Next()
-				require.NoError(b, err)
-				if n > 1_000_000 {
-					break
-				}
-			}
-		}
-	})
-	b.Run("seek to value 1_000_000", func(b *testing.B) {
-		for b.Loop() {
-			it := ef.Iterator()
-			it.Seek(1_000_000)
-		}
-	})
-	b.Run("reverse next to value 1_230", func(b *testing.B) {
-		for b.Loop() {
-			it := ef.ReverseIterator()
-			for it.HasNext() {
-				n, err := it.Next()
-				require.NoError(b, err)
-				if n <= 1_230 {
-					break
-				}
-			}
-			require.True(b, it.HasNext())
-			n, err := it.Next()
-			require.NoError(b, err)
-			require.Equal(b, uint64(1_230-123), n)
-		}
-	})
-	b.Run("reverse seek to value 1_230", func(b *testing.B) {
-		it := ef.ReverseIterator()
-		it.Seek(1_230)
-
-		for b.Loop() {
-			it := ef.ReverseIterator()
-			it.Seek(1_230)
-			n, err := it.Next()
-			require.NoError(b, err)
-			require.Equal(b, uint64(1_230), n)
-		}
-	})
-	b.Run("naive reverse iterator", func(b *testing.B) {
-		for b.Loop() {
-			it := naiveReverseIterator(ef)
-			for it.HasNext() {
-				_, err := it.Next()
-				require.NoError(b, err)
-			}
-		}
-	})
-	b.Run("reverse iterator", func(b *testing.B) {
-		for b.Loop() {
-			it := ef.ReverseIterator()
-			for it.HasNext() {
-				_, err := it.Next()
-				require.NoError(b, err)
-			}
-		}
-	})
-}
-
-func BenchmarkBuild(b *testing.B) {
-	for _, count := range []uint64{100, 1_000_000} {
-		b.Run(fmt.Sprintf("count=%d", count), func(b *testing.B) {
-			maxOffset := (count - 1) * 123
-			ef := NewEliasFano(count, maxOffset)
-			for i := range count {
-				ef.AddOffset(i * 123)
-			}
-			b.ResetTimer()
-			for b.Loop() {
-				ef.Build()
-			}
-		})
-	}
 }
 
 func naiveReverseIterator(ef *EliasFano) *stream.ArrStream[uint64] {

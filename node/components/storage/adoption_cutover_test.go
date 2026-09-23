@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -111,8 +111,8 @@ func TestCutoverStagedBatch_SwapsLiveFile(t *testing.T) {
 	require.NoError(t, snaps.OpenFolder())
 	defer snaps.Close()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	agg := dbstate.NewTest(dirs).MustOpen(ctx, db)
+	_ = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	agg := dbstate.NewTest(dirs).MustOpen(ctx)
 	defer agg.Close()
 
 	inv := snapshot.NewInventory()

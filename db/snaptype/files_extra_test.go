@@ -155,13 +155,6 @@ func TestParseFileName_Invalid(t *testing.T) {
 	require.Zero(t, to)
 }
 
-func TestParseFileNameOld_StateFile(t *testing.T) {
-	t.Parallel()
-	_, isStateFile, ok := ParseFileNameOld("snapshots", "v2.0-accounts.2519-2520.kv")
-	require.True(t, ok)
-	require.True(t, isStateFile)
-}
-
 func TestParseDirAndListings(t *testing.T) {
 	t.Parallel()
 	d := t.TempDir()

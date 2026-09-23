@@ -241,7 +241,7 @@ func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []s
 }
 
 func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
-	if ii.Disable {
+	if !ii.Enabled {
 		return nil, nil
 	}
 	return ii.openList(ctx, r.iiFiles, r.accessorFiles)
@@ -368,7 +368,7 @@ func (iit *InvertedIndexRoTx) Files() (res VisibleFiles) {
 }
 
 func (iit *InvertedIndexRoTx) NewWriter() *InvertedIndexBufferedWriter {
-	return iit.newWriter(iit.ii.dirs.Tmp, false)
+	return iit.newWriter(iit.ii.dirs.Tmp, !iit.ii.Enabled)
 }
 
 type InvertedIndexBufferedWriter struct {
@@ -376,6 +376,8 @@ type InvertedIndexBufferedWriter struct {
 
 	discard      bool
 	filenameBase string
+	tmpdir       string
+	logger       log.Logger
 
 	indexTable, indexKeysTable string
 
@@ -401,8 +403,11 @@ func (w *InvertedIndexBufferedWriter) add(key, indexKey []byte, txNum uint64) er
 	}
 	binary.BigEndian.PutUint64(w.txNumBytes[:], txNum)
 
-	if err := w.indexKeys.Collect(w.txNumBytes[:], key); err != nil {
+	if err := w.keysCollector().Collect(w.txNumBytes[:], key); err != nil {
 		return err
+	}
+	if w.index == nil {
+		w.index = newWriterCollector(w.filenameBase+".ii.vals", w.tmpdir, w.logger)
 	}
 	if err := w.index.Collect(indexKey, w.txNumBytes[:]); err != nil {
 		return err
@@ -414,15 +419,32 @@ func (w *InvertedIndexBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) err
 	if w.discard {
 		return nil
 	}
-
-	if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.index != nil {
+		if err := w.index.Load(tx, w.indexTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
-	if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.indexKeys != nil {
+		if err := w.indexKeys.Load(tx, w.indexKeysTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	w.close()
 	return nil
+}
+
+func (w *InvertedIndexBufferedWriter) keysCollector() *etl.Collector {
+	if w.indexKeys == nil {
+		w.indexKeys = newWriterCollector(w.filenameBase+".ii.keys", w.tmpdir, w.logger)
+	}
+	return w.indexKeys
+}
+
+// newWriterCollector is called on the first write: most mem batches never write.
+func newWriterCollector(logPrefix, tmpdir string, logger log.Logger) *etl.Collector {
+	// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
+	return etl.NewCollectorWithAllocator(logPrefix, tmpdir, etl.SmallSortableBuffers, logger).
+		LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 }
 
 func (w *InvertedIndexBufferedWriter) close() {
@@ -445,17 +467,12 @@ func (iit *InvertedIndexRoTx) newWriter(tmpdir string, discard bool) *InvertedIn
 		name:         iit.name,
 		discard:      discard,
 		filenameBase: iit.ii.FilenameBase,
+		tmpdir:       tmpdir,
+		logger:       iit.ii.logger,
 		stepSize:     iit.stepSize,
 
 		indexKeysTable: iit.ii.KeysTable,
 		indexTable:     iit.ii.ValuesTable,
-	}
-	if !discard {
-		// etl collector doesn't fsync: means if have enough ram, all files produced by all collectors will be in ram
-		w.indexKeys = etl.NewCollectorWithAllocator(w.filenameBase+".ii.keys", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
-		w.index = etl.NewCollectorWithAllocator(w.filenameBase+".ii.vals", tmpdir, etl.SmallSortableBuffers, iit.ii.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
@@ -609,8 +626,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 
 		g := iit.statelessGetter(i)
 		g.Reset(offset)
-		k, _ := g.Next(nil)
-		if !bytes.Equal(k, key) {
+		if g.MatchCmp(key) != 0 { // MPH false-positives protection
 			continue
 		}
 		encodedSeq, _ := g.Next(nil)
@@ -774,6 +790,18 @@ func (iit *InvertedIndexRoTx) CanHashPrune(tx kv.Tx) bool {
 		return true
 	}
 	return false
+}
+
+func (iit *InvertedIndexRoTx) checkFilesDBGap(tx kv.Tx) error {
+	prg, err := GetPruneValProgress(tx, []byte(iit.ii.ValuesTable))
+	if err != nil {
+		return err
+	}
+	if filesEnd := iit.files.EndTxNum(); prg.TxTo > filesEnd {
+		return fmt.Errorf("gap between snapshot files and DB for index %s: files end at txNum %d but the DB was pruned up to %d — [%d, %d) is in neither. Maybe you removed snapshot files (e.g. `snapshots rm-state --latest`) but forgot to run `integration stage_exec --reset`?",
+			iit.ii.FilenameBase, filesEnd, prg.TxTo, filesEnd, prg.TxTo)
+	}
+	return nil
 }
 
 func (iit *InvertedIndexRoTx) CanPrune(tx kv.Tx, untilTx uint64) bool {
@@ -1108,7 +1136,7 @@ func (ii *InvertedIndex) collate(ctx context.Context, step kv.Step, roTx kv.Tx) 
 		return InvertedIndexCollation{}, err
 	}
 	if len(offsets) > 0 {
-		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+		if err := loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return InvertedIndexCollation{}, err
 		}
 	}
@@ -1318,15 +1346,31 @@ func (ii *InvertedIndex) minTxNumInDB(tx kv.Tx) uint64 {
 	return 0
 }
 
-func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
+func (ii *InvertedIndex) lastTxNumInDB(tx kv.Tx) (uint64, bool) {
 	lst, _ := kv.LastKey(tx, ii.KeysTable)
-	if len(lst) > 0 {
-		lstInDb := binary.BigEndian.Uint64(lst)
-		return lstInDb
+	if len(lst) == 0 {
+		return 0, false
 	}
-	return 0
+	return binary.BigEndian.Uint64(lst), true
+}
+
+func (ii *InvertedIndex) maxTxNumInDB(tx kv.Tx) uint64 {
+	txNum, _ := ii.lastTxNumInDB(tx)
+	return txNum
 }
 
 func (iit *InvertedIndexRoTx) Progress(tx kv.Tx) uint64 {
 	return max(iit.files.EndTxNum(), iit.ii.maxTxNumInDB(tx))
+}
+
+// visibleEnd is the exclusive txNum bound of what this view can see: the max
+// of its two components, because GetLatest reads their union. Both sides are
+// required — on a snapshot-synced or fully-pruned datadir the DB side is empty
+// and the files carry the whole bound.
+func (iit *InvertedIndexRoTx) visibleEnd(tx kv.Tx) uint64 {
+	dbEnd, ok := iit.ii.lastTxNumInDB(tx)
+	if ok && dbEnd < math.MaxUint64 {
+		dbEnd++
+	}
+	return max(iit.files.EndTxNum(), dbEnd)
 }

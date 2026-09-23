@@ -52,9 +52,9 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	config := chain.TestChainBerlinConfig
 
 	fields := MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
-	assert.Equal(t, preset, fields["logsBloom"])
+	assert.Equal(t, preset, *fields.LogsBloom)
 
 	receipt.Bloom = types.Bloom{}
 	fields = MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
-	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), fields["logsBloom"])
+	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
 }

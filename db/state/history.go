@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type History struct {
@@ -307,55 +308,63 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var histKey []byte
 	var valOffset uint64
 
-	histView, err := hist.OpenSequentialView(true)
-	if err != nil {
-		return err
-	}
-	defer histView.Close()
-	efHistView, err := efHist.OpenSequentialView(true)
-	if err != nil {
-		return err
-	}
-	defer efHistView.Close()
+	var iiReader, histReader *seg.Reader
+	{
+		histView, err := hist.OpenSequentialView()
+		if err != nil {
+			return err
+		}
+		defer histView.Close()
+		efHistView, err := efHist.OpenSequentialView()
+		if err != nil {
+			return err
+		}
+		defer efHistView.Close()
 
-	iiReader := seg.NewReader(efHistView.MakeGetter(), h.InvertedIndex.Compression)
+		iiReader = seg.NewReader(efHistView.MakeGetter(), h.InvertedIndex.Compression)
+		histReader = seg.NewReader(histView.MakeGetter(), h.Compression)
+	}
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
-	for iiReader.HasNext() {
+	for i := 0; iiReader.HasNext(); i++ {
 		keyBuf, _ = iiReader.Next(keyBuf[:0]) // skip key
 		valBuf, _ = iiReader.Next(valBuf[:0])
 		cnt += multiencseq.Count(efBaseTxNum, valBuf)
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+		if i%1024 == 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
 		}
 	}
-
-	histReader := seg.NewReader(histView.MakeGetter(), h.Compression)
 
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(efHist.Count())/2)
 	defer ps.Delete(p)
-	rs, err := recsplit.NewRecSplit(recsplit.RecSplitArgs{
-		KeyCount:   int(cnt),
-		Enums:      false,
-		BucketSize: recsplit.DefaultBucketSize,
-		LeafSize:   recsplit.DefaultLeafSize,
-		TmpDir:     h.dirs.Tmp,
-		IndexFile:  historyIdxPath,
-		Salt:       h.salt.Load(),
-		NoFsync:    h.noFsync,
-		Workers:    h.BuildAccessorsWorkers,
-	}, h.logger)
-	if err != nil {
-		return fmt.Errorf("create recsplit: %w", err)
-	}
-	defer rs.Close()
-	rs.LogLvl(log.LvlTrace)
-	if h._testBuildVIHook != nil {
-		h._testBuildVIHook(rs)
+	var rs *recsplit.RecSplit
+	{
+		var err error
+		rs, err = recsplit.NewRecSplit(recsplit.RecSplitArgs{
+			KeyCount:   int(cnt),
+			Enums:      false,
+			BucketSize: recsplit.DefaultBucketSize,
+			LeafSize:   recsplit.DefaultLeafSize,
+			TmpDir:     h.dirs.Tmp,
+			IndexFile:  historyIdxPath,
+			Salt:       h.salt.Load(),
+			NoFsync:    h.noFsync,
+			Workers:    h.BuildAccessorsWorkers,
+		}, h.logger)
+		if err != nil {
+			return fmt.Errorf("create recsplit: %w", err)
+		}
+		defer rs.Close()
+		rs.LogLvl(log.LvlTrace)
+		if h._testBuildVIHook != nil {
+			h._testBuildVIHook(rs)
+		}
 	}
 
 	var seq multiencseq.SequenceReader
@@ -369,7 +378,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		i := 0
 
 		valOffset = 0
-		for iiReader.HasNext() {
+		for keys := 0; iiReader.HasNext(); keys++ {
 			keyBuf, _ = iiReader.Next(keyBuf[:0])
 			valBuf, _ = iiReader.Next(valBuf[:0])
 
@@ -383,7 +392,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					return err
 				}
 				histKey = historyKey(txNum, keyBuf, histKey[:0])
-				if err = rs.AddKey(histKey, valOffset); err != nil {
+				if err := rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
 
@@ -404,17 +413,21 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 				}
 			}
 
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			default:
+			if keys%1024 == 0 {
+				select {
+				case <-ctx.Done():
+					return ctx.Err()
+				default:
+				}
 			}
 		}
 
-		if err = rs.Build(ctx); err != nil {
+		if err := rs.Build(ctx); err != nil {
 			if rs.Collision() {
 				log.Info("Building recsplit. Collision happened. It's ok. Restarting...")
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 			} else {
 				return fmt.Errorf("build idx: %w", err)
 			}
@@ -461,6 +474,10 @@ func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 	return nil
 }
 
+// mdbx keeps a dupsort value as a key of the nested tree, so it is capped by keysize_max(pageSize),
+// which is pageSize/2 - 26. Here that budget is shared with the 8-byte txNum prefix.
+const maxHistoryValLen = int(ethconfig.DefaultChainDBPageSize)/2 - 26 - 8
+
 func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
@@ -481,12 +498,12 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		w.historyKey = append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...)
 		historyKey := w.historyKey[:lk+8]
 
-		if err := w.historyVals.Collect(historyKey, original); err != nil {
+		if err := w.valsCollector().Collect(historyKey, original); err != nil {
 			return err
 		}
 
 		if !w.ii.discard {
-			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
+			if err := w.ii.keysCollector().Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
 				return err
 			}
 		}
@@ -500,16 +517,16 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
 
-	if len(original) > 2048 {
-		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(k))
+	if len(original) > maxHistoryValLen {
+		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", maxHistoryValLen)
 		panic("History value is too large while largeValues=false")
 	}
 
-	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
+	if err := w.valsCollector().Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
 	if !w.ii.discard {
-		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
+		if err := w.ii.keysCollector().Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
 			return err
 		}
 	}
@@ -517,7 +534,7 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 }
 
 func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(ht.h.dirs.Tmp, false)
+	return ht.newWriter(ht.h.dirs.Tmp, !ht.h.Enabled)
 }
 
 type historyBufferedWriter struct {
@@ -551,15 +568,10 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 	w := &historyBufferedWriter{
 		discard: discard,
 
-		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
 
 		ii: ht.iit.newWriter(tmpdir, discard),
-	}
-	if !discard {
-		w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
@@ -575,11 +587,20 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.historyVals != nil {
+		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	w.close()
 	return nil
+}
+
+func (w *historyBufferedWriter) valsCollector() *etl.Collector {
+	if w.historyVals == nil {
+		w.historyVals = newWriterCollector(w.ii.filenameBase+".flush.hist", w.ii.tmpdir, w.ii.logger)
+	}
+	return w.historyVals
 }
 
 type HistoryCollation struct {
@@ -803,7 +824,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		return HistoryCollation{}, err
 	}
 	if len(offsets) > 0 {
-		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+		if err := loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}
 	}
@@ -1046,16 +1067,16 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files    visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
-	getters  []*seg.Reader
-	readers  []*recsplit.IndexReader
-	stepSize uint64
+	files        visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
+	getters      []*seg.Reader
+	pagedGetters []*seg.PagedReader
+	readers      []*recsplit.IndexReader
+	stepSize     uint64
 
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs              []byte
-	blockCompressionBuf []byte
+	_bufTs []byte
 }
 
 func (h *History) beginForTests() *HistoryRoTx {
@@ -1096,6 +1117,19 @@ func (ht *HistoryRoTx) statelessGetter(i int) *seg.Reader {
 	}
 	return ht.getters[i]
 }
+
+// pagedGetter reads one file through its own reader, so a seek keeps the page it decoded: the next seek into the
+// same page skips both the read and the decompression.
+func (ht *HistoryRoTx) pagedGetter(i, pageSize int) *seg.PagedReader {
+	if ht.pagedGetters == nil {
+		ht.pagedGetters = make([]*seg.PagedReader, len(ht.files))
+	}
+	if ht.pagedGetters[i] == nil {
+		ht.pagedGetters[i] = seg.NewPagedReader(ht.dataReader(ht.files[i].src.decompressor), pageSize, true)
+	}
+	return ht.pagedGetters[i]
+}
+
 func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	if ht.readers == nil {
 		ht.readers = make([]*recsplit.IndexReader, len(ht.files))
@@ -1114,45 +1148,6 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		ht.readers[i] = r
 	}
 	return r
-}
-
-func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
-	//defer func() {
-	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
-	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
-	//}()
-
-	if ht.h.SnapshotsDisabled {
-		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
-			return false, 0
-		}
-		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
-	} else {
-		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
-		if !canPruneIdx {
-			return false, 0
-		}
-		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
-	}
-	minTxDB := ht.h.minTxNumInDB(tx)
-	delta := 0.0
-	if txTo > minTxDB {
-		delta = float64(txTo-minTxDB) / float64(ht.stepSize) //TODO: why this is happening?
-	}
-
-	switch ht.h.FilenameBase {
-	case "accounts":
-		mxPrunableHAcc.Set(delta)
-	case "storage":
-		mxPrunableHSto.Set(delta)
-	case "code":
-		mxPrunableHCode.Set(delta)
-	case "commitment":
-		mxPrunableHComm.Set(delta)
-	}
-
-	return minIdxTx < txTo, txTo
 }
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
@@ -1316,22 +1311,18 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		return nil, false, nil
 	}
-	g := ht.statelessGetter(historyItem.i)
-	g.Reset(offset)
-	//fmt.Printf("[dbg] hist.seek: offset=%d\n", offset)
-	v, _ := g.Next(nil)
-	if traceGetAsOf == ht.h.FilenameBase {
-		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
-	}
-
 	compressedPageValuesCount := historyItem.src.decompressor.CompressedPageValuesCount()
-
 	if historyItem.src.decompressor.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
 		compressedPageValuesCount = ht.h.HistoryValuesOnCompressedPage
 	}
-
-	if compressedPageValuesCount > 1 {
-		v, ht.blockCompressionBuf = seg.GetFromPage(historyKey, v, ht.blockCompressionBuf, true)
+	g := ht.pagedGetter(historyItem.i, compressedPageValuesCount)
+	g.Reset(offset)
+	v, err := g.GetFromPage(historyKey)
+	if err != nil {
+		return nil, false, err
+	}
+	if traceGetAsOf == ht.h.FilenameBase {
+		fmt.Printf("DomainGetAsOf(%s, %x, %d) -> %s, histTxNum=%d, isNil(v)=%t\n", ht.h.FilenameBase, key, txNum, g.FileName(), histTxNum, v == nil)
 	}
 	return v, true, nil
 }
@@ -1362,7 +1353,7 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if ht.h.Disable {
+	if !ht.h.Enabled {
 		return nil, false, nil
 	}
 
@@ -1589,7 +1580,10 @@ func (ht *HistoryRoTx) HistoryKeyTxNumRange(fromTxNum, toTxNum int, asc order.By
 	return stream.MultisetKU64(itOnFiles, itOnDB, limit), nil
 }
 
-func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte)) error {
+// HistoryDump walks every value in the visible files and hands each to dumpTo.
+// val is only valid until dumpTo returns: it points into a page buffer the next
+// value decodes over.
+func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, dumpTo func(key []byte, txNum uint64, val []byte) error) error {
 	if len(ht.iit.files) == 0 {
 		return nil
 	}
@@ -1597,6 +1591,8 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 	if fromTxNum >= 0 && ht.iit.files.EndTxNum() <= uint64(fromTxNum) {
 		return nil
 	}
+
+	var histKeyBuf, pageBuf []byte
 
 	for _, item := range ht.iit.files {
 		if fromTxNum >= 0 && item.endTxNum <= uint64(fromTxNum) {
@@ -1608,8 +1604,6 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 		efGetter := ht.iit.dataReader(item.src.decompressor)
 		efGetter.Reset(0)
-
-		var histKeyBuf []byte
 
 		for efGetter.HasNext() {
 			key, _ := efGetter.Next(nil)
@@ -1650,12 +1644,14 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 				val, _ := vReader.Next(nil)
 
-				if compressedPageValuesCount > 0 {
+				if compressedPageValuesCount > 1 {
 					histKeyBuf = historyKey(txNum, key, histKeyBuf)
-					val, _ = seg.GetFromPage(histKeyBuf, val, nil, true)
+					val, pageBuf = seg.GetFromPage(histKeyBuf, val, pageBuf, true)
 				}
 
-				dumpTo(key, txNum, val)
+				if err := dumpTo(key, txNum, val); err != nil {
+					return err
+				}
 			}
 		}
 	}

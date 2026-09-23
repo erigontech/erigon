@@ -3,8 +3,8 @@
 ## Release branches
 
 - `release/3.4` — Stable 3.4.x
-- `release/3.5` — Stable 3.5.x (current — v3.5.3 is the Latest release)
-- `release/3.6` — Upcoming 3.6.x (release-candidate stage: v3.6.0-rc.1 is a draft)
+- `release/3.5` — Stable 3.5.x (previous stable line)
+- `release/3.6` — Stable 3.6.x (current — v3.6.0 is the Latest release)
 - `main` — Next feature release (3.7)
 
 The "current" marker goes stale: before choosing a backport base, verify against `gh release list --repo erigontech/erigon --limit 5` (the Latest tag) and the recent `[rX.Y]`-prefixed PR stream, and update this file if it disagrees.
@@ -34,7 +34,7 @@ Non-personal prefixes that show up for cross-cutting work:
 
 ## Choosing a base branch
 
-- Bug for current stable release → base on `release/3.5`
+- Bug for current stable release → base on `release/3.6`
 - New feature → base on `main`
-- Backport / cherry-pick → branch off the target release branch, prefix the PR title with `[rX.Y]` (e.g. `[r3.5]`)
+- Backport / cherry-pick → branch off the target release branch, prefix the PR title with `[rX.Y]` (e.g. `[r3.6]`)
 - A bug present on several maintained release lines may need a backport per line — check each `release/X.Y` for the affected code before assuming one backport covers it

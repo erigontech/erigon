@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 
@@ -37,23 +38,15 @@ import (
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {
-	attesterSlashing := &cltypes.AttesterSlashing{
-		Attestation_1: &cltypes.IndexedAttestation{
-			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 3, 4, 5, 6}),
-			Data:             &solid.AttestationData{},
-		},
-		Attestation_2: &cltypes.IndexedAttestation{
-			AttestingIndices: solid.NewRawUint64List(2048, []uint64{2, 3, 4, 1, 6}),
-			Data:             &solid.AttestationData{},
-		},
-	}
+	attesterSlashing := cltypes.NewAttesterSlashing(clparams.DenebVersion)
+	attesterSlashing.Attestation_1.AttestingIndices = solid.NewRawUint64List(2048, []uint64{2, 3, 4, 5, 6})
+	attesterSlashing.Attestation_2.AttestingIndices = solid.NewRawUint64List(2048, []uint64{2, 3, 4, 1, 6})
 	// find server
 	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
 	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
-		vhsf(mockBeaconState)
-		return nil
+		return vhsf(mockBeaconState)
 	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
@@ -62,13 +55,18 @@ func TestPoolAttesterSlashings(t *testing.T) {
 	req, err := json.Marshal(attesterSlashing)
 	require.NoError(t, err)
 	// post attester slashing
-	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/attester_slashings", "application/json", bytes.NewBuffer(req))
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/attester_slashings", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	require.Equal(t, 200, resp.StatusCode)
 	// get attester slashings
-	resp, err = server.Client().Get(server.URL + "/eth/v1/beacon/pool/attester_slashings")
+	getReq, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/pool/attester_slashings", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(getReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -108,8 +106,7 @@ func TestPoolProposerSlashings(t *testing.T) {
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
 	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
-		vhsf(mockBeaconState)
-		return nil
+		return vhsf(mockBeaconState)
 	}).AnyTimes()
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -118,13 +115,18 @@ func TestPoolProposerSlashings(t *testing.T) {
 	require.NoError(t, err)
 
 	// post attester slashing
-	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/proposer_slashings", "application/json", bytes.NewBuffer(req))
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/proposer_slashings", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	require.Equal(t, 200, resp.StatusCode)
-	// get attester slashings
-	resp, err = server.Client().Get(server.URL + "/eth/v1/beacon/pool/proposer_slashings")
+	// get proposer slashings
+	getReq, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/pool/proposer_slashings", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(getReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -154,8 +156,7 @@ func TestPoolVoluntaryExits(t *testing.T) {
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
 	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
-		vhsf(mockBeaconState)
-		return nil
+		return vhsf(mockBeaconState)
 	}).AnyTimes()
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
@@ -163,13 +164,18 @@ func TestPoolVoluntaryExits(t *testing.T) {
 	req, err := json.Marshal(voluntaryExit)
 	require.NoError(t, err)
 	// post attester slashing
-	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/voluntary_exits", "application/json", bytes.NewBuffer(req))
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/voluntary_exits", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	require.Equal(t, 200, resp.StatusCode)
-	// get attester slashings
-	resp, err = server.Client().Get(server.URL + "/eth/v1/beacon/pool/voluntary_exits")
+	// get voluntary exits
+	getReq, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/pool/voluntary_exits", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(getReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -206,8 +212,7 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
 	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
-		vhsf(mockBeaconState)
-		return nil
+		return vhsf(mockBeaconState)
 	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
@@ -216,13 +221,18 @@ func TestPoolBlsToExecutionChainges(t *testing.T) {
 	req, err := json.Marshal(msg)
 	require.NoError(t, err)
 	// post attester slashing
-	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/bls_to_execution_changes", "application/json", bytes.NewBuffer(req))
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/bls_to_execution_changes", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	require.Equal(t, 200, resp.StatusCode)
-	// get attester slashings
-	resp, err = server.Client().Get(server.URL + "/eth/v1/beacon/pool/bls_to_execution_changes")
+	// get bls to execution changes
+	getReq, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/pool/bls_to_execution_changes", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(getReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -270,8 +280,7 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
 	mockBeaconState.SetVersion(clparams.DenebVersion)
 	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
-		vhsf(mockBeaconState)
-		return nil
+		return vhsf(mockBeaconState)
 	}).AnyTimes()
 
 	server := httptest.NewServer(handler.mux)
@@ -280,13 +289,18 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	req, err := json.Marshal(msg)
 	require.NoError(t, err)
 	// post attester slashing
-	resp, err := server.Client().Post(server.URL+"/eth/v1/validator/aggregate_and_proofs", "application/json", bytes.NewBuffer(req))
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/validator/aggregate_and_proofs", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	require.Equal(t, 200, resp.StatusCode)
-	// get attester slashings
-	resp, err = server.Client().Get(server.URL + "/eth/v1/beacon/pool/attestations")
+	// get attestations
+	getReq, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/pool/attestations", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(getReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -305,6 +319,43 @@ func TestPoolAggregatesAndProofs(t *testing.T) {
 	require.Equal(t, msg[1].Message.Aggregate, out.Data[1])
 }
 
+func TestPoolAggregatesAndProofsReportsRequestIndex(t *testing.T) {
+	msg := []*cltypes.SignedAggregateAndProof{
+		{
+			Message: &cltypes.AggregateAndProof{
+				Aggregate: &solid.Attestation{
+					AggregationBits: solid.BitlistFromBytes([]byte{1, 2}, 2048),
+					Data:            &solid.AttestationData{},
+					Signature:       common.Bytes96{3, 45, 6},
+				},
+			},
+			Signature: common.Bytes96{2},
+		},
+		nil,
+	}
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	mockBeaconState := &state.CachingBeaconState{BeaconState: raw.New(&clparams.BeaconChainConfig{})}
+	mockBeaconState.SetVersion(clparams.DenebVersion)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(vhsf synced_data.ViewHeadStateFn) error {
+		return vhsf(mockBeaconState)
+	}).AnyTimes()
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	requestBody, err := json.Marshal(msg)
+	require.NoError(t, err)
+
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/validator/aggregate_and_proofs", bytes.NewBuffer(requestBody))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 400, resp.StatusCode)
+	var response poolingError
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&response))
+	require.Equal(t, []poolingFailure{{Index: 1, Message: "invalid aggregate and proof"}}, response.Failures)
+}
+
 func TestPoolSyncCommittees(t *testing.T) {
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
@@ -315,20 +366,25 @@ func TestPoolSyncCommittees(t *testing.T) {
 	}
 	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	sd.OnHeadState(s)
+	require.NoError(t, sd.OnHeadState(s))
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
 	req, err := json.Marshal(msgs)
 	require.NoError(t, err)
 	// post attester slashing
-	resp, err := server.Client().Post(server.URL+"/eth/v1/beacon/pool/sync_committees", "application/json", bytes.NewBuffer(req))
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	require.Equal(t, 200, resp.StatusCode)
-	// get attester slashings
-	resp, err = server.Client().Get(server.URL + "/eth/v1/validator/sync_committee_contribution?slot=1&subcommittee_index=0&beacon_block_root=0x0102030405060708000000000000000000000000000000000000000000000000")
+
+	getReq, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/validator/sync_committee_contribution?slot=1&subcommittee_index=0&beacon_block_root=0x0102030405060708000000000000000000000000000000000000000000000000", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(getReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
@@ -348,6 +404,26 @@ func TestPoolSyncCommittees(t *testing.T) {
 	}, out.Data)
 }
 
+func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, _, _, handler, _, syncedDataMgr, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	syncedDataMgr.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadState(gomock.Any()).Return(synced_data.ErrNotSynced)
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/sync_committees", bytes.NewReader(body))
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
 func TestPoolSyncContributionAndProofs(t *testing.T) {
 	aggrBits := make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize)
 	aggrBits[0] = 1
@@ -364,20 +440,25 @@ func TestPoolSyncContributionAndProofs(t *testing.T) {
 	}
 	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 
-	sd.OnHeadState(s)
+	require.NoError(t, sd.OnHeadState(s))
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
 	// json
 	req, err := json.Marshal(msgs)
 	require.NoError(t, err)
 	// post attester slashing
-	resp, err := server.Client().Post(server.URL+"/eth/v1/validator/contribution_and_proofs", "application/json", bytes.NewBuffer(req))
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/validator/contribution_and_proofs", bytes.NewBuffer(req))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
 	require.Equal(t, 200, resp.StatusCode)
-	// get attester slashings
-	resp, err = server.Client().Get(server.URL + "/eth/v1/validator/sync_committee_contribution?slot=1&subcommittee_index=0&beacon_block_root=0x0102030405060708000000000000000000000000000000000000000000000000")
+
+	getReq, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/validator/sync_committee_contribution?slot=1&subcommittee_index=0&beacon_block_root=0x0102030405060708000000000000000000000000000000000000000000000000", nil)
+	require.NoError(t, err)
+	resp, err = server.Client().Do(getReq)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 

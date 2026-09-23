@@ -86,7 +86,7 @@ func readFileBytes(t *testing.T, path string) []byte {
 	t.Helper()
 	f, err := os.Open(path)
 	require.NoError(t, err)
-	defer f.Close()
+	defer f.Close() //nolint:errcheck
 	b, err := io.ReadAll(f)
 	require.NoError(t, err)
 	return b

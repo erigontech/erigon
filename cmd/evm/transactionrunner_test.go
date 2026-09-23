@@ -50,3 +50,38 @@ func TestRunTransactionTest(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []testResult{{Name: "gasLimitPriceOverflow", Pass: true}}, results)
 }
+
+func TestRunTransactionTestEESTForks(t *testing.T) {
+	tests := map[string]string{
+		"Cancun": `{
+			"nonceOverflow": {
+				"txbytes": "0xf868890100000000000000000a82520894c0f6dc9e5836f54caadbf59cc69346c508e1992b80801ca037f68b9ea67aa96dcef806e691314bec49d0d6a7b0da43347fd8907a466944eda059b95678162573fc440c25b1c11339b7700153cdc2fe029760c7e5581122282e",
+				"result": {
+					"Cancun": {"intrinsicGas": "0x00", "exception": "TransactionException.NONCE_OVERFLOW"}
+				}
+			}
+		}`,
+		"Amsterdam": `{
+			"emptyAuthorizationList": {
+				"txbytes": "0x04f86401808007830186a09400000000000000000000000000000000000000008080c0c001a0884bf485199d5e86e675e79f17a710b754a36915a33a2838c24e1e53378699f1a074085ca12ad0f729b6bd6c37a7a23e925c7e1e87a557ad3100a9113786c98afd",
+				"result": {
+					"Amsterdam": {"intrinsicGas": "0x00", "exception": "TransactionException.TYPE_4_EMPTY_AUTHORIZATION_LIST"}
+				}
+			}
+		}`,
+	}
+	filter, err := compileTestFilter(".*", nil)
+	require.NoError(t, err)
+
+	for fork, fixture := range tests {
+		t.Run(fork, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "transaction.json")
+			require.NoError(t, os.WriteFile(path, []byte(fixture), 0o600))
+
+			results, err := runTransactionTest(path, filter)
+			require.NoError(t, err)
+			require.Len(t, results, 1)
+			require.True(t, results[0].Pass, results[0].Error)
+		})
+	}
+}

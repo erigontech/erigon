@@ -570,7 +570,7 @@ func newP2PNodeAt(t *testing.T, baseDir string, logger log.Logger, mode storageM
 
 	// Empty snapshots registry — genesis-only state, no frozen files.
 	allSnapshots := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{}, dirs.Snap, logger)
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots)
 
 	// --- Event bus and storage / orchestrator -----------------------------
 	var (

@@ -62,7 +62,7 @@ func TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers(t *te
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
-	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
 
 	const sideTipHeight = uint64(110)
 	staleHashAt105 := common.Hash{0x99}
@@ -123,7 +123,7 @@ func TestResetCanonicalAndRefillFromSnapshots_NoOpOnEmptyDB(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	logger := log.New()
-	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
 
 	require.NoError(t, rawdbreset.ResetCanonicalAndRefillFromSnapshots(ctx, db, dirs, br, logger))
 

@@ -339,7 +339,9 @@ func (a *ApiHandler) getHistoricalProposerDuties(ctx context.Context, tx kv.Tx, 
 
 	historicalState := state.New(a.beaconChainCfg)
 	historicalState.SetVersion(a.beaconChainCfg.GetCurrentStateVersion(epoch))
-	historicalState.SetSlot(expectedSlot)
+	if err := historicalState.SetSlot(expectedSlot); err != nil {
+		return nil, err
+	}
 	historicalState.SetValidators(validatorSet)
 
 	epochSeed := shuffling2.GetSeed(a.beaconChainCfg, mix, epoch, a.beaconChainCfg.DomainBeaconProposer)

@@ -164,6 +164,18 @@ func RawRlpHash(rawRlpData rlp.RawValue) common.Hash {
 	return crypto.Keccak256Hash(rawRlpData)
 }
 
+// TransactionHashFromEncoding returns the hash of a transaction in any encoding DecodeTransaction accepts.
+func TransactionHashFromEncoding(enc []byte) (common.Hash, error) {
+	if TypedTransactionMarshalledAsRlpString(enc) {
+		payload, _, err := rlp.SplitString(enc)
+		if err != nil {
+			return common.Hash{}, err
+		}
+		enc = payload
+	}
+	return crypto.Keccak256Hash(enc), nil
+}
+
 func RlpHash(x any) common.Hash {
 	sha := crypto.NewKeccakState()
 	rlp.Encode(sha, x) //nolint:errcheck
@@ -175,7 +187,7 @@ func RlpHash(x any) common.Hash {
 // prefixSlices contains one-byte slices for all possible prefix values (0–255).
 // Each entry is pre-allocated once during init so we can write a single prefix
 // byte into the hasher without creating a new slice every time.
-// This avoids per-call heap allocations when hashing typed transactions.
+// This avoids per-call heap allocations when hashing prefixed payloads.
 var prefixSlices [256][]byte
 
 func init() {
@@ -209,7 +221,7 @@ func rlpPayloadHash(encode func(w io.Writer, buf []byte) error) common.Hash {
 	return crypto.FinalizeHash(sha)
 }
 
-// prefixedPayloadHash hashes keccak256(prefix || payload) for typed transactions.
+// prefixedPayloadHash hashes keccak256(prefix || payload).
 func prefixedPayloadHash(prefix byte, encode func(w io.Writer, buf []byte) error) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, buf []byte) error {
 		if _, err := w.Write(prefixSlices[prefix]); err != nil {

@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -46,7 +46,7 @@ import (
 // underlying rawdb helper actually bumps the version when invoked.
 func TestUnwindDBPastBlock_IncrementsStateVersion(t *testing.T) {
 	t.Parallel()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -71,7 +71,7 @@ func TestUnwindDBPastBlock_IncrementsStateVersion(t *testing.T) {
 // chain.
 func TestUnwindDBPastBlock_DeletesNewerEpochs(t *testing.T) {
 	t.Parallel()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
@@ -141,7 +141,7 @@ func seedHeaderAt(t *testing.T, tx kv.RwTx, blockNum uint64, hash common.Hash) {
 // corresponding kv.HeaderNumber row.
 func TestDeleteHeaderNumbersPastBlock_WipesOrphans(t *testing.T) {
 	t.Parallel()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 
 	hashAt := func(n uint64) common.Hash {
@@ -190,7 +190,7 @@ func TestDeleteHeaderNumbersPastBlock_WipesOrphans(t *testing.T) {
 // surfaces it directly.
 func TestUnwindDBPastBlock_PreservesHeadersForBlocksUpToTarget(t *testing.T) {
 	t.Parallel()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 
 	hashAt := func(n uint64) common.Hash {
@@ -246,7 +246,7 @@ func TestUnwindDBPastBlock_PreservesHeadersForBlocksUpToTarget(t *testing.T) {
 // sequence with the three helpers below.
 func TestUnwindDBPastBlock_CoreTablesAreEmptyPastTarget(t *testing.T) {
 	t.Parallel()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 
 	hashAt := func(n uint64) common.Hash {
@@ -319,7 +319,7 @@ func TestUnwindDBPastBlock_CoreTablesAreEmptyPastTarget(t *testing.T) {
 // unwindDBPastBlock called rawdb.TruncateTd(toBlock+1).
 func TestUnwindDBPastBlock_PreservesHeaderTDForCaplinParentLookup(t *testing.T) {
 	t.Parallel()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 
 	hashAt := func(n uint64) common.Hash {

@@ -24,9 +24,30 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc"
 )
+
+func TestFilterCriteriaValidateTopicPositions(t *testing.T) {
+	criteria := FilterCriteria{
+		Topics: [][]common.Hash{
+			{{1}, {2}},
+			{{3}, {4}},
+			{{5}, {6}},
+			{{7}, {8}},
+		},
+	}
+	require.NoError(t, criteria.ValidateTopicPositions())
+
+	criteria.Topics = append(criteria.Topics, []common.Hash{{9}})
+	err := criteria.ValidateTopicPositions()
+	var invalidParams *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &invalidParams)
+	require.Equal(t, rpc.ErrCodeInvalidParams, invalidParams.ErrorCode())
+	require.EqualError(t, err, "query exceeds the maximum of 4 topics")
+}
 
 func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	var (
@@ -72,7 +93,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 
 	// single address
 	var test2 FilterCriteria
-	vector = fmt.Sprintf(`{"address": "%s"}`, address0.Hex())
+	vector = fmt.Sprintf(`{"address": %q}`, address0.Hex())
 	if err := json.Unmarshal([]byte(vector), &test2); err != nil {
 		t.Fatal(err)
 	}
@@ -85,7 +106,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 
 	// multiple address
 	var test3 FilterCriteria
-	vector = fmt.Sprintf(`{"address": ["%s", "%s"]}`, address0.Hex(), address1.Hex())
+	vector = fmt.Sprintf(`{"address": [%q, %q]}`, address0.Hex(), address1.Hex())
 	if err := json.Unmarshal([]byte(vector), &test3); err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +122,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 
 	// single topic
 	var test4 FilterCriteria
-	vector = fmt.Sprintf(`{"topics": ["%s"]}`, topic0.Hex())
+	vector = fmt.Sprintf(`{"topics": [%q]}`, topic0.Hex())
 	if err := json.Unmarshal([]byte(vector), &test4); err != nil {
 		t.Fatal(err)
 	}
@@ -117,7 +138,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 
 	// test multiple "AND" topics
 	var test5 FilterCriteria
-	vector = fmt.Sprintf(`{"topics": ["%s", "%s"]}`, topic0.Hex(), topic1.Hex())
+	vector = fmt.Sprintf(`{"topics": [%q, %q]}`, topic0.Hex(), topic1.Hex())
 	if err := json.Unmarshal([]byte(vector), &test5); err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +160,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 
 	// test optional topic
 	var test6 FilterCriteria
-	vector = fmt.Sprintf(`{"topics": ["%s", null, "%s"]}`, topic0.Hex(), topic2.Hex())
+	vector = fmt.Sprintf(`{"topics": [%q, null, %q]}`, topic0.Hex(), topic2.Hex())
 	if err := json.Unmarshal([]byte(vector), &test6); err != nil {
 		t.Fatal(err)
 	}
@@ -164,7 +185,7 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 
 	// test OR topics
 	var test7 FilterCriteria
-	vector = fmt.Sprintf(`{"topics": [["%s", "%s"], null, ["%s", null]]}`, topic0.Hex(), topic1.Hex(), topic2.Hex())
+	vector = fmt.Sprintf(`{"topics": [[%q, %q], null, [%q, null]]}`, topic0.Hex(), topic1.Hex(), topic2.Hex())
 	if err := json.Unmarshal([]byte(vector), &test7); err != nil {
 		t.Fatal(err)
 	}

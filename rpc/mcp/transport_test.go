@@ -28,7 +28,7 @@ func TestListenAndServeServesBothTransports(t *testing.T) {
 	var resp *http.Response
 	var err error
 	for range 100 {
-		req, reqErr := http.NewRequest(http.MethodPost, "http://"+addr+"/mcp", strings.NewReader(initBody))
+		req, reqErr := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+addr+"/mcp", strings.NewReader(initBody))
 		require.NoError(t, reqErr)
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept", "application/json, text/event-stream")
@@ -45,13 +45,15 @@ func TestListenAndServeServesBothTransports(t *testing.T) {
 	require.Equal(t, http.StatusOK, resp.StatusCode)
 	require.Contains(t, string(body), `"ErigonMCP"`)
 
-	sseResp, err := client.Get("http://" + addr + "/sse")
+	sseReq, err := http.NewRequestWithContext(t.Context(), "GET", "http://"+addr+"/sse", nil)
+	require.NoError(t, err)
+	sseResp, err := client.Do(sseReq)
 	require.NoError(t, err)
 	defer sseResp.Body.Close()
 	require.Equal(t, http.StatusOK, sseResp.StatusCode)
 	require.Equal(t, "text/event-stream", sseResp.Header.Get("Content-Type"))
 
-	slashReq, err := http.NewRequest(http.MethodPost, "http://"+addr+"/mcp/", strings.NewReader(initBody))
+	slashReq, err := http.NewRequestWithContext(t.Context(), http.MethodPost, "http://"+addr+"/mcp/", strings.NewReader(initBody))
 	require.NoError(t, err)
 	slashReq.Header.Set("Content-Type", "application/json")
 	slashReq.Header.Set("Accept", "application/json, text/event-stream")
@@ -79,7 +81,12 @@ func TestListenAndServeShutsDownWithOpenStream(t *testing.T) {
 	var err error
 	for range 100 {
 		var resp *http.Response
-		resp, err = probe.Get("http://" + addr + "/sse")
+		getReq, getErr := http.NewRequestWithContext(t.Context(), "GET", "http://"+addr+"/sse", nil)
+		if getErr == nil {
+			resp, err = probe.Do(getReq)
+		} else {
+			err = getErr
+		}
 		if err == nil {
 			resp.Body.Close()
 			break
@@ -88,7 +95,7 @@ func TestListenAndServeShutsDownWithOpenStream(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	streamReq, err := http.NewRequest(http.MethodGet, "http://"+addr+"/mcp", nil)
+	streamReq, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://"+addr+"/mcp", nil)
 	require.NoError(t, err)
 	streamReq.Header.Set("Accept", "text/event-stream")
 	// Bounds the header wait without a request deadline that would end the

@@ -69,8 +69,8 @@ func TestDecodeMinimalHashRejectsNonCanonical(t *testing.T) {
 		if err != nil {
 			t.Fatalf("input %s: canonical key must decode, got %v", c.hex, err)
 		}
-		if got := h.Big().Uint64(); got != c.want {
-			t.Fatalf("input %s: got key %d, want %d", c.hex, got, c.want)
+		if u := h.U256(); u.Uint64() != c.want {
+			t.Fatalf("input %s: got key %d, want %d", c.hex, u.Uint64(), c.want)
 		}
 	}
 }

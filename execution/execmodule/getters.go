@@ -60,7 +60,7 @@ var errNotFound = errors.New("notfound")
 func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(), error) {
 	e.lock.RLock()
 	sd := e.currentContext
-	// Fall back to published SD during background commit.
+	// Fall back to published SD while an FCU commits.
 	if sd == nil && e.publishedSD != nil {
 		sd = e.publishedSD()
 	}

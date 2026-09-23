@@ -73,9 +73,6 @@ func DeriveForkChainConfig(parent *chain.Config, cut *ParentCut, forkName string
 	if forkName == parent.ChainName {
 		return nil, fmt.Errorf("derive fork chain.Config: fork name %q is identical to parent chain name", forkName)
 	}
-	if parent.Bor != nil {
-		return nil, fmt.Errorf("derive fork chain.Config: Bor (Polygon) consensus parents are not yet supported")
-	}
 	if parent.Aura != nil {
 		return nil, fmt.Errorf("derive fork chain.Config: AuRa (Gnosis) consensus parents are not yet supported")
 	}

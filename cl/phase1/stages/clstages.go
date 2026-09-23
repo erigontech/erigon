@@ -20,6 +20,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/antiquary"
@@ -32,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/execution_client/block_collector"
@@ -48,36 +51,39 @@ import (
 )
 
 type Cfg struct {
-	rpc                     *rpc.BeaconRpcP2P
-	ethClock                eth_clock.EthereumClock
-	beaconCfg               *clparams.BeaconChainConfig
-	executionClient         execution_client.ExecutionEngine
-	state                   *state.CachingBeaconState
-	forkChoice              *forkchoice.ForkChoiceStore
-	indiciesDB              kv.RwDB
-	dirs                    datadir.Dirs
-	blockReader             freezeblocks.BeaconSnapshotReader
-	antiquary               *antiquary.Antiquary
-	syncedData              *synced_data.SyncedDataManager
-	emitter                 *beaconevents.EventEmitter
-	blockCollector          block_collector.BlockCollector
-	sn                      *freezeblocks.CaplinSnapshots
-	blobStore               blob_storage.BlobStorage
-	peerDas                 das.PeerDas
-	blobDownloader          *network2.BlobHistoryDownloader
-	attestationDataProducer attestation_producer.AttestationDataProducer
-	caplinConfig            clparams.CaplinConfig
-	hasDownloaded           bool
-
-	// blockSnapshotTipFn, when non-nil, returns the canonical
-	// chain.toml's block-tip. Passed through to
-	// StageHistoryReconstructionCfg.SetBlockSnapshotTipFn so the
-	// historical-blocks stage stops backward-walking at canonical
-	// rather than EL FrozenBlocks() (which collapses to state-tip).
-	// Wired by external setup code (typically caplin1/run.go) via
-	// SetBlockSnapshotTipFn — keeps the stages package free of
-	// snapcfg / snapshotsync dependencies.
-	blockSnapshotTipFn func() uint64
+	rpc                          *rpc.BeaconRpcP2P
+	ethClock                     eth_clock.EthereumClock
+	beaconCfg                    *clparams.BeaconChainConfig
+	executionClient              execution_client.ExecutionEngine
+	state                        *state.CachingBeaconState
+	forkChoice                   *forkchoice.ForkChoiceStore
+	indiciesDB                   kv.RwDB
+	dirs                         datadir.Dirs
+	blockReader                  freezeblocks.BeaconSnapshotReader
+	antiquary                    *antiquary.Antiquary
+	syncedData                   *synced_data.SyncedDataManager
+	emitter                      *beaconevents.EventEmitter
+	blockCollector               block_collector.BlockCollector
+	sn                           *freezeblocks.CaplinSnapshots
+	blobStore                    blob_storage.BlobStorage
+	peerDas                      das.PeerDas
+	blobDownloader               *network2.BlobHistoryDownloader
+	attestationDataProducer      attestation_producer.AttestationDataProducer
+	caplinConfig                 clparams.CaplinConfig
+	hasDownloaded                bool
+	gloasPayloadRetryOffset      atomic.Uint32
+	gloasEnvelopeRecoveryCursor  common.Hash
+	gloasEnvelopeRecoveryHead    common.Hash
+	gloasEnvelopeRecoveryPending []common.Hash
+	gloasEnvelopeRecoveryReplace int
+	gloasHeadEnvelopeRequestMu   sync.Mutex
+	gloasHeadEnvelopeRequestID   uint64
+	gloasHeadEnvelopeRequests    map[common.Hash]uint64
+	gloasHeadEnvelopeRequestHead common.Hash
+	gloasPayloadValidator        gloasPayloadValidator
+	gloasVerificationCursor      common.Hash
+	gloasVerificationHead        common.Hash
+	blockSnapshotTipFn           func() uint64
 }
 
 // SetBlockSnapshotTipFn wires the canonical block-tip provider for
@@ -136,6 +142,7 @@ func ClStagesCfg(
 	blobDownloader := network2.NewBlobHistoryDownloader(
 		ctx,
 		beaconCfg,
+		ethClock,
 		rpc,
 		indiciesDB,
 		blobStore,
@@ -167,6 +174,7 @@ func ClStagesCfg(
 		emitter:                 emitters,
 		blobStore:               blobStore,
 		blockCollector:          block_collector.NewPersistentBlockCollector(ctx, log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
+		gloasPayloadValidator:   forkChoice,
 		attestationDataProducer: attestationDataProducer,
 	}
 }
@@ -333,8 +341,12 @@ func ConsensusClStages(ctx context.Context,
 						"blockRoot", common.Hash(startingRoot),
 					)
 					downloader := network2.NewBackwardBeaconDownloader(ctx, cfg.rpc, cfg.sn, cfg.executionClient, cfg.indiciesDB, cfg.beaconCfg)
-					if urls := clparams.ConfigurableCheckpointsURLs; len(urls) > 0 {
-						downloader.SetHTTPFallbackURL(urls[0])
+					downloader.SetCurrentSlotSampler(cfg.ethClock.GetCurrentSlot)
+					downloader.SetGloasSuccessorValidator(network2.NewGloasSuccessorValidator(cfg.state, startingRoot))
+					if checkpoint_sync.RemoteCheckpointSyncEnabled(cfg.caplinConfig) {
+						if urls := clparams.GetAllCheckpointSyncEndpoints(cfg.caplinConfig.NetworkId); len(urls) > 0 {
+							downloader.SetHTTPFallbackURL(urls[0])
+						}
 					}
 
 					hrCfg := StageHistoryReconstruction(downloader, cfg.antiquary, cfg.sn, cfg.indiciesDB, cfg.executionClient, cfg.beaconCfg, cfg.caplinConfig, false, startingRoot, startingSlot, cfg.dirs.Tmp, 600*time.Millisecond, cfg.blockCollector, cfg.blockReader, cfg.blobStore, logger, cfg.forkChoice, cfg.blobDownloader)
@@ -463,6 +475,11 @@ func writeGenesisBeaconBlock(ctx context.Context, cfg *Cfg) error {
 		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
 		if version >= clparams.CapellaVersion {
 			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.beaconCfg.MaxWithdrawalsPerPayload), 44)
+		}
+	}
+	if version >= clparams.GloasVersion {
+		if bid := cfg.state.GetLatestExecutionPayloadBid(); bid != nil {
+			body.SignedExecutionPayloadBid.Message = bid
 		}
 	}
 

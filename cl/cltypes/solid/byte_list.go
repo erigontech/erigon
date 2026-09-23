@@ -126,6 +126,10 @@ func (b *ByteListSSZ) HashSSZ() ([32]byte, error) {
 	return result, nil
 }
 
+func (b *ByteListSSZ) HashSSZProgressive() ([32]byte, error) {
+	return merkle_tree.ProgressiveBasicListRoot(b.data, uint64(len(b.data)))
+}
+
 // Bytes returns a copy of the underlying data.
 func (b *ByteListSSZ) Bytes() []byte {
 	return bytes.Clone(b.data)
@@ -144,4 +148,12 @@ func (b *ByteListSSZ) SetBytes(buf []byte) error {
 // Len returns the current length of the data.
 func (b *ByteListSSZ) Len() int {
 	return len(b.data)
+}
+
+// ValidateBounds checks that the byte list does not exceed the configured limit.
+func (b *ByteListSSZ) ValidateBounds(limit uint64) error {
+	if uint64(len(b.data)) > limit {
+		return fmt.Errorf("data length %d exceeds limit %d", len(b.data), limit)
+	}
+	return nil
 }

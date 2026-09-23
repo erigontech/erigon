@@ -21,8 +21,8 @@ import (
 	"sync"
 )
 
-// Buffers that grew beyond maxBufferCap are dropped on Put so that one oversized use cannot pin memory in the pool.
-const maxBufferCap = 1 << 20
+// Buffers that grew beyond MaxBufferCap are dropped on Put so that one oversized use cannot pin memory in the pool.
+const MaxBufferCap = 1 << 20
 
 var buffers = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
@@ -34,7 +34,7 @@ func GetBuffer() *bytes.Buffer {
 }
 
 func PutBuffer(b *bytes.Buffer) {
-	if b.Cap() > maxBufferCap {
+	if b.Cap() > MaxBufferCap {
 		return
 	}
 	buffers.Put(b)

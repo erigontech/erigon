@@ -60,9 +60,9 @@ Snapshots are organised into several subdirectories. The main ones are:
 - You can replay a single historical transaction without re-executing its block.
 - If an account changes V1 → V2 → V1 within one block, `debug_getModifiedAccountsByNumber` correctly returns it.
 - Erigon stores compact per-transaction receipt *metadata* — cumulative gas used, blob gas used, log index — in a
-  **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **off by default** in
-  every prune mode (opt in with `--prune.include-receipts`). When a full receipt isn't cached, it is reconstructed on
-  demand, re-deriving logs by re-execution.
+  **required** receipt domain. Full receipts (with logs) live in a separate cache domain that is **on by default** in
+  every prune mode (opt out with `--prune.include-receipts=false`). When a full receipt isn't cached, it is
+  reconstructed on demand, re-deriving logs by re-execution.
 
 ## What does it cost on disk?
 
@@ -80,7 +80,9 @@ Real numbers from Erigon 3.6 archive nodes (`--prune.mode=archive`, default prun
 
 Block segments — headers, bodies and transactions — sit directly in `snapshots/` rather than in a sub-folder, and on mainnet they are the single largest item.
 
-Data that is off by default is excluded above. On the same mainnet node it would add 441 GB for the receipts cache (`--prune.include-receipts`), 4.4 TB for commitment history (`--prune.include-commitment-history`), and 2.5 TB for the Caplin block, blob and state archive.
+The receipts cache was still off by default when these nodes were measured, so the table excludes it. It is on by default from 3.7 and adds about 441 GB on a mainnet archive, which keeps receipts for every block. Minimal and full nodes keep receipts only for their history window, so they pay a few GB.
+
+Data that is off by default is excluded above. On the same mainnet node it would add 4.4 TB for commitment history (`--prune.include-commitment-history`) and 2.5 TB for the Caplin block, blob and state archive.
 
 Each column is one node, so totals differ slightly from the headline figures on [Hardware Requirements](../get-started/hardware-requirements), which are measured on freshly synced nodes.
 
@@ -98,9 +100,9 @@ Deleting `chaindata/` is **recoverable but not free**: it discards the latest mu
 
 ## Tuning knobs
 
-- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM.
+- **`--batchSize`** — size of the Execution stage's in-memory buffer before it is flushed to MDBX. Default: `512M`. Raising it (for example `--batchSize 1G` or higher) can speed up execution-heavy sync at the cost of more RAM. It is the Execution stage's commit threshold, so a larger value means larger single MDBX write transactions, which raise the file's high-water mark in bigger steps. Keeping it at or below `1G` is a useful heuristic if you want MDBX to grow more gradually.
 - **`--db.size.limit`** — caps the MDBX file size. Useful when running multiple Erigon instances on one disk to prevent one from starving the others.
-- **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC daemon against the same datadir). Lowering it does not reduce read concurrency: a value below the parallel-execution worker count would deadlock, since each worker holds a long-lived read transaction, so it is silently raised to the worker count. Lower `--exec.workers` instead.
+- **`--db.read.concurrency`** — maximum number of concurrent open MDBX read transactions (the read-tx semaphore). Raise it for nodes serving heavy parallel RPC (for example a high-throughput RPC daemon against the same datadir). Lowering it does not reduce read concurrency: a value below the parallel-execution worker count would deadlock, since each worker holds a long-lived read transaction, and parallel commitment (`--experimental.parallel-commitment`) also needs GOMAXPROCS + 1 readers, one per worker and one for the base trie. Erigon raises a lower value, with a warning, to a floor that also counts the warmup and read-ahead readers and a fixed reserve; rpcdaemon uses it as given. Lower `--exec.workers` instead.
 - **Symlinks for tiered storage.** Place `chaindata/` and `snapshots/domain/` on fast NVMe, leave `snapshots/idx/` and `snapshots/history/` on cheaper SATA. See [Optimizing Storage](optimizing-storage) for the recipe.
 
 ## Safe-to-delete subdirectories
@@ -114,6 +116,28 @@ If you need to reclaim space without resyncing from scratch:
 | `temp/` | Cleaned automatically at startup anyway |
 | `chaindata/` | Recoverable, but triggers a resync of the post-snapshot tip from the consensus layer — not instant; keep a backup for fast recovery |
 | `snapshots/` | **Do not delete** — would force a full resync |
+
+## Reclaiming space in `chaindata/`
+
+MDBX reuses free pages instead of returning them to the filesystem, so `mdbx.dat`
+never shrinks on its own. After a long sync or a large prune the file can stay
+much bigger than the data it actually holds.
+
+`erigon db compact` rewrites every mdbx database of a datadir without its free
+pages:
+
+```bash
+./build/bin/erigon db compact --datadir=<path>
+```
+
+Erigon must be stopped. The command takes the datadir lock and opens each
+database exclusively, so it fails instead of touching a database still in use.
+The copy is written inside the database's own directory, so each database needs
+free space for a second copy of itself on the volume it already lives on, and a
+big `chaindata/` can take hours.
+
+This is a manual defragmentation pass, not the background compaction of an
+LSM engine — MDBX has none, as described in *Storage engine: MDBX* above.
 
 ## Where to go next
 

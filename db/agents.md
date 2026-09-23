@@ -18,7 +18,8 @@ datadir/
     ├── domain/    # Latest state values
     ├── history/   # Historical value changes
     ├── idx/       # Inverted indices for search
-    └── accessor/  # Additional lookup indices
+    ├── accessor/  # Additional lookup indices
+    └── caplin/    # Consensus-layer state-table snapshots
 ```
 
 ## Key Components
@@ -66,6 +67,9 @@ Sorts data before database insertion to reduce write amplification:
 - Downloaded via BitTorrent with WebSeed fallback
 - Piece size: 2MB default
 - Verification on download
+- `Preverified.Typed` (`snapcfg/util.go`) filters block and `caplin/` entries to the binary's supported version window for their type and keeps the newest version per name. `domain/`, `history/`, `idx/`, `accessor/` state entries bypass both — they are kept unconditionally under their full name. `caplin/`-prefixed entries are the consensus state tables (`BlockRoot`, `EpochData`, …); they have no snaptype of their own and borrow `snaptype.BeaconBlocks`' window, so publishing a newer caplin state-table version requires bumping that type first, or existing binaries silently ignore the new files. Beacon blocks and blob sidecars live at the snapshots root, not under `caplin/`, and take the ordinary typed path with their own per-type windows
+- Offline verification: `integrity.VerifyTorrentFiles` (`integrity/torrent_verify.go`) re-hashes data files against their `.torrent` piece hashes, walking `<datadir>/snapshots` recursively and following symlinked subtrees, so it covers `caplin/` and the state dirs rather than only the top-level block segments. `failFast` only decides whether the run stops at the first mismatch; a mismatch, an unreachable path or a cancelled context always fails the call
+- Caplin's two snapshot collections do not share a lifecycle: `freezeblocks.CaplinSnapshots` (beacon blocks, blob sidecars) embeds `snapshotsync.BaseRoSnapshots` and reads through pinned generations, while `snapshotsync.CaplinStateSnapshots` (the `caplin/` state tables) still keeps its own `dirty`/`visible` copy. Three caplin accessors keep conventions the base does not, and consumers depend on each: `SegmentsMax` is dirty-backed (it counts a dumped-but-unindexed tail, which the archive backfill stop condition needs), `FrozenBlobs` is the exclusive `To` (consumers compare `slot < FrozenBlobs()`), and `OpenFolder` keeps caplin's own gap-filtered scan so a segment past a gap never reaches the dirty set
 
 ## Runtime settings (`snapshots/erigondb.toml`)
 

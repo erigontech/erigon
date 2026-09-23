@@ -84,7 +84,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 
 // SendRawTransactionSync implements eth_sendRawTransactionSync (https://eips.ethereum.org/EIPS/eip-7966).
 // Creates a new message call or contract creation for a previously signed transaction waiting for the transaction to be processed and the receipt to be available.
-func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (map[string]any, error) {
+func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexutil.Bytes, timeoutMs *uint64) (*ethutils.RPCReceipt, error) {
 	// If timeout is not specified or zero, we use the default, otherwise we use the passed one capped by max.
 	timeout := api.RpcTxSyncDefaultTimeout
 	if timeoutMs != nil && *timeoutMs > 0 {
@@ -122,12 +122,13 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 			Msg:  fmt.Sprintf("the transaction was added to the mempool but wasn't processed in %v", timeout),
 			Hash: hash,
 		}
-	case protoReceipt, ok := <-receiptsCh:
-		if !ok || protoReceipt == nil {
+	case batch, ok := <-receiptsCh:
+		// The filter is this transaction's hash, so the batch holds only its receipt.
+		if !ok || batch == nil || len(batch.Value) == 0 {
 			log.Warn("[rpc] receipts subscription was closed")
 			return nil, fmt.Errorf("receipts subscription was closed")
 		}
-		return ethutils.MarshalSubscribeReceipt(protoReceipt), nil
+		return ethutils.MarshalSubscribeReceipt(batch.Value[0]), nil
 	}
 }
 

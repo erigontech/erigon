@@ -18,6 +18,7 @@ package storage
 
 import (
 	"context"
+	"github.com/erigontech/erigon/db/kv"
 	"sync"
 	"time"
 
@@ -47,8 +48,11 @@ import (
 // dependency skips that side of the build (useful for tests and
 // tools that only construct one half of the storage stack).
 type productionIndexBuilder struct {
-	blockRetire  dbservices.BlockRetire
-	agg          StateAggregator
+	blockRetire dbservices.BlockRetire
+	agg         StateAggregator
+	// chainDB is the read surface Aggregator.BuildMissedAccessors needs
+	// to consult prune progress; nil skips the E3 side.
+	chainDB      kv.RoDB
 	notifier     dbservices.DBEventNotifier
 	logger       log.Logger
 	indexWorkers int
@@ -101,7 +105,7 @@ func (b *productionIndexBuilder) BuildMissedIndices(ctx context.Context, primary
 		}
 	}
 	if b.agg != nil {
-		if err := b.agg.BuildMissedAccessors(ctx, b.indexWorkers); err != nil {
+		if err := b.agg.BuildMissedAccessors(ctx, b.chainDB, b.indexWorkers); err != nil {
 			logger.Warn("[storage-lifecycle] E3 BuildMissedAccessors failed",
 				"trigger", primaryName, "elapsed", time.Since(start), "err", err)
 			return err

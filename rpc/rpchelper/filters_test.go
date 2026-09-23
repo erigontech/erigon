@@ -451,7 +451,7 @@ func TestFilters_AddLogs(t *testing.T) {
 			config := FiltersConfig{RpcSubscriptionFiltersMaxLogs: tt.maxLogs}
 			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 			_, logID, _ := f.SubscribeLogs(8, filters.FilterCriteria{}, "")
-			logEntry := &types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}
+			logEntry := &types.RPCLog{Log: types.Log{Address: common.HexToAddress("095e7baea6a6c7c4c2dfeb977efac326af552d87")}}
 
 			for i := 0; i < tt.numToAdd; i++ {
 				f.AddLogs(logID, logEntry)

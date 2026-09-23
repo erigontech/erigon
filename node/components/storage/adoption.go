@@ -293,7 +293,7 @@ func (p *Provider) validateStagedBatchStage2(ctx context.Context, batch *dlcomp.
 			return fmt.Errorf("stage 2: open block overlay: %w", err)
 		}
 		defer overlaySnaps.Close()
-		stage2BR = freezeblocks.NewBlockReader(overlaySnaps, nil)
+		stage2BR = freezeblocks.NewBlockReader(overlaySnaps)
 	}
 
 	return p.runStage2Validators(ctx, stage2DB, stage2BR, entries, pruneMode)
@@ -436,7 +436,7 @@ func (p *Provider) renameAndReopen(swaps []cutoverSwap) error {
 			return fmt.Errorf("move %s: %w", s.name, err)
 		}
 	}
-	if err := p.Aggregator.OpenFolder(); err != nil {
+	if err := p.Aggregator.OpenFolder(p.ChainDB); err != nil {
 		return fmt.Errorf("reopen aggregator: %w", err)
 	}
 	if err := p.AllSnapshots.OpenFolder(); err != nil {

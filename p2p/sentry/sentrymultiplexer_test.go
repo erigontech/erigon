@@ -342,7 +342,7 @@ func TestMessages(t *testing.T) {
 
 				go func() {
 					for range 5 {
-						streamServer.Send(&sentryproto.InboundMessage{})
+						_ = streamServer.Send(&sentryproto.InboundMessage{})
 					}
 
 					streamServer.Close()
@@ -403,7 +403,7 @@ func TestPeers(t *testing.T) {
 
 				go func() {
 					for range 5 {
-						streamServer.Send(&sentryproto.PeerEvent{})
+						_ = streamServer.Send(&sentryproto.PeerEvent{})
 					}
 
 					streamServer.Close()

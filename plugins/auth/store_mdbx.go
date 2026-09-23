@@ -96,7 +96,7 @@ func (s *MDBXStore) IsRevoked(ctx context.Context, cid CID, issuerDID string, is
 		if err != nil {
 			return err
 		}
-		if data != nil && len(data) == 8 {
+		if len(data) == 8 {
 			timestamp := binary.BigEndian.Uint64(data)
 			if issuedAt < timestamp {
 				revoked = true

@@ -25,12 +25,30 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	cfg.blobStore.Prune()
-	columnKeepSlots := cfg.caplinConfig.ColumnKeepSlots
-	if columnKeepSlots == 0 {
-		// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
-		columnKeepSlots = cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests * cfg.beaconCfg.SlotsPerEpoch
+
+	// Sidecar retention cuts against wall-clock, not the stage head, so a stalled
+	// stage does not retain data forever.
+	currentSlot := cfg.ethClock.GetCurrentSlot()
+	blobFloor := cfg.beaconCfg.BlobSidecarServeRangeStartSlot(currentSlot)
+	if cfg.caplinConfig.ArchiveBlobs || cfg.caplinConfig.BlobPruningDisabled {
+		blobFloor = 0
 	}
-	cfg.peerDas.Prune(columnKeepSlots)
+	if err := cfg.blobStore.PruneBelow(blobFloor); err != nil {
+		logger.Warn("failed to prune blob sidecars", "err", err)
+	}
+	columnFloor := cfg.beaconCfg.DataColumnSidecarServeRangeStartSlot(currentSlot)
+	if keep := cfg.caplinConfig.ColumnKeepSlots; keep > 0 {
+		columnFloor = floorFor(currentSlot, keep)
+	}
+	if err := cfg.peerDas.PruneBelow(columnFloor); err != nil {
+		logger.Warn("failed to prune data column sidecars", "err", err)
+	}
 	return nil
+}
+
+func floorFor(head, keep uint64) uint64 {
+	if head <= keep {
+		return 0
+	}
+	return head - keep
 }

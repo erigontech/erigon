@@ -72,7 +72,9 @@ func TestGetBlockRewards(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 			// Query the block in the handler with /eth/v2/beacon/blocks/{block_id}
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/rewards/blocks/" + c.blockID)
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/rewards/blocks/"+c.blockID, nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, c.code, resp.StatusCode)
@@ -132,7 +134,7 @@ func TestPostSyncCommitteeRewards(t *testing.T) {
 			url := fmt.Sprintf("%s/eth/v1/beacon/rewards/sync_committee/%s", server.URL, c.blockId)
 
 			// Create a request
-			req, err := http.NewRequest("POST", url, strings.NewReader(c.request))
+			req, err := http.NewRequestWithContext(t.Context(), "POST", url, strings.NewReader(c.request))
 			require.NoError(t, err)
 			req.Header.Set("Content-Type", "application/json")
 

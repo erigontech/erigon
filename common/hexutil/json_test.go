@@ -142,16 +142,6 @@ func TestUnmarshalBig(t *testing.T) {
 	}
 }
 
-func BenchmarkUnmarshalBig(b *testing.B) {
-	input := []byte(`"0x123456789abcdef123456789abcdef"`)
-	for b.Loop() {
-		var v Big
-		if err := v.UnmarshalJSON(input); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func TestMarshalBig(t *testing.T) {
 	for idx, test := range encodeBigTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
@@ -379,14 +369,6 @@ func TestUnmarshalUint64(t *testing.T) {
 				require.EqualValues(t, test.want, v)
 			}
 		})
-	}
-}
-
-func BenchmarkUnmarshalUint64(b *testing.B) {
-	input := []byte(`"0x123456789abcdf"`)
-	for b.Loop() {
-		var v Uint64
-		_ = v.UnmarshalJSON(input)
 	}
 }
 

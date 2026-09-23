@@ -21,13 +21,13 @@ package forkid
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/rlp"
-	polychain "github.com/erigontech/erigon/polygon/chain"
 )
 
 const futureBn = math.MaxUint64
@@ -155,24 +155,6 @@ func TestCreation(t *testing.T) {
 				{20286509, 1773653580, ID{Hash: ChecksumToBytes(0x71c457cd), Activation: 1773653580, Next: 0}},          // First Osaka block (approx)
 			},
 		},
-		{
-			polychain.Amoy,
-			[]testcase{
-				{0, 0, ID{Hash: ChecksumToBytes(0xbe06a477), Activation: 0, Next: 73100}},
-				{73100, 0, ID{Hash: ChecksumToBytes(0x135d2cd5), Activation: 73100, Next: 5423600}}, // First London, Jaipur, Delhi, Indore, Agra
-			},
-		},
-		{
-			polychain.BorMainnet,
-			[]testcase{
-				{0, 0, ID{Hash: ChecksumToBytes(0x0e07e722), Activation: 0, Next: 3395000}},
-				{3395000, 0, ID{Hash: ChecksumToBytes(0x27806576), Activation: 3395000, Next: 14750000}},   // First Istanbul block
-				{14750000, 0, ID{Hash: ChecksumToBytes(0x66e26adb), Activation: 14750000, Next: 23850000}}, // First Berlin block
-				{23850000, 0, ID{Hash: ChecksumToBytes(0x4f2f71cc), Activation: 23850000, Next: 50523000}}, // First London block
-				{50523000, 0, ID{Hash: ChecksumToBytes(0xdc08865c), Activation: 50523000, Next: 54876000}}, // First Agra block
-				{54876000, 0, ID{Hash: ChecksumToBytes(0xf097bc13), Activation: 54876000, Next: 73440256}}, // First Napoli block
-			},
-		},
 	}
 	for i, tt := range tests {
 		for j, ttt := range tt.cases {
@@ -258,7 +240,7 @@ func TestValidation(t *testing.T) {
 	heightForks, timeForks := GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
 	for i, tt := range tests {
 		filter := newFilter(heightForks, timeForks, chainspec.Mainnet.GenesisHash, tt.head, 0)
-		if err := filter(tt.id); err != tt.err {
+		if err := filter(tt.id); !errors.Is(err, tt.err) {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}
 	}

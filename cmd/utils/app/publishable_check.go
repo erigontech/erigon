@@ -114,14 +114,14 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		// should get the same name as dataFile...
 		// this checks the version is correct (between min and current), and that there's only one such data file
 		if _, err := schema.DataFile(version.StrictSearchVersion, from, to); err != nil {
-			return 0, false, fmt.Errorf("unsupported data file version: %s: %v", dataFile.Name, err)
+			return 0, false, fmt.Errorf("unsupported data file version: %s: %w", dataFile.Name, err)
 		}
 
 		if accessors.Has(statecfg.AccessorHashMap) {
 			for idxPos := uint16(0); idxPos < schema.AccessorIdxCount(); idxPos++ {
 				_, err := schema.AccessorIdxFile(version.StrictSearchVersion, from, to, idxPos)
 				if err != nil {
-					return 0, false, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %v", schema.DataTag(), dataFile.Name, idxPos, err)
+					return 0, false, fmt.Errorf("missing %s accessor idx file for data file %s (idx tag: %d): %w", schema.DataTag(), dataFile.Name, idxPos, err)
 				}
 			}
 		}
@@ -129,14 +129,14 @@ func CheckFilesForSchema(schema state.SnapNameSchema, params CheckFilesParams) (
 		if accessors.Has(statecfg.AccessorBTree) {
 			_, err := schema.BtIdxFile(version.StrictSearchVersion, from, to)
 			if err != nil {
-				return 0, false, fmt.Errorf("missing %s bt tree file for data file %s: %v", schema.DataTag(), dataFile.Name, err)
+				return 0, false, fmt.Errorf("missing %s bt tree file for data file %s: %w", schema.DataTag(), dataFile.Name, err)
 			}
 		}
 
 		if accessors.Has(statecfg.AccessorExistence) {
 			_, err := schema.ExistenceFile(version.StrictSearchVersion, from, to)
 			if err != nil {
-				return 0, false, fmt.Errorf("missing %s existence filter for data file %s: %v", schema.DataTag(), dataFile.Name, err)
+				return 0, false, fmt.Errorf("missing %s existence filter for data file %s: %w", schema.DataTag(), dataFile.Name, err)
 			}
 		}
 	}

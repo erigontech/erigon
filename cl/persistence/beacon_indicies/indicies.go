@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -34,10 +35,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 )
 
-// make a zstd writer pool
+// Encoder options must not change the output: these bytes are copied verbatim into
+// the caplin .seg files.
 var zstdWriterPool = &sync.Pool{
 	New: func() any {
-		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+		encoder, err := zstd.NewWriter(nil,
+			zstd.WithEncoderLevel(zstd.SpeedBetterCompression),
+			zstd.WithLowerEncoderMem(true))
 		if err != nil {
 			panic(err)
 		}
@@ -45,7 +49,14 @@ var zstdWriterPool = &sync.Pool{
 	},
 }
 
-func putWriter(v *zstd.Encoder) {
+// getZstdWriter returns a pooled encoder writing to w. Release with putZstdWriter.
+func getZstdWriter(w io.Writer) *zstd.Encoder {
+	encoder := zstdWriterPool.Get().(*zstd.Encoder)
+	encoder.Reset(w)
+	return encoder
+}
+
+func putZstdWriter(v *zstd.Encoder) {
 	v.Reset(nil)
 	zstdWriterPool.Put(v)
 }
@@ -346,9 +357,8 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 	// take a buffer and encoder
 	buf := pool.GetBuffer()
 	defer pool.PutBuffer(buf)
-	encoder := zstdWriterPool.Get().(*zstd.Encoder)
-	defer putWriter(encoder)
-	encoder.Reset(buf)
+	encoder := getZstdWriter(buf)
+	defer putZstdWriter(encoder)
 	_, err = snapshot_format.WriteBlockForSnapshot(encoder, block, nil)
 	if err != nil {
 		return err
@@ -471,7 +481,7 @@ func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common
 		return nil, false, nil
 	}
 	if err := h.DecodeSSZ(headerBytes, 0); err != nil {
-		return nil, false, fmt.Errorf("failed to decode BeaconHeader: %v", err)
+		return nil, false, fmt.Errorf("failed to decode BeaconHeader: %w", err)
 	}
 	canonical, err := ReadCanonicalBlockRoot(tx, h.Header.Slot)
 	if err != nil {

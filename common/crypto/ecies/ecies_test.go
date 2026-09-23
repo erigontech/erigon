@@ -174,45 +174,6 @@ func TestTooBigSharedKey(t *testing.T) {
 	}
 }
 
-// Benchmark the generation of P256 keys.
-func BenchmarkGenerateKeyP256(b *testing.B) {
-	for b.Loop() {
-		if _, err := GenerateKey(rand.Reader, elliptic.P256(), nil); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// Benchmark the generation of P256 shared keys.
-func BenchmarkGenSharedKeyP256(b *testing.B) {
-	prv, err := GenerateKey(rand.Reader, elliptic.P256(), nil)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	for b.Loop() {
-		_, err := prv.GenerateShared(&prv.PublicKey, 16, 16)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-// Benchmark the generation of S256 shared keys.
-func BenchmarkGenSharedKeyS256(b *testing.B) {
-	prv, err := GenerateKey(rand.Reader, crypto.S256(), nil)
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	for b.Loop() {
-		_, err := prv.GenerateShared(&prv.PublicKey, 16, 16)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // Verify that an encrypted message can be successfully decrypted.
 func TestEncryptDecrypt(t *testing.T) {
 	prv1, err := GenerateKey(rand.Reader, DefaultCurve, nil)

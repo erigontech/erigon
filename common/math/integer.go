@@ -125,6 +125,12 @@ func SafeAdd(x, y uint64) (uint64, bool) {
 	return sum, carryOut != 0
 }
 
+// SafeSub returns x-y and checks for underflow.
+func SafeSub(x, y uint64) (uint64, bool) {
+	diff, borrowOut := bits.Sub64(x, y, 0)
+	return diff, borrowOut != 0
+}
+
 // NextPowerOfTwo returns the least power of two at or above n, and 1 for
 // n == 0; n above 1<<63 wraps to 0.
 func NextPowerOfTwo(n uint64) uint64 {

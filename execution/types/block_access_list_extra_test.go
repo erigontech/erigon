@@ -33,9 +33,9 @@ import (
 func key(h string) accounts.StorageKey { return accounts.InternKey(common.HexToHash(h)) }
 
 func sampleBAL() BlockAccessList {
-	return BlockAccessList{&AccountChanges{
-		Address:        accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa")),
-		StorageChanges: []*SlotChanges{{Slot: key("0x01"), Changes: []*StorageChange{{Index: 0, Value: *uint256.NewInt(100)}}}},
+	return BlockAccessList{AccountChanges{
+		Address:        (common.HexToAddress("0x00000000000000000000000000000000000000aa")),
+		StorageChanges: []SlotChanges{{Slot: key("0x01"), Changes: []*StorageChange{{Index: 0, Value: *uint256.NewInt(100)}}}},
 		StorageReads:   []accounts.StorageKey{key("0x02")},
 		BalanceChanges: []*BalanceChange{{Index: 0, Value: *uint256.NewInt(5)}},
 		NonceChanges:   []*NonceChange{{Index: 0, Value: 7}},
@@ -54,7 +54,7 @@ func TestChange_GetIndex(t *testing.T) {
 func TestAccountChanges_Normalize(t *testing.T) {
 	t.Parallel()
 	ac := &AccountChanges{
-		StorageChanges: []*SlotChanges{{Slot: key("0x03")}, {Slot: key("0x01")}, {Slot: key("0x02")}},
+		StorageChanges: []SlotChanges{{Slot: key("0x03")}, {Slot: key("0x01")}, {Slot: key("0x02")}},
 		StorageReads:   []accounts.StorageKey{key("0x05"), key("0x05"), key("0x04")},
 		BalanceChanges: []*BalanceChange{{Index: 2, Value: *uint256.NewInt(1)}, {Index: 0, Value: *uint256.NewInt(1)}, {Index: 0, Value: *uint256.NewInt(99)}},
 		NonceChanges:   []*NonceChange{{Index: 1}, {Index: 0}},

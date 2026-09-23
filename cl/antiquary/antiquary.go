@@ -150,6 +150,7 @@ func (a *Antiquary) Loop() error {
 				// completed when added.
 				progress = time.Now() // reset the progress if we are not completed
 			case <-a.ctx.Done():
+				return nil
 			}
 		}
 	}
@@ -157,15 +158,6 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
-	var from uint64
-	if err := a.mainDB.View(a.ctx, func(tx kv.Tx) error {
-		var err error
-		from, err = beacon_indicies.ReadLastBeaconSnapshot(tx)
-		return err
-	}); err != nil {
-		return err
-	}
-
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := a.sn.OpenFolder(); err != nil {
 		return err
@@ -177,30 +169,17 @@ func (a *Antiquary) Loop() error {
 	}
 
 	defer logInterval.Stop()
-	available := a.sn.BlocksAvailable()
-	if from > available {
-		a.logger.Warn("[Antiquary] Snapshot progress is ahead of visible snapshots", "progress", from, "available", available)
-		from = clampBeaconSnapshotProgress(from, available)
-	}
-	indexedTo := from
-	for {
-		frozenSlots := a.sn.BlocksAvailable()
-		if indexedTo >= frozenSlots {
-			break
-		}
-		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", indexedTo, "to", frozenSlots)
-		err := indexBeaconSnapshots(a.ctx, a.mainDB, indexedTo, frozenSlots, antiquaryIndexBatchSlots, a.sn.ReadHeader, func(slot uint64) {
+	indexedTo, err := rebuildBeaconSnapshotIndex(a.ctx, a.mainDB, a.sn.BlocksAvailable, a.sn.ReadHeader,
+		antiquaryIndexBatchSlots, func(slot uint64) {
 			select {
 			case <-logInterval.C:
-				a.logger.Info("[Antiquary] Processed snapshots", "progress", slot, "target", frozenSlots)
+				a.logger.Info("[Antiquary] Processed snapshots", "progress", slot)
 			case <-a.ctx.Done():
 			default:
 			}
-		})
-		if err != nil {
-			return err
-		}
-		indexedTo = frozenSlots
+		}, a.logger)
+	if err != nil {
+		return err
 	}
 
 	if a.stateSn != nil {
@@ -224,32 +203,47 @@ func (a *Antiquary) Loop() error {
 	if a.states {
 		go a.loopStates(a.ctx)
 	}
-	// Check for snapshots retirement every 3 minutes
+	return a.retirementLoop()
+}
+
+func (a *Antiquary) retirementLoop() error {
+	blocks := &retirementStep{
+		run:     a.antiquate,
+		onError: func(err error) { log.Warn("[Antiquary] Failed to antiquate", "err", err) },
+	}
+	blobs := &retirementStep{
+		run:     a.antiquateBlobs,
+		onError: func(err error) { log.Error("[Antiquary] Failed to antiquate blobs", "err", err) },
+	}
+
 	retirementTicker := time.NewTicker(12 * time.Second)
 	defer retirementTicker.Stop()
 	for {
 		select {
 		case <-retirementTicker.C:
-			if !a.backfilled.Load() {
-				continue
-			}
-
-			if err := a.antiquate(); err != nil {
-				log.Warn("[Antiquary] Failed to antiquate", "err", err)
-			}
-			if a.cfg.DenebForkEpoch == math.MaxUint64 {
-				continue
-			}
-			if !a.blobBackfilled.Load() {
-				continue
-			}
-			if err := a.antiquateBlobs(); err != nil {
-				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
-			}
+			a.retirementTick(blocks, blobs)
 		case <-a.ctx.Done():
+			return nil
 		}
 	}
 }
+
+func (a *Antiquary) retirementTick(blocks, blobs *retirementStep) {
+	if !a.backfilled.Load() {
+		return
+	}
+	blocks.attempt(a.shuttingDown)
+
+	if a.cfg.DenebForkEpoch == math.MaxUint64 {
+		return
+	}
+	if !a.blobBackfilled.Load() {
+		return
+	}
+	blobs.attempt(a.shuttingDown)
+}
+
+func (a *Antiquary) shuttingDown() bool { return a.ctx.Err() != nil }
 
 type readBeaconSnapshotHeaderFunc func(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error)
 
@@ -258,6 +252,42 @@ func clampBeaconSnapshotProgress(progress, available uint64) uint64 {
 		return available
 	}
 	return progress
+}
+
+// rebuildBeaconSnapshotIndex indexes the visible snapshot range, resuming from the persisted
+// cursor, which is the first slot not yet indexed.
+func rebuildBeaconSnapshotIndex(ctx context.Context, db kv.RwDB, blocksAvailable func() uint64, readHeader readBeaconSnapshotHeaderFunc, batchSize uint64, onProgress func(slot uint64), logger log.Logger) (uint64, error) {
+	var from uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		from, err = beacon_indicies.ReadLastBeaconSnapshot(tx)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	if available := blocksAvailable(); from > 0 && from-1 > available {
+		logger.Warn("[Antiquary] Snapshot progress is ahead of visible snapshots", "progress", from, "available", available)
+		from = clampBeaconSnapshotProgress(from, available)
+	}
+	indexedTo := uint64(0)
+	if from > 0 {
+		indexedTo = from - 1
+	}
+	for {
+		tip := blocksAvailable()
+		if tip == 0 || from > tip {
+			return indexedTo, nil
+		}
+		logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", tip)
+		// tip is the inclusive last readable slot and indexBeaconSnapshots takes an exclusive
+		// bound, so the tip needs tip+1 to be indexed at all. It is served from the snapshot path,
+		// which does not consult the canonical index, so leaving it out gives readers a block with
+		// no root for as long as the tip stays put.
+		if err := indexBeaconSnapshots(ctx, db, from, tip+1, batchSize, readHeader, onProgress); err != nil {
+			return indexedTo, err
+		}
+		from, indexedTo = tip+1, tip
+	}
 }
 
 func indexBeaconSnapshots(ctx context.Context, db kv.RwDB, from, to, batchSize uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
@@ -378,16 +408,16 @@ func (a *Antiquary) antiquate() error {
 	}
 
 	var from, to uint64
-	var err error
 
 	if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
 		// read the last beacon snapshots
 		from = a.sn.BlocksAvailable() + 1
 		// read the finalized head
-		to, err = beacon_indicies.ReadHighestFinalized(roTx)
+		highest, err := beacon_indicies.ReadHighestFinalized(roTx)
 		if err != nil {
 			return err
 		}
+		to = highest
 		return nil
 	}); err != nil {
 		return err
@@ -437,8 +467,8 @@ func (a *Antiquary) NotifyBackfilled() {
 	a.backfilled.Store(true) // this is the lowest slot not in snapshots
 }
 
-func (a *Antiquary) NotifyBlobBackfilled() {
-	a.blobBackfilled.Store(true)
+func (a *Antiquary) NotifyBlobBackfilled(completed bool) {
+	a.blobBackfilled.Store(completed)
 }
 
 func (a *Antiquary) antiquateBlobs() error {
@@ -510,12 +540,28 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 	defer roTx.Rollback()
 	// now prune blobs from the database
+	var removeFailures uint64
+	var firstFailedSlot uint64
+	var firstRemoveErr error
 	for i := currentBlobsProgress; i < to; i++ {
 		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(roTx, i)
 		if err != nil {
 			return err
 		}
-		a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot)
+		if err := a.blobStorage.RemoveBlobSidecars(a.ctx, i, blockRoot); err != nil {
+			if a.ctx.Err() != nil {
+				return a.ctx.Err()
+			}
+			removeFailures++
+			if firstRemoveErr == nil {
+				firstFailedSlot, firstRemoveErr = i, err
+			}
+		}
+	}
+	if removeFailures > 0 {
+		// The loop spans at least CaplinMergeLimit slots and a storage fault hits every
+		// one of them, so the failures are aggregated rather than warned per slot.
+		a.logger.Warn("[Antiquary] Failed to remove blob sidecars", "slots", removeFailures, "firstSlot", firstFailedSlot, "err", firstRemoveErr)
 	}
 	return nil
 }

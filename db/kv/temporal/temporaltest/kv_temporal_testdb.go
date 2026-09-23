@@ -20,15 +20,18 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -45,13 +48,27 @@ func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 	return db, tx
 }
 
-// nolint:thelper
-func NewTestDB(tb testing.TB, dirs datadir.Dirs) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, config3.DefaultStepSize)
+type Option func(*options)
+
+type options struct {
+	stepSize uint64
 }
 
-func NewTestDBWithStepSize(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
-	return newTestDB(tb, dirs, stepSize)
+func WithStepSize(stepSize uint64) Option {
+	return func(opts *options) {
+		opts.stepSize = stepSize
+	}
+}
+
+// nolint:thelper
+func NewTestDB(tb testing.TB, dirs datadir.Dirs, opts ...Option) kv.TemporalRwDB {
+	config := options{
+		stepSize: config3.DefaultStepSize,
+	}
+	for _, opt := range opts {
+		opt(&config)
+	}
+	return newTestDB(tb, dirs, config.stepSize)
 }
 
 // nolint:thelper
@@ -66,9 +83,9 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 	ctx := context.Background()
 	if tb != nil {
 		ctx = tb.Context()
-		rawDB = memdb.NewTestDB(tb, dbcfg.ChainDB)
+		rawDB = mdbxtest.NewTestDB(tb, dbcfg.ChainDB)
 	} else {
-		rawDB = memdb.New(nil, dirs.DataDir, dbcfg.ChainDB)
+		rawDB = mdbxtest.New(nil, dirs.DataDir, dbcfg.ChainDB)
 	}
 
 	blockSnapCfg := ethconfig.Defaults.Snapshot
@@ -81,21 +98,33 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 		panic(err)
 	}
 
-	stateSnapshots := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, rawDB)
+	stateSnapshots := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx)
 	if tb != nil {
 		tb.Cleanup(stateSnapshots.Close)
 	}
-
-	if err := stateSnapshots.OpenFolder(); err != nil {
-		panic(err)
-	}
-
 	db, err := temporal.New(rawDB, stateSnapshots, blockSnapshots)
 	if err != nil {
+		panic(err)
+	}
+	if err := db.OpenStateSnapshots(ctx); err != nil {
 		panic(err)
 	}
 	if tb != nil {
 		tb.Cleanup(db.Close)
 	}
 	return db
+}
+
+// NewTestTxSD opens a read-write temporal tx and its SharedDomains, both closed
+// by the test's cleanup.
+func NewTestTxSD(tb testing.TB, db kv.TemporalRwDB) (kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(sd.Close)
+	return tx, sd
 }

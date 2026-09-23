@@ -1,6 +1,6 @@
 ---
 title: "Supported Networks"
-description: "Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync."
+description: "Mainnet, testnets, Gnosis, and all other chains Erigon can sync."
 sidebar_position: 8
 ---
 
@@ -18,7 +18,6 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 | Chain     | Tag         | ChainId |
 | --------- | ----------- | ------- |
 | Ethereum  | mainnet     | 1       |
-| Polygon\* | bor-mainnet | 137     |
 | Gnosis    | gnosis      | 100     |
 
 ## Testnets
@@ -30,12 +29,6 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 | Sepolia | sepolia | 11155111 |
 | Hoodi   | hoodi   | 560048   |
 
-### Polygon testnets
-
-| Chain  | Tag  | ChainId |
-| ------ | ---- | ------- |
-| Amoy\* | amoy | 80002   |
-
 ### Gnosis Chain Testnets
 
 | Chain  | Tag    | ChainId |
@@ -43,5 +36,5 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 | Chiado | chiado | 10200   |
 
 :::warning
-\* The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
+Erigon no longer supports Polygon. The final release series that officially supported it is 3.1.\*. For Polygon-supported software, see [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
 :::

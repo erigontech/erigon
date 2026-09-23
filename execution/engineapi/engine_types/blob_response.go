@@ -16,14 +16,18 @@
 
 package engine_types
 
-import "encoding/hex"
+import (
+	"encoding/hex"
 
-// BlobsBundleV1 and BlobsBundleV2 are the engine_getBlobs response slices. Their MarshalFastJSON
-// serializes the whole response into one pre-sized buffer (direct hex encoding) instead of reflection,
-// byte-identical to json.Marshal of the underlying slice (see blob_response_test.go).
+	"github.com/erigontech/erigon/common/hexutil"
+)
+
+// BlobsBundleV1, BlobsBundleV2, and BlobsBundleV3 are engine_getBlobs response slices.
+// MarshalFastJSON encodes them into one buffer, matching json.Marshal of the underlying slice.
 type (
 	BlobsBundleV1 []*BlobAndProofV1
 	BlobsBundleV2 []*BlobAndProofV2
+	BlobsBundleV3 []*BlobCellsAndProofsV1
 )
 
 func (bundle BlobsBundleV1) MarshalFastJSON() ([]byte, error) {
@@ -68,6 +72,77 @@ func (bundle BlobsBundleV2) MarshalFastJSON() ([]byte, error) {
 		out = appendBlobV2JSON(out, b)
 	}
 	return append(out, ']'), nil
+}
+
+func (bundle BlobsBundleV3) MarshalFastJSON() ([]byte, error) {
+	if bundle == nil {
+		return jsonNull(), nil
+	}
+	size := len("[]")
+	for i, b := range bundle {
+		if i > 0 {
+			size++
+		}
+		if b == nil {
+			size += len("null")
+			continue
+		}
+		size += len(`{"blob_cells":`) + hexPtrArrayLen(b.BlobCells) +
+			len(`,"proofs":`) + hexPtrArrayLen(b.Proofs) + len("}")
+	}
+	out := make([]byte, 0, size)
+	out = append(out, '[')
+	for i, b := range bundle {
+		if i > 0 {
+			out = append(out, ',')
+		}
+		if b == nil {
+			out = append(out, "null"...)
+			continue
+		}
+		out = append(out, `{"blob_cells":`...)
+		out = appendHexPtrArray(out, b.BlobCells)
+		out = append(out, `,"proofs":`...)
+		out = appendHexPtrArray(out, b.Proofs)
+		out = append(out, '}')
+	}
+	return append(out, ']'), nil
+}
+
+func hexPtrArrayLen(arr []*hexutil.Bytes) int {
+	if arr == nil {
+		return len("null")
+	}
+	n := len("[]")
+	for i, b := range arr {
+		if i > 0 {
+			n++
+		}
+		if b == nil {
+			n += len("null")
+		} else {
+			n += quotedHexLen(len(*b))
+		}
+	}
+	return n
+}
+
+func appendHexPtrArray(dst []byte, arr []*hexutil.Bytes) []byte {
+	if arr == nil {
+		return append(dst, "null"...)
+	}
+	dst = append(dst, '[')
+	for i, b := range arr {
+		if i > 0 {
+			dst = append(dst, ',')
+		}
+		if b == nil {
+			dst = append(dst, "null"...)
+		} else {
+			dst = appendQuotedHex(dst, *b)
+		}
+	}
+	return append(dst, ']')
 }
 
 func appendBlobV1JSON(dst []byte, b *BlobAndProofV1) []byte {

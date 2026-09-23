@@ -62,7 +62,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 * `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
 * `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
 * `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
-* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true)`. When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
+* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true`). When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
 * `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the Sentry API. The Sentry API is used for communication between the TxPool and the Sentry.
 * `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the TxPool API (default: use value of `--private.api.addr`). The TxPool API is used for communication between the TxPool and other Erigon components.
 * `--pprof`: Enable the pprof HTTP server (default: `false`)
@@ -70,7 +70,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 
 ## Command Line Options
 
-To display available options for TxPool digit:
+To display available options for TxPool, run:
 
 ```bash
 ./build/bin/txpool --help

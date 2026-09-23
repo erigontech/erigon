@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -42,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-var stringsBuilderPool = sync.Pool{
+var stringsBuilderPool = &sync.Pool{
 	New: func() any {
 		return new(strings.Builder)
 	},
@@ -289,7 +290,6 @@ func (a *ApiHandler) writeValidatorsResponse(
 	validatorIds,
 	queryFilters []string,
 ) {
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	filterIndicies, err := parseQueryValidatorIndicies(a.syncedData, validatorIds)
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
@@ -303,14 +303,15 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
-		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
+		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, a.forkchoiceStore.IsRootOptimistic(root))
 			return nil
 		}); err != nil {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced")).WriteTo(w)
 		}
 		return
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
 		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
@@ -378,7 +379,7 @@ func parseQueryValidatorIndex(syncedData synced_data.SyncedData, id string) (uin
 		}
 		idx, has, err := syncedData.ValidatorIndexByPublicKey(b48)
 		if err != nil {
-			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found: %s", err))
+			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found: %w", err))
 		}
 		if !has {
 			return math.MaxUint64, nil
@@ -424,8 +425,6 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
 
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
-
 	validatorId, err := beaconhttp.StringFromRequest(r, "validator_id")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
@@ -446,12 +445,12 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 			resp *beaconhttp.BeaconResponse
 			err  error
 		)
-		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
 			if s.ValidatorLength() <= int(validatorIndex) {
 				resp = newBeaconResponse([]int{}).WithFinalized(false)
 				return nil
 			}
-			resp, err = responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false, isOptimistic)
+			resp, err = responseValidator(validatorIndex, state.Epoch(s), s.Balances(), s.Validators(), false, a.forkchoiceStore.IsRootOptimistic(root))
 			return nil // return err later
 		}); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced"))
@@ -459,6 +458,7 @@ func (a *ApiHandler) GetEthV1BeaconStatesValidator(w http.ResponseWriter, r *htt
 
 		return resp, err
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
 		return nil, err
@@ -552,18 +552,17 @@ func (a *ApiHandler) getValidatorBalances(ctx context.Context, w http.ResponseWr
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
-
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
 		var response *beaconhttp.BeaconResponse
-		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			response = responseValidatorsBalances(w, filterIndicies, s.Balances(), false, isOptimistic)
+		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
+			response = responseValidatorsBalances(w, filterIndicies, s.Balances(), false, a.forkchoiceStore.IsRootOptimistic(root))
 			return nil
 		}); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced"))
 		}
 		return response, nil
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
@@ -607,8 +606,10 @@ func (d directString) MarshalJSON() ([]byte, error) {
 func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
 	// todo: refactor this function
 	b := stringsBuilderPool.Get().(*strings.Builder)
-	defer stringsBuilderPool.Put(b)
-	b.Reset()
+	defer func() {
+		b.Reset()
+		stringsBuilderPool.Put(b)
+	}()
 
 	var isOptimistic string = "false"
 	if optimistic {
@@ -777,16 +778,24 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 	}
 
 	attDataRootHash := common.HexToHash(attDataRoot)
-	att := a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
+	version := a.ethClock.StateVersionByEpoch(slotNum / a.beaconChainCfg.SlotsPerEpoch)
+	var att *solid.Attestation
+	if version.Before(clparams.ElectraVersion) {
+		att = a.aggregatePool.GetAggregatationByRoot(attDataRootHash)
+	} else {
+		att = a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
+	}
 	if att == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
+	}
+	if version.Before(clparams.ElectraVersion) && committeeIndexNum != att.Data.CommitteeIndex {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation committee index mismatch"))
 	}
 	if slotNum != att.Data.Slot {
 		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
 	}
 
-	version := a.ethClock.StateVersionByEpoch(slotNum / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(att).WithVersion(version), nil
 }
 
@@ -805,16 +814,16 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
-
 	var (
-		validators  *solid.ValidatorSet
-		isFinalized bool
+		validators   *solid.ValidatorSet
+		isFinalized  bool
+		isOptimistic bool
 	)
 	if blockId.Head() {
 		// If we are looking at the head, we can just read the validators from the head state
-		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
 			validators = s.Validators()
+			isOptimistic = a.forkchoiceStore.IsRootOptimistic(root)
 			return nil
 		}); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
@@ -843,6 +852,7 @@ func (a *ApiHandler) GetEthV1ValidatorIdentities(w http.ResponseWriter, r *http.
 			}
 		}
 		isFinalized = *slot <= a.forkchoiceStore.FinalizedSlot()
+		isOptimistic = a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	}
 	if validators == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("validators not found"))

@@ -81,7 +81,6 @@ type Sentinel struct {
 	ethClock           eth_clock.EthereumClock
 	peerDasStateReader peerdasstate.PeerDasStateReader
 
-	metadataLock sync.Mutex
 	// connectSem serializes concurrent Host.Connect() and Peerstore().RemovePeer()
 	// calls to work around a data race in libp2p v0.37.2's memoryAddrBook between
 	// addAddrsUnlocked() and the background gc() goroutine (see #19603).

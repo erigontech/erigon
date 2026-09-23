@@ -17,6 +17,8 @@
 package state_test
 
 import (
+	"encoding/binary"
+	"github.com/erigontech/erigon/common/length"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -210,7 +212,7 @@ func TestRecomputeAtTxNumWithoutSD_MidBlockCS(t *testing.T) {
 			domains.Close()
 			require.NoError(t, rwTx.Commit())
 		}
-		require.NoError(t, agg.BuildFiles(fileEndTxN))
+		require.NoError(t, agg.BuildFiles(db, fileEndTxN, unboundedFinalityCtx))
 		return blockEndRoot, &kvAggHandles{db: db, agg: agg}
 	}
 
@@ -478,7 +480,7 @@ func TestRecomputeAtTxNumWithoutSD_MidBlockCS_HoodiPatterns(t *testing.T) {
 			domains.Close()
 			require.NoError(t, rwTx.Commit())
 		}
-		require.NoError(t, agg.BuildFiles(fileEndTxN))
+		require.NoError(t, agg.BuildFiles(db, fileEndTxN, unboundedFinalityCtx))
 		return blockEndRoot, &kvAggHandles{db: db, agg: agg}
 	}
 
@@ -629,7 +631,7 @@ func TestRecomputeAtTxNumWithoutSD_AgainstSDComputeCommit_ShadowAheadOfTarget(t 
 		domains.Close()
 		require.NoError(t, rwTx.Commit())
 	}
-	require.NoError(t, agg.BuildFiles(ph1TxNums))
+	require.NoError(t, agg.BuildFiles(db, ph1TxNums, unboundedFinalityCtx))
 
 	// Phase 2: write through toTxNum=12 with a commitment at txnum=12
 	// (block 1). Phase 3: keep writing past target (txnums 13..15) WITH
@@ -791,7 +793,7 @@ func runRecomputeVsSDCheck(t *testing.T, tc recomputeCheckCase) {
 		domains.Close()
 		require.NoError(t, rwTx.Commit())
 	}
-	require.NoError(t, agg.BuildFiles(tc.BuildFilesAtTx))
+	require.NoError(t, agg.BuildFiles(db, tc.BuildFilesAtTx, unboundedFinalityCtx))
 
 	// --- Phase 2: writes past the file boundary (if non-aligned). No
 	// commit, no BuildFiles — these stay in shadow. ---
@@ -898,7 +900,7 @@ func runRecomputeVsSDCheck(t *testing.T, tc recomputeCheckCase) {
 		// Sample: pick first account key, read GetAsOf(at toTxNum+1)
 		// and GetLatest, log both.
 		sampleAcc := makeTestAccountAddr(0)
-		latestVal, _, err := roTx.GetLatest(kv.AccountsDomain, sampleAcc)
+		latestVal, _, err := roTx.GetLatest(kv.AccountsDomain, sampleAcc, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		asOfVal, ok, err := roTx.GetAsOf(kv.AccountsDomain, sampleAcc, tc.ToTxNum+1)
 		require.NoError(t, err)
@@ -909,4 +911,19 @@ func runRecomputeVsSDCheck(t *testing.T, tc recomputeCheckCase) {
 	t.Logf("[%s] expected=%x got=%x baselineTxNum=%d toTxNum=%d", tc.Name, expectedRoot, gotRoot, baselineTxNum, tc.ToTxNum)
 	require.Equal(t, expectedRoot, gotRoot,
 		"%s case: SD-less recompute root does not match SD.ComputeCommitment root", tc.Name)
+}
+
+// makeTestAccountAddr / makeTestStorageKey moved here when upstream
+// removed TrieReader and its integration test, which used to own them.
+func makeTestAccountAddr(i uint64) []byte {
+	addr := make([]byte, length.Addr)
+	binary.BigEndian.PutUint64(addr[length.Addr-8:], i+1)
+	return addr
+}
+
+func makeTestStorageKey(acctIdx, slot uint64) []byte {
+	key := make([]byte, length.Addr+length.Hash)
+	binary.BigEndian.PutUint64(key[length.Addr-8:], acctIdx+1)
+	binary.BigEndian.PutUint64(key[length.Addr+length.Hash-8:], slot+1)
+	return key
 }

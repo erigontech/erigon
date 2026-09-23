@@ -21,7 +21,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 // TestSnapModeFlag_FirstRunPersists verifies that the first call against a
@@ -30,7 +30,7 @@ import (
 func TestSnapModeFlag_FirstRunPersists(t *testing.T) {
 	for _, key := range []ConfigKey{SnapP2PManifest, SnapLifecycleDrivenByStorage, SnapBootstrapFromPreverified} {
 		for _, value := range []bool{true, false} {
-			_, tx := memdb.NewTestTx(t)
+			_, tx := mdbxtest.NewTestTx(t)
 			notChanged, enabled, err := key.EnsureNotChanged(tx, value)
 			require.NoError(t, err)
 			require.True(t, notChanged, "first run must report notChanged=true (key=%s value=%v)", key, value)
@@ -49,7 +49,7 @@ func TestSnapModeFlag_FirstRunPersists(t *testing.T) {
 func TestSnapModeFlag_MatchingRerunOK(t *testing.T) {
 	for _, key := range []ConfigKey{SnapP2PManifest, SnapLifecycleDrivenByStorage, SnapBootstrapFromPreverified} {
 		for _, value := range []bool{true, false} {
-			_, tx := memdb.NewTestTx(t)
+			_, tx := mdbxtest.NewTestTx(t)
 			// Seed the datadir.
 			require.NoError(t, key.ForceWrite(tx, value))
 
@@ -75,7 +75,7 @@ func TestSnapModeFlag_MismatchedRerunSignalsChange(t *testing.T) {
 	for _, key := range []ConfigKey{SnapP2PManifest, SnapLifecycleDrivenByStorage, SnapBootstrapFromPreverified} {
 		for _, persisted := range []bool{true, false} {
 			cli := !persisted
-			_, tx := memdb.NewTestTx(t)
+			_, tx := mdbxtest.NewTestTx(t)
 			require.NoError(t, key.ForceWrite(tx, persisted))
 
 			notChanged, enabled, err := key.EnsureNotChanged(tx, cli)

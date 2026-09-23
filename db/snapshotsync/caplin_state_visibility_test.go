@@ -45,7 +45,7 @@ func TestCaplinStateUnindexedSegmentInvisible(t *testing.T) {
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 
-	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table),
+	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.visibleRangesForType(table),
 		"un-indexed segment must not be a covered (visible) range")
 
 	view := s.View()
@@ -56,10 +56,9 @@ func TestCaplinStateUnindexedSegmentInvisible(t *testing.T) {
 	require.False(t, servedUnindexed, "un-indexed range must fall through to the DB, not the snapshot")
 }
 
-// The .idx path must be derived from the .seg path by replacing only the trailing
-// extension. A datadir whose path itself contains ".seg" (here the base dir) must not
-// cause the index lookup to hit a wrong path, silently leaving an indexed segment
-// un-indexed and permanently shadowed by the DB.
+// An indexed segment must remain visible when the datadir path itself contains ".seg".
+// BaseRoSnapshots resolves the index from the filename without confusing that directory
+// component with the segment extension.
 func TestCaplinStateIndexFoundWhenDatadirPathContainsSeg(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(filepath.Join(t.TempDir(), "erigon.seg"))
@@ -69,6 +68,6 @@ func TestCaplinStateIndexFoundWhenDatadirPathContainsSeg(t *testing.T) {
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 
-	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table),
+	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.visibleRangesForType(table),
 		`index in a datadir whose path contains ".seg" must still be found`)
 }

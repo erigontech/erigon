@@ -22,7 +22,35 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/ssz"
+	"github.com/stretchr/testify/require"
 )
+
+func TestTransactionsSSZUnmarshalJSONRejectsTransactionLimit(t *testing.T) {
+	txs := NewTransactionsSSZWithLimits(2, 4)
+
+	err := txs.UnmarshalJSON([]byte(`["0x01", "0x02", "0x03"]`))
+
+	require.Error(t, err)
+	require.Empty(t, txs.UnderlyngReference())
+}
+
+func TestTransactionsSSZUnmarshalJSONRejectsTransactionByteLimit(t *testing.T) {
+	txs := NewTransactionsSSZWithLimits(2, 2)
+
+	err := txs.UnmarshalJSON([]byte(`["0x010203"]`))
+
+	require.Error(t, err)
+	require.Empty(t, txs.UnderlyngReference())
+}
+
+func TestTransactionsSSZUnmarshalJSONAcceptsConfiguredLimits(t *testing.T) {
+	txs := NewTransactionsSSZWithLimits(2, 2)
+
+	err := txs.UnmarshalJSON([]byte(`["0x0102", "0x0304"]`))
+
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{1, 2}, {3, 4}}, txs.UnderlyngReference())
+}
 
 func TestTransactionsSSZ_DecodeSSZ_BoundsCheck(t *testing.T) {
 	tests := []struct {
@@ -74,7 +102,7 @@ func TestTransactionsSSZ_DecodeSSZ_BoundsCheck(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			txs := &TransactionsSSZ{}
 			err := txs.DecodeSSZ(tt.buf, 0)
-			if err != tt.wantErr {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("DecodeSSZ() error = %v, wantErr = %v", err, tt.wantErr)
 			}
 		})
@@ -114,6 +142,27 @@ func TestTransactionsSSZ_DecodeSSZ_CustomMaxTransactionsPerPayload(t *testing.T)
 	if !errors.Is(err, ssz.ErrTooBigList) {
 		t.Fatalf("expected ErrTooBigList, got %v", err)
 	}
+}
+
+func TestProgressiveTransactionsSSZDecodeRejectsResourceCountLimit(t *testing.T) {
+	tooMany := clparams.MaxTransactionsPerPayloadDefault + 1
+	firstOffset := uint32(tooMany * transactionOffsetSize)
+	buf := make([]byte, firstOffset)
+	ssz.EncodeOffset(buf[:transactionOffsetSize], firstOffset)
+
+	err := NewProgressiveTransactionsSSZ().DecodeSSZ(buf, 0)
+	require.ErrorIs(t, err, ssz.ErrTooBigList)
+}
+
+func TestProgressiveTransactionsSSZValidationUsesResourceCountLimit(t *testing.T) {
+	transactions := &TransactionsSSZ{
+		underlying:                [][]byte{{1}, {2}, {3}},
+		maxTransactionsPerPayload: 2,
+		maxBytesPerTransaction:    clparams.MaxChunkSize,
+		maxEncodedBytes:           clparams.MaxChunkSize,
+	}
+
+	require.ErrorContains(t, transactions.ValidateProgressiveBounds(), "too many transactions")
 }
 
 func TestTransactionsSSZ_DecodeSSZ_CustomMaxBytesPerTransaction(t *testing.T) {

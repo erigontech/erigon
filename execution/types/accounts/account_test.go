@@ -18,13 +18,17 @@ package accounts
 
 import (
 	"bytes"
+	"encoding/json"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestEmptyAccount(t *testing.T) {
@@ -368,5 +372,38 @@ func isIncarnationEqual(t *testing.T, initialIncarnation uint64, decodedIncarnat
 	t.Helper()
 	if initialIncarnation != decodedIncarnation {
 		t.Fatal("Can't decode the incarnation", initialIncarnation, decodedIncarnation)
+	}
+}
+
+func TestAccProofResultMarshalFastJSONTo(t *testing.T) {
+	proof := func(n int) []hexutil.Bytes {
+		nodes := make([]hexutil.Bytes, n)
+		for i := range nodes {
+			nodes[i] = bytes.Repeat([]byte{byte(i + 1)}, 532)
+		}
+		return nodes
+	}
+	maxU256 := (*hexutil.U256)(new(uint256.Int).SetAllOne())
+	for name, result := range map[string]*AccProofResult{
+		"zero":          {},
+		"no storage":    {Address: common.HexToAddress("0x01"), AccountProof: proof(3), Balance: maxU256, Nonce: hexutil.Uint64(^uint64(0))},
+		"empty storage": {AccountProof: []hexutil.Bytes{}, Balance: new(hexutil.U256), StorageProof: []StorProofResult{}},
+		"slots": {AccountProof: proof(8), Balance: (*hexutil.U256)(uint256.NewInt(1 << 40)), CodeHash: common.HexToHash("0xc0de"), StorageHash: common.HexToHash("0x5707"),
+			StorageProof: []StorProofResult{
+				{Key: "0x01", Value: maxU256, Proof: proof(5)},
+				{Key: `"quoted"`, Value: new(hexutil.U256), Proof: []hexutil.Bytes{}},
+				{Key: "0x03", Value: (*hexutil.U256)(uint256.NewInt(0x10)), Proof: proof(1)},
+				{},
+			}},
+		"large": {AccountProof: proof(2 * jsonstream.FlushThreshold / 532), Balance: new(hexutil.U256)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(result)
+			require.NoError(t, err)
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, result.MarshalFastJSONTo(s))
+			require.Equal(t, string(want), string(s.Buffer()))
+		})
 	}
 }

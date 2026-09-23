@@ -113,7 +113,8 @@ func TestServerListen(t *testing.T) {
 	defer srv.Stop()
 
 	// dial the test server
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, 5*time.Second)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -137,7 +138,7 @@ func TestServerListen(t *testing.T) {
 func TestServerDial(t *testing.T) {
 	logger := log.New()
 	// run a one-shot TCP server to handle the connection.
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatalf("could not setup listener: %v", err)
 	}
@@ -292,7 +293,7 @@ func TestServerAtCap(t *testing.T) {
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
 		t.Error("unexpected error @ checkpointPostHandshake:", err)
 	}
-	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); !errors.Is(err, DiscTooManyPeers) {
 		t.Error("wrong error for insert:", err)
 	}
 
@@ -314,7 +315,7 @@ func TestServerAtCap(t *testing.T) {
 	if err := srv.checkpoint(c, srv.checkpointPostHandshake); err != nil {
 		t.Error("unexpected error @ checkpointPostHandshake:", err)
 	}
-	if err := srv.checkpoint(c, srv.checkpointAddPeer); err != DiscTooManyPeers {
+	if err := srv.checkpoint(c, srv.checkpointAddPeer); !errors.Is(err, DiscTooManyPeers) {
 		t.Error("wrong error for insert:", err)
 	}
 
@@ -471,7 +472,7 @@ func TestServerSetupConn(t *testing.T) {
 				defer srv.Stop()
 			}
 			p1, _ := net.Pipe()
-			srv.SetupConn(p1, test.flags, test.dialDest)
+			_ = srv.SetupConn(p1, test.flags, test.dialDest)
 			if !reflect.DeepEqual(test.tt.closeErr, test.wantCloseErr) {
 				t.Errorf("test %d: close error mismatch: got %q, want %q", i, test.tt.closeErr, test.wantCloseErr)
 			}
@@ -584,7 +585,8 @@ func TestServerInboundUsesStaticEnode(t *testing.T) {
 	srv.AddPeer(staticEnode)
 
 	// Drive an inbound connection.
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, 5*time.Second)
+	dialer := net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	require.NoError(t, err)
 	defer conn.Close()
 
@@ -630,7 +632,8 @@ func TestServerInboundThrottle(t *testing.T) {
 	defer srv.Stop()
 
 	// Dial the test server.
-	conn, err := net.DialTimeout("tcp", srv.ListenAddr, timeout)
+	dialer := net.Dialer{Timeout: timeout}
+	conn, err := dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
@@ -644,15 +647,17 @@ func TestServerInboundThrottle(t *testing.T) {
 
 	// Dial again. This time the server should close the connection immediately.
 	connClosed := make(chan struct{}, 1)
-	conn, err = net.DialTimeout("tcp", srv.ListenAddr, timeout)
+	conn, err = dialer.DialContext(t.Context(), "tcp", srv.ListenAddr)
 	if err != nil {
 		t.Fatalf("could not dial: %v", err)
 	}
 	defer conn.Close()
 	go func() {
-		conn.SetDeadline(time.Now().Add(timeout))
+		if err := conn.SetDeadline(time.Now().Add(timeout)); err != nil {
+			t.Errorf("SetDeadline: %v", err)
+		}
 		buf := make([]byte, 10)
-		if n, err := conn.Read(buf); err != io.EOF || n != 0 {
+		if n, err := conn.Read(buf); !errors.Is(err, io.EOF) || n != 0 {
 			t.Errorf("expected io.EOF and n == 0, got error %q and n == %d", err, n)
 		}
 		connClosed <- struct{}{}
@@ -668,7 +673,7 @@ func TestServerInboundThrottle(t *testing.T) {
 }
 
 func listenFakeAddr(network, laddr string, remoteAddr net.Addr) (net.Listener, error) {
-	l, err := net.Listen(network, laddr)
+	l, err := net.Listen(network, laddr) //nolint:noctx
 	if err == nil {
 		l = &fakeAddrListener{l, remoteAddr}
 	}

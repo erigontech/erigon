@@ -120,7 +120,7 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 		return nil, err
 	}
 	ibs := state.New(reader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
 		return g.blockReader.Header(ctx, tx, hash, number)

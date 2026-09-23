@@ -143,6 +143,7 @@ func SetupCobra(cmd *cobra.Command, filePrefix string) log.Logger {
 	flags := cmd.Flags()
 
 	logger := logging.SetupLoggerCmd(filePrefix, cmd)
+	SetGoMemLimit(logger)
 
 	traceFile, err := flags.GetString(traceFlag.Name)
 	if err != nil {
@@ -240,9 +241,15 @@ func SetupTracerCtx(ctx *cli.Command) (*tracers.Tracer, error) {
 // Setup initializes profiling and logging based on the CLI flags.
 // It should be called as early as possible in the program.
 func Setup(nodeCtx context.Context, ctx *cli.Command, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
+	return SetupWithPrefix(nodeCtx, ctx, "erigon", rootLogger)
+}
+
+// SetupWithPrefix is Setup with an explicit log-file prefix, for binaries other than erigon.
+func SetupWithPrefix(nodeCtx context.Context, ctx *cli.Command, filePrefix string, rootLogger bool) (log.Logger, *tracers.Tracer, *http.ServeMux, *http.ServeMux, error) {
 	RaiseFdLimit()
 
-	logger := logging.SetupLoggerCtx("erigon", ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	logger := logging.SetupLoggerCtx(filePrefix, ctx, log.LvlInfo, log.LvlInfo, rootLogger)
+	SetGoMemLimit(logger)
 	tracer, err := SetupTracerCtx(ctx)
 	if err != nil {
 		return logger, tracer, nil, nil, err
@@ -432,7 +439,8 @@ func readConfigAsMap(filePath string) (map[string]any, error) {
 
 	fileConfig := make(map[string]any)
 
-	if fileExtension == ".yaml" || fileExtension == ".yml" {
+	switch {
+	case fileExtension == ".yaml" || fileExtension == ".yml":
 		yamlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return fileConfig, err
@@ -441,7 +449,7 @@ func readConfigAsMap(filePath string) (map[string]any, error) {
 		if err != nil {
 			return fileConfig, err
 		}
-	} else if fileExtension == ".toml" {
+	case fileExtension == ".toml":
 		tomlFile, err := os.ReadFile(filePath)
 		if err != nil {
 			return fileConfig, err
@@ -450,7 +458,7 @@ func readConfigAsMap(filePath string) (map[string]any, error) {
 		if err != nil {
 			return fileConfig, err
 		}
-	} else {
+	default:
 		return fileConfig, errors.New("config files only accepted are .yaml, .yml, and .toml")
 	}
 

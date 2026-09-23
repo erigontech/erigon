@@ -6,6 +6,8 @@ import (
 
 	"go.uber.org/mock/gomock"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -13,7 +15,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
 )
 
 func TestProcessExecutionPayloadEnvelopeRejectsNilEnvelope(t *testing.T) {
@@ -88,8 +89,9 @@ func TestProcessBuilderDepositRequestTopsUpExistingBuilder(t *testing.T) {
 
 	machine := &eth2.Impl{}
 	err := machine.ProcessBuilderDepositRequest(s, &solid.BuilderDepositRequest{
-		PubKey: pubkey,
-		Amount: 25,
+		PubKey:                pubkey,
+		WithdrawalCredentials: common.Hash{byte(cfg.BuilderWithdrawalPrefix)},
+		Amount:                25,
 	})
 
 	require.NoError(t, err)
@@ -113,8 +115,9 @@ func TestProcessBuilderDepositRequestRejectsBalanceOverflow(t *testing.T) {
 
 	machine := &eth2.Impl{}
 	err := machine.ProcessBuilderDepositRequest(s, &solid.BuilderDepositRequest{
-		PubKey: pubkey,
-		Amount: 1,
+		PubKey:                pubkey,
+		WithdrawalCredentials: common.Hash{byte(cfg.BuilderWithdrawalPrefix)},
+		Amount:                1,
 	})
 
 	require.Error(t, err)

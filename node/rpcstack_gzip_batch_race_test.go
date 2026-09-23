@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// gzipBatchStreamingService exposes a streamable method (last arg jsonstream.Stream) so
-// that runMethod invokes the gzip-streaming hook, per rpc/service.go's streamable detection.
+// gzipBatchStreamingService exposes a streamable method (last arg jsonstream.Stream), per
+// rpc/service.go's streamable detection.
 type gzipBatchStreamingService struct{}
 
 func (gzipBatchStreamingService) Echo(s string, stream jsonstream.Stream) error {
@@ -39,12 +39,10 @@ func (gzipBatchStreamingService) Echo(s string, stream jsonstream.Stream) error 
 	return nil
 }
 
-// TestGzipHandlerBatchConcurrentStreamableFlush reproduces a batch of streamable calls each
-// running on its own goroutine (rpc/handler.go handleBatch), where every goroutine invokes
-// the gzip-streaming flush hook installed on the shared request context. gzipResponseWriter.
-// Flush is not safe for concurrent use, so calling it from multiple goroutines races on the
-// underlying gzip.Writer and can dereference a nil flate compressor. Run with -race to
-// observe the race (or a direct panic/crash from an unrecovered panic in a batch goroutine).
+// TestGzipHandlerBatchConcurrentStreamableFlush runs a batch of streamable calls, each on
+// its own goroutine (rpc/handler.go handleBatch), against the compressing handler. The hook
+// this used to reproduce a race on is gone; the case stays as a pin that a concurrent batch
+// stays race-free under -race.
 func TestGzipHandlerBatchConcurrentStreamableFlush(t *testing.T) {
 	srv := newTestRPCServer(t)
 	require.NoError(t, srv.RegisterName("test", gzipBatchStreamingService{}))
@@ -55,11 +53,11 @@ func TestGzipHandlerBatchConcurrentStreamableFlush(t *testing.T) {
 	echoArg := strings.Repeat("x", 256) // large enough that the batch response exceeds minGzipBodySize
 	calls := make([]string, n)
 	for i := range calls {
-		calls[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":["%s"]}`, i+1, echoArg)
+		calls[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":[%q]}`, i+1, echoArg)
 	}
 	reqBody := "[" + strings.Join(calls, ",") + "]"
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()

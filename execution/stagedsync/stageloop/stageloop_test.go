@@ -24,7 +24,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/shards"
@@ -47,7 +47,7 @@ func drainSyncState(ch chan *remoteproto.SyncingReply) []*remoteproto.SyncingRep
 }
 
 func TestHookUpdateHeadEmitsSyncStateOnlyOnChange(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -78,7 +78,7 @@ func TestHookUpdateHeadEmitsSyncStateOnlyOnChange(t *testing.T) {
 }
 
 func TestHookUpdateHeadEmitsSyncedTransition(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -102,7 +102,7 @@ func TestHookUpdateHeadEmitsSyncedTransition(t *testing.T) {
 }
 
 func TestHookUpdateHeadDoesNotReEmitWhileSynced(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -139,7 +139,7 @@ func TestHookUpdateHeadDoesNotReEmitWhileSynced(t *testing.T) {
 // Two Hook instances share the same Notifications in production (pipeline and
 // stage-loop paths), so the dedup must hold across both.
 func TestTwoHooksSharingNotificationsEmitOnce(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -162,7 +162,7 @@ func TestTwoHooksSharingNotificationsEmitOnce(t *testing.T) {
 // behind notifies syncing=true when the catch-up cycle begins rather than
 // staying silent until (and if) a cycle ends while still behind.
 func TestHookBeforeRunEmitsWhenBehind(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -188,7 +188,7 @@ func TestHookBeforeRunEmitsWhenBehind(t *testing.T) {
 // NotifySyncState is the per-batch emission point used while executing frozen
 // blocks, where UpdateHead only runs once at the very end.
 func TestHookNotifySyncStateEmitsBatchProgress(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -217,7 +217,7 @@ func TestHookUpdateHeadNilSafe(t *testing.T) {
 	var hook *Hook
 	require.NoError(t, hook.UpdateHead(nil, 0, false))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		return NewHook(t.Context(), nil, nil, nil, log.New(), nil, nil, nil, nil, nil).UpdateHead(tx, 0, false)
 	}))

@@ -90,14 +90,16 @@ func createTestFileU16(b *testing.B, tmpdir string, keySize, valSize, fileSize i
 	written := 0
 	for written < fileSize {
 		*(*uint16)(unsafe.Pointer(&lenBuf[0])) = uint16(keySize)
-		w.Write(lenBuf[:])
-		w.Write(key)
+		_, _ = w.Write(lenBuf[:])
+		_, _ = w.Write(key)
 		*(*uint16)(unsafe.Pointer(&lenBuf[0])) = uint16(valSize)
-		w.Write(lenBuf[:])
-		w.Write(val)
+		_, _ = w.Write(lenBuf[:])
+		_, _ = w.Write(val)
 		written += 2 + keySize + 2 + valSize
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		b.Fatal(err)
+	}
 	f.Close()
 	return f.Name()
 }
@@ -119,19 +121,21 @@ func createTestFileU32(b *testing.B, tmpdir string, keySize, valSize, fileSize i
 	written := 0
 	for written < fileSize {
 		*(*uint32)(unsafe.Pointer(&lenBuf[0])) = uint32(keySize)
-		w.Write(lenBuf[:])
-		w.Write(key)
+		_, _ = w.Write(lenBuf[:])
+		_, _ = w.Write(key)
 		*(*uint32)(unsafe.Pointer(&lenBuf[0])) = uint32(valSize)
-		w.Write(lenBuf[:])
-		w.Write(val)
+		_, _ = w.Write(lenBuf[:])
+		_, _ = w.Write(val)
 		written += 4 + keySize + 4 + valSize
 	}
-	w.Flush()
+	if err := w.Flush(); err != nil {
+		b.Fatal(err)
+	}
 	f.Close()
 	return f.Name()
 }
 
-func openMmap(b *testing.B, fname string) ([]byte, *os.File) {
+func openMmap(b *testing.B, fname string) (mmap.Ro, *os.File) {
 	b.Helper()
 	f, err := os.Open(fname)
 	if err != nil {
@@ -141,7 +145,7 @@ func openMmap(b *testing.B, fname string) ([]byte, *os.File) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	data, _, err := mmap.Mmap(f, int(fi.Size()))
+	data, err := mmap.OpenRo(f, int(fi.Size()))
 	if err != nil {
 		b.Fatal(err)
 	}
@@ -153,6 +157,7 @@ func benchMmapU16(b *testing.B, fname string) {
 	b.Helper()
 	data, f := openMmap(b, fname)
 	defer f.Close()
+	defer data.Unmap() //nolint
 
 	m := &mmapBytesReader{data: data, pos: 0}
 	for {
@@ -169,6 +174,7 @@ func benchMmapU32(b *testing.B, fname string) {
 	b.Helper()
 	data, f := openMmap(b, fname)
 	defer f.Close()
+	defer data.Unmap() //nolint
 
 	pos := 0
 	for pos+4 <= len(data) {

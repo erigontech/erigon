@@ -30,6 +30,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -42,6 +43,8 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestCapabilities(t *testing.T) {
@@ -80,7 +83,7 @@ func TestCapabilities(t *testing.T) {
 
 		// Generate and insert blocks so Execution stage progress is set.
 		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+		c, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
 			if txErr != nil {
@@ -127,7 +130,7 @@ func TestCapabilities(t *testing.T) {
 		}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+		c, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
 			if txErr != nil {
@@ -137,6 +140,9 @@ func TestCapabilities(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(c))
+		// The prune mode alone no longer declares chain history expiry: the boundary is
+		// resolved from the block data on disk, so the fixture has to have its shape.
+		dropTransactions(t, m.DB, 1, mergeAt)
 		ctx := t.Context()
 		dbTx, err := m.DB.BeginTemporalRw(ctx)
 		require.NoError(t, err)
@@ -222,11 +228,13 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// --prune.include-receipts: receipts and logs available from genesis, not limited by state prune window.
-		require.Equal(t, uint64(0), oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
-		require.Equal(t, uint64(0), oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		// --prune.include-receipts without a window of its own: the cache is retired
+		// alongside state history, so receipts and logs follow that window instead of
+		// reaching genesis, and they advertise it.
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		// state still respects history prune distance
 		require.Equal(t, pruned, oldest(t, result.State))
 	})
@@ -369,9 +377,11 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, mergeAt, oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
 		require.Equal(t, mergeAt, oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		// The merge point and the history window bound the same block here, but only
+		// the window moves with the head, so it is the one that describes the retention.
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 	})
 
 	t.Run("wire_format", func(t *testing.T) {
@@ -663,7 +673,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {
@@ -680,4 +690,96 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 	}
 
 	return m
+}
+
+// feeHistoryResult must keep the hexutil.Big wire format: 0x-prefixed hex without leading zeros.
+func TestFeeHistoryResultJSON(t *testing.T) {
+	res := feeHistoryResult{
+		OldestBlock:  (*hexutil.Big)(big.NewInt(16)),
+		Reward:       [][]hexutil.U256{{hexutil.U256(*uint256.NewInt(0)), hexutil.U256(*uint256.NewInt(1_000_000_000))}},
+		BaseFee:      []hexutil.U256{hexutil.U256(*uint256.NewInt(1)), hexutil.U256(*new(uint256.Int).Lsh(uint256.NewInt(1), 255))},
+		GasUsedRatio: []float64{0.5},
+	}
+	got, err := json.Marshal(res)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"oldestBlock":"0x10","reward":[["0x0","0x3b9aca00"]],"baseFeePerGas":["0x1","0x8000000000000000000000000000000000000000000000000000000000000000"],"gasUsedRatio":[0.5]}`, string(got))
+}
+
+func TestFeeHistoryResultFastJSONMatchesEncodingJSON(t *testing.T) {
+	u := func(v uint64) hexutil.U256 { return hexutil.U256(*uint256.NewInt(v)) }
+	maxU256 := hexutil.U256(*new(uint256.Int).SetAllOne())
+	cases := map[string]*feeHistoryResult{
+		"rewards and blobs": {
+			OldestBlock:      (*hexutil.Big)(big.NewInt(25_981_495)),
+			Reward:           [][]hexutil.U256{{u(0), u(0xb), maxU256}, {}, nil},
+			BaseFee:          []hexutil.U256{u(1), u(83_553_224), maxU256, u(0)},
+			GasUsedRatio:     []float64{0, 0.5, 0.9996815666666666, 1e-7, 2.5e-10, 1e21, 123456789.125, math.Copysign(0, -1)},
+			BlobBaseFee:      []hexutil.U256{u(1), u(0x71301e)},
+			BlobGasUsedRatio: []float64{0.2857142857142857, 1},
+		},
+		"headers only":   {OldestBlock: (*hexutil.Big)(big.NewInt(16)), BaseFee: []hexutil.U256{u(7)}, GasUsedRatio: []float64{0.25}, BlobGasUsedRatio: []float64{}},
+		"no blocks":      {OldestBlock: (*hexutil.Big)(big.NewInt(0))},
+		"empty slices":   {OldestBlock: (*hexutil.Big)(big.NewInt(1)), Reward: [][]hexutil.U256{}, BaseFee: []hexutil.U256{}, GasUsedRatio: []float64{}},
+		"nil oldest":     {GasUsedRatio: []float64{1}},
+		"negative float": {OldestBlock: (*hexutil.Big)(big.NewInt(1)), GasUsedRatio: []float64{-0.75, -3e-9}},
+		"nil result":     nil,
+	}
+	for name, res := range cases {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(res)
+			require.NoError(t, err)
+			got, err := res.MarshalFastJSON()
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+		})
+	}
+	for _, bad := range []float64{math.NaN(), math.Inf(1)} {
+		_, wantErr := json.Marshal(&feeHistoryResult{GasUsedRatio: []float64{bad}})
+		_, gotErr := (&feeHistoryResult{GasUsedRatio: []float64{bad}}).MarshalFastJSON()
+		require.Error(t, wantErr)
+		require.EqualError(t, gotErr, wantErr.Error())
+	}
+}
+
+type syncingBackendStub struct {
+	rpchelper.ApiBackend
+	reply *remoteproto.SyncingReply
+}
+
+func (s syncingBackendStub) Syncing(context.Context) (*remoteproto.SyncingReply, error) {
+	return s.reply, nil
+}
+
+// The RPC layer forwards the node's pin instead of computing one of its own.
+func TestSyncingReportsTheStartingBlockOfTheSession(t *testing.T) {
+	api := &APIImpl{ethBackend: syncingBackendStub{reply: &remoteproto.SyncingReply{
+		Syncing:          true,
+		StartingBlock:    proto.Uint64(100),
+		CurrentBlock:     150,
+		LastNewBlockSeen: 500,
+	}}}
+
+	result, err := api.Syncing(t.Context())
+	require.NoError(t, err)
+	status, ok := result.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, hexutil.Uint64(100), status["startingBlock"])
+	require.Equal(t, hexutil.Uint64(150), status["currentBlock"])
+	require.Equal(t, hexutil.Uint64(500), status["highestBlock"])
+}
+
+// A node predating the field sends no pin, and the version check lets it: the
+// reply must then date the session to the current block, not to genesis.
+func TestSyncingWithoutAPinReportsTheCurrentBlock(t *testing.T) {
+	api := &APIImpl{ethBackend: syncingBackendStub{reply: &remoteproto.SyncingReply{
+		Syncing:          true,
+		CurrentBlock:     150,
+		LastNewBlockSeen: 500,
+	}}}
+
+	result, err := api.Syncing(t.Context())
+	require.NoError(t, err)
+	status, ok := result.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, hexutil.Uint64(150), status["startingBlock"])
 }

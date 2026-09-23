@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"io"
 	"sync/atomic"
 	"time"
@@ -76,7 +77,9 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
 	rpcService := &RPCService{server: server}
-	server.RegisterName(MetadataApi, rpcService)
+	if err := server.RegisterName(MetadataApi, rpcService); err != nil {
+		panic(err)
+	}
 	return server
 }
 
@@ -138,11 +141,12 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 
 	h := newHandler(ctx, codec, s.idgen, &s.services, s.batchLimit, s.methodAllowList, s.batchConcurrency, s.traceRequests, s.logger, s.rpcSlowLogThreshold)
 	h.allowSubscribe = false
+	h.inlineCalls = true
 	defer h.close(io.EOF, nil)
 
 	reqs, batch, err := codec.ReadBatch()
 	if err != nil {
-		if err != io.EOF {
+		if !errors.Is(err, io.EOF) {
 			return errorMessage(&invalidMessageError{"parse error"})
 		}
 		return nil

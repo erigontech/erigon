@@ -35,9 +35,9 @@ import (
 // are inert.
 type stubAggregator struct{}
 
-func (stubAggregator) Files() []string   { return nil }
-func (stubAggregator) OpenFolder() error { return nil }
-func (stubAggregator) BuildMissedAccessors(_ context.Context, _ int, _ ...kv.BuildAccessorsOption) error {
+func (stubAggregator) Files() []string          { return nil }
+func (stubAggregator) OpenFolder(kv.RoDB) error { return nil }
+func (stubAggregator) BuildMissedAccessors(_ context.Context, _ kv.RoDB, _ int, _ ...kv.BuildAccessorsOption) error {
 	return nil
 }
 func (stubAggregator) LockCollation()   {}

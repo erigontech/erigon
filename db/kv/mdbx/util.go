@@ -50,7 +50,7 @@ func RecordSummaries(dbLabel kv.Label, latency mdbx.CommitLatency) error {
 	return nil
 }
 
-func DefaultPageSize() datasize.ByteSize {
+func defaultPageSize() datasize.ByteSize {
 	osPageSize := os.Getpagesize()
 	if osPageSize < 4096 { // reduce further may lead to errors (because some data is just big)
 		osPageSize = 4096

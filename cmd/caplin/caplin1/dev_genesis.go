@@ -34,33 +34,8 @@ func writeDevGenesisBeaconBlock(ctx context.Context, genesisState *state.Caching
 	}
 	blk.StateRoot = stateRoot
 
-	// Initialize the body with preset-aware defaults.
-	body := blk.Body
-	if version >= clparams.AltairVersion {
-		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)
-	}
-	// [Modified in Gloas:EIP7732] GLOAS blocks do not have ExecutionPayload in the body.
-	if version >= clparams.BellatrixVersion && version < clparams.GloasVersion {
-		body.ExecutionPayload.Extra = solid.NewExtraData()
-		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
-
-		// Copy execution payload header from genesis state so the block hash
-		// matches the EL genesis (needed for fork choice to find the EL block).
-		execHeader := genesisState.LatestExecutionPayloadHeader()
-		if execHeader != nil {
-			body.ExecutionPayload.BlockHash = execHeader.BlockHash
-			body.ExecutionPayload.StateRoot = execHeader.StateRoot
-			body.ExecutionPayload.ParentHash = execHeader.ParentHash
-			body.ExecutionPayload.BlockNumber = execHeader.BlockNumber
-			body.ExecutionPayload.GasLimit = execHeader.GasLimit
-			body.ExecutionPayload.Time = execHeader.Time
-			body.ExecutionPayload.BaseFeePerGas = execHeader.BaseFeePerGas
-		}
-
-		if version >= clparams.CapellaVersion {
-			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
-		}
-	}
+	body := devGenesisBeaconBody(genesisState, cfg)
+	blk.Body = body
 
 	// Verify the reconstructed body root matches what the genesis state header expects.
 	// A mismatch means the block root we write differs from state.BlockRoot(), breaking
@@ -95,4 +70,37 @@ func writeDevGenesisBeaconBlock(ctx context.Context, genesisState *state.Caching
 	return db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, true)
 	})
+}
+
+func devGenesisBeaconBody(genesisState *state.CachingBeaconState, cfg *clparams.BeaconChainConfig) *cltypes.BeaconBody {
+	version := genesisState.Version()
+	body := cltypes.NewBeaconBody(cfg, version)
+	if version >= clparams.AltairVersion {
+		body.SyncAggregate = cltypes.NewSyncAggregateWithSize(int(cfg.SyncCommitteeSize) / 8)
+	}
+	if version >= clparams.BellatrixVersion && version < clparams.GloasVersion {
+		body.ExecutionPayload.Extra = solid.NewExtraData()
+		body.ExecutionPayload.Transactions = &solid.TransactionsSSZ{}
+
+		execHeader := genesisState.LatestExecutionPayloadHeader()
+		if execHeader != nil {
+			body.ExecutionPayload.BlockHash = execHeader.BlockHash
+			body.ExecutionPayload.StateRoot = execHeader.StateRoot
+			body.ExecutionPayload.ParentHash = execHeader.ParentHash
+			body.ExecutionPayload.BlockNumber = execHeader.BlockNumber
+			body.ExecutionPayload.GasLimit = execHeader.GasLimit
+			body.ExecutionPayload.Time = execHeader.Time
+			body.ExecutionPayload.BaseFeePerGas = execHeader.BaseFeePerGas
+		}
+
+		if version >= clparams.CapellaVersion {
+			body.ExecutionPayload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+		}
+	}
+	if version >= clparams.GloasVersion {
+		if bid := genesisState.GetLatestExecutionPayloadBid(); bid != nil {
+			body.SignedExecutionPayloadBid.Message = bid
+		}
+	}
+	return body
 }

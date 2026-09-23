@@ -23,6 +23,7 @@
 package forkexport
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -137,7 +138,7 @@ func WriteForkGenesisSSZ(datadir, parentChain, forkChainName string, logger log.
 	if !initial_state.IsGenesisStateSupported(parentNetworkID) {
 		return "", fmt.Errorf("parent chain %q has no supported genesis-state source (network id %d)", parentChain, parentNetworkID)
 	}
-	genState, err := initial_state.GetGenesisState(parentNetworkID)
+	genState, err := initial_state.GetGenesisState(context.Background(), parentNetworkID)
 	if err != nil {
 		return "", fmt.Errorf("fetch parent genesis state: %w", err)
 	}

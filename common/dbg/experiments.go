@@ -38,7 +38,7 @@ import (
 var (
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
-	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
+	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", uint64(estimate.AlmostAllCPUs())) // used only in offline-tooling
 
 	saveHeapProfile             = EnvBool("SAVE_HEAP_PROFILE", false)
 	heapProfileFilePath         = EnvString("HEAP_PROFILE_FILE_PATH", "")
@@ -57,19 +57,22 @@ var (
 
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
-	//state v3
-	noPrune             = EnvBool("NO_PRUNE", false)
-	noRetire            = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
-	noMerge             = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
-	noBackgroundE3Build = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
-	noMergeHistory      = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
-	noDeepMergeHistory  = EnvBool("NO_DEEP_MERGE_HISTORY", false)  // merge Hist/II only up to 2 steps (small+fast), skip larger merges
-	discardCommitment   = EnvBool("DISCARD_COMMITMENT", false)
+	// state v3
+	noPrune              = EnvBool("NO_PRUNE", false)
+	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
+	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
+	noBackgroundE3Build  = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
+	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
+	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false)  // merge Hist/II only up to 2 steps (small+fast), skip larger merges
+	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
+	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 
-	// allows to collect reading metrics for kv by file level
+	// allows to collect reading metrics for kv by file level. Read
+	// unsynchronised on every domain read, so it may only be written before any
+	// reader goroutine exists: flag parsing, or test setup before the first read.
 	KVReadLevelledMetrics = EnvBool("KV_READ_METRICS", false)
 
 	// allow simultaneous build of multiple snapshot types.
@@ -118,6 +121,8 @@ var (
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceReexec           = EnvBool("TRACE_REEXEC", false)
+	TraceBALFeed          = EnvBool("TRACE_BAL_FEED", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
@@ -134,23 +139,52 @@ var (
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
-	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
-	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
-	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
-	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
-	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead            = EnvBool("READ_AHEAD", true)
+	BALShadowCompute = EnvBool("BAL_SHADOW_COMPUTE", false)
+	// CommitmentAfterExec makes the exec loop wait for the commitment
+	// calculator to handle block N's result before starting N+1. Diagnostic:
+	// it trades the block-level exec/commitment overlap for most of the
+	// SharedDomains.changesetMu contention. Mid-block computes (step-edge
+	// checkpoints) still run alongside exec.
+	CommitmentAfterExec           = EnvBool("COMMITMENT_AFTER_EXEC", false)
+	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)
+	DisableAdaptivePin            = EnvBool("DISABLE_ADAPTIVE_PIN", true)
+	AssertStateCache              = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead                     = EnvBool("READ_AHEAD", true)
+	ReadAheadWorkers              = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
+	ReadAheadWait                 = EnvBool("READ_AHEAD_WAIT", false)
+	ReadAheadBALCode              = EnvBool("READ_AHEAD_BAL_CODE", false)
+	ReadAheadTxCode               = EnvBool("READ_AHEAD_TX_CODE", false)
+	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
+	FilesBlockingAsyncIOMultiPage = EnvBool("FILES_BLOCKING_ASYNC_IO_MULTI_PAGE", true)
 
-	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
-	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+	TraceDeletion = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
+	TrieBALWarmupers = EnvInt("TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
+
+func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
+	return max(gomaxprocs, 1)
+}
+
+func BALCommitmentWarmupReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(TrieBALWarmupers, 0)
+}
+
+func ReadAheadWorkerReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(ReadAheadWorkers, 1)
+}
 
 func init() {
 	if PerfProfiles {
@@ -383,12 +417,14 @@ func SaveHeapProfileNearOOMPeriodically(ctx context.Context, opts ...SaveHeapOpt
 	}
 }
 
-var tracedBlocks map[uint64]struct{}
-var traceAllBlocks bool
-var tracedTxIndexes map[int64]struct{}
-var tracedAccounts map[unique.Handle[common.Address]]struct{}
-var traceAllDomains bool
-var tracedDomains map[uint16]struct{}
+var (
+	tracedBlocks    map[uint64]struct{}
+	traceAllBlocks  bool
+	tracedTxIndexes map[int64]struct{}
+	tracedAccounts  map[unique.Handle[common.Address]]struct{}
+	traceAllDomains bool
+	tracedDomains   map[uint16]struct{}
+)
 
 var traceInit sync.Once
 

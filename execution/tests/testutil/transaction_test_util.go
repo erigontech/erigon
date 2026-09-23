@@ -22,7 +22,9 @@ package testutil
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -34,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
@@ -43,18 +46,7 @@ type TransactionTest struct {
 	Forks ttForks       `json:"result"`
 }
 
-type ttForks struct {
-	Berlin            ttFork
-	Byzantium         ttFork
-	Constantinople    ttFork
-	ConstantinopleFix ttFork
-	EIP150            ttFork
-	EIP158            ttFork
-	Frontier          ttFork
-	Homestead         ttFork
-	Istanbul          ttFork
-	London            ttFork
-}
+type ttForks map[string]ttFork
 
 type ttFork struct {
 	Exception    string                `json:"exception"`
@@ -97,14 +89,17 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			IsEIP2780:          rules.IsAmsterdam,
 		})
 		requiredGas := intrinsicGasResult.ExecutionGas
-		if rules.IsPrague && intrinsicGasResult.FloorGasCost > requiredGas {
-			requiredGas = intrinsicGasResult.FloorGasCost
-		}
 		if overflow {
 			return nil, nil, 0, protocol.ErrGasUintOverflow
 		}
-		if requiredGas > msg.Gas() {
-			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", msg.Gas(), requiredGas)
+		minimumGas := max(requiredGas, intrinsicGasResult.FloorGasCost)
+		if minimumGas > msg.Gas() {
+			return nil, nil, requiredGas, fmt.Errorf("insufficient gas ( %d < %d )", msg.Gas(), minimumGas)
+		}
+		if msg.To().IsNil() {
+			if err := vm.CheckMaxInitCodeSize(uint64(len(msg.Data())), rules.IsShanghai, rules.IsAmsterdam); err != nil {
+				return nil, nil, requiredGas, err
+			}
 		}
 
 		if rules.IsLondon {
@@ -128,28 +123,22 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 		return &senderValue, &h, requiredGas, nil
 	}
 
-	for _, testcase := range []struct {
-		name   string
-		signer *types.Signer
-		fork   ttFork
-		config *chain.Config
-	}{
-		{"Frontier", types.MakeFrontierSigner(), tt.Forks.Frontier, testforks.Forks["Frontier"]},
-		{"Homestead", types.LatestSignerForChainID(nil), tt.Forks.Homestead, testforks.Forks["Homestead"]},
-		{"EIP150", types.LatestSignerForChainID(nil), tt.Forks.EIP150, testforks.Forks["EIP150"]},
-		{"EIP158", types.LatestSignerForChainID(chainID), tt.Forks.EIP158, testforks.Forks["EIP158"]},
-		{"Byzantium", types.LatestSignerForChainID(chainID), tt.Forks.Byzantium, testforks.Forks["Byzantium"]},
-		{"Constantinople", types.LatestSignerForChainID(chainID), tt.Forks.Constantinople, testforks.Forks["Constantinople"]},
-		{"ConstantinopleFix", types.LatestSignerForChainID(chainID), tt.Forks.ConstantinopleFix, testforks.Forks["ConstantinopleFix"]},
-		{"Istanbul", types.LatestSignerForChainID(chainID), tt.Forks.Istanbul, testforks.Forks["Istanbul"]},
-		{"Berlin", types.LatestSignerForChainID(chainID), tt.Forks.Berlin, testforks.Forks["Berlin"]},
-		{"London", types.LatestSignerForChainID(chainID), tt.Forks.London, testforks.Forks["London"]},
-	} {
-		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *testcase.signer, (&evmtypes.BlockContext{}).Rules(testcase.config))
+	forkNames := slices.Sorted(maps.Keys(tt.Forks))
+	validated := false
+	for _, forkName := range forkNames {
+		config, ok := testforks.Forks[forkName]
+		if !ok || config == nil {
+			continue
+		}
+		validated = true
+		fork := tt.Forks[forkName]
+		rules := (&evmtypes.BlockContext{}).Rules(config)
+		signer := types.MakeSignerFromRules(chainID, rules)
+		sender, txhash, intrinsicGas, err := validateTx(tt.RLP, *signer, rules)
 
-		if testcase.fork.Exception != "" {
+		if fork.Exception != "" {
 			if err == nil {
-				return fmt.Errorf("expected error %v, got none [%v]", testcase.fork.Exception, testcase.name)
+				return fmt.Errorf("expected error %v, got none [%v]", fork.Exception, forkName)
 			}
 			continue
 		}
@@ -158,20 +147,23 @@ func (tt *TransactionTest) Run(chainID *uint256.Int) error {
 			return fmt.Errorf("got error, expected none: %w", err)
 		}
 		if sender == nil {
-			return fmt.Errorf("sender was nil, should be %x", testcase.fork.Sender)
+			return fmt.Errorf("sender was nil, should be %x", fork.Sender)
 		}
-		if *sender != testcase.fork.Sender {
-			return fmt.Errorf("sender mismatch: got %x, want %x", sender, testcase.fork.Sender)
+		if *sender != fork.Sender {
+			return fmt.Errorf("sender mismatch: got %x, want %x", sender, fork.Sender)
 		}
 		if txhash == nil {
-			return fmt.Errorf("txhash was nil, should be %x", testcase.fork.Hash)
+			return fmt.Errorf("txhash was nil, should be %x", fork.Hash)
 		}
-		if *txhash != testcase.fork.Hash {
-			return fmt.Errorf("hash mismatch: got %x, want %x", *txhash, testcase.fork.Hash)
+		if *txhash != fork.Hash {
+			return fmt.Errorf("hash mismatch: got %x, want %x", *txhash, fork.Hash)
 		}
-		if new(big.Int).SetUint64(intrinsicGas).Cmp((*big.Int)(testcase.fork.IntrinsicGas)) != 0 {
-			return fmt.Errorf("intrinsic gas mismatch: got %x, want %x", intrinsicGas, (*big.Int)(testcase.fork.IntrinsicGas))
+		if new(big.Int).SetUint64(intrinsicGas).Cmp((*big.Int)(fork.IntrinsicGas)) != 0 {
+			return fmt.Errorf("intrinsic gas mismatch: got %x, want %x", intrinsicGas, (*big.Int)(fork.IntrinsicGas))
 		}
+	}
+	if !validated && len(forkNames) > 0 {
+		return testforks.UnsupportedForkError{Name: forkNames[0]}
 	}
 	return nil
 }

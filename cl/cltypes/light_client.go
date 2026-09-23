@@ -31,10 +31,8 @@ const (
 	// FINALIZED_ROOT_GINDEX	get_generalized_index(altair.BeaconState, 'finalized_checkpoint', 'root') (= 105)
 	// CURRENT_SYNC_COMMITTEE_GINDEX	get_generalized_index(altair.BeaconState, 'current_sync_committee') (= 54)
 	// NEXT_SYNC_COMMITTEE_GINDEX	get_generalized_index(altair.BeaconState, 'next_sync_committee') (= 55)
-	ExecutionBranchSize = 4
-	// EXECUTION_BLOCK_HASH_GINDEX_GLOAS = get_generalized_index(BeaconBlockBody, 'signed_execution_payload_bid', 'message', 'parent_block_hash') (= 832)
-	// floorlog2(832) = 9
-	ExecutionBranchSizeGloas       = 9
+	ExecutionBranchSize            = 4
+	ExecutionBranchSizeGloas       = 11
 	SyncCommitteeBranchSize        = 5
 	CurrentSyncCommitteeBranchSize = 5
 	FinalizedBranchSize            = 6
@@ -45,6 +43,8 @@ const (
 	SyncCommitteeBranchSizeElectra        = 6
 	CurrentSyncCommitteeBranchSizeElectra = 6
 	FinalizedBranchSizeElectra            = 7
+	CurrentSyncCommitteeBranchSizeGloas   = 11
+	FinalizedBranchSizeGloas              = 9
 )
 
 type LightClientHeader struct {
@@ -427,6 +427,9 @@ func (l *LightClientOptimisticUpdate) Clone() clonable.Clonable {
 }
 
 func getCurrentSyncCommitteeBranchSize(version clparams.StateVersion) int {
+	if version >= clparams.GloasVersion {
+		return CurrentSyncCommitteeBranchSizeGloas
+	}
 	if version >= clparams.ElectraVersion {
 		return CurrentSyncCommitteeBranchSizeElectra
 	}
@@ -434,6 +437,9 @@ func getCurrentSyncCommitteeBranchSize(version clparams.StateVersion) int {
 }
 
 func getFinalizedBranchSize(version clparams.StateVersion) int {
+	if version >= clparams.GloasVersion {
+		return FinalizedBranchSizeGloas
+	}
 	if version >= clparams.ElectraVersion {
 		return FinalizedBranchSizeElectra
 	}

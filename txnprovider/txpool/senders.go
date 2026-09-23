@@ -223,24 +223,24 @@ func (sc *sendersBatch) getOrCreateID(addr common.Address, logger log.Logger) (u
 // the sub-pool.
 var ErrSenderIDNotRegistered = errors.New("sender id not registered")
 
-func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, error) {
+func (sc *sendersBatch) info(cacheView kvcache.CacheView, id uint64) (uint64, uint256.Int, accounts.CodeHash, error) {
 	addr, ok := sc.senderID2Addr[id]
 	if !ok {
-		return 0, uint256.Int{}, ErrSenderIDNotRegistered
+		return 0, uint256.Int{}, accounts.CodeHash{}, ErrSenderIDNotRegistered
 	}
 	encoded, err := cacheView.Get(addr[:])
 	if err != nil {
-		return 0, uint256.Int{}, err
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, err
 	}
 	if len(encoded) == 0 {
-		return 0, uint256.Int{}, nil
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, nil
 	}
 	acc := accounts.Account{}
 	err = accounts.DeserialiseV3(&acc, encoded)
 	if err != nil {
-		return 0, uint256.Int{}, err
+		return 0, uint256.Int{}, accounts.EmptyCodeHash, err
 	}
-	return acc.Nonce, acc.Balance, nil
+	return acc.Nonce, acc.Balance, acc.CodeHash, nil
 }
 
 func (sc *sendersBatch) registerNewSenders(newTxns *TxnSlots, logger log.Logger) (err error) {

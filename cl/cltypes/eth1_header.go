@@ -114,7 +114,7 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) ([]byte, error) {
 func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	h.version = clparams.StateVersion(version)
 	if len(buf) < h.EncodingSizeSSZ() {
-		return fmt.Errorf("[Eth1Header] err: %s", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[Eth1Header] err: %w", ssz.ErrLowBufferSize)
 	}
 	return ssz2.UnmarshalSSZ(buf, version, h.getSchema()...)
 }
@@ -161,8 +161,8 @@ func (h *Eth1Header) Static() bool {
 }
 
 func (h *Eth1Header) MarshalJSON() ([]byte, error) {
-	baseFeePerGas := uint256.NewInt(0).SetBytes32(h.BaseFeePerGas[:])
-	baseFeePerGas.ReverseBytes(baseFeePerGas)
+	baseFeePerGas := new(uint256.Int)
+	_ = baseFeePerGas.UnmarshalSSZ(h.BaseFeePerGas[:])
 
 	type basePayload struct {
 		ParentHash       common.Hash      `json:"parent_hash"`
@@ -248,8 +248,7 @@ func (h *Eth1Header) UnmarshalJSON(data []byte) error {
 	if err := tmp.SetFromDecimal(aux.BaseFeePerGas); err != nil {
 		return err
 	}
-	tmp.ReverseBytes(tmp)
-	tmp.WriteToArray32((*[32]byte)(&h.BaseFeePerGas))
+	_, _ = tmp.MarshalSSZAppend(h.BaseFeePerGas[:0])
 	h.BlockHash = aux.BlockHash
 	h.TransactionsRoot = aux.TransactionsRoot
 	h.WithdrawalsRoot = aux.WithdrawalsRoot

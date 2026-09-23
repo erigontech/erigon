@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	dbcfg "github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
@@ -56,7 +56,7 @@ func seedBlockTableEntry(t *testing.T, tx kv.RwTx, table string, blockNum uint64
 func TestVerifyPostUnwindDBImage_CleanState(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -99,7 +99,7 @@ func TestVerifyPostUnwindDBImage_CleanState(t *testing.T) {
 func TestVerifyPostUnwindDBImage_TxNumsLastWrong(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -117,7 +117,7 @@ func TestVerifyPostUnwindDBImage_TxNumsLastWrong(t *testing.T) {
 func TestVerifyPostUnwindDBImage_HeadersOrphan(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -138,7 +138,7 @@ func TestVerifyPostUnwindDBImage_HeadersOrphan(t *testing.T) {
 func TestVerifyPostUnwindDBImage_EthTxOrphan(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -160,7 +160,7 @@ func TestVerifyPostUnwindDBImage_EthTxOrphan(t *testing.T) {
 func TestVerifyPostUnwindDBImage_StagePastToBlock(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -180,7 +180,7 @@ func TestVerifyPostUnwindDBImage_StagePastToBlock(t *testing.T) {
 func TestVerifyPostUnwindDBImage_MultipleFailuresCombined(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

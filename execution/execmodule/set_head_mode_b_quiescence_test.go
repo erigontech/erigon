@@ -107,7 +107,7 @@ func TestSetHeadModeB_QuiescenceWaitDoesNotHoldWriteTx(t *testing.T) {
 	unwinder := &writeProbeUnwinder{db: db}
 	e := &ExecModule{
 		db:          db,
-		blockReader: freezeblocks.NewBlockReader(snaps, nil),
+		blockReader: freezeblocks.NewBlockReader(snaps),
 		semaphore:   semaphore.NewWeighted(1),
 		logger:      log.Root(),
 		unwinder:    unwinder,

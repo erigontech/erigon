@@ -47,6 +47,24 @@ func TestGetters(t *testing.T) {
 	require.Equal(t, common.Hash(root), common.HexToHash("0xfc09c7ba749aa6d19ff97e8199c768dcb626df924060806b763ca2e7c8385805"))
 }
 
+func TestCopyIntoSetsPhase0VersionOnReusedDestination(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	source := New(&cfg)
+	require.NoError(t, source.SetSlot(3))
+	destination := New(&cfg)
+	destination.SetVersion(clparams.GloasVersion)
+	require.NoError(t, destination.SetSlot(99))
+
+	require.NoError(t, source.CopyInto(destination))
+
+	require.Equal(t, clparams.Phase0Version, destination.Version())
+	expectedRoot, err := source.HashSSZ()
+	require.NoError(t, err)
+	actualRoot, err := destination.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, expectedRoot, actualRoot)
+}
+
 // TestNewBeaconStateMinimalPreset verifies that creating a BeaconState with
 // minimal-preset config (SLOTS_PER_EPOCH=8) does not panic and produces
 // correctly-sized data structures, especially the GLOAS ptc_window.

@@ -128,11 +128,12 @@ func (c typedComponent[P]) Activate(ctx context.Context, handler ...ActivityHand
 }
 
 func (c typedComponent[P]) Deactivate(ctx context.Context, handler ...ActivityHandler[P]) error {
-	return c.deactivate(ctx, func(ctx context.Context, _ *component, err error) {
+	c.deactivate(ctx, func(ctx context.Context, _ *component, err error) {
 		if len(handler) > 0 {
 			handler[0].OnActivity(ctx, c, c.state, err)
 		}
 	})
+	return nil
 }
 
 var deactivatoinWaiters = struct {
@@ -657,7 +658,9 @@ func asComponent(r relation) *component {
 }
 
 func (c *component) AddDependency(dependency relation) relation {
-	asComponent(dependency).addDependent(c, false)
+	if err := asComponent(dependency).addDependent(c, false); err != nil {
+		liblog.Warn("AddDependency failed", "component", app.LogInstance(c), "dependency", app.LogInstance(dependency), "err", err)
+	}
 	return c
 }
 
@@ -736,7 +739,7 @@ func (c *component) configure(ctx context.Context, force bool, activationLocked 
 								if r := recover(); r != nil {
 									var ok bool
 									if err, ok = r.(error); ok {
-										err = fmt.Errorf("%T configure panicked with error: %s, stack: %s", dependency, err, dbg.Stack())
+										err = fmt.Errorf("%T configure panicked with error: %w, stack: %s", dependency, err, dbg.Stack())
 									} else {
 										err = fmt.Errorf("%T configure panicked: %v, stack: %s", dependency, r, dbg.Stack())
 									}
@@ -824,7 +827,7 @@ func (c *component) initialize(ctx context.Context, activationLocked bool, onAct
 								if r := recover(); r != nil {
 									var ok bool
 									if err, ok = r.(error); ok {
-										err = fmt.Errorf("%T initialize panicked with error: %s, stack: %s", dependency, err, dbg.Stack())
+										err = fmt.Errorf("%T initialize panicked with error: %w, stack: %s", dependency, err, dbg.Stack())
 									} else {
 										err = fmt.Errorf("%T initialize panicked: %v, stack: %s", dependency, r, dbg.Stack())
 									}
@@ -963,7 +966,9 @@ func (c *component) activateDependencies(ctx context.Context, activationList []*
 					"component", app.LogInstance(c),
 					"dependency", app.LogInstance(dependency))
 			}
-			dependency.activate(ctx, noopHanlder)
+			if err := dependency.activate(ctx, noopHanlder); err != nil {
+				c.log.Warn("Activating dependency failed", "component", app.LogInstance(c), "dependency", app.LogInstance(dependency), "err", err)
+			}
 		}
 	}
 }
@@ -1049,18 +1054,17 @@ func awaitDeactivationChannels() {
 }
 
 // deactivate sends a deactivation message to the actor. Returns immediately.
-func (c *component) deactivate(ctx context.Context, onActivity onActivity) error {
+func (c *component) deactivate(ctx context.Context, onActivity onActivity) {
 	c.RLock()
 	alreadyDeactivated := c.state.IsDeactivated()
 	c.RUnlock()
 
 	if alreadyDeactivated {
 		onActivity(ctx, c, nil)
-		return nil
+		return
 	}
 
 	c.inbox <- actorMsg{kind: msgDeactivate, ctx: ctx, onActivity: onActivity}
-	return nil
 }
 
 // doDeactivate is the actual deactivation logic, run inside the actor goroutine.
@@ -1190,7 +1194,9 @@ func (c *component) setDomain(cm *componentDomain, domainLocked bool) error {
 			}
 
 			if len(c.dependents) == 0 {
-				cm.addDependency(c, domainLocked)
+				if _, err := cm.addDependency(c, domainLocked); err != nil {
+					return err
+				}
 			}
 
 			if err := cm.serviceBus().Register(c, registrations...); err != nil {
@@ -1225,7 +1231,9 @@ func (c *component) Dependents() relations {
 func (c *component) addDependent(dependent *component, parentLocked bool) error {
 	c.dependents = c.dependents.Add(dependent)
 
-	dependent.addDependency(c, parentLocked)
+	if _, err := dependent.addDependency(c, parentLocked); err != nil {
+		return err
+	}
 
 	if domain, ok := dependent.provider.(*componentDomain); ok {
 		if c.Domain() != domain {
@@ -1255,12 +1263,6 @@ func (c *component) addDependent(dependent *component, parentLocked bool) error 
 		}
 	}
 
-	return nil
-}
-
-func (c *component) removeDependent(dependent *component, dependentLocked bool) error {
-	c.dependents = c.dependents.Remove(dependent)
-	dependent.removeDependency(c, dependentLocked)
 	return nil
 }
 

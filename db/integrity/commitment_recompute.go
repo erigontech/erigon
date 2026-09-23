@@ -116,7 +116,7 @@ func RecomputeCommitmentAtBlock(
 		return nil, common.Hash{}, fmt.Errorf("open SharedDomains: %w", err)
 	}
 	defer sd.Close()
-	sd.ClearRam(true)
+	sd.ResetPendingUpdates()
 
 	// commitment branch view: as-of beginning of the block (so we replay
 	// THIS block's touches against the prior block's commitment state).

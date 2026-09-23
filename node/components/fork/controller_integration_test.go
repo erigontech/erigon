@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -97,7 +97,7 @@ func newTier2Runtime(t *testing.T, forkName string, cutBlock uint64, initialHead
 	require.NoError(t, err)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "chain.json"), forkJSON, 0o644))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		return stages.SaveStageProgress(tx, stages.Finish, initialHead)
 	}))
@@ -108,7 +108,7 @@ func newTier2Runtime(t *testing.T, forkName string, cutBlock uint64, initialHead
 		Logger:      log.Root(),
 		Disable:     true,
 		ChainConfig: hoodi,
-		Genesis:     types.NewBlockWithHeader(&types.Header{}),
+		Genesis:     types.NewBlockWithHeader(&types.Header{}, nil),
 	})
 	require.NoError(t, sentry.Start(t.Context()))
 	t.Cleanup(func() { sentry.Close() })

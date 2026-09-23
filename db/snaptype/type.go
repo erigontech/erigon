@@ -83,6 +83,18 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 		return nil, err
 	}
 
+	var saltBytes []byte
+	if exists {
+		if saltBytes, err = os.ReadFile(fpath); err != nil {
+			return nil, err
+		}
+		// WriteFileWithFsync truncates before writing, so an interrupted write leaves a
+		// wrong-sized file behind. It carries no usable salt, so treat it as missing.
+		if exists = len(saltBytes) == 4; !exists {
+			logger.Warn("discarding malformed snaptype salt file, accessors built under the previous salt no longer match", "file", fpath, "len", len(saltBytes))
+		}
+	}
+
 	if !exists {
 		if !autoCreate {
 			logger.Debug("snaptype salt file not found + autocreate disabled")
@@ -90,20 +102,7 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 		}
 		dir.MustExist(baseDir)
 
-		saltBytes := make([]byte, 4)
-		binary.BigEndian.PutUint32(saltBytes, randUint32())
-		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
-			return nil, err
-		}
-	}
-	saltBytes, err := os.ReadFile(fpath)
-	if err != nil {
-		return nil, err
-	}
-	if len(saltBytes) != 4 {
-		dir.MustExist(baseDir)
-
-		saltBytes := make([]byte, 4)
+		saltBytes = make([]byte, 4)
 		binary.BigEndian.PutUint32(saltBytes, randUint32())
 		if err := dir.WriteFileWithFsync(fpath, saltBytes, os.ModePerm); err != nil {
 			return nil, err
@@ -112,7 +111,6 @@ func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, erro
 
 	salt := binary.BigEndian.Uint32(saltBytes)
 	return &salt, nil
-
 }
 
 // GetIndicesSalt - try read salt for all indices from DB. Or fall-back to new salt creation.
@@ -238,16 +236,25 @@ var registeredTypes = map[Enum]Type{}
 var namedTypes = map[string]Type{}
 
 func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if enum >= MinCaplinEnum && enum < MaxCaplinEnum {
+		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
+	}
+	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
+}
+
+func RegisterCaplinType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if enum < MinCaplinEnum || enum >= MaxCaplinEnum {
+		panic(fmt.Sprintf("snaptype: enum %d for %q outside caplin range [%d, %d)", enum, name, MinCaplinEnum, MaxCaplinEnum))
+	}
+	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
+}
+
+func register(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
 	if prev, taken := registeredTypes[enum]; taken {
 		panic(fmt.Sprintf("snaptype: enum %d already registered as %q, cannot register %q", enum, prev.Name(), name))
 	}
-	if enum >= MinCaplinEnum && enum < MinBorEnum {
-		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
-	}
-	// ParseEnum rather than namedTypes: caplin names resolve through its
-	// switch and never appear in the map.
-	if prevEnum, taken := ParseEnum(name); taken {
-		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prevEnum))
+	if prev, taken := namedTypes[strings.ToLower(name)]; taken {
+		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prev.Enum()))
 	}
 	// Runtime file slices are sized by MaxEnum and indexed by enum, so an
 	// out-of-range registration must fail here, not on first slice access.
@@ -439,10 +446,14 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 12
+const MaxCaplinEnum = 50 // exclusive upper bound of the caplin enum range
 const MinCaplinEnum = 10
 
-const MaxEnum = 16
+// MinCaplinStateEnum is the first beacon-state type; BeaconBlocks and BlobSidecars occupy
+// the two slots below it, so a new caplin block type must go here, not at a free tail slot.
+const MinCaplinStateEnum = MinCaplinEnum + 2
+
+const MaxEnum = 54
 
 var CaplinEnums = struct {
 	Enums
@@ -455,29 +466,15 @@ var CaplinEnums = struct {
 }
 
 func (ft Enum) String() string {
-	switch ft {
-	case CaplinEnums.BeaconBlocks:
-		return "beaconblocks"
-	case CaplinEnums.BlobSidecars:
-		return "blobsidecars"
-	default:
-		if t, ok := registeredTypes[ft]; ok {
-			return t.Name()
-		}
-
-		panic(fmt.Sprintf("unknown file type: %d", ft))
+	if t, ok := registeredTypes[ft]; ok {
+		return t.Name()
 	}
+
+	panic(fmt.Sprintf("unknown file type: %d", ft))
 }
 
 func (ft Enum) Type() Type {
-	switch ft {
-	case CaplinEnums.BeaconBlocks:
-		return BeaconBlocks
-	case CaplinEnums.BlobSidecars:
-		return BlobSidecars
-	default:
-		return registeredTypes[ft]
-	}
+	return registeredTypes[ft]
 }
 
 func (e Enum) FileName(from uint64, to uint64) string {
@@ -499,17 +496,10 @@ func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder Inde
 
 func ParseEnum(s string) (Enum, bool) {
 	s = strings.ToLower(s)
-	switch s {
-	case "beaconblocks":
-		return CaplinEnums.BeaconBlocks, true
-	case "blobsidecars", "blocksidecars":
-		return CaplinEnums.BlobSidecars, true
-	default:
-		if t, ok := namedTypes[s]; ok {
-			return t.Enum(), true
-		}
-		return Enums{}.Unknown, false
+	if t, ok := namedTypes[s]; ok {
+		return t.Enum(), true
 	}
+	return Enums{}.Unknown, false
 }
 
 // Idx - iterate over segment and building .idx file
@@ -583,7 +573,9 @@ func BuildIndex(ctx context.Context, info FileInfo, indexVersion version.Version
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err
@@ -641,7 +633,9 @@ func BuildIndexWithSnapName(ctx context.Context, info FileInfo, cfg recsplit.Rec
 		if err = rs.Build(ctx); err != nil {
 			if errors.Is(err, recsplit.ErrCollision) {
 				logger.Info("Building recsplit. Collision happened. It's ok. Restarting with another salt...", "err", err)
-				rs.ResetNextSalt()
+				if err := rs.ResetNextSalt(); err != nil {
+					return err
+				}
 				continue
 			}
 			return err

@@ -1,0 +1,954 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package commitment
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/hex"
+	"math/rand"
+	"testing"
+
+	keccak "github.com/erigontech/fastkeccak"
+	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/errgroup"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/common/length"
+)
+
+// keepWholeNibble: multi-slot branch survivor vs single leaf survivor.
+func whaleSurvivorCorpus(keepWholeNibble bool) (pk [][]byte, upds []Update, k2 [][]byte, u2 []Update) {
+	var addr []byte
+	var groups [16][]storKV
+	addr, _, _, _, pk, upds, groups = whaleByNibble(30_000)
+
+	surv := -1
+	for x := range 16 {
+		if len(groups[x]) >= 2 {
+			surv = x
+			break
+		}
+	}
+
+	k2 = [][]byte{addr}
+	u2 = []Update{{Flags: BalanceUpdate | NonceUpdate}}
+	u2[0].Balance.SetUint64(99)
+	u2[0].Nonce = 7
+	for x := range 16 {
+		for i := range groups[x] {
+			kv := &groups[x][i]
+			if x == surv && (keepWholeNibble || i == 0) {
+				continue
+			}
+			k2 = append(k2, kv.pk)
+			u2 = append(u2, Update{Flags: DeleteUpdate})
+		}
+	}
+	return pk, upds, k2, u2
+}
+
+type engineBatch struct {
+	keys [][]byte
+	upds []Update
+}
+
+func runEngineBatches(t *testing.T, mode runMode, workers int, batches []engineBatch) ([][]byte, *MockState) {
+	t.Helper()
+	ms := NewMockState(t)
+	if mode != modeSeq {
+		ms.SetConcurrentCommitment(true)
+	}
+	roots := make([][]byte, len(batches))
+	var blob []byte
+	for i, b := range batches {
+		roots[i], blob = processModeBatchState(t, ms, mode, workers, b.keys, b.upds, blob)
+	}
+	return roots, ms
+}
+
+// Re-touching an extension-topped subtree must not desync the stitched cell's extension.
+func TestStreaming_ExtensionToppedMountSplit(t *testing.T) {
+	t.Parallel()
+
+	a := findAddressForHexPrefix([]byte{7, 0xa, 1}, 1)
+	b := findAddressForHexPrefix([]byte{7, 0xa, 2}, 2)
+
+	seed := NewUpdateBuilder()
+	seed.Balance(addrHex(a), 10)
+	seed.Balance(addrHex(b), 20)
+	for n := range 16 {
+		if n == 7 {
+			continue
+		}
+		seed.Balance(addrHex(findAddressForNibble(n, 100+n)), uint64(1000+n))
+	}
+	k1, u1 := seed.Build()
+
+	retouch := func(bal1, bal2 uint64) engineBatch {
+		ub := NewUpdateBuilder()
+		ub.Balance(addrHex(a), bal1)
+		ub.Balance(addrHex(b), bal2)
+		k, u := ub.Build()
+		return engineBatch{k, u}
+	}
+
+	batches := []engineBatch{
+		{k1, u1},
+		retouch(11, 22),
+		retouch(12, 23),
+	}
+
+	seqRoots, seqMs := runEngineBatches(t, modeSeq, 0, batches)
+	for _, tc := range []struct {
+		name string
+		mode runMode
+	}{
+		{"parallel", modeParallel},
+	} {
+		for _, w := range []int{1, 4, 8} {
+			roots, ms := runEngineBatches(t, tc.mode, w, batches)
+			for i := range batches {
+				require.Equalf(t, seqRoots[i], roots[i], "%s(workers=%d) batch %d root != sequential", tc.name, w, i+1)
+			}
+			requireBranchParity(t, seqMs, ms)
+		}
+	}
+}
+
+// Must not prepend the 64-nibble account prefix, which would overflow cell.extension.
+func TestDeepFold_BranchSurvivorCollapse(t *testing.T) {
+	t.Parallel()
+	wk1, wu1, wk2, wu2 := whaleSurvivorCorpus(true)
+	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+	for _, w := range []int{1, 4, 8} {
+		requireAllEnginesParity(t, k1, u1, wk2, wu2, w)
+	}
+}
+
+// Leaf hash must be the storage root, not the leaf cell's zero hash.
+func TestDeepFold_LeafSurvivorCollapse(t *testing.T) {
+	t.Parallel()
+	wk1, wu1, wk2, wu2 := whaleSurvivorCorpus(false)
+	mk, mu := buildMixedCorpus(0x5EED, 3000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+	for _, w := range []int{1, 4, 8} {
+		requireAllEnginesParity(t, k1, u1, wk2, wu2, w)
+	}
+}
+
+// Account-only re-touch must keep the singleton's storage slot; cross-engine parity is
+// blind to this since a shared updateCell bug drops it identically everywhere.
+func TestSingletonAccountOnlyRetouchKeepsStorage(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	a := hex.EncodeToString(findAddressForNibble(3, 4242))
+	loc := "00000000000000000000000000000000000000000000000000000000000000aa"
+	val := "00000000000000000000000000000000000000000000000000000000cafebabe"
+
+	ms := NewMockState(t)
+	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+
+	ub1 := NewUpdateBuilder().Balance(a, 100)
+	ub1.Storage(a, loc, val)
+	k1, u1 := ub1.Build()
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	ut1 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	_, err := tr.Process(ctx, ut1, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	ut1.Close()
+
+	k2, u2 := NewUpdateBuilder().Balance(a, 200).Build()
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	ut2 := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k2, u2)
+	got, err := tr.Process(ctx, ut2, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	got = bytes.Clone(got)
+	ut2.Close()
+
+	msr := NewMockState(t)
+	trr := NewHexPatriciaHashed(length.Addr, msr, DefaultTrieConfig())
+	ubr := NewUpdateBuilder().Balance(a, 200)
+	ubr.Storage(a, loc, val)
+	kr, ur := ubr.Build()
+	require.NoError(t, msr.applyPlainUpdates(kr, ur))
+	utr := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, kr, ur)
+	want, err := trr.Process(ctx, utr, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	utr.Close()
+
+	require.Equal(t, want, got, "account-only re-touch dropped the singleton's storage slot")
+}
+
+// The same trie carried across blocks, as a running node holds it. A sole-account root folds via
+// propagate and writes no root branch record, so its state travels only in the carried trie or
+// the state blob — a fresh trie per batch is not a lifecycle this shape has.
+func lifecycleRoots(t *testing.T, batches ...*UpdateBuilder) (carried, restored []byte) {
+	t.Helper()
+	ms, msr := NewMockState(t), NewMockState(t)
+	tr := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	var blob []byte
+	for _, ub := range batches {
+		k, u := ub.Build()
+		carried = processBatch(t, ms, tr, k, u)
+		restored, blob = processModeBatchState(t, msr, modeSeq, 0, k, u, blob)
+	}
+	return carried, restored
+}
+
+// A trie whose only leaf is one account reaches it through a root extension down to depth 64.
+// Bumping the account and deleting a subset of its slots must keep the untouched survivors under
+// both production lifecycles, matching a fresh trie built from the final state.
+func TestSoleAccount_StorageCollapseIncremental(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name      string
+		survivors int
+	}{
+		{"leaf_survivor", 1},
+		{"branch_survivor", 3},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			a := addrHex(findAddressForNibble(3, 4242))
+			surv := storageLocsForNibble(0x2, tc.survivors, 1)
+			gone := append(storageLocsForNibble(0x8, 6, 1000), storageLocsForNibble(0xd, 6, 1000000)...)
+
+			ub1 := NewUpdateBuilder().Balance(a, 1)
+			ubf := NewUpdateBuilder().Balance(a, 2)
+			for _, loc := range surv {
+				ub1.Storage(a, loc, loc)
+				ubf.Storage(a, loc, loc)
+			}
+			ub2 := NewUpdateBuilder().Balance(a, 2)
+			for _, loc := range gone {
+				ub1.Storage(a, loc, loc)
+				ub2.DeleteStorage(a, loc)
+			}
+			kf, uf := ubf.Build()
+
+			want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+			carried, restored := lifecycleRoots(t, ub1, ub2)
+			require.Equal(t, want, carried, "carried trie lost the untouched surviving slots")
+			require.Equal(t, want, restored, "state-restored trie lost the untouched surviving slots")
+		})
+	}
+}
+
+// Delete-driven endgames of the same shape: wiping all storage must leave a bare account, and
+// deleting the account with its slots must collapse the trie to the empty root.
+func TestSoleAccount_DeleteIncremental(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 4243))
+	all := append(append(storageLocsForNibble(0x2, 2, 2), storageLocsForNibble(0x8, 6, 2000)...), storageLocsForNibble(0xd, 6, 2000000)...)
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	for _, loc := range all {
+		ub1.Storage(a, loc, loc)
+	}
+
+	t.Run("delete_storage_keeps_account", func(t *testing.T) {
+		t.Parallel()
+		ub2 := NewUpdateBuilder().Balance(a, 2)
+		for _, loc := range all {
+			ub2.DeleteStorage(a, loc)
+		}
+
+		kf, uf := NewUpdateBuilder().Balance(a, 2).Build()
+		want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+		carried, restored := lifecycleRoots(t, ub1, ub2)
+		require.Equal(t, want, carried, "carried trie: deleting all storage must leave the bare account")
+		require.Equal(t, want, restored, "state-restored trie: deleting all storage must leave the bare account")
+	})
+
+	t.Run("delete_account_empties_trie", func(t *testing.T) {
+		t.Parallel()
+		ub2 := NewUpdateBuilder().Delete(a)
+		for _, loc := range all {
+			ub2.DeleteStorage(a, loc)
+		}
+
+		carried, restored := lifecycleRoots(t, ub1, ub2)
+		require.Equal(t, empty.RootHash[:], carried, "carried trie: deleting the sole account must empty the trie")
+		require.Equal(t, empty.RootHash[:], restored, "state-restored trie: deleting the sole account must empty the trie")
+	})
+}
+
+// The same shape re-expanding: a sole account whose storage collapses to one slot and then grows
+// back must re-insert the survivor under its own first storage nibble. The root cell's derived
+// navigation path has to hash the slot alone, not the whole account-plus-slot plain key.
+func TestSoleAccount_CollapseThenReexpand(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 7777))
+	surv := storageLocsForNibble(0x2, 1, 11)
+	gone := storageLocsForNibble(0x8, 1, 3000)
+	fresh := storageLocsForNibble(0x5, 1, 5000)
+
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	ubf := NewUpdateBuilder().Balance(a, 3)
+	for _, loc := range surv {
+		ub1.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	ub2 := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range gone {
+		ub1.Storage(a, loc, loc)
+		ub2.DeleteStorage(a, loc)
+	}
+	ub3 := NewUpdateBuilder().Balance(a, 3)
+	for _, loc := range fresh {
+		ub3.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	kf, uf := ubf.Build()
+
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+	carried, restored := lifecycleRoots(t, ub1, ub2, ub3)
+	require.Equal(t, want, carried, "carried trie re-expanded the survivor under the wrong nibble")
+	require.Equal(t, want, restored, "state-restored trie re-expanded the survivor under the wrong nibble")
+}
+
+func TestSoleAccount_StorageBranchUnderExtension(t *testing.T) {
+	t.Parallel()
+	a := addrHex(findAddressForNibble(3, 4244))
+	under := storageLocsForNibble(0x6, 2, 17)
+	fresh := storageLocsForNibble(0x0, 1, 4711)
+
+	ub1 := NewUpdateBuilder().Balance(a, 1)
+	ubf := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range under {
+		ub1.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	ub2 := NewUpdateBuilder().Balance(a, 2)
+	for _, loc := range fresh {
+		ub2.Storage(a, loc, loc)
+		ubf.Storage(a, loc, loc)
+	}
+	kf, uf := ubf.Build()
+
+	want, _ := engineRoot(t, modeSeq, 0, kf, uf)
+	carried, restored := lifecycleRoots(t, ub1, ub2)
+	require.Equal(t, want, carried, "carried trie lost the storage extension below the sole account")
+	require.Equal(t, want, restored, "state-restored trie lost the storage extension below the sole account")
+}
+
+// wide-minus-touch nibbles stay untouched on disk and must survive batch 2.
+func buildSubsetTouchedWhale(seed int64, wide, touch []byte, perNibble1, perNibble2 int) (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) {
+	rnd := rand.New(rand.NewSource(seed))
+	addr := make([]byte, length.Addr)
+	rnd.Read(addr)
+	a := hex.EncodeToString(addr)
+
+	firstStorageNibble := func(loc []byte) byte {
+		pk := make([]byte, 0, length.Addr+len(loc))
+		pk = append(pk, addr...)
+		pk = append(pk, loc...)
+		return KeyToHexNibbleHash(pk)[64]
+	}
+	genSlot := func(want byte) (string, string) {
+		for {
+			loc := make([]byte, length.Hash)
+			rnd.Read(loc)
+			if firstStorageNibble(loc) == want {
+				val := make([]byte, 32)
+				rnd.Read(val)
+				return hex.EncodeToString(loc), hex.EncodeToString(val)
+			}
+		}
+	}
+
+	ub1 := NewUpdateBuilder()
+	ub1.Balance(a, 1)
+	for _, n := range wide {
+		for range perNibble1 {
+			l, v := genSlot(n)
+			ub1.Storage(a, l, v)
+		}
+	}
+	k1, u1 = ub1.Build()
+
+	ub2 := NewUpdateBuilder()
+	ub2.Balance(a, 2)
+	for _, n := range touch {
+		for range perNibble2 {
+			l, v := genSlot(n)
+			ub2.Storage(a, l, v)
+		}
+	}
+	k2, u2 = ub2.Build()
+	return k1, u1, k2, u2
+}
+
+// Deep-folding a touched subset must preserve the untouched on-disk first-nibble siblings.
+func TestDeepFold_PreExistingWhale_SubsetTouched(t *testing.T) {
+	wide := nibs(0, 1, 2, 3, 4, 5, 6, 7)
+	touch := nibs(0, 1, 2)
+	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260622, wide, touch, 60, 420)
+	fk, fu := buildMixedCorpus(7777, 200)
+	k1 = append(append([][]byte{}, fk...), k1...)
+	u1 = append(append([]Update{}, fu...), u1...)
+	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
+}
+
+func TestDeepFold_PreExistingWhale_SingleNibbleOnDisk(t *testing.T) {
+	onDisk := nibs(0)
+	touch := nibs(3, 7)
+	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260702, onDisk, touch, 120, 700)
+	fk, fu := buildMixedCorpus(4242, 200)
+	k1 = append(append([][]byte{}, fk...), k1...)
+	u1 = append(append([]Update{}, fu...), u1...)
+	requireAllEnginesParity(t, k1, u1, k2, u2, 4)
+}
+
+// A fresh whale has nothing on disk beneath its prefix; its storage split point must still fork.
+func TestDeepFold_FreshWhaleForksOnStorage(t *testing.T) {
+	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
+	fk, fu := buildMixedCorpus(555, 200)
+	keys := append(append([][]byte{}, fk...), k1...)
+	upds := append(append([]Update{}, fu...), u1...)
+
+	seqRoot, _ := engineRoot(t, modeSeq, 0, keys, upds)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	parRoot, _, forks := parallelBatchForks(t, ms, 4, 0, keys, upds, nil)
+	require.Equal(t, seqRoot, parRoot)
+	require.Greater(t, forks, uint64(1), "a fresh whale must fork below the root, not only at it")
+}
+
+func TestDeepFold_ExistingWhaleForksOnStorage(t *testing.T) {
+	k1, u1, k2, u2 := buildSubsetTouchedWhale(20260708, nibs(0), nibs(3, 7), 1, 700)
+	fk, fu := buildMixedCorpus(556, 200)
+	k1 = append(append([][]byte{}, fk...), k1...)
+	u1 = append(append([]Update{}, fu...), u1...)
+
+	seqRoot, _ := incrementalRoot(t, modeSeq, 0, k1, u1, k2, u2)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	_, blob, _ := parallelBatchForks(t, ms, 4, 0, k1, u1, nil)
+	parRoot, _, forks := parallelBatchForks(t, ms, 4, 0, k2, u2, blob)
+	require.Equal(t, seqRoot, parRoot)
+	require.Greater(t, forks, uint64(1), "an account already in the pre-state must fork on its storage too")
+}
+
+func TestDeepFold_SingleSlotCollapseThenDeepReexpand(t *testing.T) {
+	t.Parallel()
+
+	const seed = 100
+	addr, _, _, _, wk1, wu1, groups := whaleByNibble(seed)
+	a := hex.EncodeToString(addr)
+
+	survNib := -1
+	for x := range 16 {
+		if len(groups[x]) >= 1 {
+			survNib = x
+			break
+		}
+	}
+	require.GreaterOrEqual(t, survNib, 0, "need a survivor nibble")
+
+	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+
+	wk2 := [][]byte{addr}
+	wu2 := []Update{{Flags: BalanceUpdate | NonceUpdate}}
+	wu2[0].Balance.SetUint64(99)
+	wu2[0].Nonce = 7
+	deleted := 0
+	kept := false
+	for x := range 16 {
+		for _, kv := range groups[x] {
+			if !kept {
+				kept = true
+				continue
+			}
+			wk2 = append(wk2, kv.pk)
+			wu2 = append(wu2, Update{Flags: DeleteUpdate})
+			deleted++
+		}
+	}
+	require.True(t, kept, "need a survivor slot")
+	require.LessOrEqual(t, deleted, int(minForkGrain), "the collapse round must stay under the fork grain")
+
+	b3 := NewUpdateBuilder()
+	b3.Balance(a, 200)
+	added := 0
+	for nib := 0; nib < 16 && added <= int(minForkGrain)+200; nib++ {
+		if nib == survNib {
+			continue
+		}
+		for _, loc := range storageLocsForNibble(byte(nib), 200, nib*1_000_003+7) {
+			b3.Storage(a, loc, "01")
+			added++
+		}
+	}
+	require.Greater(t, added, int(minForkGrain), "re-expansion must cross the fork grain")
+	wk3, wu3 := b3.Build()
+
+	batches := []engineBatch{{k1, u1}, {wk2, wu2}, {wk3, wu3}}
+
+	seqRoots, seqMs := runEngineBatches(t, modeSeq, 0, batches)
+	for _, tc := range []struct {
+		name string
+		mode runMode
+	}{
+		{"parallel", modeParallel},
+	} {
+		for _, w := range []int{1, 4, 8} {
+			roots, ms := runEngineBatches(t, tc.mode, w, batches)
+			for i := range batches {
+				require.Equalf(t, seqRoots[i], roots[i], "%s(workers=%d) batch %d root != sequential", tc.name, w, i+1)
+			}
+			requireBranchParity(t, seqMs, ms)
+		}
+	}
+}
+
+// A single-child collapse persists the storage root as a bare hash; a later re-touch must
+// not demand a branch record the collapse never wrote.
+func TestDeepFold_SurvivorCollapseThenRetouch(t *testing.T) {
+	t.Parallel()
+
+	addr, _, _, _, wk1, wu1, groups := whaleByNibble(30_000)
+
+	surv := -1
+	for x := range 16 {
+		if len(groups[x]) >= 2 {
+			surv = x
+			break
+		}
+	}
+	require.GreaterOrEqual(t, surv, 0, "need a survivor nibble with >=2 slots")
+
+	wk2 := [][]byte{addr}
+	wu2 := []Update{{Flags: BalanceUpdate | NonceUpdate}}
+	wu2[0].Balance.SetUint64(99)
+	wu2[0].Nonce = 7
+	var reAdd storKV
+	haveReAdd := false
+	for x := range 16 {
+		if x == surv {
+			continue
+		}
+		for _, kv := range groups[x] {
+			wk2 = append(wk2, kv.pk)
+			wu2 = append(wu2, Update{Flags: DeleteUpdate})
+			if !haveReAdd {
+				reAdd = kv
+				haveReAdd = true
+			}
+		}
+	}
+	require.True(t, haveReAdd, "need a deleted slot to re-add")
+
+	wk3 := [][]byte{reAdd.pk}
+	wu3 := []Update{reAdd.upd}
+
+	mk, mu := buildMixedCorpus(0xC0FFEE, 4000)
+	k1 := append(append([][]byte{}, mk...), wk1...)
+	u1 := append(append([]Update{}, mu...), wu1...)
+
+	batches := []engineBatch{{k1, u1}, {wk2, wu2}, {wk3, wu3}}
+
+	seqRoots, seqMs := runEngineBatches(t, modeSeq, 0, batches)
+	for _, tc := range []struct {
+		name string
+		mode runMode
+	}{
+		{"parallel", modeParallel},
+	} {
+		for _, w := range []int{1, 4, 8} {
+			roots, ms := runEngineBatches(t, tc.mode, w, batches)
+			for i := range batches {
+				require.Equalf(t, seqRoots[i], roots[i], "%s(workers=%d) batch %d root != sequential", tc.name, w, i+1)
+			}
+			requireBranchParity(t, seqMs, ms)
+		}
+	}
+}
+
+// Emptying storage entirely must not persist a stored empty.RootHash on the account leaf
+// (hashLen 0 instead), or a later re-populate descends into a branch record that no longer exists.
+func TestDeepFold_EmptyStorageThenRepopulate(t *testing.T) {
+	t.Parallel()
+
+	w := findAddressForHexPrefix([]byte{7, 8, 1}, 101)
+	s1 := findAddressForHexPrefix([]byte{7, 8, 2}, 102)
+	s2 := findAddressForHexPrefix([]byte{7, 8, 3}, 103)
+	f0 := findAddressForHexPrefix([]byte{0}, 104)
+	ff := findAddressForHexPrefix([]byte{0xf}, 105)
+
+	const slots = 1500
+
+	locs := make([]string, slots)
+	for i := range locs {
+		locs[i] = common.Bytes2Hex(slotHashBytes(i))
+	}
+
+	b1 := NewUpdateBuilder().
+		Balance(addrHex(w), 100).Balance(addrHex(s1), 5).Balance(addrHex(s2), 6).
+		Balance(addrHex(f0), 7).Balance(addrHex(ff), 8)
+	for _, loc := range locs {
+		b1.Storage(addrHex(w), loc, "01")
+	}
+	k1, u1 := b1.Build()
+
+	b2 := NewUpdateBuilder().Balance(addrHex(w), 200)
+	for _, loc := range locs {
+		b2.DeleteStorage(addrHex(w), loc)
+	}
+	k2, u2 := b2.Build()
+
+	b3 := NewUpdateBuilder()
+	for _, loc := range locs {
+		b3.Storage(addrHex(w), loc, "02")
+	}
+	k3, u3 := b3.Build()
+
+	batches := []engineBatch{{k1, u1}, {k2, u2}, {k3, u3}}
+
+	seqRoots, seqMs := runEngineBatches(t, modeSeq, 0, batches)
+	for _, tc := range []struct {
+		name string
+		mode runMode
+	}{
+		{"parallel", modeParallel},
+	} {
+		for _, w := range []int{1, 4, 8} {
+			roots, ms := runEngineBatches(t, tc.mode, w, batches)
+			for i := range batches {
+				require.Equalf(t, seqRoots[i], roots[i], "%s(workers=%d) batch %d root != sequential", tc.name, w, i+1)
+			}
+			requireBranchParity(t, seqMs, ms)
+		}
+	}
+}
+
+func storageLocsForNibble(nibble byte, n, seed int) []string {
+	return slotLocsForHexPrefix([]byte{nibble}, n, seed)
+}
+func slotLocsForHexPrefix(nibblePrefix []byte, n, seed int) []string {
+	out := make([]string, 0, n)
+	var s [32]byte
+	for i := seed; len(out) < n; i++ {
+		binary.BigEndian.PutUint64(s[24:], uint64(i))
+		h := keccak.Sum256(s[:])
+		match := true
+		for j, nb := range nibblePrefix {
+			var hn byte
+			if j%2 == 0 {
+				hn = h[j/2] >> 4
+			} else {
+				hn = h[j/2] & 0xf
+			}
+			if hn != nb {
+				match = false
+				break
+			}
+		}
+		if match {
+			out = append(out, common.Bytes2Hex(s[:]))
+		}
+	}
+	return out
+}
+
+// The survivor decoded from disk carries a cached stateHash but no loaded value;
+// setAccountStorageRoot must not drop that cached hash.
+func TestDeepFold_SingleSlotSurvivorNotLoaded(t *testing.T) {
+	t.Parallel()
+
+	w := findAddressForHexPrefix([]byte{7, 8, 1}, 201)
+	s1 := findAddressForHexPrefix([]byte{7, 8, 2}, 202)
+	f0 := findAddressForHexPrefix([]byte{0}, 203)
+	ff := findAddressForHexPrefix([]byte{0xf}, 204)
+
+	survLoc := storageLocsForNibble(0x1, 1, 1)[0]
+	delB := storageLocsForNibble(0x2, 700, 1000)
+	delC := storageLocsForNibble(0x3, 700, 1000000)
+
+	b1 := NewUpdateBuilder().
+		Balance(addrHex(w), 100).Balance(addrHex(s1), 5).
+		Balance(addrHex(f0), 7).Balance(addrHex(ff), 8).
+		Storage(addrHex(w), survLoc, "01")
+	for _, loc := range delB {
+		b1.Storage(addrHex(w), loc, "01")
+	}
+	for _, loc := range delC {
+		b1.Storage(addrHex(w), loc, "01")
+	}
+	k1, u1 := b1.Build()
+
+	b2 := NewUpdateBuilder().Balance(addrHex(w), 200)
+	for _, loc := range delB {
+		b2.DeleteStorage(addrHex(w), loc)
+	}
+	for _, loc := range delC {
+		b2.DeleteStorage(addrHex(w), loc)
+	}
+	k2, u2 := b2.Build()
+
+	for _, wk := range []int{1, 4, 8} {
+		requireAllEnginesParity(t, k1, u1, k2, u2, wk)
+	}
+}
+
+func TestDeepIntegration_BranchParity(t *testing.T) {
+	pk, upds := buildWhaleCorpus(bigAccountWhale(15_000))
+	ctx := context.Background()
+
+	seqMs := NewMockState(t)
+	seq := NewHexPatriciaHashed(length.Addr, seqMs, DefaultTrieConfig())
+	seqRoot := processBatch(t, seqMs, seq, pk, upds)
+
+	for _, workers := range benchWorkerCounts() {
+		parMs := NewMockState(t)
+		parMs.SetConcurrentCommitment(true)
+		require.NoError(t, parMs.applyPlainUpdates(pk, upds))
+		pph := NewParallelPatriciaHashed(mockTrieCtxFactory(parMs), length.Addr, DefaultTrieConfig())
+		pph.SetNumWorkers(workers)
+		pph.ResetContext(parMs)
+		pUpd := WrapKeyUpdates(t, ModeParallel, KeyToHexNibbleHash, pk, upds)
+		parRoot, err := pph.Process(ctx, pUpd, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		pUpd.Close()
+		pph.Release()
+
+		require.Equalf(t, seqRoot, parRoot, "deep parallel(workers=%d) root != sequential", workers)
+
+		requireBranchParity(t, seqMs, parMs)
+	}
+}
+
+type storKV struct {
+	hk  []byte
+	pk  []byte
+	upd Update
+}
+
+func whaleByNibble(slots int) (addr []byte, accHash []byte, accNib int, accUpd Update, pk [][]byte, upds []Update, groups [16][]storKV) {
+	rnd := rand.New(rand.NewSource(424242))
+	addr = make([]byte, length.Addr)
+	rnd.Read(addr)
+	a := hex.EncodeToString(addr)
+	ub := NewUpdateBuilder()
+	ub.Balance(a, 12345)
+	for range slots {
+		addRandomSlot(ub, rnd, a)
+	}
+	pk, upds = ub.Build()
+	accHash = KeyToHexNibbleHash(addr)
+	accNib = int(accHash[63])
+	for i, k := range pk {
+		if len(k) == length.Addr {
+			accUpd = upds[i]
+			continue
+		}
+		h := KeyToHexNibbleHash(k)
+		x := int(h[64])
+		groups[x] = append(groups[x], storKV{hk: h, pk: k, upd: upds[i]})
+	}
+	return addr, accHash, accNib, accUpd, pk, upds, groups
+}
+
+func foldChildAt(w *HexPatriciaHashed, accNib int, g []storKV) (cell, error) {
+	for i := range g {
+		if err := w.followAndUpdate(g[i].hk, g[i].pk, &g[i].upd); err != nil {
+			return cell{}, err
+		}
+	}
+	for w.activeRows > 1 {
+		if err := w.fold(); err != nil {
+			return cell{}, err
+		}
+	}
+	c := w.grid[0][accNib]
+	if c.hashedExtLen > 0 {
+		c.hashedExtLen--
+		copy(c.hashedExtension[:], c.hashedExtension[1:])
+	}
+	if c.extLen > 0 {
+		c.extLen--
+		copy(c.extension[:], c.extension[1:])
+	}
+	return c, nil
+}
+
+func concurrentAccountRoot(ms *MockState, addr, accHash []byte, accNib int, accUpd Update, groups [16][]storKV, parallel bool) ([]byte, error) {
+	var children [16]cell
+	var present uint16
+	run := func(x int) error {
+		w := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+		c, err := foldChildAt(w, accNib, groups[x])
+		w.Release()
+		if err != nil {
+			return err
+		}
+		children[x] = c
+		return nil
+	}
+	if parallel {
+		var eg errgroup.Group
+		for x := range 16 {
+			if len(groups[x]) == 0 {
+				continue
+			}
+			present |= uint16(1) << x
+			x := x
+			eg.Go(func() error { return run(x) })
+		}
+		if err := eg.Wait(); err != nil {
+			return nil, err
+		}
+	} else {
+		for x := range 16 {
+			if len(groups[x]) == 0 {
+				continue
+			}
+			present |= uint16(1) << x
+			if err := run(x); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	asm := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer asm.Release()
+	copy(asm.currentKey[:], accHash[:64])
+	asm.currentKeyLen = 64
+	asm.depths[0] = 64
+	asm.depths[1] = 65
+	asm.activeRows = 2
+	var ac cell
+	ac.accountAddrLen = int16(len(addr))
+	copy(ac.accountAddr[:], addr)
+	ac.CodeHash = empty.CodeHash
+	ac.setFromUpdate(&accUpd)
+	asm.grid[0][accNib] = ac
+	asm.touchMap[0] = uint16(1) << accNib
+	asm.afterMap[0] = uint16(1) << accNib
+	for x := range 16 {
+		if present&(uint16(1)<<x) != 0 {
+			asm.grid[1][x] = children[x]
+		}
+	}
+	asm.touchMap[1] = present
+	asm.afterMap[1] = present
+	for asm.activeRows > 0 {
+		if err := asm.fold(); err != nil {
+			return nil, err
+		}
+	}
+	return asm.RootHash()
+}
+
+func TestDeepConcurrent_WhaleParity(t *testing.T) {
+	addr, accHash, accNib, accUpd, pk, upds, groups := whaleByNibble(750_000)
+
+	ms := NewMockState(t)
+	seq := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	seqRoot := processBatch(t, ms, seq, pk, upds)
+
+	conRoot, err := concurrentAccountRoot(ms, addr, accHash, accNib, accUpd, groups, true)
+	require.NoError(t, err)
+	require.Equal(t, seqRoot, conRoot, "concurrent storage-fold root != sequential")
+}
+
+// A storage fold must not overwrite the account cell's hashedExtension with the storage
+// extension: only a plain-key-less cell navigates by its extension.
+func TestFillFromLowerCell_StorageFoldKeepsAccountNavPath(t *testing.T) {
+	t.Parallel()
+
+	accountCell := &cell{accountAddrLen: length.Addr, hashLen: 32}
+	navPath := []byte{0x3, 0xc, 0x1, 0x9, 0xe}
+	copy(accountCell.hashedExtension[:], navPath)
+	accountCell.hashedExtLen = int16(len(navPath))
+
+	storageBranch := &cell{hashLen: 32}
+
+	accountCell.fillFromLowerCell(storageBranch, 65, nil, 0x7)
+
+	require.Equalf(t, navPath, accountCell.hashedExtension[:accountCell.hashedExtLen],
+		"account cell must keep its account navigation path across a storage propagate fold; "+
+			"got hashedExtLen=%d", accountCell.hashedExtLen)
+	require.EqualValues(t, length.Addr, accountCell.accountAddrLen, "fold must not drop the account plain key")
+	require.EqualValues(t, 1, accountCell.extLen, "storage extension still travels up in extension space")
+}
+
+func TestFillFromLowerCell_AccountBranchSyncsNavPath(t *testing.T) {
+	t.Parallel()
+
+	branchCell := &cell{hashLen: 32}
+	lowBranch := &cell{hashLen: 32, extLen: 2}
+	lowBranch.extension[0] = 0xa
+	lowBranch.extension[1] = 0xb
+
+	branchCell.fillFromLowerCell(lowBranch, 3, []byte{0x1}, 0x2)
+
+	want := []byte{0x1, 0x2, 0xa, 0xb}
+	require.Equal(t, want, branchCell.extension[:branchCell.extLen])
+	require.Equalf(t, want, branchCell.hashedExtension[:branchCell.hashedExtLen],
+		"a branch cell navigates by its extension, so hashedExtension must stay in sync; got hashedExtLen=%d",
+		branchCell.hashedExtLen)
+}
+
+func TestFillFromLowerCell_KeyedCellKeepsForeignPlaneExtension(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		depth int16
+		low   cell
+	}{
+		{"accountWithStorageRoot", 3, cell{accountAddrLen: length.Addr, hashLen: 32, extLen: 2}},
+		{"storageWithOwnRoot", 70, cell{storageAddrLen: length.Addr + length.Hash, hashLen: 32, extLen: 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			low := tc.low
+			low.extension[0] = 0xa
+			low.extension[1] = 0xb
+
+			var up cell
+			up.fillFromLowerCell(&low, tc.depth, []byte{0x1}, 0x2)
+
+			require.Equalf(t, []byte{0xa, 0xb}, up.extension[:up.extLen],
+				"a keyed cell's extension belongs to the other plane, so the fold must copy it as is, "+
+					"not prepend the %x nibble; got extLen=%d", 0x2, up.extLen)
+		})
+	}
+}
+
+// The sync skip is keyed on the plain key, not on depth.
+func TestFillFromLowerCell_StorageBranchSyncsNavPath(t *testing.T) {
+	t.Parallel()
+
+	branchCell := &cell{hashLen: 32}
+	lowBranch := &cell{hashLen: 32, extLen: 1}
+	lowBranch.extension[0] = 0xd
+
+	branchCell.fillFromLowerCell(lowBranch, 70, nil, 0x5)
+
+	require.Equal(t, []byte{0x5, 0xd}, branchCell.hashedExtension[:branchCell.hashedExtLen],
+		"a keyless cell deep in storage still navigates by its extension")
+}

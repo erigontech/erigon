@@ -19,6 +19,12 @@ package vm
 import (
 	"math"
 	"testing"
+	"unsafe"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
 // TestDeriveFrameExecutionGasUsed covers the EIP-8037 cases where the formula
@@ -111,6 +117,45 @@ func TestDeriveFrameExecutionGasUsed(t *testing.T) {
 				t.Fatalf("deriveFrameExecutionGasUsed(input=%d, leftover=%d, state=%d) = %d, want %d",
 					tc.inputTotal, tc.gasRemainingTotal, tc.stateGasUsed, got, tc.want)
 			}
+		})
+	}
+}
+
+// TestEVMFitsItsSizeClass keeps EVM inside the allocation size class its field
+// order was chosen for. The bound is one-sided: shrinking EVM is free, growing
+// it past the class is what costs a size class per allocation.
+func TestEVMFitsItsSizeClass(t *testing.T) {
+	t.Parallel()
+
+	if got := unsafe.Sizeof(EVM{}); got > evmSizeClass {
+		t.Fatalf("sizeof(EVM) = %d, above the %d-byte size class: pack the new field into "+
+			"existing padding, or raise evmSizeClass knowing every EVM allocation grows", got, evmSizeClass)
+	}
+}
+
+func TestZeroUnpricedBaseFee(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		noBaseFee  bool
+		gasPrice   uint64
+		wantZeroed bool
+	}{
+		{name: "unpriced call skipping the fee checks", noBaseFee: true, gasPrice: 0, wantZeroed: true},
+		{name: "priced call skipping the fee checks", noBaseFee: true, gasPrice: 3, wantZeroed: false},
+		{name: "unpriced call under the fee checks", noBaseFee: false, gasPrice: 0, wantZeroed: false},
+		{name: "priced call under the fee checks", noBaseFee: false, gasPrice: 3, wantZeroed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockCtx := evmtypes.BlockContext{BaseFee: *uint256.NewInt(7)}
+			txCtx := evmtypes.TxContext{GasPrice: *uint256.NewInt(tc.gasPrice)}
+
+			got := ZeroUnpricedBaseFee(blockCtx, txCtx, Config{NoBaseFee: tc.noBaseFee})
+
+			want := uint256.NewInt(7)
+			if tc.wantZeroed {
+				want = uint256.NewInt(0)
+			}
+			require.Equal(t, want, &got.BaseFee)
 		})
 	}
 }

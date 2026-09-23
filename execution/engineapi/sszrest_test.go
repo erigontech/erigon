@@ -156,7 +156,7 @@ func TestSSZRESTCapabilitiesRoute(t *testing.T) {
 	body, err := encodeCapabilities([]string{"engine_newPayloadV1"})
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodPost, "/engine/v1/capabilities", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/engine/v1/capabilities", bytes.NewReader(body))
 	rec := httptest.NewRecorder()
 	srv.SSZRESTHandler().ServeHTTP(rec, req)
 
@@ -197,7 +197,7 @@ func TestSSZRESTAdvertisedRoutes(t *testing.T) {
 		{http.MethodPost, "/engine/v1/client/version", http.StatusBadRequest},
 	} {
 		t.Run(route.method+" "+route.path, func(t *testing.T) {
-			req := httptest.NewRequest(route.method, route.path, strings.NewReader("bad-ssz"))
+			req := httptest.NewRequestWithContext(t.Context(), route.method, route.path, strings.NewReader("bad-ssz"))
 			rec := httptest.NewRecorder()
 			srv.SSZRESTHandler().ServeHTTP(rec, req)
 			require.Equal(t, route.code, rec.Code)
@@ -367,6 +367,7 @@ func TestExchangeCapabilitiesAdvertisesJSONRPCAndSSZREST(t *testing.T) {
 	caps := srv.ExchangeCapabilities([]string{"engine_newPayloadV1"})
 	require.Contains(t, caps, "engine_newPayloadV1")
 	require.Contains(t, caps, "engine_getPayloadV6")
+	require.Contains(t, caps, "engine_getBlobsV4")
 	require.Contains(t, caps, "POST /engine/v1/capabilities")
 	require.Contains(t, caps, "GET /engine/v6/payloads/{payload_id}")
 	require.NotContains(t, caps, "engine_exchangeCapabilities")

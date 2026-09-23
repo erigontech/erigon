@@ -83,8 +83,7 @@ func (a *SignedContributionAndProof) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (a *SignedContributionAndProof) EncodingSizeSSZ() int {
-	return length.Bytes96 + a.Message.EncodingSizeSSZ()
-	// return 100 + a.Message.EncodingSizeSSZ()
+	return signedStaticSize(a.Message.EncodingSizeSSZ())
 }
 
 func (a *SignedContributionAndProof) HashSSZ() ([32]byte, error) {

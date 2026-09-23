@@ -18,6 +18,8 @@ package storage
 
 import (
 	"bytes"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/execution/execfinality"
 	"os"
 	"path/filepath"
 	"strings"
@@ -54,12 +56,12 @@ func setupV4EmitFixture(t *testing.T, stepSize uint64) *v4EmitFixture {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	logger := log.New()
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(t.Context(), db)
+	agg := dbstate.NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
@@ -104,7 +106,7 @@ func (f *v4EmitFixture) applyWrites(writes []v4Write) {
 // buildFilesUpTo retires + merges MDBX history into files up to txN.
 func (f *v4EmitFixture) buildFilesUpTo(txN uint64) {
 	f.t.Helper()
-	require.NoError(f.t, f.agg.BuildFiles(txN))
+	require.NoError(f.t, f.agg.BuildFiles(f.db, txN, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)))
 }
 
 // TestV4EmitCoversInWindowTouches drives the production wiring of
@@ -248,7 +250,7 @@ func TestV4EmitPreWindowKeyFallsThroughToBaseline(t *testing.T) {
 	// .288-304 merged files as the baseline for a mid-step-304
 	// unwind target).
 	f.agg.MergeLoop(ctx)
-	require.NoError(t, f.agg.OpenFolder())
+	require.NoError(t, f.agg.OpenFolder(f.db))
 
 	targetTxN := uint64(24)
 	fromTxN := stepSize * 1
@@ -360,7 +362,7 @@ func TestV4EmitAfterPruneSimulation(t *testing.T) {
 	// Delete .v/.ef/.efi/.vi files (prune simulation). Then reload.
 	pruned := deletePrunedHistoryFiles(t, f.dirs)
 	t.Logf("prune-simulation removed %d history/idx/accessor files: %v", len(pruned), pruned)
-	require.NoError(t, f.agg.OpenFolder())
+	require.NoError(t, f.agg.OpenFolder(f.db))
 
 	targetTxN := uint64(24)
 	fromTxN := stepSize * 1
@@ -424,7 +426,7 @@ func TestV4EmitTombstoneRecreateAcrossSteps(t *testing.T) {
 	})
 	f.buildFilesUpTo(stepSize * 2)
 	f.agg.MergeLoop(ctx)
-	require.NoError(t, f.agg.OpenFolder())
+	require.NoError(t, f.agg.OpenFolder(f.db))
 
 	targetTxN := uint64(24)
 	fromTxN := stepSize * 1
@@ -477,7 +479,7 @@ func TestV4EmitTombstoneRecreateAfterPrune(t *testing.T) {
 
 	pruned := deletePrunedHistoryFiles(t, f.dirs)
 	t.Logf("prune-simulation removed %d files: %v", len(pruned), pruned)
-	require.NoError(t, f.agg.OpenFolder())
+	require.NoError(t, f.agg.OpenFolder(f.db))
 
 	targetTxN := uint64(24)
 	fromTxN := stepSize * 1

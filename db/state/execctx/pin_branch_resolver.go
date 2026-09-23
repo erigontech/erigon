@@ -34,7 +34,7 @@ func pinBranchResolver(ttx kv.TemporalGetter) commitment.BatchBranchResolver {
 	return func(keys [][]byte) ([][]byte, error) {
 		vals := make([][]byte, len(keys))
 		for i, k := range keys {
-			v, _, err := ttx.GetLatest(kv.CommitmentDomain, k)
+			v, _, err := ttx.GetLatest(kv.CommitmentDomain, k, kv.GetLatestOptions{})
 			if err != nil {
 				return nil, err
 			}

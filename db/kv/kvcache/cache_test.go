@@ -497,7 +497,7 @@ func TestOnNewBlockCodeHashKey(t *testing.T) {
 	require.Len(elems, 1)
 
 	h := keccak.NewFastKeccak()
-	h.Write(code)
+	_, _ = h.Write(code)
 	expectedKey := h.Sum(nil)
 
 	require.Equal(expectedKey, elems[0].K)

@@ -581,17 +581,18 @@ func TestCallerStackHandler(t *testing.T) {
 		t.Fatalf("Wrong context value type, got %T expected string", r.Ctx[1])
 	}
 
-	exp := "["
+	var exp strings.Builder
+	exp.WriteString("[")
 	for i, line := range lines {
 		if i > 0 {
-			exp += " "
+			exp.WriteString(" ")
 		}
-		exp += fmt.Sprint(file, ":", line)
+		exp.WriteString(fmt.Sprint(file, ":", line))
 	}
-	exp += "]"
+	exp.WriteString("]")
 
-	if s != exp {
-		t.Fatalf("Wrong context value, got %s expected string matching %s", s, exp)
+	if s != exp.String() {
+		t.Fatalf("Wrong context value, got %s expected string matching %s", s, exp.String())
 	}
 }
 

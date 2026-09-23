@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -427,31 +428,31 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		// If we have a missed block, we just skip it.
 		if block == nil {
 			if isDumpSlot {
-				if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
+				if err := stateAntiquaryCollector.collectBalancesDump(ctx, slot, s.currentState.RawBalances()); err != nil {
 					return err
 				}
 				if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
 					return err
 				}
 				if s.currentState.Version() >= clparams.ElectraVersion {
-					if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingDepositsDump(ctx, slot, s.currentState.PendingDeposits()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPendingConsolidationsDump(slot, s.currentState.PendingConsolidations()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingConsolidationsDump(ctx, slot, s.currentState.PendingConsolidations()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(slot, s.currentState.PendingPartialWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(ctx, slot, s.currentState.PendingPartialWithdrawals()); err != nil {
 						return err
 					}
 				}
 				if s.currentState.Version() >= clparams.GloasVersion {
-					if err := stateAntiquaryCollector.collectBuildersDump(slot, s.currentState.GetBuilders()); err != nil {
+					if err := stateAntiquaryCollector.collectBuildersDump(ctx, slot, s.currentState.GetBuilders()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(ctx, slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
 						return err
 					}
-					if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+					if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(ctx, slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
 						return err
 					}
 				}
@@ -501,7 +502,7 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		events.Reset()
 
 		if isDumpSlot {
-			if err := stateAntiquaryCollector.collectBalancesDump(slot, s.currentState.RawBalances()); err != nil {
+			if err := stateAntiquaryCollector.collectBalancesDump(ctx, slot, s.currentState.RawBalances()); err != nil {
 				return err
 			}
 			if err := stateAntiquaryCollector.collectEffectiveBalancesDump(slot, s.currentState.RawValidatorSet()); err != nil {
@@ -509,24 +510,24 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			}
 			if s.currentState.Version() >= clparams.ElectraVersion {
 				log.Debug("not-found dumping electra queues", "slot", slot, "pendingDeposits", s.currentState.PendingDeposits().Len(), "pendingConsolidations", s.currentState.PendingConsolidations().Len(), "pendingWithdrawals", s.currentState.PendingPartialWithdrawals().Len())
-				if err := stateAntiquaryCollector.collectPendingDepositsDump(slot, s.currentState.PendingDeposits()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingDepositsDump(ctx, slot, s.currentState.PendingDeposits()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPendingConsolidationsDump(slot, s.currentState.PendingConsolidations()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingConsolidationsDump(ctx, slot, s.currentState.PendingConsolidations()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(slot, s.currentState.PendingPartialWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectPendingWithdrawalsDump(ctx, slot, s.currentState.PendingPartialWithdrawals()); err != nil {
 					return err
 				}
 			}
 			if s.currentState.Version() >= clparams.GloasVersion {
-				if err := stateAntiquaryCollector.collectBuildersDump(slot, s.currentState.GetBuilders()); err != nil {
+				if err := stateAntiquaryCollector.collectBuildersDump(ctx, slot, s.currentState.GetBuilders()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectBuilderPendingWithdrawalsDump(ctx, slot, s.currentState.GetBuilderPendingWithdrawals()); err != nil {
 					return err
 				}
-				if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
+				if err := stateAntiquaryCollector.collectPayloadExpectedWithdrawalsDump(ctx, slot, s.currentState.GetPayloadExpectedWithdrawals()); err != nil {
 					return err
 				}
 			}
@@ -621,49 +622,96 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// site needs a maxSlotsPerCommit batch and the snapgen site a fresh dump.
 	s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 
-	if s.snapgen {
-		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
-		from := s.stateSn.BlocksAvailable() + 1
-		if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
-			return nil
-		}
-		to := s.currentState.Slot()
-		if to < (safetyMargin + blocksPerStatefulFile) {
-			return nil
-		}
-		to -= (safetyMargin + blocksPerStatefulFile)
-		if from >= to {
-			return nil
-		}
-		if err := s.stateSn.DumpCaplinState(
-			ctx,
-			to,
-			blocksPerStatefulFile,
-			s.sn.Salt,
-			s.dirs,
-			1,
-			log.LvlInfo,
-			s.logger,
-		); err != nil {
-			return err
-		}
-		// Open the new files before collecting paths so the seeder sees them;
-		// seed from 0 since a per-type resume can dump a new type from genesis.
-		if err := s.stateSn.OpenFolder(); err != nil {
-			return err
-		}
-		// Prune only after OpenFolder: coverage must include the just-frozen range.
-		s.pruneFrozenStateTables(ctx, s.currentState.Slot())
-		if s.downloader != nil {
-			paths := s.stateSn.SegFileNames(0, to)
-			// Notify bittorent to seed the new snapshots
-			if err := s.downloader.Seed(s.ctx, paths); err != nil {
-				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
-			}
-		}
+	dumpedTo, err := s.dumpCaplinStateIfDue(ctx)
+	if err != nil {
+		return err
 	}
 
+	s.removeStateOverlapsAndSeed(ctx, dumpedTo)
+
 	return nil
+}
+
+// removeStateOverlapsAndSeed removes before seeding, so a subset the dump supersedes is not
+// hashed and announced microseconds before it is unlinked.
+func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uint64) {
+	if s.stateSn == nil {
+		return
+	}
+	dropped := map[string]struct{}{}
+	var onDelete func(l []string) error
+	if s.downloader != nil {
+		onDelete = func(l []string) error {
+			for _, name := range l {
+				dropped[filepath.Base(name)] = struct{}{}
+			}
+			return s.downloader.Delete(ctx, l)
+		}
+	}
+	if err := s.stateSn.RemoveOverlaps(onDelete); err != nil {
+		s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
+	}
+	if dumpedTo == 0 || s.downloader == nil {
+		return
+	}
+	// A removal that failed part-way leaves superseded subsets in the dirty set, and
+	// announcing one re-adds what Delete was just asked to drop.
+	// From 0, not the dump's start: a per-type resume can dump a new type from genesis.
+	all := s.stateSn.SegFileNames(0, dumpedTo)
+	names := make([]string, 0, len(all))
+	for _, name := range all {
+		if _, ok := dropped[filepath.Base(name)]; ok {
+			continue
+		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return
+	}
+	if err := s.downloader.Seed(ctx, names); err != nil {
+		s.logger.Warn("[Antiquary] Failed to add items to bittorrent", "err", err)
+	}
+}
+
+// dumpCaplinStateIfDue reports the slot dumped to, or 0 when nothing was due.
+func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
+	if !s.snapgen || s.stateSn == nil {
+		return 0, nil
+	}
+	blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
+	from := s.stateSn.BlocksAvailable() + 1
+	if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
+		return 0, nil
+	}
+	to := s.currentState.Slot()
+	if to < (safetyMargin + blocksPerStatefulFile) {
+		return 0, nil
+	}
+	to -= (safetyMargin + blocksPerStatefulFile)
+	// planStateDump floors toSlot to a whole file; reporting the unaligned value re-seeds
+	// on every finalized update until the next boundary.
+	to = (to / blocksPerStatefulFile) * blocksPerStatefulFile
+	if from >= to {
+		return 0, nil
+	}
+	if err := s.stateSn.DumpCaplinState(
+		ctx,
+		to,
+		blocksPerStatefulFile,
+		s.sn.Salt,
+		s.dirs,
+		1,
+		log.LvlInfo,
+		s.logger,
+	); err != nil {
+		return 0, err
+	}
+	if err := s.stateSn.OpenFolder(); err != nil {
+		return 0, err
+	}
+	// Prune only after OpenFolder: coverage must include the just-frozen range.
+	s.pruneFrozenStateTables(ctx, s.currentState.Slot())
+	return to, nil
 }
 
 func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx) error {

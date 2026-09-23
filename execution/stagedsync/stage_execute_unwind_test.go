@@ -48,10 +48,10 @@ func TestUnwindExecutionStage_PrunesUncommittedOverlayWrite(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 10_000)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(10_000))
 
 	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
-	br := freezeblocks.NewBlockReader(snaps, nil)
+	br := freezeblocks.NewBlockReader(snaps)
 
 	ctx := context.Background()
 	tx, err := db.BeginTemporalRw(ctx)
@@ -189,12 +189,12 @@ func TestFindExecutedDiffsetAtHeight_FallsBackAfterCanonicalReorg(t *testing.T) 
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(16))
 
 	// Block reader backed only by MDBX — the unwind range is at the tip, above any
 	// frozen snapshot boundary, so no snapshots are needed.
 	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
-	br := freezeblocks.NewBlockReader(snaps, nil)
+	br := freezeblocks.NewBlockReader(snaps)
 
 	ctx := context.Background()
 	tx, err := db.BeginTemporalRw(ctx)

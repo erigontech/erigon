@@ -65,7 +65,6 @@ const DefaultRpcTxSyncMaxTimeout = 1 * time.Minute
 const DefaultGasCap = 50_000_000
 
 type BaseApiConfig struct {
-	SingleNodeMode    bool
 	EvmCallTimeout    time.Duration // 0 → DefaultEvmCallTimeout
 	Dirs              datadir.Dirs
 	BlockRangeLimit   int
@@ -118,7 +117,7 @@ type OverlayApiConfig struct {
 }
 
 var SlowLogBlackList = []string{
-	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_blockNumber",
+	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_getHeaderByNumber", "eth_getHeaderByHash", "eth_blockNumber",
 	"erigon_blockNumber", "erigon_getHeaderByNumber", "erigon_getHeaderByHash", "erigon_getBlockByTimestamp",
 	"eth_call",
 }

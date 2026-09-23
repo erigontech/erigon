@@ -180,8 +180,13 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 		currentEpoch = 0
 	}
 
+	// A fork parked at FAR_FUTURE_EPOCH is not scheduled, so it must not become
+	// next_fork_version: the spec wants the current version when nothing follows.
 	var nextForkVersion [4]byte
 	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
+		if fork.epoch == t.beaconCfg.FarFutureEpoch || fork.epoch == math.MaxUint64 {
+			continue
+		}
 		if currentEpoch < fork.epoch {
 			nextForkVersion = fork.version
 			break

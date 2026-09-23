@@ -30,12 +30,8 @@ type fakeTemporalGetter struct {
 	err  error
 }
 
-func (f *fakeTemporalGetter) GetLatest(_ kv.Domain, k []byte) ([]byte, kv.Step, error) {
+func (f *fakeTemporalGetter) GetLatest(_ kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return f.vals[string(k)], 0, f.err
-}
-
-func (f *fakeTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
 }
 
 func (f *fakeTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }

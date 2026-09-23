@@ -32,8 +32,8 @@ import (
 // real index-builder would reject. *state.Aggregator satisfies it structurally.
 type StateAggregator interface {
 	Files() []string
-	OpenFolder() error
-	BuildMissedAccessors(ctx context.Context, workers int, opts ...kv.BuildAccessorsOption) error
+	OpenFolder(db kv.RoDB) error
+	BuildMissedAccessors(ctx context.Context, db kv.RoDB, workers int, opts ...kv.BuildAccessorsOption) error
 	LockCollation()
 	UnlockCollation()
 

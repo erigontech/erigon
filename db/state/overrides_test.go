@@ -17,6 +17,7 @@
 package state
 
 import (
+	"github.com/erigontech/erigon/db/kv"
 	"os"
 	"path/filepath"
 	"strings"
@@ -83,7 +84,7 @@ func TestDomainRoTx_substituteFile(t *testing.T) {
 
 	// Baseline: the live view reads "live".
 	dtLive := d.beginForTests()
-	v, found, _, _, err := dtLive.getLatestFromFiles(key, 0)
+	v, found, _, _, err := dtLive.getLatestFromFiles(key, nil, kv.NoStepBound)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, liveVal, v)
@@ -96,7 +97,7 @@ func TestDomainRoTx_substituteFile(t *testing.T) {
 	require.NoError(t, dtOverride.substituteFile(fi))
 	require.True(t, strings.HasPrefix(dtOverride.files[0].src.decompressor.FilePath(), staging),
 		"substituted file must resolve to the staging directory")
-	v, found, _, _, err = dtOverride.getLatestFromFiles(key, 0)
+	v, found, _, _, err = dtOverride.getLatestFromFiles(key, nil, kv.NoStepBound)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, stagedVal, v, "overridden view must read the staged bytes")
@@ -105,7 +106,7 @@ func TestDomainRoTx_substituteFile(t *testing.T) {
 
 	// The live file is unaffected by the override.
 	dtLive2 := d.beginForTests()
-	v, found, _, _, err = dtLive2.getLatestFromFiles(key, 0)
+	v, found, _, _, err = dtLive2.getLatestFromFiles(key, nil, kv.NoStepBound)
 	require.NoError(t, err)
 	require.True(t, found)
 	require.Equal(t, liveVal, v, "live file must be unchanged after the override")

@@ -28,8 +28,7 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// make a sync.pool of compressors (zstd)
-var compressorPool = sync.Pool{
+var zstdWriterPool = sync.Pool{
 	New: func() any {
 		compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 		if err != nil {
@@ -39,9 +38,45 @@ var compressorPool = sync.Pool{
 	},
 }
 
-func putComp(v *zstd.Encoder) {
+// getZstdWriter returns a pooled encoder writing to w. Release with putZstdWriter.
+func getZstdWriter(w io.Writer) *zstd.Encoder {
+	compressor := zstdWriterPool.Get().(*zstd.Encoder)
+	compressor.Reset(w)
+	return compressor
+}
+
+func putZstdWriter(v *zstd.Encoder) {
 	v.Reset(nil)
-	compressorPool.Put(v)
+	zstdWriterPool.Put(v)
+}
+
+var zstdReaderPool = sync.Pool{
+	New: func() any {
+		decompressor, err := zstd.NewReader(nil)
+		if err != nil {
+			panic(err)
+		}
+		return decompressor
+	},
+}
+
+// GetZstdReader returns a pooled decoder reading r. Release with PutZstdReader, not
+// Close: Close is permanent.
+func GetZstdReader(r io.Reader) (*zstd.Decoder, error) {
+	decompressor := zstdReaderPool.Get().(*zstd.Decoder)
+	if err := decompressor.Reset(r); err != nil {
+		PutZstdReader(decompressor)
+		return nil, err
+	}
+	return decompressor, nil
+}
+
+func PutZstdReader(v *zstd.Decoder) {
+	// Reset fails only on a closed decoder, which can never be revived.
+	if err := v.Reset(nil); err != nil {
+		return
+	}
+	zstdReaderPool.Put(v)
 }
 
 var repeatedPatternBufferPool = sync.Pool{
@@ -61,9 +96,8 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, oldVal, newVal []byt
 		return errors.New("old list is longer than new list")
 	}
 
-	compressor := compressorPool.Get().(*zstd.Encoder)
-	defer putComp(compressor)
-	compressor.Reset(w)
+	compressor := getZstdWriter(w)
+	defer putZstdWriter(compressor)
 
 	// Get one repeated pattern buffer from the pool
 	repeatedPatternPtr := repeatedPatternBufferPool.Get().(*[]repeatedPatternEntry)
@@ -138,11 +172,11 @@ func ApplyCompressedSerializedUint64ListDiff(in, out []byte, diff []byte, revers
 	}
 	var entry repeatedPatternEntry
 
-	decompressor, err := zstd.NewReader(reader)
+	decompressor, err := GetZstdReader(reader)
 	if err != nil {
 		return nil, err
 	}
-	defer decompressor.Close()
+	defer PutZstdReader(decompressor)
 
 	temp := make([]byte, 8)
 	currIndex := 0
@@ -262,7 +296,7 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		if n != validatorSSZSize {
 			return nil, fmt.Errorf("read %d bytes, expected %d", n, validatorSSZSize)
 		}
-		out = append(out, currValidator...)
+		out = append(out, currValidator...) //nolint:makezero
 	}
 
 	return out, nil

@@ -118,7 +118,7 @@ func TestHeader_RLPRoundTrip(t *testing.T) {
 func TestBlock_Accessors(t *testing.T) {
 	t.Parallel()
 	h := richHeader()
-	blk := NewBlockFromNetwork(h, &Body{})
+	blk := NewBlockFromNetwork(h, &Body{}, nil)
 
 	require.Equal(t, uint64(99), blk.NumberU64())
 	require.Equal(t, *uint256.NewInt(99), blk.Number())
@@ -156,7 +156,7 @@ func TestBlock_Accessors(t *testing.T) {
 
 func TestBlock_CopyAndWithSeal(t *testing.T) {
 	t.Parallel()
-	blk := NewBlockWithHeader(richHeader())
+	blk := NewBlockWithHeader(richHeader(), nil)
 
 	cp := blk.Copy()
 	require.Equal(t, blk.Hash(), cp.Hash())
@@ -169,9 +169,9 @@ func TestBlock_CopyAndWithSeal(t *testing.T) {
 func TestBlock_HashCheck(t *testing.T) {
 	t.Parallel()
 	valid := &Header{TxHash: empty.RootHash, UncleHash: empty.UncleHash, ReceiptHash: empty.RootHash, Number: *uint256.NewInt(1)}
-	require.NoError(t, NewBlockWithHeader(valid).HashCheck(false))
+	require.NoError(t, NewBlockWithHeader(valid, nil).HashCheck(false))
 
 	// No transactions but a non-empty receipt hash is inconsistent.
 	bad := &Header{TxHash: empty.RootHash, UncleHash: empty.UncleHash, ReceiptHash: common.HexToHash("0xdead")}
-	require.Error(t, NewBlockWithHeader(bad).HashCheck(false))
+	require.Error(t, NewBlockWithHeader(bad, nil).HashCheck(false))
 }

@@ -82,7 +82,7 @@ func TestStaleSubmission(t *testing.T) {
 
 	for id, c := range testcases {
 		for _, h := range c.headers {
-			blockWithReceipts := &types.BlockWithReceipts{Block: types.NewBlockWithHeader(h)}
+			blockWithReceipts := &types.BlockWithReceipts{Block: types.NewBlockWithHeader(h, nil)}
 			err := ethash.Seal(nil, blockWithReceipts, results, nil)
 			if err != nil {
 				t.Fatal(err)

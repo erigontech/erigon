@@ -28,13 +28,13 @@ import (
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcservices"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
@@ -50,6 +50,8 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -58,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/privateapi"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -92,8 +95,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[1])
-	emptyRaw := marshalHexBytesJSON(t, chainPack.BlockAccessLists[2])
+	availableRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableRaw},
 		{name: "available by tag", selector: "safe", want: availableRaw},
@@ -120,21 +123,21 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(&buf)
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
 		}
 		if tx == nil {
-			t.Errorf("nil tx")
+			t.Fatalf("nil tx")
 		}
 		if tx.BlockHash == nil {
-			t.Errorf("nil block hash")
+			t.Fatalf("nil block hash")
 		}
 		txcount, err := ethApi.GetBlockTransactionCountByHash(m.Ctx, *tx.BlockHash)
 		if err != nil {
@@ -156,7 +159,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 		}
 	}
 	var buf bytes.Buffer
-	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	s := jsonstream.New(&buf)
 	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, &tracersConfig.TraceConfig{}, s)
 	if err != nil {
 		t.Errorf("traceBlock %v: %v", rpc.LatestBlockNumber, err)
@@ -176,7 +179,7 @@ func TestTraceBlockByHash(t *testing.T) {
 	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(&buf)
 		tx, err := ethApi.GetTransactionByHash(m.Ctx, common.HexToHash(tt.txHash))
 		if err != nil {
 			t.Errorf("traceBlock %s: %v", tt.txHash, err)
@@ -239,7 +242,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 		},
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
-	generated, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(_ int, gen *blockgen.BlockGen) {
+	generated, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(coinbase)
 		gen.AddTx(tx)
 	})
@@ -249,7 +252,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	require.NoError(t, err)
 	defer dbtx.Rollback()
 	st := state.New(m.NewStateReader(dbtx))
-	defer st.Release(false)
+	defer st.Close()
 	senderBalance, err := st.GetBalance(accounts.InternAddress(sender))
 	require.NoError(t, err)
 	require.Equal(t, uint256.MustFromHex("0x2869323611617c47"), &senderBalance)
@@ -261,7 +264,7 @@ func TestTraceBlockByHashPrestateTracerCreate2MemoryOverflow(t *testing.T) {
 	require.Equal(t, uint256.MustFromHex("0x14a5faf390e46c23696"), &coinbaseBalance)
 	tracer := "prestateTracer"
 	var buf bytes.Buffer
-	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	stream := jsonstream.New(&buf)
 	api := newDebugApiForTest(m)
 	require.NoError(t, api.TraceBlockByHash(m.Ctx, generated.TopBlock.Hash(), &tracersConfig.TraceConfig{Tracer: &tracer}, stream))
 	require.NoError(t, stream.Flush())
@@ -293,7 +296,7 @@ func TestTraceTransaction(t *testing.T) {
 	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionTests {
 		var buf bytes.Buffer
-		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(&buf)
 		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{}, s)
 		if err != nil {
 			t.Errorf("traceTransaction %s: %v", tt.txHash, err)
@@ -322,7 +325,7 @@ func TestTraceTransactionNotFound(t *testing.T) {
 	api := newDebugApiForTest(m)
 
 	var buf bytes.Buffer
-	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	s := jsonstream.New(&buf)
 	err := api.TraceTransaction(m.Ctx, common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"), &tracersConfig.TraceConfig{}, s)
 	require.ErrorContains(t, err, "transaction not found")
 }
@@ -336,7 +339,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 
 	newStream := func() (*bytes.Buffer, jsonstream.Stream) {
 		var buf bytes.Buffer
-		return &buf, jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		return &buf, jsonstream.New(&buf)
 	}
 
 	t.Run("TraceBlockByNumber_genesis", func(t *testing.T) {
@@ -371,7 +374,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	from := common.Address{0xFF}
 	to := common.Address{0x01}
 	gas := hexutil.Uint64(21000)
-	gasPrice := hexutil.Big(*big.NewInt(1e9))
+	gasPrice := hexutil.U256(*uint256.NewInt(1e9))
 	traceCallArgs := ethapi.CallArgs{From: &from, To: &to, Gas: &gas, GasPrice: &gasPrice}
 	for _, tc := range []struct {
 		name   string
@@ -387,7 +390,8 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 				cfg = &tracersConfig.TraceConfig{Tracer: &name}
 			}
 			buf, s := newStream()
-			err := api.TraceCall(m.Ctx, traceCallArgs, rpc.BlockNumberOrHashWithNumber(1), cfg, s)
+			blockNr := rpc.BlockNumberOrHashWithNumber(1)
+			err := api.TraceCall(m.Ctx, traceCallArgs, &blockNr, cfg, s)
 			require.Error(t, err)
 			require.NoError(t, s.Flush())
 			require.Empty(t, buf.Bytes(), "stream must be empty on execution error so handler omits result field")
@@ -408,7 +412,8 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 
 	t.Run("TraceCall_bad_timeout", func(t *testing.T) {
 		buf, s := newStream()
-		err := api.TraceCall(m.Ctx, traceCallArgs, rpc.BlockNumberOrHashWithNumber(1), badTimeoutCfg, s)
+		blockNr := rpc.BlockNumberOrHashWithNumber(1)
+		err := api.TraceCall(m.Ctx, traceCallArgs, &blockNr, badTimeoutCfg, s)
 		require.Error(t, err)
 		require.NoError(t, s.Flush())
 		require.Empty(t, buf.Bytes(), "stream must be empty on AssembleTracer error so handler omits result field")
@@ -425,8 +430,8 @@ func callDebugTraceCall(t *testing.T, api *DebugAPIImpl, args ethapi.CallArgs, o
 	t.Helper()
 
 	var buf bytes.Buffer
-	s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
-	err := api.TraceCall(context.Background(), args, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), &tracersConfig.TraceConfig{
+	s := jsonstream.New(&buf)
+	err := api.TraceCall(context.Background(), args, nil, &tracersConfig.TraceConfig{
 		BlockOverrides: overrides,
 	}, s)
 	require.NoError(t, err)
@@ -449,11 +454,11 @@ func TestDebugTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 		From:                 &c.bankAddress,
 		To:                   &contractAddr,
 		Gas:                  newUint64(100_000),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}
 	returnValue := callDebugTraceCall(t, c.debugAPI(), args, &ethapi.BlockOverrides{
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(10)),
 	})
 	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", returnValue)
@@ -476,12 +481,80 @@ func TestDebugTraceCallBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 	}
 }
 
+// TestUnpricedBlobsIgnoreBlobBaseFeeOverride pins that a call naming blob fields
+// without pricing them reads BLOBBASEFEE as zero even when blockOverrides raises
+// the block's blob fee, and that eth_call and debug_traceCall answer alike.
+func TestUnpricedBlobsIgnoreBlobBaseFeeOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	const zeroWord = "0x0000000000000000000000000000000000000000000000000000000000000000"
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr := c.deployOpcodeContract(t, opBlobbasefee)
+	args := ethapi.CallArgs{
+		From:                &c.bankAddress,
+		To:                  &contractAddr,
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+	overrides := &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.U256)(uint256.NewInt(777))}
+
+	require.Equal(t, zeroWord, callDebugTraceCall(t, c.debugAPI(), args, overrides))
+
+	result, err := newTestEthAPIWithFilters(t, c.m).Call(context.Background(), args, nil, nil, overrides)
+	require.NoError(t, err)
+	require.Equal(t, zeroWord, result.String())
+}
+
+// TestPricedBlobsCompareFeeCapToBlobBaseFeeOverride pins that a priced blob call
+// compares the caller's blob fee cap against the overridden block blob fee:
+// below it the call is rejected, as eth_estimateGas rejects it, at or above it
+// the call traces and reads BLOBBASEFEE as the override.
+func TestPricedBlobsCompareFeeCapToBlobBaseFeeOverride(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr := c.deployOpcodeContract(t, opBlobbasefee)
+	argsWithFeeCap := func(feeCap uint64) ethapi.CallArgs {
+		return ethapi.CallArgs{
+			From:                &c.bankAddress,
+			To:                  &contractAddr,
+			MaxFeePerBlobGas:    (*hexutil.U256)(uint256.NewInt(feeCap)),
+			BlobVersionedHashes: []common.Hash{{1}},
+		}
+	}
+	blobBaseFee := func(fee uint64) *ethapi.BlockOverrides {
+		return &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.U256)(uint256.NewInt(fee))}
+	}
+
+	t.Run("fee cap below the override", func(t *testing.T) {
+		var buf bytes.Buffer
+		err := c.debugAPI().TraceCall(context.Background(), argsWithFeeCap(10), nil, &tracersConfig.TraceConfig{
+			BlockOverrides: blobBaseFee(11),
+		}, jsonstream.New(&buf))
+		require.ErrorIs(t, err, protocol.ErrMaxFeePerBlobGas)
+	})
+
+	t.Run("fee cap equal to the override", func(t *testing.T) {
+		returnValue := callDebugTraceCall(t, c.debugAPI(), argsWithFeeCap(10), blobBaseFee(10))
+		require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000a", returnValue)
+	})
+
+	t.Run("fee cap above the override", func(t *testing.T) {
+		returnValue := callDebugTraceCall(t, c.debugAPI(), argsWithFeeCap(11), blobBaseFee(10))
+		require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000a", returnValue)
+	})
+}
+
 // TestTxResultFieldStreamLazy verifies the lazy-write semantics of LazyFieldStream
 // with prependSeparator=true (the per-tx result field case).
 func TestTxResultFieldStreamLazy(t *testing.T) {
 	newInner := func() (*bytes.Buffer, jsonstream.Stream) {
 		var buf bytes.Buffer
-		return &buf, jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		return &buf, jsonstream.New(&buf)
 	}
 
 	t.Run("no_writes_when_unused", func(t *testing.T) {
@@ -531,7 +604,7 @@ func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	cfg := &tracersConfig.TraceConfig{Tracer: &tracer, Timeout: &timeout}
 
 	var buf bytes.Buffer
-	s := jsonstream.NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	s := jsonstream.New(&buf)
 	require.NoError(t, api.TraceBlockByNumber(m.Ctx, blockNum, cfg, s))
 	require.NoError(t, s.Flush())
 
@@ -594,7 +667,7 @@ func TestTraceTransactionNoRefund(t *testing.T) {
 	api := newDebugApiForTest(m)
 	for _, tt := range debugTraceTransactionNoRefundTests {
 		var buf bytes.Buffer
-		s := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s := jsonstream.New(&buf)
 		var norefunds = true
 		err := api.TraceTransaction(m.Ctx, common.HexToHash(tt.txHash), &tracersConfig.TraceConfig{NoRefunds: &norefunds}, s)
 		if err != nil {
@@ -878,6 +951,103 @@ func TestAccountRange(t *testing.T) {
 	})
 }
 
+func TestAccountRangeResolvesCommittedBlockTags(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newDebugApiForTest(m)
+	start := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
+
+	var latestExecuted uint64
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var err error
+		latestExecuted, err = stages.GetStageProgress(tx, stages.Execution)
+		return err
+	}))
+	blockNumbers := map[rpc.BlockNumber]uint64{
+		rpc.FinalizedBlockNumber:      1,
+		rpc.SafeBlockNumber:           3,
+		rpc.LatestExecutedBlockNumber: latestExecuted,
+	}
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		finalizedHash, err := rawdb.ReadCanonicalHash(tx, blockNumbers[rpc.FinalizedBlockNumber])
+		if err != nil {
+			return err
+		}
+		safeHash, err := rawdb.ReadCanonicalHash(tx, blockNumbers[rpc.SafeBlockNumber])
+		if err != nil {
+			return err
+		}
+		rawdb.WriteForkchoiceFinalized(tx, finalizedHash)
+		rawdb.WriteForkchoiceSafe(tx, safeHash)
+		return nil
+	}))
+
+	for tag, blockNumber := range blockNumbers {
+		t.Run(tag.String(), func(t *testing.T) {
+			want, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber)), start[:], 10, true, true, nil)
+			require.NoError(t, err)
+
+			got, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHashWithNumber(tag), start[:], 10, true, true, nil)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+
+	t.Run("latest resolves to execution head", func(t *testing.T) {
+		latestTag := rpc.LatestBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, start[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(latestExecuted)
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, start[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("pending tag is rejected", func(t *testing.T) {
+		pendingTag := rpc.PendingBlockNumber
+		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &pendingTag}, start[:], 10, true, true, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "pending block not supported")
+	})
+
+	t.Run("earliest tag returns genesis state root", func(t *testing.T) {
+		earliestTag := rpc.EarliestBlockNumber
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &earliestTag}, start[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		genesis, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, 0)
+		require.NoError(t, err)
+		require.Equal(t, fmt.Sprintf("%x", genesis.Root), result.Root)
+	})
+}
+
+// TestAccountRange_UsesCommittedBlockResolution pins that AccountRange resolves
+// block tags against committed state, not the block overlay. With the overlay
+// head one past the MDBX-committed chain, "latest" must resolve to the committed
+// head — the overlay-only block has no committed state for NewDumper.
+func TestAccountRange_UsesCommittedBlockResolution(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	addr := common.HexToAddress("0x0100000000000000000000000000000000000000")
+
+	latestTag := rpc.LatestBlockNumber
+	result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
+	require.NoError(t, err)
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	committedHead, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+	require.NoError(t, err)
+	require.Equal(t, fmt.Sprintf("%x", committedHead.Root), result.Root,
+		"must resolve to the committed head, not the overlay-only block")
+}
+
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
@@ -938,6 +1108,53 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		_, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.BlockNumber(11), &n2)
 		require.Error(t, err)
 	})
+	t.Run("block tags", func(t *testing.T) {
+		latest := rpc.LatestBlockNumber
+		earliest := rpc.EarliestBlockNumber
+
+		result, err := api.GetModifiedAccountsByNumber(m.Ctx, latest, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, earliest, &latest)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		n := rpc.BlockNumber(11)
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, n, &latest)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		_, err = api.GetModifiedAccountsByNumber(m.Ctx, latest, &earliest)
+		require.Error(t, err)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.SafeBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+
+		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.FinalizedBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+	})
+
+	t.Run("pending tag uses committed view", func(t *testing.T) {
+		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
+		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)}, nil)
+		payload, err := rlp.EncodeToBytes(pendingBlock)
+		require.NoError(t, err)
+		ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
+
+		baseWithFilters := NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+		apiWithFilters := NewPrivateDebugAPI(baseWithFilters, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+		result, err := apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
+	})
 }
 
 func TestMapTxNum2BlockNum(t *testing.T) {
@@ -997,14 +1214,15 @@ func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
 
-	var blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent common.Hash
+	var blockHash0, blockHash1, blockHash3, blockHash7, blockHash10, blockHashNonExistent common.Hash
 	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
 		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
 		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
 		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
+		blockHash7, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 7)
 		blockHash10, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
 		blockHashNonExistent, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 20)
-		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent
+		_, _, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash7, blockHash10, blockHashNonExistent
 		return nil
 	})
 
@@ -1041,12 +1259,20 @@ func TestAccountAt(t *testing.T) {
 		results, err = api.AccountAt(m.Ctx, blockHash10, 1, contract)
 		require.NoError(err)
 		require.Equal(39, int(results.Nonce))
-		require.Equal("0x", results.Code.String())
+		require.Equal(crypto.Keccak256Hash(results.Code), results.CodeHash)
 
-		// and too big txIndex
-		results, err = api.AccountAt(m.Ctx, blockHash10, 1024, contract)
-		require.NoError(err)
-		require.Equal(42, int(results.Nonce))
+	})
+	t.Run("code matches code hash", func(t *testing.T) {
+		tokenContract := common.HexToAddress("0x920fd5070602feaea2e251e9e7238b6c376bcae5")
+		result, err := api.AccountAt(m.Ctx, blockHash7, 1, tokenContract)
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Code)
+		require.Equal(t, crypto.Keccak256Hash(result.Code), result.CodeHash)
+	})
+	t.Run("large transaction index", func(t *testing.T) {
+		result, err := api.AccountAt(m.Ctx, blockHash10, 1024, contract)
+		require.NoError(t, err)
+		require.Equal(t, 42, int(result.Nonce))
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
@@ -1110,7 +1336,7 @@ func TestGetBadBlocks(t *testing.T) {
 	hash4 := putBlock(i + 3)
 	require.NoError(rawdb.TruncateCanonicalHash(tx, i, true)) // trim since i
 
-	tx.Commit()
+	require.NoError(tx.Commit())
 
 	// Reset the global bad block cache so it reads only from this test's DB
 	tx2, err := m.DB.BeginRo(ctx)
@@ -1141,7 +1367,7 @@ func TestGetRawTransaction(t *testing.T) {
 	}
 	defer tx.Rollback()
 	number := *rawdb.ReadCurrentBlockNumber(tx)
-	tx.Commit()
+	require.NoError(tx.Commit())
 
 	if number < 1 {
 		t.Error("TestSentry doesn't have enough blocks for this test")
@@ -1150,7 +1376,7 @@ func TestGetRawTransaction(t *testing.T) {
 	for i := range number {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
 		require.NoError(err)
 		txns := block.Transactions()
@@ -1183,7 +1409,7 @@ func TestGetRawReceipts(t *testing.T) {
 
 	testedNonEmpty := false
 	for i := uint64(0); i <= number; i++ {
-		block, err := api.blockByNumberWithSenders(ctx, tx, i)
+		block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), i)
 		require.NoError(err)
 		receipts, err := api.getReceipts(ctx, tx, block)
 		require.NoError(err)
@@ -1205,11 +1431,14 @@ func TestGetRawReceipts(t *testing.T) {
 }
 
 func TestExecutionWitness(t *testing.T) {
+	previousAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true // stateless verification of every witness runs only under assert
 	// Enable historical commitment schema so the test aggregator maintains per-block history.
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() {
 		statecfg.Schema = previousSchema
+		dbg.AssertEnabled = previousAssert
 	})
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -1470,12 +1699,14 @@ func TestSetHead(t *testing.T) {
 	roTx.Rollback()
 	require.Greater(t, head, uint64(1), "test chain must have at least 2 blocks")
 
-	// Helper to build a DebugAPIImpl wired to a mockEthBackend
-	makeAPI := func(mock *mockEthBackend) *DebugAPIImpl {
-		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
+	makeAPIWithBase := func(m *execmoduletester.ExecModuleTester, base *BaseAPI, mock *mockEthBackend) *DebugAPIImpl {
+		backendServer := privateapi.NewEthBackendServer(m.Ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, &rpccfg.DebugApiConfig{})
+		return NewPrivateDebugAPI(base, m.DB, backend, &rpccfg.DebugApiConfig{})
+	}
+	makeAPI := func(mock *mockEthBackend) *DebugAPIImpl {
+		return makeAPIWithBase(m, newBaseApiForTest(m), mock)
 	}
 
 	// Rewinding one block below the current head is the simplest valid rewind.
@@ -1507,6 +1738,16 @@ func TestSetHead(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "in the future")
 		require.False(t, mock.setHeadCalled, "backend must not be called for a future block")
+	})
+
+	t.Run("overlay-only head is rejected", func(t *testing.T) {
+		base, overlayTester, overlayHeader := newOverlayAheadTestAPI(t)
+		mock := &mockEthBackend{}
+		api := makeAPIWithBase(overlayTester, base, mock)
+
+		err := api.SetHead(overlayTester.Ctx, hexutil.Uint64(overlayHeader.Number.Uint64()))
+		require.ErrorContains(t, err, "in the future")
+		require.False(t, mock.setHeadCalled, "backend must not be called for an uncommitted block")
 	})
 
 	// A far-future block number must be rejected.

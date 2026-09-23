@@ -42,8 +42,8 @@ func New[K comparable, V any](metricName string, size int) (*Cache[K, V], error)
 	return &Cache[K, V]{
 		Cache:      v,
 		metricName: metricName,
-		metricHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_lru_cache_hit{%s="%s"}`, "cache", metricName)),
-		metricMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_lru_cache_miss{%s="%s"}`, "cache", metricName)),
+		metricHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_lru_cache_hit{%s=%q}`, "cache", metricName)),
+		metricMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_lru_cache_miss{%s=%q}`, "cache", metricName)),
 	}, nil
 }
 
@@ -69,8 +69,8 @@ func NewWithTTL[K comparable, V any](metricName string, size int, ttl time.Durat
 	return &CacheWithTTL[K, V]{
 		LRU:           cache,
 		metric:        metricName,
-		metricTTLHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_hit{%s="%s"}`, "cache", metricName)),
-		metricTTLMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_miss{%s="%s"}`, "cache", metricName)),
+		metricTTLHit:  metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_hit{%s=%q}`, "cache", metricName)),
+		metricTTLMiss: metrics.GetOrCreateCounter(fmt.Sprintf(`golang_ttl_lru_cache_miss{%s=%q}`, "cache", metricName)),
 	}
 }
 

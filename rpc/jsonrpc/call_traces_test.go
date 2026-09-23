@@ -17,13 +17,13 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
-	"math/big"
+	"encoding/json"
 	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
@@ -66,7 +66,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -80,9 +80,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
 	toAddress1 := common.Address{1}
@@ -101,13 +99,13 @@ func TestCallTraceUnwind(t *testing.T) {
 	m := execmoduletester.New(t)
 	var chainA, chainB *blockgen.ChainPack
 	var err error
-	chainA, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chainA, err = m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chainA: %v", err)
 	}
-	chainB, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, gen *blockgen.BlockGen) {
+	chainB, err = m.GenerateChain(20, func(i int, gen *blockgen.BlockGen) {
 		if i < 5 || i >= 10 {
 			gen.SetCoinbase(common.Address{1})
 		} else {
@@ -123,9 +121,7 @@ func TestCallTraceUnwind(t *testing.T) {
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
 	}
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
 	toAddress1 := common.Address{1}
@@ -176,7 +172,7 @@ func TestFilterNoAddresses(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -189,9 +185,7 @@ func TestFilterNoAddresses(t *testing.T) {
 			t.Fatalf("inserting chain: %v", err)
 		}
 	}
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(10)
 	traceReq1 := TraceFilterRequest{
@@ -211,15 +205,16 @@ func TestFilterAddressIntersection(t *testing.T) {
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 
 	once := new(sync.Once)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(15, func(i int, block *blockgen.BlockGen) {
 		once.Do(func() { block.SetCoinbase(common.Address{4}) })
 
 		var rcv common.Address
-		if i < 5 {
+		switch {
+		case i < 5:
 			rcv = toAddress1
-		} else if i < 10 {
+		case i < 10:
 			rcv = toAddress2
-		} else {
+		default:
 			rcv = other
 		}
 
@@ -238,9 +233,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 	fromBlock := rpc.BlockNumber(1)
 	toBlock := rpc.BlockNumber(15)
 	t.Run("second", func(t *testing.T) {
-		s := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.Wrap(s)
+		stream := jsonstream.New(nil)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
@@ -255,9 +248,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 		assert.Equal(t, []int{6, 7, 8, 9, 10}, blockNumbersFromTraces(t, stream.Buffer()))
 	})
 	t.Run("first", func(t *testing.T) {
-		s := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.Wrap(s)
+		stream := jsonstream.New(nil)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
@@ -272,9 +263,7 @@ func TestFilterAddressIntersection(t *testing.T) {
 		assert.Equal(t, []int{1, 2, 3, 4, 5}, blockNumbersFromTraces(t, stream.Buffer()))
 	})
 	t.Run("empty", func(t *testing.T) {
-		s := jsoniter.ConfigDefault.BorrowStream(nil)
-		defer jsoniter.ConfigDefault.ReturnStream(s)
-		stream := jsonstream.Wrap(s)
+		stream := jsonstream.New(nil)
 
 		traceReq1 := TraceFilterRequest{
 			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &fromBlock},
@@ -307,9 +296,7 @@ func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 		ToAddress: []*common.Address{&contractAddr},
 	}
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee), stream)
 	require.NoError(t, err)
 
@@ -340,9 +327,7 @@ func TestFilterBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
 				ToAddress: []*common.Address{&contractAddr},
 			}
 
-			s := jsoniter.ConfigDefault.BorrowStream(nil)
-			defer jsoniter.ConfigDefault.ReturnStream(s)
-			stream := jsonstream.Wrap(s)
+			stream := jsonstream.New(nil)
 			err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 				BlockOverrides: tc.override,
 			}, stream)
@@ -371,9 +356,7 @@ func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
 	}
 
 	beaconRoot := common.HexToHash("0x01")
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{BeaconRoot: &beaconRoot},
 	}, stream)
@@ -383,9 +366,9 @@ func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
 // TestFilterSignerReflectsBlockOverridesNumber is filterV3's analogue of
 // TestReplayTransactionSignerReflectsBlockOverridesNumber: filterV3 derives
 // fork rules (lastRules) from the overridden BlockContext but must also
-// recompute lastSigner from it, not from the block's real number. filterV3
-// reports per-transaction failures as an "error" field inside the stream
-// rather than as a Go error, so the assertion inspects the stream contents.
+// recompute lastSigner from it, not from the block's real number. A
+// transaction that cannot be traced must fail the whole request instead of
+// mixing an error object into the result array.
 func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -402,12 +385,163 @@ func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 		ToAddress: []*common.Address{&c.bankAddress},
 	}
 
-	s := jsoniter.ConfigDefault.BorrowStream(nil)
-	defer jsoniter.ConfigDefault.ReturnStream(s)
-	stream := jsonstream.Wrap(s)
+	stream := jsonstream.New(nil)
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
-		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(1))},
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
+	}, stream)
+	require.ErrorContains(t, err, "protected txn is not supported by signer")
+	require.Empty(t, string(stream.Buffer()))
+}
+
+// TestFilterErrorAfterExportedTracesKeepsValidJSON covers the other half of
+// filterV3's error contract: when a transaction fails after earlier traces were
+// already streamed, the request still fails and the result array holds only
+// TraceEntry items. The envelope is assembled the way runMethod does it, since
+// sealing the half-written array is the handler's job, not filterV3's.
+func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+	}
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString("2.0")
+	stream.WriteMore()
+	stream.WriteObjectField("id")
+	stream.WriteInt(1)
+	stream.WriteMore()
+	result := jsonstream.NewLazyFieldStream(stream, "result", false)
+
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
+	}, result)
+	require.ErrorContains(t, err, "protected txn is not supported by signer")
+	require.True(t, result.Written(), "test needs traces exported before the failure")
+
+	result.CloseIfOpen()
+	stream.WriteMore()
+	rpc.HandleError(err, stream)
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+
+	var envelope map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), "envelope is not valid JSON: %s", buf.String())
+	require.Contains(t, envelope, "error")
+
+	var traces []json.RawMessage
+	require.NoError(t, json.Unmarshal(envelope["result"], &traces), "result array was left unsealed: %s", envelope["result"])
+	require.NotEmpty(t, traces)
+	for i, trace := range traces {
+		var entry map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(trace, &entry), "item %d is not a JSON object", i)
+		require.Contains(t, entry, "type", "item %d is not a TraceEntry", i)
+		if reason, ok := entry["error"]; ok {
+			var failure string
+			require.NoError(t, json.Unmarshal(reason, &failure),
+				"item %d: error must be a TraceEntry failure reason, not an RPC error object", i)
+		}
+	}
+}
+
+// TestFilterCountSatisfiedIgnoresLaterErrors checks that once count traces
+// were exported the scan stops: a failure in a transaction the client never
+// asked to see must not turn a complete page into an RPC error.
+func TestFilterCountSatisfiedIgnoresLaterErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
+	count := uint64(1)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		Count:     &count,
+	}
+
+	stream := jsonstream.New(nil)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
 	require.NoError(t, err)
-	require.Contains(t, string(stream.Buffer()), "protected txn is not supported by signer")
+
+	var traces []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stream.Buffer(), &traces))
+	require.Len(t, traces, 1)
+	require.JSONEq(t, `"reward"`, string(traces[0]["type"]))
+}
+
+// TestFilterAfterSkipsTracesBeforeExporting pins the after/count pagination:
+// after skips the first matches without exporting them, count then bounds the
+// exported page.
+func TestFilterAfterSkipsTracesBeforeExporting(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	from, to := rpc.BlockNumber(1), rpc.BlockNumber(2)
+	after, count := uint64(1), uint64(1)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		After:     &after,
+		Count:     &count,
+	}
+
+	stream := jsonstream.New(nil)
+	err := api.Filter(context.Background(), traceReq, new(bool), nil, stream)
+	require.NoError(t, err)
+
+	var traces []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stream.Buffer(), &traces))
+	require.Len(t, traces, 1)
+	require.JSONEq(t, `"reward"`, string(traces[0]["type"]))
+	require.JSONEq(t, `2`, string(traces[0]["blockNumber"]))
+}
+
+// TestFilterZeroCountReturnsEmptyArray checks that count=0 yields [] without
+// tracing anything, so it cannot fail on transactions it will never export.
+func TestFilterZeroCountReturnsEmptyArray(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
+	count := uint64(0)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		Count:     &count,
+	}
+
+	stream := jsonstream.New(nil)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
+	}, stream)
+	require.NoError(t, err)
+	require.Equal(t, "[]", string(stream.Buffer()))
 }

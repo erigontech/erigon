@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/types"
@@ -46,7 +46,7 @@ func writeCanonicalBlocks(t *testing.T, tx kv.RwTx, n uint64) {
 // txNums tip resumes from the tip instead of failing.
 func TestAppendCanonicalTxNumsFromTip_FillsGap(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	writeCanonicalBlocks(t, tx, 10)
 
 	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1, nil))
@@ -71,7 +71,7 @@ func TestAppendCanonicalTxNumsFromTip_FillsGap(t *testing.T) {
 // from exactly at tip+1 the wrapper appends without retrying.
 func TestAppendCanonicalTxNumsFromTip_ContiguousStart(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	writeCanonicalBlocks(t, tx, 10)
 
 	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1, nil))
@@ -97,7 +97,7 @@ func TestAppendCanonicalTxNumsFromTip_ContiguousStart(t *testing.T) {
 // moves again.
 func TestAppendCanonicalTxNumsFromTip_UnfillableGapIsNotSuccess(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	writeCanonicalBlocks(t, tx, 5)
 	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1, nil))
 
@@ -126,7 +126,7 @@ func TestAppendCanonicalTxNumsFromTip_UnfillableGapIsNotSuccess(t *testing.T) {
 // moved. Execution then finds no work and the head stops for good.
 func TestAppendCanonicalTxNumsFromTip_PrunedBodyIsNotSuccess(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	writeCanonicalBlocks(t, tx, 10)
 	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1, nil))
 	require.NoError(t, rawdbv3.TxNums.Truncate(tx, 6))
@@ -150,7 +150,7 @@ func TestAppendCanonicalTxNumsFromTip_PrunedBodyIsNotSuccess(t *testing.T) {
 // txNums up to the canonical tip.
 func TestAppendCanonicalTxNums_PrunedBodyResolvedFromReader(t *testing.T) {
 	t.Parallel()
-	_, tx := memdb.NewTestTx(t)
+	_, tx := mdbxtest.NewTestTx(t)
 	writeCanonicalBlocks(t, tx, 10)
 	require.NoError(t, rawdb.AppendCanonicalTxNums(tx, 1, nil))
 	require.NoError(t, rawdbv3.TxNums.Truncate(tx, 6))

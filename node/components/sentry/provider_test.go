@@ -17,6 +17,7 @@
 package sentry
 
 import (
+	"context"
 	"net"
 	"path/filepath"
 	"testing"
@@ -123,11 +124,11 @@ func TestStartSharedP2PServer_DedupesAndInjects(t *testing.T) {
 
 	first := helperGrpcServerWithProtocols(
 		p2p.Protocol{Name: "eth", Version: 71, Length: 17},
-		p2p.Protocol{Name: "wit", Version: 0, Length: 5},
+		p2p.Protocol{Name: "aux", Version: 1, Length: 5},
 	)
 	second := helperGrpcServerWithProtocols(
 		p2p.Protocol{Name: "eth", Version: 70, Length: 17},
-		p2p.Protocol{Name: "wit", Version: 0, Length: 5}, // duplicate, must be dropped
+		p2p.Protocol{Name: "aux", Version: 1, Length: 5},
 	)
 
 	p := &Provider{
@@ -147,7 +148,7 @@ func TestStartSharedP2PServer_DedupesAndInjects(t *testing.T) {
 	t.Cleanup(func() { p.Close() })
 
 	require.NotNil(t, p.sharedP2PServer)
-	require.Len(t, cfg.Protocols, 3, "eth/71, eth/70, wit/0 — wit deduped")
+	require.Len(t, cfg.Protocols, 3)
 
 	require.Same(t, p.sharedP2PServer, first.GetP2PServer())
 	require.Same(t, p.sharedP2PServer, second.GetP2PServer())
@@ -186,14 +187,19 @@ func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 	require.NotNil(t, srv)
 
 	addr := srv.NodeInfo().ListenAddr
-	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	var dialer net.Dialer
+	dialCtx, dialCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	c, err := dialer.DialContext(dialCtx, "tcp", addr)
+	dialCancel()
 	require.NoError(t, err, "listener should be up before Close")
 	c.Close()
 
 	require.NoError(t, p.Close())
 	require.Nil(t, p.sharedP2PServer, "Close must clear the shared server reference")
 
-	_, err = net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	dialCtx2, dialCancel2 := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	_, err = dialer.DialContext(dialCtx2, "tcp", addr)
+	dialCancel2()
 	require.Error(t, err, "Provider.Close must shut the shared p2p.Server's listener down")
 }
 
@@ -206,7 +212,7 @@ func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 func TestRestartCycle_SwapsChainConfig(t *testing.T) {
 	cfg1 := &chain.Config{ChainID: uint256.NewInt(560048)}
 	cfg2 := &chain.Config{ChainID: uint256.NewInt(9999999)}
-	genesis := types.NewBlockWithHeader(&types.Header{})
+	genesis := types.NewBlockWithHeader(&types.Header{}, nil)
 
 	p := &Provider{}
 	p.Configure(Config{
@@ -251,7 +257,7 @@ func TestSetChainConfig_PanicsWhileStarted(t *testing.T) {
 		Logger:      log.Root(),
 		Disable:     true,
 		ChainConfig: &chain.Config{ChainID: uint256.NewInt(1)},
-		Genesis:     types.NewBlockWithHeader(&types.Header{}),
+		Genesis:     types.NewBlockWithHeader(&types.Header{}, nil),
 	})
 	require.NoError(t, p.Start(t.Context()))
 	t.Cleanup(func() { p.Close() })

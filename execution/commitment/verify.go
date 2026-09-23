@@ -28,15 +28,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// VerifyBranchHashes checks that stateHash in each cell of a branch
-// matches the hash recomputed from the provided domain values.
-//
-// branchKey: compacted trie path from commitment.kv
-// branchData: raw branch data (with PLAIN keys, already dereferenced)
-// accountValues: string(plainKey) → serialised account value (V3 format)
-// storageValues: string(plainKey) → raw storage value
-//
-// Returns nil if all hashes match, or an error listing mismatches.
 func VerifyBranchHashes(
 	branchKey []byte,
 	branchData BranchData,
@@ -48,14 +39,11 @@ func VerifyBranchHashes(
 		return fmt.Errorf("decodeCells: %w", err)
 	}
 
-	// Derive depth from branchKey (compacted nibble path).
-	// The branch node identified by N nibbles was folded at depth = N + 1,
-	// because the branch stores children one level deeper than its prefix path.
-	// E.g., root branch (0 nibbles) → depth=1; branch at "3a" (2 nibbles) → depth=3.
 	nib := nibbles.CompactToHex(branchKey)
 	if nibbles.HasTerm(nib) {
 		nib = nib[:len(nib)-1]
 	}
+	// +1: cells in this branch are one nibble deeper than the branch's own prefix.
 	depth := int16(len(nib)) + 1
 
 	var mismatches []string
@@ -69,13 +57,10 @@ func VerifyBranchHashes(
 			continue // no stored hash to verify
 		}
 
-		// Save the original stateHash for comparison.
 		var origHash common.Hash
 		copy(origHash[:], c.stateHash[:c.stateHashLen])
 		origLen := c.stateHashLen
 
-		// Load domain values into cell fields and mark as loaded.
-		// If a value is missing or empty (deletion), skip this cell — it's not verifiable.
 		canVerify := true
 		if c.storageAddrLen > 0 {
 			stoKeyBytes := c.storageAddr[:c.storageAddrLen]
@@ -83,7 +68,6 @@ func VerifyBranchHashes(
 			if !ok || len(stoVal) == 0 {
 				canVerify = false
 			} else {
-				// Storage value is stored raw in the cell's Storage field.
 				copy(c.Storage[:], stoVal)
 				c.StorageLen = int8(len(stoVal))
 				c.loaded = c.loaded.addFlag(cellLoadStorage)
@@ -115,10 +99,8 @@ func VerifyBranchHashes(
 			continue
 		}
 
-		// Clear stateHash to force recomputation.
 		c.stateHashLen = 0
 
-		// Create a fresh HexPatriciaHashed for each cell to avoid any shared state issues.
 		verifyCfg := DefaultTrieConfig()
 		verifyCfg.MemoizationOff = true
 		hph := NewHexPatriciaHashed(length.Addr, nil, verifyCfg)

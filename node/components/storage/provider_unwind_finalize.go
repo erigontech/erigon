@@ -215,12 +215,12 @@ func (p *Provider) FinalizeUnwind() error {
 			}
 		}
 		if p.Aggregator != nil {
-			if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
+			if err := p.Aggregator.OpenFolder(p.ChainDB); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: post-rename Aggregator.OpenFolder failed (continuing — accessor rebuild may be skipped)", "err", err)
 			}
 		}
 		if p.Aggregator != nil {
-			if err := p.Aggregator.BuildMissedAccessors(context.Background(), 1); err != nil && p.logger != nil {
+			if err := p.Aggregator.BuildMissedAccessors(context.Background(), p.ChainDB, 1); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: BuildMissedAccessors failed (continuing — accessors will be built on next process start)", "err", err)
 			}
 		}
@@ -346,7 +346,7 @@ func (p *Provider) FinalizeUnwind() error {
 		}
 
 		if p.Aggregator != nil {
-			if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
+			if err := p.Aggregator.OpenFolder(p.ChainDB); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: post-history OpenFolder failed (continuing)", "err", err)
 			}
 		}
@@ -424,7 +424,7 @@ func (p *Provider) FinalizeUnwind() error {
 			}
 		}
 		if p.Aggregator != nil {
-			if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
+			if err := p.Aggregator.OpenFolder(p.ChainDB); err != nil && p.logger != nil {
 				p.logger.Warn("[storage] Provider.FinalizeUnwind: removal Aggregator.OpenFolder failed (continuing)", "err", err)
 			}
 		}

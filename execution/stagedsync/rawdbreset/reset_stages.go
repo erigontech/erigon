@@ -42,9 +42,6 @@ import (
 
 func ResetState(db kv.TemporalRwDB, ctx context.Context, dirs datadir.Dirs, br dbservices.FullBlockReader, logger log.Logger) error {
 	// don't reset senders here
-	if err := db.Update(ctx, ResetWitnesses); err != nil {
-		return err
-	}
 	if err := db.Update(ctx, ResetTxLookup); err != nil {
 		return err
 	}
@@ -133,7 +130,7 @@ func ResetBlocks(db kv.RwDB, tx kv.RwTx, br dbservices.FullBlockReader, bw *bloc
 	if err != nil {
 		return err
 	}
-	if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
+	if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 		return err
 	}
 
@@ -220,19 +217,6 @@ func ResetTxLookup(tx kv.RwTx) error {
 	return nil
 }
 
-func ResetWitnesses(tx kv.RwTx) error {
-	if err := tx.ClearTable(kv.BorWitnesses); err != nil {
-		return err
-	}
-	if err := tx.ClearTable(kv.BorWitnessSizes); err != nil {
-		return err
-	}
-	if err := stages.SaveStageProgress(tx, stages.WitnessProcessing, 0); err != nil {
-		return err
-	}
-	return nil
-}
-
 var Tables = map[stages.SyncStage][]string{
 	stages.CustomTrace: {},
 	stages.Finish:      {},
@@ -309,82 +293,87 @@ func FillDBFromSnapshots(logPrefix string, ctx context.Context, tx kv.RwTx, dirs
 
 		switch stage {
 		case stages.Headers:
-			h2n := etl.NewCollectorWithAllocator(logPrefix, dirs.Tmp, etl.SmallSortableBuffers, logger)
-			defer h2n.Close()
-			h2n.SortAndFlushInBackground(true)
-			h2n.LogLvl(log.LvlDebug)
+			if err := func() error {
+				h2n := etl.NewCollectorWithAllocator(logPrefix, dirs.Tmp, etl.SmallSortableBuffers, logger)
+				defer h2n.Close()
+				h2n.SortAndFlushInBackground(true)
+				h2n.LogLvl(log.LvlDebug)
 
-			// fill some small tables from snapshots, in future we may store this data in snapshots also, but
-			// for now easier just store them in db
-			var td uint256.Int
-			var walkFirst, walkLast, walkCount uint64
-			blockNumBytes := make([]byte, 8)
-			if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
-				blockNum, blockHash := header.Number.Uint64(), header.Hash()
-				if walkCount == 0 {
-					walkFirst = blockNum
-				}
-				walkLast = blockNum
-				walkCount++
-				if _, overflow := td.AddOverflow(&td, &header.Difficulty); overflow {
-					return fmt.Errorf("TD overflows uint256 at block %d hash %x", blockNum, blockHash)
-				}
-				// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
-				// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
-				if blockNum > blocksAvailable {
-					return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
-				}
-				// Always write TD. Caplin's BlockCollector.Flush reads parent.TD
-				// for the block right after the mode-B unwind target; if that
-				// target sits below pruneMarkerBlockThreshold and TD wasn't
-				// stored, forward re-exec wedges on "parent's total difficulty
-				// not found" (live-caught on hoodi --prune.mode=minimal at
-				// depth 154k). TD is 32 bytes/block — ~100 MB per 3M-block
-				// chain — cheap next to the snapshots themselves.
-				if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+				// fill some small tables from snapshots, in future we may store this data in snapshots also, but
+				// for now easier just store them in db
+				var td uint256.Int
+				var walkFirst, walkLast, walkCount uint64
+				blockNumBytes := make([]byte, 8)
+				if err := blockReader.HeadersRange(ctx, func(header *types.Header) error {
+					blockNum, blockHash := header.Number.Uint64(), header.Hash()
+					if walkCount == 0 {
+						walkFirst = blockNum
+					}
+					walkLast = blockNum
+					walkCount++
+					if _, overflow := td.AddOverflow(&td, &header.Difficulty); overflow {
+						return fmt.Errorf("TD overflows uint256 at block %d hash %x", blockNum, blockHash)
+					}
+					// What can happen if chaindata is deleted is that maybe header.seg progress is lower or higher than
+					// body.seg progress. In this case we need to skip the header, and "normalize" the progress to keep them in sync.
+					if blockNum > blocksAvailable {
+						return nil // This can actually happen as FrozenBlocks() is SegmentIdMax() and not the last .seg
+					}
+					// Always write TD. Caplin's BlockCollector.Flush reads parent.TD
+					// for the block right after the mode-B unwind target; if that
+					// target sits below pruneMarkerBlockThreshold and TD wasn't
+					// stored, forward re-exec wedges on "parent's total difficulty
+					// not found" (live-caught on hoodi --prune.mode=minimal at
+					// depth 154k). TD is 32 bytes/block — ~100 MB per 3M-block
+					// chain — cheap next to the snapshots themselves.
+					if err := rawdb.WriteTd(tx, blockHash, blockNum, td); err != nil {
+						return err
+					}
+					tdSeededTo = blockNum
+
+					// Canonical hash still gated by pruneMarkerBlockThreshold: the
+					// stale-sidechain-pointer bug this guard was added for is
+					// unrelated to TD; keeping the guard here preserves the
+					// storage saving without breaking mode-B.
+					if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
+						if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
+							return err
+						}
+						binary.BigEndian.PutUint64(blockNumBytes, blockNum)
+						if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
+							return err
+						}
+					}
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-logEvery.C:
+						logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
+							common.PrettyExact(header.Number.Uint64()), common.PrettyExact(blockReader.FrozenBlocks())))
+					default:
+					}
+					return nil
+				}); err != nil {
 					return err
 				}
-				tdSeededTo = blockNum
+				logger.Info(fmt.Sprintf("[%s] TD seed: walked %d headers [%d..%d] seededTo=%d frozen=%d",
+					logPrefix, walkCount, walkFirst, walkLast, tdSeededTo, blocksAvailable))
 
-				// Canonical hash still gated by pruneMarkerBlockThreshold: the
-				// stale-sidechain-pointer bug this guard was added for is
-				// unrelated to TD; keeping the guard here preserves the
-				// storage saving without breaking mode-B.
-				if blockNum >= pruneMarkerBlockThreshold || blockNum == 0 {
-					if err := rawdb.WriteCanonicalHash(tx, blockHash, blockNum); err != nil {
-						return err
-					}
-					binary.BigEndian.PutUint64(blockNumBytes, blockNum)
-					if err := h2n.Collect(blockHash[:], blockNumBytes); err != nil {
-						return err
-					}
+				if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+					return err
 				}
-				select {
-				case <-ctx.Done():
-					return ctx.Err()
-				case <-logEvery.C:
-					logger.Info(fmt.Sprintf("[%s] Total difficulty index: %s/%s", logPrefix,
-						common.PrettyExact(header.Number.Uint64()), common.PrettyExact(blockReader.FrozenBlocks())))
-				default:
+				canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
+				}
+				if err := rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+					return err
 				}
 				return nil
-			}); err != nil {
-				return err
-			}
-			logger.Info(fmt.Sprintf("[%s] TD seed: walked %d headers [%d..%d] seededTo=%d frozen=%d",
-				logPrefix, walkCount, walkFirst, walkLast, tdSeededTo, blocksAvailable))
-
-			if err := h2n.Load(tx, kv.HeaderNumber, etl.IdentityLoadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-				return err
-			}
-			canonicalHash, ok, err := blockReader.CanonicalHash(ctx, tx, blocksAvailable)
-			if err != nil {
-				return err
-			}
-			if !ok {
-				return fmt.Errorf("canonical marker not found: %d", blocksAvailable)
-			}
-			if err = rawdb.WriteHeadHeaderHash(tx, canonicalHash); err != nil {
+			}(); err != nil {
 				return err
 			}
 
@@ -458,10 +447,7 @@ const (
 )
 
 func GetPruneMarkerSafeThreshold(blockReader dbservices.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
-	if blockReader.BorSnapshots() == nil {
-		snapProgress = blockReader.FrozenBlocks()
-	}
+	snapProgress := blockReader.FrozenBlocks()
 	if snapProgress < pruneMarkerSafeThreshold {
 		return 0
 	}

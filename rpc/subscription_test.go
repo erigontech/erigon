@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestNewID(t *testing.T) {
@@ -138,12 +139,18 @@ func TestServerUnsubscribe(t *testing.T) {
 	// Start the server.
 	server := newTestServer(logger)
 	service := &notificationTestService{unsubscribed: make(chan string, 1)}
-	server.RegisterName("nftest2", service)
+	if err := server.RegisterName("nftest2", service); err != nil {
+		t.Fatal(err)
+	}
 	go server.ServeCodec(NewCodec(p1), 0)
 
 	// Subscribe.
-	p2.SetDeadline(time.Now().Add(10 * time.Second))
-	p2.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["someSubscription",0,10]}`))
+	if err := p2.SetDeadline(time.Now().Add(10 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := p2.Write([]byte(`{"jsonrpc":"2.0","id":1,"method":"nftest2_subscribe","params":["someSubscription",0,10]}`)); err != nil {
+		t.Fatal(err)
+	}
 
 	// Handle received messages.
 	var (
@@ -162,7 +169,9 @@ func TestServerUnsubscribe(t *testing.T) {
 	}
 
 	// Unsubscribe and check that it is handled on the server side.
-	p2.Write([]byte(`{"jsonrpc":"2.0","method":"nftest2_unsubscribe","params":["` + sub.subid + `"]}`))
+	if _, err := p2.Write([]byte(`{"jsonrpc":"2.0","method":"nftest2_unsubscribe","params":["` + sub.subid + `"]}`)); err != nil {
+		t.Fatal(err)
+	}
 	for {
 		select {
 		case id := <-service.unsubscribed:
@@ -188,12 +197,13 @@ type subConfirmation struct {
 func waitForMessages(in *json.Decoder, successes chan subConfirmation, notifications chan subscriptionResult, errors chan error) {
 	for {
 		resp, notification, err := readAndValidateMessage(in)
-		if err != nil {
+		switch {
+		case err != nil:
 			errors <- err
 			return
-		} else if resp != nil {
+		case resp != nil:
 			successes <- *resp
-		} else {
+		default:
 			notifications <- *notification
 		}
 	}
@@ -217,11 +227,65 @@ func readAndValidateMessage(in *json.Decoder) (*subConfirmation, *subscriptionRe
 			return nil, nil, msg.Error
 		} else if err := json.Unmarshal(msg.Result, &c.subid); err != nil {
 			return nil, nil, fmt.Errorf("invalid response: %w", err)
+		} else if err := json.Unmarshal(msg.ID, &c.reqid); err != nil {
+			return nil, nil, fmt.Errorf("invalid request id: %w", err)
 		} else {
-			json.Unmarshal(msg.ID, &c.reqid)
 			return &c, nil, nil
 		}
 	default:
 		return nil, nil, fmt.Errorf("unrecognized message: %v", msg)
+	}
+}
+
+type fastJSONPayload struct{}
+
+func (fastJSONPayload) MarshalFastJSON() ([]byte, error) { return []byte(`"fast"`), nil }
+
+type streamedPayload struct{}
+
+func (streamedPayload) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	w.WriteHex([]byte{0xab})
+	return nil
+}
+
+// bothFastJSON implements both fast-JSON interfaces with value receivers, so a typed nil panics
+// unless Notify sends it down the reflection path.
+type bothFastJSON struct{ data []byte }
+
+func (b bothFastJSON) MarshalFastJSON() ([]byte, error) { return json.Marshal(b.data) }
+
+func (b bothFastJSON) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	w.WriteHex(b.data)
+	return nil
+}
+
+func TestNotifyUsesFastJSON(t *testing.T) {
+	t.Parallel()
+
+	for payload, want := range map[any]string{fastJSONPayload{}: `"fast"`, emptyFastJSON{}: "null", streamedPayload{}: `"0xab"`, (*bothFastJSON)(nil): "null"} {
+		n := &RemoteNotifier{sub: &Subscription{ID: "0x1"}}
+		if err := n.Notify("0x1", payload); err != nil {
+			t.Fatal(err)
+		}
+		if len(n.buffer) != 1 || string(n.buffer[0]) != want {
+			t.Fatalf("%T: want %s, got %#v", payload, want, n.buffer)
+		}
+	}
+}
+
+type wireOnly struct{ v int }
+
+func (w wireOnly) LocalValue() any { return w.v }
+
+// A payload that carries a wire encoding reaches an in-process subscriber as the value it wraps.
+func TestLocalNotifierDeliversLocalValue(t *testing.T) {
+	resc, closec := make(chan any, 1), make(chan any)
+	n := NewLocalNotifier("eth", resc, closec)
+	sub := n.CreateSubscription()
+	if err := n.Notify(sub.ID, wireOnly{v: 7}); err != nil {
+		t.Fatal(err)
+	}
+	if got := <-resc; got != 7 {
+		t.Fatalf("delivered %#v, want 7", got)
 	}
 }

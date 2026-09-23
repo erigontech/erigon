@@ -41,8 +41,9 @@ func finalChangeUpTo[T indexedChange](changes []T, maxTxIndex uint32) (T, bool) 
 // ToWriteSet returns the latest BAL changes at or before maxTxIndex as state writes.
 func ToWriteSet(blockAccessList types.BlockAccessList, maxTxIndex uint32) *state.WriteSet {
 	writes := &state.WriteSet{}
-	for _, accountChanges := range blockAccessList {
-		addr := accountChanges.Address
+	for i := range blockAccessList {
+		accountChanges := &blockAccessList[i]
+		addr := accounts.InternAddress(accountChanges.Address)
 		if balance, ok := finalChangeUpTo(accountChanges.BalanceChanges, maxTxIndex); ok {
 			writes.SetBalance(addr, &state.VersionedWrite[uint256.Int]{
 				WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath}, Val: balance.Value,

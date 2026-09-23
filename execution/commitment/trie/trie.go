@@ -1030,9 +1030,10 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 					}
 				}
 			}
-			if count == 1 {
+			switch {
+			case count == 1:
 				newNode = t.convertToShortNode(n.Children[pos1], uint(pos1))
-			} else if count == 2 {
+			case count == 2:
 				duo := &DuoNode{}
 				if pos1 == int(key[keyStart]) {
 					duo.child1 = nn
@@ -1046,7 +1047,7 @@ func (t *Trie) deleteRecursive(origNode Node, key []byte, keyStart int, preserve
 				}
 				duo.mask = (1 << uint(pos1)) | (uint32(1) << uint(pos2))
 				newNode = duo
-			} else if count > 2 {
+			case count > 2:
 				// n still contains at least three values and cannot be reduced.
 				n.ref.len = 0
 				newNode = n
@@ -1153,14 +1154,14 @@ func (t *Trie) getHasher() *hasher {
 // node, it will return the hash of a modified leaf node or extension node, where the
 // key prefix is removed from the key.
 // First returned value is `true` if the node with the specified prefix is found.
-func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
+func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash, error) {
 	hexPrefix := nibbles.KeybytesToHex(keyPrefix)
 	accNode, gotValue := t.getAccount(t.RootNode, hexPrefix, 0)
 	if !gotValue {
-		return false, common.Hash{}
+		return false, common.Hash{}, nil
 	}
 	if accNode.RootCorrect {
-		return true, accNode.Root
+		return true, accNode.Root, nil
 	}
 	if accNode.Storage == nil {
 		accNode.Root = EmptyRoot
@@ -1168,9 +1169,11 @@ func (t *Trie) DeepHash(keyPrefix []byte) (bool, common.Hash) {
 	} else {
 		h := t.getHasher()
 		defer returnHasherToPool(h)
-		h.hash(accNode.Storage, true, accNode.Root[:])
+		if _, err := h.hash(accNode.Storage, true, accNode.Root[:]); err != nil {
+			return false, common.Hash{}, err
+		}
 	}
-	return true, accNode.Root
+	return true, accNode.Root, nil
 }
 
 func (t *Trie) EvictNode(hex []byte) {

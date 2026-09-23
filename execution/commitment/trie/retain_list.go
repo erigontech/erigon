@@ -24,7 +24,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/big"
 	"sort"
 
 	"github.com/holiman/uint256"
@@ -177,7 +176,7 @@ func (pr *DefaultProofRetainer) ProofElement(prefix []byte) *proofElement {
 func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) {
 	result := &accounts.AccProofResult{
 		Address:  pr.addr,
-		Balance:  (*hexutil.Big)(pr.acc.Balance.ToBig()),
+		Balance:  (*hexutil.U256)(new(uint256.Int).Set(&pr.acc.Balance)),
 		Nonce:    hexutil.Uint64(pr.acc.Nonce),
 		CodeHash: pr.acc.CodeHash.Value(),
 	}
@@ -209,7 +208,7 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 			// chooses 'empty' as it seems more consistent and it is expected that
 			// provers will treat the EmptyRoot as a special case and ignore the proof
 			// bytes.
-			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
+			result.StorageProof[i].Value = new(hexutil.U256)
 			result.StorageProof[i].Proof = make([]hexutil.Bytes, 0)
 			continue
 		}
@@ -225,14 +224,14 @@ func (pr *DefaultProofRetainer) ProofResult() (*accounts.AccProofResult, error) 
 			}
 
 			if pe.storageValue != nil && bytes.Equal(pe.storageKey, hexKey[2*(length.Hash+length.Incarnation):]) {
-				result.StorageProof[i].Value = (*hexutil.Big)(pe.storageValue.ToBig())
+				result.StorageProof[i].Value = (*hexutil.U256)(new(uint256.Int).Set(pe.storageValue))
 			}
 
 			result.StorageProof[i].Proof = append(result.StorageProof[i].Proof, pe.proof.Bytes())
 		}
 
 		if result.StorageProof[i].Value == nil {
-			result.StorageProof[i].Value = (*hexutil.Big)(new(big.Int))
+			result.StorageProof[i].Value = new(hexutil.U256)
 		}
 	}
 

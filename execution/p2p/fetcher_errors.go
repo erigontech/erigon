@@ -28,6 +28,7 @@ import (
 
 var ErrInvalidFetchBlocksAmount = errors.New("invalid fetch blocks amount")
 var ErrInvalidFetchHeadersAmount = errors.New("invalid fetch headers amount")
+var ErrInvalidBodyRLP = errors.New("invalid block body RLP")
 
 type ErrInvalidFetchHeadersRange struct {
 	start uint64
@@ -147,7 +148,7 @@ type ErrTooManyBodies struct {
 }
 
 func (e ErrTooManyBodies) Error() string {
-	return fmt.Sprintf("too many bodies in fetch bodies response: requested=%d, received=%d", e.requested, e.received)
+	return fmt.Sprintf("too many bodies in fetch bodies response: requested=%d, received>=%d", e.requested, e.received)
 }
 
 func (e ErrTooManyBodies) Is(err error) bool {

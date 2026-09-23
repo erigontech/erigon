@@ -62,22 +62,11 @@ func TestLogs_Copy(t *testing.T) {
 	require.NotEqual(t, logs[0].Data[0], cp[0].Data[0])
 }
 
-func TestLogs_ToErigonLogs(t *testing.T) {
-	t.Parallel()
-	logs := Logs{sampleLog(), sampleLog()}
-	el := logs.ToErigonLogs(42)
-	require.Len(t, el, 2)
-	for i := range el {
-		require.Equal(t, uint64(42), uint64(el[i].Timestamp))
-		require.Equal(t, logs[i].Address, el[i].Address)
-	}
-}
-
 func TestToRPCTransactionLog(t *testing.T) {
 	t.Parallel()
 	log := sampleLog()
 	header := &Header{Time: 99}
-	rpc := ToRPCTransactionLog(log, header, common.Hash{}, 0)
+	rpc := ToRPCTransactionLog(log, header)
 	require.Equal(t, uint64(99), uint64(rpc.BlockTimestamp))
 	require.Equal(t, log.Address, rpc.Address)
 	require.Equal(t, log.Topics, rpc.Topics)
@@ -165,17 +154,6 @@ func TestLogForStorage_DecodeRLP_Error(t *testing.T) {
 const validLogJSON = `{"address":"0x0000000000000000000000000000000000000001",` +
 	`"topics":[],"data":"0x010203",` +
 	`"transactionHash":"0x0000000000000000000000000000000000000000000000000000000000000002"}`
-
-func TestErigonLog_UnmarshalJSON(t *testing.T) {
-	t.Parallel()
-	var el ErigonLog
-	require.NoError(t, el.UnmarshalJSON([]byte(validLogJSON)))
-	require.Equal(t, common.HexToAddress("0x01"), el.Address)
-
-	var bad ErigonLog
-	require.ErrorContains(t, bad.UnmarshalJSON([]byte(`{"topics":[],"data":"0x"}`)), "address")
-	require.Error(t, bad.UnmarshalJSON([]byte("not-json")))
-}
 
 func TestRPCLog_UnmarshalJSON(t *testing.T) {
 	t.Parallel()

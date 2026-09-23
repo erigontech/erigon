@@ -17,6 +17,7 @@
 package initial_state
 
 import (
+	"context"
 	_ "embed"
 	"fmt"
 	"io"
@@ -27,9 +28,12 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
-func downloadGenesisState(url string) ([]byte, error) {
-	// Download genesis state by wget the url. MUST NOT RETURN NIL thorugh GET request. use go stnadard library
-	resp, err := http.Get(url)
+func downloadGenesisState(ctx context.Context, url string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +60,7 @@ var chiadoStateSSZ []byte
 var bloatnetStateSSZ []byte
 
 // Return genesis state
-func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, error) {
+func GetGenesisState(ctx context.Context, network clparams.NetworkType) (*state.CachingBeaconState, error) {
 	_, config := clparams.GetConfigsByNetwork(network)
 	returnState := state.New(config)
 
@@ -79,7 +83,7 @@ func GetGenesisState(network clparams.NetworkType) (*state.CachingBeaconState, e
 		}
 	case chainspec.HoodiChainID:
 		// Download genesis state by wget the url
-		encodedState, err := downloadGenesisState("https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
+		encodedState, err := downloadGenesisState(ctx, "https://github.com/eth-clients/hoodi/raw/main/metadata/genesis.ssz")
 		if err != nil {
 			return nil, err
 		}

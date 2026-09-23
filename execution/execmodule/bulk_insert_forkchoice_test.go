@@ -70,12 +70,12 @@ func assertForkChoiceAdvancesHead(t *testing.T, batch int) {
 	ctx := context.Background()
 	m, chainPack := bulkInsertChain(t, batch)
 
-	status, err := insertBlocks(ctx, m.ExecModule, chainPack.Blocks)
+	status, err := m.InsertBlocks(ctx, chainPack.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 
 	tip := chainPack.Blocks[len(chainPack.Blocks)-1].Header()
-	res, err := updateForkChoice(ctx, m.ExecModule, tip)
+	res, err := m.UpdateForkChoice(ctx, tip)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, res.Status,
 		"forkchoice at the tip of a %d-block batch must advance the head, not report the head as a bad block", batch)

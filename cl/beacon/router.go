@@ -18,6 +18,8 @@ package beacon
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"time"
@@ -34,15 +36,11 @@ type LayeredBeaconHandler struct {
 	ArchiveApi *handler.ApiHandler
 }
 
-// ListenAndServe runs the beacon API HTTP server until ctx is cancelled.
-// On cancel it calls server.Shutdown so the TCP listener is released
-// before returning — required for CaplinService.Restart to be able to
-// rebind the same port on relaunch.
 func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, routerCfg beacon_router_configuration.RouterConfiguration) error {
-	listener, err := net.Listen(routerCfg.Protocol, routerCfg.Address)
+	var lc net.ListenConfig
+	listener, err := lc.Listen(ctx, routerCfg.Protocol, routerCfg.Address)
 	if err != nil {
-		log.Warn("[Beacon API] Failed to start listening", "addr", routerCfg.Address, "err", err)
-		return err
+		return fmt.Errorf("failed to start listening on %s: %w", routerCfg.Address, err)
 	}
 	defer listener.Close()
 	mux := chi.NewRouter()
@@ -79,21 +77,23 @@ func ListenAndServe(ctx context.Context, beaconHandler *LayeredBeaconHandler, ro
 		WriteTimeout: routerCfg.WriteTimeout,
 	}
 
-	// Wire ctx cancellation to a graceful Shutdown so the listener is
-	// released cleanly. Without this, CaplinService.Restart would fail
-	// to rebind this port on the second launch.
+	// No BaseContext from ctx: cancelling ctx is what starts the shutdown, so
+	// handing it to each request would cancel every in-flight one instead of
+	// letting the grace period below drain them.
+	serveDone := make(chan struct{})
+	defer close(serveDone)
 	go func() {
-		<-ctx.Done()
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := server.Shutdown(shutdownCtx); err != nil {
-			log.Warn("[Beacon API] Shutdown returned error", "err", err)
+		select {
+		case <-ctx.Done():
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = server.Shutdown(shutdownCtx)
+		case <-serveDone:
 		}
 	}()
 
-	if err := server.Serve(listener); err != nil && err != http.ErrServerClosed {
-		log.Warn("[Beacon API] failed to start serving", "addr", routerCfg.Address, "err", err)
-		return err
+	if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		return fmt.Errorf("failed to serve on %s: %w", routerCfg.Address, err)
 	}
 	log.Info("[Beacon API] stopped", "addr", routerCfg.Address)
 	return nil

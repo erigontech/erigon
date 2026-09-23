@@ -27,13 +27,12 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
-
-	"github.com/erigontech/erigon/db/recsplit/efcommon"
 
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/recsplit/efcommon"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -71,7 +70,7 @@ type EliasFano struct {
 // EliasFano so heap-backed EliasFano carries no extra overhead.
 type OffHeapBuilder struct {
 	*EliasFano
-	backingMmap mmap.MMap
+	backingMmap mmap.Rw
 	backingFile *os.File
 }
 
@@ -89,7 +88,7 @@ func (b *OffHeapBuilder) Close() {
 	if b.backingFile != nil {
 		name := b.backingFile.Name()
 		_ = b.backingFile.Close()
-		dir.RemoveFile(name)
+		_ = dir.RemoveFile(name)
 		b.backingFile = nil
 	}
 }
@@ -141,13 +140,13 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (_ 
 	defer func() {
 		if err != nil {
 			f.Close()
-			dir.RemoveFile(f.Name())
+			_ = dir.RemoveFile(f.Name())
 		}
 	}()
 	if err := fallocate(f, sizeBytes); err != nil {
 		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
 	}
-	m, err := mmap.MapRegion(f, int(sizeBytes), mmap.RDWR, 0, 0)
+	m, err := mmap.OpenRw(f, int(sizeBytes))
 	if err != nil {
 		return nil, fmt.Errorf("mmap ef tmp file: %w", err)
 	}

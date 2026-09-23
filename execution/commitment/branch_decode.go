@@ -22,23 +22,13 @@ import (
 	"math/bits"
 )
 
-// BranchMaps captures the three branch-level bitmasks decoded alongside
-// the per-cell payload.
 type BranchMaps struct {
-	Bitmap   uint16 // present-children bitmap (canonical encoded map)
-	TouchMap uint16 // children touched in this branch (per the deleted flag)
-	AfterMap uint16 // children present after this commitment step
+	Bitmap   uint16
+	TouchMap uint16
+	AfterMap uint16
 }
 
-// DecodeBranchInto parses the on-disk encoded form of a branch into cells.
-// branchData must already have the leading 2-byte touch-map prefix stripped.
-//
-// deleted=true  → touchMap=bitmap, afterMap=0 (touched-but-not-present-after).
-// deleted=false → touchMap=0, afterMap=bitmap (present-after).
-//
-// Pure decode — does NOT call deriveHashedKeys on the cells. Trie callers do
-// that themselves (they have the keccak scratch buffer); cache callers can
-// defer it until the cell is consumed by the trie.
+// branchData must have its leading 2-byte touch-map prefix already stripped by the caller.
 func DecodeBranchInto(
 	branchData []byte,
 	deleted bool,

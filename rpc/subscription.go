@@ -122,7 +122,14 @@ func (n *LocalNotifier) CreateSubscription() *Subscription {
 	return n.sub
 }
 
+// localValuer is a notification that carries its wire encoding; an in-process subscriber gets
+// the value it wraps instead.
+type localValuer interface{ LocalValue() any }
+
 func (n *LocalNotifier) Notify(id ID, data any) error {
+	if lv, ok := data.(localValuer); ok {
+		data = lv.LocalValue()
+	}
 	if n.sub == nil {
 		panic("can't Notify before subscription is created")
 	} else if n.sub.ID != id {
@@ -173,9 +180,24 @@ func (n *RemoteNotifier) CreateSubscription() *Subscription {
 // Notify sends a notification to the client with the given data as payload.
 // If an error occurs the RPC connection is closed and the error is returned.
 func (n *RemoteNotifier) Notify(id ID, data any) error {
-	enc, err := json.Marshal(data)
+	var (
+		enc []byte
+		err error
+	)
+	if isNilPointer(data) {
+		enc, err = json.Marshal(data)
+	} else if fm, ok := data.(fastJSONMarshalerTo); ok {
+		enc, err = marshalFastJSONTo(fm)
+	} else if fm, ok := data.(fastJSONResult); ok {
+		enc, err = fm.MarshalFastJSON()
+	} else {
+		enc, err = json.Marshal(data)
+	}
 	if err != nil {
 		return err
+	}
+	if len(enc) == 0 {
+		enc = null
 	}
 
 	n.mu.Lock()
@@ -194,6 +216,7 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 }
 
 // Closed returns a channel that is closed when the RPC connection is closed.
+//
 // Deprecated: use subscription error channel
 func (n *RemoteNotifier) Closed() <-chan any {
 	return n.h.conn.closed()
@@ -225,7 +248,10 @@ func (n *RemoteNotifier) activate() error {
 }
 
 func (n *RemoteNotifier) send(sub *Subscription, data json.RawMessage) error {
-	params, _ := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
+	params, err := json.Marshal(&subscriptionResult{ID: string(sub.ID), Result: data})
+	if err != nil {
+		return err
+	}
 	ctx := context.Background()
 	return n.h.conn.WriteJSON(ctx, &jsonrpcMessage{
 		Version: vsn,
@@ -307,7 +333,9 @@ func (sub *ClientSubscription) quitWithError(unsubscribeServer bool, err error) 
 		// unblocks deliver.
 		close(sub.quit)
 		if unsubscribeServer {
-			sub.requestUnsubscribe()
+			if err := sub.requestUnsubscribe(); err != nil {
+				sub.client.logger.Trace("RPC client failed to unsubscribe", "err", err)
+			}
 		}
 		if err != nil {
 			if errors.Is(err, ErrClientQuit) {

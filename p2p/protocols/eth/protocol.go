@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -155,10 +154,15 @@ type Packet interface {
 }
 
 // StatusPacket is the network packet for the status message for eth/64 and later.
+//
+// TD is a *uint256.Int rather than a *big.Int: total difficulty fits in 256
+// bits and the wire encoding is identical, while execution/rlp can decode a
+// uint256.Int but not a big.Int (a *big.Int field falls through to the struct
+// decoder and fails with "expected input list for big.Int").
 type StatusPacket struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
-	TD              *big.Int
+	TD              *uint256.Int
 	Head            common.Hash
 	Genesis         common.Hash
 	ForkID          forkid.ID
@@ -275,14 +279,14 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode Block
 	nbp.Block = &types.Block{}
-	if err = nbp.Block.DecodeRLP(s); err != nil {
+	if err := nbp.Block.DecodeRLP(s); err != nil {
 		return err
 	}
 	// decode TD
 	if err = s.ReadUint256(&nbp.TD); err != nil {
 		return fmt.Errorf("read TD: %w", err)
 	}
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	return nil

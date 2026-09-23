@@ -193,7 +193,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 		return noop, fmt.Errorf("RequestSnapshotsDownload: %w", err)
 	}
 
-	if err := p.Aggregator.OpenFolder(); err != nil {
+	if err := p.Aggregator.OpenFolder(p.ChainDB); err != nil {
 		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
 		return noop, fmt.Errorf("OpenFolder after history download: %w", err)
 	}
@@ -223,7 +223,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 			return
 		}
 		p.discardDownloadedHistory(ctx, downloadedPaths, downloadedNames)
-		if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
+		if err := p.Aggregator.OpenFolder(p.ChainDB); err != nil && p.logger != nil {
 			p.logger.Warn("[storage] Provider.Unwind: OpenFolder after temp-history cleanup failed", "err", err)
 		}
 	}, nil

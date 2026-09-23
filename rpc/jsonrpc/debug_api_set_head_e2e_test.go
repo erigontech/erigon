@@ -96,7 +96,7 @@ func newSetHeadE2EAPI(t *testing.T, m *execmoduletester.ExecModuleTester) *Debug
 	t.Helper()
 	backendServer := privateapi.NewEthBackendServer(
 		m.Ctx, &realExecModuleBackend{m: m}, m.DB, m.Notifications, m.BlockReader,
-		nil, log.New(), builder.NewLatestBlockBuiltStore(), nil,
+		log.New(), builder.NewLatestBlockBuiltStore(), nil,
 	)
 	backendClient := direct.NewEthBackendClientDirect(backendServer)
 	backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)

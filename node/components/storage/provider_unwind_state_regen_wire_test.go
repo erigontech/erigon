@@ -45,9 +45,9 @@ type pathSpyCall struct {
 	returnedPathTag string
 }
 
-func (a *pathSpyAggregator) Files() []string   { return nil }
-func (a *pathSpyAggregator) OpenFolder() error { return nil }
-func (a *pathSpyAggregator) BuildMissedAccessors(_ context.Context, _ int, _ ...kv.BuildAccessorsOption) error {
+func (a *pathSpyAggregator) Files() []string          { return nil }
+func (a *pathSpyAggregator) OpenFolder(kv.RoDB) error { return nil }
+func (a *pathSpyAggregator) BuildMissedAccessors(_ context.Context, _ kv.RoDB, _ int, _ ...kv.BuildAccessorsOption) error {
 	return nil
 }
 func (a *pathSpyAggregator) LockCollation()   {}
