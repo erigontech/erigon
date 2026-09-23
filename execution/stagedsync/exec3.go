@@ -201,7 +201,6 @@ func execV3(ctx context.Context,
 	// would panic on the dropped sequential-buffer keys (ERIGON_COMMITMENT_PARALLEL).
 	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
-		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
 		// Enable deferred commitment updates for fork validation and parallel initial sync.
 		// Deferred updates batch commitment calculations to block boundaries rather than
@@ -345,7 +344,6 @@ func execV3Serial(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
 	doms.SetDeferCommitmentUpdates(false)
 	if isForkValidation {
 		doms.SetDeferCommitmentUpdates(true)

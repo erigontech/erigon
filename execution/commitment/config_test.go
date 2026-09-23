@@ -19,8 +19,8 @@ func TestDefaultTrieConfig(t *testing.T) {
 	if cfg.LeaveDeferredForCaller {
 		t.Error("LeaveDeferredForCaller should default to false")
 	}
-	if !cfg.EnableTrieWarmup {
-		t.Error("EnableTrieWarmup should default to true")
+	if cfg.EnableTrieWarmup {
+		t.Error("EnableTrieWarmup should default to false")
 	}
 	if cfg.CsvMetricsFilePrefix != "" {
 		t.Errorf("CsvMetricsFilePrefix should default to empty, got %q", cfg.CsvMetricsFilePrefix)
