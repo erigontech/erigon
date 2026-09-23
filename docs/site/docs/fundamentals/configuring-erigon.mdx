@@ -544,8 +544,10 @@ Flags for configuring the [Caplin](/fundamentals/caplin) consensus layer.
   * Default: `0.0.0.0`
 * `--caplin.discovery.port value`: The port for the Caplin DISCV5 protocol.
   * Default: `4000`
-* `--caplin.discovery.tcpport value`: The TCP port for the Caplin DISCV5 protocol.
-  * Default: `4001`
+* `--caplin.discovery.tcpport value`: The TCP port for Caplin libp2p.
+	* Default: `4001`
+* `--caplin.discovery.quicport value`: The QUIC UDP port for Caplin libp2p.
+	* Default: `4001`
 * `--caplin.checkpoint-sync-url value`: The checkpoint sync endpoint.
 * `--caplin.subscribe-all-topics`: Subscribes to all gossip topics.
   * Default: `false`
