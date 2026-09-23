@@ -187,6 +187,11 @@ func TestGetPTCRejectsPreGloasSlot(t *testing.T) {
 
 	_, err := s.GetPTC(cfg.GloasForkEpoch*cfg.SlotsPerEpoch - 1)
 	require.ErrorContains(t, err, "pre-Gloas")
+
+	_, err = s.GetPTC(cfg.GloasForkEpoch * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	_, err = s.GetPTC((cfg.GloasForkEpoch + 1) * cfg.SlotsPerEpoch)
+	require.NoError(t, err)
 }
 
 func TestPtcBoolToVote(t *testing.T) {
