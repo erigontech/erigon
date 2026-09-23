@@ -112,11 +112,8 @@ func TestForkReturnsSharedNodePointer(t *testing.T) {
 
 func TestNodeRejectsInvalidReferences(t *testing.T) {
 	n := fork(nil)
-	require.Panics(t, func() { n.setLeaf(-1, nil, nil) })
-	require.Panics(t, func() { n.setChild(16, nil) })
 	require.Panics(t, func() { n.setStoredChild(0, nil, nil) })
 	require.Panics(t, func() { n.setStoredChild(0, make([]byte, 31), nil) })
-	require.Panics(t, func() { fork([]byte{16}) })
 }
 
 func assertNodeSlot(t *testing.T, n *node, nib int, child, leaf bool) {

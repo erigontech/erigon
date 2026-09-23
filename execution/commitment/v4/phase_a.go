@@ -184,6 +184,11 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		if len(entry.path) != 64 {
 			return [32]byte{}, errPhaseAUpdate
 		}
+		for _, nib := range entry.path {
+			if nib > 0x0f {
+				return [32]byte{}, errPhaseAUpdate
+			}
+		}
 		if entry.update == nil || entry.update.Flags == 0 {
 			continue
 		}

@@ -42,11 +42,6 @@ type node struct {
 }
 
 func fork(prefix []byte) *node {
-	for _, nib := range prefix {
-		if nib > 0x0f {
-			panic(fmt.Sprintf("commitment v4: invalid path nibble %d", nib))
-		}
-	}
 	return &node{path: append([]byte(nil), prefix...)}
 }
 
@@ -103,7 +98,6 @@ func (n *node) leafValueAt(nib int) []byte {
 }
 
 func (n *node) ensureSlot(nib int) *childSlot {
-	n.checkNibble(nib)
 	bit := uint16(1) << nib
 	index := n.slotIndex(nib)
 	if n.childMask&bit == 0 {
@@ -165,7 +159,6 @@ func (n *node) clearChildExt(nib int) {
 }
 
 func (n *node) clear(nib int) {
-	n.checkNibble(nib)
 	bit := uint16(1) << nib
 	if n.childMask&bit == 0 {
 		return
@@ -175,12 +168,6 @@ func (n *node) clear(nib int) {
 	n.childMask &^= bit
 	n.leafMask &^= bit
 	n.hashMask &^= bit
-}
-
-func (n *node) checkNibble(nib int) {
-	if nib < 0 || nib > 15 {
-		panic(fmt.Sprintf("commitment v4: invalid child nibble %d", nib))
-	}
 }
 
 func appendCopy(dst, src []byte) []byte {
