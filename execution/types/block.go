@@ -1455,15 +1455,32 @@ func BinaryFromStoredTxn(stored []byte) ([]byte, error) {
 	return binary, nil
 }
 
-// checkTxnShape reports whether binary is one whole transaction: a non-empty RLP list, after the
-// type byte of a typed transaction, with nothing after it.
+// txnFieldCount is how many RLP fields each transaction type carries. An unknown type is not
+// listed, so checkTxnShape decodes it in full rather than guessing.
+var txnFieldCount = map[byte]int{
+	LegacyTxType:     9,
+	AccessListTxType: 11,
+	DynamicFeeTxType: 12,
+	BlobTxType:       14,
+	SetCodeTxType:    13,
+}
+
+// checkTxnShape reports whether binary is one whole transaction of a type this code knows: the
+// right number of well-formed RLP fields, and nothing after them. A type it does not know is
+// decoded instead, so a new transaction type is served only once it is understood.
 func checkTxnShape(binary []byte) error {
 	if len(binary) == 0 {
 		return errors.New("stored txn: empty")
 	}
+	txnType := byte(LegacyTxType)
 	fields := binary
 	if binary[0] < 0x80 { // EIP-2718 type byte
-		fields = binary[1:]
+		txnType, fields = binary[0], binary[1:]
+	}
+	want, known := txnFieldCount[txnType]
+	if !known {
+		_, err := DecodeTransaction(binary)
+		return err
 	}
 	content, rest, err := rlp.SplitList(fields)
 	if err != nil {
@@ -1472,8 +1489,17 @@ func checkTxnShape(binary []byte) error {
 	if len(rest) > 0 {
 		return fmt.Errorf("stored txn: %d bytes after the field list", len(rest))
 	}
-	if len(content) == 0 {
-		return errors.New("stored txn: no fields")
+	n := 0
+	for len(content) > 0 {
+		if n++; n > want {
+			return fmt.Errorf("stored txn: type %d has more than %d fields", txnType, want)
+		}
+		if _, _, content, err = rlp.Split(content); err != nil {
+			return fmt.Errorf("stored txn: field %d: %w", n-1, err)
+		}
+	}
+	if n != want {
+		return fmt.Errorf("stored txn: type %d has %d fields, want %d", txnType, n, want)
 	}
 	return nil
 }

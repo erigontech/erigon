@@ -1181,6 +1181,12 @@ func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
 		"typed trailing bytes":   wrap(append([]byte{0x02, 0xc1, 0x80}, 0xff)),
 		"wrapped trailing bytes": append(wrap([]byte{0x02, 0xc1, 0x80}), 0xff),
 		"wrapped empty":          {0x80},
+		"legacy one field":       {0xc1, 0x80},
+		"typed one field":        {0x02, 0xc1, 0x80},
+		"unknown type byte":      {0x7f, 0xc1, 0x80},
+		"non-canonical field":    {0xc2, 0x81, 0x00},
+		"wrapped one field":      {0x82, 0xc1, 0x80},
+		"legacy field count":     append([]byte{0xf8, 0x39}, bytes.Repeat([]byte{0x80}, 57)...),
 	} {
 		_, err := BinaryFromStoredTxn(stored)
 		require.Error(t, err, name)
