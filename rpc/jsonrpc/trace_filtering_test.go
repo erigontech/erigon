@@ -557,11 +557,15 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 		"nil":   nil,
 		"empty": {},
 		"all kinds": {
-			{Action: &CallTraceAction{From: addr, CallType: "delegatecall", Gas: u(1), Input: hexutil.Bytes{1}, To: addr, Value: u(2)},
+			{
+				Action:    &CallTraceAction{From: addr, CallType: "delegatecall", Gas: u(1), Input: hexutil.Bytes{1}, To: addr, Value: u(2)},
 				BlockHash: &hash, BlockNumber: &num, Result: &TraceResult{GasUsed: &gasUsed, Output: hexutil.Bytes{3}},
-				Subtraces: 2, TraceAddress: []int{}, TransactionHash: &hash, TransactionPosition: &pos, Type: "call"},
-			{Action: &CreateTraceAction{From: addr, CreationMethod: "create2", Gas: u(5)},
-				Result: &CreateTraceResult{Address: &addr, Code: hexutil.Bytes{0x60}, GasUsed: &gasUsed}, TraceAddress: []int{0, 1}, Type: "create"},
+				Subtraces: 2, TraceAddress: []int{}, TransactionHash: &hash, TransactionPosition: &pos, Type: "call",
+			},
+			{
+				Action: &CreateTraceAction{From: addr, CreationMethod: "create2", Gas: u(5)},
+				Result: &CreateTraceResult{Address: &addr, Code: hexutil.Bytes{0x60}, GasUsed: &gasUsed}, TraceAddress: []int{0, 1}, Type: "create",
+			},
 			{Action: &CreateTraceAction{}, Error: "out of gas", Result: &CreateTraceResult{}, Type: "create"},
 			{Action: &SuicideTraceAction{Address: addr, RefundAddress: addr, Balance: u(9)}, TraceAddress: []int{3}, Type: "suicide"},
 			{Action: &RewardTraceAction{Author: addr, RewardType: "block", Value: u(2e18)}, BlockHash: &hash, BlockNumber: &num, Type: "reward"},
