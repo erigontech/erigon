@@ -86,7 +86,7 @@ func TestOrchestrator_CancelOnTransition_NonPendingRemoved_NoEvent(t *testing.T)
 
 	// Seed X.kv as local already — haveLocally gate prevents adding to pending.
 	inv := o.storage.Inventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Domain: snapshot.DomainCommitment, FromStep: 2, ToStep: 3,
 		Name: "X.kv", Kind: snapshot.KindKV, Local: true,
 	})

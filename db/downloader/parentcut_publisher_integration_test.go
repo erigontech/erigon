@@ -107,7 +107,7 @@ func TestRollingV2Publisher_ForkCutFilter_DisabledByDefault(t *testing.T) {
 
 func addBlockFile(t *testing.T, inv *snapshotinv.Inventory, name string, hash [20]byte) {
 	t.Helper()
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Name:        name,
 		TorrentHash: hash,
 		Local:       true,

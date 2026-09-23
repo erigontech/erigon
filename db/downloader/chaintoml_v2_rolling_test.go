@@ -42,7 +42,7 @@ const testENRFP = "a1b2c3d4e5f60718"
 // that GenerateV2 produces non-empty output that round-trips.
 func rollingTestInventory(_ *testing.T, marker byte) *snapshotinv.Inventory {
 	inv := snapshotinv.NewInventory()
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      1024,
@@ -51,7 +51,7 @@ func rollingTestInventory(_ *testing.T, marker byte) *snapshotinv.Inventory {
 		Local:       true,
 		Trust:       snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainStorage,
 		FromStep:    0,
 		ToStep:      1024,
@@ -199,8 +199,8 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 	// gen 0,1: distinct content, both listing {accounts.0-1024,
 	// storage.0-1024}.
 	for i := range 2 {
-		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x21+byte(i)), 0, nil)
-		require.NoError(t, err)
+		_, terr := pub.Publish(context.Background(), rollingTestInventory(t, 0x21+byte(i)), 0, nil)
+		require.NoError(t, terr)
 	}
 	oldGenIDs := append([]string(nil), pub.History()...)
 	require.Len(t, oldGenIDs, 2)
@@ -208,7 +208,7 @@ func TestRollingV2Publisher_EvictsWhenReferencesRetired(t *testing.T) {
 	// Simulate a merge: drop accounts.0-1024 and storage.0-1024,
 	// add a single merged file. Re-publish.
 	inv2 := snapshotinv.NewInventory()
-	inv2.AddFile(&snapshotinv.FileEntry{
+	_ = inv2.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      2048,
@@ -246,8 +246,8 @@ func TestRollingV2Publisher_RestartResumesGenerations(t *testing.T) {
 	require.NoError(t, err)
 	first.SetENRFingerprint(testENRFP)
 	for i := range 3 {
-		_, err := first.Publish(context.Background(), rollingTestInventory(t, 0x30+byte(i)), 0, nil)
-		require.NoError(t, err)
+		_, terr := first.Publish(context.Background(), rollingTestInventory(t, 0x30+byte(i)), 0, nil)
+		require.NoError(t, terr)
 	}
 	firstGenIDs := first.History()
 	require.Len(t, firstGenIDs, 3)
@@ -275,8 +275,8 @@ func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 	require.NoError(t, err)
 	first.SetENRFingerprint(testENRFP)
 	for i := range 3 {
-		_, err := first.Publish(context.Background(), rollingTestInventory(t, 0x40+byte(i)), 0, nil)
-		require.NoError(t, err)
+		_, terr := first.Publish(context.Background(), rollingTestInventory(t, 0x40+byte(i)), 0, nil)
+		require.NoError(t, terr)
 	}
 	require.Len(t, first.History(), 3)
 
@@ -289,7 +289,7 @@ func TestRollingV2Publisher_RestartRecoversNameSets(t *testing.T) {
 
 	// Publish with a retiring inventory — every prior gen must evict.
 	inv2 := snapshotinv.NewInventory()
-	inv2.AddFile(&snapshotinv.FileEntry{
+	_ = inv2.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      2048,
@@ -325,8 +325,8 @@ func TestRollingV2Publisher_RestartRepublishIdenticalDedups(t *testing.T) {
 		rollingTestInventory(t, 0x72),
 	}
 	for i, inv := range invs {
-		_, err := first.Publish(context.Background(), inv, 0, nil)
-		require.NoError(t, err, "publish %d", i)
+		_, terr := first.Publish(context.Background(), inv, 0, nil)
+		require.NoError(t, terr, "publish %d", i)
 	}
 	require.Len(t, first.History(), 3)
 
@@ -523,11 +523,11 @@ func TestPublishV2NonEmptyFromDiskTorrents(t *testing.T) {
 	}
 
 	inv := snapshotinv.NewInventory()
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain: snapshotinv.DomainAccounts, FromStep: 0, ToStep: 1024,
 		Name: "v1.0-accounts.0-1024.kv", Local: true, Trust: snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain: snapshotinv.DomainStorage, FromStep: 0, ToStep: 1024,
 		Name: "v1.0-storage.0-1024.kv", Local: true, Trust: snapshotinv.TrustVerified,
 	})
@@ -817,7 +817,7 @@ func TestRollingV2Publisher_ContentUCAN_EvictionRemovesUCAN(t *testing.T) {
 
 	// gen 1: retires both names — gen 0 is now invalid.
 	inv2 := snapshotinv.NewInventory()
-	inv2.AddFile(&snapshotinv.FileEntry{
+	_ = inv2.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      2048,
@@ -852,8 +852,8 @@ func TestRollingV2Publisher_KeepsGenerationsWhoseNamesAreHeldInMerged(t *testing
 	pub.SetENRFingerprint(testENRFP)
 
 	for i := range 2 {
-		_, err := pub.Publish(context.Background(), rollingTestInventory(t, 0x21+byte(i)), 0, nil)
-		require.NoError(t, err)
+		_, terr := pub.Publish(context.Background(), rollingTestInventory(t, 0x21+byte(i)), 0, nil)
+		require.NoError(t, terr)
 	}
 	oldGenIDs := append([]string(nil), pub.History()...)
 	require.Len(t, oldGenIDs, 2)
@@ -866,7 +866,7 @@ func TestRollingV2Publisher_KeepsGenerationsWhoseNamesAreHeldInMerged(t *testing
 	}
 
 	inv2 := snapshotinv.NewInventory()
-	inv2.AddFile(&snapshotinv.FileEntry{
+	_ = inv2.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      2048,
@@ -917,7 +917,7 @@ func TestRollingV2Publisher_ReapsMergedOnceUnreferencedAndOld(t *testing.T) {
 	require.NoError(t, err)
 
 	inv2 := snapshotinv.NewInventory()
-	inv2.AddFile(&snapshotinv.FileEntry{
+	_ = inv2.AddFile(&snapshotinv.FileEntry{
 		Domain: snapshotinv.DomainAccounts, FromStep: 0, ToStep: 2048,
 		Name: "v1.0-accounts.0-2048.kv", TorrentHash: [20]byte{0x21, 0xcc},
 		Local: true, Trust: snapshotinv.TrustVerified,

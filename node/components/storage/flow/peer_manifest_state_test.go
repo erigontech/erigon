@@ -86,7 +86,7 @@ func TestOrchestrator_PeerManifestState_ReplacesOnSecondReceive(t *testing.T) {
 
 	waitUntil(t, func() bool {
 		files := o.PeerManifestFiles("peer-A")
-		return files != nil && len(files) == 1 && files["v2.2-commitment.310-312.kv"] != nil
+		return len(files) == 1 && files["v2.2-commitment.310-312.kv"] != nil
 	}, 2*time.Second, "second replaces first")
 
 	files := o.PeerManifestFiles("peer-A")
@@ -152,7 +152,7 @@ func TestOrchestrator_PeerManifestState_MultiKindManifestFullyCaptured(t *testin
 
 	waitUntil(t, func() bool {
 		files := o.PeerManifestFiles("peer-A")
-		return files != nil && len(files) == 5
+		return len(files) == 5
 	}, 2*time.Second, "all 5 kinds captured")
 
 	files := o.PeerManifestFiles("peer-A")

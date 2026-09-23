@@ -204,19 +204,6 @@ type Provider struct {
 	bus          *busState
 }
 
-// activeCtx returns the ctx background goroutines should honour: p.innerCtx
-// once Start has run, else p.cfg.SentryCtx as the fallback for the
-// build-time bonding goroutine spawned by Initialize under the legacy
-// (non-Restartable) call path. The Restartable path always sets innerCtx
-// in Start before any goroutine is spawned, so this is stable across
-// Stop→SetChainConfig→Start cycles.
-func (p *Provider) activeCtx() context.Context {
-	if p.innerCtx != nil {
-		return p.innerCtx
-	}
-	return p.cfg.SentryCtx
-}
-
 // Configure stores the Provider's configuration. Call before Initialize.
 // Cheap: no network, no file I/O, no goroutines.
 func (p *Provider) Configure(cfg Config) {

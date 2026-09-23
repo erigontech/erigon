@@ -87,7 +87,11 @@ transition manually.`,
 			os.Exit(1)
 		}
 
-		out, _ := json.MarshalIndent(result, "", "  ")
+		out, merr := json.MarshalIndent(result, "", "  ")
+		if merr != nil {
+			logger.Error("set_fork: marshal result", "err", merr)
+			return
+		}
 		fmt.Println(string(out))
 		if result.RestartRequired {
 			logger.Warn("[set_fork] restart_required=true — restart erigon with --chain=" + result.ToChain + " to complete the transition")

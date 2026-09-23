@@ -270,14 +270,14 @@ func findStepCoordinateOffenders(tx kv.Tx, d *Domain, stepThreshold uint64) (sam
 	const maxReport = 16
 
 	if d.LargeValues {
-		c, err := tx.Cursor(d.ValuesTable)
-		if err != nil {
-			return nil, 0, err
+		c, werr := tx.Cursor(d.ValuesTable)
+		if werr != nil {
+			return nil, 0, werr
 		}
 		defer c.Close()
-		for k, _, err := c.First(); k != nil; k, _, err = c.Next() {
-			if err != nil {
-				return nil, 0, err
+		for k, _, cerr := c.First(); k != nil; k, _, cerr = c.Next() {
+			if cerr != nil {
+				return nil, 0, cerr
 			}
 			if len(k) < 8 {
 				continue

@@ -117,7 +117,7 @@ func TestFilesAtStep_GroupsCorrectly(t *testing.T) {
 		{Name: "v1.0-storage.0-256.kv", Domain: DomainStorage, FromStep: 0, ToStep: 256, Local: true},
 	}
 	for _, f := range files {
-		inv.AddFile(f)
+		_ = inv.AddFile(f)
 	}
 
 	// State step (accounts, 0-256) — three files.
@@ -148,7 +148,7 @@ func TestFilesAtStep_BlockGroup(t *testing.T) {
 		{Name: "v1.1-001000-001001-bodies.seg", FromStep: 1000, ToStep: 1001, Local: true},
 		{Name: "v1.1-001000-001001-transactions.seg", FromStep: 1000, ToStep: 1001, Local: true},
 	} {
-		inv.AddFile(f)
+		_ = inv.AddFile(f)
 	}
 	g := inv.FilesAtStep(StepKey{FromStep: 1000, ToStep: 1001})
 	require.Len(t, g.Files, 4)
@@ -159,7 +159,7 @@ func TestFilesAtStep_BlockGroup(t *testing.T) {
 func TestFilesAtStep_ZeroKeyReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "erigondb.toml", Kind: KindMeta, Local: true})
+	_ = inv.AddFile(&FileEntry{Name: "erigondb.toml", Kind: KindMeta, Local: true})
 	g := inv.FilesAtStep(StepKey{})
 	require.Empty(t, g.Files,
 		"zero StepKey is not a valid grouping; non-stepped files are singletons")
@@ -193,7 +193,7 @@ func TestAdvanceStep_AtomicAdvance(t *testing.T) {
 		{Name: "v1.0-accounts.0-256.kv", Domain: DomainAccounts, FromStep: 0, ToStep: 256, State: LifecycleIndexed},
 		{Name: "v1.0-accounts.0-256.kvi", Domain: DomainAccounts, FromStep: 0, ToStep: 256, State: LifecycleIndexed},
 	} {
-		inv.AddFile(f)
+		_ = inv.AddFile(f)
 	}
 	advanced := inv.AdvanceStep(StepKey{FromStep: 0, ToStep: 256, Domain: DomainAccounts}, LifecycleAdvertisable)
 	require.ElementsMatch(t, []string{
@@ -211,7 +211,7 @@ func TestAdvanceStep_AtomicAdvance(t *testing.T) {
 func TestAdvanceStep_Idempotent(t *testing.T) {
 	t.Parallel()
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Name: "v1.0-accounts.0-256.kv", Domain: DomainAccounts,
 		FromStep: 0, ToStep: 256, State: LifecycleAdvertisable,
 	})
@@ -337,7 +337,7 @@ func TestPathForName_Idempotent(t *testing.T) {
 func TestAdvanceStep_ZeroKeyNoOp(t *testing.T) {
 	t.Parallel()
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "erigondb.toml", Kind: KindMeta, State: LifecycleIndexed})
+	_ = inv.AddFile(&FileEntry{Name: "erigondb.toml", Kind: KindMeta, State: LifecycleIndexed})
 	advanced := inv.AdvanceStep(StepKey{}, LifecycleAdvertisable)
 	require.Empty(t, advanced)
 }

@@ -75,7 +75,8 @@ func newMdbxLargeValuesStepSource(cursor kv.Cursor, step kv.Step) (*mdbxLargeVal
 	if err != nil {
 		return nil, err
 	}
-	return s, s.seekMatching(k, v)
+	serr := s.seekMatching(k, v)
+	return s, serr
 }
 
 func (m *mdbxLargeValuesStepSource) seekMatching(k, v []byte) error {
@@ -141,7 +142,8 @@ func newMdbxDupSortStepSource(cursor kv.CursorDupSort, step kv.Step) (*mdbxDupSo
 	if err != nil {
 		return nil, err
 	}
-	return s, s.seekMatching(k, v)
+	serr := s.seekMatching(k, v)
+	return s, serr
 }
 
 func (m *mdbxDupSortStepSource) seekMatching(k, v []byte) error {

@@ -115,7 +115,7 @@ func WalkForkAncestry(leafAuth []byte, resolver ForkAncestryResolver, depthCap i
 
 		parentEncoded, rerr := resolver.AuthorityUCANForTrustRoot(forkedFrom)
 		if rerr != nil {
-			return nil, fmt.Errorf("%w: %v", ErrForkAncestryResolverNotFound, rerr)
+			return nil, fmt.Errorf("%w: %w", ErrForkAncestryResolverNotFound, rerr)
 		}
 		if len(parentEncoded) == 0 {
 			return nil, fmt.Errorf("%w: resolver returned empty for %x", ErrForkAncestryResolverNotFound, forkedFrom)
@@ -123,7 +123,7 @@ func WalkForkAncestry(leafAuth []byte, resolver ForkAncestryResolver, depthCap i
 
 		parent, derr := Decode(parentEncoded)
 		if derr != nil {
-			return nil, fmt.Errorf("%w: %v", ErrForkAncestryParentDecodeFailed, derr)
+			return nil, fmt.Errorf("%w: %w", ErrForkAncestryParentDecodeFailed, derr)
 		}
 		if parent.ParentHash != nil {
 			return nil, fmt.Errorf("%w: at step %d", ErrForkAncestryParentNotRoot, step+1)

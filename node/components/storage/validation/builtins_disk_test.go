@@ -224,8 +224,8 @@ func TestContentNotEmpty_ProducerGateBlocksEmptyIndex(t *testing.T) {
 		FromStep: 1024, ToStep: 2048, Kind: snapshot.KindIdx,
 		Local: true,
 	}
-	inv.AddFile(goodEntry)
-	inv.AddFile(badEntry)
+	_ = inv.AddFile(goodEntry)
+	_ = inv.AddFile(badEntry)
 
 	producer := &Producer{Chain: append(DefaultStage1Chain(), ContentNotEmpty{})}
 
@@ -268,7 +268,7 @@ func TestSizeMatchesTorrent_ProducerGateBlocksTruncatedFile(t *testing.T) {
 		FromStep: 0, ToStep: 1024, Kind: snapshot.KindKV,
 		Local: true,
 	}
-	inv.AddFile(file)
+	_ = inv.AddFile(file)
 
 	producer := &Producer{Chain: DefaultStage1ChainWithDisk(dir)}
 
@@ -288,7 +288,7 @@ func TestSizeMatchesTorrent_ProducerGateBlocksTruncatedFile(t *testing.T) {
 		FromStep: 1024, ToStep: 2048, Kind: snapshot.KindKV,
 		Local: true,
 	}
-	inv.AddFile(corruptEntry)
+	_ = inv.AddFile(corruptEntry)
 
 	changed, err = producer.MarkAdvertisable(inv, corruptEntry, FileContent{Path: filepath.Join(dir, corrupt)})
 	require.Error(t, err, "truncated file must be rejected by producer gate")

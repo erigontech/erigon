@@ -52,7 +52,7 @@ func TestAddFile_DerivesStateFromFlags(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			inv := NewInventory()
-			inv.AddFile(tc.entry)
+			_ = inv.AddFile(tc.entry)
 			got, ok := inv.LifecycleState(tc.entry.Name)
 			require.True(t, ok)
 			require.Equal(t, tc.expected, got, "expected %s, got %s", tc.expected, got)
@@ -62,7 +62,7 @@ func TestAddFile_DerivesStateFromFlags(t *testing.T) {
 
 func TestAdvanceTo_ForwardTransitionUpdatesFlags(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts})
 
 	require.True(t, inv.AdvanceTo("a.kv", LifecycleDownloaded))
 	e, ok := inv.GetByName("a.kv")
@@ -80,7 +80,7 @@ func TestAdvanceTo_ForwardTransitionUpdatesFlags(t *testing.T) {
 
 func TestAdvanceTo_SkippingIntermediateStatesIsAllowed(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts})
 
 	// Startup-scan case: discovered fully validated, jumps to Advertisable.
 	require.True(t, inv.AdvanceTo("a.kv", LifecycleAdvertisable))
@@ -90,7 +90,7 @@ func TestAdvanceTo_SkippingIntermediateStatesIsAllowed(t *testing.T) {
 
 func TestAdvanceTo_BackwardTransitionRejected(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, State: LifecycleAdvertisable, Local: true, Advertisable: true})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, State: LifecycleAdvertisable, Local: true, Advertisable: true})
 
 	// Backward (Advertisable → Indexed) rejected.
 	require.False(t, inv.AdvanceTo("a.kv", LifecycleIndexed))
@@ -100,7 +100,7 @@ func TestAdvanceTo_BackwardTransitionRejected(t *testing.T) {
 
 func TestAdvanceTo_ResetToDeclaredAlwaysAllowed(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, State: LifecycleAdvertisable, Local: true, Advertisable: true})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, State: LifecycleAdvertisable, Local: true, Advertisable: true})
 
 	require.True(t, inv.AdvanceTo("a.kv", LifecycleDeclared),
 		"reset to Declared (corruption-detected re-download) must be allowed from any state")
@@ -113,7 +113,7 @@ func TestAdvanceTo_ResetToDeclaredAlwaysAllowed(t *testing.T) {
 
 func TestAdvanceTo_NoOpAtTargetReturnsFalse(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, State: LifecycleAdvertisable, Local: true, Advertisable: true})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, State: LifecycleAdvertisable, Local: true, Advertisable: true})
 
 	// No-op: already at target. Returns false (no work to do; no notification).
 	require.False(t, inv.AdvanceTo("a.kv", LifecycleAdvertisable))
@@ -126,7 +126,7 @@ func TestAdvanceTo_UnknownEntryReturnsFalse(t *testing.T) {
 
 func TestMarkLocal_DrivesStateMachine(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts})
 
 	require.True(t, inv.MarkLocal("a.kv"))
 	state, _ := inv.LifecycleState("a.kv")
@@ -136,7 +136,7 @@ func TestMarkLocal_DrivesStateMachine(t *testing.T) {
 
 func TestMarkNotLocal_ResetsToDeclared(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, State: LifecycleAdvertisable, Local: true, Advertisable: true})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, State: LifecycleAdvertisable, Local: true, Advertisable: true})
 
 	require.True(t, inv.MarkNotLocal("a.kv"))
 	state, _ := inv.LifecycleState("a.kv")
@@ -148,7 +148,7 @@ func TestMarkNotLocal_ResetsToDeclared(t *testing.T) {
 
 func TestMarkAdvertisable_AdvancesState(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: true})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: true})
 	state, _ := inv.LifecycleState("a.kv")
 	require.Equal(t, LifecycleDownloaded, state)
 
@@ -159,7 +159,7 @@ func TestMarkAdvertisable_AdvancesState(t *testing.T) {
 
 func TestDependencies_StoredOnEntry(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Name:         "v1.0-accounts.0-256.kv",
 		Domain:       DomainAccounts,
 		Dependencies: []string{"v1.0-accounts.0-256.kvi"},

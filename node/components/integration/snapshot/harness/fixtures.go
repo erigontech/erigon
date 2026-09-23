@@ -33,11 +33,11 @@ type Fixture struct {
 func (f *Fixture) Apply(inv *snapshot.Inventory) {
 	for _, entries := range f.Domains {
 		for _, e := range entries {
-			inv.AddFile(e)
+			_ = inv.AddFile(e)
 		}
 	}
 	for _, e := range f.Blocks {
-		inv.AddFile(e)
+		_ = inv.AddFile(e)
 	}
 }
 

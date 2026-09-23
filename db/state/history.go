@@ -156,6 +156,8 @@ func (h *History) historyRetireDestPaths(step kv.Step) (vPath, efPath string, fr
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
 }
+
+//nolint:unused // superseded by the per-item variant this branch uses; kept to match upstream
 func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
 }

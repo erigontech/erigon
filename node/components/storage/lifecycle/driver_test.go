@@ -59,19 +59,19 @@ func TestDriver_SweepNoOpOnEmptyInventory(t *testing.T) {
 func TestDriver_SweepDispatchesByState(t *testing.T) {
 	inv := snapshot.NewInventory()
 
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "decl.kv", Domain: snapshot.DomainAccounts,
 		State: snapshot.LifecycleDeclared,
 	})
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "down.kv", Domain: snapshot.DomainAccounts,
 		Local: true, // → derives LifecycleDownloaded
 	})
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "idx.kv", Domain: snapshot.DomainAccounts,
 		State: snapshot.LifecycleIndexed,
 	})
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "adv.kv", Domain: snapshot.DomainAccounts,
 		State: snapshot.LifecycleAdvertisable, Local: true, Advertisable: true,
 	})
@@ -102,10 +102,10 @@ func TestDriver_NilHandlersAreSafe(t *testing.T) {
 	// default for the not-yet-cutover production wiring) does not
 	// panic when sweeping a populated inventory.
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "down.kv", Domain: snapshot.DomainAccounts, Local: true,
 	})
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "idx.kv", Domain: snapshot.DomainAccounts,
 		State: snapshot.LifecycleIndexed,
 	})
@@ -141,7 +141,7 @@ func TestDriver_SubscriptionWakesSweep(t *testing.T) {
 	d.Stop()
 	indexingCount.Store(0)
 
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "first.kv", Domain: snapshot.DomainAccounts, Local: true,
 	})
 
@@ -157,7 +157,7 @@ func TestDriver_SubscriptionWakesSweep(t *testing.T) {
 	beforeAdd := indexingCount.Load()
 
 	// AddFile triggers ChangeSet, which wakes the sweep loop.
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "second.kv", Domain: snapshot.DomainAccounts, Local: true,
 	})
 
@@ -169,10 +169,10 @@ func TestDriver_SubscriptionWakesSweep(t *testing.T) {
 
 func TestDriver_HandlerErrorDoesNotKillSweep(t *testing.T) {
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "a.kv", Domain: snapshot.DomainAccounts, Local: true,
 	})
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "b.kv", Domain: snapshot.DomainStorage, Local: true,
 	})
 

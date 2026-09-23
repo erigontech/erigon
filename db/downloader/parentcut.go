@@ -171,7 +171,7 @@ func (p *ParentCut) Validate() error {
 		// pre-Phase-1 but reject malformed when present.
 		hb, err := hex.DecodeString(p.ParentManifestHash)
 		if err != nil || len(hb) != 20 {
-			return fmt.Errorf("parent-cut: parent_manifest_hash must be 40 hex chars (got %d, err %v)", len(p.ParentManifestHash), err)
+			return fmt.Errorf("parent-cut: parent_manifest_hash must be 40 hex chars (got %d): %w", len(p.ParentManifestHash), err)
 		}
 	}
 	return nil
@@ -190,8 +190,8 @@ func (p *ParentCut) MarshalCanonical() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parent-cut marshal stage 1: %w", err)
 	}
-	if err := json.Unmarshal(data, &asMap); err != nil {
-		return nil, fmt.Errorf("parent-cut remap for canonical sort: %w", err)
+	if perr := json.Unmarshal(data, &asMap); perr != nil {
+		return nil, fmt.Errorf("parent-cut remap for canonical sort: %w", perr)
 	}
 	// json.Marshal of a map already sorts keys alphabetically (per
 	// encoding/json docs). Indent for human readability.

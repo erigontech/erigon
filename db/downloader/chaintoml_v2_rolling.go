@@ -755,19 +755,19 @@ func (r *RollingV2Publisher) Publish(
 	if len(ucanBytes) > 0 {
 		ucanName := ChainAuthorityUCANFileName(enrFP, genIDFromContent(ucanBytes))
 		ucanPath := filepath.Join(r.snapDir, ucanName)
-		if err := saveChainTomlFile(ucanPath, ucanBytes); err != nil {
-			return metainfo.Hash{}, fmt.Errorf("save %s: %w", ucanName, err)
+		if rerr := saveChainTomlFile(ucanPath, ucanBytes); rerr != nil {
+			return metainfo.Hash{}, fmt.Errorf("save %s: %w", ucanName, rerr)
 		}
-		if _, err := BuildTorrentIfNeed(ctx, ucanName, r.snapDir, r.torrentFS); err != nil {
-			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", ucanName, err)
+		if _, rerr := BuildTorrentIfNeed(ctx, ucanName, r.snapDir, r.torrentFS); rerr != nil {
+			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", ucanName, rerr)
 		}
-		ucanSpec, err := r.torrentFS.LoadByName(ucanName + ".torrent")
-		if err != nil {
-			return metainfo.Hash{}, fmt.Errorf("load %s.torrent: %w", ucanName, err)
+		ucanSpec, rerr := r.torrentFS.LoadByName(ucanName + ".torrent")
+		if rerr != nil {
+			return metainfo.Hash{}, fmt.Errorf("load %s.torrent: %w", ucanName, rerr)
 		}
 		if r.downloader != nil {
-			if err := r.downloader.AddNewSeedableFile(ctx, ucanName); err != nil {
-				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", ucanName, err)
+			if perr := r.downloader.AddNewSeedableFile(ctx, ucanName); perr != nil {
+				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", ucanName, perr)
 			}
 		}
 		ucanHashHex = hex.EncodeToString(ucanSpec.InfoHash[:])
@@ -781,8 +781,8 @@ func (r *RollingV2Publisher) Publish(
 			return metainfo.Hash{}, fmt.Errorf("marshal chain.v2 manifest: %w", err)
 		}
 	}
-	if err := saveChainTomlFile(path, tomlBytes); err != nil {
-		return metainfo.Hash{}, fmt.Errorf("save %s: %w", name, err)
+	if serr := saveChainTomlFile(path, tomlBytes); serr != nil {
+		return metainfo.Hash{}, fmt.Errorf("save %s: %w", name, serr)
 	}
 
 	// Producer Content UCAN: mint a Content UCAN over the just-written
@@ -815,10 +815,10 @@ func (r *RollingV2Publisher) Publish(
 		_, cucanErr := os.Stat(cucanPath)
 		_, cucanTorrentErr := os.Stat(cucanPath + ".torrent")
 		if cucanErr != nil || cucanTorrentErr != nil {
-			ucanBytes, err := r.contentMinter(tomlBytes)
-			if err != nil {
+			ucanBytes, uerr := r.contentMinter(tomlBytes)
+			if uerr != nil {
 				_ = dir.RemoveFile(path)
-				return metainfo.Hash{}, fmt.Errorf("publisher content UCAN %s: %w", name, err)
+				return metainfo.Hash{}, fmt.Errorf("publisher content UCAN %s: %w", name, uerr)
 			}
 			// Removing any stale artefacts before write forces
 			// BuildTorrentIfNeed to rebuild the .torrent to match
@@ -826,34 +826,34 @@ func (r *RollingV2Publisher) Publish(
 			// otherwise leave the .torrent pointing at the previous
 			// generation's piece hash.
 			_ = dir.RemoveFile(cucanPath + ".torrent")
-			if err := saveChainTomlFile(cucanPath, ucanBytes); err != nil {
+			if serr := saveChainTomlFile(cucanPath, ucanBytes); serr != nil {
 				_ = dir.RemoveFile(path)
-				return metainfo.Hash{}, fmt.Errorf("save %s: %w", cucanName, err)
+				return metainfo.Hash{}, fmt.Errorf("save %s: %w", cucanName, serr)
 			}
 		}
-		if _, err := BuildTorrentIfNeed(ctx, cucanName, r.snapDir, r.torrentFS); err != nil {
+		if _, berr := BuildTorrentIfNeed(ctx, cucanName, r.snapDir, r.torrentFS); berr != nil {
 			_ = dir.RemoveFile(path)
 			_ = dir.RemoveFile(cucanPath)
-			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", cucanName, err)
+			return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", cucanName, berr)
 		}
-		cucanSpec, err := r.torrentFS.LoadByName(cucanName + ".torrent")
-		if err != nil {
+		cucanSpec, lerr := r.torrentFS.LoadByName(cucanName + ".torrent")
+		if lerr != nil {
 			_ = dir.RemoveFile(path)
 			_ = dir.RemoveFile(cucanPath)
-			return metainfo.Hash{}, fmt.Errorf("load %s.torrent: %w", cucanName, err)
+			return metainfo.Hash{}, fmt.Errorf("load %s.torrent: %w", cucanName, lerr)
 		}
 		contentUCANHash = cucanSpec.InfoHash
 		if r.downloader != nil {
-			if err := r.downloader.AddNewSeedableFile(ctx, cucanName); err != nil {
+			if aerr := r.downloader.AddNewSeedableFile(ctx, cucanName); aerr != nil {
 				_ = dir.RemoveFile(path)
 				_ = dir.RemoveFile(cucanPath)
-				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", cucanName, err)
+				return metainfo.Hash{}, fmt.Errorf("seed %s: %w", cucanName, aerr)
 			}
 		}
 	}
 
-	if _, err := BuildTorrentIfNeed(ctx, name, r.snapDir, r.torrentFS); err != nil {
-		return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", name, err)
+	if _, berr := BuildTorrentIfNeed(ctx, name, r.snapDir, r.torrentFS); berr != nil {
+		return metainfo.Hash{}, fmt.Errorf("build %s.torrent: %w", name, berr)
 	}
 	spec, err := r.torrentFS.LoadByName(name + ".torrent")
 	if err != nil {
@@ -992,6 +992,7 @@ func (r *RollingV2Publisher) allDeliverableLocked(names, canonical map[string]st
 	return true
 }
 
+//nolint:unused // superseded by the per-item variant this branch uses; kept to match upstream
 func isSubsetOf(a, b map[string]struct{}) bool {
 	for k := range a {
 		if _, ok := b[k]; !ok {

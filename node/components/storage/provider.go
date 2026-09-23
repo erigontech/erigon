@@ -522,7 +522,7 @@ func (p *Provider) Initialize(deps Deps) error {
 							entry.FromBlock = info.From
 							entry.ToBlock = info.To
 						}
-						inv.AddFile(entry)
+						_ = inv.AddFile(entry)
 					}
 				}
 			}

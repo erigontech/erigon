@@ -79,7 +79,7 @@ func (li *LiveInventory) Refresh() error {
 
 	inv := NewInventory()
 	for _, f := range files {
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Domain:   f.Domain,
 			FromStep: f.FromStep,
 			ToStep:   f.ToStep,

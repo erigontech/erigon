@@ -50,7 +50,7 @@ func (s *recordingStorage) RecordFile(e *snapshot.FileEntry) error {
 		return s.failWith
 	}
 	s.recorded = append(s.recorded, e)
-	s.inv.AddFile(e)
+	_ = s.inv.AddFile(e)
 	return nil
 }
 

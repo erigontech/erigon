@@ -640,12 +640,12 @@ func (br *BlockRetire) MergeBlocks(
 		}
 		return seeder.Delete(ctx, names)
 	}
-	if err = merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, captureDelete); err != nil {
+	if err := merger.Merge(ctx, &snapshots.BaseRoSnapshots, snapshots.Types(), rangesToMerge, snapshots.Dir(), true /* doIndex */, onMerge, captureDelete); err != nil {
 		return false, err
 	}
 
 	// remove old garbage files
-	if err = snapshots.RemoveOverlaps(func(l []string) error {
+	if err := snapshots.RemoveOverlaps(func(l []string) error {
 		snapshotsync.MoveSupersededToMerged(snapshots.Dir(), l)
 		for _, p := range l {
 			deletedSubChunks = append(deletedSubChunks, filepath.Base(p))

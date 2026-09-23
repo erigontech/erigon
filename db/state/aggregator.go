@@ -3312,6 +3312,8 @@ func (a *Aggregator) SetQuarantineDir(path string) {
 // marked deletable (canDelete). Files an external actor already removed from disk (an
 // OpenFolder that found them gone) are close-only, so a same-name recreation before the
 // pinning readers drain is never clobbered.
+//
+//nolint:unused // upstream-owned; unreferenced on this branch
 func reclaimFiles(files retiredFiles) {
 	reclaimFilesInto(files, "")
 }

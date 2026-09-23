@@ -154,7 +154,7 @@ func seedPeerManifest(t *testing.T, seedDir string, inv *snapshot.Inventory) (st
 func makeInventory(t *testing.T) *snapshot.Inventory {
 	t.Helper()
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Domain:      snapshot.DomainAccounts,
 		FromStep:    0,
 		ToStep:      2048,
@@ -163,7 +163,7 @@ func makeInventory(t *testing.T) *snapshot.Inventory {
 		Local:       true,
 		Trust:       snapshot.TrustVerified,
 	})
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name:        "v1.0-000000-000500-headers.seg",
 		TorrentHash: [20]byte{0xaa, 0xbb, 0xcc, 0xdd},
 		Local:       true,
@@ -548,7 +548,7 @@ func TestForkPostCutValidator_AllowsCleanPostCutManifest(t *testing.T) {
 
 	seedDir := t.TempDir()
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name:        "v1.0-020000-020500-headers.seg",
 		TorrentHash: [20]byte{0xaa, 0xbb, 0xcc, 0xdd},
 		Local:       true,

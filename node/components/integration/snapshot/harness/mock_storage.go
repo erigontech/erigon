@@ -82,7 +82,7 @@ func (m *MockStorage) RecordFile(e *snapshot.FileEntry) error {
 	}
 	m.mu.Lock()
 	m.recorded = append(m.recorded, e)
-	m.inv.AddFile(e)
+	_ = m.inv.AddFile(e)
 	m.mu.Unlock()
 	return nil
 }

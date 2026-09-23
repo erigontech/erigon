@@ -166,7 +166,7 @@ func TestRollingV2Publisher_AuthorityUCANStableAcrossGenerations(t *testing.T) {
 	// gen 1: a strict superset (gen 0 stays valid → retained), same
 	// delegation.
 	inv1 := rollingTestInventory(t, 0x10)
-	inv1.AddFile(&snapshotinv.FileEntry{
+	_ = inv1.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    1024,
 		ToStep:      2048,
@@ -240,7 +240,7 @@ func TestRollingV2Publisher_AuthorityUCANStableAcrossRestart(t *testing.T) {
 	// Publish gen 1 — a strict superset (gen 0 stays retained), same
 	// delegation.
 	inv1 := rollingTestInventory(t, 0x60)
-	inv1.AddFile(&snapshotinv.FileEntry{
+	_ = inv1.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    1024,
 		ToStep:      2048,
@@ -286,7 +286,7 @@ func TestRollingV2Publisher_AuthorityUCANSurvivesEviction(t *testing.T) {
 	// rotated delegation u1.
 	ucan = []byte("u1")
 	inv2 := snapshotinv.NewInventory()
-	inv2.AddFile(&snapshotinv.FileEntry{
+	_ = inv2.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      2048,

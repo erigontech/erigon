@@ -44,7 +44,7 @@ func (f *fakeBuilder) BuildMissedIndices(_ context.Context, primary *snapshot.Fi
 		}
 	}
 	for _, depName := range primary.Dependencies {
-		f.inv.AddFile(&snapshot.FileEntry{
+		_ = f.inv.AddFile(&snapshot.FileEntry{
 			Name:   depName,
 			Domain: primary.Domain,
 			Local:  true,
@@ -65,7 +65,7 @@ func TestBuildOnIndexing_BuildsThenAdvancesWhenDepsMissing(t *testing.T) {
 		Local:        true,
 		Dependencies: []string{"v1.0-accounts.0-256.kvi"},
 	}
-	inv.AddFile(primary)
+	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
 	handler := BuildOnIndexing(builder, inv, nil)
@@ -90,8 +90,8 @@ func TestBuildOnIndexing_DepsAlreadyLocal_SkipsBuild(t *testing.T) {
 		Local:        true,
 		Dependencies: []string{"v1.0-accounts.0-256.kvi"},
 	}
-	inv.AddFile(primary)
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(primary)
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name:   "v1.0-accounts.0-256.kvi",
 		Domain: snapshot.DomainAccounts,
 		Local:  true,
@@ -116,7 +116,7 @@ func TestBuildOnIndexing_HandlesNoDependencies(t *testing.T) {
 		Kind:  snapshot.KindSalt,
 		Local: true,
 	}
-	inv.AddFile(primary)
+	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
 	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
@@ -151,7 +151,7 @@ func TestBuildOnIndexing_HandlesNoDependencies_BlockFile(t *testing.T) {
 		Name:  "v1.1-025050-025060-headers.seg",
 		Local: true,
 	}
-	inv.AddFile(primary)
+	_ = inv.AddFile(primary)
 
 	builder := &fakeBuilder{inv: inv}
 	require.NoError(t, BuildOnIndexing(builder, inv, nil)(context.Background(), primary))
@@ -171,7 +171,7 @@ func TestBuildOnIndexing_BuilderErrorPropagates(t *testing.T) {
 		Local:        true,
 		Dependencies: []string{"v1.0-accounts.0-256.kvi"},
 	}
-	inv.AddFile(primary)
+	_ = inv.AddFile(primary)
 
 	wantErr := errors.New("simulated build failure")
 	builder := &fakeBuilder{
@@ -200,7 +200,7 @@ func TestBuildOnIndexing_DepsNotYetPropagatedNoOps(t *testing.T) {
 		Local:        true,
 		Dependencies: []string{"v1.0-accounts.0-256.kvi"},
 	}
-	inv.AddFile(primary)
+	_ = inv.AddFile(primary)
 
 	// noopIndexBuilder reports success without producing the dep.
 	// Handler should return nil but NOT advance.
@@ -225,9 +225,9 @@ func TestBuildOnIndexing_PartialDepsNoOps(t *testing.T) {
 			"v1.0-history.0-256.efi",
 		},
 	}
-	inv.AddFile(primary)
+	_ = inv.AddFile(primary)
 	// Pre-add only one of the two deps.
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name:   "v1.0-history.0-256.ef",
 		Domain: snapshot.DomainAccounts,
 		Local:  true,

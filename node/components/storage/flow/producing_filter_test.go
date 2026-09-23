@@ -56,7 +56,7 @@ func TestOrchestrator_ProducingFilesAreNotRequested(t *testing.T) {
 	// Mark v2.2-commitment.310-311.kv as producing: local node had it,
 	// dropped it (RemoveFile), plans to rebuild.
 	const producing = "v2.2-commitment.310-311.kv"
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Domain:   snapshot.DomainCommitment,
 		FromStep: 310, ToStep: 311,
 		Name:  producing,
@@ -116,7 +116,7 @@ func TestOrchestrator_ProducingClearsAfterAddFile(t *testing.T) {
 	}))
 
 	const wasProducing = "v2.2-commitment.310-311.kv"
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Domain:   snapshot.DomainCommitment,
 		FromStep: 310, ToStep: 311,
 		Name:  wasProducing,
@@ -125,7 +125,7 @@ func TestOrchestrator_ProducingClearsAfterAddFile(t *testing.T) {
 	})
 	inv.RemoveFile(wasProducing)
 	// Recovery-exec rebuilt it — file is back in the authoritative set.
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Domain:   snapshot.DomainCommitment,
 		FromStep: 310, ToStep: 311,
 		Name:  wasProducing,

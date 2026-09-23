@@ -249,7 +249,7 @@ func TestV4EmitPreWindowKeyFallsThroughToBaseline(t *testing.T) {
 	// Merge steps 0-1 + 1-2 into a wider baseline (production has
 	// .288-304 merged files as the baseline for a mid-step-304
 	// unwind target).
-	f.agg.MergeLoop(ctx)
+	_ = f.agg.MergeLoop(ctx)
 	require.NoError(t, f.agg.OpenFolder(f.db))
 
 	targetTxN := uint64(24)
@@ -357,7 +357,7 @@ func TestV4EmitAfterPruneSimulation(t *testing.T) {
 		{txN: 20, key: addrUpdated, val: valInWindow},
 	})
 	f.buildFilesUpTo(stepSize * 2)
-	f.agg.MergeLoop(ctx)
+	_ = f.agg.MergeLoop(ctx)
 
 	// Delete .v/.ef/.efi/.vi files (prune simulation). Then reload.
 	pruned := deletePrunedHistoryFiles(t, f.dirs)
@@ -425,7 +425,7 @@ func TestV4EmitTombstoneRecreateAcrossSteps(t *testing.T) {
 		{txN: 22, key: addr, val: valRecreate},
 	})
 	f.buildFilesUpTo(stepSize * 2)
-	f.agg.MergeLoop(ctx)
+	_ = f.agg.MergeLoop(ctx)
 	require.NoError(t, f.agg.OpenFolder(f.db))
 
 	targetTxN := uint64(24)
@@ -475,7 +475,7 @@ func TestV4EmitTombstoneRecreateAfterPrune(t *testing.T) {
 		{txN: 22, key: addr, val: valRecreate}, // recreate in step 1 (in-window at target=24)
 	})
 	f.buildFilesUpTo(stepSize * 2)
-	f.agg.MergeLoop(ctx)
+	_ = f.agg.MergeLoop(ctx)
 
 	pruned := deletePrunedHistoryFiles(t, f.dirs)
 	t.Logf("prune-simulation removed %d files: %v", len(pruned), pruned)

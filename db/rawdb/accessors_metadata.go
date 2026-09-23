@@ -59,7 +59,7 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 			return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 		}
 		if err2 := jsoniter.ConfigFastest.Unmarshal(fixed, &config); err2 != nil {
-			return nil, fmt.Errorf("invalid chain config JSON: %x, original=%v, after-chainId-fix=%w", hash, err, err2)
+			return nil, fmt.Errorf("invalid chain config JSON: %x, original=%w, after-chainId-fix=%w", hash, err, err2)
 		}
 	}
 

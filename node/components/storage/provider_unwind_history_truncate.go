@@ -126,8 +126,8 @@ func TruncateStraddlerHistoryFile(
 	)
 
 	for efReader.HasNext() {
-		if err = ctx.Err(); err != nil {
-			return err
+		if cerr := ctx.Err(); cerr != nil {
+			return cerr
 		}
 		keyBuf, _ = efReader.Next(keyBuf[:0])
 		if !efReader.HasNext() {

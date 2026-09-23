@@ -77,7 +77,7 @@ func TestDiscoverNewFiles_PreservesExistingState(t *testing.T) {
 	// Pre-populate at Advertisable. Discover must NOT downgrade it
 	// (AddFile-replace would; the discover path checks LifecycleState
 	// first and skips).
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "a.seg", Local: true, Advertisable: true,
 	})
 
@@ -120,7 +120,7 @@ func TestSweep_RemovesEntryWhenFileGoneFromDisk(t *testing.T) {
 func TestSweep_KeepsDeclaredEntryNotYetOnDisk(t *testing.T) {
 	dir := t.TempDir()
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{Name: "pending.seg", Local: false})
+	_ = inv.AddFile(&snapshot.FileEntry{Name: "pending.seg", Local: false})
 
 	d := &Driver{Inv: inv, SnapDir: dir}
 	d.Sweep(context.Background(), nil)

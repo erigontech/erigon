@@ -169,8 +169,8 @@ func copyOneFile(srcDir, dstDir, relPath string) (int64, error) {
 		return 0, fmt.Errorf("stat source: %w", err)
 	}
 
-	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return 0, fmt.Errorf("mkdir dst parent: %w", err)
+	if werr := os.MkdirAll(filepath.Dir(dst), 0o755); werr != nil {
+		return 0, fmt.Errorf("mkdir dst parent: %w", werr)
 	}
 	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, stat.Mode().Perm())
 	if err != nil {

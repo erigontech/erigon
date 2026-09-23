@@ -149,7 +149,7 @@ func TestOrchestrator_CanonicalGate_ProducingLocallyNotRequested(t *testing.T) {
 
 	inv := o.storage.Inventory()
 	// Produce marker: RemoveFile marks as producing (per G3+G4).
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Domain: snapshot.DomainCommitment, FromStep: 0, ToStep: 1,
 		Name: "A.kv", Kind: snapshot.KindKV, Local: true,
 	})

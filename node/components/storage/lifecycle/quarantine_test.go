@@ -29,7 +29,7 @@ import (
 
 func TestQuarantine_StopsRetryingAfterThreshold(t *testing.T) {
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "stuck.kv", Domain: snapshot.DomainAccounts, Local: true,
 	})
 
@@ -56,7 +56,7 @@ func TestQuarantine_StopsRetryingAfterThreshold(t *testing.T) {
 
 func TestQuarantine_ChangeSetClears(t *testing.T) {
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "stuck.kv", Domain: snapshot.DomainAccounts, Local: true,
 	})
 
@@ -92,7 +92,7 @@ func TestQuarantine_ChangeSetClears(t *testing.T) {
 
 func TestQuarantine_SuccessfulDispatchClearsCounter(t *testing.T) {
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Name: "ok.kv", Domain: snapshot.DomainAccounts, Local: true,
 	})
 

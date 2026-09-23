@@ -96,7 +96,7 @@ func TestRestart_DrainsThenRescansFromDisk(t *testing.T) {
 	p, dir := newRestartTestProvider(t)
 
 	// Stale in-memory entry — file does not exist on disk.
-	p.Inventory.AddFile(&snapshot.FileEntry{
+	_ = p.Inventory.AddFile(&snapshot.FileEntry{
 		Name: "v1.1-stale.seg", Local: true, Trust: snapshot.TrustVerified,
 	})
 	// Fresh file on disk that the pre-Restart inventory does not know about.

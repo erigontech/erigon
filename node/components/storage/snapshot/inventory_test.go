@@ -25,13 +25,13 @@ import (
 
 func TestInventoryAddAndCoverage(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain:   DomainAccounts,
 		FromStep: 0, ToStep: 1024,
 		Name:  "v1.0-accounts.0-1024.kv",
 		Local: true, Trust: TrustVerified,
 	})
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain:   DomainAccounts,
 		FromStep: 1024, ToStep: 2048,
 		Name:  "v1.0-accounts.1024-2048.kv",
@@ -45,7 +45,7 @@ func TestInventoryAddAndCoverage(t *testing.T) {
 
 func TestInventoryGapsAgainst(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain:   DomainAccounts,
 		FromStep: 0, ToStep: 1024,
 		Name:  "v1.0-accounts.0-1024.kv",
@@ -59,11 +59,11 @@ func TestInventoryGapsAgainst(t *testing.T) {
 
 func TestInventoryReplaceWithMerge(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 0, ToStep: 512,
 		Name: "v1.0-accounts.0-512.kv", Local: true, Trust: TrustVerified,
 	})
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 512, ToStep: 1024,
 		Name: "v1.0-accounts.512-1024.kv", Local: true, Trust: TrustVerified,
 	})
@@ -85,7 +85,7 @@ func TestInventoryReplaceWithMerge(t *testing.T) {
 
 func TestInventoryReplaceWithMergeRejectsInsufficientCoverage(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 0, ToStep: 1024,
 		Name: "v1.0-accounts.0-1024.kv", Local: true, Trust: TrustVerified,
 	})
@@ -101,7 +101,7 @@ func TestInventoryReplaceWithMergeRejectsInsufficientCoverage(t *testing.T) {
 
 func TestInventoryTrustPromotion(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 0, ToStep: 1024,
 		Name: "v1.0-accounts.0-1024.kv", Trust: TrustNone,
 	})
@@ -120,15 +120,15 @@ func TestInventoryTrustPromotion(t *testing.T) {
 
 func TestInventoryCoverageAtTrust(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 0, ToStep: 1024,
 		Name: "verified.kv", Local: true, Trust: TrustVerified,
 	})
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 1024, ToStep: 2048,
 		Name: "consensus.kv", Local: true, Trust: TrustConsensus,
 	})
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 2048, ToStep: 3072,
 		Name: "none.kv", Local: true, Trust: TrustNone,
 	})
@@ -148,11 +148,11 @@ func TestInventoryCoverageAtTrust(t *testing.T) {
 
 func TestInventoryLocalVsRemote(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 0, ToStep: 1024,
 		Name: "local.kv", Local: true, Trust: TrustVerified,
 	})
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 1024, ToStep: 2048,
 		Name: "remote.kv", Local: false, Trust: TrustConsensus,
 	})
@@ -173,10 +173,10 @@ func TestInventoryLocalVsRemote(t *testing.T) {
 
 func TestInventoryBlockFiles(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Name: "v1.0-000000-000500-headers.seg", Local: true, Trust: TrustVerified,
 	})
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Name: "v1.0-000000-000500-bodies.seg", Local: true, Trust: TrustVerified,
 	})
 
@@ -193,9 +193,9 @@ func TestInventoryBlockFiles(t *testing.T) {
 // included) blocked permanently.
 func TestInventoryViewBlockFilesIncludesAccessors(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "v1.0-000000-000500-headers.seg", Local: true, Trust: TrustVerified})
-	inv.AddFile(&FileEntry{Name: "v2.0-000000-000500-headers.idx", Local: true, Trust: TrustVerified})
-	inv.AddFile(&FileEntry{Kind: KindMeta, Name: "erigondb.toml", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Name: "v1.0-000000-000500-headers.seg", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Name: "v2.0-000000-000500-headers.idx", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Kind: KindMeta, Name: "erigondb.toml", Local: true, Trust: TrustVerified})
 
 	// Precondition: the .idx is classified as a block accessor.
 	idx, ok := inv.GetByName("v2.0-000000-000500-headers.idx")
@@ -224,9 +224,9 @@ func TestInventoryNonKVKinds(t *testing.T) {
 	inv := NewInventory()
 
 	// Caplin, meta, salt — each goes to its own bucket and back-out via the kind accessor.
-	inv.AddFile(&FileEntry{Kind: KindCaplin, Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Local: true, Trust: TrustVerified})
-	inv.AddFile(&FileEntry{Kind: KindMeta, Name: "erigondb.toml", Local: true, Trust: TrustVerified})
-	inv.AddFile(&FileEntry{Kind: KindSalt, Name: "salt-blocks.txt", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Kind: KindCaplin, Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Kind: KindMeta, Name: "erigondb.toml", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Kind: KindSalt, Name: "salt-blocks.txt", Local: true, Trust: TrustVerified})
 
 	require.Len(t, inv.CaplinFiles(), 1)
 	require.Len(t, inv.MetaFiles(), 1)
@@ -235,8 +235,8 @@ func TestInventoryNonKVKinds(t *testing.T) {
 
 	// History + idx land under the domain map. Kv full-coverage masks the
 	// missing-history gap unless callers use CoverageOfKind.
-	inv.AddFile(&FileEntry{Domain: DomainAccounts, FromStep: 0, ToStep: 128, Name: "v1.1-accounts.0-128.kv", Local: true, Trust: TrustVerified})
-	inv.AddFile(&FileEntry{Domain: DomainAccounts, FromStep: 0, ToStep: 128, Kind: KindHistory, Name: "v1.1-accounts.0-128.v", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Domain: DomainAccounts, FromStep: 0, ToStep: 128, Name: "v1.1-accounts.0-128.kv", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Domain: DomainAccounts, FromStep: 0, ToStep: 128, Kind: KindHistory, Name: "v1.1-accounts.0-128.v", Local: true, Trust: TrustVerified})
 
 	kvCov := inv.CoverageOfKind(DomainAccounts, KindKV)
 	histCov := inv.CoverageOfKind(DomainAccounts, KindHistory)
@@ -370,15 +370,15 @@ func TestReplaceContent_MissingEntryReturnsFalse(t *testing.T) {
 // stays open, and a single ChangeSet covers every removed name.
 func TestInventory_DrainClearsAllCategoriesPreservesPointerAndSubscribers(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Name: "v1.1-010895-010896-headers.seg", Local: true, Trust: TrustVerified,
 	})
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Name: "caplin/v1.1-000000-000010-beaconblocks.seg", Local: true, Trust: TrustVerified,
 	})
-	inv.AddFile(&FileEntry{Name: "erigondb.toml", Local: true, Trust: TrustVerified})
-	inv.AddFile(&FileEntry{Name: "salt-blocks.txt", Local: true, Trust: TrustVerified})
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{Name: "erigondb.toml", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Name: "salt-blocks.txt", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{
 		Domain: DomainAccounts, FromStep: 0, ToStep: 2048,
 		Name: "v1.0-accounts.0-2048.kv", Local: true, Trust: TrustVerified,
 	})
@@ -409,7 +409,7 @@ func TestInventory_DrainClearsAllCategoriesPreservesPointerAndSubscribers(t *tes
 	}
 
 	// Re-add post-Drain to confirm the inventory is functional again.
-	inv.AddFile(&FileEntry{Name: "post-drain.seg", Local: true, Trust: TrustVerified})
+	_ = inv.AddFile(&FileEntry{Name: "post-drain.seg", Local: true, Trust: TrustVerified})
 	require.Len(t, inv.BlockFiles(), 1, "post-Drain AddFile works normally")
 }
 
@@ -444,11 +444,11 @@ func TestInventoryViewLocalBlockTipEmpty(t *testing.T) {
 func TestInventoryViewLocalBlockTipContiguous(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-000001-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000001-000002-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -468,21 +468,21 @@ func TestInventoryViewLocalBlockTipGapInMiddle(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
 		// Contiguous 2,971,000 → 2,972,999
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002971-002972-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002972-002973-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
 		// GAP at 2,973,000-2,973,999 (the failed-download case).
 		// Files past the gap:
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002974-002975-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002975-002976-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -499,16 +499,16 @@ func TestInventoryViewLocalBlockTipGapInMiddle(t *testing.T) {
 func TestInventoryViewLocalBlockTipNotLocalCapsTip(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-000001-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
 		// Range [1000,2000) declared but not Local — manifest entry only.
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000001-000002-" + kind + ".seg",
 			Local: false, Trust: TrustVerified,
 		})
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000002-000003-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -525,14 +525,14 @@ func TestInventoryViewLocalBlockTipNotLocalCapsTip(t *testing.T) {
 func TestInventoryViewLocalBlockTipMissingType(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-000001-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
 	}
 	// Range [1000,2000): only headers + bodies, no transactions.
 	for _, kind := range []string{"headers", "bodies"} {
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000001-000002-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -550,7 +550,7 @@ func TestInventoryViewLocalBlockTipMissingType(t *testing.T) {
 func TestInventoryViewLocalBlockTipPrunedStart(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000001-000002-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -570,12 +570,12 @@ func TestInventoryViewLocalBlockTipMixedSizes(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
 		// Merged 10k-block file: blocks 2,960,000 → 2,969,999
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002960-002970-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
 		// 1k-block file: 2,970,000 → 2,970,999
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002970-002971-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -608,12 +608,12 @@ func TestInventoryViewLocalBlockTipOverlappingMergedAndSubChunks(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
 		// Lower 100k-chunk: 2,800,000 → 2,900,000
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002800-002900-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
 		// Merged 100k-chunk: 2,900,000 → 3,000,000
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002900-003000-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -622,15 +622,15 @@ func TestInventoryViewLocalBlockTipOverlappingMergedAndSubChunks(t *testing.T) {
 		//   2,900,000 → 2,910,000
 		//   2,910,000 → 2,920,000
 		//   2,920,000 → 2,930,000
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002900-002910-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002910-002920-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002920-002930-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -648,12 +648,12 @@ func TestInventoryViewLocalBlockTipContainedRange(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
 		// 0 → 100,000 (10k-blocks-K filename → block units via PopulateFromName)
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-000100-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
 		// 10,000 → 20,000 — fully contained in the above
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000010-000020-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -673,16 +673,16 @@ func TestInventoryViewLocalBlockTipEqualFromWidestWins(t *testing.T) {
 		// Two ranges sharing from=0:
 		//   0 → 1000   (1k)
 		//   0 → 10000  (10k)
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-000001-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-000010-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
 		// Touch the wider's end so the walk can continue past it.
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000010-000011-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -711,11 +711,11 @@ func TestInventoryViewLocalBlockTipCappedAt_ClampsAboveCap(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
 		// Inventory has files covering blocks 0..2,993,999.
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-002990-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-002990-002994-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -735,7 +735,7 @@ func TestInventoryViewLocalBlockTipCappedAt_ClampsAboveCap(t *testing.T) {
 func TestInventoryViewLocalBlockTipCappedAt_PassesThroughWhenCapHigher(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-001000-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})
@@ -753,7 +753,7 @@ func TestInventoryViewLocalBlockTipCappedAt_PassesThroughWhenCapHigher(t *testin
 func TestInventoryViewLocalBlockTipCappedAt_ZeroCapDisabled(t *testing.T) {
 	inv := NewInventory()
 	for _, kind := range []string{"headers", "bodies", "transactions"} {
-		inv.AddFile(&FileEntry{
+		_ = inv.AddFile(&FileEntry{
 			Name:  "v1.1-000000-001000-" + kind + ".seg",
 			Local: true, Trust: TrustVerified,
 		})

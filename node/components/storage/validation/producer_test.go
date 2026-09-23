@@ -88,7 +88,7 @@ func TestProducer_MarkAdvertisableHappyPath(t *testing.T) {
 		FromStep: 0, ToStep: 1024, Kind: snapshot.KindKV,
 		Local: true,
 	}
-	inv.AddFile(file)
+	_ = inv.AddFile(file)
 	require.False(t, file.Advertisable, "advertisable starts false")
 
 	p := NewDefaultProducer()
@@ -104,7 +104,7 @@ func TestProducer_MarkAdvertisableValidationFailureLeavesFlagFalse(t *testing.T)
 		Name:     "", // will fail NameNotEmpty
 		FromStep: 0, ToStep: 1024,
 	}
-	inv.AddFile(file)
+	_ = inv.AddFile(file)
 
 	p := NewDefaultProducer()
 	changed, err := p.MarkAdvertisable(inv, file, nil)
@@ -120,7 +120,7 @@ func TestProducer_MarkAdvertisableIdempotent(t *testing.T) {
 		Name: "v1.0-accounts.0-1024.kv", Domain: "accounts",
 		FromStep: 0, ToStep: 1024, Kind: snapshot.KindKV,
 	}
-	inv.AddFile(file)
+	_ = inv.AddFile(file)
 
 	p := NewDefaultProducer()
 	first, err := p.MarkAdvertisable(inv, file, nil)
@@ -150,7 +150,7 @@ func TestInventory_MarkAdvertisableAcrossKinds(t *testing.T) {
 		{Name: "caplin/v1.0-beaconblocks-0.seg", Kind: snapshot.KindCaplin},
 	}
 	for _, f := range files {
-		inv.AddFile(f)
+		_ = inv.AddFile(f)
 	}
 
 	for _, f := range files {

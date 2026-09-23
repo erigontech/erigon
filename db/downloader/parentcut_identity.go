@@ -113,7 +113,7 @@ func ValidateParentIdentity(section *ParentSection, expected ExpectedParentIdent
 	if section.ParentGenesisHash != "" {
 		got, err := decodeGenesisHash(section.ParentGenesisHash)
 		if err != nil {
-			return fmt.Errorf("%w: %v", ErrParentGenesisHashMalformed, err)
+			return fmt.Errorf("%w: %w", ErrParentGenesisHashMalformed, err)
 		}
 		if got != expected.GenesisHash {
 			return fmt.Errorf("%w: manifest=%x local=%x", ErrParentGenesisHashMismatch, got, expected.GenesisHash)

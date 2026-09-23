@@ -86,7 +86,7 @@ func (s *inventoryStorage) RecordFile(e *snapshot.FileEntry) error {
 			return fmt.Errorf("validation: %w", err)
 		}
 	}
-	s.inv.AddFile(e)
+	_ = s.inv.AddFile(e)
 	return nil
 }
 
@@ -1091,16 +1091,6 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 			Range:     entry.Range(),
 		})
 	}
-}
-
-// isBlockHeader reports whether name is a block-header snapshot file
-// (e.g. "v1.0-000000-000500-headers.seg"). Header files carry
-// header.stateRoot, the consensus anchor every cryptographic state
-// validator needs — they belong to phase 1 of the orchestrator's
-// scheduling alongside state-domain files. Only .seg here: .idx
-// accessors are built locally, not distributed in the manifest.
-func isBlockHeader(name string) bool {
-	return strings.HasSuffix(name, "-headers.seg")
 }
 
 // fireInitialStateReady publishes InitialStateReady exactly once and

@@ -29,7 +29,7 @@ import (
 
 func TestWaitForReady_LocalReturnsImmediately(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: true})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: true})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -53,7 +53,7 @@ func TestWaitForReady_NotDeclaredReturnsErrNotFound(t *testing.T) {
 
 func TestWaitForReady_PendingResolvesOnMarkLocal(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: false})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: false})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
 	defer cancel()
@@ -76,7 +76,7 @@ func TestWaitForReady_PendingResolvesOnMarkLocal(t *testing.T) {
 
 func TestWaitForReady_CtxExpiresReturnsErrPending(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: false})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: false})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Millisecond)
 	defer cancel()
@@ -92,7 +92,7 @@ func TestWaitForReady_CtxExpiresReturnsErrPending(t *testing.T) {
 
 func TestWaitForReady_RequireAdvertisableGatesOnPromotion(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: true, Advertisable: false})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: true, Advertisable: false})
 
 	// Without the gate: returns immediately (Local=true is enough).
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
@@ -118,7 +118,7 @@ func TestWaitForReady_RequireAdvertisableGatesOnPromotion(t *testing.T) {
 
 func TestWaitForReady_UndeclaredDuringWaitContinuesUntilCtx(t *testing.T) {
 	inv := NewInventory()
-	inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: false})
+	_ = inv.AddFile(&FileEntry{Name: "a.kv", Domain: DomainAccounts, Local: false})
 
 	go func() {
 		time.Sleep(30 * time.Millisecond)

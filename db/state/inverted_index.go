@@ -166,9 +166,12 @@ func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep))
 }
 
+//nolint:unused // superseded by the per-item variant this branch uses; kept to match upstream
 func (ii *InvertedIndex) efFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep)
 }
+
+//nolint:unused // superseded by the per-item variant this branch uses; kept to match upstream
 func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
 }

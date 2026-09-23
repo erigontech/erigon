@@ -1043,7 +1043,7 @@ func New(
 				// composable via snapshotsync.Or so a future state-axis
 				// predicate can stack here. See
 				// docs/plans/20260522-canonical-layer-revision.md §5.
-				bus.Subscribe(func(e flow.CanonicalHeadRewound) {
+				_ = bus.Subscribe(func(e flow.CanonicalHeadRewound) {
 					dropped := view.Demote(snapshotsync.DemoteByRewindPredicate(e.ToBlock))
 					if dropped > 0 {
 						logger.Info("[canonical-view] demoted on rewind",
@@ -2580,15 +2580,6 @@ func (s *Ethereum) applyForkManifestExchangeFilters(target *chain.Config) {
 	s.manifestExchange.SetForkIDFilter(manifestexchange.BuildForkIDFilter(
 		localGenesisFork, s.genesisHash, localH, localT))
 	s.manifestExchange.SetForkPostCutValidator(manifestexchange.BuildForkPostCutValidator(target.CutBlock, nil))
-}
-
-func readCurrentBlockNumber(ctx context.Context, db kv.RwDB) (uint64, error) {
-	tx, err := db.BeginRo(ctx)
-	if err != nil {
-		return 0, err
-	}
-	defer tx.Rollback()
-	return stages.GetStageProgress(tx, stages.Finish)
 }
 
 // Protocols returns all the currently configured

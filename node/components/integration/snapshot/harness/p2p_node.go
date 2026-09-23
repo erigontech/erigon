@@ -42,7 +42,6 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	execp2p "github.com/erigontech/erigon/execution/p2p"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/app/workerpool"
 	"github.com/erigontech/erigon/node/components/downloader"
@@ -54,8 +53,6 @@ import (
 	"github.com/erigontech/erigon/node/components/storage/validation"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/ethconfig"
-	"github.com/erigontech/erigon/node/gointerfaces"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/p2p"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
@@ -375,7 +372,7 @@ func (n *P2PNode) registerSeedable(fileName string, size int64, entryTemplate *s
 	entry.TorrentHash = [20]byte(spec.InfoHash)
 	entry.Local = true
 	entry.Trust = snapshot.TrustVerified
-	n.Inventory.AddFile(&entry)
+	_ = n.Inventory.AddFile(&entry)
 	return [20]byte(spec.InfoHash)
 }
 
@@ -469,14 +466,6 @@ func (n *P2PNode) StorageProvider() *storagecomp.Provider { return n.storageProv
 func (n *P2PNode) ResumePublisherSeeding() {
 	n.T.Helper()
 	require.NoError(n.T, n.ensureV2Publisher().ResumeSeeding(n.ctx))
-}
-
-// convertGenesisDifficulty wraps gointerfaces.ConvertUint256IntToH256
-// for a genesis block — Difficulty() returns a value (uint256.Int) but
-// the converter wants a pointer.
-func convertGenesisDifficulty(b *types.Block) *typesproto.H256 {
-	d := b.Difficulty()
-	return gointerfaces.ConvertUint256IntToH256(&d)
 }
 
 // NewP2PNode constructs a fully wired P2P node for real-stack integration

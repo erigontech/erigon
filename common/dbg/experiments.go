@@ -58,13 +58,14 @@ var (
 	mergeTr = EnvInt("MERGE_THRESHOLD", -1)
 
 	// state v3
-	noPrune              = EnvBool("NO_PRUNE", false)
-	noRetire             = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
-	noMerge              = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
-	noBackgroundE3Build  = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
-	noMergeHistory       = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
-	noDeepMergeHistory   = EnvBool("NO_DEEP_MERGE_HISTORY", false)  // merge Hist/II only up to 2 steps (small+fast), skip larger merges
-	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
+	noPrune             = EnvBool("NO_PRUNE", false)
+	noRetire            = EnvBool("NO_RETIRE", false)              // kill-switch: don't delete aged frozen files (history/II + block snapshots)
+	noMerge             = EnvBool("NO_MERGE", false)               // don't merge Domain/Hist/II
+	noBackgroundE3Build = EnvBool("NO_BACKGROUND_E3_BUILD", false) // suppress background E3 file build / merge / retire goroutines
+	noMergeHistory      = EnvBool("NO_MERGE_HISTORY", false)       // don't merge Hist/II but still merge Domain
+	noDeepMergeHistory  = EnvBool("NO_DEEP_MERGE_HISTORY", false)  // merge Hist/II only up to 2 steps (small+fast), skip larger merges
+	discardCommitment   = EnvBool("DISCARD_COMMITMENT", false)
+	//nolint:unused // upstream knob; this branch always writes TD (Caplin reads parent TD after a mode-B unwind)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
 	// force skipping of any non-Erigon2 .torrent files

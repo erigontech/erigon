@@ -93,7 +93,7 @@ func TestGetState_AnchorAtNonDumpSlotIsReadable(t *testing.T) {
 			base := (hdr.Slot / dumpSlotFrequency) * dumpSlotFrequency
 			hdr.Slot = base + tc.offset
 			anchorState.SetLatestBlockHeader(&hdr)
-			anchorState.SetSlot(hdr.Slot)
+			_ = anchorState.SetSlot(hdr.Slot)
 
 			fg, _ := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 			graph := fg.(*forkGraphDisk)

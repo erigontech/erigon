@@ -61,7 +61,7 @@ func TestGenerateV2FromInventory(t *testing.T) {
 	inv := snapshotinv.NewInventory()
 
 	// Add block files.
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Name:        "v1.0-000000-000500-headers.seg",
 		TorrentHash: [20]byte{0xab, 0xcd},
 		Local:       true,
@@ -69,7 +69,7 @@ func TestGenerateV2FromInventory(t *testing.T) {
 	})
 
 	// Add domain files — mix of canonical and non-canonical.
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      2048,
@@ -78,7 +78,7 @@ func TestGenerateV2FromInventory(t *testing.T) {
 		Local:       true,
 		Trust:       snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    2048,
 		ToStep:      3072,
@@ -88,7 +88,7 @@ func TestGenerateV2FromInventory(t *testing.T) {
 		Trust:       snapshotinv.TrustConsensus,
 	})
 	// Non-canonical file (size 100, not power-of-2) — should be excluded.
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    3072,
 		ToStep:      3172,
@@ -179,13 +179,13 @@ func TestGenerateV2_AdvertisesAccessors(t *testing.T) {
 
 func TestV2MarshalRoundTrip(t *testing.T) {
 	inv := snapshotinv.NewInventory()
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Name:        "v1.0-000000-000500-headers.seg",
 		TorrentHash: [20]byte{0xab},
 		Local:       true,
 		Trust:       snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      4096,
@@ -223,25 +223,25 @@ func TestParseV2RejectsV1(t *testing.T) {
 func TestV2FullScopeRoundTrip(t *testing.T) {
 	inv := snapshotinv.NewInventory()
 
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Name:        "v1.1-000000-000100-headers.seg",
 		TorrentHash: [20]byte{0xb1}, Local: true, Trust: snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Kind: snapshotinv.KindMeta, Name: "erigondb.toml",
 		TorrentHash: [20]byte{0x1e}, Local: true, Trust: snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Kind: snapshotinv.KindSalt, Name: "salt-blocks.txt",
 		TorrentHash: [20]byte{0x5a}, Local: true, Trust: snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Kind: snapshotinv.KindCaplin, Name: "v1.1-000000-000010-beaconblocks.seg",
 		TorrentHash: [20]byte{0xca}, Local: true, Trust: snapshotinv.TrustVerified,
 	})
 	for _, kind := range []snapshotinv.FileKind{snapshotinv.KindKV, snapshotinv.KindHistory, snapshotinv.KindIdx} {
 		ext := map[snapshotinv.FileKind]string{snapshotinv.KindKV: "kv", snapshotinv.KindHistory: "v", snapshotinv.KindIdx: "ef"}[kind]
-		inv.AddFile(&snapshotinv.FileEntry{
+		_ = inv.AddFile(&snapshotinv.FileEntry{
 			Domain: snapshotinv.DomainAccounts, Kind: kind,
 			FromStep: 0, ToStep: 128,
 			Name:        "v1.1-accounts.0-128." + ext,
@@ -320,7 +320,7 @@ func TestV2SerializationIsCanonical(t *testing.T) {
 		inv := snapshotinv.NewInventory()
 		for _, f := range order {
 			cp := *f
-			inv.AddFile(&cp)
+			_ = inv.AddFile(&cp)
 		}
 		data, err := MarshalV2(GenerateV2(inv))
 		require.NoError(t, err)
@@ -391,7 +391,7 @@ func TestV2StepHeaderRoundTrip(t *testing.T) {
 	inv := snapshotinv.NewInventory()
 
 	// Block file — no step-header anchors apply (lives in Blocks section, not Domains).
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Name:        "v1.1-000000-000500-headers.seg",
 		TorrentHash: [20]byte{0x01},
 		Local:       true, Trust: snapshotinv.TrustVerified,
@@ -400,7 +400,7 @@ func TestV2StepHeaderRoundTrip(t *testing.T) {
 	// Commitment file with the validator-populated step-header anchors —
 	// represents a typical post-validation state.
 	commitmentRoot := [32]byte{0xd1, 0xe5, 0x56, 0x19, 0xbb, 0x21, 0x05, 0xd1}
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
 		Name:        "v2.0-commitment.0-256.kv",
 		TorrentHash: [20]byte{0x02},
@@ -412,7 +412,7 @@ func TestV2StepHeaderRoundTrip(t *testing.T) {
 
 	// Accounts file — no step-header anchors yet (the state-trie
 	// validator only records on the commitment domain in this iteration).
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain: snapshotinv.DomainAccounts, FromStep: 0, ToStep: 256,
 		Name:        "v2.0-accounts.0-256.kv",
 		TorrentHash: [20]byte{0x03},
@@ -462,11 +462,11 @@ func TestParseChainTomlAutoV1V2(t *testing.T) {
 	require.Equal(t, "ccdd", out["v1.1-000000-000500-bodies.seg"])
 
 	inv := snapshotinv.NewInventory()
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Name: "v1.1-000000-000500-headers.seg", TorrentHash: [20]byte{0x01},
 		Local: true, Trust: snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain: snapshotinv.DomainCommitment, FromStep: 0, ToStep: 256,
 		Name: "v2.0-commitment.0-256.kv", TorrentHash: [20]byte{0x02},
 		Local: true, Trust: snapshotinv.TrustVerified,

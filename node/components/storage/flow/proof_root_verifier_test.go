@@ -71,7 +71,7 @@ func TestProofRootVerifier_PassPromotesTrust(t *testing.T) {
 	require.NoError(t, o.SetProofRootVerifier(verifier))
 
 	var promoted atomic.Int32
-	bus.Subscribe(func(TrustPromoted) { promoted.Add(1) })
+	_ = bus.Subscribe(func(TrustPromoted) { promoted.Add(1) })
 
 	require.NoError(t, o.Start(context.Background()))
 	t.Cleanup(func() { _ = o.Close() })
@@ -112,7 +112,7 @@ func TestProofRootVerifier_FailDemotesTrust(t *testing.T) {
 	require.NoError(t, o.SetProofRootVerifier(verifier))
 
 	var promoted atomic.Int32
-	bus.Subscribe(func(TrustPromoted) { promoted.Add(1) })
+	_ = bus.Subscribe(func(TrustPromoted) { promoted.Add(1) })
 
 	require.NoError(t, o.Start(context.Background()))
 	t.Cleanup(func() { _ = o.Close() })

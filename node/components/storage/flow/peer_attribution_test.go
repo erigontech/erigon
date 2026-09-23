@@ -96,7 +96,7 @@ func TestPeerAttribution_AllAdvertisersGoneEvictsClaim(t *testing.T) {
 	// otherwise the manifest publishes a DownloadRequested and pending
 	// keeps the claim alive even after departure.
 	inv := snapshot.NewInventory()
-	inv.AddFile(&snapshot.FileEntry{
+	_ = inv.AddFile(&snapshot.FileEntry{
 		Domain: testDomain, FromStep: 0, ToStep: 2048,
 		Name:  "v1.0-accounts.0-2048.kv",
 		Local: true, Trust: snapshot.TrustVerified,

@@ -148,7 +148,8 @@ type ExecModuleTester struct {
 	// AdminUnwindProvider is the storage.Provider wired as the
 	// admin-unwind Unwinder when WithAdminUnwindWired() is set.
 	AdminUnwindProvider *storage.Provider
-	retirementWg        sync.WaitGroup
+	//nolint:unused // retained for parity with the production tester
+	retirementWg sync.WaitGroup
 
 	Notifications      *shards.Notifications
 	stateChangesClient StateChangesClient

@@ -126,18 +126,6 @@ func sortedBlocks(b []BlockFileEntry) []BlockFileEntry {
 	return out
 }
 
-func sortedKeys(m map[string]string) []string {
-	if len(m) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(m))
-	for k := range m {
-		out = append(out, k)
-	}
-	sort.Strings(out)
-	return out
-}
-
 func sortedDomainKeys(m map[string]*DomainManifest) []string {
 	if len(m) == 0 {
 		return nil

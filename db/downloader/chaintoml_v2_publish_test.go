@@ -34,14 +34,14 @@ func seedInventory(t *testing.T) *snapshotinv.Inventory {
 	t.Helper()
 	inv := snapshotinv.NewInventory()
 
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Name:        "v1.0-000000-000500-headers.seg",
 		TorrentHash: [20]byte{0xaa, 0xbb},
 		Local:       true,
 		Trust:       snapshotinv.TrustVerified,
 	})
 
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    0,
 		ToStep:      2048,
@@ -50,7 +50,7 @@ func seedInventory(t *testing.T) *snapshotinv.Inventory {
 		Local:       true,
 		Trust:       snapshotinv.TrustVerified,
 	})
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainAccounts,
 		FromStep:    2048,
 		ToStep:      4096,
@@ -182,7 +182,7 @@ func TestPublishChainTomlV2Regenerates(t *testing.T) {
 	require.NoError(t, err)
 
 	// Add another canonical file; the manifest and its hash must change.
-	inv.AddFile(&snapshotinv.FileEntry{
+	_ = inv.AddFile(&snapshotinv.FileEntry{
 		Domain:      snapshotinv.DomainStorage,
 		FromStep:    0,
 		ToStep:      1024,

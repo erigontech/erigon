@@ -66,7 +66,7 @@ func TestScenario01_LocalFileReadsImmediately(t *testing.T) {
 	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
-	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
@@ -86,7 +86,7 @@ func TestScenario02_PendingResolvesWhenFileLandsInCtx(t *testing.T) {
 	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
-	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, false))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, false))
 
 	sched := harness.NewSchedule()
 	sched.At(100*time.Millisecond, func() {
@@ -114,7 +114,7 @@ func TestScenario03_PendingTimesOutWithErrPending(t *testing.T) {
 	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
-	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, false))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, false))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
@@ -155,8 +155,8 @@ func TestScenario05_HeldViewSeesPreMergeStateThroughTransition(t *testing.T) {
 	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
-	inv.AddFile(fileEntry("v1.0-accounts.0-128.kv", snapshot.DomainAccounts, 0, 128, true))
-	inv.AddFile(fileEntry("v1.0-accounts.128-256.kv", snapshot.DomainAccounts, 128, 256, true))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.0-128.kv", snapshot.DomainAccounts, 0, 128, true))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.128-256.kv", snapshot.DomainAccounts, 128, 256, true))
 
 	v := inv.View()
 	defer v.Close()
@@ -192,7 +192,7 @@ func TestScenario05_HeldViewSeesPreMergeStateThroughTransition(t *testing.T) {
 func TestScenario06_EvictionDefersUntilHeldViewCloses(t *testing.T) {
 	inv := snapshot.NewInventory()
 
-	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
 
 	v := inv.View()
 
@@ -223,8 +223,8 @@ func TestScenario07_PhaseBoundaryReadsSplitReadyAndPending(t *testing.T) {
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	// Phase-0 latest: local. Phase-1 older: declared, not local.
-	inv.AddFile(fileEntry("v1.0-accounts.512-768.kv", snapshot.DomainAccounts, 512, 768, true))
-	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, false))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.512-768.kv", snapshot.DomainAccounts, 512, 768, true))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, false))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
@@ -250,7 +250,7 @@ func TestScenario08_BackfillCompleteAllRangesReady(t *testing.T) {
 	h := &harness.StubReadHandle{Inventory: inv}
 
 	for from, to := uint64(0), uint64(256); to <= 768; from, to = from+256, to+256 {
-		inv.AddFile(fileEntry(
+		_ = inv.AddFile(fileEntry(
 			"v1.0-accounts."+itoaRange(from, to)+".kv",
 			snapshot.DomainAccounts, from, to, true,
 		))
@@ -278,7 +278,7 @@ func TestScenario09_AdvertisableGateReadsPendingUntilPromoted(t *testing.T) {
 
 	e := fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true)
 	e.Advertisable = false
-	inv.AddFile(e)
+	_ = inv.AddFile(e)
 
 	sched := harness.NewSchedule()
 	sched.At(100*time.Millisecond, func() {
@@ -306,7 +306,7 @@ func TestScenario10_ReDownloadAfterCorruptionResolvesPending(t *testing.T) {
 	inv := snapshot.NewInventory()
 	h := &harness.StubReadHandle{Inventory: inv}
 
-	inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
+	_ = inv.AddFile(fileEntry("v1.0-accounts.0-256.kv", snapshot.DomainAccounts, 0, 256, true))
 
 	sched := harness.NewSchedule()
 	// Detection: at t=0 it's still local; corruption marks not-local at t=20ms,

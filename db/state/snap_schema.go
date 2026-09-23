@@ -513,6 +513,8 @@ func (s *E3SnapSchema) findFileByRange(searchVer statecfg.Version, folder string
 // encoding through the explicit Version when possible; for the search
 // "*" version it returns a wildcard pattern that the post-filter
 // matches by range.
+//
+//nolint:unused // upstream-owned; unreferenced on this branch
 func (s *E3SnapSchema) fileFormat(folder string, versionStr string, from, to RootNum, ext string) string {
 	if versionStr == "*" {
 		// Search pattern: wildcard the range too so the glob matches

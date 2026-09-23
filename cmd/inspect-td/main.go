@@ -27,7 +27,7 @@ func main() {
 	}
 	dir := os.Args[1]
 	var blockNum uint64
-	fmt.Sscanf(os.Args[2], "%d", &blockNum)
+	_, _ = fmt.Sscanf(os.Args[2], "%d", &blockNum)
 
 	var target []byte
 	if len(os.Args) >= 4 {
@@ -77,11 +77,12 @@ func main() {
 	// kv.HeaderCanonical — number → hash
 	{
 		v, err := tx.GetOne(kv.HeaderCanonical, prefix)
-		if err != nil {
+		switch {
+		case err != nil:
 			fmt.Printf("kv.HeaderCanonical GetOne: err=%v\n", err)
-		} else if len(v) == 0 {
+		case len(v) == 0:
 			fmt.Printf("kv.HeaderCanonical[%d] = <MISSING>\n", blockNum)
-		} else {
+		default:
 			fmt.Printf("kv.HeaderCanonical[%d] = %x\n", blockNum, v)
 			if target != nil {
 				fmt.Printf("  matches target? %v\n", bytes.Equal(v, target))
@@ -151,13 +152,14 @@ func main() {
 	// kv.HeaderNumber — hash → number. Only queryable by hash.
 	if target != nil {
 		v, err := tx.GetOne(kv.HeaderNumber, target)
-		if err != nil {
+		switch {
+		case err != nil:
 			fmt.Printf("kv.HeaderNumber GetOne: err=%v\n", err)
-		} else if len(v) == 0 {
+		case len(v) == 0:
 			fmt.Printf("kv.HeaderNumber[%x] = <MISSING>\n", target)
-		} else if len(v) >= 8 {
+		case len(v) >= 8:
 			fmt.Printf("kv.HeaderNumber[%x] = %d\n", target, binary.BigEndian.Uint64(v))
-		} else {
+		default:
 			fmt.Printf("kv.HeaderNumber[%x] = <SHORT %d bytes>\n", target, len(v))
 		}
 	}

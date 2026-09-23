@@ -83,12 +83,6 @@ func (p *Provider) straddleBlockFileForType(toBlock uint64, typeEnum snaptype.En
 	return widest, nil
 }
 
-// headersStraddleFile is a thin convenience wrapper kept for the
-// initial headers-rebuild commit's call site clarity.
-func (p *Provider) headersStraddleFile(toBlock uint64) (*snaptype.FileInfo, error) {
-	return p.straddleBlockFileForType(toBlock, snaptype2.Enums.Headers)
-}
-
 // rebuildBlockStraddles is the per-type-orchestrator for mode-B's
 // straddle rebuilds. For each of Headers, Bodies, Transactions (in
 // that order — Transactions reads the rebuilt bodies file), find the

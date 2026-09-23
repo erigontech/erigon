@@ -1238,8 +1238,7 @@ func (e *EngineServer) HandleForkChoice(
 		// so the CL re-anchors there and rebuilds the chain forward.
 		// Without this, the gap error propagates to JSON-RPC and the
 		// CL has no actionable recovery path.
-		var gap rawdbv3.ErrTxNumsAppendWithGap
-		if errors.As(err, &gap) {
+		if gap, ok := errors.AsType[rawdbv3.ErrTxNumsAppendWithGap](err); ok {
 			currentHeader := e.chainRW.GetHeaderByNumber(ctx, gap.LastBlock())
 			if currentHeader != nil {
 				currentHeadHash := currentHeader.Hash()

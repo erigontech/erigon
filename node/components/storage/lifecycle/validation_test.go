@@ -69,8 +69,8 @@ func TestBuildOnBatchValidation_StepCompleteAdvancesAtomically(t *testing.T) {
 		FromStep: 0, ToStep: 256,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
-	inv.AddFile(primary)
-	inv.AddFile(dep)
+	_ = inv.AddFile(primary)
+	_ = inv.AddFile(dep)
 
 	v := &stubStepValidator{name: "presence"}
 	err := BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), primary)
@@ -99,8 +99,8 @@ func TestBuildOnBatchValidation_IncompleteStepNoOps(t *testing.T) {
 		FromStep: 0, ToStep: 256,
 		State: snapshot.LifecycleDownloaded, Local: true,
 	}
-	inv.AddFile(primary)
-	inv.AddFile(dep)
+	_ = inv.AddFile(primary)
+	_ = inv.AddFile(dep)
 
 	v := &stubStepValidator{name: "presence"}
 	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), primary))
@@ -125,8 +125,8 @@ func TestBuildOnBatchValidation_ValidationFailureLeavesStepAtIndexed(t *testing.
 		FromStep: 0, ToStep: 256,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
-	inv.AddFile(primary)
-	inv.AddFile(dep)
+	_ = inv.AddFile(primary)
+	_ = inv.AddFile(dep)
 
 	wantErr := errors.New("simulated batch failure")
 	v := &stubStepValidator{name: "presence", err: wantErr}
@@ -149,7 +149,7 @@ func TestBuildOnBatchValidation_SingletonAdvancesDirectly(t *testing.T) {
 		Name: "erigondb.toml", Kind: snapshot.KindMeta,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
-	inv.AddFile(e)
+	_ = inv.AddFile(e)
 
 	v := &stubStepValidator{name: "presence"}
 	require.NoError(t, BuildOnBatchValidation(validation.StepChain{v}, inv, nil)(context.Background(), e))
@@ -346,8 +346,8 @@ func TestBuildOnBatchValidation_EmptyChainAcceptsCompleteStep(t *testing.T) {
 		FromStep: 0, ToStep: 256,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
-	inv.AddFile(primary)
-	inv.AddFile(dep)
+	_ = inv.AddFile(primary)
+	_ = inv.AddFile(dep)
 
 	require.NoError(t, BuildOnBatchValidation(nil, inv, nil)(context.Background(), primary))
 
@@ -364,7 +364,7 @@ func TestBuildOnValidation_EmptyChainAdvancesUnconditionally(t *testing.T) {
 		Name: "a.kv", Domain: snapshot.DomainAccounts,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
-	inv.AddFile(e)
+	_ = inv.AddFile(e)
 
 	require.NoError(t, BuildOnValidation(nil, nil, inv, nil)(context.Background(), e))
 
@@ -380,7 +380,7 @@ func TestBuildOnValidation_PassingChainAdvances(t *testing.T) {
 		Name: "a.kv", Domain: snapshot.DomainAccounts,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
-	inv.AddFile(e)
+	_ = inv.AddFile(e)
 
 	v1 := &stubValidator{name: "name-not-empty"}
 	v2 := &stubValidator{name: "range-ordering"}
@@ -401,7 +401,7 @@ func TestBuildOnValidation_FailingChainHaltsAtIndexed(t *testing.T) {
 		Name: "a.kv", Domain: snapshot.DomainAccounts,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
-	inv.AddFile(e)
+	_ = inv.AddFile(e)
 
 	wantErr := errors.New("file too small")
 	v := &stubValidator{name: "size-matches-torrent", err: wantErr}
@@ -429,7 +429,7 @@ func TestBuildOnValidation_ContentSourceFactoryFires(t *testing.T) {
 		Name: "a.kv", Domain: snapshot.DomainAccounts,
 		State: snapshot.LifecycleIndexed, Local: true,
 	}
-	inv.AddFile(e)
+	_ = inv.AddFile(e)
 
 	contentCalled := 0
 	expectedContent := validation.BytesContent("hello")

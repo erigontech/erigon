@@ -600,7 +600,7 @@ Example:
 			logger.Error("mktemp", "err", err)
 			return
 		}
-		defer dir.RemoveAll(tmpDir)
+		defer func() { _ = dir.RemoveAll(tmpDir) }()
 
 		fmt.Printf("RecomputeAtTxNumWithoutSD: toTxNum=%d maxStep=%d stepSize=%d\n", recomputeToTxNum, recomputeMaxStep, stepSize)
 		root, encodedTrieState, baselineTxNum, branches, err := commitmentdb.RecomputeAtTxNumWithoutSD(ctx, roTx, tmpDir, recomputeToTxNum, kv.Step(recomputeMaxStep), stepSize)

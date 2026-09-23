@@ -143,8 +143,8 @@ func RecomputeCommitmentAtBlock(
 	// inside touchHistoricalKeys, so we don't need to pre-build a
 	// ChangedKeysPerBlockIdx for a single-block recompute.
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		if _, err := touchHistoricalKeys(sd, tx, d, minTxNum, toTxNum, blockNum, nil, nil); err != nil {
-			return nil, common.Hash{}, fmt.Errorf("touch %s: %w", d, err)
+		if _, cerr := touchHistoricalKeys(sd, tx, d, minTxNum, toTxNum, blockNum, nil, nil); cerr != nil {
+			return nil, common.Hash{}, fmt.Errorf("touch %s: %w", d, cerr)
 		}
 	}
 

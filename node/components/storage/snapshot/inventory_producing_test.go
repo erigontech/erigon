@@ -34,7 +34,7 @@ func TestInventory_ProducingLifecycle(t *testing.T) {
 
 	require.False(t, inv.IsProducing(name), "fresh inventory: nothing is producing")
 
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain:   DomainCommitment,
 		FromStep: 310, ToStep: 311,
 		Name:  name,
@@ -46,7 +46,7 @@ func TestInventory_ProducingLifecycle(t *testing.T) {
 	inv.RemoveFile(name)
 	require.True(t, inv.IsProducing(name), "RemoveFile marks producing so downloads defer to local re-production")
 
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain:   DomainCommitment,
 		FromStep: 310, ToStep: 311,
 		Name:  name,
@@ -64,7 +64,7 @@ func TestInventory_ReplaceWithMergeDoesNotMarkProducing(t *testing.T) {
 	inv := NewInventory()
 	small := "v2.2-commitment.310-311.kv"
 	wide := "v2.2-commitment.308-311.kv"
-	inv.AddFile(&FileEntry{
+	_ = inv.AddFile(&FileEntry{
 		Domain:   DomainCommitment,
 		FromStep: 310, ToStep: 311,
 		Name:  small,

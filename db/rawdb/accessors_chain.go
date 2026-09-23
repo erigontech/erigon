@@ -795,8 +795,7 @@ func AppendCanonicalTxNumsFromTip(tx kv.RwTx, from uint64, body CanonicalBodyRea
 	}
 
 	appendErr := AppendCanonicalTxNums(tx, from, body)
-	var gap rawdbv3.ErrTxNumsAppendWithGap
-	if errors.As(appendErr, &gap) {
+	if gap, ok := errors.AsType[rawdbv3.ErrTxNumsAppendWithGap](appendErr); ok {
 		appendErr = AppendCanonicalTxNums(tx, gap.LastBlock()+1, body)
 	}
 	if appendErr != nil {

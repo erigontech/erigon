@@ -197,8 +197,8 @@ func TestRecomputeAtTxNumWithoutSD_MidBlockCS(t *testing.T) {
 				// end itself. All CCs use blockNum=0 since the entire
 				// run is still inside block 0.
 				if midStepCC && (txNum+1)%stepSize == 0 && txNum != blockEndTxN {
-					_, err := domains.ComputeCommitment(ctx, rwTx, true, 0, txNum, "", nil)
-					require.NoError(t, err)
+					_, ierr := domains.ComputeCommitment(ctx, rwTx, true, 0, txNum, "", nil)
+					require.NoError(t, ierr)
 					require.NoError(t, domains.Flush(ctx, rwTx))
 				}
 			}
@@ -882,13 +882,13 @@ func runRecomputeVsSDCheck(t *testing.T, tc recomputeCheckCase) {
 		defer roTx.Rollback()
 
 		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-			it, err := roTx.Debug().HistoryKeyTxNumRange(d, int(baselineTxNum+1), int(tc.ToTxNum+1), order.Asc, -1)
-			require.NoError(t, err)
+			it, ierr := roTx.Debug().HistoryKeyTxNumRange(d, int(baselineTxNum+1), int(tc.ToTxNum+1), order.Asc, -1)
+			require.NoError(t, ierr)
 			seen := map[string]struct{}{}
 			occurrences := 0
 			for it.HasNext() {
-				k, _, err := it.Next()
-				require.NoError(t, err)
+				k, _, ierr := it.Next()
+				require.NoError(t, ierr)
 				seen[string(k)] = struct{}{}
 				occurrences++
 			}
