@@ -6901,12 +6901,14 @@ Returns traces matching given filter
    - `fromBlock`: `Quantity` or `Tag` - (optional) From this block.
    - `toBlock`: `Quantity` or `Tag` - (optional) To this block.
    - `fromAddress`: `Array` - (optional) Sent from these addresses.
-   - `toAddress`: `Address` - (optional) Sent to these addresses.
+   - `toAddress`: `Array` - (optional) Sent to these addresses.
    - `after`: `Quantity` - (optional) The offset trace number
    - `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
-   - `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
+   - `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list. Explicit `"intersection"` remains supported; other mode values return `-32602`.
 
    The `'pending'` tag is not supported for either block bound: `trace_filter` scans committed trace history, which has no pending block.
+
+   **Migration from the union default:** a query with both `fromAddress: [X]` and `toAddress: [X]` now selects calls from X to X. To keep selecting all activity involving X, add `mode: "union"`. One-sided queries remain restricted only by the populated list. `after` and `count` apply to the combined matching result, not separately to each list.
 
 ```js
 params: [{
