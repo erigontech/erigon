@@ -632,7 +632,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	/*
 	   	Address      common.Address  `json:"address"`
 	   	AccountProof []string        `json:"accountProof"`
-	   	Balance      *hexutil.Big    `json:"balance"`
+	   	Balance      *hexutil.U256    `json:"balance"`
 	   	CodeHash     common.Hash     `json:"codeHash"`
 	   	Nonce        hexutil.Uint64  `json:"nonce"`
 	   	StorageHash  common.Hash     `json:"storageHash"`
@@ -640,7 +640,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	   }
 	   type StorageResult struct {
 	   	Key   string       `json:"key"`
-	   	Value *hexutil.Big `json:"value"`
+	   	Value *hexutil.U256 `json:"value"`
 	   	Proof []string     `json:"proof"`
 	*/
 	equal := true

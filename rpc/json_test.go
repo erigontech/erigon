@@ -560,16 +560,12 @@ func TestResponseNilResultEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-type emptyFastJSON struct{}
-
-func (emptyFastJSON) MarshalFastJSON() ([]byte, error) { return nil, nil }
-
-func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
+func TestResponseEmptyStreamedEmitsNull(t *testing.T) {
 	var out bytes.Buffer
 	s := jsonstream.Get(&out)
 	defer jsonstream.Put(s)
 
-	respond(s, json.RawMessage(`7`), emptyFastJSON{})
+	respond(s, json.RawMessage(`7`), emptyStreamed{})
 	require.NoError(t, s.Flush())
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
@@ -675,7 +671,7 @@ func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
 
 	s2 := jsonstream.Get(&got)
 	respond(s2, id, res)
-	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
+	require.LessOrEqual(t, cap(s2.Buffer()), jsonstream.MaxPooledBufferSize(),
 		"the result grew the stream buffer past the pool limit")
 	_ = s2.Flush()
 

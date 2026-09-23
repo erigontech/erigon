@@ -536,18 +536,12 @@ type ExecutionWitnessResult struct {
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
-
-	// cachedJSON, when non-nil, is this result's pre-marshaled JSON. The eager
-	// witness cache stores a shell carrying only this, so a hit serves the bytes
-	// verbatim via MarshalFastJSONTo instead of re-marshaling the struct.
-	cachedJSON []byte
 }
 
-// MarshalFastJSONTo writes a cache shell's stored bytes verbatim, and a freshly built result
-// field by field, in the order and form encoding/json uses, so both paths agree.
+// MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
 func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if m.cachedJSON != nil {
-		s.WriteRawBytes(m.cachedJSON)
+	if m == nil {
+		s.WriteNil()
 		return nil
 	}
 	s.WriteObjectStart()
