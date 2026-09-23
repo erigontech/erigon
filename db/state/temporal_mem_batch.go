@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type dataWithTxNum struct {
@@ -164,6 +165,112 @@ func (sd *TemporalMemBatch) PutCommitmentBranchDiff(k string, v []byte, txNum ui
 	return sd.domainWriters[kv.CommitmentDomain].PutWithPrevDiff(kb, v, txNum, preval, diff)
 }
 
+func (sd *TemporalMemBatch) addPutMetrics(domain kv.Domain, puts int64, putKeySize, putValueSize int) {
+	sd.metrics.Lock()
+	defer sd.metrics.Unlock()
+	sd.metrics.CachePutCount += puts
+	sd.metrics.CachePutSize += putKeySize + putValueSize
+	sd.metrics.CachePutKeySize += putKeySize
+	sd.metrics.CachePutValueSize += putValueSize
+	if dm, ok := sd.metrics.Domains[domain]; ok {
+		dm.CachePutCount += puts
+		dm.CachePutSize += putKeySize + putValueSize
+		dm.CachePutKeySize += putKeySize
+		dm.CachePutValueSize += putValueSize
+		return
+	}
+	sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
+		CachePutCount:     puts,
+		CachePutSize:      putKeySize + putValueSize,
+		CachePutKeySize:   putKeySize,
+		CachePutValueSize: putValueSize,
+	}
+}
+
+func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
+	const domain = kv.CommitmentDomain
+	count, keyBytes := 0, 0
+	for _, part := range parts {
+		count += len(part)
+		for i := range part {
+			keyBytes += len(part[i].Key)
+		}
+	}
+	keys := make([]byte, 0, keyBytes)
+	for _, part := range parts {
+		for i := range part {
+			keys = append(keys, part[i].Key...)
+		}
+	}
+	versions := make([]dataWithTxNum, count)
+	step := kv.Step(txNum / sd.stepSize)
+	writer := sd.domainWriters[domain]
+	var puts int64
+	putKeySize, putValueSize := 0, 0
+
+	sd.latestStateLocks[domain].Lock()
+	latest := sd.domains[domain]
+	if count > 2*len(latest) {
+		grown := make(map[string][]dataWithTxNum, len(latest)+count)
+		maps.Copy(grown, latest)
+		latest = grown
+		sd.domains[domain] = latest
+	}
+	var err error
+	off, slot := 0, 0
+	for _, part := range parts {
+		for i := range part {
+			d := &part[i]
+			key := common.ToStringZeroCopy(keys[off : off+len(d.Key)])
+			off += len(d.Key)
+			if bytes.Equal(d.Prev, d.Data) {
+				continue
+			}
+			version := dataWithTxNum{data: d.Data, txNum: txNum}
+			sameTxNumUpdate := false
+			if old, ok := latest[key]; ok {
+				switch {
+				case old[len(old)-1].txNum == txNum:
+					sameTxNumUpdate = true
+					putValueSize += len(d.Data) - len(old[len(old)-1].data)
+					old[len(old)-1] = version
+				case sd.inMemHistoryReads:
+					latest[key] = append(old, version)
+					putValueSize += len(d.Data)
+				default:
+					putValueSize += len(d.Data) - len(old[len(old)-1].data)
+					old[0] = version
+					latest[key] = old[:1]
+				}
+			} else {
+				versions[slot] = version
+				latest[key] = versions[slot : slot+1 : slot+1]
+				slot++
+				putKeySize += len(key)
+				putValueSize += len(d.Data)
+			}
+			puts++
+			switch {
+			case sameTxNumUpdate:
+				err = writer.addValue(d.Key, d.Data, step)
+			case len(d.Data) == 0:
+				err = writer.DeleteWithPrevDiff(d.Key, txNum, d.Prev, diff)
+			default:
+				err = writer.PutWithPrevDiff(d.Key, d.Data, txNum, d.Prev, diff)
+			}
+			if err != nil {
+				break
+			}
+		}
+		if err != nil {
+			break
+		}
+	}
+	sd.latestStateLocks[domain].Unlock()
+	sd.addPutMetrics(domain, puts, putKeySize, putValueSize)
+	return err
+}
+
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, sameTxNumUpdate bool) error {
 	// A same-txNum update only rewrites the value: history and the unwind diff
 	// record the value as of BEFORE txNum, which the first write already did —
@@ -182,28 +289,6 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) (sameTxNumUpdate bool) {
 	sd.latestStateLocks[domain].Lock()
 	defer sd.latestStateLocks[domain].Unlock()
-
-	var updateMetrics = func(domain kv.Domain, putKeySize int, putValueSize int) {
-		sd.metrics.Lock()
-		defer sd.metrics.Unlock()
-		sd.metrics.CachePutCount++
-		sd.metrics.CachePutSize += putKeySize + putValueSize
-		sd.metrics.CachePutKeySize += putKeySize
-		sd.metrics.CachePutValueSize += putValueSize
-		if dm, ok := sd.metrics.Domains[domain]; ok {
-			dm.CachePutCount++
-			dm.CachePutSize += putKeySize + putValueSize
-			dm.CachePutKeySize += putKeySize
-			dm.CachePutValueSize += putValueSize
-		} else {
-			sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
-				CachePutCount:     1,
-				CachePutSize:      putKeySize + putValueSize,
-				CachePutKeySize:   putKeySize,
-				CachePutValueSize: putValueSize,
-			}
-		}
-	}
 
 	// Own the bytes now: val may alias a .kv mmap (the foreground exec tx's file generation)
 	// that a background merge can munmap while a concurrent commitment worker reads sd.mem.
@@ -232,7 +317,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 			putValueSize += len(val)
 		}
 
-		updateMetrics(domain, putKeySize, putValueSize)
+		sd.addPutMetrics(domain, 1, putKeySize, putValueSize)
 		return sameTxNumUpdate
 	}
 
@@ -257,7 +342,7 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 		putValueSize += len(val)
 	}
 
-	updateMetrics(domain, putKeySize, putValueSize)
+	sd.addPutMetrics(domain, 1, putKeySize, putValueSize)
 	return sameTxNumUpdate
 }
 

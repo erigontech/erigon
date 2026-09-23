@@ -541,10 +541,46 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 		return nil
 	}
 	defer upd.Clear()
+	if upd.Deltas != nil {
+		return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, nil)
+	}
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
 	}
 	return upd.Apply(putBranch)
+}
+
+func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
+	batch, ok := sd.mem.(commitmentBranchBatchWriter)
+	for _, part := range parts {
+		for i := range part {
+			d := &part[i]
+			if !ok {
+				if err := sd.DomainPutCommitmentDiff(roTx, d.Key, d.Data, txNum, d.Prev, diff); err != nil {
+					return err
+				}
+				continue
+			}
+			if d.Data == nil {
+				return errors.New("PutCommitmentBranches: trying to put nil value, not allowed")
+			}
+			if d.Prev != nil {
+				continue
+			}
+			prev, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, d.Key)
+			if err != nil {
+				return err
+			}
+			d.Prev = bytes.Clone(prev)
+			if d.Prev == nil {
+				d.Prev = []byte{}
+			}
+		}
+	}
+	if !ok {
+		return nil
+	}
+	return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
 }
 
 func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.TemporalTx, lockHeld bool) error {
@@ -749,6 +785,10 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 // shared, lockable target SetChangesetAccumulator installs. Non-commitment
 // domains fall back to the normal DomainPut/DomainDel — TrieContext.PutBranch
 // (the only real caller) only ever writes kv.CommitmentDomain.
+type commitmentBranchBatchWriter interface {
+	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
+}
+
 type commitmentDiffPutDel struct {
 	temporalPutDel
 	diff *kv.DomainDiff
