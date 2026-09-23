@@ -183,7 +183,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 			// Retrieve the trace result and compare against the expected.
 			res, err := tracer.GetResult()
 			if err != nil {
@@ -323,7 +323,7 @@ func TestCallTracerWithLogPositionAfterRevert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -417,7 +417,7 @@ func TestCallTracerWithLogPositionMixedSubcalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -525,7 +525,7 @@ func TestCallTracerWithLogPositionInCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -617,7 +617,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {

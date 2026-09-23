@@ -26,9 +26,28 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
+
+func TestTxEndV2Recording(t *testing.T) {
+	usage := mdgas.TxnGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
+	var calls int
+	recorder := &Tracer{wrapped: &tracers.Tracer{Hooks: &tracing.Hooks{
+		OnTxEndV2: func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+			require.Nil(t, receipt)
+			require.Equal(t, usage, txnGasUsage)
+			require.NoError(t, err)
+			calls++
+		},
+	}}}
+	recorder.Hooks().EmitTxEnd(nil, usage, nil)
+	require.Equal(t, 1, calls)
+	encoded, err := json.Marshal(recorder.traces)
+	require.NoError(t, err)
+	require.JSONEq(t, `{"traces":[{"onTxEndV2":{"gasUsed":{"BlockExecutionGasUsed":40,"BlockStateGasUsed":70,"GasRefund":10}}}]}`, string(encoded))
+}
 
 func TestFrameV2Recording(t *testing.T) {
 	initial := mdgas.MdGas{Execution: 100, State: 200}

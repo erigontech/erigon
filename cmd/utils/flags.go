@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -497,7 +498,7 @@ var (
 	}
 	WitnessCacheBlocksFlag = cli.UintFlag{
 		Name:  "witness.cache.blocks",
-		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is stored as serialized JSON so a hit is served verbatim; memory use is roughly this count times the per-block witness size.",
+		Usage: "Number of recent blocks whose legacy debug_executionWitness result is eagerly cached in memory, keyed by block hash in an LRU (embedded RPC only; requires either --prune.experimental.include-commitment-history for recompute-on-miss or --witness.cache.head-capture for cache-only serving on a minimal node). 0 disables the cache; capped at 96. Each witness is held as its built result and encoded when served; memory use is roughly this count times the per-block witness size.",
 		Value: 0,
 	}
 	WitnessCacheHeadCaptureFlag = cli.BoolFlag{
@@ -861,6 +862,11 @@ var (
 		Name:  "db.size.limit",
 		Usage: "Runtime limit of chaindata db size (can change at any time)",
 		Value: (1 * datasize.TB).String(),
+	}
+	DbSafeNoSyncFlag = cli.BoolFlag{
+		Name:  "db.safe.nosync",
+		Usage: "Let writes reach the disk in the background: after a power cut the node resumes from the last flushed point and re-syncs the seconds in between, and the database is intact either way. Disable to flush before every commit returns",
+		Value: true,
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
@@ -1595,6 +1601,9 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)
 	}
 	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
+	if ctx.IsSet(DbSafeNoSyncFlag.Name) { // otherwise the flag's default would undo MDBX_DURABLE
+		mdbx.DefaultSafeNoSync = ctx.Bool(DbSafeNoSyncFlag.Name)
+	}
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
 		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),

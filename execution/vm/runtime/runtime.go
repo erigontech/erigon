@@ -166,9 +166,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		cfg.Value,
 		false, /* bailout */
 	)
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(nil, err)
-	}
+	cfg.EVMConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 
 	return ret, cfg.State, err
 }
@@ -291,8 +289,8 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 		protocol.HandleRuntimeFailure(vmenv, vm.CALL, sender.Address(), address, input, gas, &leftOverGas, cfg.Value, err)
 	}
 
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, err)
+	if cfg.EVMConfig.Tracer.HasTxEndHook() {
+		cfg.EVMConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, mdgas.TxnGasUsage{}, err)
 	}
 
 	return ret, leftOverGas, err
