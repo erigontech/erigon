@@ -90,6 +90,39 @@ func hashFeed(items []feedEntry, workers int) {
 	wg.Wait()
 }
 
+func compareFeed(a, b feedEntry) int {
+	if c := bytes.Compare(a.hashedKey, b.hashedKey); c != 0 {
+		return c
+	}
+	return strings.Compare(a.plainKey, b.plainKey)
+}
+
+func sortFeed(items []feedEntry, workers int) []feedEntry {
+	if workers <= 1 || len(items) < hashParallelMin {
+		slices.SortFunc(items, compareFeed)
+		return items
+	}
+	bucket := func(e feedEntry) int { return int(e.hashedKey[0])<<4 | int(e.hashedKey[1]) }
+	var bounds [257]int
+	for i := range items {
+		bounds[bucket(items[i])+1]++
+	}
+	for b := 1; b < len(bounds); b++ {
+		bounds[b] += bounds[b-1]
+	}
+	next := bounds
+	sorted := make([]feedEntry, len(items))
+	for _, e := range items {
+		b := bucket(e)
+		sorted[next[b]] = e
+		next[b]++
+	}
+	parallelFor(256, workers, 1, func(b int) {
+		slices.SortFunc(sorted[bounds[b]:bounds[b+1]], compareFeed)
+	})
+	return sorted
+}
+
 func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, warmuper *commitment.Warmuper) ([]storageTask, []accountEntry, int, error) {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
@@ -106,12 +139,7 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 	}
 
 	hashFeed(items, workers)
-	slices.SortFunc(items, func(a, b feedEntry) int {
-		if c := bytes.Compare(a.hashedKey, b.hashedKey); c != 0 {
-			return c
-		}
-		return strings.Compare(a.plainKey, b.plainKey)
-	})
+	items = sortFeed(items, workers)
 
 	p := newPartitioner()
 	var prevKey []byte

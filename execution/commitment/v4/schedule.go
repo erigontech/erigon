@@ -161,7 +161,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 
 	accountResults := make([]accountResult, len(plans))
 	accountValues := make([]byte, accountLeafScratch*len(plans))
-	parallelFor(len(plans), workers, func(i int) {
+	parallelFor(len(plans), workers, 1024, func(i int) {
 		plan := plans[i]
 		accountResults[i].plan = plan
 		if plan.skip || plan.delete {
@@ -240,14 +240,13 @@ func (g graph) planAccounts(ctx commitment.PatriciaContext, accounts []accountEn
 	return root, plans, err
 }
 
-func parallelFor(n, workers int, fn func(i int)) {
-	const chunk = 1024
+func parallelFor(n, workers, chunk int, fn func(i int)) {
 	var next atomic.Int64
 	var wg sync.WaitGroup
 	for range min(workers, (n+chunk-1)/chunk) {
 		wg.Go(func() {
 			for {
-				lo := int(next.Add(chunk)) - chunk
+				lo := int(next.Add(int64(chunk))) - chunk
 				if lo >= n {
 					return
 				}
