@@ -677,6 +677,12 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 	}
 }
 
+func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(nil, &cltypes.BeaconBlock{}))
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(&cltypes.SignedBeaconBlock{}, &cltypes.BeaconBlock{}))
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), nil))
+}
+
 func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {
 	root := common.HexToHash("0x5678")
 	for _, test := range []struct {
