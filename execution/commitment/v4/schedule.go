@@ -130,6 +130,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		storageWorkers = workers * storageOversubscribe
 	}
 	storageRoots := make([][32]byte, len(storage))
+	accountFold := foldPlan{ctx: ctx, factory: factory, workers: storageWorkers}
 	if err := runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats); err != nil {
 		return [32]byte{}, err
 	}
@@ -153,7 +154,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	if err := g.materializeRootExtension(rawCtx, root); err != nil {
 		return [32]byte{}, err
 	}
-	plans, err := makeAccountPlans(rawCtx, g, root, accounts)
+	plans, err := makeAccountPlans(rawCtx, g, root, accounts, accountFold)
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -224,41 +225,120 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			return [32]byte{}, err
 		}
 	}
-	if err := g.persistGraph(rawCtx, root, foldPlan{ctx: ctx, factory: factory, workers: storageWorkers}); err != nil {
+	if err := g.persistGraph(rawCtx, root, accountFold); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
 }
 
-func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entries []accountEntry) ([]accountPlan, error) {
-	plans := make([]accountPlan, 0, len(entries))
-	for _, entry := range entries {
-		if len(entry.hashedKey) != 64 {
+func (g graph) accountPlanFor(ctx commitment.PatriciaContext, root *node, entry accountEntry) (accountPlan, error) {
+	oldValue, found := accountLeafAt(root, entry.hashedKey)
+	if !found && storedAccountPath(root, entry.hashedKey) {
+		if err := g.ensurePath(ctx, root, entry.hashedKey); err != nil {
+			return accountPlan{}, fmt.Errorf("%w: account path %x: %w", errPhaseBRecord, entry.hashedKey, err)
+		}
+		oldValue, found = accountLeafAt(root, entry.hashedKey)
+	}
+	plan := accountPlan{entry: entry, oldValue: oldValue, found: found}
+	switch {
+	case entry.update != nil && entry.update.Deleted():
+		plan.delete = found
+		plan.skip = !found
+	case !entry.storageDirty && (entry.update == nil || entry.update.Flags == 0):
+		plan.skip = true
+	case !found && entry.update != nil && entry.update.Flags == 0:
+		plan.skip = true
+	}
+	return plan, nil
+}
+
+func (g graph) ensureRootChildren(ctx commitment.PatriciaContext, root *node, nibs []int) error {
+	for _, nib := range nibs {
+		bit := uint16(1) << nib
+		if root.childMask&bit == 0 || root.leafMask&bit != 0 || root.child(nib) != nil {
+			continue
+		}
+		if !root.hasChildHash(nib) {
+			return g.errNode
+		}
+		childPath := append(append([]byte(nil), root.path...), byte(nib))
+		childPath = append(childPath, root.childExtAt(nib)...)
+		child, err := g.unfoldChild(ctx, childPath)
+		if err != nil {
+			return err
+		}
+		root.setChild(nib, child)
+	}
+	return nil
+}
+
+func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entries []accountEntry, plan foldPlan) ([]accountPlan, error) {
+	for i := range entries {
+		if len(entries[i].hashedKey) != 64 {
 			return nil, errPhaseBKey
 		}
-		for _, nib := range entry.hashedKey {
+		for _, nib := range entries[i].hashedKey {
 			if nib > 0x0f {
 				return nil, errPhaseBKey
 			}
 		}
-		oldValue, found := accountLeafAt(root, entry.hashedKey)
-		if !found && storedAccountPath(root, entry.hashedKey) {
-			if err := g.ensurePath(ctx, root, entry.hashedKey); err != nil {
-				return nil, fmt.Errorf("%w: account path %x: %w", errPhaseBRecord, entry.hashedKey, err)
+	}
+
+	plans := make([]accountPlan, len(entries))
+	groups := make(map[int][]int, 16)
+	for i := range entries {
+		nib := int(entries[i].hashedKey[0])
+		groups[nib] = append(groups[nib], i)
+	}
+
+	if !plan.parallel() || len(root.path) != 0 || len(groups) < 2 {
+		for i := range entries {
+			p, err := g.accountPlanFor(ctx, root, entries[i])
+			if err != nil {
+				return nil, err
 			}
-			oldValue, found = accountLeafAt(root, entry.hashedKey)
+			plans[i] = p
 		}
-		plan := accountPlan{entry: entry, oldValue: oldValue, found: found}
-		switch {
-		case entry.update != nil && entry.update.Deleted():
-			plan.delete = found
-			plan.skip = !found
-		case !entry.storageDirty && (entry.update == nil || entry.update.Flags == 0):
-			plan.skip = true
-		case !found && entry.update != nil && entry.update.Flags == 0:
-			plan.skip = true
-		}
-		plans = append(plans, plan)
+		return plans, nil
+	}
+
+	nibs := make([]int, 0, len(groups))
+	for nib := range groups {
+		nibs = append(nibs, nib)
+	}
+	if err := g.ensureRootChildren(ctx, root, nibs); err != nil {
+		return nil, err
+	}
+
+	unfolded := make([]keySet, len(nibs))
+	eg, egCtx := errgroup.WithContext(plan.ctx)
+	eg.SetLimit(min(plan.workers, len(nibs)))
+	for k, nib := range nibs {
+		eg.Go(func() error {
+			workerCtx, cleanup := plan.factory(egCtx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if workerCtx == nil {
+				return g.errNode
+			}
+			wg := g
+			wg.before = &unfolded[k]
+			for _, i := range groups[nib] {
+				p, err := wg.accountPlanFor(workerCtx, root, entries[i])
+				if err != nil {
+					return err
+				}
+				plans[i] = p
+			}
+			return nil
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return nil, err
+	}
+	for k := range unfolded {
+		g.before.addAll(&unfolded[k])
 	}
 	return plans, nil
 }

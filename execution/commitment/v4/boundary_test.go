@@ -46,10 +46,10 @@ func TestPlanesRejectNonNibblePaths(t *testing.T) {
 		g := accountGraph(before)
 		root := fork(nil)
 		root.plane = planeAccount
-		_, err := makeAccountPlans(ctx, g, root, []accountEntry{{hashedKey: bad}})
+		_, err := makeAccountPlans(ctx, g, root, []accountEntry{{hashedKey: bad}}, foldPlan{})
 		require.ErrorIs(t, err, errPhaseBKey)
 
-		_, err = makeAccountPlans(ctx, g, root, []accountEntry{{hashedKey: good}})
+		_, err = makeAccountPlans(ctx, g, root, []accountEntry{{hashedKey: good}}, foldPlan{})
 		require.NoError(t, err)
 	})
 }
