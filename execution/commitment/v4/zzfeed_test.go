@@ -1,6 +1,7 @@
 package v4
 
 import (
+	"bytes"
 	"context"
 	"runtime"
 	"slices"
@@ -149,6 +150,68 @@ func TestSortFeedMatchesSerialSort(t *testing.T) {
 	for i := range want {
 		if got[i].plainKey != want[i].plainKey {
 			t.Fatalf("item %d: got %x, want %x", i, got[i].plainKey, want[i].plainKey)
+		}
+	}
+}
+
+func TestPartitionFeedMatchesSerialPartition(t *testing.T) {
+	var items []feedEntry
+	for i := range hashParallelMin {
+		addr := string(benchAddr(i))
+		update := &commitment.Update{Flags: commitment.BalanceUpdate}
+		if i%7 == 0 {
+			update = &commitment.Update{Flags: commitment.DeleteUpdate}
+		}
+		items = append(items, feedEntry{plainKey: addr, update: update})
+		for j := range i % 4 {
+			items = append(items, feedEntry{plainKey: addr + string(benchSlot(i*8+j)), update: &commitment.Update{Flags: commitment.StorageUpdate}})
+		}
+	}
+	hashFeed(items, 1)
+
+	serial := newPartitioner()
+	for _, e := range sortFeed(slices.Clone(items), 1) {
+		if err := serial.add(e.hashedKey, []byte(e.plainKey), e.update); err != nil {
+			t.Fatal(err)
+		}
+	}
+	wantStorage, wantAccounts := serial.done()
+
+	gotStorage, gotAccounts, seen, err := partitionFeed(slices.Clone(items), 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if seen != serial.seen {
+		t.Fatalf("seen %d, want %d", seen, serial.seen)
+	}
+	if len(gotAccounts) != len(wantAccounts) {
+		t.Fatalf("accounts %d, want %d", len(gotAccounts), len(wantAccounts))
+	}
+	for i := range wantAccounts {
+		if !bytes.Equal(gotAccounts[i].hashedKey, wantAccounts[i].hashedKey) || gotAccounts[i].storageDirty != wantAccounts[i].storageDirty || gotAccounts[i].update != wantAccounts[i].update {
+			t.Fatalf("account %d differs", i)
+		}
+	}
+	byAddr := func(tasks []storageTask) map[[32]byte]storageTask {
+		out := make(map[[32]byte]storageTask, len(tasks))
+		for _, task := range tasks {
+			out[task.addrHash] = task
+		}
+		return out
+	}
+	want, got := byAddr(wantStorage), byAddr(gotStorage)
+	if len(got) != len(want) || len(gotStorage) != len(wantStorage) {
+		t.Fatalf("storage tasks %d, want %d", len(gotStorage), len(wantStorage))
+	}
+	for addr, w := range want {
+		g := got[addr]
+		if g.wipe != w.wipe || len(g.entries) != len(w.entries) {
+			t.Fatalf("storage task %x differs", addr)
+		}
+		for i := range w.entries {
+			if !bytes.Equal(g.entries[i].path, w.entries[i].path) {
+				t.Fatalf("storage task %x entry %d differs", addr, i)
+			}
 		}
 	}
 }

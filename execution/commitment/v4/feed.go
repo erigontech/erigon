@@ -97,11 +97,7 @@ func compareFeed(a, b feedEntry) int {
 	return strings.Compare(a.plainKey, b.plainKey)
 }
 
-func sortFeed(items []feedEntry, workers int) []feedEntry {
-	if workers <= 1 || len(items) < hashParallelMin {
-		slices.SortFunc(items, compareFeed)
-		return items
-	}
+func bucketFeed(items []feedEntry) ([]feedEntry, [257]int) {
 	bucket := func(e feedEntry) int { return int(e.hashedKey[0])<<4 | int(e.hashedKey[1]) }
 	var bounds [257]int
 	for i := range items {
@@ -117,10 +113,50 @@ func sortFeed(items []feedEntry, workers int) []feedEntry {
 		sorted[next[b]] = e
 		next[b]++
 	}
+	return sorted, bounds
+}
+
+func sortFeed(items []feedEntry, workers int) []feedEntry {
+	if workers <= 1 || len(items) < hashParallelMin {
+		slices.SortFunc(items, compareFeed)
+		return items
+	}
+	sorted, bounds := bucketFeed(items)
 	parallelFor(256, workers, 1, func(b int) {
 		slices.SortFunc(sorted[bounds[b]:bounds[b+1]], compareFeed)
 	})
 	return sorted
+}
+
+func partitionFeed(items []feedEntry, workers int) ([]storageTask, []accountEntry, int, error) {
+	sorted, bounds := bucketFeed(items)
+	var parts [256]*partitioner
+	var errs [256]error
+	parallelFor(256, workers, 1, func(b int) {
+		bucket := sorted[bounds[b]:bounds[b+1]]
+		slices.SortFunc(bucket, compareFeed)
+		p := newPartitioner()
+		for i := range bucket {
+			if err := p.add(bucket[i].hashedKey, common.ToBytesZeroCopy(bucket[i].plainKey), bucket[i].update); err != nil {
+				errs[b] = err
+				return
+			}
+		}
+		parts[b] = p
+	})
+	var storage []storageTask
+	var accounts []accountEntry
+	seen := 0
+	for b := range parts {
+		if errs[b] != nil {
+			return nil, nil, 0, errs[b]
+		}
+		s, a := parts[b].done()
+		storage = append(storage, s...)
+		accounts = append(accounts, a...)
+		seen += parts[b].seen
+	}
+	return storage, accounts, seen, nil
 }
 
 func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, warmuper *commitment.Warmuper) ([]storageTask, []accountEntry, int, error) {
@@ -139,6 +175,9 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 	}
 
 	hashFeed(items, workers)
+	if warmuper == nil && workers > 1 && len(items) >= hashParallelMin {
+		return partitionFeed(items, workers)
+	}
 	items = sortFeed(items, workers)
 
 	p := newPartitioner()

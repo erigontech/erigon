@@ -171,8 +171,10 @@ func (t *Trie) TakeDeferredUpdates() func(func(prefix, data, prevData []byte) er
 	t.deferred = nil
 	return func(putBranch func(prefix, data, prevData []byte) error) error {
 		for _, deltas := range parts {
-			if err := applyDeltas(deltas, putBranch); err != nil {
-				return err
+			for _, d := range deltas {
+				if err := putBranch(d.key, d.data, d.prev); err != nil {
+					return err
+				}
 			}
 		}
 		return nil
