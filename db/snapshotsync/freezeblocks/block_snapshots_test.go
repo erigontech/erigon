@@ -19,6 +19,7 @@ package freezeblocks
 import (
 	"context"
 	"errors"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -548,7 +549,9 @@ func TestDumpBlocks_FullyCoveredChunkProducesNothing(t *testing.T) {
 	name := snaptype.FileNameV4(snaptype2.Headers.Versions().Current, 3_491_000, 3_492_000, "headers") + ".seg"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o644))
 
-	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	// A temporal db: block reads go through a tx that pins a block-files
+	// view, which BlockReader now requires.
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
 		// Past the chunk end so DumpBlocks' head-bound guard passes.
 		return stages.SaveStageProgress(tx, stages.Bodies, 3_500_000)

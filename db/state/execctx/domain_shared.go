@@ -850,8 +850,10 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
 	sd.mem.Unwind(txNumUnwindTo, changeset)
-	sd.aggregatorUnwind(txNumUnwindTo)
 	if !sd.localCacheUnwind {
+		// Aggregator-scope caches are shared, so a candidate SD unwinding
+		// only its own view must leave them alone.
+		sd.aggregatorUnwind(txNumUnwindTo)
 		sd.invalidateCaches(txNumUnwindTo)
 		if sd.branchCache != nil && changeset != nil {
 			for _, diff := range changeset[kv.CommitmentDomain] {

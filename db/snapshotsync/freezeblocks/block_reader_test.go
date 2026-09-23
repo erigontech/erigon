@@ -123,9 +123,9 @@ func TestBlockRetireSkipsOnGap(t *testing.T) {
 	logger := log.New()
 
 	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
@@ -162,9 +162,9 @@ func TestBlockRetireContiguous(t *testing.T) {
 	logger := log.New()
 
 	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(999), snapshots.SegmentsMax())
@@ -202,9 +202,9 @@ func TestBlockRetireFallback(t *testing.T) {
 	logger := log.New()
 
 	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
 	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
 	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
@@ -213,7 +213,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(1999), snapshots.SegmentsMax())
 
-	requireSegmentFilesExist(t, dirs.Snap, ver, 1, 1000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, dirs.Snap, ver, 0, 1000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
 	requireSegmentFilesExist(t, dirs.Snap, ver, 1000, 2000, snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions)
 
 	rwTx, err := db.BeginRw(t.Context())
@@ -246,7 +246,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	defer reopenedSnapshots.Close() // fallback safety guard in case of early test failure
 	require.NoError(t, reopenedSnapshots.OpenFolder())
 	require.Equal(t, uint64(1999), reopenedSnapshots.SegmentsMax())
-	requireSegmentFilesExist(t, dirs.Snap, ver, 1, 1000, snaptype2.Enums.Transactions)
+	requireSegmentFilesExist(t, dirs.Snap, ver, 0, 1000, snaptype2.Enums.Transactions)
 	requireSegmentFilesExist(t, dirs.Snap, ver, 1000, 2000, snaptype2.Enums.Transactions)
 
 	blockReader = NewBlockReader(reopenedSnapshots)
@@ -297,7 +297,7 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 
 	// Create indexed subsegments for all types.
 	for _, enum := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies, snaptype2.Enums.Transactions} {
-		createTestSegmentFile(t, 1, 1000, enum, dirs.Snap, ver, logger)
+		createTestSegmentFile(t, 0, 1000, enum, dirs.Snap, ver, logger)
 		createTestSegmentFile(t, 1000, 2000, enum, dirs.Snap, ver, logger)
 	}
 
@@ -346,9 +346,9 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	// Snapshot segments (blocks 1..1000) must exist before the temporal DB opens
 	// them, so its block-files view (shared with the reader) includes them.
 	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
 	db := temporaltest.NewTestDB(t, dirs)
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
@@ -537,8 +537,10 @@ func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	// Use the same from/to range as the other snapshot tests so OpenFolder
 	// recognises the segment (naming convention: v1.0-000000-000001-headers.seg).
+	// The range must span a whole 1000 or FileName emits the literal
+	// nine-digit form instead, which is a different segment entirely.
 	const (
-		from     = uint64(1)
+		from     = uint64(0)
 		to       = uint64(1000)
 		blockNum = from // first block in the segment; OrdinalLookup(from-from)=OrdinalLookup(0)
 	)
@@ -636,9 +638,9 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 
 	// Create and open header/body/tx segments after the tx began.
 	ver := version.V1_0
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
-	createTestSegmentFile(t, 1, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Headers, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Bodies, dirs.Snap, ver, logger)
+	createTestSegmentFile(t, 0, 1000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 	require.NoError(t, snapshots.OpenFolder())
 	require.Equal(t, uint64(999), snapshots.SegmentsMax())
 

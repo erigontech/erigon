@@ -699,6 +699,9 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
+	// Files the downloader landed while the aggregator was unaware only
+	// reach the storage Inventory through this notification.
+	a.notifyOpenedFiles()
 	return a.checkFilesDBGap(db)
 }
 

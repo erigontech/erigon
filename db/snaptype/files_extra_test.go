@@ -158,12 +158,19 @@ func TestParseFileName_Invalid(t *testing.T) {
 func TestParseDirAndListings(t *testing.T) {
 	t.Parallel()
 	d := t.TempDir()
+	// ParseDir only reports files whose snaptype resolves — it feeds
+	// FilesWithExt/Segments, which are block-file listings. A state .kv has
+	// no registered Type and is deliberately skipped.
+	require.NoError(t, os.WriteFile(filepath.Join(d, "v1.0-000000-000001-headers.seg"), []byte("data"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(d, "v2.0-accounts.2519-2520.kv"), []byte("data"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(d, "leftover.tmp"), []byte("x"), 0o644))
 
 	files, err := ParseDir(d)
 	require.NoError(t, err)
 	require.NotEmpty(t, files)
+	for _, f := range files {
+		require.NotNil(t, f.Type, "ParseDir must not report a file whose type does not resolve")
+	}
 
 	// Non-existent dir is not an error — returns an empty listing.
 	missing, err := ParseDir(filepath.Join(d, "nope"))
