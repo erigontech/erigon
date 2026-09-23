@@ -864,7 +864,7 @@ var (
 	}
 	DbSyncDurableFlag = cli.BoolFlag{
 		Name:  "db.sync.durable",
-		Usage: "Flush on every commit, so a power cut loses nothing. By default the flush is deferred until 8MB is unflushed, at a fraction of the fsyncs",
+		Usage: "Flush chaindata on every commit, so a power cut loses nothing. By default the flush is deferred, bounded by mdbx.DefaultSyncBytes and one second",
 		Value: false,
 	}
 	DbWriteMapFlag = cli.BoolFlag{

@@ -354,6 +354,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 		switch label {
 		case dbcfg.ChainDB:
+			if !config.MdbxSyncDurable {
+				opts = opts.DeferredSync()
+			}
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)
 			}
@@ -364,9 +367,6 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
-			if config.MdbxSyncDurable {
-				opts = opts.Durable()
-			}
 		case dbcfg.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)

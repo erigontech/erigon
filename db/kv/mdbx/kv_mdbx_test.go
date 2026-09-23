@@ -1209,19 +1209,18 @@ func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	require.NotEqual(t, a.CHandle(), b.CHandle(), "two live read txns must never share one handle")
 }
 
-// Databases defer their flush by default: mdbx writes a steady commit-point once enough is
-// unflushed, and the background goroutine is what keeps that off the committing thread -
-// mdbx checks the threshold only inside a commit.
-func TestDeferredSyncFlushesWithoutFurtherCommits(t *testing.T) {
-	val := make([]byte, 4096)
-	writeMB := func(db kv.RwDB, mb int) {
+// A deferred flush leaves data unflushed after a commit, and mdbx only tests its deadline
+// while committing - so without the background goroutine, data written and then left alone
+// stays unflushed for good.
+func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
+	open := func(o mdbx.MdbxOpts) kv.RwDB {
+		db := o.Path(t.TempDir()).WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+		t.Cleanup(db.Close)
+		return db
+	}
+	writeOne := func(db kv.RwDB) {
 		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
-			for i := range mb * 256 {
-				if err := tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i)), val); err != nil {
-					return err
-				}
-			}
-			return nil
+			return tx.Put(kv.HeaderTD, []byte("k"), make([]byte, 4096))
 		}))
 	}
 	unsynced := func(db kv.RwDB) uint {
@@ -1229,21 +1228,14 @@ func TestDeferredSyncFlushesWithoutFurtherCommits(t *testing.T) {
 		require.NoError(t, err)
 		return info.UnsyncedBytes
 	}
-	open := func(o mdbx.MdbxOpts) kv.RwDB {
-		db := o.Path(t.TempDir()).WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
-		t.Cleanup(db.Close)
-		return db
-	}
 
-	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()))
-	writeMB(deferred, 4) // under the threshold: the commit itself does not flush
-	require.NotZero(t, unsynced(deferred))
-	writeMB(deferred, 8) // over it: the background flush picks it up without another commit
-	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 10*time.Second, 20*time.Millisecond,
+	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).DeferredSync().SyncPeriod(50 * time.Millisecond).SyncPoll(10 * time.Millisecond))
+	writeOne(deferred) // far below the byte threshold: only the deadline can flush this
+	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 5*time.Second, 10*time.Millisecond,
 		"the background flush never ran")
 
-	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).Durable())
-	writeMB(durable, 4)
+	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()))
+	writeOne(durable)
 	require.Zero(t, unsynced(durable), "a durable database flushes within the commit")
 }
 
@@ -1253,7 +1245,7 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 	val := make([]byte, 4096)
 	for range 20 {
 		db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
-			SyncPoll(time.Millisecond).
+			DeferredSync().SyncPoll(time.Millisecond).
 			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 		var wg sync.WaitGroup
 		stop := make(chan struct{})
@@ -1274,8 +1266,8 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 			}
 		}()
 		time.Sleep(5 * time.Millisecond)
+		db.Close() // while the writer is still running
 		close(stop)
 		wg.Wait()
-		db.Close()
 	}
 }
