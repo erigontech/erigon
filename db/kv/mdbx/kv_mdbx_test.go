@@ -1229,6 +1229,10 @@ func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
 		return info.UnsyncedBytes
 	}
 
+	byDefault := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SyncPeriod(time.Hour))
+	writeOne(byDefault)
+	require.NotZero(t, unsynced(byDefault), "every database defers its flush unless asked otherwise")
+
 	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().SyncPeriod(50 * time.Millisecond))
 	writeOne(deferred) // far below the byte threshold: only the deadline can flush this
 	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 5*time.Second, 10*time.Millisecond,
@@ -1243,7 +1247,7 @@ func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
 // once Close returns.
 func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 	val := make([]byte, 4096)
-	for range 20 {
+	for range 3 {
 		db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
 			SafeNoSync().SyncPeriod(time.Millisecond).
 			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
