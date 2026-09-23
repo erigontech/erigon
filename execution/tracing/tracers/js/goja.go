@@ -297,6 +297,9 @@ func (t *jsTracer) onStart(from accounts.Address, to accounts.Address, create bo
 	toValue := to.Value()
 	t.ctx["to"] = t.vm.ToValue(toValue[:])
 	t.ctx["input"] = t.vm.ToValue(input)
+	if gas.State != 0 {
+		t.ctx["stateGas"] = t.vm.ToValue(gas.State)
+	}
 	valueBig, err := t.toBig(t.vm, value.ToBig().String())
 	if err != nil {
 		t.err = err
@@ -370,7 +373,7 @@ func (t *jsTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to acco
 	t.frame.from = from
 	t.frame.to = to
 	t.frame.input = bytes.Clone(input)
-	t.frame.gas = uint(gas.Execution)
+	t.frame.gas = gas
 	t.frame.value = nil
 	t.frame.value = value.ToBig()
 
@@ -395,7 +398,7 @@ func (t *jsTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, 
 		return
 	}
 
-	t.frameResult.gasUsed = uint(gasUsed.Execution)
+	t.frameResult.gasUsed = gasUsed
 	t.frameResult.output = bytes.Clone(output)
 	t.frameResult.err = err
 
@@ -888,7 +891,7 @@ type callframe struct {
 	from  accounts.Address
 	to    accounts.Address
 	input []byte
-	gas   uint
+	gas   mdgas.MdGas
 	value *big.Int
 }
 
@@ -926,8 +929,12 @@ func (f *callframe) GetInput() goja.Value {
 	return res
 }
 
-func (f *callframe) GetGas() uint {
-	return f.gas
+func (f *callframe) GetGas() uint64 {
+	return f.gas.Execution
+}
+
+func (f *callframe) GetStateGas() uint64 {
+	return f.gas.State
 }
 
 func (f *callframe) GetValue() goja.Value {
@@ -949,6 +956,7 @@ func (f *callframe) setupObject() *goja.Object {
 	_ = o.Set("getTo", f.vm.ToValue(f.GetTo))
 	_ = o.Set("getInput", f.vm.ToValue(f.GetInput))
 	_ = o.Set("getGas", f.vm.ToValue(f.GetGas))
+	_ = o.Set("getStateGas", f.vm.ToValue(f.GetStateGas))
 	_ = o.Set("getValue", f.vm.ToValue(f.GetValue))
 	return o
 }
@@ -957,13 +965,17 @@ type callframeResult struct {
 	vm    *goja.Runtime
 	toBuf toBufFn
 
-	gasUsed uint
+	gasUsed mdgas.MdGasUsage
 	output  []byte
 	err     error
 }
 
-func (r *callframeResult) GetGasUsed() uint {
-	return r.gasUsed
+func (r *callframeResult) GetGasUsed() uint64 {
+	return r.gasUsed.Execution
+}
+
+func (r *callframeResult) GetStateGasUsed() int64 {
+	return r.gasUsed.State
 }
 
 func (r *callframeResult) GetOutput() goja.Value {
@@ -985,6 +997,7 @@ func (r *callframeResult) GetError() goja.Value {
 func (r *callframeResult) setupObject() *goja.Object {
 	o := r.vm.NewObject()
 	_ = o.Set("getGasUsed", r.vm.ToValue(r.GetGasUsed))
+	_ = o.Set("getStateGasUsed", r.vm.ToValue(r.GetStateGasUsed))
 	_ = o.Set("getOutput", r.vm.ToValue(r.GetOutput))
 	_ = o.Set("getError", r.vm.ToValue(r.GetError))
 	return o
@@ -1006,13 +1019,13 @@ type steplog struct {
 	err    error
 }
 
-func (l *steplog) GetPC() uint64                { return l.pc }
-func (l *steplog) GetGas() uint64               { return l.gas.Execution }
-func (l *steplog) GetCost() uint64              { return l.cost.Execution }
-func (l *steplog) GetStateGasCost() uint64      { return l.cost.State }
-func (l *steplog) GetStateGasReservoir() uint64 { return l.gas.State }
-func (l *steplog) GetDepth() int                { return l.depth }
-func (l *steplog) GetRefund() uint64            { return l.refund }
+func (l *steplog) GetPC() uint64           { return l.pc }
+func (l *steplog) GetGas() uint64          { return l.gas.Execution }
+func (l *steplog) GetStateGas() uint64     { return l.gas.State }
+func (l *steplog) GetCost() uint64         { return l.cost.Execution }
+func (l *steplog) GetStateGasCost() uint64 { return l.cost.State }
+func (l *steplog) GetDepth() int           { return l.depth }
+func (l *steplog) GetRefund() uint64       { return l.refund }
 
 func (l *steplog) GetError() goja.Value {
 	if l.err != nil {
@@ -1026,9 +1039,9 @@ func (l *steplog) setupObject() *goja.Object {
 	// Setup basic fields.
 	_ = o.Set("getPC", l.vm.ToValue(l.GetPC))
 	_ = o.Set("getGas", l.vm.ToValue(l.GetGas))
+	_ = o.Set("getStateGas", l.vm.ToValue(l.GetStateGas))
 	_ = o.Set("getCost", l.vm.ToValue(l.GetCost))
 	_ = o.Set("getStateGasCost", l.vm.ToValue(l.GetStateGasCost))
-	_ = o.Set("getStateGasReservoir", l.vm.ToValue(l.GetStateGasReservoir))
 	_ = o.Set("getDepth", l.vm.ToValue(l.GetDepth))
 	_ = o.Set("getRefund", l.vm.ToValue(l.GetRefund))
 	_ = o.Set("getError", l.vm.ToValue(l.GetError))

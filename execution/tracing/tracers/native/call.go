@@ -54,9 +54,10 @@ type callFrame struct {
 	Type           vm.OpCode       `json:"-"`
 	From           common.Address  `json:"from"`
 	Gas            hexutil.Uint64  `json:"gas"`
-	GasUsed        hexutil.Uint64  `json:"gasUsed"`
-	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty"`
-	StateGasUsed   *hexutil.Uint64 `json:"stateGasUsed,omitempty"`
+	StateGas       hexutil.Uint64  `json:"stateGasReservoir,omitempty"`
+	GasUsed        hexutil.Uint64  `json:"gasUsed"`                  // root frame: receipt gas after refund and floor; child frame: execution gas.
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty"` // amsterdam root frame: execution block contribution before refunds, with calldata floor.
+	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed,omitempty"`   // amsterdam root frame: nonnegative block contribution; child frame: signed net state usage.
 	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty"`
 	To             *common.Address `json:"to,omitempty"`
 	Input          hexutil.Bytes   `json:"input"`
@@ -168,10 +169,11 @@ func (t *callTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to ac
 		toValue = &v
 	}
 	call := callFrame{
-		From:  from.Value(),
-		To:    toValue,
-		Input: bytes.Clone(input),
-		Gas:   hexutil.Uint64(gas.Execution),
+		From:     from.Value(),
+		To:       toValue,
+		Input:    bytes.Clone(input),
+		Gas:      hexutil.Uint64(gas.Execution),
+		StateGas: hexutil.Uint64(gas.State),
 	}
 
 	call.setType(vm.OpCode(typ))
@@ -216,6 +218,9 @@ func (t *callTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage
 	size -= 1
 
 	call.GasUsed = hexutil.Uint64(gasUsed.Execution)
+	if t.isAmsterdam {
+		call.StateGasUsed = (*hexutil.Int64)(&gasUsed.State)
+	}
 	call.processOutput(output, err)
 	t.callstack[size-1].Calls = append(t.callstack[size-1].Calls, call)
 }
@@ -247,7 +252,8 @@ func (t *callTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasU
 	t.callstack[0].GasUsed = hexutil.Uint64(receipt.GasUsed)
 	if t.isAmsterdam {
 		t.callstack[0].RegularGasUsed = toHexUint64Ptr(txnGasUsage.BlockExecutionGasUsed)
-		t.callstack[0].StateGasUsed = toHexUint64Ptr(txnGasUsage.BlockStateGasUsed)
+		stateGasUsed := hexutil.Int64(txnGasUsage.BlockStateGasUsed)
+		t.callstack[0].StateGasUsed = &stateGasUsed
 		t.callstack[0].GasRefund = toHexUint64Ptr(txnGasUsage.GasRefund)
 	}
 	if t.config.WithLog {

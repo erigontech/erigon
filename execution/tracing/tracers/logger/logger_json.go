@@ -38,20 +38,20 @@ import (
 // here rather than on StructLog so that encoding stays off the json.Marshaler
 // path, which re-scans and copies every entry.
 type jsonStructLog struct {
-	Pc                uint64              `json:"pc"`
-	Op                vm.OpCode           `json:"op"`
-	Gas               math.HexOrDecimal64 `json:"gas"`
-	GasCost           math.HexOrDecimal64 `json:"gasCost"`
-	StateGasCost      uint64              `json:"stateGasCost,omitempty"`
-	StateGasReservoir uint64              `json:"stateGasReservoir,omitempty"`
-	Memory            hexutil.Bytes       `json:"memory"`
-	MemorySize        int                 `json:"memSize"`
-	Stack             []hexutil.U256      `json:"stack"`
-	ReturnData        hexutil.Bytes       `json:"returnData"`
-	Depth             int                 `json:"depth"`
-	RefundCounter     uint64              `json:"refund"`
-	OpName            string              `json:"opName"`
-	ErrorString       string              `json:"error,omitempty"`
+	Pc            uint64              `json:"pc"`
+	Op            vm.OpCode           `json:"op"`
+	Gas           math.HexOrDecimal64 `json:"gas"`
+	StateGas      uint64              `json:"stateGasReservoir,omitempty"`
+	GasCost       math.HexOrDecimal64 `json:"gasCost"`
+	StateGasCost  uint64              `json:"stateGasCost,omitempty"`
+	Memory        hexutil.Bytes       `json:"memory"`
+	MemorySize    int                 `json:"memSize"`
+	Stack         []hexutil.U256      `json:"stack"`
+	ReturnData    hexutil.Bytes       `json:"returnData"`
+	Depth         int                 `json:"depth"`
+	RefundCounter uint64              `json:"refund"`
+	OpName        string              `json:"opName"`
+	ErrorString   string              `json:"error,omitempty"`
 }
 
 type JSONLogger struct {
@@ -63,7 +63,7 @@ type JSONLogger struct {
 // NewJSONLogger creates a new EVM tracer that prints execution steps as JSON objects
 // into the provided stream.
 func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
-	l := &JSONLogger{json.NewEncoder(writer), cfg, nil}
+	l := &JSONLogger{encoder: json.NewEncoder(writer), cfg: cfg}
 	if l.cfg == nil {
 		l.cfg = &LogConfig{}
 	}
@@ -97,16 +97,16 @@ func (l *JSONLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas, scop
 	op := vm.OpCode(typ)
 
 	log := jsonStructLog{
-		Pc:                pc,
-		Op:                op,
-		Gas:               math.HexOrDecimal64(gas.Execution),
-		GasCost:           math.HexOrDecimal64(cost.Execution),
-		StateGasCost:      cost.State,
-		StateGasReservoir: gas.State,
-		MemorySize:        len(memory),
-		Depth:             depth,
-		RefundCounter:     l.env.IntraBlockState.GetRefund(),
-		OpName:            op.String(),
+		Pc:            pc,
+		Op:            op,
+		Gas:           math.HexOrDecimal64(gas.Execution),
+		GasCost:       math.HexOrDecimal64(cost.Execution),
+		StateGasCost:  cost.State,
+		StateGas:      gas.State,
+		MemorySize:    len(memory),
+		Depth:         depth,
+		RefundCounter: l.env.IntraBlockState.GetRefund(),
+		OpName:        op.String(),
 	}
 	if err != nil {
 		log.ErrorString = err.Error()
@@ -136,13 +136,17 @@ func (l *JSONLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage
 	}
 
 	type endLog struct {
-		Output  string              `json:"output"`
-		GasUsed math.HexOrDecimal64 `json:"gasUsed"`
-		Err     string              `json:"error,omitempty"`
+		Output       string              `json:"output"`
+		GasUsed      math.HexOrDecimal64 `json:"gasUsed"`                // root frame execution gas.
+		StateGasUsed *int64              `json:"stateGasUsed,omitempty"` // amsterdam: signed net root frame state usage.
+		Err          string              `json:"error,omitempty"`
 	}
-	var errMsg string
+	log := endLog{Output: common.Bytes2Hex(output), GasUsed: math.HexOrDecimal64(gasUsed.Execution)}
+	if l.env.Rules.IsAmsterdam {
+		log.StateGasUsed = &gasUsed.State
+	}
 	if err != nil {
-		errMsg = err.Error()
+		log.Err = err.Error()
 	}
-	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed.Execution), errMsg}) //nolint:errchkjson
+	_ = l.encoder.Encode(log) //nolint:errchkjson
 }

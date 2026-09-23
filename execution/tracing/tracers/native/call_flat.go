@@ -82,6 +82,7 @@ type flatCallAction struct {
 	CreationMethod string          `json:"creationMethod,omitempty"`
 	From           *common.Address `json:"from,omitempty"`
 	Gas            *hexutil.Uint64 `json:"gas,omitempty"`
+	StateGas       hexutil.Uint64  `json:"stateGasReservoir,omitempty"`
 	Init           *hexutil.Bytes  `json:"init,omitempty"`
 	Input          *hexutil.Bytes  `json:"input,omitempty"`
 	RefundAddress  *common.Address `json:"refundAddress,omitempty"`
@@ -90,10 +91,13 @@ type flatCallAction struct {
 }
 
 type flatCallResult struct {
-	Address *common.Address `json:"address,omitempty"`
-	Code    *hexutil.Bytes  `json:"code,omitempty"`
-	GasUsed *hexutil.Uint64 `json:"gasUsed,omitempty"`
-	Output  *hexutil.Bytes  `json:"output,omitempty"`
+	Address        *common.Address `json:"address,omitempty"`
+	Code           *hexutil.Bytes  `json:"code,omitempty"`
+	GasUsed        *hexutil.Uint64 `json:"gasUsed,omitempty"`        // root frame: receipt gas after refund and floor; child frame: execution gas.
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty"` // amsterdam root frame: execution block contribution before refunds, with calldata floor.
+	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed,omitempty"`   // amsterdam root frame: nonnegative block contribution; child frame: signed net state usage.
+	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty"`
+	Output         *hexutil.Bytes  `json:"output,omitempty"`
 }
 
 // flatCallTracer reports call frame information of a tx in a flat format, i.e.
@@ -297,13 +301,17 @@ func newFlatCreate(input *callFrame) *flatCallFrame {
 			CreationMethod: strings.ToLower(input.Type.String()),
 			From:           &input.From,
 			Gas:            toHexUint64Ptr(uint64(input.Gas)),
+			StateGas:       input.StateGas,
 			Value:          input.Value,
 			Init:           &input.Input,
 		},
 		Result: &flatCallResult{
-			GasUsed: toHexUint64Ptr(uint64(input.GasUsed)),
-			Address: input.To,
-			Code:    &input.Output,
+			GasUsed:        toHexUint64Ptr(uint64(input.GasUsed)),
+			RegularGasUsed: input.RegularGasUsed,
+			StateGasUsed:   input.StateGasUsed,
+			GasRefund:      input.GasRefund,
+			Address:        input.To,
+			Code:           &input.Output,
 		},
 	}
 }
@@ -315,13 +323,17 @@ func newFlatCall(input *callFrame) *flatCallFrame {
 			From:     &input.From,
 			To:       input.To,
 			Gas:      toHexUint64Ptr(uint64(input.Gas)),
+			StateGas: input.StateGas,
 			Value:    input.Value,
 			CallType: strings.ToLower(input.Type.String()),
 			Input:    &input.Input,
 		},
 		Result: &flatCallResult{
-			GasUsed: toHexUint64Ptr(uint64(input.GasUsed)),
-			Output:  &input.Output,
+			GasUsed:        toHexUint64Ptr(uint64(input.GasUsed)),
+			RegularGasUsed: input.RegularGasUsed,
+			StateGasUsed:   input.StateGasUsed,
+			GasRefund:      input.GasRefund,
+			Output:         &input.Output,
 		},
 	}
 }

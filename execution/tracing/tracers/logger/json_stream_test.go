@@ -45,6 +45,7 @@ type mockOpContext struct {
 
 func (m *mockOpContext) MemoryData() []byte          { return m.memory }
 func (m *mockOpContext) StackData() []uint256.Int    { return m.stack }
+func (m *mockOpContext) Gas() mdgas.MdGas            { return mdgas.MdGas{} }
 func (m *mockOpContext) Caller() accounts.Address    { return m.address }
 func (m *mockOpContext) Address() accounts.Address   { return m.address }
 func (m *mockOpContext) CallValue() uint256.Int      { return uint256.Int{} }

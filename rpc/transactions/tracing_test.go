@@ -131,7 +131,11 @@ func TestTraceTxnGasUsage(t *testing.T) {
 					require.Len(t, calls, 1)
 					require.JSONEq(t, `"0x1f4"`, string(calls[0]["gasUsed"]))
 					require.NotContains(t, calls[0], "regularGasUsed")
-					require.NotContains(t, calls[0], "stateGasUsed")
+					if fork.amsterdam {
+						require.JSONEq(t, `"0x3e8"`, string(calls[0]["stateGasUsed"]))
+					} else {
+						require.NotContains(t, calls[0], "stateGasUsed")
+					}
 					require.NotContains(t, calls[0], "gasRefund")
 				}
 			})

@@ -24,9 +24,13 @@ import (
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
 
@@ -64,4 +68,45 @@ func TestJSONLoggerStepEncoding(t *testing.T) {
 		`{"pc":42,"op":85,"gas":"0xf4240","gasCost":"0x834","memory":"0x","memSize":0,"stack":[],`+
 			`"returnData":"0x","depth":3,"refund":0,"opName":"SSTORE"}`,
 		captureJSONLoggerStep(t, &LogConfig{}, &mockOpContext{}, nil, nil))
+}
+
+func TestJSONLoggerFrameGasUsage(t *testing.T) {
+	var output bytes.Buffer
+	logger := NewJSONLogger(nil, &output)
+	hooks := logger.Tracer().Hooks
+	hooks.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: true}},
+		types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, 100_000, nil, nil), accounts.ZeroAddress)
+	hooks.EmitExit(0, []byte{0xab}, mdgas.MdGasUsage{Execution: 100, State: -30, StateSpill: 10}, nil, false)
+	want := `{"output":"ab","gasUsed":"0x64","stateGasUsed":-30}`
+	require.JSONEq(t, want, output.String())
+	hooks.EmitTxEnd(&types.Receipt{GasUsed: 37_000},
+		mdgas.TxnGasUsage{BlockExecutionGasUsed: 30_000, BlockStateGasUsed: 12_000, GasRefund: 5_000}, nil)
+	require.JSONEq(t, want, output.String())
+}
+
+func TestJSONLoggerEndCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		amsterdam    bool
+		txn          bool
+		stateGasUsed int64
+		want         string
+	}{
+		{name: "pre-Amsterdam", txn: true, want: `{"output":"","gasUsed":"0x64"}`},
+		{name: "standalone", amsterdam: true, stateGasUsed: -30, want: `{"output":"","gasUsed":"0x64","stateGasUsed":-30}`},
+		{name: "zero frame usage", amsterdam: true, txn: true, want: `{"output":"","gasUsed":"0x64","stateGasUsed":0}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var output bytes.Buffer
+			logger := NewJSONLogger(nil, &output)
+			hooks := logger.Tracer().Hooks
+			var txn types.Transaction
+			if tc.txn {
+				txn = types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, 100_000, nil, nil)
+			}
+			hooks.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: tc.amsterdam}}, txn, accounts.ZeroAddress)
+			hooks.EmitExit(0, nil, mdgas.MdGasUsage{Execution: 100, State: tc.stateGasUsed}, nil, false)
+			require.JSONEq(t, tc.want, output.String())
+		})
+	}
 }

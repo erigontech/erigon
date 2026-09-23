@@ -81,17 +81,17 @@ type StructLog struct {
 // StructLogRes stores a structured log emitted by the EVM while replaying a
 // transaction in debug mode
 type StructLogRes struct {
-	Pc                uint64             `json:"pc"`
-	Op                string             `json:"op"`
-	Gas               uint64             `json:"gas"`
-	GasCost           uint64             `json:"gasCost"`
-	StateGasCost      uint64             `json:"stateGasCost,omitempty"`
-	StateGasReservoir uint64             `json:"stateGasReservoir,omitempty"`
-	Depth             int                `json:"depth"`
-	Error             error              `json:"error,omitempty"`
-	Stack             *[]string          `json:"stack,omitempty"`
-	Memory            *[]string          `json:"memory,omitempty"`
-	Storage           *map[string]string `json:"storage,omitempty"`
+	Pc           uint64             `json:"pc"`
+	Op           string             `json:"op"`
+	Gas          uint64             `json:"gas"`
+	StateGas     uint64             `json:"stateGasReservoir,omitempty"`
+	GasCost      uint64             `json:"gasCost"`
+	StateGasCost uint64             `json:"stateGasCost,omitempty"`
+	Depth        int                `json:"depth"`
+	Error        error              `json:"error,omitempty"`
+	Stack        *[]string          `json:"stack,omitempty"`
+	Memory       *[]string          `json:"memory,omitempty"`
+	Storage      *map[string]string `json:"storage,omitempty"`
 }
 
 // StructLogger is an EVM state logger and implements Tracer.
@@ -107,8 +107,6 @@ type StructLogger struct {
 	output  []byte
 	err     error
 	env     *tracing.VMContext
-
-	gasUsed uint64
 }
 
 // NewStructLogger returns a new logger
@@ -150,14 +148,9 @@ func (l *StructLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 }
 
 func (l *StructLogger) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
-	if err != nil {
-		// Don't override vm error
-		if l.err == nil {
-			l.err = err
-		}
-		return
+	if err != nil && l.err == nil {
+		l.err = err
 	}
-	l.gasUsed = receipt.GasUsed
 }
 
 // OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
@@ -277,14 +270,14 @@ func FormatLogs(logs []StructLog) []StructLogRes {
 	for index := range logs {
 		trace := &logs[index]
 		formatted[index] = StructLogRes{
-			Pc:                trace.Pc,
-			Op:                trace.Op.String(),
-			Gas:               trace.Gas.Execution,
-			StateGasReservoir: trace.Gas.State,
-			GasCost:           trace.GasCost.Execution,
-			StateGasCost:      trace.GasCost.State,
-			Depth:             trace.Depth,
-			Error:             trace.Err,
+			Pc:           trace.Pc,
+			Op:           trace.Op.String(),
+			Gas:          trace.Gas.Execution,
+			StateGas:     trace.Gas.State,
+			GasCost:      trace.GasCost.Execution,
+			StateGasCost: trace.GasCost.State,
+			Depth:        trace.Depth,
+			Error:        trace.Err,
 		}
 		if trace.Stack != nil {
 			stack := make([]string, len(trace.Stack))
@@ -405,10 +398,9 @@ func (t *mdLogger) captureStartOrEnter(from, to accounts.Address, create bool, i
 			from.String(), to.String(),
 			input, gas.Execution, value)
 	}
-
 	fmt.Fprintf(t.out, `
-|  Pc   |      Op     | Cost | State cost | State reservoir |   Stack   |   RStack  |  Refund |
-|-------|-------------|------|------------|-----------------|-----------|-----------|---------|
+|  Pc   |      Op     | Cost | State cost |   Stack   |   RStack  |  Refund |
+|-------|-------------|------|------------|-----------|-----------|---------|
 `)
 }
 
@@ -422,8 +414,11 @@ func (t *mdLogger) OnEnterV2(depth int, typ byte, from accounts.Address, to acco
 
 func (t *mdLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth == 0 {
-		fmt.Fprintf(t.out, "\nOutput: `%#x`\nConsumed gas: `%d`\nError: `%v`\n",
-			output, gasUsed.Execution, err)
+		fmt.Fprintf(t.out, "\nOutput: `%#x`\nConsumed gas: `%d`\n", output, gasUsed.Execution)
+		if t.env.Rules.IsAmsterdam {
+			fmt.Fprintf(t.out, "Consumed state gas: `%d`\n", gasUsed.State)
+		}
+		fmt.Fprintf(t.out, "Error: `%v`\n", err)
 	}
 }
 
@@ -431,7 +426,7 @@ func (t *mdLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, 
 func (t *mdLogger) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 	stack := scope.StackData()
 
-	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d | %3d | %3d |", pc, op, cost.Execution, cost.State, gas.State)
+	fmt.Fprintf(t.out, "| %4d  | %10v  |  %3d | %3d |", pc, op, cost.Execution, cost.State)
 
 	if !t.cfg.DisableStack {
 		// format stack
