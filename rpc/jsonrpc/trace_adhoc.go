@@ -124,19 +124,21 @@ type VmTrace struct {
 
 // VmTraceOp is one element of the vmTrace ops trace
 type VmTraceOp struct {
-	Cost int        `json:"cost"`
-	Ex   *VmTraceEx `json:"ex"`
-	Pc   int        `json:"pc"`
-	Sub  *VmTrace   `json:"sub"`
-	Op   string     `json:"op,omitempty"`
-	Idx  string     `json:"idx,omitempty"`
+	Cost         int        `json:"cost"`
+	StateGasCost int64      `json:"stateGasCost,omitempty"`
+	Ex           *VmTraceEx `json:"ex"`
+	Pc           int        `json:"pc"`
+	Sub          *VmTrace   `json:"sub"`
+	Op           string     `json:"op,omitempty"`
+	Idx          string     `json:"idx,omitempty"`
 }
 
 type VmTraceEx struct {
-	Mem   *VmTraceMem   `json:"mem"`
-	Push  []string      `json:"push"`
-	Store *VmTraceStore `json:"store"`
-	Used  int           `json:"used"`
+	Mem               *VmTraceMem   `json:"mem"`
+	Push              []string      `json:"push"`
+	Store             *VmTraceStore `json:"store"`
+	GasRemaining      int           `json:"used"`                // legacy "used" means remaining execution gas.
+	StateGasRemaining uint64        `json:"stateUsed,omitempty"` // mirrors legacy "used" naming for remaining state gas.
 }
 
 type VmTraceMem struct {
@@ -288,6 +290,7 @@ type OeTracer struct {
 	traceStack   []*ParityTrace
 	precompile   bool // Whether the last CaptureStart was called with `precompile = true`
 	compat       bool // Bug for bug compatibility mode
+	isAmsterdam  bool
 	lastVmOp     *VmTraceOp
 	lastOp       vm.OpCode
 	lastMemOff   uint64
@@ -358,6 +361,7 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
+			OnTxStart:  ot.OnTxStart,
 			OnEnterV2:  ot.OnEnterV2,
 			OnExitV2:   ot.OnExitV2,
 			OnOpcodeV2: ot.OnOpcodeV2,
@@ -365,6 +369,10 @@ func (ot *OeTracer) Tracer() *tracers.Tracer {
 		GetResult: ot.GetResult,
 		Stop:      ot.Stop,
 	}
+}
+
+func (ot *OeTracer) OnTxStart(env *tracing.VMContext, _ types.Transaction, _ accounts.Address) {
+	ot.isAmsterdam = env.Rules.IsAmsterdam
 }
 
 func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.Address, to accounts.Address, precompile bool, create bool, input []byte, gas mdgas.MdGas, value *uint256.Int, code []byte) {
@@ -445,6 +453,9 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		action.From = from.Value()
 		action.CreationMethod = strings.ToLower(typ.String())
 		action.Gas = hexutil.U256(*uint256.NewInt(gas.Execution))
+		if ot.isAmsterdam {
+			action.StateGas = (*hexutil.Uint64)(&gas.State)
+		}
 		action.Init = bytes.Clone(input)
 		action.Value = hexutil.U256(*value)
 		trace.Action = &action
@@ -545,6 +556,14 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 			topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
 		}
 	}
+	if ot.isAmsterdam {
+		switch result := topTrace.Result.(type) {
+		case *TraceResult:
+			result.StateGasUsed = (*hexutil.Int64)(&gasUsed.State)
+		case *CreateTraceResult:
+			result.StateGasUsed = (*hexutil.Int64)(&gasUsed.State)
+		}
+	}
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
 	if deep {
 		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
@@ -613,7 +632,8 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 			}
 		}
 		if ot.lastOffStack != nil {
-			ot.lastOffStack.Ex.Used = int(gas.Execution)
+			ot.lastOffStack.Ex.GasRemaining = int(gas.Execution)
+			ot.lastOffStack.Ex.StateGasRemaining = gas.State
 			if len(st) > 0 {
 				ot.lastOffStack.Ex.Push = []string{tracers.StackBack(st, 0).Hex()}
 			} else {
@@ -644,9 +664,16 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 		}
 		ot.lastOp = vm.OpCode(op)
 		ot.lastVmOp.Cost = int(cost.Execution)
+		ot.lastVmOp.StateGasCost = cost.State
 		ot.lastVmOp.Pc = int(pc)
 		ot.lastVmOp.Ex.Push = []string{}
-		ot.lastVmOp.Ex.Used = int(gas.Execution) - int(cost.Execution)
+		gasRemaining := scope.Gas()
+		ot.lastVmOp.Ex.StateGasRemaining = gasRemaining.State
+		if err == nil {
+			ot.lastVmOp.Ex.GasRemaining = int(gasRemaining.Execution)
+		} else {
+			ot.lastVmOp.Ex.GasRemaining = int(gas.Execution) - int(cost.Execution)
+		}
 		if !ot.compat {
 			ot.lastVmOp.Op = vm.OpCode(op).String()
 		}
@@ -690,7 +717,7 @@ func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.M
 				ot.lastVmOp.Ex.Store = &VmTraceStore{Key: tracers.StackBack(st, 0).Hex(), Val: tracers.StackBack(st, 1).Hex()}
 			}
 		}
-		if ot.lastVmOp.Ex.Used < 0 {
+		if ot.lastVmOp.Ex.GasRemaining < 0 {
 			ot.lastVmOp.Ex = nil
 		}
 	}

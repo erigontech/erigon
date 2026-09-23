@@ -363,7 +363,7 @@ func ReadHeader(db kv.Getter, hash common.Hash, number uint64) *types.Header {
 		log.Error("Invalid block header RLP", "hash", hash, "number", number, "err", err)
 		return nil
 	}
-	return header
+	return types.NewHeaderFromStorage(hash, header)
 }
 
 func ReadCurrentBlockNumber(db kv.Getter) *uint64 {

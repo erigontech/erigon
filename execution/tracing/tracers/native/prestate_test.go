@@ -75,6 +75,7 @@ type fakeOpContext struct {
 
 func (c *fakeOpContext) MemoryData() []byte          { return nil }
 func (c *fakeOpContext) StackData() []uint256.Int    { return c.stack }
+func (c *fakeOpContext) Gas() mdgas.MdGas            { return mdgas.MdGas{} }
 func (c *fakeOpContext) Caller() accounts.Address    { return c.addr }
 func (c *fakeOpContext) Address() accounts.Address   { return c.addr }
 func (c *fakeOpContext) CallValue() uint256.Int      { return uint256.Int{} }

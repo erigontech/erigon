@@ -44,19 +44,13 @@ func (ct *CallTracer) Found() bool                         { return true }
 
 func (ct *CallTracer) Tracer() *tracers.Tracer {
 	var hooks tracing.Hooks
-
 	if ct.hooks != nil {
 		hooks = *ct.hooks
 	}
-	hooks.OnEnter = nil
-	hooks.OnEnterV2 = ct.OnEnterV2
-	if ct.hooks.HasEnterHook() {
-		hooks.OnEnterV2 = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
-			ct.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
-			ct.hooks.EmitEnter(depth, typ, from, to, precompile, input, gas, value, code)
-		}
+	hooks.OnEnterV2 = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+		ct.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
+		ct.hooks.EmitEnter(depth, typ, from, to, precompile, input, gas, value, code)
 	}
-
 	return &tracers.Tracer{
 		Hooks: &hooks,
 	}

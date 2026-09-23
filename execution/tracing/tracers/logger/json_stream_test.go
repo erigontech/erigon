@@ -45,6 +45,7 @@ type mockOpContext struct {
 
 func (m *mockOpContext) MemoryData() []byte          { return m.memory }
 func (m *mockOpContext) StackData() []uint256.Int    { return m.stack }
+func (m *mockOpContext) Gas() mdgas.MdGas            { return mdgas.MdGas{} }
 func (m *mockOpContext) Caller() accounts.Address    { return m.address }
 func (m *mockOpContext) Address() accounts.Address   { return m.address }
 func (m *mockOpContext) CallValue() uint256.Int      { return uint256.Int{} }
@@ -210,9 +211,9 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 // over: exactly one array end and one object end, whatever the logger emitted.
 func closeStreamLikeCaller(stream jsonstream.Stream) {
 	stream.WriteArrayEnd()
-	stream.WriteObjectField("gas")
-	stream.WriteUint64(0)
-	stream.WriteObjectField("failed")
+	stream.Field("gas")
+	stream.Uint(0)
+	stream.Field("failed")
 	stream.WriteBool(false)
 	stream.WriteObjectEnd()
 }

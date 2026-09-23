@@ -239,24 +239,24 @@ func ExecuteTraceTx(
 	// Depending on the tracer type, format and return the output
 	if streaming {
 		stream.WriteArrayEnd()
-		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.ReceiptGasUsed)
+		stream.Field("gas")
+		stream.Uint(result.ReceiptGasUsed)
 		if evm.ChainRules().IsAmsterdam {
-			stream.WriteObjectField("regularGasUsed")
-			stream.WriteUint64(result.BlockExecutionGasUsed)
-			stream.WriteObjectField("stateGasUsed")
-			stream.WriteUint64(result.BlockStateGasUsed)
-			stream.WriteObjectField("gasRefund")
-			stream.WriteUint64(result.GasRefund)
+			stream.Field("regularGasUsed")
+			stream.Uint(result.BlockExecutionGasUsed)
+			stream.Field("stateGasUsed")
+			stream.Uint(result.BlockStateGasUsed)
+			stream.Field("gasRefund")
+			stream.Uint(result.GasRefund)
 		}
-		stream.WriteObjectField("failed")
+		stream.Field("failed")
 		stream.WriteBool(result.Failed())
 		// If the result contains a revert reason, return it.
 		ret := result.Return()
 		if len(result.Revert()) > 0 {
 			ret = result.Revert()
 		}
-		stream.WriteObjectField("returnValue")
+		stream.Field("returnValue")
 		stream.WriteHex(ret)
 		stream.WriteObjectEnd()
 	} else {

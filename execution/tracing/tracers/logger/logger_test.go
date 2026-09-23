@@ -99,10 +99,16 @@ func TestStoreCapture(t *testing.T) {
 	require.EqualValues(t, -int64(params.StateGasPerStorageSet), logs[6]["stateGasCost"])
 }
 
+func TestStructLoggerTxEndError(t *testing.T) {
+	logger := NewStructLogger(nil)
+	logger.Hooks().EmitTxEnd(nil, mdgas.TxnGasUsage{}, vm.ErrInsufficientBalance)
+	require.ErrorIs(t, logger.Error(), vm.ErrInsufficientBalance)
+}
+
 func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	var buf bytes.Buffer
 	logger := NewJSONLogger(nil, &buf)
-	logger.OnSystemCallStartV2(&tracing.VMContext{IntraBlockState: &mockIBS{}})
+	logger.OnSystemCallStartV2(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: true}, IntraBlockState: &mockIBS{}})
 
 	scope := &mockOpContext{}
 	logger.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGasCost{Execution: 10, State: -30}, scope, nil, 0, nil)
@@ -114,11 +120,33 @@ func TestJSONLoggerOnSystemCallStartSetsEnv(t *testing.T) {
 	if _, ok := entry["refund"]; !ok {
 		t.Fatal("expected json logger to emit opcode output after system call start")
 	}
-	var reservoir uint64
-	require.NoError(t, json.Unmarshal(entry["stateGasReservoir"], &reservoir))
-	require.EqualValues(t, 200, reservoir)
+	var stateGas uint64
+	require.NoError(t, json.Unmarshal(entry["stateGasReservoir"], &stateGas))
+	require.EqualValues(t, 200, stateGas)
 	require.Contains(t, entry, "stateGasCost")
 	require.JSONEq(t, `-30`, string(entry["stateGasCost"]))
+	buf.Reset()
+	logger.OnExitV2(0, nil, mdgas.MdGasUsage{Execution: 10}, nil, false)
+	require.JSONEq(t, `{"output":"","gasUsed":"0xa","stateGasUsed":0}`, buf.String())
+}
+
+func TestMarkdownLoggerStateGas(t *testing.T) {
+	var output bytes.Buffer
+	logger := NewMarkdownLogger(nil, &output)
+	logger.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: true}, IntraBlockState: &mockIBS{}}, nil, accounts.ZeroAddress)
+	logger.Hooks().EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil,
+		mdgas.MdGas{Execution: 100, State: 200}, uint256.Int{}, nil)
+	logger.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200},
+		mdgas.MdGasCost{Execution: 10, State: 30}, &mockOpContext{}, nil, 0, nil)
+	require.NotContains(t, output.String(), "reservoir")
+	require.Contains(t, output.String(), "| Cost | State cost |   Stack   |")
+	require.Contains(t, output.String(), "|   10 |  30 |        [] |")
+	logger.Hooks().EmitExit(0, nil, mdgas.MdGasUsage{Execution: 50, State: -30, StateSpill: 10}, nil, false)
+	require.Contains(t, output.String(), "Consumed state gas: `-30`\n")
+	require.NotContains(t, output.String(), "spill")
+	output.Reset()
+	logger.Hooks().EmitExit(0, nil, mdgas.MdGasUsage{Execution: 50}, nil, false)
+	require.Contains(t, output.String(), "Consumed state gas: `0`\n")
 }
 
 //func TestStoreCapture(t *testing.T) {
