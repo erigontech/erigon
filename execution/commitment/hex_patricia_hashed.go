@@ -176,7 +176,7 @@ type HexPatriciaHashed struct {
 
 	memoizationOff  bool // if true, do not rely on memoized hashes
 	readOnlyWitness bool // proofs only: off-path cells keep their stored hashes and no branch is written
-	//temp buffers
+	// temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
@@ -187,7 +187,7 @@ type HexPatriciaHashed struct {
 
 	cfg TrieConfig // static config, set at construction
 
-	//processing metrics
+	// processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 
@@ -762,7 +762,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 		nonceBytes = common.BitLenToByteLen(bits.Len64(cell.Nonce))
 	}
 
-	var structLength = uint(balanceBytes + nonceBytes + 2)
+	structLength := uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
 	var pos int
@@ -786,7 +786,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 		buffer[pos] = byte(cell.Nonce)
 	} else {
 		buffer[pos] = byte(128 + nonceBytes)
-		var nonce = cell.Nonce
+		nonce := cell.Nonce
 		for i := nonceBytes; i > 0; i-- {
 			buffer[pos+i] = byte(nonce)
 			nonce >>= 8
@@ -2766,7 +2766,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
-		log.Debug("commitment finished, counters updated (no reset)",
+		log.Debug(
+			"commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
 			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
 			"skipRatio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
@@ -2975,7 +2976,7 @@ func (s *state) Decode(buf []byte) error {
 }
 
 func (cell *cell) Encode() []byte {
-	var pos = int16(1)
+	pos := int16(1)
 	size := pos + 5 + cell.hashLen + cell.accountAddrLen + cell.storageAddrLen + cell.hashedExtLen + cell.extLen // max size
 	buf := make([]byte, size)
 

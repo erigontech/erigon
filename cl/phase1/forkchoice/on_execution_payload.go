@@ -466,7 +466,6 @@ func (f *ForkChoiceStore) authenticatePayloadHashBeforeStatusProjectionLocked(
 }
 
 func (f *ForkChoiceStore) withPayloadValidationAdmission(ctx context.Context, validate func() (execution_client.PayloadStatus, error)) (execution_client.PayloadStatus, error) {
-
 	f.payloadValidationOnce.Do(func() {
 		f.payloadValidationAdmission = make(chan struct{}, 1)
 	})
@@ -1455,6 +1454,7 @@ func (f *ForkChoiceStore) emitExecutionPayloadIntegrationEvents(blockRoot common
 		f.emitters.State().SendHeadV2(headEvent)
 	})
 }
+
 func (f *ForkChoiceStore) ensureExecutionPayloadEnvelopeIndices(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
 	return f.ensureExecutionPayloadEnvelopeIndicesWithTrust(ctx, blockRoot, signedEnvelope, applied, false)
 }

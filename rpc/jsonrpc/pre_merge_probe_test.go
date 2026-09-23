@@ -73,6 +73,7 @@ func (r *probeBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Ge
 func newProbeAPI(reader dbservices.FullBlockReader) *BaseAPI {
 	api := &BaseAPI{_blockReader: reader}
 	api._preMergeData.SetTTL(time.Minute)
+	api._preMergeUnsettledTTL = time.Minute
 	return api
 }
 
@@ -640,4 +641,51 @@ func TestPreMergeSamplingBracketsTheSearch(t *testing.T) {
 	require.True(t, data.holds, "the count is inflation alone, so no transaction is missing")
 	require.Less(t, reader.bodyReads.Load(), int64(20),
 		"the sampled counts bracket the search instead of being read and dropped")
+}
+
+// TestPreMergeProbeHoldsAnUnansweredWalkForItsTTL pins that a datadir whose block data
+// has not arrived is walked once per TTL rather than once per request: the walk reads a
+// body per halving of the merge height and every one of them is absent.
+func TestPreMergeProbeHoldsAnUnansweredWalkForItsTTL(t *testing.T) {
+	t.Parallel()
+
+	reader := &chainProbeBlockReader{}
+	api := newProbeAPI(reader)
+
+	data, err := api.holdsPreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	require.NoError(t, err)
+	require.False(t, data.holds)
+	walk := reader.bodyReads.Load()
+	require.Positive(t, walk, "the first caller walks the merge height")
+
+	for range 4 {
+		again, err := api.holdsPreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+		require.NoError(t, err)
+		require.Equal(t, data, again, "the caller gets what the walk answered")
+	}
+	require.Equal(t, walk, reader.bodyReads.Load(), "a walk that answered nothing is not repeated")
+
+	_, observed, _ := api._preMergeData.Load()
+	require.False(t, observed, "a question left open is still not an observation")
+}
+
+// TestPreMergeProbeWalksAgainOnceTheUnansweredTTLPasses pins the other half: the walk is
+// held rather than settled, so block data arriving after it is read.
+func TestPreMergeProbeWalksAgainOnceTheUnansweredTTLPasses(t *testing.T) {
+	t.Parallel()
+
+	reader := &chainProbeBlockReader{}
+	api := newProbeAPI(reader)
+	api._preMergeUnsettledTTL = time.Millisecond
+
+	data, err := api.holdsPreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	require.NoError(t, err)
+	require.False(t, data.holds)
+
+	reader.userTxns = sparsePreMergeChain()
+	time.Sleep(2 * time.Millisecond)
+
+	data, err = api.holdsPreMergeBlockData(t.Context(), nil, probeSparseMergeHeight)
+	require.NoError(t, err)
+	require.True(t, data.holds, "blocks that arrive after the TTL are walked again")
 }

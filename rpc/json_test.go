@@ -18,12 +18,16 @@ package rpc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"reflect"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -165,6 +169,14 @@ var messageCorpus = []string{
 	// empty and odd values
 	`{"method":"","id":1}`,
 	`{"":1,"method":"m"}`,
+	// string fields that are not plain ASCII text, or not strings at all
+	`{"method":"a","method":null,"id":1}`,
+	`{"jsonrpc":"2.0","jsonrpc":null}`,
+	`{"method":5,"id":1}`,
+	`{"jsonrpc":2.0,"method":["m"]}`,
+	`{"method":"caf\u00e9","id":1}`,
+	"{\"method\":\"caf\u00e9\",\"id\":1}",
+	"{\"method\":\"\xff\",\"id\":1}",
 	// not an object at all
 	`1`,
 	`"str"`,
@@ -716,4 +728,42 @@ func TestResponseLatchedErrorKeepsValidJSON(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":{"balance":""},"error":{"code":-32000,"message":"append failed"}}`, string(s.Buffer()))
 	require.True(t, json.Valid(s.Buffer()))
+}
+
+// An IPC connection coalesces notifications like a websocket one does.
+func TestCodecCoalescedMessagesLeaveInOneWrite(t *testing.T) {
+	t.Parallel()
+	server, client := net.Pipe()
+	defer client.Close()
+	var writes atomic.Int64
+	codec := NewCodec(&heldConn{Conn: writeCountingConn{server, &writes}}).(*jsonCodec)
+	defer codec.Close()
+	read := make(chan string, 1)
+	go func() {
+		b, _ := io.ReadAll(io.LimitReader(client, int64(len("0\n1\n2\n"))))
+		read <- string(b)
+	}()
+
+	err := codec.coalesce(func() {
+		for i := range 3 {
+			if err := codec.WriteJSON(context.Background(), rawResponse(strconv.Itoa(i))); err != nil {
+				t.Error(err)
+			}
+		}
+	})
+	require.NoError(t, err)
+	require.Equal(t, int64(1), writes.Load(), "3 coalesced messages, socket writes")
+	require.Equal(t, "0\n1\n2\n", <-read)
+}
+
+func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{`"eth_chainId`, `"eth_chainId"`, `"a\"b"`, `null`, `"é"`, `"`} {
+		var want, got string = "prev", "prev"
+		if json.Unmarshal([]byte(in), &want) != nil {
+			want = ""
+		}
+		decodeStringField([]byte(in), &got)
+		require.Equal(t, want, got, in)
+	}
 }

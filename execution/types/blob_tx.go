@@ -188,7 +188,8 @@ func (stx *BlobTx) SigningHash(chainID *uint256.Int) common.Hash {
 			AccessList: stx.AccessList,
 			BlobFeeCap: &stx.MaxFeePerBlobGas,
 			BlobHashes: stx.BlobVersionedHashes,
-		})
+		},
+	)
 }
 
 func (stx *BlobTx) WithSignature(signer Signer, sig []byte) (Transaction, error) {
