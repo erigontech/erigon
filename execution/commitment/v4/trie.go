@@ -46,11 +46,15 @@ type Trie struct {
 type deferredPatriciaContext struct {
 	commitment.PatriciaContext
 	meter  *meteredContext
+	sink   *deferredPatriciaContext
 	mu     sync.Mutex
 	deltas []recordDelta
 }
 
 func (c *deferredPatriciaContext) PutBranch(key, data, prev []byte) error {
+	if c.sink != nil {
+		return c.sink.PutBranch(key, data, prev)
+	}
 	if c.meter != nil {
 		c.meter.countWrite(len(data))
 	}
@@ -58,6 +62,19 @@ func (c *deferredPatriciaContext) PutBranch(key, data, prev []byte) error {
 	defer c.mu.Unlock()
 	c.deltas = append(c.deltas, recordDelta{key: key, data: data, prev: prev})
 	return nil
+}
+
+func (c *deferredPatriciaContext) wrapFactory(f commitment.TrieContextFactory) commitment.TrieContextFactory {
+	if f == nil {
+		return nil
+	}
+	return func(ctx context.Context) (commitment.PatriciaContext, func()) {
+		inner, cleanup := f(ctx)
+		if inner == nil {
+			return nil, cleanup
+		}
+		return &deferredPatriciaContext{PatriciaContext: inner, sink: c}, cleanup
+	}
 }
 
 func (c *deferredPatriciaContext) take() []recordDelta {
@@ -177,12 +194,12 @@ func (t *Trie) Process(
 	factory := metered.wrapFactory(t.ctxFactory)
 	var deferredCtx *deferredPatriciaContext
 	if t.deferUpdates {
-		factory = nil
 		if len(t.deferred) != 0 {
 			return nil, errors.New("commitment v4: deferred updates were not taken")
 		}
 		deferredCtx = &deferredPatriciaContext{PatriciaContext: metered, meter: metered}
 		processCtx = deferredCtx
+		factory = deferredCtx.wrapFactory(factory)
 	}
 	root, err := runScheduledPhases(ctx, processCtx, factory, storage, accounts, t.scheduleWorkers, t.scheduleStats)
 	if err != nil {
