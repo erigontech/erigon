@@ -101,3 +101,40 @@ func TestPutCommitmentBranchesMatchesPerRecordPuts(t *testing.T) {
 	require.Equal(t, wantLatest, gotLatest)
 	require.Equal(t, wantDiff, gotDiff)
 }
+
+func TestPutCommitmentBranchesResolvesNilPrevAfterEarlierWrites(t *testing.T) {
+	key := []byte{0x41, 1, 2, 3}
+	a, b := []byte{0x0a}, []byte{0x0b}
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	run := func(batch bool) []byte {
+		tx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+		require.NoError(t, err)
+		defer sd.Close()
+
+		rounds := []struct {
+			txNum uint64
+			parts [][]commitment.BranchDelta
+		}{
+			{1, [][]commitment.BranchDelta{{{Key: key, Data: a, Prev: []byte{}}}}},
+			{2, [][]commitment.BranchDelta{{{Key: key, Data: b, Prev: a}}, {{Key: key, Data: a, Prev: nil}}}},
+		}
+		for _, round := range rounds {
+			if batch {
+				require.NoError(t, sd.PutCommitmentBranches(tx, round.parts, round.txNum, nil))
+				continue
+			}
+			for _, part := range round.parts {
+				for _, d := range part {
+					require.NoError(t, sd.DomainPutCommitmentDiff(tx, d.Key, d.Data, round.txNum, d.Prev, nil))
+				}
+			}
+		}
+		v, _, err := sd.GetLatest(kv.CommitmentDomain, tx, key)
+		require.NoError(t, err)
+		return bytes.Clone(v)
+	}
+	require.Equal(t, run(false), run(true))
+}

@@ -551,36 +551,28 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 }
 
 func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
-	batch, ok := sd.mem.(commitmentBranchBatchWriter)
+	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok && commitmentDeltasResolved(parts) {
+		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
+	}
 	for _, part := range parts {
 		for i := range part {
-			d := &part[i]
-			if !ok {
-				if err := sd.DomainPutCommitmentDiff(roTx, d.Key, d.Data, txNum, d.Prev, diff); err != nil {
-					return err
-				}
-				continue
-			}
-			if d.Data == nil {
-				return errors.New("PutCommitmentBranches: trying to put nil value, not allowed")
-			}
-			if d.Prev != nil {
-				continue
-			}
-			prev, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, d.Key)
-			if err != nil {
+			if err := sd.DomainPutCommitmentDiff(roTx, part[i].Key, part[i].Data, txNum, part[i].Prev, diff); err != nil {
 				return err
-			}
-			d.Prev = bytes.Clone(prev)
-			if d.Prev == nil {
-				d.Prev = []byte{}
 			}
 		}
 	}
-	if !ok {
-		return nil
+	return nil
+}
+
+func commitmentDeltasResolved(parts [][]commitment.BranchDelta) bool {
+	for _, part := range parts {
+		for i := range part {
+			if part[i].Data == nil || part[i].Prev == nil {
+				return false
+			}
+		}
 	}
-	return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
+	return true
 }
 
 func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.TemporalTx, lockHeld bool) error {

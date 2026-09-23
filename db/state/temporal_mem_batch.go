@@ -188,7 +188,6 @@ func (sd *TemporalMemBatch) addPutMetrics(domain kv.Domain, puts int64, putKeySi
 }
 
 func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
-	const domain = kv.CommitmentDomain
 	count, keyBytes := 0, 0
 	for _, part := range parts {
 		count += len(part)
@@ -202,21 +201,25 @@ func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.Bran
 			keys = append(keys, part[i].Key...)
 		}
 	}
-	versions := make([]dataWithTxNum, count)
+	puts, putKeySize, putValueSize, err := sd.applyOwnedCommitmentBranches(parts, keys, make([]dataWithTxNum, count), txNum, diff)
+	sd.addPutMetrics(kv.CommitmentDomain, puts, putKeySize, putValueSize)
+	return err
+}
+
+func (sd *TemporalMemBatch) applyOwnedCommitmentBranches(parts [][]commitment.BranchDelta, keys []byte, versions []dataWithTxNum, txNum uint64, diff *kv.DomainDiff) (puts int64, putKeySize, putValueSize int, err error) {
+	const domain = kv.CommitmentDomain
 	step := kv.Step(txNum / sd.stepSize)
 	writer := sd.domainWriters[domain]
-	var puts int64
-	putKeySize, putValueSize := 0, 0
 
 	sd.latestStateLocks[domain].Lock()
+	defer sd.latestStateLocks[domain].Unlock()
 	latest := sd.domains[domain]
-	if count > 2*len(latest) {
-		grown := make(map[string][]dataWithTxNum, len(latest)+count)
+	if len(versions) > 2*len(latest) {
+		grown := make(map[string][]dataWithTxNum, len(latest)+len(versions))
 		maps.Copy(grown, latest)
 		latest = grown
 		sd.domains[domain] = latest
 	}
-	var err error
 	off, slot := 0, 0
 	for _, part := range parts {
 		for i := range part {
@@ -259,16 +262,11 @@ func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.Bran
 				err = writer.PutWithPrevDiff(d.Key, d.Data, txNum, d.Prev, diff)
 			}
 			if err != nil {
-				break
+				return puts, putKeySize, putValueSize, err
 			}
 		}
-		if err != nil {
-			break
-		}
 	}
-	sd.latestStateLocks[domain].Unlock()
-	sd.addPutMetrics(domain, puts, putKeySize, putValueSize)
-	return err
+	return puts, putKeySize, putValueSize, nil
 }
 
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, sameTxNumUpdate bool) error {
