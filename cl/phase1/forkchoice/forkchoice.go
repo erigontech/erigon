@@ -113,6 +113,9 @@ type ForkChoiceStore struct {
 	verifiedExecutionPayloadHashes     *lru.Cache[common.Hash, common.Hash]
 	executionPayloadRoots              map[common.Hash]map[common.Hash]struct{}
 	invalidatedExecutionPayloads       *sync.Map
+	// Carries an invalid verdict until the caller makes it durable, since the bounded
+	// caches below can evict in between. Not refcounted, so the writer clears its own key.
+	inFlightInvalidPayloads *sync.Map
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
@@ -447,6 +450,7 @@ func NewForkChoiceStore(
 		verifiedExecutionPayloadHashes: verifiedExecutionPayloadHashes,
 		executionPayloadRoots:          executionPayloadRoots,
 		invalidatedExecutionPayloads:   invalidatedExecutionPayloads,
+		inFlightInvalidPayloads:        &sync.Map{},
 		localValidators:                localValidators,
 		pendingConsolidations:          pendingConsolidations,
 		pendingDeposits:                pendingDeposits,
