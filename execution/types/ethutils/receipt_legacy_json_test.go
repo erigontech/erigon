@@ -285,9 +285,10 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 	}
 	receipt["logs"] = logs
 
-	if protoReceipt.BaseFee != nil {
-		baseFee := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee)
-		receipt["effectiveGasPrice"] = (*hexutil.U256)(baseFee)
+	if protoReceipt.EffectiveGasPrice != nil {
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.EffectiveGasPrice))
+	} else if protoReceipt.BaseFee != nil {
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee))
 	}
 
 	if protoReceipt.BlobGasUsed > 0 {
@@ -320,6 +321,7 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 			From:              gointerfaces.ConvertAddressToH160(common.HexToAddress("0x03")),
 			To:                gointerfaces.ConvertAddressToH160(addr),
 			BaseFee:           gointerfaces.ConvertUint256IntToH256(uint256.NewInt(7_000_000_000)),
+			EffectiveGasPrice: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(8_000_000_000)),
 			BlobGasUsed:       131072,
 			BlobGasPrice:      gointerfaces.ConvertUint256IntToH256(uint256.NewInt(1)),
 		}
@@ -333,7 +335,10 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 		"failed without logs": func(r *remoteproto.SubscribeReceiptsReply) {
 			r.Status, r.Logs, r.LogsBloom = 0, nil, make([]byte, types.BloomByteLength)
 		},
-		"no base fee, no blobs": func(r *remoteproto.SubscribeReceiptsReply) { r.BaseFee, r.BlobGasUsed, r.BlobGasPrice = nil, 0, nil },
+		"no base fee, no blobs": func(r *remoteproto.SubscribeReceiptsReply) {
+			r.BaseFee, r.EffectiveGasPrice, r.BlobGasUsed, r.BlobGasPrice = nil, nil, 0, nil
+		},
+		"base fee only": func(r *remoteproto.SubscribeReceiptsReply) { r.EffectiveGasPrice = nil },
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := full()
