@@ -546,16 +546,12 @@ func TestResponseNilResultEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-type emptyFastJSON struct{}
-
-func (emptyFastJSON) MarshalFastJSON() ([]byte, error) { return nil, nil }
-
-func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
+func TestResponseEmptyStreamedEmitsNull(t *testing.T) {
 	var out bytes.Buffer
 	s := jsonstream.Get(&out)
 	defer jsonstream.Put(s)
 
-	respond(s, json.RawMessage(`7`), emptyFastJSON{})
+	respond(s, json.RawMessage(`7`), emptyStreamed{})
 	require.NoError(t, s.Flush())
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
