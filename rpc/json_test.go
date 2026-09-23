@@ -657,7 +657,7 @@ func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
 
 	s2 := jsonstream.Get(&got)
 	respond(s2, id, res)
-	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
+	require.LessOrEqual(t, cap(s2.Buffer()), jsonstream.MaxPooledBufferSize(),
 		"the result grew the stream buffer past the pool limit")
 	_ = s2.Flush()
 
