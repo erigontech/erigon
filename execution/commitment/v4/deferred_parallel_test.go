@@ -17,6 +17,7 @@
 package v4
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"sync"
@@ -175,5 +176,47 @@ func TestAccountFoldParallelMatchesSerial(t *testing.T) {
 	parallelRoot, parallelStore := run(8)
 
 	require.Equal(t, serialRoot, parallelRoot)
+	require.Equal(t, serialStore, parallelStore)
+}
+
+func TestStorageFanOutMatchesSerial(t *testing.T) {
+	whale := benchAddr(7)
+	slot := func(i int) []byte { return append(bytes.Clone(whale), benchSlot(i)...) }
+	seed := []parityUpdate{{key: whale, update: accountParityUpdate(7)}}
+	for i := range 4 * storageFanOutMin {
+		seed = append(seed, parityUpdate{key: slot(i), update: storageParityUpdate(i)})
+	}
+	next := []parityUpdate{{key: whale, update: accountParityUpdate(8)}}
+	for i := range 4 * storageFanOutMin {
+		switch i % 3 {
+		case 0:
+			next = append(next, parityUpdate{key: slot(i), update: &commitment.Update{Flags: commitment.DeleteUpdate}})
+		case 1:
+			next = append(next, parityUpdate{key: slot(i), update: storageParityUpdate(i + 1)})
+		}
+	}
+	for i := 4 * storageFanOutMin; i < 5*storageFanOutMin; i++ {
+		next = append(next, parityUpdate{key: slot(i), update: storageParityUpdate(i)})
+	}
+
+	run := func(workers int) ([][]byte, map[string]string) {
+		c := newShardedContext()
+		tr := &Trie{scheduleWorkers: workers}
+		tr.ResetContext(c)
+		tr.SetTrieContextFactory(c.factory)
+		defer tr.Release()
+		var roots [][]byte
+		for _, round := range [][]parityUpdate{seed, next} {
+			root, err := tr.Process(context.Background(),
+				benchUpdatesIn(t.TempDir(), commitment.ModeCollect, round), "", nil, commitment.WarmupConfig{})
+			require.NoError(t, err)
+			roots = append(roots, root)
+		}
+		return roots, storeSnapshot(c)
+	}
+
+	serialRoots, serialStore := run(1)
+	parallelRoots, parallelStore := run(8)
+	require.Equal(t, serialRoots, parallelRoots)
 	require.Equal(t, serialStore, parallelStore)
 }

@@ -94,6 +94,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	workers = min(workers, len(storage))
 	var next atomic.Int64
 	g, gCtx := errgroup.WithContext(ctx)
+	taskPlan := foldPlan{ctx: gCtx, factory: factory, workers: accountPlaneFanout}
 	for range workers {
 		g.Go(func() error {
 			workerCtx, cleanup := factory(gCtx)
@@ -109,7 +110,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 					return nil
 				}
 				stats.enter()
-				root, err := runStorageTask(workerCtx, storage[i])
+				root, err := runStorageTaskWithPlan(workerCtx, storage[i], taskPlan)
 				stats.leave()
 				if err != nil {
 					return err
@@ -313,31 +314,44 @@ func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entri
 	}
 
 	plans := make([]accountPlan, len(entries))
-	groups := make(map[int][]int, 16)
+	planOne := func(ctx commitment.PatriciaContext, i int) error {
+		p, err := g.accountPlanFor(ctx, root, entries[i])
+		plans[i] = p
+		return err
+	}
+	fanned, err := g.fanOutRoot(ctx, root, len(entries), func(i int) byte { return entries[i].hashedKey[0] }, plan, planOne)
+	if err != nil || fanned {
+		return plans, err
+	}
 	for i := range entries {
-		nib := int(entries[i].hashedKey[0])
+		if err := planOne(ctx, i); err != nil {
+			return nil, err
+		}
+	}
+	return plans, nil
+}
+
+func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nibOf func(i int) byte, plan foldPlan, fn func(ctx commitment.PatriciaContext, i int) error) (bool, error) {
+	if !plan.parallel() || len(root.path) != 0 {
+		return false, nil
+	}
+	var groups [16][]int
+	for i := range n {
+		nib := nibOf(i)
 		groups[nib] = append(groups[nib], i)
 	}
-
-	if !plan.parallel() || len(root.path) != 0 || len(groups) < 2 {
-		for i := range entries {
-			p, err := g.accountPlanFor(ctx, root, entries[i])
-			if err != nil {
-				return nil, err
-			}
-			plans[i] = p
-		}
-		return plans, nil
-	}
-
-	nibs := make([]int, 0, len(groups))
+	nibs := make([]int, 0, 16)
 	for nib := range groups {
-		nibs = append(nibs, nib)
+		if len(groups[nib]) != 0 {
+			nibs = append(nibs, nib)
+		}
+	}
+	if len(nibs) < 2 {
+		return false, nil
 	}
 	if err := g.ensureRootChildren(ctx, root, nibs); err != nil {
-		return nil, err
+		return true, err
 	}
-
 	eg, egCtx := errgroup.WithContext(plan.ctx)
 	eg.SetLimit(min(plan.workers, len(nibs)))
 	for _, nib := range nibs {
@@ -350,17 +364,12 @@ func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entri
 				return g.errNode
 			}
 			for _, i := range groups[nib] {
-				p, err := g.accountPlanFor(workerCtx, root, entries[i])
-				if err != nil {
+				if err := fn(workerCtx, i); err != nil {
 					return err
 				}
-				plans[i] = p
 			}
 			return nil
 		})
 	}
-	if err := eg.Wait(); err != nil {
-		return nil, err
-	}
-	return plans, nil
+	return true, eg.Wait()
 }

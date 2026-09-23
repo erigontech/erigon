@@ -102,7 +102,7 @@ func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update)
 	current := &p.accounts[len(p.accounts)-1]
 
 	if len(hashedKey) == 64 {
-		current.update = cloneUpdate(update)
+		current.update = update
 		return nil
 	}
 
@@ -113,7 +113,7 @@ func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update)
 	current.storageDirty = true
 	p.storage[p.storageIndex].entries = append(p.storage[p.storageIndex].entries, storageEntry{
 		path:   p.keys.clone(hashedKey[64:]),
-		update: cloneUpdate(update),
+		update: update,
 	})
 	return nil
 }
@@ -142,14 +142,13 @@ func prefix(src []byte, n int) []byte {
 	return src[:n]
 }
 
-func cloneUpdate(update *commitment.Update) *commitment.Update {
-	if update == nil {
-		return nil
-	}
-	return update.Copy()
-}
+const storageFanOutMin = 1024
 
 func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte, error) {
+	return runStorageTaskWithPlan(ctx, task, foldPlan{})
+}
+
+func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, plan foldPlan) ([32]byte, error) {
 	if ctx == nil {
 		return [32]byte{}, errors.New("commitment v4: nil phase A context")
 	}
@@ -188,10 +187,28 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 				return [32]byte{}, errPhaseAUpdate
 			}
 		}
+	}
+	fanned := false
+	if len(task.entries) >= storageFanOutMin {
+		fanned, err = g.fanOutRoot(ctx, root, len(task.entries), func(i int) byte { return task.entries[i].path[0] }, plan, func(ctx commitment.PatriciaContext, i int) error {
+			if u := task.entries[i].update; u == nil || u.Flags == 0 {
+				return nil
+			}
+			return g.ensurePath(ctx, root, task.entries[i].path)
+		})
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	if !fanned {
+		plan = foldPlan{}
+	}
+
+	for _, entry := range task.entries {
 		if entry.update == nil || entry.update.Flags == 0 {
 			continue
 		}
-		if len(root.path) == 0 || bytes.HasPrefix(entry.path, root.path) {
+		if !fanned && (len(root.path) == 0 || bytes.HasPrefix(entry.path, root.path)) {
 			if err := g.ensurePath(ctx, root, entry.path); err != nil {
 				return [32]byte{}, err
 			}
@@ -215,7 +232,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	}
 
 	markStorageRoot(root)
-	if err := g.persistGraph(ctx, root, foldPlan{}); err != nil {
+	if err := g.persistGraph(ctx, root, plan); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
