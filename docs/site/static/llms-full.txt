@@ -6908,7 +6908,7 @@ Returns traces matching given filter
 
    The `'pending'` tag is not supported for either block bound: `trace_filter` scans committed trace history, which has no pending block.
 
-   **Migration from the union default:** a query with both `fromAddress: [X]` and `toAddress: [X]` now selects calls from X to X. To keep selecting all activity involving X, add `mode: "union"`. One-sided queries remain restricted only by the populated list. `after` and `count` apply to the combined matching result, not separately to each list.
+   To preserve the previous behavior when both address lists are set, specify `mode: "union"`.
 
 ```js
 params: [{
