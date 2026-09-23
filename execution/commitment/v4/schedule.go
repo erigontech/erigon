@@ -196,6 +196,8 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		at := i * accountLeafScratch
 		accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
 	})
+	var groups [16][]int
+	var rest []int
 	for i := range accountResults {
 		result := &accountResults[i]
 		if result.err != nil {
@@ -204,6 +206,29 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		if result.plan.skip {
 			continue
 		}
+		nib := result.plan.entry.hashedKey[0]
+		if !result.plan.delete && len(root.path) == 0 && directChild(root, nib) {
+			groups[nib] = append(groups[nib], i)
+			continue
+		}
+		rest = append(rest, i)
+	}
+	var groupErrs [16]error
+	parallelFor(16, workers, 1, func(nib int) {
+		for _, i := range groups[nib] {
+			if err := insert(root, accountResults[i].plan.entry.hashedKey, accountResults[i].value); err != nil {
+				groupErrs[nib] = err
+				return
+			}
+		}
+	})
+	for _, err := range groupErrs {
+		if err != nil {
+			return [32]byte{}, err
+		}
+	}
+	for _, i := range rest {
+		result := &accountResults[i]
 		if result.plan.delete {
 			if err := removeRoot(root, result.plan.entry.hashedKey); err != nil {
 				return [32]byte{}, err
@@ -222,6 +247,11 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
+}
+
+func directChild(root *node, nib byte) bool {
+	child := root.child(int(nib))
+	return child != nil && len(child.path) == len(root.path)+1
 }
 
 func (g graph) planAccounts(ctx commitment.PatriciaContext, accounts []accountEntry, plan foldPlan) (*node, []accountPlan, error) {
