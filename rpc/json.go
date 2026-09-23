@@ -106,12 +106,7 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 	return resp
 }
 
-// fastJSONResult lets an RPC result implement fast JSON marshalling where needed — e.g. large payloads that benefit from skipping the reflection-based path.
-type fastJSONResult interface {
-	MarshalFastJSON() ([]byte, error)
-}
-
-// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. Only a
+// fastJSONMarshalerTo encodes an RPC result straight into the response stream. Only a
 // type above rpc/jsonstream can name the stream; a type below it implements encoding.TextAppender
 // instead and the stream quotes the text. An implementation that fails after its first write
 // leaves part of the result behind, so that response carries both result and error.
@@ -131,13 +126,6 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 				return err
 			}
 			return rs.Err() // a latched write error left a placeholder in the stream
-		}
-		if fm, ok := result.(fastJSONResult); ok {
-			enc, err := fm.MarshalFastJSON()
-			if err == nil && len(enc) > 0 {
-				rs.WriteRawBytes(enc)
-			}
-			return err
 		}
 		// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
 		// reflection encoder and must not catch a type whose json.Marshaler writes something else.
