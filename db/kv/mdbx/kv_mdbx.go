@@ -160,6 +160,9 @@ func (opts MdbxOpts) Durable() MdbxOpts {
 	return opts
 }
 
+// SyncPoll sets how often the background flush runs.
+func (opts MdbxOpts) SyncPoll(interval time.Duration) MdbxOpts { opts.syncPoll = interval; return opts }
+
 func (opts MdbxOpts) SyncBytes(threshold datasize.ByteSize) MdbxOpts {
 	opts.syncBytes = &threshold
 	return opts
@@ -425,7 +428,11 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	}
 
 	if opts.syncPoll > 0 && opts.HasFlag(mdbx.SafeNoSync) {
-		go db.syncPoller(opts.syncPoll)
+		db.syncerDone = make(chan struct{})
+		go func() {
+			defer close(db.syncerDone)
+			db.syncPoller(opts.syncPoll)
+		}()
 	}
 
 	// Open can fail after a read txn has been pooled; Close aborts those. The outer env.Close
@@ -514,6 +521,7 @@ type MdbxKV struct {
 	path     string
 
 	syncerStop chan struct{}
+	syncerDone chan struct{} // nil when no background flush runs; closed when it has returned
 
 	txsCount              uint
 	txsCountMutex         *sync.Mutex
@@ -730,9 +738,6 @@ func (db *MdbxKV) syncPoller(interval time.Duration) {
 		case <-db.syncerStop:
 			return
 		case <-t.C:
-			if db.closed.Load() {
-				return
-			}
 			// force=true flushes whatever is dirty, so commits stay below the threshold and
 			// never pay for a flush themselves; nonblock skips this round rather than holding
 			// the write lock while a writer wants it.
@@ -747,7 +752,11 @@ func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
-	close(db.syncerStop)
+	// Join the background flush before the env goes away: it touches db.env on every tick.
+	if db.syncerDone != nil {
+		close(db.syncerStop)
+		<-db.syncerDone
+	}
 	db.waitTxsAllDoneOnClose()
 	db.drainRoTxPool()
 
