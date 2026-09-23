@@ -109,6 +109,7 @@ func TestOnBlockHashMismatchPreservesVerifiedPayload(t *testing.T) {
 		})
 	}
 }
+
 func TestOnBlockDoesNotCacheValidatedPayloadWhenEngineReturnsError(t *testing.T) {
 	blocks, anchorState, _ := tests.GetBellatrixRandom()
 	block := blocks[0]

@@ -429,9 +429,19 @@ type RPCBlock struct {
 	Uncles       []common.Hash      `json:"uncles"`
 	Withdrawals  *types.Withdrawals `json:"withdrawals,omitempty"`
 
-	TransactionCount any           `json:"transactionCount,omitempty"`
+	TransactionCount *uint64       `json:"transactionCount,omitempty"`
 	TotalDifficulty  *hexutil.U256 `json:"totalDifficulty,omitempty"`
-	Calls            any           `json:"calls,omitempty"`
+	Calls            []CallResult  `json:"calls,omitzero"`
+}
+
+// CallResult represents the result of a single call in the simulation.
+type CallResult struct {
+	ReturnData string          `json:"returnData"`
+	Logs       []*types.RPCLog `json:"logs"`
+	GasUsed    hexutil.Uint64  `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
+	Status     hexutil.Uint64  `json:"status"`
+	Error      any             `json:"error,omitempty"`
 }
 
 // MarkPending nils the fields a pending block does not have yet.
@@ -478,20 +488,36 @@ func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 	return result
 }
 
+// Each mode keeps the element type its populated form has, for callers that type-assert
+// Transactions.
+var (
+	noTxHashes any = []common.Hash{}
+	noFullTxs  any = []*RPCTransaction{}
+)
+
 // RPCMarshalBlock converts the given block to the RPC output. When inclTx is true the
 // result carries the block's transactions, as full objects if fullTx is also true and
 // as hashes otherwise.
 func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
-	transactions := make([]any, 0)
-	if inclTx {
-		txs := block.Transactions()
-		transactions = make([]any, len(txs))
-		for i, txn := range txs {
-			if fullTx {
-				transactions[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
-			} else {
-				transactions[i] = txn.Hash()
+	// A concrete slice type, not []any: boxing each element would heap-allocate
+	// every hash and send the encoder down its reflection path per transaction.
+	transactions := noTxHashes
+	if fullTx {
+		transactions = noFullTxs
+	}
+	if txs := block.Transactions(); inclTx && len(txs) > 0 {
+		if fullTx {
+			full := make([]*RPCTransaction, len(txs))
+			for i, txn := range txs {
+				full[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
 			}
+			transactions = full
+		} else {
+			hashes := make([]common.Hash, len(txs))
+			for i, txn := range txs {
+				hashes[i] = txn.Hash()
+			}
+			transactions = hashes
 		}
 	}
 
@@ -539,10 +565,14 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 		delete(m, k)
 	}
 	nullVal := json.RawMessage("null")
-	for _, k := range []string{"gasPrice", "maxFeePerGas", "maxPriorityFeePerGas"} {
+	for _, k := range []string{"maxFeePerGas", "maxPriorityFeePerGas"} {
 		if _, ok := m[k]; !ok {
 			m[k] = nullVal
 		}
+	}
+	// A dynamic-fee transaction that was only filled has no effective gas price yet.
+	if r.Tx.MaxFeePerGas != nil {
+		m["gasPrice"] = nullVal
 	}
 	zeroHex := json.RawMessage(`"0x0"`)
 	for _, k := range []string{"v", "r", "s"} {
@@ -565,7 +595,7 @@ type RPCTransaction struct {
 	BlockTimestamp       *hexutil.Uint64            `json:"blockTimestamp"`
 	From                 common.Address             `json:"from"`
 	Gas                  hexutil.Uint64             `json:"gas"`
-	GasPrice             *hexutil.U256              `json:"gasPrice,omitempty"`
+	GasPrice             *hexutil.U256              `json:"gasPrice"`
 	MaxPriorityFeePerGas *hexutil.U256              `json:"maxPriorityFeePerGas,omitempty"`
 	MaxFeePerGas         *hexutil.U256              `json:"maxFeePerGas,omitempty"`
 	Hash                 common.Hash                `json:"hash"`
@@ -639,7 +669,7 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		if txn.Type() == types.AccessListTxType {
 			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 		} else {
-			result.GasPrice = computeGasPrice(txn, blockHash, baseFee)
+			result.GasPrice = computeGasPrice(txn, baseFee)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
 			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
 		}
@@ -676,13 +706,15 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 	return result
 }
 
-func computeGasPrice(txn types.Transaction, _ common.Hash, baseFee *uint256.Int) *hexutil.U256 {
+// computeGasPrice reports the effective gas price of a transaction already in a
+// block, and the fee cap of a pending one, as the execution-apis spec requires.
+func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) *hexutil.U256 {
 	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
 		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
 		return (*hexutil.U256)(&price)
 	}
-	return nil
+	return (*hexutil.U256)(txn.GetFeeCap())
 }
 
 // newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.

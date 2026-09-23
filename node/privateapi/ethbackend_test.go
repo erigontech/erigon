@@ -14,10 +14,18 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package jsonw
+package privateapi
 
-// JSONWriter is the JSON stream a MarshalFastJSONTo writes into, in the manner of json/v2's jsontext.Encoder.
-type JSONWriter interface {
-	// WriteHex writes b as a 0x-prefixed hex string.
-	WriteHex(b []byte)
+import (
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
+)
+
+func TestNewEthBackendServerRejectsNilChainConfig(t *testing.T) {
+	require.PanicsWithValue(t, "privateapi: NewEthBackendServer: nil chainConfig", func() {
+		NewEthBackendServer(t.Context(), nil, nil, nil, nil, log.New(), nil, nil)
+	})
 }

@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -281,7 +282,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	currentBlock := reply.CurrentBlock
 
 	return map[string]any{
-		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
+		"startingBlock": hexutil.Uint64(startingBlock(reply)),
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
 		"stages":        stagesFromReply(reply.Stages),
@@ -365,49 +366,45 @@ type feeHistoryResult struct {
 	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
 }
 
-// MarshalFastJSON encodes r byte-identically to encoding/json, without a reflective call per element.
-func (r *feeHistoryResult) MarshalFastJSON() ([]byte, error) {
+// MarshalFastJSONTo writes r in encoding/json's field order and number forms.
+func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if r == nil {
-		return []byte("null"), nil
+		s.WriteNil()
+		return nil
 	}
 	if !allFinite(r.GasUsedRatio) || !allFinite(r.BlobGasUsedRatio) {
-		return json.Marshal(r) // for its error
+		_, err := json.Marshal(r) // encoding/json's error for NaN or Inf, reported before the first write
+		return err
 	}
-	perBlock := 64
+	s.WriteObjectStart()
+	jsonstream.Text(s, "oldestBlock", r.OldestBlock)
 	if len(r.Reward) > 0 {
-		perBlock += 16 * len(r.Reward[0])
-	}
-	b := make([]byte, 0, 128+perBlock*len(r.GasUsedRatio))
-	b = append(b, `{"oldestBlock":`...)
-	if r.OldestBlock == nil {
-		b = append(b, "null"...)
-	} else {
-		b = append(b, '"')
-		b, _ = r.OldestBlock.AppendText(b)
-		b = append(b, '"')
-	}
-	if len(r.Reward) > 0 {
-		b = append(b, `,"reward":[`...)
-		for i, row := range r.Reward {
-			if i > 0 {
-				b = append(b, ',')
-			}
-			b = appendJSONU256s(b, row)
-		}
-		b = append(b, ']')
+		s.Field("reward")
+		jsonstream.ArrayValue(s, r.Reward, writeU256s)
 	}
 	if len(r.BaseFee) > 0 {
-		b = appendJSONU256s(append(b, `,"baseFeePerGas":`...), r.BaseFee)
+		s.Field("baseFeePerGas")
+		writeU256s(s, &r.BaseFee)
 	}
-	b = appendJSONFloats(append(b, `,"gasUsedRatio":`...), r.GasUsedRatio)
+	s.Field("gasUsedRatio")
+	jsonstream.ArrayValue(s, r.GasUsedRatio, writeJSONFloat)
 	if len(r.BlobBaseFee) > 0 {
-		b = appendJSONU256s(append(b, `,"baseFeePerBlobGas":`...), r.BlobBaseFee)
+		s.Field("baseFeePerBlobGas")
+		writeU256s(s, &r.BlobBaseFee)
 	}
 	if len(r.BlobGasUsedRatio) > 0 {
-		b = appendJSONFloats(append(b, `,"blobGasUsedRatio":`...), r.BlobGasUsedRatio)
+		s.Field("blobGasUsedRatio")
+		jsonstream.ArrayValue(s, r.BlobGasUsedRatio, writeJSONFloat)
 	}
-	return append(b, '}'), nil
+	s.WriteObjectEnd()
+	return nil
 }
+
+func writeU256s(s *jsonstream.StackStream, vs *[]hexutil.U256) {
+	jsonstream.ArrayValue(s, *vs, writeU256)
+}
+
+func writeU256(s *jsonstream.StackStream, v *hexutil.U256) { s.WriteQuotedText(v) }
 
 func allFinite(fs []float64) bool {
 	for _, f := range fs {
@@ -418,43 +415,20 @@ func allFinite(fs []float64) bool {
 	return true
 }
 
-func appendJSONU256s(b []byte, vs []hexutil.U256) []byte {
-	if vs == nil {
-		return append(b, "null"...)
+// writeJSONFloat writes f as encoding/json does: 'e' notation outside [1e-6, 1e21), and no
+// leading zero in a negative exponent.
+func writeJSONFloat(s *jsonstream.StackStream, f *float64) {
+	format := byte('f')
+	if abs := math.Abs(*f); abs != 0 && (abs < 1e-6 || abs >= 1e21) {
+		format = 'e'
 	}
-	b = append(b, '[')
-	for i := range vs {
-		if i > 0 {
-			b = append(b, ',')
-		}
-		b = append(b, '"')
-		b, _ = vs[i].AppendText(b)
-		b = append(b, '"')
+	var buf [32]byte
+	b := strconv.AppendFloat(buf[:0], *f, format, -1, 64)
+	if n := len(b); format == 'e' && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
+		b[n-2] = b[n-1] // e-09 -> e-9
+		b = b[:n-1]
 	}
-	return append(b, ']')
-}
-
-// appendJSONFloats formats finite floats the way encoding/json does.
-func appendJSONFloats(b []byte, fs []float64) []byte {
-	if fs == nil {
-		return append(b, "null"...)
-	}
-	b = append(b, '[')
-	for i, f := range fs {
-		if i > 0 {
-			b = append(b, ',')
-		}
-		format := byte('f')
-		if abs := math.Abs(f); abs != 0 && (abs < 1e-6 || abs >= 1e21) {
-			format = 'e'
-		}
-		b = strconv.AppendFloat(b, f, format, -1, 64)
-		if n := len(b); format == 'e' && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
-			b[n-2] = b[n-1] // e-09 -> e-9
-			b = b[:n-1]
-		}
-	}
-	return append(b, ']')
+	s.WriteRawBytes(b)
 }
 
 func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {

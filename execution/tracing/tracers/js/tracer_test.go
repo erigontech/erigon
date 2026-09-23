@@ -67,7 +67,7 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 	ret, endGas, _, err := env.Run(contract, startGas, []byte{}, false)
 	tracer.OnExit(0, ret, startGas.Total()-endGas.Total(), err, true)
 	// Rest gas assumes no refund
-	tracer.OnTxEnd(&types.Receipt{GasUsed: gasLimit - endGas.Total()}, nil)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: gasLimit - endGas.Total()}, mdgas.TxnGasUsage{}, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -259,7 +259,7 @@ func TestIsPrecompile(t *testing.T) {
 }
 
 func TestEnterExit(t *testing.T) {
-	//c := vm.NewJumpDestCache(16)
+	// c := vm.NewJumpDestCache(16)
 	// test that either both or none of enter() and exit() are defined
 	if _, err := newJsTracer("{step: function() {}, fault: function() {}, result: function() { return null; }, enter: function() {}}", new(tracers.Context), nil); err == nil {
 		t.Fatal("tracer creation should've failed without exit() definition")

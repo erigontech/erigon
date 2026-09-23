@@ -1146,7 +1146,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
-	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
+	b.header.mutable = false // Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
 
@@ -1155,6 +1155,13 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 	b := NewBlock(header, txs, uncles, receipts, withdrawals, bal)
 	b.header.mutable = true
 	return b
+}
+
+// NewHeaderFromStorage caches hash, the key the header was read under, so Hash() does not hash
+// the RLP again.
+func NewHeaderFromStorage(hash common.Hash, header *Header) *Header {
+	header.hash.Store(&hash)
+	return header
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
@@ -1404,6 +1411,7 @@ func (b *Block) Body() *Body {
 	bd.SendersFromTxs()
 	return bd
 }
+
 func (b *Block) SendersToTxs(senders []common.Address) {
 	if len(senders) == 0 {
 		return
@@ -1667,48 +1675,33 @@ func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
 }
 
 func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		return err
 	}
-	for err == nil {
+	for s.MoreDataInList() {
 		var u Header
-		if err = u.DecodeRLP(s); err != nil {
-			break
+		if err := u.DecodeRLP(s); err != nil {
+			return err
 		}
 		*appendList = append(*appendList, &u)
 	}
-	return checkErrListEnd(s, err)
+	return s.ListEnd()
 }
 
 func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
 			*appendList = nil
 			return nil // EOL, check for ListEnd is in calling function
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
-	for err == nil {
+	for s.MoreDataInList() {
 		var w Withdrawal
-		if err = w.DecodeRLP(s); err != nil {
-			break
+		if err := w.DecodeRLP(s); err != nil {
+			return err
 		}
 		*appendList = append(*appendList, &w)
 	}
-	return checkErrListEnd(s, err)
-}
-
-func checkErrListEnd(s *rlp.Stream, err error) error {
-	// Match the bare EOL sentinel only. A wrapped EOL (e.g. a nested decoder
-	// returning fmt.Errorf("...: %w", rlp.EOL) on malformed input) is a real
-	// error and must propagate, not be treated as a clean end-of-list.
-	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
-		return err
-	}
-	if err := s.ListEnd(); err != nil {
-		return err
-	}
-	return nil
+	return s.ListEnd()
 }

@@ -79,7 +79,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	defer tx.Rollback()
 
-	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
 		return err
 	}
@@ -152,7 +152,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		txnHash := txn.Hash()
 
 		stream.WriteObjectStart()
-		stream.WriteObjectField("txHash")
+		stream.Field("txHash")
 		stream.WriteHex(txnHash[:])
 		select {
 		default:
@@ -186,14 +186,10 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 		if err != nil {
 			inner.CloseIfOpen()
-			stream.WriteMore()
 			rpc.HandleError(err, stream)
 		}
 
 		stream.WriteObjectEnd()
-		if txnIndex != len(txns)-1 {
-			stream.WriteMore()
-		}
 
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
@@ -322,7 +318,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 	engine := api.engine()
 
-	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, nil)
+	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader)
 	if err != nil {
 		return fmt.Errorf("get block number: %w", err)
 	}
@@ -397,6 +393,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 
 // TraceCall implements debug_traceCallMany. Returns Geth style call traces.
 func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+	if err := requireBlockSelector(simulateContext.BlockNumber); err != nil {
+		return err
+	}
 	if err := rejectPending(simulateContext.BlockNumber); err != nil {
 		return err
 	}
@@ -428,7 +427,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, nil)
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader)
 	if err != nil {
 		return err
 	}
@@ -491,7 +490,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	stream.WriteArrayStart()
-	for bundleIndex, bundle := range bundles {
+	for _, bundle := range bundles {
 		stream.WriteArrayStart()
 		// first change block context
 		bundle.BlockOverride.OverrideBlockContext(&blockCtx, overrideBlockHash)
@@ -521,15 +520,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 			_ = ibs.FinalizeTx(rules, state.NewNoopWriter())
 
-			if txnIndex < len(bundle.Transactions)-1 {
-				stream.WriteMore()
-			}
 		}
 		stream.WriteArrayEnd()
 
-		if bundleIndex < len(bundles)-1 {
-			stream.WriteMore()
-		}
 		blockCtx.BlockNumber++
 		blockCtx.Time++
 	}

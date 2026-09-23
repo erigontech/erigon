@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -159,7 +158,21 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
+}
+
+// The wire form is a 0x-prefixed 32-byte hex string, whatever Go type carries it.
+func TestGetStorageAtJSONShape(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
+	require.NoError(t, err)
+
+	enc, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.Regexp(t, `^"0x[0-9a-f]{64}"$`, string(enc))
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
@@ -173,7 +186,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
@@ -187,7 +200,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError(t *testing.T) {
@@ -252,7 +265,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 		t.Error("error expected")
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
@@ -578,10 +591,20 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+// A pooled transaction is priced at its fee cap, and carries no location.
+func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
+	feeCap := uint256.NewInt(1_000_000_000)
+	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, nil, uint256.NewInt(2), feeCap, nil)
+
+	result := newRPCPendingTransaction(txn)
+	require.NotNil(t, result.GasPrice)
+	require.Equal(t, feeCap.ToBig(), result.GasPrice.ToInt())
+	require.Nil(t, result.BlockHash)
+}
+
 func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	chainConfig := chain.TestChainOsakaConfig.Copy()
 	historyAddr := params.HistoryStorageAddress.Value()
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: chainConfig,
@@ -599,11 +622,11 @@ func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
 	at := bnhPtr(rpc.BlockNumberOrHashWithNumber(bn))
 	written, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn-1), at)
 	require.NoError(t, err)
-	require.Equal(t, ch.Blocks[bn-2].Hash(), common.HexToHash(written))
+	require.Equal(t, ch.Blocks[bn-2].Hash(), written)
 
 	notYetWritten, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn), at)
 	require.NoError(t, err)
-	require.Equal(t, common.Hash{}, common.HexToHash(notYetWritten), "slot %d is written by block %d", bn, bn+1)
+	require.Equal(t, common.Hash{}, notYetWritten, "slot %d is written by block %d", bn, bn+1)
 
 	values, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{historyAddr: {common.BigToHash(big.NewInt(bn))}}, at)
 	require.NoError(t, err)
@@ -626,8 +649,7 @@ var sloadStub = []byte{0x5f, 0x35, 0x54, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
 
 func TestTraceCallExcludesNextBlockSystemCall(t *testing.T) {
 	statecfg.EnableHistoricalCommitment()
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	chainConfig := chain.TestChainOsakaConfig.Copy()
 	historyAddr := params.HistoryStorageAddress.Value()
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
 		Config: chainConfig,

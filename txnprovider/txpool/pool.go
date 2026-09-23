@@ -540,7 +540,7 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 	}
 	p.kickKZGOffenders(ctx, validateReasons)
 
-	announcements, reasons, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
+	announcements, _, err := p.addTxns(p.lastSeenBlock.Load(), cacheView, p.senders, newTxns,
 		p.pendingBaseFee.Load(), p.pendingBlobFee.Load(), p.blockGasLimit.Load(), true, p.logger)
 	if err != nil {
 		return err
@@ -548,19 +548,6 @@ func (p *TxPool) processRemoteTxns(ctx context.Context) (err error) {
 
 	p.promoted.Reset()
 	p.promoted.AppendOther(announcements)
-
-	reasons = fillDiscardReasons(reasons, newTxns, p.discardReasonsLRU)
-	for i, reason := range reasons {
-		txn := newTxns.Txns[i]
-
-		if reason == txpoolcfg.Success {
-
-			if txn.Traced {
-				p.logger.Info(fmt.Sprintf("TX TRACING: processRemoteTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
-			}
-			p.promoted.Append(txn.TxType(), txn.Size, txn.IDHash[:])
-		}
-	}
 
 	if p.promoted.Len() > 0 {
 		copied := p.promoted.Copy()
@@ -1513,15 +1500,6 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	p.promoted.AppendOther(announcements)
 
 	reasons = fillDiscardReasons(reasons, originalTxns, p.discardReasonsLRU)
-	for i, reason := range reasons {
-		if reason == txpoolcfg.Success {
-			txn := originalTxns.Txns[i]
-			if txn.Traced {
-				p.logger.Info(fmt.Sprintf("TX TRACING: AddLocalTxns promotes idHash=%x, senderId=%d", txn.IDHash, txn.SenderID))
-			}
-			p.promoted.Append(txn.TxType(), txn.Size, txn.IDHash[:])
-		}
-	}
 	if p.promoted.Len() > 0 {
 		select {
 		case p.newPendingTxns <- p.promoted.Copy():
@@ -2254,8 +2232,16 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	logger.Trace("[txpool] onSenderStateChange", "sender", senderID, "count", p.all.count(senderID), "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len())
 }
 
-// promote reasserts invariants of the subpool and returns the list of transactions that ended up
-// being promoted to the pending or basefee pool, for re-broadcasting
+func announceFirstPending(announcements *Announcements, mt *metaTxn) {
+	if mt.announced {
+		return
+	}
+	mt.announced = true
+	announcements.Append(mt.TxnSlot.TxType(), mt.TxnSlot.Size, mt.TxnSlot.IDHash[:])
+}
+
+// promote reasserts the sub-pool invariants and adds to announcements each txn that enters pending
+// for the first time.
 func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcements *Announcements, logger log.Logger) {
 	// Demote worst transactions that do not qualify for pending sub pool anymore, to other sub pools, or discard
 	for worst := p.pending.Worst(); p.pending.Len() > 0 && (worst.subPool < BaseFeePoolBits || worst.minFeeCap.LtUint64(pendingBaseFee) || (worst.TxnSlot.TxType() == BlobTxnType && worst.TxnSlot.GetBlobFeeCap().LtUint64(pendingBlobFee))); worst = p.pending.Worst() {
@@ -2270,7 +2256,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	// Promote best transactions from base fee pool to pending pool while they qualify
 	for best := p.baseFee.Best(); p.baseFee.Len() > 0 && best.subPool >= BaseFeePoolBits && best.minFeeCap.CmpUint64(pendingBaseFee) >= 0 && (best.TxnSlot.TxType() != BlobTxnType || best.TxnSlot.GetBlobFeeCap().CmpUint64(pendingBlobFee) >= 0); best = p.baseFee.Best() {
 		tx := p.baseFee.PopBest()
-		announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
+		announceFirstPending(announcements, tx)
 		p.pending.Add(tx, logger)
 	}
 
@@ -2284,7 +2270,7 @@ func (p *TxPool) promote(pendingBaseFee uint64, pendingBlobFee uint64, announcem
 	for best := p.queued.Best(); p.queued.Len() > 0 && best.subPool >= BaseFeePoolBits; best = p.queued.Best() {
 		tx := p.queued.PopBest()
 		if best.minFeeCap.Cmp(uint256.NewInt(pendingBaseFee)) >= 0 {
-			announcements.Append(tx.TxnSlot.TxType(), tx.TxnSlot.Size, tx.TxnSlot.IDHash[:])
+			announceFirstPending(announcements, tx)
 			p.pending.Add(tx, logger)
 		} else {
 			p.baseFee.Add(tx, "promote-queued", logger)

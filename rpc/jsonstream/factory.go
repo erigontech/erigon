@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"bytes"
 	"io"
 	"sync"
 
@@ -25,18 +26,39 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-const InitialBufferSize = 4096
+const (
+	InitialBufferSize = 4096
 
-// FlushThreshold bounds how much of a response is held in memory at once. A
-// trace can run to gigabytes, and nothing above this layer flushes inside one.
-const FlushThreshold = int(64 * datasize.KB)
+	// FlushThreshold is where a stream hands its buffer over, so it bounds write syscalls at
+	// one per this many bytes. It does not bound the buffer: flushIfFull checks the length
+	// after the write that crossed it, and Get keeps whatever capacity the stream came back
+	// with, so an in-flight response can hold up to maxPooledBufferSize.
+	FlushThreshold = int(256 * datasize.KB)
+
+	// maxPooledBufferSize bounds what a stream carries back into the pool, and with it how much
+	// an in-flight response may hold. It needs headroom over FlushThreshold: a stream that
+	// crossed the threshold has already grown past it, so at cap == threshold exactly the
+	// streaming responses are dropped and only small ones stay pooled.
+	maxPooledBufferSize = int(1 * datasize.MB)
+)
+
+// MaxPooledBufferSize is what Put admits back into the pool.
+func MaxPooledBufferSize() int { return maxPooledBufferSize }
+
+const _ = uint(maxPooledBufferSize - 2*FlushThreshold)
 
 // flushIfFull hands the buffer over once it is full, so a large response streams
 // instead of being held whole.
 func flushIfFull(stream *jsoniter.Stream) {
-	if len(stream.Buffer()) < FlushThreshold {
-		return
+	if len(stream.Buffer()) >= FlushThreshold {
+		flushFull(stream)
 	}
+}
+
+// flushFull is outlined so the threshold check stays inlinable into every value write.
+//
+//go:noinline
+func flushFull(stream *jsoniter.Stream) {
 	if err := stream.Flush(); err != nil {
 		// Discarded, not retried: jsoniter latches err on the stream, so every
 		// later Flush returns it without draining and these bytes can never
@@ -53,14 +75,9 @@ func New(out io.Writer) Stream {
 
 var streamPool = sync.Pool{New: func() any { return newStackStream(nil, InitialBufferSize) }}
 
-// maxPooledBufferSize bounds what a stream carries back into the pool. A
-// non-streaming response is appended whole, so its buffer ends up as large as
-// the response, and the pool holds one per running goroutine.
-const maxPooledBufferSize = 16 * FlushThreshold
-
 // Get is New over a pool. Put the stream back once its bytes have left it;
 // skipping Put only costs the recycling.
-func Get(out io.Writer) Stream {
+func Get(out io.Writer) *StackStream {
 	s := streamPool.Get().(*StackStream)
 	s.Reset(out)
 	return s
@@ -75,4 +92,17 @@ func Put(s Stream) {
 	}
 	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection
 	streamPool.Put(ss)
+}
+
+// Marshal encodes v into a byte slice the caller owns.
+func Marshal(v interface{ MarshalFastJSONTo(*StackStream) error }) ([]byte, error) {
+	s := Get(nil)
+	defer Put(s)
+	if err := v.MarshalFastJSONTo(s); err != nil {
+		return nil, err
+	}
+	if err := s.Err(); err != nil { // a latched write error left a placeholder in the buffer
+		return nil, err
+	}
+	return bytes.Clone(s.Buffer()), nil
 }

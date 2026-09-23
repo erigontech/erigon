@@ -28,8 +28,8 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -42,6 +42,9 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestCapabilities(t *testing.T) {
@@ -118,11 +121,10 @@ func TestCapabilities(t *testing.T) {
 		t.Helper()
 		key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 		addr := crypto.PubkeyToAddress(key.PublicKey)
-		var cfgWithMerge chain.Config
-		require.NoError(t, copier.CopyWithOption(&cfgWithMerge, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
+		cfgWithMerge := chain.TestChainBerlinConfig.Copy()
 		cfgWithMerge.MergeHeight = &mergeAt
 		gspec := &types.Genesis{
-			Config: &cfgWithMerge,
+			Config: cfgWithMerge,
 			Alloc:  types.GenesisAlloc{addr: {Balance: big.NewInt(math.MaxInt64)}},
 		}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
@@ -725,15 +727,58 @@ func TestFeeHistoryResultFastJSONMatchesEncodingJSON(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(res)
 			require.NoError(t, err)
-			got, err := res.MarshalFastJSON()
+			got, err := jsonstream.Marshal(res)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
 		})
 	}
 	for _, bad := range []float64{math.NaN(), math.Inf(1)} {
 		_, wantErr := json.Marshal(&feeHistoryResult{GasUsedRatio: []float64{bad}})
-		_, gotErr := (&feeHistoryResult{GasUsedRatio: []float64{bad}}).MarshalFastJSON()
+		_, gotErr := jsonstream.Marshal(&feeHistoryResult{GasUsedRatio: []float64{bad}})
 		require.Error(t, wantErr)
 		require.EqualError(t, gotErr, wantErr.Error())
 	}
+}
+
+type syncingBackendStub struct {
+	rpchelper.ApiBackend
+	reply *remoteproto.SyncingReply
+}
+
+func (s syncingBackendStub) Syncing(context.Context) (*remoteproto.SyncingReply, error) {
+	return s.reply, nil
+}
+
+// The RPC layer forwards the node's pin instead of computing one of its own.
+func TestSyncingReportsTheStartingBlockOfTheSession(t *testing.T) {
+	api := &APIImpl{ethBackend: syncingBackendStub{reply: &remoteproto.SyncingReply{
+		Syncing:          true,
+		StartingBlock:    proto.Uint64(100),
+		CurrentBlock:     150,
+		LastNewBlockSeen: 500,
+	}}}
+
+	result, err := api.Syncing(t.Context())
+	require.NoError(t, err)
+	status, ok := result.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, hexutil.Uint64(100), status["startingBlock"])
+	require.Equal(t, hexutil.Uint64(150), status["currentBlock"])
+	require.Equal(t, hexutil.Uint64(500), status["highestBlock"])
+}
+
+// A node predating the field sends no pin, and the version check lets it: the
+// reply must then date the session to the current block, not to genesis.
+func TestSyncingWithoutAPinReportsTheCurrentBlock(t *testing.T) {
+	api := &APIImpl{ethBackend: syncingBackendStub{reply: &remoteproto.SyncingReply{
+		Syncing:          true,
+		CurrentBlock:     150,
+		LastNewBlockSeen: 500,
+	}}}
+
+	result, err := api.Syncing(t.Context())
+	require.NoError(t, err)
+	status, ok := result.(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, hexutil.Uint64(150), status["startingBlock"])
 }

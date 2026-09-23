@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -129,9 +130,7 @@ func TraceTx(
 	if err != nil {
 		return 0, err
 	}
-
 	defer cancel()
-
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		gp := new(protocol.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
 		if tracer != nil && tracer.OnTxStart != nil {
@@ -139,19 +138,17 @@ func TraceTx(
 		}
 		result, err := protocol.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
 		if err != nil {
-			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(nil, err)
+			if tracer != nil {
+				tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 			}
-
 			return result, err
-		} else if tracer != nil && tracer.OnTxEnd != nil {
-			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 		}
-
+		if tracer != nil && tracer.HasTxEndHook() {
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
+		}
 		gasUsed = result.ReceiptGasUsed
 		return result, err
 	}
-
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, precompiles, execCb)
 	return gasUsed, err
 }
@@ -224,7 +221,8 @@ func ExecuteTraceTx(
 	// Set the tracer hooks to the intra-block state before execute, so the OnLog hook may be set correctly.
 	ibs.SetHooks(tracer.Hooks)
 	// Run the transaction with tracing enabled.
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
+	vmConfig := vm.Config{Tracer: tracer.Hooks, NoBaseFee: true}
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 	refunds := true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
@@ -241,19 +239,16 @@ func ExecuteTraceTx(
 	// Depending on the tracer type, format and return the output
 	if streaming {
 		stream.WriteArrayEnd()
-		stream.WriteMore()
-		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.ReceiptGasUsed)
-		stream.WriteMore()
-		stream.WriteObjectField("failed")
+		stream.Field("gas")
+		stream.Uint(result.ReceiptGasUsed)
+		stream.Field("failed")
 		stream.WriteBool(result.Failed())
-		stream.WriteMore()
 		// If the result contains a revert reason, return it.
 		ret := result.Return()
 		if len(result.Revert()) > 0 {
 			ret = result.Revert()
 		}
-		stream.WriteObjectField("returnValue")
+		stream.Field("returnValue")
 		stream.WriteHex(ret)
 		stream.WriteObjectEnd()
 	} else {

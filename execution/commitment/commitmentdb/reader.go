@@ -273,6 +273,7 @@ func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]
 // parent commitment. The witness build runs sequential commitment, so these
 // are not exercised on the hot path, but preserving the pinned tx is correct.
 func (r *txLatestReader) Clone(kv.TemporalTx) StateReader { return &txLatestReader{tx: r.tx} }
+
 func (r *txLatestReader) CloneForWorker(context.Context, kv.TemporalTx) StateReader {
 	return &txLatestReader{tx: r.tx}
 }
