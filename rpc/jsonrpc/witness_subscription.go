@@ -18,13 +18,13 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // WitnessSubscriptionOpts are the optional debug_subscribe("executionWitnesses") params.
@@ -34,11 +34,23 @@ type WitnessSubscriptionOpts struct {
 }
 
 // WitnessNotification is one debug_subscription("executionWitnesses") payload: the
-// completed block's number and hash plus its witness as raw pre-marshaled JSON.
+// completed block's number and hash plus its witness.
 type WitnessNotification struct {
-	BlockNumber hexutil.Uint64  `json:"blockNumber"`
-	BlockHash   common.Hash     `json:"blockHash"`
-	Witness     json.RawMessage `json:"witness"`
+	BlockNumber hexutil.Uint64          `json:"blockNumber"`
+	BlockHash   common.Hash             `json:"blockHash"`
+	Witness     *ExecutionWitnessResult `json:"witness"`
+}
+
+func (n WitnessNotification) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	s.WriteObjectStart()
+	jsonstream.Text(s, "blockNumber", &n.BlockNumber)
+	s.Field("blockHash").WriteHex(n.BlockHash[:])
+	s.Field("witness")
+	if err := n.Witness.MarshalFastJSONTo(s); err != nil {
+		return err
+	}
+	s.WriteObjectEnd()
+	return nil
 }
 
 func validateWitnessEncoding(opts *WitnessSubscriptionOpts) error {
@@ -78,7 +90,7 @@ func (api *DebugAPIImpl) ExecutionWitnesses(ctx context.Context, opts *WitnessSu
 			emit(WitnessNotification{
 				BlockNumber: hexutil.Uint64(p.num),
 				BlockHash:   p.hash,
-				Witness:     p.json,
+				Witness:     p.result,
 			})
 		},
 		"[witness-feed] witness push channel was closed")
