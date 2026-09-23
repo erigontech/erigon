@@ -888,7 +888,7 @@ func targetOf(br *blockResult) commitTarget {
 // decided by ownsChangeset.
 type computeMode struct {
 	label       string // error-message context, e.g. "step-boundary "
-	midBlock    bool   // mid-block checkpoint: keep block flags dirty and don't advance lastComputedBlock (block-end otherwise)
+	midBlock    bool
 	checkRoot   bool   // compare the computed root against target.stateRoot
 	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
@@ -911,9 +911,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		return
 	}
 	cc.state.FlushToUpdates(cc.updates)
-	if !m.midBlock {
-		cc.state.ResetBlockFlags()
-	}
+	cc.state.ResetBlockFlags()
 
 	sdCtx := cc.doms.GetCommitmentContext()
 	sdCtx.SetUpdates(cc.handOffUpdates())
