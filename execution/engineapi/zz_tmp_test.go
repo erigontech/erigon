@@ -2,7 +2,9 @@ package engineapi_test
 
 import (
 	"context"
+	"os"
 	"sort"
+	"strconv"
 	"testing"
 	"time"
 
@@ -14,6 +16,13 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engineapitester"
 )
 
+func dataDir(t *testing.T) string {
+	if d := os.Getenv("EMPTYCOST_DATADIR"); d != "" {
+		return d
+	}
+	return t.TempDir()
+}
+
 func TestZZZEmptyPayloadCost(t *testing.T) {
 	ctx := t.Context()
 	logger := testlog.Logger(t, log.LvlCrit)
@@ -21,7 +30,7 @@ func TestZZZEmptyPayloadCost(t *testing.T) {
 	require.NoError(t, err)
 	eat, err := engineapitester.InitialiseEngineApiTester(ctx, engineapitester.EngineApiTesterInitArgs{
 		Logger:        logger,
-		DataDir:       t.TempDir(),
+		DataDir:       dataDir(t),
 		Genesis:       genesis,
 		CoinbaseKey:   coinbaseKey,
 		DisableSentry: true,
@@ -30,6 +39,11 @@ func TestZZZEmptyPayloadCost(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, eat.Close()) })
 
 	n := 300
+	if v := os.Getenv("EMPTYCOST_N"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			n = parsed
+		}
+	}
 	build := make([]float64, 0, n)
 	np := make([]float64, 0, n)
 	fcu := make([]float64, 0, n)
