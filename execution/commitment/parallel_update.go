@@ -44,7 +44,7 @@ func (a *plainKeyArena) intern(b []byte) []byte {
 
 func (a *plainKeyArena) reset() { a.buf = a.buf[:0] }
 
-const touchChunkKeys = 8192
+const touchChunkKeys = 16384
 
 const touchChunkBuffers = 2
 
