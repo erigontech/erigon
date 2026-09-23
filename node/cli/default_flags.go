@@ -147,7 +147,6 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapDownloadToBlockFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
-	&utils.DbFlushFlag,
 	&utils.DbWriteMapFlag,
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,

@@ -166,9 +166,6 @@ type Config struct {
 	MdbxDBSizeLimit datasize.ByteSize
 	MdbxGrowthStep  datasize.ByteSize
 	MdbxWriteMap    bool
-	// MdbxSyncDurable flushes chaindata on every commit. The zero value flushes in the
-	// background, and mdbx rolls back to the last flushed commit-point after a crash.
-	MdbxSyncDurable bool
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
 
