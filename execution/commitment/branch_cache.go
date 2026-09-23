@@ -638,17 +638,14 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	}
 	dataCopy := make([]byte, len(data))
 	copy(dataCopy, data)
+	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN}
 
 	stripe := c.putStripe(prefix)
 	stripe.Lock()
 	defer stripe.Unlock()
 
-	c.store(prefix, &branchCacheEntry{
-		data:  dataCopy,
-		step:  step,
-		txN:   txN,
-		epoch: c.coh.Epoch(),
-	})
+	entry.epoch = c.coh.Epoch()
+	c.store(prefix, entry)
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {
