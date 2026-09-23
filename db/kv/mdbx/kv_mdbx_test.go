@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1244,4 +1245,37 @@ func TestDeferredSyncFlushesWithoutFurtherCommits(t *testing.T) {
 	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).Durable())
 	writeMB(durable, 4)
 	require.Zero(t, unsynced(durable), "a durable database flushes within the commit")
+}
+
+// Close must join the background flush: it touches the env on every tick, and the env is gone
+// once Close returns.
+func TestDeferredSyncClosesWhileWriting(t *testing.T) {
+	val := make([]byte, 4096)
+	for range 20 {
+		db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
+			SyncPoll(time.Millisecond).
+			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+		var wg sync.WaitGroup
+		stop := make(chan struct{})
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if err := db.Update(t.Context(), func(tx kv.RwTx) error {
+					return tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i)), val)
+				}); err != nil {
+					return // the db is closing
+				}
+			}
+		}()
+		time.Sleep(5 * time.Millisecond)
+		close(stop)
+		wg.Wait()
+		db.Close()
+	}
 }
