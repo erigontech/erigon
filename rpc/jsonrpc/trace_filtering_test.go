@@ -572,8 +572,11 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 		requireFastJSONMatchesReflection(t, name, ts)
 	}
 
-	_, err := jsonstream.Marshal(ParityTraces{{Action: CallTraceAction{}}})
+	stream := jsonstream.Get(nil)
+	defer jsonstream.Put(stream)
+	err := ParityTraces{{Action: CallTraceAction{}}}.MarshalFastJSONTo(stream)
 	require.ErrorContains(t, err, "has no JSON writer")
+	require.Empty(t, stream.Buffer(), "an unsupported action fails before the first write")
 }
 
 func requireFastJSONMatchesReflection(t *testing.T, name string, ts ParityTraces) {
