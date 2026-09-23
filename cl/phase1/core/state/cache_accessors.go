@@ -538,6 +538,10 @@ func (b *CachingBeaconState) GetValidatorActivationChurnLimit() uint64 {
 // Falls back to ComputePTC when the requested slot is outside the
 // ptcWindow's 3-epoch range (e.g. state advanced far past the parent).
 func (b *CachingBeaconState) GetPTC(slot uint64) ([]uint64, error) {
+	epoch := GetEpochAtSlot(b.BeaconConfig(), slot)
+	if epoch < b.BeaconConfig().GloasForkEpoch {
+		return nil, fmt.Errorf("GetPTC: slot %d is pre-Gloas", slot)
+	}
 	if b.Version() >= clparams.GloasVersion {
 		ptc, err := b.GetPTCFromWindow(slot)
 		if err == nil {
