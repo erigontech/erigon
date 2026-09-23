@@ -1229,12 +1229,12 @@ func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
 		return info.UnsyncedBytes
 	}
 
-	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync(50 * time.Millisecond))
+	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().SyncPeriod(50 * time.Millisecond))
 	writeOne(deferred) // far below the byte threshold: only the deadline can flush this
 	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 5*time.Second, 10*time.Millisecond,
 		"the background flush never ran")
 
-	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()))
+	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).Durable())
 	writeOne(durable)
 	require.Zero(t, unsynced(durable), "a durable database flushes within the commit")
 }
@@ -1245,7 +1245,7 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 	val := make([]byte, 4096)
 	for range 20 {
 		db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
-			SafeNoSync(time.Millisecond).
+			SafeNoSync().SyncPeriod(time.Millisecond).
 			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 		var wg sync.WaitGroup
 		stop := make(chan struct{})
@@ -1270,4 +1270,18 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 		close(stop)
 		wg.Wait()
 	}
+}
+
+// The flush mode is settled once every option is in, so a mode set after SafeNoSync still wins
+// - mdbx rejects the thresholds outright on a read-only database.
+func TestSafeNoSyncYieldsToReadonlyWhateverTheOrder(t *testing.T) {
+	path := t.TempDir()
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(path).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	db.Close()
+
+	ro := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(path).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).
+		SafeNoSync().Readonly(true).Accede(true).MustOpen()
+	t.Cleanup(ro.Close)
 }
