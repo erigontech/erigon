@@ -22,6 +22,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -38,7 +39,7 @@ func benchJSONLoggerStep(b *testing.B, stackDepth int, memSize int) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		l.OnOpcode(42, byte(vm.SSTORE), 1_000_000, 2100, scope, rData, 3, nil)
+		l.OnOpcodeV2(42, byte(vm.SSTORE), mdgas.MdGas{Execution: 1_000_000}, mdgas.MdGas{Execution: 2100}, scope, rData, 3, nil)
 	}
 }
 

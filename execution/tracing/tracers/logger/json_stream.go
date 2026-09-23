@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -73,8 +74,8 @@ func (l *JsonStreamLogger) Tracer() *tracers.Tracer {
 		Hooks: &tracing.Hooks{
 			OnTxStart:           l.OnTxStart,
 			OnSystemCallStartV2: l.OnSystemCallStartV2,
-			OnExit:              l.OnExit,
-			OnOpcode:            l.OnOpcode,
+			OnExitV2:            l.OnExitV2,
+			OnOpcodeV2:          l.OnOpcodeV2,
 		},
 	}
 }
@@ -111,12 +112,12 @@ func (l *JsonStreamLogger) writeWord(word []byte) {
 	l.stream.WriteHex(padded)
 }
 
-func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (l *JsonStreamLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	l.writePrologueOnce()
 }
 
 // writePrologueOnce opens the response object and the structLogs array. Every
-// frame exits through OnExit, and the caller closes one object and one array, so
+// frame exits through OnExitV2, and the caller closes one object and one array, so
 // a second prologue would leave the response unbalanced.
 func (l *JsonStreamLogger) writePrologueOnce() {
 	if !l.firstCapture {
@@ -128,8 +129,8 @@ func (l *JsonStreamLogger) writePrologueOnce() {
 	l.stream.WriteArrayStart()
 }
 
-// OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
-func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+// OnOpcodeV2 also tracks SLOAD/SSTORE ops to track storage change.
+func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 	contractAddr := scope.Address()
 	memory := scope.MemoryData()
 	stack := scope.StackData()
@@ -182,9 +183,17 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	l.stream.Field("op")
 	l.stream.WriteString(op.String())
 	l.stream.Field("gas")
-	l.stream.Uint(gas)
+	l.stream.Uint(gas.Execution)
 	l.stream.Field("gasCost")
-	l.stream.Uint(cost)
+	l.stream.Uint(cost.Execution)
+	if cost.State != 0 {
+		l.stream.Field("stateGasCost")
+		l.stream.Uint(cost.State)
+	}
+	if gas.State != 0 {
+		l.stream.Field("stateGasReservoir")
+		l.stream.Uint(gas.State)
+	}
 	l.stream.Field("depth")
 	l.stream.Int(int64(depth))
 	refund := l.env.IntraBlockState.GetRefund()

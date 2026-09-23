@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -417,7 +416,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	}
 	engine := api.engine()
 
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
 	// Execute all transactions in picked blocks
 
 	count := uint64(^uint(0)) // this just makes it easier to use below
@@ -441,20 +439,19 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	// exportTrace returns done=true once count traces were exported: the array
 	// is sealed and the scan must stop, so a later failure in traces the client
 	// never asked for cannot invalidate a complete response.
-	exportTrace := func(tr any) (done bool, err error) {
+	exportTrace := func(tr *ParityTrace) (done bool, err error) {
 		nSeen++
-		b, err := json.Marshal(tr)
-		if err != nil {
-			return false, err
-		}
 		if nSeen <= after {
 			return false, nil
+		}
+		if err := tr.checkKinds(); err != nil {
+			return false, err
 		}
 		if first {
 			stream.WriteArrayStart()
 			first = false
 		}
-		stream.WriteRawBytes(b)
+		tr.writeTo(stream.Open())
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return false, err
 		}
@@ -595,7 +592,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
 				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward)
-				done, err := exportTrace(tr)
+				done, err := exportTrace(&tr)
 				if err != nil {
 					return err
 				}
@@ -607,7 +604,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 					if i < len(uncleRewards) {
 						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i])
-						done, err := exportTrace(tr)
+						done, err := exportTrace(&tr)
 						if err != nil {
 							return err
 						}
