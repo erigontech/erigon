@@ -32,13 +32,6 @@ func FuzzSingleEliasFano(f *testing.F) {
 		if len(in) == 0 {
 			t.Skip()
 		}
-		// The fuzzing engine hands the input as a read-only buffer; clone it
-		// before growing so the appends below never write into that buffer.
-		in = bytes.Clone(in)
-		for len(in) < int(2*superQ) { // make input large enough to trigger supreQ jump logic
-			in = append(in, in...)
-		}
-
 		// Treat each byte of the sequence as difference between previous value and the next
 		count := len(in)
 		keys := make([]uint64, count+1)
@@ -119,13 +112,6 @@ func FuzzDoubleEliasFano(f *testing.F) {
 		if len(in) == 0 {
 			t.Skip()
 		}
-		// The fuzzing engine hands the input as a read-only buffer; clone it
-		// before growing so the appends below never write into that buffer.
-		in = bytes.Clone(in)
-		for len(in) < int(2*superQ) { // make input large enough to trigger supreQ jump logic
-			in = append(in, in...)
-		}
-
 		var ef DoubleEliasFano
 		// Treat each byte of the sequence as difference between previous value and the next
 		numBuckets := len(in) / 2
@@ -150,8 +136,9 @@ func FuzzDoubleEliasFano(f *testing.F) {
 		if !ef1.build() || !ef2.build() || !ef.build(cumKeys, position) {
 			return
 		}
-		// Try to read from ef
-		for bucket := range numBuckets {
+		// Try to read from ef. Index numBuckets is the last one the structure
+		// holds; only Get3 stops short, since it also reads cumKeys[bucket+1].
+		for bucket := range numBuckets + 1 {
 			cumKey, bitPos := ef.Get2(uint64(bucket))
 			if cumKey != cumKeys[bucket] {
 				t.Fatalf("bucket %d: cumKey from EF = %d, expected %d", bucket, cumKey, cumKeys[bucket])

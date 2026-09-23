@@ -469,7 +469,7 @@ func setupDataColumnSidecarHandlerTestWithStore(t *testing.T, fuluForkEpoch uint
 	})
 	beaconCfg := *mainnetCfg
 	beaconCfg.FuluForkEpoch = fuluForkEpoch
-	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 1000, &beaconCfg, ethClock, beaconevents.NewEventEmitter())
+	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), &beaconCfg, beaconevents.NewEventEmitter())
 
 	c := NewConsensusHandlers(
 		ctx,

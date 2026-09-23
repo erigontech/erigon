@@ -21,7 +21,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -37,10 +36,9 @@ import (
 
 func CreateTestBlockAccessListExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	t.Helper()
-	var config chain.Config
-	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime = common.NewUint64(20)
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(&config))
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(config))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	gasPrice := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	var nonce uint64
@@ -56,8 +54,8 @@ func CreateTestBlockAccessListExecModule(t *testing.T) (*execmoduletester.ExecMo
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainPack))
 	require.Nil(t, chainPack.Blocks[0].Header().BlockAccessListHash)
-	require.NotEqual(t, []byte{0xc0}, chainPack.Blocks[1].BlockAccessList())
-	require.NotEqual(t, []byte{0xc0}, chainPack.Blocks[3].BlockAccessList())
+	require.NotEmpty(t, chainPack.Blocks[1].BlockAccessList())
+	require.NotEmpty(t, chainPack.Blocks[3].BlockAccessList())
 	err = m.DB.Update(t.Context(), func(tx kv.RwTx) error {
 		for _, block := range []*types.Block{chainPack.Blocks[2], chainPack.Blocks[4]} {
 			if err := rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xc0}); err != nil {
@@ -71,7 +69,7 @@ func CreateTestBlockAccessListExecModule(t *testing.T) (*execmoduletester.ExecMo
 	require.NoError(t, err)
 	for _, i := range []int{2, 4} {
 		block := chainPack.Blocks[i]
-		chainPack.Blocks[i] = types.NewBlockFromNetwork(block.HeaderNoCopy(), block.Body(), []byte{0xc0})
+		chainPack.Blocks[i] = types.NewBlockFromNetwork(block.HeaderNoCopy(), block.Body(), types.NewBlockAccessListSidecar(types.BlockAccessList{}))
 	}
 	chainPack.TopBlock = chainPack.Blocks[len(chainPack.Blocks)-1]
 	pruneBlockAccessListHistory(t, m, chainPack.Blocks[3])

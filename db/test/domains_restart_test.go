@@ -59,7 +59,7 @@ func testDbAndAggregatorv3(t *testing.T, fpath string, stepSize uint64) (kv.Temp
 		path = fpath
 	}
 	dirs := datadir.New(path)
-	db := temporaltest.NewTestDBWithStepSize(t, dirs, stepSize)
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(stepSize))
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator), path
 }
 
@@ -81,7 +81,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	blockNum, txNum := uint64(0), uint64(0)
@@ -169,7 +169,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	err = tx.Commit()
 	require.NoError(t, err)
 
-	err = agg.BuildFiles(txs)
+	err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	domains.Close()
@@ -194,7 +194,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 
@@ -225,7 +225,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutDB(t *testing.T) {
 	tx, err = db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err = execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	writer = state2.NewWriter(domains.AsPutDel(tx), nil, txNum)
@@ -299,7 +299,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(t, err)
 		defer domains.Close()
 		rnd := rand.New(rand.NewSource(time.Now().Unix()))
@@ -351,7 +351,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		err = tx.Commit()
 		require.NoError(t, err)
 
-		err = agg.BuildFiles(txs)
+		err = agg.BuildFiles(db, txs, unboundedFinalityCtx)
 		require.NoError(t, err)
 
 		domains.Close()
@@ -371,7 +371,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		require.NoError(t, err)
 		defer tx.Rollback()
 
-		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(t, err)
 		defer domains.Close()
 
@@ -388,7 +388,7 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		tx, err = db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer tx.Rollback()
-		domains, err = execctx.NewSharedDomains(ctx, tx, log.New())
+		domains, err = execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 		require.NoError(t, err)
 		defer domains.Close()
 
@@ -405,8 +405,8 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 		s, err := chainspec.ChainSpecByName(networkname.Test)
 		require.NoError(t, err)
 		require.Equal(t, s.GenesisStateRoot, common.BytesToHash(rh))
-		//require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
-		//common.BytesToHash(rh))
+		// require.NotEqualValues(t, latestHash, common.BytesToHash(rh))
+		// common.BytesToHash(rh))
 
 		var i, j int
 		for tt := txToStart; tt <= txs; tt++ {
@@ -430,7 +430,6 @@ func Test_AggregatorV3_RestartOnDatadir_WithoutAnything(t *testing.T) {
 			}
 		}
 	})
-
 }
 
 func randomAccount(t *testing.T) (*accounts.Account, accounts.Address) {
@@ -454,7 +453,7 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
 	require.NoError(t, err)
 	defer domains.Close()
 	blockNum, txNum := uint64(0), uint64(0)
@@ -487,7 +486,6 @@ func TestCommit(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, common.BytesToHash(common.FromHex("0xfe81cd91357cd915cae7c02b5a4771e903c16b29dec582818076954be3741030")), common.BytesToHash(domainsHash))
-
 }
 
 // The commitment context routes both the trie trace and the branch read/write
@@ -499,7 +497,8 @@ func TestCommitmentContextTraceWriter(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	// Sequential: the assertions below pin HexPatriciaHashed's own trace lines.
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithSequentialCommitment())
 	require.NoError(t, err)
 	defer domains.Close()
 

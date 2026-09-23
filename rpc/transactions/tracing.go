@@ -18,7 +18,6 @@ package transactions
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -57,7 +58,8 @@ type BlockGetter interface {
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
 	headerReader dbservices.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
-	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
+	txIndex int,
+) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	var reader state.StateReader
 	if stateCache != nil {
 		cacheView, err := stateCache.View(ctx, dbtx)
@@ -128,9 +130,7 @@ func TraceTx(
 	if err != nil {
 		return 0, err
 	}
-
 	defer cancel()
-
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
 		gp := new(protocol.GasPool).AddGas(message.Gas()).AddBlobGas(message.BlobGas())
 		if tracer != nil && tracer.OnTxStart != nil {
@@ -138,19 +138,17 @@ func TraceTx(
 		}
 		result, err := protocol.ApplyMessage(evm, message, gp, refunds, false /* gasBailout */, engine)
 		if err != nil {
-			if tracer != nil && tracer.OnTxEnd != nil {
-				tracer.OnTxEnd(nil, err)
+			if tracer != nil {
+				tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 			}
-
 			return result, err
-		} else if tracer != nil && tracer.OnTxEnd != nil {
-			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
 		}
-
+		if tracer != nil && tracer.HasTxEndHook() {
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
+		}
 		gasUsed = result.ReceiptGasUsed
 		return result, err
 	}
-
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, precompiles, execCb)
 	return gasUsed, err
 }
@@ -200,6 +198,9 @@ func AssembleTracer(
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
 		return logger.NewJsonStreamLogger(nil, ctx, stream).Tracer(), true, cancel, nil
 	default:
+		if config.LogConfig != nil && config.LogConfig.Limit < 0 {
+			return nil, false, func() {}, &rpc.InvalidParamsError{Message: "limit must not be negative"}
+		}
 		ctx, cancel := context.WithTimeout(ctx, callTimeout)
 		return logger.NewJsonStreamLogger(config.LogConfig, ctx, stream).Tracer(), true, cancel, nil
 	}
@@ -220,14 +221,14 @@ func ExecuteTraceTx(
 	// Set the tracer hooks to the intra-block state before execute, so the OnLog hook may be set correctly.
 	ibs.SetHooks(tracer.Hooks)
 	// Run the transaction with tracing enabled.
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{Tracer: tracer.Hooks, NoBaseFee: true})
-	var refunds = true
+	vmConfig := vm.Config{Tracer: tracer.Hooks, NoBaseFee: true}
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
+	refunds := true
 	if config != nil && config.NoRefunds != nil && *config.NoRefunds {
 		refunds = false
 	}
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
-
 	}
 
 	result, err := execCb(evm, refunds)
@@ -238,20 +239,17 @@ func ExecuteTraceTx(
 	// Depending on the tracer type, format and return the output
 	if streaming {
 		stream.WriteArrayEnd()
-		stream.WriteMore()
-		stream.WriteObjectField("gas")
-		stream.WriteUint64(result.ReceiptGasUsed)
-		stream.WriteMore()
-		stream.WriteObjectField("failed")
+		stream.Field("gas")
+		stream.Uint(result.ReceiptGasUsed)
+		stream.Field("failed")
 		stream.WriteBool(result.Failed())
-		stream.WriteMore()
 		// If the result contains a revert reason, return it.
-		returnVal := hex.EncodeToString(result.Return())
+		ret := result.Return()
 		if len(result.Revert()) > 0 {
-			returnVal = hex.EncodeToString(result.Revert())
+			ret = result.Revert()
 		}
-		stream.WriteObjectField("returnValue")
-		stream.WriteString("0x" + returnVal)
+		stream.Field("returnValue")
+		stream.WriteHex(ret)
 		stream.WriteObjectEnd()
 	} else {
 		r, err := tracer.GetResult()
@@ -259,8 +257,8 @@ func ExecuteTraceTx(
 			return err
 		}
 
-		_, err = stream.Write(r)
-		if err != nil {
+		stream.WriteRawBytes(r)
+		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
 		}
 	}

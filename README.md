@@ -92,7 +92,10 @@ For developers
 
 ### Building
 
-Toolchain: [Go >= 1.25](https://golang.org/doc/install), GCC 10+ or Clang, 64-bit architecture. On Linux, kernel > v4.
+Toolchain: [Go >= 1.26](https://golang.org/doc/install), GCC 11+ or Clang 13+, 64-bit architecture. On Linux, kernel > v4.
+
+On x86-64 the build targets the `x86-64-v2` baseline (requires SSE4.2, POPCNT). Intel Nehalem (2008) and AMD
+Bulldozer (2011) or newer qualify; older hardware is not supported.
 
 ```sh
 git clone https://github.com/erigontech/erigon.git
@@ -205,7 +208,9 @@ Getting in touch
 
 ### Reporting security issues/concerns
 
-Send an email to `security [at] torquem.ch`.
+Report vulnerabilities privately via
+[Security → Report a vulnerability](https://github.com/erigontech/erigon/security/advisories/new).
+Please don't open a public issue for one — see [SECURITY.md](./SECURITY.md).
 
 ### Getting help
 

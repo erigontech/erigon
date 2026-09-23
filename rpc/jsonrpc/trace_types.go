@@ -22,6 +22,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // TODO:(tjayrush)
@@ -68,6 +69,88 @@ type ParityTrace struct {
 // ParityTraces An array of parity traces
 type ParityTraces []ParityTrace
 
+// MarshalFastJSONTo streams trace_block and trace_transaction results in encoding/json's field
+// order and forms. An action or result of a type it does not know fails before the first write.
+func (ts ParityTraces) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if ts == nil {
+		s.WriteNil()
+		return nil
+	}
+	for i := range ts {
+		if err := ts[i].checkKinds(); err != nil {
+			return err
+		}
+	}
+	s.WriteArrayStart()
+	for i := range ts {
+		ts[i].writeTo(s)
+	}
+	s.WriteArrayEnd()
+	return nil
+}
+
+func (t *ParityTrace) checkKinds() error {
+	switch t.Action.(type) {
+	case nil, *CallTraceAction, *CreateTraceAction, *SuicideTraceAction, *RewardTraceAction:
+	default:
+		return fmt.Errorf("trace action of type %T has no JSON writer", t.Action)
+	}
+	switch t.Result.(type) {
+	case nil, *TraceResult, *CreateTraceResult:
+	default:
+		return fmt.Errorf("trace result of type %T has no JSON writer", t.Result)
+	}
+	return nil
+}
+
+func (t *ParityTrace) writeTo(s *jsonstream.StackStream) {
+	s.WriteObjectStart()
+	s.Field("action")
+	switch a := t.Action.(type) {
+	case *CallTraceAction:
+		a.writeTo(s)
+	case *CreateTraceAction:
+		a.writeTo(s)
+	case *SuicideTraceAction:
+		a.writeTo(s)
+	case *RewardTraceAction:
+		a.writeTo(s)
+	default:
+		s.WriteNil()
+	}
+	if t.BlockHash != nil {
+		s.Field("blockHash").WriteHex(t.BlockHash[:])
+	}
+	if t.BlockNumber != nil {
+		s.Field("blockNumber").Uint(*t.BlockNumber)
+	}
+	if t.Error != "" {
+		s.Field("error").WriteString(t.Error)
+	}
+	s.Field("result")
+	switch r := t.Result.(type) {
+	case *TraceResult:
+		r.writeTo(s)
+	case *CreateTraceResult:
+		r.writeTo(s)
+	default:
+		s.WriteNil()
+	}
+	s.Field("subtraces").Int(int64(t.Subtraces))
+	s.Field("traceAddress")
+	jsonstream.ArrayValue(s, t.TraceAddress, writeIntElem)
+	if t.TransactionHash != nil {
+		s.Field("transactionHash").WriteHex(t.TransactionHash[:])
+	}
+	if t.TransactionPosition != nil {
+		s.Field("transactionPosition").Uint(*t.TransactionPosition)
+	}
+	s.Field("type").WriteString(t.Type)
+	s.WriteObjectEnd()
+}
+
+func writeIntElem(s *jsonstream.StackStream, v *int) { s.Int(int64(*v)) }
+
 // TraceAction A parity formatted trace action
 type TraceAction struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
@@ -77,7 +160,7 @@ type TraceAction struct {
 	Balance        string         `json:"balance,omitempty"`
 	CallType       string         `json:"callType,omitempty"`
 	From           common.Address `json:"from"`
-	Gas            hexutil.Big    `json:"gas"`
+	Gas            hexutil.U256   `json:"gas"`
 	Init           hexutil.Bytes  `json:"init,omitempty"`
 	Input          hexutil.Bytes  `json:"input,omitempty"`
 	RefundAddress  string         `json:"refundAddress,omitempty"`
@@ -88,44 +171,122 @@ type TraceAction struct {
 type CallTraceAction struct {
 	From     common.Address `json:"from"`
 	CallType string         `json:"callType"`
-	Gas      hexutil.Big    `json:"gas"`
+	Gas      hexutil.U256   `json:"gas"`
 	Input    hexutil.Bytes  `json:"input"`
 	To       common.Address `json:"to"`
-	Value    hexutil.Big    `json:"value"`
+	Value    hexutil.U256   `json:"value"`
+}
+
+func (a *CallTraceAction) writeTo(s *jsonstream.StackStream) {
+	if a == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.Field("from").WriteHex(a.From[:])
+	s.Field("callType").WriteString(a.CallType)
+	jsonstream.Text(s, "gas", &a.Gas)
+	s.Field("input").WriteHex(a.Input)
+	s.Field("to").WriteHex(a.To[:])
+	jsonstream.Text(s, "value", &a.Value)
+	s.WriteObjectEnd()
 }
 
 type CreateTraceAction struct {
 	From           common.Address `json:"from"`
 	CreationMethod string         `json:"creationMethod"`
-	Gas            hexutil.Big    `json:"gas"`
+	Gas            hexutil.U256   `json:"gas"`
 	Init           hexutil.Bytes  `json:"init"`
-	Value          hexutil.Big    `json:"value"`
+	Value          hexutil.U256   `json:"value"`
+}
+
+func (a *CreateTraceAction) writeTo(s *jsonstream.StackStream) {
+	if a == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.Field("from").WriteHex(a.From[:])
+	s.Field("creationMethod").WriteString(a.CreationMethod)
+	jsonstream.Text(s, "gas", &a.Gas)
+	s.Field("init").WriteHex(a.Init)
+	jsonstream.Text(s, "value", &a.Value)
+	s.WriteObjectEnd()
 }
 
 type SuicideTraceAction struct {
 	Address       common.Address `json:"address"`
 	RefundAddress common.Address `json:"refundAddress"`
-	Balance       hexutil.Big    `json:"balance"`
+	Balance       hexutil.U256   `json:"balance"`
+}
+
+func (a *SuicideTraceAction) writeTo(s *jsonstream.StackStream) {
+	if a == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.Field("address").WriteHex(a.Address[:])
+	s.Field("refundAddress").WriteHex(a.RefundAddress[:])
+	jsonstream.Text(s, "balance", &a.Balance)
+	s.WriteObjectEnd()
 }
 
 type RewardTraceAction struct {
 	Author     common.Address `json:"author"`
 	RewardType string         `json:"rewardType"`
-	Value      hexutil.Big    `json:"value"`
+	Value      hexutil.U256   `json:"value"`
+}
+
+func (a *RewardTraceAction) writeTo(s *jsonstream.StackStream) {
+	if a == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.Field("author").WriteHex(a.Author[:])
+	s.Field("rewardType").WriteString(a.RewardType)
+	jsonstream.Text(s, "value", &a.Value)
+	s.WriteObjectEnd()
 }
 
 type CreateTraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
 	Address *common.Address `json:"address,omitempty"`
 	Code    hexutil.Bytes   `json:"code"`
-	GasUsed *hexutil.Big    `json:"gasUsed"`
+	GasUsed *hexutil.U256   `json:"gasUsed"`
+}
+
+func (r *CreateTraceResult) writeTo(s *jsonstream.StackStream) {
+	if r == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	if r.Address != nil {
+		s.Field("address").WriteHex(r.Address[:])
+	}
+	s.Field("code").WriteHex(r.Code)
+	jsonstream.Text(s, "gasUsed", r.GasUsed)
+	s.WriteObjectEnd()
 }
 
 // TraceResult A parity formatted trace result
 type TraceResult struct {
 	// Do not change the ordering of these fields -- allows for easier comparison with other clients
-	GasUsed *hexutil.Big  `json:"gasUsed"`
+	GasUsed *hexutil.U256 `json:"gasUsed"`
 	Output  hexutil.Bytes `json:"output"`
+}
+
+func (r *TraceResult) writeTo(s *jsonstream.StackStream) {
+	if r == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	jsonstream.Text(s, "gasUsed", r.GasUsed)
+	s.Field("output").WriteHex(r.Output)
+	s.WriteObjectEnd()
 }
 
 // Allows for easy printing of a parity trace for debugging

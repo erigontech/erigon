@@ -66,7 +66,6 @@ type ChainHeaderReader interface {
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
-	FrozenBorBlocks(align bool) uint64
 }
 
 // ChainReader defines a small collection of methods needed to access the local
@@ -81,8 +80,10 @@ type ChainReader interface {
 type SystemCall func(contract accounts.Address, data []byte) ([]byte, error)
 
 // Use more options to call contract
-type SysCallCustom func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
-type Call func(contract accounts.Address, data []byte) ([]byte, error)
+type (
+	SysCallCustom func(contract accounts.Address, data []byte, ibs *state.IntraBlockState, header *types.Header, constCall bool) ([]byte, error)
+	Call          func(contract accounts.Address, data []byte) ([]byte, error)
+)
 
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
@@ -184,6 +185,8 @@ type EngineWriter interface {
 	//
 	// Note, the method returns immediately and will send the result async. More
 	// than one result may also be returned depending on the consensus algorithm.
+	// Seal must not access chain after returning; the caller may release its backing resources
+	// immediately.
 	Seal(chain ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error
 
 	// SealHash returns the hash of a block prior to it being sealed.
@@ -202,7 +205,8 @@ var alwaysSkipReceiptCheck = dbg.EnvBool("EXEC_SKIP_RECEIPT_CHECK", false)
 
 func DefaultBlockPostValidation(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	if gasUsed != header.GasUsed {
 		logger.Warn("gas used mismatch", "block", header.Number.Uint64(), "header", header.GasUsed, "execution", gasUsed,
 			"diff", int64(gasUsed)-int64(header.GasUsed), "txCount", len(txns), "receiptCount", len(receipts))

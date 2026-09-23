@@ -45,7 +45,6 @@ type Account struct {
 const (
 	MimetypeDataWithValidator = "data/validator"
 	MimetypeTypedData         = "data/typed"
-	MimetypeBor               = "application/x-bor-header"
 	MimetypeTextPlain         = "text/plain"
 )
 
@@ -86,13 +85,13 @@ func (a *Account) EncodingLengthForHashing() uint {
 }
 
 func (a *Account) EncodeForStorage(buffer []byte) {
-	var fieldSet = 0 // start with first bit set to 0
-	var pos = 1
+	fieldSet := 0 // start with first bit set to 0
+	pos := 1
 	if a.Nonce > 0 {
 		fieldSet = 1
 		nonceBytes := common.BitLenToByteLen(bits.Len64(a.Nonce))
 		buffer[pos] = byte(nonceBytes)
-		var nonce = a.Nonce
+		nonce := a.Nonce
 		for i := nonceBytes; i > 0; i-- {
 			buffer[pos+i] = byte(nonce)
 			nonce >>= 8
@@ -114,7 +113,7 @@ func (a *Account) EncodeForStorage(buffer []byte) {
 		fieldSet |= 4
 		incarnationBytes := common.BitLenToByteLen(bits.Len64(a.Incarnation))
 		buffer[pos] = byte(incarnationBytes)
-		var incarnation = a.Incarnation
+		incarnation := a.Incarnation
 		for i := incarnationBytes; i > 0; i-- {
 			buffer[pos+i] = byte(incarnation)
 			incarnation >>= 8
@@ -200,7 +199,7 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 
 	nonceBytes := rlp.U64Len(a.Nonce) - 1
 
-	var structLength = uint(balanceBytes + nonceBytes + 2)
+	structLength := uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
 	var pos int
@@ -224,7 +223,7 @@ func (a *Account) EncodeForHashing(buffer []byte) {
 		buffer[pos] = byte(a.Nonce)
 	} else {
 		buffer[pos] = byte(128 + nonceBytes)
-		var nonce = a.Nonce
+		nonce := a.Nonce
 		for i := nonceBytes; i > 0; i-- {
 			buffer[pos+i] = byte(nonce)
 			nonce >>= 8
@@ -273,7 +272,8 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 	if pos+length != len(enc) {
 		return fmt.Errorf(
 			"malformed RLP for Account(%x): prefixLength(%d) + dataLength(%d) != sliceLength(%d)",
-			enc, pos, length, len(enc))
+			enc, pos, length, len(enc),
+		)
 	}
 	if !structure {
 		return fmt.Errorf(
@@ -330,7 +330,8 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 		}
 
 		if newPos+balanceBytes > len(enc) {
-			return fmt.Errorf("malformed RLP for Account.Balance(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
+			return fmt.Errorf(
+				"malformed RLP for Account.Balance(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
 				enc[pos],
 				newPos-pos, balanceBytes, len(enc)-pos,
 			)
@@ -361,7 +362,8 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 		}
 
 		if newPos+rootBytes > len(enc) {
-			return fmt.Errorf("malformed RLP for Account.Root(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
+			return fmt.Errorf(
+				"malformed RLP for Account.Root(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
 				enc[pos],
 				newPos-pos, rootBytes, len(enc)-pos,
 			)
@@ -388,7 +390,8 @@ func (a *Account) DecodeForHashing(enc []byte) error {
 		}
 
 		if newPos+codeHashBytes > len(enc) {
-			return fmt.Errorf("malformed RLP for Account.CodeHash(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
+			return fmt.Errorf(
+				"malformed RLP for Account.CodeHash(%x): prefixLength(%d) + dataLength(%d) >= sliceLength(%d)",
 				enc[pos:newPos+codeHashBytes],
 				newPos-pos, codeHashBytes, len(enc)-pos,
 			)
@@ -451,8 +454,8 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		return nil
 	}
 
-	var fieldSet = enc[0]
-	var pos = 1
+	fieldSet := enc[0]
+	pos := 1
 
 	if fieldSet&1 > 0 {
 		decodeLength := int(enc[pos])
@@ -460,7 +463,8 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		if len(enc) < pos+decodeLength+1 {
 			return fmt.Errorf(
 				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
+				enc[pos+1:], decodeLength,
+			)
 		}
 
 		a.Nonce = common.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
@@ -473,7 +477,8 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		if len(enc) < pos+decodeLength+1 {
 			return fmt.Errorf(
 				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
+				enc[pos+1:], decodeLength,
+			)
 		}
 
 		a.Balance.SetBytes(enc[pos+1 : pos+decodeLength+1])
@@ -486,7 +491,8 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		if len(enc) < pos+decodeLength+1 {
 			return fmt.Errorf(
 				"malformed CBOR for Account.Incarnation: %s, Length %d",
-				enc[pos+1:], decodeLength)
+				enc[pos+1:], decodeLength,
+			)
 		}
 
 		a.Incarnation = common.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
@@ -505,7 +511,8 @@ func (a *Account) DecodeForStorage(enc []byte) error {
 		if len(enc) < pos+decodeLength+1 {
 			return fmt.Errorf(
 				"malformed CBOR for Account.CodeHash: %s, Length %d",
-				enc[pos+1:], decodeLength)
+				enc[pos+1:], decodeLength,
+			)
 		}
 		var codeHashValue common.Hash
 		copy(codeHashValue[:], enc[pos+1:pos+decodeLength+1])
@@ -523,16 +530,17 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 		return 0, nil
 	}
 
-	var fieldSet = enc[0]
-	var pos = 1
+	fieldSet := enc[0]
+	pos := 1
 
-	//looks for the position incarnation is at
+	// looks for the position incarnation is at
 	if fieldSet&1 > 0 {
 		decodeLength := int(enc[pos])
 		if len(enc) < pos+decodeLength+1 {
 			return 0, fmt.Errorf(
 				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
+				enc[pos+1:], decodeLength,
+			)
 		}
 		pos += decodeLength + 1
 	}
@@ -542,7 +550,8 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 		if len(enc) < pos+decodeLength+1 {
 			return 0, fmt.Errorf(
 				"malformed CBOR for Account.Nonce: %s, Length %d",
-				enc[pos+1:], decodeLength)
+				enc[pos+1:], decodeLength,
+			)
 		}
 		pos += decodeLength + 1
 	}
@@ -550,11 +559,12 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 	if fieldSet&4 > 0 {
 		decodeLength := int(enc[pos])
 
-		//checks if the ending position is correct if not returns 0
+		// checks if the ending position is correct if not returns 0
 		if len(enc) < pos+decodeLength+1 {
 			return 0, fmt.Errorf(
 				"malformed CBOR for Account.Incarnation: %s, Length %d",
-				enc[pos+1:], decodeLength)
+				enc[pos+1:], decodeLength,
+			)
 		}
 
 		incarnation := common.BytesToUint64(enc[pos+1 : pos+decodeLength+1])
@@ -562,7 +572,6 @@ func DecodeIncarnationFromStorage(enc []byte) (uint64, error) {
 	}
 
 	return 0, nil
-
 }
 
 func (a *Account) SelfCopy() *Account {
@@ -699,7 +708,7 @@ func SerialiseV3(a *Account) []byte {
 	} else {
 		nonceBytes := common.BitLenToByteLen(bits.Len64(a.Nonce))
 		value[pos] = byte(nonceBytes)
-		var nonce = a.Nonce
+		nonce := a.Nonce
 		for i := nonceBytes; i > 0; i-- {
 			value[pos+i] = byte(nonce)
 			nonce >>= 8
@@ -731,7 +740,7 @@ func SerialiseV3(a *Account) []byte {
 	} else {
 		incBytes := common.BitLenToByteLen(bits.Len64(a.Incarnation))
 		value[pos] = byte(incBytes)
-		var inc = a.Incarnation
+		inc := a.Incarnation
 		for i := incBytes; i > 0; i-- {
 			value[pos+i] = byte(inc)
 			inc >>= 8

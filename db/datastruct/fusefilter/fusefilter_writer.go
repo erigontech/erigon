@@ -11,10 +11,10 @@ import (
 	"slices"
 	"unsafe"
 
-	"github.com/erigontech/erigon/common/dir"
-
 	"github.com/FastFilter/xorfilter"
-	"github.com/edsrzf/mmap-go"
+
+	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/mmap"
 )
 
 const bufSize = 4096
@@ -48,7 +48,7 @@ func NewWriterOffHeap(filePath string) (*WriterOffHeap, error) {
 func (w *WriterOffHeap) Close() {
 	if w.tmpFile != nil {
 		w.tmpFile.Close()
-		dir.RemoveFile(w.tmpFilePath)
+		_ = dir.RemoveFile(w.tmpFilePath)
 		w.tmpFile = nil
 	}
 }
@@ -59,7 +59,7 @@ func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 			w.tmpFile.Close()
 			w.tmpFile = nil
 		}
-		dir.RemoveFile(w.tmpFilePath)
+		_ = dir.RemoveFile(w.tmpFilePath)
 	}()
 	if w.count%bufSize != 0 {
 		if _, err := w.tmpFile.Write(castToBytes(w.buf[:w.count%bufSize])); err != nil {
@@ -72,11 +72,12 @@ func (w *WriterOffHeap) build() (*xorfilter.BinaryFuse[uint8], error) {
 		return nil, err
 	}
 	sz := int(st.Size())
-	m, err := mmap.MapRegion(w.tmpFile, sz, mmap.RDONLY, 0, 0)
+	m, err := mmap.OpenRo(w.tmpFile, sz)
 	if err != nil {
 		return nil, fmt.Errorf("%s %w", w.tmpFilePath, err)
 	}
-	defer m.Unmap()
+	defer func() { _ = m.Unmap() }()
+	_ = mmap.MadviseSequential(m) // the whole temp file is read front-to-back below
 
 	keysHashes := castToArrU64(m[:sz])
 
@@ -166,7 +167,7 @@ func (w *Writer) Build() error {
 	if err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
 	}
-	defer dir.RemoveFile(f.Name())
+	defer func() { _ = dir.RemoveFile(f.Name()) }()
 	defer f.Close()
 
 	fw := bufio.NewWriter(f)
@@ -228,7 +229,7 @@ func (w *WriterSharded) Build() error {
 	if err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
 	}
-	defer dir.RemoveFile(f.Name())
+	defer func() { _ = dir.RemoveFile(f.Name()) }()
 	defer f.Close()
 
 	fw := bufio.NewWriter(f)
@@ -258,7 +259,7 @@ func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
 			w.tmpFile.Close()
 			w.tmpFile = nil
 		}
-		dir.RemoveFile(w.tmpFilePath)
+		_ = dir.RemoveFile(w.tmpFilePath)
 	}()
 
 	if rem := w.count % bufSize; rem != 0 {
@@ -276,11 +277,11 @@ func (w *WriterSharded) BuildTo(fw io.Writer) (int, error) {
 		return 0, fmt.Errorf("WriterSharded: no keys added")
 	}
 
-	m, err := mmap.MapRegion(w.tmpFile, sz, mmap.RDWR, 0, 0)
+	m, err := mmap.OpenRw(w.tmpFile, sz)
 	if err != nil {
 		return 0, fmt.Errorf("%s %w", w.tmpFilePath, err)
 	}
-	defer m.Unmap()
+	defer func() { _ = m.Unmap() }()
 
 	all := castToArrU64(m[:sz])
 	slices.Sort(all) // ascending sort groups hashes by top byte = shard index

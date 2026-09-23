@@ -41,7 +41,6 @@ type whaleOpts struct {
 	tailAccounts     int
 }
 
-// addRandomSlot appends one random storage slot to account a, drawing loc then val.
 func addRandomSlot(ub *UpdateBuilder, rnd *rand.Rand, a string) {
 	loc := make([]byte, length.Hash)
 	rnd.Read(loc)
@@ -50,7 +49,6 @@ func addRandomSlot(ub *UpdateBuilder, rnd *rand.Rand, a string) {
 	ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
 }
 
-// addRandomAccount appends a random-address account (balance rnd.Uint64()+1) with slots storage slots.
 func addRandomAccount(ub *UpdateBuilder, rnd *rand.Rand, slots int) {
 	addr := make([]byte, length.Addr)
 	rnd.Read(addr)
@@ -61,7 +59,6 @@ func addRandomAccount(ub *UpdateBuilder, rnd *rand.Rand, slots int) {
 	}
 }
 
-// addNibbleAccount appends an account pinned to top nibble (balance rnd.Uint64()) with slots storage slots.
 func addNibbleAccount(ub *UpdateBuilder, rnd *rand.Rand, nibble, seed, slots int) {
 	a := hex.EncodeToString(findAddressForNibble(nibble, seed))
 	ub.Balance(a, rnd.Uint64())
@@ -133,11 +130,6 @@ func processModeBatch(t *testing.T, ms *MockState, mode runMode, workers int, ke
 	return root
 }
 
-// processModeBatchState folds one batch through the engine's production restart lifecycle:
-// the trie is restored from blob (the previous batch's EncodeCurrentState output, nil for
-// the first batch) before Process, and the new state blob is returned alongside the root.
-// State that never reaches a branch record — a propagate-folded root — survives batches
-// only through this blob.
 func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
 	t.Helper()
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
@@ -155,7 +147,6 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 		require.NoError(t, tr.RootTrie().SetState(blob))
 		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 		defer ut.Close()
-		// ModeParallel ignores the callback; values reach the trie via MockState.
 		for _, k := range keys {
 			ut.TouchPlainKey(string(k), nil, nil)
 		}
@@ -170,26 +161,23 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 	}
 }
 
-// parallelBatchDeepFolds folds one batch through the parallel engine, additionally
-// reporting how many big-storage accounts took the concurrent deep fold rather than
-// demoting to serial recursion.
-func parallelBatchDeepFolds(t *testing.T, ms *MockState, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte, uint64) {
+func parallelBatchForks(t *testing.T, ms *MockState, workers int, grain uint32, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte, uint64) {
 	t.Helper()
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
 
 	tr := newParTrie(t, ms, workers)
 	defer tr.Release()
+	tr.SetForkGrain(grain)
 	require.NoError(t, tr.RootTrie().SetState(blob))
 	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 	defer ut.Close()
-	// ModeParallel ignores the callback; values reach the trie via MockState.
 	for _, k := range keys {
 		ut.TouchPlainKey(string(k), nil, nil)
 	}
 	root := processRoot(t, tr, ut)
 	encoded, err := tr.RootTrie().EncodeCurrentState(nil)
 	require.NoError(t, err)
-	return root, encoded, tr.DeepLocalFolds()
+	return root, encoded, tr.Forks()
 }
 
 func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
@@ -206,8 +194,6 @@ func sequentialRoot(t *testing.T, keys [][]byte, upds []Update) ([]byte, *MockSt
 	return engineRoot(t, modeSeq, 0, keys, upds)
 }
 
-// Folds two batches into one MockState so batch-1 branches become on-disk state for
-// batch-2, with the trie state blob carried across the batches (encode/restore cycle).
 func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -237,6 +223,7 @@ func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 		branchDiff(t, seqMs, parMs)
 	}
 	require.Equalf(t, seqRoot, parRoot, "parallel(workers=%d) vs sequential root mismatch", workers)
+	requireBranchParity(t, seqMs, parMs)
 }
 
 func requireBranchParity(t *testing.T, seq, got *MockState) {
@@ -260,7 +247,7 @@ func requireBranchParity(t *testing.T, seq, got *MockState) {
 		branchDiff(t, seq, got)
 	}
 	require.Equal(t, len(seq.cm), len(got.cm), "branch count must match")
-	require.Zero(t, mism, "stored branch metadata differs between streaming and sequential")
+	require.Zero(t, mism, "stored branch metadata differs from sequential")
 }
 
 func branchDiff(t *testing.T, seq, par *MockState) {
@@ -379,8 +366,6 @@ func build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update) {
 	return ub.Build()
 }
 
-// buildWitnessCorpus builds accts accounts (balance i+1) each with slots sequential
-// storage slots, processes them into (ms, hph) and returns the account plain keys.
 func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, accts, slots int) [][]byte {
 	tb.Helper()
 	builder := NewUpdateBuilder()
@@ -399,8 +384,6 @@ func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, ac
 	return addrs
 }
 
-// touchAccountsSlots touches each account and its first `slots` storage slots into u
-// (slots == 0 touches accounts only).
 func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
 	for _, a := range addrs {
 		u.TouchPlainKey(string(a), nil, u.TouchAccount)
@@ -409,3 +392,5 @@ func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
 		}
 	}
 }
+
+func keyHasherNoop(key []byte) []byte { return key }

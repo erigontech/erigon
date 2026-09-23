@@ -36,18 +36,14 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 	}
 	defer cleanup()
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
+	var res CallResult
 	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
 	prevBn := blockFrom
 	for bn := blockFrom + 100; bn < blockTo; bn += 100 {
@@ -56,7 +52,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			return fmt.Errorf("Could not get modified accounts (Erigon): %w\n", res.Err)
 		}
 		if mag.Error != nil {
 			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)

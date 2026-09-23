@@ -47,7 +47,7 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 	// Fill in previous epoch participation from the pre state's pending attestations
 	if err := solid.RangeErr[*solid.PendingAttestation](b.PreviousEpochAttestations(), func(i1 int, pa *solid.PendingAttestation, i2 int) error {
 		attestationData := pa.Data
-		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, false)
+		flags, err := b.GetAttestationParticipationFlagIndicies(attestationData, pa.InclusionDelay, 0, false)
 		if err != nil {
 			return err
 		}
@@ -72,17 +72,20 @@ func (b *CachingBeaconState) UpgradeToAltair() error {
 
 	b.ResetPreviousEpochAttestations()
 	// Process sync committees
-	var err error
 	currentSyncCommittee, err := b.ComputeNextSyncCommittee()
 	if err != nil {
 		return err
 	}
-	b.SetCurrentSyncCommittee(currentSyncCommittee)
+	if err := b.SetCurrentSyncCommittee(currentSyncCommittee); err != nil {
+		return err
+	}
 	nextSyncCommittee, err := b.ComputeNextSyncCommittee()
 	if err != nil {
 		return err
 	}
-	b.SetNextSyncCommittee(nextSyncCommittee)
+	if err := b.SetNextSyncCommittee(nextSyncCommittee); err != nil {
+		return err
+	}
 
 	return nil
 }
@@ -221,8 +224,12 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 		// Do NOT directly modify the validator in the validator set, because we need to mark validatorSet as dirty in BeaconState
 		// curValidator.SetEffectiveBalance(0)
 		// curValidator.SetActivationEligibilityEpoch(b.BeaconConfig().FarFutureEpoch)
-		b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0)
-		b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch)
+		if err := b.SetEffectiveBalanceForValidatorAtIndex(int(v.index), 0); err != nil {
+			return err
+		}
+		if err := b.SetActivationEligibilityEpochForValidatorAtIndex(int(v.index), b.BeaconConfig().FarFutureEpoch); err != nil {
+			return err
+		}
 		// Use bls.G2_POINT_AT_INFINITY as a signature field placeholder
 		// and GENESIS_SLOT to distinguish from a pending deposit request
 		b.AppendPendingDeposit(&solid.PendingDeposit{
@@ -235,12 +242,18 @@ func (b *CachingBeaconState) UpgradeToElectra() error {
 	}
 
 	// Ensure early adopters of compounding credentials go through the activation churn
+	var queueErr error
 	b.ValidatorSet().Range(func(vindex int, v solid.Validator, _ int) bool {
 		if HasCompoundingWithdrawalCredential(v, b.BeaconConfig()) {
-			QueueExcessActiveBalance(b, uint64(vindex), &v)
+			if queueErr = QueueExcessActiveBalance(b, uint64(vindex), &v); queueErr != nil {
+				return false
+			}
 		}
 		return true
 	})
+	if queueErr != nil {
+		return queueErr
+	}
 	log.Info("Upgrade to Electra complete")
 	return nil
 }
@@ -290,12 +303,10 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	forkData.CurrentVersion = utils.Uint32ToBytes4(uint32(cfg.GloasForkVersion))
 	b.SetFork(forkData)
 
-	// Get the latest block hash from the previous execution payload header
-	latestBlockHash := b.LatestExecutionPayloadHeader().BlockHash
+	latestPayloadHeader := b.LatestExecutionPayloadHeader()
+	latestBlockHeader := b.LatestBlockHeader()
+	latestBlockHash := latestPayloadHeader.BlockHash
 
-	// Replace latest_execution_payload_header with latest_execution_payload_bid
-	// The bid contains only the block_hash from the previous header
-	// Compute the execution_requests_root for an empty ExecutionRequests
 	emptyRequests := cltypes.NewExecutionRequestsWithVersion(cfg, clparams.GloasVersion)
 	emptyRequestsRoot, err := emptyRequests.HashSSZ()
 	if err != nil {
@@ -303,16 +314,16 @@ func (b *CachingBeaconState) UpgradeToGloas() error {
 	}
 
 	bid := &cltypes.ExecutionPayloadBid{
-		ParentBlockHash:       common.Hash{},
+		ParentBlockHash:       latestPayloadHeader.ParentHash,
+		ParentBlockRoot:       latestBlockHeader.ParentRoot,
 		BlockHash:             latestBlockHash,
-		BuilderIndex:          0,
-		Slot:                  0,
+		PrevRandao:            latestPayloadHeader.PrevRandao,
+		GasLimit:              latestPayloadHeader.GasLimit,
+		BuilderIndex:          clparams.BuilderIndexSelfBuild,
+		Slot:                  latestBlockHeader.Slot,
 		Value:                 0,
 		BlobKzgCommitments:    *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
 		ExecutionRequestsRoot: emptyRequestsRoot,
-		PrevRandao:            common.Hash{},
-		GasLimit:              b.LatestExecutionPayloadHeader().GasLimit,
-		ParentBlockRoot:       common.Hash{},
 	}
 	b.SetLatestExecutionPayloadBid(bid)
 

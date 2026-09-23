@@ -17,7 +17,6 @@
 package sentry
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -39,7 +38,7 @@ func TestCheckPeerStatusCompatibility(t *testing.T) {
 	goodReply := eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       networkID,
-		TD:              big.NewInt(0),
+		TD:              new(uint256.Int),
 		Head:            common.Hash{},
 		Genesis:         chainspec.Mainnet.GenesisHash,
 		ForkID:          forkid.NewIDFromForks(heightForks, timeForks, chainspec.Mainnet.GenesisHash, 0, 0),

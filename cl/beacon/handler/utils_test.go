@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"math"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -50,7 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -78,8 +77,8 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		blocks, preState, postState = tests.GetElectraRandom()
 	}
 	fcu = mock_services2.NewForkChoiceStorageMock(t)
-	db = memdb.NewTestDB(t, dbcfg.ChainDB)
-	blobDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db = mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 	firstBlockRoot, _ := blocks[0].Block.HashSSZ()
 	firstBlockHeader := blocks[0].SignedBeaconBlockHeader()
@@ -88,7 +87,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 
 	if useRealSyncDataMgr {
 		syncedData = synced_data.NewSyncedDataManager(&bcfg, true)
-		syncedData.OnHeadState(postState)
+		require.NoError(t, syncedData.OnHeadState(postState))
 	} else {
 		syncedData = sync_mock_services.NewMockSyncedData(ctrl)
 	}
@@ -104,9 +103,9 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, ethClock)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs())
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
-	blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
+	require.NoError(t, blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
 		{
 			Index:                    0,
 			Blob:                     cltypes.Blob{byte(1)},
@@ -121,13 +120,23 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 			KzgCommitment:            [48]byte{1},
 			CommitmentInclusionProof: solid.NewHashVector(17),
 		},
-	})
+	}))
 	syncCommitteeMessagesService := mock_services.NewMockSyncCommitteeMessagesService(ctrl)
 	syncContributionService := mock_services.NewMockSyncContributionService(ctrl)
 	aggregateAndProofsService := mock_services.NewMockAggregateAndProofService(ctrl)
 	voluntaryExitService := mock_services.NewMockVoluntaryExitService(ctrl)
 	blsToExecutionChangeService := mock_services.NewMockBLSToExecutionChangeService(ctrl)
 	proposerSlashingService := mock_services.NewMockProposerSlashingService(ctrl)
+	blockService := mock_services.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	blockService.EXPECT().CommitGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ReleaseGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ScheduleBlockForLaterProcessing(gomock.Any()).AnyTimes()
+	blockService.EXPECT().SchedulePublishedBlockForLaterProcessing(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ *cltypes.SignedBeaconBlock, store func(context.Context) error) services.PublishedBlockJob {
+			return completedPublishedBlockJob{err: store(context.Background())}
+		},
+	).AnyTimes()
 
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
 	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SyncCommitteeMessageForGossip) error {
@@ -188,6 +197,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 		voluntaryExitService,
 		blsToExecutionChangeService,
 		proposerSlashingService,
+		blockService,
 		nil,
 		nil,
 		gossipManager,

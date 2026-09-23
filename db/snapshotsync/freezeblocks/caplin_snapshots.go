@@ -24,8 +24,6 @@ import (
 	"math"
 	"path/filepath"
 
-	"github.com/klauspost/compress/zstd"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -196,6 +194,7 @@ func (v *CaplinView) Close() { v.base.Close() }
 func (v *CaplinView) BeaconBlocks() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(snaptype.BeaconBlocks)
 }
+
 func (v *CaplinView) BlobSidecars() []*snapshotsync.VisibleSegment {
 	return v.base.Segments(snaptype.BlobSidecars)
 }
@@ -322,7 +321,9 @@ func DumpBlobSidecarsRange(ctx context.Context, db kv.RoDB, storage blob_storage
 			}
 		}
 		if commitmentsCount == 0 {
-			sn.AddWord(nil)
+			if err := sn.AddWord(nil); err != nil {
+				return err
+			}
 			continue
 		}
 		sidecars, found, err := storage.ReadBlobSidecars(ctx, i, blockRoot)
@@ -453,6 +454,29 @@ func (s *CaplinSnapshots) BuildMissingIndices(ctx context.Context, logger log.Lo
 	return s.OpenFolder()
 }
 
+// ReadFrozenBeaconBlockBodyForIntegrity validates the stored body root before promoting blinded blocks.
+func (s *CaplinSnapshots) ReadFrozenBeaconBlockBodyForIntegrity(slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	sn, ok, closeSegment := s.ViewSingleFile(snaptype.BeaconBlocks, slot)
+	defer closeSegment()
+	if !ok {
+		return nil, nil
+	}
+
+	buf, err := sn.Get(slot)
+	if err != nil {
+		return nil, err
+	}
+	if len(buf) == 0 {
+		return nil, nil
+	}
+	reader, err := getZstdReader(bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	defer putZstdReader(reader)
+	return snapshot_format.ReadBeaconBlockBodyFromSnapshotForIntegrity(reader, s.beaconCfg)
+}
+
 func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -474,9 +498,11 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeac
 		return nil, 0, common.Hash{}, nil
 	}
 	// Decompress this thing
-	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer putDecoder(reader)
-	reader.Reset(bytes.NewReader(buf))
+	reader, err := getZstdReader(bytes.NewReader(buf))
+	if err != nil {
+		return nil, 0, common.Hash{}, err
+	}
+	defer putZstdReader(reader)
 
 	// Use pooled readers to avoid allocations.
 	header, elBlockNumber, elBlockHash, err := snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)

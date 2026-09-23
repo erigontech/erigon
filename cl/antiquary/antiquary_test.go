@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
@@ -63,10 +63,10 @@ func newTestCompressor(buf *bytes.Buffer) *zstd.Encoder {
 func collectAll(t *testing.T, c *etl.Collector) map[string][]byte {
 	t.Helper()
 	result := make(map[string][]byte)
-	c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
+	require.NoError(t, c.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error { //nolint:gocritic
 		result[string(k)] = bytes.Clone(v)
 		return next(nil, nil, nil)
-	}, etl.TransformArgs{})
+	}, etl.TransformArgs{}))
 	return result
 }
 
@@ -90,7 +90,7 @@ func (db *countingRwDB) Update(ctx context.Context, f func(tx kv.RwTx) error) er
 }
 
 func TestIndexBeaconSnapshotsCommitsPerBatchAndPersistsProgress(t *testing.T) {
-	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	db := &countingRwDB{RwDB: baseDB}
 	ctx := context.Background()
 	to := uint64(snaptype.CaplinMergeLimit + 2)
@@ -130,7 +130,7 @@ func TestIndexBeaconSnapshotsCommitsPerBatchAndPersistsProgress(t *testing.T) {
 }
 
 func TestIndexBeaconSnapshotsDoesNotAdvanceProgressOnFailedBatch(t *testing.T) {
-	baseDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	db := &countingRwDB{RwDB: baseDB}
 	ctx := context.Background()
 	to := uint64(snaptype.CaplinMergeLimit + 2)
@@ -305,7 +305,7 @@ func TestAntiquateBytesListDiff_WithRealDiffFn(t *testing.T) {
 }
 
 func TestFindNearestSlotBackwards(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -340,7 +340,7 @@ func TestFindNearestSlotBackwards(t *testing.T) {
 }
 
 func TestFindNearestSlotBackwards_NoRoots(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -354,7 +354,7 @@ func TestFindNearestSlotBackwards_NoRoots(t *testing.T) {
 }
 
 func TestComputeSlotToBeRequested(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -386,7 +386,7 @@ func TestComputeSlotToBeRequested(t *testing.T) {
 }
 
 func TestComputeSlotToBeRequested_ReturnsGenesis(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -428,8 +428,10 @@ func TestNotifyBlobBackfilled(t *testing.T) {
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.Dirs{}, nil, nil, nil, nil, nil, nil, log.New(), true, true, true, false, nil)
 
 	require.False(t, a.blobBackfilled.Load())
-	a.NotifyBlobBackfilled()
+	a.NotifyBlobBackfilled(true)
 	require.True(t, a.blobBackfilled.Load())
+	a.NotifyBlobBackfilled(false)
+	require.False(t, a.blobBackfilled.Load())
 }
 
 func TestBeaconStatesCollector_CollectStateRoot(t *testing.T) {
@@ -439,7 +441,7 @@ func TestBeaconStatesCollector_CollectStateRoot(t *testing.T) {
 	root := common.HexToHash("0xdeadbeef")
 	require.NoError(t, c.collectStateRoot(42, root))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -459,7 +461,7 @@ func TestBeaconStatesCollector_CollectBlockRoot(t *testing.T) {
 	root := common.HexToHash("0xcafebabe")
 	require.NoError(t, c.collectBlockRoot(100, root))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -480,7 +482,7 @@ func TestBeaconStatesCollector_CollectEpochRandaoMix(t *testing.T) {
 	epoch := uint64(5)
 	require.NoError(t, c.collectEpochRandaoMix(epoch, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -501,7 +503,7 @@ func TestBeaconStatesCollector_CollectIntraEpochRandaoMix(t *testing.T) {
 	mix := common.HexToHash("0x1111222233334444")
 	require.NoError(t, c.collectIntraEpochRandaoMix(77, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -525,7 +527,7 @@ func TestBeaconStatesCollector_CollectSlashings(t *testing.T) {
 
 	require.NoError(t, c.collectSlashings(200, slashings))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -559,7 +561,7 @@ func TestBeaconStatesCollector_CollectBalancesDiffs(t *testing.T) {
 
 	require.NoError(t, c.collectBalancesDiffs(context.Background(), 500, old, newBal))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -589,7 +591,7 @@ func TestBeaconStatesCollector_CollectBalancesDump(t *testing.T) {
 	slot := uint64(clparams.SlotsPerDump * 2) // aligned to dump boundary
 	require.NoError(t, c.collectBalancesDump(t.Context(), slot, balances))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -618,7 +620,7 @@ func TestBeaconStatesCollector_CollectActiveIndices(t *testing.T) {
 	epoch := uint64(7)
 	require.NoError(t, c.collectActiveIndices(epoch, indices))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -650,7 +652,7 @@ func TestBeaconStatesCollector_FlushMultipleCollections(t *testing.T) {
 	require.NoError(t, c.collectBlockRoot(10, root2))
 	require.NoError(t, c.collectIntraEpochRandaoMix(10, mix))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -683,7 +685,7 @@ func TestBeaconStatesCollector_CollectInactivityScores(t *testing.T) {
 
 	require.NoError(t, c.collectInactivityScores(300, scores))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -717,7 +719,7 @@ func TestBeaconStatesCollector_CollectEffectiveBalancesDump(t *testing.T) {
 	slot := uint64(clparams.SlotsPerDump * 4)
 	require.NoError(t, c.collectEffectiveBalancesDump(slot, raw))
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -801,4 +803,64 @@ func TestRetirementLoopReturnsOnContextCancellation(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("retirementLoop did not return after context cancellation")
 	}
+}
+
+func staticSnapshotHeaderReader(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error) {
+	return &cltypes.SignedBeaconBlockHeader{
+		Header: &cltypes.BeaconBlockHeader{
+			Slot:       slot,
+			Root:       common.Hash{byte(slot % 251)},
+			ParentRoot: common.Hash{byte((slot + 1) % 251)},
+		},
+	}, slot + 1, common.Hash{byte((slot + 2) % 251)}, nil
+}
+
+// BlocksAvailable is the inclusive last readable slot and ReadBeaconBlockBodyBySlot serves that slot
+// from the snapshot path, but indexBeaconSnapshots takes an exclusive bound. Handing it the
+// inclusive tip leaves that slot unindexed while the cursor records it as done, so a reader that
+// resolves roots through the canonical index sees a block with no root there for as long as the tip
+// stays put.
+func TestRebuildBeaconSnapshotIndexIndexesTheVisibleTip(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(antiquaryIndexBatchSlots + 3)
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, db, func() uint64 { return tip },
+		staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
+		root, err := beacon_indicies.ReadCanonicalBlockRoot(tx, tip)
+		require.NoError(t, err)
+		require.NotEqual(t, common.Hash{}, root, "the visible snapshot tip was left unindexed")
+
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress, "the cursor must be the first slot not yet indexed")
+		return nil
+	}))
+}
+
+// Re-running against an unchanged tip must be a no-op rather than treating a cursor of tip+1 as
+// progress that ran ahead of the snapshots.
+func TestRebuildBeaconSnapshotIndexIsIdempotentAtAStaticTip(t *testing.T) {
+	baseDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	ctx := context.Background()
+	const tip = uint64(4)
+	tipFn := func() uint64 { return tip }
+
+	_, err := rebuildBeaconSnapshotIndex(ctx, baseDB, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+
+	db := &countingRwDB{RwDB: baseDB}
+	_, err = rebuildBeaconSnapshotIndex(ctx, db, tipFn, staticSnapshotHeaderReader, antiquaryIndexBatchSlots, nil, log.New())
+	require.NoError(t, err)
+	require.Zero(t, db.commits, "a static tip must not be re-indexed")
+
+	require.NoError(t, baseDB.View(ctx, func(tx kv.Tx) error {
+		progress, err := beacon_indicies.ReadLastBeaconSnapshot(tx)
+		require.NoError(t, err)
+		require.Equal(t, tip+1, progress)
+		return nil
+	}))
 }

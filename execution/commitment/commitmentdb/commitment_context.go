@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -37,13 +37,20 @@ var (
 
 type sd interface {
 	SetTxNum(blockNum uint64)
-	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
+	AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	// AsPutDelWithDiff is AsPutDel, but routes commitment-domain
+	// writes into diff explicitly instead of through SetChangesetAccumulator
+	// — see SharedDomainsCommitmentContext.ComputeCommitmentWithDiff.
+	AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel
+	GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, maxStep kv.Step, ok bool)
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
 	MergeMetrics(source kvmetrics.Source, wm *kvmetrics.DomainMetrics)
 	StepSize() uint64
+
+	AddCommitmentTime(d time.Duration)
 
 	// Metrics exposes the per-SD DomainMetrics so callers can read
 	// per-domain (cache, db, file) read counters. Used by the
@@ -79,6 +86,29 @@ type SharedDomainsCommitmentContext struct {
 	// EnableParaTrieDB: that variant needs the DB-backed TrieContextFactory.
 	pendingVariant commitment.TrieVariant
 	pendingCfg     commitment.TrieConfig
+	warnedUnwired  sync.Once
+}
+
+// checkParaTrieWired reports a context that selected the parallel trie and never
+// received the DB it needs. Falling back to the sequential trie is deliberate for
+// the DB-less RPC and integrity contexts, and a bug for anything that computes a
+// root, so make the difference visible instead of silently computing.
+//
+// An error rather than a panic: the calculator drives ComputeCommitment from a
+// goroutine whose result the exec loop waits on, so panicking here parks the loop
+// instead of failing it.
+func (sdc *SharedDomainsCommitmentContext) checkParaTrieWired() error {
+	if sdc.pendingVariant == "" {
+		return nil
+	}
+	if dbg.AssertEnabled {
+		return errors.New("commitment: parallel trie selected but no DB was wired; pass execctx.WithParaTrieDB or WithSequentialCommitment")
+	}
+	sdc.warnedUnwired.Do(func() {
+		log.Warn("[commitment] parallel trie selected but no DB was wired, computing on the sequential trie",
+			"pass", "execctx.WithParaTrieDB or WithSequentialCommitment")
+	})
+	return nil
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -169,29 +199,9 @@ func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
 	return sdc.pendingUpdate != nil
 }
 
-// flushPendingUpdate applies the pending commitment update using the given putter.
-// The update is written with its original TxNum. Called at the start of ComputeCommitment
-// to ensure the previously deferred update is applied before processing new ones.
-func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
-	upd := sdc.pendingUpdate
-	putBranch := func(prefix, data, prevData []byte) error {
-		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData)
-	}
-	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-		return err
-	}
-	upd.Clear()
-	sdc.pendingUpdate = nil
-	return nil
-}
-
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
-}
-
-func (sdc *SharedDomainsCommitmentContext) SetCustomHistoryStateReader(stateReader StateReader) {
-	sdc.SetStateReader(stateReader)
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetTraceWriter(w io.Writer) {
@@ -248,10 +258,12 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 // the per-ComputeCommitment lock-free metrics accumulator (nil-value => no
 // metrics); the main fold is single-goroutine so it owns that accumulator
 // exclusively. Warmup/concurrent-mount readers get their own via the factories.
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context) *TrieContext {
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context, putter kv.TemporalPutDel) *TrieContext {
+	if putter == nil {
+		putter = sdc.sharedDomains.AsPutDel(tx)
+	}
 	mainTtx := &TrieContext{
-		getter:   sdc.sharedDomains.AsGetter(tx),
-		putter:   sdc.sharedDomains.AsPutDel(tx),
+		putter:   putter,
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
 		blockNum: blockNum,
@@ -260,7 +272,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
 	} else {
-		mainTtx.stateReader = NewLatestStateReaderForWorker(readCtx, tx, sdc.sharedDomains)
+		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(readCtx)))
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -302,7 +314,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
 	case kv.StorageDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
-	//case kv.CommitmentDomain, kv.ReceiptDomain:
+	// case kv.CommitmentDomain, kv.ReceiptDomain:
 	default:
 		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
@@ -317,55 +329,32 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 	sdc.updates.TouchHashedKey(hashedKey)
 }
 
-// witnessCapture runs the on-the-fly fold and returns the captured superset node
-// set (root first), the fold's hashed keys, and the root hash.
-func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
 	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
 	if !ok {
-		return nil, nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
 	}
-	return hexPatriciaHashed.Witnesses(ctx, sdc.updates, produceExclusionProofs, logPrefix)
+	byHash, _, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, false)
+	return byHash, rootHash, err
 }
 
 // WitnessNodes builds the lean execution-witness node set: it prunes the captured
 // superset to the proof paths of the fold's keys, returning the RLP node bytes
 // (root first) and the root hash. This is the strict-verifier (reth) form.
-func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, rootHash []byte, err error) {
-	full, provedKeys, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
+func (sdc *SharedDomainsCommitmentContext) WitnessNodes(ctx context.Context, produceExclusionProofs bool) (nodes [][]byte, rootHash []byte, err error) {
+	hexPatriciaHashed, ok := sdc.Trie().(*commitment.HexPatriciaHashed)
+	if !ok {
+		return nil, nil, errors.New("shared domains commitment context doesn't have HexPatriciaHashed")
+	}
+	byHash, provedKeys, rootHash, err := hexPatriciaHashed.WitnessesByHash(ctx, sdc.updates, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, err
 	}
-	lean, err := trie.WitnessNodesForKeysFromNodes(full, provedKeys)
+	lean, err := trie.WitnessNodesForKeysByHash(byHash, rootHash, provedKeys)
 	if err != nil {
 		return nil, nil, fmt.Errorf("prune witness nodes: %w", err)
 	}
 	return lean, rootHash, nil
-}
-
-// Witness builds the proof trie from the captured superset and re-attaches codeReads
-// to present account nodes, since the consensus RLP carries only the code hash. The
-// trie is returned unpruned; consumers do their own node selection.
-func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, rootHash []byte, err error) {
-	full, _, rootHash, err := sdc.witnessCapture(ctx, produceExclusionProofs, logPrefix)
-	if err != nil {
-		return nil, nil, err
-	}
-	proofTrie, err = trie.RLPDecode(full)
-	if err != nil {
-		return nil, nil, fmt.Errorf("decode witness nodes: %w", err)
-	}
-	for addrHash, codeWithHash := range codeReads {
-		if len(codeWithHash.Code) == 0 {
-			continue
-		}
-		if acc, present := proofTrie.GetAccount(addrHash[:]); !present || acc == nil {
-			continue
-		}
-		if err := proofTrie.UpdateAccountCode(addrHash[:], trie.CodeNode(codeWithHash.Code)); err != nil {
-			return nil, nil, fmt.Errorf("attach witness code for %x: %w", addrHash, err)
-		}
-	}
-	return proofTrie, rootHash, nil
 }
 
 // WitnessLean builds the proof trie from the lean (pruned) witness node set — the
@@ -374,8 +363,8 @@ func (sdc *SharedDomainsCommitmentContext) Witness(ctx context.Context, codeRead
 // superset Witness() returns is for consumers that do their own per-key selection.
 // The returned nodes are the raw lean set (root first, no code attached), suitable for
 // feeding a node-set stateless verifier directly.
-func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, logPrefix string, produceExclusionProofs bool) (proofTrie *trie.Trie, nodes [][]byte, rootHash []byte, err error) {
-	nodes, rootHash, err = sdc.WitnessNodes(ctx, produceExclusionProofs, logPrefix)
+func (sdc *SharedDomainsCommitmentContext) WitnessLean(ctx context.Context, codeReads map[common.Hash]witnesstypes.CodeWithHash, produceExclusionProofs bool) (proofTrie *trie.Trie, nodes [][]byte, rootHash []byte, err error) {
+	nodes, rootHash, err = sdc.WitnessNodes(ctx, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -407,11 +396,31 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	}
 }
 
-// BranchChildCount returns the child count of the branch at nibblePrefix, read
-// from the in-memory commitment domain (post-compute state).
-func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+// BranchChildCount returns a branch's child count from the post-compute view.
+// It reads branches written during computation from domain memory and falls
+// back to the installed state reader for unchanged branches.
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte) (int, error) {
+	stateReader := sdc.stateReader
+	if stateReader == nil {
+		return 0, errors.New("BranchChildCount requires an installed state reader")
+	}
+	if stateReader.WithHistory() {
+		return 0, errors.New("BranchChildCount requires a reader that permits branch writes")
+	}
+	if sdc.pendingUpdate != nil {
+		return 0, errors.New("BranchChildCount cannot read while deferred branch updates are pending")
+	}
+
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(kv.CommitmentDomain, key)
+	if ok {
+		return commitment.BranchData(enc).ChildCount(), nil
+	}
+	if maxStep != kv.NoStepBound {
+		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
+	}
+
+	enc, _, err := stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
 	if err != nil {
 		return 0, err
 	}
@@ -424,8 +433,22 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, ni
 // which flushes pending deferred updates first. Direct callers must ensure
 // pendingUpdate is nil (i.e. deferred mode is not active or was flushed).
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
+	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, nil)
+}
+
+// ComputeCommitmentWithDiff is ComputeCommitment, but this call's own
+// commitment-domain writes route directly into diff instead of through
+// whatever SetChangesetAccumulator installed. diff may be nil.
+func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiff(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), diff *kv.DomainDiff) (rootHash []byte, err error) {
+	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, sdc.sharedDomains.AsPutDelWithDiff(tx, diff))
+}
+
+func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), putter kv.TemporalPutDel) (rootHash []byte, err error) {
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
+	}
+	if err := sdc.checkParaTrieWired(); err != nil {
+		return nil, err
 	}
 	if dbg.KVReadLevelledMetrics {
 		mxCommitmentRunning.Inc()
@@ -437,6 +460,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	start := time.Now()
 	defer func() {
 		took := time.Since(start)
+		sdc.sharedDomains.AddCommitmentTime(took)
 		var keysPerSec uint64
 		if took > 0 {
 			keysPerSec = uint64(float64(updateCount) / took.Seconds())
@@ -462,7 +486,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
 	readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
 
-	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx)
+	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx, putter)
 
 	// If trie trace is configured, wrap the context with a recorder.
 	// Block-targeted: when TrieTraceBlock is set, only record that specific block.
@@ -565,9 +589,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		}
 	}
 
-	// Note: pending deferred updates are flushed by SharedDomains.ComputeCommitment
-	// (the public wrapper) BEFORE this method is called. The wrapper routes the flush
-	// through FlushPendingUpdates which writes into the correct block's changeset.
+	// Note: pending deferred updates are flushed before this method is called —
+	// by SharedDomains.ComputeCommitment for the wrapper's callers, and by the
+	// calculator itself for the explicit-diff paths. Either way the flush is
+	// hash-routed into the correct block's changeset.
 
 	// When deferring commitment updates, tell Process() to leave deferred updates
 	// on the branch encoder instead of applying inline — we'll take them after.
@@ -580,7 +605,6 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
-
 	if err != nil {
 		if drainCollectors != nil {
 			for _, c := range drainCollectors() {
@@ -618,6 +642,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 				BlockNum: blockNum,
 				TxNum:    txNum,
 				Deferred: trie.TakeDeferredUpdates(),
+				Metrics:  trie.Metrics(),
 			}
 		}
 	case *commitment.ParallelPatriciaHashed:
@@ -626,6 +651,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 				BlockNum: blockNum,
 				TxNum:    txNum,
 				Deferred: trie.TakeDeferredUpdates(),
+				Metrics:  trie.Metrics(),
 			}
 		}
 	}
@@ -678,7 +704,6 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
 			stepSize: stepSize,
 			txNum:    txNum,
@@ -687,7 +712,7 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -724,7 +749,6 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),
 			stepSize:       stepSize,
 			txNum:          txNum,
@@ -734,7 +758,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -809,13 +833,14 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	}
 
 	txNum, blockNum = DecodeTxBlockNums(state)
-	return blockNum, txNum, state, nil
+	// Outlives this call: Branch hands back a buffer it reuses on the next read.
+	return blockNum, txNum, bytes.Clone(state), nil
 }
 
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	trieContext := sdc.trieContext(tx, 0, 0, ctx) // blockNum/txNum not yet known; trieContext only used for reading here
+	trieContext := sdc.trieContext(tx, 0, 0, ctx, nil) // blockNum/txNum not yet known; trieContext only used for reading here
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {
@@ -872,7 +897,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	// state could be equal but txnum/blocknum could be different.
 	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
-		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",/
+		// fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",/
 		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
 		return nil
 	}
@@ -885,7 +910,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 	var state []byte
 	var err error
 
-	switch trie := (sdc.patriciaTrie).(type) {
+	switch trie := sdc.patriciaTrie.(type) {
 	case *commitment.HexPatriciaHashed:
 		state, err = trie.EncodeCurrentState(nil)
 		if err != nil {
@@ -956,7 +981,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 }
 
 type TrieContext struct {
-	getter   kv.TemporalGetter
 	putter   kv.TemporalPutDel
 	txNum    uint64
 	blockNum uint64
@@ -965,6 +989,8 @@ type TrieContext struct {
 	traceW         io.Writer // nil = disabled; traces branch reads/writes (see [SDC] lines)
 	stateReader    StateReader
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
+
+	branchBuf []byte // reused across Branch calls; see the ownership note on Branch
 }
 
 // NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
@@ -978,15 +1004,24 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-	// Branch reads feed Merge(prev,update), branchEncoder/merger internal buffers,
-	// deferred-update queues, and unfoldBranchNode reads. The slice returned by the
-	// underlying state cache / getter aliases shared storage that another goroutine
-	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
-	// boundary so all downstream consumers are safe.
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
-	return bytes.Clone(enc), step, nil
+	// The slice from the underlying state cache / getter aliases storage another
+	// commitment worker can recycle, so the bytes have to be owned here. They are
+	// copied into a per-context buffer rather than a fresh allocation: a trie
+	// context belongs to exactly one goroutine (every mount worker builds its own
+	// via TrieContextFactory), and every caller finishes with one branch before
+	// reading the next. LatestCommitmentState is the sole caller that keeps the
+	// bytes past its own return, and clones them itself.
+	if enc == nil {
+		return nil, step, nil
+	}
+	if sdc.branchBuf == nil {
+		sdc.branchBuf = make([]byte, 0, len(enc))
+	}
+	sdc.branchBuf = append(sdc.branchBuf[:0], enc...)
+	return sdc.branchBuf, step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
@@ -1027,14 +1062,13 @@ func (sdc *TrieContext) Account(plainKey []byte) (u *commitment.Update, err erro
 		return nil, err
 	}
 
-	u.Flags |= commitment.NonceUpdate
+	// encAccount is the whole account record, so flag every field: a cell may skip its
+	// state read only when the update it was given covers the account completely. A
+	// zero code hash is the empty one the initialiser already put in u.
+	u.Flags |= commitment.NonceUpdate | commitment.BalanceUpdate | commitment.CodeUpdate
 	u.Nonce = acc.Nonce
-
-	u.Flags |= commitment.BalanceUpdate
 	u.Balance = acc.Balance
-
 	if !acc.CodeHash.IsZero() {
-		u.Flags |= commitment.CodeUpdate
 		u.CodeHash = acc.CodeHash.Value()
 	}
 
@@ -1125,7 +1159,7 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState)
+	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, err
 	}

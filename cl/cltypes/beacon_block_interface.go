@@ -15,6 +15,9 @@ type ColumnSyncableSignedBlock interface {
 	GetSlot() uint64
 	BlockHashSSZ() ([32]byte, error)
 	GetBlobKzgCommitments() *solid.ListSSZ[*KZGCommitment]
+	// BlockSignature lets PeerDAS reject a column whose header signature does not match the block.
+	// It belongs on the interface so a wrapper cannot silently drop the check.
+	BlockSignature() common.Bytes96
 }
 
 type GenericBeaconBlock interface {

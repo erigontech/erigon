@@ -2,6 +2,7 @@ package base_encoding
 
 import (
 	"encoding/binary"
+	"errors"
 	"io"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -84,7 +85,7 @@ func ApplySSZQueueDiff[T solid.EncodableHashableSSZ](r io.Reader, queue *solid.L
 	for {
 		var length uint32
 		if err := binary.Read(r, binary.LittleEndian, &length); err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				break
 			}
 			return err

@@ -568,7 +568,8 @@ func (t *dialTask) run(d *dialScheduler) {
 	err := t.dial(d, t.dest())
 	if err != nil {
 		// For static nodes, resolve one more time if dialing fails.
-		if _, ok := err.(*dialError); ok && t.flags&staticDialedConn != 0 {
+		var derr *dialError
+		if errors.As(err, &derr) && t.flags&staticDialedConn != 0 {
 			if t.resolve(d) {
 				t.dial(d, t.dest()) //nolint:errcheck
 			}
@@ -636,7 +637,8 @@ func (t *dialTask) String() string {
 }
 
 func cleanupDialErr(err error) error {
-	if netErr, ok := err.(*net.OpError); ok && netErr.Op == "dial" {
+	var netErr *net.OpError
+	if errors.As(err, &netErr) && netErr.Op == "dial" {
 		return netErr.Err
 	}
 	return err

@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
@@ -87,7 +88,15 @@ func (s *Sync) PruneStageState(id stages.SyncStage, forwardProgress uint64, tx k
 	if err != nil {
 		return nil, err
 	}
-	return &PruneState{id, forwardProgress, pruneProgress, s, CurrentSyncCycleInfo{initialCycle, false}}, nil
+	return &PruneState{
+		ID:              id,
+		ForwardProgress: forwardProgress,
+		PruneProgress:   pruneProgress,
+		state:           s,
+		CurrentSyncCycle: CurrentSyncCycleInfo{
+			IsInitialCycle: initialCycle,
+		},
+	}, nil
 }
 
 func (s *Sync) NextStage() {
@@ -193,34 +202,23 @@ func (s *Sync) SetCurrentStage(id stages.SyncStage) error {
 }
 
 func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, pruneOrder PruneOrder, logger log.Logger, mode stages.Mode) *Sync {
-	stageMap := make(map[stages.SyncStage]*Stage, len(stagesList))
-	for _, s := range stagesList {
-		stageMap[s.ID] = s
-	}
-
-	// on non-Polygon chains, WitnessProcessing stage is not run
-	var filteredUnwindOrder UnwindOrder
-	for _, stageIndex := range unwindOrder {
-		if _, exists := stageMap[stageIndex]; exists {
-			filteredUnwindOrder = append(filteredUnwindOrder, stageIndex)
+	unwindStages := make([]*Stage, len(unwindOrder))
+	for i, stageIndex := range unwindOrder {
+		for _, s := range stagesList {
+			if s.ID == stageIndex {
+				unwindStages[i] = s
+				break
+			}
 		}
 	}
-
-	var filteredPruneOrder PruneOrder
-	for _, stageIndex := range pruneOrder {
-		if _, exists := stageMap[stageIndex]; exists {
-			filteredPruneOrder = append(filteredPruneOrder, stageIndex)
+	pruneStages := make([]*Stage, len(pruneOrder))
+	for i, stageIndex := range pruneOrder {
+		for _, s := range stagesList {
+			if s.ID == stageIndex {
+				pruneStages[i] = s
+				break
+			}
 		}
-	}
-
-	unwindStages := make([]*Stage, len(filteredUnwindOrder))
-	for i, stageIndex := range filteredUnwindOrder {
-		unwindStages[i] = stageMap[stageIndex]
-	}
-
-	pruneStages := make([]*Stage, len(filteredPruneOrder))
-	for i, stageIndex := range filteredPruneOrder {
-		pruneStages[i] = stageMap[stageIndex]
 	}
 
 	logPrefixes := make([]string, len(stagesList))
@@ -373,6 +371,12 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
+// IsOnlyLoopExhausted reports whether err is non-nil and every branch in its
+// unwrap tree ends in ErrLoopExhausted.
+func IsOnlyLoopExhausted(err error) bool {
+	return commonerrors.IsOnly(err, &ErrLoopExhausted{})
+}
+
 func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
@@ -452,13 +456,13 @@ func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, 
 }
 
 // RunPrune pruning for stages as per the defined pruning order, if enabled for that stage
-func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, timeout time.Duration) error {
+func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, finalityCtx kv.FinalityContext, timeout time.Duration) error {
 	s.timings = s.timings[:0]
 	for i := 0; i < len(s.pruningOrder); i++ {
 		if s.pruningOrder[i] == nil || s.pruningOrder[i].Disabled || s.pruningOrder[i].Prune == nil {
 			continue
 		}
-		if err := s.pruneStage(ctx, initialCycle, s.pruningOrder[i], tx, timeout); err != nil {
+		if err := s.pruneStage(ctx, initialCycle, finalityCtx, s.pruningOrder[i], tx, timeout); err != nil {
 			return err
 		}
 	}
@@ -467,6 +471,16 @@ func (s *Sync) RunPrune(ctx context.Context, tx kv.RwTx, initialCycle bool, time
 	}
 	s.currentStage = 0
 	return nil
+}
+
+func (s *Sync) LastStageTiming(id stages.SyncStage) time.Duration {
+	var took time.Duration
+	for _, t := range s.timings {
+		if t.stage == id && !t.isUnwind && !t.isPrune {
+			took = t.took
+		}
+	}
+	return took
 }
 
 func (s *Sync) PrintTimings() []any {
@@ -501,8 +515,7 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
-		var errExhausted *ErrLoopExhausted
-		if errors.As(err, &errExhausted) {
+		if IsOnlyLoopExhausted(err) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
 			s.logRunStageDone(stageState, start)
 			return true, nil
@@ -538,6 +551,11 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 	unwind.Reason = s.unwindReason
 
 	if stageState.BlockNumber <= unwind.UnwindPoint {
+		if stageState.BlockNumber == unwind.UnwindPoint {
+			s.logger.Info("unwind skipped, stage exactly at unwind point", "stage", stage.ID, "unwindPoint", unwind.UnwindPoint)
+		} else {
+			s.logger.Debug("unwind skipped, stage below unwind point", "stage", stage.ID, "progress", stageState.BlockNumber, "unwindPoint", unwind.UnwindPoint)
+		}
 		return nil
 	}
 
@@ -561,7 +579,7 @@ func (s *Sync) unwindStage(initialCycle bool, stage *Stage, sd *execctx.SharedDo
 }
 
 // Run the pruning function for the given stage
-func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
+func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, finalityCtx kv.FinalityContext, stage *Stage, tx kv.RwTx, timeout time.Duration) error {
 	start := time.Now()
 
 	stageState, err := s.StageState(stage.ID, tx, initialCycle, false)
@@ -573,6 +591,7 @@ func (s *Sync) pruneStage(ctx context.Context, initialCycle bool, stage *Stage, 
 	if err != nil {
 		return err
 	}
+	pruneState.FinalityCtx = finalityCtx
 	if err := s.SetCurrentStage(stage.ID); err != nil {
 		return err
 	}
@@ -644,9 +663,11 @@ func (s *Sync) MockExecFunc(id stages.SyncStage, f ExecFunc) {
 func (s *Sync) checkStopBeforeStage(stage *Stage) {
 	s.checkStopStage(stage, "STOP_BEFORE_STAGE", dbg.StopBeforeStage())
 }
+
 func (s *Sync) checkStopAfterStage(stage *Stage) {
 	s.checkStopStage(stage, "STOP_AFTER_STAGE", dbg.StopAfterStage())
 }
+
 func (s *Sync) checkStopStage(stage *Stage, envName, value string) {
 	if string(stage.ID) == value { // stop process for debugging reasons
 		s.logger.Warn("env flag forced to stop app", "env", envName, "value", value)

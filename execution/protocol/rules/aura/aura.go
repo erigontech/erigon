@@ -96,7 +96,7 @@ func (s *Step) optCalibrate() bool {
 	return true
 }
 
-type ReceivedStepHashes map[uint64]map[common.Address]common.Hash //BTreeMap<(u64, Address), H256>
+type ReceivedStepHashes map[uint64]map[common.Address]common.Hash // BTreeMap<(u64, Address), H256>
 
 // nolint
 func (r ReceivedStepHashes) get(step uint64, author common.Address) (common.Hash, bool) {
@@ -211,7 +211,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 // / The block corresponding the parent hash must be stored already.
 // nolint
 func epochTransitionFor(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
-	//TODO: probably this version of func doesn't support non-canonical epoch transitions
+	// TODO: probably this version of func doesn't support non-canonical epoch transitions
 	h := chain.GetHeaderByHash(parentHash)
 	if h == nil {
 		return transition, false
@@ -656,11 +656,14 @@ func (c *AuRa) Prepare(chain rules.ChainHeaderReader, header *types.Header, stat
 	//return nil
 }
 
-func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) {
+func (c *AuRa) rewriteBytecode(blockNum uint64, state *state.IntraBlockState) error {
 	for addressValue, rewrittenCode := range c.cfg.RewriteBytecode[blockNum] {
 		address := accounts.InternAddress(addressValue)
-		state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified)
+		if err := state.SetCode(address, rewrittenCode, tracing.CodeChangeUnspecified); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
@@ -668,13 +671,15 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 ) error {
 	blockNum := header.Number.Uint64()
 
-	//Check block gas limit from smart contract, if applicable
+	// Check block gas limit from smart contract, if applicable
 	err := c.verifyGasLimitOverride(config, chain, header, state, syscallCustom)
 	if err != nil {
 		return err
 	}
 
-	c.rewriteBytecode(blockNum, state)
+	if err := c.rewriteBytecode(blockNum, state); err != nil {
+		return err
+	}
 
 	syscall := func(addr accounts.Address, data []byte) ([]byte, error) {
 		return syscallCustom(addr, data, state, header, false /* constCall */)
@@ -690,7 +695,7 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 		if err != nil {
 			panic(err)
 		}
-		err = c.e.PutEpoch(header.ParentHash, 0, proof) //TODO: block 0 hardcoded - need fix it inside validators
+		err = c.e.PutEpoch(header.ParentHash, 0, proof) // TODO: block 0 hardcoded - need fix it inside validators
 		if err != nil {
 			panic(err)
 		}
@@ -857,7 +862,7 @@ func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, f
 // to construct transition proof. author == ec_recover(sig) known
 // since the blocks are in the DB.
 func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to common.Hash) (out []*types.Header) {
-	var header = from
+	header := from
 	for {
 		header = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
 		if header == nil {
@@ -979,20 +984,13 @@ func (c *AuRa) Seal(chain rules.ChainHeaderReader, block *types.BlockWithReceipt
 	//		log.Warn("Sealing result is not read by miner", "sealhash", SealHash(header))
 	//	}
 	//}()
-	//
 	//return nil
-}
-
-func stepProposer(validators ValidatorSet, blockHash common.Hash, step uint64, call rules.Call) (common.Address, error) {
-	//c, err := validators.defaultCaller(blockHash)
-	//if err != nil {
-	//	return common.Address{}, err
-	//}
-	return validators.getWithCaller(blockHash, uint(step), call)
 }
 
 // epochSet fetch correct validator set for epoch at header, taking into account
 // finality of previous transitions.
+//
+//nolint:unused
 func (c *AuRa) epochSet(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, h *types.Header, call rules.SystemCall) (ValidatorSet, uint64, error) {
 	if c.cfg.ImmediateTransitions {
 		return c.cfg.Validators, h.Number.Uint64(), nil
@@ -1187,7 +1185,7 @@ func (c *AuRa) ExecuteSystemWithdrawals(withdrawals []*types.Withdrawal, syscall
 	amounts := make([]uint64, 0, len(withdrawals))
 	addresses := make([]common.Address, 0, len(withdrawals))
 	for _, w := range withdrawals {
-		amounts = append(amounts, w.Amount)
+		amounts = append(amounts, uint64(w.Amount))
 		addresses = append(addresses, w.Address)
 	}
 
@@ -1213,7 +1211,8 @@ func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 
 func (c *AuRa) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 

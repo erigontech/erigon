@@ -48,6 +48,7 @@ type columnDataPeers struct {
 }
 
 func newColumnPeers(
+	ctx context.Context,
 	sentinel sentinelproto.SentinelClient,
 	beaconConfig *clparams.BeaconChainConfig,
 	ethClock eth_clock.EthereumClock,
@@ -63,7 +64,8 @@ func newColumnPeers(
 		peersIndex:    0,
 	}
 
-	go s.refreshPeers(context.Background())
+	// The refresh loop lives as long as the owning client's ctx.
+	go s.refreshPeers(ctx)
 	return s
 }
 
@@ -171,12 +173,6 @@ func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic s
 		return err
 	}
 	return nil
-}
-
-func (c *columnDataPeers) availablePeerCount() int {
-	c.peersMutex.RLock()
-	defer c.peersMutex.RUnlock()
-	return len(c.peersQueue)
 }
 
 func (c *columnDataPeers) pickPeerRoundRobin(

@@ -19,6 +19,8 @@ package logger
 import (
 	"context"
 	"encoding/hex"
+	"maps"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -38,9 +40,11 @@ import (
 // a track record of modified storage which is used in reporting snapshots of the
 // contract their storage.
 type JsonStreamLogger struct {
-	ctx          context.Context
-	cfg          LogConfig
-	stream       jsonstream.Stream
+	ctx    context.Context
+	cfg    LogConfig
+	stream jsonstream.Stream
+	// Scratch for the hex helpers below. Every result aliases it, so only one is
+	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
 	firstCapture bool
 	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
@@ -83,36 +87,45 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-// hexWithPrefix encodes b as a 0x-prefixed hex string using the internal buffer.
-func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
+// hexWithPrefix encodes h into hexEncodeBuf as 0x-prefixed hex. It takes a hash
+// rather than a slice so the result is known to fit; the buffer is not resized.
+func (l *JsonStreamLogger) hexWithPrefix(h *common.Hash) string {
 	l.hexEncodeBuf[0] = '0'
 	l.hexEncodeBuf[1] = 'x'
-	n := hex.Encode(l.hexEncodeBuf[2:], b)
-	return string(l.hexEncodeBuf[:2+n])
+	n := hex.Encode(l.hexEncodeBuf[2:], h[:])
+	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
 }
 
-// writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
-// to the stream without any heap allocations. Pads to 32 bytes if needed.
-func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
-	if len(chunk) < 32 {
-		var word [32]byte
-		copy(word[:], chunk)
-		hex.Encode(l.hexEncodeBuf[:], word[:])
-	} else {
-		hex.Encode(l.hexEncodeBuf[:], chunk)
-	}
-	l.stream.WriteRaw(`"0x`)
-	l.stream.Write(l.hexEncodeBuf[:64]) //nolint:errcheck
-	l.stream.WriteRaw(`"`)
+// hexQuoted encodes v as a complete JSON string, quotes included, for WriteRaw.
+func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
+	l.hexEncodeBuf[0] = '"'
+	b, _ := hexutil.U256(*v).AppendText(l.hexEncodeBuf[:1])
+	return common.ToStringZeroCopy(append(b, '"'))
+}
+
+// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes. It goes through
+// hexEncodeBuf so a caller's local array does not escape through the Stream interface.
+func (l *JsonStreamLogger) writeWord(word []byte) {
+	padded := l.hexEncodeBuf[:32]
+	clear(padded[copy(padded, word):])
+	l.stream.WriteHex(padded)
 }
 
 func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
-	// no log entry are producer
-	if l.firstCapture {
-		l.stream.WriteObjectStart()
-		l.stream.WriteObjectField("structLogs")
-		l.stream.WriteArrayStart()
+	l.writePrologueOnce()
+}
+
+// writePrologueOnce opens the response object and the structLogs array. Every
+// frame exits through OnExit, and the caller closes one object and one array, so
+// a second prologue would leave the response unbalanced.
+func (l *JsonStreamLogger) writePrologueOnce() {
+	if !l.firstCapture {
+		return
 	}
+	l.firstCapture = false
+	l.stream.WriteObjectStart()
+	l.stream.Field("structLogs")
+	l.stream.WriteArrayStart()
 }
 
 // OnOpcode also tracks SLOAD/SSTORE ops to track storage change.
@@ -133,16 +146,8 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	if l.cfg.Limit != 0 && l.cfg.Limit <= l.opcodeSteps {
 		return
 	}
+	l.writePrologueOnce()
 	l.opcodeSteps++
-	if !l.firstCapture {
-		l.stream.WriteMore()
-	} else {
-		l.stream.WriteObjectStart()
-		l.stream.WriteObjectField("structLogs")
-		l.stream.WriteArrayStart()
-
-		l.firstCapture = false
-	}
 	var outputStorage bool
 	if !l.cfg.DisableStorage {
 		// initialise new changed values storage container for this contract
@@ -172,85 +177,59 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 	}
 	// create a new snapshot of the EVM.
 	l.stream.WriteObjectStart()
-	l.stream.WriteObjectField("pc")
-	l.stream.WriteUint64(pc)
-	l.stream.WriteMore()
-	l.stream.WriteObjectField("op")
+	l.stream.Field("pc")
+	l.stream.Uint(pc)
+	l.stream.Field("op")
 	l.stream.WriteString(op.String())
-	l.stream.WriteMore()
-	l.stream.WriteObjectField("gas")
-	l.stream.WriteUint64(gas)
-	l.stream.WriteMore()
-	l.stream.WriteObjectField("gasCost")
-	l.stream.WriteUint64(cost)
-	l.stream.WriteMore()
-	l.stream.WriteObjectField("depth")
-	l.stream.WriteInt(depth)
+	l.stream.Field("gas")
+	l.stream.Uint(gas)
+	l.stream.Field("gasCost")
+	l.stream.Uint(cost)
+	l.stream.Field("depth")
+	l.stream.Int(int64(depth))
 	refund := l.env.IntraBlockState.GetRefund()
 	if refund != 0 {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("refund")
-		l.stream.WriteUint64(refund)
+		l.stream.Field("refund")
+		l.stream.Uint(refund)
 	}
 
 	if err != nil {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("error")
+		l.stream.Field("error")
 		l.stream.WriteString(err.Error())
 	}
 	if !l.cfg.DisableStack {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("stack")
+		l.stream.Field("stack")
 		l.stream.WriteArrayStart()
-		for i, stackValue := range stack {
-			if i > 0 {
-				l.stream.WriteMore()
-			}
-			l.stream.WriteString(stackValue.Hex())
+		for i := range stack {
+			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
 		}
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableMemory && len(memory) > 0 {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("memory")
+		l.stream.Field("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
 			end := min(i+32, len(memory))
-			if i > 0 {
-				l.stream.WriteMore()
-			}
-			l.writeMemoryWordRaw(memory[i:end])
+			l.writeWord(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("returnData")
-		l.stream.WriteString(hexutil.Encode(rData))
+		l.stream.Field("returnData")
+		l.stream.WriteHex(rData)
 	}
 	if outputStorage {
-		l.stream.WriteMore()
-		l.stream.WriteObjectField("storage")
+		l.stream.Field("storage")
 		l.stream.WriteObjectStart()
-		first := true
-		// Sort storage by locations for easier comparison with geth
-		if l.locations != nil {
-			l.locations = l.locations[:0]
-		}
+		// Sorted by location for easier comparison with geth
 		s := l.storage[contractAddr]
-		for loc := range s {
-			l.locations = append(l.locations, loc)
-		}
+		l.locations = slices.AppendSeq(l.locations[:0], maps.Keys(s))
 		l.locations.Sort()
-		for _, loc := range l.locations {
-			value := s[loc]
-			if first {
-				first = false
-			} else {
-				l.stream.WriteMore()
-			}
-			l.stream.WriteObjectField(l.hexWithPrefix(loc[:]))
-			l.stream.WriteString(l.hexWithPrefix(value[:]))
+		for i := range l.locations {
+			loc := &l.locations[i]
+			value := s[*loc]
+			l.stream.Field(l.hexWithPrefix(loc))
+			l.writeWord(value[:])
 		}
 		l.stream.WriteObjectEnd()
 	}

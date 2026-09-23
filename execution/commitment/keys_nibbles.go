@@ -8,44 +8,19 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// KeyToHexNibbleHash hashes plain key with respect to plain key size (part < 20 bytes for account, part >= 20 bytes for storage)
-// and returns the hashed key in nibblized form suitable for hex trie (each byte represented by 2 nibbles).
 func KeyToHexNibbleHash(key []byte) []byte {
-	// `nibblized`, `hashed` - are the same array
-	// but `hashed` is 2nd half of `nibblized`
-	// will use 1st half of `nibblized` in the end
-	var nibblized, hashed []byte
-	if len(key) > length.Addr { // storage
-		nibblized = make([]byte, 128)
-		hashed = nibblized[64:]
-		h := keccak.Sum256(key[:length.Addr])
-		copy(hashed[:32], h[:])
-		h = keccak.Sum256(key[length.Addr:])
-		copy(hashed[32:], h[:])
-	} else {
-		nibblized = make([]byte, 64)
-		hashed = nibblized[32:]
-		h := keccak.Sum256(key)
-		copy(hashed, h[:])
+	if len(key) <= length.Addr {
+		return KeyToNibblizedHash(key)
 	}
-
-	for i, b := range hashed {
-		nibblized[i*2] = (b >> 4) & 0xf
-		nibblized[i*2+1] = b & 0xf
-	}
+	nibblized := make([]byte, 128)
+	h := keccak.Sum256(key[:length.Addr])
+	nibbles.Expand(h[:], nibblized)
+	h = keccak.Sum256(key[length.Addr:])
+	nibbles.Expand(h[:], nibblized[64:])
 	return nibblized
-}
-
-// expandNibbles writes each byte of src as two nibbles (src[i] -> dst[2i], dst[2i+1]).
-// src and dst must not overlap.
-func expandNibbles(src, dst []byte) {
-	_ = dst[len(src)*2-1] // bounds-check elimination
-	for i, b := range src {
-		dst[i*2] = (b >> 4) & 0xf
-		dst[i*2+1] = b & 0xf
-	}
 }
 
 // addrHashCache memoizes the nibblized keccak(addr) prefix of the most recent
@@ -60,10 +35,8 @@ type addrHashCache struct {
 
 func (c *addrHashCache) reset() { c.valid = false }
 
-// keyToHexNibbleHashCached returns the same bytes as KeyToHexNibbleHash, reusing
-// c's cached address prefix across consecutive storage keys that share an address.
 func keyToHexNibbleHashCached(key []byte, c *addrHashCache) []byte {
-	if len(key) <= length.Addr { // account key: no reusable prefix
+	if len(key) <= length.Addr {
 		return KeyToHexNibbleHash(key)
 	}
 	nibblized := make([]byte, 128)
@@ -72,31 +45,23 @@ func keyToHexNibbleHashCached(key []byte, c *addrHashCache) []byte {
 		copy(nibblized[:64], c.nibs[:])
 	} else {
 		h := keccak.Sum256(key[:length.Addr])
-		expandNibbles(h[:], nibblized[:64])
+		nibbles.Expand(h[:], nibblized[:64])
 		c.addr = addr
 		copy(c.nibs[:], nibblized[:64])
 		c.valid = true
 	}
 	h := keccak.Sum256(key[length.Addr:])
-	expandNibbles(h[:], nibblized[64:])
+	nibbles.Expand(h[:], nibblized[64:])
 	return nibblized
 }
 
 func KeyToNibblizedHash(key []byte) []byte {
-	nibblized := make([]byte, 64) // nibblized hash
-	hashed := nibblized[32:]
+	nibblized := make([]byte, 64)
 	h := keccak.Sum256(key)
-	copy(hashed, h[:])
-	for i, b := range hashed {
-		nibblized[i*2] = (b >> 4) & 0xf
-		nibblized[i*2+1] = b & 0xf
-	}
+	nibbles.Expand(h[:], nibblized)
 	return nibblized
 }
 
-// NibblesToString returns a hex string representation of a nibble sequence.
-// Each nibble (0-15) is printed as a single hex character. Works for both
-// even and odd length sequences.
 func NibblesToString(nibbles []byte) string {
 	var b strings.Builder
 	b.Grow(len(nibbles))
@@ -106,7 +71,6 @@ func NibblesToString(nibbles []byte) string {
 	return b.String()
 }
 
-// updatedNibs returns a string of nibbles that are set in the given number.
 func updatedNibs(num uint16) string {
 	var nibbles []string
 	for i := range 16 {
@@ -117,10 +81,8 @@ func updatedNibs(num uint16) string {
 	return strings.Join(nibbles, ",")
 }
 
-// hashes plainKey using keccakState and writes the hashed key nibbles to dest with respect to hashedKeyOffset.
-// Note that this function does not respect plainKey length so hashing it at once without splitting to account/storage part.
 func hashKey(hasher keccak.KeccakState, plainKey []byte, dest []byte, hashedKeyOffset int16, hashBuf []byte) error {
-	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1] // bounds checks elimination
+	_, _ = hashBuf[length.Hash-1], dest[length.Hash*2-1]
 	hasher.Reset()
 	if _, err := hasher.Write(plainKey); err != nil {
 		return err
@@ -129,19 +91,11 @@ func hashKey(hasher keccak.KeccakState, plainKey []byte, dest []byte, hashedKeyO
 		return err
 	}
 	hb := hashBuf[hashedKeyOffset/2:]
-	var k int
-	if hashedKeyOffset%2 == 1 { // write zero byte as compacted since hashedKeyOffset is odd
+	if hashedKeyOffset%2 == 1 {
 		dest[0] = hb[0] & 0xf
-		k++
-		hb = hb[1:]
+		dest, hb = dest[1:], hb[1:]
 	}
-	// write each byte as 2 hex nibbles
-	for _, c := range hb {
-		dest[k] = (c >> 4) & 0xf
-		k++
-		dest[k] = c & 0xf
-		k++
-	}
+	nibbles.Expand(hb, dest)
 	return nil
 }
 

@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -106,16 +107,16 @@ func TestClientErrorData(t *testing.T) {
 	}
 
 	// Check code.
-	if e, ok := err.(Error); !ok {
-		t.Fatalf("client did not return rpc.Error, got %#v", e)
-	} else if e.ErrorCode() != (testError{}.ErrorCode()) {
-		t.Fatalf("wrong error code %d, want %d", e.ErrorCode(), testError{}.ErrorCode())
+	if errCode, ok := errors.AsType[Error](err); !ok {
+		t.Fatalf("client did not return rpc.Error, got %#v", err)
+	} else if errCode.ErrorCode() != (testError{}.ErrorCode()) {
+		t.Fatalf("wrong error code %d, want %d", errCode.ErrorCode(), testError{}.ErrorCode())
 	}
 	// Check data.
-	if e, ok := err.(DataError); !ok {
-		t.Fatalf("client did not return rpc.DataError, got %#v", e)
-	} else if e.ErrorData() != (testError{}.ErrorData()) {
-		t.Fatalf("wrong error data %#v, want %#v", e.ErrorData(), testError{}.ErrorData())
+	if errData, ok := errors.AsType[DataError](err); !ok {
+		t.Fatalf("client did not return rpc.DataError, got %#v", err)
+	} else if errData.ErrorData() != (testError{}.ErrorData()) {
+		t.Fatalf("wrong error data %#v, want %#v", errData.ErrorData(), testError{}.ErrorData())
 	}
 }
 
@@ -166,6 +167,49 @@ func TestClientBatchRequest(t *testing.T) {
 	}
 	if !reflect.DeepEqual(batch, wantResult) {
 		t.Errorf("batch results mismatch:\ngot %swant %s", spew.Sdump(batch), spew.Sdump(wantResult))
+	}
+}
+
+// sendService records the order its calls run in. The first call is slow, so a concurrent
+// batch finishes it last.
+type sendService struct {
+	mu    sync.Mutex
+	order []int
+}
+
+func (s *sendService) SendRawTransaction(i int) int {
+	if i == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.order = append(s.order, i)
+	return i
+}
+
+func TestClientBatchSendsRunInOrder(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	server.batchConcurrency = 2
+	svc := new(sendService)
+	if err := server.RegisterName("eth", svc); err != nil {
+		t.Fatal(err)
+	}
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	batch := make([]BatchElem, 4)
+	for i := range batch {
+		batch[i] = BatchElem{Method: "eth_sendRawTransaction", Args: []any{i}, Result: new(int)}
+	}
+	if err := client.BatchCall(batch); err != nil {
+		t.Fatal(err)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if !slices.Equal(svc.order, []int{0, 1, 2, 3}) {
+		t.Fatalf("batch ran its sends in order %v, want 0 1 2 3", svc.order)
 	}
 }
 
@@ -291,7 +335,7 @@ func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t, log.N
 //
 // The HTTP transport uses synctest with in-memory connections for deterministic timing.
 // The WebSocket transport uses real TCP because its long-lived server goroutines
-// (pingLoop, ServeCodec, dispatch) have complex shutdown dependencies incompatible
+// (ServeCodec, dispatch) have complex shutdown dependencies incompatible
 // with synctest's requirement that all bubble goroutines exit.
 func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 	if testing.Short() {
@@ -418,7 +462,7 @@ func TestClientSubscribeInvalidArg(t *testing.T) {
 				t.Error(dbg.Stack())
 			}
 		}()
-		client.EthSubscribe(context.Background(), arg, "foo_bar")
+		_, _ = client.EthSubscribe(context.Background(), arg, "foo_bar")
 	}
 	check(true, nil)
 	check(true, 1)
@@ -531,59 +575,71 @@ func TestClientCloseUnsubscribeRace(t *testing.T) {
 // This test checks that Client doesn't lock up when a single subscriber
 // doesn't read subscription events.
 func TestClientNotificationStorm(t *testing.T) {
-	if testing.Short() {
-		t.Skip("slow test")
+	for _, test := range []struct {
+		name         string
+		count        int
+		wantOverflow bool
+	}{
+		{name: "full", count: maxClientSubscriptionBuffer},
+		{name: "overflow", count: maxClientSubscriptionBuffer + 1, wantOverflow: true},
+		// Delivery must also unblock after the forwarding goroutine exits.
+		{name: "notification_after_overflow", count: maxClientSubscriptionBuffer + 2, wantOverflow: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			synctest.Test(t, func(t *testing.T) {
+				logger := log.New()
+				server := newTestServer(logger)
+				defer server.Stop()
+				client := DialInProc(server, logger)
+				defer client.Close()
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+
+				nc := make(chan int)
+				sub, err := client.Subscribe(ctx, "nftest", nc, "someSubscription", test.count, 0)
+				if err != nil {
+					t.Fatal("can't subscribe:", err)
+				}
+
+				// Keep the subscriber unread until the notification burst has finished.
+				// Overflow then depends on queue capacity, not producer/consumer scheduling.
+				synctest.Wait()
+
+				var result int
+				if err := client.CallContext(ctx, &result, "nftest_echo", 42); err != nil {
+					t.Fatal("call with an unread subscriber:", err)
+				}
+				if result != 42 {
+					t.Fatalf("unexpected call result %d, want 42", result)
+				}
+
+				if test.wantOverflow {
+					select {
+					case err := <-sub.Err():
+						if !errors.Is(err, ErrSubscriptionQueueOverflow) {
+							t.Fatalf("got error %v, want %v", err, ErrSubscriptionQueueOverflow)
+						}
+					default:
+						t.Fatal("didn't get expected overflow error")
+					}
+					return
+				}
+
+				for i := range test.count {
+					select {
+					case val := <-nc:
+						if val != i {
+							t.Fatalf("(%d/%d) unexpected value %d", i, test.count, val)
+						}
+					case err := <-sub.Err():
+						t.Fatalf("(%d/%d) unexpected subscription error: %v", i, test.count, err)
+					case <-ctx.Done():
+						t.Fatalf("(%d/%d) waiting for notification: %v", i, test.count, ctx.Err())
+					}
+				}
+			})
+		})
 	}
-	logger := log.New()
-	server := newTestServer(logger)
-	defer server.Stop()
-
-	doTest := func(count int, wantError bool) {
-		client := DialInProc(server, logger)
-		defer client.Close()
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-
-		// Subscribe on the server. It will start sending many notifications
-		// very quickly.
-		nc := make(chan int)
-		sub, err := client.Subscribe(ctx, "nftest", nc, "someSubscription", count, 0)
-		if err != nil {
-			t.Fatal("can't subscribe:", err)
-		}
-		defer sub.Unsubscribe()
-
-		// Process each notification, try to run a call in between each of them.
-		for i := range count {
-			select {
-			case val := <-nc:
-				if val != i {
-					t.Fatalf("(%d/%d) unexpected value %d", i, count, val)
-				}
-			case err := <-sub.Err():
-				if wantError && err != ErrSubscriptionQueueOverflow {
-					t.Fatalf("(%d/%d) got error %q, want %q", i, count, err, ErrSubscriptionQueueOverflow)
-				} else if !wantError {
-					t.Fatalf("(%d/%d) got unexpected error %q", i, count, err)
-				}
-				return
-			}
-			var r int
-			err := client.CallContext(ctx, &r, "nftest_echo", i)
-			if err != nil {
-				if !wantError {
-					t.Fatalf("(%d/%d) call error: %v", i, count, err)
-				}
-				return
-			}
-		}
-		if wantError {
-			t.Fatalf("didn't get expected error")
-		}
-	}
-
-	doTest(8000, false)
-	doTest(30000, true)
 }
 
 func TestClientSetHeader(t *testing.T) {
@@ -679,7 +735,7 @@ func TestClientReconnect(t *testing.T) {
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}
-		go http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger))
+		go func() { _ = http.Serve(l, srv.WebsocketHandler([]string{"*"}, nil, false, logger)) }()
 		return srv, l
 	}
 
@@ -756,35 +812,78 @@ func httpTestClient(srv *Server, transport string, fl *flakeyListener) (*Client,
 		fl.Listener = hs.Listener
 		hs.Listener = fl
 	}
-	// Connect the client.
+	// Connect the client. A flakeyListener can kill the connection the handshake
+	// is running on, which is not what the caller is testing, so retry the dial.
 	hs.Start()
-	client, err := Dial(transport+"://"+hs.Listener.Addr().String(), logger)
-	if err != nil {
-		panic(err)
+	var client *Client
+	var err error
+	for range 10 {
+		if client, err = Dial(transport+"://"+hs.Listener.Addr().String(), logger); err == nil {
+			return client, hs
+		}
 	}
-	return client, hs
+	panic(err)
 }
 
-// flakeyListener kills accepted connections after a random timeout.
+// TestHTTPTestClientDialSurvivesKilledConn checks that httpTestClient returns a
+// usable client when the listener kills the connection the setup dial is
+// handshaking on.
+func TestHTTPTestClientDialSurvivesKilledConn(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+
+	// No delay and no timed kills: killFirst alone decides, so the connection
+	// the retry lands on is never taken away underneath the call below.
+	fl := &flakeyListener{killFirst: 1}
+	client, hs := httpTestClient(server, "ws", fl)
+	defer hs.Close()
+	defer client.Close()
+
+	var resp echoResult
+	if err := client.Call(&resp, "test_echo", "hello", 10, &echoArgs{"world"}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(resp, echoResult{"hello", 10, &echoArgs{"world"}}) {
+		t.Errorf("incorrect result %#v", resp)
+	}
+}
+
+// flakeyListener kills accepted connections after a random timeout. A zero
+// maxAcceptDelay or maxKillTimeout turns that half off. killFirst closes that
+// many accepted connections straight away instead, which pins the
+// connection-dies-during-the-handshake case without racing the timer.
 type flakeyListener struct {
 	net.Listener
 	maxKillTimeout time.Duration
 	maxAcceptDelay time.Duration
+	killFirst      int
 }
 
 func (l *flakeyListener) Accept() (net.Conn, error) {
-	delay := time.Duration(rand.Int63n(int64(l.maxAcceptDelay)))
-	time.Sleep(delay)
+	if l.maxAcceptDelay > 0 {
+		time.Sleep(time.Duration(rand.Int63n(int64(l.maxAcceptDelay))))
+	}
 
 	c, err := l.Listener.Accept()
-	if err == nil {
-		timeout := time.Duration(rand.Int63n(int64(l.maxKillTimeout)))
+	if err != nil {
+		return c, err
+	}
+	if l.killFirst > 0 {
+		l.killFirst--
+		c.Close()
+		return c, nil
+	}
+	if l.maxKillTimeout > 0 {
+		// Floored like upstream go-ethereum: an unfloored rand fires at t=0 often
+		// enough that the kill lands on the handshake rather than on the test.
+		timeout := max(10*time.Millisecond, time.Duration(rand.Int63n(int64(l.maxKillTimeout))))
 		time.AfterFunc(timeout, func() {
 			log.Trace(fmt.Sprintf("killing conn %v after %v", c.LocalAddr(), timeout))
 			c.Close()
 		})
 	}
-	return c, err
+	return c, nil
 }
 
 // memListener is an in-memory net.Listener backed by net.Pipe.
@@ -855,7 +954,7 @@ func memHTTPTestClient(srv *Server, fl *flakeyListener) (*Client, *http.Server) 
 	}
 
 	hs := &http.Server{Handler: srv}
-	go hs.Serve(listener)
+	go func() { _ = hs.Serve(listener) }()
 
 	httpClient := &http.Client{
 		Transport: &http.Transport{

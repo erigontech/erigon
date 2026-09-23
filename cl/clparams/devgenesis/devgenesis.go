@@ -99,7 +99,9 @@ func BuildGenesisState(
 
 	// Set genesis time and slot.
 	beaconState.SetGenesisTime(genesisTime)
-	beaconState.SetSlot(0)
+	if err := beaconState.SetSlot(0); err != nil {
+		return nil, nil, fmt.Errorf("set slot: %w", err)
+	}
 
 	// Set fork parameters for genesis. When multiple forks activate at
 	// epoch 0 (typical in dev mode), CurrentVersion must reflect the
@@ -155,7 +157,9 @@ func BuildGenesisState(
 			math.MaxUint64, // withdrawable epoch (far future)
 		)
 
-		beaconState.AddValidator(validator, maxEffectiveBalance)
+		if err := beaconState.AddValidator(validator, maxEffectiveBalance); err != nil {
+			return nil, nil, fmt.Errorf("add validator: %w", err)
+		}
 		allPubkeys = append(allPubkeys, common.Bytes48(pubkeyBytes))
 	}
 
@@ -181,8 +185,12 @@ func BuildGenesisState(
 		copy(aggPubkeyFixed[:], aggPubkey)
 
 		syncCommittee := solid.NewSyncCommitteeFromParameters(committeePubkeys, aggPubkeyFixed)
-		beaconState.SetCurrentSyncCommittee(syncCommittee)
-		beaconState.SetNextSyncCommittee(syncCommittee)
+		if err := beaconState.SetCurrentSyncCommittee(syncCommittee); err != nil {
+			return nil, nil, fmt.Errorf("set current sync committee: %w", err)
+		}
+		if err := beaconState.SetNextSyncCommittee(syncCommittee); err != nil {
+			return nil, nil, fmt.Errorf("set next sync committee: %w", err)
+		}
 
 		// Initialize epoch participation flags and inactivity scores.
 		beaconState.SetPreviousEpochParticipationFlags(make(cltypes.ParticipationFlagsList, validatorCount))
@@ -205,7 +213,9 @@ func BuildGenesisState(
 
 	// Initialize RANDAO mixes with the genesis validators root.
 	for i := uint64(0); i < cfg.EpochsPerHistoricalVector; i++ {
-		beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot))
+		if err := beaconState.SetRandaoMixAt(int(i), common.Hash(validatorsRoot)); err != nil {
+			return nil, nil, fmt.Errorf("set randao mix: %w", err)
+		}
 	}
 
 	var genesisBid *cltypes.ExecutionPayloadBid

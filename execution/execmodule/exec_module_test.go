@@ -31,7 +31,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -51,6 +50,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
@@ -112,6 +114,38 @@ func (p *rewindingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovi
 type observingTxnProvider struct {
 	txnprovider.TxnProvider
 	txnCounts chan int
+}
+
+type emptyTxnProvider struct{}
+
+func (emptyTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, nil
+}
+
+type delayedSealEngine struct {
+	rules.Engine
+	started chan struct{}
+	release chan struct{}
+}
+
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func (e *delayedSealEngine) Seal(_ rules.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
+	close(e.started)
+	go func() {
+		<-e.release
+		results <- block
+	}()
+	return nil
 }
 
 func (p *observingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -205,6 +239,64 @@ func TestValidateChainWithLastTxNumOfBlockAtStepBoundary(t *testing.T) {
 	root, err := extendingSd.GetCommitmentCtx().Trie().RootHash()
 	require.NoError(t, err)
 	require.Equal(t, chainPack.Headers[0].Root, common.BytesToHash(root))
+}
+
+func TestUpdateForkChoiceRejectsSiblingHashes(t *testing.T) {
+	for _, mode := range []struct {
+		name     string
+		parallel bool
+	}{{"synchronous", false}, {"parallel", true}} {
+		t.Run(mode.name, func(t *testing.T) {
+			for _, field := range []string{"safe", "finalized"} {
+				t.Run(field, func(t *testing.T) {
+					m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(mode.parallel))
+					a, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+						b.SetCoinbase(common.Address{0x81})
+					})
+					require.NoError(t, err)
+					b, err := m.GenerateChainFrom(m.Genesis, 1, func(_ int, b *blockgen.BlockGen) {
+						b.SetCoinbase(common.Address{0x82})
+					})
+					require.NoError(t, err)
+					_, err = m.InsertBlocks(t.Context(), a.Blocks)
+					require.NoError(t, err)
+					_, err = m.InsertBlocks(t.Context(), b.Blocks)
+					require.NoError(t, err)
+					validation, err := m.ValidateChain(t.Context(), a.Blocks[0].Header())
+					require.NoError(t, err)
+					require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+
+					var safe, finalized common.Hash
+					if field == "safe" {
+						safe = b.Blocks[0].Hash()
+					} else {
+						finalized = b.Blocks[0].Hash()
+					}
+					result, err := m.ExecModule.UpdateForkChoice(t.Context(), a.Blocks[0].Hash(), safe, finalized)
+					require.NoError(t, err)
+					m.ExecModule.WaitIdle(t.Context())
+					require.Equal(t, execmodule.ExecutionStatusInvalidForkchoice, result.Status)
+				})
+			}
+		})
+	}
+}
+
+func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithParallelStateFlushing(true))
+	chainPack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+	_, err = m.InsertBlocks(t.Context(), chainPack.Blocks)
+	require.NoError(t, err)
+	head := chainPack.Blocks[1]
+	validation, err := m.ValidateChain(t.Context(), head.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	result, err := m.ExecModule.UpdateForkChoice(t.Context(), head.Hash(), chainPack.Blocks[0].Hash(), m.Genesis.Hash())
+	require.NoError(t, err)
+	m.ExecModule.WaitIdle(t.Context())
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.Equal(t, head.Hash(), result.LatestValidHash)
 }
 
 func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeight(t *testing.T) {
@@ -353,6 +445,15 @@ func TestValidateForkPayloadOffNonTipCanonicalBlockWithCache(t *testing.T) {
 // skip the unwind path, write the new canonicals, and let AppendCanonicalTxNums
 // re-extend TxNums past commitBlock.
 func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
+	testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t, false)
+}
+
+func TestUpdateForkChoiceDoesNotFailOnExecutionProgressDiagnosticError(t *testing.T) {
+	testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t, true)
+}
+
+func testUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T, invalidExecutionProgress bool) {
+	t.Helper()
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -390,13 +491,16 @@ func TestUpdateForkChoiceRecoversWhenStateAheadOfTxNums(t *testing.T) {
 	// "too deep" and the pre-fix code rejects the FCU as ReorgTooDeep.
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
 		require.NoError(t, rawdbv3.TxNums.Truncate(tx, truncateTo+1))
 		require.NoError(t, rawdb.TruncateCanonicalHash(tx, truncateTo+1, false))
 		require.NoError(t, tx.ClearTable(kv.ChangeSets3))
+		if invalidExecutionProgress {
+			require.NoError(t, tx.Put(kv.SyncStageProgress, []byte(stages.Execution), []byte{1}))
+		}
 		return nil
 	}))
 	require.Equal(t, uint64(10), commitBlock, "commitBlock should be at block 10 after the initial chain")
@@ -472,7 +576,7 @@ func TestUpdateForkChoiceForwardExecutesAfterStateAheadRecovery(t *testing.T) {
 	const truncateTo uint64 = 5
 	var commitBlock uint64
 	require.NoError(t, m.DB.UpdateTemporal(ctx, func(tx kv.TemporalRwTx) error {
-		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		v, _, err := tx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.GreaterOrEqual(t, len(v), 16)
 		commitBlock = binary.BigEndian.Uint64(v[8:16])
@@ -616,6 +720,14 @@ func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m
 	}
 }
 
+func TestExecModuleTesterReportsUnknownPayload(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+
+	block, err := m.GetAssembledBlock(t.Context(), 404)
+	require.ErrorIs(t, err, chainreader.ErrUnknownPayload)
+	require.Nil(t, block)
+}
+
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -653,6 +765,63 @@ func TestAssembleBlock(t *testing.T) {
 
 	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
+	engine := &delayedSealEngine{
+		Engine:  merge.NewFaker(ethash.NewFaker()),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(engine.release) })
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
+		execmoduletester.WithEngine(engine),
+	)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	parent := chainPack.TopBlock
+	beaconRoot := randomHash()
+	payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		CustomTxnProvider:     emptyTxnProvider{},
+	}, time.Minute, time.Minute)
+
+	stopped := make(chan error, 1)
+	stopObserved := make(chan struct{})
+	stopCtx := &doneObservedContext{Context: context.Background(), observed: stopObserved}
+	go func() {
+		_, stopErr := payloadBuilder.Stop(stopCtx)
+		stopped <- stopErr
+	}()
+
+	select {
+	case <-engine.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach sealing")
+	}
+	select {
+	case <-stopObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not begin waiting for the builder")
+	}
+	payloadBuilder.Discard()
+
+	select {
+	case err := <-stopped:
+		require.ErrorIs(t, err, builder.ErrDiscarded)
+	case <-time.After(5 * time.Second):
+		t.Fatal("discarded builder remained blocked waiting for a seal result")
+	}
 }
 
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
@@ -1036,7 +1205,8 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1057,7 +1227,8 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		tx, txErr := types.SignTx(
 			types.NewTransaction(uint64(i), common.Address{1}, uint256.NewInt(100),
 				params.TxGas, uint256.NewInt(baseFee), nil),
-			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+		)
 		require.NoError(t, txErr)
 		var buf bytes.Buffer
 		err = tx.EncodeRLP(&buf)
@@ -1134,7 +1305,8 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	// nonce 1: simple transfer
 	tx1, err := types.SignTx(
 		types.NewTransaction(1, common.Address{2}, uint256.NewInt(5_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// nonce 2: contract creation (Changer bytecode)
@@ -1142,13 +1314,15 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 	require.NoError(t, err)
 	tx2, err := types.SignTx(
 		types.NewContractCreation(2, uint256.NewInt(0), 300_000, uint256.NewInt(baseFee), changerBytecode),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// nonce 3: simple transfer
 	tx3, err := types.SignTx(
 		types.NewTransaction(3, common.Address{3}, uint256.NewInt(3_000), params.TxGas, uint256.NewInt(baseFee), nil),
-		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
+	)
 	require.NoError(t, err)
 
 	// Add all 3 to pool.
@@ -1276,7 +1450,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		time.Hour,
 	)
 
-	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(payloadId)
+	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, eth1Block, "Eth1Block should not be nil")
 	require.NotNil(t, blobsBundle, "BlobsBundle should not be nil")
@@ -1350,7 +1524,8 @@ func TestAssembleBlockAmsterdamForkTransition(t *testing.T) {
 		Ethash:                        new(chain.EthashConfig),
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithTxPool(),
 		execmoduletester.WithChainConfig(cfg),
 		execmoduletester.WithExperimentalBAL(),
@@ -1486,7 +1661,9 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, stored, 2)
 	for i, pb := range stored {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "stored block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "stored block %d", i+1)
 	}
 	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
@@ -1506,14 +1683,18 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, byHash, 2)
 	for i, pb := range byHash {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byHash block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "byHash block %d", i+1)
 	}
 	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
 	require.NoError(t, err)
 	require.Len(t, byRange, 2)
 	for i, pb := range byRange {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byRange block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "byRange block %d", i+1)
 	}
 }
 
@@ -1531,10 +1712,9 @@ func TestGetPayloadBodiesEmptyBlockAccessList(t *testing.T) {
 
 func TestGetPayloadBodiesPreAmsterdamBlockAccessList(t *testing.T) {
 	t.Parallel()
-	var config chain.Config
-	require.NoError(t, copier.CopyWithOption(&config, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime = nil
-	m, chainPack := newPayloadBodiesBALTestChain(t, &config)
+	m, chainPack := newPayloadBodiesBALTestChain(t, config)
 	block := chainPack.Blocks[0]
 	require.Nil(t, block.Header().BlockAccessListHash)
 	requirePayloadBodiesBlockAccessList(t, m, block, nil)
@@ -1768,7 +1948,8 @@ func TestAssembleBlockStateGasLimit(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1856,7 +2037,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 		},
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithTxPool(),
@@ -1867,7 +2049,8 @@ func TestAssembleBlockStateGasLimitSSTORE(t *testing.T) {
 	// Runtime: base = calldataload(0); sstore(base+i, 1) for i in 0..3.
 	deployCode, err := hex.DecodeString(
 		"601d600c600039601d6000f3" + // initcode: deploy 29-byte runtime
-			"6000356001815560018160010155600181600201556001816003015500") // runtime
+			"6000356001815560018160010155600181600201556001816003015500",
+	) // runtime
 	require.NoError(t, err)
 
 	signer := *types.LatestSignerForChainID(m.ChainConfig.ChainID)
@@ -1998,7 +2181,8 @@ func TestAssembleBlockGasPoolSnapshotRestoreBug(t *testing.T) {
 		Alloc:    alloc,
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
@@ -2098,7 +2282,8 @@ func TestAssembleBlockGasPoolMultiBatchInitBug(t *testing.T) {
 		Alloc:    alloc,
 	}
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(keys[0]),
 		execmoduletester.WithTxPool(),
@@ -2203,7 +2388,8 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -2249,7 +2435,7 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	// and the fee burned), and the record is balance-only — nonce, code hash
 	// and storage cleared.
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, coinbaseAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, coinbaseAddr[:], kv.GetLatestOptions{})
 		if err != nil {
 			return err
 		}
@@ -2264,6 +2450,46 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
+}
+
+func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	block := chainPack.Blocks[0]
+	header := block.Header()
+	invalidBAL := types.BlockAccessList{
+		{Address: common.Address{2}},
+		{Address: common.Address{1}},
+	}
+	encoded, err := types.EncodeBlockAccessListBytes(invalidBAL)
+	require.NoError(t, err)
+	balHash := crypto.Keccak256Hash(encoded)
+	header.BlockAccessListHash = &balHash
+	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(invalidBAL))
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+}
+
+func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	block := chainPack.Blocks[0]
+	header := block.Header()
+	bal := types.BlockAccessList{{Address: common.Address{1}}}
+	wrongHash := common.Hash{1}
+	header.BlockAccessListHash = &wrongHash
+	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+	require.ErrorContains(t, err, "block access list hash mismatch")
 }
 
 // TestInsertBlocksWithBatchedFCU drives the Caplin persistent_block_collector
@@ -2351,7 +2577,8 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -2361,7 +2588,7 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		require.Eventually(t, func() bool {
 			var funded bool
 			err := m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-				v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:])
+				v, _, err := tx.GetLatest(kv.AccountsDomain, senderAddr[:], kv.GetLatestOptions{})
 				if err != nil {
 					return err
 				}
@@ -2422,7 +2649,7 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		Transactions: chainPack.Blocks[5].Transactions(),
 		Uncles:       chainPack.Blocks[5].Uncles(),
 		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
-	}, chainPack.Blocks[5].BlockAccessList())
+	}, chainPack.Blocks[5].BlockAccessListSidecar())
 
 	badRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock6})
 	require.NoError(t, err)
@@ -2465,10 +2692,8 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 	}))
 }
 
-// transferGen returns a deterministic per-block tx generator: identical
-// inputs produce identical blocks, which lets tests build forks that share
-// a prefix with the canonical chain (requires a pre-Cancun config — Cancun+
-// blocks get a random ParentBeaconBlockRoot in blockgen).
+// transferGen returns a deterministic per-block tx generator so tests can
+// build forks that share a prefix with the canonical chain.
 func transferGen(t *testing.T, key *ecdsa.PrivateKey, to common.Address, amount uint64) func(int, *blockgen.BlockGen) {
 	return func(i int, b *blockgen.BlockGen) {
 		tx, err := types.SignTx(
@@ -2489,7 +2714,8 @@ func TestLargeBatchExecGeneratesChangesetsForReorgWindow(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithAlwaysGenerateChangesets(false),
 	)
@@ -2525,7 +2751,8 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithAlwaysGenerateChangesets(false),
 	)
@@ -2592,10 +2819,6 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 // could not see that. It also asserts the compute-ahead path actually engaged (a
 // real count) so a silent degrade-to-incremental can't make the differential pass
 // trivially.
-//
-// (An end-to-end divergent-fork reorg would be a stronger check, but blockgen
-// randomises ParentBeaconBlockRoot per block, so under Amsterdam — required for
-// BALs — two chains can't share a prefix and a mid-chain parent has no state.)
 func TestBALDrivenComputeAheadChangesetIntegrity(t *testing.T) {
 	off := runBALComputeAheadChangeset(t, false, false)
 	on := runBALComputeAheadChangeset(t, true, false)
@@ -2643,11 +2866,13 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 	dbg.BALShadowCompute = shadow
 	stagedsync.ResetComputedAheadForTest()
 
-	const chainLen = 12
-	// maxReorgDepth places the changeset window at maxBlock-depth = 12-4 = 8, so
-	// blocks 1..7 are pre-window (compute-ahead candidates) and 8..12 own changesets.
-	const maxReorgDepth = 4
-	const windowStart = chainLen - maxReorgDepth
+	// Blocks 1..7 are compute-ahead candidates; blocks 8..12 own changesets.
+	const (
+		chainLen      = 12
+		maxReorgDepth = 4
+		windowStart   = chainLen - maxReorgDepth
+		reorgBackTo   = chainLen - 2
+	)
 
 	ctx := t.Context()
 	// Deterministic key: compute-ahead-off and compute-ahead-on must execute the identical chain
@@ -2658,7 +2883,8 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithKey(privKey),
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chain.AllProtocolChanges, // Amsterdam-at-0 → every block carries a BAL
@@ -2671,16 +2897,30 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 
 	// AllProtocolChanges is post-London, so txs need a fee cap above the base fee
 	// (transferGen's 1-wei price is only valid on the pre-London default).
-	canonical, err := m.GenerateChain(chainLen,
-		func(i int, b *blockgen.BlockGen) {
+	forkRecipient := common.Address{0x42}
+	generate := func(divergent bool) *blockgen.ChainPack {
+		chainPack, err := m.GenerateChain(chainLen, func(i int, b *blockgen.BlockGen) {
+			to := senderAddr
+			amount := uint64(1_000)
+			if divergent && i >= reorgBackTo {
+				to = forkRecipient
+				amount = 2_000
+			}
 			tx, txErr := types.SignTx(
-				types.NewTransaction(uint64(i), senderAddr, uint256.NewInt(1_000), 50000, uint256.NewInt(10_000_000_000), nil),
+				types.NewTransaction(uint64(i), to, uint256.NewInt(amount), 50000, uint256.NewInt(10_000_000_000), nil),
 				*types.LatestSignerForChainID(nil), privKey,
 			)
 			require.NoError(t, txErr)
 			b.AddTx(tx)
 		})
-	require.NoError(t, err)
+		require.NoError(t, err)
+		return chainPack
+	}
+	canonical := generate(false)
+	fork := generate(true)
+	require.Equal(t, canonical.Blocks[reorgBackTo-1].Hash(), fork.Blocks[reorgBackTo-1].Hash())
+	require.NotEqual(t, canonical.Blocks[reorgBackTo].Hash(), fork.Blocks[reorgBackTo].Hash())
+	require.NotEqual(t, canonical.TopBlock.Root(), fork.TopBlock.Root())
 
 	insRes, err := m.InsertBlocks(ctx, canonical.Blocks)
 	require.NoError(t, err)
@@ -2727,32 +2967,22 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 		return nil
 	}))
 
-	// End-to-end: FCU back into the window unwinds using those changesets, then
-	// FCU forward re-executes. If the compute-ahead-built state were wrong, the
-	// unwind restores a bad root and the forward re-exec fails.
-	const reorgBackTo = chainLen - 2 // within the window (>= windowStart)
-	back, err := m.UpdateForkChoice(ctx, canonical.Blocks[reorgBackTo-1].Header())
+	// The alternate suffix changes state, so success requires restoring the
+	// branch-point state before executing the fork.
+	insRes, err = m.InsertBlocks(ctx, fork.Blocks[reorgBackTo:])
 	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, back.Status, "reorg back must succeed")
-	m.ExecModule.WaitIdle(ctx)
-	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		execProg, err := stages.GetStageProgress(tx, stages.Execution)
-		require.NoError(t, err)
-		require.Equal(t, uint64(reorgBackTo), execProg, "FCU back must unwind execution (consuming the window changesets)")
-		return nil
-	}))
-
-	fwd, err := m.UpdateForkChoice(ctx, canonical.TopBlock.Header())
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insRes)
+	reorg, err := m.UpdateForkChoice(ctx, fork.TopBlock.Header())
 	require.NoError(t, err)
-	require.Equal(t, execmodule.ExecutionStatusSuccess, fwd.Status,
-		"forward re-exec after unwind must reach the correct root (compute-ahead=%v); validationError=%q",
-		computeAhead, fwd.ValidationError)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, reorg.Status,
+		"divergent reorg must reach the correct root (compute-ahead=%v); validationError=%q",
+		computeAhead, reorg.ValidationError)
 	m.ExecModule.WaitIdle(ctx)
 	require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
 		require.Equal(t, uint64(chainLen), execProg)
-		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		require.Equal(t, fork.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
 		return nil
 	}))
 	return res
@@ -2765,7 +2995,7 @@ func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
 	fakeHeader := m.Genesis.Header()
 	fakeHeader.Extra = []byte("not the genesis")
-	fakeBlock := types.NewBlockWithHeader(fakeHeader)
+	fakeBlock := types.NewBlockWithHeader(fakeHeader, nil)
 	require.NotEqual(t, m.Genesis.Hash(), fakeBlock.Hash())
 	insRes, err := m.InsertBlocks(ctx, []*types.Block{fakeBlock})
 	require.NoError(t, err)
@@ -2790,8 +3020,7 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -2808,7 +3037,8 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -2856,7 +3086,7 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 	}
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc)
 		var phoenix accounts.Account
@@ -2866,7 +3096,7 @@ func TestPreCancunMetamorphicSelfDestructSequence(t *testing.T) {
 		require.True(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero())
 		readSlot := func(owner common.Address, slot int64) []byte {
 			h := common.BigToHash(big.NewInt(slot))
-			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...), kv.GetLatestOptions{})
 			require.NoError(t, err)
 			return v
 		}
@@ -2891,8 +3121,7 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("c87f65ff3f271bf5dc8643484f66b200109caffe4bf98c4cb393dc35740b28c0")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -2909,7 +3138,8 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -2959,7 +3189,7 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 	fillerFee := chainPack.Receipts[1][1].GasUsed * tip
 	totalFees := (chainPack.Receipts[1][1].GasUsed + chainPack.Receipts[1][2].GasUsed) * tip
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc)
 		var phoenix accounts.Account
@@ -2969,7 +3199,7 @@ func TestPreCancunFeeRevivedCoinbaseAfterDestruct(t *testing.T) {
 		require.True(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero())
 		readSlot := func(owner common.Address, slot int64) []byte {
 			h := common.BigToHash(big.NewInt(slot))
-			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...), kv.GetLatestOptions{})
 			require.NoError(t, err)
 			return v
 		}
@@ -2991,8 +3221,7 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	auraCfg := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(auraCfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	auraCfg := chain.AllProtocolChanges.Copy()
 	auraCfg.CancunTime = nil
 	auraCfg.PragueTime = nil
 	auraCfg.OsakaTime = nil
@@ -3012,7 +3241,8 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 			sysAddr:    {Balance: big.NewInt(0)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3041,14 +3271,14 @@ func TestAuraSystemAddressRetainedUnderParallelExec(t *testing.T) {
 	}
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, sysAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, sysAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc, "AuRa must retain the empty SystemAddress")
 		var sys accounts.Account
 		require.NoError(t, accounts.DeserialiseV3(&sys, enc))
 		require.True(t, sys.Balance.IsZero())
 		require.Equal(t, uint64(0), sys.Nonce)
-		obsEnc, _, err := tx.GetLatest(kv.AccountsDomain, observerAddr[:])
+		obsEnc, _, err := tx.GetLatest(kv.AccountsDomain, observerAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, obsEnc)
 		var obs accounts.Account
@@ -3070,8 +3300,7 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("45a915e4d060149eb4365960e6a7a45f334393093061116b197e3240065ff2d8")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3088,7 +3317,8 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3130,7 +3360,7 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 	}
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, victimAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, victimAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc)
 		var victim accounts.Account
@@ -3140,7 +3370,7 @@ func TestPreCancunSameTxStoreAndDie(t *testing.T) {
 		require.True(t, victim.CodeHash.IsEmpty() || victim.CodeHash.IsZero())
 		readSlot := func(owner common.Address, slot int64) []byte {
 			h := common.BigToHash(big.NewInt(slot))
-			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...))
+			v, _, err := tx.GetLatest(kv.StorageDomain, append(owner[:], h[:]...), kv.GetLatestOptions{})
 			require.NoError(t, err)
 			return v
 		}
@@ -3165,8 +3395,7 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 	privKey, err := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
 	require.NoError(t, err)
 	senderAddr := crypto.PubkeyToAddress(privKey.PublicKey)
-	preCancun := &chain.Config{}
-	require.NoError(t, copier.CopyWithOption(preCancun, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	preCancun := chain.AllProtocolChanges.Copy()
 	preCancun.CancunTime = nil
 	preCancun.PragueTime = nil
 	preCancun.OsakaTime = nil
@@ -3183,7 +3412,8 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
 	)
@@ -3231,14 +3461,14 @@ func TestPreCancunCreate2RecreateThenUse(t *testing.T) {
 	}
 	require.NoError(t, m.InsertValidateAndUfc1By1(ctx, chainPack.Blocks))
 	err = m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:])
+		enc, _, err := tx.GetLatest(kv.AccountsDomain, phoenixAddr[:], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, enc)
 		var phoenix accounts.Account
 		require.NoError(t, accounts.DeserialiseV3(&phoenix, enc))
 		require.False(t, phoenix.CodeHash.IsEmpty() || phoenix.CodeHash.IsZero(), "the recreated phoenix must carry code")
 		h := common.BigToHash(big.NewInt(0))
-		v, _, err := tx.GetLatest(kv.StorageDomain, append(phoenixAddr[:], h[:]...))
+		v, _, err := tx.GetLatest(kv.StorageDomain, append(phoenixAddr[:], h[:]...), kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.Equal(t, []byte{0x01}, v, "the recreated phoenix's counter must restart from the wiped zero")
 		return nil

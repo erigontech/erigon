@@ -83,7 +83,8 @@ func TestBackwardBlockDownloader_GapBehindCurrentHead_FailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	feed, err := bbd.DownloadBlocksBackwards(ctx, initialHeader.Hash(), stubBbdHeaderReader{},
+	feed, err := bbd.DownloadBlocksBackwards(
+		ctx, initialHeader.Hash(), stubBbdHeaderReader{},
 		WithChainLengthLimit(96),
 		WithChainLengthCurrentHead(100),
 	)
@@ -122,7 +123,7 @@ type countingBALFetcher struct {
 	calls atomic.Int64
 }
 
-func (s *countingBALFetcher) Fetch(_ context.Context, reqs []BALRequest, _ *PeerId, _ []PeerId, _ time.Duration, _ time.Duration) map[common.Hash][]byte {
+func (s *countingBALFetcher) Fetch(_ context.Context, reqs []BALRequest, _ *PeerId, _ []PeerId, _ time.Duration, _ time.Duration) map[common.Hash]*types.BlockAccessListSidecar {
 	s.calls.Add(1)
 	return nil
 }
@@ -210,7 +211,8 @@ func TestBackwardBlockDownloader_GapAheadOfCurrentHead_FailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	feed, err := bbd.DownloadBlocksBackwards(ctx, initialHeader.Hash(), stubBbdHeaderReader{},
+	feed, err := bbd.DownloadBlocksBackwards(
+		ctx, initialHeader.Hash(), stubBbdHeaderReader{},
 		WithChainLengthLimit(96),
 		WithChainLengthCurrentHead(500),
 	)

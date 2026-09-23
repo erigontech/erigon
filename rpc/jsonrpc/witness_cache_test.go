@@ -17,12 +17,14 @@
 package jsonrpc
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func hashN(n byte) common.Hash {
@@ -35,9 +37,9 @@ func mkResult() *ExecutionWitnessResult {
 	return &ExecutionWitnessResult{State: []hexutil.Bytes{{0x01}}}
 }
 
-// mkSized returns a cached-shell result whose resident cost (len(cachedJSON)) is n.
+// mkSized returns a result whose resident cost (witnessResultSize) is n.
 func mkSized(n int) *ExecutionWitnessResult {
-	return &ExecutionWitnessResult{cachedJSON: make([]byte, n)}
+	return &ExecutionWitnessResult{State: []hexutil.Bytes{make(hexutil.Bytes, n-sliceHeaderBytes)}}
 }
 
 // TestNewWitnessResultCacheClampsBlocks pins the only behaviour the constructor
@@ -130,4 +132,21 @@ func TestWitnessResultCacheSingleOversizedEntryKept(t *testing.T) {
 	require.Equal(t, 1, c.Len())
 	require.True(t, c.Contains(hashN(1)))
 	require.Equal(t, 1000, c.ResidentBytes())
+}
+
+func TestExecutionWitnessResultMarshalFastJSONToMatchesReflection(t *testing.T) {
+	t.Parallel()
+	for name, w := range map[string]*ExecutionWitnessResult{
+		"empty":          {},
+		"empty lists":    {State: []hexutil.Bytes{}, Codes: []hexutil.Bytes{}, Keys: []hexutil.Bytes{}, Headers: []hexutil.Bytes{}},
+		"all fields":     {State: []hexutil.Bytes{{0x01, 0xab}, {}}, Codes: []hexutil.Bytes{{0x60}}, Keys: []hexutil.Bytes{{0xff}}, Headers: []hexutil.Bytes{{0xf9, 0x02}}},
+		"nil element":    {State: []hexutil.Bytes{nil}, Codes: []hexutil.Bytes{nil}},
+		"keys, no heads": {State: []hexutil.Bytes{{1}}, Keys: []hexutil.Bytes{{2}}},
+	} {
+		want, err := json.Marshal(w)
+		require.NoError(t, err, name)
+		got, err := jsonstream.Marshal(w)
+		require.NoError(t, err, name)
+		require.Equal(t, string(want), string(got), name)
+	}
 }

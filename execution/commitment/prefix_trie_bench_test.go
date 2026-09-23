@@ -21,10 +21,6 @@ import (
 	"testing"
 )
 
-// The Benchmark_Commitment_* family cannot measure the trie build: runParallelBench
-// calls WrapKeyUpdates, which drives every Insert, outside the timed region. This
-// times the build itself across Reset cycles, so the arena's per-batch reuse is
-// what the numbers reflect.
 func Benchmark_PrefixTrieBuildAcrossResets(b *testing.B) {
 	for _, keys := range []int{5_000, 20_000} {
 		b.Run(fmt.Sprintf("%dk-keys", keys/1000), func(b *testing.B) {

@@ -21,6 +21,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/ssz"
 	"github.com/erigontech/erigon/execution/types"
@@ -43,7 +44,7 @@ func (obj *Withdrawal) EncodeSSZ(buf []byte) ([]byte, error) {
 
 func (obj *Withdrawal) DecodeSSZ(buf []byte, _ int) error {
 	if len(buf) < obj.EncodingSizeSSZ() {
-		return fmt.Errorf("[Withdrawal] err: %s", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[Withdrawal] err: %w", ssz.ErrLowBufferSize)
 	}
 	obj.Index = ssz.UnmarshalUint64SSZ(buf)
 	obj.Validator = ssz.UnmarshalUint64SSZ(buf[8:])
@@ -63,19 +64,19 @@ func (obj *Withdrawal) HashSSZ() ([32]byte, error) { // the [32]byte is temporar
 
 func convertExecutionWithdrawalToConsensusWithdrawal(executionWithdrawal *types.Withdrawal) *Withdrawal {
 	return &Withdrawal{
-		Index:     executionWithdrawal.Index,
-		Validator: executionWithdrawal.Validator,
+		Index:     uint64(executionWithdrawal.Index),
+		Validator: uint64(executionWithdrawal.Validator),
 		Address:   executionWithdrawal.Address,
-		Amount:    executionWithdrawal.Amount,
+		Amount:    uint64(executionWithdrawal.Amount),
 	}
 }
 
 func convertConsensusWithdrawalToExecutionWithdrawal(consensusWithdrawal *Withdrawal) *types.Withdrawal {
 	return &types.Withdrawal{
-		Index:     consensusWithdrawal.Index,
-		Validator: consensusWithdrawal.Validator,
+		Index:     hexutil.Uint64(consensusWithdrawal.Index),
+		Validator: hexutil.Uint64(consensusWithdrawal.Validator),
 		Address:   consensusWithdrawal.Address,
-		Amount:    consensusWithdrawal.Amount,
+		Amount:    hexutil.Uint64(consensusWithdrawal.Amount),
 	}
 }
 
@@ -83,6 +84,17 @@ func convertExecutionWithdrawalsToConsensusWithdrawals(executionWithdrawal []*ty
 	ret := make([]*Withdrawal, len(executionWithdrawal))
 	for i, w := range executionWithdrawal {
 		ret[i] = convertExecutionWithdrawalToConsensusWithdrawal(w)
+	}
+	return ret
+}
+
+// ConvertConsensusWithdrawalsToExecutionWithdrawals converts a withdrawal list to its execution
+// representation, in order and with no shared pointers. The result is never nil, which matters
+// because the execution layer rejects a nil list and an empty one under opposite conditions.
+func ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals []*Withdrawal) []*types.Withdrawal {
+	ret := make([]*types.Withdrawal, len(consensusWithdrawals))
+	for i, w := range consensusWithdrawals {
+		ret[i] = convertConsensusWithdrawalToExecutionWithdrawal(w)
 	}
 	return ret
 }

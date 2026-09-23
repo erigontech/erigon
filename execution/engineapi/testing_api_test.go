@@ -20,7 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
-	"math/big"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -96,57 +96,70 @@ func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.
 	}
 	return execmodule.ExecutionStatusSuccess, nil
 }
+
 func (s *stubExecutionModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error) {
 	if s.validateChainFunc != nil {
 		return s.validateChainFunc(ctx, blockHash, blockNumber)
 	}
 	return execmodule.ValidationResult{}, nil
 }
+
 func (s *stubExecutionModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error) {
 	if s.updateForkChoiceFunc != nil {
 		return s.updateForkChoiceFunc(ctx, headHash, safeHash, finalizedHash)
 	}
 	return execmodule.ForkChoiceResult{}, nil
 }
+
 func (s *stubExecutionModule) GetForkChoice(ctx context.Context) (execmodule.ForkChoiceState, error) {
 	if s.getForkChoiceFunc != nil {
 		return s.getForkChoiceFunc(ctx)
 	}
 	return execmodule.ForkChoiceState{}, nil
 }
+
 func (s *stubExecutionModule) CurrentHeader(ctx context.Context) (*types.Header, error) {
 	if s.currentHeaderFunc != nil {
 		return s.currentHeaderFunc(ctx)
 	}
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetBody(_ context.Context, _ *common.Hash, _ *uint64) (*types.RawBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) HasBlock(_ context.Context, _ *common.Hash, _ *uint64) (bool, error) {
 	return false, nil
 }
+
 func (s *stubExecutionModule) GetBodiesByRange(_ context.Context, _, _ uint64) ([]*types.RawBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetBodiesByHashes(_ context.Context, _ []common.Hash) ([]*types.RawBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetPayloadBodiesByHash(_ context.Context, _ []common.Hash) ([]*execmodule.PayloadBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	return false, nil
 }
+
 func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
 	if s.headerNumberFunc != nil {
 		return s.headerNumberFunc(ctx, hash)
 	}
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
@@ -844,7 +857,6 @@ func TestBuildBlockV1(t *testing.T) {
 		require.NotNil(t, capturedParams, "AssembleBlock should have been called")
 		require.NotNil(t, capturedParams.CustomTxnProvider)
 	})
-
 }
 
 // ---------------------------------------------------------------------------
@@ -1154,7 +1166,9 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		}, clparams.CapellaVersion)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+		var rpcErr rpc.Error
+		require.True(t, errors.As(err, &rpcErr))
+		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 
 	t.Run("withdrawals before Shanghai returns invalid payload attributes", func(t *testing.T) {
@@ -1194,7 +1208,9 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		}, clparams.CapellaVersion)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+		var rpcErr rpc.Error
+		require.True(t, errors.As(err, &rpcErr))
+		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 }
 
@@ -1241,7 +1257,9 @@ func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
 	}, clparams.CapellaVersion)
 	require.Nil(t, resp)
 	require.Error(t, err)
-	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	var rpcErr rpc.Error
+	require.True(t, errors.As(err, &rpcErr))
+	require.Equal(t, -38003, rpcErr.ErrorCode())
 }
 
 // TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing pins the
@@ -1336,7 +1354,9 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 	}, clparams.DenebVersion)
 	require.Nil(t, resp)
 	require.Error(t, err)
-	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	var rpcErr rpc.Error
+	require.True(t, errors.As(err, &rpcErr))
+	require.Equal(t, -38003, rpcErr.ErrorCode())
 }
 
 // ---------------------------------------------------------------------------
@@ -1422,7 +1442,9 @@ func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
 		}
 		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
 		require.Error(t, err)
-		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+		var rpcErr rpc.Error
+		require.True(t, errors.As(err, &rpcErr))
+		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 
 	t.Run("pre-V4 without SlotNumber allowed", func(t *testing.T) {
@@ -1445,7 +1467,7 @@ func TestNewPayloadV4RejectsSlotNumber(t *testing.T) {
 	zero := hexutil.Uint64(0)
 	payload := &engine_types.ExecutionPayload{
 		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(1)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(1)),
 		Transactions:  []hexutil.Bytes{},
 		Withdrawals:   []*types.Withdrawal{},
 		BlobGasUsed:   &zero,
@@ -1461,6 +1483,25 @@ func TestNewPayloadV4RejectsSlotNumber(t *testing.T) {
 	require.Equal(t, -32602, rpcErr.ErrorCode())
 }
 
+// A null baseFeePerGas decodes to nil and must reach validation, not panic while building the header.
+func TestNewPayloadWithoutBaseFeeDoesNotPanic(t *testing.T) {
+	t.Parallel()
+
+	srv := NewEngineServer(log.New(), preAmsterdamChainConfig(), &stubExecutionModule{}, nil, false, false, false, true, nil, nil, 0, 0)
+	zero := hexutil.Uint64(0)
+	payload := &engine_types.ExecutionPayload{
+		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
+		Transactions:  []hexutil.Bytes{},
+		Withdrawals:   []*types.Withdrawal{},
+		BlobGasUsed:   &zero,
+		ExcessBlobGas: &zero,
+	}
+
+	require.NotPanics(t, func() {
+		_, _ = srv.NewPayloadV4(t.Context(), payload, []common.Hash{}, &common.Hash{}, []hexutil.Bytes{})
+	})
+}
+
 func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
 	t.Parallel()
 
@@ -1468,7 +1509,7 @@ func TestNewPayloadV5RequiresBlockAccessListBeforeAmsterdam(t *testing.T) {
 	zero := hexutil.Uint64(0)
 	payload := &engine_types.ExecutionPayload{
 		LogsBloom:     make(hexutil.Bytes, types.BloomByteLength),
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(1)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(1)),
 		Transactions:  []hexutil.Bytes{},
 		Withdrawals:   []*types.Withdrawal{},
 		BlobGasUsed:   &zero,

@@ -19,12 +19,17 @@ package privateapi
 import (
 	"context"
 	"io"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -104,7 +109,7 @@ func createReceiptNotification(txHash common.Hash) *notifications.ReceiptNotific
 
 func TestReceiptsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 	events := shards.NewEvents()
-	agg := NewReceiptsFilterAggregator(events)
+	agg := NewReceiptsFilterAggregator(events, chain.AllProtocolChanges)
 
 	ctx := t.Context()
 	srv := newTestReceiptsServer(ctx)
@@ -126,7 +131,7 @@ func TestReceiptsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 
 	// Try to distribute a receipt - but empty filter means nothing matches
 	receipt := createReceiptNotification(txHash1)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt})
 
 	if len(srv.sent) != 0 {
 		t.Error("expected the sent slice to be empty for empty filter")
@@ -135,7 +140,7 @@ func TestReceiptsFilter_EmptyFilter_DoesNotDistributeAnything(t *testing.T) {
 
 func TestReceiptsFilter_AllTransactionsFilter_DistributesAllReceipts(t *testing.T) {
 	events := shards.NewEvents()
-	agg := NewReceiptsFilterAggregator(events)
+	agg := NewReceiptsFilterAggregator(events, chain.AllProtocolChanges)
 
 	ctx := t.Context()
 	srv := newTestReceiptsServer(ctx)
@@ -157,13 +162,13 @@ func TestReceiptsFilter_AllTransactionsFilter_DistributesAllReceipts(t *testing.
 
 	// Should distribute any receipt
 	receipt1 := createReceiptNotification(txHash1)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt1})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt1})
 	if len(srv.sent) != 1 {
 		t.Error("expected the sent slice to have the receipt present")
 	}
 
 	receipt2 := createReceiptNotification(txHash2)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt2})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt2})
 	if len(srv.sent) != 2 {
 		t.Error("expected any receipt to be allowed through the filter")
 	}
@@ -171,7 +176,7 @@ func TestReceiptsFilter_AllTransactionsFilter_DistributesAllReceipts(t *testing.
 
 func TestReceiptsFilter_SpecificTransactionHash_OnlyAllowsThatTransactionThrough(t *testing.T) {
 	events := shards.NewEvents()
-	agg := NewReceiptsFilterAggregator(events)
+	agg := NewReceiptsFilterAggregator(events, chain.AllProtocolChanges)
 
 	ctx := t.Context()
 	srv := newTestReceiptsServer(ctx)
@@ -193,14 +198,14 @@ func TestReceiptsFilter_SpecificTransactionHash_OnlyAllowsThatTransactionThrough
 
 	// Try with non-matching transaction hash
 	receipt := createReceiptNotification(txHash2)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt})
 	if len(srv.sent) != 0 {
 		t.Error("the sent slice should be empty as the transaction hash didn't match")
 	}
 
 	// Try with matching transaction hash
 	receipt = createReceiptNotification(txHash1)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt})
 	if len(srv.sent) != 1 {
 		t.Error("expected the receipt to be distributed as the transaction hash matched")
 	}
@@ -208,7 +213,7 @@ func TestReceiptsFilter_SpecificTransactionHash_OnlyAllowsThatTransactionThrough
 
 func TestReceiptsFilter_MultipleTransactionHashes_AllowsAnyOfThem(t *testing.T) {
 	events := shards.NewEvents()
-	agg := NewReceiptsFilterAggregator(events)
+	agg := NewReceiptsFilterAggregator(events, chain.AllProtocolChanges)
 
 	ctx := t.Context()
 	srv := newTestReceiptsServer(ctx)
@@ -230,14 +235,14 @@ func TestReceiptsFilter_MultipleTransactionHashes_AllowsAnyOfThem(t *testing.T) 
 
 	// Try with first transaction hash
 	receipt1 := createReceiptNotification(txHash1)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt1})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt1})
 	if len(srv.sent) != 1 {
 		t.Error("expected the receipt to be distributed as txHash1 matched")
 	}
 
 	// Try with second transaction hash
 	receipt2 := createReceiptNotification(txHash2)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt2})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt2})
 	if len(srv.sent) != 2 {
 		t.Error("expected the receipt to be distributed as txHash2 matched")
 	}
@@ -245,7 +250,7 @@ func TestReceiptsFilter_MultipleTransactionHashes_AllowsAnyOfThem(t *testing.T) 
 	// Try with non-matching transaction hash
 	txHash3 := common.HexToHash("0xdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef")
 	receipt3 := createReceiptNotification(txHash3)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt3})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt3})
 	if len(srv.sent) != 2 {
 		t.Error("the sent slice should not increase as txHash3 didn't match")
 	}
@@ -253,7 +258,7 @@ func TestReceiptsFilter_MultipleTransactionHashes_AllowsAnyOfThem(t *testing.T) 
 
 func TestReceiptsFilter_UpdateFilter_ChangesWhatIsAllowed(t *testing.T) {
 	events := shards.NewEvents()
-	agg := NewReceiptsFilterAggregator(events)
+	agg := NewReceiptsFilterAggregator(events, chain.AllProtocolChanges)
 
 	ctx := t.Context()
 	srv := newTestReceiptsServer(ctx)
@@ -275,7 +280,7 @@ func TestReceiptsFilter_UpdateFilter_ChangesWhatIsAllowed(t *testing.T) {
 
 	// Should allow txHash1
 	receipt1 := createReceiptNotification(txHash1)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt1})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt1})
 	if len(srv.sent) != 1 {
 		t.Error("expected txHash1 to be allowed")
 	}
@@ -289,15 +294,72 @@ func TestReceiptsFilter_UpdateFilter_ChangesWhatIsAllowed(t *testing.T) {
 
 	// Now txHash1 should be rejected
 	receipt1Again := createReceiptNotification(txHash1)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt1Again})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt1Again})
 	if len(srv.sent) != 1 {
 		t.Error("expected txHash1 to be rejected after filter update")
 	}
 
 	// And txHash2 should be allowed
 	receipt2 := createReceiptNotification(txHash2)
-	_ = agg.distributeReceipts([]*notifications.ReceiptNotification{receipt2})
+	agg.distributeReceipts([]*notifications.ReceiptNotification{receipt2})
 	if len(srv.sent) != 2 {
 		t.Error("expected txHash2 to be allowed after filter update")
+	}
+}
+
+// A receipt notification carries the transaction as executed, whose sender may
+// no longer be cached, so the conversion must recover it from the chain config.
+func TestReceiptsFilter_RecoversSenderWithoutCachedFrom(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	chainConfig := chain.AllProtocolChanges
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	txn, err := types.SignNewTx(key, *types.LatestSigner(chainConfig), &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 3, GasLimit: 21000, To: &to},
+		ChainID:  *chainConfig.ChainID,
+		TipCap:   *uint256.NewInt(2),
+		FeeCap:   *uint256.NewInt(100),
+	})
+	require.NoError(t, err)
+
+	agg := NewReceiptsFilterAggregator(shards.NewEvents(), chainConfig)
+	rn := createReceiptNotification(txHash1)
+	rn.Tx = txn
+
+	proto := agg.receiptNotificationToProto(rn)
+	require.NotNil(t, proto.From)
+	assert.Equal(t, crypto.PubkeyToAddress(key.PublicKey), common.Address(gointerfaces.ConvertH160toAddress(proto.From)))
+}
+
+// The RPC side sends one notification per block, so the last receipt of a block that a stream
+// gets carries the flag, whichever receipts its filter lets through.
+func TestReceiptsFilter_FlagsLastReceiptOfBlockPerStream(t *testing.T) {
+	for name, tc := range map[string]struct {
+		hashes []*typesproto.H256
+		want   []bool
+	}{
+		"all receipts":  {[]*typesproto.H256{}, []bool{false, true}},
+		"first matched": {[]*typesproto.H256{gointerfaces.ConvertHashToH256(txHash1)}, []bool{true}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agg := NewReceiptsFilterAggregator(shards.NewEvents(), chain.AllProtocolChanges)
+			srv := newTestReceiptsServer(t.Context())
+			srv.received <- &remoteproto.ReceiptsFilterRequest{TransactionHashes: tc.hashes}
+			go func() {
+				if err := agg.subscribeReceipts(srv); err != nil {
+					t.Error(err)
+				}
+			}()
+			<-srv.receiveCompleted
+
+			agg.distributeReceipts([]*notifications.ReceiptNotification{createReceiptNotification(txHash1), createReceiptNotification(txHash2)})
+			var got []bool
+			for _, r := range srv.sent {
+				got = append(got, r.LastInBlock)
+			}
+			if !slices.Equal(got, tc.want) {
+				t.Fatalf("LastInBlock per sent receipt = %v, want %v", got, tc.want)
+			}
+		})
 	}
 }

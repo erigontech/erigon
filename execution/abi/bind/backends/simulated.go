@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/polygon/bor"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -86,23 +85,19 @@ type SimulatedBackend struct {
 	pendingReaderTx kv.TemporalTx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
-	rmLogsFeed event.Feed
-	chainFeed  event.Feed
-	logsFeed   event.Feed
+	logsFeed event.Feed
 }
 
 func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	var engine rules.Engine
 	switch {
-	case config.Bor != nil:
-		engine = bor.NewFaker()
 	case config.TerminalTotalDifficultyPassed:
 		engine = merge.NewFaker(ethash.NewFaker())
 	default:
 		engine = ethash.NewFaker()
 	}
-	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
+	// SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithEngine(engine))
 
 	backend := &SimulatedBackend{
@@ -703,7 +698,6 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
 		failed, _, err := executable(mid)
-
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more
@@ -815,7 +809,8 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, txn,
 		b.pendingGasUsed,
-		vm.Config{}); err != nil {
+		vm.Config{},
+	); err != nil {
 		return err
 	}
 	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)

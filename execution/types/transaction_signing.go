@@ -42,10 +42,8 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 	if config == nil {
 		return &Signer{}
 	}
-	prague := config.IsPrague(blockTime)
 	return makeSigner(config.ChainID, signerForks{
-		prague:         prague,
-		bhilai:         config.IsBhilai(blockNumber) && !prague,
+		prague:         config.IsPrague(blockTime),
 		cancun:         config.IsCancun(blockTime),
 		london:         config.IsLondon(blockNumber),
 		berlin:         config.IsBerlin(blockNumber),
@@ -55,9 +53,7 @@ func MakeSigner(config *chain.Config, blockNumber uint64, blockTime uint64) *Sig
 }
 
 // MakeSignerFromRules returns a Signer derived from an already-resolved Rules
-// instead of raw block number/time. Bhilai wins over Prague because Rules
-// construction folds Bhilai into IsPrague and the Bhilai tier does not enable
-// blob transactions. When chainID is nil, rules.ChainID is used.
+// instead of raw block number/time. When chainID is nil, rules.ChainID is used.
 func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 	if rules == nil {
 		return &Signer{}
@@ -67,7 +63,6 @@ func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 	}
 	return makeSigner(chainID, signerForks{
 		prague:         rules.IsPrague,
-		bhilai:         rules.IsBhilai,
 		cancun:         rules.IsCancun,
 		london:         rules.IsLondon,
 		berlin:         rules.IsBerlin,
@@ -77,7 +72,7 @@ func MakeSignerFromRules(chainID *uint256.Int, rules *chain.Rules) *Signer {
 }
 
 type signerForks struct {
-	prague, bhilai, cancun, london, berlin, spuriousDragon, homestead bool
+	prague, cancun, london, berlin, spuriousDragon, homestead bool
 }
 
 func makeSigner(chainID *uint256.Int, forks signerForks) *Signer {
@@ -88,14 +83,6 @@ func makeSigner(chainID *uint256.Int, forks signerForks) *Signer {
 	}
 	signer.unprotected = true
 	switch {
-	case forks.bhilai:
-		signer.protected = true
-		signer.accessList = true
-		signer.dynamicFee = true
-		signer.blob = false
-		signer.setCode = true
-		signer.chainID.Set(&chainId)
-		signer.chainIDMul.Lsh(&chainId, 1) // ×2
 	case forks.prague:
 		signer.protected = true
 		signer.accessList = true
@@ -168,9 +155,6 @@ func LatestSigner(config *chain.Config) *Signer {
 			signer.protected = true
 		}
 		if config.PragueTime != nil {
-			signer.setCode = true
-		}
-		if config.Bor != nil && config.Bor.GetBhilaiBlock() != nil {
 			signer.setCode = true
 		}
 	}

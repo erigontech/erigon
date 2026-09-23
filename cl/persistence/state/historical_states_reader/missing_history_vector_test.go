@@ -29,7 +29,7 @@ import (
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -52,7 +52,7 @@ func TestReadHistoryHashVector_MissingEntryIsTyped(t *testing.T) {
 		{"trailing hole", slot - 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := memdb.NewTestDB(t, dbcfg.ChainDB)
+			db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 			tx, err := db.BeginRw(context.Background())
 			require.NoError(t, err)
 			defer tx.Rollback()
@@ -88,7 +88,7 @@ func TestReadHistoryHashVector_CorruptEntryIsHardError(t *testing.T) {
 	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

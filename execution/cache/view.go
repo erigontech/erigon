@@ -17,6 +17,8 @@
 package cache
 
 import (
+	"bytes"
+
 	"github.com/erigontech/erigon/db/kv"
 )
 
@@ -273,6 +275,13 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 		return
 	}
 	v.c.fillIfFresh(domain, key, value, readTxNum, visibleEnd, v.readViewEpoch)
+}
+
+// FillCode offers code to the cache and returns a copy the caller may keep.
+func (v ReadView) FillCode(addr, code, codeHash []byte, readTxNum uint64) []byte {
+	stored := bytes.Clone(code)
+	v.fillCodeWithHash(addr, stored, codeHash, readTxNum)
+	return stored
 }
 
 // SeedAddrCodeHash offers an addr → codeHash mapping derived from an account

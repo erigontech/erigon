@@ -293,14 +293,33 @@ func rpcRequest(t *testing.T, url string, extraHeaders ...string) *http.Response
 	return resp
 }
 
-func TestHTTP2H2C(t *testing.T) {
+// A batch is answered through the codec, not the stream, so the gzip wrapper must not get a zero Content-Length.
+func TestGzipBatchKeepsBody(t *testing.T) {
+	srv := rpc.NewServer(50, false /* traceRequests */, false /* debugSingleRequest */, false /* disableStreaming */, testlog.Logger(t, log.LvlError), 0)
+	t.Cleanup(srv.Stop)
+	ts := httptest.NewServer(NewHTTPHandlerStack(srv, nil, nil, true, 1000, true))
+	t.Cleanup(ts.Close)
+
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, ts.URL, strings.NewReader(`[{"jsonrpc":"2.0","id":1,"method":"rpc_modules"}]`))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	require.NoError(t, err)
+	require.Contains(t, string(body), `"id":1`)
+}
+
+// Cleartext HTTP/2 is not served: it is measurably slower than HTTP/1.1 here, geth and reth
+// reach it only by prior knowledge and Nethermind refuses it too.
+func TestHTTP2CleartextNotServed(t *testing.T) {
 	srv := newTestRPCServer(t)
 	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = httpSrv.Shutdown(context.Background()) })
 
-	// Create an HTTP/2 cleartext client.
 	transport := &http.Transport{}
 	transport.Protocols = new(http.Protocols)
 	transport.Protocols.SetUnencryptedHTTP2(true)
@@ -310,25 +329,16 @@ func TestHTTP2H2C(t *testing.T) {
 	req, err := http.NewRequestWithContext(t.Context(), "POST", "http://"+addr.String(), body)
 	require.NoError(t, err)
 	req.Header.Set("Content-Type", "application/json")
-	resp, err := client.Do(req)
-	require.NoError(t, err)
-	defer resp.Body.Close()
-
-	// Validate protocol
-	assert.Equal(t, "HTTP/2.0", resp.Proto, "expected HTTP/2.0 protocol")
-
-	// Validate status
-	assert.Equal(t, http.StatusOK, resp.StatusCode)
-
-	// Validate response body
-	result, err := io.ReadAll(resp.Body)
-	require.NoError(t, err)
-	assert.Contains(t, string(result), "jsonrpc", "expected JSON-RPC response")
+	resp, err := client.Do(req) //nolint:bodyclose
+	if err == nil {
+		defer resp.Body.Close()
+	}
+	require.Error(t, err, "a client that commits to cleartext HTTP/2 has no HTTP/1.1 to fall back to")
 }
 
-// TestHTTP2H2CUpgrade checks the HTTP/1.1 Upgrade route into h2c (RFC 7540
-// Section 3.2), which curl uses for "--http2" over cleartext.
-func TestHTTP2H2CUpgrade(t *testing.T) {
+// A client offering the RFC 7540 Section 3.2 upgrade — what "curl --http2" sends over cleartext —
+// is answered on HTTP/1.1 instead of being switched, so it keeps working.
+func TestHTTP1UpgradeToH2CIsIgnored(t *testing.T) {
 	srv := newTestRPCServer(t)
 	handler := NewHTTPHandlerStack(srv, nil, nil, false, 1000, true)
 	httpSrv, addr, err := StartHTTPEndpoint("tcp://127.0.0.1:0", &HttpEndpointConfig{Timeouts: rpccfg.DefaultHTTPTimeouts}, handler)
@@ -350,7 +360,7 @@ func TestHTTP2H2CUpgrade(t *testing.T) {
 
 	statusLine, err := bufio.NewReader(conn).ReadString('\n')
 	require.NoError(t, err)
-	assert.Equal(t, "HTTP/1.1 101 Switching Protocols\r\n", statusLine)
+	assert.Equal(t, "HTTP/1.1 200 OK\r\n", statusLine)
 }
 
 // TestHTTPSEndpoint checks that the TLS endpoint negotiates HTTP/2 via ALPN and

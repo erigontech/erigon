@@ -175,15 +175,11 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 
 		senderBalanceChange := findBalanceChange(senderChanges, balIndex)
 		require.NotNilf(t, senderBalanceChange, "missing sender balance change at index %d\n%s", balIndex, bal.DebugString())
-		expectedSenderBalance, overflow := uint256.FromBig(senderBalance)
-		require.False(t, overflow)
-		require.True(t, senderBalanceChange.Value.Eq(expectedSenderBalance))
+		require.True(t, senderBalanceChange.Value.Eq(senderBalance))
 
 		receiverBalanceChange := findBalanceChange(receiverChanges, balIndex)
 		require.NotNilf(t, receiverBalanceChange, "missing receiver balance change at index %d\n%s", balIndex, bal.DebugString())
-		expectedReceiverBalance, overflow := uint256.FromBig(receiverBalance)
-		require.False(t, overflow)
-		require.True(t, receiverBalanceChange.Value.Eq(expectedReceiverBalance))
+		require.True(t, receiverBalanceChange.Value.Eq(receiverBalance))
 
 		senderNonceChange := findNonceChange(senderChanges, balIndex)
 		require.NotNilf(t, senderNonceChange, "missing sender nonce change at index %d\n%s", balIndex, bal.DebugString())
@@ -296,7 +292,7 @@ func TestEngineApiBALStorageWrites(t *testing.T) {
 		// Verify at least one storage slot was written at the mint tx index
 		foundStorageChange := false
 		for _, slotChange := range contractChanges.StorageChanges {
-			if findStorageChange(slotChange, balIndex) != nil {
+			if findStorageChange(&slotChange, balIndex) != nil {
 				foundStorageChange = true
 				break
 			}
@@ -336,8 +332,6 @@ func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
 		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 		gasPrice, err := eat.RpcApiClient.GasPrice()
 		require.NoError(t, err)
-		gasPriceU256, overflow := uint256.FromBig(gasPrice)
-		require.False(t, overflow)
 
 		// init: 600b600c600039600b6000f3   -> return the 11-byte runtime
 		// code: 6002600055 6001600055 00   -> SSTORE(0,2); SSTORE(0,1); STOP
@@ -346,7 +340,7 @@ func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
 		signTx := func(nonce uint64, to *common.Address, data []byte, gas uint64) types.Transaction {
 			tx, err := types.SignTx(&types.LegacyTx{
 				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gas, To: to, Value: uint256.Int{}, Data: data},
-				GasPrice: *gasPriceU256,
+				GasPrice: *gasPrice,
 			}, *signer, eat.CoinbaseKey)
 			require.NoError(t, err)
 			return tx
@@ -476,7 +470,7 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 		require.NotNilf(t, contractChanges, "missing contract changes\n%s", bal.DebugString())
 		foundStorageChange := false
 		for _, slotChange := range contractChanges.StorageChanges {
-			if findStorageChange(slotChange, mintIdx) != nil {
+			if findStorageChange(&slotChange, mintIdx) != nil {
 				foundStorageChange = true
 				break
 			}
@@ -485,10 +479,8 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 			"expected contract storage change at mint index %d\n%s", mintIdx, bal.DebugString())
 
 		// Verify final balances match BAL entries
-		senderBalance, err := eat.RpcApiClient.GetBalance(sender, rpc.LatestBlock)
+		expectedSenderBal, err := eat.RpcApiClient.GetBalance(sender, rpc.LatestBlock)
 		require.NoError(t, err)
-		expectedSenderBal, overflow := uint256.FromBig(senderBalance)
-		require.False(t, overflow)
 
 		// The last BAL entry for the sender should reflect the final balance
 		lastSenderBalChange := findBalanceChange(senderChanges, mintIdx)
@@ -609,7 +601,7 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 		require.NotNilf(t, changerChanges, "missing changer contract\n%s", bal.DebugString())
 		foundStorageAtChange := false
 		for _, slotChange := range changerChanges.StorageChanges {
-			if findStorageChange(slotChange, changeIdx) != nil {
+			if findStorageChange(&slotChange, changeIdx) != nil {
 				foundStorageAtChange = true
 				break
 			}
@@ -624,7 +616,7 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 
 		withdrawalBalance, err := eat.RpcApiClient.GetBalance(withdrawalReceiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		expectedWithdrawalWei := new(big.Int).Mul(big.NewInt(1000), big.NewInt(1e9))
+		expectedWithdrawalWei := uint256.NewInt(1000 * 1e9)
 		require.Equal(t, expectedWithdrawalWei, withdrawalBalance)
 
 		// --- Verify system contracts appear in BAL ---
@@ -801,8 +793,6 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 		require.NoError(t, err)
 		gasPrice, err := eat.RpcApiClient.GasPrice()
 		require.NoError(t, err)
-		gasPriceU256, overflow := uint256.FromBig(gasPrice)
-		require.False(t, overflow, "gas price overflows uint256")
 
 		// SSTORE-then-SELFDESTRUCT init code. See the docstring above for
 		// the bytecode breakdown.
@@ -822,7 +812,7 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 				Value:    uint256.Int{},
 				Data:     initCode,
 			},
-			GasPrice: *gasPriceU256,
+			GasPrice: *gasPrice,
 		}
 		signedCreateTx, err := types.SignTx(createTx, *signer, eat.CoinbaseKey)
 		require.NoError(t, err)
@@ -1054,11 +1044,9 @@ func signCreateTx(t *testing.T, eat engineapitester.EngineApiTester, key *ecdsa.
 	require.NoError(t, err)
 	gasPrice, err := eat.RpcApiClient.GasPrice()
 	require.NoError(t, err)
-	gasPriceU256, overflow := uint256.FromBig(gasPrice)
-	require.False(t, overflow, "gas price overflows uint256")
 	tx, err := types.SignTx(&types.LegacyTx{
 		CommonTx: types.CommonTx{Nonce: nonce.Uint64(), GasLimit: 1_000_000, To: nil, Value: value, Data: initCode},
-		GasPrice: *gasPriceU256,
+		GasPrice: *gasPrice,
 	}, *signer, key)
 	require.NoError(t, err)
 	return tx
@@ -1088,9 +1076,9 @@ func decodeAndValidateBAL(t *testing.T, payload *engineapitester.MockClPayload) 
 }
 
 func findAccountChanges(bal types.BlockAccessList, addr accounts.Address) *types.AccountChanges {
-	for _, ac := range bal {
-		if ac != nil && ac.Address == addr {
-			return ac
+	for i := range bal {
+		if bal[i].Address == addr.Value() {
+			return &bal[i]
 		}
 	}
 	return nil
@@ -1144,11 +1132,9 @@ func findStorageChange(sc *types.SlotChanges, index uint32) *types.StorageChange
 	return nil
 }
 
-// TestEngineApiNewPayloadBALMalformedVsInvalid pins the EIP-7928 newPayload
-// error split: a blockAccessList param that is not decodable RLP is a
-// malformed request (-32602 invalid params), while a decodable one that
-// violates EIP-7928 ordering rules is an invalid block ({status: INVALID}).
-func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
+// TestEngineApiNewPayloadBALInvalid pins that both an undecodable blockAccessList
+// and a decodable one violating EIP-7928 make the block invalid.
+func TestEngineApiNewPayloadBALInvalid(t *testing.T) {
 	if !dbg.Exec3Parallel {
 		t.Skip("requires parallel exec")
 	}
@@ -1170,9 +1156,20 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 		if executionRequests == nil {
 			executionRequests = []hexutil.Bytes{}
 		}
+		setBlockHash := func(elPayload *enginetypes.ExecutionPayload) {
+			response := *payload.GetPayloadResponse
+			response.ExecutionPayload = elPayload
+			payloadCopy := *payload
+			payloadCopy.GetPayloadResponse = &response
+			header := engineapitester.MockClPayloadToHeader(&payloadCopy)
+			balHash := crypto.Keccak256Hash(*elPayload.BlockAccessList)
+			header.BlockAccessListHash = &balHash
+			elPayload.BlockHash = header.Hash()
+		}
 		sendWithBAL := func(bal hexutil.Bytes) (*enginetypes.PayloadStatus, error) {
 			elPayload := *payload.ExecutionPayload
 			elPayload.BlockAccessList = &bal
+			setBlockHash(&elPayload)
 			return eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
 		}
 		for name, malformed := range map[string]hexutil.Bytes{
@@ -1180,11 +1177,11 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 			"string not list":   {0x80},
 			"truncated list":    {0xc1},
 		} {
-			_, err := sendWithBAL(malformed)
-			require.Errorf(t, err, "%s: expected invalid-params error", name)
-			var rpcErr rpc.Error
-			require.ErrorAsf(t, err, &rpcErr, "%s: expected rpc error, got: %v", name, err)
-			require.Equalf(t, -32602, rpcErr.ErrorCode(), "%s: %v", name, err)
+			status, err := sendWithBAL(malformed)
+			require.NoErrorf(t, err, "%s: expected INVALID status, got error: %v", name, err)
+			require.Equalf(t, enginetypes.InvalidStatus, status.Status, "%s", name)
+			require.NotNilf(t, status.ValidationError, "%s", name)
+			require.ErrorContainsf(t, status.ValidationError.Error(), types.ErrInvalidBlockAccessList.Error(), "%s", name)
 		}
 		account := append([]byte{0xda, 0x94}, make([]byte, 20)...)
 		account = append(account, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
@@ -1198,5 +1195,42 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 		require.NotNil(t, status.ValidationError)
 		require.ErrorContains(t, status.ValidationError.Error(), "access list",
 			"INVALID must originate from block-access-list validation, not e.g. a block-hash mismatch")
+
+		unknownParentPayload := *payload.ExecutionPayload
+		unknownParentPayload.ParentHash = common.Hash{0xff}
+		unknownParentBAL := hexutil.Bytes(duplicateAccounts)
+		unknownParentPayload.BlockAccessList = &unknownParentBAL
+		setBlockHash(&unknownParentPayload)
+		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &unknownParentPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "access list")
+
+		oversized, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+			Address: common.Address{1},
+		}})
+		require.NoError(t, err)
+		oversizedBytes := hexutil.Bytes(oversized)
+		elPayload := *payload.ExecutionPayload
+		elPayload.GasLimit = hexutil.Uint64(types.BalItemCost - 1)
+		elPayload.Transactions = []hexutil.Bytes{}
+		elPayload.BlockAccessList = &oversizedBytes
+		setBlockHash(&elPayload)
+		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "block access list too large")
+
+		elPayload = *payload.ExecutionPayload
+		elPayload.GasLimit = hexutil.Uint64(types.BalItemCost - 1)
+		elPayload.BlockAccessList = &oversizedBytes
+		setBlockHash(&elPayload)
+		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
 	})
 }

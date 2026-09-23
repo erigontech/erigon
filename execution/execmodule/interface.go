@@ -93,10 +93,14 @@ type AssembleBlockResult struct {
 
 // AssembledBlockResult is the native return type for GetAssembledBlock.
 type AssembledBlockResult struct {
-	// Busy is true when the builder has not finished yet.
+	// Busy is true when the module was already occupied, not when the builder is still working:
+	// otherwise the call waits for the builder to finish.
 	Busy bool
+	// Unknown is true when no builder is held for the payload id, so nothing will ever arrive for
+	// it. A caller polling that id cannot otherwise tell it from a build still running.
+	Unknown bool
 	// Block holds the assembled block with receipts and requests.
-	// Nil when Busy is true or when no builder was found for the payload ID.
+	// Nil when Busy or Unknown is true, or when the builder produced nothing.
 	Block      *types.BlockWithReceipts
 	BlockValue *uint256.Int
 }
@@ -146,12 +150,12 @@ type ExecutionModule interface {
 
 	// --- Block building ---------------------------------------------------
 
-	// AssembleBlock initiates building a new block with the supplied
-	// parameters.  Returns the payload ID assigned to the build job.
+	// AssembleBlock initiates building a block. Busy reports that the execution module is occupied;
+	// otherwise PayloadID identifies the new build.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
-	// GetAssembledBlock retrieves the block that was assembled under the
-	// given payloadID.  The result is Busy when the builder has not finished.
+	// GetAssembledBlock stops and waits for payloadID's builder. Busy reports that the execution
+	// module is occupied; Unknown reports that no builder is held for payloadID.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
 
 	// --- Header / body queries --------------------------------------------

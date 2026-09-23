@@ -14,16 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package mdbx
+package mdbx_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
-	"math/rand"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/db/kv/mdbx"
 
 	"github.com/c2h5oh/datasize"
 	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
@@ -33,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
 )
@@ -42,7 +46,7 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	path := t.TempDir()
 	logger := log.New()
 	table := "Table"
-	db := New(dbcfg.ChainDB, logger).InMem(t, path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			table:       kv.TableCfgItem{Flags: kv.DupSort},
 			kv.Sequence: kv.TableCfgItem{},
@@ -52,19 +56,28 @@ func BaseCaseDB(t *testing.T) kv.RwDB {
 	return db
 }
 
-func BaseCaseDBForBenchmark(b *testing.B) kv.RwDB {
-	b.Helper()
-	path := b.TempDir()
-	logger := log.New()
-	table := "Table"
-	db := New(dbcfg.ChainDB, logger).InMem(b, path).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
-		return kv.TableCfg{
-			table:       kv.TableCfgItem{Flags: kv.DupSort},
-			kv.Sequence: kv.TableCfgItem{},
-		}
-	}).MapSize(128 * datasize.MB).MustOpen()
-	b.Cleanup(db.Close)
-	return db
+func TestChaindataReadahead(t *testing.T) {
+	tests := []struct {
+		name            string
+		value           string
+		wantNoReadahead bool
+	}{
+		{name: "default", wantNoReadahead: false},
+		{name: "disabled", value: "false", wantNoReadahead: true},
+		{name: "enabled", value: "true", wantNoReadahead: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Setenv("CHAINDATA_READAHEAD", test.value)
+			opts := mdbx.New(dbcfg.ChainDB, log.New())
+			require.Equal(t, test.wantNoReadahead, opts.HasFlag(mdbxgo.NoReadahead))
+		})
+	}
+
+	t.Setenv("CHAINDATA_READAHEAD", "true")
+	opts := mdbx.New(dbcfg.TxPoolDB, log.New())
+	require.True(t, opts.HasFlag(mdbxgo.NoReadahead))
 }
 
 func BaseCase(t *testing.T) (kv.RwDB, kv.RwTx, kv.RwCursorDupSort) {
@@ -102,7 +115,8 @@ func iteration(t *testing.T, c kv.RwCursorDupSort, start []byte, val []byte) ([]
 		i += 1
 	}
 	for ind := i; ind > 1; ind-- {
-		c.Prev()
+		_, _, err = c.Prev()
+		require.NoError(t, err)
 	}
 
 	return keys, values
@@ -266,7 +280,7 @@ func TestRangeRwTxInterleavedWrite(t *testing.T) {
 	path := t.TempDir()
 	logger := log.New()
 	table := "Plain"
-	db := New(dbcfg.ChainDB, logger).InMem(t, path).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), path).WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{table: kv.TableCfgItem{}}
 	}).MapSize(128 * datasize.MB).MustOpen()
 	t.Cleanup(db.Close)
@@ -384,8 +398,8 @@ func TestHasDelete(t *testing.T) {
 	defer c.Close()
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
-	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1"))) //valid but already deleted
-	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) //valid key but wrong value
+	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1"))) // valid but already deleted
+	require.NoError(t, c.DeleteExact([]byte("key2"), []byte("value1.1"))) // valid key but wrong value
 
 	res, err := tx.Has(table, []byte("key1"))
 	require.NoError(t, err)
@@ -397,7 +411,7 @@ func TestHasDelete(t *testing.T) {
 
 	res, err = tx.Has(table, []byte("key3"))
 	require.NoError(t, err)
-	require.True(t, res) //There is another key3 left
+	require.True(t, res) // There is another key3 left
 
 	res, err = tx.Has(table, []byte("k"))
 	require.NoError(t, err)
@@ -591,8 +605,8 @@ func TestNextDups(t *testing.T) {
 	defer c.Close()
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.1")))
 	require.NoError(t, c.DeleteExact([]byte("key1"), []byte("value1.3")))
-	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1"))) //valid but already deleted
-	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.3"))) //valid key but wrong value
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.1"))) // valid but already deleted
+	require.NoError(t, c.DeleteExact([]byte("key3"), []byte("value3.3"))) // valid key but wrong value
 
 	require.NoError(t, tx.Put(table, []byte("key2"), []byte("value1.1")))
 	require.NoError(t, c.Put([]byte("key2"), []byte("value1.2")))
@@ -675,7 +689,7 @@ func TestDupDelete(t *testing.T) {
 	err = c.Delete([]byte("key1"))
 	require.NoError(t, err)
 
-	//TODO: find better way
+	// TODO: find better way
 	count, err := tx.Count("Table")
 	require.NoError(t, err)
 	assert.Zero(t, count)
@@ -684,35 +698,35 @@ func TestDupDelete(t *testing.T) {
 func TestDBSizeWithoutTx(t *testing.T) {
 	db := BaseCaseDB(t)
 
-	size, err := db.(*MdbxKV).DBSize()
+	size, err := db.(*mdbx.MdbxKV).DBSize()
 	require.NoError(t, err)
 	require.Greater(t, size, uint64(0))
 
 	var txSize uint64
 	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
 		var err error
-		txSize, err = tx.(*MdbxTx).DBSize()
+		txSize, err = tx.(*mdbx.MdbxTx).DBSize()
 		return err
 	}))
 	require.Equal(t, txSize, size)
 }
 
 func TestBeginRoAfterClose(t *testing.T) {
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRo(t.Context())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRwAfterClose(t *testing.T) {
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
 	db.Close()
 	_, err := db.BeginRw(t.Context())
 	require.ErrorContains(t, err, "closed")
 }
 
 func TestBeginRoWithDoneContext(t *testing.T) {
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -721,7 +735,7 @@ func TestBeginRoWithDoneContext(t *testing.T) {
 }
 
 func TestBeginRwWithDoneContext(t *testing.T) {
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
 	defer db.Close()
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
@@ -736,7 +750,7 @@ func testCloseWaitsAfterTxBegin(
 	txEndFunc func(kv.Getter) error,
 ) {
 	t.Helper()
-	db := New(dbcfg.ChainDB, log.New()).InMem(t, t.TempDir()).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.New()), t.TempDir()).MustOpen()
 	var txs []kv.Getter
 	for range count {
 		tx, err := txBeginFunc(db)
@@ -829,7 +843,7 @@ func u64tob(v uint64) []byte {
 func TestDB_Batch(t *testing.T) {
 	_db := BaseCaseDB(t)
 	table := "Table"
-	db := _db.(*MdbxKV)
+	db := _db.(*mdbx.MdbxKV)
 
 	// Iterate over multiple updates in separate goroutines.
 	n := 2
@@ -868,10 +882,10 @@ func TestDB_Batch(t *testing.T) {
 
 func TestDB_Batch_Panic(t *testing.T) {
 	_db := BaseCaseDB(t)
-	db := _db.(*MdbxKV)
+	db := _db.(*mdbx.MdbxKV)
 
 	var sentinel int
-	var bork = &sentinel
+	bork := &sentinel
 	var problem any
 	var err error
 
@@ -900,7 +914,7 @@ func TestDB_Batch_Panic(t *testing.T) {
 func TestDB_BatchFull(t *testing.T) {
 	_db := BaseCaseDB(t)
 	table := "Table"
-	db := _db.(*MdbxKV)
+	db := _db.(*mdbx.MdbxKV)
 
 	const size = 3
 	// buffered so we never leak goroutines
@@ -957,7 +971,7 @@ func TestDB_BatchFull(t *testing.T) {
 func TestDB_BatchTime(t *testing.T) {
 	_db := BaseCaseDB(t)
 	table := "Table"
-	db := _db.(*MdbxKV)
+	db := _db.(*mdbx.MdbxKV)
 
 	const size = 1
 	// buffered so we never leak goroutines
@@ -996,135 +1010,6 @@ func TestDB_BatchTime(t *testing.T) {
 		return nil
 	}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func BenchmarkDB_BeginRO(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	db := _db.(*MdbxKV)
-
-	for b.Loop() {
-		tx, _ := db.BeginRo(b.Context())
-		tx.Rollback()
-	}
-}
-
-func BenchmarkDB_Get(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	db := _db.(*MdbxKV)
-
-	// buffered so we never leak goroutines
-	err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		return tx.Put(table, u64tob(uint64(1)), u64tob(uint64(1)))
-	})
-	if err != nil {
-		b.Fatal(err)
-	}
-
-	// Ensure data is correct.
-	if err := db.View(b.Context(), func(tx kv.Tx) error {
-		key := u64tob(uint64(1))
-		for b.Loop() {
-			v, err := tx.GetOne(table, key)
-			if err != nil {
-				return err
-			}
-			if v == nil {
-				b.Errorf("key not found: %d", 1)
-			}
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-}
-
-func BenchmarkDB_Put(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	db := _db.(*MdbxKV)
-
-	const keyCount = 10000
-	keys := make([][]byte, keyCount)
-	for i := 1; i <= keyCount; i++ {
-		keys[i-1] = u64tob(uint64(i))
-	}
-
-	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		var idx int
-		for b.Loop() {
-			err := tx.Put(table, keys[idx%len(keys)], keys[idx%len(keys)])
-			if err != nil {
-				return err
-			}
-			idx++
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-}
-
-func BenchmarkDB_PutRandom(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	db := _db.(*MdbxKV)
-
-	// Ensure data is correct.
-	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		keys := make(map[string]struct{}, b.N)
-		for len(keys) < b.N {
-			keys[string(u64tob(uint64(rand.Intn(1e10))))] = struct{}{}
-		}
-		b.ResetTimer()
-		for key := range keys {
-			err := tx.Put(table, []byte(key), []byte(key))
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-}
-
-func BenchmarkDB_Delete(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	db := _db.(*MdbxKV)
-
-	const keyCount = 10000
-	keys := make([][]byte, keyCount)
-	for i := 1; i <= keyCount; i++ {
-		keys[i-1] = u64tob(uint64(i))
-	}
-
-	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		for i := range keys {
-			err := tx.Put(table, keys[i], keys[i])
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
-	}
-
-	if err := db.Update(b.Context(), func(tx kv.RwTx) error {
-		var idx int
-		for b.Loop() {
-			err := tx.Delete(table, keys[idx%len(keys)])
-			if err != nil {
-				return err
-			}
-			idx++
-		}
-		return nil
-	}); err != nil {
-		b.Fatal(err)
 	}
 }
 
@@ -1177,26 +1062,8 @@ func TestSequenceOps(t *testing.T) {
 	})
 }
 
-func BenchmarkDB_ResetSequence(b *testing.B) {
-	_db := BaseCaseDBForBenchmark(b)
-	table := "Table"
-	//db := _db.(*MdbxKV)
-	ctx := b.Context()
-
-	tx, err := _db.BeginRw(ctx)
-	require.NoError(b, err)
-	defer tx.Rollback()
-
-	for i := 0; b.Loop(); i++ {
-		err = tx.ResetSequence(table, uint64(i))
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func TestMdbxWithSyncBytes(t *testing.T) {
-	db, err := New(dbcfg.TemporaryDB, log.Root()).
+	db, err := mdbx.New(dbcfg.TemporaryDB, log.Root()).
 		Path(t.TempDir()).
 		MapSize(8 * datasize.GB).
 		GrowthStep(16 * datasize.MB).
@@ -1216,8 +1083,8 @@ func TestAutoRemove(t *testing.T) {
 	logger := log.New()
 
 	t.Run("autoRemove enabled", func(t *testing.T) {
-		db := New(dbcfg.TemporaryDB, logger).InMem(nil, t.TempDir()).AutoRemove(true).MustOpen()
-		mdbxDB := db.(*MdbxKV)
+		db := mdbx.New(dbcfg.TemporaryDB, logger).InMem(t.TempDir()).AutoRemove(true).MustOpen()
+		mdbxDB := db.(*mdbx.MdbxKV)
 		dbPath := mdbxDB.Path()
 
 		require.DirExists(t, dbPath)
@@ -1225,12 +1092,209 @@ func TestAutoRemove(t *testing.T) {
 		require.NoDirExists(t, dbPath)
 	})
 	t.Run("autoRemove disabled", func(t *testing.T) {
-		db := New(dbcfg.TemporaryDB, logger).InMem(nil, t.TempDir()).AutoRemove(false).MustOpen()
-		mdbxDB := db.(*MdbxKV)
+		db := mdbx.New(dbcfg.TemporaryDB, logger).InMem(t.TempDir()).AutoRemove(false).MustOpen()
+		mdbxDB := db.(*mdbx.MdbxKV)
 		dbPath := mdbxDB.Path()
 
 		require.DirExists(t, dbPath)
 		db.Close()
 		require.DirExists(t, dbPath)
 	})
+}
+
+func TestTxnDpLimitFromRealPageSize(t *testing.T) {
+	path := t.TempDir()
+	logger := log.New()
+	const dirtySpace = uint64(1 * datasize.GB)
+
+	open := func(requestedPageSize datasize.ByteSize) kv.RwDB {
+		return mdbx.New(dbcfg.ChainDB, logger).Path(path).
+			PageSize(requestedPageSize).DirtySpace(dirtySpace).MapSize(16 * datasize.GB).MustOpen()
+	}
+
+	db := open(16 * datasize.KB)
+	require.Equal(t, 16*datasize.KB, db.PageSize())
+	db.Close()
+
+	// mdbx keeps the page size of an existing db, so the dirty-page limit must
+	// follow the real page size - not the requested one
+	db = open(4 * datasize.KB)
+	defer db.Close()
+	require.Equal(t, 16*datasize.KB, db.PageSize())
+
+	dpLimit, err := db.(*mdbx.MdbxKV).Env().GetOption(mdbxgo.OptTxnDpLimit)
+	require.NoError(t, err)
+	require.Equal(t, dirtySpace/db.PageSize().Bytes(), dpLimit)
+}
+
+func TestBeginRoRenewedTxnSeesLatestCommit(t *testing.T) {
+	db := BaseCaseDB(t)
+	put := func(v uint64) {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error { return tx.Put(kv.Sequence, []byte("k"), u64tob(v)) }))
+	}
+	get := func() []byte {
+		tx, err := db.BeginRo(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		v, err := tx.GetOne(kv.Sequence, []byte("k"))
+		require.NoError(t, err)
+		return bytes.Clone(v)
+	}
+
+	put(1)
+	require.Equal(t, u64tob(1), get())
+	put(2)
+	require.Equal(t, u64tob(2), get(), "a read txn renewed from the pool must start on the latest commit")
+}
+
+func TestBeginRoRenewsPooledTxn(t *testing.T) {
+	db := BaseCaseDB(t)
+	pool := func() int { return mdbx.RoTxPoolLen(db.(*mdbx.MdbxKV)) }
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback() // a safety net: the explicit rollbacks below are what the test exercises
+	parked := pool()
+	tx.Rollback()
+	require.Equal(t, parked+1, pool())
+
+	tx, err = db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.Equal(t, parked, pool())
+	tx.Rollback()
+	require.Equal(t, parked+1, pool())
+}
+
+// TestCursorOnPooledTxn pins that a cursor opened on a read txn that came back from the
+// pool reads through the renewal. Reuse itself is not asserted: mdbx hands a freed txn
+// back at the same address, so CHandle equality holds whether or not pooling ran.
+func TestCursorOnPooledTxn(t *testing.T) {
+	db := BaseCaseDB(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return tx.Put(kv.Sequence, []byte("k"), u64tob(1))
+	}))
+
+	first, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer first.Rollback() // a safety net: the explicit rollback below is what the test exercises
+	first.Rollback()
+
+	second, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer second.Rollback()
+
+	c, err := second.Cursor(kv.Sequence)
+	require.NoError(t, err)
+	defer c.Close()
+	_, v, err := c.SeekExact([]byte("k"))
+	require.NoError(t, err)
+	require.Equal(t, u64tob(1), v, "a cursor opened on a renewed txn must read through it")
+}
+
+func TestRollbackTwiceParksTxnOnce(t *testing.T) {
+	db := BaseCaseDB(t)
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	tx.Rollback()
+	tx.Rollback()
+
+	a, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer a.Rollback()
+	b, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer b.Rollback()
+	require.NotEqual(t, a.CHandle(), b.CHandle(), "two live read txns must never share one handle")
+}
+
+// A deferred flush leaves data unflushed after a commit, and mdbx only tests its deadline
+// while committing - so without the background goroutine, data written and then left alone
+// stays unflushed for good.
+func TestDeferredSyncFlushesAfterWritesStop(t *testing.T) {
+	open := func(o mdbx.MdbxOpts) kv.RwDB {
+		db := o.Path(t.TempDir()).WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+		t.Cleanup(db.Close)
+		return db
+	}
+	writeOne := func(db kv.RwDB) {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.HeaderTD, []byte("k"), make([]byte, 4096))
+		}))
+	}
+	unsynced := func(db kv.RwDB) uint {
+		info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
+		require.NoError(t, err)
+		return info.UnsyncedBytes
+	}
+
+	byDefault := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SyncPeriod(time.Hour))
+	writeOne(byDefault)
+	require.NotZero(t, unsynced(byDefault), "every database defers its flush unless asked otherwise")
+
+	deferred := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).SafeNoSync().SyncPeriod(50 * time.Millisecond))
+	writeOne(deferred) // far below the byte threshold: only the deadline can flush this
+	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 5*time.Second, 10*time.Millisecond,
+		"the background flush never ran")
+
+	durable := open(mdbx.New(dbcfg.TemporaryDB, log.Root()).Durable())
+	writeOne(durable)
+	require.Zero(t, unsynced(durable), "a durable database flushes within the commit")
+}
+
+// Close must join the background flush: it touches the env on every tick, and the env is gone
+// once Close returns.
+func TestDeferredSyncClosesWhileWriting(t *testing.T) {
+	val := make([]byte, 4096)
+	for range 3 {
+		db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
+			SafeNoSync().SyncPeriod(time.Millisecond).
+			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+		var wg sync.WaitGroup
+		stop := make(chan struct{})
+		wg.Go(func() {
+			for i := 0; ; i++ {
+				select {
+				case <-stop:
+					return
+				default:
+				}
+				if err := db.Update(t.Context(), func(tx kv.RwTx) error {
+					return tx.Put(kv.HeaderTD, binary.BigEndian.AppendUint64(nil, uint64(i)), val)
+				}); err != nil {
+					return // the db is closing
+				}
+			}
+		})
+		time.Sleep(5 * time.Millisecond)
+		db.Close() // while the writer is still running
+		close(stop)
+		wg.Wait()
+	}
+}
+
+// The flush mode is settled once every option is in, so a mode set after SafeNoSync still wins
+// - mdbx rejects the thresholds outright on a read-only database.
+func TestSafeNoSyncYieldsToReadonlyWhateverTheOrder(t *testing.T) {
+	path := t.TempDir()
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(path).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
+	db.Close()
+
+	ro := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(path).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).
+		SafeNoSync().Readonly(true).Accede(true).MustOpen()
+	t.Cleanup(ro.Close)
+}
+
+// An in-memory database asks for no flush at all, and MDBX_UTTERLY_NOSYNC carries the
+// SafeNoSync bit - stripping that bit would leave a mode that fsyncs on every commit.
+func TestInMemKeepsUtterlyNoSync(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).InMem(t.TempDir()).MustOpen()
+	t.Cleanup(db.Close)
+	flags, err := db.(*mdbx.MdbxKV).Env().Flags()
+	require.NoError(t, err)
+	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
+		"utterly-nosync lost a bit, and without all of them mdbx flushes on commit")
 }

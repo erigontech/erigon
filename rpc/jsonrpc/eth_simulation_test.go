@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -17,10 +16,13 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -31,7 +33,7 @@ type simulateV1TestService struct{}
 func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.BlockNumberOrHash) (SimulationResult, error) {
 	return SimulationResult{
 		{
-			"calls": []CallResult{
+			Calls: []ethapi.CallResult{
 				{
 					ReturnData: "0x",
 					GasUsed:    hexutil.Uint64(0x5208),
@@ -44,7 +46,7 @@ func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.
 }
 
 type simulateV1ClientBlockResult struct {
-	Calls []CallResult `json:"calls"`
+	Calls []ethapi.CallResult `json:"calls"`
 }
 
 // ─── sanitizeSimulatedBlocks tests ────────────────────────────────────────────
@@ -318,9 +320,9 @@ func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, args.ChainID)
 	// The returned chain ID should equal the original.
-	assert.Equal(t, 0, (*big.Int)(args.ChainID).Cmp(originalID.ToBig()))
+	assert.Equal(t, 0, (*uint256.Int)(args.ChainID).Cmp(originalID))
 	// But it must be a different pointer — mutating args.ChainID must not affect chainConfig.
-	(*big.Int)(args.ChainID).SetInt64(999)
+	(*uint256.Int)(args.ChainID).SetUint64(999)
 	assert.Equal(t, uint64(1), originalID.Uint64(), "mutating args.ChainID must not affect chainConfig.ChainID")
 }
 
@@ -328,7 +330,7 @@ func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
 func TestSanitizeCallChainIDMismatch(t *testing.T) {
 	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
-	args.ChainID = (*hexutil.Big)(big.NewInt(999))
+	args.ChainID = (*hexutil.U256)(uint256.NewInt(999))
 	bc := blockCtx(30_000_000)
 
 	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
@@ -340,7 +342,7 @@ func TestSanitizeCallChainIDMismatch(t *testing.T) {
 func TestSanitizeCallChainIDMatch(t *testing.T) {
 	sim := newTestSimulator(uint256.NewInt(42))
 	args := callArgs()
-	args.ChainID = (*hexutil.Big)(big.NewInt(42))
+	args.ChainID = (*hexutil.U256)(uint256.NewInt(42))
 	bc := blockCtx(30_000_000)
 
 	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
@@ -467,7 +469,7 @@ func TestErrorHelpers(t *testing.T) {
 
 func TestRepairLogs(t *testing.T) {
 	hash := common.HexToHash("0xdeadbeef")
-	calls := []CallResult{
+	calls := []ethapi.CallResult{
 		{Logs: []*types.RPCLog{{}, {}}},
 		{Logs: []*types.RPCLog{{}}},
 		{Logs: nil},
@@ -481,7 +483,7 @@ func TestRepairLogs(t *testing.T) {
 func TestRepairLogsEmpty(t *testing.T) {
 	// Should not panic with empty input.
 	repairLogs(nil, common.Hash{})
-	repairLogs([]CallResult{}, common.Hash{})
+	repairLogs([]ethapi.CallResult{}, common.Hash{})
 }
 
 // ─── newSimulator tests ──────────────────────────────────────────────────────
@@ -529,7 +531,7 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	value := (*hexutil.Big)(big.NewInt(100))
+	value := (*hexutil.U256)(uint256.NewInt(100))
 	gas := hexutil.Uint64(100000)
 
 	result, err := api.SimulateV1(context.Background(), SimulationRequest{
@@ -550,8 +552,7 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result, 1)
 
-	calls, ok := result[0]["calls"].([]CallResult)
-	require.True(t, ok, "expected typed call results")
+	calls := result[0].Calls
 	require.Len(t, calls, 1)
 
 	call := calls[0]
@@ -559,6 +560,73 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	assert.Nil(t, call.Error)
 	assert.NotZero(t, uint64(call.MaxUsedGas))
 	assert.GreaterOrEqual(t, uint64(call.MaxUsedGas), uint64(call.GasUsed))
+}
+
+// A base fee override must reach the BASEFEE opcode in non-validation mode too,
+// where the call carries no gas price of its own.
+func TestSimulateV1BaseFeeOverrideReachesEVM(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	baseFeeCode := hexutil.Bytes(runtimeReturningOpcode(opBasefee))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			BlockOverrides: &ethapi.BlockOverrides{BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(7))},
+			StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &baseFeeCode},
+			},
+			Calls: []ethapi.CallArgs{{From: &bankAddr, To: &contractAddr, Gas: &gas}},
+		}},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls := result[0].Calls
+	require.Len(t, calls, 1)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
+	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000007", calls[0].ReturnData)
+}
+
+// A non-validating call pays no fee, so an overridden base fee must not credit
+// the burnt contract of a chain that has one (AuRa/Gnosis).
+func TestSimulateV1BaseFeeOverrideDoesNotFundBurntContract(t *testing.T) {
+	burntAddr := common.HexToAddress("0x00000000000000000000000000000000b0b0b0b0")
+	chainConfig := chain.AllProtocolChanges.Copy()
+	chainConfig.BurntContract = map[string]common.Address{"0": burntAddr}
+
+	m, _, bankAddr := fundedBankGenesis(t, chainConfig)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	contractAddr := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	baseFeeCode := hexutil.Bytes(runtimeReturningOpcode(opBasefee))
+	balanceCode := hexutil.Bytes(runtimeReturningOpcode(byte(vm.SELFBALANCE)))
+	gas := hexutil.Uint64(100_000)
+
+	result, err := api.SimulateV1(context.Background(), SimulationRequest{
+		BlockStateCalls: []SimulatedBlock{{
+			BlockOverrides: &ethapi.BlockOverrides{BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(7))},
+			StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(contractAddr): {Code: &baseFeeCode},
+				accounts.InternAddress(burntAddr):    {Code: &balanceCode},
+			},
+			Calls: []ethapi.CallArgs{
+				{From: &bankAddr, To: &contractAddr, Gas: &gas},
+				{From: &bankAddr, To: &burntAddr, Gas: &gas},
+			},
+		}},
+		Validation: false,
+	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+
+	calls := result[0].Calls
+	require.Len(t, calls, 2)
+	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[1].Status))
+	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000000", calls[1].ReturnData)
 }
 
 func TestSimulateV1ClientDecodesMaxUsedGas(t *testing.T) {
@@ -648,6 +716,45 @@ func TestValidateSimulationRequest(t *testing.T) {
 	}
 }
 
+// ─── computeSimulatedStateRoot tests ─────────────────────────────
+
+// observedFrozenBlocks answers the frozen-blocks sentinel and nothing else: the embedded
+// interface is nil, so any further reader call panics the test.
+type observedFrozenBlocks struct {
+	dbservices.FullBlockReader
+	frozen   uint64
+	observed bool
+}
+
+func (r observedFrozenBlocks) FrozenBlocksObserved() (uint64, bool) { return r.frozen, r.observed }
+
+func TestComputeSimulatedStateRootWithoutCommitmentHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		frozen   uint64
+		observed bool
+	}{
+		{name: "blocks are frozen", frozen: 1000, observed: true},
+		{name: "frozen count not observed yet", frozen: 0, observed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("state-history commitment was computed on a frozen chain: %v", r)
+				}
+			}()
+			sim := &simulator{blockReader: observedFrozenBlocks{frozen: tc.frozen, observed: tc.observed}}
+			block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+
+			err := sim.computeSimulatedStateRoot(context.Background(), nil, nil, &SimulatedBlock{}, block,
+				&types.Header{Number: *uint256.NewInt(0)}, 0, 0, nil, nil, false)
+
+			require.NoError(t, err)
+			require.Equal(t, common.Hash{}, block.Root())
+		})
+	}
+}
+
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
 func newUint64(n uint64) *hexutil.Uint64 {
@@ -655,6 +762,6 @@ func newUint64(n uint64) *hexutil.Uint64 {
 	return &u
 }
 
-func newBig(n uint64) *hexutil.Big {
-	return (*hexutil.Big)(new(big.Int).SetUint64(n))
+func newBig(n uint64) *hexutil.U256 {
+	return (*hexutil.U256)(uint256.NewInt(n))
 }

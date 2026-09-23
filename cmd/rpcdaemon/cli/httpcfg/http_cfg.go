@@ -49,15 +49,15 @@ const execReadAheadTxs = 2
 // a blocked permanent holder needs, deadlocking the pipeline.
 const dbReadTxsReserved = 16
 
-// RoTxsLimit sizes the MDBX read-tx semaphore, flooring it at the parallel-exec
-// worker count plus reserved headroom; the configured value (or derived default
-// when unset) wins only when already above the floor.
-func RoTxsLimit(dbReadConcurrency, execWorkers int) int64 {
+// RoTxsLimit sizes the MDBX read-tx semaphore for concurrent worker pools and
+// reserved readers.
+func RoTxsLimit(dbReadConcurrency, execWorkers, parallelCommitmentReaders, warmupWorkers, blockReadAheadWorkers int) int64 {
 	limit := DefaultDBReadConcurrency()
 	if dbReadConcurrency > 0 {
 		limit = dbReadConcurrency
 	}
-	return int64(max(limit, execWorkers+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
+	workerReaders := max(execWorkers, 0) + max(parallelCommitmentReaders, 0) + max(warmupWorkers, 0) + max(blockReadAheadWorkers, 0)
+	return int64(max(limit, workerReaders+execPermanentReadTxs+execReadAheadTxs+dbReadTxsReserved))
 }
 
 type HttpCfg struct {

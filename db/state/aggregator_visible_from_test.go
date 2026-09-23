@@ -29,7 +29,7 @@ import (
 // whatever generation is current when it runs.
 func TestFilesPin_PinsSourceGeneration(t *testing.T) {
 	stepSize := uint64(10)
-	_, agg := testDbAndAggregatorv3(t, stepSize)
+	db, agg := testDbAndAggregatorv3(t, stepSize)
 
 	gen := func(ranges []testFileRange) {
 		t.Helper()
@@ -37,7 +37,7 @@ func TestFilesPin_PinsSourceGeneration(t *testing.T) {
 		generateCodeFile(t, agg.Dirs(), ranges)
 		generateStorageFile(t, agg.Dirs(), ranges)
 		generateCommitmentFile(t, agg.Dirs(), ranges)
-		require.NoError(t, agg.OpenFolder())
+		require.NoError(t, agg.OpenFolder(db))
 	}
 
 	gen([]testFileRange{{0, 1}})

@@ -35,10 +35,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 )
-
-// randSrc and randMu removed — generateKeyWithHashedPrefix now uses per-call
-// rand.New with atomic counter seed, eliminating parallel test interference.
 
 func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Parallel()
@@ -65,7 +63,6 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	defer upds.Close()
 
 	fmt.Printf("1. Generated %d updates\n", len(updates))
-	//renderUpdates(branchNodeUpdates)
 
 	err := ms.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
@@ -76,7 +73,6 @@ func Test_HexPatriciaHashed_ResetThenSingularUpdates(t *testing.T) {
 	t.Logf("rootHash %x\n", firstRootHash)
 
 	hph.Reset()
-	//hph.SetTraceWriter(os.Stderr)
 	plainKeys, updates = NewUpdateBuilder().
 		Storage("03", "58", "050506").
 		Build()
@@ -137,9 +133,7 @@ func Test_HexPatriciaHashed_EmptyUpdate(t *testing.T) {
 	require.NotEmpty(t, hashBeforeEmptyUpdate)
 
 	fmt.Printf("1. Applied %d updates\n", len(updates))
-	//renderUpdates(branchNodeUpdates)
 
-	// generate empty updates and do NOT reset tree
 	plainKeys, updates = NewUpdateBuilder().Build()
 
 	err = ms.applyPlainUpdates(plainKeys, updates)
@@ -216,13 +210,10 @@ func Test_HexPatriciaHashed_BrokenUniqueRepr(t *testing.T) {
 		require.Equal(t, rBatch, rSeq, "sequential and batch root should match")
 	}
 
-	// Same PLAIN prefix is not necessary while HASHED CPL>0 is required
 	t.Run("InsertStorageWhenCPL==0", func(t *testing.T) {
-		// ordering of keys differs
 		uniqTest(t, true, false)
 	})
 	t.Run("InsertStorageWhenCPL>0", func(t *testing.T) {
-		// ordering of keys differs
 		uniqTest(t, false, false)
 	})
 }
@@ -234,14 +225,9 @@ func Test_HexPatriciaHashed_UniqueRepresentation(t *testing.T) {
 	plainKeys, updates := fixtureBaseWithCode().Build()
 
 	trieSequential := NewHexPatriciaHashed(length.Addr, stateSeq, DefaultTrieConfig())
-	//trieSequential.SetTraceWriter(os.Stderr)
 	trieBatch := NewHexPatriciaHashed(length.Addr, stateBatch, DefaultTrieConfig())
-	//trieBatch.SetTraceWriter(os.Stderr)
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieSequential, plainKeys, updates)
-
-	// trieSequential.SetTraceWriter(os.Stderr)
-	// trieBatch.SetTraceWriter(os.Stderr)
 
 	rSeq := processSeq(t, stateSeq, trieSequential, plainKeys, updates)
 	rBatch := processBatch(t, stateBatch, trieBatch, plainKeys, updates)
@@ -264,19 +250,16 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieNormal, plainKeys, updates)
 
-	// Apply updates to both states
 	err := stateNormal.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 	err = stateDeferred.applyPlainUpdates(plainKeys, updates)
 	require.NoError(t, err)
 
-	// Process with normal mode
 	updsNormal := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	rootNormal, err := trieNormal.Process(ctx, updsNormal, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	updsNormal.Close()
 
-	// Process with deferred mode
 	updsDeferred := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	rootDeferred, err := trieDeferred.Process(ctx, updsDeferred, "", nil, WarmupConfig{})
 	require.NoError(t, err)
@@ -287,7 +270,6 @@ func Test_HexPatriciaHashed_DeferredBranchUpdates(t *testing.T) {
 
 	require.Equal(t, rootNormal, rootDeferred, "normal and deferred mode should produce same root")
 
-	// Verify branch data is the same
 	require.Equal(t, stateNormal.cm, stateDeferred.cm, "branch data should match")
 }
 
@@ -327,7 +309,8 @@ func requireDeferredMatchesEager(tb testing.TB, rounds ...*UpdateBuilder) {
 func Test_HexPatriciaHashed_DeferredBranchUpdatesDifferential(t *testing.T) {
 	t.Parallel()
 
-	requireDeferredMatchesEager(t,
+	requireDeferredMatchesEager(
+		t,
 		NewUpdateBuilder().
 			Balance("1000000000000000000000000000000000000001", 1).
 			Nonce("1000000000000000000000000000000000000002", 2).
@@ -401,7 +384,6 @@ func Test_HexPatriciaHashed_Sepolia(t *testing.T) {
 	}
 
 	hph := NewHexPatriciaHashed(length.Addr, state, DefaultTrieConfig())
-	//hph.SetTraceWriter(os.Stderr)
 
 	for _, testData := range tests {
 		builder := NewUpdateBuilder()
@@ -457,7 +439,6 @@ func Test_Cell_EncodeDecode(t *testing.T) {
 func Test_HexPatriciaHashed_StateEncode(t *testing.T) {
 	t.Parallel()
 
-	//trie := NewHexPatriciaHashed(length.Hash, nil, nil, WarmupConfig{})
 	var s state
 	s.Root = make([]byte, 128)
 	rnd := rand.New(rand.NewSource(42))
@@ -530,14 +511,12 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, plainKeys, updates)
 	defer upds.Close()
 
-	// process updates
 	rhBefore, err := before.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	state, err := before.EncodeCurrentState(nil)
 	require.NoError(t, err)
 
-	// save and transfer state into 'after' trie
 	err = after.SetState(state)
 	require.NoError(t, err)
 
@@ -545,7 +524,6 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, rhBefore, rhAfter)
 
-	// create new update and apply it to both tries
 	nextPK, nextUpdates := NewUpdateBuilder().
 		Nonce("ff", 4).
 		Balance("b9", 6000000000).
@@ -560,7 +538,7 @@ func Test_HexPatriciaHashed_StateEncodeDecodeSetup(t *testing.T) {
 	rh2Before, err := before.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
-	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates) // they're resetted after Process
+	WrapKeyUpdatesInto(t, upds, nextPK, nextUpdates)
 
 	rh2After, err := after.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
@@ -597,9 +575,6 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("root before restore %x\n", withoutRestore)
 
-	// Has to copy commitment state from msOne to msTwo.
-	// Previously we did not apply updates in this test - trieTwo simply read same commitment data from msOne.
-	// Now when branch data is written during ProcessKeys, need to use separated state for this exact case.
 	for ck, cv := range msOne.cm {
 		err = msTwo.PutBranch([]byte(ck), cv, nil)
 		require.NoError(t, err)
@@ -622,7 +597,7 @@ func Test_HexPatriciaHashed_StateRestoreAndContinue(t *testing.T) {
 		Balance("ff", 900234).
 		Balance("04", 1233).
 		Storage("04", "01", "0401").
-		Balance("ba", 065606).
+		Balance("ba", 0o65606).
 		Balance("00", 4).
 		Balance("01", 5).
 		Balance("02", 6).
@@ -703,6 +678,61 @@ func TestHexPatriciaHashedLoadStateIfNeededReturnsCounters(t *testing.T) {
 	})
 }
 
+func TestCellPartialAccountUpdateReadsMissingFields(t *testing.T) {
+	t.Parallel()
+
+	addrHex := "00112233445566778899aabbccddeeff00112233"
+	ms := NewMockState(t)
+	plainKeys, updates := NewUpdateBuilder().
+		Balance(addrHex, 7).
+		Nonce(addrHex, 3).
+		Build()
+	require.NoError(t, ms.applyPlainUpdates(plainKeys, updates))
+
+	hph := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+
+	newAccountCell := func(addr []byte) cell {
+		var c cell
+		copy(c.accountAddr[:], addr)
+		c.accountAddrLen = int16(len(addr))
+		c.CodeHash = empty.CodeHash
+		return c
+	}
+
+	t.Run("state fills what the update left out", func(t *testing.T) {
+		c := newAccountCell(common.FromHex("0x" + addrHex))
+		c.setFromUpdate(&Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(11)})
+		require.False(t, c.loaded.account(), "a balance-only update does not load the account")
+
+		_, err := hph.loadStateIfNeeded(&c, skipStat{})
+		require.NoError(t, err)
+		require.True(t, c.loaded.account())
+		require.Equal(t, uint64(3), c.Nonce, "nonce must come from state")
+		require.Equal(t, uint64(11), c.Balance.Uint64(), "the update's balance must outrank the state read")
+	})
+
+	t.Run("hashing a cell fills the gaps too", func(t *testing.T) {
+		c := newAccountCell(common.FromHex("0x" + addrHex))
+		c.setFromUpdate(&Update{Flags: BalanceUpdate, Balance: *uint256.NewInt(11)})
+
+		_, err := hph.computeCellHash(&c, 0, nil)
+		require.NoError(t, err)
+		require.True(t, c.loaded.account(), "one read is enough, the next hash must not repeat it")
+		require.Equal(t, uint64(11), c.Balance.Uint64())
+		require.Equal(t, uint64(3), c.Nonce)
+	})
+
+	t.Run("state without the account does not delete it", func(t *testing.T) {
+		c := newAccountCell(common.FromHex("0xff00000000000000000000000000000000000011"))
+		c.setFromUpdate(&Update{Flags: NonceUpdate, Nonce: 4})
+
+		_, err := hph.loadStateIfNeeded(&c, skipStat{})
+		require.NoError(t, err)
+		require.False(t, c.Deleted(), "an account the update is creating is not in state yet")
+		require.Equal(t, uint64(4), c.Nonce)
+	})
+}
+
 func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 	t.Parallel()
 
@@ -714,7 +744,7 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 		Balance("ff", 900234).
 		Balance("04", 1233).
 		Storage("04", "01", "0401").
-		Balance("ba", 065606).
+		Balance("ba", 0o65606).
 		Balance("00", 4).
 		Balance("01", 5).
 		Balance("02", 6).
@@ -769,12 +799,10 @@ func Test_HexPatriciaHashed_RestoreAndContinue(t *testing.T) {
 
 	WrapKeyUpdatesInto(t, updTwo, plainKeys, updates)
 
-	// process updates
 	AfterRestore, err := trieOne.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
 	WrapKeyUpdatesInto(t, updTwo, plainKeys, updates)
-	// process updates again but keep in mind that two tries sharing same ms, so result should be equal (second time we just go over same data)
 	withoutRestore, err := trieTwo.Process(ctx, updTwo, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 
@@ -853,7 +881,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
 		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 0o65606).
 		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
 		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
 		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
@@ -866,7 +894,7 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
 		Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "0000fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
 		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 0o65606).
 		Nonce("27456647f49ba65e220e86cba9abfc4fc1587b81", 1).
 		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 3*1e17).
 		Nonce("b13363d527cdc18173c54ac5d4a54af05dbec22e", 1).
@@ -876,8 +904,6 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 		Nonce("14c4d3bba7f5009599257d3701785d34c7f2aa27", 1).
 		Nonce("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 169356).
 		Storage("68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d1664244ae1a444448f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
-		//Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "0000000000000000018ebc29b1264e27d09cf7cbd514fe8af173e534db038033", "8989").
-		//Storage("a8f8d73af90eee32dc9729ce8d5bb762f30d21a4", "9f49fdd48601f00df18ebc29b1264e27d09cf7cbd514fe8af173e77777778033", "8989").
 		Storage("88e76c0e9cdc73b2b2d52dbd79f19d24fe25e2f9", "d22222222e1a8a05f8f1d41e45548fbb7aa54609b985d6439ee5fd9bb0da619f", "9898").
 		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6000000).
 		Nonce("eabf041afbb6c6059fbd25eab0d3202db84e842d", 1).
@@ -890,8 +916,6 @@ func Test_HexPatriciaHashed_ProcessUpdates_UniqueRepresentationInTheMiddle(t *te
 
 	plainKeys, updates = sortUpdatesByHashIncrease(t, sequential, plainKeys, updates)
 
-	//sequential.SetTraceWriter(os.Stderr)
-	//batch.SetTraceWriter(os.Stderr)
 	somewhere := 6
 	somewhereRoot := make([]byte, 0)
 
@@ -955,12 +979,15 @@ func TestUpdate_EncodeDecode(t *testing.T) {
 	updates := []Update{
 		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
 		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
-		{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
+		{
+			Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
 			CodeHash: common.Hash{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			},
+		},
 		{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
 		{Flags: DeleteUpdate, CodeHash: empty.CodeHash},
 	}
@@ -1001,17 +1028,21 @@ func TestUpdate_Merge(t *testing.T) {
 		},
 		{
 			a: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(4568314), Nonce: 123, CodeHash: empty.CodeHash},
-			b: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
+			b: Update{
+				Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124,
 				CodeHash: common.Hash{
 					0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 					0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 					0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+					0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+				},
+			},
 			e: Update{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 124, CodeHash: common.Hash{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
 				0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x0E, 0x0F, 0x10,
 				0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18,
-				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20}},
+				0x19, 0x1A, 0x1B, 0x1C, 0x1D, 0x1E, 0x1F, 0x20,
+			}},
 		},
 		{
 			a: Update{Flags: StorageUpdate, Storage: common.Hash{0x21, 0x22, 0x23, 0x24}, StorageLen: 4, CodeHash: empty.CodeHash},
@@ -1121,7 +1152,6 @@ func TestCell_fillFromFields(t *testing.T) {
 	row, bm := generateCellRow(t, 16)
 	rnd := rand.New(rand.NewSource(0))
 
-	// Apply stateHash to cells with account or storage data (matches old callback behavior)
 	for bitset := bm; bitset != 0; {
 		bit := bitset & -bitset
 		nibble := bits.TrailingZeros16(bit)
@@ -1139,7 +1169,6 @@ func TestCell_fillFromFields(t *testing.T) {
 	enc, err := be.EncodeBranch(bm, bm, bm, &cellData)
 	require.NoError(t, err)
 
-	//original := bytes.Clone(enc)
 	fmt.Printf("%s\n", enc.String())
 
 	tm, am, decRow, err := enc.decodeCells()
@@ -1150,7 +1179,6 @@ func TestCell_fillFromFields(t *testing.T) {
 	for i := range len(decRow) {
 		t.Logf("cell %d\n", i)
 		first, second := row[i], decRow[i]
-		// after decoding extension == hashedExtension, dhk will be derived from extension
 		require.Equal(t, second.extLen, second.hashedExtLen)
 		require.Equal(t, first.extLen, second.hashedExtLen)
 		require.Equal(t, second.extension[:second.extLen], second.hashedExtension[:second.hashedExtLen])
@@ -1176,19 +1204,17 @@ func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 	row := 0
 	depth := int16(0)
 
-	// Set up 3 cells at nibbles 1, 5, 10 as pure hash nodes.
-	// computeCellHash for these returns [0xA0, hash...] (33 bytes).
 	hph.afterMap[row] = (1 << 1) | (1 << 5) | (1 << 10)
 
 	for _, nibble := range []int{1, 5, 10} {
 		cell := &hph.grid[row][nibble]
+		cell.reset()
 		cell.hashLen = 32
 		for i := range cell.hash {
 			cell.hash[i] = byte(nibble*17 + i) // unique per nibble
 		}
 	}
 
-	// Step 1: Run the old two-step approach to get reference values.
 	hph.keccak2.Reset()
 	b := [...]byte{0x80}
 	err := hph.feedBranchHashesToKeccak(row, depth, b[:])
@@ -1206,20 +1232,16 @@ func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 		bitset ^= bit
 	}
 
-	// Step 2: Run hashRow (new single-pass approach).
-	// Note: computeCellHash for pure hash nodes is idempotent, so calling twice is safe.
 	hph.keccak2.Reset()
-	cellData, err := hph.hashRow(row, depth)
+	cellData, err := hph.hashRow(row, depth, hph.keccak2)
 	require.NoError(t, err)
 
 	var newHash [32]byte
 	_, err = hph.keccak2.Read(newHash[:])
 	require.NoError(t, err)
 
-	// Step 3: Verify equivalence.
 	require.Equal(t, refHash, newHash, "keccak2 hash must match between old and new approach")
 
-	// Verify cellEncodeData for present nibbles
 	for _, nibble := range []int{1, 5, 10} {
 		require.Equal(t, refCellData[nibble].hashLen, cellData[nibble].hashLen, "nibble %d hashLen", nibble)
 		require.Equal(t, refCellData[nibble].hash, cellData[nibble].hash, "nibble %d hash", nibble)
@@ -1229,7 +1251,6 @@ func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 		require.Equal(t, refCellData[nibble].stateHashLen, cellData[nibble].stateHashLen, "nibble %d stateHashLen", nibble)
 	}
 
-	// Verify cellEncodeData for absent nibbles are zero-valued
 	for nibble := range 16 {
 		if nibble == 1 || nibble == 5 || nibble == 10 {
 			continue
@@ -1240,7 +1261,6 @@ func Test_HexPatriciaHashed_hashRow(t *testing.T) {
 		require.Equal(t, int16(0), cellData[nibble].storageAddrLen, "nibble %d should be empty", nibble)
 	}
 
-	// Verify non-zero hash was produced
 	require.NotEqual(t, [32]byte{}, newHash, "keccak2 hash must be non-zero")
 }
 
@@ -1250,19 +1270,16 @@ func Test_HexPatriciaHashed_hashRow_allEmpty(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms, DefaultTrieConfig())
 
-	// afterMap=0 means all 17 slots are empty (0x80 each)
 	hph.afterMap[0] = 0
 
 	hph.keccak2.Reset()
-	cellData, err := hph.hashRow(0, 0)
+	cellData, err := hph.hashRow(0, 0, hph.keccak2)
 	require.NoError(t, err)
 
-	// All cellEncodeData should be zero
 	for nibble := range 16 {
 		require.Equal(t, int16(0), cellData[nibble].hashLen)
 	}
 
-	// keccak2 should still produce a hash (of 17 x 0x80 bytes)
 	var hash [32]byte
 	_, err = hph.keccak2.Read(hash[:])
 	require.NoError(t, err)
@@ -1279,7 +1296,7 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 		Balance("00000000000000000000000000000000000000ff", 900234).
 		Balance("0000000000000000000000000000000000000004", 1233).
 		Storage("0000000000000000000000000000000000000004", "01", "0401").
-		Balance("00000000000000000000000000000000000000ba", 065606).
+		Balance("00000000000000000000000000000000000000ba", 0o65606).
 		Balance("0000000000000000000000000000000000000000", 4).
 		Balance("0000000000000000000000000000000000000001", 5).
 		Balance("0000000000000000000000000000000000000002", 6).
@@ -1322,34 +1339,6 @@ func Test_HexPatriciaHashed_ProcessWithDozensOfStorageKeys(t *testing.T) {
 
 	trieOne := NewHexPatriciaHashed(length.Addr, msOne, DefaultTrieConfig())
 	plainKeys, updates = sortUpdatesByHashIncrease(t, trieOne, plainKeys, updates)
-
-	//rnd := rand.New(rand.NewSource(345))
-	//noise := make([]byte, 32)
-	//prefixes := make(map[string][][]byte)
-	//prefixesCnt := make(map[string]int)
-	//for i := 0; i < 5000000; i++ {
-	//	rnd.Read(noise)
-	//	//hashed := trieOne.KeyToHexNibbleHash(noise)
-	//	trieOne.keccak.Reset()
-	//	trieOne.keccak.Write(noise)
-	//	hashed := make([]byte, 32)
-	//	trieOne.keccak.Read(hashed)
-	//	prefixesCnt[string(hashed[:5])]++
-	//	if c := prefixesCnt[string(hashed[:5])]; c < 5 {
-	//		prefixes[string(hashed[:5])] = append(prefixes[string(hashed[:5])], bytes.Clone(noise))
-	//	}
-	//}
-	//
-	//count := 0
-	//for pref, cnt := range prefixesCnt {
-	//	if cnt > 1 {
-	//		for _, noise := range prefixes[pref] {
-	//			fmt.Printf("%x %x\n", pref, noise)
-	//			count++
-	//		}
-	//	}
-	//}
-	//fmt.Printf("total %d\n", count)
 
 	trieTwo := NewHexPatriciaHashed(length.Addr, msTwo, DefaultTrieConfig())
 
@@ -1401,13 +1390,11 @@ func generateKeyWithHashedPrefix(constHashedPrefixNibbles []byte, keyLen int) (p
 		rnd.Read(plainKey[:keyLen])
 		hashedKey := KeyToNibblizedHash(plainKey)
 		if bytes.HasPrefix(hashedKey, constHashedPrefixNibbles) {
-			// found key with desired hashed prefix, return result
 			return plainKey, hashedKey
 		}
 	}
 }
 
-// longer prefixLen - harder to find required keys
 func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefixNibbles []byte, keyLen int, prefixLen int, keyCount int) (plainKeys [][]byte, hashedKeys [][]byte) {
 	tb.Helper()
 	plainKeys = make([][]byte, 0, keyCount)
@@ -1433,10 +1420,6 @@ func generatePlainKeysWithSameHashPrefix(tb testing.TB, constPrefixNibbles []byt
 	return plainKeys, hashedKeys
 }
 
-// longer prefixLen - harder to find required keys. Use up to 6 bytes for common prefix for quick pass.
-//
-// constPrefix is used when need to generate storage keys for same account address correctly. If constPrefix is not nil, keyLen must be > than len of constPrefix.
-// So final key in this case will be constPrefix + random bytes, producing hased key like hash(constPrefix)+hash(random bytes) and checking that hash of random bytes has common prefix of prefixLen
 func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [][]byte, updates []Update) ([][]byte, []Update) {
 	t.Helper()
 
@@ -1459,32 +1442,13 @@ func sortUpdatesByHashIncrease(t *testing.T, hph *HexPatriciaHashed, plainKeys [
 	return pks, upds
 }
 
-// Test_ModeUpdate_SiblingConsistency verifies that ModeUpdate produces
-// the same trie root as ModeDirect when processing two consecutive blocks,
-// where block 2 modifies only a subset of accounts from block 1.
-// The sibling accounts (untouched in block 2) must be correctly encoded
-// in branch nodes — specifically, they should be inlined when small enough,
-// not hashed. A stale cached cell in the trie could cause the sibling to
-// be hashed instead of inlined, producing a different branch encoding.
 func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
-	// TODO(#20961): ModeUpdate produces a different root than ModeDirect when
-	// only a subset of sibling accounts is touched in a follow-up block — the
-	// untouched sibling cell is being hashed instead of inlined, so the branch
-	// node's encoding diverges. Failing test left as the regression marker.
-	// Fix is non-trivial (cell-cache invalidation in HexPatriciaHashed).
-	t.Skip("known parallel-calc sibling-encoding bug, see #20961")
 	t.Parallel()
 	ctx := context.Background()
 
-	// Create two accounts that share a branch node prefix.
-	// Account A (addr 00) and Account B (addr 01) are siblings.
-	// Block 1: both modified. Block 2: only A modified.
-
-	// --- ModeDirect (serial baseline) ---
 	msDirect := NewMockState(t)
 	hphDirect := NewHexPatriciaHashed(1, msDirect, DefaultTrieConfig())
 
-	// Block 1: both accounts
 	plainKeys1, updates1 := NewUpdateBuilder().
 		Balance("00", 100).
 		Nonce("00", 1).
@@ -1504,9 +1468,6 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("ModeDirect block 1 root: %x", root1Direct)
 
-	// Block 2: only account 00 modified — partial Update (only balance).
-	// The trie must handle this correctly: sibling cells from block 1
-	// should retain their full account data for proper branch encoding.
 	plainKeys2, updates2 := NewUpdateBuilder().
 		Balance("00", 150).
 		Build()
@@ -1521,11 +1482,9 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 	require.NoError(t, err)
 	t.Logf("ModeDirect block 2 root: %x", root2Direct)
 
-	// --- ModeUpdate (parallel calculator) ---
 	msUpdate := NewMockState(t)
 	hphUpdate := NewHexPatriciaHashed(1, msUpdate, DefaultTrieConfig())
 
-	// Block 1: same accounts
 	err = msUpdate.applyPlainUpdates(plainKeys1, updates1)
 	require.NoError(t, err)
 
@@ -1538,7 +1497,6 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 
 	require.Equal(t, root1Direct, root1Update, "block 1 roots should match between ModeDirect and ModeUpdate")
 
-	// Block 2: only account 00 modified
 	err = msUpdate.applyPlainUpdates(plainKeys2, updates2)
 	require.NoError(t, err)
 
@@ -1551,6 +1509,41 @@ func Test_ModeUpdate_SiblingConsistency(t *testing.T) {
 
 	require.Equal(t, root2Direct, root2Update,
 		"block 2 roots should match — sibling accounts must be encoded consistently")
+}
+
+// A single-account trie keeps its leaf in hph.root across Process calls, so a follow-up
+// block carrying only a balance must still hash the account's real code hash.
+func Test_ModeUpdate_RootLeafKeepsCodeHash(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	const codeHash = "5ea78a5e3cec82b66117982ea93e22a8e0018a9a8adac0ef093ca1aca0e78466"
+
+	root := func(mode Mode) []byte {
+		ms := NewMockState(t)
+		hph := NewHexPatriciaHashed(1, ms, DefaultTrieConfig())
+		defer hph.Release()
+
+		keys1, upds1 := NewUpdateBuilder().
+			Balance("00", 100).
+			Nonce("00", 7).
+			CodeHash("00", codeHash).
+			Build()
+		require.NoError(t, ms.applyPlainUpdates(keys1, upds1))
+		block1 := WrapKeyUpdates(t, mode, KeyToHexNibbleHash, keys1, upds1)
+		defer block1.Close()
+		_, err := hph.Process(ctx, block1, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		keys2, upds2 := NewUpdateBuilder().Balance("00", 150).Build()
+		require.NoError(t, ms.applyPlainUpdates(keys2, upds2))
+		block2 := WrapKeyUpdates(t, mode, KeyToHexNibbleHash, keys2, upds2)
+		defer block2.Close()
+		got, err := hph.Process(ctx, block2, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+		return bytes.Clone(got)
+	}
+
+	require.Equal(t, root(ModeDirect), root(ModeUpdate))
 }
 
 func TestModeUpdatePreservesAccountAcrossStorageFold(t *testing.T) {
@@ -1618,8 +1611,6 @@ func TestSetTraceWriter_NilWriterSafe(t *testing.T) {
 	ms := NewMockState(t)
 	hph := NewHexPatriciaHashed(1, ms, DefaultTrieConfig())
 
-	// A nil writer must be safe on the trace path (no nil-deref); this exercises
-	// Process with tracing disabled.
 	hph.SetTraceWriter(nil)
 
 	plainKeys, updates := NewUpdateBuilder().
@@ -1636,9 +1627,6 @@ func TestSetTraceWriter_NilWriterSafe(t *testing.T) {
 	rootHash, err := hph.Process(ctx, upds, "", nil, WarmupConfig{})
 	require.NoError(t, err)
 	require.NotEmpty(t, rootHash, "root hash must not be empty")
-
-	// With nil traceW, there is nowhere to capture output — the test verifies
-	// that Process completes without panicking on nil writer.
 }
 
 func TestSetTraceWriter_BufferCapturesOutput(t *testing.T) {
@@ -1671,12 +1659,10 @@ func TestSetTraceWriter_BufferCapturesOutput(t *testing.T) {
 	output := buf.String()
 	require.NotEmpty(t, output, "trace buffer should contain output when traceW is set")
 
-	// Process should emit [proc] lines — one per key update processed.
 	procCount := strings.Count(output, "[proc]")
 	require.True(t, procCount >= 4,
 		"trace output should contain at least 4 [proc] lines (one per update), got %d in:\n%s", procCount, output)
 
-	// fold is called during commitment computation — match the tagged prefix.
 	require.True(t, strings.Contains(output, "fold ["),
 		"trace output should contain fold-related lines, got:\n%s", output)
 }
@@ -1714,4 +1700,240 @@ func (hph *HexPatriciaHashed) feedBranchHashesToKeccak(row int, depth int16, emp
 		bitset ^= bit
 	}
 	return nil
+}
+
+func Test_HexPatriciaHashed_CallerDeferredIgnoresCapacityLimit(t *testing.T) {
+	t.Parallel()
+
+	k1, u1, _, _ := collapseCorpus()
+
+	ms := NewMockState(t)
+	ctr := &branchWriteCounter{PatriciaContext: ms, wrote: map[string][]byte{}}
+
+	cfg := DefaultTrieConfig()
+	cfg.DeferBranchUpdates = true
+	trie := NewHexPatriciaHashed(length.Addr, ctr, cfg)
+	defer trie.Release()
+	trie.SetLeaveDeferredForCaller(true)
+	trie.branchEncoder.maxDeferredUpdates = 2
+
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	defer upds.Close()
+
+	ctr.on = true
+	_, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{})
+	ctr.on = false
+	require.NoError(t, err)
+
+	require.Greater(t, len(ctr.wrote)+len(trie.branchEncoder.deferred), 2, "corpus must exceed the lowered limit, or the test proves nothing")
+	require.Zero(t, len(ctr.wrote), "caller-deferred mode must write no branch record before the root is returned")
+}
+
+func TestDeferredCallerOwned_MatchesEagerAcrossDeletions(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	k1, u1, k2, u2 := collapseCorpus()
+
+	eagerState := NewMockState(t)
+	callerState := NewMockState(t)
+
+	eagerCfg := DefaultTrieConfig()
+	eagerCfg.DeferBranchUpdates = false
+	callerCfg := DefaultTrieConfig()
+	callerCfg.DeferBranchUpdates = true
+
+	trieEager := NewHexPatriciaHashed(length.Addr, eagerState, eagerCfg)
+	defer trieEager.Release()
+	trieCaller := NewHexPatriciaHashed(length.Addr, callerState, callerCfg)
+	defer trieCaller.Release()
+	trieCaller.SetLeaveDeferredForCaller(true)
+
+	var deletions int
+	for round, batch := range []struct {
+		keys [][]byte
+		upds []Update
+	}{{k1, u1}, {k2, u2}} {
+		require.NoError(t, eagerState.applyPlainUpdates(batch.keys, batch.upds))
+		require.NoError(t, callerState.applyPlainUpdates(batch.keys, batch.upds))
+
+		eagerUpds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, batch.keys, batch.upds)
+		rootEager, err := trieEager.Process(ctx, eagerUpds, "", nil, WarmupConfig{})
+		eagerUpds.Close()
+		require.NoError(t, err, "round %d eager", round)
+
+		callerUpds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, batch.keys, batch.upds)
+		rootCaller, err := trieCaller.Process(ctx, callerUpds, "", nil, WarmupConfig{})
+		callerUpds.Close()
+		require.NoError(t, err, "round %d caller-owned", round)
+		require.Equal(t, rootEager, rootCaller, "round %d root", round)
+
+		pending := trieCaller.TakeDeferredUpdates()
+		require.NotEmpty(t, pending, "round %d left nothing for the caller to apply", round)
+		for _, upd := range pending {
+			if len(upd.raw) == 4 && upd.raw[2] == 0 && upd.raw[3] == 0 {
+				deletions++
+			}
+		}
+
+		written, err := ApplyDeferredBranchUpdates(pending, 4, callerState.PutBranch, nil)
+		require.NoError(t, err, "round %d apply", round)
+		require.NotZero(t, written, "round %d wrote nothing", round)
+		for _, upd := range pending {
+			putDeferredUpdate(upd)
+		}
+
+		require.Equal(t, eagerState.cm, callerState.cm, "round %d stored branches", round)
+	}
+
+	require.NotZero(t, deletions, "the corpus must delete branches, or this proves nothing about deferred deletions")
+	t.Logf("deferred branch deletions applied: %d", deletions)
+}
+
+func TestPostOrderAfter(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name       string
+		next, prev []byte
+		want       bool
+	}{
+		{"parent closes after its child", []byte{1}, []byte{1, 2}, true},
+		{"sibling to the right", []byte{1, 3}, []byte{1, 2}, true},
+		{"right subtree after a left one two levels up", []byte{2, 0}, []byte{1, 9, 9}, true},
+		{"the same row twice", []byte{1, 2}, []byte{1, 2}, false},
+		{"descending back into a closed row", []byte{1, 2, 3}, []byte{1, 2}, false},
+		{"sibling to the left", []byte{1, 1}, []byte{1, 2}, false},
+		{"root closes last", []byte{}, []byte{7}, true},
+		{"nothing follows the root", []byte{7}, []byte{}, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, postOrderAfter(tc.next, tc.prev))
+		})
+	}
+}
+
+func TestAdvanceFoldFrontier_RejectsReenteredRow(t *testing.T) {
+	t.Parallel()
+	hph := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
+	defer hph.Release()
+
+	for _, key := range [][]byte{{1, 2, 3}, {1, 2}, {1, 5}, {1}} {
+		require.NoError(t, hph.advanceFoldFrontier(key), "post-order fold [%x] must be accepted", key)
+	}
+
+	err := hph.advanceFoldFrontier([]byte{1, 2})
+	require.Error(t, err, "row [0102] closed three folds ago; re-emitting it would overwrite its deferred record")
+	require.Contains(t, err.Error(), "0102")
+
+	hph.resetFoldFrontier()
+	require.NoError(t, hph.advanceFoldFrontier([]byte{1, 2}), "a new walk starts with no frontier")
+}
+
+func TestFoldFrontier_IsEnforcedDuringProcess(t *testing.T) {
+	t.Parallel()
+
+	k1, u1, _, _ := collapseCorpus()
+	ms := NewMockState(t)
+	trie := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
+	defer trie.Release()
+
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	upds := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	defer upds.Close()
+
+	_, err := trie.Process(context.Background(), upds, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	require.True(t, trie.foldFrontierSet, "every fold in a round passes the frontier check, so a completed round must leave one set")
+	require.Zero(t, trie.foldFrontierLen, "the last fold of a round closes the root")
+}
+
+type branchReadCounter struct {
+	PatriciaContext
+	reads map[string]int
+}
+
+func (c *branchReadCounter) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	c.reads[string(prefix)]++
+	return c.PatriciaContext.Branch(prefix)
+}
+
+func TestDeferredCollection_AddsNoBranchRead(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	k1, u1, k2, u2 := collapseCorpus()
+
+	ms := NewMockState(t)
+	counter := &branchReadCounter{PatriciaContext: ms, reads: map[string]int{}}
+
+	cfg := DefaultTrieConfig()
+	trie := NewHexPatriciaHashed(length.Addr, counter, cfg)
+	defer trie.Release()
+	trie.SetLeaveDeferredForCaller(true)
+
+	require.NoError(t, ms.applyPlainUpdates(k1, u1))
+	seed := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k1, u1)
+	_, err := trie.Process(ctx, seed, "", nil, WarmupConfig{})
+	seed.Close()
+	require.NoError(t, err)
+	_, err = ApplyDeferredBranchUpdates(trie.TakeDeferredUpdates(), 4, ms.PutBranch, nil)
+	require.NoError(t, err)
+
+	require.NoError(t, ms.applyPlainUpdates(k2, u2))
+	counter.reads = map[string]int{}
+	round := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, k2, u2)
+	_, err = trie.Process(ctx, round, "", nil, WarmupConfig{})
+	round.Close()
+	require.NoError(t, err)
+
+	pending := trie.TakeDeferredUpdates()
+	defer func() {
+		for _, upd := range pending {
+			putDeferredUpdate(upd)
+		}
+	}()
+
+	var totalReads, repeated, withPrev int
+	for _, n := range counter.reads {
+		totalReads += n
+		if n > 1 {
+			repeated++
+		}
+	}
+	for _, upd := range pending {
+		if len(upd.prev) > 0 {
+			withPrev++
+		}
+	}
+
+	require.NotZero(t, withPrev, "no record carried a previous value, so this proves nothing")
+	require.Zero(t, repeated,
+		"a round reads each branch prefix once; preparing an update's prev must reuse what the unfold read, not read it again")
+	t.Logf("branch reads %d for %d records, %d of them merged onto a previous value", totalReads, len(pending), withPrev)
+}
+
+func TestStateDecodeRejectsTruncatedInput(t *testing.T) {
+	enc, err := (&state{Root: []byte{1, 2, 3}}).Encode(nil)
+	require.NoError(t, err)
+	for n := range len(enc) {
+		require.Error(t, new(state).Decode(enc[:n]), "prefix of %d bytes", n)
+	}
+}
+
+func TestComputeCellHashKeepsLeafPath(t *testing.T) {
+	acct := common.HexToAddress("0x0000F90827F1C53a10cb7A02335B175320002935")
+	hph := NewHexPatriciaHashed(length.Addr, NewMockState(t), DefaultTrieConfig())
+	upd := Update{Flags: NonceUpdate}
+	upd.Nonce = 1
+	hph.updateCell(acct[:], KeyToHexNibbleHash(acct[:]), &upd)
+	addStorageToCell(&hph.root, acct, common.Hash{}, []byte{0xaa})
+	hph.root.hashedExtLen = 0
+	require.NoError(t, hph.root.deriveHashedKeys(0, hph.keccak, hph.accountKeyLen, hph.cellHashBuf[:]))
+	path := bytes.Clone(hph.root.hashedExtension[:hph.root.hashedExtLen])
+
+	_, err := hph.computeCellHash(&hph.root, 0, nil)
+	require.NoError(t, err)
+	require.Equal(t, path, hph.root.hashedExtension[:hph.root.hashedExtLen])
 }

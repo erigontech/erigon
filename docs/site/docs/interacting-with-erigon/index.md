@@ -17,7 +17,6 @@ The Erigon RPC Service, managed by Erigon's modular [RPC Daemon](/fundamentals/m
 * [`trace`](/interacting-with-erigon/trace): Transaction tracing API.
 * [`txpool`](/interacting-with-erigon/txpool): Transaction pool API.
 * [`admin`](/interacting-with-erigon/admin): Node administration API
-* [`bor`](/interacting-with-erigon/bor): Polygon Bor-specific API (when running on Polygon)
 * [`ots`](/interacting-with-erigon/ots): These methods are specifically tailored for use with Otterscan, an open-source, fast block explorer.
 * [`internal`](/interacting-with-erigon/internal): Erigon specific API for development and debugging purposes.
 * [`gRPC`](/interacting-with-erigon/grpc): API for lower-level data access.
@@ -65,7 +64,7 @@ erigon --http --http.api eth,net,debug,trace
 rpcdaemon --http.api eth,net,debug,trace
 ```
 
-The default APIs enabled are `eth` and `erigon`. Available namespaces include: `admin`, `debug`, `eth`, `erigon`, `net`, `trace`, `txpool`, `web3`, `bor` (Polygon only), and `internal`.
+The default APIs enabled are `eth` and `erigon`. Available namespaces include: `admin`, `debug`, `eth`, `erigon`, `net`, `trace`, `txpool`, `web3`, and `internal`.
 
 You can also restrict who can access the HTTP server by specifying domains for Cross-Origin requests using `--http.corsdomain`:
 

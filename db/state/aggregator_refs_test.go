@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/version"
 )
 
@@ -38,15 +39,15 @@ func writeRefsToml(t *testing.T, dirs datadir.Dirs, refs bool) {
 	t.Helper()
 	content := fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = %d\nreferences_in_commitment_branches = %v\n",
 		config3.DefaultStepSize, config3.DefaultStepsInFrozenFile, refs)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), content, 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), content, 0o644))
 }
 
 func openTestAggForRefs(t *testing.T, dirs datadir.Dirs, settings *ErigonDBSettings) *Aggregator {
 	t.Helper()
 	logger := log.New()
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := NewTest(dirs).Logger(logger).WithErigonDBSettings(settings).MustOpen(t.Context(), db)
+	agg := NewTest(dirs).Logger(logger).WithErigonDBSettings(settings).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	return agg
 }
@@ -58,9 +59,9 @@ func TestReloadErigonDBSettingsAppliesCommitmentRefsFlag(t *testing.T) {
 	writeRefsToml(t, dirs, false)
 
 	logger := log.New()
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
-	agg := NewTest(dirs).Logger(logger).MustOpen(t.Context(), db)
+	agg := NewTest(dirs).Logger(logger).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 
 	require.NoError(t, agg.ReloadErigonDBSettings(true))
@@ -102,7 +103,7 @@ func TestResolvedRefsFlagBindsCommitmentWriteVersion(t *testing.T) {
 		dirs := datadir.New(t.TempDir())
 		content := fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = %d\n",
 			config3.DefaultStepSize, config3.DefaultStepsInFrozenFile)
-		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), content, 0644))
+		require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE), content, 0o644))
 
 		settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 		require.NoError(t, err)

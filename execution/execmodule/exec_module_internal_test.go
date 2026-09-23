@@ -19,17 +19,22 @@ package execmodule
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/blockmetrics"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -55,6 +60,35 @@ type sideForkReader struct {
 	canonicalHash common.Hash
 	forkHeader    *types.Header
 	forkBody      *types.Body
+}
+
+func TestDrainWaitsForInFlightExecution(t *testing.T) {
+	module := &ExecModule{semaphore: semaphore.NewWeighted(1)}
+	require.NoError(t, module.semaphore.Acquire(t.Context(), 1))
+	release := sync.OnceFunc(func() { module.semaphore.Release(1) })
+	t.Cleanup(release)
+
+	started := make(chan struct{})
+	drained := make(chan struct{})
+	go func() {
+		close(started)
+		module.Drain()
+		close(drained)
+	}()
+	<-started
+
+	select {
+	case <-drained:
+		t.Fatal("drain returned while execution was still active")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	release()
+	select {
+	case <-drained:
+	case <-time.After(time.Second):
+		t.Fatal("drain did not return after execution became idle")
+	}
 }
 
 func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (bool, error) {
@@ -98,8 +132,8 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 func TestUnwindToCommonCanonicalReturnsCanonicalityError(t *testing.T) {
 	expectedErr := errors.New("canonicality read failed")
 	e := &ExecModule{
-		bacgroundCtx: t.Context(),
-		blockReader:  headerNumberErrorReader{err: expectedErr},
+		backgroundCtx: t.Context(),
+		blockReader:   headerNumberErrorReader{err: expectedErr},
 	}
 	header := &types.Header{Number: *uint256.NewInt(0)}
 
@@ -117,7 +151,7 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 		forkHeader:    forkHeader,
 		forkBody:      &types.Body{},
 	}
-	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16)
+	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, nil)
 
 	// Stop at the suspension boundary; this test needs no execution pipeline to
 	// prove that suspension failure aborts before the validator stages its unwind.
@@ -126,4 +160,42 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 		return suspendErr
 	}, log.New())
 	require.ErrorIs(t, criticalErr, suspendErr)
+}
+
+func TestForkValidatorBuildsBlockMetricsCacheOnlyWhenEnabled(t *testing.T) {
+	reader := sideForkReader{canonicalHash: common.HexToHash("0x01")}
+
+	off := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, nil)
+	require.Nil(t, off.blockMetricsCache,
+		"a disabled threshold must not build the cache: the nil check is what keeps newPayload from recording")
+	require.Nil(t, off.TakeBlockMetrics(common.HexToHash("0x02")))
+
+	every := time.Duration(0)
+	on := newForkValidator(t.Context(), 10, &PipelineExecutor{}, reader, 16, &every)
+	require.NotNil(t, on.blockMetricsCache)
+}
+
+func TestRecordBlockMetricsTakesCommitmentTimeFromSharedDomains(t *testing.T) {
+	prevReadMetrics := dbg.KVReadLevelledMetrics
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
+
+	every := time.Duration(0)
+	fv := newForkValidator(t.Context(), 10, &PipelineExecutor{}, sideForkReader{}, 16, &every)
+	sd := &execctx.SharedDomains{}
+	header := &types.Header{Number: *uint256.NewInt(7), GasUsed: 21_000}
+	hash := header.Hash()
+
+	sd.AddCommitmentTime(5 * time.Millisecond)
+	fv.recordBlockMetrics(sd, header, &types.RawBody{}, hash, &blockmetrics.Sample{}, 1, 20*time.Millisecond, 12*time.Millisecond)
+
+	rec := fv.TakeBlockMetrics(hash)
+	require.NotNil(t, rec)
+	require.Equal(t, 5*time.Millisecond, rec.StateHash)
+	require.Equal(t, 7*time.Millisecond, rec.Execution)
+	require.Equal(t, 20*time.Millisecond, rec.Validation)
+	require.Zero(t, sd.TakeCommitmentTime(), "a commitment time left behind is reported again by the next block")
+}
+
+func (fv *ForkValidator) LastValidationExecStageTiming() time.Duration {
+	return fv.executor.lastValidationExecStageTiming()
 }
