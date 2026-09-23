@@ -133,8 +133,8 @@ func (n *node) setLeafShared(nib int, suffix, value []byte) {
 	s.node = nil
 	s.hash = [32]byte{}
 	s.ext = nil
-	s.suffix = suffix[:len(suffix):len(suffix)]
-	s.value = value[:len(value):len(value)]
+	s.suffix = slices.Clip(suffix)
+	s.value = slices.Clip(value)
 }
 
 func (n *node) setChild(nib int, child *node) {
