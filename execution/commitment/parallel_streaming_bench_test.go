@@ -56,16 +56,22 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	runParallelBenchWith(b, pk, updates, workers,
-		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} })
+		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} }, false)
 }
 
 func runCollectingParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
-	runParallelBenchWith(b, pk, updates, workers, collectingTrieCtxFactory)
+	runParallelBenchWith(b, pk, updates, workers, collectingTrieCtxFactory, false)
+}
+
+func runCollectAndProcessBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
+	runParallelBenchWith(b, pk, updates, workers,
+		func(ms *MockState) (TrieContextFactory, func()) { return mockTrieCtxFactory(ms), func() {} }, true)
 }
 
 func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers int,
-	newFactory func(*MockState) (TrieContextFactory, func())) {
+	newFactory func(*MockState) (TrieContextFactory, func()), timeCollect bool) {
 	ctx := context.Background()
+	tmp := b.TempDir()
 	b.ReportAllocs()
 	var pph *ParallelPatriciaHashed
 	defer func() {
@@ -88,8 +94,14 @@ func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers i
 		}
 		pph.RootTrie().Reset()
 		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		if timeCollect {
+			upds = NewUpdates(ModeParallel, tmp, KeyToHexNibbleHash)
+		}
 		b.StartTimer()
 
+		if timeCollect {
+			WrapKeyUpdatesInto(b, upds, pk, updates)
+		}
 		_, err := pph.Process(ctx, upds, "", nil, WarmupConfig{})
 
 		b.StopTimer()
@@ -622,4 +634,22 @@ func collectingTrieCtxFactory(ms *MockState) (TrieContextFactory, func()) {
 		made = nil
 	}
 	return f, drain
+}
+
+func Benchmark_ModeParallel_TouchAndProcess(b *testing.B) {
+	ncpu := runtime.NumCPU()
+	for _, c := range []struct {
+		name  string
+		build func(testing.TB) ([][]byte, []Update)
+	}{
+		{"100K-AccountsOnly", build100KAccountsCorpus},
+		{"500K-StorageHeavy", build500KStorageHeavyCorpus},
+	} {
+		pk, updates := c.build(b)
+		for _, w := range []int{4, ncpu} {
+			b.Run(fmt.Sprintf("%s/w%d", c.name, w), func(b *testing.B) {
+				runCollectAndProcessBench(b, pk, updates, w)
+			})
+		}
+	}
 }

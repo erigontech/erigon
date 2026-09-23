@@ -48,14 +48,19 @@ const touchChunkKeys = 8192
 
 const touchChunkBuffers = 2
 
+type touchEntry struct {
+	hashedKey []byte
+	plainKey  []byte
+	update    *Update
+}
+
 type parallelUpdate struct {
 	trie *prefixTrie
 
-	pending   *touchChunk
+	pending   []touchEntry
 	chunkKeys int
-	buildCh   chan *touchChunk
-	freeCh    chan *touchChunk
-	pool      []*touchChunk
+	buildCh   chan []touchEntry
+	freeCh    chan []touchEntry
 	inflight  sync.WaitGroup
 
 	deferredMu       sync.Mutex
@@ -67,58 +72,46 @@ type parallelUpdate struct {
 func newParallelUpdate() *parallelUpdate {
 	return &parallelUpdate{
 		trie:      newPrefixTrie(),
-		pending:   new(touchChunk),
 		chunkKeys: touchChunkKeys,
 	}
 }
 
 // Collect is not safe for concurrent calls; the caller must serialize them.
 func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
-	pu.pending.collect(hashedKey, plainKey, update)
-	if pu.pending.count() >= pu.chunkKeys {
+	pu.pending = append(pu.pending, touchEntry{hashedKey: hashedKey, plainKey: plainKey, update: update})
+	if len(pu.pending) >= pu.chunkKeys {
 		pu.handOff()
 	}
 }
 
 func (pu *parallelUpdate) startBuilder() {
-	pu.buildCh = make(chan *touchChunk, touchChunkBuffers)
-	pu.freeCh = make(chan *touchChunk, touchChunkBuffers)
-	for range touchChunkBuffers {
-		if n := len(pu.pool); n > 0 {
-			pu.freeCh <- pu.pool[n-1]
-			pu.pool = pu.pool[:n-1]
-		} else {
-			pu.freeCh <- &touchChunk{entries: make([]touchEntry, 0, pu.chunkKeys)}
+	if pu.freeCh == nil {
+		pu.freeCh = make(chan []touchEntry, touchChunkBuffers)
+		for range touchChunkBuffers {
+			pu.freeCh <- make([]touchEntry, 0, pu.chunkKeys)
 		}
 	}
-	go func(build <-chan *touchChunk, free chan<- *touchChunk) {
-		for p := range build {
-			pu.insertChunk(p)
-			p.reset()
-			free <- p
+	pu.buildCh = make(chan []touchEntry, touchChunkBuffers)
+	go func(build <-chan []touchEntry, free chan<- []touchEntry) {
+		for c := range build {
+			pu.insertChunk(c)
+			clear(c)
+			free <- c[:0]
 			pu.inflight.Done()
 		}
 	}(pu.buildCh, pu.freeCh)
 }
 
 func (pu *parallelUpdate) stopBuilder() {
-	if pu.buildCh == nil {
-		return
+	if pu.buildCh != nil {
+		close(pu.buildCh)
+		pu.buildCh = nil
 	}
-	close(pu.buildCh)
-	for range touchChunkBuffers {
-		select {
-		case p := <-pu.freeCh:
-			pu.pool = append(pu.pool, p)
-		default:
-		}
-	}
-	pu.buildCh, pu.freeCh = nil, nil
 }
 
 func (pu *parallelUpdate) handOff() {
 	if pu.trie == nil {
-		pu.pending.reset()
+		pu.pending = pu.pending[:0]
 		return
 	}
 	if pu.buildCh == nil {
@@ -129,21 +122,20 @@ func (pu *parallelUpdate) handOff() {
 	pu.pending = <-pu.freeCh
 }
 
-func (pu *parallelUpdate) insertChunk(p *touchChunk) {
-	for i := range p.entries {
-		pu.trie.Insert(p.entries[i].hashedKey, p.entries[i].plainKey, p.entries[i].update)
+func (pu *parallelUpdate) insertChunk(c []touchEntry) {
+	for i := range c {
+		pu.trie.Insert(c[i].hashedKey, c[i].plainKey, c[i].update)
 	}
 }
 
 func (pu *parallelUpdate) Build() {
-	if pu.pending.count() > 0 {
+	if len(pu.pending) > 0 {
 		if pu.buildCh != nil {
 			pu.handOff()
-		} else if pu.trie != nil {
-			pu.insertChunk(pu.pending)
-			pu.pending.reset()
 		} else {
-			pu.pending.reset()
+			pu.insertChunk(pu.pending)
+			clear(pu.pending)
+			pu.pending = pu.pending[:0]
 		}
 	}
 	pu.inflight.Wait()
@@ -166,7 +158,8 @@ func (pu *parallelUpdate) drainDeferred() {
 func (pu *parallelUpdate) Reset() {
 	pu.inflight.Wait()
 	pu.stopBuilder()
-	pu.pending.reset()
+	clear(pu.pending)
+	pu.pending = pu.pending[:0]
 	if pu.trie != nil {
 		pu.trie.Reset()
 	}
@@ -177,8 +170,9 @@ func (pu *parallelUpdate) Reset() {
 func (pu *parallelUpdate) Close() {
 	pu.inflight.Wait()
 	pu.stopBuilder()
-	pu.pool = nil
-	pu.pending.reset()
+	pu.freeCh = nil
+	clear(pu.pending)
+	pu.pending = nil
 	pu.trie = nil
 	pu.drainDeferred()
 	pu.keyArena.reset()

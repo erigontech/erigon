@@ -161,23 +161,23 @@ func TestChunkBuild_BackgroundBuildKeepsMergeOrder(t *testing.T) {
 	}
 }
 
-func TestChunkBuild_BuffersReturnToThePoolAcrossBatches(t *testing.T) {
+func TestChunkBuild_BuffersSurviveBatches(t *testing.T) {
 	t.Parallel()
 
 	cases := randomTouchCases(777, 200, 0)
 	pu, backgrounded := buildChunked(cases, 8)
 	require.True(t, backgrounded)
-	require.Len(t, pu.pool, touchChunkBuffers, "every chunk buffer must come back to the pool")
+	require.Len(t, pu.freeCh, touchChunkBuffers, "every chunk buffer must be back in the free list")
 
 	pu.Reset()
 	for _, c := range cases {
 		pu.Collect(c.hashedKey, c.plainKey, nil)
 	}
 	pu.Build()
-	require.Len(t, pu.pool, touchChunkBuffers, "a second batch must reuse the pooled buffers")
-	for _, p := range pu.pool {
-		require.GreaterOrEqual(t, cap(p.entries), pu.chunkKeys,
-			"a pooled chunk buffer must keep its capacity, or every chunk re-grows it")
+	require.Len(t, pu.freeCh, touchChunkBuffers, "a second batch must reuse the same buffers")
+	for range touchChunkBuffers {
+		require.GreaterOrEqual(t, cap(<-pu.freeCh), pu.chunkKeys,
+			"a recycled buffer must keep its capacity, or every chunk re-grows it")
 	}
 	require.EqualValues(t, len(cases), pu.trie.root.subtreeCount)
 }
