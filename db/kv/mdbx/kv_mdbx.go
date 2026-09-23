@@ -139,23 +139,15 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
-// DeferredSync stops flushing on every commit and instead flushes when period has passed or
-// bytes have accumulated, whichever comes first; zero leaves that bound unset. A crash then
-// rolls the database back to the last flushed point - mdbx keeps it intact either way - so the
-// bounds are the loss window. The flush runs on a background goroutine, because mdbx tests its
-// thresholds only inside a commit, which would otherwise make one unlucky commit pay for it.
-func (opts MdbxOpts) DeferredSync(period time.Duration, bytes datasize.ByteSize) MdbxOpts {
+// DeferredSync stops flushing on every commit: the data is flushed once a second, or once
+// 64MB is unflushed, whichever comes first, by a background goroutine - mdbx tests those
+// thresholds only inside a commit, which would otherwise make one unlucky commit pay for the
+// flush. A crash rolls the database back to the last flushed point; mdbx keeps it intact
+// either way. The file also runs larger, because pages are not reused until that point.
+func (opts MdbxOpts) DeferredSync() MdbxOpts {
 	opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
-	if period > 0 {
-		opts = opts.SyncPeriod(period)
-		opts.syncPoll = max(period/8, 5*time.Millisecond)
-	}
-	if bytes > 0 {
-		opts = opts.SyncBytes(bytes)
-		if opts.syncPoll == 0 {
-			opts.syncPoll = 100 * time.Millisecond
-		}
-	}
+	opts = opts.SyncPeriod(time.Second).SyncBytes(64 * datasize.MB)
+	opts.syncPoll = 125 * time.Millisecond
 	return opts
 }
 

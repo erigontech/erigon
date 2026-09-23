@@ -1225,7 +1225,7 @@ func TestDeferredSyncFlushesWithoutFurtherCommits(t *testing.T) {
 
 	deferred := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).
-		DeferredSync(50*time.Millisecond, 0).MustOpen()
+		DeferredSync().MustOpen()
 	t.Cleanup(deferred.Close)
 	write(deferred)
 	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 5*time.Second, 10*time.Millisecond,
@@ -1234,7 +1234,7 @@ func TestDeferredSyncFlushesWithoutFurtherCommits(t *testing.T) {
 	kept := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).
 		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
-		SyncPeriod(50 * time.Millisecond).MustOpen()
+		SyncPeriod(time.Second).MustOpen()
 	t.Cleanup(kept.Close)
 	write(kept)
 	time.Sleep(300 * time.Millisecond)
