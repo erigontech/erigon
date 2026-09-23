@@ -778,9 +778,11 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_RecoversFromPan
 	}
 }
 
-// TestPublishBackground_PublishesToRealTopic proves a queued message
-// eventually reaches the real gossip Publish path (wiring end-to-end),
-// separate from the async-scheduling behavior proved above.
+// TestPublishBackground_PublishesToRealTopic proves a queued message reaches
+// the real gossip Publish path end-to-end: it subscribes to the topic on the
+// same pubsub instance and asserts the published bytes are actually
+// delivered, rather than only observing that the pre-publish test hook ran
+// (which would still pass even if the worker stopped calling Publish).
 func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PublishesToRealTopic() {
 	forkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
 	topicName := "test_publish_topic"
@@ -792,20 +794,21 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PublishesToReal
 	}
 	s.Require().NoError(s.gm.subscriptions.Add(topic, topicHandle, validator))
 
-	published := make(chan struct{})
-	s.gm.publishHookForTest = func(name string, data []byte) {
-		if name == topicName {
-			close(published)
-		}
-	}
+	sub, err := topicHandle.Subscribe()
+	s.Require().NoError(err)
+	defer sub.Cancel()
 
-	s.gm.PublishBackground(topicName, []byte("hello"))
+	payload := []byte("hello")
+	s.gm.PublishBackground(topicName, payload)
 
-	select {
-	case <-published:
-	case <-time.After(2 * time.Second):
-		s.FailNow("PublishBackground never reached the publish hook")
-	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	msg, err := sub.Next(ctx)
+	s.Require().NoError(err, "expected PublishBackground's message to be delivered to a real pubsub subscription")
+
+	got, err := utils.DecompressSnappy(msg.GetData(), true)
+	s.Require().NoError(err)
+	s.Equal(payload, got)
 }
 
 func TestGossipManager(t *testing.T) {
