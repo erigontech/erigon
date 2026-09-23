@@ -169,6 +169,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	}
 	if root == nil {
 		root = fork(nil)
+		root.loaded = true
 	}
 	root.plane = planeStorage
 	markStorageRoot(root)

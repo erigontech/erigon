@@ -148,6 +148,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	}
 	if root == nil {
 		root = fork(nil)
+		root.loaded = true
 	}
 	root.plane = planeAccount
 	before := new(keySet)
