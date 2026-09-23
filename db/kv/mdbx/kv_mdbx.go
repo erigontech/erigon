@@ -29,6 +29,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 	"unsafe"
 
@@ -93,23 +94,15 @@ type MdbxOpts struct {
 }
 
 const (
+	DefaultSyncBytes  = 8 * datasize.MB
 	DefaultMapSize    = 2 * datasize.TB
 	DefaultGrowthStep = 1 * datasize.GB
 )
 
-// defaultSyncBytes bounds how much stays unflushed before mdbx writes a steady commit-point.
-// Every database here holds data the node can fetch or rebuild, so bounding the loss in bytes
-// costs a re-download or a re-execution at worst, and mdbx keeps the file intact regardless.
-// Flushes then scale with data written instead of with time, so one value fits every disk,
-// filesystem and workload: 8MB is where fewer flushes stop paying, at 8x fewer than per-commit.
-var defaultSyncBytes = 8 * datasize.MB
-
 func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
-		flags:      mdbx.NoReadahead | mdbx.SafeNoSync,
-		syncBytes:  &defaultSyncBytes,
-		syncPoll:   time.Second,
+		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
 		pageSize:   defaultPageSize(),
 
@@ -119,9 +112,6 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		shrinkThreshold: -1, // default
 		label:           label,
 		metrics:         label == dbcfg.ChainDB,
-	}
-	if dbg.MdbxDurable { // one switch for the processes that build their own options
-		opts = opts.Durable()
 	}
 	if label == dbcfg.ChainDB {
 		if dbg.EnvBool("CHAINDATA_READAHEAD", true) {
@@ -151,11 +141,26 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
-// Durable flushes on every commit, so a power cut loses nothing. The default instead bounds
-// the loss by defaultSyncBytes, at a fraction of the flushes.
+// DeferredSync flushes once DefaultSyncBytes is unflushed or a second has passed, instead of
+// on every commit; a crash then rolls the database back to that point. Ignored for read-only,
+// accede and utterly-nosync databases, which reject the option or must not lock at open.
+func (opts MdbxOpts) DeferredSync() MdbxOpts {
+	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) || opts.utterlyNoSync() {
+		return opts
+	}
+	opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
+	opts = opts.SyncBytes(DefaultSyncBytes).SyncPeriod(time.Second)
+	opts.syncPoll = time.Second
+	return opts
+}
+
+// Durable flushes on every commit, undoing DeferredSync.
 func (opts MdbxOpts) Durable() MdbxOpts {
-	opts = opts.Flags(func(f uint) uint { return f&^mdbx.SafeNoSync | mdbx.Durable })
+	opts = opts.Flags(func(f uint) uint {
+		return f&^(mdbx.UtterlyNoSync|mdbx.SafeNoSync|mdbx.NoMetaSync) | mdbx.Durable
+	})
 	opts.syncBytes = nil
+	opts.syncPeriod = 0
 	opts.syncPoll = 0
 	return opts
 }
@@ -174,7 +179,13 @@ func (opts MdbxOpts) WithTableCfg(f TableCfgFunc) MdbxOpts     { opts.bucketsCfg
 func (opts MdbxOpts) WithMetrics() MdbxOpts                    { opts.metrics = true; return opts }
 
 // Flags
-func (opts MdbxOpts) HasFlag(flag uint) bool           { return opts.flags&flag != 0 }
+func (opts MdbxOpts) HasFlag(flag uint) bool { return opts.flags&flag != 0 }
+
+// utterlyNoSync reports the mode that wipes previous steady commits. HasFlag cannot answer it:
+// MDBX_UTTERLY_NOSYNC contains MDBX_SAFE_NOSYNC, so only the extra bit tells them apart.
+func (opts MdbxOpts) utterlyNoSync() bool {
+	return opts.flags&(mdbx.UtterlyNoSync&^mdbx.SafeNoSync) != 0
+}
 func (opts MdbxOpts) Flags(f func(uint) uint) MdbxOpts { opts.flags = f(opts.flags); return opts }
 func (opts MdbxOpts) AddFlags(flags uint) MdbxOpts     { opts.flags |= flags; return opts }
 func (opts MdbxOpts) RemoveFlags(flags uint) MdbxOpts  { opts.flags &^= flags; return opts }
@@ -427,7 +438,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
-	if opts.syncPoll > 0 && opts.HasFlag(mdbx.SafeNoSync) {
+	if opts.syncPoll > 0 && opts.HasFlag(mdbx.SafeNoSync) && !opts.utterlyNoSync() {
 		db.syncerDone = make(chan struct{})
 		go func() {
 			defer close(db.syncerDone)
@@ -727,9 +738,8 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 
 // Close closes db
 // All transactions must be closed before closing the database.
-// syncPoller flushes deferred writes off the committing threads. Under SafeNoSync mdbx
-// checks its sync thresholds only inside mdbx_txn_commit and mdbx_env_sync, so without this
-// the flush lands on whichever transaction happens to cross the threshold.
+// syncPoller enforces the sync deadline once writes stop: mdbx checks it only inside
+// mdbx_txn_commit and mdbx_env_sync.
 func (db *MdbxKV) syncPoller(interval time.Duration) {
 	t := time.NewTicker(interval)
 	defer t.Stop()
@@ -738,10 +748,9 @@ func (db *MdbxKV) syncPoller(interval time.Duration) {
 		case <-db.syncerStop:
 			return
 		case <-t.C:
-			// force=true flushes whatever is dirty, so commits stay below the threshold and
-			// never pay for a flush themselves; nonblock skips this round rather than holding
-			// the write lock while a writer wants it.
-			if err := db.env.Sync(true, true); err != nil {
+			// force=false flushes only once mdbx's own threshold is due, nonblock returns
+			// MDBX_BUSY instead of waiting behind a writer - both are ordinary outcomes here.
+			if err := db.env.Sync(false, true); err != nil && !errors.Is(err, syscall.EBUSY) {
 				db.log.Warn("[db] deferred sync", "label", db.opts.label, "err", err)
 			}
 		}
