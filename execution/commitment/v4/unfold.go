@@ -71,9 +71,9 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		return nil, err
 	}
 
-	record := NewRecord(data, len(path))
 	n := fork(path)
 	n.raw = bytes.Clone(data)
+	record := NewRecord(n.raw, len(path))
 	n.loaded = true
 	n.plane = plane
 	n.storageRoot = plane == planeStorage && len(path) == 0
@@ -99,7 +99,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		}
 		if l.leaf&bit != 0 {
 			suffix, value := record.leafAt(l, nib)
-			n.setLeaf(nib, suffix, value)
+			n.setLeafShared(nib, suffix, value)
 			continue
 		}
 		hash := record.slotAt(l, nib)

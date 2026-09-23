@@ -72,7 +72,7 @@ func accountLeafAt(n *node, path []byte) ([]byte, bool) {
 		if !packedMatches(n.leafSuffixAt(nib), path[len(n.path)+1:]) {
 			return nil, false
 		}
-		return append([]byte(nil), n.leafValueAt(nib)...), true
+		return n.leafValueAt(nib), true
 	}
 	return accountLeafAt(n.child(nib), path)
 }

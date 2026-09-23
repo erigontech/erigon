@@ -17,6 +17,7 @@
 package v4
 
 import (
+	"bytes"
 	"fmt"
 	"math/bits"
 	"slices"
@@ -120,8 +121,20 @@ func (n *node) setLeaf(nib int, suffix, value []byte) {
 	s.node = nil
 	s.hash = [32]byte{}
 	s.ext = nil
-	s.suffix = appendCopy(s.suffix, suffix)
-	s.value = appendCopy(s.value, value)
+	s.suffix = bytes.Clone(suffix)
+	s.value = bytes.Clone(value)
+}
+
+func (n *node) setLeafShared(nib int, suffix, value []byte) {
+	s := n.ensureSlot(nib)
+	bit := uint16(1) << nib
+	n.leafMask |= bit
+	n.hashMask &^= bit
+	s.node = nil
+	s.hash = [32]byte{}
+	s.ext = nil
+	s.suffix = suffix[:len(suffix):len(suffix)]
+	s.value = value[:len(value):len(value)]
 }
 
 func (n *node) setChild(nib int, child *node) {
