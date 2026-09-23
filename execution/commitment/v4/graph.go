@@ -18,8 +18,11 @@ package v4
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/bits"
+
+	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -179,64 +182,139 @@ func (g graph) reachableRecordKeys(root *node, keys *keySet) {
 	visit(root, true)
 }
 
-func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node) error {
+type materializeAcc struct {
+	deltas []recordDelta
+	after  keySet
+}
+
+func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *materializeAcc) ([32]byte, error) {
+	if n == nil {
+		return [32]byte{}, g.errNode
+	}
+	var pathScratch [64]byte
+	for nib := range 16 {
+		bit := uint16(1) << nib
+		if n.childMask&bit == 0 || n.leafMask&bit != 0 {
+			continue
+		}
+		child := n.child(nib)
+		if child == nil {
+			if !n.hasChildHash(nib) {
+				return [32]byte{}, g.errNode
+			}
+			acc.after.addNodeKey(g, storedChildPath(n, nib, n == root, pathScratch[:0]))
+			continue
+		}
+		childHash, err := g.materialize(ctx, child, root, acc)
+		if err != nil {
+			return [32]byte{}, err
+		}
+		n.setStoredChild(nib, childHash[:], g.childExt(n, child, root))
+	}
+	path := n.path
+	depth := len(path)
+	if n == root {
+		path = nil
+		depth = 0
+	}
+	hash, delta, err := foldAndEncodeRecord(ctx, n, depth, g.nodeKey(path, nil))
+	if err != nil {
+		return [32]byte{}, err
+	}
+	acc.deltas = append(acc.deltas, delta)
+	return hash, nil
+}
+
+func (g graph) childExt(n, child, root *node) []byte {
+	if n == root && len(n.path) != 0 && bytes.Equal(child.path, n.path) {
+		return nil
+	}
+	return child.path[len(n.path)+1:]
+}
+
+type foldPlan struct {
+	ctx     context.Context
+	factory commitment.TrieContextFactory
+	workers int
+}
+
+func (p foldPlan) parallel() bool {
+	return p.factory != nil && p.workers > 1 && p.ctx != nil
+}
+
+func (g graph) materializeRootChildren(root *node, acc *materializeAcc, plan foldPlan) error {
+	nibs := make([]int, 0, 16)
+	for nib := range 16 {
+		bit := uint16(1) << nib
+		if root.childMask&bit == 0 || root.leafMask&bit != 0 {
+			continue
+		}
+		if root.child(nib) != nil {
+			nibs = append(nibs, nib)
+		}
+	}
+	if len(nibs) < 2 {
+		return nil
+	}
+
+	type result struct {
+		hash [32]byte
+		ext  []byte
+		acc  materializeAcc
+	}
+	results := make([]result, len(nibs))
+	eg, egCtx := errgroup.WithContext(plan.ctx)
+	eg.SetLimit(min(plan.workers, len(nibs)))
+	for k, nib := range nibs {
+		eg.Go(func() error {
+			workerCtx, cleanup := plan.factory(egCtx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if workerCtx == nil {
+				return g.errNode
+			}
+			child := root.child(nib)
+			hash, err := g.materialize(workerCtx, child, root, &results[k].acc)
+			if err != nil {
+				return err
+			}
+			results[k].hash = hash
+			results[k].ext = g.childExt(root, child, root)
+			return nil
+		})
+	}
+	if err := eg.Wait(); err != nil {
+		return err
+	}
+	for k, nib := range nibs {
+		root.setStoredChild(nib, results[k].hash[:], results[k].ext)
+		acc.deltas = append(acc.deltas, results[k].acc.deltas...)
+		acc.after.addAll(&results[k].acc.after)
+	}
+	return nil
+}
+
+func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan foldPlan) error {
 	if root == nil {
 		return g.errNode
 	}
 	if err := promoteRootExtension(root); err != nil {
 		return err
 	}
-	deltas := make([]recordDelta, 0, g.before.len()+1)
-	after := new(keySet)
-	var materialize func(*node) ([32]byte, error)
-	materialize = func(n *node) ([32]byte, error) {
-		if n == nil {
-			return [32]byte{}, g.errNode
+	acc := &materializeAcc{deltas: make([]recordDelta, 0, g.before.len()+1)}
+	if plan.parallel() && len(root.path) == 0 {
+		if err := g.materializeRootChildren(root, acc, plan); err != nil {
+			return err
 		}
-		var pathScratch [64]byte
-		for nib := range 16 {
-			bit := uint16(1) << nib
-			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-				continue
-			}
-			child := n.child(nib)
-			if child == nil {
-				if !n.hasChildHash(nib) {
-					return [32]byte{}, g.errNode
-				}
-				after.addNodeKey(g, storedChildPath(n, nib, n == root, pathScratch[:0]))
-				continue
-			}
-			childHash, err := materialize(child)
-			if err != nil {
-				return [32]byte{}, err
-			}
-			var ext []byte
-			if !(n == root && len(n.path) != 0 && bytes.Equal(child.path, n.path)) {
-				ext = child.path[len(n.path)+1:]
-			}
-			n.setStoredChild(nib, childHash[:], ext)
-		}
-		path := n.path
-		depth := len(path)
-		if n == root {
-			path = nil
-			depth = 0
-		}
-		hash, delta, err := foldAndEncodeRecord(ctx, n, depth, g.nodeKey(path, nil))
-		if err != nil {
-			return [32]byte{}, err
-		}
-		deltas = append(deltas, delta)
-		return hash, nil
 	}
-	if _, err := materialize(root); err != nil {
+	if _, err := g.materialize(ctx, root, root, acc); err != nil {
 		return err
 	}
-	for _, delta := range deltas {
-		after.add(delta.key)
+	for _, delta := range acc.deltas {
+		acc.after.add(delta.key)
 	}
-	deltas, err := appendRemovedDeltas(ctx, deltas, g.before, after)
+	deltas, err := appendRemovedDeltas(ctx, acc.deltas, g.before, &acc.after)
 	if err != nil {
 		return err
 	}

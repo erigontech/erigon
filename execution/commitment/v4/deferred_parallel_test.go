@@ -156,3 +156,24 @@ func TestStoragePhaseSpreadsTasksAcrossWorkers(t *testing.T) {
 	_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 }
+
+func TestAccountFoldParallelMatchesSerial(t *testing.T) {
+	entries := benchEntries("storage", 512)
+	run := func(workers int) ([]byte, map[string]string) {
+		c := newShardedContext()
+		tr := &Trie{scheduleWorkers: workers}
+		tr.ResetContext(c)
+		tr.SetTrieContextFactory(c.factory)
+		defer tr.Release()
+		root, err := tr.Process(context.Background(),
+			benchUpdatesIn(t.TempDir(), commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
+		require.NoError(t, err)
+		return root, storeSnapshot(c)
+	}
+
+	serialRoot, serialStore := run(1)
+	parallelRoot, parallelStore := run(8)
+
+	require.Equal(t, serialRoot, parallelRoot)
+	require.Equal(t, serialStore, parallelStore)
+}

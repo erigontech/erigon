@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
-	"slices"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -130,8 +129,6 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		workers = runtime.NumCPU()
 		storageWorkers = workers * storageOversubscribe
 	}
-	slices.SortStableFunc(storage, func(a, b storageTask) int { return len(b.entries) - len(a.entries) })
-
 	storageRoots := make([][32]byte, len(storage))
 	if err := runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats); err != nil {
 		return [32]byte{}, err
@@ -227,7 +224,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			return [32]byte{}, err
 		}
 	}
-	if err := g.persistGraph(rawCtx, root); err != nil {
+	if err := g.persistGraph(rawCtx, root, foldPlan{ctx: ctx, factory: factory, workers: storageWorkers}); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)

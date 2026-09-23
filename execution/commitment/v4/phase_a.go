@@ -217,7 +217,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	}
 
 	markStorageRoot(root)
-	if err := g.persistGraph(ctx, root); err != nil {
+	if err := g.persistGraph(ctx, root, foldPlan{}); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
