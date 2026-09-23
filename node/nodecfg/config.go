@@ -49,14 +49,6 @@ const (
 // Config represents a small collection of configuration values to fine tune the
 // P2P network layer of a protocol stack. These values can be further extended by
 // all registered services.
-// Chaindata flush modes. SafeNoSync flushes once enough is unflushed or the deadline passes,
-// and mdbx rolls back to the last flushed commit-point after a crash; Durable flushes on every
-// commit, so a power cut loses nothing.
-const (
-	SyncModeSafeNoSync = "" // default
-	SyncModeDurable    = "durable"
-)
-
 type Config struct {
 	// Name sets the instance name of the node. It must not contain the / character and is
 	// used in the devp2p node identifier. The instance name of Erigon is "erigon". If no
@@ -174,8 +166,9 @@ type Config struct {
 	MdbxDBSizeLimit datasize.ByteSize
 	MdbxGrowthStep  datasize.ByteSize
 	MdbxWriteMap    bool
-	// MdbxSyncMode is SyncModeSafeNoSync (the zero value) or SyncModeDurable.
-	MdbxSyncMode string
+	// MdbxSyncDurable flushes chaindata on every commit. The zero value flushes in the
+	// background, and mdbx rolls back to the last flushed commit-point after a crash.
+	MdbxSyncDurable bool
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
 

@@ -141,33 +141,25 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
-// SafeNoSync flushes once DefaultSyncBytes is unflushed or a second has passed, instead of on
+// SafeNoSync flushes once DefaultSyncBytes is unflushed or deadline has passed, instead of on
 // every commit. Mdbx keeps the last flushed commit-point explicitly, so a crash rolls back to
 // it and never corrupts the file. Ignored for read-only, accede and utterly-nosync databases,
 // which reject the option or must not lock at open.
-func (opts MdbxOpts) SafeNoSync() MdbxOpts {
+func (opts MdbxOpts) SafeNoSync(deadline time.Duration) MdbxOpts {
 	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) || opts.utterlyNoSync() {
 		return opts
 	}
 	opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
-	opts = opts.SyncBytes(DefaultSyncBytes).SyncPeriod(time.Second)
-	opts.syncPoll = time.Second
-	return opts
+	opts.syncPoll = deadline
+	return opts.SyncBytes(DefaultSyncBytes).SyncPeriod(deadline)
 }
 
 // Durable flushes on every commit, undoing SafeNoSync.
 func (opts MdbxOpts) Durable() MdbxOpts {
-	opts = opts.Flags(func(f uint) uint {
+	return opts.Flags(func(f uint) uint {
 		return f&^(mdbx.UtterlyNoSync|mdbx.SafeNoSync|mdbx.NoMetaSync) | mdbx.Durable
 	})
-	opts.syncBytes = nil
-	opts.syncPeriod = 0
-	opts.syncPoll = 0
-	return opts
 }
-
-// SyncPoll sets how often the background flush runs.
-func (opts MdbxOpts) SyncPoll(interval time.Duration) MdbxOpts { opts.syncPoll = interval; return opts }
 
 func (opts MdbxOpts) SyncBytes(threshold datasize.ByteSize) MdbxOpts {
 	opts.syncBytes = &threshold

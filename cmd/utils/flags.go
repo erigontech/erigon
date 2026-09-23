@@ -1601,14 +1601,11 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)
 	}
 	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
-	switch mode := ctx.String(DbFlushFlag.Name); mode {
-	case "background":
-		cfg.MdbxSyncMode = nodecfg.SyncModeSafeNoSync
-	case "every-commit":
-		cfg.MdbxSyncMode = nodecfg.SyncModeDurable
-	default:
-		return fmt.Errorf("invalid --%s: %q, want background or every-commit", DbFlushFlag.Name, mode)
+	flush := ctx.String(DbFlushFlag.Name)
+	if flush != "background" && flush != "every-commit" {
+		return fmt.Errorf("invalid --%s: %q, want background or every-commit", DbFlushFlag.Name, flush)
 	}
+	cfg.MdbxSyncDurable = flush == "every-commit"
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
 		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),
