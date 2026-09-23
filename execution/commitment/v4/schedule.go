@@ -68,7 +68,7 @@ type accountResult struct {
 	err   error
 }
 
-const storageChunk = 16
+const storageOversubscribe = 4
 
 func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, workers int, stats *scheduleStats) error {
 	if len(storage) == 0 {
@@ -101,20 +101,17 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 				if err := gCtx.Err(); err != nil {
 					return err
 				}
-				start := int(next.Add(storageChunk)) - storageChunk
-				if start >= len(storage) {
+				i := int(next.Add(1)) - 1
+				if i >= len(storage) {
 					return nil
 				}
 				stats.enter()
-				for i := start; i < min(start+storageChunk, len(storage)); i++ {
-					root, err := runStorageTask(workerCtx, storage[i])
-					if err != nil {
-						stats.leave()
-						return err
-					}
-					roots[i] = root
-				}
+				root, err := runStorageTask(workerCtx, storage[i])
 				stats.leave()
+				if err != nil {
+					return err
+				}
+				roots[i] = root
 			}
 		})
 	}
@@ -128,13 +125,15 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	storageWorkers := workers
 	if workers <= 0 {
 		workers = runtime.NumCPU()
+		storageWorkers = workers * storageOversubscribe
 	}
 	slices.SortStableFunc(storage, func(a, b storageTask) int { return len(b.entries) - len(a.entries) })
 
 	storageRoots := make([][32]byte, len(storage))
-	if err := runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, workers, stats); err != nil {
+	if err := runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats); err != nil {
 		return [32]byte{}, err
 	}
 	results := make(map[[32]byte][32]byte, len(storage))

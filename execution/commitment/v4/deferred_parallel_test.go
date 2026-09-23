@@ -18,11 +18,15 @@ package v4
 
 import (
 	"context"
+	"fmt"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -91,4 +95,64 @@ func TestDeferredProcessMatchesInlineProcess(t *testing.T) {
 	require.NoError(t, apply(deferredCtx.PutBranch))
 
 	require.Equal(t, storeSnapshot(inlineCtx), storeSnapshot(deferredCtx))
+}
+
+type workerBarrier struct {
+	mu      sync.Mutex
+	seen    int
+	want    int
+	release chan struct{}
+	timeout time.Duration
+}
+
+func (b *workerBarrier) arrive() error {
+	b.mu.Lock()
+	b.seen++
+	if b.seen == b.want {
+		close(b.release)
+	}
+	b.mu.Unlock()
+
+	select {
+	case <-b.release:
+		return nil
+	case <-time.After(b.timeout):
+		b.mu.Lock()
+		seen := b.seen
+		b.mu.Unlock()
+		return fmt.Errorf("only %d of %d storage workers ever claimed a task", seen, b.want)
+	}
+}
+
+type barrierContext struct {
+	*shardedContext
+	barrier *workerBarrier
+	arrived bool
+}
+
+func (c *barrierContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	if !c.arrived {
+		c.arrived = true
+		if err := c.barrier.arrive(); err != nil {
+			return nil, 0, err
+		}
+	}
+	return c.shardedContext.Branch(key)
+}
+
+func TestStoragePhaseSpreadsTasksAcrossWorkers(t *testing.T) {
+	const workers = 4
+	inner := newShardedContext()
+	barrier := &workerBarrier{want: workers, release: make(chan struct{}), timeout: 15 * time.Second}
+
+	tr := &Trie{scheduleWorkers: workers}
+	tr.ResetContext(inner)
+	tr.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) {
+		return &barrierContext{shardedContext: inner, barrier: barrier}, nil
+	})
+	defer tr.Release()
+
+	u := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, benchEntries("storage", 2*workers))
+	_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
 }
