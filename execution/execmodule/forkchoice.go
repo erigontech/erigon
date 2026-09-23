@@ -899,12 +899,6 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 			return nil, err
 		}
 	}
-	// Force fsync so data is durable before the next slot.
-	if err := e.db.Update(e.backgroundCtx, func(tx kv.RwTx) error {
-		return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
-	}); err != nil {
-		return nil, err
-	}
 	return timings, nil
 }
 
