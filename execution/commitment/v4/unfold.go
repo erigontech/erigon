@@ -17,6 +17,7 @@
 package v4
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/bits"
@@ -72,6 +73,8 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 
 	record := NewRecord(data, len(path))
 	n := fork(path)
+	n.raw = bytes.Clone(data)
+	n.loaded = true
 	n.plane = plane
 	n.storageRoot = plane == planeStorage && len(path) == 0
 	if len(path) == 0 && data[0]&hdrHasSelfExt != 0 {

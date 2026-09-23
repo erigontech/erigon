@@ -33,8 +33,10 @@ type childSlot struct {
 type node struct {
 	path        []byte
 	slots       []childSlot
+	raw         []byte
 	plane       byte
 	storageRoot bool
+	loaded      bool
 
 	childMask uint16
 	leafMask  uint16

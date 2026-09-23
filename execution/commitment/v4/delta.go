@@ -35,11 +35,22 @@ func foldAndEncodeRecord(ctx commitment.PatriciaContext, n *node, depth int, key
 	if err != nil {
 		return [32]byte{}, recordDelta{}, err
 	}
-	delta, err := readRecordDelta(ctx, key, encodeRecord(n, depth, nil))
+	data := encodeRecord(n, depth, nil)
+	if n.loaded {
+		return hash, newRecordDelta(key, data, n.raw), nil
+	}
+	delta, err := readRecordDelta(ctx, key, data)
 	if err != nil {
 		return [32]byte{}, recordDelta{}, err
 	}
 	return hash, delta, nil
+}
+
+func newRecordDelta(key, data, prev []byte) recordDelta {
+	if data == nil {
+		data = []byte{}
+	}
+	return recordDelta{key: key, data: data, prev: prev}
 }
 
 func readRecordDelta(ctx commitment.PatriciaContext, key, data []byte) (recordDelta, error) {
@@ -47,10 +58,7 @@ func readRecordDelta(ctx commitment.PatriciaContext, key, data []byte) (recordDe
 	if err != nil {
 		return recordDelta{}, err
 	}
-	if data == nil {
-		data = []byte{}
-	}
-	return recordDelta{key: key, data: data, prev: bytes.Clone(prev)}, nil
+	return newRecordDelta(key, data, bytes.Clone(prev)), nil
 }
 
 func applyDelta(delta recordDelta, putBranch putBranchFunc) error {
