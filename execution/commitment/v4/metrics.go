@@ -1,0 +1,86 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package v4
+
+import (
+	"context"
+	"sync/atomic"
+	"time"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
+)
+
+type meteredContext struct {
+	commitment.PatriciaContext
+	readBytes  *atomic.Uint64
+	writeBytes *atomic.Uint64
+	writes     *atomic.Uint64
+}
+
+func newMeteredContext(inner commitment.PatriciaContext) *meteredContext {
+	return &meteredContext{
+		PatriciaContext: inner,
+		readBytes:       new(atomic.Uint64),
+		writeBytes:      new(atomic.Uint64),
+		writes:          new(atomic.Uint64),
+	}
+}
+
+func (c *meteredContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	data, step, err := c.PatriciaContext.Branch(prefix)
+	if len(data) != 0 {
+		c.readBytes.Add(uint64(len(data)))
+	}
+	return data, step, err
+}
+
+func (c *meteredContext) PutBranch(prefix, data, prevData []byte) error {
+	c.writes.Add(1)
+	c.writeBytes.Add(uint64(len(data)))
+	return c.PatriciaContext.PutBranch(prefix, data, prevData)
+}
+
+func (c *meteredContext) wrap(inner commitment.PatriciaContext) *meteredContext {
+	return &meteredContext{
+		PatriciaContext: inner,
+		readBytes:       c.readBytes,
+		writeBytes:      c.writeBytes,
+		writes:          c.writes,
+	}
+}
+
+func (c *meteredContext) wrapFactory(f commitment.TrieContextFactory) commitment.TrieContextFactory {
+	if f == nil {
+		return nil
+	}
+	return func(ctx context.Context) (commitment.PatriciaContext, func()) {
+		inner, cleanup := f(ctx)
+		if inner == nil {
+			return inner, cleanup
+		}
+		return c.wrap(inner), cleanup
+	}
+}
+
+func (c *meteredContext) publish(start time.Time, keys uint64) {
+	m := commitment.NewMetrics("")
+	m.AddRoundKeys(keys)
+	m.AddBranchRead(int(c.readBytes.Load()))
+	commitment.ObserveRound(m, start)
+	commitment.PublishBranchWrites(int(c.writes.Load()), int(c.writeBytes.Load()), nil)
+}

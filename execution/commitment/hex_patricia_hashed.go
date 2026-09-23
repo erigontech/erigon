@@ -2657,7 +2657,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	hph.metrics.updates.Store(updatesCount)
 	hph.metrics.AddRoundKeys(updatesCount)
 	roundStart := time.Now()
-	defer func() { observeRound(hph.metrics, roundStart) }()
+	defer func() { ObserveRound(hph.metrics, roundStart) }()
 	if hph.metrics.collectCommitmentMetrics {
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)

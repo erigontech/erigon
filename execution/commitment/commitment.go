@@ -447,20 +447,20 @@ func ApplyDeferredBranchUpdates(
 		var written, bytesOut int
 		for _, upd := range deferred {
 			if err := mergeDeferredUpdate(upd, merger); err != nil {
-				publishBranchWrites(written, bytesOut, m)
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
 			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
-				publishBranchWrites(written, bytesOut, m)
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
 			bytesOut += len(upd.encoded)
 		}
-		publishBranchWrites(written, bytesOut, m)
+		PublishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
@@ -498,13 +498,13 @@ func ApplyDeferredBranchUpdates(
 			continue
 		}
 		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
-			publishBranchWrites(written, bytesOut, m)
+			PublishBranchWrites(written, bytesOut, m)
 			return written, err
 		}
 		written++
 		bytesOut += len(upd.encoded)
 	}
-	publishBranchWrites(written, bytesOut, m)
+	PublishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
 
@@ -547,7 +547,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	publishBranchWrites(1, len(updateCopy), be.metrics)
+	PublishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 

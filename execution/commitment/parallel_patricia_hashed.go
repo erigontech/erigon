@@ -240,7 +240,7 @@ func (p *ParallelPatriciaHashed) Process(
 	p.metrics.Reset()
 	p.metrics.AddRoundKeys(updates.Size())
 	roundStart := time.Now()
-	defer func() { observeRound(p.metrics, roundStart) }()
+	defer func() { ObserveRound(p.metrics, roundStart) }()
 
 	pu := updates.parallel
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {

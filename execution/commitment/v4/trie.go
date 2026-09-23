@@ -22,6 +22,7 @@ import (
 	"errors"
 	"io"
 	"sync"
+	"time"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -149,6 +150,11 @@ func (t *Trie) Process(
 		return nil, errors.New("commitment v4: Process requires ModeCollect updates")
 	}
 
+	roundStart := time.Now()
+	metered := newMeteredContext(t.ctx)
+	var seen int
+	defer func() { metered.publish(roundStart, uint64(seen)) }()
+
 	var warmuper *commitment.Warmuper
 	if warmup.Enabled {
 		warmup.Key = warmupKeyV4
@@ -158,19 +164,20 @@ func (t *Trie) Process(
 		defer warmuper.CloseAndWait()
 	}
 
-	storage, accounts, seen, err := partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper)
+	storage, accounts, seenKeys, err := partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper)
 	if err != nil {
 		return nil, err
 	}
-	processCtx := t.ctx
-	factory := t.ctxFactory
+	seen = seenKeys
+	var processCtx commitment.PatriciaContext = metered
+	factory := metered.wrapFactory(t.ctxFactory)
 	var deferredCtx *deferredPatriciaContext
 	if t.deferUpdates {
 		factory = nil
 		if len(t.deferred) != 0 {
 			return nil, errors.New("commitment v4: deferred updates were not taken")
 		}
-		deferredCtx = &deferredPatriciaContext{PatriciaContext: t.ctx}
+		deferredCtx = &deferredPatriciaContext{PatriciaContext: metered}
 		processCtx = deferredCtx
 	}
 	root, err := runScheduledPhases(ctx, processCtx, factory, storage, accounts, t.scheduleWorkers, t.scheduleStats)
