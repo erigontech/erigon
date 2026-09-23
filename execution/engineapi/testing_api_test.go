@@ -96,57 +96,70 @@ func (s *stubExecutionModule) InsertBlocks(ctx context.Context, blocks []*types.
 	}
 	return execmodule.ExecutionStatusSuccess, nil
 }
+
 func (s *stubExecutionModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (execmodule.ValidationResult, error) {
 	if s.validateChainFunc != nil {
 		return s.validateChainFunc(ctx, blockHash, blockNumber)
 	}
 	return execmodule.ValidationResult{}, nil
 }
+
 func (s *stubExecutionModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error) {
 	if s.updateForkChoiceFunc != nil {
 		return s.updateForkChoiceFunc(ctx, headHash, safeHash, finalizedHash)
 	}
 	return execmodule.ForkChoiceResult{}, nil
 }
+
 func (s *stubExecutionModule) GetForkChoice(ctx context.Context) (execmodule.ForkChoiceState, error) {
 	if s.getForkChoiceFunc != nil {
 		return s.getForkChoiceFunc(ctx)
 	}
 	return execmodule.ForkChoiceState{}, nil
 }
+
 func (s *stubExecutionModule) CurrentHeader(ctx context.Context) (*types.Header, error) {
 	if s.currentHeaderFunc != nil {
 		return s.currentHeaderFunc(ctx)
 	}
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetBody(_ context.Context, _ *common.Hash, _ *uint64) (*types.RawBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) HasBlock(_ context.Context, _ *common.Hash, _ *uint64) (bool, error) {
 	return false, nil
 }
+
 func (s *stubExecutionModule) GetBodiesByRange(_ context.Context, _, _ uint64) ([]*types.RawBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetBodiesByHashes(_ context.Context, _ []common.Hash) ([]*types.RawBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetPayloadBodiesByHash(_ context.Context, _ []common.Hash) ([]*execmodule.PayloadBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetPayloadBodiesByRange(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
 	return nil, nil
 }
+
 func (s *stubExecutionModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	return false, nil
 }
+
 func (s *stubExecutionModule) GetHeaderHashNumber(ctx context.Context, hash common.Hash) (*uint64, error) {
 	if s.headerNumberFunc != nil {
 		return s.headerNumberFunc(ctx, hash)
 	}
 	return nil, nil
 }
+
 func (s *stubExecutionModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	return nil, nil
 }
@@ -844,7 +857,6 @@ func TestBuildBlockV1(t *testing.T) {
 		require.NotNil(t, capturedParams, "AssembleBlock should have been called")
 		require.NotNil(t, capturedParams.CustomTxnProvider)
 	})
-
 }
 
 // ---------------------------------------------------------------------------

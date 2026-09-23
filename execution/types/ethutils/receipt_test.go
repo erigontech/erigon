@@ -120,9 +120,11 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 			logs := make(types.Logs, tc.logs)
 			for i := range logs {
 				// Every derived field distinct, so a field written from the wrong source shows.
-				logs[i] = &types.Log{Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64),
+				logs[i] = &types.Log{
+					Address: to, Topics: []common.Hash{{0x01}, {0x02}}, Data: make([]byte, 64),
 					BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3, BlockHash: common.HexToHash("0xb10c"),
-					Index: hexutil.Uint(10 + i), Removed: i == 1}
+					Index: hexutil.Uint(10 + i), Removed: i == 1,
+				}
 			}
 			if tc.nilLogs {
 				logs = nil
@@ -211,7 +213,8 @@ func TestRPCReceiptMarshalFastJSONToOptionalFields(t *testing.T) {
 
 func requireFastJSONMatches(t *testing.T, v interface {
 	MarshalFastJSONTo(*jsonstream.StackStream) error
-}) {
+},
+) {
 	t.Helper()
 	want, err := json.Marshal(v)
 	require.NoError(t, err)

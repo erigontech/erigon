@@ -20,8 +20,10 @@ import "github.com/erigontech/erigon/rpc"
 
 const MaxBuilders = 128
 
-var UnknownPayloadErr = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
-var InvalidForkchoiceStateErr = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
-var InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
-var TooLargeRequestErr = rpc.CustomError{Code: -38004, Message: "Too large request"}
-var ReorgTooDeepErr = rpc.CustomError{Code: -38006, Message: "Too deep reorg"}
+var (
+	UnknownPayloadErr           = rpc.CustomError{Code: -38001, Message: "Unknown payload"}
+	InvalidForkchoiceStateErr   = rpc.CustomError{Code: -38002, Message: "Invalid forkchoice state"}
+	InvalidPayloadAttributesErr = rpc.CustomError{Code: -38003, Message: "Invalid payload attributes"}
+	TooLargeRequestErr          = rpc.CustomError{Code: -38004, Message: "Too large request"}
+	ReorgTooDeepErr             = rpc.CustomError{Code: -38006, Message: "Too deep reorg"}
+)

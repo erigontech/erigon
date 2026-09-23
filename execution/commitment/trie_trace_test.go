@@ -493,7 +493,7 @@ plain_key = "68ee6c0e9cdc73b2b2d52dbd79f19d24fe25e2f9"
 update = "050100000000000004"
 `
 	tracePath := filepath.Join(t.TempDir(), "old_format_trace.toml")
-	err := os.WriteFile(tracePath, []byte(oldFormatTOML), 0600)
+	err := os.WriteFile(tracePath, []byte(oldFormatTOML), 0o600)
 	require.NoError(t, err)
 
 	loaded, err := LoadTrieTrace(tracePath)

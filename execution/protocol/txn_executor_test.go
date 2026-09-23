@@ -431,7 +431,7 @@ func TestEIP2780AuthorizationOutOfGasProducesCallTrace(t *testing.T) {
 			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
 			require.NoError(t, err)
 			require.ErrorIs(t, result.Err, vm.ErrRuntimeOutOfGas)
-			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 
 			trace, err := tracer.GetResult()
 			require.NoError(t, err)
@@ -486,7 +486,7 @@ func TestEIP2780TopLevelCallTraceStartsBeforeStateChanges(t *testing.T) {
 			})
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
-			tracer.OnTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, nil)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 
 			trace, err := tracer.GetResult()
 			require.NoError(t, err)
@@ -511,7 +511,8 @@ func TestEIP2780RecipientStartsWarm(t *testing.T) {
 	result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(true, false)
 	require.NoError(t, err)
 	require.NoError(t, result.Err)
-	require.Equal(t,
+	require.Equal(
+		t,
 		params.TxBaseEIP2780+params.ColdAccountAccessEIP2780+vm.GasQuickStep+params.WarmStorageReadCostEIP2929,
 		result.BlockExecutionGasUsed,
 	)
@@ -649,6 +650,119 @@ func TestEIP2780CalldataFloorBindsBlockExecutionGas(t *testing.T) {
 	require.Equal(t, intrinsic.FloorGasCost, result.ReceiptGasUsed)
 	require.Equal(t, intrinsic.FloorGasCost, result.BlockExecutionGasUsed)
 	require.Zero(t, result.BlockStateGasUsed)
+}
+
+func TestGasRefundWithCalldataFloor(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		dataLen    int
+		noRefunds  bool
+		gasBailout bool
+		wantRefund uint64
+	}{
+		{name: "capped", dataLen: 4096, wantRefund: 8719},
+		{name: "uncapped", dataLen: 8192, wantRefund: 10000},
+		{name: "no refunds", dataLen: 4096, noRefunds: true},
+		{name: "gas bailout", dataLen: 4096, gasBailout: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const blockGasLimit = 1_000_000
+			sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+			recipient := accounts.InternAddress(common.HexToAddress("0x2222222222222222222222222222222222222222"))
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, ibs.SetCode(recipient, []byte{
+				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE),
+				byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.SSTORE),
+				byte(vm.STOP),
+			}, tracing.CodeChangeUnspecified))
+			evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+			msg := types.NewMessage(
+				sender, recipient, 0, uint256.NewInt(0), blockGasLimit,
+				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
+				make([]byte, test.dataLen), nil, false, false, true, false, nil,
+			)
+			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(!test.noRefunds, test.gasBailout)
+			require.NoError(t, err)
+			require.NoError(t, result.Err)
+			require.Equal(t, result.MaxGasUsed, result.ReceiptGasUsed)
+			require.Equal(t, result.ReceiptGasUsed, result.BlockExecutionGasUsed)
+			require.Zero(t, result.BlockStateGasUsed)
+			require.EqualValues(t, 10_000, ibs.GetRefund())
+			require.Equal(t, test.wantRefund, result.GasRefund)
+		})
+	}
+}
+
+type completionErrorWriter struct {
+	state.StateWriter
+	err error
+}
+
+func (w *completionErrorWriter) UpdateAccountData(accounts.Address, *accounts.Account, *accounts.Account) error {
+	return w.err
+}
+
+func TestApplyTransactionTxEndV2(t *testing.T) {
+	finalizeErr := errors.New("finalization failed")
+	for _, test := range []struct {
+		name       string
+		noReceipts bool
+		writerErr  error
+	}{
+		{name: "receipt"},
+		{name: "without receipt", noReceipts: true},
+		{name: "finalization failure", writerErr: finalizeErr},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const blockGasLimit = 1_000_000
+			sender := accounts.InternAddress(common.HexToAddress("0x1111111111111111111111111111111111111111"))
+			recipient := common.HexToAddress("0x2222222222222222222222222222222222222222")
+			ibs := state.New(state.NewNoopReader())
+			defer ibs.Close()
+			require.NoError(t, ibs.SetCode(accounts.InternAddress(recipient), []byte{
+				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
+			}, tracing.CodeChangeUnspecified))
+			txn := &types.LegacyTx{CommonTx: types.CommonTx{GasLimit: 200_000, To: &recipient}}
+			txn.SetSender(sender)
+			var received mdgas.TxnGasUsage
+			var receivedReceipt *types.Receipt
+			var completionErr error
+			var calls int
+			cfg := vm.Config{NoBaseFee: true, NoReceipts: test.noReceipts, Tracer: &tracing.Hooks{
+				OnTxEndV2: func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+					completionErr = err
+					received = txnGasUsage
+					receivedReceipt = receipt
+					calls++
+				},
+			}}
+			evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+			var gasUsed GasUsed
+			writer := &completionErrorWriter{StateWriter: state.NewNoopWriter(), err: test.writerErr}
+			receipt, err := applyTransaction(chain.AllProtocolChanges, nil, NewGasPool(blockGasLimit, 0), ibs,
+				writer, &types.Header{GasLimit: blockGasLimit}, txn, &gasUsed, evm, cfg)
+			require.ErrorIs(t, err, test.writerErr)
+			require.Equal(t, 1, calls)
+			require.ErrorIs(t, completionErr, test.writerErr)
+			require.EqualValues(t, params.StateGasPerStorageSet, received.BlockStateGasUsed)
+			if test.writerErr != nil {
+				require.Nil(t, receivedReceipt)
+				return
+			}
+			require.Equal(t, mdgas.TxnGasUsage{
+				BlockExecutionGasUsed: gasUsed.BlockExecution,
+				BlockStateGasUsed:     params.StateGasPerStorageSet,
+			}, received)
+			require.Equal(t, receipt, receivedReceipt)
+			if test.noReceipts {
+				require.Nil(t, receipt)
+			} else {
+				require.NotNil(t, receipt)
+				require.Equal(t, gasUsed.Receipt, receipt.GasUsed)
+			}
+		})
+	}
 }
 
 func TestEIP2780ContractCreationRuntimeOutOfGasKeepsSenderNonce(t *testing.T) {

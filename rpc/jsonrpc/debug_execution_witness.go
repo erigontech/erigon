@@ -3,7 +3,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -537,27 +536,32 @@ type ExecutionWitnessResult struct {
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
-
-	// cachedJSON, when non-nil, is this result's pre-marshaled JSON. The eager
-	// witness cache stores a shell carrying only this, so a hit serves the bytes
-	// verbatim via MarshalFastJSONTo instead of re-marshaling the struct.
-	cachedJSON []byte
 }
 
-// MarshalFastJSONTo is the rpc fast-result path: a cache shell writes its stored bytes
-// verbatim; a freshly built result marshals its exported fields, byte-identical to the
-// cached form so both paths agree.
+// MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
 func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	enc := m.cachedJSON
-	if enc == nil {
-		var err error
-		if enc, err = json.Marshal(m); err != nil {
-			return err
-		}
+	if m == nil {
+		s.WriteNil()
+		return nil
 	}
-	s.WriteRawBytes(enc)
+	s.WriteObjectStart()
+	s.Field("state")
+	jsonstream.ArrayValue(s, m.State, writeHexElem)
+	s.Field("codes")
+	jsonstream.ArrayValue(s, m.Codes, writeHexElem)
+	if len(m.Keys) > 0 {
+		s.Field("keys")
+		jsonstream.ArrayValue(s, m.Keys, writeHexElem)
+	}
+	if len(m.Headers) > 0 {
+		s.Field("headers")
+		jsonstream.ArrayValue(s, m.Headers, writeHexElem)
+	}
+	s.WriteObjectEnd()
 	return nil
 }
+
+func writeHexElem(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
 	if header, ok := m.headerByNumber[blockNum]; ok {

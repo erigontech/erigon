@@ -106,12 +106,7 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 	return resp
 }
 
-// fastJSONResult lets an RPC result implement fast JSON marshalling where needed — e.g. large payloads that benefit from skipping the reflection-based path.
-type fastJSONResult interface {
-	MarshalFastJSON() ([]byte, error)
-}
-
-// fastJSONMarshalerTo is a fastJSONResult that encodes straight into the response stream. Only a
+// fastJSONMarshalerTo encodes an RPC result straight into the response stream. Only a
 // type above rpc/jsonstream can name the stream; a type below it implements encoding.TextAppender
 // instead and the stream quotes the text. An implementation that fails after its first write
 // leaves part of the result behind, so that response carries both result and error.
@@ -132,13 +127,6 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 			}
 			return rs.Err() // a latched write error left a placeholder in the stream
 		}
-		if fm, ok := result.(fastJSONResult); ok {
-			enc, err := fm.MarshalFastJSON()
-			if err == nil && len(enc) > 0 {
-				rs.WriteRawBytes(enc)
-			}
-			return err
-		}
 		// A TextAppender's JSON is taken to be its quoted text, so this must stay ahead of the
 		// reflection encoder and must not catch a type whose json.Marshaler writes something else.
 		if ta, ok := result.(encoding.TextAppender); ok {
@@ -154,10 +142,10 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 // for the caller's metrics and logs.
 func writeLazyResponse(stream jsonstream.Stream, id json.RawMessage, write func(*jsonstream.LazyFieldStream) error) error {
 	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
+	stream.Field("jsonrpc")
 	stream.WriteString(vsn)
 	if id != nil {
-		stream.WriteObjectField("id")
+		stream.Field("id")
 		stream.WriteRawBytes(id)
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
@@ -490,18 +478,11 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 		}
 		switch string(key) {
 		case "jsonrpc":
-			// The decoded fields go through encoding/json, which unescapes the
-			// strings. A value that does not decode zeroes the field, so a
-			// repeated key cannot leave an earlier value standing.
-			if json.Unmarshal(value, &msg.Version) != nil {
-				msg.Version = ""
-			}
+			decodeStringField(value, &msg.Version)
 		case "id":
 			msg.ID = value
 		case "method":
-			if json.Unmarshal(value, &msg.Method) != nil {
-				msg.Method = ""
-			}
+			decodeStringField(value, &msg.Method)
 		case "params":
 			msg.Params = value
 		case "error":
@@ -512,6 +493,29 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 			msg.Result = value
 		}
 	})
+}
+
+// decodeStringField sets dst as json.Unmarshal would: it unescapes the string and replaces invalid
+// UTF-8, and a null leaves dst as it is. Plain printable ASCII is its own text, so it skips the
+// decoder. A value that does not decode zeroes dst.
+func decodeStringField(value []byte, dst *string) {
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		text := value[1 : len(value)-1]
+		plain := true
+		for _, c := range text {
+			if c < 0x20 || c >= 0x80 || c == '\\' {
+				plain = false
+				break
+			}
+		}
+		if plain {
+			*dst = string(text)
+			return
+		}
+	}
+	if json.Unmarshal(value, dst) != nil {
+		*dst = ""
+	}
 }
 
 // isBatch returns true when the first non-whitespace characters is '['

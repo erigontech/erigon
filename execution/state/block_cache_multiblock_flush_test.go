@@ -97,7 +97,8 @@ func TestBlockStateCacheFlushClearsAcrossBlocks(t *testing.T) {
 
 	enc2, _, err := domains.GetLatest(kv.StorageDomain, tx, composite)
 	require.NoError(t, err)
-	require.Empty(t, enc2,
+	require.Empty(
+		t, enc2,
 		"after block 2 flush, domain should be cleared (value=empty); "+
 			"got %x — this is the 24839762 trie-root race: Flush skipped "+
 			"the delete because committedStorage was never refreshed",

@@ -95,6 +95,9 @@ type (
 	// TxEndHook is called after the execution of a transaction ends.
 	TxEndHook = func(receipt *types.Receipt, err error)
 
+	// TxEndHookV2 takes precedence over TxEndHook.
+	TxEndHookV2 = func(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error)
+
 	// EnterHook is invoked when the processing of a message starts.
 	EnterHook = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte)
 
@@ -197,6 +200,7 @@ type Hooks struct {
 	// VM events
 	OnTxStart     TxStartHook
 	OnTxEnd       TxEndHook
+	OnTxEndV2     TxEndHookV2
 	OnEnter       EnterHook
 	OnEnterV2     EnterHookV2
 	OnExit        ExitHook
@@ -225,6 +229,21 @@ type Hooks struct {
 	OnStorageChange StorageChangeHook
 	OnLog           LogHook
 	Flush           func(tx types.Transaction)
+}
+
+func (h *Hooks) HasTxEndHook() bool {
+	return h != nil && (h.OnTxEndV2 != nil || h.OnTxEnd != nil)
+}
+
+func (h *Hooks) EmitTxEnd(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+	if h == nil {
+		return
+	}
+	if h.OnTxEndV2 != nil {
+		h.OnTxEndV2(receipt, txnGasUsage, err)
+	} else if h.OnTxEnd != nil {
+		h.OnTxEnd(receipt, err)
+	}
 }
 
 func (h *Hooks) HasEnterHook() bool {

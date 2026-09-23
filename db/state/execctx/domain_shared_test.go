@@ -1041,7 +1041,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 	err = db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, maxTx-stepSize, unboundedFinalityCtx)
 	require.NoError(t, err)
 
-	{ //prune
+	{ // prune
 		rwTx, err = db.BeginTemporalRw(ctx)
 		require.NoError(t, err)
 		defer rwTx.Rollback()
@@ -1210,7 +1210,7 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		defer domains.Close()
 		require.Equal(int(stepSize*2+2-2), iterCount(domains))
 	}
-	{ //delete marker is in Files
+	{ // delete marker is in Files
 		domains.Close()
 		err = rwTx.Commit() // otherwise agg.BuildFiles will not see data
 		require.NoError(err)

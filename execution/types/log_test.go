@@ -208,7 +208,7 @@ func TestFilterLogsTopics(t *testing.T) {
 		filter [][]common.Hash  // the topic filter we want to use
 		want   []common.Address // slice of addresses that should pass the filter
 	}
-	var basicSet = Logs{
+	basicSet := Logs{
 		{
 			Address: a1,
 			Topics:  []common.Hash{F, F, F, F, F, B, B},
@@ -234,7 +234,7 @@ func TestFilterLogsTopics(t *testing.T) {
 			Topics:  []common.Hash{F, F, F, D},
 		},
 	}
-	var filterLogTests = map[string]filterLogTest{
+	filterLogTests := map[string]filterLogTest{
 		"1. no topics, should return all topics": {
 			input:  basicSet,
 			filter: [][]common.Hash{},

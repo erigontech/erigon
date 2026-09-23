@@ -188,7 +188,8 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 }
 
 func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine rules.EngineReader) (
-	*evmtypes.ExecutionResult, error) {
+	*evmtypes.ExecutionResult, error,
+) {
 	// Only zero-gas transactions may be service ones
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
 		blockContext := evm.Context
@@ -515,14 +516,16 @@ func (st *TxnExecutor) ApplyFrame() (*evmtypes.ExecutionResult, error) {
 	}
 
 	result := &evmtypes.ExecutionResult{
-		ReceiptGasUsed:        st.txnGasUsed,
-		BlockExecutionGasUsed: st.blockExecutionGasUsed,
-		BlockStateGasUsed:     st.blockStateGasUsed,
-		Err:                   vmerr,
-		Reverted:              errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:            ret,
-		SenderInitBalance:     senderInitBalance,
-		CoinbaseInitBalance:   coinbaseInitBalance,
+		TxnGasUsage: mdgas.TxnGasUsage{
+			BlockExecutionGasUsed: st.blockExecutionGasUsed,
+			BlockStateGasUsed:     st.blockStateGasUsed,
+		},
+		ReceiptGasUsed:      st.txnGasUsed,
+		Err:                 vmerr,
+		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:          ret,
+		SenderInitBalance:   senderInitBalance,
+		CoinbaseInitBalance: coinbaseInitBalance,
 	}
 
 	if st.evm.Context.PostApplyMessage != nil {
@@ -691,6 +694,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	totalGasUsed := gasUsed.total()
+	var refund uint64
 	switch {
 	case refunds && !gasBailout:
 		refundQuotient := params.RefundQuotient
@@ -703,16 +707,16 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 			st.blockStateGasUsed = combined.StateClamped()
 			st.blockExecutionGasUsed = max(combined.Execution, intrinsicGasResult.FloorGasCost)
 			st.txnGasUsedB4Refunds = combined.Total()
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+			refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 		case rules.IsPrague:
 			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+			refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = max(intrinsicGasResult.FloorGasCost, st.txnGasUsedB4Refunds-refund)
 			st.blockExecutionGasUsed = st.txnGasUsed
 		default:
 			st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
-			refund := min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
+			refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
 			st.txnGasUsed = st.txnGasUsedB4Refunds - refund
 			st.blockExecutionGasUsed = st.txnGasUsed
 		}
@@ -786,17 +790,20 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	}
 
 	result = &evmtypes.ExecutionResult{
-		ReceiptGasUsed:        st.txnGasUsed,
-		BlockExecutionGasUsed: st.blockExecutionGasUsed,
-		BlockStateGasUsed:     st.blockStateGasUsed,
-		MaxGasUsed:            max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
-		Err:                   vmerr,
-		Reverted:              errors.Is(vmerr, vm.ErrExecutionReverted),
-		ReturnData:            ret,
-		SenderInitBalance:     senderInitBalance,
-		CoinbaseInitBalance:   coinbaseInitBalance,
-		FeeTipped:             tipAmount,
-		FeeBurnt:              burnAmount,
+		TxnGasUsage: mdgas.TxnGasUsage{
+			BlockExecutionGasUsed: st.blockExecutionGasUsed,
+			BlockStateGasUsed:     st.blockStateGasUsed,
+			GasRefund:             refund,
+		},
+		ReceiptGasUsed:      st.txnGasUsed,
+		MaxGasUsed:          max(st.txnGasUsedB4Refunds, intrinsicGasResult.FloorGasCost),
+		Err:                 vmerr,
+		Reverted:            errors.Is(vmerr, vm.ErrExecutionReverted),
+		ReturnData:          ret,
+		SenderInitBalance:   senderInitBalance,
+		CoinbaseInitBalance: coinbaseInitBalance,
+		FeeTipped:           tipAmount,
+		FeeBurnt:            burnAmount,
 	}
 
 	result.BurntContractAddress = burntContractAddress

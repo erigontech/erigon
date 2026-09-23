@@ -125,7 +125,7 @@ func (tt *TrieTrace) Save(path string) error {
 	if err != nil {
 		return fmt.Errorf("marshal trie trace: %w", err)
 	}
-	if err := os.WriteFile(path, data, 0600); err != nil {
+	if err := os.WriteFile(path, data, 0o600); err != nil {
 		return fmt.Errorf("write trie trace to %s: %w", path, err)
 	}
 	return nil
