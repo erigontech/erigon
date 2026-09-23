@@ -37,9 +37,9 @@ func mkResult() *ExecutionWitnessResult {
 	return &ExecutionWitnessResult{State: []hexutil.Bytes{{0x01}}}
 }
 
-// mkSized returns a cached-shell result whose resident cost (len(cachedJSON)) is n.
+// mkSized returns a result whose resident cost (witnessResultSize) is n.
 func mkSized(n int) *ExecutionWitnessResult {
-	return &ExecutionWitnessResult{cachedJSON: make([]byte, n)}
+	return &ExecutionWitnessResult{State: []hexutil.Bytes{make(hexutil.Bytes, n-sliceHeaderBytes)}}
 }
 
 // TestNewWitnessResultCacheClampsBlocks pins the only behaviour the constructor

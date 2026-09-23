@@ -19,7 +19,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -195,18 +194,18 @@ func TestWitnessCacheStorePublishes(t *testing.T) {
 	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x42)
-	enc := json.RawMessage(`{"state":["0x01"],"codes":[],"keys":[],"headers":[]}`)
-	api.storeWitness(7, hash, enc)
+	result := mkResult()
+	api.storeWitness(7, hash, result)
 
 	cached, ok := cache.Get(hash)
 	require.True(t, ok, "storeWitness must insert into the cache")
-	require.True(t, bytes.Equal(enc, cached.cachedJSON), "cached bytes must be the stored bytes")
+	require.Same(t, result, cached, "the cache must hold the stored result")
 
 	select {
 	case push := <-ch:
 		require.Equal(t, uint64(7), push.num)
 		require.Equal(t, hash, push.hash)
-		require.True(t, bytes.Equal(enc, push.json), "pushed bytes must be the identical cached bytes")
+		require.Same(t, result, push.result, "the push must carry the cached result")
 	case <-time.After(time.Second):
 		t.Fatal("storeWitness must publish to the feed")
 	}
@@ -221,13 +220,13 @@ func TestCacheAddAloneDoesNotPublish(t *testing.T) {
 	defer cache.unsubscribe(ch)
 
 	hash := hashN(0x77)
-	enc := json.RawMessage(`{"state":["0x02"],"codes":[],"keys":[],"headers":[]}`)
+	result := mkResult()
 
-	cache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	cache.Add(hash, result)
 	require.True(t, cache.Contains(hash), "Add caches")
 	require.Empty(t, ch, "Add alone must not publish")
 
-	cache.store(9, hash, enc)
+	cache.store(9, hash, result)
 	require.Len(t, ch, 1, "store caches and publishes")
 }
 
@@ -285,7 +284,7 @@ func TestBuildPathsPublish(t *testing.T) {
 }
 
 // requireBuildPublished asserts a build published (num, hash) exactly once carrying the
-// bytes it cached. A witness that lands in the cache with no push is the bypass this
+// result it cached. A witness that lands in the cache with no push is the bypass this
 // guards: the insert went somewhere other than store.
 func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResultCache, num uint64, hash common.Hash) {
 	t.Helper()
@@ -295,7 +294,7 @@ func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResu
 		require.Equal(t, hash, push.hash)
 		cached, ok := cache.Get(hash)
 		require.True(t, ok, "a published witness must also be cached")
-		require.True(t, bytes.Equal(cached.cachedJSON, push.json), "pushed bytes must be the cached bytes")
+		require.Same(t, cached, push.result, "the push must carry the cached result")
 		require.Empty(t, ch, "one build publishes exactly once")
 	case <-time.After(30 * time.Second):
 		if cache.Contains(hash) {

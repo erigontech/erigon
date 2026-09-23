@@ -396,13 +396,7 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		return false
 	}
 	witnessCacheBuildDuration.ObserveDuration(start)
-	enc, err := jsonstream.Marshal(result)
-	if err != nil {
-		witnessCacheBuildFailOtherCounter.Inc()
-		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
-		return false
-	}
-	api.storeWitness(num, hash, enc)
+	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }
@@ -486,18 +480,12 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		return false
 	}
 	witnessCacheBuildDuration.ObserveDuration(start)
-	enc, err := jsonstream.Marshal(result)
-	if err != nil {
-		witnessCacheBuildFailOtherCounter.Inc()
-		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
-		return false
-	}
-	api.storeWitness(num, hash, enc)
+	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }
 
-func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, enc []byte) {
-	api.witnessCache.store(num, hash, enc)
+func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, result *ExecutionWitnessResult) {
+	api.witnessCache.store(num, hash, result)
 	witnessCacheEntriesResidentGauge.SetInt(api.witnessCache.Len())
 }
