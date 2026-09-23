@@ -486,9 +486,13 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}
-			if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameSyncCommittee(int(subnetId)), encodedSSZ); err != nil {
-				a.logger.Debug("[Beacon REST] failed to publish sync committee message to gossip", "err", err)
-			}
+			// Published in the background: publishing is real network I/O that
+			// must not be tied to this request's context, which net/http cancels
+			// the instant this handler returns.
+			a.gossipManager.PublishBackground(
+				gossip.TopicNameSyncCommittee(int(subnetId)), encodedSSZ,
+				"validatorIndex", v.ValidatorIndex, "subnet", subnetId, "slot", v.Slot,
+			)
 		}
 	}
 	if len(failures) > 0 {

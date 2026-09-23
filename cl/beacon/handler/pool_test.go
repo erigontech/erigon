@@ -22,6 +22,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -33,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
@@ -402,6 +404,55 @@ func TestPoolSyncCommittees(t *testing.T) {
 		SubcommitteeIndex: 0,
 		AggregationBits:   make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize),
 	}, out.Data)
+}
+
+// TestPoolSyncCommitteesPublishesInBackground proves the handler queues the
+// gossip publish rather than awaiting it inline: it must call
+// PublishBackground, never the blocking Publish, and must not depend on the
+// publish completing before writing the HTTP response.
+func TestPoolSyncCommitteesPublishesInBackground(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	published := make(chan struct{}, 1)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any()).Do(
+		func(name string, data []byte, logCtx ...any) {
+			select {
+			case published <- struct{}{}:
+			default:
+			}
+		},
+	).MinTimes(1)
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+
+	select {
+	case <-published:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected PostEthV1BeaconPoolSyncCommittees to call PublishBackground")
+	}
 }
 
 func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {

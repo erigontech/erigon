@@ -47,6 +47,17 @@ type PeerBanner interface {
 	BanPeer(pid string)
 }
 
+// publishQueueSize bounds how many background publishes may be queued behind
+// a busy worker before PublishBackground starts dropping messages instead of
+// blocking its caller.
+const publishQueueSize = 64
+
+type publishJob struct {
+	name   string
+	data   []byte
+	logCtx []any
+}
+
 // GossipManager is responsible for managing the gossip subscriptions and publications
 // making sure that this module is simple and don't depend on network services pkg
 type GossipManager struct {
@@ -63,6 +74,12 @@ type GossipManager struct {
 	activeIndicies uint64
 	subscriptions  *TopicSubscriptions
 	subscribeAll   bool
+
+	publishQueue chan publishJob
+	// publishHookForTest, when non-nil, runs inside the publish worker
+	// immediately before the real Publish call. Tests use it to observe or
+	// pause a queued job at a known point.
+	publishHookForTest func(name string, data []byte)
 
 	// For graceful shutdown
 	cancel context.CancelFunc
@@ -92,11 +109,13 @@ func NewGossipManager(
 		subscriptions:      NewTopicSubscriptions(cctx, p2p),
 		subscribeAll:       subscribeAll,
 		activeIndicies:     activeIndicies,
+		publishQueue:       make(chan publishJob, publishQueueSize),
 		cancel:             cancel,
 	}
 
 	go gm.observeBandwidth(cctx, maxInboundTrafficPerPeer, maxOutboundTrafficPerPeer, adaptableTrafficRequirements)
 	go gm.goCheckForkAndResubscribe(cctx)
+	go gm.publishWorker(cctx)
 	//gm.stats.goPrintStats(cctx)
 	return gm
 }
@@ -284,18 +303,60 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
-	// Log peer count for attestation topics to help diagnose propagation issues
-	if gossip.IsTopicBeaconAttestation(name) {
+	// Log peer count for attestation and sync-committee topics to help diagnose propagation issues
+	if gossip.IsTopicBeaconAttestation(name) || gossip.IsTopicSyncCommittee(name) {
 		peerCount := len(g.p2p.Pubsub().ListPeers(topic))
 		if peerCount == 0 {
-			log.Warn("[Gossip] Publishing attestation with NO peers on subnet", "topic", name, "peerCount", peerCount)
+			log.Warn("[Gossip] Publishing with NO peers on subnet", "topic", name, "peerCount", peerCount)
 		} else if peerCount < 3 {
-			log.Debug("[Gossip] Publishing attestation with low peer count", "topic", name, "peerCount", peerCount)
+			log.Debug("[Gossip] Publishing with low peer count", "topic", name, "peerCount", peerCount)
 		}
 	}
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
 	// Removed MinTopicSize(1) - don't fail if no peers on subnet, message will propagate when peers join
 	return topicHandle.topic.Publish(ctx, compressedData)
+}
+
+// PublishBackground queues data for asynchronous publish to the given gossip
+// topic without blocking the caller: the actual network I/O runs on this
+// GossipManager's own background worker, decoupled from whatever triggered
+// the call (in particular, an HTTP request's context, which net/http cancels
+// the instant the handler returns). If the worker is busy and the queue is
+// full, the message is dropped and logged rather than blocking - callers
+// must not rely on this call for backpressure.
+func (g *GossipManager) PublishBackground(name string, data []byte, logCtx ...any) {
+	select {
+	case g.publishQueue <- publishJob{name: name, data: data, logCtx: logCtx}:
+	default:
+		fields := append([]any{"topic", name}, logCtx...)
+		log.Warn("[GossipManager] publish queue full, dropping message", fields...)
+	}
+}
+
+func (g *GossipManager) publishWorker(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case job := <-g.publishQueue:
+			g.runPublishJob(ctx, job)
+		}
+	}
+}
+
+func (g *GossipManager) runPublishJob(ctx context.Context, job publishJob) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Error("[GossipManager] panic in background publish, dropping message", "err", r, "topic", job.name)
+		}
+	}()
+	if g.publishHookForTest != nil {
+		g.publishHookForTest(job.name, job.data)
+	}
+	if err := g.Publish(ctx, job.name, job.data); err != nil {
+		fields := append([]any{"topic", job.name, "err", err}, job.logCtx...)
+		log.Warn("[GossipManager] failed to publish message to gossip", fields...)
+	}
 }
 
 func (g *GossipManager) goCheckForkAndResubscribe(ctx context.Context) {

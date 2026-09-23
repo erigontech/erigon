@@ -165,6 +165,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
 	gossipManager.EXPECT().Publish(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	gossipManager.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 	gossipManager.EXPECT().SubscribeWithExpiry(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
 
 	vp = validator_params.NewValidatorParams()

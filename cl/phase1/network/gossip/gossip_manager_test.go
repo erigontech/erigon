@@ -19,6 +19,7 @@ package gossip
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -661,6 +662,150 @@ func (s *subscribeUpcomingTopicsTestSuite) TestRegisterGossipService_ConditionsF
 	result := gossipSrv.SatisfiesConditions(pid, msg, 0)
 	s.True(conditionCalled, "condition must be evaluated")
 	s.False(result, "failing condition should return false")
+}
+
+// TestPublishBackground_DoesNotBlockCaller proves PublishBackground returns
+// before the underlying publish completes, rather than merely returning
+// quickly. unblock is only closed after observing the return, so an
+// implementation that (regresses to) waiting on the publish would deadlock
+// this test until the timeout, not just run slower.
+func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_DoesNotBlockCaller() {
+	hookEntered := make(chan struct{})
+	unblock := make(chan struct{})
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		close(hookEntered)
+		<-unblock
+	}
+
+	returned := make(chan struct{})
+	go func() {
+		s.gm.PublishBackground("test_topic", []byte("data"))
+		close(returned)
+	}()
+
+	select {
+	case <-returned:
+	case <-time.After(2 * time.Second):
+		s.FailNow("PublishBackground blocked on the background publish completing")
+	}
+	close(unblock)
+
+	select {
+	case <-hookEntered:
+	case <-time.After(2 * time.Second):
+		s.FailNow("background worker never invoked the publish hook")
+	}
+}
+
+// TestPublishBackground_DropsWhenQueueFull proves PublishBackground never
+// blocks the caller, even once the background worker is busy and the queue
+// is saturated: it drops the message instead.
+func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_DropsWhenQueueFull() {
+	hookEntered := make(chan struct{})
+	unblock := make(chan struct{})
+	defer close(unblock)
+	var hookEnteredOnce sync.Once
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		hookEnteredOnce.Do(func() { close(hookEntered) })
+		<-unblock
+	}
+
+	// Occupy the single worker so nothing drains the queue below.
+	s.gm.PublishBackground("occupy", nil)
+	select {
+	case <-hookEntered:
+	case <-time.After(2 * time.Second):
+		s.FailNow("worker never picked up the occupying job")
+	}
+
+	// Fill the queue buffer exactly to capacity; each of these must still
+	// enqueue without blocking since capacity remains.
+	for range publishQueueSize {
+		done := make(chan struct{})
+		go func() {
+			s.gm.PublishBackground("filler", nil)
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			s.FailNow("buffered enqueue unexpectedly blocked before the queue was full")
+		}
+	}
+
+	// The queue is now full and the worker is still occupied: one more call
+	// must drop the message rather than block.
+	done := make(chan struct{})
+	go func() {
+		s.gm.PublishBackground("overflow", nil)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		s.FailNow("PublishBackground blocked instead of dropping when the queue was full")
+	}
+}
+
+// TestPublishBackground_RecoversFromPanicAndContinuesProcessing proves a
+// panic while publishing one message does not take down the worker: it must
+// recover and keep processing subsequent messages.
+func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_RecoversFromPanicAndContinuesProcessing() {
+	calls := make(chan string, 2)
+	first := true
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		calls <- name
+		if first {
+			first = false
+			panic("boom")
+		}
+	}
+
+	s.gm.PublishBackground("job1", nil)
+	select {
+	case got := <-calls:
+		s.Equal("job1", got)
+	case <-time.After(2 * time.Second):
+		s.FailNow("job1 was never processed")
+	}
+
+	s.gm.PublishBackground("job2", nil)
+	select {
+	case got := <-calls:
+		s.Equal("job2", got)
+	case <-time.After(2 * time.Second):
+		s.FailNow("worker did not survive the panic to process job2")
+	}
+}
+
+// TestPublishBackground_PublishesToRealTopic proves a queued message
+// eventually reaches the real gossip Publish path (wiring end-to-end),
+// separate from the async-scheduling behavior proved above.
+func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PublishesToRealTopic() {
+	forkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
+	topicName := "test_publish_topic"
+	topic := composeTopic(forkDigest, topicName)
+	topicHandle, err := s.gm.p2p.Pubsub().Join(topic)
+	s.Require().NoError(err)
+	validator := func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		return pubsub.ValidationAccept
+	}
+	s.Require().NoError(s.gm.subscriptions.Add(topic, topicHandle, validator))
+
+	published := make(chan struct{})
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		if name == topicName {
+			close(published)
+		}
+	}
+
+	s.gm.PublishBackground(topicName, []byte("hello"))
+
+	select {
+	case <-published:
+	case <-time.After(2 * time.Second):
+		s.FailNow("PublishBackground never reached the publish hook")
+	}
 }
 
 func TestGossipManager(t *testing.T) {
