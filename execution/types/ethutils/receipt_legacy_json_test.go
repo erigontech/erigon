@@ -245,12 +245,7 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 
 	// To can be null for contract creation
 	if protoReceipt.To != nil {
-		toAddr := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.To))
-		if toAddr != (common.Address{}) {
-			receipt["to"] = toAddr
-		} else {
-			receipt["to"] = nil
-		}
+		receipt["to"] = common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.To))
 	} else {
 		receipt["to"] = nil
 	}
@@ -261,12 +256,7 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 	receipt["gasUsed"] = hexutil.Uint64(protoReceipt.GasUsed)
 
 	if protoReceipt.ContractAddress != nil {
-		addr := common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.ContractAddress))
-		if addr != (common.Address{}) {
-			receipt["contractAddress"] = addr
-		} else {
-			receipt["contractAddress"] = nil
-		}
+		receipt["contractAddress"] = common.Address(gointerfaces.ConvertH160toAddress(protoReceipt.ContractAddress))
 	} else {
 		receipt["contractAddress"] = nil
 	}
