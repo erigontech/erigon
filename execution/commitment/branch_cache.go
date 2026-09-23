@@ -207,14 +207,7 @@ type AdaptivePinControllerProvider interface {
 const branchCacheTailShards = 256
 
 func (c *BranchCache) putStripe(prefix []byte) *sync.Mutex {
-	if len(prefix) == 0 {
-		return &c.putStripes[0]
-	}
-	stripe := prefix[len(prefix)-1]
-	if len(prefix) > 1 {
-		stripe ^= prefix[0]
-	}
-	return &c.putStripes[stripe]
+	return &c.putStripes[uint8(maphash.Hash(prefix))]
 }
 
 func (c *BranchCache) lockAllPutStripes() {
