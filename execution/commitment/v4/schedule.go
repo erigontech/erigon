@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
@@ -135,76 +136,65 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	}
 	storageRoots := make([][32]byte, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
-	if err := runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats); err != nil {
+	overlap := factory != nil && storageWorkers > 1
+	storageDone := make(chan error, 1)
+	if overlap {
+		go func() {
+			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats)
+		}()
+	} else {
+		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats)
+	}
+
+	g := accountGraph()
+	root, plans, planErr := g.planAccounts(rawCtx, accounts, accountFold)
+	if err := <-storageDone; err != nil {
 		return [32]byte{}, err
+	}
+	if planErr != nil {
+		return [32]byte{}, planErr
 	}
 	results := make(map[[32]byte][32]byte, len(storage))
 	for i, task := range storage {
 		results[task.addrHash] = storageRoots[i]
 	}
 
-	root, err := unfold(rawCtx, nil, planeAccount, nil)
-	if err != nil {
-		return [32]byte{}, err
-	}
-	if root == nil {
-		root = fork(nil)
-		root.loaded = true
-	}
-	root.plane = planeAccount
-	g := accountGraph()
-	if err := g.materializeRootExtension(rawCtx, root); err != nil {
-		return [32]byte{}, err
-	}
-	plans, err := makeAccountPlans(rawCtx, g, root, accounts, accountFold)
-	if err != nil {
-		return [32]byte{}, err
-	}
-
 	accountResults := make([]accountResult, len(plans))
 	accountValues := make([]byte, accountLeafScratch*len(plans))
-	ag := new(errgroup.Group)
-	ag.SetLimit(workers)
-	for i := range plans {
-		ag.Go(func() error {
-			plan := plans[i]
-			accountResults[i].plan = plan
-			if plan.skip || plan.delete {
-				return nil
+	parallelFor(len(plans), workers, func(i int) {
+		plan := plans[i]
+		accountResults[i].plan = plan
+		if plan.skip || plan.delete {
+			return
+		}
+		storageRoot := empty.RootHash
+		if plan.entry.storageDirty {
+			var ok bool
+			storageRoot, ok = results[hashAddressPath(plan.entry.hashedKey)]
+			if !ok {
+				accountResults[i].err = errPhaseBRecord
+				return
 			}
-			storageRoot := empty.RootHash
-			if plan.entry.storageDirty {
-				var ok bool
-				storageRoot, ok = results[hashAddressPath(plan.entry.hashedKey)]
-				if !ok {
-					accountResults[i].err = errPhaseBRecord
-					return nil
-				}
-				if !plan.found && plan.entry.update == nil && storageRoot == empty.RootHash {
-					accountResults[i].plan.skip = true
-					return nil
-				}
-			} else if plan.found {
-				_, _, _, existingRoot, decodeErr := decodeAccountLeaf(plan.oldValue)
-				if decodeErr != nil {
-					accountResults[i].err = fmt.Errorf("%w: %w", errPhaseBRecord, decodeErr)
-					return nil
-				}
-				copy(storageRoot[:], existingRoot)
+			if !plan.found && plan.entry.update == nil && storageRoot == empty.RootHash {
+				accountResults[i].plan.skip = true
+				return
 			}
-			stats.enter()
-			defer stats.leave()
-			update, updateErr := accountUpdate(plan.oldValue, plan.found, plan.entry.update)
-			if updateErr != nil {
-				accountResults[i].err = updateErr
-				return nil
+		} else if plan.found {
+			_, _, _, existingRoot, decodeErr := decodeAccountLeaf(plan.oldValue)
+			if decodeErr != nil {
+				accountResults[i].err = fmt.Errorf("%w: %w", errPhaseBRecord, decodeErr)
+				return
 			}
-			at := i * accountLeafScratch
-			accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
-			return nil
-		})
-	}
-	_ = ag.Wait()
+			copy(storageRoot[:], existingRoot)
+		}
+		update, updateErr := accountUpdate(plan.oldValue, plan.found, plan.entry.update)
+		if updateErr != nil {
+			accountResults[i].err = updateErr
+			return
+		}
+		at := i * accountLeafScratch
+		accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
+	})
 	for i := range accountResults {
 		result := &accountResults[i]
 		if result.err != nil {
@@ -231,6 +221,43 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		return [32]byte{}, err
 	}
 	return fold(root, 0)
+}
+
+func (g graph) planAccounts(ctx commitment.PatriciaContext, accounts []accountEntry, plan foldPlan) (*node, []accountPlan, error) {
+	root, err := unfold(ctx, nil, planeAccount, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	if root == nil {
+		root = fork(nil)
+		root.loaded = true
+	}
+	root.plane = planeAccount
+	if err := g.materializeRootExtension(ctx, root); err != nil {
+		return nil, nil, err
+	}
+	plans, err := makeAccountPlans(ctx, g, root, accounts, plan)
+	return root, plans, err
+}
+
+func parallelFor(n, workers int, fn func(i int)) {
+	const chunk = 1024
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(workers, (n+chunk-1)/chunk) {
+		wg.Go(func() {
+			for {
+				lo := int(next.Add(chunk)) - chunk
+				if lo >= n {
+					return
+				}
+				for i := lo; i < min(lo+chunk, n); i++ {
+					fn(i)
+				}
+			}
+		})
+	}
+	wg.Wait()
 }
 
 func (g graph) accountPlanFor(ctx commitment.PatriciaContext, root *node, entry accountEntry) (accountPlan, error) {
