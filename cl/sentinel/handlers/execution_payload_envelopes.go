@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"errors"
+	"slices"
 
 	"github.com/libp2p/go-libp2p/core/network"
 
@@ -56,6 +57,10 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if req.Count == 0 {
 		return nil
 	}
+	endSlot := req.StartSlot + req.Count
+	if endSlot < req.StartSlot {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
+	}
 
 	if cost := min(int(req.Count), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
@@ -69,10 +74,13 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		}
 	}
 
-	var (
-		endSlot   = req.StartSlot + req.Count
-		startSlot = max(req.StartSlot, minServeEpoch*c.beaconConfig.SlotsPerEpoch)
-	)
+	startSlot := max(req.StartSlot, minServeEpoch*c.beaconConfig.SlotsPerEpoch)
+	if startSlot >= endSlot {
+		return nil
+	}
+	if startSlot < c.forkChoiceReader.LowestAvailableSlot() {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+	}
 
 	curSlot := c.ethClock.GetCurrentSlot()
 
@@ -87,15 +95,26 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return err
 	}
 
-	count := uint64(0)
-	for slot := startSlot; slot < endSlot; slot++ {
-		if slot > curSlot || slot > headSlot {
-			break
-		}
+	lastSlot := endSlot - 1
+	lastSlot = min(lastSlot, curSlot, headSlot)
+	if lastSlot < startSlot {
+		return nil
+	}
+
+	type responseCandidate struct {
+		root  common.Hash
+		epoch uint64
+	}
+	responseCandidates := make([]responseCandidate, 0, req.Count)
+	ancestorRoot := head.Root
+	for slot := lastSlot; ; slot-- {
 
 		// Only serve envelopes from GLOAS fork onwards
 		epoch := slot / c.beaconConfig.SlotsPerEpoch
 		if c.beaconConfig.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
+			if slot == startSlot {
+				break
+			}
 			continue
 		}
 
@@ -103,36 +122,43 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		if err != nil {
 			return err
 		}
-		if blockRoot == (common.Hash{}) {
-			continue
-		}
-
-		payloadStatus := head.PayloadStatus
-		if blockRoot != head.Root {
-			ancestor := c.forkChoiceReader.Ancestor(head.Root, slot)
-			if ancestor.Root != blockRoot {
-				continue
+		if blockRoot != (common.Hash{}) {
+			payloadStatus := head.PayloadStatus
+			if blockRoot != head.Root || slot != headSlot {
+				ancestor := c.forkChoiceReader.Ancestor(ancestorRoot, slot)
+				ancestorRoot = ancestor.Root
+				if ancestor.Root != blockRoot {
+					if slot == startSlot {
+						break
+					}
+					continue
+				}
+				payloadStatus = ancestor.PayloadStatus
 			}
-			payloadStatus = ancestor.PayloadStatus
+			if payloadStatus == cltypes.PayloadStatusFull {
+				responseCandidates = append(responseCandidates, responseCandidate{root: blockRoot, epoch: epoch})
+			}
 		}
-		if payloadStatus != cltypes.PayloadStatusFull {
+		if slot == startSlot {
+			break
+		}
+	}
+
+	for _, candidate := range slices.Backward(responseCandidates) {
+		if !c.forkChoiceReader.HasEnvelope(candidate.root) {
 			continue
 		}
 
-		if !c.forkChoiceReader.HasEnvelope(blockRoot) {
-			continue
-		}
-
-		envelope, err := c.forkChoiceReader.ReadEnvelopeFromDisk(blockRoot)
+		envelope, err := c.forkChoiceReader.ReadEnvelopeFromDisk(candidate.root)
 		if err != nil {
-			log.Debug("failed to read envelope from disk", "blockRoot", blockRoot, "error", err)
+			log.Debug("failed to read envelope from disk", "blockRoot", candidate.root, "error", err)
 			continue
 		}
 		if envelope == nil {
 			continue
 		}
 
-		forkDigest, err := c.ethClock.ComputeForkDigest(epoch)
+		forkDigest, err := c.ethClock.ComputeForkDigest(candidate.epoch)
 		if err != nil {
 			log.Debug("failed to compute fork digest", "error", err)
 			return err
@@ -148,10 +174,6 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			return err
 		}
 
-		count++
-		if count >= maxPayloads {
-			break
-		}
 	}
 
 	return nil

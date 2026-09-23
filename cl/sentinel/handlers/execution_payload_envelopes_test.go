@@ -53,18 +53,27 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	for _, tc := range []struct {
 		name              string
 		headPayloadStatus cltypes.PayloadStatus
+		unavailable       bool
+		overflow          bool
 	}{
 		{name: "empty head payload", headPayloadStatus: cltypes.PayloadStatusEmpty},
 		{name: "full head payload", headPayloadStatus: cltypes.PayloadStatusFull},
+		{name: "unavailable history", headPayloadStatus: cltypes.PayloadStatusFull, unavailable: true},
+		{name: "overflowing range", headPayloadStatus: cltypes.PayloadStatusFull, overflow: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			testExecutionPayloadEnvelopesByRangeHandler(t, tc.headPayloadStatus)
+			testExecutionPayloadEnvelopesByRangeHandler(t, tc.headPayloadStatus, tc.unavailable, tc.overflow)
 		})
 	}
 }
 
-func testExecutionPayloadEnvelopesByRangeHandler(t *testing.T, headPayloadStatus cltypes.PayloadStatus) {
-	ctx := context.Background()
+func testExecutionPayloadEnvelopesByRangeHandler(
+	t *testing.T,
+	headPayloadStatus cltypes.PayloadStatus,
+	unavailable bool,
+	overflow bool,
+) {
+	ctx := t.Context()
 
 	// Set up two connected libp2p hosts
 	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
@@ -144,11 +153,13 @@ func testExecutionPayloadEnvelopesByRangeHandler(t *testing.T, headPayloadStatus
 		fcMock.SetEnvelope(blockRoot, envelope)
 		if i < int(count)-1 {
 			payloadStatus := cltypes.PayloadStatusFull
-			if i == 2 {
+			if i == 1 {
+				payloadStatus = cltypes.PayloadStatusPending
+			} else if i == 2 {
 				payloadStatus = cltypes.PayloadStatusEmpty
 			}
 			fcMock.Ancestors[block.Block.Slot] = forkchoice.ForkChoiceNode{Root: blockRoot, PayloadStatus: payloadStatus}
-			if payloadStatus == cltypes.PayloadStatusFull {
+			if payloadStatus == cltypes.PayloadStatusFull && i != 0 {
 				expEnvelopes = append(expEnvelopes, envelope)
 			}
 		} else if headPayloadStatus == cltypes.PayloadStatusFull {
@@ -158,6 +169,19 @@ func testExecutionPayloadEnvelopesByRangeHandler(t *testing.T, headPayloadStatus
 	fcMock.HeadVal = canonicalRoots[count-1]
 	fcMock.HeadSlotVal = startSlot + count - 1
 	fcMock.HeadPayloadStatusVal = headPayloadStatus
+	if unavailable {
+		lowestAvailableSlot := startSlot + 1
+		fcMock.LowestAvailableSlotVal = &lowestAvailableSlot
+	}
+	ancestorInputs := make([]common.Hash, 0, count-1)
+	fcMock.AncestorFn = func(root common.Hash, slot uint64) forkchoice.ForkChoiceNode {
+		ancestorInputs = append(ancestorInputs, root)
+		ancestor := fcMock.Ancestors[slot]
+		if slot == startSlot {
+			ancestor.Root = common.Hash{0xff}
+		}
+		return ancestor
+	}
 
 	c := NewConsensusHandlers(
 		ctx,
@@ -178,6 +202,10 @@ func testExecutionPayloadEnvelopesByRangeHandler(t *testing.T, headPayloadStatus
 		StartSlot: startSlot,
 		Count:     count,
 	}
+	if overflow {
+		req.StartSlot = ^uint64(0)
+		req.Count = 1
+	}
 	var reqBuf bytes.Buffer
 	err = ssz_snappy.EncodeAndWrite(&reqBuf, req)
 	require.NoError(t, err)
@@ -188,6 +216,17 @@ func testExecutionPayloadEnvelopesByRangeHandler(t *testing.T, headPayloadStatus
 
 	_, err = stream.Write(reqBuf.Bytes())
 	require.NoError(t, err)
+	if unavailable || overflow {
+		firstByte := make([]byte, 1)
+		_, err = io.ReadFull(stream, firstByte)
+		require.NoError(t, err)
+		if unavailable {
+			require.Equal(t, byte(ResourceUnavailablePrefix), firstByte[0])
+		} else {
+			require.Equal(t, byte(InvalidRequestPrefix), firstByte[0])
+		}
+		return
+	}
 
 	// Read response chunks
 	sr := snappypool.Reader(stream)
@@ -240,6 +279,7 @@ func testExecutionPayloadEnvelopesByRangeHandler(t *testing.T, headPayloadStatus
 	// Verify stream is exhausted
 	_, err = stream.Read(make([]byte, 1))
 	require.ErrorIs(t, err, io.EOF, "stream should be empty after all envelopes")
+	require.Equal(t, []common.Hash{canonicalRoots[4], canonicalRoots[3], canonicalRoots[2], canonicalRoots[1]}, ancestorInputs)
 }
 
 func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
