@@ -364,6 +364,9 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 				opts = opts.GrowthStep(config.MdbxGrowthStep)
 			}
 			opts = opts.DirtySpace(uint64(1024 * datasize.MB))
+			if config.MdbxSyncPeriod > 0 || config.MdbxSyncBytes > 0 {
+				opts = opts.DeferredSync(config.MdbxSyncPeriod, config.MdbxSyncBytes)
+			}
 		case dbcfg.ConsensusDB:
 			if config.MdbxPageSize.Bytes() > 0 {
 				opts = opts.PageSize(config.MdbxPageSize)

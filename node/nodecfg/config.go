@@ -27,6 +27,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
@@ -166,6 +167,13 @@ type Config struct {
 	MdbxDBSizeLimit datasize.ByteSize
 	MdbxGrowthStep  datasize.ByteSize
 	MdbxWriteMap    bool
+	// MdbxSyncPeriod bounds how long a chaindata commit may stay unflushed. Zero keeps every
+	// commit durable; a non-zero value defers the flush, so a power cut rolls the database back
+	// to the last flushed point instead of losing nothing.
+	MdbxSyncPeriod time.Duration
+	// MdbxSyncBytes bounds how much unflushed data may accumulate, capping both the loss window
+	// and the file growth that deferring a flush causes.
+	MdbxSyncBytes datasize.ByteSize
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
 

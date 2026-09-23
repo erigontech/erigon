@@ -71,6 +71,7 @@ type MdbxOpts struct {
 	path            string
 	syncPeriod      time.Duration      // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
 	syncBytes       *datasize.ByteSize // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
+	syncPoll        time.Duration      // interval of the background goroutine which performs the deferred flushes, so no committing thread pays for them
 	mapSize         datasize.ByteSize
 	growthStep      datasize.ByteSize
 	shrinkThreshold int
@@ -137,6 +138,26 @@ func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSiz
 func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
+
+// DeferredSync stops flushing on every commit and instead flushes when period has passed or
+// bytes have accumulated, whichever comes first; zero leaves that bound unset. A crash then
+// rolls the database back to the last flushed point - mdbx keeps it intact either way - so the
+// bounds are the loss window. The flush runs on a background goroutine, because mdbx tests its
+// thresholds only inside a commit, which would otherwise make one unlucky commit pay for it.
+func (opts MdbxOpts) DeferredSync(period time.Duration, bytes datasize.ByteSize) MdbxOpts {
+	opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
+	if period > 0 {
+		opts = opts.SyncPeriod(period)
+		opts.syncPoll = max(period/8, 5*time.Millisecond)
+	}
+	if bytes > 0 {
+		opts = opts.SyncBytes(bytes)
+		if opts.syncPoll == 0 {
+			opts.syncPoll = 100 * time.Millisecond
+		}
+	}
+	return opts
+}
 
 func (opts MdbxOpts) SyncBytes(threshold datasize.ByteSize) MdbxOpts {
 	opts.syncBytes = &threshold
@@ -394,10 +415,16 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 
 		liveTxs: make(map[*MdbxTx]liveTxInfo),
 
+		syncerStop: make(chan struct{}),
+
 		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), dbg.SlowTx()),
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
+	}
+
+	if opts.syncPoll > 0 && opts.HasFlag(mdbx.SafeNoSync) {
+		go db.syncPoller(opts.syncPoll)
 	}
 
 	// Open can fail after a read txn has been pooled; Close aborts those. The outer env.Close
@@ -484,6 +511,8 @@ type MdbxKV struct {
 	txSize   uint64
 	closed   atomic.Bool
 	path     string
+
+	syncerStop chan struct{}
 
 	txsCount              uint
 	txsCountMutex         *sync.Mutex
@@ -689,10 +718,34 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 
 // Close closes db
 // All transactions must be closed before closing the database.
+// syncPoller flushes deferred writes off the committing threads. Under SafeNoSync mdbx
+// checks its sync thresholds only inside mdbx_txn_commit and mdbx_env_sync, so without this
+// the flush lands on whichever transaction happens to cross the threshold.
+func (db *MdbxKV) syncPoller(interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-db.syncerStop:
+			return
+		case <-t.C:
+			if db.closed.Load() {
+				return
+			}
+			// force=false leaves the decision to mdbx's own thresholds; nonblock skips this
+			// round rather than holding the write lock while a writer wants it.
+			if err := db.env.Sync(false, true); err != nil {
+				db.log.Warn("[db] deferred sync", "label", db.opts.label, "err", err)
+			}
+		}
+	}
+}
+
 func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
+	close(db.syncerStop)
 	db.waitTxsAllDoneOnClose()
 	db.drainRoTxPool()
 

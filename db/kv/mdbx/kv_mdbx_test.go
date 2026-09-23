@@ -1207,3 +1207,36 @@ func TestRollbackTwiceParksTxnOnce(t *testing.T) {
 	defer b.Rollback()
 	require.NotEqual(t, a.CHandle(), b.CHandle(), "two live read txns must never share one handle")
 }
+
+// With a deferred sync, nothing flushes the data until a threshold is reached, and mdbx tests
+// its thresholds only while committing. The background flush is what keeps that off the
+// committing goroutine, so without it the unsynced volume just sits there.
+func TestDeferredSyncFlushesWithoutFurtherCommits(t *testing.T) {
+	write := func(db kv.RwDB) {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.HeaderTD, []byte("k"), make([]byte, 4096))
+		}))
+	}
+	unsynced := func(db kv.RwDB) uint {
+		info, err := db.(*mdbx.MdbxKV).Env().Info(nil)
+		require.NoError(t, err)
+		return info.UnsyncedBytes
+	}
+
+	deferred := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).
+		DeferredSync(50*time.Millisecond, 0).MustOpen()
+	t.Cleanup(deferred.Close)
+	write(deferred)
+	require.Eventually(t, func() bool { return unsynced(deferred) == 0 }, 5*time.Second, 10*time.Millisecond,
+		"the background flush never ran")
+
+	kept := mdbx.New(dbcfg.TemporaryDB, log.Root()).Path(t.TempDir()).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).
+		Flags(func(f uint) uint { return f&^mdbxgo.Durable | mdbxgo.SafeNoSync }).
+		SyncPeriod(50 * time.Millisecond).MustOpen()
+	t.Cleanup(kept.Close)
+	write(kept)
+	time.Sleep(300 * time.Millisecond)
+	require.NotZero(t, unsynced(kept), "without the background flush the data should still be unsynced")
+}
