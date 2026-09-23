@@ -67,7 +67,10 @@ type accountResult struct {
 	err   error
 }
 
-const storageOversubscribe = 4
+const (
+	storageOversubscribe = 4
+	accountPlaneFanout   = 16
+)
 
 func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, workers int, stats *scheduleStats) error {
 	if len(storage) == 0 {
@@ -124,13 +127,14 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	storageWorkers := workers
+	storageWorkers, accountWorkers := workers, workers
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 		storageWorkers = workers * storageOversubscribe
+		accountWorkers = min(workers, accountPlaneFanout)
 	}
 	storageRoots := make([][32]byte, len(storage))
-	accountFold := foldPlan{ctx: ctx, factory: factory, workers: storageWorkers}
+	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
 	if err := runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats); err != nil {
 		return [32]byte{}, err
 	}
