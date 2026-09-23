@@ -206,11 +206,41 @@ func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.Bran
 	return err
 }
 
-func (sd *TemporalMemBatch) applyOwnedCommitmentBranches(parts [][]commitment.BranchDelta, keys []byte, versions []dataWithTxNum, txNum uint64, diff *kv.DomainDiff) (puts int64, putKeySize, putValueSize int, err error) {
-	const domain = kv.CommitmentDomain
-	step := kv.Step(txNum / sd.stepSize)
-	writer := sd.domainWriters[domain]
+const (
+	commitmentOpSkip uint8 = iota
+	commitmentOpPut
+	commitmentOpSameTxNum
 
+	commitmentWriteChunk = 8192
+)
+
+func (sd *TemporalMemBatch) applyOwnedCommitmentBranches(parts [][]commitment.BranchDelta, keys []byte, versions []dataWithTxNum, txNum uint64, diff *kv.DomainDiff) (puts int64, putKeySize, putValueSize int, err error) {
+	flat := make([]*commitment.BranchDelta, 0, len(versions))
+	for _, part := range parts {
+		for i := range part {
+			flat = append(flat, &part[i])
+		}
+	}
+	ops := make([]uint8, len(flat))
+	ready := make(chan int, len(flat)/commitmentWriteChunk+1)
+	written := make(chan error, 1)
+	go func() {
+		var err error
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("commitment domain writer: %v", r)
+			}
+			written <- err
+		}()
+		err = sd.writeCommitmentOps(flat, ops, ready, txNum, diff)
+	}()
+	puts, putKeySize, putValueSize = sd.insertOwnedCommitmentBranches(flat, ops, keys, versions, txNum, ready)
+	return puts, putKeySize, putValueSize, <-written
+}
+
+func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.BranchDelta, ops []uint8, keys []byte, versions []dataWithTxNum, txNum uint64, ready chan<- int) (puts int64, putKeySize, putValueSize int) {
+	const domain = kv.CommitmentDomain
+	defer close(ready)
 	sd.latestStateLocks[domain].Lock()
 	defer sd.latestStateLocks[domain].Unlock()
 	latest := sd.domains[domain]
@@ -221,52 +251,65 @@ func (sd *TemporalMemBatch) applyOwnedCommitmentBranches(parts [][]commitment.Br
 		sd.domains[domain] = latest
 	}
 	off, slot := 0, 0
-	for _, part := range parts {
-		for i := range part {
-			d := &part[i]
-			key := common.ToStringZeroCopy(keys[off : off+len(d.Key)])
-			off += len(d.Key)
-			if bytes.Equal(d.Prev, d.Data) {
-				continue
-			}
-			version := dataWithTxNum{data: d.Data, txNum: txNum}
-			sameTxNumUpdate := false
-			if old, ok := latest[key]; ok {
-				switch {
-				case old[len(old)-1].txNum == txNum:
-					sameTxNumUpdate = true
-					putValueSize += len(d.Data) - len(old[len(old)-1].data)
-					old[len(old)-1] = version
-				case sd.inMemHistoryReads:
-					latest[key] = append(old, version)
-					putValueSize += len(d.Data)
-				default:
-					putValueSize += len(d.Data) - len(old[len(old)-1].data)
-					old[0] = version
-					latest[key] = old[:1]
-				}
-			} else {
-				versions[slot] = version
-				latest[key] = versions[slot : slot+1 : slot+1]
-				slot++
-				putKeySize += len(key)
-				putValueSize += len(d.Data)
-			}
-			puts++
+	for i, d := range flat {
+		key := common.ToStringZeroCopy(keys[off : off+len(d.Key)])
+		off += len(d.Key)
+		if i > 0 && i%commitmentWriteChunk == 0 {
+			ready <- i
+		}
+		if bytes.Equal(d.Prev, d.Data) {
+			continue
+		}
+		version := dataWithTxNum{data: d.Data, txNum: txNum}
+		ops[i] = commitmentOpPut
+		if old, ok := latest[key]; ok {
 			switch {
-			case sameTxNumUpdate:
+			case old[len(old)-1].txNum == txNum:
+				ops[i] = commitmentOpSameTxNum
+				putValueSize += len(d.Data) - len(old[len(old)-1].data)
+				old[len(old)-1] = version
+			case sd.inMemHistoryReads:
+				latest[key] = append(old, version)
+				putValueSize += len(d.Data)
+			default:
+				putValueSize += len(d.Data) - len(old[len(old)-1].data)
+				old[0] = version
+				latest[key] = old[:1]
+			}
+		} else {
+			versions[slot] = version
+			latest[key] = versions[slot : slot+1 : slot+1]
+			slot++
+			putKeySize += len(key)
+			putValueSize += len(d.Data)
+		}
+		puts++
+	}
+	ready <- len(flat)
+	return puts, putKeySize, putValueSize
+}
+
+func (sd *TemporalMemBatch) writeCommitmentOps(flat []*commitment.BranchDelta, ops []uint8, ready <-chan int, txNum uint64, diff *kv.DomainDiff) error {
+	writer := sd.domainWriters[kv.CommitmentDomain]
+	step := kv.Step(txNum / sd.stepSize)
+	lo := 0
+	var err error
+	for hi := range ready {
+		for i := lo; i < hi && err == nil; i++ {
+			d := flat[i]
+			switch {
+			case ops[i] == commitmentOpSkip:
+			case ops[i] == commitmentOpSameTxNum:
 				err = writer.addValue(d.Key, d.Data, step)
 			case len(d.Data) == 0:
 				err = writer.DeleteWithPrevDiff(d.Key, txNum, d.Prev, diff)
 			default:
 				err = writer.PutWithPrevDiff(d.Key, d.Data, txNum, d.Prev, diff)
 			}
-			if err != nil {
-				return puts, putKeySize, putValueSize, err
-			}
 		}
+		lo = hi
 	}
-	return puts, putKeySize, putValueSize, nil
+	return err
 }
 
 func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint64, preval []byte, sameTxNumUpdate bool) error {

@@ -49,7 +49,7 @@ func splitParts(deltas []commitment.BranchDelta, size int) [][]commitment.Branch
 }
 
 func TestPutCommitmentBranchesMatchesPerRecordPuts(t *testing.T) {
-	seed := commitmentPutCorpus(64)
+	seed := commitmentPutCorpus(3*8192 + 17)
 	next := make([]commitment.BranchDelta, 0, len(seed)+2)
 	for i, d := range seed {
 		switch i % 4 {
