@@ -1171,6 +1171,10 @@ func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
 		rlp.EncodeStringToBuf(b, out)
 		return out
 	}
+	var legacy bytes.Buffer
+	require.NoError(t, rightvrsTx.MarshalBinary(&legacy))
+	legacyBinary := legacy.Bytes()
+
 	for name, stored := range map[string][]byte{
 		"empty":                  {},
 		"legacy empty list":      {0xc0},
@@ -1187,6 +1191,8 @@ func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
 		"non-canonical field":    {0xc2, 0x81, 0x00},
 		"wrapped one field":      {0x82, 0xc1, 0x80},
 		"legacy field count":     append([]byte{0xf8, 0x39}, bytes.Repeat([]byte{0x80}, 57)...),
+		"zero type byte":         append([]byte{0x00}, legacyBinary...),
+		"wrapped legacy list":    wrap(legacyBinary),
 	} {
 		_, err := BinaryFromStoredTxn(stored)
 		require.Error(t, err, name)

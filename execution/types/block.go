@@ -1447,6 +1447,9 @@ func BinaryFromStoredTxn(stored []byte) ([]byte, error) {
 		if len(rest) > 0 {
 			return nil, fmt.Errorf("stored txn: %d bytes after the wrapped transaction", len(rest))
 		}
+		if len(content) == 0 || content[0] >= 0x80 {
+			return nil, errors.New("stored txn: wrapped content is not a typed transaction")
+		}
 		binary = content
 	}
 	if err := checkTxnShape(binary); err != nil {
@@ -1463,6 +1466,8 @@ var txnFieldCount = map[byte]int{
 	DynamicFeeTxType: 12,
 	BlobTxType:       14,
 	SetCodeTxType:    13,
+
+	AccountAbstractionTxType: 19,
 }
 
 // checkTxnShape reports whether binary is one whole transaction of a type this code knows: the
@@ -1474,7 +1479,10 @@ func checkTxnShape(binary []byte) error {
 	}
 	txnType := byte(LegacyTxType)
 	fields := binary
-	if binary[0] < 0x80 { // EIP-2718 type byte
+	if binary[0] < 0x80 { // EIP-2718 type byte, and legacy is the absence of one
+		if binary[0] == LegacyTxType {
+			return errors.New("stored txn: 0x00 is not a transaction type")
+		}
 		txnType, fields = binary[0], binary[1:]
 	}
 	want, known := txnFieldCount[txnType]
