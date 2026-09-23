@@ -57,11 +57,10 @@ type touchEntry struct {
 type parallelUpdate struct {
 	trie *prefixTrie
 
-	pending   []touchEntry
-	chunkKeys int
-	buildCh   chan []touchEntry
-	freeCh    chan []touchEntry
-	inflight  sync.WaitGroup
+	pending  []touchEntry
+	buildCh  chan []touchEntry
+	freeCh   chan []touchEntry
+	inflight sync.WaitGroup
 
 	deferredMu       sync.Mutex
 	deferredCombined []*DeferredBranchUpdate
@@ -70,16 +69,13 @@ type parallelUpdate struct {
 }
 
 func newParallelUpdate() *parallelUpdate {
-	return &parallelUpdate{
-		trie:      newPrefixTrie(),
-		chunkKeys: touchChunkKeys,
-	}
+	return &parallelUpdate{trie: newPrefixTrie()}
 }
 
 // Collect is not safe for concurrent calls; the caller must serialize them.
 func (pu *parallelUpdate) Collect(hashedKey, plainKey []byte, update *Update) {
 	pu.pending = append(pu.pending, touchEntry{hashedKey: hashedKey, plainKey: plainKey, update: update})
-	if len(pu.pending) >= pu.chunkKeys {
+	if len(pu.pending) >= touchChunkKeys {
 		pu.handOff()
 	}
 }
@@ -88,7 +84,7 @@ func (pu *parallelUpdate) startBuilder() {
 	if pu.freeCh == nil {
 		pu.freeCh = make(chan []touchEntry, touchChunkBuffers)
 		for range touchChunkBuffers {
-			pu.freeCh <- make([]touchEntry, 0, pu.chunkKeys)
+			pu.freeCh <- make([]touchEntry, 0, touchChunkKeys)
 		}
 	}
 	pu.buildCh = make(chan []touchEntry, touchChunkBuffers)
@@ -102,7 +98,8 @@ func (pu *parallelUpdate) startBuilder() {
 	}(pu.buildCh, pu.freeCh)
 }
 
-func (pu *parallelUpdate) stopBuilder() {
+func (pu *parallelUpdate) drainBuilder() {
+	pu.inflight.Wait()
 	if pu.buildCh != nil {
 		close(pu.buildCh)
 		pu.buildCh = nil
@@ -110,10 +107,6 @@ func (pu *parallelUpdate) stopBuilder() {
 }
 
 func (pu *parallelUpdate) handOff() {
-	if pu.trie == nil {
-		pu.pending = pu.pending[:0]
-		return
-	}
 	if pu.buildCh == nil {
 		pu.startBuilder()
 	}
@@ -138,8 +131,7 @@ func (pu *parallelUpdate) Build() {
 			pu.pending = pu.pending[:0]
 		}
 	}
-	pu.inflight.Wait()
-	pu.stopBuilder()
+	pu.drainBuilder()
 }
 
 func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
@@ -156,8 +148,7 @@ func (pu *parallelUpdate) drainDeferred() {
 }
 
 func (pu *parallelUpdate) Reset() {
-	pu.inflight.Wait()
-	pu.stopBuilder()
+	pu.drainBuilder()
 	clear(pu.pending)
 	pu.pending = pu.pending[:0]
 	if pu.trie != nil {
@@ -168,8 +159,7 @@ func (pu *parallelUpdate) Reset() {
 }
 
 func (pu *parallelUpdate) Close() {
-	pu.inflight.Wait()
-	pu.stopBuilder()
+	pu.drainBuilder()
 	pu.freeCh = nil
 	clear(pu.pending)
 	pu.pending = nil

@@ -116,11 +116,8 @@ func buildReferenceTrie(cases []touchCase) *prefixTrie {
 	return tr
 }
 
-func buildChunked(cases []touchCase, chunkKeys int) (*parallelUpdate, bool) {
+func buildChunked(cases []touchCase) (*parallelUpdate, bool) {
 	pu := newParallelUpdate()
-	if chunkKeys > 0 {
-		pu.chunkKeys = chunkKeys
-	}
 	for _, c := range cases {
 		var upd *Update
 		if c.update != nil {
@@ -137,35 +134,23 @@ func buildChunked(cases []touchCase, chunkKeys int) (*parallelUpdate, bool) {
 func TestChunkBuild_MatchesInsertionOrderTrie(t *testing.T) {
 	t.Parallel()
 
-	for _, n := range []int{1, 2, 17, 5000} {
+	for _, n := range []int{1, 2, 17, 5000, 8200} {
 		cases := randomTouchCases(int64(n)*7919+3, n, 4)
 		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
-		pu, backgrounded := buildChunked(cases, 1<<20)
-		require.False(t, backgrounded, "n=%d must stay under the hand-off threshold", n)
-		require.Equal(t, want, flattenPrefixTrie(t, pu.trie),
-			"presorted build must match insertion-order build for n=%d", n)
-	}
-}
-
-func TestChunkBuild_BackgroundBuildKeepsMergeOrder(t *testing.T) {
-	t.Parallel()
-
-	for _, n := range []int{1, 2, 17, 3000} {
-		cases := randomTouchCases(int64(n)*4242+1, n, 3)
-		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
-		pu, backgrounded := buildChunked(cases, 8)
-		require.Equal(t, n > 8, backgrounded, "n=%d must cross the hand-off threshold", n)
+		pu, backgrounded := buildChunked(cases)
+		require.Equal(t, len(cases) > touchChunkKeys, backgrounded,
+			"n=%d: hand-off must trigger exactly when the batch outgrows one chunk", n)
 		require.Nil(t, pu.buildCh, "Build must reap the builder goroutine")
 		require.Equal(t, want, flattenPrefixTrie(t, pu.trie),
-			"chunks built in the background must not change the merge order for n=%d", n)
+			"chunked build must match insertion-order build for n=%d", n)
 	}
 }
 
 func TestChunkBuild_BuffersSurviveBatches(t *testing.T) {
 	t.Parallel()
 
-	cases := randomTouchCases(777, 200, 0)
-	pu, backgrounded := buildChunked(cases, 8)
+	cases := randomTouchCases(777, touchChunkKeys+8, 0)
+	pu, backgrounded := buildChunked(cases)
 	require.True(t, backgrounded)
 	require.Len(t, pu.freeCh, touchChunkBuffers, "every chunk buffer must be back in the free list")
 
@@ -176,7 +161,7 @@ func TestChunkBuild_BuffersSurviveBatches(t *testing.T) {
 	pu.Build()
 	require.Len(t, pu.freeCh, touchChunkBuffers, "a second batch must reuse the same buffers")
 	for range touchChunkBuffers {
-		require.GreaterOrEqual(t, cap(<-pu.freeCh), pu.chunkKeys,
+		require.GreaterOrEqual(t, cap(<-pu.freeCh), touchChunkKeys,
 			"a recycled buffer must keep its capacity, or every chunk re-grows it")
 	}
 	require.EqualValues(t, len(cases), pu.trie.root.subtreeCount)
