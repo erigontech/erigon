@@ -29,15 +29,15 @@ type graph struct {
 	addrHash []byte
 	errKey   error
 	errNode  error
-	unfolded *keySet
+	before   *keySet
 }
 
-func accountGraph() graph {
-	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord, unfolded: new(keySet)}
+func accountGraph(before *keySet) graph {
+	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord, before: before}
 }
 
-func storageGraph(addrHash []byte) graph {
-	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage, unfolded: new(keySet)}
+func storageGraph(addrHash []byte, before *keySet) graph {
+	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage, before: before}
 }
 
 func (g graph) nodeKey(path, dst []byte) []byte {
@@ -53,8 +53,8 @@ func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, 
 		return nil, fmt.Errorf("%w: missing child at depth %d", g.errNode, len(path))
 	}
 	child.plane = g.plane
-	if g.unfolded != nil {
-		g.unfolded.addNodeKey(g, path)
+	if g.before != nil {
+		g.before.addNodeKey(g, path)
 	}
 	return child, nil
 }
@@ -179,14 +179,14 @@ func (g graph) reachableRecordKeys(root *node, keys *keySet) {
 	visit(root, true)
 }
 
-func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, before *keySet) error {
+func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node) error {
 	if root == nil {
 		return g.errNode
 	}
 	if err := promoteRootExtension(root); err != nil {
 		return err
 	}
-	deltas := make([]recordDelta, 0, before.len()+1)
+	deltas := make([]recordDelta, 0, g.before.len()+1)
 	after := new(keySet)
 	var materialize func(*node) ([32]byte, error)
 	materialize = func(n *node) ([32]byte, error) {
@@ -236,8 +236,7 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, before *
 	for _, delta := range deltas {
 		after.add(delta.key)
 	}
-	before.addAll(g.unfolded)
-	deltas, err := appendRemovedDeltas(ctx, deltas, before, after)
+	deltas, err := appendRemovedDeltas(ctx, deltas, g.before, after)
 	if err != nil {
 		return err
 	}

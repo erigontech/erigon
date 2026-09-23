@@ -150,8 +150,8 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		root = fork(nil)
 	}
 	root.plane = planeAccount
-	g := accountGraph()
 	before := new(keySet)
+	g := accountGraph(before)
 	g.reachableRecordKeys(root, before)
 	if err := g.materializeRootExtension(rawCtx, root); err != nil {
 		return [32]byte{}, err
@@ -227,7 +227,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			return [32]byte{}, err
 		}
 	}
-	if err := g.persistGraph(rawCtx, root, before); err != nil {
+	if err := g.persistGraph(rawCtx, root); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)

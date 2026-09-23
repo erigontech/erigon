@@ -64,7 +64,7 @@ func TestKeySetForEachMissing(t *testing.T) {
 }
 
 func TestKeySetAddNodeKeyMatchesNodeKey(t *testing.T) {
-	g := storageGraph(bytes.Repeat([]byte{0x7e}, 32))
+	g := storageGraph(bytes.Repeat([]byte{0x7e}, 32), new(keySet))
 	s := new(keySet)
 	paths := [][]byte{nil, {0x01}, {0x0a, 0x0b, 0x0c}}
 	for _, p := range paths {

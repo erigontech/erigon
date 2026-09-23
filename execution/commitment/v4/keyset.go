@@ -49,12 +49,6 @@ func (s *keySet) addNodeKey(g graph, path []byte) {
 	s.spans = append(s.spans, keySpan{start, int32(len(s.arena))})
 }
 
-func (s *keySet) addAll(other *keySet) {
-	for i := range other.spans {
-		s.add(other.at(i))
-	}
-}
-
 func (s *keySet) sortDedup() {
 	slices.SortFunc(s.spans, func(a, b keySpan) int {
 		return bytes.Compare(s.arena[a.start:a.end], s.arena[b.start:b.end])

@@ -163,7 +163,6 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 		return empty.RootHash, nil
 	}
 
-	g := storageGraph(task.addrHash[:])
 	root, err := unfold(ctx, nil, planeStorage, task.addrHash[:])
 	if err != nil {
 		return [32]byte{}, err
@@ -174,6 +173,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	root.plane = planeStorage
 	markStorageRoot(root)
 	before := new(keySet)
+	g := storageGraph(task.addrHash[:], before)
 	g.reachableRecordKeys(root, before)
 	if err := g.materializeRootExtension(ctx, root); err != nil {
 		return [32]byte{}, err
@@ -211,7 +211,7 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	}
 
 	markStorageRoot(root)
-	if err := g.persistGraph(ctx, root, before); err != nil {
+	if err := g.persistGraph(ctx, root); err != nil {
 		return [32]byte{}, err
 	}
 	return fold(root, 0)

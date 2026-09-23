@@ -19,6 +19,7 @@ package v4
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -92,6 +93,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		return n, nil
 	}
 
+	n.slots = make([]childSlot, 0, bits.OnesCount16(l.child))
 	for nib := range 16 {
 		bit := uint16(1) << nib
 		if l.child&bit == 0 {

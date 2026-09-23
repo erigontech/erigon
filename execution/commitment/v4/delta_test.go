@@ -111,10 +111,10 @@ func TestPersistGraphRetainsOnlyFoldedDeltasAfterChildWalk(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			g := storageGraph(addr[:])
 			before := new(keySet)
+			g := storageGraph(addr[:], before)
 			g.reachableRecordKeys(root, before)
-			require.NoError(t, g.persistGraph(ctx, root, before))
+			require.NoError(t, g.persistGraph(ctx, root))
 			require.NotEmpty(t, ctx.branches)
 			require.Equal(t, 1, linkedNodeCount(root))
 			require.Empty(t, ctx.accountCalls)
@@ -138,7 +138,8 @@ func TestPersistGraphKeepsRecordsThatOnlyMovedDeeper(t *testing.T) {
 	ctx := newMockContext()
 	var addr [32]byte
 	addr[0] = 0x7e
-	g := storageGraph(addr[:])
+	before := new(keySet)
+	g := storageGraph(addr[:], before)
 
 	deepPath := []byte{0x0c, 0x06}
 	deepKey := StorageNodeKey(addr, deepPath, nil)
@@ -152,13 +153,12 @@ func TestPersistGraphKeepsRecordsThatOnlyMovedDeeper(t *testing.T) {
 	root.storageRoot = true
 	root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
 	root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
-	before := new(keySet)
 	g.reachableRecordKeys(root, before)
 	require.True(t, keySetHas(before, deepKey))
 
 	diverging := append([]byte{0x0c, 0x07}, bytes.Repeat([]byte{0x05}, 62)...)
 	require.NoError(t, insert(root, diverging, []byte{0x01}))
-	require.NoError(t, g.persistGraph(ctx, root, before))
+	require.NoError(t, g.persistGraph(ctx, root))
 
 	require.Equal(t, deepData, ctx.branches[string(deepKey)], "record that only moved from depth 1 to depth 2 must not be tombstoned")
 	require.Equal(t, []byte{0xca, 0xfe}, ctx.branches[string(siblingKey)])
