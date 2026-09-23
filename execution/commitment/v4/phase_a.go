@@ -173,7 +173,8 @@ func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte,
 	}
 	root.plane = planeStorage
 	markStorageRoot(root)
-	before := g.reachableRecordKeys(root)
+	before := new(keySet)
+	g.reachableRecordKeys(root, before)
 	if err := g.materializeRootExtension(ctx, root); err != nil {
 		return [32]byte{}, err
 	}

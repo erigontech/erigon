@@ -68,7 +68,9 @@ func TestRemovedRecordDeltaUsesNonNilTombstone(t *testing.T) {
 	key := []byte{0x40, 0}
 	ctx.branches[string(key)] = []byte{1, 2, 3}
 
-	deltas, err := appendRemovedDeltas(ctx, nil, map[string]struct{}{string(key): {}}, nil)
+	before := new(keySet)
+	before.add(key)
+	deltas, err := appendRemovedDeltas(ctx, nil, before, new(keySet))
 	require.NoError(t, err)
 	require.Len(t, deltas, 1)
 	require.NotNil(t, deltas[0].data)
@@ -110,7 +112,8 @@ func TestPersistGraphRetainsOnlyFoldedDeltasAfterChildWalk(t *testing.T) {
 				}
 			}
 			g := storageGraph(addr[:])
-			before := g.reachableRecordKeys(root)
+			before := new(keySet)
+			g.reachableRecordKeys(root, before)
 			require.NoError(t, g.persistGraph(ctx, root, before))
 			require.NotEmpty(t, ctx.branches)
 			require.Equal(t, 1, linkedNodeCount(root))
@@ -149,8 +152,9 @@ func TestPersistGraphKeepsRecordsThatOnlyMovedDeeper(t *testing.T) {
 	root.storageRoot = true
 	root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
 	root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
-	before := g.reachableRecordKeys(root)
-	require.Contains(t, before, string(deepKey))
+	before := new(keySet)
+	g.reachableRecordKeys(root, before)
+	require.True(t, keySetHas(before, deepKey))
 
 	diverging := append([]byte{0x0c, 0x07}, bytes.Repeat([]byte{0x05}, 62)...)
 	require.NoError(t, insert(root, diverging, []byte{0x01}))
@@ -158,4 +162,13 @@ func TestPersistGraphKeepsRecordsThatOnlyMovedDeeper(t *testing.T) {
 
 	require.Equal(t, deepData, ctx.branches[string(deepKey)], "record that only moved from depth 1 to depth 2 must not be tombstoned")
 	require.Equal(t, []byte{0xca, 0xfe}, ctx.branches[string(siblingKey)])
+}
+
+func keySetHas(s *keySet, key []byte) bool {
+	for i := range s.spans {
+		if bytes.Equal(s.at(i), key) {
+			return true
+		}
+	}
+	return false
 }

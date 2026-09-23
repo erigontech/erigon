@@ -18,7 +18,6 @@ package v4
 
 import (
 	"bytes"
-	"slices"
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -70,20 +69,17 @@ func applyDeltas(deltas []recordDelta, putBranch putBranchFunc) error {
 	return nil
 }
 
-func appendRemovedDeltas(ctx commitment.PatriciaContext, deltas []recordDelta, before, after map[string]struct{}) ([]recordDelta, error) {
-	removed := make([]string, 0, len(before))
-	for key := range before {
-		if _, ok := after[key]; !ok {
-			removed = append(removed, key)
-		}
-	}
-	slices.Sort(removed)
-	for _, key := range removed {
-		delta, err := readRecordDelta(ctx, []byte(key), nil)
-		if err != nil {
-			return nil, err
+func appendRemovedDeltas(ctx commitment.PatriciaContext, deltas []recordDelta, before, after *keySet) ([]recordDelta, error) {
+	err := before.forEachMissing(after, func(key []byte) error {
+		delta, readErr := readRecordDelta(ctx, key, nil)
+		if readErr != nil {
+			return readErr
 		}
 		deltas = append(deltas, delta)
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return deltas, nil
 }
