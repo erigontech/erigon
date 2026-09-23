@@ -17,16 +17,19 @@
 package transactions
 
 import (
+	"bytes"
 	"io"
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	_ "github.com/erigontech/erigon/execution/tracing/tracers/native" // registers callTracer
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -65,4 +68,89 @@ func TestAssembleTracerAcceptsNonNegativeLimit(t *testing.T) {
 func TestAssembleTracerIgnoresLimitForNamedTracer(t *testing.T) {
 	callTracer := "callTracer"
 	require.NoError(t, assembleWithLogConfig(t, &logger.LogConfig{Limit: -1}, &callTracer))
+}
+
+// countingReader records how often the inner reader is consulted and hands back
+// buffers it reuses, the way a real reader backed by a pooled buffer does.
+type countingReader struct {
+	accountReads, storageReads, codeReads, codeSizeReads int
+	account                                              *accounts.Account
+	codeBuf                                              []byte
+}
+
+func (c *countingReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	c.accountReads++
+	return c.account, nil
+}
+
+func (c *countingReader) ReadAccountStorage(accounts.Address, accounts.StorageKey) (uint256.Int, bool, error) {
+	c.storageReads++
+	return *uint256.NewInt(7), true, nil
+}
+
+func (c *countingReader) ReadAccountCode(accounts.Address) ([]byte, error) {
+	c.codeReads++
+	c.codeBuf = append(c.codeBuf[:0], byte(c.codeReads), 0x60, 0x00)
+	return c.codeBuf, nil
+}
+
+func (c *countingReader) ReadAccountCodeSize(accounts.Address) (int, error) {
+	c.codeSizeReads++
+	return 3, nil
+}
+
+func (c *countingReader) ReadAccountDataForDebug(accounts.Address) (*accounts.Account, error) {
+	return c.account, nil
+}
+func (c *countingReader) ReadAccountIncarnation(accounts.Address) (uint64, error) { return 0, nil }
+func (c *countingReader) SetTrace(bool, string)                                   {}
+func (c *countingReader) Trace() bool                                             { return false }
+func (c *countingReader) TracePrefix() string                                     { return "" }
+
+func TestMemoReaderServesRepeatedReadsFromItsCache(t *testing.T) {
+	addr := accounts.InternAddress(common.HexToAddress("0x01"))
+	key := accounts.StorageKey{}
+	inner := &countingReader{account: &accounts.Account{Nonce: 3}}
+	m := newMemoReader(inner)
+
+	first, err := m.ReadAccountData(addr)
+	require.NoError(t, err)
+	first.Nonce = 99
+
+	second, err := m.ReadAccountData(addr)
+	require.NoError(t, err)
+	require.Equal(t, 1, inner.accountReads, "a repeated account read must not reach the inner reader")
+	require.Equal(t, uint64(3), second.Nonce, "mutating a returned account must not change the cache")
+
+	for range 2 {
+		v, found, err := m.ReadAccountStorage(addr, key)
+		require.NoError(t, err)
+		require.True(t, found)
+		require.Equal(t, *uint256.NewInt(7), v)
+		n, err := m.ReadAccountCodeSize(addr)
+		require.NoError(t, err)
+		require.Equal(t, 3, n)
+	}
+	require.Equal(t, 1, inner.storageReads, "a repeated storage read must not reach the inner reader")
+	require.Equal(t, 1, inner.codeSizeReads, "a repeated code-size read must not reach the inner reader")
+}
+
+func TestMemoReaderKeepsCodeAfterTheInnerBufferIsReused(t *testing.T) {
+	first := accounts.InternAddress(common.HexToAddress("0x01"))
+	second := accounts.InternAddress(common.HexToAddress("0x02"))
+	inner := &countingReader{account: &accounts.Account{}}
+	m := newMemoReader(inner)
+
+	want, err := m.ReadAccountCode(first)
+	require.NoError(t, err)
+	snapshot := bytes.Clone(want)
+
+	_, err = m.ReadAccountCode(second)
+	require.NoError(t, err)
+	require.Equal(t, snapshot, want, "the inner reader reusing its buffer must not rewrite a slice already returned")
+
+	got, err := m.ReadAccountCode(first)
+	require.NoError(t, err)
+	require.Equal(t, 2, inner.codeReads, "a repeated code read must not reach the inner reader")
+	require.Equal(t, snapshot, got, "the inner reader reusing its buffer must not rewrite a cached entry")
 }
