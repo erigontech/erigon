@@ -130,6 +130,37 @@ func TestFlattenPrefixTrie_Paths(t *testing.T) {
 	require.Equal(t, []string{"", "12", "123", "12f", "5"}, got)
 }
 
+func TestChunkBuild_WalkOrderIsSortedWhateverTheArrivalOrder(t *testing.T) {
+	t.Parallel()
+
+	cases := randomTouchCases(31337, 2000, 0)
+	shuffled := slices.Clone(cases)
+	rnd := rand.New(rand.NewSource(9))
+	rnd.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+	pu, _ := buildChunked(shuffled)
+	flat := flattenPrefixTrie(t, pu.trie)
+
+	paths := make([]string, 0, len(flat))
+	terminals := make([]string, 0, len(cases))
+	for _, n := range flat {
+		paths = append(paths, n.path)
+		if n.plainKey != "" {
+			terminals = append(terminals, n.path)
+		}
+	}
+	require.True(t, slices.IsSorted(paths), "the walk must emit nodes in hashed-key order")
+
+	want := make([]string, 0, len(cases))
+	for _, c := range cases {
+		if c.plainKey != nil {
+			want = append(want, NibblesToString(c.hashedKey))
+		}
+	}
+	slices.Sort(want)
+	require.Equal(t, want, terminals, "every collected key must appear once, in sorted order")
+}
+
 func TestChunkBuild_MatchesInsertionOrderTrie(t *testing.T) {
 	t.Parallel()
 

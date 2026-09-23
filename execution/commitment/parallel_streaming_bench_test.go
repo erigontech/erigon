@@ -71,7 +71,6 @@ func runCollectAndProcessBench(b *testing.B, pk [][]byte, updates []Update, work
 func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers int,
 	newFactory func(*MockState) (TrieContextFactory, func()), timeCollect bool) {
 	ctx := context.Background()
-	tmp := b.TempDir()
 	b.ReportAllocs()
 	var pph *ParallelPatriciaHashed
 	defer func() {
@@ -93,9 +92,11 @@ func runParallelBenchWith(b *testing.B, pk [][]byte, updates []Update, workers i
 			pph.ResetContext(ms)
 		}
 		pph.RootTrie().Reset()
-		upds := WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
+		var upds *Updates
 		if timeCollect {
-			upds = NewUpdates(ModeParallel, tmp, KeyToHexNibbleHash)
+			upds = NewUpdates(ModeParallel, "", KeyToHexNibbleHash)
+		} else {
+			upds = WrapKeyUpdates(b, ModeParallel, KeyToHexNibbleHash, pk, updates)
 		}
 		b.StartTimer()
 

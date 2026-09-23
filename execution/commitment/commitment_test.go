@@ -865,6 +865,13 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.Equal(t, uint64(0), ut.Size())
 }
 
+func requireParallelCount(t *testing.T, ut *Updates, n int, msg string) {
+	t.Helper()
+	require.Equal(t, uint64(n), ut.Size())
+	ut.parallel.Build()
+	require.EqualValues(t, n, ut.parallel.trie.root.subtreeCount, msg)
+}
+
 func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
 	t.Parallel()
 
@@ -881,17 +888,10 @@ func TestUpdatesModeParallel_TouchPlainKeyRoutes(t *testing.T) {
 		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 	}
 
-	require.Equal(t, uint64(len(keys)), ut.Size())
-	ut.parallel.Build()
-	require.NotNil(t, ut.parallel.trie.root)
-	require.EqualValues(t, len(keys), ut.parallel.trie.root.subtreeCount,
-		"every touched key must show up in the prefix trie")
+	requireParallelCount(t, ut, len(keys), "every touched key must show up in the prefix trie")
 
 	ut.TouchPlainKey(string(keys[0]), []byte("v2"), ut.TouchStorage)
-	require.Equal(t, uint64(len(keys)), ut.Size())
-	ut.parallel.Build()
-	require.EqualValues(t, len(keys), ut.parallel.trie.root.subtreeCount,
-		"duplicate TouchPlainKey must not double-count in the trie")
+	requireParallelCount(t, ut, len(keys), "duplicate TouchPlainKey must not double-count in the trie")
 }
 
 func TestUpdatesModeParallel_RepeatTouchDoesNotRehash(t *testing.T) {
@@ -913,10 +913,7 @@ func TestUpdatesModeParallel_RepeatTouchDoesNotRehash(t *testing.T) {
 	}
 
 	require.EqualValues(t, 1, hashCalls.Load(), "a repeat touch must not rehash the key")
-	require.Equal(t, uint64(1), ut.Size())
-	ut.parallel.Build()
-	require.NotNil(t, ut.parallel.trie.root)
-	require.EqualValues(t, 1, ut.parallel.trie.root.subtreeCount)
+	requireParallelCount(t, ut, 1, "the single touched key must reach the trie")
 }
 
 func TestUpdatesModeParallel_TouchHashedKey(t *testing.T) {
@@ -932,9 +929,7 @@ func TestUpdatesModeParallel_TouchHashedKey(t *testing.T) {
 	ut.TouchHashedKey(hk2)
 	ut.TouchHashedKey(hk1)
 
-	require.Equal(t, uint64(2), ut.Size())
-	ut.parallel.Build()
-	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount)
+	requireParallelCount(t, ut, 2, "a repeated hashed key must not double-count in the trie")
 }
 
 func TestUpdatesModeParallel_Reset(t *testing.T) {
@@ -950,9 +945,7 @@ func TestUpdatesModeParallel_Reset(t *testing.T) {
 	for _, k := range keys {
 		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 	}
-	require.Equal(t, uint64(2), ut.Size())
-	ut.parallel.Build()
-	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount)
+	requireParallelCount(t, ut, 2, "both touched keys must reach the trie")
 
 	ut.Reset()
 
@@ -966,9 +959,7 @@ func TestUpdatesModeParallel_Reset(t *testing.T) {
 	for _, k := range keys {
 		ut.TouchPlainKey(string(k), []byte("v"), ut.TouchStorage)
 	}
-	require.Equal(t, uint64(2), ut.Size())
-	ut.parallel.Build()
-	require.EqualValues(t, 2, ut.parallel.trie.root.subtreeCount)
+	requireParallelCount(t, ut, 2, "a collection reused after Reset must refill the trie")
 }
 
 func TestUpdatesModeParallel_Close(t *testing.T) {
