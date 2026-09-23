@@ -164,7 +164,7 @@ func TestChunkBuild_WalkOrderIsSortedWhateverTheArrivalOrder(t *testing.T) {
 func TestChunkBuild_MatchesInsertionOrderTrie(t *testing.T) {
 	t.Parallel()
 
-	for _, n := range []int{1, 2, 17, 5000, 8200} {
+	for _, n := range []int{1, 2, 17, 5000, touchChunkKeys + 1, 3*touchChunkKeys + 7} {
 		cases := randomTouchCases(int64(n)*7919+3, n, 4)
 		want := flattenPrefixTrie(t, buildReferenceTrie(cases))
 		pu, backgrounded := buildChunked(cases)

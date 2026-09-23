@@ -1381,6 +1381,9 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 }
 
 func (t *Updates) SetMode(m Mode) {
+	if t.parallel != nil {
+		t.parallel.Reset()
+	}
 	t.mode = m
 	switch t.mode {
 	case ModeDirect:
