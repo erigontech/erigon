@@ -26,9 +26,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-var ErrInvalidFetchBlocksAmount = errors.New("invalid fetch blocks amount")
-var ErrInvalidFetchHeadersAmount = errors.New("invalid fetch headers amount")
-var ErrInvalidBodyRLP = errors.New("invalid block body RLP")
+var (
+	ErrInvalidFetchBlocksAmount  = errors.New("invalid fetch blocks amount")
+	ErrInvalidFetchHeadersAmount = errors.New("invalid fetch headers amount")
+	ErrInvalidBodyRLP            = errors.New("invalid block body RLP")
+)
 
 type ErrInvalidFetchHeadersRange struct {
 	start uint64

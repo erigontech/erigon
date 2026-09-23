@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -183,7 +182,15 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 					log.Warn(closedWarn)
 					return
 				}
-				notify(emit, item)
+				err := rpc.CoalesceNotifications(notifier, func() {
+					notify(emit, item)
+					for range len(ch) {
+						notify(emit, <-ch)
+					}
+				})
+				if err != nil {
+					log.Warn("[rpc] notification batch write failed, connection closed", "err", err)
+				}
 			case <-rpcSub.Err():
 				return
 			}
@@ -193,23 +200,20 @@ func subscribeRPC[T any](ctx context.Context, subscribe func() (<-chan T, func()
 	return rpcSub, nil
 }
 
-// sharedJSON gives every remote subscriber the bytes of one encoding of the event, and an
-// in-process one the value itself.
-type sharedJSON[T any] struct {
-	ev    *rpchelper.Shared[T]
-	value func(T) any
+type fastMarshaler interface {
+	MarshalFastJSONTo(*jsonstream.StackStream) error
 }
 
-func (s sharedJSON[T]) MarshalFastJSONTo(w *jsonstream.StackStream) error {
-	enc, err := s.ev.Encode(func(v T) ([]byte, error) {
-		val := s.value(v)
-		if fm, ok := val.(interface {
-			MarshalFastJSONTo(*jsonstream.StackStream) error
-		}); ok {
-			return jsonstream.Marshal(fm)
-		}
-		return json.Marshal(val)
-	})
+// sharedJSON gives every remote subscriber the bytes of one encoding of the event, and an
+// in-process one the value itself. V keeps the payload on the streaming encoder: a type
+// without one does not compile here, instead of falling back to reflection at runtime.
+type sharedJSON[T any, V fastMarshaler] struct {
+	ev    *rpchelper.Shared[T]
+	value func(T) V
+}
+
+func (s sharedJSON[T, V]) MarshalFastJSONTo(w *jsonstream.StackStream) error {
+	enc, err := s.ev.Encode(func(v T) ([]byte, error) { return jsonstream.Marshal(s.value(v)) })
 	if err != nil {
 		return err
 	}
@@ -217,11 +221,11 @@ func (s sharedJSON[T]) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	return nil
 }
 
-func (s sharedJSON[T]) LocalValue() any { return s.value(s.ev.Value) }
+func (s sharedJSON[T, V]) LocalValue() any { return s.value(s.ev.Value) }
 
-func headerValue(h *types.Header) any { return h }
+func headerValue(h *types.Header) *types.Header { return h }
 
-func subscribeReceiptsValue(rs []*remoteproto.SubscribeReceiptsReply) any {
+func subscribeReceiptsValue(rs []*remoteproto.SubscribeReceiptsReply) ethutils.RPCReceipts {
 	out := make(ethutils.RPCReceipts, len(rs))
 	for i, r := range rs {
 		out[i] = ethutils.MarshalSubscribeReceipt(r)
@@ -241,7 +245,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 		},
 		func(emit func(payload any), h *rpchelper.Shared[*types.Header]) {
 			if h != nil && h.Value != nil {
-				emit(sharedJSON[*types.Header]{h, headerValue})
+				emit(sharedJSON[*types.Header, *types.Header]{h, headerValue})
 			}
 		},
 		"[rpc] new heads channel was closed")
@@ -320,7 +324,7 @@ func (api *APIImpl) TransactionReceipts(ctx context.Context, crit *filters.Recei
 		},
 		func(emit func(payload any), r *rpchelper.Shared[[]*remoteproto.SubscribeReceiptsReply]) {
 			if r != nil && len(r.Value) > 0 {
-				emit(sharedJSON[[]*remoteproto.SubscribeReceiptsReply]{r, subscribeReceiptsValue})
+				emit(sharedJSON[[]*remoteproto.SubscribeReceiptsReply, ethutils.RPCReceipts]{r, subscribeReceiptsValue})
 			}
 		},
 		"[rpc] receipts channel was closed")

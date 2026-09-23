@@ -101,7 +101,8 @@ func VerifyTorrentFiles(ctx context.Context, dir string, failFast bool, logger l
 			case <-gctx.Done():
 				return
 			case <-logEvery.C:
-				logger.Info("[verify] progress",
+				logger.Info(
+					"[verify] progress",
 					"percent", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
 					"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
 				)

@@ -874,7 +874,6 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 	}
 	if stateObject != nil && !stateObject.deleted {
 		code, err := stateObject.Code()
-
 		if err != nil {
 			return accounts.ZeroAddress, false, err
 		}
@@ -1001,7 +1000,7 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 					prev.Add(prev, &bi.increase)
 				}
 
-				sdb.tracingHooks.OnBalanceChange(addr, *prev, *(new(uint256.Int).Add(prev, &amount)), reason)
+				sdb.tracingHooks.OnBalanceChange(addr, *prev, *new(uint256.Int).Add(prev, &amount), reason)
 			}
 
 			bi.increase = u256.Add(bi.increase, amount)
@@ -1276,7 +1275,6 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	}
 
 	readAccount, source, version, err := readAccount(sdb, addr)
-
 	if err != nil {
 		return nil, UnknownSource, UnknownVersion, err
 	}
@@ -2219,7 +2217,6 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 		}
 	} else {
 		readAccount, _, _, err := sdb.getVersionedAccount(addr, true)
-
 		if err != nil {
 			return err
 		}
@@ -2844,7 +2841,8 @@ func (sdb *IntraBlockState) clearJournalAndRefund() {
 // Cancun fork:
 // - Reset transient storage (EIP-1153)
 func (sdb *IntraBlockState) Prepare(rules *chain.Rules, sender, coinbase accounts.Address, dst accounts.Address,
-	precompiles []accounts.Address, list types.AccessList) {
+	precompiles []accounts.Address, list types.AccessList,
+) {
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(sender.Handle()) || !dst.IsNil() && dbg.TraceAccount(dst.Handle())) {
 		fmt.Printf("%d (%d.%d) ibs.Prepare: sender: %x, coinbase: %x, dest: %x, %x, %v, %v\n", sdb.blockNum, sdb.txIndex, sdb.version, sender, coinbase, dst, precompiles, list, rules)
 	}

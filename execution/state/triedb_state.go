@@ -425,7 +425,6 @@ func (tds *TrieDbState) GetTouchedPlainKeys() (plainKeys [][]byte, hashedKeys []
 	hashedKeys = accountHashTouches
 	hashedKeys = append(hashedKeys, storageHashTouches...)
 	return plainKeys, hashedKeys
-
 }
 
 func (tds *TrieDbState) ResolveBuffer() {

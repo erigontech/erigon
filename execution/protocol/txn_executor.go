@@ -188,7 +188,8 @@ func ApplyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailou
 }
 
 func applyMessage(evm *vm.EVM, msg Message, gp *GasPool, refunds bool, gasBailout bool, noFeeBurnAndTip bool, engine rules.EngineReader) (
-	*evmtypes.ExecutionResult, error) {
+	*evmtypes.ExecutionResult, error,
+) {
 	// Only zero-gas transactions may be service ones
 	if msg.FeeCap().IsZero() && !msg.IsFree() && engine != nil {
 		blockContext := evm.Context

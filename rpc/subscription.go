@@ -97,6 +97,17 @@ type Notifier interface {
 	Closed() <-chan any
 }
 
+// CoalesceNotifications runs send so the notifications it sends leave the socket together.
+func CoalesceNotifications(n Notifier, send func()) error {
+	if rn, ok := n.(*RemoteNotifier); ok {
+		if c, ok := rn.h.conn.(interface{ coalesce(func()) error }); ok {
+			return c.coalesce(send)
+		}
+	}
+	send()
+	return nil
+}
+
 type LocalNotifier struct {
 	idgen     func() ID
 	namespace string

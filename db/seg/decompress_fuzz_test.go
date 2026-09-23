@@ -109,5 +109,4 @@ func FuzzDecompressMatch(f *testing.F) {
 			word_idx++
 		}
 	})
-
 }

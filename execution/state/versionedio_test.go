@@ -127,16 +127,21 @@ type minimalStateReader struct{}
 func (r *minimalStateReader) ReadAccountData(addr accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (r *minimalStateReader) ReadAccountDataForDebug(addr accounts.Address) (*accounts.Account, error) {
 	return nil, nil
 }
+
 func (r *minimalStateReader) ReadAccountStorage(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
+
 func (r *minimalStateReader) ReadAccountCode(addr accounts.Address) ([]byte, error) {
 	return nil, nil
 }
+
 func (r *minimalStateReader) ReadAccountCodeSize(addr accounts.Address) (int, error) { return 0, nil }
+
 func (r *minimalStateReader) ReadAccountIncarnation(addr accounts.Address) (uint64, error) {
 	return 0, nil
 }
@@ -329,7 +334,6 @@ func TestAsBlockAccessList_NonRevertableOverridesRevertable(t *testing.T) {
 	}
 	require.True(t, found,
 		"system address should be included: non-revertable user access overrides earlier revertable access")
-
 }
 
 // TestVersionedIO_BalanceNetZeroWriteOmittedFromBAL verifies that a balance
@@ -1591,6 +1595,7 @@ func TestApplyVersionedWrites_SelfDestructDominatesCreateContract(t *testing.T) 
 	require.True(t, stateObject.selfdestructed)
 	require.False(t, stateObject.createdContract)
 }
+
 func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testing.T) {
 	t.Parallel()
 
@@ -1610,6 +1615,7 @@ func TestCreateAccount_FundedThenCreated_SyntheticReadKeepsPreTxBalance(t *testi
 	require.True(t, vr.Val.IsZero(),
 		"the synthetic creation BalancePath read must keep the pre-tx balance (0); the CREATE2 re-creation must not overwrite it with the in-tx funded balance")
 }
+
 func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChange(t *testing.T) {
 	t.Parallel()
 
@@ -1643,6 +1649,7 @@ func TestCreateAccount_InternalBalanceReadPromotedOnCreate_NoSpuriousBalanceChan
 		}
 	}
 }
+
 func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 	t.Parallel()
 
@@ -1674,6 +1681,7 @@ func TestVersionedIO_CreatedAccountEmptyCodeChangeOmitted(t *testing.T) {
 	}
 	require.True(t, found, "authority account must appear in BAL")
 }
+
 func TestVersionedIO_MidBlockEmptyCodeHashReadMustNotDropRealClear(t *testing.T) {
 	t.Parallel()
 
