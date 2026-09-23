@@ -18,6 +18,7 @@ package vm
 
 import (
 	"slices"
+	"strconv"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -518,17 +519,43 @@ func TestGasChangeV2FailedCodeDeposit(t *testing.T) {
 }
 
 func TestGasChangeV2NestedCreate(t *testing.T) {
-	ibs := state.New(state.NewNoopReader())
-	defer ibs.Close()
-	address := accounts.InternAddress(common.HexToAddress("0x1000"))
-	require.NoError(t, ibs.SetCode(address, []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0), byte(CREATE)}, tracing.CodeChangeUnspecified))
-	recorder := &gasTraceRecorder{t: t}
-	evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: recorder.hooks()})
-	_, _, _, err := evm.CallCode(accounts.ZeroAddress, address, nil, mdgas.MdGas{Execution: 200_000, State: 50_000}, uint256.Int{})
-	require.NoError(t, err)
-	require.True(t, slices.ContainsFunc(recorder.changes, func(change gasChange) bool {
-		return change.reason == tracing.GasChangeCallNewAccount && change.old.Total() == change.new.Total()+params.StateGasNewAccount
-	}))
+	for _, op := range []OpCode{CREATE, CREATE2} {
+		for _, reservoir := range []uint64{0, params.StateGasNewAccount / 2, params.StateGasNewAccount} {
+			t.Run(op.String()+"/"+strconv.FormatUint(reservoir, 10), func(t *testing.T) {
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				address := accounts.InternAddress(common.HexToAddress("0x1000"))
+				code := []byte{byte(PUSH0), byte(PUSH0), byte(PUSH0)}
+				if op == CREATE2 {
+					code = append(code, byte(PUSH0))
+				}
+				code = append(code, byte(op))
+				require.NoError(t, ibs.SetCode(address, code, tracing.CodeChangeUnspecified))
+				recorder := &gasTraceRecorder{t: t}
+				hooks := recorder.hooks()
+				var costs []mdgas.MdGasCost
+				hooks.OnOpcodeV2 = func(_ uint64, opcode byte, _ mdgas.MdGas, cost mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, err error) {
+					if OpCode(opcode) == op {
+						require.NoError(t, err)
+						costs = append(costs, cost)
+					}
+				}
+				evm := NewEVM(gasTraceBlockContext(), evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, Config{Tracer: hooks})
+				_, _, used, err := evm.CallCode(accounts.ZeroAddress, address, nil, mdgas.MdGas{Execution: 500_000, State: reservoir}, uint256.Int{})
+				require.NoError(t, err)
+				require.Len(t, costs, 1)
+				require.EqualValues(t, params.StateGasNewAccount, costs[0].State)
+				require.EqualValues(t, params.StateGasNewAccount, used.State)
+				require.EqualValues(t, params.StateGasNewAccount-reservoir, used.StateSpill)
+				require.True(t, slices.ContainsFunc(recorder.changes, func(change gasChange) bool {
+					return change.reason == tracing.GasChangeCallOpCode && change.old.Total()-change.new.Total() == costs[0].Execution+uint64(costs[0].State)
+				}))
+				require.False(t, slices.ContainsFunc(recorder.changes, func(change gasChange) bool {
+					return change.reason == tracing.GasChangeCallNewAccount
+				}))
+			})
+		}
+	}
 }
 
 func gasTraceBlockContext() evmtypes.BlockContext {

@@ -29,6 +29,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func callValueTransferGas(rules *chain.Rules) uint64 {
@@ -373,7 +375,7 @@ func gasCreateEip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return gas, nil
+	return gasCreateAccount(evm, callContext, availableGas, gas, false), nil
 }
 
 func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (gas mdgas.MdGasCost, err error) {
@@ -398,7 +400,42 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 	if overflow {
 		return mdgas.MdGasCost{}, ErrGasUintOverflow
 	}
-	return gas, nil
+	return gasCreateAccount(evm, callContext, availableGas, gas, true), nil
+}
+
+type createGasPreparation struct {
+	address     accounts.Address
+	codeHash    accounts.CodeHash
+	preparation createPreparation
+	err         error
+}
+
+func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, gas mdgas.MdGasCost, create2 bool) mdgas.MdGasCost {
+	if !evm.chainRules.IsAmsterdam || availableGas.Execution < gas.Execution {
+		return gas
+	}
+	prepared := &callContext.create
+	*prepared = createGasPreparation{}
+	caller := callContext.Contract.Address()
+	if create2 {
+		offset := callContext.Stack.back(1).Uint64()
+		size := callContext.Stack.back(2).Uint64()
+		input := codeAndHash{code: getData(callContext.Memory.Data(), offset, size)}
+		prepared.codeHash = input.Hash()
+		prepared.address = accounts.InternAddress(types.CreateAddress2(caller.Value(), callContext.Stack.back(3).Bytes32(), prepared.codeHash))
+	} else {
+		nonce, err := evm.intraBlockState.GetNonce(caller)
+		if err != nil {
+			prepared.err = fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			return gas
+		}
+		prepared.address = accounts.InternAddress(types.CreateAddress(caller.Value(), nonce))
+	}
+	prepared.preparation, prepared.err = evm.prepareCreate(caller, prepared.address, *callContext.Stack.peek(), true, false, true)
+	if prepared.err == nil && prepared.preparation.chargeNewAccount {
+		gas.State = params.StateGasNewAccount
+	}
+	return gas
 }
 
 func gasExpFrontier(_ *EVM, callContext *CallContext, availableGas mdgas.MdGas, memorySize uint64) (mdgas.MdGasCost, error) {

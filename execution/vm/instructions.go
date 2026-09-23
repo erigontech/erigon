@@ -997,11 +997,24 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, input []byte, salt *uint256.Int) (uint64, []byte, error) {
 	codeAndHash := &codeAndHash{code: input}
 	typ := CREATE
-	var address accounts.Address
 	if salt != nil {
 		typ = CREATE2
+	}
+	var address accounts.Address
+	var preparation createPreparation
+	var suberr error
+	switch {
+	case evm.chainRules.IsAmsterdam:
+		address = scope.create.address
+		codeAndHash.hash = scope.create.codeHash
+		preparation = scope.create.preparation
+		suberr = scope.create.err
+		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
+			return pc, nil, suberr
+		}
+	case salt != nil:
 		address = accounts.InternAddress(types.CreateAddress2(scope.Contract.Address().Value(), salt.Bytes32(), codeAndHash.Hash()))
-	} else {
+	default:
 		nonce, err := evm.intraBlockState.GetNonce(scope.Contract.Address())
 		if err != nil {
 			return pc, nil, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -1011,20 +1024,8 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	gas := scope.Gas()
 	returnGas := gas
 	var childGasUsed mdgas.MdGasUsage
-	var preparation createPreparation
-	var suberr error
-	if evm.chainRules.IsAmsterdam {
-		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
-			return pc, nil, suberr
-		}
-	}
 	forwarded := false
 	if suberr == nil {
-		if preparation.chargeNewAccount && !scope.useMdGas(params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallNewAccount) {
-			return pc, nil, ErrOutOfGas
-		}
-		gas = scope.Gas()
 		if evm.chainRules.IsTangerineWhistle {
 			gas.Execution -= gas.Execution / 64
 		}

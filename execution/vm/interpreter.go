@@ -81,6 +81,7 @@ type CallContext struct {
 	// the GC scans a struct only up to its last pointer word (PtrBytes), and
 	// Stack.data is 32 KB it can skip entirely.
 	Contract Contract
+	create   createGasPreparation
 	Stack    Stack
 }
 
@@ -148,6 +149,7 @@ func (c *CallContext) put() {
 	c.cacheGen = 0
 	c.stateGasSpill = 0
 	c.newAccountCharged = false
+	c.create = createGasPreparation{}
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
 	c.cachedKeyGen = ^uint64(0)
