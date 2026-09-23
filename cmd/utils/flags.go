@@ -862,6 +862,11 @@ var (
 		Usage: "Runtime limit of chaindata db size (can change at any time)",
 		Value: (1 * datasize.TB).String(),
 	}
+	DbSyncDeferredFlag = cli.BoolFlag{
+		Name:  "db.sync.deferred",
+		Usage: "Flush chaindata in the background once 8MB is unflushed, instead of on every commit. Disable to flush every commit, at ~8x the fsyncs",
+		Value: true,
+	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
 		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
@@ -1595,6 +1600,7 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)
 	}
 	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
+	cfg.MdbxSyncDeferred = ctx.Bool(DbSyncDeferredFlag.Name)
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
 		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),

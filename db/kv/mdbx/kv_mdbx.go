@@ -71,6 +71,7 @@ type MdbxOpts struct {
 	path            string
 	syncPeriod      time.Duration      // to be used only in combination with SafeNoSync flag. The dirty data will automatically be flushed to disk periodically in the background.
 	syncBytes       *datasize.ByteSize // to be used only in combination with SafeNoSync flag. The dirty data will be flushed to disk when this threshold is reached.
+	syncPoll        time.Duration      // interval of the background goroutine which performs the deferred flushes, so no committing thread pays for them
 	mapSize         datasize.ByteSize
 	growthStep      datasize.ByteSize
 	shrinkThreshold int
@@ -96,10 +97,19 @@ const (
 	DefaultGrowthStep = 1 * datasize.GB
 )
 
+// defaultSyncBytes bounds how much stays unflushed before mdbx writes a steady commit-point.
+// Every database here holds data the node can fetch or rebuild, so bounding the loss in bytes
+// costs a re-download or a re-execution at worst, and mdbx keeps the file intact regardless.
+// Flushes then scale with data written instead of with time, so one value fits every disk,
+// filesystem and workload: 8MB is where fewer flushes stop paying, at 8x fewer than per-commit.
+var defaultSyncBytes = 8 * datasize.MB
+
 func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
-		flags:      mdbx.NoReadahead | mdbx.Durable,
+		flags:      mdbx.NoReadahead | mdbx.SafeNoSync,
+		syncBytes:  &defaultSyncBytes,
+		syncPoll:   time.Second,
 		log:        log,
 		pageSize:   defaultPageSize(),
 
@@ -110,6 +120,9 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		label:           label,
 		metrics:         label == dbcfg.ChainDB,
 	}
+	if dbg.EnvBool("MDBX_DURABLE", false) {
+		opts = opts.Durable()
+	}
 	if label == dbcfg.ChainDB {
 		if dbg.EnvBool("CHAINDATA_READAHEAD", true) {
 			// enable readahead for chaindata by default. Erigon3 require fast updates and prune. Also it's chaindata is small (dosen GB)
@@ -117,12 +130,6 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		}
 		if dbg.MdbxNoSync {
 			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
-			if p := dbg.EnvDuration("MDBX_SYNC_PERIOD", 0); p != 0 {
-				opts = opts.SyncPeriod(p)
-			}
-			if b := dbg.EnvDataSize("MDBX_SYNC_BYTES", 0); b != 0 {
-				opts = opts.SyncBytes(b)
-			}
 		}
 		if dbg.MdbxNoSyncUnsafe {
 			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.UtterlyNoSync | mdbx.NoMetaSync })
@@ -143,6 +150,15 @@ func (opts MdbxOpts) PageSize(v datasize.ByteSize) MdbxOpts       { opts.pageSiz
 func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthStep = v; return opts }
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
+
+// Durable flushes on every commit, so a power cut loses nothing. The default instead bounds
+// the loss by defaultSyncBytes, at a fraction of the flushes.
+func (opts MdbxOpts) Durable() MdbxOpts {
+	opts = opts.Flags(func(f uint) uint { return f&^mdbx.SafeNoSync | mdbx.Durable })
+	opts.syncBytes = nil
+	opts.syncPoll = 0
+	return opts
+}
 
 func (opts MdbxOpts) SyncBytes(threshold datasize.ByteSize) MdbxOpts {
 	opts.syncBytes = &threshold
@@ -408,26 +424,8 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		MaxBatchDelay: DefaultMaxBatchDelay,
 	}
 
-	if poll := dbg.EnvDuration("MDBX_SYNC_POLL", 0); poll != 0 && opts.HasFlag(mdbx.SafeNoSync) {
-		go func() {
-			t := time.NewTicker(poll)
-			defer t.Stop()
-			for {
-				select {
-				case <-db.syncerStop:
-					return
-				case <-t.C:
-					if db.closed.Load() {
-						return
-					}
-					// force=false: flush only when mdbx's own syncbytes/syncperiod
-					// threshold is reached; nonblock: skip while a writer holds the lock.
-					if err := db.env.Sync(false, true); err != nil {
-						db.log.Warn("[db] sync poll", "err", err)
-					}
-				}
-			}
-		}()
+	if opts.syncPoll > 0 && opts.HasFlag(mdbx.SafeNoSync) {
+		go db.syncPoller(opts.syncPoll)
 	}
 
 	// Open can fail after a read txn has been pooled; Close aborts those. The outer env.Close
@@ -721,6 +719,30 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 
 // Close closes db
 // All transactions must be closed before closing the database.
+// syncPoller flushes deferred writes off the committing threads. Under SafeNoSync mdbx
+// checks its sync thresholds only inside mdbx_txn_commit and mdbx_env_sync, so without this
+// the flush lands on whichever transaction happens to cross the threshold.
+func (db *MdbxKV) syncPoller(interval time.Duration) {
+	t := time.NewTicker(interval)
+	defer t.Stop()
+	for {
+		select {
+		case <-db.syncerStop:
+			return
+		case <-t.C:
+			if db.closed.Load() {
+				return
+			}
+			// force=true flushes whatever is dirty, so commits stay below the threshold and
+			// never pay for a flush themselves; nonblock skips this round rather than holding
+			// the write lock while a writer wants it.
+			if err := db.env.Sync(true, true); err != nil {
+				db.log.Warn("[db] deferred sync", "label", db.opts.label, "err", err)
+			}
+		}
+	}
+}
+
 func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return

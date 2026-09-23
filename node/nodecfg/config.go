@@ -166,6 +166,9 @@ type Config struct {
 	MdbxDBSizeLimit datasize.ByteSize
 	MdbxGrowthStep  datasize.ByteSize
 	MdbxWriteMap    bool
+	// MdbxSyncDeferred flushes chaindata in the background instead of on every commit, so a
+	// power cut rolls the database back to the last flushed point instead of losing nothing.
+	MdbxSyncDeferred bool
 	// HealthCheck enables standard grpc health check
 	HealthCheck bool
 
