@@ -864,8 +864,8 @@ var (
 	}
 	DbSyncDeferredFlag = cli.BoolFlag{
 		Name:  "db.sync.deferred",
-		Usage: "Flush chaindata in the background instead of on every commit. Faster on slow disks; a power cut then loses up to a second of work and the file runs larger",
-		Value: false,
+		Usage: "Flush chaindata in the background once 8MB is unflushed, instead of on every commit. Disable to flush every commit, at ~8x the fsyncs",
+		Value: true,
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",

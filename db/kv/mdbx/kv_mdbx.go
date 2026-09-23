@@ -97,10 +97,19 @@ const (
 	DefaultGrowthStep = 1 * datasize.GB
 )
 
+// defaultSyncBytes bounds how much stays unflushed before mdbx writes a steady commit-point.
+// Every database here holds data the node can fetch or rebuild, so bounding the loss in bytes
+// costs a re-download or a re-execution at worst, and mdbx keeps the file intact regardless.
+// Flushes then scale with data written instead of with time, so one value fits every disk,
+// filesystem and workload: 8MB is where fewer flushes stop paying, at 8x fewer than per-commit.
+var defaultSyncBytes = 8 * datasize.MB
+
 func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
-		flags:      mdbx.NoReadahead | mdbx.Durable,
+		flags:      mdbx.NoReadahead | mdbx.SafeNoSync,
+		syncBytes:  &defaultSyncBytes,
+		syncPoll:   time.Second,
 		log:        log,
 		pageSize:   defaultPageSize(),
 
@@ -139,15 +148,12 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
-// DeferredSync stops flushing on every commit: the data is flushed once a second, or once
-// 64MB is unflushed, whichever comes first, by a background goroutine - mdbx tests those
-// thresholds only inside a commit, which would otherwise make one unlucky commit pay for the
-// flush. A crash rolls the database back to the last flushed point; mdbx keeps it intact
-// either way. The file also runs larger, because pages are not reused until that point.
-func (opts MdbxOpts) DeferredSync() MdbxOpts {
-	opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
-	opts = opts.SyncPeriod(time.Second).SyncBytes(64 * datasize.MB)
-	opts.syncPoll = 125 * time.Millisecond
+// Durable flushes on every commit, so a power cut loses nothing. The default instead bounds
+// the loss by defaultSyncBytes, at a fraction of the flushes.
+func (opts MdbxOpts) Durable() MdbxOpts {
+	opts = opts.Flags(func(f uint) uint { return f&^mdbx.SafeNoSync | mdbx.Durable })
+	opts.syncBytes = nil
+	opts.syncPoll = 0
 	return opts
 }
 
@@ -724,9 +730,10 @@ func (db *MdbxKV) syncPoller(interval time.Duration) {
 			if db.closed.Load() {
 				return
 			}
-			// force=false leaves the decision to mdbx's own thresholds; nonblock skips this
-			// round rather than holding the write lock while a writer wants it.
-			if err := db.env.Sync(false, true); err != nil {
+			// force=true flushes whatever is dirty, so commits stay below the threshold and
+			// never pay for a flush themselves; nonblock skips this round rather than holding
+			// the write lock while a writer wants it.
+			if err := db.env.Sync(true, true); err != nil {
 				db.log.Warn("[db] deferred sync", "label", db.opts.label, "err", err)
 			}
 		}
