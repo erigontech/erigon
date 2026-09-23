@@ -98,7 +98,12 @@ func compareFeed(a, b feedEntry) int {
 }
 
 func bucketFeed(items []feedEntry) ([]feedEntry, [257]int) {
-	bucket := func(e feedEntry) int { return int(e.hashedKey[0])<<4 | int(e.hashedKey[1]) }
+	bucket := func(e feedEntry) int {
+		if len(e.hashedKey) < 2 {
+			return 0
+		}
+		return int(e.hashedKey[0])<<4 | int(e.hashedKey[1])
+	}
 	var bounds [257]int
 	for i := range items {
 		bounds[bucket(items[i])+1]++

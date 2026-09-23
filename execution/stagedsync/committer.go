@@ -996,9 +996,6 @@ func (cc *commitmentCalculator) computeWithoutCheck(ctx context.Context, target 
 	cc.compute(ctx, target, computeMode{label: "partial-block "})
 }
 
-// computeStepBoundary checkpoints commitment at a mid-block step edge without
-// advancing lastComputedBlock or resetting block flags — the block-end fold
-// still needs the pre-edge dirty keys.
 func (cc *commitmentCalculator) computeStepBoundary(ctx context.Context, target commitTarget) {
 	cc.compute(ctx, target, computeMode{label: "step-boundary ", midBlock: true})
 }
