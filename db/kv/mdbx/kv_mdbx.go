@@ -29,7 +29,6 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
-	"syscall"
 	"time"
 	"unsafe"
 
@@ -55,6 +54,10 @@ var dbRoTxOverloaded = metrics.GetOrCreateCounter(`db_rotx_overloaded_total`)
 // A deferred flush that keeps failing means no new steady commit-point, so a crash rolls back
 // further than the deadline promises - worth alerting on, not just logging.
 var dbDeferredFlushFailed = metrics.GetOrCreateCounter(`db_deferred_flush_failed_total`)
+
+// mdbxBusy is MDBX_BUSY: another thread holds the write lock. mdbx does not map it onto
+// syscall.EBUSY, so errors.Is against the syscall never matches.
+const mdbxBusy = mdbx.Errno(-30778)
 
 func init() {
 	mdbx.MapFullErrorMessage += " You can try remove the database files (e.g., by running rm -rf /path/to/db)"
@@ -175,7 +178,11 @@ func (opts MdbxOpts) Durable() MdbxOpts {
 // database asking mdbx for something it rejects: read-only refuses the thresholds outright,
 // accede must not take the write lock at open, and utterly-nosync wants no flush at all.
 func (opts MdbxOpts) resolveSync() MdbxOpts {
-	if opts.HasFlag(mdbx.Readonly) || opts.HasFlag(mdbx.Accede) || opts.utterlyNoSync() {
+	if opts.utterlyNoSync() { // asked for no flush at all, and the bit set includes SafeNoSync
+		opts.syncBytes, opts.syncPeriod = nil, 0
+		return opts
+	}
+	if opts.HasFlag(mdbx.Readonly) || opts.HasFlag(mdbx.Accede) {
 		opts.syncBytes, opts.syncPeriod = nil, 0
 		return opts.Flags(func(f uint) uint { return f &^ mdbx.SafeNoSync })
 	}
@@ -768,9 +775,9 @@ func (db *MdbxKV) syncPoller(interval time.Duration) {
 		case <-db.syncerStop:
 			return
 		case <-t.C:
-			// force=false: flush only when mdbx says a threshold is due. EBUSY just means a
-			// writer holds the lock; any other error leaves the data unflushed.
-			if err := db.env.Sync(false, true); err != nil && !errors.Is(err, syscall.EBUSY) {
+			// force=false: flush only when mdbx says a threshold is due. A writer holding the
+			// lock is MDBX_BUSY and routine; any other error leaves the data unflushed.
+			if err := db.env.Sync(false, true); err != nil && !mdbx.IsErrno(err, mdbxBusy) {
 				dbDeferredFlushFailed.Inc()
 				db.log.Error("[db] deferred flush failed, unflushed data is growing", "label", db.opts.label, "err", err)
 			}
@@ -784,12 +791,16 @@ func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
-	// Join the background flush before the env goes away: it touches db.env on every tick.
+	db.waitTxsAllDoneOnClose()
+	// Only now is there nothing left to flush: stop the background flush, then take the one
+	// it may have skipped while a writer held the lock.
 	if db.syncerDone != nil {
 		close(db.syncerStop)
 		<-db.syncerDone
+		if err := db.env.Sync(true, false); err != nil {
+			db.log.Warn("[db] final flush", "label", db.opts.label, "err", err)
+		}
 	}
-	db.waitTxsAllDoneOnClose()
 	db.drainRoTxPool()
 
 	if db.env != nil {

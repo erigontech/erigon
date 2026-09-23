@@ -1287,3 +1287,14 @@ func TestSafeNoSyncYieldsToReadonlyWhateverTheOrder(t *testing.T) {
 		SafeNoSync().Readonly(true).Accede(true).MustOpen()
 	t.Cleanup(ro.Close)
 }
+
+// An in-memory database asks for no flush at all, and MDBX_UTTERLY_NOSYNC carries the
+// SafeNoSync bit - stripping that bit would leave a mode that fsyncs on every commit.
+func TestInMemKeepsUtterlyNoSync(t *testing.T) {
+	db := mdbx.New(dbcfg.TemporaryDB, log.Root()).InMem(t.TempDir()).MustOpen()
+	t.Cleanup(db.Close)
+	flags, err := db.(*mdbx.MdbxKV).Env().Flags()
+	require.NoError(t, err)
+	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
+		"utterly-nosync lost a bit, and without all of them mdbx flushes on commit")
+}
