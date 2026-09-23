@@ -18,8 +18,6 @@ package v4
 
 import (
 	"bytes"
-
-	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type recordDelta struct {
@@ -30,35 +28,25 @@ type recordDelta struct {
 
 type putBranchFunc func(key, data, prev []byte) error
 
-func foldAndEncodeRecord(ctx commitment.PatriciaContext, n *node, depth int, key []byte) ([32]byte, recordDelta, error) {
+func foldAndEncodeRecord(n *node, depth int, key []byte) ([32]byte, recordDelta, error) {
 	hash, err := fold(n, depth)
 	if err != nil {
 		return [32]byte{}, recordDelta{}, err
 	}
-	data := encodeRecord(n, depth, nil)
-	if n.loaded {
-		return hash, newRecordDelta(key, data, n.raw), nil
-	}
-	delta, err := readRecordDelta(ctx, key, data)
-	if err != nil {
-		return [32]byte{}, recordDelta{}, err
-	}
-	return hash, delta, nil
+	data := encodeRecord(n, depth, make([]byte, 0, len(n.raw)+encodeSlack))
+	return hash, newRecordDelta(key, data, n.raw), nil
 }
+
+const encodeSlack = 96
 
 func newRecordDelta(key, data, prev []byte) recordDelta {
 	if data == nil {
 		data = []byte{}
 	}
-	return recordDelta{key: key, data: data, prev: prev}
-}
-
-func readRecordDelta(ctx commitment.PatriciaContext, key, data []byte) (recordDelta, error) {
-	prev, _, err := ctx.Branch(key)
-	if err != nil {
-		return recordDelta{}, err
+	if prev == nil {
+		prev = []byte{}
 	}
-	return newRecordDelta(key, data, bytes.Clone(prev)), nil
+	return recordDelta{key: key, data: data, prev: prev}
 }
 
 func applyDelta(delta recordDelta, putBranch putBranchFunc) error {

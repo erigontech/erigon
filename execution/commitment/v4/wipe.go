@@ -30,40 +30,36 @@ var (
 )
 
 func wipeStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) error {
-	keys, err := enumerateStorageRecords(ctx, addrHash)
+	records, err := enumerateStorageRecords(ctx, addrHash)
 	if err != nil {
 		return err
 	}
-	for _, key := range keys {
-		if err := putStorageRecord(ctx, key, nil); err != nil {
+	for _, r := range records {
+		if err := applyDelta(newRecordDelta(r.key, nil, r.prev), ctx.PutBranch); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func enumerateStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) ([][]byte, error) {
+func enumerateStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) ([]recordDelta, error) {
 	rootKey := StorageRootKey(addrHash)
-	keys := make([][]byte, 0, 1)
-	seen := make(map[string]struct{})
-	keys = append(keys, append([]byte(nil), rootKey...))
-	seen[string(rootKey)] = struct{}{}
-
 	data, _, err := ctx.Branch(rootKey)
 	if err != nil {
 		return nil, err
 	}
+	records := []recordDelta{{key: rootKey, prev: bytes.Clone(data)}}
 	if len(data) == 0 {
-		return keys, nil
+		return records, nil
 	}
-	if err := enumerateRecordChildren(ctx, addrHash, nil, data, 0, &keys, seen); err != nil {
+	seen := map[string]struct{}{string(rootKey): {}}
+	if err := enumerateRecordChildren(ctx, addrHash, nil, records[0].prev, 0, &records, seen); err != nil {
 		return nil, err
 	}
-	return keys, nil
+	return records, nil
 }
 
-func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, path, data []byte, depth int, keys *[][]byte, seen map[string]struct{}) error {
-	data = bytes.Clone(data)
+func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, path, data []byte, depth int, records *[]recordDelta, seen map[string]struct{}) error {
 	if err := Validate(data, depth); err != nil {
 		return err
 	}
@@ -86,7 +82,6 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 			return fmt.Errorf("%w: repeated child key", errWipeRecord)
 		}
 		seen[string(key)] = struct{}{}
-		*keys = append(*keys, key)
 		childData, _, err := ctx.Branch(key)
 		if err != nil {
 			return err
@@ -94,7 +89,9 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 		if len(childData) == 0 {
 			return fmt.Errorf("%w: missing child at depth %d", errWipeRecord, len(childPath))
 		}
-		if err := enumerateRecordChildren(ctx, addrHash, childPath, childData, len(childPath), keys, seen); err != nil {
+		childData = bytes.Clone(childData)
+		*records = append(*records, recordDelta{key: key, prev: childData})
+		if err := enumerateRecordChildren(ctx, addrHash, childPath, childData, len(childPath), records, seen); err != nil {
 			return err
 		}
 	}

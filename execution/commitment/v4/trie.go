@@ -40,28 +40,51 @@ type Trie struct {
 	scheduleWorkers int
 	scheduleStats   *scheduleStats
 	deferUpdates    bool
-	deferred        []recordDelta
+	deferred        [][]recordDelta
 }
 
 type deferredPatriciaContext struct {
 	commitment.PatriciaContext
-	meter  *meteredContext
-	sink   *deferredPatriciaContext
-	mu     sync.Mutex
-	deltas []recordDelta
+	meter *meteredContext
+	sink  *deferredPatriciaContext
+	mu    sync.Mutex
+	parts [][]recordDelta
 }
 
 func (c *deferredPatriciaContext) PutBranch(key, data, prev []byte) error {
+	return c.putDeltas([]recordDelta{{key: key, data: data, prev: prev}})
+}
+
+func (c *deferredPatriciaContext) putDeltas(deltas []recordDelta) error {
 	if c.sink != nil {
-		return c.sink.PutBranch(key, data, prev)
+		return c.sink.putDeltas(deltas)
+	}
+	changed := deltas[:0]
+	size := 0
+	for _, d := range deltas {
+		if bytes.Equal(d.prev, d.data) {
+			continue
+		}
+		changed = append(changed, d)
+		size += len(d.data)
+	}
+	if len(changed) == 0 {
+		return nil
 	}
 	if c.meter != nil {
-		c.meter.countWrite(len(data))
+		c.meter.countWrites(len(changed), size)
 	}
 	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.deltas = append(c.deltas, recordDelta{key: key, data: data, prev: prev})
+	c.parts = append(c.parts, changed)
+	c.mu.Unlock()
 	return nil
+}
+
+func putDeltas(ctx commitment.PatriciaContext, deltas []recordDelta) error {
+	if d, ok := ctx.(*deferredPatriciaContext); ok {
+		return d.putDeltas(deltas)
+	}
+	return applyDeltas(deltas, ctx.PutBranch)
 }
 
 func (c *deferredPatriciaContext) wrapFactory(f commitment.TrieContextFactory) commitment.TrieContextFactory {
@@ -77,12 +100,12 @@ func (c *deferredPatriciaContext) wrapFactory(f commitment.TrieContextFactory) c
 	}
 }
 
-func (c *deferredPatriciaContext) take() []recordDelta {
+func (c *deferredPatriciaContext) take() [][]recordDelta {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	deltas := c.deltas
-	c.deltas = nil
-	return deltas
+	parts := c.parts
+	c.parts = nil
+	return parts
 }
 
 func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
@@ -144,10 +167,15 @@ func (t *Trie) TakeDeferredUpdates() func(func(prefix, data, prevData []byte) er
 	if t == nil || len(t.deferred) == 0 {
 		return nil
 	}
-	deltas := t.deferred
+	parts := t.deferred
 	t.deferred = nil
 	return func(putBranch func(prefix, data, prevData []byte) error) error {
-		return applyDeltas(deltas, putBranch)
+		for _, deltas := range parts {
+			if err := applyDeltas(deltas, putBranch); err != nil {
+				return err
+			}
+		}
+		return nil
 	}
 }
 

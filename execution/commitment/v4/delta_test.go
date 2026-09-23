@@ -47,22 +47,6 @@ func TestApplyDeltasReturnsPutError(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 }
 
-func TestReadRecordDeltaCopiesBranchBuffer(t *testing.T) {
-	ctx := newMockContext()
-	key := []byte{0x40, 0}
-	otherKey := []byte{0x40, 1, 1}
-	ctx.branches[string(key)] = []byte{1, 2, 3}
-	ctx.branches[string(otherKey)] = []byte{4, 5, 6}
-
-	delta, err := readRecordDelta(ctx, key, []byte{7, 8})
-	require.NoError(t, err)
-	_, _, err = ctx.Branch(otherKey)
-	require.NoError(t, err)
-	require.Equal(t, []byte{1, 2, 3}, delta.prev)
-	require.Equal(t, key, delta.key)
-	require.Equal(t, []byte{7, 8}, delta.data)
-}
-
 func TestFoldAndEncodeRecordKeepsFoldAndRecordInOneWalk(t *testing.T) {
 	ctx := newMockContext()
 	n := fork(nil)
@@ -70,7 +54,7 @@ func TestFoldAndEncodeRecordKeepsFoldAndRecordInOneWalk(t *testing.T) {
 	path := append([]byte{3}, bytes.Repeat([]byte{4}, 63)...)
 	n.setLeaf(int(path[0]), packPath(path[1:], nil), []byte{9})
 
-	hash, delta, err := foldAndEncodeRecord(ctx, n, 0, StorageRootKey([32]byte{}))
+	hash, delta, err := foldAndEncodeRecord(n, 0, StorageRootKey([32]byte{}))
 	require.NoError(t, err)
 	require.Len(t, hash, 32)
 	require.NotEmpty(t, delta.data)

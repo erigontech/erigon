@@ -233,11 +233,3 @@ func markStorageRoot(root *node) {
 		markStorageRoot(root.child(nib))
 	}
 }
-
-func putStorageRecord(ctx commitment.PatriciaContext, key, data []byte) error {
-	delta, err := readRecordDelta(ctx, key, data)
-	if err != nil {
-		return err
-	}
-	return applyDelta(delta, ctx.PutBranch)
-}

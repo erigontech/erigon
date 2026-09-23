@@ -144,7 +144,7 @@ type materializeAcc struct {
 	deltas []recordDelta
 }
 
-func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *materializeAcc) ([32]byte, error) {
+func (g graph) materialize(n, root *node, acc *materializeAcc) ([32]byte, error) {
 	if n == nil {
 		return [32]byte{}, g.errNode
 	}
@@ -160,7 +160,7 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *m
 			}
 			continue
 		}
-		childHash, err := g.materialize(ctx, child, root, acc)
+		childHash, err := g.materialize(child, root, acc)
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -172,7 +172,7 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *m
 		path = nil
 		depth = 0
 	}
-	hash, delta, err := foldAndEncodeRecord(ctx, n, depth, g.nodeKey(path, nil))
+	hash, delta, err := foldAndEncodeRecord(n, depth, g.nodeKey(path, nil))
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -197,7 +197,7 @@ func (p foldPlan) parallel() bool {
 	return p.factory != nil && p.workers > 1 && p.ctx != nil
 }
 
-func (g graph) materializeRootChildren(root *node, acc *materializeAcc, plan foldPlan) error {
+func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]materializeAcc, error) {
 	nibs := make([]int, 0, 16)
 	for nib := range 16 {
 		bit := uint16(1) << nib
@@ -209,44 +209,30 @@ func (g graph) materializeRootChildren(root *node, acc *materializeAcc, plan fol
 		}
 	}
 	if len(nibs) < 2 {
-		return nil
+		return nil, nil
 	}
 
-	type result struct {
-		hash [32]byte
-		ext  []byte
-		acc  materializeAcc
-	}
-	results := make([]result, len(nibs))
+	accs := make([]materializeAcc, len(nibs))
+	hashes := make([][32]byte, len(nibs))
 	eg, egCtx := errgroup.WithContext(plan.ctx)
 	eg.SetLimit(min(plan.workers, len(nibs)))
 	for k, nib := range nibs {
 		eg.Go(func() error {
-			workerCtx, cleanup := plan.factory(egCtx)
-			if cleanup != nil {
-				defer cleanup()
-			}
-			if workerCtx == nil {
-				return g.errNode
-			}
-			child := root.child(nib)
-			hash, err := g.materialize(workerCtx, child, root, &results[k].acc)
-			if err != nil {
+			if err := egCtx.Err(); err != nil {
 				return err
 			}
-			results[k].hash = hash
-			results[k].ext = g.childExt(root, child, root)
-			return nil
+			hash, err := g.materialize(root.child(nib), root, &accs[k])
+			hashes[k] = hash
+			return err
 		})
 	}
 	if err := eg.Wait(); err != nil {
-		return err
+		return nil, err
 	}
 	for k, nib := range nibs {
-		root.setStoredChild(nib, results[k].hash[:], results[k].ext)
-		acc.deltas = append(acc.deltas, results[k].acc.deltas...)
+		root.setStoredChild(nib, hashes[k][:], g.childExt(root, root.child(nib), root))
 	}
-	return nil
+	return accs, nil
 }
 
 func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan foldPlan) error {
@@ -256,14 +242,21 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	if err := promoteRootExtension(root); err != nil {
 		return err
 	}
-	acc := &materializeAcc{}
+	var accs []materializeAcc
 	if plan.parallel() && len(root.path) == 0 {
-		if err := g.materializeRootChildren(root, acc, plan); err != nil {
+		var err error
+		if accs, err = g.materializeRootChildren(root, plan); err != nil {
 			return err
 		}
 	}
-	if _, err := g.materialize(ctx, root, root, acc); err != nil {
+	var acc materializeAcc
+	if _, err := g.materialize(root, root, &acc); err != nil {
 		return err
 	}
-	return applyDeltas(acc.deltas, ctx.PutBranch)
+	for _, part := range append(accs, acc) {
+		if err := putDeltas(ctx, part.deltas); err != nil {
+			return err
+		}
+	}
+	return nil
 }
