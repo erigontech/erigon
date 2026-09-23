@@ -26,11 +26,28 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-const InitialBufferSize = 4096
+const (
+	InitialBufferSize = 4096
 
-// FlushThreshold bounds how much of a response is held in memory at once. A
-// trace can run to gigabytes, and nothing above this layer flushes inside one.
-const FlushThreshold = int(64 * datasize.KB)
+	// FlushThreshold bounds how much of a response is held in memory at once. A
+	// trace can run to gigabytes, and nothing above this layer flushes inside one.
+	// It costs one buffer of this size per in-flight response, and a write syscall
+	// per that many bytes.
+	FlushThreshold = int(64 * datasize.KB)
+
+	// maxPooledBufferSize bounds what a stream carries back into the pool. A non-streaming
+	// response is appended whole, so its buffer ends up as large as the response, and the
+	// pool holds one per running goroutine. It has to leave room for FlushThreshold or
+	// nothing is ever recycled, but it is otherwise a separate decision: this is retention
+	// after a response is done, that is memory held during one.
+	maxPooledBufferSize = int(1 * datasize.MB)
+)
+
+// A streaming buffer reaches FlushThreshold plus whatever the write that crossed it added, so
+// the cap needs headroom above the threshold: at cap == threshold, Put drops every buffer, the
+// pool recycles nothing, and throughput falls below the smaller threshold it replaced.
+// Negative on an unsigned constant does not compile.
+const _ = uint(maxPooledBufferSize - 2*FlushThreshold)
 
 // flushIfFull hands the buffer over once it is full, so a large response streams
 // instead of being held whole.
@@ -59,11 +76,6 @@ func New(out io.Writer) Stream {
 }
 
 var streamPool = sync.Pool{New: func() any { return newStackStream(nil, InitialBufferSize) }}
-
-// maxPooledBufferSize bounds what a stream carries back into the pool. A
-// non-streaming response is appended whole, so its buffer ends up as large as
-// the response, and the pool holds one per running goroutine.
-const maxPooledBufferSize = 16 * FlushThreshold
 
 // Get is New over a pool. Put the stream back once its bytes have left it;
 // skipping Put only costs the recycling.
