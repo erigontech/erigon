@@ -158,3 +158,45 @@ func TestGetPayloadResponseQuantitiesJSON(t *testing.T) {
 		require.Equal(t, string(enc), string(again), q)
 	}
 }
+
+// The payload bodies are streamed field by field, so they must match encoding/json byte for byte:
+// missing blocks are null elements, and nil withdrawals or access list are null, not [].
+func TestExecutionPayloadBodiesMarshalFastJSONToMatchesReflection(t *testing.T) {
+	txs := []hexutil.Bytes{{0x02, 0xab}, {0xf8, 0x01}, {}}
+	withdrawals := []*types.Withdrawal{{Index: 0, Validator: 1, Address: common.Address{0xaa}, Amount: 0}, nil, {Index: 7, Validator: 8, Address: common.Address{0xbb}, Amount: 9}}
+	bal := hexutil.Bytes{0xc0}
+	emptyBal := hexutil.Bytes{}
+	for name, bodies := range map[string]ExecutionPayloadBodies{
+		"nil":               nil,
+		"empty":             {},
+		"missing block":     {nil, {Transactions: txs}},
+		"nil withdrawals":   {{Transactions: txs}},
+		"empty withdrawals": {{Transactions: []hexutil.Bytes{}, Withdrawals: []*types.Withdrawal{}}},
+		"withdrawals":       {{Transactions: txs, Withdrawals: withdrawals}},
+		"nil tx list":       {{Withdrawals: withdrawals}},
+	} {
+		t.Run("v1 "+name, func(t *testing.T) { requireStreamedMatchesReflection(t, bodies) })
+	}
+	for name, bodies := range map[string]ExecutionPayloadBodiesV2{
+		"nil":               nil,
+		"missing block":     {nil},
+		"nil access list":   {{Transactions: txs, Withdrawals: withdrawals}},
+		"access list":       {{Transactions: txs, BlockAccessList: &bal}},
+		"empty access list": {{Transactions: txs, Withdrawals: []*types.Withdrawal{}, BlockAccessList: &emptyBal}},
+	} {
+		t.Run("v2 "+name, func(t *testing.T) { requireStreamedMatchesReflection(t, bodies) })
+	}
+}
+
+func requireStreamedMatchesReflection(t *testing.T, v interface {
+	MarshalFastJSONTo(*jsonstream.StackStream) error
+}) {
+	t.Helper()
+	want, err := json.Marshal(v)
+	require.NoError(t, err)
+	s := jsonstream.Get(nil)
+	defer jsonstream.Put(s)
+	require.NoError(t, v.MarshalFastJSONTo(s))
+	require.NoError(t, s.Flush())
+	require.Equal(t, string(want), string(s.Buffer()))
+}

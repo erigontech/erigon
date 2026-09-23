@@ -1157,6 +1157,32 @@ func TestTransactionHashFromEncoding(t *testing.T) {
 			got, err := TransactionHashFromEncoding(enc)
 			require.NoError(t, err)
 			require.Equal(t, txn.Hash(), got, "type %d, encoding %x", txn.Type(), enc[:1])
+			bin, err := BinaryFromStoredTxn(enc)
+			require.NoError(t, err)
+			require.Equal(t, binary.Bytes(), bin, "type %d, encoding %x", txn.Type(), enc[:1])
 		}
+	}
+}
+
+// A stored record that is not one whole transaction is rejected, not handed out as one.
+func TestBinaryFromStoredTxnRejectsMalformed(t *testing.T) {
+	wrap := func(b []byte) []byte {
+		out := make([]byte, rlp.StringLen(b))
+		rlp.EncodeStringToBuf(b, out)
+		return out
+	}
+	for name, stored := range map[string][]byte{
+		"empty":                  {},
+		"legacy empty list":      {0xc0},
+		"legacy not a list":      {0x01, 0x02},
+		"legacy trailing bytes":  append([]byte{0xc1, 0x80}, 0xff),
+		"typed empty list":       wrap([]byte{0x02, 0xc0}),
+		"typed without fields":   wrap([]byte{0x02}),
+		"typed trailing bytes":   wrap(append([]byte{0x02, 0xc1, 0x80}, 0xff)),
+		"wrapped trailing bytes": append(wrap([]byte{0x02, 0xc1, 0x80}), 0xff),
+		"wrapped empty":          {0x80},
+	} {
+		_, err := BinaryFromStoredTxn(stored)
+		require.Error(t, err, name)
 	}
 }

@@ -1433,6 +1433,60 @@ func rlpFromBinaryTxn(binaryTxn []byte) []byte {
 	return wrapped
 }
 
+// BinaryFromStoredTxn is the inverse of rlpFromBinaryTxn: it returns the binary (canonical
+// EIP-2718) encoding of a stored transaction, a subslice of stored, without decoding its fields.
+// The record's RLP shape is checked, so a stored value that is not one whole transaction is
+// rejected here rather than served as a transaction.
+func BinaryFromStoredTxn(stored []byte) ([]byte, error) {
+	binary := stored
+	if TypedTransactionMarshalledAsRlpString(stored) {
+		content, rest, err := rlp.SplitString(stored)
+		if err != nil {
+			return nil, err
+		}
+		if len(rest) > 0 {
+			return nil, fmt.Errorf("stored txn: %d bytes after the wrapped transaction", len(rest))
+		}
+		binary = content
+	}
+	if err := checkTxnShape(binary); err != nil {
+		return nil, err
+	}
+	return binary, nil
+}
+
+// checkTxnShape reports whether binary is one whole transaction: a non-empty RLP list, after the
+// type byte of a typed transaction, with nothing after it.
+func checkTxnShape(binary []byte) error {
+	if len(binary) == 0 {
+		return errors.New("stored txn: empty")
+	}
+	fields := binary
+	if binary[0] < 0x80 { // EIP-2718 type byte
+		fields = binary[1:]
+	}
+	content, rest, err := rlp.SplitList(fields)
+	if err != nil {
+		return fmt.Errorf("stored txn: %w", err)
+	}
+	if len(rest) > 0 {
+		return fmt.Errorf("stored txn: %d bytes after the field list", len(rest))
+	}
+	if len(content) == 0 {
+		return errors.New("stored txn: no fields")
+	}
+	return nil
+}
+
+// BinaryRawBody is b with its transactions in their binary (canonical EIP-2718) encoding.
+func (b *Body) BinaryRawBody() (*RawBody, error) {
+	txs, err := MarshalTransactionsBinary(b.Transactions)
+	if err != nil {
+		return nil, err
+	}
+	return &RawBody{Transactions: txs, Uncles: b.Uncles, Withdrawals: b.Withdrawals}, nil
+}
+
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
