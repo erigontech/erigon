@@ -1672,8 +1672,6 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 // RemoveOwnTmpFiles unlinks leftover .tmp files of this collection's own types, leaving those of
 // any other collection compressing into the same directory. Safe only while this collection has no
 // compression in flight, since its own in-progress .tmp is indistinguishable from a leftover.
-//
-// TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
 func (s *BaseRoSnapshots) RemoveOwnTmpFiles() error {
 	tmpFiles, err := snaptype.TmpFiles(s.dir)
 	if err != nil {
