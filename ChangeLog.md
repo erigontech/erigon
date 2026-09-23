@@ -51,6 +51,8 @@ recovery during non-finality, and RPC correctness at the chain tip and on pruned
 
 #### RPC
 
+- Logs returned by `erigon_getLogsByHash`, `eth_getFilterChanges`, and `eth_subscribe("logs")` now include
+  `blockTimestamp`, matching `eth_getLogs` (#23935, #23296) — by @lupin012, @taratorio
 - `eth_subscribe("syncing")` reports sync-state changes over WebSocket. Both it and `eth_syncing` now show snapshot
   download progress instead of remaining at block zero throughout the download (#22570, #22716) — by @lupin012
 - Minimal nodes can serve recent `debug_executionWitness` results without commitment history using
