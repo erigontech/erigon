@@ -354,7 +354,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 		switch label {
 		case dbcfg.ChainDB:
-			if !config.MdbxSyncDurable {
+			if !config.MdbxSyncDurable && !dbg.EnvBool("MDBX_DURABLE", false) { // probe: A/B switch
 				opts = opts.DeferredSync()
 			}
 			if config.MdbxPageSize.Bytes() > 0 {
