@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	db, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(os.Args[1]).Accede(true).Readonly(true).Open(context.Background())
+	db, err := mdbx.New(dbcfg.ChainDB, log.New()).Path(os.Args[1]).Accede(true).Open(context.Background())
 	if err != nil {
 		fmt.Println("OPEN_FAILED", err)
 		os.Exit(1)
