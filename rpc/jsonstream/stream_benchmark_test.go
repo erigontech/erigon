@@ -28,10 +28,10 @@ func benchmarkSimpleObject(b *testing.B, s Stream) {
 	b.Helper()
 	for b.Loop() {
 		s.WriteObjectStart()
-		s.WriteObjectField("name")
+		s.Field("name")
 		s.WriteString("John")
-		s.WriteObjectField("age")
-		s.WriteInt(30)
+		s.Field("age")
+		s.Int(30)
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
@@ -50,19 +50,19 @@ func benchmarkNestedStructure(b *testing.B, s Stream) {
 	b.Helper()
 	for b.Loop() {
 		s.WriteObjectStart()
-		s.WriteObjectField("person")
+		s.Field("person")
 		s.WriteObjectStart()
-		s.WriteObjectField("name")
+		s.Field("name")
 		s.WriteString("John")
-		s.WriteObjectField("address")
+		s.Field("address")
 		s.WriteObjectStart()
-		s.WriteObjectField("city")
+		s.Field("city")
 		s.WriteString("New York")
-		s.WriteObjectField("zip")
+		s.Field("zip")
 		s.WriteString("10001")
 		s.WriteObjectEnd()
 		s.WriteObjectEnd()
-		s.WriteObjectField("active")
+		s.Field("active")
 		s.WriteTrue()
 		s.WriteObjectEnd()
 
@@ -83,7 +83,7 @@ func benchmarkLargeArray(b *testing.B, s Stream) {
 	for b.Loop() {
 		s.WriteArrayStart()
 		for j := range 1000 {
-			s.WriteInt(j)
+			s.Int(int64(j))
 		}
 		s.WriteArrayEnd()
 
@@ -103,15 +103,15 @@ func benchmarkMixedTypes(b *testing.B, s Stream) {
 	b.Helper()
 	for b.Loop() {
 		s.WriteObjectStart()
-		s.WriteObjectField("string")
+		s.Field("string")
 		s.WriteString("value")
-		s.WriteObjectField("int")
-		s.WriteInt(42)
-		s.WriteObjectField("float")
+		s.Field("int")
+		s.Int(42)
+		s.Field("float")
 		s.WriteFloat64(3.14159)
-		s.WriteObjectField("bool")
+		s.Field("bool")
 		s.WriteBool(true)
-		s.WriteObjectField("null")
+		s.Field("null")
 		s.WriteNil()
 		s.WriteObjectEnd()
 
@@ -133,10 +133,10 @@ func benchmarkWriteToBuffer(b *testing.B, s Stream) {
 	for b.Loop() {
 		s.Reset(buf)
 		s.WriteObjectStart()
-		s.WriteObjectField("name")
+		s.Field("name")
 		s.WriteString("John")
-		s.WriteObjectField("age")
-		s.WriteInt(30)
+		s.Field("age")
+		s.Int(30)
 		s.WriteObjectEnd()
 
 		err := s.ClosePending(0)
@@ -156,13 +156,13 @@ func benchmarkIncompleteStructure(b *testing.B, s Stream) {
 	for b.Loop() {
 		// Create an incomplete structure
 		s.WriteObjectStart()
-		s.WriteObjectField("name")
+		s.Field("name")
 		s.WriteString("John")
-		s.WriteObjectField("details")
+		s.Field("details")
 		s.WriteObjectStart()
-		s.WriteObjectField("age")
-		s.WriteInt(30)
-		s.WriteObjectField("address") // Missing value
+		s.Field("age")
+		s.Int(30)
+		s.Field("address") // Missing value
 
 		err := s.Flush()
 		assert.NoError(b, err)

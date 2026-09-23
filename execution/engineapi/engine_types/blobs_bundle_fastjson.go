@@ -17,8 +17,7 @@
 package engine_types
 
 import (
-	"encoding/json"
-
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -35,39 +34,68 @@ func writeBlobsBundle(s *jsonstream.StackStream, b *BlobsBundle) {
 		return
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("commitments")
+	s.Field("commitments")
 	jsonstream.ArrayValue(s, b.Commitments, writeHex)
-	jsonstream.Field(s, "proofs")
+	s.Field("proofs")
 	jsonstream.ArrayValue(s, b.Proofs, writeHex)
-	jsonstream.Field(s, "blobs")
+	s.Field("blobs")
 	jsonstream.ArrayValue(s, b.Blobs, writeHex)
 	s.WriteObjectEnd()
 }
 
 // MarshalFastJSONTo writes the getPayload envelope, byte-identical to json.Marshal(r).
-// executionPayload and blockValue go through json.Marshal before the first write, so their
-// errors leave nothing written; the other fields are streamed.
 func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if r == nil {
 		s.WriteNil()
 		return nil
 	}
-	executionPayload, err := json.Marshal(r.ExecutionPayload)
-	if err != nil {
-		return err
-	}
-	blockValue, err := json.Marshal(r.BlockValue)
-	if err != nil {
-		return err
-	}
 	s.WriteObjectStart()
-	s.WriteObjectField("executionPayload").WriteRawBytes(executionPayload)
-	jsonstream.Field(s, "blockValue").WriteRawBytes(blockValue)
-	jsonstream.Field(s, "blobsBundle")
+	s.Field("executionPayload")
+	r.ExecutionPayload.writeTo(s)
+	jsonstream.Text(s, "blockValue", r.BlockValue)
+	s.Field("blobsBundle")
 	writeBlobsBundle(s, r.BlobsBundle)
-	jsonstream.Field(s, "executionRequests")
+	s.Field("executionRequests")
 	jsonstream.ArrayValue(s, r.ExecutionRequests, writeHex)
-	jsonstream.Field(s, "shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
+	s.Field("shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
 	s.WriteObjectEnd()
 	return nil
 }
+
+// writeTo writes the payload in its struct's field order and encoding/json's forms.
+func (p *ExecutionPayload) writeTo(s *jsonstream.StackStream) {
+	if p == nil {
+		s.WriteNil()
+		return
+	}
+	s.WriteObjectStart()
+	s.Field("parentHash").WriteHex(p.ParentHash[:])
+	s.Field("feeRecipient").WriteHex(p.FeeRecipient[:])
+	s.Field("stateRoot").WriteHex(p.StateRoot[:])
+	s.Field("receiptsRoot").WriteHex(p.ReceiptsRoot[:])
+	s.Field("logsBloom").WriteHex(p.LogsBloom)
+	s.Field("prevRandao").WriteHex(p.PrevRandao[:])
+	jsonstream.Text(s, "blockNumber", &p.BlockNumber)
+	jsonstream.Text(s, "gasLimit", &p.GasLimit)
+	jsonstream.Text(s, "gasUsed", &p.GasUsed)
+	jsonstream.Text(s, "timestamp", &p.Timestamp)
+	s.Field("extraData").WriteHex(p.ExtraData)
+	jsonstream.Text(s, "baseFeePerGas", p.BaseFeePerGas)
+	s.Field("blockHash").WriteHex(p.BlockHash[:])
+	s.Field("transactions")
+	jsonstream.ArrayValue(s, p.Transactions, writeHex)
+	s.Field("withdrawals")
+	jsonstream.ArrayValue(s, p.Withdrawals, writeWithdrawal)
+	jsonstream.Text(s, "blobGasUsed", p.BlobGasUsed)
+	jsonstream.Text(s, "excessBlobGas", p.ExcessBlobGas)
+	if p.SlotNumber != nil {
+		jsonstream.Text(s, "slotNumber", p.SlotNumber)
+	}
+	if p.BlockAccessList != nil {
+		s.Field("blockAccessList").WriteHex(*p.BlockAccessList)
+	}
+	s.WriteObjectEnd()
+}
+
+// writeWithdrawal never fails: Withdrawal.MarshalFastJSONTo reports no error.
+func writeWithdrawal(s *jsonstream.StackStream, w **types.Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }

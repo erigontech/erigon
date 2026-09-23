@@ -41,54 +41,54 @@ func (h *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 // struct declares them so the bytes match reflection exactly. The caller owns the braces,
 // which is how RPCBlock flattens the embedded header into its own object.
 func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
-	s.WriteObjectField("number")
+	s.Field("number")
 	if h.Number == nil {
 		s.WriteNil()
 	} else {
 		s.WriteQuotedText(h.Number)
 	}
-	jsonstream.Field(s, "hash")
+	s.Field("hash")
 	if h.Hash == nil {
 		s.WriteNil()
 	} else {
 		s.WriteHex(h.Hash[:])
 	}
-	jsonstream.Field(s, "parentHash").WriteHex(h.ParentHash[:])
-	jsonstream.Field(s, "nonce")
+	s.Field("parentHash").WriteHex(h.ParentHash[:])
+	s.Field("nonce")
 	if h.Nonce == nil {
 		s.WriteNil()
 	} else {
 		s.WriteHex(h.Nonce[:])
 	}
-	jsonstream.Field(s, "mixHash").WriteHex(h.MixHash[:])
-	jsonstream.Field(s, "sha3Uncles").WriteHex(h.Sha3Uncles[:])
-	jsonstream.Field(s, "logsBloom")
+	s.Field("mixHash").WriteHex(h.MixHash[:])
+	s.Field("sha3Uncles").WriteHex(h.Sha3Uncles[:])
+	s.Field("logsBloom")
 	if h.LogsBloom == nil {
 		s.WriteNil()
 	} else {
 		s.WriteHex(h.LogsBloom[:])
 	}
-	jsonstream.Field(s, "stateRoot").WriteHex(h.StateRoot[:])
-	jsonstream.Field(s, "miner")
+	s.Field("stateRoot").WriteHex(h.StateRoot[:])
+	s.Field("miner")
 	if h.Miner == nil {
 		s.WriteNil()
 	} else {
 		s.WriteHex(h.Miner[:])
 	}
 	jsonstream.Text(s, "difficulty", h.Difficulty)
-	jsonstream.Field(s, "extraData").WriteHex(h.ExtraData)
+	s.Field("extraData").WriteHex(h.ExtraData)
 	jsonstream.Text(s, "gasLimit", &h.GasLimit)
 	jsonstream.Text(s, "gasUsed", &h.GasUsed)
 	jsonstream.Text(s, "timestamp", &h.Timestamp)
-	jsonstream.Field(s, "transactionsRoot").WriteHex(h.TransactionsRoot[:])
-	jsonstream.Field(s, "receiptsRoot").WriteHex(h.ReceiptsRoot[:])
+	s.Field("transactionsRoot").WriteHex(h.TransactionsRoot[:])
+	s.Field("receiptsRoot").WriteHex(h.ReceiptsRoot[:])
 
 	// omitempty: a nil pointer is left out entirely.
 	if h.BaseFeePerGas != nil {
 		jsonstream.Text(s, "baseFeePerGas", h.BaseFeePerGas)
 	}
 	if h.WithdrawalsRoot != nil {
-		jsonstream.Field(s, "withdrawalsRoot").WriteHex(h.WithdrawalsRoot[:])
+		s.Field("withdrawalsRoot").WriteHex(h.WithdrawalsRoot[:])
 	}
 	if h.BlobGasUsed != nil {
 		jsonstream.Text(s, "blobGasUsed", h.BlobGasUsed)
@@ -97,19 +97,19 @@ func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
 		jsonstream.Text(s, "excessBlobGas", h.ExcessBlobGas)
 	}
 	if h.ParentBeaconBlockRoot != nil {
-		jsonstream.Field(s, "parentBeaconBlockRoot").WriteHex(h.ParentBeaconBlockRoot[:])
+		s.Field("parentBeaconBlockRoot").WriteHex(h.ParentBeaconBlockRoot[:])
 	}
 	if h.RequestsHash != nil {
-		jsonstream.Field(s, "requestsHash").WriteHex(h.RequestsHash[:])
+		s.Field("requestsHash").WriteHex(h.RequestsHash[:])
 	}
 	if h.BlockAccessListHash != nil {
-		jsonstream.Field(s, "blockAccessListHash").WriteHex(h.BlockAccessListHash[:])
+		s.Field("blockAccessListHash").WriteHex(h.BlockAccessListHash[:])
 	}
 	if h.SlotNumber != nil {
 		jsonstream.Text(s, "slotNumber", h.SlotNumber)
 	}
 	if h.AuraSeal != nil {
-		jsonstream.Field(s, "auraSeal").WriteHex(*h.AuraSeal)
+		s.Field("auraSeal").WriteHex(*h.AuraSeal)
 	}
 	if h.AuraStep != nil {
 		jsonstream.Text(s, "auraStep", h.AuraStep)
@@ -130,17 +130,15 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	// first write, never with half a result already streamed.
 	hashes, hashesOK := b.Transactions.([]common.Hash)
 	full, fullOK := b.Transactions.([]*RPCTransaction)
-	var rawTxs, txCount, calls []byte
+	var rawTxs []byte
 	var err error
 	if !hashesOK && !fullOK {
 		if rawTxs, err = marshalIfSet(b.Transactions); err != nil {
 			return err
 		}
 	}
-	if txCount, err = marshalIfSet(b.TransactionCount); err != nil {
-		return err
-	}
-	if calls, err = marshalIfSet(b.Calls); err != nil {
+	callErrs, err := marshalCallErrors(b.Calls)
+	if err != nil {
 		return err
 	}
 
@@ -154,30 +152,67 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	case hashesOK:
 		jsonstream.HexesField(s, "transactions", hashes)
 	case fullOK:
-		jsonstream.Field(s, "transactions")
+		s.Field("transactions")
 		jsonstream.ArrayValue(s, full, writeTxElem)
 	case rawTxs != nil:
-		jsonstream.Field(s, "transactions").WriteRawBytes(rawTxs)
+		s.Field("transactions").WriteRawBytes(rawTxs)
 	}
 
 	jsonstream.HexesField(s, "uncles", b.Uncles)
 
 	if b.Withdrawals != nil {
-		jsonstream.Field(s, "withdrawals")
+		s.Field("withdrawals")
 		jsonstream.ArrayValue(s, *b.Withdrawals, writeWithdrawalElem)
 	}
-	if txCount != nil {
-		jsonstream.Field(s, "transactionCount").WriteRawBytes(txCount)
+	if b.TransactionCount != nil {
+		s.Field("transactionCount").Uint(*b.TransactionCount)
 	}
 	if b.TotalDifficulty != nil {
 		jsonstream.Text(s, "totalDifficulty", b.TotalDifficulty)
 	}
-	if calls != nil {
-		jsonstream.Field(s, "calls").WriteRawBytes(calls)
+	if b.Calls != nil {
+		s.Field("calls").WriteArrayStart()
+		for i := range b.Calls {
+			b.Calls[i].writeTo(s, callErrs[i])
+		}
+		s.WriteArrayEnd()
 	}
 	s.WriteObjectEnd()
 	return nil
 }
+
+// marshalCallErrors encodes the calls' errors up front, the one part of a call result that
+// needs the reflection encoder, so a failure is reported before the block's first write.
+func marshalCallErrors(calls []CallResult) ([][]byte, error) {
+	if calls == nil {
+		return nil, nil
+	}
+	errs := make([][]byte, len(calls))
+	for i := range calls {
+		var err error
+		if errs[i], err = marshalIfSet(calls[i].Error); err != nil {
+			return nil, err
+		}
+	}
+	return errs, nil
+}
+
+func (r *CallResult) writeTo(s *jsonstream.StackStream, callErr []byte) {
+	s.WriteObjectStart()
+	s.Field("returnData").WriteString(r.ReturnData)
+	s.Field("logs")
+	jsonstream.ArrayValue(s, r.Logs, writeLogElem)
+	jsonstream.Text(s, "gasUsed", &r.GasUsed)
+	jsonstream.Text(s, "maxUsedGas", &r.MaxUsedGas)
+	jsonstream.Text(s, "status", &r.Status)
+	if callErr != nil {
+		s.Field("error").WriteRawBytes(callErr)
+	}
+	s.WriteObjectEnd()
+}
+
+// writeLogElem never fails: RPCLog.MarshalFastJSONTo reports no error.
+func writeLogElem(s *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).MarshalFastJSONTo(s) }
 
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
 func writeTxElem(s *jsonstream.StackStream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }
@@ -188,10 +223,10 @@ func writeWithdrawalElem(s *jsonstream.StackStream, wd **types.Withdrawal) {
 		return
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("index").WriteQuotedText(&(*wd).Index)
-	s.WriteObjectField("validatorIndex").WriteQuotedText(&(*wd).Validator)
-	s.WriteObjectField("address").WriteHex((*wd).Address[:])
-	s.WriteObjectField("amount").WriteQuotedText(&(*wd).Amount)
+	s.Field("index").WriteQuotedText(&(*wd).Index)
+	s.Field("validatorIndex").WriteQuotedText(&(*wd).Validator)
+	s.Field("address").WriteHex((*wd).Address[:])
+	s.Field("amount").WriteQuotedText(&(*wd).Amount)
 	s.WriteObjectEnd()
 }
 
