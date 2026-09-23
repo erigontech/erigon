@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestBlockDecodingNestedRLPExtra(t *testing.T) {
@@ -815,4 +816,51 @@ func TestHeaderMarshalJSONQuantities(t *testing.T) {
 	enc, err = json.Marshal(h)
 	require.NoError(t, err)
 	require.Contains(t, string(enc), `"baseFeePerGas":null`)
+}
+
+// MarshalFastJSONTo replaces the generated MarshalJSON on the newHeads path, so every field,
+// including the optional ones, must come out byte for byte the same.
+func TestHeaderMarshalFastJSONTo(t *testing.T) {
+	t.Parallel()
+	hash := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+	num := uint64(7)
+	full := &Header{
+		ParentHash:            hash,
+		UncleHash:             hash,
+		Coinbase:              common.HexToAddress("0x1234567890123456789012345678901234567890"),
+		Root:                  hash,
+		TxHash:                hash,
+		ReceiptHash:           hash,
+		Bloom:                 Bloom{1, 2, 3},
+		Difficulty:            *uint256.NewInt(0x2000),
+		Number:                *uint256.NewInt(0x18c5467),
+		GasLimit:              30_000_000,
+		GasUsed:               21_000,
+		Time:                  1_700_000_000,
+		Extra:                 []byte{0xde, 0xad},
+		MixDigest:             hash,
+		Nonce:                 EncodeNonce(42),
+		AuRaStep:              5,
+		AuRaSeal:              []byte{9, 9},
+		BaseFee:               uint256.NewInt(1_000_000_000),
+		WithdrawalsHash:       &hash,
+		BlobGasUsed:           &num,
+		ExcessBlobGas:         &num,
+		ParentBeaconBlockRoot: &hash,
+		RequestsHash:          &hash,
+		BlockAccessListHash:   &hash,
+		SlotNumber:            &num,
+	}
+	empty := &Header{}
+	noOptionals := &Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(0), Extra: []byte{}}
+
+	for name, h := range map[string]*Header{"full": full, "empty": empty, "noOptionals": noOptionals} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(h)
+			require.NoError(t, err)
+			got, err := jsonstream.Marshal(h)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+		})
+	}
 }
