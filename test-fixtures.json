@@ -22,9 +22,9 @@
     "size": 551429689
   },
   "cl_mainnet": {
-    "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-beta.0/mainnet.tar.gz",
-    "sha256": "0ef9c069293e2171dd75c5593faf7b97e32b9bcdce9285e870959938747c0774",
-    "size": 902712950
+    "url": "https://github.com/ethereum/consensus-specs/releases/download/v1.7.0-beta.2/mainnet.tar.gz",
+    "sha256": "0047b48f19fe6f74114291a46d0a16804871338ebec7166de6f3e4690da4313b",
+    "size": 910914643
   },
   "legacy_cancun": {
     "url": "https://github.com/ethereum/legacytests/archive/1f581b8ccdc4c63acf5f2c5c1b155c690c32a8eb.tar.gz",

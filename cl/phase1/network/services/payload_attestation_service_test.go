@@ -125,6 +125,8 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 	ethClockMock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
 		return time.Unix(int64(slot*12), 0)
 	}).AnyTimes()
+	ethClockMock.EXPECT().GetEpochAtSlot(gomock.Any()).Return(uint64(0)).AnyTimes()
+	ethClockMock.EXPECT().StateVersionByEpoch(gomock.Any()).Return(clparams.GloasVersion).AnyTimes()
 
 	seenCache, err := lru.New[seenPayloadAttestationKey, struct{}]("seen_payload_attestations", seenPayloadAttestationCacheSize)
 	require.NoError(t, err)
@@ -457,6 +459,27 @@ func TestPayloadAttestationServiceNilMessage(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, &cltypes.PayloadAttestationMessage{})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "nil payload attestation message")
+}
+
+func TestPayloadAttestationServiceRejectsPreGloasSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GenesisTime().Return(uint64(0)).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).DoAndReturn(func(slot uint64) time.Time {
+		return time.Unix(int64(slot*12), 0)
+	}).AnyTimes()
+	clock.EXPECT().GetEpochAtSlot(uint64(63)).Return(uint64(1)).AnyTimes()
+	clock.EXPECT().StateVersionByEpoch(uint64(1)).Return(clparams.FuluVersion).AnyTimes()
+	service.ethClock = clock
+	service.now = func() time.Time { return time.Unix(63*12+6, 0) }
+
+	err := service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(63, 1, common.Hash{1}))
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.ErrorContains(t, err, "pre-Gloas")
 }
 
 func TestPayloadAttestationServiceSlotMismatch(t *testing.T) {
