@@ -50,6 +50,7 @@ var (
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
+	MdbxDurable      = EnvBool("MDBX_DURABLE", false)
 	MdbxNoSyncUnsafe = EnvBool("MDBX_NO_FSYNC_UNSAFE", false)
 
 	stopBeforeStage = EnvString("STOP_BEFORE_STAGE", "")
