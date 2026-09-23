@@ -177,6 +177,18 @@ func TestGetPTCFromWindowRejectsSlotOutsideWindow(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestGetPTCRejectsPreGloasSlot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.GloasForkEpoch = 2
+	s := state2.New(&cfg)
+	s.SetVersion(clparams.GloasVersion)
+	require.NoError(t, s.SetSlot(cfg.GloasForkEpoch*cfg.SlotsPerEpoch))
+	s.SetPtcWindow(solid.NewUint64VectorOfVectors(int(3*cfg.SlotsPerEpoch), 4))
+
+	_, err := s.GetPTC(cfg.GloasForkEpoch*cfg.SlotsPerEpoch - 1)
+	require.ErrorContains(t, err, "pre-Gloas")
+}
+
 func TestPtcBoolToVote(t *testing.T) {
 	require.Equal(t, int8(1), boolToVote(true))
 	require.Equal(t, int8(-1), boolToVote(false))

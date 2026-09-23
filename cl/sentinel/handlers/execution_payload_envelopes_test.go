@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -49,6 +50,20 @@ func getGloasEthClockAndConfig(t *testing.T) (eth_clock.EthereumClock, *clparams
 }
 
 func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
+	for _, tc := range []struct {
+		name              string
+		headPayloadStatus cltypes.PayloadStatus
+	}{
+		{name: "empty head payload", headPayloadStatus: cltypes.PayloadStatusEmpty},
+		{name: "full head payload", headPayloadStatus: cltypes.PayloadStatusFull},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			testExecutionPayloadEnvelopesByRangeHandler(t, tc.headPayloadStatus)
+		})
+	}
+}
+
+func testExecutionPayloadEnvelopesByRangeHandler(t *testing.T, headPayloadStatus cltypes.PayloadStatus) {
 	ctx := context.Background()
 
 	// Set up two connected libp2p hosts
@@ -91,6 +106,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 	// Create envelopes for each block and store them in mock.
 	// The canonical block root is HashSSZ(header), computed by WriteBeaconBlockHeaderAndIndicies.
 	expEnvelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, count)
+	canonicalRoots := make([]common.Hash, 0, count)
 	for i, block := range expBlocks {
 		if uint64(i) >= count {
 			break
@@ -109,6 +125,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		}
 		blockRoot, err := header.HashSSZ()
 		require.NoError(t, err)
+		canonicalRoots = append(canonicalRoots, blockRoot)
 
 		// Create a properly versioned Eth1Block for GLOAS
 		payload := cltypes.NewEth1Block(clparams.GloasVersion, beaconCfg)
@@ -125,8 +142,22 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		envelope.Message.BuilderIndex = uint64(i)
 
 		fcMock.SetEnvelope(blockRoot, envelope)
-		expEnvelopes = append(expEnvelopes, envelope)
+		if i < int(count)-1 {
+			payloadStatus := cltypes.PayloadStatusFull
+			if i == 2 {
+				payloadStatus = cltypes.PayloadStatusEmpty
+			}
+			fcMock.Ancestors[block.Block.Slot] = forkchoice.ForkChoiceNode{Root: blockRoot, PayloadStatus: payloadStatus}
+			if payloadStatus == cltypes.PayloadStatusFull {
+				expEnvelopes = append(expEnvelopes, envelope)
+			}
+		} else if headPayloadStatus == cltypes.PayloadStatusFull {
+			expEnvelopes = append(expEnvelopes, envelope)
+		}
 	}
+	fcMock.HeadVal = canonicalRoots[count-1]
+	fcMock.HeadSlotVal = startSlot + count - 1
+	fcMock.HeadPayloadStatusVal = headPayloadStatus
 
 	c := NewConsensusHandlers(
 		ctx,

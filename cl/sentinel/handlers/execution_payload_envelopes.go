@@ -82,9 +82,14 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	}
 	defer tx.Rollback()
 
+	head, headSlot, err := c.forkChoiceReader.GetHeadNode()
+	if err != nil {
+		return err
+	}
+
 	count := uint64(0)
 	for slot := startSlot; slot < endSlot; slot++ {
-		if slot > curSlot {
+		if slot > curSlot || slot > headSlot {
 			break
 		}
 
@@ -99,6 +104,18 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			return err
 		}
 		if blockRoot == (common.Hash{}) {
+			continue
+		}
+
+		payloadStatus := head.PayloadStatus
+		if blockRoot != head.Root {
+			ancestor := c.forkChoiceReader.Ancestor(head.Root, slot)
+			if ancestor.Root != blockRoot {
+				continue
+			}
+			payloadStatus = ancestor.PayloadStatus
+		}
+		if payloadStatus != cltypes.PayloadStatusFull {
 			continue
 		}
 
