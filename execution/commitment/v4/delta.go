@@ -18,6 +18,8 @@ package v4
 
 import (
 	"bytes"
+
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type recordDelta struct {
@@ -28,13 +30,21 @@ type recordDelta struct {
 
 type putBranchFunc func(key, data, prev []byte) error
 
-func foldAndEncodeRecord(n *node, depth int, key []byte) ([32]byte, recordDelta, error) {
+func foldAndEncodeRecord(ctx commitment.PatriciaContext, n *node, depth int, key []byte) ([32]byte, recordDelta, error) {
 	hash, err := fold(n, depth)
 	if err != nil {
 		return [32]byte{}, recordDelta{}, err
 	}
-	data := encodeRecord(n, depth, make([]byte, 0, len(n.raw)+encodeSlack))
-	return hash, newRecordDelta(key, data, n.raw), nil
+	prev := n.raw
+	if !n.loaded {
+		stored, _, err := ctx.Branch(key)
+		if err != nil {
+			return [32]byte{}, recordDelta{}, err
+		}
+		prev = bytes.Clone(stored)
+	}
+	data := encodeRecord(n, depth, make([]byte, 0, len(prev)+encodeSlack))
+	return hash, newRecordDelta(key, data, prev), nil
 }
 
 const encodeSlack = 96

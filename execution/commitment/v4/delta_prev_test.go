@@ -72,3 +72,37 @@ func TestRecordDeltaPrevMatchesStore(t *testing.T) {
 	require.NoError(t, round(benchEntries("storage", n)))
 	require.NoError(t, round(fresh))
 }
+
+func TestRecordDeltaPrevMatchesStoreWhenLiveKeysAreRecreated(t *testing.T) {
+	whale := benchAddr(7)
+	slot := func(i int) []byte { return append(bytes.Clone(whale), benchSlot(i)...) }
+	put := func(i int) parityUpdate { return parityUpdate{key: slot(i), update: storageParityUpdate(i)} }
+	del := func(i int) parityUpdate {
+		return parityUpdate{key: slot(i), update: &commitment.Update{Flags: commitment.DeleteUpdate}}
+	}
+	account := parityUpdate{key: whale, update: accountParityUpdate(7)}
+	collapseRounds := [][]parityUpdate{{account}, {account, del(1), put(50)}}
+	for i := range 40 {
+		collapseRounds[0] = append(collapseRounds[0], put(i))
+	}
+
+	for name, rounds := range map[string][][]parityUpdate{
+		"leaf root split":      {{account, put(0)}, {account, put(6)}},
+		"root extension split": {{account, put(0), put(6)}, {account, put(40)}},
+		"collapse and resplit": collapseRounds,
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := &prevCheckContext{shardedContext: newShardedContext()}
+			dir := t.TempDir()
+			for _, entries := range rounds {
+				tr := &Trie{}
+				tr.ResetContext(c)
+				tr.SetTrieContextFactory(c.factory)
+				_, err := tr.Process(context.Background(),
+					benchUpdatesIn(dir, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
+				tr.Release()
+				require.NoError(t, err)
+			}
+		})
+	}
+}

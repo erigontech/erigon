@@ -54,7 +54,7 @@ func TestFoldAndEncodeRecordKeepsFoldAndRecordInOneWalk(t *testing.T) {
 	path := append([]byte{3}, bytes.Repeat([]byte{4}, 63)...)
 	n.setLeaf(int(path[0]), packPath(path[1:], nil), []byte{9})
 
-	hash, delta, err := foldAndEncodeRecord(n, 0, StorageRootKey([32]byte{}))
+	hash, delta, err := foldAndEncodeRecord(ctx, n, 0, StorageRootKey([32]byte{}))
 	require.NoError(t, err)
 	require.Len(t, hash, 32)
 	require.NotEmpty(t, delta.data)
