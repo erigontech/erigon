@@ -35,7 +35,7 @@ func wipeStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) error
 		return err
 	}
 	for _, r := range records {
-		if err := applyDelta(newRecordDelta(r.key, nil, r.prev), ctx.PutBranch); err != nil {
+		if err := applyDelta(newRecordDelta(r.Key, nil, r.Prev), ctx.PutBranch); err != nil {
 			return err
 		}
 	}
@@ -48,12 +48,12 @@ func enumerateStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) 
 	if err != nil {
 		return nil, err
 	}
-	records := []recordDelta{{key: rootKey, prev: bytes.Clone(data)}}
+	records := []recordDelta{{Key: rootKey, Prev: bytes.Clone(data)}}
 	if len(data) == 0 {
 		return records, nil
 	}
 	seen := map[string]struct{}{string(rootKey): {}}
-	if err := enumerateRecordChildren(ctx, addrHash, nil, records[0].prev, 0, &records, seen); err != nil {
+	if err := enumerateRecordChildren(ctx, addrHash, nil, records[0].Prev, 0, &records, seen); err != nil {
 		return nil, err
 	}
 	return records, nil
@@ -90,7 +90,7 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 			return fmt.Errorf("%w: missing child at depth %d", errWipeRecord, len(childPath))
 		}
 		childData = bytes.Clone(childData)
-		*records = append(*records, recordDelta{key: key, prev: childData})
+		*records = append(*records, recordDelta{Key: key, Prev: childData})
 		if err := enumerateRecordChildren(ctx, addrHash, childPath, childData, len(childPath), records, seen); err != nil {
 			return err
 		}

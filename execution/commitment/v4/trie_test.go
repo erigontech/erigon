@@ -94,9 +94,9 @@ func TestTrieDeferredUpdatesWaitForApply(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, ctx.putCalls)
 
-	apply := trie.TakeDeferredUpdates()
-	require.NotNil(t, apply)
-	require.NoError(t, apply(ctx.PutBranch))
+	pending := &commitment.PendingCommitmentUpdate{Deltas: trie.TakeDeferredDeltas()}
+	require.NotNil(t, pending.Deltas)
+	require.NoError(t, pending.Apply(ctx.PutBranch))
 	require.NotZero(t, ctx.putCalls)
 }
 

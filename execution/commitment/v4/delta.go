@@ -22,11 +22,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-type recordDelta struct {
-	key  []byte
-	data []byte
-	prev []byte
-}
+type recordDelta = commitment.BranchDelta
 
 type putBranchFunc func(key, data, prev []byte) error
 
@@ -56,14 +52,14 @@ func newRecordDelta(key, data, prev []byte) recordDelta {
 	if prev == nil {
 		prev = []byte{}
 	}
-	return recordDelta{key: key, data: data, prev: prev}
+	return recordDelta{Key: key, Data: data, Prev: prev}
 }
 
 func applyDelta(delta recordDelta, putBranch putBranchFunc) error {
-	if bytes.Equal(delta.prev, delta.data) {
+	if bytes.Equal(delta.Prev, delta.Data) {
 		return nil
 	}
-	return putBranch(delta.key, delta.data, delta.prev)
+	return putBranch(delta.Key, delta.Data, delta.Prev)
 }
 
 func applyDeltas(deltas []recordDelta, putBranch putBranchFunc) error {

@@ -319,13 +319,19 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	}
 }
 
+type BranchDelta struct {
+	Key  []byte
+	Data []byte
+	Prev []byte
+}
+
 type PendingCommitmentUpdate struct {
 	BlockNum uint64
 	// BlockHash disambiguates changeset lookups sharing a block number.
-	BlockHash     common.Hash
-	TxNum         uint64
-	Deferred      []*DeferredBranchUpdate
-	DeferredApply func(func(prefix, data, prevData []byte) error) error
+	BlockHash common.Hash
+	TxNum     uint64
+	Deferred  []*DeferredBranchUpdate
+	Deltas    [][]BranchDelta
 	// Metrics is the producing trie's, carried so the later apply still reaches
 	// that trie's log and CSV counters. The Prometheus counters do not depend on
 	// it — publishBranchWrites bills those where the write lands.
@@ -333,15 +339,22 @@ type PendingCommitmentUpdate struct {
 }
 
 func (p *PendingCommitmentUpdate) Apply(putBranch func(prefix, data, prevData []byte) error) error {
-	if p.DeferredApply != nil {
-		return p.DeferredApply(putBranch)
+	if p.Deltas != nil {
+		for _, part := range p.Deltas {
+			for i := range part {
+				if err := putBranch(part[i].Key, part[i].Data, part[i].Prev); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
 	}
 	_, err := ApplyDeferredBranchUpdates(p.Deferred, runtime.NumCPU(), putBranch, p.Metrics)
 	return err
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
-	p.DeferredApply = nil
+	p.Deltas = nil
 	for _, upd := range p.Deferred {
 		putDeferredUpdate(upd)
 	}

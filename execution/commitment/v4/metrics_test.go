@@ -83,7 +83,7 @@ func TestDeferredProcessPublishesBranchWrites(t *testing.T) {
 	u := benchUpdatesIn(dir, commitment.ModeCollect, entries)
 	_, err := tr.Process(context.Background(), u, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
-	require.NotNil(t, tr.TakeDeferredUpdates())
+	require.NotNil(t, tr.TakeDeferredDeltas())
 
 	require.Positive(t, writeBytes.GetValueUint64()-beforeBytes,
 		"deferred rounds still bill commitment_branch_write_bytes_total")

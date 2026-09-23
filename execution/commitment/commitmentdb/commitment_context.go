@@ -91,7 +91,7 @@ type SharedDomainsCommitmentContext struct {
 
 type deferredCommitmentTrie interface {
 	SetDeferCommitmentUpdates(bool)
-	TakeDeferredUpdates() func(func(prefix, data, prevData []byte) error) error
+	TakeDeferredDeltas() [][]commitment.BranchDelta
 }
 
 type trieContextFactorySetter interface {
@@ -687,11 +687,11 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		}
 	}
 	if trie, ok := sdc.patriciaTrie.(deferredCommitmentTrie); ok && sdc.deferCommitmentUpdates {
-		if apply := trie.TakeDeferredUpdates(); apply != nil {
+		if deltas := trie.TakeDeferredDeltas(); deltas != nil {
 			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
-				BlockNum:      blockNum,
-				TxNum:         txNum,
-				DeferredApply: apply,
+				BlockNum: blockNum,
+				TxNum:    txNum,
+				Deltas:   deltas,
 			}
 		}
 	}

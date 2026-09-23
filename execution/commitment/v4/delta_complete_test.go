@@ -35,7 +35,7 @@ func newDeltaContext() *deltaContext {
 }
 
 func (m *deltaContext) PutBranch(key, data, prev []byte) error {
-	m.deltas = append(m.deltas, recordDelta{key: bytes.Clone(key), data: bytes.Clone(data), prev: bytes.Clone(prev)})
+	m.deltas = append(m.deltas, recordDelta{Key: bytes.Clone(key), Data: bytes.Clone(data), Prev: bytes.Clone(prev)})
 	return m.mockContext.PutBranch(key, data, prev)
 }
 
@@ -50,9 +50,9 @@ func (m *deltaContext) snapshot() map[string][]byte {
 func requireTombstone(t *testing.T, deltas []recordDelta, key []byte) {
 	t.Helper()
 	for _, delta := range deltas {
-		if bytes.Equal(delta.key, key) {
-			require.Empty(t, delta.data)
-			require.NotEmpty(t, delta.prev)
+		if bytes.Equal(delta.Key, key) {
+			require.Empty(t, delta.Data)
+			require.NotEmpty(t, delta.Prev)
 			return
 		}
 	}
@@ -79,8 +79,8 @@ func TestCompleteDeltasCarryEveryChangedRecordPreviousValue(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, ctx.deltas)
 	for _, delta := range ctx.deltas {
-		require.Equal(t, previous[string(delta.key)], delta.prev, "previous value for %x", delta.key)
-		require.NotEqual(t, delta.prev, delta.data, "unchanged record emitted for %x", delta.key)
+		require.Equal(t, previous[string(delta.Key)], delta.Prev, "previous value for %x", delta.Key)
+		require.NotEqual(t, delta.Prev, delta.Data, "unchanged record emitted for %x", delta.Key)
 	}
 }
 
@@ -130,7 +130,7 @@ func TestCompleteDeltasReplayAndReloadRecovery(t *testing.T) {
 	final := ctx.snapshot()
 	replayed := make(map[string][]byte)
 	for _, delta := range append(firstDeltas, secondDeltas...) {
-		replayed[string(delta.key)] = bytes.Clone(delta.data)
+		replayed[string(delta.Key)] = bytes.Clone(delta.Data)
 	}
 	require.Equal(t, final, replayed)
 

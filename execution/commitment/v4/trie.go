@@ -52,7 +52,7 @@ type deferredPatriciaContext struct {
 }
 
 func (c *deferredPatriciaContext) PutBranch(key, data, prev []byte) error {
-	return c.putDeltas([]recordDelta{{key: key, data: data, prev: prev}})
+	return c.putDeltas([]recordDelta{{Key: key, Data: data, Prev: prev}})
 }
 
 func (c *deferredPatriciaContext) putDeltas(deltas []recordDelta) error {
@@ -62,11 +62,11 @@ func (c *deferredPatriciaContext) putDeltas(deltas []recordDelta) error {
 	changed := deltas[:0]
 	size := 0
 	for _, d := range deltas {
-		if bytes.Equal(d.prev, d.data) {
+		if bytes.Equal(d.Prev, d.Data) {
 			continue
 		}
 		changed = append(changed, d)
-		size += len(d.data)
+		size += len(d.Data)
 	}
 	if len(changed) == 0 {
 		return nil
@@ -163,22 +163,13 @@ func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) {
 	}
 }
 
-func (t *Trie) TakeDeferredUpdates() func(func(prefix, data, prevData []byte) error) error {
+func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
 	if t == nil || len(t.deferred) == 0 {
 		return nil
 	}
 	parts := t.deferred
 	t.deferred = nil
-	return func(putBranch func(prefix, data, prevData []byte) error) error {
-		for _, deltas := range parts {
-			for _, d := range deltas {
-				if err := putBranch(d.key, d.data, d.prev); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
+	return parts
 }
 
 func (t *Trie) Process(

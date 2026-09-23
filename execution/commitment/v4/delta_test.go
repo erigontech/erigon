@@ -27,21 +27,21 @@ import (
 func TestApplyDeltasSkipsUnchangedRecords(t *testing.T) {
 	var applied []recordDelta
 	deltas := []recordDelta{
-		{key: []byte{1}, data: []byte{2}, prev: []byte{2}},
-		{key: []byte{3}, data: []byte{4}, prev: []byte{5}},
-		{key: []byte{6}, data: nil, prev: nil},
+		{Key: []byte{1}, Data: []byte{2}, Prev: []byte{2}},
+		{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}},
+		{Key: []byte{6}, Data: nil, Prev: nil},
 	}
 	err := applyDeltas(deltas, func(key, data, prev []byte) error {
-		applied = append(applied, recordDelta{key: bytes.Clone(key), data: bytes.Clone(data), prev: bytes.Clone(prev)})
+		applied = append(applied, recordDelta{Key: bytes.Clone(key), Data: bytes.Clone(data), Prev: bytes.Clone(prev)})
 		return nil
 	})
 	require.NoError(t, err)
-	require.Equal(t, []recordDelta{{key: []byte{3}, data: []byte{4}, prev: []byte{5}}}, applied)
+	require.Equal(t, []recordDelta{{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}}}, applied)
 }
 
 func TestApplyDeltasReturnsPutError(t *testing.T) {
 	wantErr := errors.New("put failed")
-	err := applyDeltas([]recordDelta{{key: []byte{1}, data: []byte{2}, prev: []byte{3}}}, func(_, _, _ []byte) error {
+	err := applyDeltas([]recordDelta{{Key: []byte{1}, Data: []byte{2}, Prev: []byte{3}}}, func(_, _, _ []byte) error {
 		return wantErr
 	})
 	require.ErrorIs(t, err, wantErr)
@@ -57,8 +57,8 @@ func TestFoldAndEncodeRecordKeepsFoldAndRecordInOneWalk(t *testing.T) {
 	hash, delta, err := foldAndEncodeRecord(ctx, n, 0, StorageRootKey([32]byte{}))
 	require.NoError(t, err)
 	require.Len(t, hash, 32)
-	require.NotEmpty(t, delta.data)
-	require.NoError(t, Validate(delta.data, 0))
+	require.NotEmpty(t, delta.Data)
+	require.NoError(t, Validate(delta.Data, 0))
 	require.Empty(t, ctx.putCalls)
 }
 
