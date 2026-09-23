@@ -1118,3 +1118,62 @@ func TestBodyWithRawTransactionsMatchesDecodedBody(t *testing.T) {
 		require.Equal(t, binaryTxs, got.Transactions, "block %d", num)
 	}
 }
+
+// A record that is not one whole transaction stays in the database: reading it as a raw body
+// fails, so the malformed bytes never reach a caller that expects a transaction.
+func TestBodyWithRawTransactionsRejectsMalformedRecord(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
+
+	wrapped := func(b []byte) []byte {
+		out := make([]byte, rlp.StringLen(b))
+		rlp.EncodeStringToBuf(b, out)
+		return out
+	}
+	to := common.Address{1}
+	valid, err := types.MarshalTransactionsBinary(types.Transactions{
+		types.NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
+	})
+	require.NoError(t, err)
+	typed := &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000},
+		ChainID:  *uint256.NewInt(1), TipCap: *uint256.NewInt(1), FeeCap: *uint256.NewInt(2),
+	}
+	typedBinary, err := types.MarshalTransactionsBinary(types.Transactions{typed})
+	require.NoError(t, err)
+
+	records := map[uint64][][]byte{
+		1: valid,
+		2: {wrapped(typedBinary[0])},
+		3: {{0xc0}},
+		4: {wrapped([]byte{0x02})},
+		5: {append(wrapped(typedBinary[0]), 0xff)},
+	}
+	binary := map[uint64][]byte{1: valid[0], 2: typedBinary[0]}
+
+	rwTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for num, txs := range records {
+		hash := common.Hash{byte(num)}
+		_, err = rawdb.WriteRawBody(rwTx, hash, num, &types.RawBody{Transactions: txs})
+		require.NoError(t, err)
+		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hash, num))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for num := range uint64(5) {
+		num++
+		body, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{byte(num)}, num)
+		if num <= 2 {
+			require.NoError(t, err, "block %d", num)
+			require.Equal(t, binary[num], body.Transactions[0], "block %d", num)
+			continue
+		}
+		require.Error(t, err, "block %d served a malformed record", num)
+		require.Nil(t, body)
+	}
+}

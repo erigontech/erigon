@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
@@ -263,4 +264,25 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 	}
 
 	return m
+}
+
+// A record that is not one whole transaction never becomes frozen: the dump decodes every
+// transaction before it writes the segment, so the block files cannot hold a malformed one.
+func TestDumpTxsRejectsMalformedStoredTxn(t *testing.T) {
+	if testing.Short() {
+		t.Skip("long-running test")
+	}
+	m := createDumpTestKV(t, chain.AllProtocolChanges, 3)
+
+	rwTx, err := m.DB.BeginRw(m.Ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	hash, err := rawdb.ReadCanonicalHash(rwTx, 2)
+	require.NoError(t, err)
+	_, err = rawdb.WriteRawBody(rwTx, hash, 2, &types.RawBody{Transactions: [][]byte{{0xc0}}})
+	require.NoError(t, err)
+	require.NoError(t, rwTx.Commit())
+
+	_, err = freezeblocks.DumpTxs(m.Ctx, m.DB, m.ChainConfig, 0, 4, nil, func([]byte) error { return nil }, 1, log.LvlInfo, log.New())
+	require.ErrorContains(t, err, "rlp")
 }
