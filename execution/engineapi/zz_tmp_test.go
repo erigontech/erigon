@@ -3,6 +3,7 @@ package engineapi_test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"testing"
@@ -60,6 +61,9 @@ func TestZZZEmptyPayloadCost(t *testing.T) {
 			t2 := time.Now()
 			require.NoError(t, eat.MockCl.UpdateForkChoice(ctx, p))
 			t3 := time.Now()
+			if dir := os.Getenv("EMPTYCOST_DATADIR"); dir != "" {
+				_ = os.WriteFile(filepath.Join(dir, "head.txt"), []byte(strconv.FormatUint(uint64(p.ExecutionPayload.BlockNumber), 10)), 0o644)
+			}
 
 			build = append(build, t1.Sub(t0).Seconds()*1000)
 			np = append(np, t2.Sub(t1).Seconds()*1000)
