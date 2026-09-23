@@ -1,11 +1,16 @@
 package engineapi_test
 
 import (
+	"bytes"
 	"context"
+	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -39,6 +44,39 @@ func TestZZZEmptyPayloadCost(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { require.NoError(t, eat.Close()) })
 
+	var rpcCalls atomic.Int64
+	rpcStop := make(chan struct{})
+	var rpcWg sync.WaitGroup
+	if clients, _ := strconv.Atoi(os.Getenv("EMPTYCOST_RPC")); clients > 0 {
+		body := []byte(`{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":["latest",false]}`)
+		for range clients {
+			rpcWg.Add(1)
+			go func() {
+				defer rpcWg.Done()
+				cl := &http.Client{}
+				for {
+					select {
+					case <-rpcStop:
+						return
+					default:
+					}
+					req, err := http.NewRequest("POST", eat.JsonRpcUrl, bytes.NewReader(body))
+					if err != nil {
+						return
+					}
+					req.Header.Set("Content-Type", "application/json")
+					resp, err := cl.Do(req)
+					if err != nil {
+						continue
+					}
+					io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					rpcCalls.Add(1)
+				}
+			}()
+		}
+	}
+
 	n := 300
 	if v := os.Getenv("EMPTYCOST_N"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil {
@@ -49,6 +87,7 @@ func TestZZZEmptyPayloadCost(t *testing.T) {
 	np := make([]float64, 0, n)
 	fcu := make([]float64, 0, n)
 
+	start := time.Now()
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		for range n {
 
@@ -70,6 +109,12 @@ func TestZZZEmptyPayloadCost(t *testing.T) {
 			fcu = append(fcu, t3.Sub(t2).Seconds()*1000)
 		}
 	})
+	total := time.Since(start)
+	close(rpcStop)
+	rpcWg.Wait()
+	if c := rpcCalls.Load(); c > 0 {
+		t.Logf("%-11s n=%d rps=%.0f", "rpc", c, float64(c)/total.Seconds())
+	}
 	for name, v := range map[string][]float64{"build": build, "newPayload": np, "fcu": fcu} {
 		sort.Float64s(v)
 		sum := 0.0
