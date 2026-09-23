@@ -754,6 +754,10 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 // syncPoller enforces the sync deadline once writes stop: mdbx checks it only inside
 // mdbx_txn_commit and mdbx_env_sync.
 func (db *MdbxKV) syncPoller(interval time.Duration) {
+	// The flush is a blocking cgo call: on its own locked thread it stays out of the
+	// scheduler's P pool instead of making one hand off mid-syscall.
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
 	t := time.NewTicker(interval)
 	defer t.Stop()
 	for {
