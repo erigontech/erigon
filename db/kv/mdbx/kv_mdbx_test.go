@@ -1249,9 +1249,7 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 			WithTableCfg(func(kv.TableCfg) kv.TableCfg { return kv.ChaindataTablesCfg }).MustOpen()
 		var wg sync.WaitGroup
 		stop := make(chan struct{})
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := 0; ; i++ {
 				select {
 				case <-stop:
@@ -1264,7 +1262,7 @@ func TestDeferredSyncClosesWhileWriting(t *testing.T) {
 					return // the db is closing
 				}
 			}
-		}()
+		})
 		time.Sleep(5 * time.Millisecond)
 		db.Close() // while the writer is still running
 		close(stop)
