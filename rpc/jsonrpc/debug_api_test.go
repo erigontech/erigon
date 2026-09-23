@@ -628,18 +628,18 @@ func TestTraceBlockErrorAfterWrite(t *testing.T) {
 	// Replicate the per-tx structure of the traceBlock loop.
 	s.WriteArrayStart()
 	s.WriteObjectStart()
-	s.WriteObjectField("txHash")
+	s.Field("txHash")
 	s.WriteString("0xdeadbeef")
 	inner.ResetField()
 
 	// Simulate TraceTx writing a partial result before returning an error:
 	// the first write to inner triggers ensure() and sets Written=true.
 	inner.WriteObjectStart()
-	inner.WriteObjectField("from")
+	inner.Field("from")
 	inner.WriteString("0xabcd")
 	// Replicate the traceBlock error handler.
 	inner.CloseIfOpen()
-	s.WriteObjectField("error")
+	s.Field("error")
 	s.WriteString("partial write error")
 	s.WriteObjectEnd()
 

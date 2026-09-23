@@ -52,36 +52,36 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 	w.WriteObjectStart()
 
-	w.WriteObjectField("blockHash").WriteHex(r.BlockHash[:])
-	jsonstream.Field(w, "blockNumber").WriteQuotedText(&r.BlockNumber)
-	jsonstream.Field(w, "transactionHash").WriteHex(r.TransactionHash[:])
-	jsonstream.Field(w, "transactionIndex").WriteQuotedText(&r.TransactionIndex)
-	jsonstream.Field(w, "from")
+	w.Field("blockHash").WriteHex(r.BlockHash[:])
+	w.Field("blockNumber").WriteQuotedText(&r.BlockNumber)
+	w.Field("transactionHash").WriteHex(r.TransactionHash[:])
+	w.Field("transactionIndex").WriteQuotedText(&r.TransactionIndex)
+	w.Field("from")
 	if r.From == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.From[:])
 	}
-	jsonstream.Field(w, "to")
+	w.Field("to")
 	if r.To == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.To[:])
 	}
-	jsonstream.Field(w, "type").WriteQuotedText(&r.Type)
-	jsonstream.Field(w, "gasUsed").WriteQuotedText(&r.GasUsed)
-	jsonstream.Field(w, "cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
-	jsonstream.Field(w, "contractAddress")
+	w.Field("type").WriteQuotedText(&r.Type)
+	w.Field("gasUsed").WriteQuotedText(&r.GasUsed)
+	w.Field("cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
+	w.Field("contractAddress")
 	if r.ContractAddress == nil {
 		w.WriteNil()
 	} else {
 		w.WriteHex(r.ContractAddress[:])
 	}
-	jsonstream.Field(w, "logs")
+	w.Field("logs")
 	if err := writeLogs(w, r.Logs); err != nil {
 		return err
 	}
-	jsonstream.Field(w, "logsBloom")
+	w.Field("logsBloom")
 	if r.LogsBloom == nil {
 		w.WriteNil()
 	} else {
@@ -89,19 +89,19 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 
 	if r.EffectiveGasPrice != nil {
-		jsonstream.Field(w, "effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
+		w.Field("effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
 	}
 	if r.Status != nil {
-		jsonstream.Field(w, "status").WriteQuotedText(r.Status)
+		w.Field("status").WriteQuotedText(r.Status)
 	}
 	if len(r.Root) > 0 {
-		jsonstream.Field(w, "root").WriteHex(r.Root)
+		w.Field("root").WriteHex(r.Root)
 	}
 	if r.BlobGasPrice != nil {
-		jsonstream.Field(w, "blobGasPrice").WriteQuotedText(r.BlobGasPrice)
+		w.Field("blobGasPrice").WriteQuotedText(r.BlobGasPrice)
 	}
 	if r.BlobGasUsed != nil {
-		jsonstream.Field(w, "blobGasUsed").WriteQuotedText(r.BlobGasUsed)
+		w.Field("blobGasUsed").WriteQuotedText(r.BlobGasUsed)
 	}
 
 	w.WriteObjectEnd()
@@ -138,14 +138,14 @@ func writeLog(w *jsonstream.StackStream, lp **types.Log) {
 		return
 	}
 	w.WriteObjectStart()
-	w.WriteObjectField("address").WriteHex(l.Address[:])
+	w.Field("address").WriteHex(l.Address[:])
 	jsonstream.HexesField(w, "topics", l.Topics)
-	jsonstream.Field(w, "data").WriteHex(l.Data)
-	jsonstream.Field(w, "blockNumber").WriteQuotedText(&l.BlockNumber)
-	jsonstream.Field(w, "transactionHash").WriteHex(l.TxHash[:])
-	jsonstream.Field(w, "transactionIndex").WriteQuotedText(&l.TxIndex)
-	jsonstream.Field(w, "blockHash").WriteHex(l.BlockHash[:])
-	jsonstream.Field(w, "logIndex").WriteQuotedText(&l.Index)
-	jsonstream.Field(w, "removed").WriteBool(l.Removed)
+	w.Field("data").WriteHex(l.Data)
+	w.Field("blockNumber").WriteQuotedText(&l.BlockNumber)
+	w.Field("transactionHash").WriteHex(l.TxHash[:])
+	w.Field("transactionIndex").WriteQuotedText(&l.TxIndex)
+	w.Field("blockHash").WriteHex(l.BlockHash[:])
+	w.Field("logIndex").WriteQuotedText(&l.Index)
+	w.Field("removed").WriteBool(l.Removed)
 	w.WriteObjectEnd()
 }

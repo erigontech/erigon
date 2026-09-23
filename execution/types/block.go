@@ -1157,6 +1157,13 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 	return b
 }
 
+// NewHeaderFromStorage caches hash, the key the header was read under, so Hash() does not hash
+// the RLP again.
+func NewHeaderFromStorage(hash common.Hash, header *Header) *Header {
+	header.hash.Store(&hash)
+	return header
+}
+
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
 func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {

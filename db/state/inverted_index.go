@@ -447,16 +447,16 @@ func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
 	return iit
 }
 
+// initFilesRo fills a zero iit field by field: assigning a whole literal would zero it again and
+// copy it with bulk write barriers, on every read tx.
 func (ii *InvertedIndex) initFilesRo(iit *InvertedIndexRoTx, iv *iiVisible) {
-	*iit = InvertedIndexRoTx{
-		ii:                ii,
-		visible:           iv,
-		files:             iv.files,
-		stepSize:          ii.stepSize,
-		stepsInFrozenFile: ii.stepsInFrozenFile,
-		name:              ii.Name,
-		salt:              ii.salt.Load(),
-	}
+	iit.ii = ii
+	iit.visible = iv
+	iit.files = iv.files
+	iit.stepSize = ii.stepSize
+	iit.stepsInFrozenFile = ii.stepsInFrozenFile
+	iit.name = ii.Name
+	iit.salt = ii.salt.Load()
 }
 
 func (iit *InvertedIndexRoTx) Close() {

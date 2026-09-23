@@ -1032,7 +1032,7 @@ func (m *MemoryMutation) GetLatestValSize(name kv.Domain, k []byte) (size int, f
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
 		val, ok, err := m.DomainReader.GetAsOf(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1062,7 +1062,7 @@ func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uin
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
 		val, ok, err := m.DomainReader.HistorySeek(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1252,7 +1252,7 @@ func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
 		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1273,7 +1273,7 @@ func (v *OverlayTemporalReadView) IndexRange(name kv.InvertedIdx, k []byte, from
 func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
 		val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
