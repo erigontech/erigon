@@ -75,7 +75,7 @@ func (c *meteredContext) wrapFactory(f commitment.TrieContextFactory) commitment
 	return func(ctx context.Context) (commitment.PatriciaContext, func()) {
 		inner, cleanup := f(ctx)
 		if inner == nil {
-			return inner, cleanup
+			return nil, cleanup
 		}
 		return c.wrap(inner), cleanup
 	}

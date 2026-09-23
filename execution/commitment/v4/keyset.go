@@ -28,11 +28,6 @@ type keySet struct {
 	spans []keySpan
 }
 
-func (s *keySet) reset() {
-	s.arena = s.arena[:0]
-	s.spans = s.spans[:0]
-}
-
 func (s *keySet) len() int { return len(s.spans) }
 
 func (s *keySet) at(i int) []byte { return s.arena[s.spans[i].start:s.spans[i].end] }
