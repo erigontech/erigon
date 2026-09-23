@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"math/bits"
 	"math/rand"
 	"slices"
 	"testing"
@@ -56,17 +57,10 @@ func flattenPrefixTrie(t *testing.T, tr *prefixTrie) []flatNode {
 }
 
 func nthSetNibble(bitmap uint16, n int) byte {
-	seen := 0
-	for i := range 16 {
-		if bitmap&(1<<i) == 0 {
-			continue
-		}
-		if seen == n {
-			return byte(i)
-		}
-		seen++
+	for range n {
+		bitmap &= bitmap - 1
 	}
-	panic("bitmap has fewer set bits than requested")
+	return byte(bits.TrailingZeros16(bitmap))
 }
 
 type touchCase struct {
@@ -106,12 +100,7 @@ func randomTouchCases(seed int64, n, dupEvery int) []touchCase {
 func buildReferenceTrie(cases []touchCase) *prefixTrie {
 	tr := newPrefixTrie()
 	for _, c := range cases {
-		var upd *Update
-		if c.update != nil {
-			cp := *c.update
-			upd = &cp
-		}
-		tr.Insert(c.hashedKey, c.plainKey, upd)
+		tr.Insert(c.hashedKey, c.plainKey, c.update)
 	}
 	return tr
 }
@@ -119,16 +108,26 @@ func buildReferenceTrie(cases []touchCase) *prefixTrie {
 func buildChunked(cases []touchCase) (*parallelUpdate, bool) {
 	pu := newParallelUpdate()
 	for _, c := range cases {
-		var upd *Update
-		if c.update != nil {
-			cp := *c.update
-			upd = &cp
-		}
-		pu.Collect(c.hashedKey, c.plainKey, upd)
+		pu.Collect(c.hashedKey, c.plainKey, c.update)
 	}
 	backgrounded := pu.buildCh != nil
 	pu.Build()
 	return pu, backgrounded
+}
+
+func TestFlattenPrefixTrie_Paths(t *testing.T) {
+	t.Parallel()
+
+	tr := newPrefixTrie()
+	for _, hk := range [][]byte{nibs(1, 2, 3), nibs(1, 2, 0xf), nibs(5)} {
+		tr.Insert(hk, hk, nil)
+	}
+
+	var got []string
+	for _, n := range flattenPrefixTrie(t, tr) {
+		got = append(got, n.path)
+	}
+	require.Equal(t, []string{"", "12", "123", "12f", "5"}, got)
 }
 
 func TestChunkBuild_MatchesInsertionOrderTrie(t *testing.T) {
