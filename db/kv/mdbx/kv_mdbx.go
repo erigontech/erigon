@@ -117,6 +117,12 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		}
 		if dbg.MdbxNoSync {
 			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
+			if p := dbg.EnvDuration("MDBX_SYNC_PERIOD", 0); p != 0 {
+				opts = opts.SyncPeriod(p)
+			}
+			if b := dbg.EnvDataSize("MDBX_SYNC_BYTES", 0); b != 0 {
+				opts = opts.SyncBytes(b)
+			}
 		}
 		if dbg.MdbxNoSyncUnsafe {
 			opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.UtterlyNoSync | mdbx.NoMetaSync })
@@ -394,10 +400,34 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 
 		liveTxs: make(map[*MdbxTx]liveTxInfo),
 
+		syncerStop: make(chan struct{}),
+
 		leakDetector: dbg.NewLeakDetector("db."+string(opts.label), dbg.SlowTx()),
 
 		MaxBatchSize:  DefaultMaxBatchSize,
 		MaxBatchDelay: DefaultMaxBatchDelay,
+	}
+
+	if poll := dbg.EnvDuration("MDBX_SYNC_POLL", 0); poll != 0 && opts.HasFlag(mdbx.SafeNoSync) {
+		go func() {
+			t := time.NewTicker(poll)
+			defer t.Stop()
+			for {
+				select {
+				case <-db.syncerStop:
+					return
+				case <-t.C:
+					if db.closed.Load() {
+						return
+					}
+					// force=false: flush only when mdbx's own syncbytes/syncperiod
+					// threshold is reached; nonblock: skip while a writer holds the lock.
+					if err := db.env.Sync(false, true); err != nil {
+						db.log.Warn("[db] sync poll", "err", err)
+					}
+				}
+			}
+		}()
 	}
 
 	// Open can fail after a read txn has been pooled; Close aborts those. The outer env.Close
@@ -484,6 +514,8 @@ type MdbxKV struct {
 	txSize   uint64
 	closed   atomic.Bool
 	path     string
+
+	syncerStop chan struct{}
 
 	txsCount              uint
 	txsCountMutex         *sync.Mutex
@@ -693,6 +725,7 @@ func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
+	close(db.syncerStop)
 	db.waitTxsAllDoneOnClose()
 	db.drainRoTxPool()
 
