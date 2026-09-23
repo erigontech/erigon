@@ -42,8 +42,7 @@ func TestPlanesRejectNonNibblePaths(t *testing.T) {
 
 	t.Run("account", func(t *testing.T) {
 		ctx := newDeltaContext()
-		before := new(keySet)
-		g := accountGraph(before)
+		g := accountGraph()
 		root := fork(nil)
 		root.plane = planeAccount
 		_, err := makeAccountPlans(ctx, g, root, []accountEntry{{hashedKey: bad}}, foldPlan{})

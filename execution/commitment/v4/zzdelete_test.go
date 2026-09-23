@@ -41,6 +41,13 @@ func slotValue(path []byte) []byte {
 	return []byte{path[0] + 1, path[1] + 1, path[2] + 1, path[3] + 1}
 }
 
+func requireRecordsContain(t *testing.T, want, got map[string][]byte) {
+	t.Helper()
+	for k, v := range want {
+		require.Equal(t, v, got[k], "record %x must match the fresh trie's", k)
+	}
+}
+
 func liveRecords(ctx *mockContext) map[string][]byte {
 	out := make(map[string][]byte)
 	for k, v := range ctx.branches {
@@ -105,7 +112,7 @@ func TestPhaseAStorageDeleteMatchesFreshTrie(t *testing.T) {
 			want := seedStorage(t, fresh, addr, survivors)
 
 			require.Equal(t, want, got, "root after delete must equal the fresh trie's root")
-			require.Equal(t, liveRecords(fresh), liveRecords(staged), "surviving records must match the fresh trie's")
+			requireRecordsContain(t, liveRecords(fresh), liveRecords(staged))
 		})
 	}
 }

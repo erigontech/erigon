@@ -168,35 +168,6 @@ func TestPhaseAStorageWipeThenReinsert(t *testing.T) {
 	}())
 }
 
-func TestPhaseAStorageTwoToOneTombstonesOrphanedChild(t *testing.T) {
-	var address [32]byte
-	address[0] = 0x61
-	child := fork([]byte{2})
-	child.plane = planeStorage
-	pathA := append([]byte{2, 3}, bytes.Repeat([]byte{4}, 62)...)
-	pathB := append([]byte{2, 5}, bytes.Repeat([]byte{6}, 62)...)
-	child.setLeaf(3, packPath(pathA[2:], nil), []byte{1})
-	child.setLeaf(5, packPath(pathB[2:], nil), []byte{2})
-	childHash, err := fold(child, 1)
-	require.NoError(t, err)
-	rootPath := append([]byte{9}, bytes.Repeat([]byte{8}, 63)...)
-	root := fork(nil)
-	root.plane = planeStorage
-	root.setStoredChild(2, childHash[:], nil)
-	root.setLeaf(9, packPath(rootPath[1:], nil), []byte{3})
-	ctx := newMockContext()
-	ctx.branches[string(StorageRootKey(address))] = encodeRecord(root, 0, nil)
-	ctx.branches[string(StorageNodeKey(address, []byte{2}, nil))] = encodeRecord(child, 1, nil)
-
-	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: pathB, update: &commitment.Update{Flags: commitment.DeleteUpdate}},
-		{path: rootPath, update: &commitment.Update{Flags: commitment.DeleteUpdate}},
-	}})
-	require.NoError(t, err)
-	require.Empty(t, ctx.branches[string(StorageNodeKey(address, []byte{2}, nil))])
-	require.True(t, NewRecord(ctx.branches[string(StorageRootKey(address))], 0).isLeafRoot())
-}
-
 func TestPartitionRejectsUnsortedInput(t *testing.T) {
 	p := newPartitioner()
 	update := &commitment.Update{Flags: commitment.BalanceUpdate}

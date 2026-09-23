@@ -76,18 +76,3 @@ func applyDeltas(deltas []recordDelta, putBranch putBranchFunc) error {
 	}
 	return nil
 }
-
-func appendRemovedDeltas(ctx commitment.PatriciaContext, deltas []recordDelta, before, after *keySet) ([]recordDelta, error) {
-	err := before.forEachMissing(after, func(key []byte) error {
-		delta, readErr := readRecordDelta(ctx, key, nil)
-		if readErr != nil {
-			return readErr
-		}
-		deltas = append(deltas, delta)
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return deltas, nil
-}

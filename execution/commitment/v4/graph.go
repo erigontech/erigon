@@ -32,15 +32,14 @@ type graph struct {
 	addrHash []byte
 	errKey   error
 	errNode  error
-	before   *keySet
 }
 
-func accountGraph(before *keySet) graph {
-	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord, before: before}
+func accountGraph() graph {
+	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord}
 }
 
-func storageGraph(addrHash []byte, before *keySet) graph {
-	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage, before: before}
+func storageGraph(addrHash []byte) graph {
+	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage}
 }
 
 func (g graph) nodeKey(path, dst []byte) []byte {
@@ -56,9 +55,6 @@ func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, 
 		return nil, fmt.Errorf("%w: missing child at depth %d", g.errNode, len(path))
 	}
 	child.plane = g.plane
-	if g.before != nil {
-		g.before.addNodeKey(g, path)
-	}
 	return child, nil
 }
 
@@ -144,54 +140,14 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	return g.ensurePath(ctx, child, path)
 }
 
-func storedChildPath(n *node, nib int, isRoot bool, dst []byte) []byte {
-	dst = append(dst, n.path...)
-	if isRoot && len(n.path) != 0 {
-		return dst
-	}
-	dst = append(dst, byte(nib))
-	return append(dst, n.childExtAt(nib)...)
-}
-
-func (g graph) reachableRecordKeys(root *node, keys *keySet) {
-	var visit func(*node, bool)
-	visit = func(n *node, isRoot bool) {
-		if n == nil {
-			return
-		}
-		var pathScratch [64]byte
-		path := n.path
-		if isRoot {
-			path = nil
-		}
-		keys.addNodeKey(g, path)
-		for nib := range 16 {
-			bit := uint16(1) << nib
-			if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-				continue
-			}
-			if child := n.child(nib); child != nil {
-				visit(child, false)
-				continue
-			}
-			if n.hasChildHash(nib) {
-				keys.addNodeKey(g, storedChildPath(n, nib, isRoot, pathScratch[:0]))
-			}
-		}
-	}
-	visit(root, true)
-}
-
 type materializeAcc struct {
 	deltas []recordDelta
-	after  keySet
 }
 
 func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *materializeAcc) ([32]byte, error) {
 	if n == nil {
 		return [32]byte{}, g.errNode
 	}
-	var pathScratch [64]byte
 	for nib := range 16 {
 		bit := uint16(1) << nib
 		if n.childMask&bit == 0 || n.leafMask&bit != 0 {
@@ -202,7 +158,6 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *m
 			if !n.hasChildHash(nib) {
 				return [32]byte{}, g.errNode
 			}
-			acc.after.addNodeKey(g, storedChildPath(n, nib, n == root, pathScratch[:0]))
 			continue
 		}
 		childHash, err := g.materialize(ctx, child, root, acc)
@@ -290,7 +245,6 @@ func (g graph) materializeRootChildren(root *node, acc *materializeAcc, plan fol
 	for k, nib := range nibs {
 		root.setStoredChild(nib, results[k].hash[:], results[k].ext)
 		acc.deltas = append(acc.deltas, results[k].acc.deltas...)
-		acc.after.addAll(&results[k].acc.after)
 	}
 	return nil
 }
@@ -302,7 +256,7 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	if err := promoteRootExtension(root); err != nil {
 		return err
 	}
-	acc := &materializeAcc{deltas: make([]recordDelta, 0, g.before.len()+1)}
+	acc := &materializeAcc{}
 	if plan.parallel() && len(root.path) == 0 {
 		if err := g.materializeRootChildren(root, acc, plan); err != nil {
 			return err
@@ -311,12 +265,5 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	if _, err := g.materialize(ctx, root, root, acc); err != nil {
 		return err
 	}
-	for _, delta := range acc.deltas {
-		acc.after.add(delta.key)
-	}
-	deltas, err := appendRemovedDeltas(ctx, acc.deltas, g.before, &acc.after)
-	if err != nil {
-		return err
-	}
-	return applyDeltas(deltas, ctx.PutBranch)
+	return applyDeltas(acc.deltas, ctx.PutBranch)
 }

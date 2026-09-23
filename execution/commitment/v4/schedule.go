@@ -152,9 +152,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		root.loaded = true
 	}
 	root.plane = planeAccount
-	before := new(keySet)
-	g := accountGraph(before)
-	g.reachableRecordKeys(root, before)
+	g := accountGraph()
 	if err := g.materializeRootExtension(rawCtx, root); err != nil {
 		return [32]byte{}, err
 	}
@@ -314,10 +312,9 @@ func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entri
 		return nil, err
 	}
 
-	unfolded := make([]keySet, len(nibs))
 	eg, egCtx := errgroup.WithContext(plan.ctx)
 	eg.SetLimit(min(plan.workers, len(nibs)))
-	for k, nib := range nibs {
+	for _, nib := range nibs {
 		eg.Go(func() error {
 			workerCtx, cleanup := plan.factory(egCtx)
 			if cleanup != nil {
@@ -326,10 +323,8 @@ func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entri
 			if workerCtx == nil {
 				return g.errNode
 			}
-			wg := g
-			wg.before = &unfolded[k]
 			for _, i := range groups[nib] {
-				p, err := wg.accountPlanFor(workerCtx, root, entries[i])
+				p, err := g.accountPlanFor(workerCtx, root, entries[i])
 				if err != nil {
 					return err
 				}
@@ -340,9 +335,6 @@ func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entri
 	}
 	if err := eg.Wait(); err != nil {
 		return nil, err
-	}
-	for k := range unfolded {
-		g.before.addAll(&unfolded[k])
 	}
 	return plans, nil
 }
