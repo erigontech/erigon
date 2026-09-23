@@ -52,6 +52,10 @@ import (
 
 var dbRoTxOverloaded = metrics.GetOrCreateCounter(`db_rotx_overloaded_total`)
 
+// A deferred flush that keeps failing means no new steady commit-point, so a crash rolls back
+// further than the deadline promises - worth alerting on, not just logging.
+var dbDeferredFlushFailed = metrics.GetOrCreateCounter(`db_deferred_flush_failed_total`)
+
 func init() {
 	mdbx.MapFullErrorMessage += " You can try remove the database files (e.g., by running rm -rf /path/to/db)"
 }
@@ -76,7 +80,6 @@ type MdbxOpts struct {
 	growthStep      datasize.ByteSize
 	shrinkThreshold int
 	flags           uint
-	durable         bool // flush on every commit, set explicitly rather than by DefaultSafeNoSync
 	pageSize        datasize.ByteSize
 	dirtySpace      uint64 // if exceed this space, modified pages will `spill` to disk
 	mergeThreshold  uint64
@@ -112,7 +115,7 @@ var (
 func New(label kv.Label, log log.Logger) MdbxOpts {
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
-		flags:      mdbx.NoReadahead | mdbx.Durable,
+		flags:      mdbx.NoReadahead | defaultSyncFlag(),
 		log:        log,
 		pageSize:   defaultPageSize(),
 
@@ -151,18 +154,22 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
+func defaultSyncFlag() uint {
+	if DefaultSafeNoSync {
+		return mdbx.SafeNoSync
+	}
+	return mdbx.Durable
+}
+
 // SafeNoSync flushes once DefaultSyncBytes is unflushed or DefaultSyncPeriod has passed,
 // instead of on every commit. Mdbx keeps the last flushed commit-point explicitly, so a crash
 // rolls back to it and never corrupts the file.
 func (opts MdbxOpts) SafeNoSync() MdbxOpts {
-	opts = opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
-	return opts.SyncBytes(DefaultSyncBytes).SyncPeriod(DefaultSyncPeriod)
+	return opts.Flags(func(f uint) uint { return f&^mdbx.Durable | mdbx.SafeNoSync })
 }
 
 // Durable flushes on every commit, undoing SafeNoSync.
 func (opts MdbxOpts) Durable() MdbxOpts {
-	opts.durable = true
-	opts.syncBytes, opts.syncPeriod = nil, 0
 	return opts.Flags(func(f uint) uint {
 		return f&^(mdbx.UtterlyNoSync|mdbx.SafeNoSync|mdbx.NoMetaSync) | mdbx.Durable
 	})
@@ -176,10 +183,16 @@ func (opts MdbxOpts) resolveSync() MdbxOpts {
 		opts.syncBytes, opts.syncPeriod = nil, 0
 		return opts.Flags(func(f uint) uint { return f &^ mdbx.SafeNoSync })
 	}
-	if opts.durable || opts.syncBytes != nil || opts.syncPeriod != 0 || !DefaultSafeNoSync {
-		return opts // an explicit choice wins
+	if !opts.HasFlag(mdbx.SafeNoSync) {
+		return opts
 	}
-	return opts.SafeNoSync()
+	if opts.syncBytes == nil {
+		opts = opts.SyncBytes(DefaultSyncBytes)
+	}
+	if opts.syncPeriod == 0 {
+		opts = opts.SyncPeriod(DefaultSyncPeriod)
+	}
+	return opts
 }
 
 func (opts MdbxOpts) SyncBytes(threshold datasize.ByteSize) MdbxOpts {
@@ -766,6 +779,7 @@ func (db *MdbxKV) syncPoller(interval time.Duration) {
 			// MDBX_BUSY only means a writer holds the lock; anything else leaves the data
 			// unflushed, so the next crash rolls back further than the deadline promises.
 			if err := db.env.Sync(false, true); err != nil && !errors.Is(err, syscall.EBUSY) {
+				dbDeferredFlushFailed.Inc()
 				db.log.Error("[db] deferred flush failed, unflushed data is growing", "label", db.opts.label, "err", err)
 			}
 		}
