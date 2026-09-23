@@ -103,6 +103,15 @@ func TestAdaptivePin_ExtendRecordsPreloadMetrics(t *testing.T) {
 	}
 }
 
+func drainHalf(cache *BranchCache, allPaths [][]byte, full int) {
+	for i, p := range allPaths {
+		if i*2 > full {
+			break
+		}
+		cache.Invalidate(nibbles.HexToCompact(p))
+	}
+}
+
 func TestAdaptivePin_RebuildsAfterPinnedSetDrains(t *testing.T) {
 	hash, tree, allPaths := buildSyntheticTree(t)
 	resolve := fakeResolver(tree, nil, 100, "")
@@ -120,12 +129,7 @@ func TestAdaptivePin_RebuildsAfterPinnedSetDrains(t *testing.T) {
 		t.Fatalf("promote pinned %d entries for a %d-node tree; the drain below needs a full pin set", full, len(allPaths))
 	}
 
-	for i, p := range allPaths {
-		if i*2 > full {
-			break
-		}
-		cache.Invalidate(nibbles.HexToCompact(p))
-	}
+	drainHalf(cache, allPaths, full)
 	if left := cache.PinnedCount(); left*2 >= full {
 		t.Fatalf("drain left %d of %d entries, not the majority loss this test is about", left, full)
 	}
@@ -160,12 +164,7 @@ func TestAdaptivePin_RebuildIgnoresThePromotionThreshold(t *testing.T) {
 		t.Fatalf("promote pinned %d entries for a %d-node tree; the drain below needs a full pin set", full, len(allPaths))
 	}
 
-	for i, p := range allPaths {
-		if i*2 > full {
-			break
-		}
-		cache.Invalidate(nibbles.HexToCompact(p))
-	}
+	drainHalf(cache, allPaths, full)
 
 	feedMisses(99)
 	c.OnBlockComplete(context.Background(), 11, resolve, nil)
@@ -202,12 +201,7 @@ func TestAdaptivePin_RebuildKeepsTheContractSlot(t *testing.T) {
 		t.Fatalf("promote pinned %d entries for a %d-node tree; the drain below needs a full pin set", full, len(allPaths))
 	}
 
-	for i, p := range allPaths {
-		if i*2 > full {
-			break
-		}
-		cache.Invalidate(nibbles.HexToCompact(p))
-	}
+	drainHalf(cache, allPaths, full)
 
 	c.onCacheMiss(missPrefix)
 	for range 50 {
@@ -247,12 +241,7 @@ func TestAdaptivePin_RebuildKeepsPinsEarnedByExtensions(t *testing.T) {
 		t.Fatalf("extension grew the pin set to %d of %d paths; this test needs it full", full, len(allPaths))
 	}
 
-	for i, p := range allPaths {
-		if i*2 > full {
-			break
-		}
-		cache.Invalidate(nibbles.HexToCompact(p))
-	}
+	drainHalf(cache, allPaths, full)
 	survivors := cache.PinnedCount()
 
 	c.onCacheMiss(missPrefix)

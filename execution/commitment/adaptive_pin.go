@@ -138,7 +138,6 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 						"pinned_was", state.parallel.PinnedTotal(),
 						"used_mb_was", state.parallel.UsedBytes()/(1<<20))
 				}
-				fresh.pinTxNum = txNum
 				state.parallel = fresh
 				rebuilt++
 			}
