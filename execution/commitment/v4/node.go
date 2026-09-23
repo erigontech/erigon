@@ -57,7 +57,6 @@ func (n *node) slotIndex(nib int) int {
 }
 
 func (n *node) slot(nib int) *childSlot {
-	n.checkNibble(nib)
 	if n.childMask&(uint16(1)<<nib) == 0 {
 		return nil
 	}
@@ -71,8 +70,11 @@ func (n *node) child(nib int) *node {
 	return nil
 }
 
+func (n *node) hasChildHash(nib int) bool {
+	return n.hashMask&(uint16(1)<<nib) != 0
+}
+
 func (n *node) childHashAt(nib int) []byte {
-	n.checkNibble(nib)
 	if n.hashMask&(uint16(1)<<nib) == 0 {
 		return nil
 	}

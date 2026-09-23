@@ -198,7 +198,7 @@ func promoteRootExtension(n *node) error {
 		}
 		n.path = append(n.path[:0], child.path...)
 	} else {
-		if len(n.childHashAt(nib)) != 32 {
+		if !n.hasChildHash(nib) {
 			return ErrRootShape
 		}
 		n.path = append(n.path[:0], byte(nib))
@@ -244,7 +244,7 @@ func collapseRoot(n *node) error {
 		}
 		return promoteRootExtension(n)
 	}
-	if len(n.childHashAt(nib)) != 32 {
+	if !n.hasChildHash(nib) {
 		return ErrRootShape
 	}
 	ext := append(append([]byte(nil), n.path...), byte(nib))

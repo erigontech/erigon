@@ -92,7 +92,7 @@ func storedAccountPath(n *node, path []byte) bool {
 	if child := n.child(nib); child != nil {
 		return storedAccountPath(child, path)
 	}
-	if len(n.childHashAt(nib)) != 32 {
+	if !n.hasChildHash(nib) {
 		return false
 	}
 	childPath := append(append([]byte(nil), n.path...), byte(nib))

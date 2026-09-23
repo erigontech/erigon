@@ -105,9 +105,6 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 			continue
 		}
 		hash := record.slotAt(l, nib)
-		if len(hash) != 32 {
-			return nil, fmt.Errorf("%w: child %d hash", ErrInvalidRecord, nib)
-		}
 		ext, err := decodeExtension(record.extAt(l, nib))
 		if err != nil {
 			return nil, err

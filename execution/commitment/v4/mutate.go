@@ -221,7 +221,7 @@ func insert(n *node, path, value []byte) error {
 	if child := n.child(targetNib); child != nil {
 		return splitChild(n, targetNib, child, path, value)
 	}
-	if len(n.childHashAt(targetNib)) == 32 {
+	if n.hasChildHash(targetNib) {
 		return splitStoredChild(n, targetNib, path, value)
 	}
 	return ErrInsertPath

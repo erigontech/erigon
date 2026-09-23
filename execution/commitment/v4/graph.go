@@ -78,7 +78,7 @@ func (g graph) materializeRootExtension(ctx commitment.PatriciaContext, root *no
 	if root.child(nib) != nil {
 		return nil
 	}
-	if len(root.childHashAt(nib)) != 32 {
+	if !root.hasChildHash(nib) {
 		return g.errNode
 	}
 	child, err := g.unfoldChild(ctx, root.path)
@@ -106,7 +106,7 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 		if child := n.child(nib); child != nil && bytes.Equal(child.path, n.path) {
 			return g.ensurePath(ctx, child, path)
 		}
-		if len(n.childHashAt(nib)) != 32 {
+		if !n.hasChildHash(nib) {
 			return g.errNode
 		}
 		child, err := g.unfoldChild(ctx, n.path)
@@ -125,7 +125,7 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 		}
 		return g.ensurePath(ctx, child, path)
 	}
-	if len(n.childHashAt(nib)) != 32 {
+	if !n.hasChildHash(nib) {
 		return g.errNode
 	}
 	childPath := append(append([]byte(nil), n.path...), byte(nib))
@@ -171,7 +171,7 @@ func (g graph) reachableRecordKeys(root *node, keys *keySet) {
 				visit(child, false)
 				continue
 			}
-			if len(n.childHashAt(nib)) == 32 {
+			if n.hasChildHash(nib) {
 				keys.addNodeKey(g, storedChildPath(n, nib, isRoot, pathScratch[:0]))
 			}
 		}
@@ -201,7 +201,7 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node) error {
 			}
 			child := n.child(nib)
 			if child == nil {
-				if len(n.childHashAt(nib)) != 32 {
+				if !n.hasChildHash(nib) {
 					return [32]byte{}, g.errNode
 				}
 				after.addNodeKey(g, storedChildPath(n, nib, n == root, pathScratch[:0]))
