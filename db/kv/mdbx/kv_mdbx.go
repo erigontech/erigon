@@ -141,10 +141,11 @@ func (opts MdbxOpts) GrowthStep(v datasize.ByteSize) MdbxOpts     { opts.growthS
 func (opts MdbxOpts) Path(path string) MdbxOpts                   { opts.path = path; return opts }
 func (opts MdbxOpts) SyncPeriod(period time.Duration) MdbxOpts    { opts.syncPeriod = period; return opts }
 
-// DeferredSync flushes once DefaultSyncBytes is unflushed or a second has passed, instead of
-// on every commit; a crash then rolls the database back to that point. Ignored for read-only,
-// accede and utterly-nosync databases, which reject the option or must not lock at open.
-func (opts MdbxOpts) DeferredSync() MdbxOpts {
+// SafeNoSync flushes once DefaultSyncBytes is unflushed or a second has passed, instead of on
+// every commit. Mdbx keeps the last flushed commit-point explicitly, so a crash rolls back to
+// it and never corrupts the file. Ignored for read-only, accede and utterly-nosync databases,
+// which reject the option or must not lock at open.
+func (opts MdbxOpts) SafeNoSync() MdbxOpts {
 	if opts.HasFlag(mdbx.Accede) || opts.HasFlag(mdbx.Readonly) || opts.utterlyNoSync() {
 		return opts
 	}
@@ -154,7 +155,7 @@ func (opts MdbxOpts) DeferredSync() MdbxOpts {
 	return opts
 }
 
-// Durable flushes on every commit, undoing DeferredSync.
+// Durable flushes on every commit, undoing SafeNoSync.
 func (opts MdbxOpts) Durable() MdbxOpts {
 	opts = opts.Flags(func(f uint) uint {
 		return f&^(mdbx.UtterlyNoSync|mdbx.SafeNoSync|mdbx.NoMetaSync) | mdbx.Durable
@@ -736,8 +737,6 @@ func (db *MdbxKV) waitTxsAllDoneOnClose() {
 	}
 }
 
-// Close closes db
-// All transactions must be closed before closing the database.
 // syncPoller enforces the sync deadline once writes stop: mdbx checks it only inside
 // mdbx_txn_commit and mdbx_env_sync.
 func (db *MdbxKV) syncPoller(interval time.Duration) {
@@ -757,6 +756,8 @@ func (db *MdbxKV) syncPoller(interval time.Duration) {
 	}
 }
 
+// Close closes db
+// All transactions must be closed before closing the database.
 func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return

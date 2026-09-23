@@ -862,10 +862,11 @@ var (
 		Usage: "Runtime limit of chaindata db size (can change at any time)",
 		Value: (1 * datasize.TB).String(),
 	}
-	DbSyncDurableFlag = cli.BoolFlag{
-		Name:  "db.sync.durable",
-		Usage: "Flush chaindata on every commit, so a power cut loses nothing. By default the flush is deferred, bounded by mdbx.DefaultSyncBytes and one second",
-		Value: false,
+	DbFlushFlag = cli.StringFlag{
+		Name: "db.flush",
+		Usage: "When chaindata reaches the disk: 'background' keeps writes flowing and, after a power cut, resumes from the last flushed point and re-syncs the seconds in between - the database is never damaged either way. " +
+			"'every-commit' waits for the disk before each commit returns: nothing is ever re-synced, at several times the disk writes",
+		Value: "background",
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
@@ -1600,7 +1601,14 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)
 	}
 	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
-	cfg.MdbxSyncDurable = ctx.Bool(DbSyncDurableFlag.Name)
+	switch mode := ctx.String(DbFlushFlag.Name); mode {
+	case "background":
+		cfg.MdbxSyncMode = nodecfg.SyncModeSafeNoSync
+	case "every-commit":
+		cfg.MdbxSyncMode = nodecfg.SyncModeDurable
+	default:
+		return fmt.Errorf("invalid --%s: %q, want background or every-commit", DbFlushFlag.Name, mode)
+	}
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
 		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),
