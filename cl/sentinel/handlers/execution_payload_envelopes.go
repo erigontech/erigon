@@ -116,6 +116,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	responseCandidates := make([]responseCandidate, 0, req.Count)
 	canonicalBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(canonicalRoots))
 	for i, root := range canonicalRoots {
+		if canonicalSlots[i] > lastSlot && len(canonicalBlocks) == 0 {
+			break
+		}
 		block, ok := c.forkChoiceReader.GetBlock(root)
 		if !ok || block == nil || block.Block == nil {
 			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
