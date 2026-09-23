@@ -580,7 +580,6 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 
 		// execute the operation
 		pc, res, err = operation.execute(pc, evm, callContext)
-
 		if err != nil {
 			break
 		}

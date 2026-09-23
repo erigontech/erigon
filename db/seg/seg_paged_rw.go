@@ -109,7 +109,7 @@ func WordsAmount2PagesAmount(wordsAmount int, pageSize int) (pagesAmount int) {
 		return 0
 	}
 	if pageSize > 0 {
-		pagesAmount = (wordsAmount-1)/pageSize + 1 //amount of pages
+		pagesAmount = (wordsAmount-1)/pageSize + 1 // amount of pages
 	}
 	return pagesAmount
 }
@@ -249,6 +249,7 @@ func (g *PagedReader) Next2(buf []byte) (k, v, bufOut []byte, pageOffset uint64)
 	k, v = g.page.Next()
 	return k, v, buf, g.currentPageOffset
 }
+
 func (g *PagedReader) Skip() (uint64, int) {
 	v, offset := g.Next(nil)
 	return offset, len(v)
@@ -398,6 +399,7 @@ func (c *PagedWriter) PagesCompressed() int     { return c.pagesCompressed }
 func (c *PagedWriter) Close() {
 	c.parent.Close()
 }
+
 func (c *PagedWriter) Compress() error {
 	// Flush any remaining unwritten page data
 	if err := c.Flush(); err != nil {
@@ -492,6 +494,7 @@ func (c *PagedWriter) resetPage() {
 	c.kLengths, c.vLengths = c.kLengths[:0], c.vLengths[:0]
 	c.keys, c.vals = c.keys[:0], c.vals[:0]
 }
+
 func (c *PagedWriter) Flush() error {
 	if c.pageSize <= 1 {
 		return nil
@@ -553,7 +556,7 @@ func pageHeaderTo(buf []byte, kLengths, vLengths []uint32, capacityHint int) []b
 }
 
 func (c *PagedWriter) bytes() (wholePage []byte, notEmpty bool) {
-	//TODO: alignment,compress+alignment
+	// TODO: alignment,compress+alignment
 	return c.bytesUncompressed()
 }
 

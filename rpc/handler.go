@@ -166,6 +166,60 @@ func (h *handler) isRpcMethodNeedsCheck(method string) bool {
 	return !slices.Contains(h.slowLogBlacklist, method)
 }
 
+// inOrderMethods change state that a later call of the same batch may depend on, such as a
+// sender's next nonce in the txpool. A batch holding one runs its calls one by one, in order.
+var inOrderMethods = map[string]struct{}{
+	"eth_sendRawTransaction":     {},
+	"eth_sendRawTransactionSync": {},
+	"graphql_sendRawTransaction": {},
+	"eth_uninstallFilter":        {},
+	"eth_getFilterChanges":       {},
+	"admin_addPeer":              {},
+	"admin_removePeer":           {},
+	"admin_addTrustedPeer":       {},
+	"admin_removeTrustedPeer":    {},
+	"debug_setHead":              {},
+	"debug_setGCPercent":         {},
+	"debug_setMemoryLimit":       {},
+	"eth_submitWork":             {},
+	"eth_submitHashrate":         {},
+	"testing_commitBlockV1":      {},
+}
+
+// hasInOrderCall also counts subscribe calls, each of which adds to the batch's notifiers that
+// two goroutines must not append to at once, and unsubscribe calls.
+func hasInOrderCall(calls []*jsonrpcMessage) bool {
+	for _, msg := range calls {
+		if _, ok := inOrderMethods[msg.Method]; ok || msg.isSubscribe() || msg.isUnsubscribe() || strings.HasPrefix(msg.Method, "engine_") {
+			return true
+		}
+	}
+	return false
+}
+
+// answerBatchCall runs one call of a batch and returns its answer, or nil when it needs none.
+func (h *handler) answerBatchCall(cp *callProc, msg *jsonrpcMessage) []byte {
+	select {
+	case <-cp.ctx.Done():
+		return nil
+	default:
+	}
+
+	// A non-nil res is an error answer that still has to be written. On nil the answer
+	// is already in the stream, or the message needs none.
+	buf := bytes.NewBuffer(nil)
+	stream := jsonstream.Get(buf)
+	defer jsonstream.Put(stream)
+	if res := h.handleCallMsg(cp, msg, stream); res != nil {
+		res.writeTo(stream)
+	}
+	_ = stream.Flush()
+	if buf.Len() == 0 {
+		return nil
+	}
+	return buf.Bytes()
+}
+
 // handleBatch executes all messages in a batch and returns the responses.
 func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 	// Emit error response for empty batches:
@@ -196,41 +250,28 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 
 	// Calls may block indefinitely, so they go to a goroutine unless the caller waits anyway:
 	h.startCallProc(func(cp *callProc) {
-		// Batch items below run concurrently and write into private per-item buffers.
-		// All goroutines will place results right to this array. Because requests order must match reply orders.
+		// Answers go to their request's slot, because the reply order must match the request order.
 		answersWithNils := make([][]byte, len(calls))
-		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
-		boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
-		defer close(boundedConcurrency)
-		wg := sync.WaitGroup{}
-		for i := range calls {
-			boundedConcurrency <- struct{}{}
-			wg.Go(func() {
-				defer func() {
-					<-boundedConcurrency
-				}()
-
-				select {
-				case <-cp.ctx.Done():
-					return
-				default:
-				}
-
-				// A non-nil res is an error answer that still has to be written. On nil the answer
-				// is already in the stream, or the message needs none.
-				buf := bytes.NewBuffer(nil)
-				stream := jsonstream.Get(buf)
-				defer jsonstream.Put(stream)
-				if res := h.handleCallMsg(cp, calls[i], stream); res != nil {
-					res.writeTo(stream)
-				}
-				_ = stream.Flush()
-				if buf.Len() > 0 {
-					answersWithNils[i] = buf.Bytes()
-				}
-			})
+		if hasInOrderCall(calls) {
+			for i, msg := range calls {
+				answersWithNils[i] = h.answerBatchCall(cp, msg)
+			}
+		} else {
+			// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
+			boundedConcurrency := make(chan struct{}, h.maxBatchConcurrency)
+			defer close(boundedConcurrency)
+			wg := sync.WaitGroup{}
+			for i := range calls {
+				boundedConcurrency <- struct{}{}
+				wg.Go(func() {
+					defer func() {
+						<-boundedConcurrency
+					}()
+					answersWithNils[i] = h.answerBatchCall(cp, calls[i])
+				})
+			}
+			wg.Wait()
 		}
-		wg.Wait()
 		h.addSubscriptions(cp.notifiers)
 		h.sendBatchAnswers(cp.ctx, answersWithNils)
 		for _, n := range cp.notifiers {

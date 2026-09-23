@@ -495,7 +495,6 @@ func TestAggregatorV3_RestartOnDatadir(t *testing.T) {
 		}
 		aggregatorV3_RestartOnDatadir(t, rc)
 	})
-
 }
 
 type runCfg struct {

@@ -261,7 +261,7 @@ func TestCacheWithTTLWriteTrafficBoundsResidencyByTheTTL(t *testing.T) {
 	const (
 		writes = 200
 		live   = 10
-		step   = time.Second
+		step   = time.Minute
 	)
 	// A cache written to with a fresh key every step and never read: key i is stamped as if it had
 	// been written (writes-live-i) steps ago, so only the last live of them are within their ttl.

@@ -16,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -32,7 +33,7 @@ type simulateV1TestService struct{}
 func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.BlockNumberOrHash) (SimulationResult, error) {
 	return SimulationResult{
 		{
-			Calls: []CallResult{
+			Calls: []ethapi.CallResult{
 				{
 					ReturnData: "0x",
 					GasUsed:    hexutil.Uint64(0x5208),
@@ -45,7 +46,7 @@ func (simulateV1TestService) SimulateV1(context.Context, SimulationRequest, rpc.
 }
 
 type simulateV1ClientBlockResult struct {
-	Calls []CallResult `json:"calls"`
+	Calls []ethapi.CallResult `json:"calls"`
 }
 
 // ─── sanitizeSimulatedBlocks tests ────────────────────────────────────────────
@@ -468,7 +469,7 @@ func TestErrorHelpers(t *testing.T) {
 
 func TestRepairLogs(t *testing.T) {
 	hash := common.HexToHash("0xdeadbeef")
-	calls := []CallResult{
+	calls := []ethapi.CallResult{
 		{Logs: []*types.RPCLog{{}, {}}},
 		{Logs: []*types.RPCLog{{}}},
 		{Logs: nil},
@@ -482,7 +483,7 @@ func TestRepairLogs(t *testing.T) {
 func TestRepairLogsEmpty(t *testing.T) {
 	// Should not panic with empty input.
 	repairLogs(nil, common.Hash{})
-	repairLogs([]CallResult{}, common.Hash{})
+	repairLogs([]ethapi.CallResult{}, common.Hash{})
 }
 
 // ─── newSimulator tests ──────────────────────────────────────────────────────
@@ -551,8 +552,7 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result, 1)
 
-	calls, ok := result[0].Calls.([]CallResult)
-	require.True(t, ok, "expected typed call results")
+	calls := result[0].Calls
 	require.Len(t, calls, 1)
 
 	call := calls[0]
@@ -585,8 +585,7 @@ func TestSimulateV1BaseFeeOverrideReachesEVM(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result, 1)
 
-	calls, ok := result[0].Calls.([]CallResult)
-	require.True(t, ok, "expected typed call results")
+	calls := result[0].Calls
 	require.Len(t, calls, 1)
 	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[0].Status))
 	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000007", calls[0].ReturnData)
@@ -624,8 +623,7 @@ func TestSimulateV1BaseFeeOverrideDoesNotFundBurntContract(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, result, 1)
 
-	calls, ok := result[0].Calls.([]CallResult)
-	require.True(t, ok, "expected typed call results")
+	calls := result[0].Calls
 	require.Len(t, calls, 2)
 	require.Equal(t, uint64(types.ReceiptStatusSuccessful), uint64(calls[1].Status))
 	assert.Equal(t, "0x0000000000000000000000000000000000000000000000000000000000000000", calls[1].ReturnData)
@@ -714,6 +712,45 @@ func TestValidateSimulationRequest(t *testing.T) {
 			if customErr.Message != tc.wantError {
 				t.Fatalf("unexpected error message: want %q, got %q", tc.wantError, customErr.Message)
 			}
+		})
+	}
+}
+
+// ─── computeSimulatedStateRoot tests ─────────────────────────────
+
+// observedFrozenBlocks answers the frozen-blocks sentinel and nothing else: the embedded
+// interface is nil, so any further reader call panics the test.
+type observedFrozenBlocks struct {
+	dbservices.FullBlockReader
+	frozen   uint64
+	observed bool
+}
+
+func (r observedFrozenBlocks) FrozenBlocksObserved() (uint64, bool) { return r.frozen, r.observed }
+
+func TestComputeSimulatedStateRootWithoutCommitmentHistory(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		frozen   uint64
+		observed bool
+	}{
+		{name: "blocks are frozen", frozen: 1000, observed: true},
+		{name: "frozen count not observed yet", frozen: 0, observed: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Fatalf("state-history commitment was computed on a frozen chain: %v", r)
+				}
+			}()
+			sim := &simulator{blockReader: observedFrozenBlocks{frozen: tc.frozen, observed: tc.observed}}
+			block := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(1)}, nil)
+
+			err := sim.computeSimulatedStateRoot(context.Background(), nil, nil, &SimulatedBlock{}, block,
+				&types.Header{Number: *uint256.NewInt(0)}, 0, 0, nil, nil, false)
+
+			require.NoError(t, err)
+			require.Equal(t, common.Hash{}, block.Root())
 		})
 	}
 }

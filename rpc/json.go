@@ -274,6 +274,7 @@ type jsonCodec struct {
 	encode       func(v any) error // encoder to allow multiple transports
 	conn         deadlineCloser
 	writeTimeout time.Duration // used if the context has no deadline, counted once the write holds the connection
+	held         *heldConn     // the socket, when the transport can hold writes back; nil otherwise
 }
 
 // newFuncCodec creates a codec that uses the given functions to read and write. If conn
@@ -316,7 +317,9 @@ func (b rawBatch) writeTo(s jsonstream.Stream) {
 func NewCodec(conn Conn) ServerCodec {
 	dec := json.NewDecoder(conn)
 	dec.UseNumber()
-	return newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c := newFuncCodec(conn, newJSONEncoder(conn), dec.Decode, nil)
+	c.held, _ = conn.(*heldConn)
+	return c
 }
 
 // newJSONEncoder returns the writer side every JSON transport shares.
@@ -410,6 +413,26 @@ func (c *jsonCodec) WriteJSON(ctx context.Context, v any) error {
 	return c.encode(v)
 }
 
+// coalesce runs send with the socket held, so the messages it writes leave in one socket write.
+func (c *jsonCodec) coalesce(send func()) (err error) {
+	if c.held == nil {
+		send()
+		return nil
+	}
+	c.held.hold()
+	defer func() {
+		// Writes set the socket deadline under encMu, so the release holds it too: a concurrent write
+		// would re-arm the deadline mid-flush.
+		c.encMu.Lock()
+		defer c.encMu.Unlock()
+		if err = c.held.release(time.Now().Add(c.writeTimeout)); err != nil {
+			_ = c.held.Conn.Close()
+		}
+	}()
+	send()
+	return nil
+}
+
 func (c *jsonCodec) Close() {
 	c.closer.Do(func() {
 		close(c.closeCh)
@@ -467,18 +490,11 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 		}
 		switch string(key) {
 		case "jsonrpc":
-			// The decoded fields go through encoding/json, which unescapes the
-			// strings. A value that does not decode zeroes the field, so a
-			// repeated key cannot leave an earlier value standing.
-			if json.Unmarshal(value, &msg.Version) != nil {
-				msg.Version = ""
-			}
+			decodeStringField(value, &msg.Version)
 		case "id":
 			msg.ID = value
 		case "method":
-			if json.Unmarshal(value, &msg.Method) != nil {
-				msg.Method = ""
-			}
+			decodeStringField(value, &msg.Method)
 		case "params":
 			msg.Params = value
 		case "error":
@@ -489,6 +505,29 @@ func fillMessage(input []byte, msg *jsonrpcMessage) {
 			msg.Result = value
 		}
 	})
+}
+
+// decodeStringField sets dst as json.Unmarshal would: it unescapes the string and replaces invalid
+// UTF-8, and a null leaves dst as it is. Plain printable ASCII is its own text, so it skips the
+// decoder. A value that does not decode zeroes dst.
+func decodeStringField(value []byte, dst *string) {
+	if len(value) >= 2 && value[0] == '"' && value[len(value)-1] == '"' {
+		text := value[1 : len(value)-1]
+		plain := true
+		for _, c := range text {
+			if c < 0x20 || c >= 0x80 || c == '\\' {
+				plain = false
+				break
+			}
+		}
+		if plain {
+			*dst = string(text)
+			return
+		}
+	}
+	if json.Unmarshal(value, dst) != nil {
+		*dst = ""
+	}
 }
 
 // isBatch returns true when the first non-whitespace characters is '['

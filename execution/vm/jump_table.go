@@ -271,7 +271,6 @@ func newSpuriousDragonInstructionSet() JumpTable {
 	instructionSet[EXP].dynamicGas = gasExpEIP160
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
-
 }
 
 // EIP 150 a.k.a Tangerine Whistle

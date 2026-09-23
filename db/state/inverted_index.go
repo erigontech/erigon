@@ -92,7 +92,7 @@ func NewInvertedIndex(cfg statecfg.InvIdxCfg, stepSize, stepsInFrozenFile uint64
 	if cfg.FilenameBase == "" {
 		panic("assert: empty `filenameBase`")
 	}
-	//if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
+	// if cfg.compressorCfg.MaxDictPatterns == 0 && cfg.compressorCfg.MaxPatternLen == 0 {
 	cfg.CompressorCfg = seg.DefaultCfg
 	if cfg.Accessors == 0 {
 		cfg.Accessors = statecfg.AccessorHashMap
@@ -133,6 +133,7 @@ func (ii *InvertedIndex) efAccessorNewFilePath(fromStep, toStep kv.Step) string 
 	}
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", ii.FileVersion.AccessorEFI.String(), ii.FilenameBase, fromStep, toStep))
 }
+
 func (ii *InvertedIndex) efNewFilePath(fromStep, toStep kv.Step) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
@@ -150,6 +151,7 @@ func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string
 func (ii *InvertedIndex) efFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, fromStep, toStep)
 }
+
 func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
 }
@@ -260,12 +262,14 @@ func (ii *InvertedIndex) buildEfAccessor(ctx context.Context, item *FilesItem, p
 	}
 	return ii.buildMapAccessor(ctx, fromStep, toStep, item.decompressor, ps)
 }
+
 func (ii *InvertedIndex) dataReader(f *seg.Decompressor) *seg.Reader {
 	if !strings.Contains(f.FileName(), ".ef") {
 		panic("assert: miss-use " + f.FileName())
 	}
 	return seg.NewReader(f.MakeGetter(), ii.Compression)
 }
+
 func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".ef") {
 		panic("assert: miss-use " + f.FileName())
@@ -275,9 +279,11 @@ func (ii *InvertedIndex) dataWriter(f *seg.Compressor, forceNoCompress bool) *se
 	}
 	return seg.NewWriter(f, ii.Compression)
 }
+
 func (iit *InvertedIndexRoTx) dataReader(f *seg.Decompressor) *seg.Reader {
 	return iit.ii.dataReader(f)
 }
+
 func (iit *InvertedIndexRoTx) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
 	return iit.ii.dataWriter(f, forceNoCompress)
 }
@@ -441,17 +447,18 @@ func (ii *InvertedIndex) beginFilesRo(iv *iiVisible) *InvertedIndexRoTx {
 	return iit
 }
 
+// initFilesRo fills a zero iit field by field: assigning a whole literal would zero it again and
+// copy it with bulk write barriers, on every read tx.
 func (ii *InvertedIndex) initFilesRo(iit *InvertedIndexRoTx, iv *iiVisible) {
-	*iit = InvertedIndexRoTx{
-		ii:                ii,
-		visible:           iv,
-		files:             iv.files,
-		stepSize:          ii.stepSize,
-		stepsInFrozenFile: ii.stepsInFrozenFile,
-		name:              ii.Name,
-		salt:              ii.salt.Load(),
-	}
+	iit.ii = ii
+	iit.visible = iv
+	iit.files = iv.files
+	iit.stepSize = ii.stepSize
+	iit.stepsInFrozenFile = ii.stepsInFrozenFile
+	iit.name = ii.Name
+	iit.salt = ii.salt.Load()
 }
+
 func (iit *InvertedIndexRoTx) Close() {
 	if iit.files == nil { // invariant: it's safe to call Close multiple times
 		return
@@ -523,6 +530,7 @@ func (iit *InvertedIndexRoTx) statelessGetter(i int) *seg.Reader {
 	}
 	return r
 }
+
 func (iit *InvertedIndexRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 	if iit.readers == nil {
 		iit.readers = make([]*recsplit.IndexReader, len(iit.files))
@@ -561,7 +569,7 @@ func (iit *InvertedIndexRoTx) seekInFiles(key []byte, txNum uint64) (found bool,
 			if txNum <= fromCache.found {
 				iit.seekInFilesCache.hit++
 				return true, fromCache.found, nil
-			} else if fromCache.found == 0 { //not found
+			} else if fromCache.found == 0 { // not found
 				iit.seekInFilesCache.hit++
 				return false, 0, nil
 			}
@@ -624,7 +632,7 @@ func (iit *InvertedIndexRoTx) IdxRange(key []byte, startTxNum, endTxNum int, asc
 }
 
 func (iit *InvertedIndexRoTx) recentIterateRange(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
-	//optimization: return empty pre-allocated iterator if range is frozen
+	// optimization: return empty pre-allocated iterator if range is frozen
 	if asc {
 		isFrozenRange := len(iit.files) > 0 && endTxNum >= 0 && iit.files.EndTxNum() >= uint64(endTxNum)
 		if isFrozenRange {

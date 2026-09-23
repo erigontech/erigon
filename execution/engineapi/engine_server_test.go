@@ -371,13 +371,7 @@ func getBlobsV4Fixture(t *testing.T, value byte) (common.Hash, txpool.PoolBlobBu
 
 func newGetBlobsV4Client(t *testing.T, getter txpool.BlobGetter) *rpc.Client {
 	t.Helper()
-	logger := log.New()
-	server := rpc.NewServer(1, false, false, false, logger, 0)
-	t.Cleanup(server.Stop)
-	require.NoError(t, server.RegisterName("engine", &EngineServer{logger: logger, blobGetter: getter}))
-	client := rpc.DialInProc(server, logger)
-	t.Cleanup(client.Close)
-	return client
+	return newEngineInProcClient(t, &EngineServer{logger: log.New(), blobGetter: getter})
 }
 
 func TestGetBlobsV4(t *testing.T) {
