@@ -33,11 +33,6 @@ func insertRoot(n *node, path, value []byte) error {
 	if n == nil || len(path) != 64 {
 		return ErrRootPath
 	}
-	for _, nib := range path {
-		if nib > 0x0f {
-			return ErrRootPath
-		}
-	}
 
 	if n.childMask == 0 {
 		n.path = nil

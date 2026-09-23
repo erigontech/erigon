@@ -40,11 +40,6 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	if len(path) > 63 {
 		return nil, fmt.Errorf("commitment v4: path depth %d", len(path))
 	}
-	for _, nib := range path {
-		if nib > 0x0f {
-			return nil, fmt.Errorf("commitment v4: invalid path nibble %d", nib)
-		}
-	}
 
 	var key []byte
 	if plane == planeAccount {

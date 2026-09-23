@@ -55,11 +55,6 @@ func remove(n *node, path []byte) error {
 	if n == nil || len(path) != 64 {
 		return fmt.Errorf("%w: node %v path length %d", ErrRemovePath, n != nil, len(path))
 	}
-	for _, nib := range path {
-		if nib > 0x0f {
-			return fmt.Errorf("%w: nibble %d", ErrRemovePath, nib)
-		}
-	}
 	if !bytes.HasPrefix(path, n.path) {
 		return ErrRemoveNotFound
 	}
@@ -198,11 +193,6 @@ func insert(n *node, path, value []byte) error {
 	}
 	if len(path) != 64 || len(n.path) >= len(path) || !bytes.HasPrefix(path, n.path) {
 		return fmt.Errorf("%w: node depth %d, path length %d", ErrInsertPath, len(n.path), len(path))
-	}
-	for _, nib := range path {
-		if nib > 0x0f {
-			return fmt.Errorf("%w: nibble %d", ErrInsertPath, nib)
-		}
 	}
 
 	depth := len(n.path)
