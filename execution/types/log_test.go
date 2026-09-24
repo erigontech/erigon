@@ -615,7 +615,7 @@ func TestRPCLogsMarshalFastJSONTo(t *testing.T) {
 	}
 }
 
-// Every RPCLog field says which of the spec's two hex forms it is written as, and the encoder
+// Every RPCLog field says which of the spec's forms it is written as, and the encoder
 // is held to that: a dropped field, a wrong form or a reordered key fails here.
 func TestRPCLogMatchesItsTags(t *testing.T) {
 	t.Parallel()
