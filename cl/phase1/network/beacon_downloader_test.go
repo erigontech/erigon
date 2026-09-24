@@ -55,6 +55,53 @@ func gloasFromGenesisConfig() *clparams.BeaconChainConfig {
 	return &cfg
 }
 
+func TestBeaconAPIBaseURLPreservesURLComponents(t *testing.T) {
+	tests := []struct {
+		name       string
+		checkpoint string
+		wantBase   string
+		wantAPI    string
+	}{
+		{
+			name:       "full state endpoint",
+			checkpoint: "https://user:pass@beacon.example/prefix/eth/v2/debug/beacon/states/finalized?key=a%2Fb#ignored",
+			wantBase:   "https://user:pass@beacon.example/prefix?key=a%2Fb",
+			wantAPI:    "https://user:pass@beacon.example/prefix/eth/v1/test?key=a%2Fb",
+		},
+		{
+			name:       "bare base with query",
+			checkpoint: "https://beacon.example/prefix/?key=x%2Fy",
+			wantBase:   "https://beacon.example/prefix?key=x%2Fy",
+			wantAPI:    "https://beacon.example/prefix/eth/v1/test?key=x%2Fy",
+		},
+		{
+			name:       "eth marker outside path",
+			checkpoint: "https://beacon.example/prefix?next=/eth/value",
+			wantBase:   "https://beacon.example/prefix?next=/eth/value",
+			wantAPI:    "https://beacon.example/prefix/eth/v1/test?next=/eth/value",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			baseURL := BeaconAPIBaseURL(tt.checkpoint)
+			require.Equal(t, tt.wantBase, baseURL)
+			apiURL, err := beaconAPIURL(baseURL, "/eth/v1/test")
+			require.NoError(t, err)
+			require.Equal(t, tt.wantAPI, apiURL)
+		})
+	}
+}
+
+func TestBeaconAPIBaseURLRejectsMalformedEndpoint(t *testing.T) {
+	for _, endpoint := range []string{
+		"://bad",
+		"ftp://beacon.example/checkpoint",
+		"https:///missing-host",
+	} {
+		require.Empty(t, BeaconAPIBaseURL(endpoint), endpoint)
+	}
+}
+
 func linkBeaconBlocks(t *testing.T, blocks ...*cltypes.SignedBeaconBlock) {
 	t.Helper()
 	for i := 1; i < len(blocks); i++ {

@@ -2930,6 +2930,29 @@ func TestOnExecutionPayloadMergesStrongerConcurrentValidationResult(t *testing.T
 	require.True(t, f.IsPayloadVerified(blockRoot))
 }
 
+func TestOnExecutionPayloadValidatesPersistedEnvelopeWithoutStatus(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	blockRoot := envelope.Message.BeaconBlockRoot
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusNotValidated, nil)
+
+	f := newPayloadVoteTestStore(t, blockRoot, false, false)
+	f.beaconCfg = cfg
+	f.engine = engine
+	f.forkGraph = &persistingEnvelopeForkGraph{
+		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		envelope:                  envelope,
+	}
+	f.executionPayloadGasLimit, _ = lru.New[common.Hash, uint64](16)
+
+	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, false, true), ErrIgnore)
+	status, ok := f.GetRecentExecutionPayloadStatusByRoot(blockRoot)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+}
+
 func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {
 	want := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{}}
 	f := &ForkChoiceStore{forkGraph: blockRefreshForkGraph{block: want}}

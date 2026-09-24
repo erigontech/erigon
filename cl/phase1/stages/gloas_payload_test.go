@@ -49,9 +49,13 @@ type selectedHeadEnvelopeTestStore struct {
 }
 
 type anchorEnvelopeTestStore struct {
-	root     common.Hash
-	state    *state2.CachingBeaconState
-	envelope *cltypes.SignedExecutionPayloadEnvelope
+	root        common.Hash
+	state       *state2.CachingBeaconState
+	envelope    *cltypes.SignedExecutionPayloadEnvelope
+	status      execution_client.PayloadStatus
+	statusKnown bool
+	readCalls   int
+	onCalls     int
 }
 
 func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
@@ -67,6 +71,24 @@ func (s *anchorEnvelopeTestStore) GetStateAtBlockRoot(root common.Hash, _ bool) 
 		return nil, nil
 	}
 	return s.state, nil
+}
+
+func (s *anchorEnvelopeTestStore) OnExecutionPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
+	s.onCalls++
+	s.envelope = envelope
+	return nil
+}
+
+func (s *anchorEnvelopeTestStore) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	s.readCalls++
+	if root != s.root {
+		return nil, nil
+	}
+	return s.envelope, nil
+}
+
+func (s *anchorEnvelopeTestStore) GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool) {
+	return s.status, s.statusKnown
 }
 
 func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
@@ -423,6 +445,83 @@ func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
 	require.True(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
 	require.True(t, store.HasEnvelope(anchorRoot))
 	require.Equal(t, 2, requests)
+}
+
+func TestPrepareParentEnvelopeDoesNotReapplyAcceptedAnchor(t *testing.T) {
+	beaconCfg, anchorState, anchorBid, envelope, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+	anchorState.SetLatestExecutionPayloadBid(anchorBid)
+	child := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = anchorBid.Slot + 1
+	child.Block.ParentRoot = anchorRoot
+	child.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = anchorBid.BlockHash
+	store := &anchorEnvelopeTestStore{root: anchorRoot, state: anchorState, envelope: envelope}
+	recoveryCalls := 0
+
+	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, func(context.Context) error {
+		recoveryCalls++
+		return nil
+	}, child, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{anchorRoot: envelope}, false))
+	require.Zero(t, store.onCalls)
+	require.Zero(t, recoveryCalls)
+}
+
+func TestPrepareParentEnvelopeRevalidatesPersistedAnchor(t *testing.T) {
+	beaconCfg, anchorState, anchorBid, envelope, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+	anchorState.SetLatestExecutionPayloadBid(anchorBid)
+	child := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = anchorBid.Slot + 1
+	child.Block.ParentRoot = anchorRoot
+	child.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = anchorBid.BlockHash
+	store := &anchorEnvelopeTestStore{root: anchorRoot, state: anchorState, envelope: envelope}
+
+	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, nil, child, nil, true))
+	require.Equal(t, 1, store.onCalls)
+}
+
+func TestPrepareParentEnvelopeSkipsPersistedEnvelopeWithKnownStatus(t *testing.T) {
+	beaconCfg, anchorState, anchorBid, envelope, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+	anchorState.SetLatestExecutionPayloadBid(anchorBid)
+	child := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = anchorBid.Slot + 1
+	child.Block.ParentRoot = anchorRoot
+	child.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = anchorBid.BlockHash
+	store := &anchorEnvelopeTestStore{
+		root:        anchorRoot,
+		state:       anchorState,
+		envelope:    envelope,
+		status:      execution_client.PayloadStatusValidated,
+		statusKnown: true,
+	}
+
+	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, nil, child, nil, true))
+	require.Zero(t, store.readCalls)
+	require.Zero(t, store.onCalls)
+}
+
+func TestPrepareParentEnvelopeRevalidatesPersistedEnvelopeWithUnavailableStatus(t *testing.T) {
+	beaconCfg, anchorState, anchorBid, envelope, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+	anchorState.SetLatestExecutionPayloadBid(anchorBid)
+	child := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = anchorBid.Slot + 1
+	child.Block.ParentRoot = anchorRoot
+	child.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = anchorBid.BlockHash
+	store := &anchorEnvelopeTestStore{
+		root:        anchorRoot,
+		state:       anchorState,
+		envelope:    envelope,
+		status:      execution_client.PayloadStatusNone,
+		statusKnown: true,
+	}
+
+	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, nil, child, envelopes, true))
+	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, nil, child, envelopes, true))
+	require.Equal(t, 1, store.readCalls)
+	require.Equal(t, 1, store.onCalls)
 }
 
 func TestSelectedHeadEnvelopeRequestCoalescesOnlyWhileRequestIsActive(t *testing.T) {

@@ -1010,9 +1010,19 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
-	// Skip if envelope already processed and persisted
+	// Skip if the persisted envelope already has a usable validation status.
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-		return false, nil
+		if missingMode == retryQueuedEnvelope || !validatePayload || f.engine == nil {
+			return false, nil
+		}
+		var status execution_client.PayloadStatus
+		known := false
+		if f.payloadStatusByRoot != nil {
+			status, known = f.payloadStatusByRoot.Get(beaconBlockRoot)
+		}
+		if known && status != execution_client.PayloadStatusNone {
+			return false, nil
+		}
 	}
 
 	// Envelope verification only reads the state (the consume-once
