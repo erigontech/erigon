@@ -285,7 +285,7 @@ func (s *executionPayloadBidService) ValidateBid(_ context.Context, msg *cltypes
 	if bid.Slot <= parentHeader.Slot {
 		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", bid.Slot, parentHeader.Slot)
 	}
-	if err := s.validateBidBlobLimit(bid); err != nil {
+	if err := s.validateBidContents(bid); err != nil {
 		return err
 	}
 	if _, ok := s.forkchoiceStore.GetRecentExecutionPayloadStatus(bid.ParentBlockHash); !ok {
@@ -370,10 +370,13 @@ func (s *executionPayloadBidService) validateBidStateless(bid *cltypes.Execution
 	if bid.ExecutionPayment != 0 {
 		return fmt.Errorf("bid execution_payment must be 0, got %d", bid.ExecutionPayment)
 	}
-	return s.validateBidBlobLimit(bid)
+	return s.validateBidContents(bid)
 }
 
-func (s *executionPayloadBidService) validateBidBlobLimit(bid *cltypes.ExecutionPayloadBid) error {
+func (s *executionPayloadBidService) validateBidContents(bid *cltypes.ExecutionPayloadBid) error {
+	if bid.BlockHash == bid.ParentBlockHash {
+		return errors.New("bid block hash equals parent block hash")
+	}
 	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	maxBlobsPerBlock := int(s.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock)
 	if bid.BlobKzgCommitments.Len() > maxBlobsPerBlock {
