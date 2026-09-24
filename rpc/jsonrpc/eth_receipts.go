@@ -449,7 +449,6 @@ func appendRPCLogs(logs types.RPCLogs, receiptLogs types.Logs, addrMap map[commo
 // {{A}, {B}}         matches topic A in first position AND B in second position
 // {{A, B}, {C, D}}   matches topic (A OR B) in first position AND (C OR D) in second position
 func getTopicsBitmapV3(tx kv.TemporalTx, topics [][]common.Hash, from, to uint64, asc order.By) (res stream.U64, err error) {
-
 	for _, sub := range topics {
 		if len(sub) == 0 {
 			continue
@@ -560,7 +559,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
-	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txnHash, true, true), nil
+	return ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, true), nil
 }
 
 // GetBlockReceipts - receipts for individual block
@@ -609,7 +608,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 	result := make(ethutils.RPCReceipts, 0, len(receipts))
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, true))
+		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), true, true))
 	}
 
 	return result, nil

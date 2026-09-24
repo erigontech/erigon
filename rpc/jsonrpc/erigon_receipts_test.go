@@ -50,7 +50,8 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = false // assertions re-execute instead of serving the persistent cache
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},

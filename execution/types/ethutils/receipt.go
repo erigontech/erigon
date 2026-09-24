@@ -62,7 +62,6 @@ func MarshalReceipt(
 	txn types.Transaction,
 	chainConfig *chain.Config,
 	header *types.Header,
-	txnHash common.Hash,
 	signed bool,
 	withBlockTimestamp bool,
 ) *RPCReceipt {
@@ -101,7 +100,7 @@ func MarshalReceipt(
 	result := &RPCReceipt{
 		BlockHash:         receipt.BlockHash,
 		BlockNumber:       hexutil.Uint64(receipt.BlockNumber.Uint64()),
-		TransactionHash:   txnHash,
+		TransactionHash:   receipt.TxHash,
 		TransactionIndex:  hexutil.Uint64(receipt.TransactionIndex),
 		From:              from,
 		To:                txn.GetTo(),
@@ -257,7 +256,7 @@ func LogReceipts(level log.Lvl, msg string, receipts types.Receipts, txns types.
 	marshalled := make([]*RPCReceipt, 0, len(receipts))
 	for i, receipt := range receipts {
 		txn := txns[i]
-		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, txn.Hash(), true, false))
+		marshalled = append(marshalled, MarshalReceipt(receipt, txn, cc, header, true, false))
 	}
 
 	result, err := json.Marshal(marshalled)

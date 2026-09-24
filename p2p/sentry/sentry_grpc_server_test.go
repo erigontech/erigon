@@ -547,7 +547,6 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 		},
 	}
 	return s
-
 }
 
 func startHandshake(

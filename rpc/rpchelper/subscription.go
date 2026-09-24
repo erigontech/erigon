@@ -86,6 +86,7 @@ func newChanSub[T any](size int, protocol SubProtocol) *chan_sub[T] {
 	}
 	return s
 }
+
 func (s *chan_sub[T]) Send(x T) {
 	s.lock.Lock()
 	defer s.lock.Unlock()

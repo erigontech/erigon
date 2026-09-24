@@ -67,13 +67,21 @@ func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 			buf = appendInlined(buf, inner)
 			continue
 		}
+		if !field.IsExported() {
+			continue
+		}
 		tag, ok := field.Tag.Lookup("json")
 		if !ok {
-			continue
+			return nil, fmt.Errorf("%s.%s: no json tag", typ.Name(), field.Name)
 		}
 		name, opts, _ := strings.Cut(tag, ",")
 		if name == "-" {
 			continue
+		}
+		// The form is checked before anything that could return early, so a field left out of
+		// a fixture cannot pass with no tag at all.
+		if _, err := formOf(field); err != nil {
+			return nil, fmt.Errorf("%s.%s: %w", typ.Name(), field.Name, err)
 		}
 		value := rv.Field(i)
 		if strings.Contains(opts, "omitempty") && isEmpty(value) {
@@ -89,6 +97,15 @@ func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 		buf = appendField(buf, c.Name, []byte(c.Raw))
 	}
 	return append(buf, '}'), nil
+}
+
+// formOf reports the field's declared form, and refuses a field that names none.
+func formOf(field reflect.StructField) (string, error) {
+	form, ok := field.Tag.Lookup("ethjson")
+	if !ok || form == "" {
+		return "", errors.New("no ethjson tag")
+	}
+	return form, nil
 }
 
 // isEmpty is what encoding/json's omitempty leaves out: a zero value, and also a slice, map or

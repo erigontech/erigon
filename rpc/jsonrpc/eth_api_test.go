@@ -293,7 +293,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -318,7 +318,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,

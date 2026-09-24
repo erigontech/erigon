@@ -210,7 +210,8 @@ func (p *Nodes) RequestID() []byte      { return p.ReqID }
 func (p *Nodes) SetRequestID(id []byte) { p.ReqID = id }
 
 func (p *Nodes) AppendLogInfo(ctx []any) []any {
-	return append(ctx,
+	return append(
+		ctx,
 		"req", hexutil.Bytes(p.ReqID),
 		"tot", p.RespCount,
 		"n", len(p.Nodes),
