@@ -24,8 +24,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
-// hexType lists the types written as hex strings. The hexutil types write their own text; a
-// fixed-size byte array is written as its bytes, whatever its own text, so none needs escaping.
+// hexType lists the types written as hex strings. The hexutil numbers write their own text; Bytes
+// and a fixed-size byte array are written as their bytes, whatever their own text, so none needs
+// escaping.
 // The array must still have text, as encoding/json writes a plain array as a list of numbers.
 type hexType interface {
 	hexutil.Uint64 | hexutil.Uint | hexutil.Int64 | hexutil.U256 | hexutil.Big | hexutil.Bytes |
@@ -95,11 +96,10 @@ func hexField[T hexType](s *StackStream, name string, v *T) {
 	s.afterValue()
 }
 
-// ownText reports whether v is one of the hexutil types, which write their own text; the rest
-// are byte arrays.
+// ownText reports whether v is a hexutil number, which writes its own text; the rest are bytes.
 func ownText[T hexType](v *T) bool {
 	switch any(v).(type) {
-	case *hexutil.Uint64, *hexutil.Uint, *hexutil.Int64, *hexutil.U256, *hexutil.Big, *hexutil.Bytes:
+	case *hexutil.Uint64, *hexutil.Uint, *hexutil.Int64, *hexutil.U256, *hexutil.Big:
 		return true
 	}
 	return false
@@ -119,6 +119,9 @@ func appendOwnText[T hexType](s *StackStream, buf []byte, v *T) []byte {
 }
 
 func bytesOf[T hexType](v *T) []byte {
+	if b, ok := any(v).(*hexutil.Bytes); ok {
+		return *b
+	}
 	return unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v))
 }
 
