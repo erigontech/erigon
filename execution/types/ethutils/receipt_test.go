@@ -315,6 +315,12 @@ func TestRPCReceiptMatchesItsTags(t *testing.T) {
 			BlobGasPrice: &price, BlobGasUsed: &blobGas,
 		},
 		"optional fields absent": {Logs: []*types.RPCLog{}},
+		// The timestamp-less shape goes through its own writer, held to the same tags.
+		"plain logs": {Logs: types.Logs{{
+			Address: addr, Topics: []common.Hash{{0x01}}, Data: []byte{1, 2},
+			BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3,
+			BlockHash: common.HexToHash("0xb10c"), Index: 4, Removed: true,
+		}}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			want, err := ethjsontest.ExpectedJSON(r)

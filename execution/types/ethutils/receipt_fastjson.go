@@ -137,14 +137,14 @@ func writeLog(w *jsonstream.StackStream, lp **types.Log) {
 		return
 	}
 	w.WriteObjectStart()
-	w.Field("address").WriteHex(l.Address[:])
-	jsonstream.HexesField(w, "topics", l.Topics)
-	w.Field("data").WriteHex(l.Data)
-	w.Field("blockNumber").WriteQuotedText(&l.BlockNumber)
-	w.Field("transactionHash").WriteHex(l.TxHash[:])
-	w.Field("transactionIndex").WriteQuotedText(&l.TxIndex)
-	w.Field("blockHash").WriteHex(l.BlockHash[:])
-	w.Field("logIndex").WriteQuotedText(&l.Index)
+	ethjson.Data(w, "address", l.Address[:])
+	ethjson.DataList(w, "topics", l.Topics)
+	ethjson.Data(w, "data", l.Data)
+	ethjson.Quantity(w, "blockNumber", l.BlockNumber)
+	ethjson.Data(w, "transactionHash", l.TxHash[:])
+	ethjson.Quantity(w, "transactionIndex", l.TxIndex)
+	ethjson.Data(w, "blockHash", l.BlockHash[:])
+	ethjson.Quantity(w, "logIndex", l.Index)
 	w.Field("removed").WriteBool(l.Removed)
 	w.WriteObjectEnd()
 }
