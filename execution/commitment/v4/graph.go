@@ -140,11 +140,7 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	return g.ensurePath(ctx, child, path)
 }
 
-type materializeAcc struct {
-	deltas []recordDelta
-}
-
-func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *materializeAcc) ([32]byte, error) {
+func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *[]recordDelta) ([32]byte, error) {
 	if n == nil {
 		return [32]byte{}, g.errNode
 	}
@@ -176,7 +172,7 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *m
 	if err != nil {
 		return [32]byte{}, err
 	}
-	acc.deltas = append(acc.deltas, delta)
+	*acc = append(*acc, delta)
 	return hash, nil
 }
 
@@ -197,7 +193,7 @@ func (p foldPlan) parallel() bool {
 	return p.factory != nil && p.workers > 1 && p.ctx != nil
 }
 
-func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]materializeAcc, error) {
+func (g graph) materializeRootChildren(root *node, plan foldPlan) ([][]recordDelta, error) {
 	nibs := make([]int, 0, 16)
 	for nib := range 16 {
 		bit := uint16(1) << nib
@@ -212,7 +208,7 @@ func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]materialize
 		return nil, nil
 	}
 
-	accs := make([]materializeAcc, len(nibs))
+	accs := make([][]recordDelta, len(nibs))
 	hashes := make([][32]byte, len(nibs))
 	eg, egCtx := errgroup.WithContext(plan.ctx)
 	eg.SetLimit(min(plan.workers, len(nibs)))
@@ -246,19 +242,19 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	if err := promoteRootExtension(root); err != nil {
 		return err
 	}
-	var accs []materializeAcc
+	var accs [][]recordDelta
 	if plan.parallel() && len(root.path) == 0 {
 		var err error
 		if accs, err = g.materializeRootChildren(root, plan); err != nil {
 			return err
 		}
 	}
-	var acc materializeAcc
+	var acc []recordDelta
 	if _, err := g.materialize(ctx, root, root, &acc); err != nil {
 		return err
 	}
 	for _, part := range append(accs, acc) {
-		if err := putDeltas(ctx, part.deltas); err != nil {
+		if err := putDeltas(ctx, part); err != nil {
 			return err
 		}
 	}

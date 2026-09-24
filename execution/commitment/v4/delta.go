@@ -46,25 +46,18 @@ func foldAndEncodeRecord(ctx commitment.PatriciaContext, n *node, depth int, key
 const encodeSlack = 96
 
 func newRecordDelta(key, data, prev []byte) recordDelta {
-	if data == nil {
-		data = []byte{}
-	}
 	if prev == nil {
 		prev = []byte{}
 	}
 	return recordDelta{Key: key, Data: data, Prev: prev}
 }
 
-func applyDelta(delta recordDelta, putBranch putBranchFunc) error {
-	if bytes.Equal(delta.Prev, delta.Data) {
-		return nil
-	}
-	return putBranch(delta.Key, delta.Data, delta.Prev)
-}
-
 func applyDeltas(deltas []recordDelta, putBranch putBranchFunc) error {
 	for _, delta := range deltas {
-		if err := applyDelta(delta, putBranch); err != nil {
+		if bytes.Equal(delta.Prev, delta.Data) {
+			continue
+		}
+		if err := putBranch(delta.Key, delta.Data, delta.Prev); err != nil {
 			return err
 		}
 	}

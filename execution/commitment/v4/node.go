@@ -114,15 +114,7 @@ func (n *node) ensureSlot(nib int) *childSlot {
 }
 
 func (n *node) setLeaf(nib int, suffix, value []byte) {
-	s := n.ensureSlot(nib)
-	bit := uint16(1) << nib
-	n.leafMask |= bit
-	n.hashMask &^= bit
-	s.node = nil
-	s.hash = [32]byte{}
-	s.ext = nil
-	s.suffix = bytes.Clone(suffix)
-	s.value = bytes.Clone(value)
+	n.setLeafShared(nib, bytes.Clone(suffix), bytes.Clone(value))
 }
 
 func (n *node) setLeafShared(nib int, suffix, value []byte) {
