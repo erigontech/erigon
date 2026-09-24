@@ -28,6 +28,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/race"
 
 	"github.com/holiman/uint256"
@@ -35,7 +36,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 )
 
 type testEncoder struct {
@@ -595,4 +595,50 @@ func pointerTo(v any) any {
 		return &t
 	}
 	panic("unhandled case")
+}
+
+// The JSON wrapper types in common/hexutil are named versions of plain Go types, and
+// several consensus structs carry them. RLP must see through the wrapper, or the same
+// value would be stored differently depending on which type a field happens to use.
+func TestHexutilWrappersEncodeLikeTheirBaseType(t *testing.T) {
+	for _, v := range []uint64{0, 1, 127, 128, 255, 256, 1 << 32, ^uint64(0)} {
+		wrapped, err := EncodeToBytes(hexutil.Uint64(v))
+		require.NoError(t, err)
+		plain, err := EncodeToBytes(v)
+		require.NoError(t, err)
+		require.Equal(t, plain, wrapped, "hexutil.Uint64(%d)", v)
+
+		wrapped, err = EncodeToBytes(hexutil.Uint(uint(v)))
+		require.NoError(t, err)
+		plain, err = EncodeToBytes(uint(v))
+		require.NoError(t, err)
+		require.Equal(t, plain, wrapped, "hexutil.Uint(%d)", v)
+	}
+
+	for _, b := range [][]byte{nil, {}, {0}, {1, 2, 3}, make([]byte, 300)} {
+		wrapped, err := EncodeToBytes(hexutil.Bytes(b))
+		require.NoError(t, err)
+		plain, err := EncodeToBytes(b)
+		require.NoError(t, err)
+		require.Equal(t, plain, wrapped, "hexutil.Bytes(%x)", b)
+	}
+}
+
+// A named uint256.Int is an array of four words, so the slice writer would encode it as a
+// list of limbs. RLP refuses it instead of storing a value no decoder expects.
+func TestNamedUint256IsRefused(t *testing.T) {
+	n := uint256.NewInt(0x1234)
+	plain, err := EncodeToBytes(n)
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x82, 0x12, 0x34}, plain)
+
+	_, err = EncodeToBytes((*hexutil.U256)(n))
+	require.ErrorContains(t, err, "defined as uint256.Int")
+	_, err = EncodeToBytes(hexutil.U256(*n))
+	require.ErrorContains(t, err, "defined as uint256.Int")
+	_, err = EncodeToBytes(struct{ N *hexutil.U256 }{(*hexutil.U256)(n)})
+	require.ErrorContains(t, err, "defined as uint256.Int")
+
+	var into hexutil.U256
+	require.ErrorContains(t, DecodeBytes(plain, &into), "defined as uint256.Int")
 }
