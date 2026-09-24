@@ -2,6 +2,7 @@ package forkchoice
 
 import (
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -9,6 +10,27 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 )
+
+type queuedPruneForkGraph struct {
+	payloadVoteForkGraph
+	primaryRoot   common.Hash
+	outerEntered  chan struct{}
+	pruneQueued   chan struct{}
+	outerReturned chan struct{}
+}
+
+func (g *queuedPruneForkGraph) WithRetainedBlock(root common.Hash, fn func(func(common.Hash) bool)) bool {
+	if root == g.primaryRoot {
+		close(g.outerEntered)
+		<-g.pruneQueued
+		fn(g.IsBlockRetained)
+		close(g.outerReturned)
+		return true
+	}
+	<-g.outerReturned
+	fn(g.IsBlockRetained)
+	return true
+}
 
 func TestMarkPayloadStatusAndGasLimitIfRetained(t *testing.T) {
 	root := common.HexToHash("0x1234")
@@ -48,6 +70,37 @@ func TestMarkPayloadStatusAndGasLimitIfRetained(t *testing.T) {
 				require.False(t, ok)
 			}
 		})
+	}
+}
+
+func TestInvalidPayloadStatusDoesNotNestRetainedBlockGuard(t *testing.T) {
+	primaryRoot := common.HexToHash("0x1234")
+	sharedRoot := common.HexToHash("0x5678")
+	executionHash := common.HexToHash("0xabcd")
+	graph := &queuedPruneForkGraph{
+		primaryRoot:   primaryRoot,
+		outerEntered:  make(chan struct{}),
+		pruneQueued:   make(chan struct{}),
+		outerReturned: make(chan struct{}),
+	}
+	f := &ForkChoiceStore{
+		forkGraph: graph,
+		executionPayloadRoots: map[common.Hash]map[common.Hash]struct{}{
+			executionHash: {primaryRoot: {}, sharedRoot: {}},
+		},
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.MarkPayloadStatusAndGasLimitIfRetained(primaryRoot, executionHash, execution_client.PayloadStatusInvalidated, 36_000_000)
+	}()
+
+	<-graph.outerEntered
+	close(graph.pruneQueued)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("invalid payload update nested the retained-block guard behind a queued prune")
 	}
 }
 

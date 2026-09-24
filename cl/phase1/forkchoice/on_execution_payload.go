@@ -621,8 +621,8 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 		return nil
 	}
 	if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
-		retained := guard.WithRetainedBlock(beaconBlockRoot, func() {
-			payloadStatus = f.markPayloadStatusRetainedLocked(beaconBlockRoot, executionBlockHash, payloadStatus)
+		retained := guard.WithRetainedBlock(beaconBlockRoot, func(isRetained func(common.Hash) bool) {
+			payloadStatus = f.markPayloadStatusRetainedLocked(beaconBlockRoot, executionBlockHash, payloadStatus, isRetained)
 		})
 		if !retained {
 			return fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
