@@ -40,6 +40,20 @@ type Withdrawal struct {
 	Amount    hexutil.Uint64 `json:"amount"`         // value of withdrawal in GWei
 }
 
+func (obj *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if obj == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteObjectStart()
+	jsonstream.Text(s, "index", &obj.Index)
+	jsonstream.Text(s, "validatorIndex", &obj.Validator)
+	s.Field("address").WriteHex(obj.Address[:])
+	jsonstream.Text(s, "amount", &obj.Amount)
+	s.WriteObjectEnd()
+	return nil
+}
+
 func (obj *Withdrawal) EncodingSize() int {
 	encodingSize := 21 /* Address */
 	encodingSize += rlp.U64Len(uint64(obj.Index))
@@ -74,21 +88,6 @@ func (obj *Withdrawal) EncodeRLP(w io.Writer) error {
 	}
 
 	return rlp.EncodeU64(uint64(obj.Amount), w, b[:])
-}
-
-// MarshalFastJSONTo writes the same bytes as encoding/json.
-func (obj *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if obj == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteObjectStart()
-	s.Field("index").WriteQuotedText(&obj.Index)
-	s.Field("validatorIndex").WriteQuotedText(&obj.Validator)
-	s.Field("address").WriteHex(obj.Address[:])
-	s.Field("amount").WriteQuotedText(&obj.Amount)
-	s.WriteObjectEnd()
-	return nil
 }
 
 func (obj *Withdrawal) DecodeRLP(s *rlp.Stream) error {
