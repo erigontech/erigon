@@ -35,7 +35,8 @@ func TestGenerateSample(t *testing.T) {
 	require.NoError(t, err)
 	out := filepath.Join(t.TempDir(), "gen_sample_json.go")
 
-	generateIn(t, "testdata/sample", "Sample", out, "writeComputedJSON")
+	t.Chdir("testdata/sample")
+	require.NoError(t, run("Sample", out, "writeComputedJSON"))
 	got, err := os.ReadFile(out)
 	require.NoError(t, err)
 
@@ -84,8 +85,8 @@ func TestGenerateOverStaleOutput(t *testing.T) {
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(stale), 0o644))
 	}
 
-	// generateIn leaves the working directory there, so the output is read by its own name.
-	generateIn(t, dir, "Sample", "gen_sample_json.go", "writeComputedJSON")
+	t.Chdir(dir)
+	require.NoError(t, run("Sample", "gen_sample_json.go", "writeComputedJSON"))
 	got, err := os.ReadFile("gen_sample_json.go")
 	require.NoError(t, err)
 	require.NotContains(t, string(got), "x.SinceRenamed")
@@ -101,11 +102,4 @@ func TestGenerateRefusesBrokenPackage(t *testing.T) {
 
 	t.Chdir(dir)
 	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON"), "undefinedHere")
-}
-
-// generateIn runs the generator the way go generate does, from the package's own directory.
-func generateIn(t *testing.T, dir, typeName, out, computed string) {
-	t.Helper()
-	t.Chdir(dir)
-	require.NoError(t, run(typeName, out, computed))
 }

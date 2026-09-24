@@ -66,5 +66,8 @@ type Sample struct {
 	unexported int                  //nolint:unused
 }
 
+// Inner writes itself, which is what an objects field needs of its type.
+func (x *Inner) MarshalFastJSONTo(s *jsonstream.StackStream) error { return nil }
+
 // writeComputedJSON stands for a value the struct does not hold, such as a header's hash.
 func (x *Sample) writeComputedJSON(s *jsonstream.StackStream) {}

@@ -134,20 +134,13 @@ func load() (*packages.Package, error) {
 	if len(pkgs) != 1 {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
-	fromGenerated := map[string]bool{}
 	for _, e := range pkgs[0].Errors {
 		if strings.Contains(e.Msg, method) {
 			continue
 		}
 		file, _, _ := strings.Cut(e.Pos, ":")
-		if file == "" {
-			return nil, e
-		}
-		if _, seen := fromGenerated[file]; !seen {
-			content, err := os.ReadFile(file)
-			fromGenerated[file] = err == nil && bytes.HasPrefix(content, []byte(marker))
-		}
-		if !fromGenerated[file] {
+		content, err := os.ReadFile(file)
+		if err != nil || !bytes.HasPrefix(content, []byte(marker)) {
 			return nil, e
 		}
 	}
