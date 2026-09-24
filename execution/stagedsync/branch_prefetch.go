@@ -17,8 +17,11 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
+	"hash/maphash"
 	"sync"
+	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
@@ -28,9 +31,11 @@ import (
 var branchPrefetchEnabled = dbg.EnvBool("COMMITMENT_V4_PREFETCH", true)
 
 const (
-	branchPrefetchWorkers = 8
-	branchPrefetchQueue   = 1 << 16
-	branchPrefetchPerTx   = 256
+	branchPrefetchWorkers  = 8
+	branchPrefetchQueue    = 1 << 16
+	branchPrefetchPerTx    = 256
+	branchPrefetchShards   = 64
+	branchPrefetchMaxBytes = 1 << 30
 )
 
 type prefetchItem struct {
@@ -39,13 +44,30 @@ type prefetchItem struct {
 	storage bool
 }
 
+type prefetchedRecord struct {
+	data []byte
+	step kv.Step
+}
+
+type prefetchedShard struct {
+	mu      sync.RWMutex
+	records map[string]prefetchedRecord
+}
+
 type branchPrefetcher struct {
-	work chan prefetchItem
-	wg   sync.WaitGroup
+	work   chan prefetchItem
+	wg     sync.WaitGroup
+	gate   sync.RWMutex
+	seed   maphash.Seed
+	shards [branchPrefetchShards]prefetchedShard
+	bytes  atomic.Int64
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
-	p := &branchPrefetcher{work: make(chan prefetchItem, branchPrefetchQueue)}
+	p := &branchPrefetcher{work: make(chan prefetchItem, branchPrefetchQueue), seed: maphash.MakeSeed()}
+	for i := range p.shards {
+		p.shards[i].records = make(map[string]prefetchedRecord)
+	}
 	ctx = kv.WithNonBlockingAcquire(ctx)
 	for range branchPrefetchWorkers {
 		p.wg.Go(func() { p.run(ctx, db) })
@@ -63,16 +85,23 @@ func (p *branchPrefetcher) add(it prefetchItem) {
 	}
 }
 
-func (p *branchPrefetcher) drain() {
+func (p *branchPrefetcher) pause() {
 	if p == nil {
 		return
 	}
+	p.gate.Lock()
 	for {
 		select {
 		case <-p.work:
 		default:
 			return
 		}
+	}
+}
+
+func (p *branchPrefetcher) resume() {
+	if p != nil {
+		p.gate.Unlock()
 	}
 }
 
@@ -84,18 +113,48 @@ func (p *branchPrefetcher) close() {
 	p.wg.Wait()
 }
 
+func (p *branchPrefetcher) shard(key []byte) *prefetchedShard {
+	return &p.shards[maphash.Bytes(p.seed, key)%branchPrefetchShards]
+}
+
+func (p *branchPrefetcher) get(key []byte) ([]byte, kv.Step, bool) {
+	s := p.shard(key)
+	s.mu.RLock()
+	r, ok := s.records[string(key)]
+	s.mu.RUnlock()
+	return r.data, r.step, ok
+}
+
+func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
+	if p.bytes.Load() >= branchPrefetchMaxBytes {
+		return data
+	}
+	data = bytes.Clone(data)
+	s := p.shard(key)
+	s.mu.Lock()
+	s.records[string(key)] = prefetchedRecord{data: data, step: step}
+	s.mu.Unlock()
+	p.bytes.Add(int64(len(key) + len(data)))
+	return data
+}
+
 func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 	for it := range p.work {
+		p.gate.RLock()
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		if err != nil {
+			p.gate.RUnlock()
 			continue
 		}
 		read := func(key []byte) []byte {
-			v, _, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
-			if err != nil {
+			if data, _, ok := p.get(key); ok {
+				return data
+			}
+			data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+			if err != nil || len(data) == 0 {
 				return nil
 			}
-			return v
+			return p.put(key, data, step)
 		}
 		it.touch(read)
 	chunk:
@@ -111,6 +170,7 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			}
 		}
 		tx.Rollback()
+		p.gate.RUnlock()
 	}
 }
 

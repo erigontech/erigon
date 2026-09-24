@@ -320,6 +320,7 @@ func newCommitmentCalculator(
 	calc := newCalcState(asOfReader, logger, logPrefix)
 	if branchPrefetchEnabled && doms.GetCommitmentContext().AcceptsFeed() {
 		calc.prefetch = newBranchPrefetcher(workCtx, db)
+		asOfReader.prefetched = calc.prefetch
 	}
 
 	return &commitmentCalculator{
@@ -384,7 +385,10 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
-	cc.state.prefetch.close()
+	if p := cc.state.prefetch; p != nil {
+		p.close()
+		cc.logger.Debug("["+cc.logPrefix+"] commitment branch prefetch", "bytes", p.bytes.Load())
+	}
 	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
@@ -916,7 +920,8 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	cc.state.prefetch.drain()
+	cc.state.prefetch.pause()
+	defer cc.state.prefetch.resume()
 	sdCtx := cc.doms.GetCommitmentContext()
 	if sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
 		cc.state.FlushToFeed(&cc.feed)
@@ -1125,10 +1130,11 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // Commitment domain reads use GetLatest since branches are only written
 // by the calculator sequentially.
 type asOfStateReader struct {
-	sd     *execctx.SharedDomains
-	roTx   kv.TemporalTx
-	getter execctxapi.StateGetter
-	txNum  uint64
+	sd         *execctx.SharedDomains
+	roTx       kv.TemporalTx
+	getter     execctxapi.StateGetter
+	txNum      uint64
+	prefetched *branchPrefetcher
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -1141,6 +1147,9 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
+		if enc, step, ok := r.prefetchedBranch(plainKey); ok {
+			return enc, step, nil
+		}
 		// Branches: use GetLatest — written only by this calculator, sequential.
 		if r.getter != nil {
 			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
@@ -1173,8 +1182,18 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	return enc, step, err
 }
 
+func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
+	if r.prefetched == nil {
+		return nil, 0, false
+	}
+	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
+		return nil, 0, false
+	}
+	return r.prefetched.get(key)
+}
+
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, prefetched: r.prefetched}
 }
 
 // CloneForWorker meters the worker's CommitmentDomain reads into the per-worker
@@ -1186,5 +1205,5 @@ func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.Tempor
 	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
 		getterOpts = getterOpts.WithMetrics(metrics)
 	}
-	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
+	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum, prefetched: r.prefetched}
 }
