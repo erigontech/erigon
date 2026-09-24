@@ -157,7 +157,7 @@ func writeFields(w *bytes.Buffer, st *ast.StructType, structs map[string]*ast.St
 			}
 			jsonTag, ok := tag.Lookup("json")
 			if !ok {
-				continue
+				return fmt.Errorf("%s: no json tag", id.Name)
 			}
 			name, opts, _ := strings.Cut(jsonTag, ",")
 			if name == "-" {
@@ -179,53 +179,59 @@ func typeString(e ast.Expr) string {
 	return b.String()
 }
 
-// fieldStatement picks the writer for one field from its declared form and Go type.
+// fieldStatement picks the writer for one field from its declared form and Go type. A field
+// its json tag lets omit is wrapped in the presence test encoding/json would apply; without
+// omitempty, an absent value is written as null.
 func fieldStatement(ref, name, form, goType string, omitempty bool) (string, error) {
 	pointer := strings.HasPrefix(goType, "*")
 	bare := strings.TrimPrefix(goType, "*")
 
+	var write, present string
 	switch form {
 	case "":
 		return "", fmt.Errorf("no ethjson tag")
 	case "bool":
-		return fmt.Sprintf("\ts.Field(%q).WriteBool(%s)\n", name, ref), nil
+		write = fmt.Sprintf("s.Field(%q).WriteBool(%s)", name, ref)
+		present = ref
 	case "datalist":
-		return fmt.Sprintf("\tethjson.DataList(s, %q, %s)\n", name, ref), nil
+		write = fmt.Sprintf("ethjson.DataList(s, %q, %s)", name, ref)
+		present = fmt.Sprintf("len(%s) > 0", ref)
 	case "data":
 		// Slicing reads the same on an array, a pointer to one and a slice, so the emitted
 		// call does not need to know which it has.
-		value := ref + "[:]"
-		if !pointer {
-			return fmt.Sprintf("\tethjson.Data(s, %q, %s)\n", name, value), nil
-		}
-		return guarded(ref, name, fmt.Sprintf("\t\tethjson.Data(s, %q, %s)\n", name, value), omitempty), nil
-	case "quantity":
-		if is256(bare) {
-			if pointer {
-				return fmt.Sprintf("\tethjson.Quantity256(s, %q, (*uint256.Int)(%s))\n", name, ref), nil
-			}
-			return fmt.Sprintf("\tethjson.Quantity256(s, %q, (*uint256.Int)(&%s))\n", name, ref), nil
-		}
+		write = fmt.Sprintf("ethjson.Data(s, %q, %s[:])", name, ref)
 		if pointer {
-			if omitempty {
-				return guarded(ref, name, fmt.Sprintf("\t\tethjson.Quantity(s, %q, *%s)\n", name, ref), true), nil
-			}
-			return fmt.Sprintf("\tethjson.QuantityOrNull(s, %q, %s)\n", name, ref), nil
+			present = ref + " != nil"
+		} else {
+			present = fmt.Sprintf("len(%s[:]) > 0", ref)
 		}
-		if omitempty {
-			return fmt.Sprintf("\tif %s != 0 {\n\t\tethjson.Quantity(s, %q, %s)\n\t}\n", ref, name, ref), nil
+	case "quantity":
+		switch {
+		case is256(bare) && pointer:
+			write = fmt.Sprintf("ethjson.Quantity256(s, %q, (*uint256.Int)(%s))", name, ref)
+			present = ref + " != nil"
+		case is256(bare):
+			write = fmt.Sprintf("ethjson.Quantity256(s, %q, (*uint256.Int)(&%s))", name, ref)
+			present = fmt.Sprintf("!(*uint256.Int)(&%s).IsZero()", ref)
+		case pointer:
+			write = fmt.Sprintf("ethjson.Quantity(s, %q, *%s)", name, ref)
+			present = ref + " != nil"
+		default:
+			write = fmt.Sprintf("ethjson.Quantity(s, %q, %s)", name, ref)
+			present = ref + " != 0"
 		}
-		return fmt.Sprintf("\tethjson.Quantity(s, %q, %s)\n", name, ref), nil
+	default:
+		return "", fmt.Errorf("unknown ethjson form %q", form)
 	}
-	return "", fmt.Errorf("unknown ethjson form %q", form)
-}
 
-// guarded writes null for an absent field, or leaves it out when its json tag says omitempty.
-func guarded(ref, name, write string, omitempty bool) string {
-	if omitempty {
-		return fmt.Sprintf("\tif %s != nil {\n%s\t}\n", ref, write)
+	switch {
+	case omitempty:
+		return fmt.Sprintf("\tif %s {\n\t\t%s\n\t}\n", present, write), nil
+	case pointer: // absent, and the tag does not allow leaving it out
+		return fmt.Sprintf("\tif %s == nil {\n\t\ts.Field(%q).WriteNil()\n\t} else {\n\t\t%s\n\t}\n", ref, name, write), nil
+	default:
+		return "\t" + write + "\n", nil
 	}
-	return fmt.Sprintf("\tif %s == nil {\n\t\ts.Field(%q).WriteNil()\n\t} else {\n%s\t}\n", ref, name, write)
 }
 
 func is256(goType string) bool {
