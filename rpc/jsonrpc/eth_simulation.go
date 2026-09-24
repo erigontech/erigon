@@ -344,11 +344,11 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 		overrides := block.BlockOverrides
 
 		var withdrawalsHash *common.Hash
-		if s.chainConfig.IsShanghai((uint64)(*overrides.Time)) {
+		if s.chainConfig.IsShanghai(uint64(*overrides.Time)) {
 			withdrawalsHash = &empty.WithdrawalsHash
 		}
 		var parentBeaconRoot *common.Hash
-		if s.chainConfig.IsCancun((uint64)(*overrides.Time)) {
+		if s.chainConfig.IsCancun(uint64(*overrides.Time)) {
 			parentBeaconRoot = &common.Hash{}
 			if overrides.BeaconRoot != nil {
 				parentBeaconRoot = overrides.BeaconRoot
@@ -439,8 +439,10 @@ type diffTrackingWriter struct {
 	touchedKeys keysByAccount
 }
 
-type storageKeys []accounts.StorageKey
-type keysByAccount map[accounts.Address]storageKeys
+type (
+	storageKeys   []accounts.StorageKey
+	keysByAccount map[accounts.Address]storageKeys
+)
 
 var _ state.StateWriter = (*diffTrackingWriter)(nil)
 
@@ -843,7 +845,8 @@ func (s *simulator) simulateCall(
 		callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)
 		callResult.ReturnData = "0x"
 		callResult.Error = rpc.NewJsonErrorFromErr(
-			fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), s.returnDataLimit))
+			fmt.Errorf("call returned result on length %d exceeding --rpc.returndata.limit %d", len(result.ReturnData), s.returnDataLimit),
+		)
 	} else {
 		if result.Failed() {
 			callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)

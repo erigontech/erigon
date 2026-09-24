@@ -24,9 +24,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-var (
-	errTimestampTooOld = errors.New("timestamp too old")
-)
+var errTimestampTooOld = errors.New("timestamp too old")
 
 func checkTime(
 	r *http.Request,

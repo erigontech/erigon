@@ -54,7 +54,7 @@ func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, block
 
 func (b DirectBackend) CallContract(ctx context.Context, callMsg bind.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	blockNumberOrHash := BlockNumArg(blockNum)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil, nil)
 }

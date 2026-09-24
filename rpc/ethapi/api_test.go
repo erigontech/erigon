@@ -517,8 +517,10 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	setcode := base()
 	setcode.Type = 4
 	setcode.Authorizations = &[]types.JsonAuthorization{
-		{ChainID: hexutil.U256(*uint256.NewInt(1)), Address: to, Nonce: 1, YParity: 0,
-			R: hexutil.U256(*uint256.NewInt(0xaa)), S: hexutil.U256(*uint256.NewInt(0xbb))},
+		{
+			ChainID: hexutil.U256(*uint256.NewInt(1)), Address: to, Nonce: 1, YParity: 0,
+			R: hexutil.U256(*uint256.NewInt(0xaa)), S: hexutil.U256(*uint256.NewInt(0xbb)),
+		},
 		{},
 	}
 	pending := base()

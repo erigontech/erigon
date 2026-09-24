@@ -219,7 +219,6 @@ func TestMultiHandler(t *testing.T) {
 	if r2.Msg != "clone" {
 		t.Fatalf("wrong value for h2.Msg. Got %s expected %s", r2.Msg, "clone")
 	}
-
 }
 
 type waitHandler struct {
@@ -431,7 +430,8 @@ func TestFailoverHandler(t *testing.T) {
 
 	l.SetHandler(FailoverHandler(
 		StreamHandler(w, JsonFormat()),
-		h))
+		h,
+	))
 
 	l.Debug("test ok")
 	if r.Msg != "" {

@@ -223,8 +223,10 @@ func (req *requestGenerator) rpcCallOnce(ctx context.Context, result any, method
 	return client.CallContext(ctx, result, string(method), args...)
 }
 
-const requestTimeout = time.Second * 20
-const connectionTimeout = time.Millisecond * 500
+const (
+	requestTimeout    = time.Second * 20
+	connectionTimeout = time.Millisecond * 500
+)
 
 func isConnectionError(err error) bool {
 	var opErr *net.OpError
@@ -412,7 +414,6 @@ func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, su
 	}
 
 	namespace, subMethod, err := NamespaceAndSubMethodFromMethod(string(method))
-
 	if err != nil {
 		return nil, fmt.Errorf("cannot get namespace and submethod from method: %w", err)
 	}

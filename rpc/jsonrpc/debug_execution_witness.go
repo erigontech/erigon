@@ -59,7 +59,7 @@ type RecordingState struct {
 	// codeHashes is keyed by the code itself: one code is recorded under several maps and addresses.
 	codeHashes map[string]common.Hash
 
-	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
+	// HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
 	// In-memory state overlay (writes)
 	accountOverlay map[common.Address]*accounts.Account // non-nil = updated, entry present with nil value=deleted
@@ -1246,7 +1246,8 @@ func detectCollapseSiblings(
 		return nil, fmt.Errorf(
 			"debug_executionWitness: commitment trie for block %d is at block %d instead of parent %d; "+
 				"commitment history may be pruned for this block range",
-			blockNum, seekBlockNum, parentNum)
+			blockNum, seekBlockNum, parentNum,
+		)
 	}
 
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
@@ -1576,8 +1577,10 @@ func (s *witnessStateless) tracing(addr common.Address) bool {
 }
 
 // Ensure witnessStateless implements both interfaces
-var _ state.StateReader = (*witnessStateless)(nil)
-var _ state.StateWriter = (*witnessStateless)(nil)
+var (
+	_ state.StateReader = (*witnessStateless)(nil)
+	_ state.StateWriter = (*witnessStateless)(nil)
+)
 
 // newWitnessStateless creates a new witnessStateless from ExecutionWitnessResult
 func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, error) {

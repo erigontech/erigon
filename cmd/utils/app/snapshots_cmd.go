@@ -328,14 +328,15 @@ var snapshotCommand = cli.Command{
 			Name:    "rm-state-snapshots",
 			Aliases: []string{"rm-state-segments", "rm-state"},
 			Action:  doRmStateSnapshots,
-			Flags: joinFlags([]cli.Flag{
-				&utils.DataDirFlag,
-				&cli.StringFlag{Name: "step", Usage: "step range to remove: 'from-to' (e.g. 5-10), or 'from+' (e.g. 5+) for everything from step N to the latest"},
-				&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
-				&cli.BoolFlag{Name: "dry-run"},
-				&cli.StringSliceFlag{Name: "domain"},
-				&cli.BoolFlag{Name: "only-history", Aliases: []string{"history"}, Usage: "remove only history files (SnapHistory+SnapIdx), not domain data"},
-			},
+			Flags: joinFlags(
+				[]cli.Flag{
+					&utils.DataDirFlag,
+					&cli.StringFlag{Name: "step", Usage: "step range to remove: 'from-to' (e.g. 5-10), or 'from+' (e.g. 5+) for everything from step N to the latest"},
+					&cli.BoolFlag{Name: "recentStep", Aliases: []string{"latest", "latestStep", "recent"}, Usage: "remove minimal possible recent/latest files: and Domain and History. Useful when have 1 corrupted recent file"},
+					&cli.BoolFlag{Name: "dry-run"},
+					&cli.StringSliceFlag{Name: "domain"},
+					&cli.BoolFlag{Name: "only-history", Aliases: []string{"history"}, Usage: "remove only history files (SnapHistory+SnapIdx), not domain data"},
+				},
 			),
 		},
 		{
@@ -2109,7 +2110,6 @@ func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
 	}
 
 	return nil
-
 }
 
 func checkIfBlockSnapshotsPublishable(snapDir string) error {
@@ -2139,7 +2139,7 @@ func checkIfBlockSnapshotsPublishable(snapDir string) error {
 	// Check block sanity
 	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+			if os.IsNotExist(err) { // it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2315,7 +2315,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 
 	if err := filepath.WalkDir(dirs.SnapDomain, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+			if os.IsNotExist(err) { // it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2427,7 +2427,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 
 	if err := filepath.WalkDir(dirs.SnapIdx, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+			if os.IsNotExist(err) { // it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2553,7 +2553,7 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	intervals := []interval{}
 	if err := filepath.WalkDir(snapDir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+			if os.IsNotExist(err) { // it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -2596,7 +2596,6 @@ func doBlockSnapshotsRangeCheck(snapDir string, suffix string, snapType string) 
 	}
 
 	return nil
-
 }
 
 func doPublishable(dat datadir.Dirs, chainDB kv.RoDB) error {
@@ -2669,7 +2668,7 @@ func doClearIndexing(ctx context.Context, cliCtx *cli.Command) error {
 func deleteFilesWithExtensions(dir string, extensions []string) error {
 	return filepath.WalkDir(dir, func(path string, info fs.DirEntry, err error) error {
 		if err != nil {
-			if os.IsNotExist(err) { //it's ok if some file get removed during walk
+			if os.IsNotExist(err) { // it's ok if some file get removed during walk
 				return nil
 			}
 			return err
@@ -3000,6 +2999,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 
 	return nil
 }
+
 func doLS(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	return lsDatadir(ctx, dirs, log.Root())
 }
@@ -3339,7 +3339,7 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	compresCfg := seg.DefaultCfg
 	workers := estimate.CompressSnapshot.Workers()
 	compresCfg.Workers = workers
-	var word = make([]byte, 0, 4096)
+	word := make([]byte, 0, 4096)
 
 	switch {
 	case info.Type.Enum() == snaptype2.Enums.Headers || info.Type.Enum() == snaptype2.Enums.Bodies:
