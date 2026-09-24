@@ -135,19 +135,19 @@ func TestEthSubscribeReceipts(t *testing.T) {
 var (
 	_ interface {
 		MarshalFastJSONTo(*jsonstream.StackStream) error
-	} = sharedJSON[*types.Header, *types.Header]{}
-	_ interface{ LocalValue() any } = sharedJSON[*types.Header, *types.Header]{}
+	} = sharedJSON[*types.Header, *types.RPCHeaderView]{}
+	_ interface{ LocalValue() any } = sharedJSON[*types.Header, *types.RPCHeaderView]{}
 )
 
 func TestSharedJSONEncodesTheValue(t *testing.T) {
 	h := &types.Header{Number: *uint256.NewInt(7)}
-	s := sharedJSON[*types.Header, *types.Header]{&rpchelper.Shared[*types.Header]{Value: h}, headerValue}
+	s := sharedJSON[*types.Header, *types.RPCHeaderView]{&rpchelper.Shared[*types.Header]{Value: h}, headerValue}
 	got, err := jsonstream.Marshal(s)
 	require.NoError(t, err)
-	want, err := json.Marshal(h)
+	want, err := jsonstream.Marshal(types.NewRPCHeaderView(h))
 	require.NoError(t, err)
 	require.Equal(t, string(want), string(got))
-	require.Same(t, h, s.LocalValue())
+	require.Same(t, h, s.LocalValue().(*types.RPCHeaderView).Header)
 }
 
 // fastOnly encodes differently through its fast marshaller than through reflection, so the output
@@ -192,7 +192,7 @@ func TestEthSubscribeNewHeadsOverWebsocket(t *testing.T) {
 	require.NoError(t, err)
 	ff.OnNewEvent(&remoteproto.SubscribeReply{Type: remoteproto.Event_HEADER, Data: payload})
 
-	want, err := json.Marshal(header)
+	want, err := jsonstream.Marshal(types.NewRPCHeaderView(header))
 	require.NoError(t, err)
 	select {
 	case got := <-ch:

@@ -18,58 +18,81 @@ package types
 
 import (
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// MarshalJSON encodes through MarshalFastJSONTo, so a header inside another value gets the
-// same bytes as the RPC paths that stream it.
-func (h *Header) MarshalJSON() ([]byte, error) {
-	return jsonstream.Marshal(h)
+// RPCHeaderView is a header as a reply spells it: the header itself, borrowed rather than
+// copied, plus the hash, which is computed from the header instead of stored in it. A reply
+// that needs the hash names it here, so every field it writes has a declaration.
+type RPCHeaderView struct {
+	*Header `ethjson:"inline"`
+	Hash    common.Hash `json:"hash" ethjson:"data"`
 }
 
-// MarshalFastJSONTo writes the fields in the order headerJSONByDeclaration spells them.
+// NewRPCHeaderView hashes the header once for the reply that carries it.
+func NewRPCHeaderView(h *Header) *RPCHeaderView {
+	if h == nil {
+		return nil
+	}
+	return &RPCHeaderView{Header: h, Hash: h.Hash()}
+}
+
+func (v *RPCHeaderView) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if v == nil || v.Header == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteObjectStart()
+	v.Header.writeFastJSONFields(s)
+	jsonstream.Data(s, "hash", v.Hash[:])
+	s.WriteObjectEnd()
+	return nil
+}
+
+// MarshalFastJSONTo writes the fields in the order Header's json tags declare them.
 func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if h == nil {
 		s.WriteNil()
 		return nil
 	}
 	s.WriteObjectStart()
-	s.Field("parentHash").WriteHex(h.ParentHash[:])
-	s.Field("sha3Uncles").WriteHex(h.UncleHash[:])
-	s.Field("miner").WriteHex(h.Coinbase[:])
-	s.Field("stateRoot").WriteHex(h.Root[:])
-	s.Field("transactionsRoot").WriteHex(h.TxHash[:])
-	s.Field("receiptsRoot").WriteHex(h.ReceiptHash[:])
-	s.Field("logsBloom").WriteHex(h.Bloom[:])
-	jsonstream.Text(s, "difficulty", (*hexutil.U256)(&h.Difficulty))
-	jsonstream.Text(s, "number", (*hexutil.U256)(&h.Number))
-	jsonstream.Text(s, "gasLimit", (*hexutil.Uint64)(&h.GasLimit))
-	jsonstream.Text(s, "gasUsed", (*hexutil.Uint64)(&h.GasUsed))
-	jsonstream.Text(s, "timestamp", (*hexutil.Uint64)(&h.Time))
-	s.Field("extraData").WriteHex(h.Extra)
-	s.Field("mixHash").WriteHex(h.MixDigest[:])
-	s.Field("nonce").WriteHex(h.Nonce[:])
+	h.writeFastJSONFields(s)
+	s.WriteObjectEnd()
+	return nil
+}
+
+func (h *Header) writeFastJSONFields(s *jsonstream.StackStream) {
+	jsonstream.Data(s, "parentHash", h.ParentHash[:])
+	jsonstream.Data(s, "sha3Uncles", h.UncleHash[:])
+	jsonstream.Data(s, "miner", h.Coinbase[:])
+	jsonstream.Data(s, "stateRoot", h.Root[:])
+	jsonstream.Data(s, "transactionsRoot", h.TxHash[:])
+	jsonstream.Data(s, "receiptsRoot", h.ReceiptHash[:])
+	jsonstream.Data(s, "logsBloom", h.Bloom[:])
+	jsonstream.Quantity256(s, "difficulty", &h.Difficulty)
+	jsonstream.Quantity256(s, "number", &h.Number)
+	jsonstream.Quantity(s, "gasLimit", h.GasLimit)
+	jsonstream.Quantity(s, "gasUsed", h.GasUsed)
+	jsonstream.Quantity(s, "timestamp", h.Time)
+	jsonstream.Data(s, "extraData", h.Extra)
+	jsonstream.Data(s, "mixHash", h.MixDigest[:])
+	jsonstream.Data(s, "nonce", h.Nonce[:])
 	if h.AuRaStep != 0 {
-		jsonstream.Text(s, "auraStep", (*hexutil.Uint64)(&h.AuRaStep))
+		jsonstream.Quantity(s, "auraStep", h.AuRaStep)
 	}
 	if len(h.AuRaSeal) != 0 {
-		s.Field("auraSeal").WriteHex(h.AuRaSeal)
+		jsonstream.Data(s, "auraSeal", h.AuRaSeal)
 	}
-	jsonstream.Text(s, "baseFeePerGas", (*hexutil.U256)(h.BaseFee))
+	jsonstream.Quantity256(s, "baseFeePerGas", h.BaseFee)
 	writeHashField(s, "withdrawalsRoot", h.WithdrawalsHash)
-	jsonstream.Text(s, "blobGasUsed", (*hexutil.Uint64)(h.BlobGasUsed))
-	jsonstream.Text(s, "excessBlobGas", (*hexutil.Uint64)(h.ExcessBlobGas))
+	jsonstream.QuantityOrNull(s, "blobGasUsed", h.BlobGasUsed)
+	jsonstream.QuantityOrNull(s, "excessBlobGas", h.ExcessBlobGas)
 	writeHashField(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot)
 	writeHashField(s, "requestsHash", h.RequestsHash)
 	writeHashField(s, "blockAccessListHash", h.BlockAccessListHash)
 	if h.SlotNumber != nil {
-		jsonstream.Text(s, "slotNumber", (*hexutil.Uint64)(h.SlotNumber))
+		jsonstream.Quantity(s, "slotNumber", *h.SlotNumber)
 	}
-	hash := h.Hash()
-	s.Field("hash").WriteHex(hash[:])
-	s.WriteObjectEnd()
-	return nil
 }
 
 func writeHashField(s *jsonstream.StackStream, name string, h *common.Hash) {

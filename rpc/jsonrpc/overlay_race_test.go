@@ -2109,7 +2109,7 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
 				return NewErigonAPI(h.base, db, nil).GetHeaderByNumber(h.m.Ctx, head(h))
 			},
-			hashOf: func(v any) common.Hash { return v.(*types.Header).Hash() },
+			hashOf: func(v any) common.Hash { return v.(*types.RPCHeaderView).Hash },
 		},
 		{
 			name: "ots_getBlockDetails",

@@ -79,38 +79,38 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 type Header struct {
-	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required"`
-	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required"`
-	Coinbase    common.Address `json:"miner"`
-	Root        common.Hash    `json:"stateRoot"        gencodec:"required"`
-	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required"`
-	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required"`
-	Bloom       Bloom          `json:"logsBloom"        gencodec:"required"`
-	Difficulty  uint256.Int    `json:"difficulty"       gencodec:"required"`
-	Number      uint256.Int    `json:"number"           gencodec:"required"`
-	GasLimit    uint64         `json:"gasLimit"         gencodec:"required"`
-	GasUsed     uint64         `json:"gasUsed"          gencodec:"required"`
-	Time        uint64         `json:"timestamp"        gencodec:"required"`
-	Extra       []byte         `json:"extraData"        gencodec:"required"`
-	MixDigest   common.Hash    `json:"mixHash"` // prevRandao after EIP-4399
-	Nonce       BlockNonce     `json:"nonce"`
+	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required" ethjson:"data"`
+	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required" ethjson:"data"`
+	Coinbase    common.Address `json:"miner" ethjson:"data"`
+	Root        common.Hash    `json:"stateRoot"        gencodec:"required" ethjson:"data"`
+	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required" ethjson:"data"`
+	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required" ethjson:"data"`
+	Bloom       Bloom          `json:"logsBloom"        gencodec:"required" ethjson:"data"`
+	Difficulty  uint256.Int    `json:"difficulty"       gencodec:"required" ethjson:"quantity"`
+	Number      uint256.Int    `json:"number"           gencodec:"required" ethjson:"quantity"`
+	GasLimit    uint64         `json:"gasLimit"         gencodec:"required" ethjson:"quantity"`
+	GasUsed     uint64         `json:"gasUsed"          gencodec:"required" ethjson:"quantity"`
+	Time        uint64         `json:"timestamp"        gencodec:"required" ethjson:"quantity"`
+	Extra       []byte         `json:"extraData"        gencodec:"required" ethjson:"data"`
+	MixDigest   common.Hash    `json:"mixHash" ethjson:"data"` // prevRandao after EIP-4399
+	Nonce       BlockNonce     `json:"nonce" ethjson:"data"`
 	// AuRa extensions (alternative to MixDigest & Nonce)
-	AuRaStep uint64 `json:"auraStep,omitempty"`
-	AuRaSeal []byte `json:"auraSeal,omitempty"`
+	AuRaStep uint64 `json:"auraStep,omitempty" ethjson:"quantity"`
+	AuRaSeal []byte `json:"auraSeal,omitempty" ethjson:"data"`
 
-	BaseFee         *uint256.Int `json:"baseFeePerGas"`   // EIP-1559
-	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
+	BaseFee         *uint256.Int `json:"baseFeePerGas" ethjson:"quantity"` // EIP-1559
+	WithdrawalsHash *common.Hash `json:"withdrawalsRoot" ethjson:"data"`   // EIP-4895
 
 	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
-	BlobGasUsed   *uint64 `json:"blobGasUsed"`
-	ExcessBlobGas *uint64 `json:"excessBlobGas"`
+	BlobGasUsed   *uint64 `json:"blobGasUsed" ethjson:"quantity"`
+	ExcessBlobGas *uint64 `json:"excessBlobGas" ethjson:"quantity"`
 
-	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot" ethjson:"data"` // EIP-4788
 
-	RequestsHash        *common.Hash `json:"requestsHash"`        // EIP-7685
-	BlockAccessListHash *common.Hash `json:"blockAccessListHash"` // EIP-7928
+	RequestsHash        *common.Hash `json:"requestsHash" ethjson:"data"`        // EIP-7685
+	BlockAccessListHash *common.Hash `json:"blockAccessListHash" ethjson:"data"` // EIP-7928
 
-	SlotNumber *uint64 `json:"slotNumber"` // EIP-7843
+	SlotNumber *uint64 `json:"slotNumber,omitempty" ethjson:"quantity"` // EIP-7843; omitempty until CI accepts a null slotNumber
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
@@ -543,7 +543,6 @@ type headerMarshaling struct {
 	BaseFee       *hexutil.U256
 	BlobGasUsed   *hexutil.Uint64
 	ExcessBlobGas *hexutil.Uint64
-	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
 }
 
 // Hash returns the keccak256 hash of the header's RLP encoding.
