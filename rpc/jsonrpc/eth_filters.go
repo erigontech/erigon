@@ -223,7 +223,7 @@ func (s sharedJSON[T, V]) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 
 func (s sharedJSON[T, V]) LocalValue() any { return s.value(s.ev.Value) }
 
-func headerValue(h *types.Header) *types.RPCHeaderView { return types.NewRPCHeaderView(h) }
+func headerValue(h *types.Header) *types.RPCHeader { return types.NewRPCHeader(h) }
 
 func subscribeReceiptsValue(rs []*remoteproto.SubscribeReceiptsReply) ethutils.RPCReceipts {
 	out := make(ethutils.RPCReceipts, len(rs))
@@ -245,7 +245,7 @@ func (api *APIImpl) NewHeads(ctx context.Context) (*rpc.Subscription, error) {
 		},
 		func(emit func(payload any), h *rpchelper.Shared[*types.Header]) {
 			if h != nil && h.Value != nil {
-				emit(sharedJSON[*types.Header, *types.RPCHeaderView]{h, headerValue})
+				emit(sharedJSON[*types.Header, *types.RPCHeader]{h, headerValue})
 			}
 		},
 		"[rpc] new heads channel was closed")

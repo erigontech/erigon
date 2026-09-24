@@ -21,24 +21,28 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// RPCHeaderView is a header as a reply spells it: the header itself, borrowed rather than
+// RPCHeader is a header as a reply spells it: the header itself, borrowed rather than
 // copied, plus the hash, which is computed from the header instead of stored in it. A reply
 // that needs the hash names it here, so every field it writes has a declaration.
-type RPCHeaderView struct {
-	*Header `ethjson:"inline"`
-	Hash    common.Hash `json:"hash" ethjson:"data"`
+type RPCHeader struct {
+	*Header
+	Hash common.Hash `json:"hash" ethjson:"data"`
 }
 
-// NewRPCHeaderView hashes the header once for the reply that carries it.
-func NewRPCHeaderView(h *Header) *RPCHeaderView {
+// MarshalJSON encodes through MarshalFastJSONTo, so a header inside another value gets the
+// same bytes as the replies that stream it, and there is one encoder to keep honest.
+func (v *RPCHeader) MarshalJSON() ([]byte, error) { return jsonstream.Marshal(v) }
+
+// NewRPCHeader hashes the header once for the reply that carries it.
+func NewRPCHeader(h *Header) *RPCHeader {
 	if h == nil {
 		return nil
 	}
-	return &RPCHeaderView{Header: h, Hash: h.Hash()}
+	return &RPCHeader{Header: h, Hash: h.Hash()}
 }
 
-func (v *RPCHeaderView) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if v == nil || v.Header == nil {
+func (v *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if v == nil {
 		s.WriteNil()
 		return nil
 	}
@@ -48,6 +52,8 @@ func (v *RPCHeaderView) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	s.WriteObjectEnd()
 	return nil
 }
+
+func (h *Header) MarshalJSON() ([]byte, error) { return jsonstream.Marshal(h) }
 
 // MarshalFastJSONTo writes the fields in the order Header's json tags declare them.
 func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {

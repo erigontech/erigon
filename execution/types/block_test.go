@@ -864,31 +864,26 @@ func TestHeaderMarshalFastJSONTo(t *testing.T) {
 			require.NoError(t, err)
 			got, err := jsonstream.Marshal(h)
 			require.NoError(t, err)
-			require.Equal(t, string(want), string(got), "MarshalFastJSONTo")
-
-			generated, err := json.Marshal(h)
-			require.NoError(t, err)
-			require.Equal(t, string(want), string(generated), "MarshalJSON")
+			require.Equal(t, string(want), string(got))
 		})
 	}
 }
 
-// RPCHeaderView adds the one field a reply has that the header does not carry, so its own
+// RPCHeader adds the one field a reply has that the header does not carry, so its own
 // declaration is what the encoder answers to.
-func TestRPCHeaderViewMarshalFastJSONTo(t *testing.T) {
+func TestRPCHeaderMarshalFastJSONTo(t *testing.T) {
 	t.Parallel()
 	for name, h := range map[string]*Header{
 		"every field set": headerWithEveryFieldSet(),
 		"empty":           {},
 	} {
 		t.Run(name, func(t *testing.T) {
-			view := NewRPCHeaderView(h)
+			view := NewRPCHeader(h)
 			want, err := ethjsontest.ExpectedJSON(view)
 			require.NoError(t, err)
 			got, err := jsonstream.Marshal(view)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
-			require.Contains(t, string(got), `"hash":"`+h.Hash().Hex()+`"`)
 		})
 	}
 }

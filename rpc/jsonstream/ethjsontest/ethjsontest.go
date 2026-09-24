@@ -35,8 +35,8 @@ var u256 = reflect.TypeFor[uint256.Int]()
 // ExpectedJSON encodes v the way its tags declare: the json tag gives each field's name, its
 // position and whether it may be omitted, and the ethjson tag gives the hex form the JSON-RPC
 // spec uses for it — "quantity" for a number, "data" for bytes. A field without an ethjson tag
-// falls back to encoding/json. An embedded field tagged ethjson:"inline" is flattened, as
-// encoding/json flattens an anonymous one.
+// falls back to encoding/json. An embedded field is flattened, as encoding/json flattens an
+// anonymous one.
 func ExpectedJSON(v any) ([]byte, error) {
 	rv := reflect.ValueOf(v)
 	for rv.Kind() == reflect.Pointer {
@@ -50,7 +50,7 @@ func ExpectedJSON(v any) ([]byte, error) {
 	buf := []byte{'{'}
 	for i := range typ.NumField() {
 		field := typ.Field(i)
-		if field.Tag.Get("ethjson") == "inline" {
+		if field.Anonymous {
 			inner, err := ExpectedJSON(rv.Field(i).Interface())
 			if err != nil {
 				return nil, fmt.Errorf("%s.%s: %w", typ.Name(), field.Name, err)
@@ -79,8 +79,7 @@ func ExpectedJSON(v any) ([]byte, error) {
 	return append(buf, '}'), nil
 }
 
-// appendInlined splices an embedded struct's fields in, the way encoding/json flattens an
-// anonymous field.
+// appendInlined splices an embedded struct's fields in, the way encoding/json does.
 func appendInlined(buf []byte, object []byte) []byte {
 	if len(object) <= 2 {
 		return buf
