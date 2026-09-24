@@ -21,6 +21,7 @@ import (
 	"slices"
 	"unsafe"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -30,7 +31,8 @@ import (
 // The array must still have text, as encoding/json writes a plain array as a list of numbers.
 type hexType interface {
 	hexutil.Uint64 | hexutil.Uint | hexutil.Int64 | hexutil.U256 | hexutil.Big | hexutil.Bytes |
-		~[8]byte | ~[20]byte | ~[32]byte | ~[256]byte
+		common.Hash | common.Address |
+		~[8]byte | ~[256]byte // types.BlockNonce, types.Bloom: execution/types imports this package
 	encoding.TextAppender
 }
 

@@ -1466,7 +1466,7 @@ func assertHexPtr[T hexType](t *testing.T, v *T) {
 	}{v}, func(s *StackStream) { HexPtrOmitempty(s, "v", v) })
 }
 
-type quotingArray [8]byte
+type quotingArray [256]byte
 
 func (quotingArray) AppendText(dst []byte) ([]byte, error) { return append(dst, `"`...), nil }
 
@@ -1475,7 +1475,7 @@ func TestHexWritesArrayBytes(t *testing.T) {
 	s := Get(nil)
 	defer Put(s)
 	Hex(s, "", quotingArray{0xab})
-	require.Equal(t, `"":"0xab00000000000000"`, string(s.Buffer()))
+	require.Equal(t, `"":"0xab`+strings.Repeat("00", 255)+`"`, string(s.Buffer()))
 }
 
 // Hexes and HexesOmitempty write what encoding/json writes for a slice field tagged without and
