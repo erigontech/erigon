@@ -1433,6 +1433,94 @@ func rlpFromBinaryTxn(binaryTxn []byte) []byte {
 	return wrapped
 }
 
+// BinaryFromStoredTxn is the inverse of rlpFromBinaryTxn: it returns the binary (canonical
+// EIP-2718) encoding of a stored transaction, a subslice of stored, without decoding its fields.
+// The record's RLP shape is checked, so a stored value that is not one whole transaction is
+// rejected here rather than served as a transaction.
+func BinaryFromStoredTxn(stored []byte) ([]byte, error) {
+	binary := stored
+	if TypedTransactionMarshalledAsRlpString(stored) {
+		content, rest, err := rlp.SplitString(stored)
+		if err != nil {
+			return nil, err
+		}
+		if len(rest) > 0 {
+			return nil, fmt.Errorf("stored txn: %d bytes after the wrapped transaction", len(rest))
+		}
+		if len(content) == 0 || content[0] >= 0x80 {
+			return nil, errors.New("stored txn: wrapped content is not a typed transaction")
+		}
+		binary = content
+	}
+	if err := checkTxnShape(binary); err != nil {
+		return nil, err
+	}
+	return binary, nil
+}
+
+// txnFieldCount is how many RLP fields each transaction type carries. An unknown type is not
+// listed, so checkTxnShape decodes it in full rather than guessing.
+var txnFieldCount = map[byte]int{
+	LegacyTxType:     9,
+	AccessListTxType: 11,
+	DynamicFeeTxType: 12,
+	BlobTxType:       14,
+	SetCodeTxType:    13,
+
+	AccountAbstractionTxType: 19,
+}
+
+// checkTxnShape reports whether binary is one whole transaction of a type this code knows: the
+// right number of well-formed RLP fields, and nothing after them. A type it does not know is
+// decoded instead, so a new transaction type is served only once it is understood.
+func checkTxnShape(binary []byte) error {
+	if len(binary) == 0 {
+		return errors.New("stored txn: empty")
+	}
+	txnType := byte(LegacyTxType)
+	fields := binary
+	if binary[0] < 0x80 { // EIP-2718 type byte, and legacy is the absence of one
+		if binary[0] == LegacyTxType {
+			return errors.New("stored txn: 0x00 is not a transaction type")
+		}
+		txnType, fields = binary[0], binary[1:]
+	}
+	want, known := txnFieldCount[txnType]
+	if !known {
+		_, err := DecodeTransaction(binary)
+		return err
+	}
+	content, rest, err := rlp.SplitList(fields)
+	if err != nil {
+		return fmt.Errorf("stored txn: %w", err)
+	}
+	if len(rest) > 0 {
+		return fmt.Errorf("stored txn: %d bytes after the field list", len(rest))
+	}
+	n := 0
+	for len(content) > 0 {
+		if n++; n > want {
+			return fmt.Errorf("stored txn: type %d has more than %d fields", txnType, want)
+		}
+		if _, _, content, err = rlp.Split(content); err != nil {
+			return fmt.Errorf("stored txn: field %d: %w", n-1, err)
+		}
+	}
+	if n != want {
+		return fmt.Errorf("stored txn: type %d has %d fields, want %d", txnType, n, want)
+	}
+	return nil
+}
+
+// BinaryRawBody is b with its transactions in their binary (canonical EIP-2718) encoding.
+func (b *Body) BinaryRawBody() (*RawBody, error) {
+	txs, err := MarshalTransactionsBinary(b.Transactions)
+	if err != nil {
+		return nil, err
+	}
+	return &RawBody{Transactions: txs, Uncles: b.Uncles, Withdrawals: b.Withdrawals}, nil
+}
+
 // RawBody creates a RawBody based on the block. It is not very efficient, so
 // will probably be removed in favour of RawBlock. Also it panics
 func (b *Block) RawBody() *RawBody {
