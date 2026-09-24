@@ -23,11 +23,47 @@ import (
 	"github.com/stretchr/testify/require"
 
 	bscchain "github.com/erigontech/erigon/bsc/chain"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/enode"
 )
+
+// TestChapelForkPrecompiles pins that Chapel's fork schedule actually reaches the
+// EVM. A fork block parsed into the config but never gated resolves to the previous
+// fork's precompile set, which under-charges gas and diverges the state root.
+func TestChapelForkPrecompiles(t *testing.T) {
+	t.Parallel()
+
+	spec, err := chainspec.ChainSpecByName(networkname.Chapel)
+	require.NoError(t, err)
+
+	blsVerify := accounts.InternAddress(common.BytesToAddress([]byte{102}))
+
+	for _, tc := range []struct {
+		name  string
+		block uint64
+		bls   bool
+	}{
+		{"planck", 28196022, false},
+		{"luban", 29613785, true},
+		{"plato", 29861024, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			blockContext := evmtypes.BlockContext{BlockNumber: tc.block}
+			set := vm.Precompiles(blockContext.Rules(spec.Config))
+			if tc.bls {
+				require.Contains(t, set, blsVerify)
+				return
+			}
+			require.NotContains(t, set, blsVerify)
+		})
+	}
+}
 
 func TestChapelSpec(t *testing.T) {
 	t.Parallel()
