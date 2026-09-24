@@ -118,21 +118,28 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	}
 
 	g := graph{plane: planeAccount}
-	root, plans, planErr := g.planAccounts(rawCtx, accounts, accountFold)
-	if err := <-storageDone; err != nil {
+	root, err := g.loadRoot(rawCtx)
+	if err != nil {
+		<-storageDone
 		return [32]byte{}, nil, err
 	}
-	if planErr != nil {
-		return [32]byte{}, nil, planErr
-	}
-	results := make(map[[32]byte][32]byte, len(storage))
-	for i, task := range storage {
-		results[task.addrHash] = storageRoots[i]
-	}
-
+	plans := make([]accountPlan, len(accounts))
 	accountResults := make([]accountResult, len(plans))
 	accountValues := make([]byte, accountLeafScratch*len(plans))
-	parallelFor(len(plans), workers, 1024, func(i int) {
+	storageReady := make(chan struct{})
+	var storageErr error
+	var results map[[32]byte][32]byte
+	go func() {
+		defer close(storageReady)
+		if storageErr = <-storageDone; storageErr != nil {
+			return
+		}
+		results = make(map[[32]byte][32]byte, len(storage))
+		for i, task := range storage {
+			results[task.addrHash] = storageRoots[i]
+		}
+	}()
+	encode := func(i int) {
 		plan := &plans[i]
 		if plan.skip || plan.delete {
 			return
@@ -160,10 +167,78 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		}
 		at := i * accountLeafScratch
 		accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
-	})
+	}
+
+	var pipelined [16]bool
+	var groupHashes [16][32]byte
+	var groupParts [16]deltaParts
+	var pending [16]*pendingRemoval
+	pipeline := func(ctx commitment.PatriciaContext, nib int, group []int) error {
+		<-storageReady
+		child := root.child(nib)
+		if storageErr != nil || len(root.path) != 0 || child == nil || len(child.path) != 1 {
+			return nil
+		}
+		for k, i := range group {
+			encode(i)
+			if err := accountResults[i].err; err != nil {
+				return err
+			}
+			plan := &plans[i]
+			switch {
+			case plan.skip:
+			case plan.delete:
+				state, err := remove(child, plan.entry.hashedKey)
+				if err != nil {
+					return err
+				}
+				if state.kind != removalKeep {
+					pending[nib] = &pendingRemoval{state: state, rest: group[k+1:]}
+					return nil
+				}
+			default:
+				if err := insert(child, plan.entry.hashedKey, accountResults[i].value); err != nil {
+					return err
+				}
+			}
+		}
+		hash, err := g.materialize(ctx, child, root, &groupParts[nib])
+		if err != nil {
+			return err
+		}
+		groupHashes[nib], pipelined[nib] = hash, true
+		return nil
+	}
+	planErr := g.planAccounts(rawCtx, root, accounts, plans, accountFold, pipeline)
+	<-storageReady
+	if storageErr != nil {
+		return [32]byte{}, nil, storageErr
+	}
+	if planErr != nil {
+		return [32]byte{}, nil, planErr
+	}
+
+	remaining := make([]int, 0, len(plans))
+	for i := range plans {
+		if nib := plans[i].entry.hashedKey[0]; !pipelined[nib] && pending[nib] == nil {
+			remaining = append(remaining, i)
+		}
+	}
+	for nib := range 16 {
+		switch {
+		case pipelined[nib]:
+			root.setStoredChild(nib, groupHashes[nib][:], nil)
+		case pending[nib] != nil:
+			applyRemoval(root, nib, pending[nib].state)
+			collapsedState(root)
+			remaining = append(remaining, pending[nib].rest...)
+		}
+	}
+	slices.Sort(remaining)
+	parallelFor(len(remaining), workers, 1024, func(k int) { encode(remaining[k]) })
 	var groups [16][]int
 	var rest []int
-	for i := range accountResults {
+	for _, i := range remaining {
 		if err := accountResults[i].err; err != nil {
 			return [32]byte{}, nil, err
 		}
@@ -213,30 +288,30 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		return [32]byte{}, nil, err
 	}
 	hash, err := fold(root, 0)
-	return hash, append(slices.Concat(storageParts...), accountParts...), err
+	return hash, slices.Concat(slices.Concat(storageParts...), slices.Concat(groupParts[:]...), accountParts), err
 }
 
-func (g graph) planAccounts(ctx commitment.PatriciaContext, accounts []accountEntry, plan foldPlan) (*node, []accountPlan, error) {
-	root, err := g.loadRoot(ctx)
-	if err != nil {
-		return nil, nil, err
-	}
-	plans := make([]accountPlan, len(accounts))
+type pendingRemoval struct {
+	state removalState
+	rest  []int
+}
+
+func (g graph) planAccounts(ctx commitment.PatriciaContext, root *node, accounts []accountEntry, plans []accountPlan, plan foldPlan, after func(ctx commitment.PatriciaContext, nib int, group []int) error) error {
 	planOne := func(ctx commitment.PatriciaContext, i int) error {
 		p, err := g.accountPlanFor(ctx, root, accounts[i])
 		plans[i] = p
 		return err
 	}
-	fanned, err := g.fanOutRoot(ctx, root, len(accounts), func(i int) byte { return accounts[i].hashedKey[0] }, plan, planOne)
+	fanned, err := g.fanOutRoot(ctx, root, len(accounts), func(i int) byte { return accounts[i].hashedKey[0] }, plan, planOne, after)
 	if err != nil || fanned {
-		return root, plans, err
+		return err
 	}
 	for i := range accounts {
 		if err := planOne(ctx, i); err != nil {
-			return root, nil, err
+			return err
 		}
 	}
-	return root, plans, nil
+	return nil
 }
 
 func parallelFor(n, workers, chunk int, fn func(i int)) {
@@ -297,7 +372,7 @@ func (g graph) ensureRootChildren(ctx commitment.PatriciaContext, root *node, ni
 	return nil
 }
 
-func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nibOf func(i int) byte, plan foldPlan, fn func(ctx commitment.PatriciaContext, i int) error) (bool, error) {
+func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nibOf func(i int) byte, plan foldPlan, fn func(ctx commitment.PatriciaContext, i int) error, after func(ctx commitment.PatriciaContext, nib int, group []int) error) (bool, error) {
 	if !plan.parallel() || len(root.path) != 0 {
 		return false, nil
 	}
@@ -333,6 +408,9 @@ func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nib
 				if err := fn(workerCtx, i); err != nil {
 					return err
 				}
+			}
+			if after != nil {
+				return after(workerCtx, nib, groups[nib])
 			}
 			return nil
 		})

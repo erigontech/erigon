@@ -17,7 +17,9 @@
 package v4
 
 import (
+	"bytes"
 	"context"
+	"maps"
 	"sync/atomic"
 	"testing"
 
@@ -163,4 +165,65 @@ func TestRunStoragePhaseHonorsFanOutMin(t *testing.T) {
 	}
 	require.Equal(t, int32(1), factoryCalls(1<<20))
 	require.Greater(t, factoryCalls(16), int32(1))
+}
+
+func TestPipelinedAccountGroupsMatchSerial(t *testing.T) {
+	var sparse, dense []int
+	for i := 0; len(dense) < 1500 || len(sparse) < 2; i++ {
+		h := commitment.KeyToHexNibbleHash(parityAddress(i))
+		switch {
+		case h[0] != 0:
+			if len(dense) < 1500 {
+				dense = append(dense, i)
+			}
+		case len(sparse) == 0:
+			sparse = append(sparse, i)
+		case len(sparse) == 1 && h[1] != commitment.KeyToHexNibbleHash(parityAddress(sparse[0]))[1]:
+			sparse = append(sparse, i)
+		}
+	}
+	deleted := &commitment.Update{Flags: commitment.DeleteUpdate}
+	seed := make([]parityUpdate, 0, 2*len(dense))
+	for _, i := range append(append([]int(nil), dense...), sparse...) {
+		address := parityAddress(i)
+		seed = append(seed, parityUpdate{key: address, update: accountParityUpdate(i)})
+		if i%3 == 0 {
+			seed = append(seed, parityUpdate{key: append(bytes.Clone(address), paritySlot(i)...), update: storageParityUpdate(i)})
+		}
+	}
+	base := newParityContext()
+	seeder := &Trie{scheduleWorkers: 1}
+	seeder.ResetContext(base)
+	_, err := seeder.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, seed), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+
+	next := []parityUpdate{{key: parityAddress(sparse[0]), update: deleted}, {key: parityAddress(dense[3]), update: deleted}}
+	for k, i := range dense[10:400] {
+		address := parityAddress(i)
+		next = append(next, parityUpdate{key: address, update: accountParityUpdate(i + 1)})
+		if k%4 == 0 {
+			next = append(next, parityUpdate{key: append(bytes.Clone(address), paritySlot(i+7)...), update: storageParityUpdate(i + 2)})
+		}
+	}
+	for i := 100000; i < 100200; i++ {
+		if commitment.KeyToHexNibbleHash(parityAddress(i))[0] != 0 {
+			next = append(next, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)})
+		}
+	}
+	run := func(workers int) ([]byte, map[string][]byte) {
+		ctx := newParityContext()
+		maps.Copy(ctx.branches, base.branches)
+		trie := &Trie{scheduleWorkers: workers}
+		trie.ResetContext(ctx)
+		if workers > 1 {
+			trie.SetTrieContextFactory(ctx.factory)
+		}
+		root, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, next), "", nil, commitment.WarmupConfig{})
+		require.NoError(t, err)
+		return root, ctx.branches
+	}
+	serialRoot, serialBranches := run(1)
+	parallelRoot, parallelBranches := run(4)
+	require.Equal(t, serialRoot, parallelRoot)
+	require.Equal(t, serialBranches, parallelBranches)
 }

@@ -142,7 +142,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 				return nil
 			}
 			return g.ensurePath(ctx, root, task.entries[i].path)
-		})
+		}, nil)
 		if err != nil {
 			return [32]byte{}, nil, err
 		}
