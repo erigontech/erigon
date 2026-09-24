@@ -105,6 +105,9 @@ func fold(n *node, depth int) ([32]byte, error) {
 }
 
 func foldLeaf(n *node, nib int, includeNib bool, out []byte) ([]byte, error) {
+	if ref, ok := n.cachedLeafRef(nib); ok && !includeNib {
+		return append(out, ref...), nil
+	}
 	suffixCount := 64 - len(n.path) - 1
 	suffix, payload := n.leafAt(nib)
 	if len(suffix) != packedLen(suffixCount) {

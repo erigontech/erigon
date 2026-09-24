@@ -19,6 +19,7 @@ package v4
 import (
 	"bytes"
 	"context"
+	"maps"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -82,4 +83,67 @@ func TestPrefetchPathCoversRoundReads(t *testing.T) {
 			require.Truef(t, prefetched[string(key)], "account %d slot %d: round read %x was not prefetched", c.account, c.slot, key)
 		}
 	}
+}
+
+type leafRefContext struct {
+	*mockContext
+	corrupt bool
+}
+
+func (c *leafRefContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	refs := ComputeLeafRefs(key, data)
+	if refs != nil && c.corrupt {
+		for i := range refs.Refs {
+			refs.Refs[i][0] ^= 0xff
+		}
+	}
+	return refs
+}
+
+func TestLeafRefsKeepRootsAndRecords(t *testing.T) {
+	const contracts = 2000
+	seed := make([]parityUpdate, 0, contracts*3)
+	for i := range contracts {
+		addr := benchAddr(i)
+		seed = append(seed, parityUpdate{key: addr, update: accountParityUpdate(i)})
+		for j := range 2 {
+			seed = append(seed, parityUpdate{key: append(bytes.Clone(addr), benchSlot(i*2+j)...), update: storageParityUpdate(i + j)})
+		}
+	}
+	base := newMockContext()
+	tr := &Trie{}
+	tr.ResetContext(base)
+	_, err := tr.Process(context.Background(), benchUpdatesIn(t.TempDir(), commitment.ModeCollect, seed), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+
+	next := make([]parityUpdate, 0, 600)
+	for i := 0; i < contracts; i += 10 {
+		addr := benchAddr(i)
+		next = append(next,
+			parityUpdate{key: addr, update: accountParityUpdate(i + 3)},
+			parityUpdate{key: append(bytes.Clone(addr), benchSlot(i*2)...), update: storageParityUpdate(i + 7)},
+			parityUpdate{key: benchAddr(contracts + i), update: accountParityUpdate(i + 11)})
+	}
+	run := func(ctx commitment.PatriciaContext, branches map[string][]byte) ([]byte, map[string][]byte) {
+		clone := newMockContext()
+		maps.Copy(clone.branches, branches)
+		switch c := ctx.(type) {
+		case *leafRefContext:
+			c.mockContext = clone
+		default:
+			ctx = clone
+		}
+		trie := &Trie{}
+		trie.ResetContext(ctx)
+		root, err := trie.Process(context.Background(), benchUpdatesIn(t.TempDir(), commitment.ModeCollect, next), "", nil, commitment.WarmupConfig{})
+		require.NoError(t, err)
+		return root, clone.branches
+	}
+	plainRoot, plainBranches := run(nil, base.branches)
+	refRoot, refBranches := run(&leafRefContext{}, base.branches)
+	require.Equal(t, plainRoot, refRoot)
+	require.Equal(t, plainBranches, refBranches)
+
+	corruptRoot, _ := run(&leafRefContext{corrupt: true}, base.branches)
+	require.NotEqual(t, plainRoot, corruptRoot)
 }

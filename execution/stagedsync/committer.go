@@ -1205,6 +1205,13 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	return r.prefetched.get(key)
 }
 
+func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	if r.prefetched == nil || len(data) == 0 {
+		return nil
+	}
+	return r.prefetched.leafRefs(key, data)
+}
+
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, prefetched: r.prefetched}
 }

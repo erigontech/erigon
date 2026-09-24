@@ -28,7 +28,8 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		return nil, fmt.Errorf("commitment v4: path depth %d", len(path))
 	}
 
-	data, _, err := branchOwned(ctx, nodeKey(plane, addrHash, path, nil))
+	key := nodeKey(plane, addrHash, path, nil)
+	data, _, err := branchOwned(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +61,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	if len(path) != 0 {
 		n.record, n.layout = record, l
 		n.childMask, n.leafMask, n.hashMask = l.child, l.leaf, l.child&^l.leaf
+		n.refs = leafRefsOf(ctx, key, data)
 		return n, nil
 	}
 	n.slots = make([]childSlot, 0, bits.OnesCount16(l.child))

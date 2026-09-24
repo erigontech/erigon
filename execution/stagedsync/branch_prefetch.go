@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 	v4 "github.com/erigontech/erigon/execution/commitment/v4"
 )
 
@@ -47,6 +48,7 @@ type prefetchItem struct {
 type prefetchedRecord struct {
 	data []byte
 	step kv.Step
+	refs *commitment.LeafRefs
 }
 
 type prefetchedShard struct {
@@ -127,16 +129,32 @@ func (p *branchPrefetcher) get(key []byte) ([]byte, kv.Step, bool) {
 	return r.data, r.step, ok
 }
 
+func (p *branchPrefetcher) leafRefs(key, data []byte) *commitment.LeafRefs {
+	s := p.shard(key)
+	s.mu.RLock()
+	r, ok := s.records[string(key)]
+	s.mu.RUnlock()
+	if !ok || len(r.data) != len(data) || &r.data[0] != &data[0] {
+		return nil
+	}
+	return r.refs
+}
+
 func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 	if p.bytes.Load() >= branchPrefetchMaxBytes {
 		return data
 	}
 	data = bytes.Clone(data)
+	refs := v4.ComputeLeafRefs(key, data)
 	s := p.shard(key)
 	s.mu.Lock()
-	s.records[string(key)] = prefetchedRecord{data: data, step: step}
+	s.records[string(key)] = prefetchedRecord{data: data, step: step, refs: refs}
 	s.mu.Unlock()
-	p.bytes.Add(int64(len(key) + len(data)))
+	size := len(key) + len(data)
+	if refs != nil {
+		size += 32 * len(refs.Refs)
+	}
+	p.bytes.Add(int64(size))
 	return data
 }
 

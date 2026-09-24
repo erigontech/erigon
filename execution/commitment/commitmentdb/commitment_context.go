@@ -1105,6 +1105,17 @@ type ownedBranchReader interface {
 	ReadsOwnedBranches()
 }
 
+type leafRefReader interface {
+	LeafRefs(key, data []byte) *commitment.LeafRefs
+}
+
+func (sdc *TrieContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	if r, ok := sdc.stateReader.(leafRefReader); ok {
+		return r.LeafRefs(key, data)
+	}
+	return nil
+}
+
 func (sdc *TrieContext) BranchOwned(pref []byte) ([]byte, kv.Step, error) {
 	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
 	if err != nil {

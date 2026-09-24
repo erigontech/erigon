@@ -21,6 +21,8 @@ import (
 	"fmt"
 	"math/bits"
 	"slices"
+
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type childSlot struct {
@@ -37,6 +39,7 @@ type node struct {
 	raw    []byte
 	record Record
 	layout layout
+	refs   *commitment.LeafRefs
 	plane  byte
 	loaded bool
 
