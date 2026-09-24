@@ -152,6 +152,23 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	return encodeDirectPayloadID(id), nil
 }
 
+func (cc *ExecutionClientDirect) ForkChoiceUpdateIfNewer(ctx context.Context, finalized, safe, head common.Hash, _ clparams.StateVersion) error {
+	status, err := cc.chainRW.UpdateForkChoiceIfNewer(ctx, head, safe, finalized)
+	if err != nil {
+		return fmt.Errorf("execution client forward-only forkchoice update failed: %w", err)
+	}
+	if status == execmodule.ExecutionStatusInvalidForkchoice {
+		return errors.New("forkchoice was invalid")
+	}
+	if status == execmodule.ExecutionStatusBadBlock {
+		return errors.New("bad block as forkchoice")
+	}
+	if status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("forward-only forkchoice update returned status %d", status)
+	}
+	return nil
+}
+
 func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
 	id, err := startPayloadBuild(ctx, cc.chainRW, head, attributes)
 	if err != nil {

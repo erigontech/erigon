@@ -266,6 +266,20 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, s
 	return result.Status, validationError, result.LatestValidHash, nil
 }
 
+func (c ChainReaderWriterEth1) UpdateForkChoiceIfNewer(ctx context.Context, headHash, safeHash, finalizeHash common.Hash) (execmodule.ExecutionStatus, error) {
+	callCtx := ctx
+	if c.fcuTimeout > 0 {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, c.fcuTimeout)
+		defer cancel()
+	}
+	result, err := c.executionModule.UpdateForkChoiceIfNewer(callCtx, headHash, safeHash, finalizeHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.Status, nil
+}
+
 func (c ChainReaderWriterEth1) GetForkChoice(ctx context.Context) (headHash, finalizedHash, safeHash common.Hash, err error) {
 	state, err := c.executionModule.GetForkChoice(ctx)
 	if err != nil {

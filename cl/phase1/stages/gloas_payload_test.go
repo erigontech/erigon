@@ -1366,6 +1366,10 @@ func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, com
 	return nil, nil
 }
 
+func (t *testExecutionEngine) ForkChoiceUpdateIfNewer(context.Context, common.Hash, common.Hash, common.Hash, clparams.StateVersion) error {
+	return nil
+}
+
 func (t *testExecutionEngine) SupportInsertion() bool { return t.supportInsertion }
 
 func (t *testExecutionEngine) InsertBlocks(context.Context, []*types.Block) error {

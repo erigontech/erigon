@@ -2492,6 +2492,83 @@ func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
 	require.ErrorContains(t, err, "block access list hash mismatch")
 }
 
+func TestUpdateForkChoiceIfNewerDoesNotMoveHeadBackward(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+
+	status, err := m.ExecModule.InsertBlocks(t.Context(), chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	result, err := m.UpdateForkChoice(t.Context(), chainPack.Blocks[1].HeaderNoCopy())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.Eventually(t, func() bool {
+		ready, err := m.ExecModule.Ready(t.Context())
+		return err == nil && ready
+	}, 5*time.Second, 10*time.Millisecond)
+
+	firstHash := chainPack.Blocks[0].Hash()
+	result, err = m.ExecModule.UpdateForkChoiceIfNewer(t.Context(), firstHash, firstHash, firstHash)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	currentHash := chainPack.Blocks[1].Hash()
+	result, err = m.ExecModule.UpdateForkChoiceIfNewer(t.Context(), currentHash, currentHash, currentHash)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+
+	head, err := m.ExecModule.CurrentHeader(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, chainPack.Blocks[1].Hash(), head.Hash())
+}
+
+func TestUpdateForkChoiceIfNewerMovesHeadForward(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+
+	status, err := m.ExecModule.InsertBlocks(t.Context(), chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	firstHash := chainPack.Blocks[0].Hash()
+	result, err := m.UpdateForkChoice(t.Context(), chainPack.Blocks[0].HeaderNoCopy())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.Eventually(t, func() bool {
+		ready, err := m.ExecModule.Ready(t.Context())
+		return err == nil && ready
+	}, 5*time.Second, 10*time.Millisecond)
+
+	result, err = m.ExecModule.UpdateForkChoiceIfNewer(t.Context(), chainPack.Blocks[1].Hash(), firstHash, firstHash)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.Eventually(t, func() bool {
+		ready, err := m.ExecModule.Ready(t.Context())
+		return err == nil && ready
+	}, 5*time.Second, 10*time.Millisecond)
+
+	head, err := m.ExecModule.CurrentHeader(t.Context())
+	require.NoError(t, err)
+	require.Equal(t, chainPack.Blocks[1].Hash(), head.Hash())
+}
+
+func TestUpdateForkChoiceIfNewerReadsInsertedBlockOverlay(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(2, nil)
+	require.NoError(t, err)
+
+	status, err := m.ExecModule.InsertBlocks(t.Context(), chainPack.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	targetHash := chainPack.Blocks[1].Hash()
+	result, err := m.ExecModule.UpdateForkChoiceIfNewer(t.Context(), targetHash, targetHash, targetHash)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+}
+
 // TestInsertBlocksWithBatchedFCU drives the Caplin persistent_block_collector
 // pattern: InsertBlocks(batch) → ForkChoiceUpdate(last block of batch),
 // repeated for each batch. Verifies parent TD continuity across batches —

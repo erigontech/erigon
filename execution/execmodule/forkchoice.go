@@ -113,6 +113,14 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 }
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
+	return e.requestForkChoiceUpdate(ctx, headHash, safeHash, finalizedHash, false)
+}
+
+func (e *ExecModule) UpdateForkChoiceIfNewer(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
+	return e.requestForkChoiceUpdate(ctx, headHash, safeHash, finalizedHash, true)
+}
+
+func (e *ExecModule) requestForkChoiceUpdate(ctx context.Context, headHash, safeHash, finalizedHash common.Hash, onlyIfNewer bool) (ForkChoiceResult, error) {
 	outcomeCh := make(chan forkchoiceOutcome, 1)
 
 	// Spawn the actual forkchoice work using the module's background context so
@@ -124,7 +132,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 	// cleanup has run, so any follow-up op (AssembleBlock, next FCU) that acquires
 	// the semaphore observes fully-settled state.
 	go func() {
-		if err := e.updateForkChoice(e.backgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
+		if err := e.updateForkChoice(e.backgroundCtx, headHash, safeHash, finalizedHash, onlyIfNewer, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
 	}()
@@ -354,7 +362,7 @@ func (e *ExecModule) unwindIfNeeded(
 	return nil, nil
 }
 
-func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
+func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, onlyIfNewer bool, outcomeCh chan forkchoiceOutcome) (err error) {
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
@@ -371,6 +379,16 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	}()
 
 	defer UpdateForkChoiceDuration(time.Now())
+	if onlyIfNewer {
+		result, skip, err := e.skipForkChoiceIfNotNewer(ctx, originalBlockHash)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+		}
+		if skip {
+			sendForkchoiceResultWithoutWaiting(outcomeCh, result, false)
+			return nil
+		}
+	}
 	// The next semaphore acquirer must observe settled state, so the bg-prune
 	// path runs this eagerly before handing the semaphore to its goroutine.
 	cleanupBeforeSemaRelease := sync.OnceFunc(func() {
@@ -785,6 +803,47 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		ValidationError: validationError,
 	}, stateFlushingInParallel)
 	return nil
+}
+
+func (e *ExecModule) skipForkChoiceIfNotNewer(ctx context.Context, targetHash common.Hash) (ForkChoiceResult, bool, error) {
+	tx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return ForkChoiceResult{}, false, err
+	}
+	defer tx.Rollback()
+
+	targetNumber, err := e.blockReader.HeaderNumber(ctx, tx, targetHash)
+	if err != nil {
+		return ForkChoiceResult{}, false, err
+	}
+	if targetNumber == nil && e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
+		targetNumber, err = e.blockReader.HeaderNumber(ctx, e.currentContext.BlockOverlay(), targetHash)
+		if err != nil {
+			return ForkChoiceResult{}, false, err
+		}
+	}
+	if targetNumber == nil {
+		return ForkChoiceResult{}, false, fmt.Errorf("forkchoice: block %x not found", targetHash)
+	}
+	currentHashBytes, err := tx.GetOne(kv.HeadHeaderKey, []byte(kv.HeadHeaderKey))
+	if err != nil {
+		return ForkChoiceResult{}, false, err
+	}
+	if len(currentHashBytes) == 0 {
+		return ForkChoiceResult{}, false, nil
+	}
+	currentHash := common.BytesToHash(currentHashBytes)
+	currentNumber, err := e.blockReader.HeaderNumber(ctx, tx, currentHash)
+	if err != nil {
+		return ForkChoiceResult{}, false, err
+	}
+	if currentNumber == nil {
+		return ForkChoiceResult{}, false, fmt.Errorf("forkchoice: current head %x has no block number", currentHash)
+	}
+	if *targetNumber > *currentNumber {
+		return ForkChoiceResult{}, false, nil
+	}
+	return ForkChoiceResult{LatestValidHash: currentHash, Status: ExecutionStatusSuccess}, true, nil
 }
 
 // runPostForkchoice runs the background FCU prune. Flush+commit and the

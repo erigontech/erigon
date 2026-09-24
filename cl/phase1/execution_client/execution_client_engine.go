@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -209,6 +210,26 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		return []byte{}, nil
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
+}
+
+func (cc *ExecutionClientEngine) ForkChoiceUpdateIfNewer(ctx context.Context, finalized, safe, head common.Hash, _ clparams.StateVersion) error {
+	if !cc.isLocal() {
+		return ErrNotSupported
+	}
+	status, err := cc.chainRW.UpdateForkChoiceIfNewer(ctx, head, safe, finalized)
+	if err != nil {
+		return fmt.Errorf("execution client forward-only forkchoice update failed: %w", err)
+	}
+	if status == execmodule.ExecutionStatusInvalidForkchoice {
+		return errors.New("forkchoice was invalid")
+	}
+	if status == execmodule.ExecutionStatusBadBlock {
+		return errors.New("bad block as forkchoice")
+	}
+	if status != execmodule.ExecutionStatusSuccess {
+		return fmt.Errorf("forward-only forkchoice update returned status %d", status)
+	}
+	return nil
 }
 
 func (cc *ExecutionClientEngine) SupportInsertion() bool {

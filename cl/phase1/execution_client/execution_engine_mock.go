@@ -126,6 +126,44 @@ func (c *MockExecutionEngineForkChoiceUpdateCall) DoAndReturn(f func(context.Con
 	return c
 }
 
+// ForkChoiceUpdateIfNewer mocks base method.
+func (m *MockExecutionEngine) ForkChoiceUpdateIfNewer(ctx context.Context, finalized, safe, head common.Hash, version clparams.StateVersion) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "ForkChoiceUpdateIfNewer", ctx, finalized, safe, head, version)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// ForkChoiceUpdateIfNewer indicates an expected call of ForkChoiceUpdateIfNewer.
+func (mr *MockExecutionEngineMockRecorder) ForkChoiceUpdateIfNewer(ctx, finalized, safe, head, version any) *MockExecutionEngineForkChoiceUpdateIfNewerCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ForkChoiceUpdateIfNewer", reflect.TypeOf((*MockExecutionEngine)(nil).ForkChoiceUpdateIfNewer), ctx, finalized, safe, head, version)
+	return &MockExecutionEngineForkChoiceUpdateIfNewerCall{Call: call}
+}
+
+// MockExecutionEngineForkChoiceUpdateIfNewerCall wrap *gomock.Call
+type MockExecutionEngineForkChoiceUpdateIfNewerCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockExecutionEngineForkChoiceUpdateIfNewerCall) Return(arg0 error) *MockExecutionEngineForkChoiceUpdateIfNewerCall {
+	c.Call = c.Call.Return(arg0)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockExecutionEngineForkChoiceUpdateIfNewerCall) Do(f func(context.Context, common.Hash, common.Hash, common.Hash, clparams.StateVersion) error) *MockExecutionEngineForkChoiceUpdateIfNewerCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockExecutionEngineForkChoiceUpdateIfNewerCall) DoAndReturn(f func(context.Context, common.Hash, common.Hash, common.Hash, clparams.StateVersion) error) *MockExecutionEngineForkChoiceUpdateIfNewerCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // FrozenBlocks mocks base method.
 func (m *MockExecutionEngine) FrozenBlocks(ctx context.Context) uint64 {
 	m.ctrl.T.Helper()
