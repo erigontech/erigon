@@ -41,12 +41,11 @@ type Computed struct {
 }
 
 // ExpectedJSON encodes v the way its tags declare: the json tag gives each field's name, its
-// position and whether it may be omitted, and the ethjson tag gives the hex form the JSON-RPC
-// spec uses for it — "quantity" for a number, "data" for bytes, "datalist" for an array of
-// them, "bool" for a plain JSON bool, "objects"
-// for an array of values that declare themselves. A field without an ethjson tag
-// A field without an ethjson tag is an error: nothing would say which form it is. An embedded
-// field is flattened, as encoding/json flattens an anonymous one.
+// position and whether it may be omitted, and the ethjson tag gives the form the JSON-RPC spec
+// writes it in — "quantity" for a number, "data" for bytes, "datalist" for an array of those,
+// "objects" for an array of values that declare themselves, "bool" for a plain JSON bool. A
+// field with no ethjson tag is an error, since nothing would say which form it is, and an
+// embedded field is flattened as encoding/json flattens an anonymous one.
 func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	rv := reflect.ValueOf(v)
 	for rv.Kind() == reflect.Pointer {
@@ -137,7 +136,7 @@ func jsonrpcValue(v reflect.Value, form string) ([]byte, error) {
 		// with the encoder often enough to hide a forgotten tag.
 		return nil, errors.New("no ethjson tag")
 	case "quantity":
-		if v.Type() == u256 || (v.Type().ConvertibleTo(u256) && u256.ConvertibleTo(v.Type())) {
+		if v.Type().ConvertibleTo(u256) && u256.ConvertibleTo(v.Type()) {
 			n := v.Convert(u256).Interface().(uint256.Int)
 			return json.Marshal((*hexutil.U256)(&n))
 		}
@@ -158,49 +157,43 @@ func jsonrpcValue(v reflect.Value, form string) ([]byte, error) {
 		}
 		return json.Marshal(v.Bool())
 	case "objects":
-		if v.Kind() == reflect.Interface {
-			if v.IsNil() {
-				return []byte("null"), nil
-			}
-			v = v.Elem()
-		}
-		if v.Kind() == reflect.Slice && v.IsNil() {
-			return []byte("null"), nil
-		}
-		buf := []byte{'['}
-		for i := range v.Len() {
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			encoded, err := ExpectedJSON(v.Index(i).Interface())
+		return jsonArray(v, func(e reflect.Value) ([]byte, error) { return ExpectedJSON(e.Interface()) })
+	case "datalist":
+		return jsonArray(v, func(e reflect.Value) ([]byte, error) {
+			bytes, err := asBytes(e)
 			if err != nil {
 				return nil, err
 			}
-			buf = append(buf, encoded...)
-		}
-		return append(buf, ']'), nil
-	case "datalist":
+			return json.Marshal(hexutil.Bytes(bytes))
+		})
+	}
+	return nil, fmt.Errorf("unknown ethjson form %q", form)
+}
+
+// jsonArray encodes a slice, or an interface holding one, with elem per element. A nil slice
+// is null, as encoding/json writes it.
+func jsonArray(v reflect.Value, elem func(reflect.Value) ([]byte, error)) ([]byte, error) {
+	if v.Kind() == reflect.Interface {
 		if v.IsNil() {
 			return []byte("null"), nil
 		}
-		buf := []byte{'['}
-		for i := range v.Len() {
-			bytes, err := asBytes(v.Index(i))
-			if err != nil {
-				return nil, err
-			}
-			if i > 0 {
-				buf = append(buf, ',')
-			}
-			encoded, err := json.Marshal(hexutil.Bytes(bytes))
-			if err != nil {
-				return nil, err
-			}
-			buf = append(buf, encoded...)
-		}
-		return append(buf, ']'), nil
+		v = v.Elem()
 	}
-	return nil, fmt.Errorf("unknown ethjson form %q", form)
+	if v.Kind() == reflect.Slice && v.IsNil() {
+		return []byte("null"), nil
+	}
+	buf := []byte{'['}
+	for i := range v.Len() {
+		if i > 0 {
+			buf = append(buf, ',')
+		}
+		encoded, err := elem(v.Index(i))
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, encoded...)
+	}
+	return append(buf, ']'), nil
 }
 
 func asBytes(v reflect.Value) ([]byte, error) {
