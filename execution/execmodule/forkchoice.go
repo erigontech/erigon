@@ -189,8 +189,10 @@ func (e *ExecModule) unwindIfNeeded(
 	// we short circuit reorgs if:
 	//   1. the head is an ancestor of the last finalised block
 	//   2. the head is a duplicate FCU (e.g. CLs sending the same FCU repeatedly)
+	isCurrentHead := fcuHeader.Number.Uint64() == finishProgressBefore
 	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash &&
-		(fcuHeader.Number.Uint64() < finalisedBlockNum || fcuHeader.Number.Uint64() == finishProgressBefore) {
+		(fcuHeader.Number.Uint64() < finalisedBlockNum || isCurrentHead) {
+		lastKnownSafeHash := rawdb.ReadForkchoiceSafe(tx)
 		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
@@ -201,6 +203,18 @@ func (e *ExecModule) unwindIfNeeded(
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusInvalidForkchoice,
 			}, nil
+		}
+		// The caller discards tx on this path, so persist new safe and finalized hashes
+		// for the current head directly. An ancestor head skips the update.
+		markersChanged := (safeHash != common.Hash{} && safeHash != lastKnownSafeHash) ||
+			(finalizedHash != common.Hash{} && finalizedHash != lastKnownFinalisedHash)
+		if isCurrentHead && markersChanged {
+			if err := e.db.Update(ctx, func(rwTx kv.RwTx) error {
+				writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
+				return nil
+			}); err != nil {
+				return nil, err
+			}
 		}
 		return &ForkChoiceResult{
 			LatestValidHash: blockHash,

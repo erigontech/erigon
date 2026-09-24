@@ -299,3 +299,70 @@ func TestExecModule_GivenReorgPastMaxReorgDepth_WhenNonFinality_ThenReorg(t *tes
 	defer tx.Rollback()
 	require.Equal(t, uint64(21), tx.Debug().TxNumsInFiles(kv.CommitmentDomain))
 }
+
+func TestExecModule_GivenSameHeadFCULowersFinalised_WhenReorgAboveIt_ThenReorg(t *testing.T) {
+	// `erigon import` inserts the chain and finalises its tip in one fork choice. A consensus client
+	// that then re-sends that head with its own, older finalised block must have its safe and
+	// finalised blocks applied, otherwise a reorg that forks below the imported tip but above the
+	// finalised block of the consensus client is rejected as an invalid forkchoice state.
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
+	const (
+		chainLen          = 20
+		finalisedBlockNum = 2
+		forkBlockNum      = 10
+	)
+	emt := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	canonical, err := emt.GenerateChain(chainLen, nil)
+	require.NoError(t, err)
+	status, err := emt.InsertBlocks(ctx, canonical.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	tipHash := canonical.TopBlock.Hash()
+	result, err := emt.UpdateForkChoice(
+		ctx,
+		canonical.TopBlock.Header(),
+		execmoduletester.WithSafeHash(tipHash),
+		execmoduletester.WithFinalisedHash(tipHash),
+	)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+
+	finalisedHash := canonical.Blocks[finalisedBlockNum-1].Hash()
+	result, err = emt.UpdateForkChoice(
+		ctx,
+		canonical.TopBlock.Header(),
+		execmoduletester.WithSafeHash(finalisedHash),
+		execmoduletester.WithFinalisedHash(finalisedHash),
+	)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	forkchoice, err := emt.ExecModule.GetForkChoice(ctx)
+	require.NoError(t, err)
+	require.Equal(t, tipHash, forkchoice.HeadHash)
+	require.Equal(t, finalisedHash, forkchoice.SafeHash)
+	require.Equal(t, finalisedHash, forkchoice.FinalizedHash)
+
+	fork, err := emt.GenerateChainFrom(canonical.Blocks[forkBlockNum-1], chainLen-forkBlockNum, func(_ int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	status, err = emt.InsertBlocks(ctx, fork.Blocks)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	validation, err := emt.ValidateChain(ctx, fork.TopBlock.Header())
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus)
+	result, err = emt.UpdateForkChoice(
+		ctx,
+		fork.TopBlock.Header(),
+		execmoduletester.WithSafeHash(finalisedHash),
+		execmoduletester.WithFinalisedHash(finalisedHash),
+	)
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	forkchoice, err = emt.ExecModule.GetForkChoice(ctx)
+	require.NoError(t, err)
+	require.Equal(t, fork.TopBlock.Hash(), forkchoice.HeadHash)
+	require.Equal(t, finalisedHash, forkchoice.FinalizedHash)
+}

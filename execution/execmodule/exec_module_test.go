@@ -299,6 +299,45 @@ func TestUpdateForkChoiceParallelFlushingAcceptsAncestorHashes(t *testing.T) {
 	require.Equal(t, head.Hash(), result.LatestValidHash)
 }
 
+func TestUpdateForkChoiceSameHeadAppliesSafeAndFinalized(t *testing.T) {
+	// -1 leaves a hash out of the fork choice under test, which keeps its previous value
+	for _, tc := range []struct {
+		name              string
+		safeIdx, finalIdx int
+	}{
+		{name: "both", safeIdx: 1, finalIdx: 0},
+		{name: "safe only", safeIdx: 1, finalIdx: -1},
+		{name: "finalized only", safeIdx: -1, finalIdx: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			m := execmoduletester.New(t)
+			chainPack, err := m.GenerateChain(3, nil)
+			require.NoError(t, err)
+			require.NoError(t, m.InsertValidateAndUfc1By1(t.Context(), chainPack.Blocks))
+			before, err := m.ExecModule.GetForkChoice(t.Context())
+			require.NoError(t, err)
+			hashAt := func(i int, previous common.Hash) common.Hash {
+				if i < 0 {
+					return previous
+				}
+				return chainPack.Blocks[i].Hash()
+			}
+			safe, finalized := hashAt(tc.safeIdx, common.Hash{}), hashAt(tc.finalIdx, common.Hash{})
+			head := chainPack.TopBlock
+			result, err := m.UpdateForkChoice(t.Context(), head.Header(),
+				execmoduletester.WithSafeHash(safe),
+				execmoduletester.WithFinalisedHash(finalized))
+			require.NoError(t, err)
+			require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+			after, err := m.ExecModule.GetForkChoice(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, head.Hash(), after.HeadHash)
+			require.Equal(t, hashAt(tc.safeIdx, before.SafeHash), after.SafeHash)
+			require.Equal(t, hashAt(tc.finalIdx, before.FinalizedHash), after.FinalizedHash)
+		})
+	}
+}
+
 func TestValidateChainAndUpdateForkChoiceWithSideForksThatGoBackAndForwardInHeight(t *testing.T) {
 	// This was caught by some of the gas-benchmark tests which run a series of new payloads and FCUs
 	// for forks with different lengths, and they jump from one fork to another.
