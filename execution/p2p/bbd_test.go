@@ -156,7 +156,6 @@ func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
 		defer cancel()
 		started := make(chan struct{})
 		var balCalls int
-		var balErr error
 		bal := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{1}}})
 		balHash, err := bal.Hash()
 		require.NoError(t, err)
@@ -165,7 +164,7 @@ func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
 			if balCalls == 1 {
 				close(started)
 				<-ctx.Done()
-				balErr = ctx.Err()
+				err = ctx.Err()
 				return nil
 			}
 			return map[common.Hash]*types.BlockAccessListSidecar{reqs[0].Hash: bal}
@@ -196,7 +195,7 @@ func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
 		default:
 			t.Fatal("body retry is still waiting for the failed batch's BAL fetch")
 		}
-		require.ErrorIs(t, balErr, context.Canceled)
+		require.ErrorIs(t, err, context.Canceled)
 		require.NoError(t, ctx.Err())
 		require.Equal(t, 2, balCalls)
 		require.Len(t, fetcher.peers, 2)
