@@ -59,10 +59,14 @@ var hashEncodeTests = []struct {
 	hashCount   int
 	expectedErr bool
 }{
-	{payloadStr: "e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
-		hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, expectedErr: false},
-	{hashesStr: fmt.Sprintf("%x", toHashes(1, 2, 3)),
-		payloadStr: "f863a00100000000000000000000000000000000000000000000000000000000000000a00200000000000000000000000000000000000000000000000000000000000000a00300000000000000000000000000000000000000000000000000000000000000", hashCount: 3, expectedErr: false},
+	{
+		payloadStr: "e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
+		hashesStr:  "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, expectedErr: false,
+	},
+	{
+		hashesStr:  fmt.Sprintf("%x", toHashes(1, 2, 3)),
+		payloadStr: "f863a00100000000000000000000000000000000000000000000000000000000000000a00200000000000000000000000000000000000000000000000000000000000000a00300000000000000000000000000000000000000000000000000000000000000", hashCount: 3, expectedErr: false,
+	},
 }
 
 func TestEncodeHash(t *testing.T) {
@@ -83,8 +87,10 @@ var gpt66EncodeTests = []struct {
 	requestID   uint64
 	expectedErr bool
 }{
-	{payloadStr: "e68306f854e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
-		hashesStr: "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, requestID: 456788, expectedErr: false},
+	{
+		payloadStr: "e68306f854e1a0595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328",
+		hashesStr:  "595e27a835cd79729ff1eeacec3120eeb6ed1464a04ec727aaca734ead961328", hashCount: 1, requestID: 456788, expectedErr: false,
+	},
 }
 
 // TestEncodeGPT66 tests the encoding of GetPoolTransactions66 packet

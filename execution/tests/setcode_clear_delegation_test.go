@@ -22,7 +22,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -62,8 +61,7 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 			authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
 			delegate := common.HexToAddress("0x000000000000000000000000000000000000cafe")
 
-			pragueConfig := new(chain.Config)
-			require.NoError(t, copier.CopyWithOption(pragueConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+			pragueConfig := chain.TestChainOsakaConfig.Copy()
 			pragueConfig.OsakaTime = nil
 			setAuth, err := types.SignAuthorization(authorityKey, *pragueConfig.ChainID, delegate, 0)
 			require.NoError(t, err)

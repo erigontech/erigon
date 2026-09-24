@@ -17,108 +17,38 @@
 package types
 
 import (
-	"strconv"
-
-	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
-func quotedHexLen(n int) int { return len(`"0x"`) + 2*n }
-
-const maxQuotedUintLen = len(`"0x0123456789abcdef"`)
-
-func appendQuotedHex(dst []byte, b []byte) []byte {
-	dst = append(dst, '"')
-	dst, _ = hexutil.Bytes(b).AppendText(dst)
-	return append(dst, '"')
-}
-
-func appendQuotedUint64(dst []byte, v hexutil.Uint64) []byte {
-	dst = append(dst, '"')
-	dst, _ = v.AppendText(dst)
-	return append(dst, '"')
-}
-
-// fastJSONLen is an upper bound on the encoded size, so the buffer is allocated
-// once instead of doubling.
-func (l *RPCLog) fastJSONLen() int {
+// MarshalFastJSONTo writes the log in the order RPCLog declares its fields, straight into
+// the response stream, so a result never needs a buffer of its own.
+func (l *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if l == nil {
-		return len("null")
+		s.WriteNil()
+		return nil
 	}
-	n := len(`{"address":,"topics":[],"data":,"blockNumber":,"transactionHash":,`) +
-		len(`"transactionIndex":,"blockHash":,"logIndex":,"removed":false,"blockTimestamp":}`)
-	n += quotedHexLen(length.Addr)
-	if l.Topics == nil {
-		n += len("null") - len("[]")
-	}
-	n += len(l.Topics) * (quotedHexLen(length.Hash) + 1)
-	n += quotedHexLen(len(l.Data))
-	n += 2 * quotedHexLen(length.Hash) // transactionHash, blockHash
-	n += 4 * maxQuotedUintLen          // blockNumber, transactionIndex, logIndex, blockTimestamp
-	return n
+	s.WriteObjectStart()
+	ethjson.Data(s, "address", l.Address[:])
+	ethjson.DataList(s, "topics", l.Topics)
+	// A nil Data is "0x", not null.
+	ethjson.Data(s, "data", l.Data)
+	ethjson.Quantity(s, "blockNumber", l.BlockNumber)
+	ethjson.Data(s, "transactionHash", l.TxHash[:])
+	ethjson.Quantity(s, "transactionIndex", l.TxIndex)
+	ethjson.Data(s, "blockHash", l.BlockHash[:])
+	ethjson.Quantity(s, "logIndex", l.Index)
+	s.Field("removed").WriteBool(l.Removed)
+	ethjson.Quantity(s, "blockTimestamp", l.BlockTimestamp)
+	s.WriteObjectEnd()
+	return nil
 }
 
-// appendFastJSON writes the log in the field order encoding/json uses for the
-// struct, so the output is byte-identical to reflection-based marshalling.
-func (l *RPCLog) appendFastJSON(dst []byte) []byte {
-	if l == nil {
-		return append(dst, "null"...)
-	}
-	dst = append(dst, `{"address":`...)
-	dst = appendQuotedHex(dst, l.Address[:])
-
-	dst = append(dst, `,"topics":`...)
-	if l.Topics == nil {
-		dst = append(dst, "null"...)
-	} else {
-		dst = append(dst, '[')
-		for i := range l.Topics {
-			if i > 0 {
-				dst = append(dst, ',')
-			}
-			dst = appendQuotedHex(dst, l.Topics[i][:])
-		}
-		dst = append(dst, ']')
-	}
-
-	dst = append(dst, `,"data":`...)
-	dst = appendQuotedHex(dst, l.Data)
-	dst = append(dst, `,"blockNumber":`...)
-	dst = appendQuotedUint64(dst, l.BlockNumber)
-	dst = append(dst, `,"transactionHash":`...)
-	dst = appendQuotedHex(dst, l.TxHash[:])
-	dst = append(dst, `,"transactionIndex":`...)
-	dst = appendQuotedUint64(dst, hexutil.Uint64(l.TxIndex))
-	dst = append(dst, `,"blockHash":`...)
-	dst = appendQuotedHex(dst, l.BlockHash[:])
-	dst = append(dst, `,"logIndex":`...)
-	dst = appendQuotedUint64(dst, hexutil.Uint64(l.Index))
-	dst = strconv.AppendBool(append(dst, `,"removed":`...), l.Removed)
-	dst = append(dst, `,"blockTimestamp":`...)
-	dst = appendQuotedUint64(dst, l.BlockTimestamp)
-	return append(dst, '}')
+// MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
+// pointer method RPCLogs itself would not satisfy the fast-JSON interface.
+func (logs RPCLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	jsonstream.ArrayValue(s, logs, writeLogElem)
+	return nil
 }
 
-// MarshalFastJSON is the single-log form of RPCLogs.MarshalFastJSON.
-func (l *RPCLog) MarshalFastJSON() ([]byte, error) {
-	return l.appendFastJSON(make([]byte, 0, l.fastJSONLen())), nil
-}
-
-// MarshalFastJSON is byte-identical to json.Marshal, encoded into one buffer sized by fastJSONLen.
-func (logs RPCLogs) MarshalFastJSON() ([]byte, error) {
-	if logs == nil {
-		return []byte("null"), nil
-	}
-	size := len("[]") + len(logs)
-	for _, l := range logs {
-		size += l.fastJSONLen()
-	}
-	out := append(make([]byte, 0, size), '[')
-	for i, l := range logs {
-		if i > 0 {
-			out = append(out, ',')
-		}
-		out = l.appendFastJSON(out)
-	}
-	return append(out, ']'), nil
-}
+func writeLogElem(s *jsonstream.StackStream, l **RPCLog) { _ = (*l).MarshalFastJSONTo(s) }

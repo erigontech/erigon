@@ -47,7 +47,7 @@ func benchmarkDrain(b *testing.B, leafDepth, stepBudget int) {
 		}
 		c := NewBranchCache(64)
 		for {
-			_, done, err := p.Run(stepBudget, nil, resolve, c, nil)
+			_, done, err := p.Run(b.Context(), stepBudget, nil, resolve, c, nil)
 			if err != nil {
 				b.Fatal(err)
 			}

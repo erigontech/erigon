@@ -17,14 +17,179 @@
 package native
 
 import (
+	"errors"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+func TestMuxForwardsTxEndV2(t *testing.T) {
+	receipt := &types.Receipt{GasUsed: 100}
+	usage := mdgas.TxnGasUsage{BlockExecutionGasUsed: 40, BlockStateGasUsed: 70, GasRefund: 10}
+	var calls int
+	var legacyCalls int
+	mux := newTestMuxTracer([]string{"v2", "v1", "nil"}, []*tracers.Tracer{
+		{Hooks: &tracing.Hooks{
+			OnTxEndV2: func(gotReceipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
+				require.Same(t, receipt, gotReceipt)
+				require.Equal(t, usage, txnGasUsage)
+				require.NoError(t, err)
+				calls++
+			},
+			OnTxEnd: func(*types.Receipt, error) { t.Fatal("V2 must take precedence") },
+		}},
+		{Hooks: &tracing.Hooks{OnTxEnd: func(gotReceipt *types.Receipt, err error) {
+			require.Same(t, receipt, gotReceipt)
+			require.NoError(t, err)
+			legacyCalls++
+		}}},
+		{},
+	})
+	mux.EmitTxEnd(receipt, usage, nil)
+	require.Equal(t, 1, calls)
+	require.Equal(t, 1, legacyCalls)
+}
+
+func TestMuxForwardsFrameV2(t *testing.T) {
+	entry := []mdgas.MdGas{{Execution: 100, State: 200}, {Execution: 30, State: 50}}
+	usage := []mdgas.MdGasUsage{{Execution: 3, State: 12, StateSpill: 2}, {Execution: 20, State: -10}}
+	var entered []mdgas.MdGas
+	var exited []mdgas.MdGasUsage
+	var legacyEntry []uint64
+	var legacyUsage []uint64
+	children := []*tracers.Tracer{
+		{Hooks: &tracing.Hooks{
+			OnEnterV2: func(_ int, _ byte, _, _ accounts.Address, _ bool, _ []byte, gas mdgas.MdGas, _ uint256.Int, _ []byte) {
+				entered = append(entered, gas)
+			},
+			OnExitV2: func(_ int, _ []byte, gasUsed mdgas.MdGasUsage, _ error, _ bool) {
+				exited = append(exited, gasUsed)
+			},
+			OnEnter: func(_ int, _ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+				t.Fatal("V2 must take precedence")
+			},
+			OnExit: func(_ int, _ []byte, _ uint64, _ error, _ bool) {
+				t.Fatal("V2 must take precedence")
+			},
+		}},
+		{Hooks: &tracing.Hooks{
+			OnEnter: func(_ int, _ byte, _, _ accounts.Address, _ bool, _ []byte, gas uint64, _ uint256.Int, _ []byte) {
+				legacyEntry = append(legacyEntry, gas)
+			},
+			OnExit: func(_ int, _ []byte, gasUsed uint64, _ error, _ bool) {
+				legacyUsage = append(legacyUsage, gasUsed)
+			},
+		}},
+		{},
+		{Hooks: &tracing.Hooks{}},
+	}
+	mux := newTestMuxTracer([]string{"v2", "v1", "nil", "empty"}, children)
+	mux.EmitEnter(0, 0xf1, accounts.ZeroAddress, accounts.ZeroAddress, false, nil, entry[0], uint256.Int{}, nil)
+	mux.EmitEnter(1, 0xf1, accounts.ZeroAddress, accounts.ZeroAddress, false, nil, entry[1], uint256.Int{}, nil)
+	mux.EmitExit(1, nil, usage[0], nil, false)
+	mux.EmitExit(0, nil, usage[1], nil, false)
+	require.Equal(t, entry, entered)
+	require.Equal(t, usage, exited)
+	require.Equal(t, []uint64{100, 30}, legacyEntry)
+	require.Equal(t, []uint64{3, 20}, legacyUsage)
+}
+
+func TestMuxForwardsOpcodeV2(t *testing.T) {
+	gas := mdgas.MdGas{Execution: 100, State: 200}
+	cost := mdgas.MdGas{Execution: 10, State: 50}
+	var received [][2]mdgas.MdGas
+	var legacy [][2]uint64
+	children := []*tracers.Tracer{
+		{Hooks: &tracing.Hooks{
+			OnOpcodeV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, _ tracing.OpContext, rData []byte, depth int, err error) {
+				require.Equal(t, uint64(42), pc)
+				require.Equal(t, byte(0x55), op)
+				require.Equal(t, []byte{1}, rData)
+				require.Equal(t, 2, depth)
+				require.NoError(t, err)
+				received = append(received, [2]mdgas.MdGas{gas, cost})
+			},
+			OnOpcode: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+				t.Fatal("V2 must take precedence")
+			},
+		}},
+		{Hooks: &tracing.Hooks{OnOpcode: func(_ uint64, _ byte, gas, cost uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+			legacy = append(legacy, [2]uint64{gas, cost})
+		}}},
+		{},
+		{Hooks: &tracing.Hooks{}},
+	}
+	mux := newTestMuxTracer([]string{"v2", "v1", "nil", "empty"}, children)
+	mux.EmitOpcode(42, 0x55, gas, cost, nil, []byte{1}, 2, nil)
+	require.Equal(t, [][2]mdgas.MdGas{{gas, cost}}, received)
+	require.Equal(t, [][2]uint64{{100, 10}}, legacy)
+}
+
+func TestMuxForwardsFaultV2(t *testing.T) {
+	gas := mdgas.MdGas{Execution: 100, State: 200}
+	cost := mdgas.MdGas{Execution: 10, State: 50}
+	fault := errors.New("opcode failed")
+	var received [][2]mdgas.MdGas
+	var legacy [][2]uint64
+	children := []*tracers.Tracer{
+		{Hooks: &tracing.Hooks{
+			OnFaultV2: func(pc uint64, op byte, gas, cost mdgas.MdGas, _ tracing.OpContext, depth int, err error) {
+				require.Equal(t, uint64(42), pc)
+				require.Equal(t, byte(0x55), op)
+				require.Equal(t, 2, depth)
+				require.ErrorIs(t, err, fault)
+				received = append(received, [2]mdgas.MdGas{gas, cost})
+			},
+			OnFault: func(_ uint64, _ byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
+				t.Fatal("V2 must take precedence")
+			},
+		}},
+		{Hooks: &tracing.Hooks{OnFault: func(_ uint64, _ byte, gas, cost uint64, _ tracing.OpContext, _ int, _ error) {
+			legacy = append(legacy, [2]uint64{gas, cost})
+		}}},
+		{},
+		{Hooks: &tracing.Hooks{}},
+	}
+	mux := newTestMuxTracer([]string{"v2", "v1", "nil", "empty"}, children)
+	mux.EmitFault(42, 0x55, gas, cost, nil, 2, fault)
+	require.Equal(t, [][2]mdgas.MdGas{{gas, cost}}, received)
+	require.Equal(t, [][2]uint64{{100, 10}}, legacy)
+}
+
+func TestMuxForwardsGasChangeV2(t *testing.T) {
+	old := mdgas.MdGas{Execution: 100, State: 200}
+	new := mdgas.MdGas{Execution: 90, State: 150}
+	var received [][2]mdgas.MdGas
+	var reasons []tracing.GasChangeReason
+	var legacy [][2]uint64
+	children := []*tracers.Tracer{
+		{Hooks: &tracing.Hooks{
+			OnGasChangeV2: func(old, new mdgas.MdGas, reason tracing.GasChangeReason) {
+				received = append(received, [2]mdgas.MdGas{old, new})
+				reasons = append(reasons, reason)
+			},
+			OnGasChange: func(_, _ uint64, _ tracing.GasChangeReason) { t.Fatal("V2 must take precedence") },
+		}},
+		{Hooks: &tracing.Hooks{OnGasChange: func(old, new uint64, _ tracing.GasChangeReason) {
+			legacy = append(legacy, [2]uint64{old, new})
+		}}},
+		{},
+	}
+	mux := newTestMuxTracer([]string{"v2", "v1", "nil"}, children)
+	mux.EmitGasChange(old, new, tracing.GasChangeCallOpCode)
+	require.Equal(t, [][2]mdgas.MdGas{{old, new}}, received)
+	require.Equal(t, []tracing.GasChangeReason{tracing.GasChangeCallOpCode}, reasons)
+	require.Equal(t, [][2]uint64{{100, 90}}, legacy)
+	mux.EmitGasChange(old, new, tracing.GasChangeTxIntrinsicGas)
+	require.Equal(t, [2]uint64{100, 90}, legacy[1])
+}
 
 // newTestMuxTracer is a test helper that constructs a muxTracer from
 // pre-built child tracers, bypassing the JSON-based registry lookup

@@ -32,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 // legacyMarshalReceipt is the map[string]any builder this package used before
@@ -216,7 +215,7 @@ func TestMarshalReceiptMatchesLegacyJSON(t *testing.T) {
 								name := fmt.Sprintf("%s/%s/logs=%s/bloom=%v/%s/contract=%v/ts=%v", cfg.name, txName, logs.name, !bloom.IsEmpty(), state.name, contract != (common.Address{}), withBlockTimestamp)
 								want, err := json.Marshal(legacyMarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
 								require.NoError(t, err)
-								got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
+								got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, true, withBlockTimestamp))
 								require.NoError(t, err)
 								require.JSONEq(t, string(want), string(got), name)
 							}
@@ -296,9 +295,10 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 	}
 	receipt["logs"] = logs
 
-	if protoReceipt.BaseFee != nil {
-		baseFee := gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee)
-		receipt["effectiveGasPrice"] = (*hexutil.U256)(baseFee)
+	if protoReceipt.EffectiveGasPrice != nil {
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.EffectiveGasPrice))
+	} else if protoReceipt.BaseFee != nil {
+		receipt["effectiveGasPrice"] = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee))
 	}
 
 	if protoReceipt.BlobGasUsed > 0 {
@@ -314,7 +314,6 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 
 func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 	addr := common.HexToAddress("0xdac17f958d2ee523a2206206994597c13d831ec7")
-	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
 	full := func() *remoteproto.SubscribeReceiptsReply {
 		bloom := make([]byte, 256)
 		bloom[3] = 0x10
@@ -329,15 +328,12 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 			GasUsed:           21_000,
 			ContractAddress:   gointerfaces.ConvertAddressToH160(addr),
 			LogsBloom:         bloom,
-			Logs: []*remoteproto.SubscribeLogsReply{
-				{Address: gointerfaces.ConvertAddressToH160(addr), Topics: []*typesproto.H256{gointerfaces.ConvertHashToH256(topic)}, Data: []byte{1, 2}},
-				{},
-			},
-			From:         gointerfaces.ConvertAddressToH160(common.HexToAddress("0x03")),
-			To:           gointerfaces.ConvertAddressToH160(addr),
-			BaseFee:      gointerfaces.ConvertUint256IntToH256(uint256.NewInt(7_000_000_000)),
-			BlobGasUsed:  131072,
-			BlobGasPrice: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(1)),
+			From:              gointerfaces.ConvertAddressToH160(common.HexToAddress("0x03")),
+			To:                gointerfaces.ConvertAddressToH160(addr),
+			BaseFee:           gointerfaces.ConvertUint256IntToH256(uint256.NewInt(7_000_000_000)),
+			EffectiveGasPrice: gointerfaces.ConvertUint256IntToH256(uint256.NewInt(8_000_000_000)),
+			BlobGasUsed:       131072,
+			BlobGasPrice:      gointerfaces.ConvertUint256IntToH256(uint256.NewInt(1)),
 		}
 	}
 	zero := gointerfaces.ConvertAddressToH160(common.Address{})
@@ -349,7 +345,10 @@ func TestMarshalSubscribeReceiptMatchesLegacyJSON(t *testing.T) {
 		"failed without logs": func(r *remoteproto.SubscribeReceiptsReply) {
 			r.Status, r.Logs, r.LogsBloom = 0, nil, make([]byte, types.BloomByteLength)
 		},
-		"no base fee, no blobs": func(r *remoteproto.SubscribeReceiptsReply) { r.BaseFee, r.BlobGasUsed, r.BlobGasPrice = nil, 0, nil },
+		"no base fee, no blobs": func(r *remoteproto.SubscribeReceiptsReply) {
+			r.BaseFee, r.EffectiveGasPrice, r.BlobGasUsed, r.BlobGasPrice = nil, nil, 0, nil
+		},
+		"base fee only": func(r *remoteproto.SubscribeReceiptsReply) { r.EffectiveGasPrice = nil },
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := full()

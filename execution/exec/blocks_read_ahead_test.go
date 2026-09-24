@@ -772,7 +772,8 @@ func TestCachePopulatingGetterStaleViewDoesNotFill(t *testing.T) {
 		TemporalGetter: stubTemporalGetter{v: []byte("pre-delete-record")},
 		stepSize:       1_562_500,
 		view: sc.View(cache.FrontierWithStateVersion(
-			cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }), 1)),
+			cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 11, true }), 1,
+		)),
 	}
 
 	_, _, err := cpg.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})

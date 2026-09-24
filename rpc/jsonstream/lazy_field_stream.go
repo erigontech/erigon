@@ -16,7 +16,12 @@
 
 package jsonstream
 
-import "io"
+import (
+	"encoding"
+	"io"
+
+	"github.com/erigontech/erigon/common/dbg"
+)
 
 var (
 	_ Stream = (*StackStream)(nil)
@@ -33,7 +38,10 @@ var (
 // added to the interface.
 type LazyFieldStream struct {
 	inner            Stream
+	owner            *StackStream
 	written          bool
+	mark             int
+	markDepth        int
 	openDepth        uint
 	field            string
 	prependSeparator bool
@@ -62,28 +70,44 @@ func (s *LazyFieldStream) CloseIfOpen() {
 func (s *LazyFieldStream) ensure() {
 	if !s.written {
 		s.written = true
+		s.mark, s.markDepth = len(s.inner.Buffer()), s.inner.Depth()
 		if s.prependSeparator {
-			s.inner.WriteMore()
+			s.inner.markSeparatorPending()
 		}
-		s.inner.WriteObjectField(s.field)
+		s.owner = s.inner.Field(s.field)
 		s.openDepth = uint(s.inner.Depth() - 1)
 	}
+}
+
+// RewindIfEmpty unwrites the field name when the buffer still ends with it, so the caller can
+// put something else in the enclosing object. Anything else — a value written after it, or a
+// flush that carried it off to the writer — leaves the field where it is and reports false.
+func (s *LazyFieldStream) RewindIfEmpty() bool {
+	if !s.written || s.mark > len(s.owner.Buffer()) || !s.bufferEndsWithField() {
+		return false
+	}
+	s.owner.rewindField(s.mark, s.markDepth)
+	s.written = false
+	return true
+}
+
+func (s *LazyFieldStream) bufferEndsWithField() bool {
+	rest := s.owner.Buffer()[s.mark:]
+	if len(rest) > 0 && rest[0] == ',' {
+		rest = rest[1:]
+	} else if s.prependSeparator {
+		return false
+	}
+	return len(rest) == len(s.field)+3 && rest[0] == '"' &&
+		string(rest[1:len(rest)-2]) == s.field && rest[len(rest)-2] == '"' && rest[len(rest)-1] == ':'
 }
 
 func (s *LazyFieldStream) WriteNil()              { s.ensure(); s.inner.WriteNil() }
 func (s *LazyFieldStream) WriteTrue()             { s.ensure(); s.inner.WriteTrue() }
 func (s *LazyFieldStream) WriteFalse()            { s.ensure(); s.inner.WriteFalse() }
 func (s *LazyFieldStream) WriteBool(v bool)       { s.ensure(); s.inner.WriteBool(v) }
-func (s *LazyFieldStream) WriteInt(v int)         { s.ensure(); s.inner.WriteInt(v) }
-func (s *LazyFieldStream) WriteInt8(v int8)       { s.ensure(); s.inner.WriteInt8(v) }
-func (s *LazyFieldStream) WriteInt16(v int16)     { s.ensure(); s.inner.WriteInt16(v) }
-func (s *LazyFieldStream) WriteInt32(v int32)     { s.ensure(); s.inner.WriteInt32(v) }
-func (s *LazyFieldStream) WriteInt64(v int64)     { s.ensure(); s.inner.WriteInt64(v) }
-func (s *LazyFieldStream) WriteUint(v uint)       { s.ensure(); s.inner.WriteUint(v) }
-func (s *LazyFieldStream) WriteUint8(v uint8)     { s.ensure(); s.inner.WriteUint8(v) }
-func (s *LazyFieldStream) WriteUint16(v uint16)   { s.ensure(); s.inner.WriteUint16(v) }
-func (s *LazyFieldStream) WriteUint32(v uint32)   { s.ensure(); s.inner.WriteUint32(v) }
-func (s *LazyFieldStream) WriteUint64(v uint64)   { s.ensure(); s.inner.WriteUint64(v) }
+func (s *LazyFieldStream) Int(v int64)            { s.ensure(); s.inner.Int(v) }
+func (s *LazyFieldStream) Uint(v uint64)          { s.ensure(); s.inner.Uint(v) }
 func (s *LazyFieldStream) WriteFloat32(v float32) { s.ensure(); s.inner.WriteFloat32(v) }
 func (s *LazyFieldStream) WriteFloat64(v float64) { s.ensure(); s.inner.WriteFloat64(v) }
 func (s *LazyFieldStream) WriteString(v string)   { s.ensure(); s.inner.WriteString(v) }
@@ -95,11 +119,30 @@ func (s *LazyFieldStream) WriteArrayStart()       { s.ensure(); s.inner.WriteArr
 func (s *LazyFieldStream) WriteEmptyArray()       { s.ensure(); s.inner.WriteEmptyArray() }
 func (s *LazyFieldStream) WriteEmptyObject()      { s.ensure(); s.inner.WriteEmptyObject() }
 
-// A separator and a field name carry no value bytes, so opening the field for
-// them would emit `"result":` with nothing to follow it. They belong to a
-// container a value write already opened.
-func (s *LazyFieldStream) WriteMore()                   { s.inner.WriteMore() }
-func (s *LazyFieldStream) WriteObjectField(name string) { s.inner.WriteObjectField(name) }
+// Open writes the field this stream is holding and returns the stream that owns the buffer.
+func (s *LazyFieldStream) Open() *StackStream {
+	s.ensure()
+	return s.owner
+}
+
+func (s *LazyFieldStream) WriteQuotedText(v encoding.TextAppender) {
+	s.ensure()
+	s.inner.WriteQuotedText(v)
+}
+
+// A field name carries no value bytes, so opening the field for it would emit
+// `"result":` with nothing to follow it. It belongs to a container a value write
+// already opened.
+func (s *LazyFieldStream) Field(name string) *StackStream {
+	s.assertOpened()
+	return s.inner.Field(name)
+}
+
+func (s *LazyFieldStream) assertOpened() {
+	if dbg.AssertEnabled && !s.written {
+		panic("jsonstream: field written before " + s.field + " opened, its value would land in the enclosing object")
+	}
+}
 
 // The ends close what a value opened, so the field is already there.
 func (s *LazyFieldStream) WriteObjectEnd() { s.inner.WriteObjectEnd() }
@@ -109,8 +152,11 @@ func (s *LazyFieldStream) Buffer() []byte                 { return s.inner.Buffe
 func (s *LazyFieldStream) Flush() error                   { return s.inner.Flush() }
 func (s *LazyFieldStream) ClosePending(target uint) error { return s.inner.ClosePending(target) }
 func (s *LazyFieldStream) Depth() int                     { return s.inner.Depth() }
+func (s *LazyFieldStream) Err() error                     { return s.inner.Err() }
 
 func (s *LazyFieldStream) Reset(out io.Writer) {
 	s.inner.Reset(out)
 	s.written = false
 }
+
+func (s *LazyFieldStream) markSeparatorPending() { s.inner.markSeparatorPending() }

@@ -57,7 +57,7 @@ type AdaptivePinController struct {
 	states map[[32]byte]*adaptiveContractState
 }
 
-type DbBranchesProvider func(contractHash []byte) map[string][]byte
+type DbBranchesProvider func(contractHash []byte, budgetBytes int) map[string][]byte
 
 type adaptiveContractState struct {
 	contractHash     [32]byte
@@ -98,10 +98,6 @@ func (c *AdaptivePinController) Bind() {
 	c.cache.SetMissCallback(c.onCacheMiss)
 }
 
-func (c *AdaptivePinController) PerContractBudgetBytes() int {
-	return c.cfg.PerContractMaxBudgetBytes
-}
-
 func (c *AdaptivePinController) onCacheMiss(prefix []byte) {
 	hash, ok := ContractHashFromPrefix(prefix)
 	if !ok {
@@ -122,19 +118,37 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	var promoted, extended, demoted int
+	var promoted, extended, demoted, rebuilt int
 
 	for hash, state := range c.states {
 		n, hadMisses := misses[hash]
 		if hadMisses && n > 0 {
 			state.coldBlocksInARow = 0
 			delete(misses, hash)
-			if state.parallel.QueueRemaining() > 0 && state.parallel.UsedBytes() < c.cfg.PerContractMaxBudgetBytes {
-				remaining := c.cfg.PerContractMaxBudgetBytes - state.parallel.UsedBytes()
+			if c.trunkDrainedLocked(state) {
+				fresh, err := NewContractTrunkPreloadParallel(state.contractHash[:])
+				if err != nil {
+					c.warnf("[adaptive-pin] rebuild failed", "hash", hex.EncodeToString(hash[:]), "err", err)
+					continue
+				}
+				if c.logger != nil {
+					c.logger.Info("[adaptive-pin] rebuilding",
+						"hash", hex.EncodeToString(hash[:]),
+						"live", c.cache.PinnedCountFor(hash[:]),
+						"pinned_was", state.parallel.PinnedTotal(),
+						"used_mb_was", state.parallel.UsedBytes()/(1<<20))
+				}
+				state.parallel = fresh
+				rebuilt++
+			}
+			remaining := c.cfg.PerContractMaxBudgetBytes - state.parallel.UsedBytes()
+			if state.parallel.QueueRemaining() > 0 && remaining >= minEntryBytes {
 				step := min(c.cfg.ExtensionBudgetBytes, remaining)
-				if err := c.runExtensionLocked(ctx, state, txNum, step, resolve, provider); err != nil {
+				newlyPinned, err := c.runExtensionLocked(ctx, state, txNum, step, resolve, provider)
+				switch {
+				case err != nil:
 					c.warnf("[adaptive-pin] extend failed", "hash", hex.EncodeToString(hash[:]), "err", err)
-				} else {
+				case newlyPinned > 0:
 					extended++
 				}
 			}
@@ -170,16 +184,20 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 	if demoted > 0 {
 		mxAdaptiveDemoted.AddUint64(uint64(demoted))
 	}
+	if rebuilt > 0 {
+		mxAdaptiveRebuilt.AddUint64(uint64(rebuilt))
+	}
 	mxAdaptiveActive.SetUint64(uint64(len(c.states)))
 	c.cache.PublishMetrics()
 
-	if c.logger != nil && (promoted+extended+demoted > 0 || len(c.states) > 0) {
+	if c.logger != nil && (promoted+extended+demoted+rebuilt > 0 || len(c.states) > 0) {
 		c.logger.Info("[adaptive-pin]",
 			"txNum", txNum,
 			"promoted_total", len(c.states),
 			"promoted_this_block", promoted,
 			"extended_this_block", extended,
 			"demoted_this_block", demoted,
+			"rebuilt_this_block", rebuilt,
 			"cache_pinned_total", c.cache.PinnedCount())
 	}
 }
@@ -187,20 +205,24 @@ func (c *AdaptivePinController) OnBlockComplete(ctx context.Context, txNum uint6
 func (c *AdaptivePinController) snapshotMisses() map[[32]byte]uint64 {
 	out := make(map[[32]byte]uint64)
 	c.misses.Range(func(k, v any) bool {
-		hash := k.([32]byte)
 		if n := v.(*atomic.Uint64).Swap(0); n > 0 {
-			out[hash] = n
+			out[k.([32]byte)] = n
+		} else {
+			c.misses.Delete(k)
 		}
 		return true
 	})
 	return out
 }
 
+func (c *AdaptivePinController) trunkDrainedLocked(state *adaptiveContractState) bool {
+	pinned := state.parallel.PinnedTotal()
+	return pinned > 0 && c.cache.PinnedCountFor(state.contractHash[:])*2 < pinned
+}
+
 // demoteLocked: caller must hold c.mu.
 func (c *AdaptivePinController) demoteLocked(hash [32]byte, state *adaptiveContractState) {
-	for _, prefix := range state.parallel.PinnedPrefixes() {
-		c.cache.Invalidate(prefix)
-	}
+	c.cache.UnpinContract(hash[:])
 	if c.logger != nil {
 		c.logger.Info("[adaptive-pin] demoted",
 			"hash", hex.EncodeToString(hash[:]),
@@ -225,14 +247,12 @@ func (c *AdaptivePinController) promoteLocked(
 	p.pinTxNum = txNum
 	var dbBranches map[string][]byte
 	if provider != nil {
-		dbBranches = provider(hash[:])
+		dbBranches = provider(hash[:], c.cfg.InitialViewBudgetBytes)
 	}
 	started := time.Now()
-	if _, _, err := p.Run(c.cfg.InitialViewBudgetBytes, dbBranches, resolve, c.cache, c.logger); err != nil {
+	if _, _, err := p.Run(ctx, c.cfg.InitialViewBudgetBytes, dbBranches, resolve, c.cache, c.logger); err != nil {
 		recordPreload(started, 0)
-		for _, prefix := range p.PinnedPrefixes() {
-			c.cache.Invalidate(prefix)
-		}
+		c.cache.UnpinContract(hash[:])
 		return nil, err
 	}
 	recordPreload(started, p.usedBytes)
@@ -250,16 +270,16 @@ func (c *AdaptivePinController) runExtensionLocked(
 	stepBudget int,
 	resolve BatchBranchResolver,
 	provider DbBranchesProvider,
-) error {
+) (newlyPinned int, err error) {
 	var dbBranches map[string][]byte
 	if provider != nil {
-		dbBranches = provider(state.contractHash[:])
+		dbBranches = provider(state.contractHash[:], stepBudget)
 	}
 	state.parallel.pinTxNum = txNum
 	before, started := state.parallel.usedBytes, time.Now()
-	_, _, err := state.parallel.Run(stepBudget, dbBranches, resolve, c.cache, c.logger)
+	newlyPinned, _, err = state.parallel.Run(ctx, stepBudget, dbBranches, resolve, c.cache, c.logger)
 	recordPreload(started, state.parallel.usedBytes-before)
-	return err
+	return newlyPinned, err
 }
 
 func pickPromotionCandidates(misses map[[32]byte]uint64, threshold uint64, maxN int) [][32]byte {

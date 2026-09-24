@@ -35,7 +35,6 @@ const (
 )
 
 func CreateHandler(api []rpc.API) http.Handler {
-
 	var graphqlAPI jsonrpc.GraphQLAPI
 
 	for _, r := range api {

@@ -82,7 +82,7 @@ func CompactToHex(compact []byte) []byte {
 // nibble encoding with a trailing Terminator byte.
 func KeybytesToHex(str []byte) []byte {
 	l := len(str)*2 + 1
-	var nibbles = make([]byte, l)
+	nibbles := make([]byte, l)
 	for i, b := range str {
 		nibbles[i*2] = b / Terminator
 		nibbles[i*2+1] = b % Terminator
@@ -126,7 +126,7 @@ func HasTerm(s []byte) bool {
 
 // CommonPrefixLen returns the length of the common prefix of a and b.
 func CommonPrefixLen(a, b []byte) int {
-	var i, length = 0, len(a)
+	i, length := 0, len(a)
 	if len(b) < length {
 		length = len(b)
 	}

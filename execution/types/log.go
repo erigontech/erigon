@@ -37,29 +37,29 @@ import (
 type Log struct {
 	// Consensus fields:
 	// address of the contract that generated the event
-	Address common.Address `json:"address" codec:"1"`
+	Address common.Address `json:"address" ethjson:"data" codec:"1"`
 	// list of topics provided by the contract.
-	Topics []common.Hash `json:"topics" codec:"2"`
+	Topics []common.Hash `json:"topics" ethjson:"datalist" codec:"2"`
 	// supplied by the contract, usually ABI-encoded
-	Data hexutil.Bytes `json:"data" codec:"3"`
+	Data hexutil.Bytes `json:"data" ethjson:"data" codec:"3"`
 
 	// Derived fields. These fields are filled in by the node
 	// but not secured by consensus.
 	// block in which the transaction was included
-	BlockNumber hexutil.Uint64 `json:"blockNumber" codec:"-"`
+	BlockNumber hexutil.Uint64 `json:"blockNumber" ethjson:"quantity" codec:"-"`
 
 	// hash of the transaction
-	TxHash common.Hash `json:"transactionHash" codec:"-"`
+	TxHash common.Hash `json:"transactionHash" ethjson:"data" codec:"-"`
 	// index of the transaction in the block
-	TxIndex hexutil.Uint `json:"transactionIndex" codec:"-"`
+	TxIndex hexutil.Uint `json:"transactionIndex" ethjson:"quantity" codec:"-"`
 	// hash of the block in which the transaction was included
-	BlockHash common.Hash `json:"blockHash" codec:"-"`
+	BlockHash common.Hash `json:"blockHash" ethjson:"data" codec:"-"`
 	// index of the log in the block
-	Index hexutil.Uint `json:"logIndex" codec:"-"`
+	Index hexutil.Uint `json:"logIndex" ethjson:"quantity" codec:"-"`
 
 	// The Removed field is true if this log was reverted due to a chain reorganisation.
 	// You must pay attention to this field if you receive logs through a filter query.
-	Removed bool `json:"removed" codec:"-"`
+	Removed bool `json:"removed" ethjson:"bool" codec:"-"`
 }
 
 // UnmarshalJSON validates required fields: address, topics, data, transactionHash.
@@ -118,7 +118,7 @@ type Logs []*Log
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 type RPCLog struct {
 	Log
-	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
+	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" ethjson:"quantity" codec:"-"`
 }
 
 // UnmarshalJSON parses both the embedded Log fields and the RPC-specific blockTimestamp field.
@@ -271,12 +271,12 @@ func (logs Logs) ContainingTopics(addrMap map[common.Address]struct{}, topicsMap
 		if _, requested := addrMap[v.Address]; !requested && len(addrMap) > 0 {
 			continue // not there? skip this log
 		}
-		//topicsMap len zero match any topics
+		// topicsMap len zero match any topics
 		if len(topicsMap) == 0 {
 			o = append(o, v)
 		} else {
 			for i := range v.Topics {
-				//Contain any topics that matched
+				// Contain any topics that matched
 				if _, ok := topicsMap[v.Topics[i]]; ok {
 					found = true
 				}
@@ -303,11 +303,11 @@ type rlpStorageLog struct {
 	Address common.Address
 	Topics  []common.Hash
 	Data    []byte
-	//BlockNumber uint64
-	//TxHash common.Hash
-	//TxIndex uint
-	//BlockHash   common.Hash
-	//Index uint
+	// BlockNumber uint64
+	// TxHash common.Hash
+	// TxIndex uint
+	// BlockHash   common.Hash
+	// Index uint
 }
 
 // EncodeRLP implements rlp.Encoder.

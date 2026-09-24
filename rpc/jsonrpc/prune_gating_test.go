@@ -372,7 +372,8 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
 		return apis.eth.CreateAccessList(ctx, pruneGatingCallArgs(), &bnh, nil, nil)
 	}},
-	{"eth_callMany", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	// The bundles run on top of the block's own transactions, so the body has to be there.
+	{"eth_callMany", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		bundles, simulate := pruneGatingBundle(ref.num)
 		return apis.eth.CallMany(ctx, bundles, simulate, nil, nil)
 	}},
@@ -509,13 +510,17 @@ var pruneGatingConfigs = []pruneGatingConfig{
 	{name: "full_legacy", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode}},
 	// The same shape on a chain that declares a merge point: there the blocks
 	// sentinel is chain history expiry rather than a no-op.
-	{name: "full_legacy_merge_chain", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode},
-		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight), dropPreMergeTxs: true},
+	{
+		name: "full_legacy_merge_chain", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight), dropPreMergeTxs: true,
+	},
 	// Both retentions carry the chain-history-expiry sentinel, the pair a legacy
 	// archive datadir and an operator asking for expiry on top of archive persist
 	// alike. This fixture holds every body, so it is the archive one.
-	{name: "legacy_archive_sentinel_pair", mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
-		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight)},
+	{
+		name: "legacy_archive_sentinel_pair", mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	},
 	// State history in full while block bodies follow a window, the shape an operator
 	// asks for with --prune.mode=archive --prune.distance.blocks=N. It is the only row
 	// where the blocks boundary is stricter than the history one.

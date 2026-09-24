@@ -104,7 +104,7 @@ func (b *batch) run() {
 
 retry:
 	for len(b.calls) > 0 {
-		var failIdx = -1
+		failIdx := -1
 		err := b.db.Update(context.Background(), func(tx kv.RwTx) error {
 			for i, c := range b.calls {
 				if err := safelyCall(c.fn, tx); err != nil {

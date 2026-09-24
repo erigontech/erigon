@@ -37,7 +37,7 @@ import (
 type AccountRef accounts.Address
 
 // Address casts AccountRef to a Address
-func (ar AccountRef) Address() accounts.Address { return (accounts.Address)(ar) }
+func (ar AccountRef) Address() accounts.Address { return accounts.Address(ar) }
 
 // Contract represents an ethereum contract in the state database. It contains
 // the contract code, calling arguments. Contract implements ContractRef

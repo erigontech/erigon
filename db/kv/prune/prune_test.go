@@ -32,8 +32,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 )
 
-const testTxLookupTable = "TestTxLookup"
-const testDupSortTable = "TestDupSort"
+const (
+	testTxLookupTable = "TestTxLookup"
+	testDupSortTable  = "TestDupSort"
+)
 
 func openTestDB(tb testing.TB) kv.RwDB {
 	tb.Helper()

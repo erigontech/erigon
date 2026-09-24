@@ -146,6 +146,7 @@ func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 		})
 	}
 }
+
 func TestSignedExecutionPayloadEnvelopeCloneNilMessage(t *testing.T) {
 	envelope := &SignedExecutionPayloadEnvelope{
 		Signature: common.Bytes96{1, 2, 3},
@@ -457,4 +458,17 @@ func executionPayloadBidWithCommitments(count int) *ExecutionPayloadBid {
 		commitments.Append(new(KZGCommitment))
 	}
 	return &ExecutionPayloadBid{BlobKzgCommitments: *commitments}
+}
+
+func TestExecutionPayloadEnvelopeHashSSZRejectsIncompleteEnvelope(t *testing.T) {
+	_, errNilMessage := (&SignedExecutionPayloadEnvelope{}).HashSSZ()
+	require.Error(t, errNilMessage)
+	_, errNilPayload := (&SignedExecutionPayloadEnvelope{
+		Message: &ExecutionPayloadEnvelope{ExecutionRequests: &ExecutionRequests{}},
+	}).HashSSZ()
+	require.Error(t, errNilPayload)
+	_, errNilRequests := (&SignedExecutionPayloadEnvelope{
+		Message: &ExecutionPayloadEnvelope{Payload: &Eth1Block{}},
+	}).HashSSZ()
+	require.Error(t, errNilRequests)
 }

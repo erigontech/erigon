@@ -103,7 +103,8 @@ func TestFeeHistoryTruncatesBlobArrays(t *testing.T) {
 	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{}, nil, gasprice.NewFeeHistoryCache(), log.New())
 
 	oldest, _, baseFee, gasUsedRatio, blobBaseFee, blobGasUsedRatio, err := oracle.FeeHistory(
-		context.Background(), 5, rpc.BlockNumber(10), nil)
+		context.Background(), 5, rpc.BlockNumber(10), nil,
+	)
 	require.NoError(t, err)
 
 	// Range is 6..10 with block 8 missing, so blocks 6 and 7 are returned.
