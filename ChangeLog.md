@@ -1,3 +1,16 @@
+# Erigon v3.8.0 — TBD
+
+### Breaking Changes
+
+- rpc: `--rpc.accessList` now applies to WebSocket, IPC and in-process connections too, not only HTTP, and gates `*_subscribe`: an allow list that does not name a subscribe method now answers `-32601` there (`*_unsubscribe` stays allowed). WebSocket and IPC batches now run with `--rpc.batch.concurrency` (default 2) instead of a fixed 50. This can be a breaking change for allow lists used with subscriptions (#24190) — by @AskAlexSharov
+
+### Changed
+
+- rpc: `ots_hasCode` now answers about the end of the block it is given, matching `eth_getCode`. It addressed the state by the block itself where the block-state helpers address it by the next block, so it answered about the end of the previous block and a contract deployed in block N read as having no code at block N (#24223) — by @Sahil-4555
+- rpc: `rpchelper.GetBlockNumber` and the related resolvers no longer take a `filters` argument, so the transaction a handler passes decides which view it reads. Two effects are visible over JSON-RPC. On a node building a payload, the `pending` tag on `eth_getBalance`, `eth_getTransactionCount` (when the txpool holds no nonce for the address), `eth_getCode`, `eth_getStorageAt`, `eth_getStorageValues`, `eth_estimateGas`, `ots_hasCode`, `erigon_getBalanceChangesInBlock` and the GraphQL account getters answered `block N+1 is not executed` and now serves the latest executed state; on a node that is not building a payload these are unchanged. `eth_callBundle` likewise failed there and now executes against the latest executed block instead of attempting replay at the in-memory pending height. While a block is published but not yet committed, `erigon_getBalanceChangesInBlock`, `eth_getBlockAccessList`, `debug_getRawBlockAccessList`, `erigon_getBlockReceiptsByBlockHash`, `ots_hasCode`, `eth_callBundle` and `eth_createAccessList` now name the committed head, instead of naming the overlay head and then failing to read it (#24090) — by @Sahil-4555
+
+---
+
 # Erigon v3.7.0 — Velvet Vibrissae — TBD
 
 Erigon 3.7.0 is headlined by **parallel commitment enabled by default**, **broad RPC performance improvements**,
@@ -54,14 +67,11 @@ recovery during non-finality, and RPC correctness at the chain tip and on pruned
   blob hashes before Cancun; `eth_createAccessList` also rejects pre-Berlin blocks (#23700) — by @Sahil-4555
 - **EIP-7702 transaction-pool limits.** Delegated senders may have only one in-flight transaction and cannot submit
   nonce-gapped transactions. Same-nonce replacement remains supported (#23294) — by @yperbasis
-- rpc: `--rpc.accessList` now applies to WebSocket, IPC and in-process connections too, not only HTTP, and gates `*_subscribe`: an allow list that does not name a subscribe method now answers `-32601` there (`*_unsubscribe` stays allowed). WebSocket and IPC batches now run with `--rpc.batch.concurrency` (default 2) instead of a fixed 50. This can be a breaking change for allow lists used with subscriptions (#24190) — by @AskAlexSharov
 
 ### Added and Changed
 
 #### RPC
 
-- rpc: `ots_hasCode` now answers about the end of the block it is given, matching `eth_getCode`. It addressed the state by the block itself where the block-state helpers address it by the next block, so it answered about the end of the previous block and a contract deployed in block N read as having no code at block N (#24102) — by @Sahil-4555
-- rpc: `rpchelper.GetBlockNumber` and the related resolvers no longer take a `filters` argument, so the transaction a handler passes decides which view it reads. Two effects are visible over JSON-RPC. On a node building a payload, the `pending` tag on `eth_getBalance`, `eth_getTransactionCount` (when the txpool holds no nonce for the address), `eth_getCode`, `eth_getStorageAt`, `eth_getStorageValues`, `eth_estimateGas`, `ots_hasCode`, `erigon_getBalanceChangesInBlock` and the GraphQL account getters answered `block N+1 is not executed` and now serves the latest executed state; on a node that is not building a payload these are unchanged. `eth_callBundle` likewise failed there and now executes against the latest executed block instead of attempting replay at the in-memory pending height. While a block is published but not yet committed, `erigon_getBalanceChangesInBlock`, `eth_getBlockAccessList`, `debug_getRawBlockAccessList`, `erigon_getBlockReceiptsByBlockHash`, `ots_hasCode`, `eth_callBundle` and `eth_createAccessList` now name the committed head, instead of naming the overlay head and then failing to read it (#24090) — by @Sahil-4555
 - Logs returned by `erigon_getLogsByHash`, `eth_getFilterChanges`, and `eth_subscribe("logs")` now include
   `blockTimestamp`, matching `eth_getLogs` (#23935, #23296) — by @lupin012, @taratorio
 - `eth_subscribe("syncing")` reports sync-state changes over WebSocket. Both it and `eth_syncing` now show snapshot
