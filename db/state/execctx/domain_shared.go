@@ -582,8 +582,8 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
 	apply := func() error {
-		if swapper, ok := sd.mem.(commitmentDiffSwapper); ok && upd.Deltas != nil {
-			return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, swapper.CommitmentDiff())
+		if upd.Deltas != nil {
+			return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, sd.mem.(commitmentDiffSwapper).CommitmentDiff())
 		}
 		return upd.Apply(putBranch)
 	}
@@ -595,7 +595,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 
 	switcher, ok := sd.mem.(changesetSwitcher)
 	if !ok {
-		return upd.Apply(putBranch)
+		return apply()
 	}
 
 	// Hash-aware lookup when the pending update carries a BlockHash. This

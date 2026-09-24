@@ -82,17 +82,6 @@ func TestCommitmentV4StateRejectsLegacyBlob(t *testing.T) {
 	require.ErrorContains(t, err, "invalid state variant marker")
 }
 
-func TestLegacyStateRejectsCommitmentV4Blob(t *testing.T) {
-	t.Parallel()
-
-	v4State, err := (&stateCodecTrie{}).EncodeState(1, 2, nil)
-	require.NoError(t, err)
-
-	sdc := &SharedDomainsCommitmentContext{patriciaTrie: commitment.NewHexPatriciaHashed(20, nil, commitment.DefaultTrieConfig())}
-	_, _, err = sdc.restorePatriciaState(v4State)
-	require.ErrorContains(t, err, "commitment v4 state cannot be restored")
-}
-
 type stateCodecTrie struct{}
 
 func (*stateCodecTrie) RootHash() ([]byte, error) { return nil, nil }

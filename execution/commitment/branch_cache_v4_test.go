@@ -65,75 +65,34 @@ func TestBranchCacheV4RoutingTiers(t *testing.T) {
 
 					key := makeV4CacheKey(tc.tag, tc.addr, v4CachePath(depth))
 					value := []byte{tc.tag, byte(depth), 0xa5}
-					if tc.tag == 0x40 {
-						c.Put(key, value, 0, 0)
-					} else {
-						c.PinEntry(key, value, 0, 0)
-					}
+					c.Put(key, value, 0, 0)
 
 					got, _, ok := c.Get(key)
 					require.True(t, ok)
 					require.Equal(t, value, got)
 
 					path := v4CachePath(depth)
-					if tc.tag == 0x40 {
-						switch {
-						case depth <= 4 && depth <= int(c.maxDepth):
-							var packed [4]byte
-							for i := 0; i < len(path) && i < len(packed); i++ {
-								packed[i] = path[i]
-							}
-							slot := c.v4AccountTrunk.slot(&packed, depth, false)
-							require.NotNil(t, slot)
-							if slot != nil {
-								require.NotNil(t, slot.Load())
-							}
-						default:
-							require.Equal(t, 1, c.tailLen())
-							require.NotNil(t, c.tail.Load())
-							_, ok = c.tail.Load().Get(maphash.Hash(key))
-							require.True(t, ok)
+					if tc.tag == 0x40 && depth <= 4 && depth <= int(c.maxDepth) {
+						var packed [4]byte
+						for i := 0; i < len(path) && i < len(packed); i++ {
+							packed[i] = path[i]
 						}
-						return
-					}
-
-					pinned := c.pinned.Load()
-					require.NotNil(t, pinned)
-					mapKey := append([]byte{tc.tag}, addrHash...)
-					trunk, ok := pinned.Get(mapKey)
-					require.True(t, ok)
-					var packed [4]byte
-					for i := 0; i < len(path) && i < len(packed); i++ {
-						packed[i] = path[i]
-					}
-					if depth <= 4 && depth <= int(c.maxDepth) {
-						slot := trunk.slot(&packed, depth, false)
+						slot := c.v4AccountTrunk.slot(&packed, depth, false)
 						require.NotNil(t, slot)
 						if slot != nil {
 							require.NotNil(t, slot.Load())
 						}
-					} else {
-						_, ok = trunk.deep.Get(key)
-						require.True(t, ok)
+						return
 					}
+					require.Equal(t, 1, c.tailLen())
+					require.NotNil(t, c.tail.Load())
+					_, ok = c.tail.Load().Get(maphash.Hash(key))
+					require.True(t, ok)
+					require.Nil(t, c.pinned.Load())
 				})
 			}
 		})
 	}
-}
-
-func TestBranchCacheV4PinEntryAccountReachability(t *testing.T) {
-	c := NewBranchCache(100)
-	defer c.Close()
-
-	key := makeV4CacheKey(0x40, nil, []byte{1, 2})
-	c.PinEntry(key, []byte("pinned-account"), 0, 0)
-
-	got, _, ok := c.Get(key)
-	require.True(t, ok)
-	require.Equal(t, []byte("pinned-account"), got)
-	require.Equal(t, uint64(1), c.trunkHits.Load())
-	require.Zero(t, c.tailHits.Load())
 }
 
 func TestBranchCacheV4RoutingCollision(t *testing.T) {

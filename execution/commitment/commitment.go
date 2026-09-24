@@ -327,16 +327,6 @@ type PendingCommitmentUpdate struct {
 }
 
 func (p *PendingCommitmentUpdate) Apply(putBranch func(prefix, data, prevData []byte) error) error {
-	if p.Deltas != nil {
-		for _, part := range p.Deltas {
-			for i := range part {
-				if err := putBranch(part[i].Key, part[i].Data, part[i].Prev); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
 	_, err := ApplyDeferredBranchUpdates(p.Deferred, runtime.NumCPU(), putBranch, p.Metrics)
 	return err
 }

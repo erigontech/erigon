@@ -71,8 +71,6 @@ type SharedDomainsCommitmentContext struct {
 	stateReader   StateReader
 	paraTrieDB    kv.TemporalRoDB // DB used for para trie and/or parallel trie warmup
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
-	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers holds the resolved
-	// worker count from WarmupNumWorkersOrDefault.
 	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
 	warmupBase commitment.WarmupConfig
 	tmpDir     string // temp directory for ETL collectors
@@ -875,7 +873,6 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // LatestCommitmentState searches for last encoded state for CommitmentContext.
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
-	tv := sdc.patriciaTrie.Variant()
 	var step kv.Step
 
 	state, step, err = trieContext.Branch(sdc.commitmentStateKey())
@@ -887,10 +884,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
-	if tv == commitment.VariantCommitmentV4 {
-		if len(state) == 0 {
-			return 0, 0, nil, nil
-		}
+	if len(state) != 0 && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV4 {
 		return 0, 0, bytes.Clone(state), nil
 	}
 	if len(state) < 16 {
@@ -1018,9 +1012,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 		}
 		sdc.justRestored.Store(true)
 		return blockNum, txNum, nil
-	}
-	if len(value) > 0 && value[0] == commitment.CommitmentV4StateMarker {
-		return 0, 0, errors.New("commitment v4 state cannot be restored by a legacy trie")
 	}
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {

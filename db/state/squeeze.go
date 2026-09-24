@@ -942,10 +942,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	start := time.Now()
 
-	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
-	// variant enables it explicitly.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
-	rebuildTrieCfg.EnableTrieWarmup = false
 	rebuildTrieCfg.Variant = execctx.PickTrieVariant()
 	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 

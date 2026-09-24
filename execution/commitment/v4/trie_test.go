@@ -75,9 +75,13 @@ func TestTrieDeferredUpdatesWaitForApply(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, ctx.putCalls)
 
-	pending := &commitment.PendingCommitmentUpdate{Deltas: trie.TakeDeferredDeltas()}
-	require.NotNil(t, pending.Deltas)
-	require.NoError(t, pending.Apply(ctx.PutBranch))
+	deltas := trie.TakeDeferredDeltas()
+	require.NotNil(t, deltas)
+	for _, part := range deltas {
+		for _, d := range part {
+			require.NoError(t, ctx.PutBranch(d.Key, d.Data, d.Prev))
+		}
+	}
 	require.NotZero(t, ctx.putCalls)
 }
 

@@ -91,9 +91,13 @@ func TestDeferredProcessMatchesInlineProcess(t *testing.T) {
 
 	require.Equal(t, inlineRoot, deferredRoot)
 
-	pending := &commitment.PendingCommitmentUpdate{Deltas: deferred.TakeDeferredDeltas()}
-	require.NotNil(t, pending.Deltas)
-	require.NoError(t, pending.Apply(deferredCtx.PutBranch))
+	deltas := deferred.TakeDeferredDeltas()
+	require.NotNil(t, deltas)
+	for _, part := range deltas {
+		for _, d := range part {
+			require.NoError(t, deferredCtx.PutBranch(d.Key, d.Data, d.Prev))
+		}
+	}
 
 	require.Equal(t, storeSnapshot(inlineCtx), storeSnapshot(deferredCtx))
 }
