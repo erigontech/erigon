@@ -19,13 +19,18 @@ package v4
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"maps"
+	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -70,7 +75,7 @@ func TestRunStoragePhaseUsesConfiguredWorkers(t *testing.T) {
 		return newMockContext(), nil
 	}
 
-	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, make([]deltaParts, len(storage)), 4, 0)
+	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, make([]deltaParts, len(storage)), 4, 0, newStorageGate(storage))
 	require.NoError(t, err)
 	require.Equal(t, int32(4), factoryCalls.Load())
 }
@@ -160,7 +165,8 @@ func TestRunStoragePhaseHonorsFanOutMin(t *testing.T) {
 			return newMockContext(), nil
 		}
 		roots := make([][32]byte, 1)
-		require.NoError(t, runStoragePhase(context.Background(), newMockContext(), factory, []storageTask{task}, roots, make([]deltaParts, 1), 2, fanOutMin))
+		tasks := []storageTask{task}
+		require.NoError(t, runStoragePhase(context.Background(), newMockContext(), factory, tasks, roots, make([]deltaParts, 1), 2, fanOutMin, newStorageGate(tasks)))
 		return calls.Load()
 	}
 	require.Equal(t, int32(1), factoryCalls(1<<20))
@@ -226,4 +232,121 @@ func TestPipelinedAccountGroupsMatchSerial(t *testing.T) {
 	parallelRoot, parallelBranches := run(4)
 	require.Equal(t, serialRoot, parallelRoot)
 	require.Equal(t, serialBranches, parallelBranches)
+}
+
+func TestStorageGateReleasesEachNibbleWhenItsTasksFinish(t *testing.T) {
+	storage := []storageTask{{addrHash: [32]byte{0x01}}, {addrHash: [32]byte{0x0f}}, {addrHash: [32]byte{0xf0}}}
+	gate := newStorageGate(storage)
+	released := func(nib int) bool {
+		select {
+		case <-gate.ready[nib]:
+			return true
+		default:
+			return false
+		}
+	}
+	require.True(t, released(5))
+	require.False(t, released(0))
+	gate.done(&storage[0])
+	require.False(t, released(0))
+	gate.done(&storage[2])
+	require.True(t, released(15))
+	require.False(t, released(0))
+	gate.done(&storage[1])
+	require.True(t, released(0))
+}
+
+func TestRunStoragePhaseReleasesEveryTask(t *testing.T) {
+	storage := make([]storageTask, 64)
+	for i := range storage {
+		storage[i].wipe = true
+		storage[i].addrHash[0] = byte(i * 4)
+	}
+	factory := func(context.Context) (commitment.PatriciaContext, func()) { return newMockContext(), nil }
+	for _, workers := range []int{1, 4} {
+		gate := newStorageGate(storage)
+		require.NoError(t, runStoragePhase(context.Background(), newMockContext(), factory, storage, make([][32]byte, len(storage)), make([]deltaParts, len(storage)), workers, 0, gate))
+		for nib := range gate.ready {
+			select {
+			case <-gate.ready[nib]:
+			default:
+				t.Fatalf("workers=%d: nibble %d not released", workers, nib)
+			}
+		}
+	}
+}
+
+type chainGatedContext struct {
+	*parityContext
+	known     map[string][]byte
+	blocked   [32]byte
+	chainRead chan struct{}
+	once      sync.Once
+}
+
+func (c *chainGatedContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	switch {
+	case key[0] == tagStorageNode && bytes.Equal(key[1:33], c.blocked[:]):
+		select {
+		case <-c.chainRead:
+		case <-time.After(5 * time.Second):
+			return nil, 0, errors.New("storage task waited for another nibble's account chain")
+		}
+	case key[0] == tagAccountNode:
+		if _, ok := c.known[string(key)]; !ok {
+			c.once.Do(func() { close(c.chainRead) })
+		}
+	}
+	return c.parityContext.Branch(key)
+}
+
+func (c *chainGatedContext) factory(context.Context) (commitment.PatriciaContext, func()) {
+	return c, nil
+}
+
+func TestAccountChainDoesNotWaitForOtherNibblesStorage(t *testing.T) {
+	address := func(i int) []byte {
+		a := make([]byte, 20)
+		binary.BigEndian.PutUint64(a[12:], uint64(i))
+		return a
+	}
+	var zero []int
+	contract := -1
+	for i := 0; len(zero) < 400 || contract < 0; i++ {
+		switch commitment.KeyToHexNibbleHash(address(i))[0] {
+		case 0:
+			if len(zero) < 400 {
+				zero = append(zero, i)
+			}
+		case 15:
+			if contract < 0 {
+				contract = i
+			}
+		}
+	}
+	seed := []parityUpdate{{key: address(contract), update: accountParityUpdate(contract)}}
+	for k := range 8 {
+		seed = append(seed, parityUpdate{key: append(address(contract), paritySlot(k)...), update: storageParityUpdate(k)})
+	}
+	for _, i := range zero[:300] {
+		seed = append(seed, parityUpdate{key: address(i), update: accountParityUpdate(i)})
+	}
+	base := newParityContext()
+	seeder := &Trie{scheduleWorkers: 1}
+	seeder.ResetContext(base)
+	_, err := seeder.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, seed), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
+
+	next := []parityUpdate{{key: append(address(contract), paritySlot(100)...), update: storageParityUpdate(100)}}
+	for _, i := range zero[300:] {
+		next = append(next, parityUpdate{key: address(i), update: accountParityUpdate(i)})
+	}
+	ctx := &chainGatedContext{parityContext: newParityContext(), known: base.branches, chainRead: make(chan struct{})}
+	maps.Copy(ctx.branches, base.branches)
+	ctx.blocked = hashAddressPath(commitment.KeyToHexNibbleHash(address(contract))[:64])
+	trie := &Trie{scheduleWorkers: 4}
+	trie.ResetContext(ctx)
+	trie.SetTrieContextFactory(ctx.factory)
+	_, err = trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, next), "", nil, commitment.WarmupConfig{})
+	require.NoError(t, err)
 }

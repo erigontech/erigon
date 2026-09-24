@@ -48,7 +48,32 @@ const (
 	accountPlaneFanout   = 16
 )
 
-func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers, fanOutMin int) error {
+type storageGate struct {
+	left  [16]atomic.Int32
+	ready [16]chan struct{}
+}
+
+func newStorageGate(storage []storageTask) *storageGate {
+	g := &storageGate{}
+	for i := range storage {
+		g.left[storage[i].addrHash[0]>>4].Add(1)
+	}
+	for nib := range g.ready {
+		g.ready[nib] = make(chan struct{})
+		if g.left[nib].Load() == 0 {
+			close(g.ready[nib])
+		}
+	}
+	return g
+}
+
+func (g *storageGate) done(task *storageTask) {
+	if nib := task.addrHash[0] >> 4; g.left[nib].Add(-1) == 0 {
+		close(g.ready[nib])
+	}
+}
+
+func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers, fanOutMin int, gate *storageGate) error {
 	if len(storage) == 0 {
 		return nil
 	}
@@ -62,6 +87,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 				return err
 			}
 			roots[i], parts[i] = root, taskParts
+			gate.done(&storage[i])
 		}
 		return nil
 	}
@@ -92,6 +118,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 					return err
 				}
 				roots[i], parts[i] = root, taskParts
+				gate.done(&storage[i])
 			}
 		})
 	}
@@ -109,12 +136,13 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	storageParts := make([]deltaParts, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
 	storageDone := make(chan error, 1)
+	gate := newStorageGate(storage)
 	if factory != nil && storageWorkers > 1 {
 		go func() {
-			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
+			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin, gate)
 		}()
 	} else {
-		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
+		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin, gate)
 	}
 
 	g := graph{plane: planeAccount}
@@ -127,17 +155,16 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	accountResults := make([]accountResult, len(plans))
 	accountValues := make([]byte, accountLeafScratch*len(plans))
 	storageReady := make(chan struct{})
+	indexed := make(chan struct{})
 	var storageErr error
-	var results map[[32]byte][32]byte
+	taskOf := make(map[[32]byte]int, len(storage))
 	go func() {
 		defer close(storageReady)
-		if storageErr = <-storageDone; storageErr != nil {
-			return
+		for i := range storage {
+			taskOf[storage[i].addrHash] = i
 		}
-		results = make(map[[32]byte][32]byte, len(storage))
-		for i, task := range storage {
-			results[task.addrHash] = storageRoots[i]
-		}
+		close(indexed)
+		storageErr = <-storageDone
 	}()
 	encode := func(i int) {
 		plan := &plans[i]
@@ -146,12 +173,12 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		}
 		storageRoot := empty.RootHash
 		if plan.entry.storageDirty {
-			var ok bool
-			storageRoot, ok = results[hashAddressPath(plan.entry.hashedKey)]
+			at, ok := taskOf[hashAddressPath(plan.entry.hashedKey)]
 			if !ok {
 				accountResults[i].err = errNodeRecord
 				return
 			}
+			storageRoot = storageRoots[at]
 			if !plan.found && plan.entry.update == nil && storageRoot == empty.RootHash {
 				plan.skip = true
 				return
@@ -174,9 +201,16 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	var groupParts [16]deltaParts
 	var pending [16]*pendingRemoval
 	pipeline := func(ctx commitment.PatriciaContext, nib int, group []int) error {
-		<-storageReady
+		select {
+		case <-gate.ready[nib]:
+			<-indexed
+		case <-storageReady:
+			if storageErr != nil {
+				return nil
+			}
+		}
 		child := root.child(nib)
-		if storageErr != nil || len(root.path) != 0 || child == nil || len(child.path) != 1 {
+		if len(root.path) != 0 || child == nil || len(child.path) != 1 {
 			return nil
 		}
 		for k, i := range group {
