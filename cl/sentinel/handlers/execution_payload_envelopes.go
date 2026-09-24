@@ -18,6 +18,7 @@ package handlers
 
 import (
 	"errors"
+	"math"
 
 	"github.com/libp2p/go-libp2p/core/network"
 
@@ -50,9 +51,8 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if maxPayloads == 0 {
 		return errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}
-	// Validate count
-	if req.Count > maxPayloads {
-		return errors.New("request count exceeds MAX_REQUEST_PAYLOADS")
+	if maxPayloads > math.MaxInt {
+		return errors.New("MAX_REQUEST_PAYLOADS exceeds platform capacity")
 	}
 	if req.Count == 0 {
 		return nil
@@ -62,7 +62,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, InvalidRequestPrefix)
 	}
 
-	if cost := min(int(req.Count), int(maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
+	if cost := int(min(req.Count, maxPayloads)) - 1; !c.consumeRateLimit(s, cost) {
 		return nil
 	}
 
@@ -104,48 +104,82 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if canonicalHeadSlot != headSlot || canonicalHeadRoot != head.Root {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
-	canonicalRoots, canonicalSlots, err := beacon_indicies.ReadBeaconBlockRootsInSlotRange(c.ctx, tx, startSlot, req.Count+1)
-	if err != nil {
-		return err
-	}
-
 	type responseCandidate struct {
 		root  common.Hash
 		epoch uint64
 	}
-	responseCandidates := make([]responseCandidate, 0, req.Count)
-	canonicalBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(canonicalRoots))
-	for i, root := range canonicalRoots {
-		if canonicalSlots[i] > lastSlot && len(canonicalBlocks) == 0 {
-			break
+	responseCandidates := make([]responseCandidate, 0, maxPayloads)
+	type canonicalBlock struct {
+		root  common.Hash
+		slot  uint64
+		block *cltypes.SignedBeaconBlock
+	}
+	var pending *canonicalBlock
+	canonicalUnavailable := false
+	canonicalReadLimit := maxPayloads
+	if canonicalReadLimit != math.MaxUint64 {
+		canonicalReadLimit++
+	}
+	canonicalReadCount := uint64(0)
+	scanLimitReached := false
+	err = beacon_indicies.RangeBlockRoots(c.ctx, tx, startSlot, headSlot, func(slot uint64, root common.Hash) bool {
+		if pending == nil && slot > lastSlot {
+			return false
 		}
 		block, ok := c.forkChoiceReader.GetBlock(root)
 		if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
-			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+			canonicalUnavailable = true
+			return false
 		}
-		canonicalBlocks = append(canonicalBlocks, block)
-		if canonicalSlots[i] > lastSlot {
-			break
+		current := &canonicalBlock{root: root, slot: slot, block: block}
+		if pending != nil {
+			if current.block.Block.ParentRoot != pending.root {
+				canonicalUnavailable = true
+				return false
+			}
+			epoch := pending.slot / c.beaconConfig.SlotsPerEpoch
+			if c.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion &&
+				forkchoice.ParentPayloadStatusFromBids(pending.block, current.block.Block) == cltypes.PayloadStatusFull {
+				responseCandidates = append(responseCandidates, responseCandidate{root: pending.root, epoch: epoch})
+				pending = nil
+				if uint64(len(responseCandidates)) == maxPayloads {
+					return false
+				}
+			}
+			pending = nil
 		}
-	}
-	for i, root := range canonicalRoots {
-		slot := canonicalSlots[i]
 		if slot > lastSlot {
-			break
+			return false
 		}
-		epoch := slot / c.beaconConfig.SlotsPerEpoch
-		if c.beaconConfig.GetCurrentStateVersion(epoch) < clparams.GloasVersion {
-			continue
+		pending = current
+		canonicalReadCount++
+		if canonicalReadCount == canonicalReadLimit {
+			scanLimitReached = true
+			return false
 		}
-		payloadStatus := head.PayloadStatus
-		if slot != headSlot || root != head.Root {
-			if i+1 >= len(canonicalBlocks) || canonicalBlocks[i+1].Block.ParentRoot != root {
+		return true
+	})
+	if err != nil {
+		return err
+	}
+	if canonicalUnavailable {
+		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+	}
+	if pending != nil {
+		if pending.slot != headSlot || pending.root != head.Root {
+			if scanLimitReached {
+				pending = nil
+			} else {
 				return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 			}
-			payloadStatus = forkchoice.ParentPayloadStatusFromBids(canonicalBlocks[i], canonicalBlocks[i+1].Block)
+		} else if uint64(len(responseCandidates)) == maxPayloads {
+			pending = nil
 		}
-		if payloadStatus == cltypes.PayloadStatusFull {
-			responseCandidates = append(responseCandidates, responseCandidate{root: root, epoch: epoch})
+	}
+	if pending != nil {
+		epoch := pending.slot / c.beaconConfig.SlotsPerEpoch
+		if c.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion && head.PayloadStatus == cltypes.PayloadStatusFull {
+			responseCandidates = append(responseCandidates, responseCandidate{root: pending.root, epoch: epoch})
 		}
 	}
 

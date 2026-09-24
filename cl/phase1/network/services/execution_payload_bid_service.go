@@ -126,7 +126,6 @@ var errBidDependencyUnavailable = fmt.Errorf("%w: bid dependency unavailable", E
 const (
 	bidValidationStateCacheSize   = 4
 	bidValidationStateTTLSlots    = 2
-	maximumGossipClockDisparity   = 500 * time.Millisecond
 	parentBuilderExitsRetryDelay  = 100 * time.Millisecond
 	parentBuilderExitsCacheSize   = 1024
 	parentBuilderExitsMaxInFlight = 1
@@ -582,7 +581,7 @@ func (s *executionPayloadBidService) readParentBuilderExitRequests(root common.H
 		return nil, fmt.Errorf("%w: read parent payload execution requests: %w", errBidDependencyUnavailable, err)
 	}
 	if envelope == nil {
-		// Full parents without an envelope remain unavailable pending https://github.com/ethereum/consensus-specs/pull/5125.
+		// Full parents without a persisted envelope remain unavailable.
 		return nil, fmt.Errorf("%w: parent payload execution requests unavailable", errBidDependencyUnavailable)
 	}
 	if envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
