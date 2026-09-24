@@ -2119,8 +2119,11 @@ func TestPostExecutionPayloadEnvelopeSuppressesPreparationDuringExecutionWork(t 
 }
 
 func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, _, _, _, headState, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
+	previousHeadForkEpoch := headState.BeaconConfig().GloasForkEpoch
+	t.Cleanup(func() { headState.BeaconConfig().GloasForkEpoch = previousHeadForkEpoch })
+	headState.BeaconConfig().GloasForkEpoch = 0
 	indices := make([]string, 2049)
 	for i := range indices {
 		indices[i] = `"1"`
@@ -3097,6 +3100,7 @@ func TestPostProposerPreferencesAcknowledgesOnlyIdenticalRetries(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/service=%t", test.name, withService), func(t *testing.T) {
 				ctrl := gomock.NewController(t)
 				config := clparams.MainnetBeaconConfig
+				config.GloasForkEpoch = 3
 				// Keep the request well inside the valid time window without sleeping.
 				config.SecondsPerSlot = uint64(time.Hour / time.Second)
 				stored := &cltypes.SignedProposerPreferences{
