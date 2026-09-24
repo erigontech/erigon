@@ -315,12 +315,12 @@ func TestIsPastSlotBoundaries(t *testing.T) {
 	}{
 		{"before_start", start.Add(-time.Nanosecond), false},
 		{"at_start", start, false},
-		{"at_disparity", start.Add(gloasMaximumClockDisparity), false},
-		{"after_disparity", start.Add(gloasMaximumClockDisparity + time.Nanosecond), true},
+		{"at_disparity", start.Add(maximumGossipClockDisparity), false},
+		{"after_disparity", start.Add(maximumGossipClockDisparity + time.Nanosecond), true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			past, valid := isPastSlot(service.ethClock, service.beaconCfg, test.now, 100, gloasMaximumClockDisparity)
+			past, valid := isPastSlot(service.ethClock, service.beaconCfg, test.now, 100, maximumGossipClockDisparity)
 			require.True(t, valid)
 			require.Equal(t, test.past, past)
 		})
@@ -332,7 +332,7 @@ func TestProposerPreferencesServiceAcceptsCurrentSlotAtDisparityEdge(t *testing.
 	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
 	msg := newTestSignedProposerPreferences(96, 42)
 	service.now = func() time.Time {
-		return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity)
+		return service.ethClock.GetSlotTime(96).Add(maximumGossipClockDisparity)
 	}
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
@@ -350,7 +350,7 @@ func TestProposerPreferencesServiceEmitsEvent(t *testing.T) {
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	msg := newTestSignedProposerPreferences(100, 42)
-	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity) }
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(maximumGossipClockDisparity) }
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
 	event := <-events
@@ -381,7 +381,7 @@ func TestProposerPreferencesServiceProgressesWhileEventFeedIsBlocked(t *testing.
 	<-ready
 
 	msg := newTestSignedProposerPreferences(100, 42)
-	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity) }
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(maximumGossipClockDisparity) }
 	processDone := make(chan error, 1)
 	ctx := t.Context()
 	go func() { processDone <- service.ProcessMessage(ctx, nil, msg) }()
@@ -408,7 +408,7 @@ func TestProposerPreferencesServiceLookaheadClockDisparityBoundary(t *testing.T)
 	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
 	msg := newTestSignedProposerPreferences(100, 42)
 	lookaheadStart := service.ethClock.GetSlotTime(64)
-	now := lookaheadStart.Add(-gloasMaximumClockDisparity - time.Millisecond)
+	now := lookaheadStart.Add(-maximumGossipClockDisparity - time.Millisecond)
 	service.now = func() time.Time { return now }
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
@@ -416,7 +416,7 @@ func TestProposerPreferencesServiceLookaheadClockDisparityBoundary(t *testing.T)
 	require.Contains(t, err.Error(), "not yet known")
 	require.False(t, service.hasSeenPreference(newSeenProposerPreferencesKey(msg.Message)))
 
-	now = lookaheadStart.Add(-gloasMaximumClockDisparity)
+	now = lookaheadStart.Add(-maximumGossipClockDisparity)
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
 	stored, ok := epbsPool.GetPreference(100, testDependentRoot)
 	require.True(t, ok)
@@ -471,7 +471,7 @@ func TestProposerPreferencesServiceDoesNotPruneOnExpiredMessage(t *testing.T) {
 	msg := newTestSignedProposerPreferences(100, 42)
 	key := pool.ProposerPreferencesKey{Slot: 100, DependentRoot: msg.Message.DependentRoot}
 	epbsPool.ProposerPreferences.Add(key, msg)
-	preferenceBoundary := time.Unix(100*12, 0).Add(gloasMaximumClockDisparity)
+	preferenceBoundary := time.Unix(100*12, 0).Add(maximumGossipClockDisparity)
 	service.now = func() time.Time { return preferenceBoundary.Add(time.Nanosecond) }
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
@@ -479,7 +479,7 @@ func TestProposerPreferencesServiceDoesNotPruneOnExpiredMessage(t *testing.T) {
 	_, found := epbsPool.ProposerPreferences.Get(key)
 	require.True(t, found)
 
-	bidBoundary := time.Unix(101*12, 0).Add(gloasMaximumClockDisparity)
+	bidBoundary := time.Unix(101*12, 0).Add(maximumGossipClockDisparity)
 	service.now = func() time.Time { return bidBoundary }
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
