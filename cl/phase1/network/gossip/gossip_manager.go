@@ -53,9 +53,10 @@ type PeerBanner interface {
 const publishQueueSize = 64
 
 type publishJob struct {
-	name   string
-	data   []byte
-	logCtx []any
+	name       string
+	data       []byte
+	forkDigest common.Bytes4
+	logCtx     []any
 }
 
 // GossipManager is responsible for managing the gossip subscriptions and publications
@@ -293,11 +294,15 @@ func (g *GossipManager) SubscribeWithExpiry(name string, expiry time.Time) error
 }
 
 func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) error {
-	compressedData := utils.CompressSnappy(data)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		return err
 	}
+	return g.publishToDigest(ctx, forkDigest, name, data)
+}
+
+func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.Bytes4, name string, data []byte) error {
+	compressedData := utils.CompressSnappy(data)
 	topic := composeTopic(forkDigest, name)
 	topicHandle := g.subscriptions.Get(topic)
 	if topicHandle == nil {
@@ -321,12 +326,22 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 // topic without blocking the caller: the actual network I/O runs on this
 // GossipManager's own background worker, decoupled from whatever triggered
 // the call (in particular, an HTTP request's context, which net/http cancels
-// the instant the handler returns). If the worker is busy and the queue is
-// full, the message is dropped and logged rather than blocking - callers
-// must not rely on this call for backpressure.
+// the instant the handler returns). The fork digest is resolved now, at
+// enqueue time, and carried with the job - not re-resolved when the worker
+// gets to it - so a message accepted just before a fork activates still
+// publishes to the topic it was actually validated against, rather than
+// whatever fork happens to be current once the queue drains. If the worker
+// is busy and the queue is full, the message is dropped and logged rather
+// than blocking - callers must not rely on this call for backpressure.
 func (g *GossipManager) PublishBackground(name string, data []byte, logCtx ...any) {
+	forkDigest, err := g.ethClock.CurrentForkDigest()
+	if err != nil {
+		fields := append([]any{"topic", name, "err", err}, logCtx...)
+		log.Warn("[GossipManager] failed to resolve fork digest, dropping message", fields...)
+		return
+	}
 	select {
-	case g.publishQueue <- publishJob{name: name, data: data, logCtx: logCtx}:
+	case g.publishQueue <- publishJob{name: name, data: data, forkDigest: forkDigest, logCtx: logCtx}:
 	default:
 		fields := append([]any{"topic", name}, logCtx...)
 		log.Warn("[GossipManager] publish queue full, dropping message", fields...)
@@ -353,7 +368,7 @@ func (g *GossipManager) runPublishJob(ctx context.Context, job publishJob) {
 	if g.publishHookForTest != nil {
 		g.publishHookForTest(job.name, job.data)
 	}
-	if err := g.Publish(ctx, job.name, job.data); err != nil {
+	if err := g.publishToDigest(ctx, job.forkDigest, job.name, job.data); err != nil {
 		fields := append([]any{"topic", job.name, "err", err}, job.logCtx...)
 		log.Warn("[GossipManager] failed to publish message to gossip", fields...)
 	}

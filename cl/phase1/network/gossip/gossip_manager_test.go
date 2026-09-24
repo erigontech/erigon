@@ -36,6 +36,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/metrics"
 	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
 )
@@ -809,6 +810,90 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PublishesToReal
 	got, err := utils.DecompressSnappy(msg.GetData(), true)
 	s.Require().NoError(err)
 	s.Equal(payload, got)
+}
+
+// TestPublishBackground_CapturesForkDigestAtEnqueueTime proves a message
+// publishes under the fork digest that was active when it was queued, not
+// whatever digest happens to be active once the worker gets around to
+// draining it. Without this, a message accepted just before a fork
+// activates could be sent to the new fork's topic (or fail topic lookup)
+// instead of the one it was actually validated against.
+func TestPublishBackground_CapturesForkDigestAtEnqueueTime(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+
+	oldDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
+	newDigest := common.Bytes4{0x12, 0x34, 0x56, 0x78}
+	var mu sync.Mutex
+	digest := oldDigest
+	mockClock.EXPECT().CurrentForkDigest().DoAndReturn(func() (common.Bytes4, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		return digest, nil
+	}).AnyTimes()
+
+	testHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	defer testHost.Close()
+	ps, err := pubsub.NewGossipSub(context.Background(), testHost, pubsub.WithMessageIdFn(func(pmsg *pb.Message) string {
+		return string(pmsg.Data)
+	}))
+	require.NoError(t, err)
+
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().Pubsub().Return(ps).AnyTimes()
+	mockP2P.EXPECT().Host().Return(testHost).AnyTimes()
+	mockP2P.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
+
+	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+	gm := NewGossipManager(context.Background(), mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+	defer gm.Close()
+
+	topicName := "test_publish_topic"
+	oldTopic := composeTopic(oldDigest, topicName)
+	oldTopicHandle, err := ps.Join(oldTopic)
+	require.NoError(t, err)
+	validator := func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		return pubsub.ValidationAccept
+	}
+	require.NoError(t, gm.subscriptions.Add(oldTopic, oldTopicHandle, validator))
+
+	sub, err := oldTopicHandle.Subscribe()
+	require.NoError(t, err)
+	defer sub.Cancel()
+
+	hookEntered := make(chan struct{})
+	unblock := make(chan struct{})
+	gm.publishHookForTest = func(name string, data []byte) {
+		close(hookEntered)
+		<-unblock
+	}
+
+	payload := []byte("hello")
+	gm.PublishBackground(topicName, payload)
+
+	// Wait until the worker has dequeued the job (so PublishBackground's own
+	// digest capture has already happened), then flip the digest before
+	// letting the worker actually publish.
+	select {
+	case <-hookEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never picked up the job")
+	}
+	mu.Lock()
+	digest = newDigest
+	mu.Unlock()
+	close(unblock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	msg, err := sub.Next(ctx)
+	require.NoError(t, err, "expected the message on the topic active when it was enqueued, not the one active when the worker drained it")
+
+	got, err := utils.DecompressSnappy(msg.GetData(), true)
+	require.NoError(t, err)
+	require.Equal(t, payload, got)
 }
 
 func TestGossipManager(t *testing.T) {
