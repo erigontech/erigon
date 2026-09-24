@@ -90,6 +90,10 @@ func (p *branchPrefetcher) pause() {
 		return
 	}
 	p.gate.Lock()
+	p.drain()
+}
+
+func (p *branchPrefetcher) drain() {
 	for {
 		select {
 		case <-p.work:
@@ -109,6 +113,7 @@ func (p *branchPrefetcher) close() {
 	if p == nil {
 		return
 	}
+	p.drain()
 	close(p.work)
 	p.wg.Wait()
 }
