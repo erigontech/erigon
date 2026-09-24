@@ -39,6 +39,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon/common/length"
+
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/imports"
 )
@@ -286,11 +288,11 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 			return "", fmt.Errorf(`ethjson:%q cannot be omitempty on %s`, form, t)
 		}
 	case "datalist":
-		// A hash-sized element grows the buffer once for the whole array; one of its own
-		// length cannot, so the two have separate writers behind one form.
+		// Both writers grow the buffer once; DataList takes only a hash-sized element, which
+		// is the whole of what decides between them.
 		writer := "Datas"
 		if slice, ok := t.Underlying().(*types.Slice); ok {
-			if _, fixed := slice.Elem().Underlying().(*types.Array); fixed {
+			if a, fixed := slice.Elem().Underlying().(*types.Array); fixed && a.Len() == length.Hash {
 				writer = "DataList"
 			}
 		}
