@@ -50,6 +50,7 @@ type CaplinCliCfg struct {
 	EngineAPIPort           int           `json:"engine_api_port"`
 	MevRelayUrl             string        `json:"mev_relay_url"`
 	AllowPrivateBuilderURLs bool          `json:"allow_private_builder_urls"`
+	CheckpointSyncURLs      []string      `json:"checkpoint_sync_urls"`
 	CustomConfig            string        `json:"custom_config"`
 	CustomGenesisState      string        `json:"custom_genesis_state"`
 	MaxPeerCount            uint64        `json:"max_peer_count"`
@@ -99,8 +100,9 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 		}
 	}
 
-	if checkpointUrls := ctx.StringSlice(utils.CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
-		clparams.ConfigurableCheckpointsURLs = checkpointUrls
+	if checkpointURLs := ctx.StringSlice(utils.CaplinCheckpointSyncUrlFlag.Name); len(checkpointURLs) > 0 {
+		cfg.CheckpointSyncURLs = append([]string(nil), checkpointURLs...)
+		clparams.ConfigurableCheckpointsURLs = checkpointURLs
 	}
 
 	cfg.SubscribeAllTopics = ctx.Bool(utils.CaplinSubscribeAllTopicsFlag.Name)

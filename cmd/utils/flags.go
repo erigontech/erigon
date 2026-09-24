@@ -1879,8 +1879,9 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.MevRelayUrl = ctx.String(CaplinMevRelayUrl.Name)
 	cfg.CaplinConfig.AllowPrivateBuilderURLs = ctx.Bool(CaplinAllowPrivateBuilderURLs.Name)
 	cfg.CaplinConfig.EnableValidatorMonitor = ctx.Bool(CaplinValidatorMonitorFlag.Name)
-	if checkpointUrls := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointUrls) > 0 {
-		clparams.ConfigurableCheckpointsURLs = checkpointUrls
+	if checkpointURLs := ctx.StringSlice(CaplinCheckpointSyncUrlFlag.Name); len(checkpointURLs) > 0 {
+		cfg.CaplinConfig.CheckpointSyncURLs = append([]string(nil), checkpointURLs...)
+		clparams.ConfigurableCheckpointsURLs = checkpointURLs
 	}
 	cfg.CaplinConfig.CustomConfigPath = ctx.String(CaplinCustomConfigFlag.Name)
 	cfg.CaplinConfig.CustomGenesisStatePath = ctx.String(CaplinCustomGenesisFlag.Name)

@@ -81,6 +81,9 @@ type Cfg struct {
 	gloasHeadEnvelopeRequests    map[common.Hash]uint64
 	gloasHeadEnvelopeRequestHead common.Hash
 	gloasPayloadValidator        gloasPayloadValidator
+	gloasEnvelopeAcceptor        gloasEnvelopeAcceptor
+	gloasEnvelopeHTTPURLs        []string
+	gloasEnvelopeHTTPOffset      atomic.Uint64
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash
 }
@@ -92,6 +95,33 @@ type Args struct {
 	targetSlot, seenSlot   uint64
 
 	hasDownloaded bool
+}
+
+func resolveGloasEnvelopeHTTPURLs(caplinConfig clparams.CaplinConfig) []string {
+	var checkpointURLs []string
+	switch {
+	case len(caplinConfig.CheckpointSyncURLs) > 0:
+		checkpointURLs = caplinConfig.CheckpointSyncURLs
+	case len(clparams.ConfigurableCheckpointsURLs) > 0:
+		checkpointURLs = clparams.ConfigurableCheckpointsURLs
+	case checkpoint_sync.RemoteCheckpointSyncEnabled(caplinConfig):
+		checkpointURLs = clparams.GetAllCheckpointSyncEndpoints(caplinConfig.NetworkId)
+	}
+	baseURLs := make([]string, 0, len(checkpointURLs))
+	seen := make(map[string]struct{}, len(checkpointURLs))
+	for i, checkpointURL := range checkpointURLs {
+		baseURL := network2.BeaconAPIBaseURL(checkpointURL)
+		if baseURL == "" {
+			log.Warn("Ignoring invalid checkpoint sync URL for envelope recovery", "index", i)
+			continue
+		}
+		if _, ok := seen[baseURL]; ok {
+			continue
+		}
+		seen[baseURL] = struct{}{}
+		baseURLs = append(baseURLs, baseURL)
+	}
+	return baseURLs
 }
 
 func ClStagesCfg(
@@ -150,6 +180,8 @@ func ClStagesCfg(
 		blobStore:               blobStore,
 		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
 		gloasPayloadValidator:   forkChoice,
+		gloasEnvelopeAcceptor:   forkChoice,
+		gloasEnvelopeHTTPURLs:   resolveGloasEnvelopeHTTPURLs(caplinConfig),
 		attestationDataProducer: attestationDataProducer,
 	}
 }

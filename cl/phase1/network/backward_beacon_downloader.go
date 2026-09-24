@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -322,13 +321,12 @@ func (b *BackwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) 
 	if checkpointSyncURL == "" {
 		return
 	}
-	before, _, found := strings.Cut(checkpointSyncURL, "/eth/")
-	if !found {
-		// URL is already a base URL without path (e.g. https://beacon.example.io).
-		b.httpFallbackURL = strings.TrimRight(checkpointSyncURL, "/")
+	baseURL := BeaconAPIBaseURL(checkpointSyncURL)
+	if baseURL == "" {
+		log.Warn("Ignoring invalid beacon API fallback URL")
 		return
 	}
-	b.httpFallbackURL = before
+	b.httpFallbackURL = baseURL
 }
 
 // SetShouldStopAtFn sets the stop condition.
@@ -1143,7 +1141,10 @@ func (b *BackwardBeaconDownloader) isGloasSlot(slot uint64) bool {
 // slot-based queries return HEAD-chain blocks, but root-based queries work regardless.
 func fetchBlockFromBeaconAPIByRoot(ctx context.Context, baseURL string, root common.Hash, beaconCfg *clparams.BeaconChainConfig) (*cltypes.SignedBeaconBlock, error) {
 	client := &http.Client{Timeout: 10 * time.Second}
-	reqURL := fmt.Sprintf("%s/eth/v2/beacon/blocks/0x%x", baseURL, root)
+	reqURL, err := beaconAPIURL(baseURL, fmt.Sprintf("/eth/v2/beacon/blocks/0x%x", root))
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -1254,7 +1255,10 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, 
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelopes/0x%x", b.httpFallbackURL, blockRoot)
+	reqURL, err := beaconAPIURL(b.httpFallbackURL, fmt.Sprintf("/eth/v1/beacon/execution_payload_envelopes/0x%x", blockRoot))
+	if err != nil {
+		return nil, err
+	}
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, err

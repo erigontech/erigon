@@ -2930,6 +2930,29 @@ func TestOnExecutionPayloadMergesStrongerConcurrentValidationResult(t *testing.T
 	require.True(t, f.IsPayloadVerified(blockRoot))
 }
 
+func TestOnExecutionPayloadValidatesPersistedEnvelopeWithoutStatus(t *testing.T) {
+	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
+	blockRoot := envelope.Message.BeaconBlockRoot
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(execution_client.PayloadStatusNotValidated, nil)
+
+	f := newPayloadVoteTestStore(t, blockRoot, false, false)
+	f.beaconCfg = cfg
+	f.engine = engine
+	f.forkGraph = &persistingEnvelopeForkGraph{
+		dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block},
+		envelope:                  envelope,
+	}
+	f.executionPayloadGasLimit, _ = lru.New[common.Hash, uint64](16)
+
+	require.ErrorIs(t, f.OnExecutionPayload(t.Context(), envelope, false, true), ErrIgnore)
+	status, ok := f.GetRecentExecutionPayloadStatusByRoot(blockRoot)
+	require.True(t, ok)
+	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+}
+
 func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {
 	want := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{}}
 	f := &ForkChoiceStore{forkGraph: blockRefreshForkGraph{block: want}}
@@ -3560,28 +3583,6 @@ func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
 		t.Run(fmt.Sprintf("valid=%t", valid), func(t *testing.T) {
 			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 			require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
-			exit := solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x1234")}
-			envelope.Message.ExecutionRequests.BuilderExits.Append(&exit)
-			requestsRoot, err := envelope.Message.ExecutionRequests.HashSSZ()
-			require.NoError(t, err)
-			bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
-			bid.ExecutionRequestsRoot = requestsRoot
-			requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
-			blockHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
-			require.NoError(t, err)
-			envelope.Message.Payload.BlockHash = blockHash
-			bid.BlockHash = blockHash
-			bodyRoot, err := block.Block.Body.HashSSZ()
-			require.NoError(t, err)
-			blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
-				Slot:          block.Block.Slot,
-				ProposerIndex: block.Block.ProposerIndex,
-				ParentRoot:    block.Block.ParentRoot,
-				BodyRoot:      bodyRoot,
-			})
-			blockRoot, err := block.Block.HashSSZ()
-			require.NoError(t, err)
-			envelope.Message.BeaconBlockRoot = blockRoot
 			if !valid {
 				envelope.Message.Payload.GasUsed++
 			}
@@ -3616,9 +3617,6 @@ func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
 			if valid {
 				require.NoError(t, err)
 				require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
-				exits, ok := f.GetCachedParentBuilderExitRequests(envelope.Message.BeaconBlockRoot)
-				require.True(t, ok)
-				require.Equal(t, []solid.BuilderExitRequest{exit}, exits)
 				require.Len(t, f.pendingELPayloads, 1)
 			} else {
 				require.ErrorContains(t, err, "mismatching hash")
@@ -3634,6 +3632,28 @@ func TestLocalSelfBuildValidatesPayloadHashWithoutEngine(t *testing.T) {
 		t.Run(fmt.Sprintf("valid=%t", valid), func(t *testing.T) {
 			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 			require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+			exit := solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x1234")}
+			envelope.Message.ExecutionRequests.BuilderExits.Append(&exit)
+			requestsRoot, err := envelope.Message.ExecutionRequests.HashSSZ()
+			require.NoError(t, err)
+			bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+			bid.ExecutionRequestsRoot = requestsRoot
+			requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+			blockHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+			require.NoError(t, err)
+			envelope.Message.Payload.BlockHash = blockHash
+			bid.BlockHash = blockHash
+			bodyRoot, err := block.Block.Body.HashSSZ()
+			require.NoError(t, err)
+			blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+				Slot:          block.Block.Slot,
+				ProposerIndex: block.Block.ProposerIndex,
+				ParentRoot:    block.Block.ParentRoot,
+				BodyRoot:      bodyRoot,
+			})
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			envelope.Message.BeaconBlockRoot = blockRoot
 			if !valid {
 				envelope.Message.Payload.GasUsed++
 			}
@@ -3648,6 +3668,9 @@ func TestLocalSelfBuildValidatesPayloadHashWithoutEngine(t *testing.T) {
 			if valid {
 				require.NoError(t, err)
 				require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+				exits, ok := f.GetCachedParentBuilderExitRequests(envelope.Message.BeaconBlockRoot)
+				require.True(t, ok)
+				require.Equal(t, []solid.BuilderExitRequest{exit}, exits)
 			} else {
 				require.ErrorContains(t, err, "mismatching hash")
 				require.False(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))

@@ -114,6 +114,7 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		CaplinDiscoveryQUICPort:   uint64(cfg.ServerQUICPort),
 		BeaconAPIRouter:           rcfg,
 		NetworkId:                 networkId,
+		CheckpointSyncURLs:        cfg.CheckpointSyncURLs,
 		LocalDiscovery:            cfg.LocalDiscovery,
 		MevRelayUrl:               cfg.MevRelayUrl,
 		AllowPrivateBuilderURLs:   cfg.AllowPrivateBuilderURLs,

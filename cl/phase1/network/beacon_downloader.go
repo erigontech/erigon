@@ -24,6 +24,7 @@ import (
 	"io"
 	"math"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -98,19 +99,47 @@ func (f *ForwardBeaconDownloader) SetProcessFunction(fn ProcessFn) {
 	f.process = fn
 }
 
+// BeaconAPIBaseURL derives a validated beacon API base URL from a checkpoint state endpoint.
+func BeaconAPIBaseURL(checkpointSyncURL string) string {
+	u, err := url.Parse(checkpointSyncURL)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return ""
+	}
+	if index := strings.Index(u.Path, "/eth/"); index >= 0 {
+		u.Path = u.Path[:index]
+	}
+	u.Path = strings.TrimRight(u.Path, "/")
+	u.RawPath = ""
+	u.Fragment = ""
+	return u.String()
+}
+
+func beaconAPIURL(baseURL, apiPath string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	if (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return "", fmt.Errorf("invalid beacon API base URL %q", baseURL)
+	}
+	u.Path = strings.TrimRight(u.Path, "/") + "/" + strings.TrimLeft(apiPath, "/")
+	u.RawPath = ""
+	u.Fragment = ""
+	return u.String(), nil
+}
+
 // SetHTTPFallbackURL sets the beacon API base URL for HTTP-based block fetching
 // when P2P blocks_by_range requests fail. Derived from the checkpoint sync URL.
 func (f *ForwardBeaconDownloader) SetHTTPFallbackURL(checkpointSyncURL string) {
 	if checkpointSyncURL == "" {
 		return
 	}
-	before, _, found := strings.Cut(checkpointSyncURL, "/eth/")
-	if found {
-		f.httpFallbackURL = before
-	} else {
-		// Accept bare base URL (no /eth/ path).
-		f.httpFallbackURL = strings.TrimRight(checkpointSyncURL, "/")
+	baseURL := BeaconAPIBaseURL(checkpointSyncURL)
+	if baseURL == "" {
+		log.Warn("Ignoring invalid beacon API fallback URL")
+		return
 	}
+	f.httpFallbackURL = baseURL
 }
 
 // SetMinSlot sets the earliest slot the downloader may request.
@@ -979,7 +1008,12 @@ func fetchBlocksFromBeaconAPI(ctx context.Context, baseURL string, startSlot, co
 			defer func() { <-sem }()
 
 			results[idx].slot = slot
-			reqURL := fmt.Sprintf("%s/eth/v2/beacon/blocks/%d", baseURL, slot)
+			reqURL, err := beaconAPIURL(baseURL, fmt.Sprintf("/eth/v2/beacon/blocks/%d", slot))
+			if err != nil {
+				results[idx].err = err
+				cancel()
+				return
+			}
 			req, err := http.NewRequestWithContext(requestCtx, "GET", reqURL, nil)
 			if err != nil {
 				results[idx].err = err
@@ -1148,7 +1182,10 @@ func fetchEnvelopesFromBeaconAPI(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelopes/0x%x", baseURL, root)
+			reqURL, err := beaconAPIURL(baseURL, fmt.Sprintf("/eth/v1/beacon/execution_payload_envelopes/0x%x", root))
+			if err != nil {
+				return
+			}
 			req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 			if err != nil {
 				return
@@ -1209,6 +1246,18 @@ func fetchEnvelopesFromBeaconAPI(
 		}
 	}
 	return result
+}
+
+// FetchEnvelopesFromBeaconAPI adds valid execution payload envelopes from a beacon API to received.
+func FetchEnvelopesFromBeaconAPI(
+	ctx context.Context,
+	baseURL string,
+	blocks []*cltypes.SignedBeaconBlock,
+	fullRoots [][32]byte,
+	received map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	beaconCfg *clparams.BeaconChainConfig,
+) int {
+	return fetchEnvelopesFromBeaconAPI(ctx, baseURL, blocks, fullRoots, received, beaconCfg).fetched
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.
