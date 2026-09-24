@@ -155,7 +155,6 @@ func Fuzz_AggregatorV3_Merge(f *testing.F) {
 
 		require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 	})
-
 }
 
 func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
@@ -176,7 +175,7 @@ func Fuzz_AggregatorV3_MergeValTransform(f *testing.F) {
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	//var maxWrite, otherMaxWrite uint64
+	// var maxWrite, otherMaxWrite uint64
 	f.Fuzz(func(t *testing.T, data []byte) {
 		if len(data) < int(txs*(length.Addr+length.Hash)) {
 			t.Skip()

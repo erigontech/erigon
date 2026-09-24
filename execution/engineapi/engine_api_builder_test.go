@@ -199,7 +199,7 @@ func TestEngineApiBuiltBlockStateMatchesValidation(t *testing.T) {
 		// Verify receiver balance via RPC.
 		receiverBalance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		require.Equal(t, amount, receiverBalance)
+		require.Equal(t, uint256.MustFromBig(amount), receiverBalance)
 
 		// Verify sender nonce via RPC.
 		senderNonce, err := eat.RpcApiClient.GetTransactionCount(sender, rpc.LatestBlock)
@@ -234,7 +234,7 @@ func TestEngineApiMultiBlockSequence(t *testing.T) {
 		// Verify cumulative balance.
 		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		require.Equal(t, big.NewInt(5000), balance)
+		require.Equal(t, uint256.NewInt(5000), balance)
 	})
 }
 
@@ -365,7 +365,7 @@ func TestEngineApiBuiltBlockReorgRecovery(t *testing.T) {
 		// Verify cumulative balance.
 		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		require.Equal(t, big.NewInt(6000), balance)
+		require.Equal(t, uint256.NewInt(6000), balance)
 	})
 }
 
@@ -410,13 +410,13 @@ func TestEngineApiBlockGasOverflowSpillsToNextBlock(t *testing.T) {
 		// All 10 transactions should be included across the 2 blocks.
 		require.Equal(t, 10, b2TxCount+b3TxCount)
 		// Verify cumulative balance across the distinct recipients.
-		total := big.NewInt(0)
+		total := uint256.NewInt(0)
 		for _, receiver := range receivers {
 			balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 			require.NoError(t, err)
 			total.Add(total, balance)
 		}
-		require.Equal(t, big.NewInt(1000), total) // 10 * 100
+		require.Equal(t, uint256.NewInt(1000), total) // 10 * 100
 	})
 }
 
@@ -516,7 +516,7 @@ func TestEngineApiSequentialNonceAdvancement(t *testing.T) {
 		// Verify cumulative balance.
 		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		require.Equal(t, big.NewInt(300), balance)
+		require.Equal(t, uint256.NewInt(300), balance)
 	})
 }
 
@@ -563,11 +563,12 @@ func TestEngineApiMultipleSendersInBlock(t *testing.T) {
 		// Verify cumulative balance.
 		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		require.Equal(t, big.NewInt(300), balance)
+		require.Equal(t, uint256.NewInt(300), balance)
 
 		// Verify both sender nonces advanced.
 		coinbaseNonce, err := eat.RpcApiClient.GetTransactionCount(
-			crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey), rpc.LatestBlock)
+			crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey), rpc.LatestBlock,
+		)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), coinbaseNonce.Uint64())
 
@@ -641,7 +642,7 @@ func TestEngineApiHighGasContractsFillBlock(t *testing.T) {
 		// Verify receiver balance.
 		balance, err := eat.RpcApiClient.GetBalance(receiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		require.Equal(t, big.NewInt(1000), balance) // 500 + 500
+		require.Equal(t, uint256.NewInt(1000), balance) // 500 + 500
 	})
 }
 
@@ -677,7 +678,6 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 		require.NoError(t, err)
 		gasPrice, err := eat.RpcApiClient.GasPrice()
 		require.NoError(t, err)
-		gasPriceU256, _ := uint256.FromBig(gasPrice)
 
 		// Send tx to withdrawal request contract with 0.5 ETH.
 		withdrawalRequestAddr := params.WithdrawalRequestAddress.Value()
@@ -689,7 +689,7 @@ func TestEngineApiBuiltBlockWithWithdrawalRequest(t *testing.T) {
 				Value:    *uint256.NewInt(500_000_000_000_000_000), // 0.5 ETH
 				Data:     calldata,
 			},
-			GasPrice: *gasPriceU256,
+			GasPrice: *gasPrice,
 		}
 		signer := types.LatestSignerForChainID(eat.ChainConfig.ChainID)
 		signedTxn, err := types.SignTx(txn, *signer, eat.CoinbaseKey)
@@ -874,7 +874,7 @@ func TestEngineApiEIP8246PreservedBalanceSurvivesCreate2Recreate(t *testing.T) {
 		createdAddr := create2Addr(factoryAddr, salt, common.FromHex(contracts.SelfDestructInConstructorBin))
 		balance, err := eat.RpcApiClient.GetBalance(createdAddr, rpc.LatestBlock)
 		require.NoError(t, err)
-		expected := new(big.Int).Add(valueTx1, valueTx2)
+		expected := uint256.MustFromBig(new(big.Int).Add(valueTx1, valueTx2))
 		require.Equal(t, expected, balance,
 			"EIP-8246: tx1's preserved balance must survive tx2's CREATE2 at the same address")
 		code, err := eat.RpcApiClient.GetCode(createdAddr, rpc.LatestBlock)
@@ -1091,7 +1091,7 @@ func requireProxyCreditPreserved(t *testing.T, eat engineapitester.EngineApiTest
 	t.Helper()
 	onChain, err := eat.RpcApiClient.GetBalance(proxy, rpc.LatestBlock)
 	require.NoError(t, err)
-	require.Equalf(t, creditWei.ToBig(), onChain, "proxy %s must retain the dispersed credit", proxy)
+	require.Equalf(t, creditWei, onChain, "proxy %s must retain the dispersed credit", proxy)
 	code, err := eat.RpcApiClient.GetCode(proxy, rpc.LatestBlock)
 	require.NoError(t, err)
 	require.NotEmptyf(t, code, "proxy %s must be CREATE2-deployed", proxy)
@@ -1099,8 +1099,7 @@ func requireProxyCreditPreserved(t *testing.T, eat engineapitester.EngineApiTest
 	require.NotNilf(t, cc, "proxy %s missing from BAL\n%s", proxy, bal.DebugString())
 	credit := lastBalanceChange(cc)
 	require.NotNilf(t, credit, "proxy %s has no balance change in BAL (credit dropped)\n%s", proxy, bal.DebugString())
-	want, _ := uint256.FromBig(onChain)
-	require.Truef(t, credit.Value.Eq(want), "proxy %s BAL balance %s != on-chain %s\n%s", proxy, credit.Value.Hex(), want.Hex(), bal.DebugString())
+	require.Truef(t, credit.Value.Eq(onChain), "proxy %s BAL balance %s != on-chain %s\n%s", proxy, credit.Value.Hex(), onChain.Hex(), bal.DebugString())
 	require.NotEmptyf(t, cc.CodeChanges, "proxy %s missing code change\n%s", proxy, bal.DebugString())
 	require.Lessf(t, credit.Index, cc.CodeChanges[0].Index, "proxy %s credit must precede its CREATE2 deploy\n%s", proxy, bal.DebugString())
 }

@@ -146,15 +146,19 @@ func readSetPut[T any](m *map[accounts.Address]VersionedRead[T], addr accounts.A
 func (s *ReadSet) SetAddress(addr accounts.Address, tr VersionedRead[AccountView]) {
 	readSetPut(&s.address, addr, tr)
 }
+
 func (s *ReadSet) SetBalance(addr accounts.Address, tr VersionedRead[uint256.Int]) {
 	readSetPut(&s.balance, addr, tr)
 }
+
 func (s *ReadSet) SetNonce(addr accounts.Address, tr VersionedRead[uint64]) {
 	readSetPut(&s.nonce, addr, tr)
 }
+
 func (s *ReadSet) SetIncarnation(addr accounts.Address, tr VersionedRead[uint64]) {
 	readSetPut(&s.incarnation, addr, tr)
 }
+
 func (s *ReadSet) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool]) {
 	if prev, ok := s.selfDestruct[addr]; ok && prev.Version != tr.Version {
 		for _, w := range s.selfDestructWitnesses[addr] {
@@ -170,18 +174,23 @@ func (s *ReadSet) SetSelfDestruct(addr accounts.Address, tr VersionedRead[bool])
 	}
 	readSetPut(&s.selfDestruct, addr, tr)
 }
+
 func (s *ReadSet) SetCreateContract(addr accounts.Address, tr VersionedRead[bool]) {
 	readSetPut(&s.createContract, addr, tr)
 }
+
 func (s *ReadSet) SetCode(addr accounts.Address, tr VersionedRead[[]byte]) {
 	readSetPut(&s.code, addr, tr)
 }
+
 func (s *ReadSet) SetCodeHash(addr accounts.Address, tr VersionedRead[accounts.CodeHash]) {
 	readSetPut(&s.codeHash, addr, tr)
 }
+
 func (s *ReadSet) SetCodeSize(addr accounts.Address, tr VersionedRead[int]) {
 	readSetPut(&s.codeSize, addr, tr)
 }
+
 func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr VersionedRead[uint256.Int]) {
 	if s.storage == nil {
 		s.storage = make(map[accounts.Address]map[accounts.StorageKey]VersionedRead[uint256.Int])
@@ -198,38 +207,47 @@ func (s *ReadSet) GetAddress(addr accounts.Address) (VersionedRead[AccountView],
 	tr, ok := s.address[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetBalance(addr accounts.Address) (VersionedRead[uint256.Int], bool) {
 	tr, ok := s.balance[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetNonce(addr accounts.Address) (VersionedRead[uint64], bool) {
 	tr, ok := s.nonce[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetIncarnation(addr accounts.Address) (VersionedRead[uint64], bool) {
 	tr, ok := s.incarnation[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetSelfDestruct(addr accounts.Address) (VersionedRead[bool], bool) {
 	tr, ok := s.selfDestruct[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetCreateContract(addr accounts.Address) (VersionedRead[bool], bool) {
 	tr, ok := s.createContract[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetCode(addr accounts.Address) (VersionedRead[[]byte], bool) {
 	tr, ok := s.code[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetCodeHash(addr accounts.Address) (VersionedRead[accounts.CodeHash], bool) {
 	tr, ok := s.codeHash[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetCodeSize(addr accounts.Address) (VersionedRead[int], bool) {
 	tr, ok := s.codeSize[addr]
 	return tr, ok
 }
+
 func (s *ReadSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (VersionedRead[uint256.Int], bool) {
 	inner := s.storage[addr]
 	if inner == nil {
@@ -603,6 +621,7 @@ var (
 func getVWAddress() *VersionedWrite[*accounts.Account] {
 	return vwPoolAddress.Get().(*VersionedWrite[*accounts.Account])
 }
+
 func getVWBalance() *VersionedWrite[uint256.Int] {
 	return vwPoolBalance.Get().(*VersionedWrite[uint256.Int])
 }
@@ -610,15 +629,19 @@ func getVWNonce() *VersionedWrite[uint64] { return vwPoolNonce.Get().(*Versioned
 func getVWIncarnation() *VersionedWrite[uint64] {
 	return vwPoolIncarnation.Get().(*VersionedWrite[uint64])
 }
+
 func getVWSelfDestruct() *VersionedWrite[bool] {
 	return vwPoolSelfDestruct.Get().(*VersionedWrite[bool])
 }
+
 func getVWCreateContract() *VersionedWrite[bool] {
 	return vwPoolCreateContract.Get().(*VersionedWrite[bool])
 }
+
 func getVWCode() *VersionedWrite[accounts.Code] {
 	return vwPoolCode.Get().(*VersionedWrite[accounts.Code])
 }
+
 func getVWCodeHash() *VersionedWrite[accounts.CodeHash] {
 	return vwPoolCodeHash.Get().(*VersionedWrite[accounts.CodeHash])
 }
@@ -763,30 +786,39 @@ func (s *WriteSet) revive() {
 func (s *WriteSet) SetAddress(addr accounts.Address, vw *VersionedWrite[*accounts.Account]) {
 	writeSetPut(s, &s.address, addr, vw, wsMapPoolAddress)
 }
+
 func (s *WriteSet) SetBalance(addr accounts.Address, vw *VersionedWrite[uint256.Int]) {
 	writeSetPut(s, &s.balance, addr, vw, wsMapPoolBalance)
 }
+
 func (s *WriteSet) SetNonce(addr accounts.Address, vw *VersionedWrite[uint64]) {
 	writeSetPut(s, &s.nonce, addr, vw, wsMapPoolNonce)
 }
+
 func (s *WriteSet) SetIncarnation(addr accounts.Address, vw *VersionedWrite[uint64]) {
 	writeSetPut(s, &s.incarnation, addr, vw, wsMapPoolIncarnation)
 }
+
 func (s *WriteSet) SetSelfDestruct(addr accounts.Address, vw *VersionedWrite[bool]) {
 	writeSetPut(s, &s.selfDestruct, addr, vw, wsMapPoolSelfDestruct)
 }
+
 func (s *WriteSet) SetCreateContract(addr accounts.Address, vw *VersionedWrite[bool]) {
 	writeSetPut(s, &s.createContract, addr, vw, wsMapPoolCreateContract)
 }
+
 func (s *WriteSet) SetCode(addr accounts.Address, vw *VersionedWrite[accounts.Code]) {
 	writeSetPut(s, &s.code, addr, vw, wsMapPoolCode)
 }
+
 func (s *WriteSet) SetCodeHash(addr accounts.Address, vw *VersionedWrite[accounts.CodeHash]) {
 	writeSetPut(s, &s.codeHash, addr, vw, wsMapPoolCodeHash)
 }
+
 func (s *WriteSet) SetCodeSize(addr accounts.Address, vw *VersionedWrite[int]) {
 	writeSetPut(s, &s.codeSize, addr, vw, wsMapPoolCodeSize)
 }
+
 func (s *WriteSet) SetStorage(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) {
 	if s.storage == nil {
 		s.storage = wsGetStorageOuter()
@@ -1112,6 +1144,7 @@ func (s *WriteSet) GetAddress(addr accounts.Address) (*VersionedWrite[*accounts.
 	vw, ok := s.address[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetBalance(addr accounts.Address) (*VersionedWrite[uint256.Int], bool) {
 	if s == nil {
 		return nil, false
@@ -1119,6 +1152,7 @@ func (s *WriteSet) GetBalance(addr accounts.Address) (*VersionedWrite[uint256.In
 	vw, ok := s.balance[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetNonce(addr accounts.Address) (*VersionedWrite[uint64], bool) {
 	if s == nil {
 		return nil, false
@@ -1126,6 +1160,7 @@ func (s *WriteSet) GetNonce(addr accounts.Address) (*VersionedWrite[uint64], boo
 	vw, ok := s.nonce[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetIncarnation(addr accounts.Address) (*VersionedWrite[uint64], bool) {
 	if s == nil {
 		return nil, false
@@ -1133,6 +1168,7 @@ func (s *WriteSet) GetIncarnation(addr accounts.Address) (*VersionedWrite[uint64
 	vw, ok := s.incarnation[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetSelfDestruct(addr accounts.Address) (*VersionedWrite[bool], bool) {
 	if s == nil {
 		return nil, false
@@ -1140,6 +1176,7 @@ func (s *WriteSet) GetSelfDestruct(addr accounts.Address) (*VersionedWrite[bool]
 	vw, ok := s.selfDestruct[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetCreateContract(addr accounts.Address) (*VersionedWrite[bool], bool) {
 	if s == nil {
 		return nil, false
@@ -1147,6 +1184,7 @@ func (s *WriteSet) GetCreateContract(addr accounts.Address) (*VersionedWrite[boo
 	vw, ok := s.createContract[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetCode(addr accounts.Address) (*VersionedWrite[accounts.Code], bool) {
 	if s == nil {
 		return nil, false
@@ -1154,6 +1192,7 @@ func (s *WriteSet) GetCode(addr accounts.Address) (*VersionedWrite[accounts.Code
 	vw, ok := s.code[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetCodeHash(addr accounts.Address) (*VersionedWrite[accounts.CodeHash], bool) {
 	if s == nil {
 		return nil, false
@@ -1161,6 +1200,7 @@ func (s *WriteSet) GetCodeHash(addr accounts.Address) (*VersionedWrite[accounts.
 	vw, ok := s.codeHash[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetCodeSize(addr accounts.Address) (*VersionedWrite[int], bool) {
 	if s == nil {
 		return nil, false
@@ -1168,6 +1208,7 @@ func (s *WriteSet) GetCodeSize(addr accounts.Address) (*VersionedWrite[int], boo
 	vw, ok := s.codeSize[addr]
 	return vw, ok
 }
+
 func (s *WriteSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (*VersionedWrite[uint256.Int], bool) {
 	if s == nil {
 		return nil, false
@@ -1275,24 +1316,31 @@ func (s *WriteSet) addrs() map[accounts.Address]struct{} {
 func (s *WriteSet) Addresses() iter.Seq2[accounts.Address, *VersionedWrite[*accounts.Account]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[*accounts.Account] { return s.address })
 }
+
 func (s *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint256.Int] { return s.balance })
 }
+
 func (s *WriteSet) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint64] { return s.nonce })
 }
+
 func (s *WriteSet) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint64] { return s.incarnation })
 }
+
 func (s *WriteSet) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[bool] { return s.selfDestruct })
 }
+
 func (s *WriteSet) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[accounts.Code] { return s.code })
 }
+
 func (s *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[accounts.CodeHash] { return s.codeHash })
 }
+
 func (s *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
 		return s.storage
@@ -1435,42 +1483,49 @@ func (s *WriteSet) DelBalance(addr accounts.Address) {
 		delete(s.balance, addr)
 	}
 }
+
 func (s *WriteSet) DelNonce(addr accounts.Address) {
 	if vw, ok := s.nonce[addr]; ok {
 		releaseVWNonce(vw)
 		delete(s.nonce, addr)
 	}
 }
+
 func (s *WriteSet) DelIncarnation(addr accounts.Address) {
 	if vw, ok := s.incarnation[addr]; ok {
 		releaseVWIncarnation(vw)
 		delete(s.incarnation, addr)
 	}
 }
+
 func (s *WriteSet) DelSelfDestruct(addr accounts.Address) {
 	if vw, ok := s.selfDestruct[addr]; ok {
 		releaseVWSelfDestruct(vw)
 		delete(s.selfDestruct, addr)
 	}
 }
+
 func (s *WriteSet) DelCode(addr accounts.Address) {
 	if vw, ok := s.code[addr]; ok {
 		releaseVWCode(vw)
 		delete(s.code, addr)
 	}
 }
+
 func (s *WriteSet) DelCodeHash(addr accounts.Address) {
 	if vw, ok := s.codeHash[addr]; ok {
 		releaseVWCodeHash(vw)
 		delete(s.codeHash, addr)
 	}
 }
+
 func (s *WriteSet) DelCodeSize(addr accounts.Address) {
 	if vw, ok := s.codeSize[addr]; ok {
 		releaseVWCodeSize(vw)
 		delete(s.codeSize, addr)
 	}
 }
+
 func (s *WriteSet) DelStorage(addr accounts.Address, key accounts.StorageKey) {
 	if inner := s.storage[addr]; inner != nil {
 		if vw, ok := inner[key]; ok {
@@ -1626,7 +1681,6 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 	// the address holds nothing; the domain cannot say otherwise.
 	if vr.stateReader != nil && !recorded {
 		account, err := vr.stateReader.ReadAccountData(address)
-
 		if err != nil {
 			return nil, err
 		}
@@ -1695,7 +1749,6 @@ func (vr versionedStateReader) ReadAccountDataForDebug(address accounts.Address)
 
 	if vr.stateReader != nil {
 		account, err := vr.stateReader.ReadAccountDataForDebug(address)
-
 		if err != nil {
 			return nil, err
 		}
@@ -2545,7 +2598,7 @@ func (io *VersionedIO) AsBlockAccessList() types.BlockAccessList {
 		// beneficiary, BALANCE opcode, etc.) from incidental gas-calculation
 		// reads (Empty() in statefulGasCall). Keep it when it has actual state
 		// changes or when a user tx performed a non-revertable access to it.
-		if account.changes.Address == params.SystemAddress && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
+		if account.changes.Address == params.SystemAddress.Value() && !hasAccountChanges(account.changes) && !account.nonRevertableUserAccess {
 			continue
 		}
 		bal = append(bal, *account.changes)
@@ -2695,7 +2748,7 @@ func (a *accountState) setBalanceValue(v uint256.Int) {
 
 func newAccountState(addr accounts.Address) *accountState {
 	return &accountState{
-		changes: &types.AccountChanges{Address: addr},
+		changes: &types.AccountChanges{Address: addr.Value()},
 		balance: newBalanceTracker(),
 		nonce:   newNonceTracker(),
 		code:    newCodeTracker(),

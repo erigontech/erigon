@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"math"
 	"testing"
 
@@ -36,6 +37,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
+	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
@@ -53,7 +56,7 @@ func TestTxPoolContent(t *testing.T) {
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	txPool := txpoolproto.NewTxpoolClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, txPool, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
-	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, txPool)
+	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), txPool)
 
 	expectValue := uint64(1234)
 	txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(expectValue), params.TxGas, uint256.NewInt(10*common.GWei), nil), *types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
@@ -130,7 +133,7 @@ func TestTxPoolContentBaseFeeSubPool(t *testing.T) {
 		}},
 		status: &txpoolproto.StatusReply{PendingCount: 2, BaseFeeCount: 1, QueuedCount: 1},
 	}
-	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), m.DB, pool)
+	api := NewTxPoolAPI(NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), pool)
 
 	addr := m.Address.String()
 
@@ -162,9 +165,55 @@ func TestTxPoolStatusSumsCountsWithoutWrapping(t *testing.T) {
 	pool := &stubPoolContentClient{
 		status: &txpoolproto.StatusReply{PendingCount: math.MaxUint32, BaseFeeCount: 1, QueuedCount: 0},
 	}
-	api := NewTxPoolAPI(nil, nil, pool)
+	api := NewTxPoolAPI(nil, pool)
 
 	status, err := api.Status(context.Background())
 	require.NoError(err)
 	require.Equal(hexutil.Uint(math.MaxUint32)+1, status["pending"])
+}
+
+// The named map types exist only to reach a fast marshaller, so what they write has to be
+// the bytes encoding/json wrote before, key order included.
+func TestMapResultsMarshalAsJSONDoes(t *testing.T) {
+	txn := func(nonce uint64) *ethapi.RPCTransaction {
+		to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+		return newRPCPendingTransaction(&types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21000, To: &to},
+			GasPrice: *uint256.NewInt(1e9),
+		})
+	}
+	a1 := common.HexToAddress("0xfe00000000000000000000000000000000000001")
+	a2 := common.HexToAddress("0x0100000000000000000000000000000000000002")
+
+	for name, result := range map[string]any{
+		"content": TxPoolContent{
+			"queued":  {a1.Hex(): {"10": txn(10), "2": txn(2)}},
+			"pending": {a2.Hex(): {"1": txn(1)}, a1.Hex(): {"3": txn(3)}},
+		},
+		"contentFrom": TxPoolContentFrom{"pending": {"7": txn(7)}, "queued": {}},
+		"storageValues": StorageValues{
+			a1: {hexutil.Bytes{0x01}, hexutil.Bytes{}},
+			a2: {hexutil.Bytes{0xff, 0x00}},
+		},
+		"emptyContent":  TxPoolContent{"pending": {}, "queued": {}},
+		"nilSubPool":    TxPoolContent{"pending": nil, "queued": {a1.Hex(): nil}},
+		"nilNonceMap":   TxPoolContentFrom{"pending": nil},
+		"emptySlotList": StorageValues{a1: {}},
+		"nilStorage":    StorageValues(nil),
+		"nilSlotValues": StorageValues{a1: nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := json.Marshal(result)
+			require.NoError(t, err)
+
+			s := jsonstream.Get(nil)
+			defer jsonstream.Put(s)
+			require.NoError(t, result.(interface {
+				MarshalFastJSONTo(*jsonstream.StackStream) error
+			}).MarshalFastJSONTo(s))
+			require.NoError(t, s.Flush())
+
+			require.Equal(t, string(want), string(s.Buffer()), "bytes and key order must match encoding/json")
+		})
+	}
 }

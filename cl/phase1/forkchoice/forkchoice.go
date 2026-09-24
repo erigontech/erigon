@@ -88,28 +88,34 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time            atomic.Uint64
-	highestSeen     atomic.Uint64
-	highestSeenRoot atomic.Value // common.Hash
+	time             atomic.Uint64
+	highestSeen      atomic.Uint64
+	highestSeenRoot  atomic.Value // common.Hash
+	blocksProcessing atomic.Int64
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
 	unrealizedJustifiedCheckpoint atomic.Value
 	unrealizedFinalizedCheckpoint atomic.Value
 
-	proposerBoostRoot              atomic.Value
-	headHash                       common.Hash
-	headSlot                       uint64
-	headPayloadStatus              cltypes.PayloadStatus
-	genesisTime                    uint64
-	genesisValidatorsRoot          common.Hash
-	weights                        map[common.Hash]uint64
-	headSet                        map[common.Hash]struct{}
-	hotSidecars                    map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
-	verifiedExecutionPayload       *lru.Cache[common.Hash, struct{}]
-	verifiedExecutionPayloadHashes *lru.Cache[common.Hash, common.Hash]
-	executionPayloadRoots          map[common.Hash]map[common.Hash]struct{}
-	invalidatedExecutionPayloads   *sync.Map
+	proposerBoostRoot                  atomic.Value
+	headHash                           common.Hash
+	headSlot                           uint64
+	headPayloadStatus                  cltypes.PayloadStatus
+	genesisTime                        uint64
+	genesisValidatorsRoot              common.Hash
+	anchorExecutionPayloadBuilderIndex uint64
+	anchorHasExecutionPayloadBid       bool
+	weights                            map[common.Hash]uint64
+	headSet                            map[common.Hash]struct{}
+	hotSidecars                        map[common.Hash][]*cltypes.BlobSidecar // Set of sidecars that are not yet processed.
+	verifiedExecutionPayload           *lru.Cache[common.Hash, struct{}]
+	verifiedExecutionPayloadHashes     *lru.Cache[common.Hash, common.Hash]
+	executionPayloadRoots              map[common.Hash]map[common.Hash]struct{}
+	invalidatedExecutionPayloads       *sync.Map
+	// Carries an invalid verdict until the caller makes it durable, since the bounded
+	// caches below can evict in between. Not refcounted, so the writer clears its own key.
+	inFlightInvalidPayloads *sync.Map
 	// [New in Gloas:EIP7732] Track execution payload validation status by execution block hash.
 	// Used to check if parent execution payload has been validated/invalidated for gossip validation.
 	executionPayloadStatus *lru.Cache[common.Hash, execution_client.PayloadStatus]
@@ -180,7 +186,7 @@ type ForkChoiceStore struct {
 	probabilisticHeadGetter bool
 
 	// [New in Gloas:EIP7732]
-	ptcVoteMu                   sync.Mutex // protects payload vote updates and first-valid gossip tracking
+	ptcVoteMu                   sync.Mutex // protects live payload vote updates, paired reads, and first-valid gossip tracking
 	payloadTimelinessVote       sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadDataAvailabilityVote sync.Map   // map[common.Hash][clparams.PtcSize]int8 (0=unvoted, 1=true, -1=false)
 	payloadAttestationSeenSlot  uint64
@@ -399,12 +405,17 @@ func NewForkChoiceStore(
 	randaoMixesLists.Add(anchorRoot, r)
 	// Seed the eth2Root→eth1Hash mapping for the anchor block so that
 	// fork choice can resolve the EL genesis hash at startup.
-	anchorExecHeader := anchorState.LatestExecutionPayloadHeader()
-	if anchorExecHeader != nil && anchorExecHeader.BlockHash != (common.Hash{}) {
-		eth2Roots.Add(anchorRoot, anchorExecHeader.BlockHash)
+	var anchorExecutionHash common.Hash
+	if anchorState.Version().AfterOrEqual(clparams.GloasVersion) {
+		anchorExecutionHash = anchorState.GetLatestBlockHash()
+	} else if header := anchorState.LatestExecutionPayloadHeader(); header != nil {
+		anchorExecutionHash = header.BlockHash
+	}
+	if anchorExecutionHash != (common.Hash{}) {
+		eth2Roots.Add(anchorRoot, anchorExecutionHash)
 		// Also map the zero hash → EL genesis for the finalized checkpoint
 		// which starts as zero at genesis.
-		eth2Roots.Add(common.Hash{}, anchorExecHeader.BlockHash)
+		eth2Roots.Add(common.Hash{}, anchorExecutionHash)
 	}
 
 	headSet := make(map[common.Hash]struct{})
@@ -439,6 +450,7 @@ func NewForkChoiceStore(
 		verifiedExecutionPayloadHashes: verifiedExecutionPayloadHashes,
 		executionPayloadRoots:          executionPayloadRoots,
 		invalidatedExecutionPayloads:   invalidatedExecutionPayloads,
+		inFlightInvalidPayloads:        &sync.Map{},
 		localValidators:                localValidators,
 		pendingConsolidations:          pendingConsolidations,
 		pendingDeposits:                pendingDeposits,
@@ -451,6 +463,12 @@ func NewForkChoiceStore(
 		executionPayloadGasLimit:       executionPayloadGasLimit,
 		payloadAttestationContexts:     payloadAttestationContexts,
 		db:                             db,
+	}
+	if anchorState.Version() >= clparams.GloasVersion {
+		if bid := anchorState.GetLatestExecutionPayloadBid(); bid != nil {
+			f.anchorExecutionPayloadBuilderIndex = bid.BuilderIndex
+			f.anchorHasExecutionPayloadBid = true
+		}
 	}
 	f.justifiedCheckpoint.Store(anchorCheckpoint)
 	f.finalizedCheckpoint.Store(anchorCheckpoint)
@@ -553,6 +571,12 @@ func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
+// Blocks parked between network-service retries have not entered OnBlock and are not counted.
+func (f *ForkChoiceStore) BlockProcessing() bool {
+	return f.blocksProcessing.Load() > 0
 }
 
 // HighestSeenRoot returns the block root of the highest seen slot.
@@ -668,6 +692,10 @@ func (f *ForkChoiceStore) AnchorRoot() common.Hash {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.forkGraph.AnchorRoot()
+}
+
+func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
+	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
 }
 
 func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {

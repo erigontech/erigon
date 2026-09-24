@@ -121,6 +121,9 @@ const (
 	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
 	CaplinStateRoots Check = "CaplinStateRoots"
 
+	// CaplinBlobSidecars validates frozen blob sidecars against canonical beacon blocks and their cryptographic proofs.
+	CaplinBlobSidecars Check = "CaplinBlobSidecars"
+
 	// TorrentPieces re-hashes data files against their .torrent piece hashes. It runs as a
 	// pre-pass rather than from the check loop, because only --file-integrity-cache enables
 	// it, but it is named so --skip-check can turn it off like any other check.
@@ -135,11 +138,13 @@ var FastChecks = []Check{
 	HistoryNoSystemTxs, CommitmentHistVal, StateRootVerifyByHistory,
 }
 
-var SlowChecks = []Check{StateVerify}
-var DeprecatedChecks = []Check{
-	CommitmentKvDeref, //StateVerify - will overcome
-	StateProgress,
-}
+var (
+	SlowChecks       = []Check{CaplinBlobSidecars, StateVerify}
+	DeprecatedChecks = []Check{
+		CommitmentKvDeref, // StateVerify - will overcome
+		StateProgress,
+	}
+)
 var AllChecks = append(append(append([]Check{TorrentPieces}, FastChecks...), SlowChecks...), DeprecatedChecks...)
 
 // SortChecksByCost returns a copy of checks ordered by their position in FastChecks

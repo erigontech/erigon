@@ -75,6 +75,26 @@ func expectSidecarFilesPresent(blobStorage *blobstoragemock.MockBlobStorage) {
 		Return(true, nil).AnyTimes()
 }
 
+func TestNewBlobHistoryDownloaderRequiresClock(t *testing.T) {
+	require.PanicsWithValue(t, "ethClock is required", func() {
+		NewBlobHistoryDownloader(
+			t.Context(),
+			&clparams.MainnetBeaconConfig,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			nil,
+			false,
+			false,
+			log.New(),
+		)
+	})
+}
+
 // A historical fulu block whose PeerDAS data columns are served by no peer (older
 // than the network custody window) makes DownloadColumnsAndRecoverBlobs block until
 // its context is cancelled. Column recovery must be bounded per block so the archive
@@ -108,7 +128,7 @@ func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 
 	done := make(chan struct{})
 	go func() {
-		b.recoverFuluColumns([]*cltypes.SignedBeaconBlock{fulu})
+		b.recoverFuluColumns(rootedBlocks(t, fulu))
 		close(done)
 	}()
 
@@ -141,7 +161,7 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 		logger:                log.New(),
 	}
 	done := make(chan bool, 1)
-	go func() { done <- downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}) }()
+	go func() { done <- downloader.recoverFuluColumns(rootedBlocks(t, block)) }()
 
 	bounded := false
 	select {
@@ -170,7 +190,7 @@ func TestBlobHistoryDownloaderMixedBatchAttemptsFuluAfterDenebFailure(t *testing
 		logger:                log.New(),
 	}
 
-	require.False(t, downloader.processBatch([]*cltypes.SignedBeaconBlock{deneb, fulu}))
+	require.False(t, downloader.processBatch(rootedBlocks(t, deneb, fulu)))
 }
 
 func TestBlobHistoryDownloaderMixedBatchCancellationDoesNotStartFulu(t *testing.T) {
@@ -188,7 +208,7 @@ func TestBlobHistoryDownloaderMixedBatchCancellationDoesNotStartFulu(t *testing.
 		logger:                log.New(),
 	}
 
-	require.False(t, downloader.processBatch([]*cltypes.SignedBeaconBlock{deneb, fulu}))
+	require.False(t, downloader.processBatch(rootedBlocks(t, deneb, fulu)))
 }
 
 func TestBlobHistoryDownloaderIncompleteFuluRecoveryWithholdsCompletionUntilRetry(t *testing.T) {
@@ -264,7 +284,7 @@ func TestBlobHistoryDownloaderCompletedFuluRecoveryMeetsDurablePostcondition(t *
 		logger: log.New(),
 	}
 
-	require.True(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+	require.True(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 }
 
 func TestBlobHistoryDownloaderFuluRecoveryDoesNotDeleteConcurrentCompletion(t *testing.T) {
@@ -313,7 +333,7 @@ func TestBlobHistoryDownloaderFuluRecoveryDoesNotDeleteConcurrentCompletion(t *t
 		logger: log.New(),
 	}
 
-	require.True(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+	require.True(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 	fresh := blob_storage.NewBlobStore(db, fs)
 	sidecars, found, err := fresh.ReadBlobSidecars(t.Context(), block.Block.Slot, root)
 	require.NoError(t, err)
@@ -348,7 +368,7 @@ func TestBlobHistoryDownloaderFuluRecoveryWaitsForAsyncPersistence(t *testing.T)
 		logger: log.New(),
 	}
 
-	require.True(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+	require.True(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 	require.GreaterOrEqual(t, reads.Load(), int32(3))
 }
 
@@ -372,7 +392,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsStaleCommitmentCount(t *testing
 		logger:                log.New(),
 	}
 
-	require.False(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+	require.False(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 }
 
 func TestBlobHistoryDownloaderFuluTransientReadErrorDoesNotRemoveStorage(t *testing.T) {
@@ -390,7 +410,7 @@ func TestBlobHistoryDownloaderFuluTransientReadErrorDoesNotRemoveStorage(t *test
 		logger:                log.New(),
 	}
 
-	require.False(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+	require.False(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 }
 
 func TestBlobHistoryDownloaderFuluRecoveryRetainsPartialCommitmentCount(t *testing.T) {
@@ -413,7 +433,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRetainsPartialCommitmentCount(t *testi
 		logger:                log.New(),
 	}
 
-	require.False(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+	require.False(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 }
 
 func TestBlobHistoryDownloaderFuluRecoveryRetainsExcessCommitmentCount(t *testing.T) {
@@ -436,7 +456,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRetainsExcessCommitmentCount(t *testin
 		logger:                log.New(),
 	}
 
-	require.False(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+	require.False(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 }
 
 func TestBlobHistoryDownloaderCountEqualFuluSkipsDeepScanValidation(t *testing.T) {
@@ -684,7 +704,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsInvalidStoredSidecars(t *testin
 				logger: log.New(),
 			}
 
-			require.False(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+			require.False(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 		})
 	}
 }
@@ -712,7 +732,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsFailedStoredSidecarVerification
 		logger: log.New(),
 	}
 
-	require.False(t, downloader.recoverFuluColumns([]*cltypes.SignedBeaconBlock{block}))
+	require.False(t, downloader.recoverFuluColumns(rootedBlocks(t, block)))
 }
 
 func TestBlobHistoryDownloaderFuluBlockWithoutBlobsCompletes(t *testing.T) {
@@ -783,7 +803,7 @@ func TestDenebRecoveryBatchAccumulatesComplementaryPartialsAndStoresCompleteGrou
 	ctrl := gomock.NewController(t)
 	storage := blobstoragemock.NewMockBlobStorage(ctrl)
 	block, req, sidecars := denebRecoveryFixture(t, 2)
-	batch, err := newDenebRecoveryBatch([]*cltypes.SignedBeaconBlock{block}, req)
+	batch, err := newDenebRecoveryBatch(rootedBlocks(t, block), req)
 	require.NoError(t, err)
 	batch.verifier = func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error { return nil }
 
@@ -805,7 +825,7 @@ func TestDenebRecoveryBatchAccumulatesComplementaryPartialsAndStoresCompleteGrou
 
 func TestDenebRecoveryBatchAcceptsUsefulOverlapFromInflightRequest(t *testing.T) {
 	block, req, sidecars := denebRecoveryFixture(t, 2)
-	batch, err := newDenebRecoveryBatch([]*cltypes.SignedBeaconBlock{block}, req)
+	batch, err := newDenebRecoveryBatch(rootedBlocks(t, block), req)
 	require.NoError(t, err)
 	batch.verifier = func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error { return nil }
 
@@ -823,7 +843,7 @@ func TestDenebRecoveryBatchRetriesStorageWithoutRefetch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	storage := blobstoragemock.NewMockBlobStorage(ctrl)
 	block, req, sidecars := denebRecoveryFixture(t, 1)
-	batch, err := newDenebRecoveryBatch([]*cltypes.SignedBeaconBlock{block}, req)
+	batch, err := newDenebRecoveryBatch(rootedBlocks(t, block), req)
 	require.NoError(t, err)
 	batch.verifier = func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error { return nil }
 	storage.EXPECT().WriteBlobSidecars(gomock.Any(), req.Get(0).BlockRoot, sidecars).Return(errors.New("temporary write failure"))
@@ -865,7 +885,7 @@ func TestDenebRecoveryBatchRetriesStorageWithoutRefetch(t *testing.T) {
 
 func TestDenebRecoveryBatchInvalidResponsesDoNotPoisonAccumulator(t *testing.T) {
 	block, req, sidecars := denebRecoveryFixture(t, 2)
-	batch, err := newDenebRecoveryBatch([]*cltypes.SignedBeaconBlock{block}, req)
+	batch, err := newDenebRecoveryBatch(rootedBlocks(t, block), req)
 	require.NoError(t, err)
 	batch.verifier = func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error { return nil }
 
@@ -968,7 +988,7 @@ func TestBlobHistoryDownloaderPostchecksPersistedDenebGroupAfterRequestCancellat
 		logger:      log.New(),
 	}
 
-	require.False(t, downloader.recoverDenebBlobs([]*cltypes.SignedBeaconBlock{blockA, blockB}))
+	require.False(t, downloader.recoverDenebBlobs(rootedBlocks(t, blockA, blockB)))
 	require.Len(t, downloader.retryRanges, 1)
 	require.Equal(t, blockA.Block.Slot, downloader.retryRanges[0].start)
 	require.Equal(t, blockB.Block.Slot, downloader.retryRanges[0].end)
@@ -1000,7 +1020,7 @@ func TestBlobHistoryDownloaderMixedDenebBatchIgnoresZeroCommitmentStorage(t *tes
 				logger:      log.New(),
 			}
 
-			require.True(t, downloader.recoverDenebBlobs(blocks))
+			require.True(t, downloader.recoverDenebBlobs(rootedBlocks(t, blocks...)))
 		})
 	}
 }
@@ -1103,7 +1123,7 @@ func TestCollectIncompleteBlocksSkipsSlotsCompleteUnderTheCanonicalRoot(t *testi
 		return beacon_indicies.MarkRootCanonical(context.Background(), tx, slot, canonical)
 	}))
 
-	batch, _, err := downloader.collectIncompleteBlocks(slot, slot)
+	batch, _, err := downloader.collectIncompleteBlocks(slot, slot, 0)
 	require.NoError(t, err)
 	require.Empty(t, batch, "a slot already complete in the store must not be queued for download")
 }
@@ -1134,7 +1154,7 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsWhoseFilesWerePruned(t *testin
 	downloader.blobStorage = storage
 	downloader.archiveBlobs = true
 
-	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot)
+	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot, 0)
 	require.NoError(t, err)
 	require.Len(t, batch, 1, "an archive slot whose sidecar files are gone must stay queued")
 }
@@ -1165,14 +1185,14 @@ func TestCollectIncompleteBlocksQueuesArchiveSlotsMissingALaterSidecarFile(t *te
 	downloader.blobStorage = storage
 	downloader.archiveBlobs = true
 
-	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot)
+	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot, 0)
 	require.NoError(t, err)
 	require.Len(t, batch, 1, "a partially stored archive slot must stay queued")
 }
 
-// A non-archive node prunes on purpose, so a missing file below its retention window is expected and
-// must not be re-queued. Only the archive path treats a count-equal slot with no file as work.
-func TestCollectIncompleteBlocksLeavesPrunedNonArchiveSlotsAlone(t *testing.T) {
+// A retention expansion can make a previously pruned bucket mandatory again after restart, while
+// its commitment-count row still makes the slot look complete.
+func TestCollectIncompleteBlocksQueuesPrunedNonArchiveSlotInsideSelectedRange(t *testing.T) {
 	block, sidecar := validDenebRecoverySidecar(t, 100)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
@@ -1181,12 +1201,182 @@ func TestCollectIncompleteBlocksLeavesPrunedNonArchiveSlotsAlone(t *testing.T) {
 	storage := blob_storage.NewBlobStore(db, fs)
 	require.NoError(t, storage.WriteBlobSidecars(t.Context(), blockRoot, []*cltypes.BlobSidecar{sidecar}))
 	require.NoError(t, storage.PruneBelow(10_000))
+	storage = blob_storage.NewBlobStore(db, fs)
 
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = storage
 	downloader.archiveBlobs = false
 
-	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot)
+	batch, _, err := downloader.collectIncompleteBlocks(block.Block.Slot, block.Block.Slot, 0)
 	require.NoError(t, err)
-	require.Empty(t, batch, "a non-archive node must not re-queue what it deliberately pruned")
+	require.Len(t, batch, 1, "a selected non-archive slot whose sidecar file is gone must stay queued")
+}
+
+func TestCollectIncompleteBlocksSkipsFuluSlotsBeforeDataColumnServeRange(t *testing.T) {
+	const slot = uint64(100)
+	ctrl := gomock.NewController(t)
+	storage := blobstoragemock.NewMockBlobStorage(ctrl)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = slot
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = storage
+	downloader.archiveBlobs = false
+
+	batch, _, err := downloader.collectIncompleteBlocks(slot, slot, slot+1)
+	require.NoError(t, err)
+	require.Empty(t, batch)
+
+	storage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
+	storage.EXPECT().BlobSidecarExists(gomock.Any(), slot, gomock.Any(), uint64(0)).Return(false, nil)
+	batch, _, err = downloader.collectIncompleteBlocks(slot, slot, slot)
+	require.NoError(t, err)
+	require.Len(t, batch, 1)
+}
+
+// Blocks reach the downloader through ReadBeaconBlockBodyBySlot, which decodes them without their
+// execution payload for both the snapshot and the database path, so hashing one yields a root that
+// never existed on chain. Peers index columns and sidecars by the real root, so a request built
+// from the self-hash matches nothing and every recovery times out.
+func TestRecoverFuluColumnsRequestsTheCanonicalRoot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	const slot = 100
+	canonical := common.HexToHash("0xc0ffee")
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = slot
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	selfHash, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
+
+	var requested []common.Hash
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(_ context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
+			for _, b := range blocks {
+				root, err := b.BlockHashSSZ()
+				require.NoError(t, err)
+				requested = append(requested, root)
+			}
+			return nil
+		}).AnyTimes()
+
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	blobStorage.EXPECT().BlobSidecarExists(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(false, nil).AnyTimes()
+	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, false, nil).AnyTimes()
+
+	downloader := &BlobHistoryDownloader{
+		ctx:                   t.Context(),
+		beaconCfg:             &clparams.MainnetBeaconConfig,
+		rpc:                   boundaryPeerCounter(1),
+		blobStorage:           blobStorage,
+		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
+		columnBackfillTimeout: 200 * time.Millisecond,
+		logger:                log.New(),
+	}
+
+	downloader.recoverFuluColumns([]incompleteBlock{{block: block, root: canonical}})
+
+	require.NotEmpty(t, requested, "the column request was never issued")
+	require.Equal(t, canonical, requested[0],
+		"columns must be requested under the canonical root, not the payload-stripped hash")
+}
+
+// The Deneb path builds by-root identifiers, so it carries the same defect and needs the same root.
+func TestBlobsIdentifiersUseTheSuppliedRoot(t *testing.T) {
+	const slot = 100
+	canonical := common.HexToHash("0xc0ffee")
+
+	block, _ := validDenebRecoverySidecar(t, slot)
+	selfHash, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
+
+	ids, err := blobsIdentifiersFromRootedBlocks([]incompleteBlock{{block: block, root: canonical}}, &clparams.MainnetBeaconConfig)
+	require.NoError(t, err)
+	require.Positive(t, ids.Len(), "no identifiers were produced")
+	require.Equal(t, canonical, ids.Get(0).BlockRoot,
+		"identifiers must carry the canonical root, not the payload-stripped hash")
+}
+
+// rootedBlocks pairs each block with its own hash, which is what these fixtures use as the
+// canonical root. Tests that need the two to differ construct incompleteBlock directly.
+func rootedBlocks(t *testing.T, blocks ...*cltypes.SignedBeaconBlock) []incompleteBlock {
+	t.Helper()
+	out := make([]incompleteBlock, 0, len(blocks))
+	for _, b := range blocks {
+		root, err := b.Block.HashSSZ()
+		require.NoError(t, err)
+		out = append(out, incompleteBlock{block: b, root: root})
+	}
+	return out
+}
+
+// PeerDAS reads the proposer signature off the block to reject columns whose header signature does
+// not match. It used to do that with a type switch on the concrete block types, so a wrapper
+// silently disabled the check; the signature is part of the interface now, and the wrapper must
+// carry the wrapped block's own.
+func TestRootedColumnBlockPreservesTheSignature(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = 100
+	block.Signature = common.Bytes96{0xaa, 0xbb, 0xcc}
+
+	var wrapped cltypes.ColumnSyncableSignedBlock = rootedColumnBlock{
+		SignedBeaconBlock: block,
+		root:              common.HexToHash("0xc0ffee"),
+	}
+
+	require.Equal(t, block.Signature, wrapped.BlockSignature(),
+		"the wrapper must expose the wrapped block's signature, or PeerDAS cannot reject a mismatched column")
+
+	root, err := wrapped.BlockHashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, common.HexToHash("0xc0ffee"), common.Hash(root), "and still override the root")
+}
+
+// Response grouping is keyed on the canonical root, so a fixture whose two roots are equal would
+// keep passing if the map were rebuilt from the block's own hash. This one separates them.
+func TestNewDenebRecoveryBatchGroupsOnTheCanonicalRoot(t *testing.T) {
+	const slot = 100
+	canonical := common.HexToHash("0xc0ffee")
+
+	block, _ := validDenebRecoverySidecar(t, slot)
+	selfHash, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
+
+	items := []incompleteBlock{{block: block, root: canonical}}
+	req, err := blobsIdentifiersFromRootedBlocks(items, &clparams.MainnetBeaconConfig)
+	require.NoError(t, err)
+
+	batch, err := newDenebRecoveryBatch(items, req)
+	require.NoError(t, err)
+	require.Contains(t, batch.groups, canonical, "the group must be keyed on the canonical root")
+	require.NotContains(t, batch.groups, common.Hash(selfHash), "never on the payload-stripped hash")
+	require.NotNil(t, batch.groups[canonical].block, "the group must resolve back to its block")
+}
+
+// The retry path re-reads a block by slot, so it has to re-resolve the canonical root too; the
+// block it gets back is payload-stripped like any other and cannot supply it.
+func TestReadRetryBlockReturnsTheCanonicalRoot(t *testing.T) {
+	const slot = 100
+	canonical := common.HexToHash("0xc0ffee")
+
+	block, _ := validDenebRecoverySidecar(t, slot)
+	selfHash, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NotEqual(t, canonical, common.Hash(selfHash), "fixture must separate the two roots")
+
+	downloader := newBoundaryDownloader(t, slot, 0, slot, &boundaryBlockReader{block: block})
+	require.NoError(t, downloader.indiciesDB.(kv.RwDB).Update(t.Context(), func(tx kv.RwTx) error {
+		return beacon_indicies.MarkRootCanonical(t.Context(), tx, slot, canonical)
+	}))
+
+	got, root, err := downloader.readRetryBlock(slot)
+	require.NoError(t, err)
+	require.NotNil(t, got)
+	require.Equal(t, canonical, root, "the retry must carry the indexed root, not the block's own hash")
+	require.NotEqual(t, common.Hash(selfHash), root)
 }

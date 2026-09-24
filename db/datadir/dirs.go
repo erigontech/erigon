@@ -229,55 +229,6 @@ func (d Dirs) TryFlock() (unlock func(), err error) {
 	return
 }
 
-// ApplyMigrations - can get flock.
-func ApplyMigrations(dirs Dirs) error { //nolint
-	need, err := downloaderV2MigrationNeeded(&dirs)
-	if err != nil {
-		return err
-	}
-	if !need {
-		return nil
-	}
-
-	lock, locked, err := TryFlock(dirs)
-	if err != nil {
-		return err
-	}
-	if !locked {
-		return nil
-	}
-	defer func() { panicif.Err(lock.Unlock()) }()
-
-	// add your migration here
-
-	if err := downloaderV2Migration(&dirs); err != nil {
-		return err
-	}
-	return nil
-}
-
-func downloaderV2MigrationNeeded(dirs *Dirs) (bool, error) {
-	return dir.FileExist(filepath.Join(dirs.Snap, "db", "mdbx.dat"))
-}
-func downloaderV2Migration(dirs *Dirs) error {
-	// move db from `datadir/snapshot/db` to `datadir/downloader`
-	exists, err := downloaderV2MigrationNeeded(dirs)
-	if err != nil {
-		return err
-	}
-	if !exists {
-		return nil
-	}
-	from, to := filepath.Join(dirs.Snap, "db", "mdbx.dat"), filepath.Join(dirs.Downloader, "mdbx.dat")
-	if err := os.Rename(from, to); err != nil {
-		//fall back to copy-file if folders are on different disks
-		if err := CopyFile(from, to); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
 func CopyFile(from, to string) error {
 	r, err := os.Open(from)
 	if err != nil {
@@ -321,7 +272,7 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -389,7 +340,7 @@ func (d *Dirs) RenameNewVersions() error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -419,7 +370,6 @@ func (d *Dirs) RenameNewVersions() error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}
@@ -427,7 +377,7 @@ func (d *Dirs) RenameNewVersions() error {
 		// removing the rest of vx.y- files (i.e. v1.1- v2.0- etc, unsupported in 3.0)
 		if err := filepath.WalkDir(dirPath, func(path string, dirEntry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -467,6 +417,7 @@ func (d *Dirs) RenameNewVersions() error {
 
 	return nil
 }
+
 func (d *Dirs) PreverifiedPath() string {
 	return filepath.Join(d.Snap, PreverifiedFileName)
 }

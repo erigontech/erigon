@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math/big"
@@ -31,7 +32,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/kzg"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -75,8 +76,8 @@ func TestEstimateGas(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTestEthAPIWithFilters(t, m)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
@@ -208,7 +209,7 @@ func TestEstimateGasStateOverrideFundsSender(t *testing.T) {
 	api := newTestEthAPIWithFilters(t, m)
 
 	poor := common.HexToAddress("0x00000000000000000000000000000000000000aa")
-	balance := (*hexutil.Big)(big.NewInt(1e18))
+	balance := (*hexutil.U256)(uint256.NewInt(1e18))
 	args := &ethapi.CallArgs{
 		From:         &poor,
 		To:           &receiverAddr,
@@ -327,7 +328,7 @@ func TestEstimateGasStateOverrideLowersSenderBalance(t *testing.T) {
 	_, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
 	require.NoError(t, err)
 
-	poorBalance := (*hexutil.Big)(big.NewInt(feePerGas * allowance))
+	poorBalance := (*hexutil.U256)(uint256.NewInt(feePerGas * allowance))
 	_, err = api.EstimateGas(context.Background(), args, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(bankAddr): {Balance: &poorBalance},
 	}, nil)
@@ -423,7 +424,7 @@ func TestEstimateGasZeroFundableAllowance(t *testing.T) {
 	api := newTestEthAPIWithFilters(t, m)
 
 	poor := common.HexToAddress("0x00000000000000000000000000000000000000ab")
-	dust := (*hexutil.Big)(big.NewInt(1000))
+	dust := (*hexutil.U256)(uint256.NewInt(1000))
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From:         &poor,
 		To:           &receiverAddr,
@@ -464,16 +465,16 @@ func TestEstimateGasBlobFeeChargedBeforeAllowance(t *testing.T) {
 
 	const feePerGas = 1e9
 	const allowance = 25_000 // below what the contract call needs
-	blobFee := new(big.Int).Mul(big.NewInt(feePerGas), new(big.Int).SetUint64(params.GasPerBlob))
+	blobFee := new(uint256.Int).Mul(uint256.NewInt(feePerGas), uint256.NewInt(params.GasPerBlob))
 
 	for _, tc := range []struct {
 		name    string
-		balance *big.Int
+		balance *uint256.Int
 		wantErr string
 	}{
 		{
 			name:    "funds left over cap the allowance",
-			balance: new(big.Int).Add(blobFee, big.NewInt(feePerGas*allowance)),
+			balance: new(uint256.Int).Add(blobFee, uint256.NewInt(feePerGas*allowance)),
 			wantErr: fmt.Sprintf("gas required exceeds allowance (%d)", allowance),
 		},
 		{
@@ -484,7 +485,7 @@ func TestEstimateGasBlobFeeChargedBeforeAllowance(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			callData := hexutil.Bytes(contractInvocationData(1))
-			balance := (*hexutil.Big)(tc.balance)
+			balance := (*hexutil.U256)(tc.balance)
 			_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 				From:                &bankAddr,
 				To:                  &contractAddr,
@@ -612,6 +613,11 @@ func TestStateCallMethodsRejectPendingTag(t *testing.T) {
 
 	t.Run("eth_createAccessList", func(t *testing.T) {
 		_, err := api.CreateAccessList(ctx, ethapi.CallArgs{}, &pending, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
+	t.Run("eth_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, nil, StateContext{BlockNumber: pending}, nil, nil)
 		require.ErrorIs(t, err, errPendingStateNotSupported)
 	})
 
@@ -775,10 +781,10 @@ func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	_, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -799,7 +805,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	callDataBytes := hexutil.Bytes(callData)
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	_, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -810,7 +816,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 }
 
 func TestGetProof(t *testing.T) {
-	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
+	maxGetProofRewindBlockCount := 1      // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
 	cfg := &rpccfg.EthApiConfig{
@@ -1118,6 +1124,199 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 	require.Nil(t, proof)
 }
 
+// TestGetProofStorageKeyEncoding pins the storage-key echo format eth_getProof shares
+// with geth for keys of at most 32 bytes: a shorter key comes back canonicalized, a
+// full 32-byte key comes back verbatim.
+func TestGetProofStorageKeyEncoding(t *testing.T) {
+	t.Parallel()
+
+	hashSizedKey := "0x00000000000000000000000000000000000000000000000000000000deadbeef"
+	tests := []struct {
+		name string
+		key  []byte
+		want string
+	}{
+		{"single byte", []byte{0x0a}, "0xa"},
+		{"leading zero byte dropped", []byte{0x00, 0xde, 0xad}, "0xdead"},
+		{"no leading zeros", []byte{0xde, 0xad, 0xbe, 0xef}, "0xdeadbeef"},
+		{"zero", []byte{0x00}, "0x0"},
+		{"hash sized key kept verbatim", hexutil.FromHex(hashSizedKey), hashSizedKey},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			info := StorageKeysInfo{KeyLength: len(tt.key)}
+			info.Hash.SetBytes(tt.key)
+			require.Equal(t, tt.want, info.EncodeKey())
+		})
+	}
+}
+
+// TestGetProofRequestShapes covers the shapes eth_getProof must honour: the account
+// fields for each account shape, the block parameter forms execution-apis allows, and
+// the storage-key list rules.
+func TestGetProofRequestShapes(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, bankAddr, contractAddr, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
+
+	key := func(b byte) hexutil.Bytes {
+		k := common.Hash{}
+		k[31] = b
+		return k[:]
+	}
+
+	headProof, err := api.GetProof(ctx, bankAddr, nil, head)
+	require.NoError(t, err)
+
+	// Block 3, not the head: blocks 4 to 6 are empty, so a by-hash lookup that regressed
+	// to resolving "latest" would still match a head-block proof.
+	var midHash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		midHash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 3)
+		return err
+	}))
+	midProof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(3)))
+	require.NoError(t, err)
+
+	// An account with an empty storage trie answers a key request with an empty proof
+	// array, the shape geth and besu use, rather than reth's 0x80 sentinel node.
+	t.Run("eoa", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, []hexutil.Bytes{key(0)}, head)
+		require.NoError(t, err)
+		require.Equal(t, bankAddr, proof.Address)
+		require.Equal(t, empty.CodeHash, proof.CodeHash)
+		require.Equal(t, empty.RootHash, proof.StorageHash)
+		require.False(t, (*uint256.Int)(proof.Balance).IsZero())
+		require.NotEmpty(t, proof.AccountProof)
+		require.Len(t, proof.StorageProof, 1)
+		require.Empty(t, proof.StorageProof[0].Proof)
+		require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
+	})
+
+	t.Run("contract", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, contractAddr, nil, head)
+		require.NoError(t, err)
+		require.Equal(t, contractAddr, proof.Address)
+		require.NotEqual(t, empty.CodeHash, proof.CodeHash)
+		require.NotEqual(t, empty.RootHash, proof.StorageHash)
+		require.Equal(t, hexutil.Uint64(1), proof.Nonce)
+	})
+
+	t.Run("no account", func(t *testing.T) {
+		missing := common.HexToAddress("0x0000000000000000000000000000000000000001")
+		proof, err := api.GetProof(ctx, missing, []hexutil.Bytes{key(0)}, head)
+		require.NoError(t, err)
+		require.Equal(t, missing, proof.Address)
+		require.Equal(t, hexutil.Uint64(0), proof.Nonce)
+		require.True(t, (*uint256.Int)(proof.Balance).IsZero())
+		require.Equal(t, common.Hash{}, proof.CodeHash)
+		require.Equal(t, common.Hash{}, proof.StorageHash)
+		require.NotEmpty(t, proof.AccountProof, "a missing account still needs an exclusion proof")
+		require.Len(t, proof.StorageProof, 1)
+		require.Empty(t, proof.StorageProof[0].Proof)
+		require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
+	})
+
+	t.Run("omitted block defaults to latest", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, headProof.AccountProof, proof.AccountProof)
+	})
+
+	t.Run("by canonical hash", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithHash(midHash, true)))
+		require.NoError(t, err)
+		require.Equal(t, midProof.AccountProof, proof.AccountProof)
+		require.NotEqual(t, headProof.AccountProof, proof.AccountProof, "a block hash must not resolve to latest")
+	})
+
+	t.Run("earliest tag is genesis", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.EarliestBlockNumber)))
+		require.NoError(t, err)
+		require.Equal(t, hexutil.Uint64(0), proof.Nonce, "the bank has sent no transaction at genesis")
+		require.NotEqual(t, headProof.AccountProof, proof.AccountProof)
+	})
+
+	t.Run("pending is rejected", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)))
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+		require.Nil(t, proof)
+	})
+
+	t.Run("unknown block", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(999_999)))
+		var notFound rpc.BlockNotFoundErr
+		require.ErrorAs(t, err, &notFound)
+		require.Nil(t, proof)
+	})
+
+	t.Run("too many keys", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, contractAddr, make([]hexutil.Bytes, maxGetProofKeys+1), head)
+		require.Nil(t, proof)
+		var customErr *rpc.CustomError
+		require.ErrorAs(t, err, &customErr)
+		require.Equal(t, rpc.ErrCodeInvalidParams, customErr.ErrorCode())
+	})
+
+	t.Run("key longer than 32 bytes is rejected", func(t *testing.T) {
+		// Not first: a guard that only checked storageKeys[0] would pass this request.
+		proof, err := api.GetProof(ctx, contractAddr, []hexutil.Bytes{key(4), make(hexutil.Bytes, 33)}, head)
+		require.Nil(t, proof)
+		var customErr *rpc.CustomError
+		require.ErrorAs(t, err, &customErr)
+		require.Equal(t, rpc.ErrCodeInvalidParams, customErr.ErrorCode())
+	})
+
+	t.Run("duplicate keys each get a proof, in request order", func(t *testing.T) {
+		keys := []hexutil.Bytes{key(4), key(0), key(4)}
+		proof, err := api.GetProof(ctx, contractAddr, keys, head)
+		require.NoError(t, err)
+		require.Len(t, proof.StorageProof, len(keys))
+		for i, k := range keys {
+			require.Equal(t, hexutil.Encode(k), proof.StorageProof[i].Key)
+		}
+		require.Equal(t, proof.StorageProof[0], proof.StorageProof[2])
+	})
+}
+
+// TestGetProofJSONShape pins the wire format the execution-apis fixtures require: an
+// empty storage-key list serializes as an array rather than null, and a short key is
+// echoed minimized next to a zero value.
+func TestGetProofJSONShape(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, bankAddr, _, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	ctx := context.Background()
+	head := bnhPtr(rpc.BlockNumberOrHashWithNumber(6))
+
+	t.Run("no keys serializes as an empty array", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, nil, head)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(proof)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"storageProof":[]`)
+	})
+
+	t.Run("short key echoes minimized", func(t *testing.T) {
+		proof, err := api.GetProof(ctx, bankAddr, []hexutil.Bytes{{0x00}}, head)
+		require.NoError(t, err)
+		encoded, err := json.Marshal(proof)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"storageProof":[{"key":"0x0","value":"0x0","proof":[]}]`)
+	})
+}
+
 func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	ctx := context.Background()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -1335,7 +1534,7 @@ func chainWithDeployedContract(t *testing.T) (*execmoduletester.ExecModuleTester
 
 // fundedBankGenesis returns a fresh ExecModuleTester whose genesis funds a
 // bank account keyed by a fixed, well-known private key, under cfg.
-func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
+func fundedBankGenesis(t testing.TB, cfg *chain.Config) (m *execmoduletester.ExecModuleTester, bankKey *ecdsa.PrivateKey, bankAddress common.Address) {
 	t.Helper()
 
 	bankKey, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -1345,8 +1544,7 @@ func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.Exe
 	bankFunds, ok := new(big.Int).SetString("100000000000000000000", 10)
 	require.True(t, ok)
 
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, cfg, copier.Option{DeepCopy: true}))
+	chainConfig := cfg.Copy()
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
@@ -1361,7 +1559,7 @@ func fundedBankGenesis(t *testing.T, cfg *chain.Config) (m *execmoduletester.Exe
 	return m, bankKey, bankAddress
 }
 
-func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
+func chainWithDeployedContractAndConfig(t testing.TB, cfg *chain.Config) (*execmoduletester.ExecModuleTester, common.Address, common.Address, common.Address) {
 	t.Helper()
 
 	var (
@@ -1758,6 +1956,208 @@ func TestCallRejectsBlobHashesBeforeCancun(t *testing.T) {
 	})
 }
 
+// TestCreateAccessListAuthGas pins that the authorization count is bounded by the
+// intrinsic gas check alone. A gas limit eth_estimateGas returned must be accepted,
+// and one below the intrinsic cost must be refused by that check rather than by a
+// separate count heuristic.
+func TestCreateAccessListAuthGas(t *testing.T) {
+	const authCount = 9
+
+	authorizations := func(addr common.Address) []types.JsonAuthorization {
+		auths := make([]types.JsonAuthorization, authCount)
+		for i := range auths {
+			auths[i] = types.JsonAuthorization{}.FromAuthorization(types.Authorization{
+				ChainID: *uint256.NewInt(1337),
+				Address: addr,
+				Nonce:   uint64(i),
+				YParity: 1,
+				R:       *uint256.NewInt(0x1111),
+				S:       *uint256.NewInt(0x2222),
+			})
+		}
+		return auths
+	}
+
+	preAmsterdam := chain.AllProtocolChanges.Copy()
+	preAmsterdam.AmsterdamTime = nil
+
+	for _, tc := range []struct {
+		name string
+		cfg  *chain.Config
+	}{
+		{"amsterdam", chain.AllProtocolChanges},
+		{"pre-amsterdam", preAmsterdam},
+	} {
+		t.Run(tc.name+" accepts the estimated gas", func(t *testing.T) {
+			m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, tc.cfg)
+			api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+			args := ethapi.CallArgs{
+				From:              &bankAddress,
+				To:                &receiverAddress,
+				AuthorizationList: authorizations(receiverAddress),
+			}
+
+			estimate, err := api.EstimateGas(context.Background(), &args, nil, nil, nil)
+			require.NoError(t, err)
+
+			args.Gas = &estimate
+			_, err = api.CreateAccessList(context.Background(), args, nil, nil, nil)
+			require.NoError(t, err, "eth_estimateGas result must be accepted by eth_createAccessList")
+		})
+	}
+
+	// Amsterdam prices an authorization below the count heuristic's old divisor, so
+	// this is the case that heuristic used to reject.
+	t.Run("amsterdam estimate lands under the old divisor", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+		estimate, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: authorizations(receiverAddress),
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Less(t, uint64(estimate), authCount*uint64(params.CallNewAccountGas))
+	})
+
+	t.Run("under-gassed reports the intrinsic shortfall", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+		gas := hexutil.Uint64(params.TxGas)
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			Gas:               &gas,
+			AuthorizationList: authorizations(receiverAddress),
+		}, nil, nil, nil)
+		// The intrinsic gas check rejects it and names the shortfall, which the
+		// removed guard could not do.
+		require.ErrorContains(t, err, "intrinsic gas too low")
+	})
+
+	t.Run("no gas field leaves the rpc gas cap to refuse it", func(t *testing.T) {
+		m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+		api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+		auths := make([]types.JsonAuthorization, 4096)
+		for i := range auths {
+			auths[i] = authorizations(receiverAddress)[0]
+		}
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:              &bankAddress,
+			To:                &receiverAddress,
+			AuthorizationList: auths,
+		}, nil, nil, nil)
+		require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
+	})
+}
+
+// TestExcludeAuthoritiesOrder pins that no authority is recovered until the intrinsic
+// gas check has passed. An authority only reaches excl through a recovery, so an empty
+// excl on a refused request means none of them ran.
+func TestExcludeAuthoritiesOrder(t *testing.T) {
+	const gasCap = 5_000_000
+
+	amsterdam := &chain.Rules{
+		ChainID:     uint256.NewInt(1337),
+		IsHomestead: true, IsIstanbul: true, IsBerlin: true, IsLondon: true,
+		IsShanghai: true, IsCancun: true, IsPrague: true, IsOsaka: true, IsAmsterdam: true,
+	}
+	delegate := common.HexToAddress("0x11")
+	from, to := common.HexToAddress("0x22"), common.HexToAddress("0x33")
+
+	sign := func(t *testing.T, nonce uint64) types.JsonAuthorization {
+		t.Helper()
+		key, err := crypto.GenerateKey()
+		require.NoError(t, err)
+		auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), delegate, nonce)
+		require.NoError(t, err)
+		return types.JsonAuthorization{}.FromAuthorization(auth)
+	}
+	message := func(t *testing.T, auths []types.JsonAuthorization, gas *hexutil.Uint64) *types.Message {
+		t.Helper()
+		msg, err := (&ethapi.CallArgs{From: &from, To: &to, Gas: gas, AuthorizationList: auths}).ToMessage(gasCap, nil)
+		require.NoError(t, err)
+		return msg
+	}
+
+	lowGas := hexutil.Uint64(params.TxGas)
+	for _, tc := range []struct {
+		name  string
+		count int
+		gas   *hexutil.Uint64
+	}{
+		{"gas below the intrinsic cost recovers nothing", 64, &lowGas},
+		{"no gas field leaves the rpc gas cap to refuse it", 4096, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// One signature replicated: these cases only need the list to be too
+			// long, and signing every entry would dominate the test.
+			auth := sign(t, 0)
+			auths := make([]types.JsonAuthorization, tc.count)
+			for i := range auths {
+				auths[i] = auth
+			}
+			excl := map[common.Address]struct{}{}
+
+			err := excludeAuthorities(message(t, auths, tc.gas), amsterdam, excl)
+
+			require.ErrorIs(t, err, protocol.ErrIntrinsicGas)
+			require.Empty(t, excl, "the request was refused, so no authority may be recovered")
+		})
+	}
+
+	// The oracle for the cases above: distinct authorities do land in excl when the
+	// list is affordable, so an empty excl there would be the test failing to look.
+	t.Run("an affordable list is recovered", func(t *testing.T) {
+		auths := make([]types.JsonAuthorization, 8)
+		for i := range auths {
+			auths[i] = sign(t, uint64(i))
+		}
+		excl := map[common.Address]struct{}{}
+		gas := hexutil.Uint64(1_000_000)
+
+		require.NoError(t, excludeAuthorities(message(t, auths, &gas), amsterdam, excl))
+
+		require.Len(t, excl, 8)
+	})
+}
+
+// TestCreateAccessListExcludedAccessList pins that a caller-supplied entry the
+// tracer drops is not charged for. The sender is pre-warmed, so its entry never
+// reaches the executor and must not count against the gas limit either.
+func TestCreateAccessListExcludedAccessList(t *testing.T) {
+	m, bankAddress, _, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	auth, err := types.SignAuthorization(key, *uint256.NewInt(1337), receiverAddress, 0)
+	require.NoError(t, err)
+
+	keys := make([]common.Hash, 200)
+	for i := range keys {
+		keys[i] = common.BigToHash(big.NewInt(int64(i)))
+	}
+	// The sender is in excl, so NewAccessListTracer drops this whole entry.
+	accessList := types.AccessList{{Address: bankAddress, StorageKeys: keys}}
+	gas := hexutil.Uint64(280_000)
+
+	res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+		From:              &bankAddress,
+		To:                &receiverAddress,
+		Gas:               &gas,
+		AccessList:        &accessList,
+		AuthorizationList: []types.JsonAuthorization{types.JsonAuthorization{}.FromAuthorization(auth)},
+	}, nil, nil, nil)
+
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+}
+
 // TestCreateAccessListPreBerlin pins that eth_createAccessList rejects on a
 // pre-Berlin block, same as eth_call: EIP-2930 access lists are not a
 // meaningful concept there, regardless of whether the caller supplied one or
@@ -1837,4 +2237,41 @@ func TestCreateAccessListPreBerlin(t *testing.T) {
 		require.Len(t, *res.Accesslist, 1)
 		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
 	})
+}
+
+func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	historyAddr := params.HistoryStorageAddress.Value()
+	gspec := &types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: []byte{0x00}, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
+
+	const bn = 2
+	slot := func(n uint64) hexutil.Bytes {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[24:], n)
+		return h[:]
+	}
+	proof, err := api.GetProof(context.Background(), historyAddr, []hexutil.Bytes{slot(bn - 1), slot(bn)}, bnhPtr(rpc.BlockNumberOrHashWithNumber(bn)))
+	require.NoError(t, err)
+	require.NoError(t, trie.VerifyAccountProof(ch.Blocks[bn-1].Root(), proof))
+	require.Len(t, proof.StorageProof, 2)
+
+	written, notYetWritten := proof.StorageProof[0], proof.StorageProof[1]
+	require.Equal(t, ch.Blocks[bn-2].Hash(), common.Hash((*uint256.Int)(written.Value).Bytes32()))
+	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, written))
+	require.True(t, (*uint256.Int)(notYetWritten.Value).IsZero(), "slot %d at block %d holds %x, which only block %d writes", bn, bn, (*uint256.Int)(notYetWritten.Value).Bytes32(), bn+1)
+	require.NoError(t, trie.VerifyStorageProof(proof.StorageHash, notYetWritten))
 }

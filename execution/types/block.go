@@ -79,38 +79,38 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 type Header struct {
-	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required"`
-	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required"`
-	Coinbase    common.Address `json:"miner"`
-	Root        common.Hash    `json:"stateRoot"        gencodec:"required"`
-	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required"`
-	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required"`
-	Bloom       Bloom          `json:"logsBloom"        gencodec:"required"`
-	Difficulty  uint256.Int    `json:"difficulty"       gencodec:"required"`
-	Number      uint256.Int    `json:"number"           gencodec:"required"`
-	GasLimit    uint64         `json:"gasLimit"         gencodec:"required"`
-	GasUsed     uint64         `json:"gasUsed"          gencodec:"required"`
-	Time        uint64         `json:"timestamp"        gencodec:"required"`
-	Extra       []byte         `json:"extraData"        gencodec:"required"`
-	MixDigest   common.Hash    `json:"mixHash"` // prevRandao after EIP-4399
-	Nonce       BlockNonce     `json:"nonce"`
+	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required" ethjson:"data"`
+	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required" ethjson:"data"`
+	Coinbase    common.Address `json:"miner" ethjson:"data"`
+	Root        common.Hash    `json:"stateRoot"        gencodec:"required" ethjson:"data"`
+	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required" ethjson:"data"`
+	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required" ethjson:"data"`
+	Bloom       Bloom          `json:"logsBloom"        gencodec:"required" ethjson:"data"`
+	Difficulty  uint256.Int    `json:"difficulty"       gencodec:"required" ethjson:"quantity"`
+	Number      uint256.Int    `json:"number"           gencodec:"required" ethjson:"quantity"`
+	GasLimit    uint64         `json:"gasLimit"         gencodec:"required" ethjson:"quantity"`
+	GasUsed     uint64         `json:"gasUsed"          gencodec:"required" ethjson:"quantity"`
+	Time        uint64         `json:"timestamp"        gencodec:"required" ethjson:"quantity"`
+	Extra       []byte         `json:"extraData"        gencodec:"required" ethjson:"data"`
+	MixDigest   common.Hash    `json:"mixHash" ethjson:"data"` // prevRandao after EIP-4399
+	Nonce       BlockNonce     `json:"nonce" ethjson:"data"`
 	// AuRa extensions (alternative to MixDigest & Nonce)
-	AuRaStep uint64 `json:"auraStep,omitempty"`
-	AuRaSeal []byte `json:"auraSeal,omitempty"`
+	AuRaStep uint64 `json:"auraStep,omitempty" ethjson:"quantity"`
+	AuRaSeal []byte `json:"auraSeal,omitempty" ethjson:"data"`
 
-	BaseFee         *uint256.Int `json:"baseFeePerGas"`   // EIP-1559
-	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
+	BaseFee         *uint256.Int `json:"baseFeePerGas" ethjson:"quantity"` // EIP-1559
+	WithdrawalsHash *common.Hash `json:"withdrawalsRoot" ethjson:"data"`   // EIP-4895
 
 	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
-	BlobGasUsed   *uint64 `json:"blobGasUsed"`
-	ExcessBlobGas *uint64 `json:"excessBlobGas"`
+	BlobGasUsed   *uint64 `json:"blobGasUsed" ethjson:"quantity"`
+	ExcessBlobGas *uint64 `json:"excessBlobGas" ethjson:"quantity"`
 
-	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot" ethjson:"data"` // EIP-4788
 
-	RequestsHash        *common.Hash `json:"requestsHash"`        // EIP-7685
-	BlockAccessListHash *common.Hash `json:"blockAccessListHash"` // EIP-7928
+	RequestsHash        *common.Hash `json:"requestsHash" ethjson:"data"`        // EIP-7685
+	BlockAccessListHash *common.Hash `json:"blockAccessListHash" ethjson:"data"` // EIP-7928
 
-	SlotNumber *uint64 `json:"slotNumber"` // EIP-7843
+	SlotNumber *uint64 `json:"slotNumber,omitempty" ethjson:"quantity"` // EIP-7843; omitempty until CI accepts a null slotNumber
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
@@ -534,13 +534,13 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 // field type overrides for gencodec
 type headerMarshaling struct {
-	Difficulty    *hexutil.Big
-	Number        *hexutil.Big
+	Difficulty    *hexutil.U256
+	Number        *hexutil.U256
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
 	Time          hexutil.Uint64
 	Extra         hexutil.Bytes
-	BaseFee       *hexutil.Big
+	BaseFee       *hexutil.U256
 	BlobGasUsed   *hexutil.Uint64
 	ExcessBlobGas *hexutil.Uint64
 	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
@@ -1146,7 +1146,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
-	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
+	b.header.mutable = false // Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
 
@@ -1155,6 +1155,13 @@ func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, r
 	b := NewBlock(header, txs, uncles, receipts, withdrawals, bal)
 	b.header.mutable = true
 	return b
+}
+
+// NewHeaderFromStorage caches hash, the key the header was read under, so Hash() does not hash
+// the RLP again.
+func NewHeaderFromStorage(hash common.Hash, header *Header) *Header {
+	header.hash.Store(&hash)
+	return header
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
@@ -1404,6 +1411,7 @@ func (b *Block) Body() *Body {
 	bd.SendersFromTxs()
 	return bd
 }
+
 func (b *Block) SendersToTxs(senders []common.Address) {
 	if len(senders) == 0 {
 		return
@@ -1667,48 +1675,33 @@ func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
 }
 
 func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		return err
 	}
-	for err == nil {
+	for s.MoreDataInList() {
 		var u Header
-		if err = u.DecodeRLP(s); err != nil {
-			break
+		if err := u.DecodeRLP(s); err != nil {
+			return err
 		}
 		*appendList = append(*appendList, &u)
 	}
-	return checkErrListEnd(s, err)
+	return s.ListEnd()
 }
 
 func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
 			*appendList = nil
 			return nil // EOL, check for ListEnd is in calling function
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
-	for err == nil {
+	for s.MoreDataInList() {
 		var w Withdrawal
-		if err = w.DecodeRLP(s); err != nil {
-			break
+		if err := w.DecodeRLP(s); err != nil {
+			return err
 		}
 		*appendList = append(*appendList, &w)
 	}
-	return checkErrListEnd(s, err)
-}
-
-func checkErrListEnd(s *rlp.Stream, err error) error {
-	// Match the bare EOL sentinel only. A wrapped EOL (e.g. a nested decoder
-	// returning fmt.Errorf("...: %w", rlp.EOL) on malformed input) is a real
-	// error and must propagate, not be treated as a clean end-of-list.
-	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
-		return err
-	}
-	if err := s.ListEnd(); err != nil {
-		return err
-	}
-	return nil
+	return s.ListEnd()
 }

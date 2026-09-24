@@ -272,7 +272,7 @@ func TestAssembledBlockToPayloadResponseReturnsSidecarEncodingError(t *testing.T
 	// A nil nested StorageChange is the encoding failure that survives an
 	// account list of values.
 	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{{
-		Address: accounts.InternAddress(common.Address{2}),
+		Address: common.Address{2},
 		StorageChanges: []types.SlotChanges{{
 			Slot:    accounts.InternKey(common.Hash{3}),
 			Changes: []*types.StorageChange{nil},
@@ -373,51 +373,67 @@ func (s *getPayloadStubModule) Ready(_ context.Context) (bool, error) { return t
 func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.Block) (execmodule.ExecutionStatus, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) UpdateForkChoice(_ context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetForkChoice(_ context.Context) (execmodule.ForkChoiceState, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) AssembleBlock(_ context.Context, _ *builder.Parameters) (execmodule.AssembleBlockResult, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) CurrentHeader(_ context.Context) (*types.Header, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetHeader(_ context.Context, _ *common.Hash, _ *uint64) (*types.Header, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBody(_ context.Context, _ *common.Hash, _ *uint64) (*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) HasBlock(_ context.Context, _ *common.Hash, _ *uint64) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBodiesByRange(_ context.Context, _, _ uint64) ([]*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetBodiesByHashes(_ context.Context, _ []common.Hash) ([]*types.RawBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetPayloadBodiesByHash(_ context.Context, _ []common.Hash) ([]*execmodule.PayloadBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetPayloadBodiesByRange(_ context.Context, _, _ uint64) ([]*execmodule.PayloadBody, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) IsCanonicalHash(_ context.Context, _ common.Hash) (bool, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetHeaderHashNumber(_ context.Context, _ common.Hash) (*uint64, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) GetTD(_ context.Context, _ *common.Hash, _ *uint64) (*uint256.Int, error) {
 	panic("not implemented")
 }
+
 func (s *getPayloadStubModule) FrozenBlocks(_ context.Context) (uint64, bool, error) {
 	panic("not implemented")
 }

@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -44,6 +45,7 @@ type mockOpContext struct {
 
 func (m *mockOpContext) MemoryData() []byte          { return m.memory }
 func (m *mockOpContext) StackData() []uint256.Int    { return m.stack }
+func (m *mockOpContext) Gas() mdgas.MdGas            { return mdgas.MdGas{} }
 func (m *mockOpContext) Caller() accounts.Address    { return m.address }
 func (m *mockOpContext) Address() accounts.Address   { return m.address }
 func (m *mockOpContext) CallValue() uint256.Int      { return uint256.Int{} }
@@ -60,13 +62,14 @@ func (m *mockIBS) GetCode(accounts.Address) ([]byte, error)         { return nil
 func (m *mockIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
 	return accounts.NilCodeHash, nil
 }
+
 func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
 func (m *mockIBS) Exist(accounts.Address) (bool, error) { return false, nil }
 func (m *mockIBS) GetRefund() uint64                    { return 0 }
 
-// captureOnOpcode runs a single OnOpcode call and returns the parsed structLog entry.
+// captureOnOpcode runs a single OnOpcodeV2 call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.
 // storageKey/storageVal are pushed onto the stack for SSTORE (top=key, below=val).
 func captureOnOpcode(t *testing.T, cfg *LogConfig, memory []byte, storageKey, storageVal *common.Hash) map[string]json.RawMessage {
@@ -92,7 +95,7 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 		scope.stack = []uint256.Int{val, key} // bottom=val, top=key
 	}
 
-	l.OnOpcode(0, byte(op), 100, 3, scope, rData, 1, nil)
+	l.OnOpcodeV2(0, byte(op), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, rData, 1, nil)
 
 	// Mirror what ExecuteTraceTx does to close the stream after execution.
 	stream.WriteArrayEnd()
@@ -112,7 +115,7 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 	return outer.StructLogs[0]
 }
 
-// captureOnOpcodes runs n OnOpcode calls through a single logger and returns every
+// captureOnOpcodes runs n OnOpcodeV2 calls through a single logger and returns every
 // structLog entry that made it to the stream. The pc of each step is set to its
 // index so callers can assert which steps were kept.
 func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.RawMessage {
@@ -124,7 +127,7 @@ func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.Raw
 
 	scope := &mockOpContext{}
 	for i := range n {
-		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 	}
 
 	// Mirror what ExecuteTraceTx does to close the stream after execution.
@@ -193,7 +196,7 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 
 	scope := &mockOpContext{}
 	for i := range 4 {
-		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 	}
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
@@ -208,16 +211,35 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 // over: exactly one array end and one object end, whatever the logger emitted.
 func closeStreamLikeCaller(stream jsonstream.Stream) {
 	stream.WriteArrayEnd()
-	stream.WriteMore()
-	stream.WriteObjectField("gas")
-	stream.WriteUint64(0)
-	stream.WriteMore()
-	stream.WriteObjectField("failed")
+	stream.Field("gas")
+	stream.Uint(0)
+	stream.Field("failed")
 	stream.WriteBool(false)
 	stream.WriteObjectEnd()
 }
 
-// The structLogs prologue must be written at most once. OnExit opens it too, for
+func TestJsonStreamLoggerStateGasCost(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{DisableStack: true, DisableStorage: true}, t.Context(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+	scope := &mockOpContext{}
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 10, State: 30}, scope, nil, 1, nil)
+	l.OnOpcodeV2(1, byte(vm.STOP), mdgas.MdGas{Execution: 60}, mdgas.MdGas{}, scope, nil, 1, nil)
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+	var result struct {
+		StructLogs []map[string]json.RawMessage `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result.StructLogs, 2)
+	require.Contains(t, result.StructLogs[0], "stateGasCost")
+	require.JSONEq(t, `30`, string(result.StructLogs[0]["stateGasCost"]))
+	require.JSONEq(t, `10`, string(result.StructLogs[0]["gasCost"]))
+	require.NotContains(t, result.StructLogs[1], "stateGasCost")
+}
+
+// The structLogs prologue must be written at most once. OnExitV2 opens it too, for
 // traces that captured no step, and the caller closes exactly one object and one
 // array however many frames exited.
 func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
@@ -244,11 +266,11 @@ func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
 
 			scope := &mockOpContext{}
 			for i := range tt.opcodes {
-				l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+				l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 			}
 			// Two frames exit, as in any trace of a transaction that makes a call.
-			l.OnExit(1, nil, 0, nil, false)
-			l.OnExit(0, nil, 0, nil, false)
+			l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false)
+			l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 
 			closeStreamLikeCaller(stream)
 			require.NoError(t, stream.Flush())
@@ -266,9 +288,9 @@ func TestJsonStreamLogger_SeparatorFollowsStepsNotPrologue(t *testing.T) {
 	l := NewJsonStreamLogger(&LogConfig{DisableStack: true, DisableStorage: true}, context.Background(), stream)
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 
-	l.OnExit(1, nil, 0, nil, false)
-	l.OnOpcode(0, byte(vm.MLOAD), 100, 3, &mockOpContext{}, nil, 1, nil)
-	l.OnExit(0, nil, 0, nil, false)
+	l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false)
+	l.OnOpcodeV2(0, byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, &mockOpContext{}, nil, 1, nil)
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
 
 	closeStreamLikeCaller(stream)
 	require.NoError(t, stream.Flush())
@@ -446,7 +468,7 @@ func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 		key := common.BigToHash(big.NewInt(int64(i + 1)))
 		val := common.BigToHash(big.NewInt(int64(100 + i)))
 		scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
-		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 		want["0x"+hex.EncodeToString(key[:])] = "0x" + hex.EncodeToString(val[:])
 	}
 
@@ -484,7 +506,7 @@ func TestJsonStreamLogger_StorageWithMemory(t *testing.T) {
 	stream := jsonstream.New(&buf)
 	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
 	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
-	l.OnOpcode(0, byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	require.NoError(t, stream.Flush())
@@ -516,7 +538,7 @@ func TestJsonStreamLogger_ClosePendingAfterMemory(t *testing.T) {
 
 	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 32*4)}
 	for i := range 3 {
-		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 	}
 
 	require.NoError(t, stream.ClosePending(0))
@@ -554,7 +576,7 @@ func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakB
 		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
 	}
 	for i := range steps {
-		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 		if n := len(stream.Buffer()); n > peakBuffer {
 			peakBuffer = n
 		}
@@ -568,7 +590,7 @@ func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakB
 // TestJsonStreamLogger_LargeTraceStaysBounded covers the case streaming exists
 // for: one transaction whose trace dwarfs any buffer. Nothing in the RPC layer
 // flushes inside a transaction, so the stream has to do it. Memory tracing used
-// to bound it by accident, because writeMemoryWordRaw went through Write, which
+// to bound it by accident, because memory words went through Write, which
 // flushed per 32-byte word; with memory off nothing drained at all.
 func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
 	for name, cfg := range map[string]*LogConfig{
@@ -602,19 +624,5 @@ func TestHexQuotedMatchesUint256Hex(t *testing.T) {
 	} {
 		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
 		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
-	}
-}
-
-// TestHexQuotedHashMatchesHexWithPrefix pins the pre-quoted form against the
-// one WriteString produced, which the RPC output has to stay identical to.
-func TestHexQuotedHashMatchesHexWithPrefix(t *testing.T) {
-	l := &JsonStreamLogger{}
-	for _, seed := range []int{0, 1, 7, 255} {
-		var h common.Hash
-		for i := range h {
-			h[i] = byte(i*seed + 1)
-		}
-		want := `"` + l.hexWithPrefix(&h) + `"`
-		require.Equal(t, want, l.hexQuotedHash(&h), "seed=%d", seed)
 	}
 }

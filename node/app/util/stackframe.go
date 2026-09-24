@@ -42,7 +42,6 @@ type StackFrame struct {
 
 // NewStackFrame popoulates a stack frame object from the program counter.
 func NewStackFrame(pc uintptr) (frame StackFrame) {
-
 	frame = StackFrame{ProgramCounter: pc}
 	if frame.Func() == nil {
 		return
@@ -53,7 +52,6 @@ func NewStackFrame(pc uintptr) (frame StackFrame) {
 	// and we want to show the line that corresponds to the function call
 	frame.File, frame.LineNumber = frame.Func().FileLine(pc - 1)
 	return
-
 }
 
 // Func returns the function that contained this frame.

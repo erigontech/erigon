@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -479,7 +480,6 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 
 func TestGetLatest_RejectsParentMemHitAboveStagedUnwindBound(t *testing.T) {
 	t.Parallel()
-
 	const stepSize = uint64(16)
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
@@ -513,7 +513,6 @@ func TestGetLatest_RejectsParentMemHitAboveStagedUnwindBound(t *testing.T) {
 
 func TestGetCode_RejectsParentAccountAboveStagedUnwindBound(t *testing.T) {
 	t.Parallel()
-
 	const stepSize = uint64(16)
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
@@ -539,15 +538,21 @@ func TestGetCode_RejectsParentAccountAboveStagedUnwindBound(t *testing.T) {
 	})
 	require.NoError(t, parent.DomainPut(kv.AccountsDomain, rwTx, addr, deadForkAccount, 40, nil)) // step 2
 
-	codeStore := cache.NewCodeStore(1<<20, 1<<20)
-	require.NoError(t, codeStore.PutByHash(rwTx, codeHash[:], deadForkCode))
-	child.SetCodeStore(codeStore)
+	stateCache := newSmallStateCache()
+	t.Cleanup(stateCache.Close)
+	child.BindStateCache(stateCache)
+	cachedAddr := common.Address{0xc3}
+	seed(t, stateCache, rwTx, kv.CodeDomain, cachedAddr[:], deadForkCode, 5)
 
 	stepBytes := make([]byte, 8)
 	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
 	var diffs [kv.DomainLen][]kv.DomainEntryDiff
 	diffs[kv.AccountsDomain] = []kv.DomainEntryDiff{{Key: string(addr) + string(stepBytes), Value: nil}}
 	child.Unwind(10, &diffs)
+
+	cachedCode, cached := stateCache.View(nil).GetCodeByHash(codeHash[:])
+	require.True(t, cached)
+	require.Equal(t, deadForkCode, cachedCode)
 
 	got, ok, err := child.GetCode(rwTx, addr, 40)
 	require.NoError(t, err)
@@ -607,13 +612,11 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 
 func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	t.Parallel()
-
 	const stepSize = uint64(16)
 	ctx := t.Context()
 	db := newTestDb(t, stepSize)
 	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	codeStore := cache.NewCodeStore(1<<20, 1<<20)
 
 	addr := make([]byte, 20)
 	addr[0] = 0xdd
@@ -630,7 +633,6 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	require.NoError(t, err)
 	defer seedDomains.Close()
 	seedDomains.BindStateCache(stateCache)
-	seedDomains.SetCodeStore(codeStore)
 	seedDomains.SetTxNum(20)
 	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, addr, account, 20, nil))
 	require.NoError(t, seedDomains.DomainPut(kv.CodeDomain, seedTx, addr, code, 20, nil))
@@ -649,7 +651,6 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	require.NoError(t, err)
 	defer unwindDomains.Close()
 	unwindDomains.BindStateCache(stateCache)
-	unwindDomains.SetCodeStore(codeStore)
 	unwindDomains.Unwind(10, &diffs)
 
 	futureAddr := make([]byte, 20)
@@ -762,4 +763,328 @@ func TestGuardAggregatorForCache_ApplyOnlySkips(t *testing.T) {
 	f := &fakeForbidder{}
 	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
 	require.False(t, f.called)
+}
+
+func TestValidationUnwindPreservesCanonicalCache(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	key, older, current, diffs := twoStepRows(t, db, sc)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	candidate, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer candidate.Close()
+	candidate.BindStateCache(sc)
+	diffs[kv.AccountsDomain][0].Value = older
+	candidate.Unwind(16, &diffs)
+	got, _, err := candidate.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	require.Equal(t, older, got)
+	got, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "discarded validation must preserve the canonical cache entry")
+	require.Equal(t, current, got)
+}
+
+func TestValidationUnwindPreservesCanonicalBranches(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	candidate, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer candidate.Close()
+	branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	key := []byte{1, 2}
+	branches.Put(key, []byte("canonical"), 1, 20)
+	candidate.Unwind(16, nil)
+	got, _, err := candidate.GetLatest(kv.CommitmentDomain, tx, key)
+	require.NoError(t, err)
+	require.Empty(t, got)
+	got, _, ok := branches.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("canonical"), got)
+}
+
+func TestValidationUnwindAdoptionInvalidatesSharedCache(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	parent, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer parent.Close()
+	parent.BindStateCache(sc)
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer child.Close()
+	child.BindStateCache(sc)
+	key := make([]byte, 20)
+	seed(t, sc, tx, kv.AccountsDomain, key, encAccount(2), 20)
+	branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branches.Put([]byte{1, 2}, []byte{3}, 1, 20)
+	child.Unwind(16, nil)
+	require.NoError(t, parent.Merge(t.Context(), 0, child, 0))
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok)
+	_, _, ok = branches.Get([]byte{1, 2})
+	require.False(t, ok)
+}
+
+func TestValidationAdoptionInvalidatesChildCache(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	target := newSmallStateCache()
+	t.Cleanup(target.Close)
+	candidate := newSmallStateCache()
+	t.Cleanup(candidate.Close)
+	parent, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer parent.Close()
+	parent.BindStateCache(target)
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer child.Close()
+	child.BindStateCache(candidate)
+	key := make([]byte, 20)
+	seed(t, target, tx, kv.AccountsDomain, key, encAccount(2), 20)
+	seed(t, candidate, tx, kv.AccountsDomain, key, encAccount(2), 20)
+	child.Unwind(16, nil)
+	require.NoError(t, parent.Merge(t.Context(), 0, child, 0))
+	_, ok := target.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "adoption must invalidate the target's cache")
+	_, ok = candidate.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "adoption must invalidate the candidate's own cache, which its local unwind deliberately skipped")
+}
+
+func TestValidationUnwindDoesNotRevokeCanonicalFills(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer child.Close()
+	child.BindStateCache(sc)
+	view := sc.View(frontierAtStateVersion(t, tx, frontierAt(32)))
+	child.Unwind(16, nil)
+	key := make([]byte, 20)
+	view.Fill(kv.AccountsDomain, key, encAccount(2), 20)
+	got, ok := view.Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, encAccount(2), got)
+	got, _, err = child.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	require.Empty(t, got, "the candidate must reject a later canonical fill")
+	got, ok = view.Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, encAccount(2), got, "candidate misses must not overwrite canonical entries")
+}
+
+func TestValidationCachePublicationRequiresCommit(t *testing.T) {
+	t.Parallel()
+	for _, fail := range []bool{false, true} {
+		name := "commit"
+		if fail {
+			name = "abort"
+		}
+		t.Run(name, func(t *testing.T) {
+			db := newTestDb(t, 16)
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			sc := newSmallStateCache()
+			t.Cleanup(sc.Close)
+			sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+			require.NoError(t, err)
+			defer sd.Close()
+			sd.BindStateCache(sc)
+			key := make([]byte, 20)
+			seed(t, sc, tx, kv.AccountsDomain, key, encAccount(2), 20)
+			branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+			branches.Put([]byte{1, 2}, []byte{3}, 1, 20)
+			sd.Unwind(16, nil)
+			stop := errors.New("cancel publication")
+			err = sd.Commit(t.Context(), tx, func(kv.RwTx) error {
+				if fail {
+					return stop
+				}
+				return nil
+			})
+			if fail {
+				require.ErrorIs(t, err, stop)
+			} else {
+				require.NoError(t, err)
+			}
+			_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+			require.Equal(t, fail, ok)
+			_, _, ok = branches.Get([]byte{1, 2})
+			require.Equal(t, fail, ok)
+		})
+	}
+}
+
+func TestValidationUnwindBoundsCodeSizeRead(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer child.Close()
+	child.BindStateCache(sc)
+	view := sc.View(frontierAtStateVersion(t, tx, frontierAt(32)))
+	child.Unwind(16, nil)
+	addr := make([]byte, 20)
+	addr[0] = 0xc7
+	code := []byte{0x60, 0x00, 0x60, 0x00, 0x55}
+	view.Fill(kv.CodeDomain, addr, code, 20)
+	got, ok := view.Get(kv.CodeDomain, addr)
+	require.True(t, ok)
+	require.Equal(t, code, got)
+
+	size, ok, err := child.GetCodeSize(tx, addr, 40)
+	require.NoError(t, err)
+	require.False(t, ok, "the candidate must reject a code entry stamped at or above its unwind bound")
+	require.Zero(t, size)
+
+	got, ok = view.Get(kv.CodeDomain, addr)
+	require.True(t, ok, "the read bound must reject without evicting the canonical entry")
+	require.Equal(t, code, got)
+}
+
+func TestValidationUnwindBoundsAddrCodeHashShortcut(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	child, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer child.Close()
+	child.BindStateCache(sc)
+	view := sc.View(frontierAtStateVersion(t, tx, frontierAt(32)))
+	child.Unwind(16, nil)
+	addr := make([]byte, 20)
+	addr[0] = 0xc8
+	code := []byte{0x60, 0x01, 0x60, 0x00, 0x55}
+	codeHash := crypto.Keccak256Hash(code)
+	view.SeedAddrCodeHash(addr, codeHash, 20)
+	view.FillCodeSize(codeHash[:], len(code), 20)
+	seeded, ok := view.GetAddrCodeHash(addr)
+	require.True(t, ok, "the fixture needs an addr binding above the unwind bound")
+	require.Equal(t, codeHash, common.Hash(seeded))
+
+	size, ok, err := child.GetCodeSize(tx, addr, 40)
+	require.NoError(t, err)
+	require.False(t, ok, "the candidate must not resolve code through an addr binding above its unwind bound")
+	require.Zero(t, size)
+
+	seeded, ok = view.GetAddrCodeHash(addr)
+	require.True(t, ok, "the read bound must reject without evicting the canonical binding")
+	require.Equal(t, codeHash, common.Hash(seeded))
+}
+
+func TestValidationUnwindRejectsEntryAtTheBound(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	candidate, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer candidate.Close()
+	candidate.BindStateCache(sc)
+	key := make([]byte, 20)
+	key[0] = 0xc9
+	seed(t, sc, tx, kv.AccountsDomain, key, encAccount(2), 16)
+	candidate.Unwind(16, nil)
+	got, _, err := candidate.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	require.Empty(t, got, "an entry stamped exactly at the unwind bound belongs to the discarded range")
+}
+
+func TestLocalCacheUnwindDoesNotFillSharedStateCache(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	committed := newSmallStateCache()
+	t.Cleanup(committed.Close)
+	key, _, _, _ := twoStepRows(t, db, committed)
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	candidate, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer candidate.Close()
+	candidate.BindStateCache(sc)
+	candidate.Unwind(16, nil)
+	_, _, err = candidate.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok, "a speculative session must not seed the shared state cache from a database read")
+}
+
+func TestCanonicalUnwindStillFillsSharedStateCache(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	committed := newSmallStateCache()
+	t.Cleanup(committed.Close)
+	key, _, _, _ := twoStepRows(t, db, committed)
+	sc := newSmallStateCache()
+	t.Cleanup(sc.Close)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.BindStateCache(sc)
+	sd.Unwind(16, nil)
+	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok, "a canonical session must keep filling the shared state cache after its own unwind")
+}
+
+func TestValidationCommitAppliesDeferredBranchUnwind(t *testing.T) {
+	t.Parallel()
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	branches := tx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	key := []byte{1, 2}
+	branches.Put(key, []byte("stale"), 1, 20)
+
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.Unwind(16, nil)
+	_, _, ok := branches.Get(key)
+	require.True(t, ok, "a speculative session must leave the shared branch cache intact")
+
+	require.NoError(t, sd.Commit(t.Context(), tx))
+	_, _, ok = branches.Get(key)
+	require.False(t, ok, "commit must apply the deferred unwind to the shared branch cache")
 }

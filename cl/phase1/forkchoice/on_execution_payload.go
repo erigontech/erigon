@@ -411,6 +411,111 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	})
 }
 
+// executionHashMarkedInvalid reports whether this execution payload is already known bad.
+func (f *ForkChoiceStore) executionHashMarkedInvalid(executionBlockHash common.Hash) bool {
+	// invalidatedExecutionPayloads outlives the bounded status caches, so it has to be
+	// consulted too or the verdict is lost once the entry is evicted.
+	if f.invalidatedExecutionPayloads != nil {
+		if _, invalidated := f.invalidatedExecutionPayloads.Load(executionBlockHash); invalidated {
+			return true
+		}
+	}
+	if f.inFlightInvalidPayloads != nil {
+		if _, invalidated := f.inFlightInvalidPayloads.Load(executionBlockHash); invalidated {
+			return true
+		}
+	}
+	if f.executionPayloadStatus == nil {
+		return false
+	}
+	status, ok := f.executionPayloadStatus.Get(executionBlockHash)
+	return ok && status == execution_client.PayloadStatusInvalidated
+}
+
+// rootMarkedInvalid reports whether the payload for this beacon root is already known bad.
+func (f *ForkChoiceStore) rootMarkedInvalid(blockRoot common.Hash) bool {
+	if f.payloadStatusByRoot == nil {
+		return false
+	}
+	status, ok := f.payloadStatusByRoot.Get(blockRoot)
+	return ok && status == execution_client.PayloadStatusInvalidated
+}
+
+// newPayloadForBlockWhileYieldingForkChoiceLock validates a pre-Gloas block's payload with
+// the EL without holding f.mu. stillAdmissible is best effort: it runs under a read lock
+// when that lock is free and is skipped when it is not, so the admission token is never
+// held waiting on f.mu. Verdicts it accepts reach the status caches before the token is
+// released, so a queued caller can short-circuit instead of re-asking the EL.
+func (f *ForkChoiceStore) newPayloadForBlockWhileYieldingForkChoiceLock(
+	ctx context.Context,
+	blockRoot common.Hash,
+	stillAdmissible func() error,
+	derivedExecutionHash func() (common.Hash, bool),
+	payload *cltypes.Eth1Block,
+	parentBlockRoot *common.Hash,
+	versionedHashes []common.Hash,
+	executionRequestsList []hexutil.Bytes,
+) (execution_client.PayloadStatus, common.Hash, error) {
+	var publishedInvalidHash common.Hash
+	f.mu.Unlock()
+	defer f.mu.Lock()
+	status, err := f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
+		// The wait for the token can be long enough for the block to go stale. The check
+		// needs f.mu, but this owns the global token, so never wait for it: whoever holds
+		// the lock may be in a slow EL call of its own and every payload would queue
+		// behind that. Skipping costs an EL round trip plus the status and optimistic
+		// entries the caller records before its own re-check rejects the block.
+		if f.mu.TryRLock() {
+			err := stillAdmissible()
+			f.mu.RUnlock()
+			if err != nil {
+				return execution_client.PayloadStatusNone, err
+			}
+		}
+		// Invalid is terminal and outranks a validated marker, matching markPayloadStatus.
+		// The claimed hash is safe to read: only derived hashes are ever written, so a hit
+		// means this payload really is the one the EL rejected.
+		if f.rootMarkedInvalid(blockRoot) || f.executionHashMarkedInvalid(payload.BlockHash) {
+			return execution_client.PayloadStatusInvalidated, nil
+		}
+		if f.verifiedExecutionPayload != nil && f.verifiedExecutionPayload.Contains(blockRoot) {
+			return execution_client.PayloadStatusValidated, nil
+		}
+		status, err := f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
+		switch status {
+		case execution_client.PayloadStatusValidated:
+			// A VALID status alongside an error is contradictory; the caller rejects it.
+			// A root invalidated during the call stays invalid, so do not revive it.
+			if err == nil && f.verifiedExecutionPayload != nil && !f.rootMarkedInvalid(blockRoot) {
+				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+			}
+		case execution_client.PayloadStatusInvalidated:
+			// Cache nothing unless the request named its own payload. A mismatched hash is
+			// rejected for naming the wrong payload, which says nothing about the content
+			// of either one, and a root verdict cached here is later promoted to the
+			// claimed hash by the caller's early invalid branch.
+			executionHash, derived := derivedExecutionHash()
+			if !derived || executionHash != payload.BlockHash {
+				break
+			}
+			// Both clients report INVALID with the reason attached, so this cannot be
+			// gated on err.
+			if f.payloadStatusByRoot != nil {
+				f.payloadStatusByRoot.Add(blockRoot, status)
+			}
+			if f.executionPayloadStatus != nil {
+				f.executionPayloadStatus.Add(executionHash, status)
+			}
+			if f.inFlightInvalidPayloads != nil {
+				f.inFlightInvalidPayloads.Store(executionHash, struct{}{})
+				publishedInvalidHash = executionHash
+			}
+		}
+		return status, err
+	})
+	return status, publishedInvalidHash, err
+}
+
 func (f *ForkChoiceStore) validateEnvelopePersistenceCommitmentsWhileYieldingForkChoiceLock(
 	block *cltypes.SignedBeaconBlock,
 	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
@@ -466,7 +571,6 @@ func (f *ForkChoiceStore) authenticatePayloadHashBeforeStatusProjectionLocked(
 }
 
 func (f *ForkChoiceStore) withPayloadValidationAdmission(ctx context.Context, validate func() (execution_client.PayloadStatus, error)) (execution_client.PayloadStatus, error) {
-
 	f.payloadValidationOnce.Do(func() {
 		f.payloadValidationAdmission = make(chan struct{}, 1)
 	})
@@ -575,22 +679,7 @@ func (f *ForkChoiceStore) rejectKnownInvalidPayloadStatusLocked(payloadStatus ex
 }
 
 func (f *ForkChoiceStore) payloadInvalidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
-	if f.invalidatedExecutionPayloads != nil {
-		if _, invalidated := f.invalidatedExecutionPayloads.Load(executionBlockHash); invalidated {
-			return true
-		}
-	}
-	if f.payloadStatusByRoot != nil {
-		if status, ok := f.payloadStatusByRoot.Get(blockRoot); ok && status == execution_client.PayloadStatusInvalidated {
-			return true
-		}
-	}
-	if f.executionPayloadStatus != nil {
-		if status, ok := f.executionPayloadStatus.Get(executionBlockHash); ok && status == execution_client.PayloadStatusInvalidated {
-			return true
-		}
-	}
-	return false
+	return f.rootMarkedInvalid(blockRoot) || f.executionHashMarkedInvalid(executionBlockHash)
 }
 
 func (f *ForkChoiceStore) payloadValidatedLocked(blockRoot, executionBlockHash common.Hash) bool {
@@ -681,25 +770,71 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForGossip(signedEnvelo
 		return err
 	}
 
-	f.mu.Lock()
-	defer f.mu.Unlock()
+	releaseValidation, err := f.acquireExecutionPayloadValidationRead(context.Background())
+	if err != nil {
+		return err
+	}
+	validationHeld := true
+	lockHeld := true
+	defer func() {
+		if lockHeld {
+			f.mu.RUnlock()
+		}
+		if validationHeld {
+			releaseValidation()
+		}
+	}()
 	root := signedEnvelope.Message.BeaconBlockRoot
-	blockState, err := f.forkGraph.GetState(root, false)
+	blockState, err := f.forkGraph.GetState(root, true)
 	if err != nil || blockState == nil {
-		return fmt.Errorf("beacon block state %v is unavailable", root)
+		return fmt.Errorf("%w: beacon block state %v is unavailable", ErrIgnore, root)
 	}
 	block, ok := f.forkGraph.GetBlock(root)
-	if !ok || block == nil || block.Block == nil {
-		return fmt.Errorf("beacon block %v is unavailable", root)
-	}
 	finalizedSlot := f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
+	f.mu.RUnlock()
+	lockHeld = false
+	if !ok || block == nil || block.Block == nil {
+		return fmt.Errorf("%w: beacon block %v is unavailable", ErrIgnore, root)
+	}
 	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
-		return fmt.Errorf("envelope slot %d is before finalized slot %d", signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
 	}
 	if err := f.validateEnvelopeAgainstBlockForGossip(signedEnvelope, block, blockState); err != nil {
+		releaseValidation()
+		validationHeld = false
 		return fmt.Errorf("execution payload envelope failed gossip validation: %w", err)
 	}
+	releaseValidation()
+	validationHeld = false
+	f.mu.RLock()
+	lockHeld = true
+	finalizedSlot = f.computeStartSlotAtEpoch(f.FinalizedCheckpoint().Epoch)
+	f.mu.RUnlock()
+	lockHeld = false
+	if signedEnvelope.Message.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("%w: envelope slot %d is before finalized slot %d", ErrIgnore, signedEnvelope.Message.Payload.SlotNumber, finalizedSlot)
+	}
 	return nil
+}
+
+// acquireExecutionPayloadValidationRead returns with f.mu held and never waits for it while holding validation capacity.
+func (f *ForkChoiceStore) acquireExecutionPayloadValidationRead(ctx context.Context) (func(), error) {
+	f.executionPayloadValidationOnce.Do(func() {
+		f.executionPayloadValidation = make(chan struct{}, 1)
+	})
+	for {
+		select {
+		case f.executionPayloadValidation <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		if f.mu.TryRLock() {
+			return func() { <-f.executionPayloadValidation }, nil
+		}
+		<-f.executionPayloadValidation
+		f.mu.RLock()
+		f.mu.RUnlock() //nolint:gocritic,staticcheck // This pair waits for a queued writer before retrying.
+	}
 }
 
 func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
@@ -707,28 +842,16 @@ func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
 	beaconBlockRoot common.Hash,
 	builderIndex uint64,
 ) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if err := ctx.Err(); err != nil {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
 	token, err := f.envelopeGossipAdmissions.Claim(ctx, beaconBlockRoot, builderIndex)
 	if err != nil {
 		return ExecutionPayloadEnvelopeAdmissionToken{}, err
 	}
 	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-		envelope, readErr := f.forkGraph.ReadEnvelopeFromDisk(beaconBlockRoot)
-		if err := ctx.Err(); err != nil {
-			f.envelopeGossipAdmissions.Finish(token, false)
-			return ExecutionPayloadEnvelopeAdmissionToken{}, err
-		}
-		if readErr != nil || envelope == nil || envelope.Message == nil {
-			if f.forkGraph.HasEnvelope(beaconBlockRoot) {
-				f.envelopeGossipAdmissions.Finish(token, false)
-				if readErr == nil {
-					readErr = errors.New("persisted execution payload envelope is incomplete")
-				}
-				return ExecutionPayloadEnvelopeAdmissionToken{}, fmt.Errorf("%w: persisted execution payload envelope is unavailable: %w", ErrExecutionPayloadEnvelopeAdmissionBusy, readErr)
-			}
-		} else {
-			f.envelopeGossipAdmissions.Finish(token, true)
-			return ExecutionPayloadEnvelopeAdmissionToken{}, NewExecutionPayloadEnvelopeAlreadySeenError(envelope)
-		}
+		f.envelopeGossipAdmissions.Finish(token, true)
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeLookupRequired
 	}
 	if err := ctx.Err(); err != nil {
 		f.envelopeGossipAdmissions.Finish(token, false)
@@ -737,8 +860,30 @@ func (f *ForkChoiceStore) ClaimExecutionPayloadEnvelopeForGossip(
 	return token, nil
 }
 
+func (f *ForkChoiceStore) TryClaimExecutionPayloadEnvelopeForGossip(
+	beaconBlockRoot common.Hash,
+	builderIndex uint64,
+) (ExecutionPayloadEnvelopeAdmissionToken, error) {
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeLookupRequired
+	}
+	token, err := f.envelopeGossipAdmissions.TryClaim(beaconBlockRoot, builderIndex)
+	if err != nil {
+		return ExecutionPayloadEnvelopeAdmissionToken{}, err
+	}
+	if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+		f.envelopeGossipAdmissions.Finish(token, true)
+		return ExecutionPayloadEnvelopeAdmissionToken{}, ErrExecutionPayloadEnvelopeLookupRequired
+	}
+	return token, nil
+}
+
 func (f *ForkChoiceStore) FinishExecutionPayloadEnvelopeForGossip(token ExecutionPayloadEnvelopeAdmissionToken, seen bool) {
 	f.envelopeGossipAdmissions.Finish(token, seen)
+}
+
+func (f *ForkChoiceStore) ForgetExecutionPayloadEnvelopeForGossip(beaconBlockRoot common.Hash, builderIndex uint64) {
+	f.envelopeGossipAdmissions.ForgetSeen(beaconBlockRoot, builderIndex)
 }
 
 func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelopeForConsensus(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
@@ -1009,8 +1154,8 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
 	}
-	// Invalidate head cache — payload status may have changed from PENDING to FULL.
-	// This forces GetHead to recompute on next call so GetHeadPayloadStatus is fresh.
+
+	// Payload status participates in Gloas head selection, so a change invalidates the cached head.
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
 
@@ -1260,18 +1405,15 @@ func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelope(ctx context.Context, 
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
 		return errors.New("nil execution payload envelope")
 	}
-	f.executionPayloadValidationOnce.Do(func() {
-		f.executionPayloadValidation = make(chan struct{}, 1)
-	})
-	select {
-	case f.executionPayloadValidation <- struct{}{}:
-		defer func() { <-f.executionPayloadValidation }()
-	case <-ctx.Done():
-		return ctx.Err()
+	releaseValidation, err := f.acquireExecutionPayloadValidationRead(ctx)
+	if err != nil {
+		return err
 	}
+	defer func() {
+		f.mu.RUnlock()
+		releaseValidation()
+	}()
 	blockRoot := common.Hash(signedEnvelope.Message.BeaconBlockRoot)
-	f.mu.RLock()
-	defer f.mu.RUnlock()
 	block, ok := f.forkGraph.GetBlock(blockRoot)
 	if !ok || block == nil {
 		return fmt.Errorf("block not found for beacon_block_root %v", blockRoot)
@@ -1372,8 +1514,8 @@ func (f *ForkChoiceStore) emitExecutionPayloadIntegrationEvents(blockRoot common
 	if !headCached && f.justifiedCheckpoint.Load() == nil {
 		return
 	}
-	headRoot, headSlot, headErr := f.GetHead(nil)
-	if headErr != nil || headRoot != blockRoot || f.beaconCfg.SlotsPerEpoch == 0 {
+	head, headSlot, headErr := f.GetHeadNode()
+	if headErr != nil || head.Root != blockRoot || f.beaconCfg.SlotsPerEpoch == 0 {
 		return
 	}
 	var headEvent *beaconevents.HeadV2Data
@@ -1383,7 +1525,7 @@ func (f *ForkChoiceStore) emitExecutionPayloadIntegrationEvents(blockRoot common
 			f.beaconCfg,
 			headState,
 			headSlot,
-			headRoot,
+			head.Root,
 			block.Block.StateRoot,
 			"full",
 			f.IsRootOptimistic(blockRoot),
@@ -1393,15 +1535,16 @@ func (f *ForkChoiceStore) emitExecutionPayloadIntegrationEvents(blockRoot common
 		return
 	}
 	f.emitters.WithHeadEventLock(func() {
-		currentHeadRoot, currentHeadSlot, err := f.GetHead(nil)
-		if err != nil || currentHeadRoot != headRoot || currentHeadSlot != headSlot ||
-			beaconevents.PayloadStatusName(f.GetHeadPayloadStatus()) != headEvent.Data.PayloadStatus ||
-			f.IsRootOptimistic(currentHeadRoot) != headEvent.Data.ExecutionOptimistic {
+		currentHead, currentHeadSlot, err := f.GetHeadNode()
+		if err != nil || currentHead.Root != head.Root || currentHeadSlot != headSlot ||
+			beaconevents.PayloadStatusName(currentHead.PayloadStatus) != headEvent.Data.PayloadStatus ||
+			f.IsRootOptimistic(currentHead.Root) != headEvent.Data.ExecutionOptimistic {
 			return
 		}
 		f.emitters.State().SendHeadV2(headEvent)
 	})
 }
+
 func (f *ForkChoiceStore) ensureExecutionPayloadEnvelopeIndices(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (*cltypes.SignedExecutionPayloadEnvelope, bool, error) {
 	return f.ensureExecutionPayloadEnvelopeIndicesWithTrust(ctx, blockRoot, signedEnvelope, applied, false)
 }

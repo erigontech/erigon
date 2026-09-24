@@ -48,7 +48,7 @@ func (f formatFunc) Format(r *Record) []byte {
 func TerminalFormat() Format {
 	logNoTimestamps := logEnvBool("ERIGON_LOG_NO_TIMESTAMPS", false)
 	return FormatFunc(func(r *Record) []byte {
-		var color = 0
+		color := 0
 		switch r.Lvl {
 		case LvlCrit:
 			color = 35

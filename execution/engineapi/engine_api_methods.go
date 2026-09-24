@@ -65,6 +65,7 @@ var ourCapabilities = []string{
 	"engine_getBlobsV1",
 	"engine_getBlobsV2",
 	"engine_getBlobsV3",
+	"engine_getBlobsV4",
 	"POST /engine/v1/payloads",
 	"POST /engine/v2/payloads",
 	"POST /engine/v3/payloads",
@@ -206,21 +207,24 @@ func (e *EngineServer) NewPayloadV2(ctx context.Context, payload *engine_types.E
 // NewPayloadV3 processes new payloads (blocks) from the beacon chain with withdrawals & blob gas.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_newpayloadv3
 func (e *EngineServer) NewPayloadV3(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash,
+) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, nil, clparams.DenebVersion)
 }
 
 // NewPayloadV4 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas and requests.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/prague.md#engine_newpayloadv4
 func (e *EngineServer) NewPayloadV4(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes,
+) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.ElectraVersion)
 }
 
 // NewPayloadV5 processes new payloads (blocks) from the beacon chain with withdrawals, blob gas, requests and block access list.
 // See https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5
 func (e *EngineServer) NewPayloadV5(ctx context.Context, payload *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes,
+) (*engine_types.PayloadStatus, error) {
 	return e.newPayload(ctx, payload, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, clparams.GloasVersion)
 }
 
@@ -298,12 +302,12 @@ func (e *EngineServer) GetBlobsV1(ctx context.Context, blobHashes []common.Hash)
 	if e.config.IsOsaka(currentHeader.Time) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.DenebVersion, nil)
 	if err != nil {
 		return nil, err
 	}
 	ret, _ := resp.([]*engine_types.BlobAndProofV1)
-	return engine_types.BlobsBundleV1(ret), nil
+	return ret, nil
 }
 
 func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
@@ -313,12 +317,12 @@ func (e *EngineServer) GetBlobsV2(ctx context.Context, blobHashes []common.Hash)
 	}
 	// GetBlobsV2 was actually introduced in Fusaka,
 	// but here we're using the Pectra version to differentiate it from GetBlobsV3.
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.ElectraVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.ElectraVersion, nil)
 	if err != nil {
 		return nil, err
 	}
 	ret, _ := resp.([]*engine_types.BlobAndProofV2)
-	return engine_types.BlobsBundleV2(ret), nil
+	return ret, nil
 }
 
 func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error) {
@@ -326,10 +330,20 @@ func (e *EngineServer) GetBlobsV3(ctx context.Context, blobHashes []common.Hash)
 	if e.headPredatesOsaka(ctx) {
 		return nil, nil
 	}
-	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion)
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.FuluVersion, nil)
 	if err != nil {
 		return nil, err
 	}
 	ret, _ := resp.([]*engine_types.BlobAndProofV2)
-	return engine_types.BlobsBundleV2(ret), nil
+	return ret, nil
+}
+
+func (e *EngineServer) GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) (engine_types.BlobsBundleV3, error) {
+	e.logger.Debug("[GetBlobsV4] Received Request", "hashes", len(blobHashes))
+	resp, err := e.getBlobs(ctx, blobHashes, clparams.GloasVersion, cellIndices)
+	if err != nil {
+		return nil, err
+	}
+	ret, _ := resp.([]*engine_types.BlobCellsAndProofsV1)
+	return ret, nil
 }

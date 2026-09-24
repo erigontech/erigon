@@ -76,7 +76,7 @@ type Filters struct {
 
 	pendingBlock *types.Block
 
-	headsSubs        *concurrent.SyncMap[HeadsSubID, Sub[*types.Header]]
+	headsSubs        *concurrent.SyncMap[HeadsSubID, Sub[*Shared[*types.Header]]]
 	pendingLogsSubs  *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
 	pendingBlockSubs *concurrent.SyncMap[PendingBlockSubID, Sub[*types.Block]]
 	syncingSubs      *concurrent.SyncMap[SyncingSubID, *chan_sub[*remoteproto.SyncingReply]]
@@ -123,7 +123,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 	logger.Info("rpc filters: subscribing to Erigon events")
 
 	ff := &Filters{
-		headsSubs:          concurrent.NewSyncMap[HeadsSubID, Sub[*types.Header]](),
+		headsSubs:          concurrent.NewSyncMap[HeadsSubID, Sub[*Shared[*types.Header]]](),
 		pendingTxsSubs:     concurrent.NewSyncMap[PendingTxsSubID, Sub[[]types.Transaction]](),
 		pendingLogsSubs:    concurrent.NewSyncMap[PendingLogsSubID, Sub[types.Logs]](),
 		pendingBlockSubs:   concurrent.NewSyncMap[PendingBlockSubID, Sub[*types.Block]](),
@@ -224,7 +224,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 				return
 			default:
 			}
-			if err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
+			err := ethBackend.SubscribeReceipts(ctx, ff.OnReceipts, func(send func(*remoteproto.ReceiptsFilterRequest) error) {
 				ff.mu.Lock()
 				ff.receiptsRequestor.Store(send)
 				ff.mu.Unlock()
@@ -233,7 +233,9 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 						logger.Warn("rpc filters: error sending pending receipts filter update", "err", err)
 					}
 				}
-			}); err != nil {
+			})
+			ff.receiptsSubs.endStream()
+			if err != nil {
 				select {
 				case <-ctx.Done():
 					activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "ethBackend_Receipts"}).Dec()
@@ -275,7 +277,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 			}
 		}()
 
-		if !reflect.ValueOf(mining).IsNil() { //https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
+		if !reflect.ValueOf(mining).IsNil() { // https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
 			go func() {
 				activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingBlock"}).Inc()
 				for {
@@ -545,9 +547,9 @@ func (ff *Filters) HandlePendingLogs(reply *txpoolproto.OnPendingLogsReply) {
 
 // SubscribeNewHeads subscribes to new block headers and returns a channel to receive the headers
 // and a subscription ID to manage the subscription.
-func (ff *Filters) SubscribeNewHeads(size int, protocol SubProtocol) (<-chan *types.Header, HeadsSubID) {
+func (ff *Filters) SubscribeNewHeads(size int, protocol SubProtocol) (<-chan *Shared[*types.Header], HeadsSubID) {
 	id := HeadsSubID(generateSubscriptionID())
-	sub := newChanSub[*types.Header](size, protocol)
+	sub := newChanSub[*Shared[*types.Header]](size, protocol)
 	ff.headsSubs.Put(id, sub)
 	ff.registerSubscription(SubscriptionID(id), FilterTypeHeads, sub)
 	return sub.ch, id
@@ -720,8 +722,8 @@ func (ff *Filters) unsubscribePendingTxsInternal(id PendingTxsSubID) bool {
 // SubscribeReceipts subscribes to transaction receipts and returns a channel to receive the receipts
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription
 // is installed and the error is returned.
-func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *remoteproto.SubscribeReceiptsReply, ReceiptsSubID, error) {
-	sub := newChanSub[*remoteproto.SubscribeReceiptsReply](size, "")
+func (ff *Filters) SubscribeReceipts(size int, criteria filters.ReceiptsFilterCriteria) (<-chan *Shared[[]*remoteproto.SubscribeReceiptsReply], ReceiptsSubID, error) {
+	sub := newChanSub[*Shared[[]*remoteproto.SubscribeReceiptsReply]](size, "")
 	id := ff.receiptsSubs.insertReceiptsFilter(sub, criteria.TransactionHashes, ff.config.RpcSubscriptionFiltersMaxLogs)
 	if err := ff.sendReceiptsFilterUpdate(); err != nil {
 		ff.receiptsSubs.removeReceiptsFilter(id)
@@ -966,8 +968,9 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 
 	ff.invalidateStalePendingBlock(&header)
 
-	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*types.Header]) error {
-		v.Send(&header)
+	ev := &Shared[*types.Header]{Value: &header}
+	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*Shared[*types.Header]]) error {
+		v.Send(ev)
 		return nil
 	})
 }

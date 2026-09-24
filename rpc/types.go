@@ -20,12 +20,14 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"math/big"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -41,6 +43,9 @@ type API struct {
 	Version   string // api version for DApp's
 	Service   any    // receiver instance which holds the methods
 	Public    bool   // indication if the methods must be considered safe for public use
+
+	// Iface, when set, keeps exported methods of Service that it does not declare off the wire.
+	Iface reflect.Type
 }
 
 // Error wraps RPC errors, which contain an error code in addition to the message.
@@ -76,8 +81,10 @@ type jsonWriter interface {
 	remoteAddr() string
 }
 
-type BlockNumber int64
-type Timestamp uint64
+type (
+	BlockNumber int64
+	Timestamp   uint64
+)
 
 const (
 	LatestExecutedBlockNumber = BlockNumber(-5)
@@ -203,33 +210,37 @@ type BlockNumberOrHash struct {
 }
 
 func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
-	type erased BlockNumberOrHash
-	e := erased{}
-	err := json.Unmarshal(data, &e)
-	if err == nil {
-		if e.BlockNumber != nil && e.BlockHash != nil {
-			return errors.New("cannot specify both BlockHash and BlockNumber, choose one or the other")
+	if len(data) > 0 && data[0] == '{' {
+		type erased BlockNumberOrHash
+		e := erased{}
+		if err := json.Unmarshal(data, &e); err == nil {
+			if e.BlockNumber != nil && e.BlockHash != nil {
+				return errors.New("cannot specify both BlockHash and BlockNumber, choose one or the other")
+			}
+			if e.BlockNumber == nil && e.BlockHash == nil {
+				return errors.New("at least one of BlockNumber or BlockHash is needed if a dictionary is provided")
+			}
+			bnh.BlockNumber = e.BlockNumber
+			bnh.BlockHash = e.BlockHash
+			bnh.RequireCanonical = e.RequireCanonical
+			return nil
 		}
-		if e.BlockNumber == nil && e.BlockHash == nil {
-			return errors.New("at least one of BlockNumber or BlockHash is needed if a dictionary is provided")
-		}
-		bnh.BlockNumber = e.BlockNumber
-		bnh.BlockHash = e.BlockHash
-		bnh.RequireCanonical = e.RequireCanonical
-		return nil
 	}
-	// Try simple number first
-	blckNum, err := strconv.ParseUint(string(data), 10, 64)
-	if err == nil {
-		if blckNum > math.MaxInt64 {
-			return errors.New("blocknumber too high")
+	if len(data) > 0 && data[0] != '"' {
+		blckNum, err := strconv.ParseUint(string(data), 10, 64)
+		if err == nil {
+			if blckNum > math.MaxInt64 {
+				return errors.New("blocknumber too high")
+			}
+			bn := BlockNumber(blckNum)
+			bnh.BlockNumber = &bn
+			return nil
 		}
-		bn := BlockNumber(blckNum)
-		bnh.BlockNumber = &bn
-		return nil
 	}
 	var input string
-	if err := json.Unmarshal(data, &input); err != nil {
+	if n := len(data); n >= 2 && data[0] == '"' && data[n-1] == '"' && bytes.IndexByte(data, '\\') < 0 {
+		input = string(data[1 : n-1])
+	} else if err := json.Unmarshal(data, &input); err != nil {
 		return err
 	}
 	switch input {
@@ -267,7 +278,8 @@ func (bnh *BlockNumberOrHash) UnmarshalJSON(data []byte) error {
 			bnh.BlockHash = &hash
 			return nil
 		} else {
-			if blckNum, err = hexutil.DecodeUint64(input); err != nil {
+			blckNum, err := hexutil.DecodeUint64(input)
+			if err != nil {
 				return err
 			}
 			if blckNum > math.MaxInt64 {
@@ -323,15 +335,15 @@ func BlockNumberOrHashWithHash(hash common.Hash, canonical bool) BlockNumberOrHa
 type BlockReference BlockNumberOrHash
 
 func (br *BlockReference) UnmarshalJSON(data []byte) error {
-	return ((*BlockNumberOrHash)(br)).UnmarshalJSON(data)
+	return (*BlockNumberOrHash)(br).UnmarshalJSON(data)
 }
 
 func (br BlockReference) Number() (BlockNumber, bool) {
-	return ((*BlockNumberOrHash)(&br)).Number()
+	return (*BlockNumberOrHash)(&br).Number()
 }
 
 func (br BlockReference) Hash() (common.Hash, bool) {
-	return ((*BlockNumberOrHash)(&br)).Hash()
+	return (*BlockNumberOrHash)(&br).Hash()
 }
 
 func (br BlockReference) String() string {
@@ -442,15 +454,12 @@ func (ts *Timestamp) UnmarshalJSON(data []byte) error {
 	// parse string to uint64
 	timestamp, err := strconv.ParseUint(input, 10, 64)
 	if err != nil {
-
 		// try hex number
 		if timestamp, err = hexutil.DecodeUint64(input); err != nil {
 			return err
 		}
-
 	}
 
 	*ts = Timestamp(timestamp)
 	return nil
-
 }

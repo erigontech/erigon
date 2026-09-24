@@ -34,6 +34,7 @@ func NewBitmap64() *roaring64.Bitmap {
 	a.Clear()
 	return a
 }
+
 func ReturnToPool64(a *roaring64.Bitmap) {
 	if a == nil {
 		return

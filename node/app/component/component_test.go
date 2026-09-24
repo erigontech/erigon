@@ -36,8 +36,7 @@ func TestMain(m *testing.M) {
 	os.Exit(0)
 }
 
-type provider struct {
-}
+type provider struct{}
 
 func TestCreateComponent(t *testing.T) {
 	c, err := component.NewComponent[provider](t.Context())
@@ -151,6 +150,7 @@ func mockProvider(ctrl *gomock.Controller, _ int) *component.MockComponentProvid
 		AnyTimes()
 	return p
 }
+
 func TestComponentLifecycle(t *testing.T) {
 	// This test uses gomock with exact call counts, which is sensitive to the
 	// shared root domain's init() goroutine triggering extra lifecycle calls on
@@ -434,7 +434,8 @@ func TestLogger(t *testing.T) {
 	defer liblog.Root().SetHandler(prev)
 
 	liblog.Root().SetHandler(
-		liblog.DiscardHandler())
+		liblog.DiscardHandler(),
+	)
 
 	component.LogLevel(liblog.LvlTrace)
 
@@ -448,7 +449,8 @@ func TestLogger(t *testing.T) {
 	require.Nil(t, err)
 
 	liblog.Root().SetHandler(
-		liblog.DiscardHandler())
+		liblog.DiscardHandler(),
+	)
 	c, err = component.NewComponent[provider](t.Context(),
 		component.WithLogLabels("label"),
 		component.WithLogCtx("name", "value"),
@@ -479,7 +481,8 @@ func (p ctxprovider) Initialize(ctx context.Context, options ...app.Option) erro
 	defer liblog.Root().SetHandler(prev)
 
 	liblog.Root().SetHandler(
-		liblog.DiscardHandler())
+		liblog.DiscardHandler(),
+	)
 
 	cmp := component.ComponentValue[ctxprovider](ctx)
 	log := app.CtxLogger(ctx)
@@ -488,7 +491,8 @@ func (p ctxprovider) Initialize(ctx context.Context, options ...app.Option) erro
 	log.Info("initializing (cmp)")
 
 	liblog.Root().SetHandler(
-		liblog.DiscardHandler())
+		liblog.DiscardHandler(),
+	)
 
 	_ = app.CtxLogger(ctx)
 	log.Info("initializing (ctx)")
@@ -532,8 +536,7 @@ func TestContext(t *testing.T) {
 	require.Equal(t, component.Deactivated, c.State())
 }
 
-type cfgprovider struct {
-}
+type cfgprovider struct{}
 
 func (p cfgprovider) Configure(ctx context.Context, options ...app.Option) error {
 	app.ApplyOptions(&p, options)
@@ -648,7 +651,8 @@ func TestEvents(t *testing.T) {
 		func(s string) {
 			callch <- s
 		},
-		testfn))
+		testfn,
+	))
 
 	nocalls := bus.Post("test")
 	require.Equal(t, 2, nocalls)
@@ -668,7 +672,8 @@ func TestEvents(t *testing.T) {
 
 	bus = c.EventBus("tb")
 
-	require.NoError(t, bus.Register(c.Provider(),
+	require.NoError(t, bus.Register(
+		c.Provider(),
 		func(s string) {
 			callch <- s
 		},
@@ -1011,7 +1016,8 @@ func TestFails(t *testing.T) {
 			default:
 				t.Fatalf("unexpected state: %s", state)
 			}
-		}))
+		},
+	))
 	require.Nil(t, err)
 
 	state, err := c.AwaitState(t.Context(), component.Failed)
@@ -1042,7 +1048,8 @@ func TestFails(t *testing.T) {
 			default:
 				t.Fatalf("unexpected state: %s", state)
 			}
-		}))
+		},
+	))
 	require.Nil(t, err)
 
 	state, err = c.AwaitState(t.Context(), component.Failed)
