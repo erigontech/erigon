@@ -85,15 +85,16 @@ func MarshalReceipt(
 
 	var logsToMarshal jsonstream.Marshaler
 
-	if withBlockTimestamp {
+	switch {
+	case withBlockTimestamp:
 		rpcLogs := make(types.RPCLogs, 0, len(receipt.Logs))
 		for _, l := range receipt.Logs {
 			rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
 		}
 		logsToMarshal = rpcLogs
-	} else if receipt.Logs == nil {
+	case receipt.Logs == nil:
 		logsToMarshal = types.Logs{}
-	} else {
+	default:
 		logsToMarshal = receipt.Logs
 	}
 
