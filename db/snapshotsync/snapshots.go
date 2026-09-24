@@ -518,6 +518,7 @@ type BaseRoSnapshots struct {
 	cfg               ethconfig.BlocksFreezing
 	snCfg             *snapcfg.Cfg
 	logger            log.Logger
+	removeFile        func(string) error
 
 	ready     ready
 	operators map[snaptype.Enum]*retireOperators
@@ -594,6 +595,7 @@ func newRoSnapshots(cfg ethconfig.BlocksFreezing, snapDir string, types []snapty
 	snCfg := snapcfg.KnownCfgOrDevnet(cfg.ChainName)
 	s := &BaseRoSnapshots{dir: snapDir, cfg: cfg, snCfg: snCfg, logger: logger,
 		types: types, enums: enums, baseSegType: baseSegType,
+		removeFile:        dir.RemoveFile,
 		dirty:             make(DirtyFiles, snaptype.MaxEnum),
 		alignMin:          alignMin,
 		operators:         map[snaptype.Enum]*retireOperators{},
@@ -1666,7 +1668,12 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 
 	s.removeOrphanedIdx(supersededIdx)
 
-	return s.RemoveOwnTmpFiles()
+	// The merge is already committed by this point, so a leftover that cannot be unlinked must not
+	// be reported as a failed merge.
+	if err := s.RemoveOwnTmpFiles(); err != nil {
+		s.logger.Warn("[snapshots] could not sweep leftover .tmp files", "err", err)
+	}
+	return nil
 }
 
 // RemoveOwnTmpFiles unlinks leftover .tmp files of this collection's own types, leaving those of
@@ -1677,13 +1684,16 @@ func (s *BaseRoSnapshots) RemoveOwnTmpFiles() error {
 	if err != nil {
 		return err
 	}
+	var errs []error
 	for _, f := range tmpFiles {
 		if !s.ownsTmpFile(f) {
 			continue
 		}
-		_ = dir.RemoveFile(f)
+		if err := s.removeFile(f); err != nil && !errors.Is(err, os.ErrNotExist) {
+			errs = append(errs, err)
+		}
 	}
-	return nil
+	return errors.Join(errs...)
 }
 
 // ownsTmpFile reports whether a .tmp in the snapshot dir could have been produced by this
