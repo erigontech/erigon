@@ -76,8 +76,13 @@ func TestGenerateOverStaleOutput(t *testing.T) {
 	dir := "testdata/stale"
 	require.NoError(t, os.CopyFS(dir, os.DirFS("testdata/sample")))
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	stale := "package sample\n\nfunc (x *Sample) MarshalFastJSONTo(s *jsonstream.StackStream) error {\n\t_ = x.SinceRenamed\n\treturn nil\n}\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "gen_sample_json.go"), []byte(stale), 0o644))
+	// The sibling matters as much as the output: go generate runs one directive per type, and
+	// the first run must not fail on a file a later run would rewrite.
+	for name, recv := range map[string]string{"gen_sample_json.go": "Sample", "gen_inner_json.go": "Inner"} {
+		stale := marker + " DO NOT EDIT.\n\npackage sample\n\nfunc (x *" + recv +
+			") MarshalFastJSONTo(s *jsonstream.StackStream) error {\n\t_ = x.SinceRenamed\n\treturn nil\n}\n"
+		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(stale), 0o644))
+	}
 
 	require.NoError(t, run("Sample", dir, "gen_sample_json.go", "writeComputedJSON"))
 	got, err := os.ReadFile(filepath.Join(dir, "gen_sample_json.go"))
