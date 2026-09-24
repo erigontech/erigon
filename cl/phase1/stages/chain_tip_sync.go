@@ -812,8 +812,9 @@ func prepareParentEnvelopeForChild(
 		parentRoot := common.Hash(child.Block.ParentRoot)
 		envelope := envelopes[parentRoot]
 		acceptedThisCycle := envelope != nil
-		_, statusKnown := store.GetRecentExecutionPayloadStatusByRoot(parentRoot)
-		if !acceptedThisCycle && !statusKnown && store.HasEnvelope(parentRoot) {
+		status, statusKnown := store.GetRecentExecutionPayloadStatusByRoot(parentRoot)
+		statusUsable := statusKnown && status != execution_client.PayloadStatusNone
+		if !acceptedThisCycle && !statusUsable && store.HasEnvelope(parentRoot) {
 			persisted, err := store.ReadEnvelopeFromDisk(parentRoot)
 			if err != nil {
 				log.Debug("[chainTipSync] failed to read persisted parent envelope", "slot", child.Block.Slot, "err", err)
@@ -821,7 +822,7 @@ func prepareParentEnvelopeForChild(
 				envelope = persisted
 			}
 		}
-		if !acceptedThisCycle && !statusKnown && envelope != nil && envelope.Message != nil {
+		if !acceptedThisCycle && !statusUsable && envelope != nil && envelope.Message != nil {
 			if err := store.OnExecutionPayload(ctx, envelope, false, validate); err != nil {
 				log.Debug("[chainTipSync] failed to apply parent envelope", "slot", child.Block.Slot, "err", err)
 			}

@@ -501,7 +501,7 @@ func TestPrepareParentEnvelopeSkipsPersistedEnvelopeWithKnownStatus(t *testing.T
 	require.Zero(t, store.onCalls)
 }
 
-func TestPrepareParentEnvelopeSkipsPersistedEnvelopeWithUnavailableStatus(t *testing.T) {
+func TestPrepareParentEnvelopeRevalidatesPersistedEnvelopeWithUnavailableStatus(t *testing.T) {
 	beaconCfg, anchorState, anchorBid, envelope, anchorRoot := validAnchorEnvelopeFixture(t, 1)
 	anchorState.SetLatestExecutionPayloadBid(anchorBid)
 	child := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
@@ -518,8 +518,8 @@ func TestPrepareParentEnvelopeSkipsPersistedEnvelopeWithUnavailableStatus(t *tes
 	}
 
 	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, nil, child, nil, true))
-	require.Zero(t, store.readCalls)
-	require.Zero(t, store.onCalls)
+	require.Equal(t, 1, store.readCalls)
+	require.Equal(t, 1, store.onCalls)
 }
 
 func TestSelectedHeadEnvelopeRequestCoalescesOnlyWhileRequestIsActive(t *testing.T) {
