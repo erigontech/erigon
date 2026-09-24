@@ -88,23 +88,13 @@ func hexField[T hexType](s *StackStream, name string, v *T) {
 	s.beforeValue()
 	buf := s.stream.Buffer()
 	start := len(buf)
-	if ownText(v) {
-		buf = append(appendOwnText(s, append(buf, '"'), v), '"')
-	} else {
-		b := bytesOf(v)
+	if b, ok := bytesOf(v); ok {
 		buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
+	} else {
+		buf = append(appendOwnText(s, append(buf, '"'), v), '"')
 	}
 	s.commit(buf, start)
 	s.afterValue()
-}
-
-// ownText reports whether v is a hexutil number, which writes its own text; the rest are bytes.
-func ownText[T hexType](v *T) bool {
-	switch any(v).(type) {
-	case *hexutil.Uint64, *hexutil.Uint, *hexutil.Int64, *hexutil.U256, *hexutil.Big:
-		return true
-	}
-	return false
 }
 
 // appendOwnText appends v's text. On failure it appends nothing and latches the error, which
@@ -120,11 +110,23 @@ func appendOwnText[T hexType](s *StackStream, buf []byte, v *T) []byte {
 	return text
 }
 
-func bytesOf[T hexType](v *T) []byte {
-	if b, ok := any(v).(*hexutil.Bytes); ok {
-		return *b
+// bytesOf returns the bytes of a byte array or Bytes; ok is false for a hexutil number, which
+// writes its own text.
+func bytesOf[T hexType](v *T) (b []byte, ok bool) {
+	if isByteArray[T]() {
+		return unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v)), true
 	}
-	return unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v))
+	if b, ok := any(v).(*hexutil.Bytes); ok {
+		return *b, true
+	}
+	return nil, false
+}
+
+// isByteArray is fixed for each instantiation, so the compiler drops the branch it guards: of
+// the hexTypes only the byte arrays have an alignment of 1.
+func isByteArray[T hexType]() bool {
+	var v T
+	return unsafe.Alignof(v) == 1
 }
 
 // Hexes writes a slice field, null for a nil slice.
@@ -154,15 +156,26 @@ func HexesValue[S ~[]E, E hexType](s *StackStream, items S) {
 	// exact for the fixed-size types, a first guess for Bytes and Big; no further than the flush
 	size := 2 + len(items)*(hexutil.QuotedLen(int(unsafe.Sizeof(*new(E))))+1)
 	buf := append(slices.Grow(s.stream.Buffer(), min(size, FlushThreshold)), '[')
-	own := len(items) > 0 && ownText(&items[0])
+	if isByteArray[E]() && size <= FlushThreshold {
+		for i := range items {
+			if i > 0 {
+				buf = append(buf, ',')
+			}
+			b, _ := bytesOf(&items[i])
+			buf = hexutil.AppendQuoted(buf, b)
+		}
+		s.stream.SetBuffer(append(buf, ']'))
+		s.afterValue()
+		return
+	}
 	for i := range items {
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		if own {
-			buf = append(appendOwnText(s, append(buf, '"'), &items[i]), '"')
+		if b, ok := bytesOf(&items[i]); ok {
+			buf = hexutil.AppendQuoted(buf, b)
 		} else {
-			buf = hexutil.AppendQuoted(buf, bytesOf(&items[i]))
+			buf = append(appendOwnText(s, append(buf, '"'), &items[i]), '"')
 		}
 		if len(buf) >= FlushThreshold { // blob arrays reach megabytes
 			s.stream.SetBuffer(buf)

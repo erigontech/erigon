@@ -1557,3 +1557,17 @@ func TestHexDoesNotAllocate(t *testing.T) {
 	})
 	require.Zero(t, allocs)
 }
+
+// bytesOf tells byte arrays from the hexutil types by alignment alone, which holds only while
+// no hexutil type aligns to 1.
+func TestIsByteArray(t *testing.T) {
+	require.True(t, isByteArray[common.Hash]())
+	require.True(t, isByteArray[common.Address]())
+	require.True(t, isByteArray[quotingArray]())
+	require.False(t, isByteArray[hexutil.Uint64]())
+	require.False(t, isByteArray[hexutil.Uint]())
+	require.False(t, isByteArray[hexutil.Int64]())
+	require.False(t, isByteArray[hexutil.U256]())
+	require.False(t, isByteArray[hexutil.Big]())
+	require.False(t, isByteArray[hexutil.Bytes]())
+}
