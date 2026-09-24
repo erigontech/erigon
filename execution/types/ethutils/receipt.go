@@ -86,7 +86,7 @@ func MarshalReceipt(
 	var logsToMarshal jsonstream.Marshaler
 
 	if withBlockTimestamp {
-		rpcLogs := make(types.RPCLogs, 0, len(receipt.Logs))
+		rpcLogs := make(types.Logs, 0, len(receipt.Logs))
 		for _, l := range receipt.Logs {
 			rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
 		}
@@ -156,19 +156,17 @@ func MarshalReceipt(
 
 // RPCLogFromProto is the log a subscription delivers, the same object eth_getLogs returns. The
 // address and both hashes must be set, as every backend sets them.
-func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.RPCLog {
-	lg := &types.RPCLog{
-		Log: types.Log{
-			Address:     gointerfaces.ConvertH160toAddress(l.Address),
-			Topics:      make([]common.Hash, len(l.Topics)),
-			Data:        l.Data,
-			BlockNumber: hexutil.Uint64(l.BlockNumber),
-			TxHash:      gointerfaces.ConvertH256ToHash(l.TransactionHash),
-			TxIndex:     hexutil.Uint(l.TransactionIndex),
-			BlockHash:   gointerfaces.ConvertH256ToHash(l.BlockHash),
-			Index:       hexutil.Uint(l.LogIndex),
-			Removed:     l.Removed,
-		},
+func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.Log {
+	lg := &types.Log{
+		Address:        gointerfaces.ConvertH160toAddress(l.Address),
+		Topics:         make([]common.Hash, len(l.Topics)),
+		Data:           l.Data,
+		BlockNumber:    hexutil.Uint64(l.BlockNumber),
+		TxHash:         gointerfaces.ConvertH256ToHash(l.TransactionHash),
+		TxIndex:        hexutil.Uint(l.TransactionIndex),
+		BlockHash:      gointerfaces.ConvertH256ToHash(l.BlockHash),
+		Index:          hexutil.Uint(l.LogIndex),
+		Removed:        l.Removed,
 		BlockTimestamp: hexutil.Uint64(l.BlockTimestamp),
 	}
 	for i, topic := range l.Topics {
@@ -200,7 +198,7 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 		log.Warn("[rpc] subscribed receipt has a malformed logs bloom", "len", n, "txHash", txHash)
 	}
 
-	logs := make(types.RPCLogs, len(protoReceipt.Logs))
+	logs := make(types.Logs, len(protoReceipt.Logs))
 	for i, protoLog := range protoReceipt.Logs {
 		logs[i] = RPCLogFromProto(protoLog)
 	}

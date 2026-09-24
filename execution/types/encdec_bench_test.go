@@ -280,11 +280,11 @@ func BenchmarkLogJSON(b *testing.B) {
 		}
 	})
 
-	rpcLog := &RPCLog{
-		Log:            *log,
+	rpcLog := &Log{
+		// stamped from log
 		BlockTimestamp: hexutil.Uint64(1700000000),
 	}
-	b.Run("RPCLog/Single", func(b *testing.B) {
+	b.Run("Log/Single", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			benchJSONSink, _ = json.Marshal(rpcLog)
@@ -316,11 +316,11 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 		}
 	})
 
-	rpcLog := &RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(1700000000)}
+	rpcLog := stamped(log, hexutil.Uint64(1700000000))
 	rpcEncoded, err := json.Marshal(rpcLog)
 	require.NoError(b, err)
-	var rpcSink RPCLog
-	b.Run("RPCLog/Single", func(b *testing.B) {
+	var rpcSink Log
+	b.Run("Log/Single", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {
 			_ = json.Unmarshal(rpcEncoded, &rpcSink)

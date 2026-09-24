@@ -226,10 +226,10 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 	return o
 }
 
-// AppendFilteredRPCLogs appends the logs matching addrMap and topicMap to dst,
+// AppendFilteredLogs appends the logs matching addrMap and topicMap to dst,
 // adding a timestamp to each entry. It stops once dst holds limit entries, so a caller
 // enforcing a result cap never converts more logs than it can use; limit 0 is unlimited.
-func (logs Logs) AppendFilteredRPCLogs(dst Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, timestamp uint64, limit int) Logs {
+func (logs Logs) AppendFilteredLogs(dst Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, timestamp uint64, limit int) Logs {
 	for _, l := range logs {
 		if limit != 0 && len(dst) >= limit {
 			break

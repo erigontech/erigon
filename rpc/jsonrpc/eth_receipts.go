@@ -206,7 +206,7 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 }
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
-func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
+func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	if err := crit.ValidateTopicPositions(); err != nil {
 		return nil, err
 	}
@@ -330,8 +330,8 @@ func applyFiltersV3(txNumsReader rawdbv3.TxNumsReader, tx kv.TemporalTx, begin, 
 	return out, nil
 }
 
-func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) (types.RPCLogs, error) {
-	logs := types.RPCLogs{}
+func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end uint64, crit filters.FilterCriteria, rangeLimit int, maxResults int) (types.Logs, error) {
+	logs := types.Logs{}
 
 	// Treat range-limit violations as invalid filter input to match eth_getLogs parameter validation.
 	if rangeLimit != 0 && (end-begin) > uint64(rangeLimit) {
@@ -421,14 +421,14 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 	return logs, nil
 }
 
-func appendRPCLogs(logs types.RPCLogs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.RPCLogs, error) {
+func appendRPCLogs(logs types.Logs, receiptLogs types.Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, blockTime uint64, maxResults int) (types.Logs, error) {
 	// One entry past the cap is enough to detect the overflow without converting the rest.
 	// At math.MaxInt there is no such entry, so the append stays unlimited.
 	var limit int
 	if maxResults != 0 && maxResults != math.MaxInt {
 		limit = maxResults + 1
 	}
-	logs = receiptLogs.AppendFilteredRPCLogs(logs, addrMap, topicMap, blockTime, limit)
+	logs = receiptLogs.AppendFilteredLogs(logs, addrMap, topicMap, blockTime, limit)
 	if maxResults != 0 && len(logs) > maxResults {
 		return nil, &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),

@@ -211,8 +211,8 @@ func (r *CallResult) writeTo(s *jsonstream.StackStream, callErr []byte) {
 	s.WriteObjectEnd()
 }
 
-// writeLogElem never fails: RPCLog.MarshalFastJSONTo reports no error.
-func writeLogElem(s *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).MarshalFastJSONTo(s) }
+// writeLogElem never fails: Log.MarshalFastJSONTo reports no error.
+func writeLogElem(s *jsonstream.StackStream, l **types.Log) { _ = (*l).MarshalFastJSONTo(s) }
 
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
 func writeTxElem(s *jsonstream.StackStream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }

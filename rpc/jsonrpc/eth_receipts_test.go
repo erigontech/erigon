@@ -37,10 +37,10 @@ func logsWithIndexes(n int) types.Logs {
 	return logs
 }
 
-func rpcLogsWithIndexes(n int) types.RPCLogs {
-	logs := make(types.RPCLogs, n)
+func rpcLogsWithIndexes(n int) types.Logs {
+	logs := make(types.Logs, n)
 	for i, l := range logsWithIndexes(n) {
-		logs[i] = &types.RPCLog{Log: *l}
+		logs[i] = l
 	}
 	return logs
 }
@@ -50,7 +50,7 @@ func TestAppendRPCLogs(t *testing.T) {
 
 	cases := []struct {
 		name        string
-		logs        types.RPCLogs
+		logs        types.Logs
 		receiptLogs types.Logs
 		maxResults  int
 		wantLen     int
@@ -79,7 +79,7 @@ func TestAppendRPCLogs(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, got, tc.wantLen)
 			for i, l := range got[len(tc.logs):] {
-				assert.Equal(t, tc.receiptLogs[i].Index, l.Log.Index)
+				assert.Equal(t, tc.receiptLogs[i].Index, l.Index)
 				assert.Equal(t, hexutil.Uint64(blockTime), l.BlockTimestamp)
 			}
 		})

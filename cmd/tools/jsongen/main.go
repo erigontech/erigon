@@ -36,6 +36,7 @@ import (
 	"go/types"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -86,7 +87,9 @@ func run(typeName, out, computed string) error {
 
 	var file bytes.Buffer
 	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String(), method)
-	// imports.Process adds what the body uses and gofmts in one step.
+	// imports.Process drops what the body does not use and gofmts in one step. The header names
+	// uint256 rather than leaving it to be resolved, because more than one module supplies that
+	// package name and the choice would then follow whoever ran the tool.
 	formatted, err := imports.Process(out, file.Bytes(), nil)
 	if err != nil {
 		return fmt.Errorf("%s: %w\n%s", typeName, err, file.String())
@@ -105,6 +108,8 @@ const header = marker + ` DO NOT EDIT.
 package %[1]s
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -135,16 +140,39 @@ func load() (*packages.Package, error) {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
 	for _, e := range pkgs[0].Errors {
-		if strings.Contains(e.Msg, method) {
+		if strings.Contains(e.Msg, missingCall) || strings.Contains(e.Msg, missingForInterface) {
 			continue
 		}
-		file, _, _ := strings.Cut(e.Pos, ":")
-		content, err := os.ReadFile(file)
+		content, err := os.ReadFile(positionFile(e.Pos))
 		if err != nil || !bytes.HasPrefix(content, []byte(marker)) {
 			return nil, e
 		}
 	}
 	return pkgs[0], nil
+}
+
+// The two ways the compiler words the absence of the method this writes: a call to it, and a
+// value that has to satisfy an interface asking for it. Matching the whole phrase keeps any
+// other mention of the name an error.
+const (
+	missingCall         = "has no field or method " + method
+	missingForInterface = "missing method " + method
+)
+
+// positionFile takes the file out of a packages.Error position. Cutting at the first colon
+// would keep only the drive letter of a Windows path, so the line and column come off the right.
+func positionFile(pos string) string {
+	for range 2 {
+		i := strings.LastIndex(pos, ":")
+		if i < 0 {
+			break
+		}
+		if _, err := strconv.Atoi(pos[i+1:]); err != nil {
+			break
+		}
+		pos = pos[:i]
+	}
+	return pos
 }
 
 // writeFields emits one statement per field. An embedded struct is flattened, the way
@@ -182,7 +210,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 			return fmt.Errorf("%s: no json tag", f.Name())
 		}
 		name, opts, _ := strings.Cut(jsonTag, ",")
-		if name == "-" {
+		if jsonTag == "-" { // a lone dash skips the field; `-,` names it "-"
 			continue
 		}
 		omitempty := false
