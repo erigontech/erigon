@@ -819,6 +819,61 @@ func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
 	require.NotContains(t, result.StateDiff, accounts.InternAddress(untouched))
 }
 
+// vmTrace attaches a sub only to call and create ops that run a child frame.
+func TestTraceCallVmTraceSubs(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0004")
+
+	for _, tc := range []struct {
+		name   string
+		code   []byte
+		pc     int
+		frame  string
+		hasSub bool
+	}{
+		{
+			name:   "call without code",
+			code:   []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.GAS), byte(vm.CALL), byte(vm.STOP)},
+			pc:     7,
+			frame:  CALL,
+			hasSub: true,
+		},
+		{
+			name:  "selfdestruct",
+			code:  []byte{byte(vm.PUSH0), byte(vm.SELFDESTRUCT)},
+			pc:    1,
+			frame: SUICIDE,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := hexutil.Bytes(tc.code)
+			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
+				[]string{TraceTypeTrace, TraceTypeVmTrace}, nil, &config.TraceConfig{
+					StateOverrides: &ethapi.StateOverrides{
+						accounts.InternAddress(target): {Code: &code},
+					},
+				})
+			require.NoError(t, err)
+			require.Len(t, result.Trace, 2)
+			require.Equal(t, tc.frame, result.Trace[1].Type)
+
+			var op *VmTraceOp
+			for _, o := range result.VmTrace.Ops {
+				if o.Pc == tc.pc {
+					op = o
+				}
+			}
+			require.NotNil(t, op)
+			if tc.hasSub {
+				require.NotNil(t, op.Sub)
+			} else {
+				require.Nil(t, op.Sub)
+			}
+		})
+	}
+}
+
 // runtimeReturningOpcode returns the given zero-argument opcode's value as a
 // 32-byte word: <opcode>, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN.
 func runtimeReturningOpcode(opcode byte) []byte {

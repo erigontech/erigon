@@ -391,7 +391,10 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		}
 		if ot.lastVmOp != nil {
 			vmTrace = &VmTrace{Ops: []*VmTraceOp{}}
-			ot.lastVmOp.Sub = vmTrace
+			// SELFDESTRUCT enters a frame that runs no code, so it gets no sub.
+			if typ != vm.SELFDESTRUCT {
+				ot.lastVmOp.Sub = vmTrace
+			}
 			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
 		} else {
 			vmTrace = ot.r.VmTrace
