@@ -2727,7 +2727,7 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 		return
 	}
 	if branchCache := at.BranchCache(); branchCache != nil {
-		branchCache.Put(k, v, uint64(step), txNum)
+		branchCache.TryPut(k, v, uint64(step), txNum)
 	}
 }
 

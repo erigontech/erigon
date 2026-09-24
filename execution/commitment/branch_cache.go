@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"bytes"
 	"encoding/binary"
 	"fmt"
 	"os"
@@ -633,12 +634,14 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 
 // Put copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
+	c.PutOwned(prefix, bytes.Clone(data), step, txN)
+}
+
+func (c *BranchCache) PutOwned(prefix []byte, data []byte, step, txN uint64) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
-	dataCopy := make([]byte, len(data))
-	copy(dataCopy, data)
-	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN}
+	entry := &branchCacheEntry{data: data, step: step, txN: txN}
 
 	stripe := c.putStripe(prefix)
 	stripe.Lock()
@@ -646,6 +649,18 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 
 	entry.epoch = c.coh.Epoch()
 	c.store(prefix, entry)
+}
+
+func (c *BranchCache) TryPut(prefix []byte, data []byte, step, txN uint64) {
+	if isCommitmentStateKey(prefix) {
+		return
+	}
+	stripe := c.putStripe(prefix)
+	if !stripe.TryLock() {
+		return
+	}
+	defer stripe.Unlock()
+	c.store(prefix, &branchCacheEntry{data: bytes.Clone(data), step: step, txN: txN, epoch: c.coh.Epoch()})
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {

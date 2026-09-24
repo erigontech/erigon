@@ -1368,7 +1368,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		if len(u.val) == 0 {
 			sd.branchCache.Invalidate(u.key)
 		} else {
-			sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
+			sd.branchCache.PutOwned(u.key, u.val, uint64(u.step), u.txN)
 		}
 	}
 	if sd.stateCache != nil {

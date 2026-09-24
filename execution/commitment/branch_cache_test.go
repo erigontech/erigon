@@ -544,3 +544,20 @@ func TestBranchCache_StorageTrunkRoundTripAcrossDepths(t *testing.T) {
 		})
 	}
 }
+
+func TestBranchCache_TryPutSkipsBusyStripe(t *testing.T) {
+	c := NewBranchCache(10)
+	key := []byte{0xa0, 0xb0}
+
+	stripe := c.putStripe(key)
+	stripe.Lock()
+	c.TryPut(key, []byte("fill"), 0, 100)
+	stripe.Unlock()
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
+
+	c.TryPut(key, []byte("fill"), 0, 100)
+	got, _, ok := c.Get(key)
+	require.True(t, ok)
+	require.Equal(t, []byte("fill"), got)
+}
