@@ -44,6 +44,14 @@ type GasUsed struct {
 // Pre-Amsterdam blockStateGasUsed is 0, so this equals BlockExecution.
 func (gu *GasUsed) BlockGasUsed() uint64 { return max(gu.BlockExecution, gu.BlockState) }
 
+// AddResult accumulates one transaction: the post-refund receipt gas and the
+// pre-refund gas of each block dimension (EIP-7778, EIP-8037).
+func (gu *GasUsed) AddResult(result *evmtypes.ExecutionResult) {
+	gu.Receipt += result.ReceiptGasUsed
+	gu.BlockExecution += result.BlockExecutionGasUsed
+	gu.BlockState += result.BlockStateGasUsed
+}
+
 func SetGasUsed(h *types.Header, gu *GasUsed) {
 	h.GasUsed = gu.BlockGasUsed()
 	if h.BlobGasUsed != nil {
@@ -103,9 +111,7 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	if err != nil {
 		return nil, err
 	}
-	gasUsed.Receipt += result.ReceiptGasUsed
-	gasUsed.BlockExecution += result.BlockExecutionGasUsed
-	gasUsed.BlockState += result.BlockStateGasUsed
+	gasUsed.AddResult(result)
 	gasUsed.Blob += txn.GetBlobGas()
 
 	// Set the receipt logs and create the bloom filter.
