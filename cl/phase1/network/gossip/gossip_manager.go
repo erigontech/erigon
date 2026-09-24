@@ -68,8 +68,8 @@ func publishQueueSizeFor(cfg *clparams.BeaconChainConfig) int {
 
 var publishQueueDroppedCounter = metrics.GetOrCreateCounterVec(
 	"caplin_gossip_publish_queue_rejected_total",
-	[]string{"topic"},
-	"Total background gossip publishes dropped because the queue was full",
+	[]string{"topic", "reason"},
+	"Total background gossip publishes dropped instead of queued",
 )
 
 type publishJob struct {
@@ -102,6 +102,10 @@ type GossipManager struct {
 	// pause a queued job at a known point.
 	publishHookForTest func(name string, data []byte)
 
+	// lifetimeCtx is cancelled by Close. PublishBackground checks it so a
+	// message enqueued after shutdown is dropped observably instead of
+	// sitting in the queue with nothing left to drain it.
+	lifetimeCtx context.Context
 	// For graceful shutdown
 	cancel context.CancelFunc
 }
@@ -131,6 +135,7 @@ func NewGossipManager(
 		subscribeAll:       subscribeAll,
 		activeIndicies:     activeIndicies,
 		publishQueue:       make(chan publishJob, publishQueueSizeFor(beaconConfig)),
+		lifetimeCtx:        cctx,
 		cancel:             cancel,
 	}
 
@@ -354,6 +359,12 @@ func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.B
 // is busy and the queue is full, the message is dropped and logged rather
 // than blocking - callers must not rely on this call for backpressure.
 func (g *GossipManager) PublishBackground(name string, data []byte, logCtx ...any) {
+	if g.lifetimeCtx.Err() != nil {
+		publishQueueDroppedCounter.WithLabelValues(name, "shutdown").Inc()
+		fields := append([]any{"topic", name}, logCtx...)
+		log.Debug("[GossipManager] gossip manager shut down, dropping message", fields...)
+		return
+	}
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
 		fields := append([]any{"topic", name, "err", err}, logCtx...)
@@ -363,7 +374,7 @@ func (g *GossipManager) PublishBackground(name string, data []byte, logCtx ...an
 	select {
 	case g.publishQueue <- publishJob{name: name, data: data, forkDigest: forkDigest, logCtx: logCtx}:
 	default:
-		publishQueueDroppedCounter.WithLabelValues(name).Inc()
+		publishQueueDroppedCounter.WithLabelValues(name, "queue_full").Inc()
 		fields := append([]any{"topic", name}, logCtx...)
 		log.Warn("[GossipManager] publish queue full, dropping message", fields...)
 	}

@@ -919,6 +919,32 @@ func TestNewGossipManager_SizesPublishQueueToSyncCommittee(t *testing.T) {
 		"queue must hold at least one full sync-committee-sized burst without dropping")
 }
 
+// TestPublishBackground_DropsAfterClose proves a message enqueued after the
+// manager has shut down is dropped (observably), rather than sitting in the
+// queue forever with nothing left to consume it - the worker stops draining
+// the queue as soon as Close cancels its context, but PublishBackground had
+// no awareness of that and would otherwise silently enqueue into a channel
+// nothing will ever read from again.
+func TestPublishBackground_DropsAfterClose(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+	mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+	mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+
+	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+	gm := NewGossipManager(context.Background(), mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+
+	require.NoError(t, gm.Close())
+
+	gm.PublishBackground("test_topic", []byte("data"))
+
+	require.Equal(t, 0, len(gm.publishQueue),
+		"a message enqueued after Close must not be left sitting in a queue nothing will ever drain")
+}
+
 func TestGossipManager(t *testing.T) {
 	suite.Run(t, new(subscribeUpcomingTopicsTestSuite))
 	suite.Run(t, new(newPubsubValidatorTestSuite))
