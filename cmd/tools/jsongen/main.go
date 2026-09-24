@@ -214,7 +214,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 			continue
 		}
 		omitempty := false
-		for _, opt := range strings.Split(opts, ",") {
+		for opt := range strings.SplitSeq(opts, ",") {
 			switch opt {
 			case "":
 			case "omitempty":
