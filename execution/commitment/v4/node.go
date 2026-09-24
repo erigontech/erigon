@@ -35,6 +35,8 @@ type node struct {
 	path        []byte
 	slots       []childSlot
 	raw         []byte
+	record      Record
+	layout      layout
 	plane       byte
 	storageRoot bool
 	loaded      bool
@@ -42,6 +44,7 @@ type node struct {
 	childMask uint16
 	leafMask  uint16
 	hashMask  uint16
+	slotMask  uint16
 }
 
 func fork(prefix []byte) *node {
@@ -51,14 +54,19 @@ func fork(prefix []byte) *node {
 const slotsInitialCap = 4
 
 func (n *node) slotIndex(nib int) int {
-	return bits.OnesCount16(n.childMask & (uint16(1)<<nib - 1))
+	return bits.OnesCount16(n.slotMask & (uint16(1)<<nib - 1))
 }
 
 func (n *node) slot(nib int) *childSlot {
-	if n.childMask&(uint16(1)<<nib) == 0 {
+	if n.slotMask&(uint16(1)<<nib) == 0 {
 		return nil
 	}
 	return &n.slots[n.slotIndex(nib)]
+}
+
+func (n *node) stored(nib int) bool {
+	bit := uint16(1) << nib
+	return n.childMask&bit != 0 && n.slotMask&bit == 0
 }
 
 func (n *node) child(nib int) *node {
@@ -76,6 +84,9 @@ func (n *node) childHashAt(nib int) []byte {
 	if n.hashMask&(uint16(1)<<nib) == 0 {
 		return nil
 	}
+	if n.stored(nib) {
+		return slices.Clip(n.record.slotAt(n.layout, nib))
+	}
 	return n.slots[n.slotIndex(nib)].hash[:]
 }
 
@@ -83,31 +94,68 @@ func (n *node) childExtAt(nib int) []byte {
 	if s := n.slot(nib); s != nil {
 		return s.ext
 	}
-	return nil
+	if !n.stored(nib) {
+		return nil
+	}
+	ext, err := decodeExtension(n.record.extAt(n.layout, nib))
+	if err != nil {
+		panic(fmt.Sprintf("commitment v4: validated record has a bad extension at %d: %v", nib, err))
+	}
+	return ext
+}
+
+func (n *node) hasChildExt(nib int) bool {
+	if n.stored(nib) {
+		encoded := n.record.extAt(n.layout, nib)
+		return len(encoded) != 0 && encoded[0] != 0
+	}
+	return len(n.childExtAt(nib)) != 0
+}
+
+func (n *node) appendChildExt(out []byte, nib int) []byte {
+	if n.stored(nib) {
+		return append(out, n.record.extAt(n.layout, nib)...)
+	}
+	ext := n.childExtAt(nib)
+	if len(ext) > 255 {
+		panic(fmt.Sprintf("commitment v4: child extension %d is too long", nib))
+	}
+	out = append(out, byte(len(ext)))
+	var extScratch [32]byte
+	return append(out, packPath(ext, extScratch[:0])...)
 }
 
 func (n *node) leafSuffixAt(nib int) []byte {
 	if s := n.slot(nib); s != nil {
 		return s.suffix
 	}
-	return nil
+	if !n.stored(nib) {
+		return nil
+	}
+	suffix, _ := n.record.leafAt(n.layout, nib)
+	return slices.Clip(suffix)
 }
 
 func (n *node) leafValueAt(nib int) []byte {
 	if s := n.slot(nib); s != nil {
 		return s.value
 	}
-	return nil
+	if !n.stored(nib) {
+		return nil
+	}
+	_, value := n.record.leafAt(n.layout, nib)
+	return slices.Clip(value)
 }
 
 func (n *node) ensureSlot(nib int) *childSlot {
 	bit := uint16(1) << nib
 	index := n.slotIndex(nib)
-	if n.childMask&bit == 0 {
+	if n.slotMask&bit == 0 {
 		if n.slots == nil {
 			n.slots = make([]childSlot, 0, slotsInitialCap)
 		}
 		n.slots = slices.Insert(n.slots, index, childSlot{})
+		n.slotMask |= bit
 		n.childMask |= bit
 	}
 	return &n.slots[index]
@@ -160,6 +208,11 @@ func (n *node) setStoredChild(nib int, hash []byte, ext []byte) {
 }
 
 func (n *node) clearChildExt(nib int) {
+	if n.stored(nib) && n.hashMask&(uint16(1)<<nib) != 0 {
+		hash := n.childHashAt(nib)
+		copy(n.ensureSlot(nib).hash[:], hash)
+		return
+	}
 	if s := n.slot(nib); s != nil {
 		s.ext = nil
 	}
@@ -170,11 +223,14 @@ func (n *node) clear(nib int) {
 	if n.childMask&bit == 0 {
 		return
 	}
-	index := n.slotIndex(nib)
-	n.slots = slices.Delete(n.slots, index, index+1)
+	if n.slotMask&bit != 0 {
+		index := n.slotIndex(nib)
+		n.slots = slices.Delete(n.slots, index, index+1)
+	}
 	n.childMask &^= bit
 	n.leafMask &^= bit
 	n.hashMask &^= bit
+	n.slotMask &^= bit
 }
 
 func appendCopy(dst, src []byte) []byte {

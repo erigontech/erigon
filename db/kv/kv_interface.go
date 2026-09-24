@@ -471,6 +471,7 @@ type GetLatestOptions struct {
 	maxStep     Step
 	hasMaxStep  bool
 	branchCache bool
+	owned       bool
 	buf         []byte
 }
 
@@ -498,6 +499,15 @@ func (opts GetLatestOptions) WithMaxStep(maxStep Step) GetLatestOptions {
 func (opts GetLatestOptions) WithBranchCache() GetLatestOptions {
 	opts.branchCache = true
 	return opts
+}
+
+func (opts GetLatestOptions) WithOwned() GetLatestOptions {
+	opts.owned = true
+	return opts
+}
+
+func (opts GetLatestOptions) Owned() bool {
+	return opts.owned
 }
 
 func (opts GetLatestOptions) Metrics() (GetLatestMetrics, time.Time) {

@@ -22,6 +22,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func TestUnfoldReadsOneExactRecordWithoutStateReads(t *testing.T) {
@@ -119,4 +122,32 @@ func TestUnfoldRejectsInvalidPlaneAndAddress(t *testing.T) {
 	_, err = unfold(ctx, nil, planeStorage, nil)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrUnfoldAddress))
+}
+
+type ownedBranchContext struct{ *mockContext }
+
+func (c ownedBranchContext) BranchOwned(key []byte) ([]byte, kv.Step, error) {
+	return c.branches[string(key)], 0, nil
+}
+
+func TestUnfoldKeepsOwnedBranchBytes(t *testing.T) {
+	m := newMockContext()
+	address := [32]byte{7}
+	_, err := runStorageTask(m, storageTask{addrHash: address, entries: []storageEntry{
+		entryOf(append([]byte{1}, bytes.Repeat([]byte{2}, 63)...), phaseAStorageUpdate([]byte{1})),
+		entryOf(append([]byte{3}, bytes.Repeat([]byte{4}, 63)...), phaseAStorageUpdate([]byte{2})),
+	}})
+	require.NoError(t, err)
+	stored := m.branches[string(StorageRootKey(address))]
+	require.NotEmpty(t, stored)
+
+	for _, ctx := range []commitment.PatriciaContext{ownedBranchContext{m}, newMeteredContext(ownedBranchContext{m})} {
+		n, err := unfold(ctx, nil, planeStorage, address[:])
+		require.NoError(t, err)
+		require.Same(t, &stored[0], &n.raw[0])
+	}
+
+	n, err := unfold(m, nil, planeStorage, address[:])
+	require.NoError(t, err)
+	require.NotSame(t, &m.branchBuf[0], &n.raw[0])
 }

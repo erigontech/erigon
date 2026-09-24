@@ -153,10 +153,11 @@ func foldBranchChild(parent *node, nib, depth int) ([]byte, error) {
 	if !parent.hasChildHash(nib) {
 		return nil, fmt.Errorf("%w: child %d hash", errFoldNode, nib)
 	}
-	if len(parent.childExtAt(nib)) == 0 {
+	ext := parent.childExtAt(nib)
+	if len(ext) == 0 {
 		return parent.childHashAt(nib), nil
 	}
-	wrapped := extensionRef(parent.childExtAt(nib), parent.childHashAt(nib))
+	wrapped := extensionRef(ext, parent.childHashAt(nib))
 	return wrapped[:], nil
 }
 

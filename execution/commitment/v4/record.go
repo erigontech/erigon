@@ -411,7 +411,7 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 	extMask := uint16(0)
 	for nib := range 16 {
 		bit := uint16(1) << nib
-		if n.childMask&bit != 0 && n.leafMask&bit == 0 && len(n.childExtAt(nib)) != 0 {
+		if n.childMask&bit != 0 && n.leafMask&bit == 0 && n.hasChildExt(nib) {
 			extMask |= bit
 		}
 	}
@@ -473,13 +473,7 @@ func encodeRecord(n *node, depth int, dst []byte) []byte {
 		if extMask&bit == 0 {
 			continue
 		}
-		ext := n.childExtAt(nib)
-		if len(ext) > 255 {
-			panic(fmt.Sprintf("commitment v4: child extension %d is too long", nib))
-		}
-		out = append(out, byte(len(ext)))
-		var extScratch [32]byte
-		out = append(out, packPath(ext, extScratch[:0])...)
+		out = n.appendChildExt(out, nib)
 	}
 
 	suffixCount := 64 - depth - 1

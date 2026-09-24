@@ -1118,6 +1118,27 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	return sdc.branchBuf, step, nil
 }
 
+type ownedBranchReader interface {
+	ReadsOwnedBranches() bool
+}
+
+func (sdc *TrieContext) BranchOwned(pref []byte) ([]byte, kv.Step, error) {
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
+	}
+	if enc == nil {
+		return nil, step, nil
+	}
+	if r, ok := sdc.stateReader.(ownedBranchReader); !ok || !r.ReadsOwnedBranches() {
+		enc = bytes.Clone(enc)
+	}
+	return enc, step, nil
+}
+
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	if sdc.stateReader.WithHistory() { // do not store branches if explicitly operate on history
 		return nil

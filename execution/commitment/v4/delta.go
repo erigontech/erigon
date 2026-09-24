@@ -17,8 +17,6 @@
 package v4
 
 import (
-	"bytes"
-
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -33,11 +31,9 @@ func foldAndEncodeRecord(ctx commitment.PatriciaContext, n *node, depth int, key
 	}
 	prev := n.raw
 	if !n.loaded {
-		stored, _, err := ctx.Branch(key)
-		if err != nil {
+		if prev, _, err = branchOwned(ctx, key); err != nil {
 			return [32]byte{}, recordDelta{}, err
 		}
-		prev = bytes.Clone(stored)
 	}
 	data := encodeRecord(n, depth, make([]byte, 0, len(prev)+encodeSlack))
 	return hash, newRecordDelta(key, data, prev), nil

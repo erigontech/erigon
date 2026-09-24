@@ -652,6 +652,14 @@ func (c *BranchCache) PutOwned(prefix []byte, data []byte, step, txN uint64) {
 }
 
 func (c *BranchCache) TryPut(prefix []byte, data []byte, step, txN uint64) {
+	c.tryPut(prefix, data, step, txN, true)
+}
+
+func (c *BranchCache) TryPutOwned(prefix []byte, data []byte, step, txN uint64) {
+	c.tryPut(prefix, data, step, txN, false)
+}
+
+func (c *BranchCache) tryPut(prefix []byte, data []byte, step, txN uint64, clone bool) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -660,7 +668,10 @@ func (c *BranchCache) TryPut(prefix []byte, data []byte, step, txN uint64) {
 		return
 	}
 	defer stripe.Unlock()
-	c.store(prefix, &branchCacheEntry{data: bytes.Clone(data), step: step, txN: txN, epoch: c.coh.Epoch()})
+	if clone {
+		data = bytes.Clone(data)
+	}
+	c.store(prefix, &branchCacheEntry{data: data, step: step, txN: txN, epoch: c.coh.Epoch()})
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {

@@ -361,3 +361,22 @@ func TestComputeCommitmentReportsItsDuration(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, 1, rec.calls)
 }
+
+type ownedTestStateReader struct{ *testStateReader }
+
+func (ownedTestStateReader) ReadsOwnedBranches() bool { return true }
+
+func TestTrieContextBranchOwnedCopiesOnlyBorrowedBytes(t *testing.T) {
+	t.Parallel()
+	data := []byte{1, 2, 3}
+	borrowed := &TrieContext{stateReader: &testStateReader{branchData: data}}
+	got, _, err := borrowed.BranchOwned([]byte{0xaa})
+	require.NoError(t, err)
+	require.Equal(t, data, got)
+	require.NotSame(t, &data[0], &got[0])
+
+	owned := &TrieContext{stateReader: ownedTestStateReader{&testStateReader{branchData: data}}}
+	got, _, err = owned.BranchOwned([]byte{0xaa})
+	require.NoError(t, err)
+	require.Same(t, &data[0], &got[0])
+}

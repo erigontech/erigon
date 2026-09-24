@@ -17,6 +17,7 @@
 package v4
 
 import (
+	"bytes"
 	"context"
 	"sync/atomic"
 	"time"
@@ -47,6 +48,26 @@ func (c *meteredContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 		c.readBytes.Add(uint64(len(data)))
 	}
 	return data, step, err
+}
+
+func (c *meteredContext) BranchOwned(prefix []byte) ([]byte, kv.Step, error) {
+	data, step, err := branchOwned(c.PatriciaContext, prefix)
+	if len(data) != 0 {
+		c.readBytes.Add(uint64(len(data)))
+	}
+	return data, step, err
+}
+
+type ownedBrancher interface {
+	BranchOwned(prefix []byte) ([]byte, kv.Step, error)
+}
+
+func branchOwned(ctx commitment.PatriciaContext, prefix []byte) ([]byte, kv.Step, error) {
+	if o, ok := ctx.(ownedBrancher); ok {
+		return o.BranchOwned(prefix)
+	}
+	data, step, err := ctx.Branch(prefix)
+	return bytes.Clone(data), step, err
 }
 
 func (c *meteredContext) countDeltas(parts deltaParts) {

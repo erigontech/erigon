@@ -238,3 +238,25 @@ func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, []byte("v2-branch-bytes"), v, "fresh SD must read the latest committed branch, not the stale read-through entry")
 }
+
+func TestCommitmentReadSharesItsOnlyCopyWithTheBranchCache(t *testing.T) {
+	db, key, value := commitmentFileFixture(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	stored, _, err := roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	got, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.NotSame(t, &stored[0], &got[0])
+	cached, _, ok := branchCache.Get(key)
+	require.True(t, ok)
+	require.Same(t, &got[0], &cached[0])
+}

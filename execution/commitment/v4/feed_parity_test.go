@@ -18,6 +18,7 @@ package v4
 
 import (
 	"context"
+	"slices"
 	"testing"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -78,13 +79,15 @@ func TestProcessFeedMatchesProcess(t *testing.T) {
 		next = append(next, parityUpdate{key: whale[i].key, update: deleted()})
 	}
 
-	run := func(feed bool) ([][]byte, map[string]string) {
+	run := func(feed, deferred bool) ([][]byte, map[string]string, []string) {
 		c := newShardedContext()
 		tr := &Trie{}
 		tr.ResetContext(c)
 		tr.SetTrieContextFactory(c.factory)
+		tr.SetDeferCommitmentUpdates(deferred)
 		defer tr.Release()
 		var roots [][]byte
+		var deltas []string
 		for _, round := range [][]parityUpdate{seed, next} {
 			var root []byte
 			var err error
@@ -95,13 +98,24 @@ func TestProcessFeedMatchesProcess(t *testing.T) {
 			}
 			require.NoError(t, err)
 			roots = append(roots, root)
+			for _, part := range tr.TakeDeferredDeltas() {
+				for _, d := range part {
+					deltas = append(deltas, string(d.Key)+"|"+string(d.Data)+"|"+string(d.Prev))
+					require.NoError(t, c.PutBranch(d.Key, d.Data, d.Prev))
+				}
+			}
 		}
-		return roots, storeSnapshot(c)
+		slices.Sort(deltas)
+		return roots, storeSnapshot(c), deltas
 	}
 
-	wantRoots, wantStore := run(false)
-	gotRoots, gotStore := run(true)
-	require.NotEqual(t, wantRoots[0], wantRoots[1])
-	require.Equal(t, wantRoots, gotRoots)
-	require.Equal(t, wantStore, gotStore)
+	for _, deferred := range []bool{false, true} {
+		wantRoots, wantStore, wantDeltas := run(false, deferred)
+		gotRoots, gotStore, gotDeltas := run(true, deferred)
+		require.NotEqual(t, wantRoots[0], wantRoots[1])
+		require.Equal(t, wantRoots, gotRoots)
+		require.Equal(t, wantStore, gotStore)
+		require.Equal(t, deferred, len(wantDeltas) != 0)
+		require.Equal(t, wantDeltas, gotDeltas)
+	}
 }

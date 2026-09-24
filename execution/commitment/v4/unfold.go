@@ -17,7 +17,6 @@
 package v4
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"math/bits"
@@ -57,7 +56,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		key = StorageNodeKey(address, path, nil)
 	}
 
-	data, _, err := ctx.Branch(key)
+	data, _, err := branchOwned(ctx, key)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +71,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	}
 
 	n := fork(path)
-	n.raw = bytes.Clone(data)
+	n.raw = data
 	record := NewRecord(n.raw, len(path))
 	n.loaded = true
 	n.plane = plane
@@ -91,6 +90,11 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		return n, nil
 	}
 
+	if len(path) != 0 {
+		n.record, n.layout = record, l
+		n.childMask, n.leafMask, n.hashMask = l.child, l.leaf, l.child&^l.leaf
+		return n, nil
+	}
 	n.slots = make([]childSlot, 0, bits.OnesCount16(l.child))
 	for nib := range 16 {
 		bit := uint16(1) << nib
