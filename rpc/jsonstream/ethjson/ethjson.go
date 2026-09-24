@@ -21,6 +21,7 @@ package ethjson
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -54,4 +55,10 @@ func Quantity256(s *jsonstream.StackStream, name string, v *uint256.Int) {
 func Data(s *jsonstream.StackStream, name string, b []byte) {
 	s.Field(name)
 	s.WriteHex(b)
+}
+
+// DataList writes fixed-size values as one array field, growing the buffer once for the whole
+// array rather than once per element. A nil slice is null.
+func DataList[S ~[]E, E ~[length.Hash]byte](s *jsonstream.StackStream, name string, items S) {
+	jsonstream.HexesField(s, name, items)
 }

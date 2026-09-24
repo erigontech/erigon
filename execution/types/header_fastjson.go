@@ -29,12 +29,6 @@ func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
-	h.writeFastJSONFields(s)
-	s.WriteObjectEnd()
-	return nil
-}
-
-func (h *Header) writeFastJSONFields(s *jsonstream.StackStream) {
 	ethjson.Data(s, "parentHash", h.ParentHash[:])
 	ethjson.Data(s, "sha3Uncles", h.UncleHash[:])
 	ethjson.Data(s, "miner", h.Coinbase[:])
@@ -68,6 +62,8 @@ func (h *Header) writeFastJSONFields(s *jsonstream.StackStream) {
 	}
 	hash := h.Hash()
 	ethjson.Data(s, "hash", hash[:])
+	s.WriteObjectEnd()
+	return nil
 }
 
 func writeHashField(s *jsonstream.StackStream, name string, h *common.Hash) {
