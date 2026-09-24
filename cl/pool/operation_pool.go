@@ -77,6 +77,7 @@ func (o *OperationPool[K, T]) pruneRecentlySeen(now time.Time) {
 		o.lastPruned = now
 	}
 }
+
 func (o *OperationPool[K, T]) restoreIfMissingWithPersistentIdentity(k K, operation T, identity any, matches func(any) bool) bool {
 	o.persistentMu.Lock()
 	defer o.persistentMu.Unlock()
