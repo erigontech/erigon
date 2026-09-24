@@ -32,6 +32,8 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCReceipt -dir . -out gen_rpcreceipt_json.go
+
 // RPCReceipt is the RPC form of a receipt. Logs is []*types.RPCLog, types.Logs, []*types.Log or nil.
 type RPCReceipt struct {
 	BlockHash         common.Hash     `json:"blockHash" ethjson:"data"`

@@ -19,8 +19,6 @@ package ethutils
 import (
 	"encoding/json"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
@@ -43,67 +41,6 @@ func (rs RPCReceipts) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 		}
 	}
 	w.WriteArrayEnd()
-	return nil
-}
-
-// MarshalFastJSONTo writes the receipt's fields in the order the struct declares them, so
-// the bytes match reflection exactly.
-func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
-	if r == nil {
-		w.WriteNil()
-		return nil
-	}
-	w.WriteObjectStart()
-
-	ethjson.Data(w, "blockHash", r.BlockHash[:])
-	ethjson.Quantity(w, "blockNumber", r.BlockNumber)
-	ethjson.Data(w, "transactionHash", r.TransactionHash[:])
-	ethjson.Quantity(w, "transactionIndex", r.TransactionIndex)
-	if r.From == nil {
-		w.Field("from").WriteNil()
-	} else {
-		ethjson.Data(w, "from", r.From[:])
-	}
-	if r.To == nil {
-		w.Field("to").WriteNil()
-	} else {
-		ethjson.Data(w, "to", r.To[:])
-	}
-	ethjson.Quantity(w, "type", r.Type)
-	ethjson.Quantity(w, "gasUsed", r.GasUsed)
-	ethjson.Quantity(w, "cumulativeGasUsed", r.CumulativeGasUsed)
-	if r.ContractAddress == nil {
-		w.Field("contractAddress").WriteNil()
-	} else {
-		ethjson.Data(w, "contractAddress", r.ContractAddress[:])
-	}
-	w.Field("logs")
-	if err := writeLogs(w, r.Logs); err != nil {
-		return err
-	}
-	if r.LogsBloom == nil {
-		w.Field("logsBloom").WriteNil()
-	} else {
-		ethjson.Data(w, "logsBloom", r.LogsBloom[:])
-	}
-
-	if r.EffectiveGasPrice != nil {
-		ethjson.Quantity256(w, "effectiveGasPrice", (*uint256.Int)(r.EffectiveGasPrice))
-	}
-	if r.Status != nil {
-		ethjson.Quantity(w, "status", *r.Status)
-	}
-	if len(r.Root) > 0 {
-		ethjson.Data(w, "root", r.Root)
-	}
-	if r.BlobGasPrice != nil {
-		ethjson.Quantity256(w, "blobGasPrice", (*uint256.Int)(r.BlobGasPrice))
-	}
-	if r.BlobGasUsed != nil {
-		ethjson.Quantity(w, "blobGasUsed", *r.BlobGasUsed)
-	}
-
-	w.WriteObjectEnd()
 	return nil
 }
 

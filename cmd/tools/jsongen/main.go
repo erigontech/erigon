@@ -70,6 +70,11 @@ func run(typeName, dir, out string) error {
 	if err := writeFields(&body, st, "x", map[string]struct{}{}); err != nil {
 		return fmt.Errorf("%s: %w", typeName, err)
 	}
+	// A value the struct does not hold, such as a header's hash, is written by a method the
+	// package declares; the generator only calls it, after the declared fields.
+	if hasMethod(obj.Type(), "writeComputedJSON") {
+		body.WriteString("\tx.writeComputedJSON(s)\n")
+	}
 
 	var file bytes.Buffer
 	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String())
@@ -171,7 +176,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 		}
 		written[name] = struct{}{}
 
-		stmt, err := fieldStatement(recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), slices.Contains(strings.Split(opts, ","), "omitempty"))
+		stmt, err := fieldStatement(recv+"."+f.Name(), name, f.Name(), tag.Get("ethjson"), f.Type(), slices.Contains(strings.Split(opts, ","), "omitempty"))
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.Name(), err)
 		}
@@ -183,7 +188,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 // fieldStatement picks the writer for one field from its declared form and its type. A field
 // its json tag lets omit is wrapped in the presence test encoding/json would apply; without
 // omitempty, an absent value is written as null.
-func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (string, error) {
+func fieldStatement(ref, name, field, form string, t types.Type, omitempty bool) (string, error) {
 	_, pointer := t.Underlying().(*types.Pointer)
 	bare := deref(t)
 
@@ -197,6 +202,11 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 		}
 		write = fmt.Sprintf("s.Field(%q).WriteBool(%s)", name, ref)
 		present = ref
+	case "objects":
+		// The shapes this may hold are the package's business, so it writes them; the
+		// generator only places the field.
+		write = fmt.Sprintf("s.Field(%q)\n\t\tif err := write%s(s, %s); err != nil {\n\t\t\treturn err\n\t\t}", name, field, ref)
+		present = ref + " != nil"
 	case "datalist":
 		if pointer || !isSliceOfArrays(bare) {
 			return "", fmt.Errorf(`ethjson:"datalist" on %s`, t)
@@ -299,4 +309,14 @@ func is256(t types.Type) bool {
 		return false
 	}
 	return the256[named.Obj().Pkg().Path()+"."+named.Obj().Name()]
+}
+
+func hasMethod(t types.Type, name string) bool {
+	ms := types.NewMethodSet(types.NewPointer(t))
+	for i := range ms.Len() {
+		if ms.At(i).Obj().Name() == name {
+			return true
+		}
+	}
+	return false
 }
