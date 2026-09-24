@@ -19,8 +19,11 @@ package ethutils
 import (
 	"encoding/json"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // RPCReceipts is eth_getBlockReceipts' answer. The RPC encoder only consults the top-level
@@ -52,56 +55,52 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 	w.WriteObjectStart()
 
-	w.Field("blockHash").WriteHex(r.BlockHash[:])
-	w.Field("blockNumber").WriteQuotedText(&r.BlockNumber)
-	w.Field("transactionHash").WriteHex(r.TransactionHash[:])
-	w.Field("transactionIndex").WriteQuotedText(&r.TransactionIndex)
-	w.Field("from")
+	ethjson.Data(w, "blockHash", r.BlockHash[:])
+	ethjson.Quantity(w, "blockNumber", r.BlockNumber)
+	ethjson.Data(w, "transactionHash", r.TransactionHash[:])
+	ethjson.Quantity(w, "transactionIndex", r.TransactionIndex)
 	if r.From == nil {
-		w.WriteNil()
+		w.Field("from").WriteNil()
 	} else {
-		w.WriteHex(r.From[:])
+		ethjson.Data(w, "from", r.From[:])
 	}
-	w.Field("to")
 	if r.To == nil {
-		w.WriteNil()
+		w.Field("to").WriteNil()
 	} else {
-		w.WriteHex(r.To[:])
+		ethjson.Data(w, "to", r.To[:])
 	}
-	w.Field("type").WriteQuotedText(&r.Type)
-	w.Field("gasUsed").WriteQuotedText(&r.GasUsed)
-	w.Field("cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
-	w.Field("contractAddress")
+	ethjson.Quantity(w, "type", r.Type)
+	ethjson.Quantity(w, "gasUsed", r.GasUsed)
+	ethjson.Quantity(w, "cumulativeGasUsed", r.CumulativeGasUsed)
 	if r.ContractAddress == nil {
-		w.WriteNil()
+		w.Field("contractAddress").WriteNil()
 	} else {
-		w.WriteHex(r.ContractAddress[:])
+		ethjson.Data(w, "contractAddress", r.ContractAddress[:])
 	}
 	w.Field("logs")
 	if err := writeLogs(w, r.Logs); err != nil {
 		return err
 	}
-	w.Field("logsBloom")
 	if r.LogsBloom == nil {
-		w.WriteNil()
+		w.Field("logsBloom").WriteNil()
 	} else {
-		w.WriteHex(r.LogsBloom[:])
+		ethjson.Data(w, "logsBloom", r.LogsBloom[:])
 	}
 
 	if r.EffectiveGasPrice != nil {
-		w.Field("effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
+		ethjson.Quantity256(w, "effectiveGasPrice", (*uint256.Int)(r.EffectiveGasPrice))
 	}
 	if r.Status != nil {
-		w.Field("status").WriteQuotedText(r.Status)
+		ethjson.Quantity(w, "status", *r.Status)
 	}
 	if len(r.Root) > 0 {
-		w.Field("root").WriteHex(r.Root)
+		ethjson.Data(w, "root", r.Root)
 	}
 	if r.BlobGasPrice != nil {
-		w.Field("blobGasPrice").WriteQuotedText(r.BlobGasPrice)
+		ethjson.Quantity256(w, "blobGasPrice", (*uint256.Int)(r.BlobGasPrice))
 	}
 	if r.BlobGasUsed != nil {
-		w.Field("blobGasUsed").WriteQuotedText(r.BlobGasUsed)
+		ethjson.Quantity(w, "blobGasUsed", *r.BlobGasUsed)
 	}
 
 	w.WriteObjectEnd()
@@ -138,14 +137,14 @@ func writeLog(w *jsonstream.StackStream, lp **types.Log) {
 		return
 	}
 	w.WriteObjectStart()
-	w.Field("address").WriteHex(l.Address[:])
-	jsonstream.HexesField(w, "topics", l.Topics)
-	w.Field("data").WriteHex(l.Data)
-	w.Field("blockNumber").WriteQuotedText(&l.BlockNumber)
-	w.Field("transactionHash").WriteHex(l.TxHash[:])
-	w.Field("transactionIndex").WriteQuotedText(&l.TxIndex)
-	w.Field("blockHash").WriteHex(l.BlockHash[:])
-	w.Field("logIndex").WriteQuotedText(&l.Index)
+	ethjson.Data(w, "address", l.Address[:])
+	ethjson.DataList(w, "topics", l.Topics)
+	ethjson.Data(w, "data", l.Data)
+	ethjson.Quantity(w, "blockNumber", l.BlockNumber)
+	ethjson.Data(w, "transactionHash", l.TxHash[:])
+	ethjson.Quantity(w, "transactionIndex", l.TxIndex)
+	ethjson.Data(w, "blockHash", l.BlockHash[:])
+	ethjson.Quantity(w, "logIndex", l.Index)
 	w.Field("removed").WriteBool(l.Removed)
 	w.WriteObjectEnd()
 }

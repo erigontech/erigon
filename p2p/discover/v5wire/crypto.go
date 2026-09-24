@@ -119,7 +119,7 @@ type hashFn func() hash.Hash
 // deriveKeys creates the session keys.
 func deriveKeys(hash hashFn, priv *ecdsa.PrivateKey, pub *ecdsa.PublicKey, n1, n2 enode.ID, challenge []byte) *session {
 	const text = "discovery v5 key agreement"
-	var info = make([]byte, 0, len(text)+len(n1)+len(n2))
+	info := make([]byte, 0, len(text)+len(n1)+len(n2))
 	info = append(info, text...)
 	info = append(info, n1[:]...)
 	info = append(info, n2[:]...)

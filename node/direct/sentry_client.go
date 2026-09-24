@@ -57,8 +57,10 @@ type SentryClientRemote struct {
 	ready    bool
 }
 
-var _ SentryClient = (*SentryClientRemote)(nil) // compile-time interface check
-var _ SentryClient = (*SentryClientDirect)(nil) // compile-time interface check
+var (
+	_ SentryClient = (*SentryClientRemote)(nil) // compile-time interface check
+	_ SentryClient = (*SentryClientDirect)(nil) // compile-time interface check
+)
 
 // NewSentryClientRemote - app code must use this class
 // to avoid concurrency - it accepts protocol (which received async by SetStatus) in constructor,
@@ -102,6 +104,7 @@ func (c *SentryClientRemote) HandShake(ctx context.Context, in *emptypb.Empty, o
 	c.ready = true
 	return reply, nil
 }
+
 func (c *SentryClientRemote) SetStatus(ctx context.Context, in *sentryproto.StatusData, opts ...grpc.CallOption) (*sentryproto.SetStatusReply, error) {
 	return c.SentryClient.SetStatus(ctx, in, opts...)
 }

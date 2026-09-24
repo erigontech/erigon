@@ -79,7 +79,8 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 		}
 		if !configChainName.Ok {
 			return errors.New(
-				"chain flag not set and chain name not found in chaindata. datadir is ready for sync, invalid, or requires chain flag to reset")
+				"chain flag not set and chain name not found in chaindata. datadir is ready for sync, invalid, or requires chain flag to reset",
+			)
 		}
 		chainName = configChainName.Unwrap()
 		logger.Info("read chain name from config", "chain", chainName)

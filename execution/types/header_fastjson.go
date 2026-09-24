@@ -18,51 +18,50 @@ package types
 
 import (
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
-// MarshalFastJSONTo writes the fields in the order gen_header_json.go declares them, so the
-// bytes match the generated MarshalJSON exactly.
+// MarshalFastJSONTo writes the fields in the order Header's json tags declare them.
 func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if h == nil {
 		s.WriteNil()
 		return nil
 	}
 	s.WriteObjectStart()
-	s.Field("parentHash").WriteHex(h.ParentHash[:])
-	s.Field("sha3Uncles").WriteHex(h.UncleHash[:])
-	s.Field("miner").WriteHex(h.Coinbase[:])
-	s.Field("stateRoot").WriteHex(h.Root[:])
-	s.Field("transactionsRoot").WriteHex(h.TxHash[:])
-	s.Field("receiptsRoot").WriteHex(h.ReceiptHash[:])
-	s.Field("logsBloom").WriteHex(h.Bloom[:])
-	jsonstream.Text(s, "difficulty", (*hexutil.U256)(&h.Difficulty))
-	jsonstream.Text(s, "number", (*hexutil.U256)(&h.Number))
-	jsonstream.Text(s, "gasLimit", (*hexutil.Uint64)(&h.GasLimit))
-	jsonstream.Text(s, "gasUsed", (*hexutil.Uint64)(&h.GasUsed))
-	jsonstream.Text(s, "timestamp", (*hexutil.Uint64)(&h.Time))
-	s.Field("extraData").WriteHex(h.Extra)
-	s.Field("mixHash").WriteHex(h.MixDigest[:])
-	s.Field("nonce").WriteHex(h.Nonce[:])
+	ethjson.Data(s, "parentHash", h.ParentHash[:])
+	ethjson.Data(s, "sha3Uncles", h.UncleHash[:])
+	ethjson.Data(s, "miner", h.Coinbase[:])
+	ethjson.Data(s, "stateRoot", h.Root[:])
+	ethjson.Data(s, "transactionsRoot", h.TxHash[:])
+	ethjson.Data(s, "receiptsRoot", h.ReceiptHash[:])
+	ethjson.Data(s, "logsBloom", h.Bloom[:])
+	ethjson.Quantity256(s, "difficulty", &h.Difficulty)
+	ethjson.Quantity256(s, "number", &h.Number)
+	ethjson.Quantity(s, "gasLimit", h.GasLimit)
+	ethjson.Quantity(s, "gasUsed", h.GasUsed)
+	ethjson.Quantity(s, "timestamp", h.Time)
+	ethjson.Data(s, "extraData", h.Extra)
+	ethjson.Data(s, "mixHash", h.MixDigest[:])
+	ethjson.Data(s, "nonce", h.Nonce[:])
 	if h.AuRaStep != 0 {
-		jsonstream.Text(s, "auraStep", (*hexutil.Uint64)(&h.AuRaStep))
+		ethjson.Quantity(s, "auraStep", h.AuRaStep)
 	}
 	if len(h.AuRaSeal) != 0 {
-		s.Field("auraSeal").WriteHex(h.AuRaSeal)
+		ethjson.Data(s, "auraSeal", h.AuRaSeal)
 	}
-	jsonstream.Text(s, "baseFeePerGas", (*hexutil.U256)(h.BaseFee))
+	ethjson.Quantity256(s, "baseFeePerGas", h.BaseFee)
 	writeHashField(s, "withdrawalsRoot", h.WithdrawalsHash)
-	jsonstream.Text(s, "blobGasUsed", (*hexutil.Uint64)(h.BlobGasUsed))
-	jsonstream.Text(s, "excessBlobGas", (*hexutil.Uint64)(h.ExcessBlobGas))
+	ethjson.QuantityOrNull(s, "blobGasUsed", h.BlobGasUsed)
+	ethjson.QuantityOrNull(s, "excessBlobGas", h.ExcessBlobGas)
 	writeHashField(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot)
 	writeHashField(s, "requestsHash", h.RequestsHash)
 	writeHashField(s, "blockAccessListHash", h.BlockAccessListHash)
 	if h.SlotNumber != nil {
-		jsonstream.Text(s, "slotNumber", (*hexutil.Uint64)(h.SlotNumber))
+		ethjson.Quantity(s, "slotNumber", *h.SlotNumber)
 	}
 	hash := h.Hash()
-	s.Field("hash").WriteHex(hash[:])
+	ethjson.Data(s, "hash", hash[:])
 	s.WriteObjectEnd()
 	return nil
 }

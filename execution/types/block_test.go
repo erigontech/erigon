@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 )
 
 func TestBlockDecodingNestedRLPExtra(t *testing.T) {
@@ -818,13 +819,11 @@ func TestHeaderMarshalJSONQuantities(t *testing.T) {
 	require.Contains(t, string(enc), `"baseFeePerGas":null`)
 }
 
-// MarshalFastJSONTo replaces the generated MarshalJSON on the newHeads path, so every field,
-// including the optional ones, must come out byte for byte the same.
-func TestHeaderMarshalFastJSONTo(t *testing.T) {
-	t.Parallel()
+// headerWithEveryFieldSet fills every field, so no optional one is skipped.
+func headerWithEveryFieldSet() *Header {
 	hash := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
 	num := uint64(7)
-	full := &Header{
+	return &Header{
 		ParentHash:            hash,
 		UncleHash:             hash,
 		Coinbase:              common.HexToAddress("0x1234567890123456789012345678901234567890"),
@@ -851,16 +850,27 @@ func TestHeaderMarshalFastJSONTo(t *testing.T) {
 		BlockAccessListHash:   &hash,
 		SlotNumber:            &num,
 	}
+}
+
+func TestHeaderMarshalFastJSONTo(t *testing.T) {
+	t.Parallel()
+	full := headerWithEveryFieldSet()
 	empty := &Header{}
-	noOptionals := &Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(0), Extra: []byte{}}
+	noOptionals := &Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(0), Extra: []byte{}, AuRaSeal: []byte{}}
 
 	for name, h := range map[string]*Header{"full": full, "empty": empty, "noOptionals": noOptionals} {
 		t.Run(name, func(t *testing.T) {
-			want, err := json.Marshal(h)
+			hash := h.Hash()
+			want, err := ethjsontest.ExpectedJSON(h, ethjsontest.Computed{Name: "hash", Raw: `"` + hash.Hex() + `"`})
 			require.NoError(t, err)
 			got, err := jsonstream.Marshal(h)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+
+			// gen_header_json.go is hand-maintained, so hold it to the tags as well.
+			generated, err := json.Marshal(h)
+			require.NoError(t, err)
+			require.JSONEq(t, string(want), string(generated))
 		})
 	}
 }

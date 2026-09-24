@@ -20,6 +20,7 @@ import (
 	"context"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -184,6 +185,52 @@ func TestFetchAcrossPeers(t *testing.T) {
 		out := fetchAcrossPeers(context.Background(), reqs,
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2), *serving}, 8, fetch)
 		require.Len(t, out, 2)
+	})
+
+	t.Run("cancels redundant requests once the batch is complete", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
+			serving := PeerIdFromUint64(1)
+			blocked := PeerIdFromUint64(2)
+			started := make(chan struct{})
+			stopped := make(chan struct{})
+			var queuedCalls atomic.Int32
+			fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+				switch {
+				case p.Equal(serving):
+					<-started
+					return serveAll(rs)
+				case p.Equal(blocked):
+					close(started)
+					<-ctx.Done()
+					close(stopped)
+					return nil
+				default:
+					queuedCalls.Add(1)
+					return nil
+				}
+			}
+			result := make(chan map[common.Hash]*types.BlockAccessListSidecar, 1)
+			go func() {
+				result <- fetchAcrossPeers(ctx, reqs,
+					[]PeerId{*serving, *blocked, *PeerIdFromUint64(3)}, 2, fetch)
+			}()
+			synctest.Wait()
+			select {
+			case got := <-result:
+				require.Equal(t, serveAll(reqs), got)
+			default:
+				t.Fatal("complete BAL batch is still waiting for a redundant peer")
+			}
+			select {
+			case <-stopped:
+			default:
+				t.Fatal("redundant peer request was not stopped")
+			}
+			require.Zero(t, queuedCalls.Load())
+			require.NoError(t, ctx.Err())
+		})
 	})
 
 	t.Run("merges partial results across peers", func(t *testing.T) {
