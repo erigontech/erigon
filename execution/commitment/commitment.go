@@ -165,24 +165,16 @@ func DecodeCommitmentV4State(value []byte) (blockNum, txNum uint64, root []byte,
 }
 
 func IsCommitmentStateKey(key []byte) bool {
-	if len(key) == len(KeyCommitmentV4State) {
-		return key[0] == KeyCommitmentV4State[0]
-	}
-	return bytes.Equal(key, KeyCommitmentState)
+	return bytes.Equal(key, KeyCommitmentV4State) || bytes.Equal(key, KeyCommitmentState)
 }
 
-type TrieFunc func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
-
-var NewCommitmentV4Trie TrieFunc
+var NewCommitmentV4Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
 	case VariantCommitmentV4:
 		if NewCommitmentV4Trie == nil {
 			panic("commitment v4 selected without importing execution/commitment/v4")
-		}
-		if mode != ModeCollect {
-			panic(fmt.Sprintf("commitment v4 requires ModeCollect, got %s mode", mode))
 		}
 		return NewCommitmentV4Trie(tmpdir, cfg)
 	case VariantParallelHexPatricia:
@@ -1492,10 +1484,6 @@ func (t *Updates) SetMode(m Mode) {
 		if t.parallel == nil {
 			t.parallel = newParallelUpdate()
 		}
-	case ModeCollect:
-		if t.treeIdx == nil {
-			t.treeIdx = make(map[string]*KeyUpdate)
-		}
 	}
 	t.Reset()
 }
@@ -1699,9 +1687,6 @@ func mergeUpdateInto(existing, update *Update) {
 }
 
 func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
-	if t.mode != ModeCollect {
-		return fmt.Errorf("commitment: Drain requires ModeCollect, got %s", t.mode)
-	}
 	for i := range t.collected {
 		if err := fn(t.collected[i].plainKey, &t.collected[i].update); err != nil {
 			return err

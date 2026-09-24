@@ -37,16 +37,6 @@ func TestInitializeTrieAndUpdatesV4(t *testing.T) {
 	require.Equal(t, commitment.VariantCommitmentV4, trie.Variant())
 }
 
-func TestInitializeTrieAndUpdatesV4RejectsUnsupportedModes(t *testing.T) {
-	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = commitment.VariantCommitmentV4
-	for _, mode := range []commitment.Mode{commitment.ModeDirect, commitment.ModeParallel, commitment.ModeUpdate} {
-		require.PanicsWithValue(t, "commitment v4 requires ModeCollect, got "+mode.String()+" mode", func() {
-			commitment.InitializeTrieAndUpdates(mode, t.TempDir(), cfg)
-		})
-	}
-}
-
 func TestInitializeTrieAndUpdatesV4RejectsV2Keys(t *testing.T) {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV4

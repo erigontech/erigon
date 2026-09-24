@@ -1139,7 +1139,7 @@ type asOfStateReader struct {
 
 func (r *asOfStateReader) WithHistory() bool { return false }
 
-func (r *asOfStateReader) ReadsOwnedBranches() bool { return true }
+func (r *asOfStateReader) ReadsOwnedBranches() {}
 
 func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 	return nil

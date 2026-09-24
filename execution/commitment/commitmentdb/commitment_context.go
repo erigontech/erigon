@@ -263,9 +263,6 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 		cfg.Variant = commitment.VariantHexPatriciaTrie
 		ctx.pendingCfg = cfg
 	}
-	if variant == commitment.VariantCommitmentV4 {
-		mode = commitment.ModeCollect
-	}
 	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
 	return ctx
 }
@@ -1113,7 +1110,7 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 }
 
 type ownedBranchReader interface {
-	ReadsOwnedBranches() bool
+	ReadsOwnedBranches()
 }
 
 func (sdc *TrieContext) BranchOwned(pref []byte) ([]byte, kv.Step, error) {
@@ -1127,7 +1124,7 @@ func (sdc *TrieContext) BranchOwned(pref []byte) ([]byte, kv.Step, error) {
 	if enc == nil {
 		return nil, step, nil
 	}
-	if r, ok := sdc.stateReader.(ownedBranchReader); !ok || !r.ReadsOwnedBranches() {
+	if _, ok := sdc.stateReader.(ownedBranchReader); !ok {
 		enc = bytes.Clone(enc)
 	}
 	return enc, step, nil
@@ -1268,22 +1265,18 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	for _, key := range CommitmentStateKeys {
-		stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
-		if err != nil {
-			return 0, err
-		}
-		if len(stateVal) == 0 {
-			continue
-		}
-		if bytes.Equal(key, KeyCommitmentV4State) {
-			blockNum, _, _, err := commitment.DecodeCommitmentV4State(stateVal)
-			return blockNum, err
-		}
-		if len(stateVal) >= 16 {
-			_, minUnwindable := DecodeTxBlockNums(stateVal)
-			return minUnwindable, nil
-		}
+	v, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentV4State, kv.GetLatestOptions{})
+	if err != nil {
+		return 0, err
 	}
-	return 0, nil
+	if len(v) > 0 {
+		blockNum, _, _, err := commitment.DecodeCommitmentV4State(v)
+		return blockNum, err
+	}
+	v, _, err = tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
+	if err != nil || len(v) < 16 {
+		return 0, err
+	}
+	_, minUnwindable := DecodeTxBlockNums(v)
+	return minUnwindable, nil
 }

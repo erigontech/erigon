@@ -36,15 +36,10 @@ func u64ident(k uint64) uint32 { return uint32(k) }
 // KeyCommitmentState must never enter the BranchCache: it changes every block.
 var KeyCommitmentState = []byte("state")
 
-func isCommitmentStateKey(prefix []byte) bool {
-	return IsCommitmentStateKey(prefix)
-}
-
 // BranchCache: writer stripes only make stamped publications atomic with
 // Clear; callers must still ensure one logical mutation per prefix.
 type BranchCache struct {
-	root   atomic.Pointer[branchCacheEntry]
-	v4Root atomic.Pointer[branchCacheEntry]
+	root atomic.Pointer[branchCacheEntry]
 
 	// accountTrunk: nibble depths 1-4; depth 5+ spills to the LRU tail.
 	accountTrunk   *trunk
@@ -280,7 +275,7 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 		case 0x40:
 			var path [4]byte
 			depth, ok := v4KeyPath(prefix, 1, &path)
-			if !ok || depth == 0 {
+			if !ok {
 				return nil
 			}
 			return c.v4AccountTrunk.slot(&path, depth, forWrite)
@@ -342,20 +337,15 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) 
 		return nil, 0, false
 	}
 	var mapKey [33]byte
-	var packed []byte
 	if len(prefix) > 0 && prefix[0] == 0x41 {
 		var valid bool
 		n, valid = v4KeyPath(prefix, 33, nibBuf)
-		if !valid || len(prefix) < 33 {
+		if !valid {
 			return nil, 0, false
 		}
-		mapKey[0] = 0x41
-		copy(mapKey[1:], prefix[1:33])
+		copy(mapKey[:], prefix[:33])
 	} else {
-		if len(prefix) > 0 && (prefix[0] == 0x40 || prefix[0] == 0x42) {
-			return nil, 0, false
-		}
-		if len(prefix) < 33 || prefix[0]&0x20 != 0 {
+		if len(prefix) < 33 || prefix[0] == 0x40 || prefix[0] == 0x42 || prefix[0]&0x20 != 0 {
 			return nil, 0, false
 		}
 		acctHash, valid := ContractHashFromPrefix(prefix)
@@ -365,16 +355,15 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) 
 		copy(mapKey[1:], acctHash[:])
 		n = storageNibbles(prefix, nibBuf)
 	}
-	packed = mapKey[:]
 	if p != nil {
-		if st, found := p.Get(packed); found {
+		if st, found := p.Get(mapKey[:]); found {
 			return st, n, true
 		}
 	}
 	if !create {
 		return nil, 0, false
 	}
-	st, _ = c.pinnedForWrite().LoadOrStore(packed, newStorageTrunk(c.maxDepth))
+	st, _ = c.pinnedForWrite().LoadOrStore(mapKey[:], newStorageTrunk(c.maxDepth))
 	return st, n, true
 }
 
@@ -473,23 +462,9 @@ func isRootPrefix(prefix []byte) bool {
 	return len(prefix) == 1 && prefix[0] == 0x00
 }
 
-func isV4AccountRoot(prefix []byte) bool {
-	return len(prefix) == 2 && prefix[0] == 0x40 && prefix[1] == 0
-}
-
 func (c *BranchCache) lookup(prefix []byte) (*branchCacheEntry, bool) {
 	if isRootPrefix(prefix) {
 		entry := c.root.Load()
-		if entry == nil {
-			c.rootMisses.Add(1)
-			c.fireOnMiss(prefix)
-			return nil, false
-		}
-		c.rootHits.Add(1)
-		return entry, true
-	}
-	if isV4AccountRoot(prefix) {
-		entry := c.v4Root.Load()
 		if entry == nil {
 			c.rootMisses.Add(1)
 			c.fireOnMiss(prefix)
@@ -542,10 +517,6 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 		c.root.Store(entry)
 		return
 	}
-	if isV4AccountRoot(prefix) {
-		c.v4Root.Store(entry)
-		return
-	}
 	if slot := c.trunkSlot(prefix, true); slot != nil {
 		slot.Store(entry)
 		return
@@ -569,7 +540,7 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 
 // PinEntry copies data; safe to mutate the input after the call.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return
 	}
 	dataCopy := make([]byte, len(data))
@@ -580,10 +551,6 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	defer stripe.Unlock()
 
 	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
-	if isV4AccountRoot(prefix) {
-		c.v4Root.Store(entry)
-		return
-	}
 	if len(prefix) > 0 && prefix[0] == 0x40 {
 		if slot := c.trunkSlot(prefix, true); slot != nil {
 			slot.Swap(entry)
@@ -615,7 +582,7 @@ func (c *BranchCache) PinnedCount() int {
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
 	coh := c.coh.Snapshot()
@@ -638,7 +605,7 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 }
 
 func (c *BranchCache) PutOwned(prefix []byte, data []byte, step, txN uint64) {
-	if isCommitmentStateKey(prefix) {
+	if IsCommitmentStateKey(prefix) {
 		return
 	}
 	entry := &branchCacheEntry{data: data, step: step, txN: txN}
@@ -651,16 +618,8 @@ func (c *BranchCache) PutOwned(prefix []byte, data []byte, step, txN uint64) {
 	c.store(prefix, entry)
 }
 
-func (c *BranchCache) TryPut(prefix []byte, data []byte, step, txN uint64) {
-	c.tryPut(prefix, data, step, txN, true)
-}
-
-func (c *BranchCache) TryPutOwned(prefix []byte, data []byte, step, txN uint64) {
-	c.tryPut(prefix, data, step, txN, false)
-}
-
-func (c *BranchCache) tryPut(prefix []byte, data []byte, step, txN uint64, clone bool) {
-	if isCommitmentStateKey(prefix) {
+func (c *BranchCache) TryPut(prefix []byte, data []byte, step, txN uint64, owned bool) {
+	if IsCommitmentStateKey(prefix) {
 		return
 	}
 	stripe := c.putStripe(prefix)
@@ -668,7 +627,7 @@ func (c *BranchCache) tryPut(prefix []byte, data []byte, step, txN uint64, clone
 		return
 	}
 	defer stripe.Unlock()
-	if clone {
+	if !owned {
 		data = bytes.Clone(data)
 	}
 	c.store(prefix, &branchCacheEntry{data: data, step: step, txN: txN, epoch: c.coh.Epoch()})
@@ -677,10 +636,6 @@ func (c *BranchCache) tryPut(prefix []byte, data []byte, step, txN uint64, clone
 func (c *BranchCache) Invalidate(prefix []byte) {
 	if isRootPrefix(prefix) {
 		c.root.Store(nil)
-		return
-	}
-	if isV4AccountRoot(prefix) {
-		c.v4Root.Store(nil)
 		return
 	}
 	if slot := c.trunkSlot(prefix, false); slot != nil {
@@ -714,7 +669,6 @@ func (c *BranchCache) Clear() {
 	defer c.unlockAllPutStripes()
 
 	c.root.Store(nil)
-	c.v4Root.Store(nil)
 	clearTrunk(c.accountTrunk)
 	clearTrunk(c.v4AccountTrunk)
 	c.pinned.Store(nil)

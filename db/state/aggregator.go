@@ -2727,23 +2727,14 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled, owned bool, k, v []byte, st
 	if !enabled || len(v) == 0 {
 		return
 	}
-	branchCache := at.BranchCache()
-	switch {
-	case branchCache == nil:
-	case owned:
-		branchCache.TryPutOwned(k, v, uint64(step), txNum)
-	default:
-		branchCache.TryPut(k, v, uint64(step), txNum)
+	if branchCache := at.BranchCache(); branchCache != nil {
+		branchCache.TryPut(k, v, uint64(step), txNum, owned)
 	}
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {
 	if domain != kv.CommitmentDomain {
-		v, step, ok, err = at.d[domain].getLatest(k, tx, opts)
-		if opts.Owned() {
-			v = bytes.Clone(v)
-		}
-		return v, step, ok, err
+		return at.d[domain].getLatest(k, tx, opts)
 	}
 	metrics, start := opts.Metrics()
 	maxStep := opts.MaxStep()

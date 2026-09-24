@@ -78,8 +78,6 @@ func TestBranchCacheV4RoutingTiers(t *testing.T) {
 					path := v4CachePath(depth)
 					if tc.tag == 0x40 {
 						switch {
-						case depth == 0:
-							require.NotNil(t, c.v4Root.Load())
 						case depth <= 4 && depth <= int(c.maxDepth):
 							var packed [4]byte
 							for i := 0; i < len(path) && i < len(packed); i++ {

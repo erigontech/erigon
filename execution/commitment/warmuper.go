@@ -51,7 +51,6 @@ const warmupKeyScratchLen = maxCompactKeyLen + 1
 
 type WarmupStats struct {
 	KeysProcessed uint64
-	RecordsFound  uint64
 	Duration      time.Duration
 }
 
@@ -69,17 +68,14 @@ type Warmuper struct {
 	g    *errgroup.Group
 
 	keysProcessed atomic.Uint64
-	recordsFound  atomic.Uint64
 	startTime     atomic.Int64
-	duration      atomic.Int64
 
 	outstanding [arenaRingSize]atomic.Int64
 	mu          sync.Mutex
 	cond        *sync.Cond
 
-	started   atomic.Bool
-	closed    atomic.Bool
-	closeOnce sync.Once
+	started atomic.Bool
+	closed  atomic.Bool
 }
 
 type warmupWorkItem struct {
@@ -89,12 +85,6 @@ type warmupWorkItem struct {
 }
 
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
-	if cfg.Key == nil {
-		panic("warmup key function is nil")
-	}
-	if cfg.Step == nil {
-		panic("warmup step function is nil")
-	}
 	ctx, cancel := context.WithCancel(ctx)
 	w := &Warmuper{
 		ctx:        ctx,
@@ -123,25 +113,29 @@ func (w *Warmuper) begin() bool {
 	return true
 }
 
+func (w *Warmuper) goWorker(run func(trieCtx PatriciaContext, buf []byte) error) {
+	w.g.Go(func() error {
+		trieCtx, cleanup := w.ctxFactory(w.ctx)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if trieCtx == nil {
+			if err := w.ctx.Err(); err != nil {
+				return err
+			}
+			return errors.New("warmup trie context factory returned nil PatriciaContext")
+		}
+		return run(trieCtx, make([]byte, warmupKeyScratchLen))
+	})
+}
+
 func (w *Warmuper) Start() {
 	if !w.begin() {
 		return
 	}
 
-	for i := 0; i < w.numWorkers; i++ {
-		w.g.Go(func() error {
-			trieCtx, cleanup := w.ctxFactory(w.ctx)
-			if cleanup != nil {
-				defer cleanup()
-			}
-			if trieCtx == nil {
-				if err := w.ctx.Err(); err != nil {
-					return err
-				}
-				return errors.New("warmup trie context factory returned nil PatriciaContext")
-			}
-
-			buf := make([]byte, warmupKeyScratchLen)
+	for range w.numWorkers {
+		w.goWorker(func(trieCtx PatriciaContext, buf []byte) error {
 			for {
 				select {
 				case <-w.ctx.Done():
@@ -177,18 +171,7 @@ func (w *Warmuper) WarmSorted(n int, key func(i int) []byte) {
 	}
 	var next atomic.Int64
 	for range w.numWorkers {
-		w.g.Go(func() error {
-			trieCtx, cleanup := w.ctxFactory(w.ctx)
-			if cleanup != nil {
-				defer cleanup()
-			}
-			if trieCtx == nil {
-				if err := w.ctx.Err(); err != nil {
-					return err
-				}
-				return errors.New("warmup trie context factory returned nil PatriciaContext")
-			}
-			buf := make([]byte, warmupKeyScratchLen)
+		w.goWorker(func(trieCtx PatriciaContext, buf []byte) error {
 			for w.ctx.Err() == nil {
 				lo := int(next.Add(warmSortedChunk)) - warmSortedChunk
 				if lo >= n {
@@ -224,15 +207,9 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
 		}
-		if err == nil && len(branchData) != 0 {
-			w.recordsFound.Add(1)
-		}
 
 		nextDepth, stop := w.step(branchData, hashedKey, depth)
-		if stop {
-			break
-		}
-		if nextDepth <= depth {
+		if stop || nextDepth <= depth {
 			break
 		}
 		depth = nextDepth
@@ -278,15 +255,12 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 }
 
 func (w *Warmuper) Stats() WarmupStats {
-	duration := time.Duration(0)
-	if w.closed.Load() {
-		duration = time.Duration(w.duration.Load())
-	} else if startTime := w.startTime.Load(); startTime != 0 {
+	var duration time.Duration
+	if startTime := w.startTime.Load(); startTime != 0 {
 		duration = time.Duration(time.Now().UnixNano() - startTime)
 	}
 	return WarmupStats{
 		KeysProcessed: w.keysProcessed.Load(),
-		RecordsFound:  w.recordsFound.Load(),
 		Duration:      duration,
 	}
 }
@@ -313,11 +287,8 @@ func (w *Warmuper) CloseAndWait() {
 }
 
 func (w *Warmuper) Close() {
-	w.closeOnce.Do(func() {
-		if startTime := w.startTime.Load(); startTime != 0 {
-			w.duration.Store(time.Now().UnixNano() - startTime)
-		}
-		w.closed.Store(true)
-		w.cancel()
-	})
+	if w.closed.Swap(true) {
+		return
+	}
+	w.cancel()
 }

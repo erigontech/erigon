@@ -551,12 +551,12 @@ func TestBranchCache_TryPutSkipsBusyStripe(t *testing.T) {
 
 	stripe := c.putStripe(key)
 	stripe.Lock()
-	c.TryPut(key, []byte("fill"), 0, 100)
+	c.TryPut(key, []byte("fill"), 0, 100, false)
 	stripe.Unlock()
 	_, _, ok := c.Get(key)
 	require.False(t, ok)
 
-	c.TryPut(key, []byte("fill"), 0, 100)
+	c.TryPut(key, []byte("fill"), 0, 100, false)
 	got, _, ok := c.Get(key)
 	require.True(t, ok)
 	require.Equal(t, []byte("fill"), got)
