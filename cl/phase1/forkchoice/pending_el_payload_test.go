@@ -6,8 +6,50 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 )
+
+func TestMarkPayloadStatusAndGasLimitIfRetained(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	executionHash := common.HexToHash("0xabcd")
+	gasLimit := uint64(36_000_000)
+
+	for _, test := range []struct {
+		name     string
+		retained bool
+	}{
+		{name: "retained", retained: true},
+		{name: "pruned", retained: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cache, err := lru.New[common.Hash, uint64](1)
+			require.NoError(t, err)
+			f := &ForkChoiceStore{
+				forkGraph:                payloadVoteForkGraph{retained: &test.retained},
+				executionPayloadGasLimit: cache,
+			}
+
+			status, retained := f.MarkPayloadStatusAndGasLimitIfRetained(
+				root,
+				executionHash,
+				execution_client.PayloadStatusNotValidated,
+				gasLimit,
+			)
+
+			require.Equal(t, test.retained, retained)
+			if test.retained {
+				require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+				got, ok := f.GetExecutionPayloadGasLimit(executionHash)
+				require.True(t, ok)
+				require.Equal(t, gasLimit, got)
+			} else {
+				_, ok := f.GetExecutionPayloadGasLimit(executionHash)
+				require.False(t, ok)
+			}
+		})
+	}
+}
 
 func TestStalePayloadRetryAfterPruneIsDropped(t *testing.T) {
 	root := common.HexToHash("0x1234")

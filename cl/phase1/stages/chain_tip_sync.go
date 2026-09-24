@@ -244,12 +244,6 @@ MainLoop:
 				deadline: time.Now().Add(gloasPayloadRetryBudget),
 				results:  make(map[common.Hash]bool),
 			}
-			var retryStoredPayload func(context.Context, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error)
-			if canValidateGloasPayloads(cfg) {
-				retryStoredPayload = func(retryCtx context.Context, parentBlock *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
-					return retryGloasPayloadWithEL(retryCtx, cfg, parentBlock, envelope)
-				}
-			}
 
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
@@ -290,7 +284,7 @@ MainLoop:
 						if envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
-						if wasStored && !payloadReplay.accepted(ctx, cfg.forkChoice, common.Hash(parentRoot), env, envErr, retryStoredPayload) {
+						if wasStored && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, common.Hash(parentRoot), env, envErr) {
 							continue
 						}
 					}
@@ -837,12 +831,16 @@ type gloasPayloadValidator interface {
 	NewPayloadWithAdmission(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error)
 }
 
+type gloasPayloadRetryResultStore interface {
+	MarkPayloadStatusAndGasLimitIfRetained(common.Hash, common.Hash, execution_client.PayloadStatus, uint64) (execution_client.PayloadStatus, bool)
+	RequeuePendingELPayload(forkchoice.PendingELPayload)
+}
+
 type storedParentPayloadStore interface {
+	gloasPayloadRetryResultStore
 	HasEnvelope(common.Hash) bool
 	GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool)
 	GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool)
-	MarkPayloadStatusIfRetained(common.Hash, common.Hash, execution_client.PayloadStatus) (execution_client.PayloadStatus, bool)
-	RequeuePendingELPayload(forkchoice.PendingELPayload)
 }
 
 type storedParentPayloadReplay struct {
@@ -852,11 +850,11 @@ type storedParentPayloadReplay struct {
 
 func (r *storedParentPayloadReplay) accepted(
 	ctx context.Context,
+	cfg *Cfg,
 	store storedParentPayloadStore,
 	root common.Hash,
 	envelope *cltypes.SignedExecutionPayloadEnvelope,
 	applyErr error,
-	retry func(context.Context, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error),
 ) bool {
 	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
 		return false
@@ -865,7 +863,7 @@ func (r *storedParentPayloadReplay) accepted(
 		return accepted
 	}
 	retryCtx, cancel := context.WithDeadline(ctx, r.deadline)
-	accepted := ensureStoredParentPayloadAccepted(retryCtx, store, root, envelope, retry)
+	accepted := ensureStoredParentPayloadAccepted(retryCtx, cfg, store, root, envelope)
 	cancel()
 	r.results[root] = accepted
 	return accepted
@@ -873,10 +871,10 @@ func (r *storedParentPayloadReplay) accepted(
 
 func ensureStoredParentPayloadAccepted(
 	ctx context.Context,
+	cfg *Cfg,
 	store storedParentPayloadStore,
 	root common.Hash,
 	envelope *cltypes.SignedExecutionPayloadEnvelope,
-	retry func(context.Context, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error),
 ) bool {
 	if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
 		return false
@@ -884,7 +882,13 @@ func ensureStoredParentPayloadAccepted(
 	if status, ok := store.GetRecentExecutionPayloadStatusByRoot(root); ok {
 		switch status {
 		case execution_client.PayloadStatusNotValidated, execution_client.PayloadStatusValidated:
-			return true
+			status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(
+				root,
+				envelope.Message.Payload.BlockHash,
+				status,
+				envelope.Message.Payload.GasLimit,
+			)
+			return retained && (status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated)
 		case execution_client.PayloadStatusInvalidated:
 			return false
 		}
@@ -892,26 +896,45 @@ func ensureStoredParentPayloadAccepted(
 	if !store.HasEnvelope(root) {
 		return false
 	}
-	if retry == nil {
-		status, retained := store.MarkPayloadStatusIfRetained(root, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNotValidated)
+	if !canValidateGloasPayloads(cfg) {
+		status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(
+			root,
+			envelope.Message.Payload.BlockHash,
+			execution_client.PayloadStatusNotValidated,
+			envelope.Message.Payload.GasLimit,
+		)
 		return retained && (status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated)
 	}
 	block, ok := store.GetBlock(root)
 	if !ok || block == nil || block.Block == nil {
 		return false
 	}
-	status, err := retry(ctx, block, envelope)
+	status, err := retryGloasPayloadWithEL(ctx, cfg, block, envelope)
 	if err != nil {
 		log.Warn("[chainTipSync] persisted parent GLOAS NewPayload failed", "slot", block.Block.Slot, "blockRoot", root, "status", status, "err", err)
 	}
-	status, retained := store.MarkPayloadStatusIfRetained(root, envelope.Message.Payload.BlockHash, status)
+	status, retained := recordGloasPayloadRetryResult(store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status)
 	if !retained {
 		return false
 	}
-	if status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated {
-		store.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: block, Envelope: envelope})
-	}
 	return status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
+}
+
+func recordGloasPayloadRetryResult(
+	store gloasPayloadRetryResultStore,
+	payload forkchoice.PendingELPayload,
+	status execution_client.PayloadStatus,
+) (execution_client.PayloadStatus, bool) {
+	if !validPendingGloasPayload(payload) {
+		return execution_client.PayloadStatusNone, false
+	}
+	beaconRoot := payload.Envelope.Message.BeaconBlockRoot
+	executionPayload := payload.Envelope.Message.Payload
+	status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, executionPayload.BlockHash, status, executionPayload.GasLimit)
+	if retained && (status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated) {
+		store.RequeuePendingELPayload(payload)
+	}
+	return status, retained
 }
 
 func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
@@ -972,16 +995,11 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if err != nil {
 			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
 		}
-		execHash := p.Envelope.Message.Payload.BlockHash
-		var retained bool
-		status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(beaconRoot, execHash, status)
+		status, retained := recordGloasPayloadRetryResult(cfg.forkChoice, p, status)
 		if !retained {
 			continue
 		}
-		switch status {
-		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
-			cfg.forkChoice.RequeuePendingELPayload(p)
-		case execution_client.PayloadStatusInvalidated:
+		if status == execution_client.PayloadStatusInvalidated {
 			log.Warn("[chainTipSync] pending GLOAS payload invalidated by EL", "slot", p.Block.Block.Slot, "blockRoot", beaconRoot)
 		}
 	}
@@ -1116,22 +1134,22 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
 		}
 		if isGloasPayloadKnownInvalid(cfg, envelope) {
-			cfg.forkChoice.MarkPayloadStatusIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated)
+			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
 			return true
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 		}
-		var retained bool
-		status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(item.root, execHash, status)
+		status, retained := recordGloasPayloadRetryResult(
+			cfg.forkChoice,
+			forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
+			status,
+		)
 		if !retained {
 			return true
 		}
-		switch status {
-		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
-			cfg.forkChoice.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: item.block, Envelope: envelope})
-		case execution_client.PayloadStatusInvalidated:
+		if status == execution_client.PayloadStatusInvalidated {
 			log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
 		}
 		swept++

@@ -21,6 +21,7 @@ type storedParentPayloadTestStore struct {
 	block        *cltypes.SignedBeaconBlock
 	markRetained bool
 	marked       execution_client.PayloadStatus
+	markedGas    uint64
 	requeued     []forkchoice.PendingELPayload
 }
 
@@ -34,8 +35,9 @@ func (s *storedParentPayloadTestStore) GetBlock(common.Hash) (*cltypes.SignedBea
 	return s.block, s.block != nil
 }
 
-func (s *storedParentPayloadTestStore) MarkPayloadStatusIfRetained(_ common.Hash, _ common.Hash, status execution_client.PayloadStatus) (execution_client.PayloadStatus, bool) {
+func (s *storedParentPayloadTestStore) MarkPayloadStatusAndGasLimitIfRetained(_ common.Hash, _ common.Hash, status execution_client.PayloadStatus, gasLimit uint64) (execution_client.PayloadStatus, bool) {
 	s.marked = status
+	s.markedGas = gasLimit
 	return status, s.markRetained
 }
 
@@ -86,6 +88,7 @@ func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 	root := common.Hash{1}
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	payload.BlockHash = common.Hash{2}
+	payload.GasLimit = 36_000_000
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: root,
 		Payload:         payload,
@@ -98,16 +101,19 @@ func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 		block:        block,
 		markRetained: true,
 	}
-	retries := 0
+	engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusNotValidated}
+	cfg := &Cfg{
+		beaconCfg:             &clparams.MainnetBeaconConfig,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), store, root, envelope, func(context.Context, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
-		retries++
-		return execution_client.PayloadStatusNotValidated, nil
-	})
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), cfg, store, root, envelope)
 
 	require.True(t, accepted)
-	require.Equal(t, 1, retries)
+	require.Equal(t, 1, engine.newPayloadCalls)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
+	require.Equal(t, payload.GasLimit, store.markedGas)
 	require.Len(t, store.requeued, 1)
 }
 
@@ -125,13 +131,32 @@ func TestEnsureStoredParentPayloadAcceptedRejectsInvalidVerdict(t *testing.T) {
 		block:       cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), store, root, envelope, func(context.Context, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
-		t.Fatal("invalidated payload must not be replayed")
-		return execution_client.PayloadStatusNone, nil
-	})
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
 
 	require.False(t, accepted)
 	require.Empty(t, store.requeued)
+}
+
+func TestEnsureStoredParentPayloadAcceptedRestoresGasLimitForKnownVerdict(t *testing.T) {
+	root := common.Hash{1}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockHash = common.Hash{2}
+	payload.GasLimit = 36_000_000
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         payload,
+	}}
+	store := &storedParentPayloadTestStore{
+		has:          true,
+		status:       execution_client.PayloadStatusNotValidated,
+		statusFound:  true,
+		markRetained: true,
+	}
+
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
+
+	require.True(t, accepted)
+	require.Equal(t, payload.GasLimit, store.markedGas)
 }
 
 func TestEnsureStoredParentPayloadAcceptedWithoutExecutionClient(t *testing.T) {
@@ -147,7 +172,7 @@ func TestEnsureStoredParentPayloadAcceptedWithoutExecutionClient(t *testing.T) {
 		markRetained: true,
 	}
 
-	accepted := ensureStoredParentPayloadAccepted(t.Context(), store, root, envelope, nil)
+	accepted := ensureStoredParentPayloadAccepted(t.Context(), &Cfg{}, store, root, envelope)
 
 	require.True(t, accepted)
 	require.EqualValues(t, execution_client.PayloadStatusNotValidated, store.marked)
@@ -170,21 +195,23 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 		deadline: time.Now().Add(-time.Second),
 		results:  make(map[common.Hash]bool),
 	}
-	retries := 0
-
-	accepted := replay.accepted(t.Context(), store, root, envelope, forkchoice.ErrIgnore, func(ctx context.Context, _ *cltypes.SignedBeaconBlock, _ *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
-		retries++
+	engine := &testExecutionEngine{}
+	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
 		<-ctx.Done()
 		return execution_client.PayloadStatusNone, ctx.Err()
-	})
-	replayed := replay.accepted(t.Context(), store, root, envelope, forkchoice.ErrIgnore, func(context.Context, *cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (execution_client.PayloadStatus, error) {
-		t.Fatal("cached parent payload must not be replayed")
-		return execution_client.PayloadStatusNone, nil
-	})
+	}
+	cfg := &Cfg{
+		beaconCfg:             &clparams.MainnetBeaconConfig,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+	}
+
+	accepted := replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
+	replayed := replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore)
 
 	require.False(t, accepted)
 	require.False(t, replayed)
-	require.Equal(t, 1, retries)
+	require.Equal(t, 1, engine.newPayloadCalls)
 }
 
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
@@ -194,6 +221,7 @@ func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 
 	accepted := replay.accepted(
 		t.Context(),
+		&Cfg{},
 		store,
 		root,
 		&cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
@@ -201,7 +229,6 @@ func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 			Payload:         cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig),
 		}},
 		forkchoice.ErrInvalidExecutionPayloadEnvelope,
-		nil,
 	)
 
 	require.False(t, accepted)
