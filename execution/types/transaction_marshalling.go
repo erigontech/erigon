@@ -77,8 +77,8 @@ type JsonAuthorization struct {
 	S       hexutil.U256   `json:"s" ethjson:"quantity"`
 }
 
-// AuthorizationList is a set-code transaction's authorizations in a reply. Geth keeps a plain
-// slice here too, so an absent list is omitted rather than written as an empty array.
+// AuthorizationList is a set-code transaction's authorizations in a reply. An absent list is
+// omitted rather than written as an empty array.
 type AuthorizationList []JsonAuthorization
 
 // MarshalFastJSONTo writes the list as a bare array. The receiver must stay a value, so the

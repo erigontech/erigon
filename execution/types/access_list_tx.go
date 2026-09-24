@@ -36,9 +36,9 @@ import (
 
 var ErrAccessListPreBerlin = errors.New("eip-2930 transactions require Berlin")
 
-// AccessTuple is the element type of an access list.
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type AccessTuple
 
+// AccessTuple is the element type of an access list.
 type AccessTuple struct {
 	Address     common.Address `json:"address" ethjson:"data"`
 	StorageKeys []common.Hash  `json:"storageKeys" ethjson:"datalist"`

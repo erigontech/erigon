@@ -592,10 +592,10 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(plain{Raw: r.Raw, Tx: stripped})
 }
 
-// RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction.
-// Numeric fields may alias the source transaction; they are read-only after construction.
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCTransaction -out gen_rpctransaction_json.go
 
+// RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction.
+// Numeric fields may alias the source transaction; they are read-only after construction.
 type RPCTransaction struct {
 	BlockHash            *common.Hash            `json:"blockHash" ethjson:"data"`
 	BlockNumber          *hexutil.U256           `json:"blockNumber" ethjson:"quantity"`
