@@ -329,6 +329,32 @@ func TestValidateDirectBidAllowsExecutionPayment(t *testing.T) {
 	require.NoError(t, service.ValidateBid(context.Background(), msg))
 }
 
+func TestExecutionPayloadBidRejectsParentBlockHash(t *testing.T) {
+	for _, api := range []bool{false, true} {
+		for _, zero := range []bool{false, true} {
+			service, _, clock, fc, epbsPool := setupExecutionPayloadBidService(t, gomock.NewController(t))
+			msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+			if zero {
+				msg.Message.ParentBlockHash = common.Hash{}
+			}
+			msg.Message.BlockHash = msg.Message.ParentBlockHash
+			fc.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+			addPreferencesToPool(epbsPool, 100)
+			clock.EXPECT().GetCurrentSlot().Return(uint64(100))
+			var err error
+			if api {
+				err = service.ValidateBid(t.Context(), msg)
+			} else {
+				err = service.ProcessMessage(t.Context(), nil, msg)
+			}
+			require.ErrorContains(t, err, "block hash equals parent block hash", "api=%t zero=%t", api, zero)
+			require.NotErrorIs(t, err, ErrIgnore)
+			require.False(t, service.seenCache.Contains(newSeenBidKey(msg.Message)))
+			require.Empty(t, epbsPool.HighestBids.Keys())
+		}
+	}
+}
+
 func TestValidateDirectBidUsesFrozenParentWhenHeadFlipsToSibling(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	service, _, ethClockMock, fcMock, _ := setupExecutionPayloadBidService(t, ctrl)

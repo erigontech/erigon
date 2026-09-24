@@ -587,6 +587,9 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 	if bid.ParentBlockHash != s.GetLatestBlockHash() {
 		return invalidExecutionPayloadBid("processExecutionPayloadBid: parent block hash mismatch")
 	}
+	if bid.BlockHash == bid.ParentBlockHash {
+		return invalidExecutionPayloadBid("processExecutionPayloadBid: block hash equals parent block hash")
+	}
 	parentBlockRoot, err := s.GetBlockRootAtSlot(s.Slot() - 1)
 	if err != nil {
 		return fmt.Errorf("processExecutionPayloadBid: failed to get parent block root: %w", err)
