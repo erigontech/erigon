@@ -17,7 +17,7 @@ func (x *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	s.WriteObjectStart()
 	ethjson.Data(s, "address", x.Address[:])
 	ethjson.DataList(s, "topics", x.Topics)
-	ethjson.Data(s, "data", x.Data)
+	ethjson.Data(s, "data", x.Data[:])
 	ethjson.Quantity(s, "blockNumber", x.BlockNumber)
 	ethjson.Data(s, "transactionHash", x.TxHash[:])
 	ethjson.Quantity(s, "transactionIndex", x.TxIndex)

@@ -68,7 +68,7 @@ func run(typeName, dir, out string) error {
 	}
 
 	var file bytes.Buffer
-	fmt.Fprintf(&file, header, pkg, typeName, typeName, body.String())
+	fmt.Fprintf(&file, header, pkg, typeName, body.String())
 	formatted, err := format.Source(file.Bytes())
 	if err != nil {
 		return fmt.Errorf("%s: %w\n%s", typeName, err, file.String())
@@ -86,14 +86,14 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
-// MarshalFastJSONTo writes the fields %[3]s declares, in that order.
+// MarshalFastJSONTo writes the fields %[2]s declares, in that order.
 func (x *%[2]s) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
 	}
 	s.WriteObjectStart()
-%[4]s	s.WriteObjectEnd()
+%[3]s	s.WriteObjectEnd()
 	return nil
 }
 `
@@ -105,6 +105,9 @@ func parsePackage(dir string) (string, map[string]*ast.StructType, error) {
 	}, 0)
 	if err != nil {
 		return "", nil, err
+	}
+	if len(pkgs) != 1 {
+		return "", nil, fmt.Errorf("%s holds %d packages, want 1", dir, len(pkgs))
 	}
 	structs := map[string]*ast.StructType{}
 	name := ""
@@ -189,10 +192,9 @@ func fieldStatement(ref, name, form, goType string, omitempty bool) (string, err
 	case "datalist":
 		return fmt.Sprintf("\tethjson.DataList(s, %q, %s)\n", name, ref), nil
 	case "data":
-		value := ref
-		if isByteArray(bare) {
-			value = ref + "[:]"
-		}
+		// Slicing reads the same on an array, a pointer to one and a slice, so the emitted
+		// call does not need to know which it has.
+		value := ref + "[:]"
 		if !pointer {
 			return fmt.Sprintf("\tethjson.Data(s, %q, %s)\n", name, value), nil
 		}
@@ -224,14 +226,6 @@ func guarded(ref, name, write string, omitempty bool) string {
 		return fmt.Sprintf("\tif %s != nil {\n%s\t}\n", ref, write)
 	}
 	return fmt.Sprintf("\tif %s == nil {\n\t\ts.Field(%q).WriteNil()\n\t} else {\n%s\t}\n", ref, name, write)
-}
-
-func isByteArray(goType string) bool {
-	switch goType {
-	case "common.Hash", "common.Address", "Bloom", "types.Bloom", "BlockNonce", "types.BlockNonce":
-		return true
-	}
-	return strings.HasPrefix(goType, "[") && strings.HasSuffix(goType, "]byte")
 }
 
 func is256(goType string) bool {
