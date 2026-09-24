@@ -39,12 +39,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -131,18 +131,9 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	if len(stateKey) == 0 {
 		return fmt.Errorf("commitment state record not found in %s", dirs.DataDir)
 	}
-	var rootBytes []byte
-	var blockNum, txNum uint64
-	if bytes.Equal(stateKey, commitmentdb.KeyCommitmentV4State) {
-		blockNum, txNum, rootBytes, err = commitment.DecodeCommitmentV4State(commitmentState)
-		if err != nil {
-			return fmt.Errorf("extract state root: %w", err)
-		}
-	} else {
-		rootBytes, blockNum, txNum, err = commitment.HexTrieExtractStateRoot(commitmentState)
-		if err != nil {
-			return fmt.Errorf("extract state root: %w", err)
-		}
+	rootBytes, blockNum, txNum, err := integrity.ExtractCommitmentStateRoot(stateKey, commitmentState)
+	if err != nil {
+		return fmt.Errorf("extract state root: %w", err)
 	}
 	commitmentRoot := common.BytesToHash(rootBytes)
 	if err := checkRootPin(commitmentRoot, rawdb.ReadHeaderByNumber(tx, blockNum), blockNum); err != nil {

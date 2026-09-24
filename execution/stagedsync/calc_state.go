@@ -42,17 +42,6 @@ type calcStorage struct {
 	slots map[accounts.StorageKey]calcSlot
 }
 
-func (st *calcStorage) set(key accounts.StorageKey, value uint256.Int) [32]byte {
-	slot, ok := st.slots[key]
-	if !ok {
-		k := key.Value()
-		slot.hash = keccak.Sum256(k[:])
-	}
-	slot.value = value
-	st.slots[key] = slot
-	return slot.hash
-}
-
 // calcDomainReader provides lazy-load reads for calcState using the
 // asOfStateReader. This ensures all reads (both lazy-load and trie
 // fold/unfold sibling reads) go through the same GetAsOf path,
@@ -272,18 +261,29 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
 		// (FlushToUpdates) reads exactly the value set below, so the cold
 		// GetAsOf seek it would cost is wasted.
-		slots := cs.storageOf(addr)
+		st := cs.storageState[addr]
+		if st == nil {
+			address := addr.Value()
+			st = &calcStorage{hash: keccak.Sum256(address[:]), slots: make(map[accounts.StorageKey]calcSlot)}
+			cs.storageState[addr] = st
+		}
 		dirty := cs.storageDirty[addr]
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
-			cs.prefetch.add(prefetchItem{account: slots.hash})
+			cs.prefetch.add(prefetchItem{account: st.hash})
 		}
 		for key, vw := range inner {
-			hash := slots.set(key, vw.Val)
+			slot, ok := st.slots[key]
+			if !ok {
+				k := key.Value()
+				slot.hash = keccak.Sum256(k[:])
+			}
+			slot.value = vw.Val
+			st.slots[key] = slot
 			if !dirty[key] {
 				dirty[key] = true
-				cs.prefetch.add(prefetchItem{account: slots.hash, slot: hash, storage: true})
+				cs.prefetch.add(prefetchItem{account: st.hash, slot: slot.hash, storage: true})
 			}
 		}
 	}
@@ -306,16 +306,6 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 // touched this window (already in the maps) get explicit deletes; the account's
 // own DeleteUpdate collapses the rest of the subtree, so untouched on-disk slots
 // need not be read.
-func (cs *calcState) storageOf(addr accounts.Address) *calcStorage {
-	st := cs.storageState[addr]
-	if st == nil {
-		address := addr.Value()
-		st = &calcStorage{hash: keccak.Sum256(address[:]), slots: make(map[accounts.StorageKey]calcSlot)}
-		cs.storageState[addr] = st
-	}
-	return st
-}
-
 func (cs *calcState) deleteStorageSubtree(addr accounts.Address) {
 	st := cs.storageState[addr]
 	if st == nil || len(st.slots) == 0 {

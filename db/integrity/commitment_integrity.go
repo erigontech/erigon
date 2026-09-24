@@ -160,7 +160,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	if end != endTxNum {
 		return info, fmt.Errorf("%w: commitment root not found with same endTxNum: %d != %d", ErrIntegrity, end, endTxNum)
 	}
-	rootHashBytes, blockNum, txNum, err := extractCommitmentStateRoot(stateKey, v)
+	rootHashBytes, blockNum, txNum, err := ExtractCommitmentStateRoot(stateKey, v)
 	if err != nil {
 		return info, fmt.Errorf("%w: commitment root could not be extracted: %w", ErrIntegrity, err)
 	}
@@ -220,7 +220,7 @@ func latestCommitmentStateFromFiles(tx kv.TemporalTx, maxTxNum uint64) (stateKey
 	return nil, nil, false, 0, 0, nil
 }
 
-func extractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64, error) {
+func ExtractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64, error) {
 	if bytes.Equal(stateKey, commitmentdb.KeyCommitmentV4State) {
 		blockNum, txNum, root, err := commitment.DecodeCommitmentV4State(value)
 		return root, blockNum, txNum, err
@@ -988,7 +988,7 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 			return 0, err
 		}
 		if commitment.IsCommitmentStateKey(k) {
-			rootHashBytes, blockNum, txNum, err := extractCommitmentStateRoot(k, v)
+			rootHashBytes, blockNum, txNum, err := ExtractCommitmentStateRoot(k, v)
 			if err != nil {
 				return 0, fmt.Errorf("issue extracting state root value in %s for [%d,%d) tx nums: %w", fileName, bucketStart, bucketEnd, err)
 			}

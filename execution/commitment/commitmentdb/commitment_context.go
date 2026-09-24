@@ -164,12 +164,6 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 	}
 }
 
-// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
-// It requires a DB to be set by calling EnableParaTrieDB
-func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
-	sdc.warmupBase.Enabled = trieWarmup
-}
-
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
 // When enabled, branch updates from Process() are stored as a pending update
 // instead of being applied inline. Used during fork validation where the update is

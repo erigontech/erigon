@@ -17,7 +17,6 @@
 package stagedsync
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"fmt"
@@ -40,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -643,27 +641,12 @@ func retireBlockSnapshots(ctx context.Context, cfg SnapshotsCfg, logger log.Logg
 // readCommitmentBlockFromDB reads the commitment domain's "state" key via a
 // temporary RO tx. The RwTx from the snapshot stage is not temporal, so we
 // need a separate temporal RO tx to read domain data from snapshot files.
-// The value format: txNum(8 bytes) + blockNum(8 bytes) + trie state.
 func readCommitmentBlockFromDB(ctx context.Context, db kv.TemporalRwDB) uint64 {
 	roTx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0
 	}
 	defer roTx.Rollback()
-	for _, key := range [][]byte{commitment.KeyCommitmentV4State, commitmentdb.KeyCommitmentState} {
-		v, _, err := roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
-		if err != nil || len(v) == 0 {
-			continue
-		}
-		if bytes.Equal(key, commitment.KeyCommitmentV4State) {
-			if len(v) != 1+8+8+32 || v[0] != commitment.CommitmentV4StateMarker {
-				return 0
-			}
-			return binary.BigEndian.Uint64(v[9:17])
-		}
-		if len(v) >= 16 {
-			return binary.BigEndian.Uint64(v[8:16])
-		}
-	}
-	return 0
+	n, _ := commitmentdb.LatestBlockNumWithCommitment(roTx)
+	return n
 }
