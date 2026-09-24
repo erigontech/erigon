@@ -1,27 +1,125 @@
-# Erigon v3.7.0 — TBD
+# Erigon v3.7.0 — Velvet Vibrissae — TBD
+
+Erigon 3.7.0 is headlined by **parallel commitment enabled by default**, **broad RPC performance improvements**,
+**persisted receipts by default**, and **Glamsterdam on Sepolia**. It also improves Caplin validator reliability,
+recovery during non-finality, and RPC correctness at the chain tip and on pruned nodes.
+
+### Highlights
+
+- **Parallel commitment, on by default.** State-root computation now uses multiple cores, with work shared across both
+  account and storage tries. Use `--experimental.parallel-commitment=false` to select sequential commitment
+  (#23831, #23972; closes #21137) — by @awskii
+- **Broad RPC performance improvements.** Faster `eth_getLogs`, `eth_feeHistory`, and `eth_getProof`, plus lower CPU and
+  memory costs for block and receipt responses. Faster JSON encoding and less copying reduce memory pressure for large
+  HTTP and IPC batches (#23975, #24013, #24034, #23943, #23969, #23960) — by @AskAlexSharov
+- **Persisted receipts enabled by default.** New datadirs retain receipts so receipt and log queries can avoid block
+  re-execution within the retention window. This trades more disk space for lower RPC latency; existing datadirs keep
+  their stored setting (#23774) — by @AskAlexSharov
+- **Glamsterdam on Sepolia.** Upgrade Sepolia nodes before **6 October 2026, 13:53:36 UTC**. The release schedules
+  Amsterdam in the execution layer and Gloas in Caplin at epoch `353024` ([#24246](https://github.com/erigontech/erigon/pull/24246))
+  — by @yperbasis. BAL-driven parallel execution also avoids unnecessary transaction retries on Glamsterdam networks
+  (#22190) — by @taratorio
 
 ### Breaking Changes
 
-- rpc: `eth_getFilterLogs` now runs a historical query from the criteria stored by `eth_newFilter`; it neither drains the live-log queue read by `eth_getFilterChanges` nor refreshes the filter expiry deadline. Historical queries enforce `rpc.blockrange.limit`, `rpc.logs.maxresults`, and `rpc.logs.querylimit`; a filter can return `-32602` when one of these limits is exceeded, and queries may surface initialization, pruned-history, or not-yet-executed errors. This can be a breaking change (#23296) — by @taratorio
-- rpc: `eth_newFilter` and `eth_subscribe("logs")` now reject criteria exceeding the per-filter `rpc.subscription.filters.maxaddresses` or `rpc.subscription.filters.maxtopics` limit with `-32602` instead of silently capping them. This can be a breaking change for nodes that configure either limit above `0`; both limits default to `0` (unlimited) (#23296) — by @taratorio
-- rpc: `eth_newFilter` and `eth_subscribe("logs")` now reject criteria with more than four topic positions with `-32602` instead of accepting a filter that cannot match any Ethereum log. This can be a breaking change (#23296) — by @taratorio
-- rpc: the `callTracer` `withLog` option of `debug_traceTransaction` and `debug_traceBlock*` now numbers a log's `index` over the whole block instead of restarting at `0x0` on every transaction, matching geth's `callTracer` and the index the same log carries in `eth_getLogs` and in its receipt. In `debug_traceCallMany` the calls of one bundle now share that count instead of each restarting, while every bundle still starts at zero, since a bundle is a simulated block of its own; `debug_traceCall` is unchanged. On a node whose receipt domain has no record for a transaction, `eth_getTransactionReceipt` and `eth_getLogs` now return an error instead of a receipt whose log `index` had underflowed. This can be a breaking change for clients that join trace logs to `eth_getLogs` indices (#23797) — by @lupin012
-- rpc: `eth_call`, `eth_estimateGas`, `eth_simulateV1`, `trace_call`, `debug_traceCall`, and `eth_createAccessList` now reject a request carrying an `accessList` before Berlin or `blobVersionedHashes` before Cancun, matching go-ethereum's own validation and the cross-client survey in [execution-apis#884](https://github.com/ethereum/execution-apis/issues/884). This includes `eth_createAccessList` itself on a pre-Berlin block: it previously computed and returned an access list there, but now rejects the request, since EIP-2930 access lists have no meaningful answer before the fork that introduces them. This can be a breaking change for callers of `eth_createAccessList` against a pre-Berlin block (#23700) — by @Sahil-4555
+- **Receipt storage defaults change for fresh datadirs.** To retain the previous disk-saving default, set
+  `--prune.include-receipts=false` when creating the datadir. Receipt retention follows state-history retention unless
+  `--prune.receipts.distance` is set; archive operators should budget for the additional receipt history. Changing the
+  receipt enable/disable setting of an existing datadir requires a fresh datadir (#23774) — by @AskAlexSharov
+- **amd64 releases require x86-64-v2.** Docker images and tarballs now require CPU features including SSE4.2 and POPCNT.
+  The separate `linux/amd64/v2` Docker platform and `amd64v2` tarball are removed; use the standard amd64 artifacts.
+  Source builds require Go 1.26 or newer (#23877, #23735) — by @AskAlexSharov
+- **Polygon removal.** Polygon chain names, datadirs, and `--bor.*` / `--polygon.*` flags are no longer accepted; use
+  [0xPolygon/erigon](https://github.com/0xPolygon/erigon). Support ended in 3.1 (#23492, #23497, #23537) — by @awskii, @taratorio
+- **Removed startup flags.** Remove `--fcu.background.commit` and `--experimental.streaming-commitment` from startup
+  arguments; these flags now prevent startup (#23051, #23191) — by @AskAlexSharov, @awskii
+- **Required JSON-RPC arguments cannot be `null`.** A `null` required positional argument now returns `-32602` instead
+  of silently becoming a zero value, matching geth (#23668) — by @lupin012
+- **Caplin restart migration.** On upgrade, nodes with `--caplin.checkpoint-sync.disable` must re-sync Caplin from genesis
+  unless a locally saved finalized state exists; the old head-state snapshot is no longer used. Allow checkpoint sync
+  during the upgrade to avoid this replay (#22746) — by @awskii
+- **Polling log filters follow historical-query semantics.** `eth_getFilterLogs` queries the filter's stored criteria
+  without draining `eth_getFilterChanges` or renewing the filter lifetime. It enforces `--rpc.blockrange.limit`,
+  `--rpc.logs.maxresults`, and `--rpc.logs.querylimit`. Log filters and subscriptions reject more than four topic
+  positions, or criteria exceeding configured `--rpc.subscription.filters.maxaddresses` /
+  `--rpc.subscription.filters.maxtopics`, with `-32602`; those two limits still default to unlimited (#23296) — by @taratorio
+- **Log JSON compatibility.** `erigon_getLogs` and `erigon_getLatestLogs` rename `timestamp` to `blockTimestamp`.
+  `callTracer` with `withLog` now uses block-wide log indices for transaction and block traces, and bundle-wide indices
+  for `debug_traceCallMany`. Update consumers of the old field or transaction-local indices (#23337, #23797) — by
+  @Sahil-4555, @lupin012
+- **Pending-state requests are rejected where matching state is unavailable.** This affects `eth_call`,
+  `eth_createAccessList`, `eth_simulateV1`, proofs, witnesses, tracing, and GraphQL `call`. Use `latest` or an explicit
+  canonical block for these requests (#22533) — by @yperbasis
+- **Call validation respects fork activation.** Call and simulation endpoints reject access lists before Berlin and
+  blob hashes before Cancun; `eth_createAccessList` also rejects pre-Berlin blocks (#23700) — by @Sahil-4555
+- **EIP-7702 transaction-pool limits.** Delegated senders may have only one in-flight transaction and cannot submit
+  nonce-gapped transactions. Same-nonce replacement remains supported (#23294) — by @yperbasis
 - rpc: `--rpc.accessList` now applies to WebSocket, IPC and in-process connections too, not only HTTP, and gates `*_subscribe`: an allow list that does not name a subscribe method now answers `-32601` there (`*_unsubscribe` stays allowed). WebSocket and IPC batches now run with `--rpc.batch.concurrency` (default 2) instead of a fixed 50. This can be a breaking change for allow lists used with subscriptions (#24190) — by @AskAlexSharov
-- build, docker: the amd64 Docker image and `.tar.gz` are now built for the `x86-64-v2` baseline (SSE4.2, POPCNT) instead of `x86-64`; the `.deb` was already built at this baseline. The separate `linux/amd64/v2` Docker platform and `amd64v2` tarball are removed since the plain `amd64` artifact now carries those instructions. CPUs older than Intel Nehalem (2008) / AMD Bulldozer (2011), and hypervisor profiles that mask v2 CPU features, fail Go's startup CPU-feature check and exit immediately instead of running. This can be a breaking change for operators pinned to the legacy `amd64v2`-tagged artifact or running on older/masked-CPU hosts (#23877) — by @AskAlexSharov
 
-### Added
+### Added and Changed
 
-- `--witness.cache.blocks`, `--witness.cache.head-capture`, and `--witness.cache.maxmb` enable an eager in-memory cache of recent-block legacy `debug_executionWitness` results, keyed by block hash. Head-capture mode lets a minimal node (no commitment-domain history) serve witnesses for the last N head blocks cache-only — a miss returns out-of-window rather than recomputing from history. New `witness_cache_*` metrics track hits, misses, builds, and resident entries. Embedded RPC only — by @awskii
-
-### Changed
+#### RPC
 
 - rpc: `ots_hasCode` now answers about the end of the block it is given, matching `eth_getCode`. It addressed the state by the block itself where the block-state helpers address it by the next block, so it answered about the end of the previous block and a contract deployed in block N read as having no code at block N (#24102) — by @Sahil-4555
 - rpc: `rpchelper.GetBlockNumber` and the related resolvers no longer take a `filters` argument, so the transaction a handler passes decides which view it reads. Two effects are visible over JSON-RPC. On a node building a payload, the `pending` tag on `eth_getBalance`, `eth_getTransactionCount` (when the txpool holds no nonce for the address), `eth_getCode`, `eth_getStorageAt`, `eth_getStorageValues`, `eth_estimateGas`, `ots_hasCode`, `erigon_getBalanceChangesInBlock` and the GraphQL account getters answered `block N+1 is not executed` and now serves the latest executed state; on a node that is not building a payload these are unchanged. `eth_callBundle` likewise failed there and now executes against the latest executed block instead of attempting replay at the in-memory pending height. While a block is published but not yet committed, `erigon_getBalanceChangesInBlock`, `eth_getBlockAccessList`, `debug_getRawBlockAccessList`, `erigon_getBlockReceiptsByBlockHash`, `ots_hasCode`, `eth_callBundle` and `eth_createAccessList` now name the committed head, instead of naming the overlay head and then failing to read it (#24090) — by @Sahil-4555
-- rpc: `erigon_getLogsByHash` now reports `blockTimestamp` on every log, matching `eth_getLogs`, `erigon_getLogs` and `erigon_getLatestLogs` (#23935) — by @lupin012
-- rpc: live logs returned by `eth_getFilterChanges` and `eth_subscribe("logs")` now include `blockTimestamp`, matching `eth_getLogs` and `eth_getFilterLogs` (#23296) — by @taratorio
-- node: RPC HTTP gzip compression moved from the cgo-based `go-libdeflate` to the pure-Go `klauspost/compress`, and fully buffered (one-shot) responses now compress at `BestSpeed` (level 1) instead of level 6; streaming responses were already at `BestSpeed`. Large one-shot responses gain ~10-14% latency and roughly half the compression CPU, in exchange for slightly larger compressed bodies (+2-8% wire size — relevant for operators who pay for egress). Also removes the libdeflate compressor pool and its `libdeflate_pool_*` metrics, eliminating the cgo leak class fixed in #22700 (#22882) — by @lupin012
-- rpc: `erigon_getLogs` and `erigon_getLatestLogs` renamed the log field `timestamp` to `blockTimestamp`, matching the name `eth_getLogs` and the other log-returning methods already use. Clients that read the `timestamp` key must be updated (#23337) - by @Sahil-4555
+- Logs returned by `erigon_getLogsByHash`, `eth_getFilterChanges`, and `eth_subscribe("logs")` now include
+  `blockTimestamp`, matching `eth_getLogs` (#23935, #23296) — by @lupin012, @taratorio
+- `eth_subscribe("syncing")` reports sync-state changes over WebSocket. Both it and `eth_syncing` now show snapshot
+  download progress instead of remaining at block zero throughout the download (#22570, #22716) — by @lupin012
+- Minimal nodes can serve recent `debug_executionWitness` results without commitment history using
+  `--witness.cache.blocks` and `--witness.cache.head-capture`; `--witness.cache.maxmb` bounds cache memory.
+  `debug_subscribe("executionWitnesses")` pushes newly built witnesses. These features require embedded RPC; head-capture
+  serves cached blocks only, and the cache starts empty after a restart (#22384, #22663, #22407) — by @awskii
+- `eth_getHeaderByHash` and `eth_getHeaderByNumber` provide header-only queries in the `eth` namespace
+  (#23717) — by @MysticRyuujin
+- State selection fixes prevent traces and fee queries from mixing committed and newly published blocks. Historical
+  account and storage reads now use the end of the requested block, fixing incorrect values and inconsistent storage
+  proofs around system-contract updates (#22533, #22987, #24056) — by @yperbasis, @lupin012, @AskAlexSharov
+- Receipt, log, block, trace, and witness queries check the retention windows of the data they need. Pruned nodes can
+  serve retained blocks and receipts without unnecessary state-history requirements, while requests for unavailable
+  history fail explicitly (#23322, #23760, #23996) — by @lupin012
+- `trace_callMany` preserves earlier simulated calls' state regardless of the requested trace types and no longer reads
+  changes from the next real block. `eth_estimateGas` applies state overrides to balance and code checks as well as
+  execution (#23121, #23951, #23655) — by @lupin012
+- Blob-fee handling now matches geth: `eth_estimateGas` reserves funds for blobs before calculating the gas allowance,
+  and `eth_call` does not charge the chain's blob base fee when blob fields are supplied without a nonzero blob fee cap
+  (#23949) — by @lupin012
+- `callTracer` omits `to` for failed `CREATE` and `CREATE2` calls instead of returning the zero address, matching geth
+  (#23765) — by @AskAlexSharov
+- HTTP responses support negotiated Zstandard compression. Fully buffered gzip responses use less CPU at the cost of
+  slightly larger bodies (#23482, #22882) — by @AskAlexSharov, @lupin012
+
+#### Consensus layer and execution
+
+- Reorgs can exceed the normal depth limit during non-finality. Changesets and block access lists are retained, and
+  snapshot retirement waits for finality, preserving the data needed to recover (#23612) — by @taratorio
+- Caplin resumes from a suitable locally saved finalized state on restart, avoiding an unnecessary remote checkpoint
+  download and execution-history backfill. `--caplin.resume-max-staleness-epochs` limits the state's age, capped by the
+  chain's sidecar-retention window (#22746) — by @awskii
+- Caplin no longer blocks state-backed validator duties during a head-state copy, reducing missed sync-committee duties
+  under load. Proposed blocks now include eligible BLS-to-execution withdrawal-credential changes
+  (#24199, #22827) — by @lystopad, @awskii
+- Blob-history backfill works with small peer sets, repairs gaps at snapshot boundaries, and only records complete,
+  verified recoveries. Blob pruning now respects each chain's configured serving window, so it no longer discards
+  sidecars that backfill is trying to restore (#23138, #24191; backport of #24044) — by @domiwei
+- On Glamsterdam networks, `--caplin.builder.allow-private-urls` allows validator-configured builder URLs to resolve to
+  private or loopback addresses (#23548) — by @domiwei
+- A slow transaction-pool gRPC subscriber can no longer block transaction gossip to peers
+  (#23730) — by @Sahil-4555
+
+#### Operations
+
+- Unless explicitly configured, Go's soft memory limit (`GOMEMLIMIT`) defaults to 80% of RAM or the container memory
+  limit, whichever is lower. Code caches enforce their byte budget even with large contracts, reducing out-of-memory failures
+  (#23757, #23790) — by @AskAlexSharov
+- Bloated MDBX databases are compacted automatically at startup when reclaimable space is at least 10 GB and exceeds
+  four times the live data. `erigon db compact --datadir=<path>` provides manual compaction while the node is stopped
+  (#23956, #23677) — by @AskAlexSharov
+- Embedded RPC supports HTTPS through `--https.enabled`, `--https.cert`, and `--https.key`, plus IPC through
+  `--socket.enabled`. Use `--http.url`, `--https.url`, and `--socket.url` to select TCP or Unix-socket endpoints
+  (#23108) — by @lupin012
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.6.1...v3.7.0
 
 ---
 
