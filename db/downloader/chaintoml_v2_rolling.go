@@ -665,6 +665,14 @@ func (r *RollingV2Publisher) Publish(
 	// downstream step sees the manifest.
 	if r.servableSource != nil {
 		if servable := r.servableSource(); servable != nil {
+			// Atomic-set gate first: a file rebuilt in place leaves its old
+			// hash unservable, and the rest of its coordinate must go with
+			// it rather than be advertised for a consumer to pair with the
+			// previous generation.
+			if dropped := FilterManifestByAtomicSet(manifest, servable); dropped > 0 && r.downloader != nil {
+				r.downloader.log(log.LvlWarn, "[chaintoml] v2 atomic-set gate dropped incomplete coordinates",
+					"dropped", dropped)
+			}
 			if dropped := FilterManifestByServable(manifest, servable); dropped > 0 && r.downloader != nil {
 				r.downloader.log(log.LvlWarn, "[chaintoml] v2 servable gate dropped unservable entries",
 					"dropped", dropped)

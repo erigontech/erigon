@@ -342,3 +342,24 @@ func inferKindFromName(name string) (FileKind, bool) {
 	}
 	return "", false
 }
+
+// Coordinate identifies the files that must move together: a primary and the
+// accessors built from it. Set members carry independent version prefixes
+// (v2.2-commitment.330-331.kv pairs with v2.1-commitment.330-331.kvi), so the
+// coordinate is what the name encodes, never the name itself.
+type Coordinate struct {
+	Type string
+	From uint64
+	To   uint64
+}
+
+// CoordinateOf derives a file's coordinate from its name. Reports false for
+// names that are not part of a primary/accessor set — meta, salt, and anything
+// the snapshot parser does not recognise.
+func CoordinateOf(name string) (Coordinate, bool) {
+	info, _, _ := snaptype.ParseFileName("", name)
+	if info.TypeString == "" || info.To == 0 {
+		return Coordinate{}, false
+	}
+	return Coordinate{Type: info.TypeString, From: info.From, To: info.To}, true
+}

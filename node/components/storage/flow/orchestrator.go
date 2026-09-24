@@ -1009,6 +1009,9 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	// path uses BlockHeadersReady, an earlier signal — unaffected.
 	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
 	inv := o.storage.Inventory()
+	// A coordinate whose members we hold at mixed generations must be
+	// re-fetched whole, so holding the name is not enough to skip it.
+	stale := staleCoordinates(peerEntries, o.heldHashes(domain))
 	o.peerMu.Lock()
 	// Canonical gate against the LIVE intersection: file must be
 	// advertised by every trusted peer with matching hash. Using the
@@ -1019,7 +1022,7 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	gateOnCanonical := len(o.peerManifests) > 0
 	for _, entry := range peerEntries {
 		eligibleForPhase1 := domain != "" || entry.Kind != snapshot.KindCaplin
-		if o.haveLocally(domain, entry.Name) {
+		if o.haveLocally(domain, entry.Name) && !coordinateIsStale(stale, entry.Name) {
 			if eligibleForPhase1 {
 				o.phase1Files[entry.Name] = struct{}{}
 			}
@@ -1568,22 +1571,40 @@ func (o *Orchestrator) PeerManifestFiles(peerID string) map[string]*snapshot.Fil
 // meta, or salt file — they all live outside the per-domain map. Scan
 // every flat slice rather than make the caller pre-classify by Kind.
 func (o *Orchestrator) haveLocally(domain snapshot.Domain, name string) bool {
-	inv := o.storage.Inventory()
-	var entries []*snapshot.FileEntry
-	if domain == "" {
-		entries = append(entries, inv.BlockFiles()...)
-		entries = append(entries, inv.CaplinFiles()...)
-		entries = append(entries, inv.MetaFiles()...)
-		entries = append(entries, inv.SaltFiles()...)
-	} else {
-		entries = inv.AllDomainFiles(domain)
-	}
-	for _, f := range entries {
+	for _, f := range o.localEntriesFor(domain) {
 		if f.Name == name && f.Local {
 			return true
 		}
 	}
 	return false
+}
+
+func (o *Orchestrator) localEntriesFor(domain snapshot.Domain) []*snapshot.FileEntry {
+	inv := o.storage.Inventory()
+	if domain != "" {
+		return inv.AllDomainFiles(domain)
+	}
+	blocks, caplin, meta, salt := inv.BlockFiles(), inv.CaplinFiles(), inv.MetaFiles(), inv.SaltFiles()
+	entries := make([]*snapshot.FileEntry, 0, len(blocks)+len(caplin)+len(meta)+len(salt))
+	entries = append(entries, blocks...)
+	entries = append(entries, caplin...)
+	entries = append(entries, meta...)
+	entries = append(entries, salt...)
+	return entries
+}
+
+// heldHashes maps the names we hold locally to the generation we hold them
+// at, so gap-fill can tell "we have this name" from "we have what the peer is
+// advertising".
+func (o *Orchestrator) heldHashes(domain snapshot.Domain) map[string][20]byte {
+	entries := o.localEntriesFor(domain)
+	held := make(map[string][20]byte, len(entries))
+	for _, f := range entries {
+		if f.Local {
+			held[f.Name] = f.TorrentHash
+		}
+	}
+	return held
 }
 
 // onDownloadComplete promotes the file to the local inventory at TrustVerified
