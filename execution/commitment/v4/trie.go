@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"io"
-	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -40,72 +39,7 @@ type Trie struct {
 	scheduleWorkers int
 	scheduleStats   *scheduleStats
 	deferUpdates    bool
-	deferred        [][]recordDelta
-}
-
-type deferredPatriciaContext struct {
-	commitment.PatriciaContext
-	meter *meteredContext
-	sink  *deferredPatriciaContext
-	mu    sync.Mutex
-	parts [][]recordDelta
-}
-
-func (c *deferredPatriciaContext) PutBranch(key, data, prev []byte) error {
-	return c.putDeltas([]recordDelta{{Key: key, Data: data, Prev: prev}})
-}
-
-func (c *deferredPatriciaContext) putDeltas(deltas []recordDelta) error {
-	if c.sink != nil {
-		return c.sink.putDeltas(deltas)
-	}
-	changed := deltas[:0]
-	size := 0
-	for _, d := range deltas {
-		if bytes.Equal(d.Prev, d.Data) {
-			continue
-		}
-		changed = append(changed, d)
-		size += len(d.Data)
-	}
-	if len(changed) == 0 {
-		return nil
-	}
-	if c.meter != nil {
-		c.meter.countWrites(len(changed), size)
-	}
-	c.mu.Lock()
-	c.parts = append(c.parts, changed)
-	c.mu.Unlock()
-	return nil
-}
-
-func putDeltas(ctx commitment.PatriciaContext, deltas []recordDelta) error {
-	if d, ok := ctx.(*deferredPatriciaContext); ok {
-		return d.putDeltas(deltas)
-	}
-	return applyDeltas(deltas, ctx.PutBranch)
-}
-
-func (c *deferredPatriciaContext) wrapFactory(f commitment.TrieContextFactory) commitment.TrieContextFactory {
-	if f == nil {
-		return nil
-	}
-	return func(ctx context.Context) (commitment.PatriciaContext, func()) {
-		inner, cleanup := f(ctx)
-		if inner == nil {
-			return nil, cleanup
-		}
-		return &deferredPatriciaContext{PatriciaContext: inner, sink: c}, cleanup
-	}
-}
-
-func (c *deferredPatriciaContext) take() [][]recordDelta {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	parts := c.parts
-	c.parts = nil
-	return parts
+	deferred        deltaParts
 }
 
 func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
@@ -205,28 +139,23 @@ func (t *Trie) Process(
 		defer warmuper.CloseAndWait()
 	}
 
+	if t.deferUpdates && len(t.deferred) != 0 {
+		return nil, errors.New("commitment v4: deferred updates were not taken")
+	}
 	storage, accounts, seenKeys, err := partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper)
 	if err != nil {
 		return nil, err
 	}
 	seen = seenKeys
-	var processCtx commitment.PatriciaContext = metered
-	factory := metered.wrapFactory(t.ctxFactory)
-	var deferredCtx *deferredPatriciaContext
-	if t.deferUpdates {
-		if len(t.deferred) != 0 {
-			return nil, errors.New("commitment v4: deferred updates were not taken")
-		}
-		deferredCtx = &deferredPatriciaContext{PatriciaContext: metered, meter: metered}
-		processCtx = deferredCtx
-		factory = deferredCtx.wrapFactory(factory)
-	}
-	root, err := runScheduledPhases(ctx, processCtx, factory, storage, accounts, t.scheduleWorkers, t.scheduleStats)
+	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, t.scheduleWorkers, t.scheduleStats)
 	if err != nil {
 		return nil, err
 	}
-	if deferredCtx != nil {
-		t.deferred = deferredCtx.take()
+	metered.countDeltas(parts)
+	if t.deferUpdates {
+		t.deferred = parts
+	} else if err := applyDeltas(parts, t.ctx.PutBranch); err != nil {
+		return nil, err
 	}
 	t.root = append(t.root[:0], root[:]...)
 	if onProgress != nil {

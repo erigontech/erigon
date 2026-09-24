@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -73,7 +74,7 @@ const (
 	accountPlaneFanout   = 16
 )
 
-func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, workers int, stats *scheduleStats) error {
+func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers int, stats *scheduleStats) error {
 	if len(storage) == 0 {
 		return nil
 	}
@@ -82,11 +83,11 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			root, err := runStorageTask(rawCtx, task)
+			root, taskParts, err := runStorageTaskWithPlan(rawCtx, task, foldPlan{})
 			if err != nil {
 				return err
 			}
-			roots[i] = root
+			roots[i], parts[i] = root, taskParts
 		}
 		return nil
 	}
@@ -110,21 +111,21 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 					return nil
 				}
 				stats.enter()
-				root, err := runStorageTaskWithPlan(workerCtx, storage[i], taskPlan)
+				root, taskParts, err := runStorageTaskWithPlan(workerCtx, storage[i], taskPlan)
 				stats.leave()
 				if err != nil {
 					return err
 				}
-				roots[i] = root
+				roots[i], parts[i] = root, taskParts
 			}
 		})
 	}
 	return g.Wait()
 }
 
-func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers int, stats *scheduleStats) ([32]byte, error) {
+func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers int, stats *scheduleStats) ([32]byte, deltaParts, error) {
 	if rawCtx == nil {
-		return [32]byte{}, errors.New("commitment v4: nil scheduled context")
+		return [32]byte{}, nil, errors.New("commitment v4: nil scheduled context")
 	}
 	if ctx == nil {
 		ctx = context.Background()
@@ -136,24 +137,25 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		accountWorkers = min(workers, accountPlaneFanout)
 	}
 	storageRoots := make([][32]byte, len(storage))
+	storageParts := make([]deltaParts, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
 	overlap := factory != nil && storageWorkers > 1
 	storageDone := make(chan error, 1)
 	if overlap {
 		go func() {
-			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats)
+			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, stats)
 		}()
 	} else {
-		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageWorkers, stats)
+		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, stats)
 	}
 
 	g := accountGraph()
 	root, plans, planErr := g.planAccounts(rawCtx, accounts, accountFold)
 	if err := <-storageDone; err != nil {
-		return [32]byte{}, err
+		return [32]byte{}, nil, err
 	}
 	if planErr != nil {
-		return [32]byte{}, planErr
+		return [32]byte{}, nil, planErr
 	}
 	results := make(map[[32]byte][32]byte, len(storage))
 	for i, task := range storage {
@@ -201,7 +203,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	for i := range accountResults {
 		result := &accountResults[i]
 		if result.err != nil {
-			return [32]byte{}, result.err
+			return [32]byte{}, nil, result.err
 		}
 		if result.plan.skip {
 			continue
@@ -224,29 +226,31 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	})
 	for _, err := range groupErrs {
 		if err != nil {
-			return [32]byte{}, err
+			return [32]byte{}, nil, err
 		}
 	}
 	for _, i := range rest {
 		result := &accountResults[i]
 		if result.plan.delete {
 			if err := removeRoot(root, result.plan.entry.hashedKey); err != nil {
-				return [32]byte{}, err
+				return [32]byte{}, nil, err
 			}
 			continue
 		}
 		if len(root.path) == 0 {
 			if err := insert(root, result.plan.entry.hashedKey, result.value); err != nil {
-				return [32]byte{}, err
+				return [32]byte{}, nil, err
 			}
 		} else if err := insertRoot(root, result.plan.entry.hashedKey, result.value); err != nil {
-			return [32]byte{}, err
+			return [32]byte{}, nil, err
 		}
 	}
-	if err := g.persistGraph(rawCtx, root, accountFold); err != nil {
-		return [32]byte{}, err
+	accountParts, err := g.persistGraph(rawCtx, root, accountFold)
+	if err != nil {
+		return [32]byte{}, nil, err
 	}
-	return fold(root, 0)
+	hash, err := fold(root, 0)
+	return hash, append(slices.Concat(storageParts...), accountParts...), err
 }
 
 func directChild(root *node, nib byte) bool {

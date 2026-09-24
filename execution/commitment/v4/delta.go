@@ -52,13 +52,12 @@ func newRecordDelta(key, data, prev []byte) recordDelta {
 	return recordDelta{Key: key, Data: data, Prev: prev}
 }
 
-func applyDeltas(deltas []recordDelta, putBranch putBranchFunc) error {
-	for _, delta := range deltas {
-		if bytes.Equal(delta.Prev, delta.Data) {
-			continue
-		}
-		if err := putBranch(delta.Key, delta.Data, delta.Prev); err != nil {
-			return err
+func applyDeltas(parts deltaParts, putBranch putBranchFunc) error {
+	for _, part := range parts {
+		for _, delta := range part {
+			if err := putBranch(delta.Key, delta.Data, delta.Prev); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

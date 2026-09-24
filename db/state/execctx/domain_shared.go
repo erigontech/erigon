@@ -50,10 +50,6 @@ var (
 	mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
 )
 
-// CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
-// (key, value, step, txNum) by TemporalMemBatch.FlushWithCommitmentCallback.
-type CommitmentFlushCallback func(k []byte, v []byte, step kv.Step, txNum uint64)
-
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
 	Keys []string
@@ -585,6 +581,12 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
+	apply := func() error {
+		if swapper, ok := sd.mem.(commitmentDiffSwapper); ok && upd.Deltas != nil {
+			return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, swapper.CommitmentDiff())
+		}
+		return upd.Apply(putBranch)
+	}
 
 	if !lockHeld {
 		sd.changesetMu.Lock()
@@ -616,7 +618,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// see concurrency contract on the wrappers above.
 		defer sd.SwapCommitmentDiffLocked(cs)()
 
-		if err := upd.Apply(putBranch); err != nil {
+		if err := apply(); err != nil {
 			return err
 		}
 
@@ -625,7 +627,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	}
 
 	// No past changeset found — write into whatever is current.
-	return upd.Apply(putBranch)
+	return apply()
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
@@ -777,6 +779,10 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 // shared, lockable target SetChangesetAccumulator installs. Non-commitment
 // domains fall back to the normal DomainPut/DomainDel — TrieContext.PutBranch
 // (the only real caller) only ever writes kv.CommitmentDomain.
+type domainCounter interface {
+	DomainLen(domain kv.Domain) int
+}
+
 type commitmentBranchBatchWriter interface {
 	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
 }
@@ -1253,6 +1259,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// It borrows the batch's buffers rather than holding a second image of the
 	// whole flush; see FlushConfig.DomainCallbacks.
 	var pendingBranches []branchCacheUpdate
+	if counter, ok := sd.mem.(domainCounter); ok && sd.branchCache != nil {
+		pendingBranches = make([]branchCacheUpdate, 0, counter.DomainLen(kv.CommitmentDomain))
+	}
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {

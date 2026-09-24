@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -121,29 +122,26 @@ func prefix(src []byte, n int) []byte {
 	return src[:n:n]
 }
 
-const storageFanOutMin = 1024
+var storageFanOutMin = dbg.EnvInt("COMMITMENT_V4_STORAGE_FANOUT_MIN", 128)
 
-func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte, error) {
-	return runStorageTaskWithPlan(ctx, task, foldPlan{})
-}
-
-func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, plan foldPlan) ([32]byte, error) {
+func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, plan foldPlan) ([32]byte, deltaParts, error) {
 	if ctx == nil {
-		return [32]byte{}, errors.New("commitment v4: nil phase A context")
+		return [32]byte{}, nil, errors.New("commitment v4: nil phase A context")
 	}
 	if task.wipe {
-		if err := wipeStorageRecords(ctx, task.addrHash); err != nil {
-			return [32]byte{}, err
+		records, err := enumerateStorageRecords(ctx, task.addrHash)
+		if err != nil || len(records) == 0 {
+			return empty.RootHash, nil, err
 		}
-		return empty.RootHash, nil
+		return empty.RootHash, deltaParts{records}, nil
 	}
 	if len(task.entries) == 0 {
-		return empty.RootHash, nil
+		return empty.RootHash, nil, nil
 	}
 
 	root, err := unfold(ctx, nil, planeStorage, task.addrHash[:])
 	if err != nil {
-		return [32]byte{}, err
+		return [32]byte{}, nil, err
 	}
 	if root == nil {
 		root = fork(nil)
@@ -153,17 +151,17 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	markStorageRoot(root)
 	g := storageGraph(task.addrHash[:])
 	if err := g.materializeRootExtension(ctx, root); err != nil {
-		return [32]byte{}, err
+		return [32]byte{}, nil, err
 	}
 	markStorageRoot(root)
 
 	for _, entry := range task.entries {
 		if len(entry.path) != 64 {
-			return [32]byte{}, errPhaseAUpdate
+			return [32]byte{}, nil, errPhaseAUpdate
 		}
 		for _, nib := range entry.path {
 			if nib > 0x0f {
-				return [32]byte{}, errPhaseAUpdate
+				return [32]byte{}, nil, errPhaseAUpdate
 			}
 		}
 	}
@@ -176,7 +174,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 			return g.ensurePath(ctx, root, task.entries[i].path)
 		})
 		if err != nil {
-			return [32]byte{}, err
+			return [32]byte{}, nil, err
 		}
 	}
 	if !fanned {
@@ -189,7 +187,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 		}
 		if !fanned && (len(root.path) == 0 || bytes.HasPrefix(entry.path, root.path)) {
 			if err := g.ensurePath(ctx, root, entry.path); err != nil {
-				return [32]byte{}, err
+				return [32]byte{}, nil, err
 			}
 		}
 		if entry.update.Deleted() {
@@ -197,24 +195,25 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 				if errors.Is(err, ErrRemoveNotFound) {
 					continue
 				}
-				return [32]byte{}, err
+				return [32]byte{}, nil, err
 			}
 			continue
 		}
 		if entry.update.Flags&commitment.StorageUpdate == 0 || entry.update.StorageLen < 0 {
-			return [32]byte{}, errPhaseAUpdate
+			return [32]byte{}, nil, errPhaseAUpdate
 		}
-		value := append([]byte(nil), entry.update.Storage[:entry.update.StorageLen]...)
-		if err := insertRoot(root, entry.path, value); err != nil {
-			return [32]byte{}, err
+		if err := insertRoot(root, entry.path, entry.update.Storage[:entry.update.StorageLen]); err != nil {
+			return [32]byte{}, nil, err
 		}
 	}
 
 	markStorageRoot(root)
-	if err := g.persistGraph(ctx, root, plan); err != nil {
-		return [32]byte{}, err
+	parts, err := g.persistGraph(ctx, root, plan)
+	if err != nil {
+		return [32]byte{}, nil, err
 	}
-	return fold(root, 0)
+	hash, err := fold(root, 0)
+	return hash, parts, err
 }
 
 func markStorageRoot(root *node) {

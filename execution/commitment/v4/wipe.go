@@ -29,24 +29,13 @@ var (
 	errWipePath   = errors.New("commitment v4: invalid wipe path")
 )
 
-func wipeStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) error {
-	records, err := enumerateStorageRecords(ctx, addrHash)
-	if err != nil {
-		return err
-	}
-	return putDeltas(ctx, records)
-}
-
 func enumerateStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) ([]recordDelta, error) {
 	rootKey := StorageRootKey(addrHash)
 	data, _, err := ctx.Branch(rootKey)
-	if err != nil {
+	if err != nil || len(data) == 0 {
 		return nil, err
 	}
 	records := []recordDelta{{Key: rootKey, Data: []byte{}, Prev: bytes.Clone(data)}}
-	if len(data) == 0 {
-		return records, nil
-	}
 	seen := map[string]struct{}{string(rootKey): {}}
 	if err := enumerateRecordChildren(ctx, addrHash, nil, records[0].Prev, 0, &records, seen); err != nil {
 		return nil, err

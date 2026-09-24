@@ -80,7 +80,7 @@ func TestRunStoragePhaseUsesConfiguredWorkers(t *testing.T) {
 		return newMockContext(), nil
 	}
 
-	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, 4, new(scheduleStats))
+	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, make([]deltaParts, len(storage)), 4, new(scheduleStats))
 	require.NoError(t, err)
 	require.Equal(t, int32(4), factoryCalls.Load())
 }

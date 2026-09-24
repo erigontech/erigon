@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
-	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -198,8 +197,7 @@ func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.Bran
 }
 
 const (
-	commitmentOpSkip uint8 = iota
-	commitmentOpPut
+	commitmentOpPut uint8 = iota
 	commitmentOpSameTxNum
 
 	commitmentWriteChunk = 8192
@@ -247,9 +245,6 @@ func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.Bra
 		if i > 0 && i%commitmentWriteChunk == 0 {
 			ready <- i
 		}
-		if bytes.Equal(d.Prev, d.Data) {
-			continue
-		}
 		version := dataWithTxNum{data: d.Data, txNum: txNum}
 		ops[i] = commitmentOpPut
 		if old, ok := latest[key]; ok {
@@ -288,7 +283,6 @@ func (sd *TemporalMemBatch) writeCommitmentOps(flat []*commitment.BranchDelta, o
 		for i := lo; i < hi && err == nil; i++ {
 			d := flat[i]
 			switch {
-			case ops[i] == commitmentOpSkip:
 			case ops[i] == commitmentOpSameTxNum:
 				err = writer.addValue(d.Key, d.Data, step)
 			case len(d.Data) == 0:
@@ -903,7 +897,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 						return true
 					}
 					latest := history[len(history)-1]
-					cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+					cb(common.ToBytesZeroCopy(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 					return true
 				})
 				continue
@@ -913,7 +907,7 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 					continue
 				}
 				latest := history[len(history)-1]
-				cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
+				cb(common.ToBytesZeroCopy(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
 			}
 		}
 	}
@@ -921,27 +915,10 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 	return nil
 }
 
-// FlushWithCommitmentCallback flushes the batch then invokes cb per
-// commitment-domain tuple under the lock.
-func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
-	sd.lockAllDomains()
-	defer sd.unlockAllDomains()
-
-	if err := sd.flushLocked(ctx, tx); err != nil {
-		return err
-	}
-
-	if cb != nil {
-		for keyStr, history := range sd.domains[kv.CommitmentDomain] {
-			if len(history) == 0 {
-				continue
-			}
-			latest := history[len(history)-1]
-			cb([]byte(keyStr), latest.data, kv.Step(latest.txNum/sd.stepSize), latest.txNum)
-		}
-	}
-
-	return nil
+func (sd *TemporalMemBatch) DomainLen(domain kv.Domain) int {
+	sd.latestStateLocks[domain].RLock()
+	defer sd.latestStateLocks[domain].RUnlock()
+	return len(sd.domains[domain])
 }
 
 func (sd *TemporalMemBatch) flushDiffSet(_ context.Context, tx kv.RwTx) error {

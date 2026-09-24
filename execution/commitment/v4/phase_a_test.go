@@ -26,6 +26,14 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
+func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte, error) {
+	root, parts, err := runStorageTaskWithPlan(ctx, task, foldPlan{})
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return root, applyDeltas(parts, ctx.PutBranch)
+}
+
 func phaseAStorageUpdate(value []byte) *commitment.Update {
 	update := &commitment.Update{Flags: commitment.StorageUpdate, StorageLen: int8(len(value))}
 	copy(update.Storage[:], value)

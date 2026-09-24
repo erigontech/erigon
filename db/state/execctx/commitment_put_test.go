@@ -22,10 +22,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -137,4 +139,54 @@ func TestPutCommitmentBranchesResolvesNilPrevAfterEarlierWrites(t *testing.T) {
 		return bytes.Clone(v)
 	}
 	require.Equal(t, run(false), run(true))
+}
+
+func TestFlushPendingDeltasLandInTheBlockChangeset(t *testing.T) {
+	seed := commitmentPutCorpus(64)
+	next := make([]commitment.BranchDelta, len(seed))
+	for i, d := range seed {
+		next[i] = commitment.BranchDelta{Key: d.Key, Data: []byte{byte(i), 1}, Prev: d.Data}
+	}
+	blockHash := common.Hash{7}
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	run := func(pending bool) (map[string][]byte, []kv.DomainEntryDiff, []kv.DomainEntryDiff) {
+		tx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+		require.NoError(t, err)
+		defer sd.Close()
+
+		require.NoError(t, sd.PutCommitmentBranches(tx, [][]commitment.BranchDelta{cloneDeltas(seed)}, 1, nil))
+		block, live := &changeset.StateChangeSet{}, &changeset.StateChangeSet{}
+		sd.SavePastChangesetAccumulator(blockHash, 5, block)
+		sd.SetChangesetAccumulator(live)
+		if pending {
+			sd.GetCommitmentContext().SetPendingUpdate(&commitment.PendingCommitmentUpdate{
+				BlockNum: 5, BlockHash: blockHash, TxNum: 2, Deltas: splitParts(cloneDeltas(next), 5),
+			})
+			require.NoError(t, sd.FlushPendingUpdates(t.Context(), tx))
+		} else {
+			restore := sd.SwapCommitmentDiffLocked(block)
+			for _, d := range cloneDeltas(next) {
+				require.NoError(t, sd.DomainPut(kv.CommitmentDomain, tx, d.Key, d.Data, 2, d.Prev))
+			}
+			restore()
+		}
+		latest := make(map[string][]byte, len(seed))
+		for _, d := range seed {
+			v, _, err := sd.GetLatest(kv.CommitmentDomain, tx, d.Key)
+			require.NoError(t, err)
+			latest[string(d.Key)] = bytes.Clone(v)
+		}
+		return latest, block.Diffs[kv.CommitmentDomain].GetDiffSet(), live.Diffs[kv.CommitmentDomain].GetDiffSet()
+	}
+
+	wantLatest, wantBlock, wantLive := run(false)
+	gotLatest, gotBlock, gotLive := run(true)
+	require.Len(t, wantBlock, len(seed))
+	require.Empty(t, wantLive)
+	require.Equal(t, wantLatest, gotLatest)
+	require.Equal(t, wantBlock, gotBlock)
+	require.Equal(t, wantLive, gotLive)
 }

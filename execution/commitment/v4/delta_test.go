@@ -24,24 +24,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestApplyDeltasSkipsUnchangedRecords(t *testing.T) {
-	var applied []recordDelta
-	deltas := []recordDelta{
-		{Key: []byte{1}, Data: []byte{2}, Prev: []byte{2}},
-		{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}},
-		{Key: []byte{6}, Data: nil, Prev: nil},
-	}
-	err := applyDeltas(deltas, func(key, data, prev []byte) error {
-		applied = append(applied, recordDelta{Key: bytes.Clone(key), Data: bytes.Clone(data), Prev: bytes.Clone(prev)})
-		return nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, []recordDelta{{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}}}, applied)
+func TestDeltaPartsDropUnchangedRecords(t *testing.T) {
+	var parts deltaParts
+	parts.add(recordDelta{Key: []byte{1}, Data: []byte{2}, Prev: []byte{2}})
+	parts.add(recordDelta{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}})
+	parts.add(recordDelta{Key: []byte{6}, Data: nil, Prev: nil})
+	require.Equal(t, deltaParts{{{Key: []byte{3}, Data: []byte{4}, Prev: []byte{5}}}}, parts)
 }
 
 func TestApplyDeltasReturnsPutError(t *testing.T) {
 	wantErr := errors.New("put failed")
-	err := applyDeltas([]recordDelta{{Key: []byte{1}, Data: []byte{2}, Prev: []byte{3}}}, func(_, _, _ []byte) error {
+	err := applyDeltas(deltaParts{{{Key: []byte{1}, Data: []byte{2}, Prev: []byte{3}}}}, func(_, _, _ []byte) error {
 		return wantErr
 	})
 	require.ErrorIs(t, err, wantErr)
@@ -82,7 +75,9 @@ func TestPersistGraphRetainsOnlyFoldedDeltasAfterChildWalk(t *testing.T) {
 				}
 			}
 			g := storageGraph(addr[:])
-			require.NoError(t, g.persistGraph(ctx, root, foldPlan{}))
+			parts, err := g.persistGraph(ctx, root, foldPlan{})
+			require.NoError(t, err)
+			require.NoError(t, applyDeltas(parts, ctx.PutBranch))
 			require.NotEmpty(t, ctx.branches)
 			require.Equal(t, 1, linkedNodeCount(root))
 			require.Empty(t, ctx.accountCalls)
@@ -123,7 +118,9 @@ func TestPersistGraphKeepsRecordsThatOnlyMovedDeeper(t *testing.T) {
 
 	diverging := append([]byte{0x0c, 0x07}, bytes.Repeat([]byte{0x05}, 62)...)
 	require.NoError(t, insert(root, diverging, []byte{0x01}))
-	require.NoError(t, g.persistGraph(ctx, root, foldPlan{}))
+	parts, err := g.persistGraph(ctx, root, foldPlan{})
+	require.NoError(t, err)
+	require.NoError(t, applyDeltas(parts, ctx.PutBranch))
 
 	require.Equal(t, deepData, ctx.branches[string(deepKey)], "record that only moved from depth 1 to depth 2 must not be tombstoned")
 	require.Equal(t, []byte{0xca, 0xfe}, ctx.branches[string(siblingKey)])

@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math/bits"
+	"slices"
 
 	"golang.org/x/sync/errgroup"
 
@@ -145,6 +146,9 @@ const deltaChunk = 1024
 type deltaParts [][]recordDelta
 
 func (p *deltaParts) add(d recordDelta) {
+	if bytes.Equal(d.Prev, d.Data) {
+		return
+	}
 	n := len(*p)
 	switch {
 	case n == 0:
@@ -251,30 +255,23 @@ func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts,
 	return accs, nil
 }
 
-func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan foldPlan) error {
+func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan foldPlan) (deltaParts, error) {
 	if root == nil {
-		return g.errNode
+		return nil, g.errNode
 	}
 	if err := promoteRootExtension(root); err != nil {
-		return err
+		return nil, err
 	}
 	var accs []deltaParts
 	if plan.parallel() && len(root.path) == 0 {
 		var err error
 		if accs, err = g.materializeRootChildren(root, plan); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	var acc deltaParts
 	if _, err := g.materialize(ctx, root, root, &acc); err != nil {
-		return err
+		return nil, err
 	}
-	for _, parts := range append(accs, acc) {
-		for _, part := range parts {
-			if err := putDeltas(ctx, part); err != nil {
-				return err
-			}
-		}
-	}
-	return nil
+	return append(slices.Concat(accs...), acc...), nil
 }

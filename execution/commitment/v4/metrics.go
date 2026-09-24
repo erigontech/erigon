@@ -49,14 +49,15 @@ func (c *meteredContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	return data, step, err
 }
 
-func (c *meteredContext) countWrites(count, n int) {
-	c.writes.Add(uint64(count))
-	c.writeBytes.Add(uint64(n))
-}
-
-func (c *meteredContext) PutBranch(prefix, data, prevData []byte) error {
-	c.countWrites(1, len(data))
-	return c.PatriciaContext.PutBranch(prefix, data, prevData)
+func (c *meteredContext) countDeltas(parts deltaParts) {
+	size := 0
+	for _, part := range parts {
+		c.writes.Add(uint64(len(part)))
+		for i := range part {
+			size += len(part[i].Data)
+		}
+	}
+	c.writeBytes.Add(uint64(size))
 }
 
 func (c *meteredContext) wrap(inner commitment.PatriciaContext) *meteredContext {
