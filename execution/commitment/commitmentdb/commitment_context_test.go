@@ -44,7 +44,7 @@ func TestCommitmentV4StateDispatch(t *testing.T) {
 	state, err := sdc.encodeCommitmentState(12, 34)
 	require.NoError(t, err)
 	require.Equal(t, commitment.CommitmentV4StateMarker, state[0])
-	require.Equal(t, KeyCommitmentV4State, sdc.commitmentStateKey())
+	require.Equal(t, commitment.KeyCommitmentV4State, sdc.commitmentStateKey())
 
 	blockNum, txNum, err := sdc.restorePatriciaState(state)
 	require.NoError(t, err)
