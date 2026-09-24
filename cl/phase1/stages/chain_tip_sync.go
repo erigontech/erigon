@@ -241,8 +241,9 @@ MainLoop:
 			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
 			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
 			payloadReplay := storedParentPayloadReplay{
-				deadline: time.Now().Add(gloasPayloadRetryBudget),
-				results:  make(map[common.Hash]bool),
+				deadline:  time.Now().Add(gloasPayloadRetryBudget),
+				remaining: len(envelopes),
+				results:   make(map[common.Hash]bool),
 			}
 
 			// Handle blocks received on the response channel
@@ -363,7 +364,11 @@ func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock)
 		}
 		hasEnvelope := cfg.forkChoice.HasEnvelope(common.Hash(parentRoot))
 		status, statusFound := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(common.Hash(parentRoot))
-		if parentEnvelopeNeedsRecovery(block, parentBlock, hasEnvelope, status, statusFound) {
+		gasLimitFound := false
+		if parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid(); parentBid != nil && parentBid.Message != nil {
+			_, gasLimitFound = cfg.forkChoice.GetExecutionPayloadGasLimit(parentBid.Message.BlockHash)
+		}
+		if parentEnvelopeNeedsRecovery(block, parentBlock, hasEnvelope, status, statusFound, gasLimitFound) {
 			roots = append(roots, parentRoot)
 			seen[parentRoot] = struct{}{}
 		}
@@ -380,8 +385,8 @@ func parentEnvelopeRequired(child, parent *cltypes.SignedBeaconBlock) bool {
 	return childBid != nil && childBid.Message != nil && parentBid != nil && parentBid.Message != nil && childBid.Message.ParentBlockHash == parentBid.Message.BlockHash
 }
 
-func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound bool) bool {
-	return parentEnvelopeRequired(child, parent) && (!stored || !statusFound || status == execution_client.PayloadStatusNone)
+func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound, gasLimitFound bool) bool {
+	return parentEnvelopeRequired(child, parent) && (!stored || !statusFound || status == execution_client.PayloadStatusNone || !gasLimitFound)
 }
 
 // fetchParentEnvelopes batch-fetches execution payload envelopes for the given roots.
@@ -844,8 +849,9 @@ type storedParentPayloadStore interface {
 }
 
 type storedParentPayloadReplay struct {
-	deadline time.Time
-	results  map[common.Hash]bool
+	deadline  time.Time
+	remaining int
+	results   map[common.Hash]bool
 }
 
 func (r *storedParentPayloadReplay) accepted(
@@ -862,7 +868,17 @@ func (r *storedParentPayloadReplay) accepted(
 	if accepted, ok := r.results[root]; ok {
 		return accepted
 	}
-	retryCtx, cancel := context.WithDeadline(ctx, r.deadline)
+	attemptDeadline := r.deadline
+	if r.remaining > 1 {
+		now := time.Now()
+		if budget := r.deadline.Sub(now); budget > 0 {
+			attemptDeadline = now.Add(budget / time.Duration(r.remaining))
+		}
+	}
+	if r.remaining > 0 {
+		r.remaining--
+	}
+	retryCtx, cancel := context.WithDeadline(ctx, attemptDeadline)
 	accepted := ensureStoredParentPayloadAccepted(retryCtx, cfg, store, root, envelope)
 	cancel()
 	r.results[root] = accepted
@@ -1214,7 +1230,12 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	}
 	execHash := envelope.Message.Payload.BlockHash
 	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(anchorRoot, execHash, status)
+	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+		anchorRoot,
+		execHash,
+		status,
+		envelope.Message.Payload.GasLimit,
+	)
 	if !retained {
 		return
 	}

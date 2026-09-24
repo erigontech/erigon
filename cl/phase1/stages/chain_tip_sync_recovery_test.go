@@ -12,7 +12,25 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
+
+type orderedPayloadValidator struct {
+	slow  common.Hash
+	calls []common.Hash
+}
+
+func (v *orderedPayloadValidator) NewPayloadWithAdmission(ctx context.Context, payload *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+	v.calls = append(v.calls, payload.BlockHash)
+	if payload.BlockHash == v.slow {
+		<-ctx.Done()
+		return execution_client.PayloadStatusNone, ctx.Err()
+	}
+	if err := ctx.Err(); err != nil {
+		return execution_client.PayloadStatusNone, err
+	}
+	return execution_client.PayloadStatusNotValidated, nil
+}
 
 type storedParentPayloadTestStore struct {
 	has          bool
@@ -79,9 +97,10 @@ func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {
 	require.False(t, parentEnvelopeRequired(nil, parent))
 	require.False(t, parentEnvelopeRequired(child, nil))
 	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{1}
-	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusValidated, true))
-	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, true))
-	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, false))
+	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusValidated, true, true))
+	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusValidated, true, false))
+	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, true, true))
+	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, false, true))
 }
 
 func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
@@ -212,6 +231,39 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 	require.False(t, accepted)
 	require.False(t, replayed)
 	require.Equal(t, 1, engine.newPayloadCalls)
+}
+
+func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
+	firstRoot := common.Hash{1}
+	secondRoot := common.Hash{2}
+	firstPayload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	firstPayload.BlockHash = common.Hash{3}
+	secondPayload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	secondPayload.BlockHash = common.Hash{4}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	firstStore := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
+	secondStore := &storedParentPayloadTestStore{has: true, block: block, markRetained: true}
+	validator := &orderedPayloadValidator{slow: firstPayload.BlockHash}
+	replay := storedParentPayloadReplay{
+		deadline:  time.Now().Add(100 * time.Millisecond),
+		remaining: 2,
+		results:   make(map[common.Hash]bool),
+	}
+	cfg := &Cfg{
+		beaconCfg:             &clparams.MainnetBeaconConfig,
+		executionClient:       &testExecutionEngine{},
+		gloasPayloadValidator: validator,
+	}
+
+	require.False(t, replay.accepted(t.Context(), cfg, firstStore, firstRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: firstRoot,
+		Payload:         firstPayload,
+	}}, nil))
+	require.True(t, replay.accepted(t.Context(), cfg, secondStore, secondRoot, &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: secondRoot,
+		Payload:         secondPayload,
+	}}, nil))
+	require.Equal(t, []common.Hash{firstPayload.BlockHash, secondPayload.BlockHash}, validator.calls)
 }
 
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {

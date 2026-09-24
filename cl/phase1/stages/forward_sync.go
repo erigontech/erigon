@@ -474,7 +474,12 @@ func validateAnchorPayloadWithExecutionClient(ctx context.Context, cfg *Cfg, anc
 		log.Warn("[Caplin] Anchor envelope EL validation failed", "anchorRoot", anchorRoot, "status", status, "err", err)
 	}
 	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(anchorRoot, env.Message.Payload.BlockHash, status)
+	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+		anchorRoot,
+		env.Message.Payload.BlockHash,
+		status,
+		env.Message.Payload.GasLimit,
+	)
 	if !retained {
 		return nil
 	}

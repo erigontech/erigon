@@ -3,6 +3,7 @@ package stages
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math/big"
 	"sync"
 	"testing"
@@ -1091,31 +1092,46 @@ func TestForwardSyncValidatesOnlyWhenInsertionIsUnavailable(t *testing.T) {
 }
 
 func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
-	cfg, _, bid, env, anchorRoot := validAnchorEnvelopeFixture(t, 1)
-	remoteEL := &testExecutionEngine{
-		supportInsertion: false,
-		payloadStatus:    execution_client.PayloadStatusValidated,
-	}
+	cfg, st, bid, env, _ := validAnchorEnvelopeFixture(t, 1)
+	anchorRoot, err := st.BlockRoot()
+	require.NoError(t, err)
 
-	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
-		beaconCfg:             cfg,
-		executionClient:       remoteEL,
-		gloasPayloadValidator: remoteEL,
-		forkChoice:            &forkchoice.ForkChoiceStore{},
-	}, anchorRoot, bid, env))
-	require.Equal(t, 1, remoteEL.newPayloadCalls)
+	for _, supportInsertion := range []bool{false, true} {
+		t.Run(fmt.Sprintf("supports insertion=%t", supportInsertion), func(t *testing.T) {
+			forkGraph, err := fork_graph.NewForkGraphDisk(st, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+			require.NoError(t, err)
+			store, err := forkchoice.NewForkChoiceStore(
+				nil,
+				st,
+				nil,
+				pool.NewOperationsPool(cfg),
+				forkGraph,
+				beaconevents.NewEventEmitter(),
+				nil,
+				nil,
+				public_keys_registry.NewInMemoryPublicKeysRegistry(),
+				validator_params.NewValidatorParams(),
+				false,
+				nil,
+			)
+			require.NoError(t, err)
+			engine := &testExecutionEngine{
+				supportInsertion: supportInsertion,
+				payloadStatus:    execution_client.PayloadStatusValidated,
+			}
 
-	localEL := &testExecutionEngine{
-		supportInsertion: true,
-		payloadStatus:    execution_client.PayloadStatusValidated,
+			require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
+				beaconCfg:             cfg,
+				executionClient:       engine,
+				gloasPayloadValidator: engine,
+				forkChoice:            store,
+			}, anchorRoot, bid, env))
+			require.Equal(t, 1, engine.newPayloadCalls)
+			gasLimit, ok := store.GetExecutionPayloadGasLimit(env.Message.Payload.BlockHash)
+			require.True(t, ok)
+			require.Equal(t, env.Message.Payload.GasLimit, gasLimit)
+		})
 	}
-	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
-		beaconCfg:             cfg,
-		executionClient:       localEL,
-		gloasPayloadValidator: localEL,
-		forkChoice:            &forkchoice.ForkChoiceStore{},
-	}, anchorRoot, bid, env))
-	require.Equal(t, 1, localEL.newPayloadCalls)
 }
 
 func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
