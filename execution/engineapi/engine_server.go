@@ -577,7 +577,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 		return ret, nil
 	}
-
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.

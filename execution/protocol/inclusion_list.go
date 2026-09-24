@@ -16,7 +16,6 @@ func CheckInclusionListTransactions(
 	blockTxns types.Transactions,
 	inclusionListTxns types.Transactions,
 ) bool {
-
 	inBlock := make(map[common.Hash]struct{}, len(blockTxns))
 	for _, tx := range blockTxns {
 		inBlock[tx.Hash()] = struct{}{}

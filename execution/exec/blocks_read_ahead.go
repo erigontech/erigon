@@ -30,10 +30,10 @@ import (
 
 type BlockReadAheader struct {
 	// keeps some caches for block themselves
-	headers        *lru.Cache[common.Hash, *types.Header]
-	bodies         *lru.Cache[common.Hash, *types.Body]
-	senders        *lru.Cache[common.Hash, []byte] // just do raw senders
-	bals           *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
+	headers *lru.Cache[common.Hash, *types.Header]
+	bodies  *lru.Cache[common.Hash, *types.Body]
+	senders *lru.Cache[common.Hash, []byte] // just do raw senders
+	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
 	// inclusionLists is the only copy of each IL (never persisted), so unlike
 	// the other caches a miss cannot fall back to the DB.
 	inclusionLists *lru.Cache[common.Hash, types.Transactions]
