@@ -63,15 +63,16 @@ func run(typeName, dir, out string) error {
 	}
 
 	var body bytes.Buffer
-	if err := writeFields(&body, target, structs, "x", map[string]struct{}{}); err != nil {
+	used := map[string]bool{"jsonstream": true}
+	if err := writeFields(&body, target, structs, "x", map[string]struct{}{}, used); err != nil {
 		return fmt.Errorf("%s: %w", typeName, err)
 	}
 
 	imports := []string{`"github.com/erigontech/erigon/rpc/jsonstream"`}
-	if strings.Contains(body.String(), "ethjson.") {
+	if used["ethjson"] {
 		imports = append(imports, `"github.com/erigontech/erigon/rpc/jsonstream/ethjson"`)
 	}
-	if strings.Contains(body.String(), "uint256.") {
+	if used["uint256"] {
 		imports = append([]string{`"github.com/holiman/uint256"`, ""}, imports...)
 	}
 
@@ -145,7 +146,7 @@ func parsePackage(dir string) (string, map[string]*ast.StructType, error) {
 
 // writeFields emits one statement per field. An embedded struct is flattened, the way
 // encoding/json flattens an anonymous field.
-func writeFields(w *bytes.Buffer, st *ast.StructType, structs map[string]*ast.StructType, recv string, written map[string]struct{}) error {
+func writeFields(w *bytes.Buffer, st *ast.StructType, structs map[string]*ast.StructType, recv string, written map[string]struct{}, used map[string]bool) error {
 	for _, f := range st.Fields.List {
 		tag := reflect.StructTag("")
 		if f.Tag != nil {
@@ -165,7 +166,7 @@ func writeFields(w *bytes.Buffer, st *ast.StructType, structs map[string]*ast.St
 			if !ok {
 				return fmt.Errorf("embedded %s is not a struct in this package", typeString(f.Type))
 			}
-			if err := writeFields(w, embedded, structs, recv, written); err != nil {
+			if err := writeFields(w, embedded, structs, recv, written, used); err != nil {
 				return err
 			}
 			continue
@@ -189,7 +190,7 @@ func writeFields(w *bytes.Buffer, st *ast.StructType, structs map[string]*ast.St
 				return fmt.Errorf("%s: %q is already written; encoding/json would emit it once", id.Name, name)
 			}
 			written[name] = struct{}{}
-			stmt, err := fieldStatement(recv+"."+id.Name, name, tag.Get("ethjson"), typeString(f.Type), strings.Contains(opts, "omitempty"))
+			stmt, err := fieldStatement(recv+"."+id.Name, name, tag.Get("ethjson"), typeString(f.Type), strings.Contains(opts, "omitempty"), used)
 			if err != nil {
 				return fmt.Errorf("%s: %w", id.Name, err)
 			}
@@ -208,23 +209,32 @@ func typeString(e ast.Expr) string {
 // fieldStatement picks the writer for one field from its declared form and Go type. A field
 // its json tag lets omit is wrapped in the presence test encoding/json would apply; without
 // omitempty, an absent value is written as null.
-func fieldStatement(ref, name, form, goType string, omitempty bool) (string, error) {
+func fieldStatement(ref, name, form, goType string, omitempty bool, used map[string]bool) (string, error) {
 	pointer := strings.HasPrefix(goType, "*")
 	bare := strings.TrimPrefix(goType, "*")
 
 	var write, present string
+	used["jsonstream"] = true
 	switch form {
 	case "":
 		return "", fmt.Errorf("no ethjson tag")
 	case "bool":
+		if pointer {
+			return "", fmt.Errorf(`ethjson:"bool" on a pointer`)
+		}
 		write = fmt.Sprintf("s.Field(%q).WriteBool(%s)", name, ref)
 		present = ref
 	case "datalist":
+		if pointer {
+			return "", fmt.Errorf(`ethjson:"datalist" on a pointer`)
+		}
+		used["ethjson"] = true
 		write = fmt.Sprintf("ethjson.DataList(s, %q, %s)", name, ref)
 		present = fmt.Sprintf("len(%s) > 0", ref)
 	case "data":
 		// Slicing reads the same on an array, a pointer to one and a slice, so the emitted
 		// call does not need to know which it has.
+		used["ethjson"] = true
 		write = fmt.Sprintf("ethjson.Data(s, %q, %s[:])", name, ref)
 		if pointer {
 			present = ref + " != nil"
@@ -234,15 +244,20 @@ func fieldStatement(ref, name, form, goType string, omitempty bool) (string, err
 	case "quantity":
 		switch {
 		case is256(bare) && pointer:
+			used["ethjson"], used["uint256"] = true, true
 			write = fmt.Sprintf("ethjson.Quantity256(s, %q, (*uint256.Int)(%s))", name, ref)
 			present = ref + " != nil"
 		case is256(bare):
+			used["ethjson"], used["uint256"] = true, true
 			write = fmt.Sprintf("ethjson.Quantity256(s, %q, (*uint256.Int)(&%s))", name, ref)
+			used["uint256"] = true
 			present = fmt.Sprintf("!(*uint256.Int)(&%s).IsZero()", ref)
 		case pointer:
+			used["ethjson"] = true
 			write = fmt.Sprintf("ethjson.Quantity(s, %q, *%s)", name, ref)
 			present = ref + " != nil"
 		default:
+			used["ethjson"] = true
 			write = fmt.Sprintf("ethjson.Quantity(s, %q, %s)", name, ref)
 			present = ref + " != 0"
 		}
