@@ -109,12 +109,6 @@ func TestSwapBalance(t *testing.T) {
 	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	latest := rpc.LatestBlockNumber
-	results, err := api.CallMany(context.Background(), json.RawMessage(`
-[
-	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
-	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
-]
-`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
 	/*
 		Let's assume A - 0x71562b71999873db5b286df957af199ec94617f7 B - 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b
 		A has big balance.
@@ -122,7 +116,14 @@ func TestSwapBalance(t *testing.T) {
 		2. Return 1 wei to initial sender. Gp: 0 wei. Spent: 1 wei.
 		Balance new: 1 wei
 		Balance old diff is 1 wei.
-	*/if err != nil {
+	*/
+	results, err := api.CallMany(context.Background(), json.RawMessage(`
+[
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
+]
+`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
 	if results == nil {
@@ -248,6 +249,11 @@ func TestCorrectStateDiff(t *testing.T) {
 	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
 	latest := rpc.LatestBlockNumber
+	/*
+		C->D 1 wei
+		A->B 2 wei
+		B->A 1 wei
+	*/
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
 	[{"from":"0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]],
@@ -255,11 +261,7 @@ func TestCorrectStateDiff(t *testing.T) {
 	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
 ]
 `), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
-	/*
-		C->D 1 wei
-		A->B 2 wei
-		B->A 1 wei
-	*/if err != nil {
+	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
 	if results == nil {
