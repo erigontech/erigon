@@ -69,8 +69,19 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 	return maps.Clone(Precompiles(chainRules))
 }
 
+// Precompiles resolves the newest active fork first. The case order is load-bearing:
+// an arm placed below an older fork's arm can never match, because that older fork
+// stays active forever.
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
+	case chainRules.IsOsaka:
+		return PrecompiledContractsOsaka
+	case chainRules.IsPrague:
+		return PrecompiledContractsPrague
+	case chainRules.IsCancun:
+		return PrecompiledContractsCancun
+	case chainRules.IsHertz:
+		return PrecompiledContractsHertzForBSC
 	case chainRules.IsPlato:
 		return PrecompiledContractsPlatoForBSC
 	case chainRules.IsLuban:
@@ -81,19 +92,12 @@ func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 		return PrecompiledContractsMoranForBSC
 	case chainRules.IsNano:
 		return PrecompiledContractsNanoForBSC
-	case chainRules.IsParlia:
-		// BSC base cross-chain precompiles. Later BSC-fork sets (Nano+, Cancun
-		// KZG, Prague BLS) are added as those forks are reached.
-		return PrecompiledContractsIstanbulForBSC
-	case chainRules.IsOsaka:
-		return PrecompiledContractsOsaka
-	case chainRules.IsPrague:
-		return PrecompiledContractsPrague
-	case chainRules.IsCancun:
-		return PrecompiledContractsCancun
 	case chainRules.IsBerlin:
 		return PrecompiledContractsBerlin
 	case chainRules.IsIstanbul:
+		if chainRules.IsParlia {
+			return PrecompiledContractsIstanbulForBSC
+		}
 		return PrecompiledContractsIstanbul
 	case chainRules.IsByzantium:
 		return PrecompiledContractsByzantium
@@ -249,6 +253,17 @@ var PrecompiledContractsPlatoForBSC = func() PrecompiledContracts {
 	return m
 }()
 
+// PrecompiledContractsHertzForBSC clones Berlin rather than Plato: Hertz is where BSC
+// activates Berlin, so modexp moves to its EIP-2565 pricing at the same block.
+var PrecompiledContractsHertzForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsBerlin)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{100}))] = &tmHeaderValidate{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{101}))] = &iavlMerkleProofValidatePlato{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{102}))] = &blsSignatureVerify{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{103}))] = &cometBFTLightBlockValidateHertz{}
+	return m
+}()
+
 var (
 	PrecompiledAddressesOsaka          []accounts.Address
 	PrecompiledAddressesPrague         []accounts.Address
@@ -261,6 +276,7 @@ var (
 	PrecompiledAddressesPlanckForBSC   []accounts.Address
 	PrecompiledAddressesLubanForBSC    []accounts.Address
 	PrecompiledAddressesPlatoForBSC    []accounts.Address
+	PrecompiledAddressesHertzForBSC    []accounts.Address
 	PrecompiledAddressesByzantium      []accounts.Address
 	PrecompiledAddressesHomestead      []accounts.Address
 )
@@ -293,6 +309,9 @@ func init() {
 	for k := range PrecompiledContractsPlatoForBSC {
 		PrecompiledAddressesPlatoForBSC = append(PrecompiledAddressesPlatoForBSC, k)
 	}
+	for k := range PrecompiledContractsHertzForBSC {
+		PrecompiledAddressesHertzForBSC = append(PrecompiledAddressesHertzForBSC, k)
+	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
@@ -310,6 +329,14 @@ func init() {
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	switch {
+	case rules.IsOsaka:
+		return PrecompiledAddressesOsaka
+	case rules.IsPrague:
+		return PrecompiledAddressesPrague
+	case rules.IsCancun:
+		return PrecompiledAddressesCancun
+	case rules.IsHertz:
+		return PrecompiledAddressesHertzForBSC
 	case rules.IsPlato:
 		return PrecompiledAddressesPlatoForBSC
 	case rules.IsLuban:
@@ -320,17 +347,12 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 		return PrecompiledAddressesMoranForBSC
 	case rules.IsNano:
 		return PrecompiledAddressesNanoForBSC
-	case rules.IsParlia:
-		return PrecompiledAddressesIstanbulForBSC
-	case rules.IsOsaka:
-		return PrecompiledAddressesOsaka
-	case rules.IsPrague:
-		return PrecompiledAddressesPrague
-	case rules.IsCancun:
-		return PrecompiledAddressesCancun
 	case rules.IsBerlin:
 		return PrecompiledAddressesBerlin
 	case rules.IsIstanbul:
+		if rules.IsParlia {
+			return PrecompiledAddressesIstanbulForBSC
+		}
 		return PrecompiledAddressesIstanbul
 	case rules.IsByzantium:
 		return PrecompiledAddressesByzantium

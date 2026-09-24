@@ -473,7 +473,7 @@ func (c *cometBFTLightBlockValidate) RequiredGas(input []byte) uint64 {
 	return params2.CometBFTLightBlockValidateGas
 }
 
-func (c *cometBFTLightBlockValidate) Run(input []byte) (result []byte, err error) {
+func (c *cometBFTLightBlockValidate) run(input []byte, isHertz bool) (result []byte, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("internal error: %v", r)
@@ -485,7 +485,7 @@ func (c *cometBFTLightBlockValidate) Run(input []byte) (result []byte, err error
 		return nil, err
 	}
 
-	validatorSetChanged, err := cs.ApplyLightBlock(block, false)
+	validatorSetChanged, err := cs.ApplyLightBlock(block, isHertz)
 	if err != nil {
 		return nil, err
 	}
@@ -496,4 +496,21 @@ func (c *cometBFTLightBlockValidate) Run(input []byte) (result []byte, err error
 	}
 
 	return v2.EncodeLightBlockValidationResult(validatorSetChanged, consensusStateBytes), nil
+}
+
+func (c *cometBFTLightBlockValidate) Run(input []byte) (result []byte, err error) {
+	return c.run(input, false)
+}
+
+// cometBFTLightBlockValidateHertz corrects the validator-set-changed flag, which the
+// pre-Hertz contract computes against the already-updated state and so always reports
+// as unchanged.
+type cometBFTLightBlockValidateHertz struct {
+	cometBFTLightBlockValidate
+}
+
+func (c *cometBFTLightBlockValidateHertz) Name() string { return "CometBFTLightBlockValidateHertz" }
+
+func (c *cometBFTLightBlockValidateHertz) Run(input []byte) (result []byte, err error) {
+	return c.run(input, true)
 }

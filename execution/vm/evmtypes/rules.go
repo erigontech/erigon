@@ -53,6 +53,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsPlanck:           c.IsPlanck(bc.BlockNumber),
 		IsLuban:            c.IsLuban(bc.BlockNumber),
 		IsPlato:            c.IsPlato(bc.BlockNumber),
+		IsHertz:            c.IsHertz(bc.BlockNumber),
 	}
 
 	if c.L2 != nil {
