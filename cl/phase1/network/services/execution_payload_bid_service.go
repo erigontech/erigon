@@ -479,12 +479,19 @@ func (s *executionPayloadBidService) validateBidAuthentication(ctx context.Conte
 
 func (s *executionPayloadBidService) parentBuilderExitRequests(ctx context.Context, root common.Hash, now time.Time) ([]solid.BuilderExitRequest, error) {
 	s.parentExitsMu.Lock()
+	var cachedFailure parentBuilderExitsResult
+	hasCachedFailure := false
 	if result, ok := s.parentExitsCache.Get(root); ok {
-		if result.err == nil || now.Before(result.retryAt) {
+		if result.err == nil {
 			s.parentExitsMu.Unlock()
-			return result.requests, result.err
+			return result.requests, nil
 		}
-		s.parentExitsCache.Remove(root)
+		if now.Before(result.retryAt) {
+			cachedFailure = result
+			hasCachedFailure = true
+		} else {
+			s.parentExitsCache.Remove(root)
+		}
 	}
 	if reader, ok := s.forkchoiceStore.(cachedParentBuilderExitReader); ok {
 		if requests, ok := reader.GetCachedParentBuilderExitRequests(root); ok {
@@ -499,6 +506,10 @@ func (s *executionPayloadBidService) parentBuilderExitRequests(ctx context.Conte
 			s.parentExitsMu.Unlock()
 			return requests, nil
 		}
+	}
+	if hasCachedFailure {
+		s.parentExitsMu.Unlock()
+		return cachedFailure.requests, cachedFailure.err
 	}
 	if err := ctx.Err(); err != nil {
 		s.parentExitsMu.Unlock()

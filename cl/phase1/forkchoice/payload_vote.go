@@ -201,7 +201,7 @@ func (f *ForkChoiceStore) getParentPayloadStatus(block *cltypes.BeaconBlock) clt
 
 // ParentPayloadStatusFromBids derives the parent's canonical payload status from its child.
 func ParentPayloadStatusFromBids(parentBlock *cltypes.SignedBeaconBlock, block *cltypes.BeaconBlock) cltypes.PayloadStatus {
-	if parentBlock == nil || parentBlock.Block == nil || block == nil {
+	if parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil || block == nil || block.Body == nil {
 		return cltypes.PayloadStatusEmpty
 	}
 	// Pre-GLOAS parent blocks have no bid field. From the GLOAS fork choice

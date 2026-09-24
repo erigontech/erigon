@@ -56,6 +56,7 @@ type executionPayloadEnvelopesByRangeTestCase struct {
 	missingFirstFull   bool
 	missingMiddleFull  bool
 	incompleteBlock    bool
+	incompleteBody     bool
 	emptyRange         bool
 	headIndexMismatch  bool
 	wantResponsePrefix byte
@@ -71,6 +72,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		{name: "missing first full envelope", headPayloadStatus: cltypes.PayloadStatusFull, missingFirstFull: true, wantResponsePrefix: ResourceUnavailablePrefix},
 		{name: "missing middle full envelope", headPayloadStatus: cltypes.PayloadStatusFull, missingMiddleFull: true},
 		{name: "incomplete canonical block", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBlock: true, wantResponsePrefix: ResourceUnavailablePrefix},
+		{name: "canonical block with nil body", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBody: true, wantResponsePrefix: ResourceUnavailablePrefix},
 		{name: "empty slot range ignores later incomplete block", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBlock: true, emptyRange: true},
 		{name: "head and canonical index mismatch", headPayloadStatus: cltypes.PayloadStatusFull, headIndexMismatch: true, wantResponsePrefix: ResourceUnavailablePrefix},
 	} {
@@ -202,6 +204,9 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 			incompleteRoot = canonicalRoots[0]
 		}
 		fcMock.Blocks[incompleteRoot] = &cltypes.SignedBeaconBlock{}
+	}
+	if tc.incompleteBody {
+		fcMock.Blocks[canonicalRoots[1]].Block.Body = nil
 	}
 	if tc.headIndexMismatch {
 		fcMock.HeadVal = common.Hash{0xee}
