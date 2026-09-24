@@ -315,6 +315,9 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 	case "datalist":
 		write = fmt.Sprintf("ethjson.DataList(s, %q, %s)", name, ref)
 		present = fmt.Sprintf("len(%s) > 0", ref)
+	case "datas":
+		write = fmt.Sprintf("ethjson.Datas(s, %q, %s)", name, ref)
+		present = fmt.Sprintf("len(%s) > 0", ref)
 	case "data":
 		// Slicing reads the same on an array and on a pointer to one, but a pointer to a slice
 		// has to be dereferenced first.

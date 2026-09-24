@@ -79,10 +79,12 @@ type PayloadAttributes struct {
 // BlobsBundle holds the blobs of an execution payload.
 // It covers both BlobsBundleV1 (https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#blobsbundlev1)
 // and BlobsBundleV2 (https://github.com/ethereum/execution-apis/blob/main/src/engine/osaka.md#blobsbundlev2)
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobsBundle
+
 type BlobsBundle struct {
-	Commitments []hexutil.Bytes       `json:"commitments"`
-	Proofs      []hexutil.Bytes       `json:"proofs"`
-	Blobs       []hexutil.Bytes       `json:"blobs"`
+	Commitments []hexutil.Bytes       `json:"commitments" ethjson:"datas"`
+	Proofs      []hexutil.Bytes       `json:"proofs" ethjson:"datas"`
+	Blobs       []hexutil.Bytes       `json:"blobs" ethjson:"datas"`
 	SSZVersion  clparams.StateVersion `json:"-"`
 }
 
