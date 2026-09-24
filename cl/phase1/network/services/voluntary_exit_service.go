@@ -114,7 +114,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 
 	currentEpoch := uint64(0)
-	now := s.now().Add(500 * time.Millisecond)
+	now := s.now().Add(maximumGossipClockDisparity)
 	if !now.Before(s.ethClock.GetSlotTime(0)) {
 		currentEpoch = s.ethClock.GetEpochAtSlot(s.ethClock.GetSlotByTime(now))
 	}
