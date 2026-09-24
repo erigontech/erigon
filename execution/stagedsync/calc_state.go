@@ -42,7 +42,7 @@ type calcStorage struct {
 	slots map[accounts.StorageKey]calcSlot
 }
 
-func (st *calcStorage) set(key accounts.StorageKey, value uint256.Int) {
+func (st *calcStorage) set(key accounts.StorageKey, value uint256.Int) [32]byte {
 	slot, ok := st.slots[key]
 	if !ok {
 		k := key.Value()
@@ -50,6 +50,7 @@ func (st *calcStorage) set(key accounts.StorageKey, value uint256.Int) {
 	}
 	slot.value = value
 	st.slots[key] = slot
+	return slot.hash
 }
 
 // calcDomainReader provides lazy-load reads for calcState using the
@@ -137,6 +138,8 @@ type calcState struct {
 	feedUpdates []commitment.Update
 	feedSlots   []commitment.FeedSlot
 	feedValues  []byte
+
+	prefetch *branchPrefetcher
 }
 
 // LazyLoadErr returns the first error encountered during ensureAccount
@@ -203,6 +206,7 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
+	cs.prefetch.add(prefetchItem{account: acc.hash})
 }
 
 // ApplyWrites folds a tx's typed write collections into the local state.
@@ -273,10 +277,14 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
+			cs.prefetch.add(prefetchItem{account: slots.hash})
 		}
 		for key, vw := range inner {
-			slots.set(key, vw.Val)
-			dirty[key] = true
+			hash := slots.set(key, vw.Val)
+			if !dirty[key] {
+				dirty[key] = true
+				cs.prefetch.add(prefetchItem{account: slots.hash, slot: hash, storage: true})
+			}
 		}
 	}
 	// An account still Deleted after the field writes (no reviving non-zero

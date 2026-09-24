@@ -92,3 +92,28 @@ func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 	}
 	return nextDepth, false
 }
+
+func PrefetchPath(read func(key []byte) []byte, addrHash, slotHash []byte, depth int) {
+	var nibbles [128]byte
+	hashedKey := unpackPath(addrHash, 64, nibbles[:64:64])
+	if len(slotHash) != 0 {
+		unpackPath(slotHash, 64, nibbles[64:128:128])
+		hashedKey = nibbles[:128]
+	}
+	var buf [2 + 32 + 32 + 1]byte
+	for depth < len(hashedKey) {
+		key, ok := warmupKeyV4(hashedKey, depth, buf[:0])
+		if !ok {
+			return
+		}
+		data := read(key)
+		if len(data) == 0 {
+			return
+		}
+		next, stop := warmupStepV4(data, hashedKey, depth)
+		if stop || next <= depth {
+			return
+		}
+		depth = next
+	}
+}

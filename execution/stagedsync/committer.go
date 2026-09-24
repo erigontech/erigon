@@ -317,6 +317,10 @@ func newCommitmentCalculator(
 	// (avoids future sd.mem state) and GetLatest for commitment branches
 	// (written sequentially by this calculator).
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, txNum: 0}
+	calc := newCalcState(asOfReader, logger, logPrefix)
+	if branchPrefetchEnabled && doms.GetCommitmentContext().AcceptsFeed() {
+		calc.prefetch = newBranchPrefetcher(workCtx, db)
+	}
 
 	return &commitmentCalculator{
 		doms:                 doms,
@@ -326,7 +330,7 @@ func newCommitmentCalculator(
 		logger:               logger,
 		updates:              calcUpdates,
 		spare:                spareUpdates,
-		state:                newCalcState(asOfReader, logger, logPrefix),
+		state:                calc,
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
 		signalCtx:            signalCtx,
@@ -380,6 +384,7 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
+	cc.state.prefetch.close()
 	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
@@ -911,6 +916,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
+	cc.state.prefetch.drain()
 	sdCtx := cc.doms.GetCommitmentContext()
 	if sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
 		cc.state.FlushToFeed(&cc.feed)
