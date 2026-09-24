@@ -27,6 +27,8 @@ import (
 	jsoniter "github.com/json-iterator/go"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -103,6 +105,20 @@ func (s *StackStream) WriteQuantity(v uint64) {
 	buf := s.stream.Buffer()
 	start := len(buf)
 	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
+	s.commit(append(buf, '"'), start)
+	s.afterValue()
+}
+
+// WriteQuantity256 writes a 256-bit quantity the same way, null when the field is absent.
+func (s *StackStream) WriteQuantity256(v *uint256.Int) {
+	if v == nil {
+		s.WriteNil()
+		return
+	}
+	s.beforeValue()
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf, _ = hexutil.U256(*v).AppendText(append(buf, '"'))
 	s.commit(append(buf, '"'), start)
 	s.afterValue()
 }

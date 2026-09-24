@@ -21,7 +21,6 @@ package ethjson
 import (
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -46,30 +45,10 @@ func QuantityOrNull[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v
 
 // Quantity256 writes a 256-bit quantity, null when the field is absent.
 func Quantity256(s *jsonstream.StackStream, name string, v *uint256.Int) {
-	jsonstream.Text(s, name, (*hexutil.U256)(v))
+	s.Field(name).WriteQuantity256(v)
 }
 
 // Data writes a byte string whose length is its own, such as extraData or a log's data.
 func Data(s *jsonstream.StackStream, name string, b []byte) {
 	s.Field(name).WriteHex(b)
-}
-
-// The Omit writers leave a field out, which is what a json tag's omitempty asks for; a field
-// without omitempty writes null instead.
-func QuantityOmitEmpty[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v T) {
-	if v != 0 {
-		Quantity(s, name, v)
-	}
-}
-
-func QuantityPtrOmitEmpty[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v *T) {
-	if v != nil {
-		Quantity(s, name, *v)
-	}
-}
-
-func DataOmitEmpty(s *jsonstream.StackStream, name string, b []byte) {
-	if len(b) > 0 {
-		Data(s, name, b)
-	}
 }

@@ -50,8 +50,12 @@ func (h *Header) writeFastJSONFields(s *jsonstream.StackStream) {
 	ethjson.Data(s, "extraData", h.Extra)
 	ethjson.Data(s, "mixHash", h.MixDigest[:])
 	ethjson.Data(s, "nonce", h.Nonce[:])
-	ethjson.QuantityOmitEmpty(s, "auraStep", h.AuRaStep)
-	ethjson.DataOmitEmpty(s, "auraSeal", h.AuRaSeal)
+	if h.AuRaStep != 0 {
+		ethjson.Quantity(s, "auraStep", h.AuRaStep)
+	}
+	if len(h.AuRaSeal) != 0 {
+		ethjson.Data(s, "auraSeal", h.AuRaSeal)
+	}
 	ethjson.Quantity256(s, "baseFeePerGas", h.BaseFee)
 	writeHashField(s, "withdrawalsRoot", h.WithdrawalsHash)
 	ethjson.QuantityOrNull(s, "blobGasUsed", h.BlobGasUsed)
@@ -59,7 +63,9 @@ func (h *Header) writeFastJSONFields(s *jsonstream.StackStream) {
 	writeHashField(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot)
 	writeHashField(s, "requestsHash", h.RequestsHash)
 	writeHashField(s, "blockAccessListHash", h.BlockAccessListHash)
-	ethjson.QuantityPtrOmitEmpty(s, "slotNumber", h.SlotNumber)
+	if h.SlotNumber != nil {
+		ethjson.Quantity(s, "slotNumber", *h.SlotNumber)
+	}
 	hash := h.Hash()
 	ethjson.Data(s, "hash", hash[:])
 }
