@@ -24,98 +24,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// MarshalFastJSONTo writes the header as its own object. RPCBlock flattens the same fields
-// into its own object instead, through WriteFieldsTo.
-func (h *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if h == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteObjectStart()
-	h.WriteFieldsTo(s)
-	s.WriteObjectEnd()
-	return nil
-}
-
-// WriteFieldsTo writes the header's fields without the enclosing object, in the order the
-// struct declares them so the bytes match reflection exactly. The caller owns the braces,
-// which is how RPCBlock flattens the embedded header into its own object.
-func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
-	s.Field("number")
-	if h.Number == nil {
-		s.WriteNil()
-	} else {
-		s.WriteQuotedText(h.Number)
-	}
-	s.Field("hash")
-	if h.Hash == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(h.Hash[:])
-	}
-	s.Field("parentHash").WriteHex(h.ParentHash[:])
-	s.Field("nonce")
-	if h.Nonce == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(h.Nonce[:])
-	}
-	s.Field("mixHash").WriteHex(h.MixHash[:])
-	s.Field("sha3Uncles").WriteHex(h.Sha3Uncles[:])
-	s.Field("logsBloom")
-	if h.LogsBloom == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(h.LogsBloom[:])
-	}
-	s.Field("stateRoot").WriteHex(h.StateRoot[:])
-	s.Field("miner")
-	if h.Miner == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(h.Miner[:])
-	}
-	jsonstream.Text(s, "difficulty", h.Difficulty)
-	s.Field("extraData").WriteHex(h.ExtraData)
-	jsonstream.Text(s, "gasLimit", &h.GasLimit)
-	jsonstream.Text(s, "gasUsed", &h.GasUsed)
-	jsonstream.Text(s, "timestamp", &h.Timestamp)
-	s.Field("transactionsRoot").WriteHex(h.TransactionsRoot[:])
-	s.Field("receiptsRoot").WriteHex(h.ReceiptsRoot[:])
-
-	// omitempty: a nil pointer is left out entirely.
-	if h.BaseFeePerGas != nil {
-		jsonstream.Text(s, "baseFeePerGas", h.BaseFeePerGas)
-	}
-	if h.WithdrawalsRoot != nil {
-		s.Field("withdrawalsRoot").WriteHex(h.WithdrawalsRoot[:])
-	}
-	if h.BlobGasUsed != nil {
-		jsonstream.Text(s, "blobGasUsed", h.BlobGasUsed)
-	}
-	if h.ExcessBlobGas != nil {
-		jsonstream.Text(s, "excessBlobGas", h.ExcessBlobGas)
-	}
-	if h.ParentBeaconBlockRoot != nil {
-		s.Field("parentBeaconBlockRoot").WriteHex(h.ParentBeaconBlockRoot[:])
-	}
-	if h.RequestsHash != nil {
-		s.Field("requestsHash").WriteHex(h.RequestsHash[:])
-	}
-	if h.BlockAccessListHash != nil {
-		s.Field("blockAccessListHash").WriteHex(h.BlockAccessListHash[:])
-	}
-	if h.SlotNumber != nil {
-		jsonstream.Text(s, "slotNumber", h.SlotNumber)
-	}
-	if h.AuraSeal != nil {
-		s.Field("auraSeal").WriteHex(*h.AuraSeal)
-	}
-	if h.AuraStep != nil {
-		jsonstream.Text(s, "auraStep", h.AuraStep)
-	}
-}
-
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
 // without it the promoted header method would satisfy the fast-JSON interface and a block
 // would serialise as a bare header, losing its transactions.
@@ -162,7 +70,9 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 
 	if b.Withdrawals != nil {
 		s.Field("withdrawals")
-		jsonstream.ArrayValue(s, *b.Withdrawals, writeWithdrawalElem)
+		if err := b.Withdrawals.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
 	}
 	if b.TransactionCount != nil {
 		s.Field("transactionCount").Uint(*b.TransactionCount)
@@ -216,19 +126,6 @@ func writeLogElem(s *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).Marsha
 
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
 func writeTxElem(s *jsonstream.StackStream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }
-
-func writeWithdrawalElem(s *jsonstream.StackStream, wd **types.Withdrawal) {
-	if *wd == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	s.Field("index").WriteQuotedText(&(*wd).Index)
-	s.Field("validatorIndex").WriteQuotedText(&(*wd).Validator)
-	s.Field("address").WriteHex((*wd).Address[:])
-	s.Field("amount").WriteQuotedText(&(*wd).Amount)
-	s.WriteObjectEnd()
-}
 
 // marshalIfSet encodes v unless it is absent, so the caller states each field once.
 func marshalIfSet(v any) ([]byte, error) {

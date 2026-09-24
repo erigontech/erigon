@@ -36,6 +36,7 @@ import (
 	"go/types"
 	"os"
 	"reflect"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -47,6 +48,7 @@ func main() {
 	typeName := flag.String("type", "", "struct to generate for")
 	out := flag.String("out", "", "file to write; default gen_<type>_json.go")
 	computed := flag.String("computed", "", "method to call for fields the struct does not hold")
+	fields := flag.String("fields", "", "also write the fields into a method of this name, for a type another object inlines")
 	flag.Parse()
 	if *typeName == "" {
 		flag.Usage()
@@ -55,14 +57,14 @@ func main() {
 	if *out == "" {
 		*out = "gen_" + strings.ToLower(*typeName) + "_json.go"
 	}
-	if err := run(*typeName, *out, *computed); err != nil {
+	if err := run(*typeName, *out, *computed, *fields); err != nil {
 		fmt.Fprintln(os.Stderr, "jsongen:", err)
 		os.Exit(1)
 	}
 }
 
-func run(typeName, out, computed string) error {
-	pkg, err := load()
+func run(typeName, out, computed, fields string) error {
+	pkg, err := load(fields)
 	if err != nil {
 		return err
 	}
@@ -86,7 +88,11 @@ func run(typeName, out, computed string) error {
 	}
 
 	var file bytes.Buffer
-	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String(), method)
+	if fields == "" {
+		fmt.Fprintf(&file, header, pkg.Name, typeName, body.String(), method)
+	} else {
+		fmt.Fprintf(&file, headerWithFields, pkg.Name, typeName, body.String(), method, fields)
+	}
 	// imports.Process drops what the body does not use and gofmts in one step. The header names
 	// uint256 rather than leaving it to be resolved, because more than one module supplies that
 	// package name and the choice would then follow whoever ran the tool.
@@ -129,7 +135,41 @@ func (x *%[2]s) %[4]s(s *jsonstream.StackStream) error {
 // renamed since the last run still has its old name in a generated body, and on a first run the
 // method this writes is missing altogether; neither says anything about the tags. Any other
 // error does, and stops the run rather than generating from types that will not build.
-func load() (*packages.Package, error) {
+// headerWithFields keeps the fields in a method of their own, so a type that inlines this one
+// writes them without the enclosing object.
+const headerWithFields = marker + ` DO NOT EDIT.
+// The source of truth is %[2]s's json and ethjson tags.
+
+package %[1]s
+
+import (
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/rpc/jsonstream"
+)
+
+// %[4]s writes the fields %[2]s declares, in that order.
+func (x *%[2]s) %[4]s(s *jsonstream.StackStream) error {
+	if x == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteObjectStart()
+	if err := x.%[5]s(s); err != nil {
+		return err
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+// %[5]s writes those fields without the enclosing object.
+func (x *%[2]s) %[5]s(s *jsonstream.StackStream) error {
+%[3]s	return nil
+}
+`
+
+// load takes the names this run is about to write, so a first run reads past their absence.
+func load(fields string) (*packages.Package, error) {
 	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes |
 		packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps}
 	pkgs, err := packages.Load(cfg, ".")
@@ -139,8 +179,14 @@ func load() (*packages.Package, error) {
 	if len(pkgs) != 1 {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
+	writing := []string{method}
+	if fields != "" {
+		writing = append(writing, fields)
+	}
 	for _, e := range pkgs[0].Errors {
-		if strings.Contains(e.Msg, missingCall) || strings.Contains(e.Msg, missingForInterface) {
+		if slices.ContainsFunc(writing, func(name string) bool {
+			return strings.Contains(e.Msg, missingCallOf(name)) || strings.Contains(e.Msg, missingForInterfaceOf(name))
+		}) {
 			continue
 		}
 		content, err := os.ReadFile(positionFile(e.Pos))
@@ -154,10 +200,8 @@ func load() (*packages.Package, error) {
 // The two ways the compiler words the absence of the method this writes: a call to it, and a
 // value that has to satisfy an interface asking for it. Matching the whole phrase keeps any
 // other mention of the name an error.
-const (
-	missingCall         = "has no field or method " + method
-	missingForInterface = "missing method " + method
-)
+func missingCallOf(name string) string         { return "has no field or method " + name }
+func missingForInterfaceOf(name string) string { return "missing method " + name }
 
 // positionFile takes the file out of a packages.Error position. Cutting at the first colon
 // would keep only the drive letter of a Windows path, so the line and column come off the right.
@@ -272,9 +316,13 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 		write = fmt.Sprintf("ethjson.DataList(s, %q, %s)", name, ref)
 		present = fmt.Sprintf("len(%s) > 0", ref)
 	case "data":
-		// Slicing reads the same on an array, a pointer to one and a slice, so the emitted
-		// call does not need to know which it has.
-		write = fmt.Sprintf("ethjson.Data(s, %q, %s[:])", name, ref)
+		// Slicing reads the same on an array and on a pointer to one, but a pointer to a slice
+		// has to be dereferenced first.
+		sliced := ref + "[:]"
+		if _, slice := deref(t).Underlying().(*types.Slice); slice && pointer {
+			sliced = "(*" + ref + ")[:]"
+		}
+		write = fmt.Sprintf("ethjson.Data(s, %q, %s)", name, sliced)
 		if pointer {
 			present = ref + " != nil"
 		} else {

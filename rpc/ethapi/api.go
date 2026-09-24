@@ -383,40 +383,42 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 	return logger.FormatLogs(logs)
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCHeader -out gen_rpcheader_json.go -fields WriteFieldsTo
+
 // RPCHeader is the RPC representation of a block header. Quantities, byte slices
 // and optional hashes alias the header they were built from, so the caller must
 // pass a header nobody will mutate and must not write through the fields.
 // Hash, Nonce, Miner and LogsBloom are pointers because some namespaces null them.
 type RPCHeader struct {
-	Number           *hexutil.U256     `json:"number"`
-	Hash             *common.Hash      `json:"hash"`
-	ParentHash       common.Hash       `json:"parentHash"`
-	Nonce            *types.BlockNonce `json:"nonce"`
-	MixHash          common.Hash       `json:"mixHash"`
-	Sha3Uncles       common.Hash       `json:"sha3Uncles"`
-	LogsBloom        *types.Bloom      `json:"logsBloom"`
-	StateRoot        common.Hash       `json:"stateRoot"`
-	Miner            *common.Address   `json:"miner"`
-	Difficulty       *hexutil.U256     `json:"difficulty"`
-	ExtraData        hexutil.Bytes     `json:"extraData"`
-	GasLimit         hexutil.Uint64    `json:"gasLimit"`
-	GasUsed          hexutil.Uint64    `json:"gasUsed"`
-	Timestamp        hexutil.Uint64    `json:"timestamp"`
-	TransactionsRoot common.Hash       `json:"transactionsRoot"`
-	ReceiptsRoot     common.Hash       `json:"receiptsRoot"`
+	Number           *hexutil.U256     `json:"number" ethjson:"quantity"`
+	Hash             *common.Hash      `json:"hash" ethjson:"data"`
+	ParentHash       common.Hash       `json:"parentHash" ethjson:"data"`
+	Nonce            *types.BlockNonce `json:"nonce" ethjson:"data"`
+	MixHash          common.Hash       `json:"mixHash" ethjson:"data"`
+	Sha3Uncles       common.Hash       `json:"sha3Uncles" ethjson:"data"`
+	LogsBloom        *types.Bloom      `json:"logsBloom" ethjson:"data"`
+	StateRoot        common.Hash       `json:"stateRoot" ethjson:"data"`
+	Miner            *common.Address   `json:"miner" ethjson:"data"`
+	Difficulty       *hexutil.U256     `json:"difficulty" ethjson:"quantity"`
+	ExtraData        hexutil.Bytes     `json:"extraData" ethjson:"data"`
+	GasLimit         hexutil.Uint64    `json:"gasLimit" ethjson:"quantity"`
+	GasUsed          hexutil.Uint64    `json:"gasUsed" ethjson:"quantity"`
+	Timestamp        hexutil.Uint64    `json:"timestamp" ethjson:"quantity"`
+	TransactionsRoot common.Hash       `json:"transactionsRoot" ethjson:"data"`
+	ReceiptsRoot     common.Hash       `json:"receiptsRoot" ethjson:"data"`
 
-	BaseFeePerGas         *hexutil.U256   `json:"baseFeePerGas,omitempty"`
-	WithdrawalsRoot       *common.Hash    `json:"withdrawalsRoot,omitempty"`
-	BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed,omitempty"`
-	ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas,omitempty"`
-	ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot,omitempty"`
-	RequestsHash          *common.Hash    `json:"requestsHash,omitempty"`
-	BlockAccessListHash   *common.Hash    `json:"blockAccessListHash,omitempty"`
-	SlotNumber            *hexutil.Uint64 `json:"slotNumber,omitempty"`
+	BaseFeePerGas         *hexutil.U256   `json:"baseFeePerGas,omitempty" ethjson:"quantity"`
+	WithdrawalsRoot       *common.Hash    `json:"withdrawalsRoot,omitempty" ethjson:"data"`
+	BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed,omitempty" ethjson:"quantity"`
+	ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas,omitempty" ethjson:"quantity"`
+	ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot,omitempty" ethjson:"data"`
+	RequestsHash          *common.Hash    `json:"requestsHash,omitempty" ethjson:"data"`
+	BlockAccessListHash   *common.Hash    `json:"blockAccessListHash,omitempty" ethjson:"data"`
+	SlotNumber            *hexutil.Uint64 `json:"slotNumber,omitempty" ethjson:"quantity"`
 
 	// For Gnosis only
-	AuraSeal *hexutil.Bytes  `json:"auraSeal,omitempty"`
-	AuraStep *hexutil.Uint64 `json:"auraStep,omitempty"`
+	AuraSeal *hexutil.Bytes  `json:"auraSeal,omitempty" ethjson:"data"`
+	AuraStep *hexutil.Uint64 `json:"auraStep,omitempty" ethjson:"quantity"`
 }
 
 // RPCBlock is the RPC representation of a block. TransactionCount, TotalDifficulty

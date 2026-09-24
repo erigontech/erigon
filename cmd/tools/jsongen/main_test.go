@@ -38,7 +38,7 @@ func TestGenerateSample(t *testing.T) {
 	out := filepath.Join(t.TempDir(), "gen_sample_json.go")
 
 	t.Chdir("testdata/sample")
-	require.NoError(t, run("Sample", out, "writeComputedJSON"))
+	require.NoError(t, run("Sample", out, "writeComputedJSON", ""))
 	got, err := os.ReadFile(out)
 	require.NoError(t, err)
 
@@ -66,7 +66,7 @@ func TestGenerateRejects(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Chdir("testdata/bad")
-			require.Error(t, run(typeName, filepath.Join(t.TempDir(), "out.go"), ""))
+			require.Error(t, run(typeName, filepath.Join(t.TempDir(), "out.go"), "", ""))
 		})
 	}
 }
@@ -88,7 +88,7 @@ func TestGenerateOverStaleOutput(t *testing.T) {
 	}
 
 	t.Chdir(pkg)
-	require.NoError(t, run("Sample", "gen_sample_json.go", "writeComputedJSON"))
+	require.NoError(t, run("Sample", "gen_sample_json.go", "writeComputedJSON", ""))
 	got, err := os.ReadFile("gen_sample_json.go")
 	require.NoError(t, err)
 	require.NotContains(t, string(got), "x.SinceRenamed")
@@ -103,7 +103,7 @@ func TestGenerateRefusesBrokenPackage(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(pkg, "typo.go"), []byte("package sample\n\nvar _ = undefinedHere\n"), 0o644))
 
 	t.Chdir(pkg)
-	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON"), "undefinedHere")
+	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON", ""), "undefinedHere")
 }
 
 // A Windows path carries a colon of its own, and CI runs there.
