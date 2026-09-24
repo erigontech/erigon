@@ -18,88 +18,148 @@ package jsonstream
 
 import (
 	"encoding"
+	"encoding/hex"
 	"slices"
 	"unsafe"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
-// hexType lists the types whose AppendText output needs no JSON escaping, which is what lets
-// their text go out unscanned. Add a type only if its text is hex.
+// hexType lists the types written as hex strings. The hexutil types write their own text; a
+// fixed-size byte array is written as its bytes, whatever its own text, so none needs escaping.
+// The array must still have text, as encoding/json writes a plain array as a list of numbers.
 type hexType interface {
 	hexutil.Uint64 | hexutil.Uint | hexutil.Int64 | hexutil.U256 | hexutil.Big | hexutil.Bytes |
-		common.Hash | common.Address |
-		~[8]byte | ~[256]byte // types.BlockNonce, types.Bloom: execution/types imports this package
-}
-
-type hexPtr[T hexType] interface {
-	*T
+		~[8]byte | ~[20]byte | ~[32]byte | ~[256]byte
 	encoding.TextAppender
 }
 
-// Hex writes a field, null for a nil v.
-func Hex[T hexType, P hexPtr[T]](s *StackStream, name string, v P) {
-	var t encoding.TextAppender
-	if v != nil {
-		t = v
-	}
-	s.hexField(name, t)
+// emptyHexType lists the hexTypes that omitempty can leave out: a zero number, or Bytes with no
+// bytes. encoding/json never leaves out an array or a big number.
+type emptyHexType interface {
+	hexutil.Uint64 | hexutil.Uint | hexutil.Int64 | hexutil.Bytes
+	encoding.TextAppender
 }
 
-// HexOmitempty writes a pointer field tagged omitempty: a nil v is left out. A value field
-// tagged omitempty is left out when zero, which the caller checks.
-func HexOmitempty[T hexType, P hexPtr[T]](s *StackStream, name string, v P) {
+// Hex writes a value field.
+func Hex[T hexType](s *StackStream, name string, v T) {
+	hexField(s, name, &v)
+}
+
+// HexOmitempty writes a value field tagged omitempty.
+func HexOmitempty[T emptyHexType](s *StackStream, name string, v T) {
+	hexFieldOmitempty(s, name, &v)
+}
+
+// HexPtr writes a pointer field, null for nil.
+func HexPtr[T hexType](s *StackStream, name string, v *T) {
+	hexField(s, name, v)
+}
+
+// HexPtrOmitempty writes a pointer field tagged omitempty: nil is left out.
+func HexPtrOmitempty[T hexType](s *StackStream, name string, v *T) {
 	if v != nil {
-		s.hexField(name, v)
+		hexField(s, name, v)
 	}
 }
 
-func (s *StackStream) hexField(name string, v encoding.TextAppender) {
+func hexFieldOmitempty[T emptyHexType](s *StackStream, name string, v *T) {
+	switch x := any(v).(type) {
+	case *hexutil.Bytes:
+		if len(*x) == 0 {
+			return
+		}
+	case *hexutil.Uint64:
+		if *x == 0 {
+			return
+		}
+	case *hexutil.Uint:
+		if *x == 0 {
+			return
+		}
+	case *hexutil.Int64:
+		if *x == 0 {
+			return
+		}
+	}
+	hexField(s, name, v)
+}
+
+func hexField[T hexType](s *StackStream, name string, v *T) {
 	s.Field(name)
 	if v == nil {
 		s.WriteNil()
 		return
 	}
-	s.writeQuotedText(v)
+	s.beforeValue()
+	start := len(s.stream.Buffer())
+	s.commit(append(appendHex(s, append(s.stream.Buffer(), '"'), v), '"'), start)
+	s.afterValue()
+}
+
+// appendHex appends v's hex text. A failing AppendText appends nothing and latches its error,
+// which keeps the JSON well-formed and stops it reaching the client.
+func appendHex[T hexType](s *StackStream, buf []byte, v *T) []byte {
+	var text []byte
+	var err error
+	switch x := any(v).(type) {
+	case *hexutil.Uint64:
+		text, err = x.AppendText(buf)
+	case *hexutil.Uint:
+		text, err = x.AppendText(buf)
+	case *hexutil.Int64:
+		text, err = x.AppendText(buf)
+	case *hexutil.U256:
+		text, err = x.AppendText(buf)
+	case *hexutil.Big:
+		text, err = x.AppendText(buf)
+	case *hexutil.Bytes:
+		text, err = x.AppendText(buf)
+	default: // a byte array
+		text = hex.AppendEncode(append(buf, "0x"...), unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v)))
+	}
+	if err != nil {
+		if s.stream.Error == nil {
+			s.stream.Error = err
+		}
+		return buf
+	}
+	return text
 }
 
 // Hexes writes a slice field, null for a nil slice.
-func Hexes[S ~[]E, E hexType, P hexPtr[E]](s *StackStream, name string, items S) {
-	hexesField[S, E, P](s, name, items)
+func Hexes[S ~[]E, E hexType](s *StackStream, name string, items S) {
+	hexesField(s, name, items)
 }
 
 // HexesOmitempty writes a slice field tagged omitempty: an empty slice is left out.
-func HexesOmitempty[S ~[]E, E hexType, P hexPtr[E]](s *StackStream, name string, items S) {
+func HexesOmitempty[S ~[]E, E hexType](s *StackStream, name string, items S) {
 	if len(items) > 0 {
-		hexesField[S, E, P](s, name, items)
+		hexesField(s, name, items)
 	}
 }
 
-func hexesField[S ~[]E, E hexType, P hexPtr[E]](s *StackStream, name string, items S) {
+func hexesField[S ~[]E, E hexType](s *StackStream, name string, items S) {
 	s.Field(name)
-	HexesValue[S, E, P](s, items)
+	HexesValue(s, items)
 }
 
 // HexesValue writes the array itself, with no field name, null for a nil slice.
-func HexesValue[S ~[]E, E hexType, P hexPtr[E]](s *StackStream, items S) {
+func HexesValue[S ~[]E, E hexType](s *StackStream, items S) {
 	if items == nil {
 		s.WriteNil()
 		return
 	}
 	s.beforeValue()
 	// exact for the fixed-size types, a first guess for Bytes and Big; no further than the flush
-	size := 2 + len(items)*(hexutil.QuotedLen(int(unsafe.Sizeof(items[0])))+1)
-	buf := slices.Grow(s.stream.Buffer(), min(size, FlushThreshold))
-	s.stream.SetBuffer(append(buf, '['))
+	size := 2 + len(items)*(hexutil.QuotedLen(int(unsafe.Sizeof(*new(E))))+1)
+	s.stream.SetBuffer(append(slices.Grow(s.stream.Buffer(), min(size, FlushThreshold)), '['))
 	for i := range items {
-		buf = s.stream.Buffer()
+		buf := s.stream.Buffer()
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		buf = append(buf, '"')
-		text := s.appendText(buf, P(&items[i]))
-		s.stream.SetBuffer(append(text, '"'))
+		s.stream.SetBuffer(append(appendHex(s, append(buf, '"'), &items[i]), '"'))
 		flushIfFull(s.stream) // blob arrays reach megabytes
 	}
 	s.stream.SetBuffer(append(s.stream.Buffer(), ']'))

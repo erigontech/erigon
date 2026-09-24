@@ -377,7 +377,7 @@ func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return err
 	}
 	s.WriteObjectStart()
-	jsonstream.Hex(s, "oldestBlock", r.OldestBlock)
+	jsonstream.HexPtr(s, "oldestBlock", r.OldestBlock)
 	if len(r.Reward) > 0 {
 		s.Field("reward")
 		jsonstream.ArrayValue(s, r.Reward, writeU256s)

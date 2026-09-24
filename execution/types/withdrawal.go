@@ -46,10 +46,10 @@ func (obj *Withdrawal) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
-	jsonstream.Hex(s, "index", &obj.Index)
-	jsonstream.Hex(s, "validatorIndex", &obj.Validator)
-	jsonstream.Hex(s, "address", &obj.Address)
-	jsonstream.Hex(s, "amount", &obj.Amount)
+	jsonstream.Hex(s, "index", obj.Index)
+	jsonstream.Hex(s, "validatorIndex", obj.Validator)
+	jsonstream.Hex(s, "address", obj.Address)
+	jsonstream.Hex(s, "amount", obj.Amount)
 	s.WriteObjectEnd()
 	return nil
 }

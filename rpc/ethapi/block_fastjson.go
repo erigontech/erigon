@@ -41,32 +41,32 @@ func (h *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 // struct declares them so the bytes match reflection exactly. The caller owns the braces,
 // which is how RPCBlock flattens the embedded header into its own object.
 func (h *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) {
-	jsonstream.Hex(s, "number", h.Number)
-	jsonstream.Hex(s, "hash", h.Hash)
-	jsonstream.Hex(s, "parentHash", &h.ParentHash)
-	jsonstream.Hex(s, "nonce", h.Nonce)
-	jsonstream.Hex(s, "mixHash", &h.MixHash)
-	jsonstream.Hex(s, "sha3Uncles", &h.Sha3Uncles)
-	jsonstream.Hex(s, "logsBloom", h.LogsBloom)
-	jsonstream.Hex(s, "stateRoot", &h.StateRoot)
-	jsonstream.Hex(s, "miner", h.Miner)
-	jsonstream.Hex(s, "difficulty", h.Difficulty)
-	jsonstream.Hex(s, "extraData", &h.ExtraData)
-	jsonstream.Hex(s, "gasLimit", &h.GasLimit)
-	jsonstream.Hex(s, "gasUsed", &h.GasUsed)
-	jsonstream.Hex(s, "timestamp", &h.Timestamp)
-	jsonstream.Hex(s, "transactionsRoot", &h.TransactionsRoot)
-	jsonstream.Hex(s, "receiptsRoot", &h.ReceiptsRoot)
-	jsonstream.HexOmitempty(s, "baseFeePerGas", h.BaseFeePerGas)
-	jsonstream.HexOmitempty(s, "withdrawalsRoot", h.WithdrawalsRoot)
-	jsonstream.HexOmitempty(s, "blobGasUsed", h.BlobGasUsed)
-	jsonstream.HexOmitempty(s, "excessBlobGas", h.ExcessBlobGas)
-	jsonstream.HexOmitempty(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot)
-	jsonstream.HexOmitempty(s, "requestsHash", h.RequestsHash)
-	jsonstream.HexOmitempty(s, "blockAccessListHash", h.BlockAccessListHash)
-	jsonstream.HexOmitempty(s, "slotNumber", h.SlotNumber)
-	jsonstream.HexOmitempty(s, "auraSeal", h.AuraSeal)
-	jsonstream.HexOmitempty(s, "auraStep", h.AuraStep)
+	jsonstream.HexPtr(s, "number", h.Number)
+	jsonstream.HexPtr(s, "hash", h.Hash)
+	jsonstream.Hex(s, "parentHash", h.ParentHash)
+	jsonstream.HexPtr(s, "nonce", h.Nonce)
+	jsonstream.Hex(s, "mixHash", h.MixHash)
+	jsonstream.Hex(s, "sha3Uncles", h.Sha3Uncles)
+	jsonstream.HexPtr(s, "logsBloom", h.LogsBloom)
+	jsonstream.Hex(s, "stateRoot", h.StateRoot)
+	jsonstream.HexPtr(s, "miner", h.Miner)
+	jsonstream.HexPtr(s, "difficulty", h.Difficulty)
+	jsonstream.Hex(s, "extraData", h.ExtraData)
+	jsonstream.Hex(s, "gasLimit", h.GasLimit)
+	jsonstream.Hex(s, "gasUsed", h.GasUsed)
+	jsonstream.Hex(s, "timestamp", h.Timestamp)
+	jsonstream.Hex(s, "transactionsRoot", h.TransactionsRoot)
+	jsonstream.Hex(s, "receiptsRoot", h.ReceiptsRoot)
+	jsonstream.HexPtrOmitempty(s, "baseFeePerGas", h.BaseFeePerGas)
+	jsonstream.HexPtrOmitempty(s, "withdrawalsRoot", h.WithdrawalsRoot)
+	jsonstream.HexPtrOmitempty(s, "blobGasUsed", h.BlobGasUsed)
+	jsonstream.HexPtrOmitempty(s, "excessBlobGas", h.ExcessBlobGas)
+	jsonstream.HexPtrOmitempty(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot)
+	jsonstream.HexPtrOmitempty(s, "requestsHash", h.RequestsHash)
+	jsonstream.HexPtrOmitempty(s, "blockAccessListHash", h.BlockAccessListHash)
+	jsonstream.HexPtrOmitempty(s, "slotNumber", h.SlotNumber)
+	jsonstream.HexPtrOmitempty(s, "auraSeal", h.AuraSeal)
+	jsonstream.HexPtrOmitempty(s, "auraStep", h.AuraStep)
 }
 
 // MarshalFastJSONTo writes the whole block. It must exist: RPCBlock embeds RPCHeader, so
@@ -98,7 +98,7 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	s.WriteObjectStart()
 	b.RPCHeader.WriteFieldsTo(s)
 
-	jsonstream.Hex(s, "size", &b.Size)
+	jsonstream.Hex(s, "size", b.Size)
 
 	// omitempty on an `any` drops only a nil interface, so an empty list still shows.
 	switch {
@@ -120,7 +120,7 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if b.TransactionCount != nil {
 		s.Field("transactionCount").Uint(*b.TransactionCount)
 	}
-	jsonstream.HexOmitempty(s, "totalDifficulty", b.TotalDifficulty)
+	jsonstream.HexPtrOmitempty(s, "totalDifficulty", b.TotalDifficulty)
 	if b.Calls != nil {
 		s.Field("calls").WriteArrayStart()
 		for i := range b.Calls {
@@ -153,9 +153,9 @@ func (r *CallResult) writeTo(s *jsonstream.StackStream, callErr []byte) {
 	s.Field("returnData").WriteString(r.ReturnData)
 	s.Field("logs")
 	jsonstream.ArrayValue(s, r.Logs, writeLogElem)
-	jsonstream.Hex(s, "gasUsed", &r.GasUsed)
-	jsonstream.Hex(s, "maxUsedGas", &r.MaxUsedGas)
-	jsonstream.Hex(s, "status", &r.Status)
+	jsonstream.Hex(s, "gasUsed", r.GasUsed)
+	jsonstream.Hex(s, "maxUsedGas", r.MaxUsedGas)
+	jsonstream.Hex(s, "status", r.Status)
 	if callErr != nil {
 		s.Field("error").WriteRawBytes(callErr)
 	}
@@ -174,10 +174,10 @@ func writeWithdrawalElem(s *jsonstream.StackStream, wd **types.Withdrawal) {
 		return
 	}
 	s.WriteObjectStart()
-	jsonstream.Hex(s, "index", &(*wd).Index)
-	jsonstream.Hex(s, "validatorIndex", &(*wd).Validator)
-	jsonstream.Hex(s, "address", &(*wd).Address)
-	jsonstream.Hex(s, "amount", &(*wd).Amount)
+	jsonstream.Hex(s, "index", (*wd).Index)
+	jsonstream.Hex(s, "validatorIndex", (*wd).Validator)
+	jsonstream.Hex(s, "address", (*wd).Address)
+	jsonstream.Hex(s, "amount", (*wd).Amount)
 	s.WriteObjectEnd()
 }
 

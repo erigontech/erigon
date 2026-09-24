@@ -40,12 +40,12 @@ type StorProofResult struct {
 
 func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	s.WriteObjectStart()
-	jsonstream.Hex(s, "address", &r.Address)
+	jsonstream.Hex(s, "address", r.Address)
 	jsonstream.Hexes(s, "accountProof", r.AccountProof)
-	jsonstream.Hex(s, "balance", r.Balance)
-	jsonstream.Hex(s, "codeHash", &r.CodeHash)
-	jsonstream.Hex(s, "nonce", &r.Nonce)
-	jsonstream.Hex(s, "storageHash", &r.StorageHash)
+	jsonstream.HexPtr(s, "balance", r.Balance)
+	jsonstream.Hex(s, "codeHash", r.CodeHash)
+	jsonstream.Hex(s, "nonce", r.Nonce)
+	jsonstream.Hex(s, "storageHash", r.StorageHash)
 	s.Field("storageProof")
 	jsonstream.ArrayValue(s, r.StorageProof, writeStorProofElem)
 	s.WriteObjectEnd()
@@ -55,7 +55,7 @@ func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 func writeStorProofElem(s *jsonstream.StackStream, sp *StorProofResult) {
 	s.WriteObjectStart()
 	s.Field("key").WriteString(sp.Key)
-	jsonstream.Hex(s, "value", sp.Value)
+	jsonstream.HexPtr(s, "value", sp.Value)
 	jsonstream.Hexes(s, "proof", sp.Proof)
 	s.WriteObjectEnd()
 }

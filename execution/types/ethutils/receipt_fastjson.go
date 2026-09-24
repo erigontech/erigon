@@ -52,28 +52,26 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 	w.WriteObjectStart()
 
-	jsonstream.Hex(w, "blockHash", &r.BlockHash)
-	jsonstream.Hex(w, "blockNumber", &r.BlockNumber)
-	jsonstream.Hex(w, "transactionHash", &r.TransactionHash)
-	jsonstream.Hex(w, "transactionIndex", &r.TransactionIndex)
-	jsonstream.Hex(w, "from", r.From)
-	jsonstream.Hex(w, "to", r.To)
-	jsonstream.Hex(w, "type", &r.Type)
-	jsonstream.Hex(w, "gasUsed", &r.GasUsed)
-	jsonstream.Hex(w, "cumulativeGasUsed", &r.CumulativeGasUsed)
-	jsonstream.Hex(w, "contractAddress", r.ContractAddress)
+	jsonstream.Hex(w, "blockHash", r.BlockHash)
+	jsonstream.Hex(w, "blockNumber", r.BlockNumber)
+	jsonstream.Hex(w, "transactionHash", r.TransactionHash)
+	jsonstream.Hex(w, "transactionIndex", r.TransactionIndex)
+	jsonstream.HexPtr(w, "from", r.From)
+	jsonstream.HexPtr(w, "to", r.To)
+	jsonstream.Hex(w, "type", r.Type)
+	jsonstream.Hex(w, "gasUsed", r.GasUsed)
+	jsonstream.Hex(w, "cumulativeGasUsed", r.CumulativeGasUsed)
+	jsonstream.HexPtr(w, "contractAddress", r.ContractAddress)
 	w.Field("logs")
 	if err := writeLogs(w, r.Logs); err != nil {
 		return err
 	}
-	jsonstream.Hex(w, "logsBloom", r.LogsBloom)
-	jsonstream.HexOmitempty(w, "effectiveGasPrice", r.EffectiveGasPrice)
-	jsonstream.HexOmitempty(w, "status", r.Status)
-	if len(r.Root) > 0 {
-		jsonstream.Hex(w, "root", &r.Root)
-	}
-	jsonstream.HexOmitempty(w, "blobGasPrice", r.BlobGasPrice)
-	jsonstream.HexOmitempty(w, "blobGasUsed", r.BlobGasUsed)
+	jsonstream.HexPtr(w, "logsBloom", r.LogsBloom)
+	jsonstream.HexPtrOmitempty(w, "effectiveGasPrice", r.EffectiveGasPrice)
+	jsonstream.HexPtrOmitempty(w, "status", r.Status)
+	jsonstream.HexOmitempty(w, "root", r.Root)
+	jsonstream.HexPtrOmitempty(w, "blobGasPrice", r.BlobGasPrice)
+	jsonstream.HexPtrOmitempty(w, "blobGasUsed", r.BlobGasUsed)
 
 	w.WriteObjectEnd()
 	return nil
@@ -109,14 +107,14 @@ func writeLog(w *jsonstream.StackStream, lp **types.Log) {
 		return
 	}
 	w.WriteObjectStart()
-	jsonstream.Hex(w, "address", &l.Address)
+	jsonstream.Hex(w, "address", l.Address)
 	jsonstream.Hexes(w, "topics", l.Topics)
-	jsonstream.Hex(w, "data", &l.Data)
-	jsonstream.Hex(w, "blockNumber", &l.BlockNumber)
-	jsonstream.Hex(w, "transactionHash", &l.TxHash)
-	jsonstream.Hex(w, "transactionIndex", &l.TxIndex)
-	jsonstream.Hex(w, "blockHash", &l.BlockHash)
-	jsonstream.Hex(w, "logIndex", &l.Index)
+	jsonstream.Hex(w, "data", l.Data)
+	jsonstream.Hex(w, "blockNumber", l.BlockNumber)
+	jsonstream.Hex(w, "transactionHash", l.TxHash)
+	jsonstream.Hex(w, "transactionIndex", l.TxIndex)
+	jsonstream.Hex(w, "blockHash", l.BlockHash)
+	jsonstream.Hex(w, "logIndex", l.Index)
 	w.Field("removed").WriteBool(l.Removed)
 	w.WriteObjectEnd()
 }

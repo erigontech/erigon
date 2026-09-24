@@ -1421,30 +1421,63 @@ func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 	}
 }
 
-// Hex and HexOmitempty write what encoding/json writes for a pointer field tagged without and
-// with omitempty.
+// Each helper writes what encoding/json writes for the field shape it is named for.
 func TestHexMatchesReflection(t *testing.T) {
 	hash := common.HexToHash("0xab")
-	addr := common.HexToAddress("0xcd")
 	u64 := hexutil.Uint64(0)
-	b := hexutil.Bytes{}
-	assertHexField(t, &hash)
-	assertHexField(t, (*common.Hash)(nil))
-	assertHexField(t, &addr)
-	assertHexField(t, &u64)
-	assertHexField(t, (*hexutil.Uint64)(nil))
-	assertHexField(t, &b)
-	assertHexField(t, (*hexutil.Bytes)(nil))
+	assertHex(t, hash)
+	assertHex(t, common.HexToAddress("0xcd"))
+	assertHex(t, hexutil.U256{})
+	assertHexPtr(t, &hash)
+	assertHexPtr(t, (*common.Hash)(nil))
+	assertHexPtr(t, &u64)
+	assertHexPtr(t, (*hexutil.Uint64)(nil))
+	for _, v := range []hexutil.Uint64{0, 7} {
+		assertHexOmitempty(t, v)
+	}
+	for _, v := range []hexutil.Bytes{nil, {}, {0xab}} {
+		assertHexOmitempty(t, v)
+		assertHexPtr(t, &v)
+	}
+	assertHexOmitempty(t, hexutil.Int64(0))
+	assertHexOmitempty(t, hexutil.Uint(0))
 }
 
-func assertHexField[T hexType, P hexPtr[T]](t *testing.T, v P) {
+func assertHex[T hexType](t *testing.T, v T) {
 	t.Helper()
 	assertMatches(t, struct {
-		V P `json:"v"`
+		V T `json:"v"`
 	}{v}, func(s *StackStream) { Hex(s, "v", v) })
+}
+
+func assertHexOmitempty[T emptyHexType](t *testing.T, v T) {
+	t.Helper()
+	assertHex(t, v)
 	assertMatches(t, struct {
-		V P `json:"v,omitempty"`
+		V T `json:"v,omitempty"`
 	}{v}, func(s *StackStream) { HexOmitempty(s, "v", v) })
+}
+
+func assertHexPtr[T hexType](t *testing.T, v *T) {
+	t.Helper()
+	assertMatches(t, struct {
+		V *T `json:"v"`
+	}{v}, func(s *StackStream) { HexPtr(s, "v", v) })
+	assertMatches(t, struct {
+		V *T `json:"v,omitempty"`
+	}{v}, func(s *StackStream) { HexPtrOmitempty(s, "v", v) })
+}
+
+type quotingArray [8]byte
+
+func (quotingArray) AppendText(dst []byte) ([]byte, error) { return append(dst, `"`...), nil }
+
+// A byte array goes out as its bytes, so its own text cannot put an unescaped byte in the output.
+func TestHexWritesArrayBytes(t *testing.T) {
+	s := Get(nil)
+	defer Put(s)
+	Hex(s, "", quotingArray{0xab})
+	require.Equal(t, `"":"0xab00000000000000"`, string(s.Buffer()))
 }
 
 // Hexes and HexesOmitempty write what encoding/json writes for a slice field tagged without and
@@ -1457,14 +1490,14 @@ func TestHexesMatchesReflection(t *testing.T) {
 	assertHexesField(t, []hexutil.Uint64{0, 7})
 }
 
-func assertHexesField[S ~[]E, E hexType, P hexPtr[E]](t *testing.T, items S) {
+func assertHexesField[S ~[]E, E hexType](t *testing.T, items S) {
 	t.Helper()
 	assertMatches(t, struct {
 		V S `json:"v"`
-	}{items}, func(s *StackStream) { Hexes[S, E, P](s, "v", items) })
+	}{items}, func(s *StackStream) { Hexes(s, "v", items) })
 	assertMatches(t, struct {
 		V S `json:"v,omitempty"`
-	}{items}, func(s *StackStream) { HexesOmitempty[S, E, P](s, "v", items) })
+	}{items}, func(s *StackStream) { HexesOmitempty(s, "v", items) })
 }
 
 func assertMatches(t *testing.T, v any, write func(*StackStream)) {
@@ -1507,4 +1540,22 @@ func TestHexesFlushesPerElement(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, string(want), out.String())
 	require.LessOrEqual(t, cap(s.Buffer()), maxPooledBufferSize)
+}
+
+// The helpers take fields by value and must not move them to the heap to write them.
+func TestHexDoesNotAllocate(t *testing.T) {
+	s := newStackStream(nil, 1<<16)
+	hash, u256, blob := common.HexToHash("0x01"), hexutil.U256{7}, hexutil.Bytes{1, 2, 3}
+	allocs := testing.AllocsPerRun(100, func() {
+		s.stream.SetBuffer(s.stream.Buffer()[:0])
+		s.stack = s.stack[:0]
+		s.WriteObjectStart()
+		Hex(s, "a", hash)
+		Hex(s, "b", u256)
+		HexOmitempty(s, "c", blob)
+		HexPtr(s, "d", &hash)
+		Hexes(s, "e", []common.Hash{hash})
+		s.WriteObjectEnd()
+	})
+	require.Zero(t, allocs)
 }
