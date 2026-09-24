@@ -39,29 +39,29 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 	t.Parallel()
 
 	t.Run("account_keys", func(t *testing.T) {
-		var c addrHashCache
+		var c AddrHashCache
 		for i := range 100 {
 			addr := make([]byte, length.Addr)
 			addr[0] = byte(i)
 			addr[19] = byte(i * 7)
-			assert.Equal(t, KeyToHexNibbleHash(addr), keyToHexNibbleHashCached(addr, &c), "account key %d", i)
+			assert.Equal(t, KeyToHexNibbleHash(addr), KeyToHexNibbleHashCached(addr, &c), "account key %d", i)
 		}
 	})
 
 	t.Run("storage_keys", func(t *testing.T) {
-		var c addrHashCache
+		var c AddrHashCache
 		for i := range 100 {
 			key := make([]byte, 52)
 			key[0] = byte(i % 30)
 			key[19] = byte(i)
 			key[20] = byte(i)
 			key[51] = byte(i * 3)
-			assert.Equal(t, KeyToHexNibbleHash(key), keyToHexNibbleHashCached(key, &c), "storage key %d", i)
+			assert.Equal(t, KeyToHexNibbleHash(key), KeyToHexNibbleHashCached(key, &c), "storage key %d", i)
 		}
 	})
 
 	t.Run("whale_storage", func(t *testing.T) {
-		var c addrHashCache
+		var c AddrHashCache
 		addr := make([]byte, length.Addr)
 		addr[0], addr[1], addr[19] = 0xDE, 0xAD, 0xBE
 		for slot := range 1000 {
@@ -69,30 +69,30 @@ func TestKeyToHexNibbleHashCached_MatchesUncached(t *testing.T) {
 			copy(key[:20], addr)
 			key[20] = byte(slot >> 8)
 			key[51] = byte(slot)
-			assert.Equal(t, KeyToHexNibbleHash(key), keyToHexNibbleHashCached(key, &c), "whale slot %d", slot)
+			assert.Equal(t, KeyToHexNibbleHash(key), KeyToHexNibbleHashCached(key, &c), "whale slot %d", slot)
 		}
 	})
 
 	t.Run("interleaved", func(t *testing.T) {
-		var c addrHashCache
+		var c AddrHashCache
 		for i := range 200 {
 			addr := make([]byte, length.Addr)
 			addr[0] = byte(i % 4)
 			addr[19] = byte(i % 4)
-			assert.Equal(t, KeyToHexNibbleHash(addr), keyToHexNibbleHashCached(addr, &c), "acct %d", i)
+			assert.Equal(t, KeyToHexNibbleHash(addr), KeyToHexNibbleHashCached(addr, &c), "acct %d", i)
 
 			key := make([]byte, 52)
 			copy(key[:20], addr)
 			key[20] = byte(i)
 			key[51] = byte(i)
-			assert.Equal(t, KeyToHexNibbleHash(key), keyToHexNibbleHashCached(key, &c), "storage %d", i)
+			assert.Equal(t, KeyToHexNibbleHash(key), KeyToHexNibbleHashCached(key, &c), "storage %d", i)
 		}
 	})
 }
 
 func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
 	t.Parallel()
-	var c addrHashCache
+	var c AddrHashCache
 	require.False(t, c.valid)
 
 	mkKey := func(addrByte, slot byte) []byte {
@@ -102,20 +102,20 @@ func TestAddrHashCache_ReuseAndInvalidation(t *testing.T) {
 		return key
 	}
 
-	keyToHexNibbleHashCached(mkKey(0xAA, 0), &c)
+	KeyToHexNibbleHashCached(mkKey(0xAA, 0), &c)
 	require.True(t, c.valid)
 	require.Equal(t, byte(0xAA), c.addr[0])
 	firstNibs := c.nibs
 
-	keyToHexNibbleHashCached(mkKey(0xAA, 1), &c)
+	KeyToHexNibbleHashCached(mkKey(0xAA, 1), &c)
 	require.Equal(t, firstNibs, c.nibs)
 
-	keyToHexNibbleHashCached(mkKey(0xBB, 0), &c)
+	KeyToHexNibbleHashCached(mkKey(0xBB, 0), &c)
 	require.Equal(t, byte(0xBB), c.addr[0])
 	require.NotEqual(t, firstNibs, c.nibs)
 
 	acctBefore := c.addr
-	keyToHexNibbleHashCached(make([]byte, length.Addr), &c)
+	KeyToHexNibbleHashCached(make([]byte, length.Addr), &c)
 	require.Equal(t, acctBefore, c.addr)
 
 	c.reset()

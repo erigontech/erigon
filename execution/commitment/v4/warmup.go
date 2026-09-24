@@ -22,8 +22,7 @@ func warmupKeyV4(hashedKey []byte, depth int, dst []byte) ([]byte, bool) {
 	}
 
 	if len(hashedKey) > 64 && depth >= 64 {
-		var addrHash [32]byte
-		packPath(hashedKey[:64], addrHash[:0])
+		addrHash := hashAddressPath(hashedKey[:64])
 		return nodeKey(tagStorageNode, addrHash[:], hashedKey[64:depth], dst[:0]), true
 	}
 	return nodeKey(tagAccountNode, nil, hashedKey[:depth], dst[:0]), true
@@ -47,24 +46,11 @@ func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 	branchPoint := depth
 	if planeDepth == 0 && l.selfExtLen != 0 {
 		selfExt := record.SelfExt()
-		if len(selfExt) != 1+packedLen(l.selfExtLen) {
+		end := branchPoint + l.selfExtLen
+		if len(selfExt) == 0 || end > len(hashedKey) || !packedMatches(selfExt[1:], hashedKey[branchPoint:end]) {
 			return 0, true
 		}
-		for i := range l.selfExtLen {
-			if branchPoint+i >= len(hashedKey) {
-				return 0, true
-			}
-			nibble := selfExt[1+i/2]
-			if i&1 == 0 {
-				nibble >>= 4
-			} else {
-				nibble &= 0x0f
-			}
-			if hashedKey[branchPoint+i] != nibble {
-				return 0, true
-			}
-		}
-		branchPoint += l.selfExtLen
+		branchPoint = end
 	}
 	if branchPoint >= len(hashedKey) {
 		return 0, true

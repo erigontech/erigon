@@ -43,8 +43,17 @@ func storageGraph(addrHash []byte) graph {
 	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage}
 }
 
-func (g graph) nodeKey(path, dst []byte) []byte {
-	return nodeKey(g.plane, g.addrHash, path, dst)
+func (g graph) loadRoot(ctx commitment.PatriciaContext) (*node, error) {
+	root, err := unfold(ctx, nil, g.plane, g.addrHash)
+	if err != nil {
+		return nil, err
+	}
+	if root == nil {
+		root = fork(nil)
+		root.loaded = true
+	}
+	root.plane = g.plane
+	return root, g.materializeRootExtension(ctx, root)
 }
 
 func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, error) {
@@ -161,9 +170,6 @@ func (p *deltaParts) add(d recordDelta) {
 }
 
 func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *deltaParts) ([32]byte, error) {
-	if n == nil {
-		return [32]byte{}, g.errNode
-	}
 	for nib := range 16 {
 		bit := uint16(1) << nib
 		if n.childMask&bit == 0 || n.leafMask&bit != 0 {
@@ -188,7 +194,7 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *d
 		path = nil
 		depth = 0
 	}
-	hash, delta, err := foldAndEncodeRecord(ctx, n, depth, g.nodeKey(path, nil))
+	hash, delta, err := foldAndEncodeRecord(ctx, n, depth, nodeKey(g.plane, g.addrHash, path, nil))
 	if err != nil {
 		return [32]byte{}, err
 	}
@@ -216,10 +222,6 @@ func (p foldPlan) parallel() bool {
 func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts, error) {
 	nibs := make([]int, 0, 16)
 	for nib := range 16 {
-		bit := uint16(1) << nib
-		if root.childMask&bit == 0 || root.leafMask&bit != 0 {
-			continue
-		}
 		if root.child(nib) != nil {
 			nibs = append(nibs, nib)
 		}
@@ -256,9 +258,6 @@ func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts,
 }
 
 func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan foldPlan) (deltaParts, error) {
-	if root == nil {
-		return nil, g.errNode
-	}
 	if err := promoteRootExtension(root); err != nil {
 		return nil, err
 	}

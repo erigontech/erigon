@@ -81,9 +81,6 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 }
 
 func childRecordPath(record Record, l layout, path []byte, nib int) ([]byte, error) {
-	if nib < 0 || nib > 15 {
-		return nil, errWipePath
-	}
 	if selfExt := record.SelfExt(); len(path) == 0 && len(selfExt) != 0 {
 		return unpackPath(selfExt[1:], int(selfExt[0]), nil), nil
 	}
@@ -96,7 +93,7 @@ func childRecordPath(record Record, l layout, path []byte, nib int) ([]byte, err
 		}
 		childPath = append(childPath, decoded...)
 	}
-	if len(childPath) == 0 || len(childPath) > 63 {
+	if len(childPath) > 63 {
 		return nil, errWipePath
 	}
 	return childPath, nil

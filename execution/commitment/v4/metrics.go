@@ -26,20 +26,15 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
+type meterCounts struct{ readBytes, writeBytes, writes atomic.Uint64 }
+
 type meteredContext struct {
 	commitment.PatriciaContext
-	readBytes  *atomic.Uint64
-	writeBytes *atomic.Uint64
-	writes     *atomic.Uint64
+	*meterCounts
 }
 
 func newMeteredContext(inner commitment.PatriciaContext) *meteredContext {
-	return &meteredContext{
-		PatriciaContext: inner,
-		readBytes:       new(atomic.Uint64),
-		writeBytes:      new(atomic.Uint64),
-		writes:          new(atomic.Uint64),
-	}
+	return &meteredContext{inner, new(meterCounts)}
 }
 
 func (c *meteredContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
@@ -81,15 +76,6 @@ func (c *meteredContext) countDeltas(parts deltaParts) {
 	c.writeBytes.Add(uint64(size))
 }
 
-func (c *meteredContext) wrap(inner commitment.PatriciaContext) *meteredContext {
-	return &meteredContext{
-		PatriciaContext: inner,
-		readBytes:       c.readBytes,
-		writeBytes:      c.writeBytes,
-		writes:          c.writes,
-	}
-}
-
 func (c *meteredContext) wrapFactory(f commitment.TrieContextFactory) commitment.TrieContextFactory {
 	if f == nil {
 		return nil
@@ -99,7 +85,7 @@ func (c *meteredContext) wrapFactory(f commitment.TrieContextFactory) commitment
 		if inner == nil {
 			return nil, cleanup
 		}
-		return c.wrap(inner), cleanup
+		return &meteredContext{inner, c.meterCounts}, cleanup
 	}
 }
 

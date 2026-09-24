@@ -1391,7 +1391,7 @@ type Updates struct {
 	curArena int
 	gen      uint64
 
-	addrCache      addrHashCache
+	addrCache      AddrHashCache
 	addrCacheReuse bool
 }
 
@@ -1433,7 +1433,7 @@ func hasherReusesAddrPrefix(h keyHasher) bool {
 
 func (t *Updates) hashKey(key []byte) []byte {
 	if t.addrCacheReuse {
-		return keyToHexNibbleHashCached(key, &t.addrCache)
+		return KeyToHexNibbleHashCached(key, &t.addrCache)
 	}
 	return t.hasher(key)
 }

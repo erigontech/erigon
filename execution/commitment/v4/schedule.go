@@ -18,7 +18,6 @@ package v4
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime"
 	"slices"
@@ -30,30 +29,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 )
-
-type scheduleStats struct {
-	inFlight atomic.Int64
-	max      atomic.Int64
-}
-
-func (s *scheduleStats) enter() {
-	if s == nil {
-		return
-	}
-	current := s.inFlight.Add(1)
-	for {
-		maximum := s.max.Load()
-		if current <= maximum || s.max.CompareAndSwap(maximum, current) {
-			return
-		}
-	}
-}
-
-func (s *scheduleStats) leave() {
-	if s != nil {
-		s.inFlight.Add(-1)
-	}
-}
 
 type accountPlan struct {
 	entry    accountEntry
@@ -74,7 +49,7 @@ const (
 	accountPlaneFanout   = 16
 )
 
-func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers int, stats *scheduleStats) error {
+func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers int) error {
 	if len(storage) == 0 {
 		return nil
 	}
@@ -110,9 +85,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 				if i >= len(storage) {
 					return nil
 				}
-				stats.enter()
 				root, taskParts, err := runStorageTaskWithPlan(workerCtx, storage[i], taskPlan)
-				stats.leave()
 				if err != nil {
 					return err
 				}
@@ -123,10 +96,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	return g.Wait()
 }
 
-func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers int, stats *scheduleStats) ([32]byte, deltaParts, error) {
-	if rawCtx == nil {
-		return [32]byte{}, nil, errors.New("commitment v4: nil scheduled context")
-	}
+func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers int) ([32]byte, deltaParts, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -143,10 +113,10 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	storageDone := make(chan error, 1)
 	if overlap {
 		go func() {
-			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, stats)
+			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers)
 		}()
 	} else {
-		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, stats)
+		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers)
 	}
 
 	g := accountGraph()
@@ -209,7 +179,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			continue
 		}
 		nib := result.plan.entry.hashedKey[0]
-		if !result.plan.delete && len(root.path) == 0 && directChild(root, nib) {
+		if child := root.child(int(nib)); !result.plan.delete && len(root.path) == 0 && child != nil && len(child.path) == len(root.path)+1 {
 			groups[nib] = append(groups[nib], i)
 			continue
 		}
@@ -253,22 +223,9 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	return hash, append(slices.Concat(storageParts...), accountParts...), err
 }
 
-func directChild(root *node, nib byte) bool {
-	child := root.child(int(nib))
-	return child != nil && len(child.path) == len(root.path)+1
-}
-
 func (g graph) planAccounts(ctx commitment.PatriciaContext, accounts []accountEntry, plan foldPlan) (*node, []accountPlan, error) {
-	root, err := unfold(ctx, nil, planeAccount, nil)
+	root, err := g.loadRoot(ctx)
 	if err != nil {
-		return nil, nil, err
-	}
-	if root == nil {
-		root = fork(nil)
-		root.loaded = true
-	}
-	root.plane = planeAccount
-	if err := g.materializeRootExtension(ctx, root); err != nil {
 		return nil, nil, err
 	}
 	plans, err := makeAccountPlans(ctx, g, root, accounts, plan)
@@ -336,17 +293,6 @@ func (g graph) ensureRootChildren(ctx commitment.PatriciaContext, root *node, ni
 }
 
 func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entries []accountEntry, plan foldPlan) ([]accountPlan, error) {
-	for i := range entries {
-		if len(entries[i].hashedKey) != 64 {
-			return nil, errPhaseBKey
-		}
-		for _, nib := range entries[i].hashedKey {
-			if nib > 0x0f {
-				return nil, errPhaseBKey
-			}
-		}
-	}
-
 	plans := make([]accountPlan, len(entries))
 	planOne := func(ctx commitment.PatriciaContext, i int) error {
 		p, err := g.accountPlanFor(ctx, root, entries[i])

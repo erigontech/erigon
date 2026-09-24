@@ -22,8 +22,6 @@ import (
 
 type recordDelta = commitment.BranchDelta
 
-type putBranchFunc func(key, data, prev []byte) error
-
 func foldAndEncodeRecord(ctx commitment.PatriciaContext, n *node, depth int, key []byte) ([32]byte, recordDelta, error) {
 	hash, err := fold(n, depth)
 	if err != nil {
@@ -36,19 +34,15 @@ func foldAndEncodeRecord(ctx commitment.PatriciaContext, n *node, depth int, key
 		}
 	}
 	data := encodeRecord(n, depth, make([]byte, 0, len(prev)+encodeSlack))
-	return hash, newRecordDelta(key, data, prev), nil
+	if prev == nil {
+		prev = []byte{}
+	}
+	return hash, recordDelta{Key: key, Data: data, Prev: prev}, nil
 }
 
 const encodeSlack = 96
 
-func newRecordDelta(key, data, prev []byte) recordDelta {
-	if prev == nil {
-		prev = []byte{}
-	}
-	return recordDelta{Key: key, Data: data, Prev: prev}
-}
-
-func applyDeltas(parts deltaParts, putBranch putBranchFunc) error {
+func applyDeltas(parts deltaParts, putBranch func(key, data, prev []byte) error) error {
 	for _, part := range parts {
 		for _, delta := range part {
 			if err := putBranch(delta.Key, delta.Data, delta.Prev); err != nil {

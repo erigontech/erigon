@@ -37,7 +37,6 @@ type Trie struct {
 	ctxFactory      commitment.TrieContextFactory
 	root            []byte
 	scheduleWorkers int
-	scheduleStats   *scheduleStats
 	deferUpdates    bool
 	deferred        deltaParts
 }
@@ -161,7 +160,7 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 		return nil, err
 	}
 	seen = seenKeys
-	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, t.scheduleWorkers, t.scheduleStats)
+	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, t.scheduleWorkers)
 	if err != nil {
 		return nil, err
 	}

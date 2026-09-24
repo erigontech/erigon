@@ -24,39 +24,10 @@ import (
 	"strings"
 	"sync"
 
-	keccak "github.com/erigontech/fastkeccak"
-
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
-
-type addrPrefixCache struct {
-	addr  [length.Addr]byte
-	nibs  [64]byte
-	valid bool
-}
-
-func (c *addrPrefixCache) hash(key []byte) []byte {
-	if len(key) <= length.Addr {
-		return commitment.KeyToHexNibbleHash(key)
-	}
-	out := make([]byte, 128)
-	addr := [length.Addr]byte(key[:length.Addr])
-	if c.valid && c.addr == addr {
-		copy(out[:64], c.nibs[:])
-	} else {
-		h := keccak.Sum256(key[:length.Addr])
-		nibbles.Expand(h[:], out[:64])
-		c.addr = addr
-		copy(c.nibs[:], out[:64])
-		c.valid = true
-	}
-	h := keccak.Sum256(key[length.Addr:])
-	nibbles.Expand(h[:], out[64:])
-	return out
-}
 
 const hashParallelMin = 2048
 
@@ -68,9 +39,9 @@ type feedEntry struct {
 
 func hashFeed(items []feedEntry, workers int) {
 	if workers <= 1 || len(items) < hashParallelMin {
-		var cache addrPrefixCache
+		var cache commitment.AddrHashCache
 		for i := range items {
-			items[i].hashedKey = cache.hash(common.ToBytesZeroCopy(items[i].plainKey))
+			items[i].hashedKey = commitment.KeyToHexNibbleHashCached(common.ToBytesZeroCopy(items[i].plainKey), &cache)
 		}
 		return
 	}
@@ -81,9 +52,9 @@ func hashFeed(items []feedEntry, workers int) {
 		wg.Add(1)
 		go func(lo, hi int) {
 			defer wg.Done()
-			var cache addrPrefixCache
+			var cache commitment.AddrHashCache
 			for i := lo; i < hi; i++ {
-				items[i].hashedKey = cache.hash(common.ToBytesZeroCopy(items[i].plainKey))
+				items[i].hashedKey = commitment.KeyToHexNibbleHashCached(common.ToBytesZeroCopy(items[i].plainKey), &cache)
 			}
 		}(start, end)
 	}
@@ -95,15 +66,6 @@ func compareFeed(a, b feedEntry) int {
 		return c
 	}
 	return strings.Compare(a.plainKey, b.plainKey)
-}
-
-func bucketFeed(items []feedEntry) [257]int {
-	return bucketBy(items, func(e *feedEntry) int {
-		if len(e.hashedKey) < 2 {
-			return 0
-		}
-		return int(e.hashedKey[0])<<4 | int(e.hashedKey[1])
-	})
 }
 
 func bucketBy[T any](items []T, bucket func(*T) int) [257]int {
@@ -134,7 +96,7 @@ func warmSorted(warmuper *commitment.Warmuper, items []feedEntry) {
 }
 
 func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper) ([]storageTask, []accountEntry, int, error) {
-	bounds := bucketFeed(items)
+	bounds := bucketBy(items, func(e *feedEntry) int { return int(e.hashedKey[0])<<4 | int(e.hashedKey[1]) })
 	var parts [256]*partitioner
 	var errs [256]error
 	parallelFor(256, workers, 1, func(b int) {

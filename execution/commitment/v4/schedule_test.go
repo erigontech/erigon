@@ -18,10 +18,8 @@ package v4
 
 import (
 	"context"
-	"sync"
 	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -29,41 +27,31 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func TestScheduleStatsTrackPeakInFlight(t *testing.T) {
-	stats := new(scheduleStats)
-	release := make(chan struct{})
-	var wg sync.WaitGroup
-	for range 4 {
-		wg.Go(func() {
-			stats.enter()
-			<-release
-			stats.leave()
-		})
-	}
-	require.Eventually(t, func() bool { return stats.inFlight.Load() == 4 }, time.Second, time.Millisecond)
-	close(release)
-	wg.Wait()
-
-	require.Equal(t, int64(0), stats.inFlight.Load())
-	require.Equal(t, int64(4), stats.max.Load())
-}
-
 func TestScheduleWorkerBoundDuringTrieProcess(t *testing.T) {
-	entries := make([]parityUpdate, 0, 96)
-	for i := range 32 {
+	first := commitment.KeyToHexNibbleHash(parityAddress(0))[0]
+	entries := make([]parityUpdate, 0, 16)
+	for i := 0; i < 256 && len(entries) < 16; i++ {
 		address := parityAddress(i)
+		if commitment.KeyToHexNibbleHash(address)[0] != first {
+			continue
+		}
 		entries = append(entries, parityUpdate{key: address, update: accountParityUpdate(i)}, parityUpdate{
 			key:    append(append([]byte(nil), address...), paritySlot(i)...),
 			update: storageParityUpdate(i),
 		})
 	}
-	stats := new(scheduleStats)
-	trie := &Trie{scheduleWorkers: 2, scheduleStats: stats}
-	trie.ResetContext(newParityContext())
+	require.Len(t, entries, 16)
+	ctx := newParityContext()
+	var factoryCalls atomic.Int32
+	trie := &Trie{scheduleWorkers: 2}
+	trie.ResetContext(ctx)
+	trie.SetTrieContextFactory(func(c context.Context) (commitment.PatriciaContext, func()) {
+		factoryCalls.Add(1)
+		return ctx.factory(c)
+	})
 	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
-	require.LessOrEqual(t, stats.max.Load(), int64(2))
-	require.Equal(t, int64(0), stats.inFlight.Load())
+	require.Equal(t, int32(2), factoryCalls.Load())
 	trie.Release()
 }
 
@@ -80,7 +68,7 @@ func TestRunStoragePhaseUsesConfiguredWorkers(t *testing.T) {
 		return newMockContext(), nil
 	}
 
-	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, make([]deltaParts, len(storage)), 4, new(scheduleStats))
+	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, make([]deltaParts, len(storage)), 4)
 	require.NoError(t, err)
 	require.Equal(t, int32(4), factoryCalls.Load())
 }

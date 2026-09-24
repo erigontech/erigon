@@ -152,32 +152,13 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 		return empty.RootHash, nil, nil
 	}
 
-	root, err := unfold(ctx, nil, planeStorage, task.addrHash[:])
-	if err != nil {
-		return [32]byte{}, nil, err
-	}
-	if root == nil {
-		root = fork(nil)
-		root.loaded = true
-	}
-	root.plane = planeStorage
-	markStorageRoot(root)
 	g := storageGraph(task.addrHash[:])
-	if err := g.materializeRootExtension(ctx, root); err != nil {
+	root, err := g.loadRoot(ctx)
+	if err != nil {
 		return [32]byte{}, nil, err
 	}
 	markStorageRoot(root)
 
-	for _, entry := range task.entries {
-		if len(entry.path) != 64 {
-			return [32]byte{}, nil, errPhaseAUpdate
-		}
-		for _, nib := range entry.path {
-			if nib > 0x0f {
-				return [32]byte{}, nil, errPhaseAUpdate
-			}
-		}
-	}
 	fanned := false
 	if len(task.entries) >= storageFanOutMin {
 		fanned, err = g.fanOutRoot(ctx, root, len(task.entries), func(i int) byte { return task.entries[i].path[0] }, plan, func(ctx commitment.PatriciaContext, i int) error {
@@ -232,9 +213,6 @@ func markStorageRoot(root *node) {
 	}
 	root.storageRoot = true
 	for nib := range 16 {
-		if root.childMask&(uint16(1)<<nib) == 0 || root.leafMask&(uint16(1)<<nib) != 0 {
-			continue
-		}
 		markStorageRoot(root.child(nib))
 	}
 }
