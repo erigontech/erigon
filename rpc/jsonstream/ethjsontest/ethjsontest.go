@@ -32,12 +32,19 @@ import (
 
 var u256 = reflect.TypeFor[uint256.Int]()
 
+// Computed is a field the encoder writes that the struct has no field for, such as a block
+// hash. Raw is the field's JSON, already encoded.
+type Computed struct {
+	Name string
+	Raw  string
+}
+
 // ExpectedJSON encodes v the way its tags declare: the json tag gives each field's name, its
 // position and whether it may be omitted, and the ethjson tag gives the hex form the JSON-RPC
 // spec uses for it — "quantity" for a number, "data" for bytes. A field without an ethjson tag
 // falls back to encoding/json. An embedded field is flattened, as encoding/json flattens an
 // anonymous one.
-func ExpectedJSON(v any) ([]byte, error) {
+func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	rv := reflect.ValueOf(v)
 	for rv.Kind() == reflect.Pointer {
 		if rv.IsNil() {
@@ -75,6 +82,9 @@ func ExpectedJSON(v any) ([]byte, error) {
 			return nil, fmt.Errorf("%s.%s: %w", typ.Name(), field.Name, err)
 		}
 		buf = appendField(buf, name, encoded)
+	}
+	for _, c := range computed {
+		buf = appendField(buf, c.Name, []byte(c.Raw))
 	}
 	return append(buf, '}'), nil
 }

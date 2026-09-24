@@ -38,8 +38,8 @@ type ErigonAPI interface {
 	BlockNumber(ctx context.Context, rpcBlockNumPtr *rpc.BlockNumber) (hexutil.Uint64, error)
 
 	// Blocks related (see ./erigon_blocks.go)
-	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.RPCHeader, error)
-	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.RPCHeader, error)
+	GetHeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error)
+	GetHeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error)
 	GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (*ethapi.RPCBlock, error)
 	GetBalanceChangesInBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (map[common.Address]*hexutil.U256, error)
 

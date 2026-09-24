@@ -38,14 +38,14 @@ import (
 )
 
 // GetHeaderByNumber implements erigon_getHeaderByNumber. Returns a block's header given a block number ignoring the block's transaction and uncle list (may be faster).
-func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*types.RPCHeader, error) {
+func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.BlockNumber) (*types.Header, error) {
 	// Pending block is only known by the miner
 	if blockNumber == rpc.PendingBlockNumber {
 		block := api.pendingBlock()
 		if block == nil {
 			return nil, nil
 		}
-		return types.NewRPCHeader(block.Header()), nil
+		return block.Header(), nil
 	}
 
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
@@ -63,11 +63,11 @@ func (api *ErigonImpl) GetHeaderByNumber(ctx context.Context, blockNumber rpc.Bl
 		return nil, fmt.Errorf("block header not found: %d", blockNumber)
 	}
 
-	return types.NewRPCHeader(header), nil
+	return header, nil
 }
 
 // GetHeaderByHash implements erigon_getHeaderByHash. Returns a block's header given a block's hash.
-func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.RPCHeader, error) {
+func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -82,7 +82,7 @@ func (api *ErigonImpl) GetHeaderByHash(ctx context.Context, hash common.Hash) (*
 		return nil, fmt.Errorf("block header not found: %s", hash.String())
 	}
 
-	return types.NewRPCHeader(header), nil
+	return header, nil
 }
 
 func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Timestamp, fullTx bool) (*ethapi.RPCBlock, error) {

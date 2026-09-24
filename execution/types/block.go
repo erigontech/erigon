@@ -74,8 +74,12 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("BlockNonce", input, n[:])
 }
 
+//()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
+
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
+// Every field carries an ethjson tag naming which of the spec's two hex forms it is written
+// as, a quantity or data; TestHeaderMarshalFastJSONTo holds the encoder to them.
 type Header struct {
 	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required" ethjson:"data"`
 	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required" ethjson:"data"`
@@ -531,6 +535,18 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 }
 
 // field type overrides for gencodec
+type headerMarshaling struct {
+	Difficulty    *hexutil.U256
+	Number        *hexutil.U256
+	GasLimit      hexutil.Uint64
+	GasUsed       hexutil.Uint64
+	Time          hexutil.Uint64
+	Extra         hexutil.Bytes
+	BaseFee       *hexutil.U256
+	BlobGasUsed   *hexutil.Uint64
+	ExcessBlobGas *hexutil.Uint64
+	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
+}
 
 // Hash returns the keccak256 hash of the header's RLP encoding.
 //
