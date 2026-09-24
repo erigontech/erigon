@@ -32,28 +32,26 @@ type Inner struct {
 }
 
 type Sample struct {
-	Inner                      // flattened
-	Hash       common.Hash     `json:"hash" ethjson:"data"`
-	Bytes      []byte          `json:"bytes" ethjson:"data"`
-	OptBytes   hexutil.Bytes   `json:"optBytes,omitempty" ethjson:"data"`
-	PtrHash    *common.Hash    `json:"ptrHash" ethjson:"data"`
-	Topics     []common.Hash   `json:"topics" ethjson:"datalist"`
-	Num        uint64          `json:"num" ethjson:"quantity"`
-	OptNum     hexutil.Uint    `json:"optNum,omitempty" ethjson:"quantity"`
-	PtrNum     *uint64         `json:"ptrNum" ethjson:"quantity"`
-	OptPtrNum  *hexutil.Uint64 `json:"optPtrNum,omitempty" ethjson:"quantity"`
-	Big        uint256.Int     `json:"big" ethjson:"quantity"`
-	OptBig     hexutil.U256    `json:"optBig,omitempty" ethjson:"quantity"`
-	PtrBig     *uint256.Int    `json:"ptrBig" ethjson:"quantity"`
-	Flag       bool            `json:"flag" ethjson:"bool"`
-	OptFlag    bool            `json:"optFlag,omitempty" ethjson:"bool"`
-	Logs       any             `json:"logs" ethjson:"objects"`
-	Renamed    uint64          `json:",omitempty" ethjson:"quantity"`
-	Skipped    string          `json:"-"`
-	unexported int             //nolint:unused
+	Inner                           // flattened
+	Hash       common.Hash          `json:"hash" ethjson:"data"`
+	Bytes      []byte               `json:"bytes" ethjson:"data"`
+	OptBytes   hexutil.Bytes        `json:"optBytes,omitempty" ethjson:"data"`
+	PtrHash    *common.Hash         `json:"ptrHash" ethjson:"data"`
+	Topics     []common.Hash        `json:"topics" ethjson:"datalist"`
+	Num        uint64               `json:"num" ethjson:"quantity"`
+	OptNum     hexutil.Uint         `json:"optNum,omitempty" ethjson:"quantity"`
+	PtrNum     *uint64              `json:"ptrNum" ethjson:"quantity"`
+	OptPtrNum  *hexutil.Uint64      `json:"optPtrNum,omitempty" ethjson:"quantity"`
+	Big        uint256.Int          `json:"big" ethjson:"quantity"`
+	OptBig     hexutil.U256         `json:"optBig,omitempty" ethjson:"quantity"`
+	PtrBig     *uint256.Int         `json:"ptrBig" ethjson:"quantity"`
+	Flag       bool                 `json:"flag" ethjson:"bool"`
+	OptFlag    bool                 `json:"optFlag,omitempty" ethjson:"bool"`
+	Logs       jsonstream.Marshaler `json:"logs" ethjson:"objects"`
+	Renamed    uint64               `json:",omitempty" ethjson:"quantity"`
+	Skipped    string               `json:"-"`
+	unexported int                  //nolint:unused
 }
-
-func writeLogs(s *jsonstream.StackStream, logs any) error { return nil }
 
 // writeComputedJSON stands for a value the struct does not hold, such as a header's hash.
 func (x *Sample) writeComputedJSON(s *jsonstream.StackStream) {}

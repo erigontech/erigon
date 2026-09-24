@@ -17,11 +17,7 @@
 package ethutils
 
 import (
-	"encoding/json"
-
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // RPCReceipts is eth_getBlockReceipts' answer. The RPC encoder only consults the top-level
@@ -42,46 +38,4 @@ func (rs RPCReceipts) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 	w.WriteArrayEnd()
 	return nil
-}
-
-// writeLogs streams the shapes this package builds. Any other shape goes through
-// encoding/json, which can only fail on a value no constructor here produces.
-func writeLogs(w *jsonstream.StackStream, logs any) error {
-	switch v := logs.(type) {
-	case types.Logs:
-		jsonstream.ArrayValue(w, v, writeLog)
-	case []*types.Log:
-		jsonstream.ArrayValue(w, v, writeLog)
-	case []*types.RPCLog:
-		jsonstream.ArrayValue(w, v, writeRPCLogElem)
-	default:
-		b, err := json.Marshal(v)
-		if err != nil {
-			return err
-		}
-		w.WriteRawBytes(b)
-	}
-	return nil
-}
-
-func writeRPCLogElem(w *jsonstream.StackStream, l **types.RPCLog) { _ = (*l).MarshalFastJSONTo(w) }
-
-// writeLog writes one log in the order types.Log declares its fields.
-func writeLog(w *jsonstream.StackStream, lp **types.Log) {
-	l := *lp
-	if l == nil {
-		w.WriteNil()
-		return
-	}
-	w.WriteObjectStart()
-	ethjson.Data(w, "address", l.Address[:])
-	ethjson.DataList(w, "topics", l.Topics)
-	ethjson.Data(w, "data", l.Data)
-	ethjson.Quantity(w, "blockNumber", l.BlockNumber)
-	ethjson.Data(w, "transactionHash", l.TxHash[:])
-	ethjson.Quantity(w, "transactionIndex", l.TxIndex)
-	ethjson.Data(w, "blockHash", l.BlockHash[:])
-	ethjson.Quantity(w, "logIndex", l.Index)
-	w.Field("removed").WriteBool(l.Removed)
-	w.WriteObjectEnd()
 }

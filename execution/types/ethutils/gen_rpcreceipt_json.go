@@ -38,9 +38,13 @@ func (x *RPCReceipt) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	} else {
 		ethjson.Data(s, "contractAddress", x.ContractAddress[:])
 	}
-	s.Field("logs")
-	if err := writeLogs(s, x.Logs); err != nil {
-		return err
+	if x.Logs == nil {
+		s.Field("logs").WriteNil()
+	} else {
+		s.Field("logs")
+		if err := x.Logs.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
 	}
 	if x.LogsBloom == nil {
 		s.Field("logsBloom").WriteNil()

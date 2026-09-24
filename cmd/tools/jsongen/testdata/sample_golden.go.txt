@@ -52,9 +52,13 @@ func (x *Sample) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if x.OptFlag {
 		s.Field("optFlag").WriteBool(x.OptFlag)
 	}
-	s.Field("logs")
-	if err := writeLogs(s, x.Logs); err != nil {
-		return err
+	if x.Logs == nil {
+		s.Field("logs").WriteNil()
+	} else {
+		s.Field("logs")
+		if err := x.Logs.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
 	}
 	if x.Renamed != 0 {
 		ethjson.Quantity(s, "Renamed", x.Renamed)

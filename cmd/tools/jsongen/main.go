@@ -176,7 +176,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 		}
 		written[name] = struct{}{}
 
-		stmt, err := fieldStatement(recv+"."+f.Name(), name, f.Name(), tag.Get("ethjson"), f.Type(), slices.Contains(strings.Split(opts, ","), "omitempty"))
+		stmt, err := fieldStatement(recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), slices.Contains(strings.Split(opts, ","), "omitempty"))
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.Name(), err)
 		}
@@ -188,8 +188,9 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 // fieldStatement picks the writer for one field from its declared form and its type. A field
 // its json tag lets omit is wrapped in the presence test encoding/json would apply; without
 // omitempty, an absent value is written as null.
-func fieldStatement(ref, name, field, form string, t types.Type, omitempty bool) (string, error) {
+func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (string, error) {
 	_, pointer := t.Underlying().(*types.Pointer)
+	_, iface := t.Underlying().(*types.Interface)
 	bare := deref(t)
 
 	var write, present string
@@ -203,9 +204,10 @@ func fieldStatement(ref, name, field, form string, t types.Type, omitempty bool)
 		write = fmt.Sprintf("s.Field(%q).WriteBool(%s)", name, ref)
 		present = ref
 	case "objects":
-		// The shapes this may hold are the package's business, so it writes them; the
-		// generator only places the field.
-		write = fmt.Sprintf("s.Field(%q)\n\t\tif err := write%s(s, %s); err != nil {\n\t\t\treturn err\n\t\t}", name, field, ref)
+		if !writesItself(bare) {
+			return "", fmt.Errorf(`ethjson:"objects" on %s, which has no MarshalFastJSONTo`, t)
+		}
+		write = fmt.Sprintf("s.Field(%q)\n\t\tif err := %s.MarshalFastJSONTo(s); err != nil {\n\t\t\treturn err\n\t\t}", name, ref)
 		present = ref + " != nil"
 	case "datalist":
 		if pointer || !isSliceOfArrays(bare) {
@@ -251,7 +253,7 @@ func fieldStatement(ref, name, field, form string, t types.Type, omitempty bool)
 	switch {
 	case omitempty:
 		return fmt.Sprintf("\tif %s {\n\t\t%s\n\t}\n", present, write), nil
-	case pointer: // absent, and the tag does not allow leaving it out
+	case pointer || iface: // absent, and the tag does not allow leaving it out
 		return fmt.Sprintf("\tif %s == nil {\n\t\ts.Field(%q).WriteNil()\n\t} else {\n\t\t%s\n\t}\n", ref, name, write), nil
 	default:
 		return "\t" + write + "\n", nil
@@ -315,6 +317,24 @@ func hasMethod(t types.Type, name string) bool {
 	ms := types.NewMethodSet(types.NewPointer(t))
 	for i := range ms.Len() {
 		if ms.At(i).Obj().Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+// writesItself reports a value that carries its own encoder, so the generator only places the
+// field and leaves the bytes to it.
+func writesItself(t types.Type) bool {
+	if iface, ok := t.Underlying().(*types.Interface); ok {
+		return hasMethodIn(iface, "MarshalFastJSONTo")
+	}
+	return hasMethod(t, "MarshalFastJSONTo")
+}
+
+func hasMethodIn(iface *types.Interface, name string) bool {
+	for i := range iface.NumMethods() {
+		if iface.Method(i).Name() == name {
 			return true
 		}
 	}
