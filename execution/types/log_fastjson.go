@@ -18,27 +18,28 @@ package types
 
 import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
-// MarshalFastJSONTo writes the log in the field order encoding/json uses for the struct,
-// straight into the response stream, so a result never needs a buffer of its own.
+// MarshalFastJSONTo writes the log in the order RPCLog declares its fields, straight into
+// the response stream, so a result never needs a buffer of its own.
 func (l *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if l == nil {
 		s.WriteNil()
 		return nil
 	}
 	s.WriteObjectStart()
-	s.Field("address").WriteHex(l.Address[:])
-	jsonstream.HexesField(s, "topics", l.Topics)
+	ethjson.Data(s, "address", l.Address[:])
+	ethjson.DataList(s, "topics", l.Topics)
 	// A nil Data is "0x", not null.
-	s.Field("data").WriteHex(l.Data)
-	jsonstream.Text(s, "blockNumber", &l.BlockNumber)
-	s.Field("transactionHash").WriteHex(l.TxHash[:])
-	jsonstream.Text(s, "transactionIndex", &l.TxIndex)
-	s.Field("blockHash").WriteHex(l.BlockHash[:])
-	jsonstream.Text(s, "logIndex", &l.Index)
+	ethjson.Data(s, "data", l.Data)
+	ethjson.Quantity(s, "blockNumber", l.BlockNumber)
+	ethjson.Data(s, "transactionHash", l.TxHash[:])
+	ethjson.Quantity(s, "transactionIndex", l.TxIndex)
+	ethjson.Data(s, "blockHash", l.BlockHash[:])
+	ethjson.Quantity(s, "logIndex", l.Index)
 	s.Field("removed").WriteBool(l.Removed)
-	jsonstream.Text(s, "blockTimestamp", &l.BlockTimestamp)
+	ethjson.Quantity(s, "blockTimestamp", l.BlockTimestamp)
 	s.WriteObjectEnd()
 	return nil
 }

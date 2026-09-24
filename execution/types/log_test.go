@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/require"
@@ -610,6 +611,35 @@ func TestRPCLogsMarshalFastJSONTo(t *testing.T) {
 			require.NoError(t, s.Flush())
 			require.NoError(t, s.Err())
 			require.Equal(t, string(want), sink.String())
+		})
+	}
+}
+
+// Every RPCLog field says which of the spec's two hex forms it is written as, and the encoder
+// is held to that: a dropped field, a wrong form or a reordered key fails here.
+func TestRPCLogMatchesItsTags(t *testing.T) {
+	t.Parallel()
+	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
+	for name, l := range map[string]*RPCLog{
+		"every field set": {Log: Log{
+			Address:     common.HexToAddress("0xdAC17F958D2ee523a2206206994597C13D831ec7"),
+			Topics:      []common.Hash{topic, {}},
+			Data:        []byte{1, 2, 3},
+			BlockNumber: hexutil.Uint64(^uint64(0)),
+			TxHash:      common.HexToHash("0xaabb"),
+			TxIndex:     hexutil.Uint(^uint(0)),
+			BlockHash:   common.HexToHash("0xccdd"),
+			Index:       hexutil.Uint(^uint(0)),
+			Removed:     true,
+		}, BlockTimestamp: hexutil.Uint64(^uint64(0))},
+		"zero": {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := ethjsontest.ExpectedJSON(l)
+			require.NoError(t, err)
+			got, err := jsonstream.Marshal(l)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
 		})
 	}
 }
