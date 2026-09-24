@@ -62,6 +62,14 @@ func (x *Sample) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 			return err
 		}
 	}
+	if x.Nested == nil {
+		s.Field("nested").WriteNil()
+	} else {
+		s.Field("nested")
+		if err := x.Nested.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
 	if x.Renamed != 0 {
 		ethjson.Quantity(s, "Renamed", x.Renamed)
 	}

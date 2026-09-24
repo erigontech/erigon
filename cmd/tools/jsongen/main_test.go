@@ -80,7 +80,7 @@ func TestGenerateOverStaleOutput(t *testing.T) {
 	// The sibling matters as much as the output: go generate runs one directive per type, and
 	// the first run must not fail on a file a later run would rewrite.
 	for name, recv := range map[string]string{"gen_sample_json.go": "Sample", "gen_inner_json.go": "Inner"} {
-		stale := marker + " DO NOT EDIT.\n\npackage sample\n\nfunc (x *" + recv +
+		stale := marker + " DO NOT EDIT.\n" + sourceOfTruth + recv + "'s json and ethjson tags.\n\npackage sample\n\nfunc (x *" + recv +
 			") MarshalFastJSONTo(s *jsonstream.StackStream) error {\n\t_ = x.SinceRenamed\n\treturn nil\n}\n"
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(stale), 0o644))
 	}

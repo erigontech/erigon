@@ -60,6 +60,7 @@ type Sample struct {
 	Flag       bool                 `json:"flag" ethjson:"bool"`
 	OptFlag    bool                 `json:"optFlag,omitempty" ethjson:"bool"`
 	Logs       jsonstream.Marshaler `json:"logs" ethjson:"objects"`
+	Nested     *Inner               `json:"nested" ethjson:"objects"`
 	Renamed    uint64               `json:",omitempty" ethjson:"quantity"`
 	Skipped    string               `json:"-"`
 	unexported int                  //nolint:unused
