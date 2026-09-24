@@ -203,9 +203,9 @@ func TestWarmupV4StepSelfExtensionAndTruncated(t *testing.T) {
 	copy(hashedKey, []byte{1, 2, 4})
 	nextDepth, stop := warmupStepV4(record, hashedKey, 0)
 	require.False(t, stop)
-	require.Equal(t, 3, nextDepth)
+	require.Equal(t, 2, nextDepth)
 
-	hashedKey[2] = 5
+	hashedKey[1] = 5
 	nextDepth, stop = warmupStepV4(record, hashedKey, 0)
 	require.True(t, stop)
 	require.Zero(t, nextDepth)

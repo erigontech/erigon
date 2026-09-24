@@ -48,7 +48,7 @@ func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 		if end > len(hashedKey) || !packedMatches(selfExt[1:], hashedKey[branchPoint:end]) {
 			return 0, true
 		}
-		branchPoint = end
+		return end, false
 	}
 	if branchPoint >= len(hashedKey) {
 		return 0, true

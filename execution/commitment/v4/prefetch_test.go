@@ -51,6 +51,14 @@ func TestPrefetchPathCoversRoundReads(t *testing.T) {
 		{11, contracts*2 + 11},
 		{contracts + 17, contracts*2 + 17},
 	}
+	for i := range contracts {
+		first, second := keccak.Sum256(benchSlot(i*2)), keccak.Sum256(benchSlot(i*2+1))
+		if first[0]>>4 == second[0]>>4 {
+			cases = append(cases, struct{ account, slot int }{i, i * 2})
+			break
+		}
+	}
+	require.Len(t, cases, 7)
 	for _, c := range cases {
 		addr, slot := benchAddr(c.account), benchSlot(c.slot)
 		addrHash, slotHash := keccak.Sum256(addr), keccak.Sum256(slot)
