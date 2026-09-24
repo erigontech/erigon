@@ -856,7 +856,7 @@ func TestHeaderMarshalFastJSONTo(t *testing.T) {
 	t.Parallel()
 	full := headerWithEveryFieldSet()
 	empty := &Header{}
-	noOptionals := &Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(0), Extra: []byte{}}
+	noOptionals := &Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(0), Extra: []byte{}, AuRaSeal: []byte{}}
 
 	for name, h := range map[string]*Header{"full": full, "empty": empty, "noOptionals": noOptionals} {
 		t.Run(name, func(t *testing.T) {

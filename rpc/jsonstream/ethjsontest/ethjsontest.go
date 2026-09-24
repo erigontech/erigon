@@ -42,8 +42,7 @@ type Computed struct {
 // ExpectedJSON encodes v the way its tags declare: the json tag gives each field's name, its
 // position and whether it may be omitted, and the ethjson tag gives the hex form the JSON-RPC
 // spec uses for it — "quantity" for a number, "data" for bytes. A field without an ethjson tag
-// falls back to encoding/json. An embedded field is flattened, as encoding/json flattens an
-// anonymous one.
+// falls back to encoding/json.
 func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	rv := reflect.ValueOf(v)
 	for rv.Kind() == reflect.Pointer {
@@ -57,14 +56,6 @@ func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	buf := []byte{'{'}
 	for i := range typ.NumField() {
 		field := typ.Field(i)
-		if field.Anonymous {
-			inner, err := ExpectedJSON(rv.Field(i).Interface())
-			if err != nil {
-				return nil, fmt.Errorf("%s.%s: %w", typ.Name(), field.Name, err)
-			}
-			buf = appendInlined(buf, inner)
-			continue
-		}
 		tag, ok := field.Tag.Lookup("json")
 		if !ok {
 			continue
@@ -74,7 +65,7 @@ func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 			continue
 		}
 		value := rv.Field(i)
-		if strings.Contains(opts, "omitempty") && value.IsZero() {
+		if strings.Contains(opts, "omitempty") && isEmpty(value) {
 			continue
 		}
 		encoded, err := jsonrpcValue(value, field.Tag.Get("ethjson"))
@@ -89,15 +80,14 @@ func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	return append(buf, '}'), nil
 }
 
-// appendInlined splices an embedded struct's fields in, the way encoding/json does.
-func appendInlined(buf []byte, object []byte) []byte {
-	if len(object) <= 2 {
-		return buf
+// isEmpty is what encoding/json's omitempty leaves out: a zero value, and also a slice, map or
+// string with nothing in it, which IsZero alone reports as present.
+func isEmpty(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Slice, reflect.Map, reflect.String, reflect.Array:
+		return v.Len() == 0
 	}
-	if len(buf) > 1 {
-		buf = append(buf, ',')
-	}
-	return append(buf, object[1:len(object)-1]...)
+	return v.IsZero()
 }
 
 func appendField(buf []byte, name string, encoded []byte) []byte {

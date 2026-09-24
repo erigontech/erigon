@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
 	"strings"
 
 	jsoniter "github.com/json-iterator/go"
@@ -91,6 +92,18 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 		return
 	}
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
+	s.afterValue()
+}
+
+// WriteQuantity writes v the way the JSON-RPC spec writes a number: 0x and the shortest
+// lowercase hex. The bytes go straight into the buffer, so no hexutil value is built for the
+// call and nothing can escape.
+func (s *StackStream) WriteQuantity(v uint64) {
+	s.beforeValue()
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
+	s.commit(append(buf, '"'), start)
 	s.afterValue()
 }
 

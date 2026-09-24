@@ -18,6 +18,7 @@ package types
 
 import (
 	"encoding/binary"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // Testdata format: repeated [u32 LE length][rlp bytes]. Produced by the
@@ -218,5 +220,30 @@ func BenchmarkHeaderMarshalJSON(b *testing.B) {
 		if _, err := h.MarshalJSON(); err != nil {
 			b.Fatal(err)
 		}
+	}
+}
+
+// BenchmarkHeaderMarshalFastJSONTo encodes through the writer a served reply uses: a pooled
+// stream over a response recorder, flushed and returned each iteration.
+func BenchmarkHeaderMarshalFastJSONTo(b *testing.B) {
+	headers := loadHeadersRLP(b, "headers-mainnet-01894.rlp")
+	var h Header
+	if err := rlp.DecodeBytes(headers[0], &h); err != nil {
+		b.Fatal(err)
+	}
+	_ = h.Hash() // memoized, as a served header's is
+	rec := httptest.NewRecorder()
+	b.ReportAllocs()
+	for b.Loop() {
+		rec.Body.Reset()
+		s := jsonstream.Get(rec)
+		rs := jsonstream.NewLazyFieldStream(s, "result", false)
+		if err := h.MarshalFastJSONTo(rs.Open()); err != nil {
+			b.Fatal(err)
+		}
+		if err := s.Flush(); err != nil {
+			b.Fatal(err)
+		}
+		jsonstream.Put(s)
 	}
 }

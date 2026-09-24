@@ -32,8 +32,7 @@ import (
 // type and hold that mapping in one place: an encoder cannot pass a byte slice where the
 // spec wants a quantity, and no encoder needs to name a hexutil type.
 func Quantity[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v T) {
-	q := hexutil.Uint64(v)
-	jsonstream.Text(s, name, &q)
+	s.Field(name).WriteQuantity(uint64(v))
 }
 
 // QuantityOrNull writes null for a field the header or receipt does not carry.
