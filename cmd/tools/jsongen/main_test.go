@@ -1,0 +1,65 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package main
+
+import (
+	"flag"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+)
+
+var update = flag.Bool("update", false, "rewrite the golden file")
+
+// testdata/sample carries one field per branch, so this fails when any of them changes shape:
+// omitempty per kind, a pointer written as null, an embedded struct flattened, a json tag with
+// no name, and the forms a field may declare.
+func TestGenerateSample(t *testing.T) {
+	const golden = "testdata/sample_golden.go.txt"
+	out := filepath.Join(t.TempDir(), "gen_sample_json.go")
+
+	require.NoError(t, run("Sample", "testdata/sample", out))
+	got, err := os.ReadFile(out)
+	require.NoError(t, err)
+
+	if *update {
+		require.NoError(t, os.WriteFile(golden, got, 0o644))
+		return
+	}
+	want, err := os.ReadFile(golden)
+	require.NoError(t, err)
+	require.Equal(t, string(want), string(got))
+}
+
+// A field the generator cannot place must stop it, rather than produce a file that does not
+// compile or quietly omits the field.
+func TestGenerateRejects(t *testing.T) {
+	for name, typeName := range map[string]string{
+		"no ethjson tag":   "MissingForm",
+		"form vs type":     "WrongForm",
+		"duplicate name":   "DuplicateName",
+		"tagged embedded":  "TaggedEmbedded",
+		"embedded pointer": "PointerEmbedded",
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := run(typeName, "testdata/bad", filepath.Join(t.TempDir(), "out.go"))
+			require.Error(t, err)
+		})
+	}
+}

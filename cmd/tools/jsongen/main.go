@@ -30,6 +30,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -39,7 +40,7 @@ import (
 func main() {
 	typeName := flag.String("type", "", "struct to generate for")
 	dir := flag.String("dir", ".", "package directory holding it")
-	out := flag.String("out", "", "file to write, relative to dir")
+	out := flag.String("out", "", "file to write, relative to dir unless absolute")
 	flag.Parse()
 	if *typeName == "" || *out == "" {
 		flag.Usage()
@@ -72,7 +73,10 @@ func run(typeName, dir, out string) error {
 
 	var file bytes.Buffer
 	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String())
-	path := filepath.Join(dir, out)
+	path := out
+	if !filepath.IsAbs(out) {
+		path = filepath.Join(dir, out)
+	}
 	// imports.Process adds what the body uses and gofmts in one step.
 	formatted, err := imports.Process(path, file.Bytes(), nil)
 	if err != nil {
@@ -111,9 +115,14 @@ func load(dir string) (*packages.Package, error) {
 	if len(pkgs) != 1 {
 		return nil, fmt.Errorf("%s holds %d packages, want 1", dir, len(pkgs))
 	}
-	// Type errors are expected the first time a package is generated for: the method this
-	// writes is missing until it exists. The struct's own fields still type-check, and a
-	// name that truly is not there fails the lookup below.
+	// A type error is expected the first time a package is generated for: the method this
+	// writes is what makes the package compile. Anything else — a parse error, a missing
+	// import — means the tags being read are not the ones that will build.
+	for _, e := range pkgs[0].Errors {
+		if e.Kind != packages.TypeError {
+			return nil, e
+		}
+	}
 	return pkgs[0], nil
 }
 
@@ -129,7 +138,12 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 			if _, named := tag.Lookup("json"); named {
 				return fmt.Errorf("embedded %s has a json tag, which encoding/json nests", f.Name())
 			}
-			embedded, ok := deref(f.Type()).Underlying().(*types.Struct)
+			// A nil embedded pointer makes encoding/json omit the whole group, which a
+			// flattened encoder cannot express, so the generator refuses one.
+			if _, ptr := f.Type().Underlying().(*types.Pointer); ptr {
+				return fmt.Errorf("embedded %s is a pointer, which may be nil", f.Name())
+			}
+			embedded, ok := f.Type().Underlying().(*types.Struct)
 			if !ok {
 				return fmt.Errorf("embedded %s is not a struct", f.Name())
 			}
@@ -157,7 +171,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 		}
 		written[name] = struct{}{}
 
-		stmt, err := fieldStatement(recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), strings.Contains(opts, "omitempty"))
+		stmt, err := fieldStatement(recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), slices.Contains(strings.Split(opts, ","), "omitempty"))
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.Name(), err)
 		}
@@ -271,13 +285,18 @@ func isSliceOfArrays(t types.Type) bool {
 	return isBytes(s.Elem())
 }
 
-// is256 reports a uint256.Int under any name, so an alias or a named copy such as hexutil.U256
-// is recognised by its type rather than by how it is spelled.
+// the256 lists the types the generated code converts to *uint256.Int. Matching the underlying
+// [4]uint64 alone would accept any four-word array, which that conversion would misread.
+var the256 = map[string]bool{
+	"github.com/holiman/uint256.Int":                   true,
+	"github.com/erigontech/erigon/common/hexutil.U256": true,
+}
+
+// is256 reports one of those, under an alias or not, since an alias denotes the same named type.
 func is256(t types.Type) bool {
-	a, ok := t.Underlying().(*types.Array)
-	if !ok || a.Len() != 4 {
+	named, ok := t.(*types.Named)
+	if !ok || named.Obj().Pkg() == nil {
 		return false
 	}
-	b, ok := a.Elem().Underlying().(*types.Basic)
-	return ok && b.Kind() == types.Uint64
+	return the256[named.Obj().Pkg().Path()+"."+named.Obj().Name()]
 }
