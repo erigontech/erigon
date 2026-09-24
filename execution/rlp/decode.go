@@ -201,7 +201,7 @@ func isNamedU256(typ reflect.Type) bool {
 }
 
 func errNamedU256(typ reflect.Type) error {
-	return fmt.Errorf("rlp: type %v is defined as uint256.Int; convert it to uint256.Int first", typ)
+	return fmt.Errorf("rlp: %v is its own type declared as uint256.Int, so RLP would encode its four words as a list instead of one integer; use uint256.Int on the field", typ)
 }
 
 func makeDecoder(typ reflect.Type, tags rlpstruct.Tags) (dec decoder, err error) {

@@ -633,12 +633,12 @@ func TestNamedUint256IsRefused(t *testing.T) {
 	require.Equal(t, []byte{0x82, 0x12, 0x34}, plain)
 
 	_, err = EncodeToBytes((*hexutil.U256)(n))
-	require.ErrorContains(t, err, "defined as uint256.Int")
+	require.ErrorContains(t, err, "would encode its four words as a list")
 	_, err = EncodeToBytes(hexutil.U256(*n))
-	require.ErrorContains(t, err, "defined as uint256.Int")
+	require.ErrorContains(t, err, "would encode its four words as a list")
 	_, err = EncodeToBytes(struct{ N *hexutil.U256 }{(*hexutil.U256)(n)})
-	require.ErrorContains(t, err, "defined as uint256.Int")
+	require.ErrorContains(t, err, "would encode its four words as a list")
 
 	var into hexutil.U256
-	require.ErrorContains(t, DecodeBytes(plain, &into), "defined as uint256.Int")
+	require.ErrorContains(t, DecodeBytes(plain, &into), "would encode its four words as a list")
 }
