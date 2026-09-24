@@ -241,7 +241,7 @@ MainLoop:
 			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
 			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
 			payloadReplay := storedParentPayloadReplay{
-				deadline:  time.Now().Add(gloasPayloadRetryBudget),
+				budget:    gloasPayloadRetryBudget,
 				remaining: len(envelopes),
 				results:   make(map[common.Hash]bool),
 			}
@@ -281,11 +281,14 @@ MainLoop:
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
 						wasStored := cfg.forkChoice.HasEnvelope(common.Hash(parentRoot))
-						envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg))
+						envelopeCtx, cancelEnvelope := payloadReplay.attemptContext(ctx, common.Hash(parentRoot))
+						envErr := cfg.forkChoice.OnExecutionPayload(envelopeCtx, env, false, canValidateGloasPayloads(cfg))
 						if envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
-						if wasStored && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, common.Hash(parentRoot), env, envErr) {
+						accepted := !wasStored || payloadReplay.accepted(envelopeCtx, cfg, cfg.forkChoice, common.Hash(parentRoot), env, envErr)
+						cancelEnvelope()
+						if !accepted {
 							continue
 						}
 					}
@@ -386,7 +389,8 @@ func parentEnvelopeRequired(child, parent *cltypes.SignedBeaconBlock) bool {
 }
 
 func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound, gasLimitFound bool) bool {
-	return parentEnvelopeRequired(child, parent) && (!stored || !statusFound || status == execution_client.PayloadStatusNone || !gasLimitFound)
+	gasLimitRequired := status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
+	return parentEnvelopeRequired(child, parent) && (!stored || !statusFound || status == execution_client.PayloadStatusNone || (gasLimitRequired && !gasLimitFound))
 }
 
 // fetchParentEnvelopes batch-fetches execution payload envelopes for the given roots.
@@ -849,24 +853,19 @@ type storedParentPayloadStore interface {
 }
 
 type storedParentPayloadReplay struct {
-	deadline  time.Time
-	remaining int
-	results   map[common.Hash]bool
+	budget           time.Duration
+	deadline         time.Time
+	remaining        int
+	attemptDeadlines map[common.Hash]time.Time
+	results          map[common.Hash]bool
 }
 
-func (r *storedParentPayloadReplay) accepted(
-	ctx context.Context,
-	cfg *Cfg,
-	store storedParentPayloadStore,
-	root common.Hash,
-	envelope *cltypes.SignedExecutionPayloadEnvelope,
-	applyErr error,
-) bool {
-	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
-		return false
+func (r *storedParentPayloadReplay) attemptContext(ctx context.Context, root common.Hash) (context.Context, context.CancelFunc) {
+	if deadline, ok := r.attemptDeadlines[root]; ok {
+		return context.WithDeadline(ctx, deadline)
 	}
-	if accepted, ok := r.results[root]; ok {
-		return accepted
+	if r.deadline.IsZero() {
+		r.deadline = time.Now().Add(r.budget)
 	}
 	attemptDeadline := r.deadline
 	if r.remaining > 1 {
@@ -878,7 +877,32 @@ func (r *storedParentPayloadReplay) accepted(
 	if r.remaining > 0 {
 		r.remaining--
 	}
-	retryCtx, cancel := context.WithDeadline(ctx, attemptDeadline)
+	if r.attemptDeadlines == nil {
+		r.attemptDeadlines = make(map[common.Hash]time.Time)
+	}
+	r.attemptDeadlines[root] = attemptDeadline
+	return context.WithDeadline(ctx, attemptDeadline)
+}
+
+func (r *storedParentPayloadReplay) accepted(
+	ctx context.Context,
+	cfg *Cfg,
+	store storedParentPayloadStore,
+	root common.Hash,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+	applyErr error,
+) bool {
+	if accepted, ok := r.results[root]; ok {
+		return accepted
+	}
+	if r.results == nil {
+		r.results = make(map[common.Hash]bool)
+	}
+	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
+		r.results[root] = false
+		return false
+	}
+	retryCtx, cancel := r.attemptContext(ctx, root)
 	accepted := ensureStoredParentPayloadAccepted(retryCtx, cfg, store, root, envelope)
 	cancel()
 	r.results[root] = accepted

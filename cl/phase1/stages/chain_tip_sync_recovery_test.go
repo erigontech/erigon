@@ -101,6 +101,7 @@ func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {
 	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusValidated, true, false))
 	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, true, true))
 	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, false, true))
+	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusInvalidated, true, false))
 }
 
 func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
@@ -264,6 +265,31 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 		Payload:         secondPayload,
 	}}, nil))
 	require.Equal(t, []common.Hash{firstPayload.BlockHash, secondPayload.BlockHash}, validator.calls)
+}
+
+func TestStoredParentPayloadReplayBudgetsInitialApply(t *testing.T) {
+	firstRoot := common.Hash{1}
+	secondRoot := common.Hash{2}
+	firstPayload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	firstPayload.BlockHash = common.Hash{3}
+	secondPayload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	secondPayload.BlockHash = common.Hash{4}
+	validator := &orderedPayloadValidator{slow: firstPayload.BlockHash}
+	replay := storedParentPayloadReplay{
+		budget:    100 * time.Millisecond,
+		remaining: 2,
+	}
+
+	firstCtx, cancelFirst := replay.attemptContext(t.Context(), firstRoot)
+	_, err := validator.NewPayloadWithAdmission(firstCtx, firstPayload, nil, nil, nil)
+	cancelFirst()
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	secondCtx, cancelSecond := replay.attemptContext(t.Context(), secondRoot)
+	status, err := validator.NewPayloadWithAdmission(secondCtx, secondPayload, nil, nil, nil)
+	cancelSecond()
+	require.NoError(t, err)
+	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
 }
 
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
