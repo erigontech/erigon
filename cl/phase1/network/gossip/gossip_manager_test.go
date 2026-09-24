@@ -17,8 +17,10 @@
 package gossip
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -681,7 +683,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_DoesNotBlockCal
 
 	returned := make(chan struct{})
 	go func() {
-		s.gm.PublishBackground("test_topic", []byte("data"))
+		s.NoError(s.gm.PublishBackground("test_topic", []byte("data"), time.Time{}))
 		close(returned)
 	}()
 
@@ -713,7 +715,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_DropsWhenQueueF
 	}
 
 	// Occupy the single worker so nothing drains the queue below.
-	s.gm.PublishBackground("occupy", nil)
+	s.NoError(s.gm.PublishBackground("occupy", nil, time.Time{}))
 	select {
 	case <-hookEntered:
 	case <-time.After(2 * time.Second):
@@ -725,7 +727,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_DropsWhenQueueF
 	for range cap(s.gm.publishQueue) {
 		done := make(chan struct{})
 		go func() {
-			s.gm.PublishBackground("filler", nil)
+			s.NoError(s.gm.PublishBackground("filler", nil, time.Time{}))
 			close(done)
 		}()
 		select {
@@ -736,10 +738,10 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_DropsWhenQueueF
 	}
 
 	// The queue is now full and the worker is still occupied: one more call
-	// must drop the message rather than block.
+	// must drop the message rather than block, and report the exact reason.
 	done := make(chan struct{})
 	go func() {
-		s.gm.PublishBackground("overflow", nil)
+		s.ErrorIs(s.gm.PublishBackground("overflow", nil, time.Time{}), ErrPublishQueueFull)
 		close(done)
 	}()
 	select {
@@ -763,7 +765,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_RecoversFromPan
 		}
 	}
 
-	s.gm.PublishBackground("job1", nil)
+	s.NoError(s.gm.PublishBackground("job1", nil, time.Time{}))
 	select {
 	case got := <-calls:
 		s.Equal("job1", got)
@@ -771,7 +773,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_RecoversFromPan
 		s.FailNow("job1 was never processed")
 	}
 
-	s.gm.PublishBackground("job2", nil)
+	s.NoError(s.gm.PublishBackground("job2", nil, time.Time{}))
 	select {
 	case got := <-calls:
 		s.Equal("job2", got)
@@ -795,7 +797,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PanicLogInclude
 		panic("boom")
 	}
 
-	s.gm.PublishBackground("job-with-context", nil, "validatorIndex", 42)
+	s.NoError(s.gm.PublishBackground("job-with-context", nil, time.Time{}, "validatorIndex", 42))
 
 	deadline := time.After(2 * time.Second)
 	for {
@@ -834,7 +836,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PublishesToReal
 	defer sub.Cancel()
 
 	payload := []byte("hello")
-	s.gm.PublishBackground(topicName, payload)
+	s.NoError(s.gm.PublishBackground(topicName, payload, time.Time{}))
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -905,7 +907,7 @@ func TestPublishBackground_CapturesForkDigestAtEnqueueTime(t *testing.T) {
 	}
 
 	payload := []byte("hello")
-	gm.PublishBackground(topicName, payload)
+	require.NoError(t, gm.PublishBackground(topicName, payload, time.Time{}))
 
 	// Wait until the worker has dequeued the job (so PublishBackground's own
 	// digest capture has already happened), then flip the digest before
@@ -972,8 +974,9 @@ func TestPublishBackground_DropsAfterClose(t *testing.T) {
 		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
 
 	require.NoError(t, gm.Close())
+	<-gm.workerDone
 
-	gm.PublishBackground("test_topic", []byte("data"))
+	require.ErrorIs(t, gm.PublishBackground("test_topic", []byte("data"), time.Time{}), ErrGossipManagerShutdown)
 
 	require.Equal(t, 0, len(gm.publishQueue),
 		"a message enqueued after Close must not be left sitting in a queue nothing will ever drain")
@@ -1003,7 +1006,11 @@ func TestPublishBackground_NoStrandedJobsUnderConcurrentClose(t *testing.T) {
 		wg.Add(2)
 		go func() {
 			defer wg.Done()
-			gm.PublishBackground("topic", []byte("data"))
+			// The whole point of this stress test is the race between this
+			// admission attempt and Close below - it may legitimately
+			// return either nil or ErrGossipManagerShutdown depending on
+			// timing; only the queue's final state (asserted below) matters.
+			_ = gm.PublishBackground("topic", []byte("data"), time.Time{})
 		}()
 		go func() {
 			defer wg.Done()
@@ -1011,9 +1018,12 @@ func TestPublishBackground_NoStrandedJobsUnderConcurrentClose(t *testing.T) {
 		}()
 		wg.Wait()
 
-		require.Eventually(t, func() bool {
-			return len(gm.publishQueue) == 0
-		}, 2*time.Second, time.Millisecond,
+		select {
+		case <-gm.workerDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("worker never completed its shutdown drain")
+		}
+		require.Equal(t, 0, len(gm.publishQueue),
 			"a job must never be left stranded in the queue with no consumer left to drain it")
 	}
 }
@@ -1060,21 +1070,24 @@ func TestPublishBackground_DrainsBufferedJobsOnParentContextCancellation(t *test
 			}
 		}
 
-		gm.PublishBackground("occupy", nil)
+		require.NoError(t, gm.PublishBackground("occupy", nil, time.Time{}))
 		select {
 		case <-occupyEntered:
 		case <-time.After(2 * time.Second):
 			t.Fatal("worker never picked up the occupying job")
 		}
 
-		gm.PublishBackground("buffered", nil)
+		require.NoError(t, gm.PublishBackground("buffered", nil, time.Time{}))
 		parentCancel()
 
 		close(unblockOccupy)
 
-		require.Eventually(t, func() bool {
-			return len(gm.publishQueue) == 0
-		}, 2*time.Second, time.Millisecond,
+		select {
+		case <-gm.workerDone:
+		case <-time.After(2 * time.Second):
+			t.Fatal("worker never completed its shutdown drain")
+		}
+		require.Equal(t, 0, len(gm.publishQueue),
 			"a job buffered when the parent context is cancelled must still be drained, not stranded")
 	}
 }
@@ -1115,8 +1128,9 @@ func TestPublishBackground_NoAdmissionAfterParentContextCancellation(t *testing.
 	}
 
 	done := make(chan struct{})
+	var publishErr error
 	go func() {
-		gm.PublishBackground("racy", []byte("data"))
+		publishErr = gm.PublishBackground("racy", []byte("data"), time.Time{})
 		close(done)
 	}()
 
@@ -1139,11 +1153,295 @@ func TestPublishBackground_NoAdmissionAfterParentContextCancellation(t *testing.
 	case <-time.After(2 * time.Second):
 		t.Fatal("PublishBackground never returned")
 	}
+	require.NoError(t, publishErr, "the message legitimately won admission before shutdown, so it must not report a shutdown error")
 
-	require.Eventually(t, func() bool {
-		return len(gm.publishQueue) == 0
-	}, 2*time.Second, time.Millisecond,
+	select {
+	case <-gm.workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never completed its shutdown drain")
+	}
+	require.Equal(t, 0, len(gm.publishQueue),
 		"a message admitted while racing parent-context cancellation must not be left stranded")
+}
+
+// TestRunPublishJob_DropsExpiredJobWithoutPublishingAndContinuesWithFreshWork
+// proves a job that was still fresh at admission but has since expired is
+// dropped when the worker reaches it - counted as outcome=expired rather
+// than spending a compress/peer-lookup/publish cycle on stale work - and
+// that fresh work queued behind it still proceeds normally rather than the
+// FIFO queue getting stuck.
+func (s *subscribeUpcomingTopicsTestSuite) TestRunPublishJob_DropsExpiredJobWithoutPublishingAndContinuesWithFreshWork() {
+	occupyEntered := make(chan struct{})
+	unblockOccupy := make(chan struct{})
+	var once sync.Once
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		if name == "occupy_expiry_test" {
+			once.Do(func() { close(occupyEntered) })
+			<-unblockOccupy
+		}
+	}
+
+	admissionTime := time.Now()
+	s.gm.nowFunc = func() time.Time { return admissionTime }
+
+	s.Require().NoError(s.gm.PublishBackground("occupy_expiry_test", nil, time.Time{}))
+	select {
+	case <-occupyEntered:
+	case <-time.After(2 * time.Second):
+		s.FailNow("worker never picked up the occupying job")
+	}
+
+	const staleTopic = "stale_while_queued"
+	const freshTopic = "fresh_behind_stale"
+	// Both admitted while still fresh relative to admissionTime.
+	s.Require().NoError(s.gm.PublishBackground(staleTopic, nil, admissionTime.Add(time.Second)))
+	s.Require().NoError(s.gm.PublishBackground(freshTopic, nil, admissionTime.Add(time.Hour)))
+
+	expiredBefore := publishOutcomeCounter.WithLabelValues(staleTopic, "expired").GetValue()
+	freshExpiredBefore := publishOutcomeCounter.WithLabelValues(freshTopic, "expired").GetValue()
+
+	// Advance the clock past staleTopic's expiry but well before freshTopic's,
+	// simulating it going stale while sitting behind the occupying job.
+	s.gm.nowFunc = func() time.Time { return admissionTime.Add(2 * time.Second) }
+
+	processed := make(chan string, 2)
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		processed <- name
+	}
+	close(unblockOccupy)
+
+	seen := map[string]bool{}
+	for range 2 {
+		select {
+		case name := <-processed:
+			seen[name] = true
+		case <-time.After(2 * time.Second):
+			s.FailNow("worker did not process both queued jobs")
+		}
+	}
+	s.True(seen[staleTopic] && seen[freshTopic], "both jobs must still reach the worker, fresh work proceeding behind stale work")
+
+	s.Eventually(func() bool {
+		return publishOutcomeCounter.WithLabelValues(staleTopic, "expired").GetValue() == expiredBefore+1
+	}, 2*time.Second, time.Millisecond, "the stale job must be counted as expired")
+	s.Equal(freshExpiredBefore, publishOutcomeCounter.WithLabelValues(freshTopic, "expired").GetValue(),
+		"the fresh job must not be dropped as expired just because it was queued behind one that was")
+}
+
+// TestPublishBackground_ExpiryBoundary proves the exact inclusive boundary
+// the consensus spec's gossip validation uses is preserved: admission is
+// rejected only once now strictly exceeds the expiry deadline, not at or
+// before it. An injected clock makes each case exact rather than
+// timing-dependent.
+func TestPublishBackground_ExpiryBoundary(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+	mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+	mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+
+	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+	gm := NewGossipManager(context.Background(), mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+	defer gm.Close()
+
+	now := time.Unix(1_700_000_000, 0)
+	gm.nowFunc = func() time.Time { return now }
+
+	for _, tc := range []struct {
+		name    string
+		expiry  time.Time
+		wantErr error
+	}{
+		{"just before the deadline: rejected", now.Add(-time.Nanosecond), ErrPublishJobExpired},
+		{"exactly at the deadline: accepted (inclusive)", now, nil},
+		{"just after the deadline: accepted", now.Add(time.Nanosecond), nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := gm.PublishBackground("boundary_topic", nil, tc.expiry)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestPublishBackground_DeliversToRemotePeer proves a queued message
+// actually reaches a second, independently connected libp2p host over the
+// real gossip transport - a local subscription on the publishing node's
+// own pubsub instance (as in TestPublishBackground_PublishesToRealTopic)
+// does not by itself establish delivery to any other peer.
+func TestPublishBackground_DeliversToRemotePeer(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+	forkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
+	mockClock.EXPECT().CurrentForkDigest().Return(forkDigest, nil).AnyTimes()
+
+	ctx := context.Background()
+	msgIDFn := func(pmsg *pb.Message) string { return string(pmsg.Data) }
+
+	publisherHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	defer publisherHost.Close()
+	publisherPS, err := pubsub.NewGossipSub(ctx, publisherHost, pubsub.WithMessageIdFn(msgIDFn))
+	require.NoError(t, err)
+
+	receiverHost, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	defer receiverHost.Close()
+	receiverPS, err := pubsub.NewGossipSub(ctx, receiverHost, pubsub.WithMessageIdFn(msgIDFn))
+	require.NoError(t, err)
+
+	require.NoError(t, receiverHost.Connect(ctx, peer.AddrInfo{
+		ID:    publisherHost.ID(),
+		Addrs: publisherHost.Addrs(),
+	}))
+
+	topicName := "test_remote_delivery_topic"
+	topic := composeTopic(forkDigest, topicName)
+
+	receiverTopicHandle, err := receiverPS.Join(topic)
+	require.NoError(t, err)
+	defer receiverTopicHandle.Close()
+	receiverSub, err := receiverTopicHandle.Subscribe()
+	require.NoError(t, err)
+	defer receiverSub.Cancel()
+
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().Pubsub().Return(publisherPS).AnyTimes()
+	mockP2P.EXPECT().Host().Return(publisherHost).AnyTimes()
+	mockP2P.EXPECT().BandwidthCounter().Return(metrics.NewBandwidthCounter()).AnyTimes()
+
+	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+	gm := NewGossipManager(ctx, mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+	defer gm.Close()
+
+	publisherTopicHandle, err := publisherPS.Join(topic)
+	require.NoError(t, err)
+	validator := func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		return pubsub.ValidationAccept
+	}
+	require.NoError(t, gm.subscriptions.Add(topic, publisherTopicHandle, validator))
+	// Add only joins the topic in GossipManager's bookkeeping; it does not
+	// itself subscribe (that additionally requires a matching
+	// SubscribeWithExpiry/toSubscribes entry). gossipsub only grafts peers
+	// that are actually subscribed, not merely joined, into a topic's mesh -
+	// without this, ListPeers below would never see the connected peer.
+	_, err = publisherTopicHandle.Subscribe()
+	require.NoError(t, err)
+
+	// Wait for the gossip mesh to recognize the connected peer on this topic
+	// before publishing - polling the actual condition, not a fixed sleep.
+	// Note this only proves topic-subscription awareness (ListPeers), not
+	// that gossipsub has actually grafted the peer into the topic's mesh for
+	// eager-push delivery - that state isn't exposed publicly, which is why
+	// delivery below is confirmed by retrying with fresh payloads bound to
+	// an overall deadline, rather than trusting a single publish attempt.
+	require.Eventually(t, func() bool {
+		return len(publisherPS.ListPeers(topic)) > 0 && len(receiverPS.ListPeers(topic)) > 0
+	}, 5*time.Second, 10*time.Millisecond, "gossip mesh never formed between the two hosts")
+
+	const payloadPrefix = "unique-cross-host-payload-"
+	var got []byte
+	require.Eventually(t, func() bool {
+		payload := []byte(payloadPrefix + strconv.Itoa(int(time.Now().UnixNano())))
+		if err := gm.PublishBackground(topicName, payload, time.Time{}); err != nil {
+			return false
+		}
+		attemptCtx, cancel := context.WithTimeout(ctx, 300*time.Millisecond)
+		defer cancel()
+		msg, err := receiverSub.Next(attemptCtx)
+		if err != nil {
+			return false
+		}
+		decompressed, err := utils.DecompressSnappy(msg.GetData(), true)
+		if err != nil || !bytes.HasPrefix(decompressed, []byte(payloadPrefix)) {
+			return false
+		}
+		got = decompressed
+		return true
+	}, 10*time.Second, 10*time.Millisecond, "message never reached the remote peer over the real gossip transport, even after retrying admission with fresh payloads")
+
+	require.True(t, bytes.HasPrefix(got, []byte(payloadPrefix)))
+}
+
+// TestPublishAcceptedAndOutcomeCountersAreConsistentAtQuiescence proves the
+// invariant the metrics are meant to guarantee: once the worker has
+// finished with a job, the accepted count for its topic equals the sum of
+// its terminal-outcome counts - a job is never silently missing an
+// outcome, and rejected (never-accepted) work is never counted as one.
+func (s *subscribeUpcomingTopicsTestSuite) TestPublishAcceptedAndOutcomeCountersAreConsistentAtQuiescence() {
+	const okTopicName = "invariant_ok_topic"
+	forkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
+	okTopic := composeTopic(forkDigest, okTopicName)
+	okTopicHandle, err := s.gm.p2p.Pubsub().Join(okTopic)
+	s.Require().NoError(err)
+	validator := func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		return pubsub.ValidationAccept
+	}
+	s.Require().NoError(s.gm.subscriptions.Add(okTopic, okTopicHandle, validator))
+
+	const errTopicName = "invariant_error_topic"       // never joined: publishToDigest fails
+	const expiredTopicName = "invariant_expired_topic" // stale by the time the worker gets to it
+	const panicTopicName = "invariant_panic_topic"     // hook panics for this one
+
+	occupyEntered := make(chan struct{})
+	unblockOccupy := make(chan struct{})
+	var once sync.Once
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		switch name {
+		case "occupy":
+			once.Do(func() { close(occupyEntered) })
+			<-unblockOccupy
+		case panicTopicName:
+			panic("boom")
+		}
+	}
+
+	admissionTime := time.Now()
+	s.gm.nowFunc = func() time.Time { return admissionTime }
+
+	s.Require().NoError(s.gm.PublishBackground("occupy", nil, time.Time{}))
+	select {
+	case <-occupyEntered:
+	case <-time.After(2 * time.Second):
+		s.FailNow("worker never picked up the occupying job")
+	}
+
+	s.Require().NoError(s.gm.PublishBackground(okTopicName, []byte("ok"), time.Time{}))
+	s.Require().NoError(s.gm.PublishBackground(errTopicName, []byte("err"), time.Time{}))
+	s.Require().NoError(s.gm.PublishBackground(expiredTopicName, []byte("exp"), admissionTime.Add(time.Hour)))
+	s.Require().NoError(s.gm.PublishBackground(panicTopicName, []byte("panic"), time.Time{}))
+
+	// Advance the clock past expiredTopicName's deadline before the worker
+	// reaches any of these four - all still safely queued behind "occupy".
+	s.gm.nowFunc = func() time.Time { return admissionTime.Add(2 * time.Hour) }
+	close(unblockOccupy)
+
+	for _, tc := range []struct{ name, outcome string }{
+		{okTopicName, "handoff_ok"},
+		{errTopicName, "publish_error"},
+		{expiredTopicName, "expired"},
+		{panicTopicName, "panic"},
+	} {
+		s.Eventually(func() bool {
+			return publishOutcomeCounter.WithLabelValues(tc.name, tc.outcome).GetValue() == 1
+		}, 2*time.Second, time.Millisecond, "expected outcome %s for topic %s", tc.outcome, tc.name)
+	}
+
+	for _, name := range []string{okTopicName, errTopicName, expiredTopicName, panicTopicName} {
+		accepted := publishAcceptedCounter.WithLabelValues(name).GetValue()
+		sum := publishOutcomeCounter.WithLabelValues(name, "handoff_ok").GetValue() +
+			publishOutcomeCounter.WithLabelValues(name, "publish_error").GetValue() +
+			publishOutcomeCounter.WithLabelValues(name, "panic").GetValue() +
+			publishOutcomeCounter.WithLabelValues(name, "expired").GetValue() +
+			publishOutcomeCounter.WithLabelValues(name, "shutdown").GetValue()
+		s.Equal(accepted, sum, "accepted must equal the sum of terminal outcomes for topic %s at quiescence", name)
+	}
 }
 
 func TestGossipManager(t *testing.T) {

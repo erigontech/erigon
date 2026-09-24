@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -424,12 +425,13 @@ func TestPoolSyncCommitteesPublishesInBackground(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockGossip := gossip_mock.NewMockGossip(ctrl)
 	published := make(chan struct{}, 1)
-	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any()).Do(
-		func(name string, data []byte, logCtx ...any) {
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(name string, data []byte, expiry time.Time, logCtx ...any) error {
 			select {
 			case published <- struct{}{}:
 			default:
 			}
+			return nil
 		},
 	).MinTimes(1)
 	handler.gossipManager = mockGossip
@@ -473,6 +475,88 @@ func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
 	handler.mux.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
+// TestPoolSyncCommitteesReturns500OnAdmissionFailure proves a known
+// admission failure (queue full, in this case) is surfaced as a 500 for an
+// otherwise-valid batch, rather than hidden behind a 200 the way a
+// fire-and-forget PublishBackground would.
+func TestPoolSyncCommitteesReturns500OnAdmissionFailure(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(gossip.ErrPublishQueueFull).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode,
+		"a known admission failure must not be hidden behind a 200")
+}
+
+// TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure proves the
+// response precedence when a batch has both a validation failure (an
+// out-of-range validator index, which pool.go already reports as an
+// indexed 400 via the existing ComputeSubnetsForSyncCommittee error path)
+// and, independently, an admission failure for the other, valid message:
+// the 400 takes precedence, since it carries more actionable detail, but
+// does not silently discard the admission failure - PublishBackground's own
+// logging/counting for it still happens regardless of which response is
+// written.
+func TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  999_999_999, // out of range: fails ComputeSubnetsForSyncCommittee
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(gossip.ErrPublishQueueFull).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"a validation failure must take precedence over an admission failure in the response")
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {
