@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/dir"
 )
 
 var update = flag.Bool("update", false, "rewrite the golden file")
@@ -75,17 +77,17 @@ func TestGenerateRejects(t *testing.T) {
 // package before the run that would fix it.
 func TestGenerateOverStaleOutput(t *testing.T) {
 	// Inside the module, or the go tool has no go.mod to resolve the package against.
-	const dir = "testdata/stale"
-	require.NoError(t, os.CopyFS(dir, os.DirFS("testdata/sample")))
-	t.Cleanup(func() { os.RemoveAll(dir) })
+	const pkg = "testdata/stale"
+	require.NoError(t, os.CopyFS(pkg, os.DirFS("testdata/sample")))
+	t.Cleanup(func() { _ = dir.RemoveAll(pkg) })
 	for name, recv := range map[string]string{"gen_sample_json.go": "Sample", "gen_left_json.go": "Left"} {
 		stale := marker + " DO NOT EDIT.\n\npackage sample\n\n" +
 			"import \"github.com/erigontech/erigon/rpc/jsonstream\"\n\nfunc (x *" + recv +
 			") MarshalFastJSONTo(s *jsonstream.StackStream) error {\n\t_ = x.SinceRenamed\n\treturn nil\n}\n"
-		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(stale), 0o644))
+		require.NoError(t, os.WriteFile(filepath.Join(pkg, name), []byte(stale), 0o644))
 	}
 
-	t.Chdir(dir)
+	t.Chdir(pkg)
 	require.NoError(t, run("Sample", "gen_sample_json.go", "writeComputedJSON"))
 	got, err := os.ReadFile("gen_sample_json.go")
 	require.NoError(t, err)
@@ -95,12 +97,12 @@ func TestGenerateOverStaleOutput(t *testing.T) {
 // An error outside a generated file says the tags being read are not the ones that will build,
 // so it must stop the run instead of being skipped along with the stale output.
 func TestGenerateRefusesBrokenPackage(t *testing.T) {
-	const dir = "testdata/broken"
-	require.NoError(t, os.CopyFS(dir, os.DirFS("testdata/sample")))
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "typo.go"), []byte("package sample\n\nvar _ = undefinedHere\n"), 0o644))
+	const pkg = "testdata/broken"
+	require.NoError(t, os.CopyFS(pkg, os.DirFS("testdata/sample")))
+	t.Cleanup(func() { _ = dir.RemoveAll(pkg) })
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "typo.go"), []byte("package sample\n\nvar _ = undefinedHere\n"), 0o644))
 
-	t.Chdir(dir)
+	t.Chdir(pkg)
 	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON"), "undefinedHere")
 }
 

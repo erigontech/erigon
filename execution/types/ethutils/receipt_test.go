@@ -152,11 +152,12 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 // direct construction reaches the nil branches.
 func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	for name, logs := range map[string]jsonstream.Marshaler{
-		"nil types.Logs":    types.Logs(nil),
-		"untyped nil":       nil,
-		"nil in types.Logs": types.Logs{nil, {Address: to}},
-		"stamped log":       types.Logs{{Address: to, BlockTimestamp: 7}},
+	for name, logs := range map[string]types.Logs{
+		"nil":           nil,
+		"empty":         {},
+		"nil element":   {nil, {Address: to}},
+		"stamped log":   {{Address: to, BlockTimestamp: 7}},
+		"unstamped log": {{Address: to}},
 	} {
 		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
 	}

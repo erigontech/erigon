@@ -30,26 +30,25 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCReceipt
 
 // RPCReceipt is the RPC form of a receipt.
 type RPCReceipt struct {
-	BlockHash         common.Hash          `json:"blockHash" ethjson:"data"`
-	BlockNumber       hexutil.Uint64       `json:"blockNumber" ethjson:"quantity"`
-	TransactionHash   common.Hash          `json:"transactionHash" ethjson:"data"`
-	TransactionIndex  hexutil.Uint64       `json:"transactionIndex" ethjson:"quantity"`
-	From              *common.Address      `json:"from" ethjson:"data"`
-	To                *common.Address      `json:"to" ethjson:"data"`
-	Type              hexutil.Uint         `json:"type" ethjson:"quantity"`
-	GasUsed           hexutil.Uint64       `json:"gasUsed" ethjson:"quantity"`
-	CumulativeGasUsed hexutil.Uint64       `json:"cumulativeGasUsed" ethjson:"quantity"`
-	ContractAddress   *common.Address      `json:"contractAddress" ethjson:"data"`
-	Logs              jsonstream.Marshaler `json:"logs" ethjson:"objects"`
-	LogsBloom         *types.Bloom         `json:"logsBloom" ethjson:"data"`
-	EffectiveGasPrice *hexutil.U256        `json:"effectiveGasPrice,omitempty" ethjson:"quantity"`
+	BlockHash         common.Hash     `json:"blockHash" ethjson:"data"`
+	BlockNumber       hexutil.Uint64  `json:"blockNumber" ethjson:"quantity"`
+	TransactionHash   common.Hash     `json:"transactionHash" ethjson:"data"`
+	TransactionIndex  hexutil.Uint64  `json:"transactionIndex" ethjson:"quantity"`
+	From              *common.Address `json:"from" ethjson:"data"`
+	To                *common.Address `json:"to" ethjson:"data"`
+	Type              hexutil.Uint    `json:"type" ethjson:"quantity"`
+	GasUsed           hexutil.Uint64  `json:"gasUsed" ethjson:"quantity"`
+	CumulativeGasUsed hexutil.Uint64  `json:"cumulativeGasUsed" ethjson:"quantity"`
+	ContractAddress   *common.Address `json:"contractAddress" ethjson:"data"`
+	Logs              types.Logs      `json:"logs" ethjson:"objects"`
+	LogsBloom         *types.Bloom    `json:"logsBloom" ethjson:"data"`
+	EffectiveGasPrice *hexutil.U256   `json:"effectiveGasPrice,omitempty" ethjson:"quantity"`
 
 	Status       *hexutil.Uint64 `json:"status,omitempty" ethjson:"quantity"`
 	Root         hexutil.Bytes   `json:"root,omitempty" ethjson:"data"`
@@ -83,17 +82,18 @@ func MarshalReceipt(
 		from = &address
 	}
 
-	var logsToMarshal jsonstream.Marshaler
+	var logsToMarshal types.Logs
 
-	if withBlockTimestamp {
+	switch {
+	case withBlockTimestamp:
 		rpcLogs := make(types.Logs, 0, len(receipt.Logs))
 		for _, l := range receipt.Logs {
 			rpcLogs = append(rpcLogs, types.StampedLog(l, header.Time))
 		}
 		logsToMarshal = rpcLogs
-	} else if receipt.Logs == nil {
+	case receipt.Logs == nil:
 		logsToMarshal = types.Logs{}
-	} else {
+	default:
 		logsToMarshal = receipt.Logs
 	}
 
