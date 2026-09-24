@@ -43,24 +43,29 @@ func TestChapelForkPrecompiles(t *testing.T) {
 	require.NoError(t, err)
 
 	blsVerify := accounts.InternAddress(common.BytesToAddress([]byte{102}))
+	cometBFT := accounts.InternAddress(common.BytesToAddress([]byte{103}))
 
 	for _, tc := range []struct {
-		name  string
-		block uint64
-		bls   bool
+		name     string
+		block    uint64
+		bls      bool
+		cometBFT string
 	}{
-		{"planck", 28196022, false},
-		{"luban", 29613785, true},
-		{"plato", 29861024, true},
+		{"planck", 28196022, false, ""},
+		{"luban", 29613785, true, "CometBFTLightBlockValidate"},
+		{"plato", 29861024, true, "CometBFTLightBlockValidate"},
+		{"hertz", 31103030, true, "CometBFTLightBlockValidateHertz"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			blockContext := evmtypes.BlockContext{BlockNumber: tc.block}
 			set := vm.Precompiles(blockContext.Rules(spec.Config))
-			if tc.bls {
-				require.Contains(t, set, blsVerify)
+			if !tc.bls {
+				require.NotContains(t, set, blsVerify)
 				return
 			}
-			require.NotContains(t, set, blsVerify)
+			require.Contains(t, set, blsVerify)
+			require.Contains(t, set, cometBFT)
+			assert.Equal(t, tc.cometBFT, set[cometBFT].Name())
 		})
 	}
 }
