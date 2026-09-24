@@ -39,8 +39,11 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	if len(data) == 0 {
 		return fork(path), nil
 	}
-	if err := Validate(data, len(path)); err != nil {
-		return nil, err
+	refs := leafRefsOf(ctx, key, data)
+	if refs == nil {
+		if err := Validate(data, len(path)); err != nil {
+			return nil, err
+		}
 	}
 
 	n := fork(path)
@@ -61,7 +64,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	if len(path) != 0 {
 		n.record, n.layout = record, l
 		n.childMask, n.leafMask, n.hashMask = l.child, l.leaf, l.child&^l.leaf
-		n.refs = leafRefsOf(ctx, key, data)
+		n.refs = refs
 		return n, nil
 	}
 	n.slots = make([]childSlot, 0, bits.OnesCount16(l.child))

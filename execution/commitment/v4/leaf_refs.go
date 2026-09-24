@@ -37,6 +37,8 @@ func (c *meteredContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	return leafRefsOf(c.PatriciaContext, key, data)
 }
 
+var validatedWithoutRefs = &commitment.LeafRefs{}
+
 func ComputeLeafRefs(key, data []byte) *commitment.LeafRefs {
 	if len(key) < 2 || len(data) == 0 {
 		return nil
@@ -48,7 +50,7 @@ func ComputeLeafRefs(key, data []byte) *commitment.LeafRefs {
 	record := Record{data: data, depth: depth}
 	l := record.layout()
 	if l.leaf == 0 {
-		return nil
+		return validatedWithoutRefs
 	}
 	var path [64]byte
 	n := node{path: path[:depth], record: record, layout: l, plane: plane, childMask: l.child, leafMask: l.leaf, hashMask: l.child &^ l.leaf}
@@ -66,7 +68,7 @@ func ComputeLeafRefs(key, data []byte) *commitment.LeafRefs {
 		refs.Refs = append(refs.Refs, [32]byte(ref))
 	}
 	if refs.Mask == 0 {
-		return nil
+		return validatedWithoutRefs
 	}
 	return refs
 }
