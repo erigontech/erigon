@@ -91,6 +91,22 @@ type SystemTxEngine interface {
 	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error
 }
 
+// StorageBaseline overrides the committed value of one storage slot for one
+// transaction.
+type StorageBaseline struct {
+	Address accounts.Address
+	Key     accounts.StorageKey
+	Value   uint256.Int
+}
+
+// StorageBaselineEngine is implemented by engines (Parlia) whose canonical chain
+// committed the output of a storage-cache bug in the client that sealed it: one
+// transaction observed committed storage that correct execution does not
+// produce. The executor installs the returned slots for that transaction only.
+type StorageBaselineEngine interface {
+	StorageBaselines(blockNum uint64, txIndex int) []StorageBaseline
+}
+
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
 // different semantics which could lead e.g. to different reward values.

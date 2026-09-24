@@ -160,6 +160,10 @@ type IntraBlockState struct {
 	// Per-transaction access list
 	accessList accessList
 
+	// Engine-supplied committed values for individual storage slots, valid for
+	// the current transaction only. See SetStorageBaseline.
+	storageBaselines map[storageBaselineKey]uint256.Int
+
 	// Transient storage
 	transientStorage transientStorage
 
@@ -942,6 +946,11 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	versionedValue, source, _, err := readState(sdb, addr, key)
+	if err == nil {
+		if baseline, ok := sdb.storageBaseline(addr, key); ok && !sdb.wroteStorage(addr, key) {
+			versionedValue = baseline
+		}
+	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
 		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, versionedValue.Hex()[2:])
@@ -954,6 +963,11 @@ func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	versionedValue, source, _, err := readCommittedState(sdb, addr, key)
+	if err == nil {
+		if baseline, ok := sdb.storageBaseline(addr, key); ok {
+			versionedValue = baseline
+		}
+	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, versionedValue.Hex()[2:])
@@ -2852,6 +2866,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	sdb.txIndex = ti
 	sdb.blockNum = bn
 	sdb.sdProbeEpoch++
+	sdb.storageBaselines = nil
 }
 
 // no not lock
