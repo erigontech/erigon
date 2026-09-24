@@ -517,7 +517,9 @@ func TestPrepareParentEnvelopeRevalidatesPersistedEnvelopeWithUnavailableStatus(
 		statusKnown: true,
 	}
 
-	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, nil, child, nil, true))
+	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, nil, child, envelopes, true))
+	require.True(t, prepareParentEnvelopeForChild(context.Background(), store, nil, child, envelopes, true))
 	require.Equal(t, 1, store.readCalls)
 	require.Equal(t, 1, store.onCalls)
 }

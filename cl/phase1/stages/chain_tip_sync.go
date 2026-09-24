@@ -820,6 +820,9 @@ func prepareParentEnvelopeForChild(
 				log.Debug("[chainTipSync] failed to read persisted parent envelope", "slot", child.Block.Slot, "err", err)
 			} else {
 				envelope = persisted
+				if persisted != nil && envelopes != nil {
+					envelopes[parentRoot] = persisted
+				}
 			}
 		}
 		if !acceptedThisCycle && !statusUsable && envelope != nil && envelope.Message != nil {
