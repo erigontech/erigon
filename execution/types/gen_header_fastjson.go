@@ -34,7 +34,7 @@ func (x *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if x.AuRaStep != 0 {
 		ethjson.Quantity(s, "auraStep", x.AuRaStep)
 	}
-	if len(x.AuRaSeal[:]) > 0 {
+	if len(x.AuRaSeal) > 0 {
 		ethjson.Data(s, "auraSeal", x.AuRaSeal[:])
 	}
 	if x.BaseFee == nil {

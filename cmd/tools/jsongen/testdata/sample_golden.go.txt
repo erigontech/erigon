@@ -22,7 +22,7 @@ func (x *Sample) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	ethjson.Quantity(s, "rightValue", x.Right.Value)
 	ethjson.Data(s, "hash", x.Hash[:])
 	ethjson.Data(s, "bytes", x.Bytes[:])
-	if len(x.OptBytes[:]) > 0 {
+	if len(x.OptBytes) > 0 {
 		ethjson.Data(s, "optBytes", x.OptBytes[:])
 	}
 	if x.PtrHash == nil {

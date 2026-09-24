@@ -69,17 +69,17 @@ func run(typeName, dir, out string) error {
 	}
 
 	var body bytes.Buffer
-	if err := writeFields(&body, st, "x", map[string]struct{}{}); err != nil {
+	if err := writeFields(pkg.Types, &body, st, "x", map[string]struct{}{}); err != nil {
 		return fmt.Errorf("%s: %w", typeName, err)
 	}
 	// A value the struct does not hold, such as a header's hash, is written by a method the
 	// package declares; the generator only calls it, after the declared fields.
-	if hasMethod(obj.Type(), "writeComputedJSON") {
+	if declares(pkg.Types, obj.Type(), "writeComputedJSON") {
 		body.WriteString("\tx.writeComputedJSON(s)\n")
 	}
 
 	var file bytes.Buffer
-	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String())
+	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String(), method)
 	path := out
 	if !filepath.IsAbs(out) {
 		path = filepath.Join(dir, out)
@@ -103,8 +103,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// MarshalFastJSONTo writes the fields %[2]s declares, in that order.
-func (x *%[2]s) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+// %[4]s writes the fields %[2]s declares, in that order.
+func (x *%[2]s) %[4]s(s *jsonstream.StackStream) error {
 	if x == nil {
 		s.WriteNil()
 		return nil
@@ -138,7 +138,7 @@ func load(dir string) (*packages.Package, error) {
 // writeFields emits one statement per field. An embedded struct is flattened, the way
 // encoding/json flattens an anonymous field, and a name written twice is an error rather than
 // a silent choice between them.
-func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[string]struct{}) error {
+func writeFields(pkg *types.Package, w *bytes.Buffer, st *types.Struct, recv string, written map[string]struct{}) error {
 	for i := range st.NumFields() {
 		f, tag := st.Field(i), reflect.StructTag(st.Tag(i))
 		if f.Embedded() {
@@ -156,7 +156,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 			if !ok {
 				return fmt.Errorf("embedded %s is not a struct", f.Name())
 			}
-			if err := writeFields(w, embedded, recv+"."+f.Name(), written); err != nil {
+			if err := writeFields(pkg, w, embedded, recv+"."+f.Name(), written); err != nil {
 				return err
 			}
 			continue
@@ -180,7 +180,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 		}
 		written[name] = struct{}{}
 
-		stmt, err := fieldStatement(recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), slices.Contains(strings.Split(opts, ","), "omitempty"))
+		stmt, err := fieldStatement(pkg, recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), slices.Contains(strings.Split(opts, ","), "omitempty"))
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.Name(), err)
 		}
@@ -192,7 +192,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 // fieldStatement picks the writer for one field from its declared form and its type. A field
 // its json tag lets omit is wrapped in the presence test encoding/json would apply; without
 // omitempty, an absent value is written as null.
-func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (string, error) {
+func fieldStatement(pkg *types.Package, ref, name, form string, t types.Type, omitempty bool) (string, error) {
 	_, pointer := t.Underlying().(*types.Pointer)
 	_, iface := t.Underlying().(*types.Interface)
 	bare := deref(t)
@@ -202,16 +202,16 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 	case "":
 		return "", fmt.Errorf("no ethjson tag")
 	case "bool":
-		if pointer || !isBasic(bare, types.IsBoolean) {
+		if pointer || !isBool(bare) {
 			return "", fmt.Errorf(`ethjson:"bool" on %s`, t)
 		}
 		write = fmt.Sprintf("s.Field(%q).WriteBool(%s)", name, ref)
 		present = ref
 	case "objects":
-		if !writesItself(bare) {
-			return "", fmt.Errorf(`ethjson:"objects" on %s, which has no MarshalFastJSONTo`, t)
+		if !declares(pkg, bare, method) {
+			return "", fmt.Errorf(`ethjson:%q on %s, which has no %s`, form, t, method)
 		}
-		write = fmt.Sprintf("s.Field(%q)\n\t\tif err := %s.MarshalFastJSONTo(s); err != nil {\n\t\t\treturn err\n\t\t}", name, ref)
+		write = fmt.Sprintf("s.Field(%q)\nif err := %s.%s(s); err != nil {\nreturn err\n}", name, ref, method)
 		present = ref + " != nil"
 	case "datalist":
 		if pointer || !isHashSlice(bare) {
@@ -232,7 +232,7 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 		if pointer {
 			present = ref + " != nil"
 		} else {
-			present = fmt.Sprintf("len(%s[:]) > 0", ref)
+			present = fmt.Sprintf("len(%s) > 0", ref) // an array is never empty, so omitempty cannot fire
 		}
 	case "quantity":
 		switch {
@@ -274,9 +274,9 @@ func deref(t types.Type) types.Type {
 	return t
 }
 
-func isBasic(t types.Type, info types.BasicInfo) bool {
+func isBool(t types.Type) bool {
 	b, ok := t.Underlying().(*types.Basic)
-	return ok && b.Info()&info != 0
+	return ok && b.Info()&types.IsBoolean != 0
 }
 
 func isByte(t types.Type) bool {
@@ -329,30 +329,10 @@ func is256(t types.Type) bool {
 	return the256[named.Obj().Pkg().Path()+"."+named.Obj().Name()]
 }
 
-func hasMethod(t types.Type, name string) bool {
-	ms := types.NewMethodSet(types.NewPointer(t))
-	for i := range ms.Len() {
-		if ms.At(i).Obj().Name() == name {
-			return true
-		}
-	}
-	return false
-}
-
-// writesItself reports a value that carries its own encoder, so the generator only places the
-// field and leaves the bytes to it.
-func writesItself(t types.Type) bool {
-	if iface, ok := t.Underlying().(*types.Interface); ok {
-		return hasMethodIn(iface, "MarshalFastJSONTo")
-	}
-	return hasMethod(t, "MarshalFastJSONTo")
-}
-
-func hasMethodIn(iface *types.Interface, name string) bool {
-	for i := range iface.NumMethods() {
-		if iface.Method(i).Name() == name {
-			return true
-		}
-	}
-	return false
+// declares reports a method the generated code may call. LookupFieldOrMethod answers for a
+// named type and for an interface alike, and pkg is what finds an unexported one.
+func declares(pkg *types.Package, t types.Type, name string) bool {
+	obj, _, _ := types.LookupFieldOrMethod(t, true, pkg, name)
+	_, ok := obj.(*types.Func)
+	return ok
 }

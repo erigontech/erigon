@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 const (
@@ -117,6 +119,12 @@ type Header struct {
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
 	mutable bool
 	hash    atomic.Pointer[common.Hash]
+}
+
+// writeComputedJSON writes the reply's hash, which Header derives rather than stores.
+func (h *Header) writeComputedJSON(s *jsonstream.StackStream) {
+	hash := h.Hash()
+	ethjson.Data(s, "hash", hash[:])
 }
 
 // NewEmptyHeaderForAssembling - returns mutable header object - for assembling/sealing/etc...
