@@ -1289,6 +1289,27 @@ func TestExecutionPayloadBidServiceUsesCachedParentExitSummary(t *testing.T) {
 	require.Equal(t, byte(1), requests[0].SourceAddress[0])
 }
 
+func TestExecutionPayloadBidServiceHotCacheSupersedesTransientFailure(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	root := common.HexToHash("0x01")
+	reader := &cachedParentExitReader{
+		countingBidEnvelopeReader: &countingBidEnvelopeReader{ForkChoiceStorageReader: fc},
+		root:                      root,
+		requests:                  []solid.BuilderExitRequest{{SourceAddress: common.Address{1}}},
+	}
+	service.forkchoiceStore = reader
+	now := time.Unix(100*12, 0)
+	service.parentExitsCache.Add(root, parentBuilderExitsResult{
+		err:     errBidDependencyUnavailable,
+		retryAt: now.Add(parentBuilderExitsRetryDelay),
+	})
+
+	requests, err := service.parentBuilderExitRequests(t.Context(), root, now)
+	require.NoError(t, err)
+	require.Equal(t, reader.requests, requests)
+	require.Zero(t, reader.reads.Load())
+}
+
 func TestExecutionPayloadBidServiceRetriesUnavailableParentExits(t *testing.T) {
 	service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
