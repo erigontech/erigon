@@ -56,46 +56,27 @@ func accountUpdate(value []byte, found bool, update *commitment.Update) (*commit
 	return result, nil
 }
 
-func accountLeafAt(n *node, path []byte) ([]byte, bool) {
+func accountLeafAt(n *node, path []byte) (value []byte, found, stored bool) {
 	if child := rootExtensionChild(n); child != nil {
 		n = child
 	}
 	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) || len(n.path) >= len(path) {
-		return nil, false
+		return nil, false, false
 	}
 	nib := int(path[len(n.path)])
 	bit := uint16(1) << nib
 	if n.childMask&bit == 0 {
-		return nil, false
+		return nil, false, false
 	}
 	if n.leafMask&bit != 0 {
-		if !packedMatches(n.leafSuffixAt(nib), path[len(n.path)+1:]) {
-			return nil, false
+		suffix, value := n.leafAt(nib)
+		if !packedMatches(suffix, path[len(n.path)+1:]) {
+			return nil, false, false
 		}
-		return n.leafValueAt(nib), true
-	}
-	return accountLeafAt(n.child(nib), path)
-}
-
-func storedAccountPath(n *node, path []byte) bool {
-	if child := rootExtensionChild(n); child != nil {
-		n = child
-	}
-	if n == nil || len(path) != 64 || !bytes.HasPrefix(path, n.path) || len(n.path) >= len(path) {
-		return false
-	}
-	nib := int(path[len(n.path)])
-	bit := uint16(1) << nib
-	if n.childMask&bit == 0 || n.leafMask&bit != 0 {
-		return false
+		return value, true, false
 	}
 	if child := n.child(nib); child != nil {
-		return storedAccountPath(child, path)
+		return accountLeafAt(child, path)
 	}
-	if !n.hasChildHash(nib) {
-		return false
-	}
-	childPath := append(append([]byte(nil), n.path...), byte(nib))
-	childPath = append(childPath, n.childExtAt(nib)...)
-	return bytes.HasPrefix(path, childPath)
+	return nil, false, n.hasChildHash(nib) && bytes.HasPrefix(path, n.childPath(nib, nil))
 }

@@ -84,10 +84,12 @@ func TestInsertRecomputesPushedLeafSuffixFromFullPath(t *testing.T) {
 	require.NoError(t, insert(n, newPath, []byte{0xbb}))
 	branch := n.child(2)
 	require.NotNil(t, branch)
-	require.Equal(t, packPath(oldPath[len(branch.path)+1:], nil), branch.leafSuffixAt(int(oldPath[len(branch.path)])))
-	require.Equal(t, packPath(newPath[len(branch.path)+1:], nil), branch.leafSuffixAt(int(newPath[len(branch.path)])))
-	require.Equal(t, []byte{0xaa}, branch.leafValueAt(int(oldPath[len(branch.path)])))
-	require.Equal(t, []byte{0xbb}, branch.leafValueAt(int(newPath[len(branch.path)])))
+	oldSuffix, oldValue := branch.leafAt(int(oldPath[len(branch.path)]))
+	newSuffix, newValue := branch.leafAt(int(newPath[len(branch.path)]))
+	require.Equal(t, packPath(oldPath[len(branch.path)+1:], nil), oldSuffix)
+	require.Equal(t, packPath(newPath[len(branch.path)+1:], nil), newSuffix)
+	require.Equal(t, []byte{0xaa}, oldValue)
+	require.Equal(t, []byte{0xbb}, newValue)
 }
 
 func TestInsertUsesNoStateReads(t *testing.T) {

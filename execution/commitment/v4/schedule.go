@@ -39,7 +39,6 @@ type accountPlan struct {
 }
 
 type accountResult struct {
-	plan  accountPlan
 	value []byte
 	err   error
 }
@@ -100,9 +99,6 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 }
 
 func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers, fanOutMin int) ([32]byte, deltaParts, error) {
-	if ctx == nil {
-		ctx = context.Background()
-	}
 	storageWorkers, accountWorkers := workers, workers
 	if workers <= 0 {
 		workers = runtime.NumCPU()
@@ -112,9 +108,8 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	storageRoots := make([][32]byte, len(storage))
 	storageParts := make([]deltaParts, len(storage))
 	accountFold := foldPlan{ctx: ctx, factory: factory, workers: accountWorkers}
-	overlap := factory != nil && storageWorkers > 1
 	storageDone := make(chan error, 1)
-	if overlap {
+	if factory != nil && storageWorkers > 1 {
 		go func() {
 			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
 		}()
@@ -138,8 +133,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	accountResults := make([]accountResult, len(plans))
 	accountValues := make([]byte, accountLeafScratch*len(plans))
 	parallelFor(len(plans), workers, 1024, func(i int) {
-		plan := plans[i]
-		accountResults[i].plan = plan
+		plan := &plans[i]
 		if plan.skip || plan.delete {
 			return
 		}
@@ -152,7 +146,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 				return
 			}
 			if !plan.found && plan.entry.update == nil && storageRoot == empty.RootHash {
-				accountResults[i].plan.skip = true
+				plan.skip = true
 				return
 			}
 		} else if plan.found {
@@ -174,15 +168,15 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	var groups [16][]int
 	var rest []int
 	for i := range accountResults {
-		result := &accountResults[i]
-		if result.err != nil {
-			return [32]byte{}, nil, result.err
+		if err := accountResults[i].err; err != nil {
+			return [32]byte{}, nil, err
 		}
-		if result.plan.skip {
+		plan := &plans[i]
+		if plan.skip {
 			continue
 		}
-		nib := result.plan.entry.hashedKey[0]
-		if child := root.child(int(nib)); !result.plan.delete && len(root.path) == 0 && child != nil && len(child.path) == len(root.path)+1 {
+		nib := plan.entry.hashedKey[0]
+		if child := root.child(int(nib)); !plan.delete && len(root.path) == 0 && child != nil && len(child.path) == len(root.path)+1 {
 			groups[nib] = append(groups[nib], i)
 			continue
 		}
@@ -191,7 +185,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	var groupErrs [16]error
 	parallelFor(16, workers, 1, func(nib int) {
 		for _, i := range groups[nib] {
-			if err := insert(root, accountResults[i].plan.entry.hashedKey, accountResults[i].value); err != nil {
+			if err := insert(root, plans[i].entry.hashedKey, accountResults[i].value); err != nil {
 				groupErrs[nib] = err
 				return
 			}
@@ -203,18 +197,18 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		}
 	}
 	for _, i := range rest {
-		result := &accountResults[i]
-		if result.plan.delete {
-			if err := removeRoot(root, result.plan.entry.hashedKey); err != nil {
+		hashedKey := plans[i].entry.hashedKey
+		if plans[i].delete {
+			if err := removeRoot(root, hashedKey); err != nil {
 				return [32]byte{}, nil, err
 			}
 			continue
 		}
 		if len(root.path) == 0 {
-			if err := insert(root, result.plan.entry.hashedKey, result.value); err != nil {
+			if err := insert(root, hashedKey, accountResults[i].value); err != nil {
 				return [32]byte{}, nil, err
 			}
-		} else if err := insertRoot(root, result.plan.entry.hashedKey, result.value); err != nil {
+		} else if err := insertRoot(root, hashedKey, accountResults[i].value); err != nil {
 			return [32]byte{}, nil, err
 		}
 	}
@@ -231,8 +225,22 @@ func (g graph) planAccounts(ctx commitment.PatriciaContext, accounts []accountEn
 	if err != nil {
 		return nil, nil, err
 	}
-	plans, err := makeAccountPlans(ctx, g, root, accounts, plan)
-	return root, plans, err
+	plans := make([]accountPlan, len(accounts))
+	planOne := func(ctx commitment.PatriciaContext, i int) error {
+		p, err := g.accountPlanFor(ctx, root, accounts[i])
+		plans[i] = p
+		return err
+	}
+	fanned, err := g.fanOutRoot(ctx, root, len(accounts), func(i int) byte { return accounts[i].hashedKey[0] }, plan, planOne)
+	if err != nil || fanned {
+		return root, plans, err
+	}
+	for i := range accounts {
+		if err := planOne(ctx, i); err != nil {
+			return root, nil, err
+		}
+	}
+	return root, plans, nil
 }
 
 func parallelFor(n, workers, chunk int, fn func(i int)) {
@@ -255,12 +263,12 @@ func parallelFor(n, workers, chunk int, fn func(i int)) {
 }
 
 func (g graph) accountPlanFor(ctx commitment.PatriciaContext, root *node, entry accountEntry) (accountPlan, error) {
-	oldValue, found := accountLeafAt(root, entry.hashedKey)
-	if !found && storedAccountPath(root, entry.hashedKey) {
+	oldValue, found, stored := accountLeafAt(root, entry.hashedKey)
+	if stored {
 		if err := g.ensurePath(ctx, root, entry.hashedKey); err != nil {
 			return accountPlan{}, fmt.Errorf("%w: account path %x: %w", errPhaseBRecord, entry.hashedKey, err)
 		}
-		oldValue, found = accountLeafAt(root, entry.hashedKey)
+		oldValue, found, _ = accountLeafAt(root, entry.hashedKey)
 	}
 	plan := accountPlan{entry: entry, oldValue: oldValue, found: found}
 	switch {
@@ -284,34 +292,13 @@ func (g graph) ensureRootChildren(ctx commitment.PatriciaContext, root *node, ni
 		if !root.hasChildHash(nib) {
 			return g.errNode
 		}
-		childPath := append(append([]byte(nil), root.path...), byte(nib))
-		childPath = append(childPath, root.childExtAt(nib)...)
-		child, err := g.unfoldChild(ctx, childPath)
+		child, err := g.unfoldChild(ctx, root.childPath(nib, nil))
 		if err != nil {
 			return err
 		}
 		root.setChild(nib, child)
 	}
 	return nil
-}
-
-func makeAccountPlans(ctx commitment.PatriciaContext, g graph, root *node, entries []accountEntry, plan foldPlan) ([]accountPlan, error) {
-	plans := make([]accountPlan, len(entries))
-	planOne := func(ctx commitment.PatriciaContext, i int) error {
-		p, err := g.accountPlanFor(ctx, root, entries[i])
-		plans[i] = p
-		return err
-	}
-	fanned, err := g.fanOutRoot(ctx, root, len(entries), func(i int) byte { return entries[i].hashedKey[0] }, plan, planOne)
-	if err != nil || fanned {
-		return plans, err
-	}
-	for i := range entries {
-		if err := planOne(ctx, i); err != nil {
-			return nil, err
-		}
-	}
-	return plans, nil
 }
 
 func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nibOf func(i int) byte, plan foldPlan, fn func(ctx commitment.PatriciaContext, i int) error) (bool, error) {

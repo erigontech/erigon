@@ -19,7 +19,6 @@ package v4
 import (
 	"bytes"
 	"errors"
-	"fmt"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -29,7 +28,6 @@ var (
 	errPhaseAKey     = errors.New("commitment v4: invalid phase A key")
 	errPhaseAUpdate  = errors.New("commitment v4: invalid phase A update")
 	errPhaseAStorage = errors.New("commitment v4: invalid storage task")
-	errPhaseAOrder   = errors.New("commitment v4: phase A input is not sorted by hashed key")
 )
 
 type storageOp uint8
@@ -73,7 +71,6 @@ type accountEntry struct {
 type partitioner struct {
 	storage      []storageTask
 	accounts     []accountEntry
-	prev         []byte
 	storageIndex int
 	seen         int
 }
@@ -87,10 +84,6 @@ func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
 	if len(hashedKey) != 64 && len(hashedKey) != 128 {
 		return nil
 	}
-	if p.prev != nil && bytes.Compare(hashedKey, p.prev) < 0 {
-		return fmt.Errorf("%w: %x after %x", errPhaseAOrder, hashedKey, p.prev)
-	}
-	p.prev = hashedKey
 
 	accountHash := hashedKey[:64:64]
 	if len(p.accounts) == 0 || !bytes.Equal(p.accounts[len(p.accounts)-1].hashedKey, accountHash) {
@@ -156,7 +149,6 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	if err != nil {
 		return [32]byte{}, nil, err
 	}
-	markStorageRoot(root)
 
 	fanned := false
 	if len(task.entries) >= plan.fanOutMin {
@@ -178,7 +170,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 		if entry.op == storageSkip {
 			continue
 		}
-		if !fanned && (len(root.path) == 0 || bytes.HasPrefix(entry.path, root.path)) {
+		if !fanned && bytes.HasPrefix(entry.path, root.path) {
 			if err := g.ensurePath(ctx, root, entry.path); err != nil {
 				return [32]byte{}, nil, err
 			}
@@ -197,21 +189,10 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 		}
 	}
 
-	markStorageRoot(root)
 	parts, err := g.persistGraph(ctx, root, plan)
 	if err != nil {
 		return [32]byte{}, nil, err
 	}
 	hash, err := fold(root, 0)
 	return hash, parts, err
-}
-
-func markStorageRoot(root *node) {
-	if root == nil {
-		return
-	}
-	root.storageRoot = true
-	for nib := range 16 {
-		markStorageRoot(root.child(nib))
-	}
 }

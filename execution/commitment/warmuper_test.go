@@ -292,8 +292,7 @@ func TestWarmupHPHKeyMatchesCompactEncoding(t *testing.T) {
 
 	for depth := range 65 {
 		expected := nibbles.HexToCompact(hashedKey[:depth])
-		got, ok := HexPatriciaWarmupKey(hashedKey, depth, make([]byte, 0, maxCompactKeyLen))
-		require.True(t, ok)
+		got := HexPatriciaWarmupKey(hashedKey, depth, make([]byte, 0, maxCompactKeyLen))
 		require.Equalf(t, expected, got, "depth=%d parity=%d", depth, depth&1)
 	}
 }

@@ -40,16 +40,21 @@ func TestApplyDeltasReturnsPutError(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 }
 
-func TestFoldAndEncodeRecordKeepsFoldAndRecordInOneWalk(t *testing.T) {
+func TestMaterializeFoldsAndEncodesRecordInOneWalk(t *testing.T) {
 	ctx := newMockContext()
 	n := fork(nil)
 	n.plane = planeStorage
 	path := append([]byte{3}, bytes.Repeat([]byte{4}, 63)...)
 	n.setLeaf(int(path[0]), packPath(path[1:], nil), []byte{9})
 
-	hash, delta, err := foldAndEncodeRecord(ctx, n, 0, StorageRootKey([32]byte{}))
+	var acc deltaParts
+	hash, err := storageGraph(make([]byte, 32)).materialize(ctx, n, n, &acc)
 	require.NoError(t, err)
 	require.Len(t, hash, 32)
+	require.Len(t, acc, 1)
+	require.Len(t, acc[0], 1)
+	delta := acc[0][0]
+	require.Equal(t, StorageNodeKey([32]byte{}, nil, nil), delta.Key)
 	require.NotEmpty(t, delta.Data)
 	require.NoError(t, Validate(delta.Data, 0))
 	require.Empty(t, ctx.putCalls)
@@ -112,7 +117,6 @@ func TestPersistGraphKeepsRecordsThatOnlyMovedDeeper(t *testing.T) {
 
 	root := fork(nil)
 	root.plane = planeStorage
-	root.storageRoot = true
 	root.setStoredChild(0x0c, bytes.Repeat([]byte{0x11}, 32), []byte{0x06})
 	root.setStoredChild(0x02, bytes.Repeat([]byte{0x22}, 32), nil)
 

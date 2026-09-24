@@ -16,16 +16,12 @@
 
 package v4
 
-func warmupKeyV4(hashedKey []byte, depth int, dst []byte) ([]byte, bool) {
-	if depth < 0 || depth > len(hashedKey) {
-		return nil, false
-	}
-
+func warmupKeyV4(hashedKey []byte, depth int, dst []byte) []byte {
 	if len(hashedKey) > 64 && depth >= 64 {
 		addrHash := hashAddressPath(hashedKey[:64])
-		return nodeKey(tagStorageNode, addrHash[:], hashedKey[64:depth], dst[:0]), true
+		return nodeKey(tagStorageNode, addrHash[:], hashedKey[64:depth], dst[:0])
 	}
-	return nodeKey(tagAccountNode, nil, hashedKey[:depth], dst[:0]), true
+	return nodeKey(tagAccountNode, nil, hashedKey[:depth], dst[:0])
 }
 
 func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) {
@@ -47,7 +43,7 @@ func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 	if planeDepth == 0 && l.selfExtLen != 0 {
 		selfExt := record.SelfExt()
 		end := branchPoint + l.selfExtLen
-		if len(selfExt) == 0 || end > len(hashedKey) || !packedMatches(selfExt[1:], hashedKey[branchPoint:end]) {
+		if end > len(hashedKey) || !packedMatches(selfExt[1:], hashedKey[branchPoint:end]) {
 			return 0, true
 		}
 		branchPoint = end
@@ -88,16 +84,12 @@ func PrefetchPath(read func(key []byte) []byte, addrHash, slotHash []byte, depth
 	}
 	var buf [2 + 32 + 32 + 1]byte
 	for depth < len(hashedKey) {
-		key, ok := warmupKeyV4(hashedKey, depth, buf[:0])
-		if !ok {
-			return
-		}
-		data := read(key)
+		data := read(warmupKeyV4(hashedKey, depth, buf[:0]))
 		if len(data) == 0 {
 			return
 		}
 		next, stop := warmupStepV4(data, hashedKey, depth)
-		if stop || next <= depth {
+		if stop {
 			return
 		}
 		depth = next

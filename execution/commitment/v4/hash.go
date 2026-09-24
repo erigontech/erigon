@@ -58,42 +58,25 @@ func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
 	if len(payload) > length.Hash {
 		panic(fmt.Sprintf("commitment v4: storage leaf payload has length %d", len(payload)))
 	}
-	single := len(payload) == 1 && payload[0] < 0x80
-	innerLen := 1 + len(payload)
-	if single || len(payload) == 0 {
-		innerLen = 1
-	}
-	outerLen := 1 + innerLen
-	if single {
-		outerLen = 1
+	innerLen := rlp.StringLen(payload)
+	outerLen := innerLen
+	if innerLen > 1 || len(payload) == 0 {
+		outerLen++
 	}
 	contentLen := rlp.StringLen(suffix) + outerLen
 	start := len(dst)
 	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
 	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
 	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
-	switch {
-	case outerLen == 1:
-		dst[pos] = payload[0]
+	if outerLen > innerLen {
+		dst[pos] = byte(0x80 + innerLen)
 		pos++
-	case innerLen == 1:
-		dst[pos] = 0x81
-		dst[pos+1] = 0x80
-		if len(payload) != 0 {
-			dst[pos+1] = payload[0]
-		}
-		pos += 2
-	default:
-		dst[pos] = byte(0x80 + outerLen - 1)
-		dst[pos+1] = byte(0x80 + len(payload))
-		pos += 2
-		pos += copy(dst[pos:], payload)
 	}
-	encodedBytes := dst[start:pos]
-	if len(encodedBytes) < 32 {
-		return encodedBytes
+	pos += rlp.EncodeStringToBuf(payload, dst[pos:])
+	if pos-start < 32 {
+		return dst[start:pos]
 	}
-	hash := keccak.Sum256(encodedBytes)
+	hash := keccak.Sum256(dst[start:pos])
 	return append(dst[:start], hash[:]...)
 }
 

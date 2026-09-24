@@ -27,10 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-var (
-	errTrieReleased = errors.New("commitment v4: trie released")
-	errTrieContext  = errors.New("commitment v4: missing Patricia context")
-)
+var errTrieContext = errors.New("commitment v4: missing Patricia context")
 
 type Trie struct {
 	ctx             commitment.PatriciaContext
@@ -42,10 +39,7 @@ type Trie struct {
 	deferred        deltaParts
 }
 
-func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
-	if cfg.NibblesV2 {
-		panic(ErrV4RequiresV1Keyed)
-	}
+func NewTrie(tmpdir string, _ commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
 	return &Trie{}, commitment.NewUpdates(commitment.ModeCollect, tmpdir, commitment.KeyToHexNibbleHash)
 }
 
@@ -54,9 +48,6 @@ func init() {
 }
 
 func (t *Trie) RootHash() ([]byte, error) {
-	if t == nil {
-		return nil, errTrieReleased
-	}
 	if len(t.root) == 0 {
 		return bytes.Clone(empty.RootHash[:]), nil
 	}
@@ -69,44 +60,17 @@ func (t *Trie) Variant() commitment.TrieVariant {
 	return commitment.VariantCommitmentV4
 }
 
-func (*Trie) StateKey() []byte {
-	return commitment.KeyCommitmentV4State
-}
+func (t *Trie) Reset() { t.root = nil }
 
-func (t *Trie) Reset() {
-	if t != nil {
-		t.root = nil
-	}
-}
+func (t *Trie) SetTrieContextFactory(f commitment.TrieContextFactory) { t.ctxFactory = f }
 
-func (t *Trie) SetTrieContextFactory(f commitment.TrieContextFactory) {
-	if t != nil {
-		t.ctxFactory = f
-	}
-}
+func (t *Trie) ResetContext(ctx commitment.PatriciaContext) { t.ctx = ctx }
 
-func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
-	if t != nil {
-		t.ctx = ctx
-	}
-}
+func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) { t.deferUpdates = deferUpdates }
 
-func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) {
-	if t != nil {
-		t.deferUpdates = deferUpdates
-	}
-}
-
-func (t *Trie) SetStorageFanOutMin(n int) {
-	if t != nil {
-		t.fanOutMin = n
-	}
-}
+func (t *Trie) SetStorageFanOutMin(n int) { t.fanOutMin = n }
 
 func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
-	if t == nil || len(t.deferred) == 0 {
-		return nil
-	}
 	parts := t.deferred
 	t.deferred = nil
 	return parts
@@ -148,9 +112,6 @@ func (t *Trie) ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgres
 }
 
 func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProgress), partition func() ([]storageTask, []accountEntry, int, error)) ([]byte, error) {
-	if t == nil {
-		return nil, errTrieReleased
-	}
 	if t.ctx == nil {
 		return nil, errTrieContext
 	}
@@ -158,15 +119,14 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 		return nil, errors.New("commitment v4: deferred updates were not taken")
 	}
 	roundStart := time.Now()
-	metered := newMeteredContext(t.ctx)
+	metered := &meteredContext{t.ctx, new(meterCounts)}
 	var seen int
 	defer func() { metered.publish(roundStart, uint64(seen)) }()
 
-	storage, accounts, seenKeys, err := partition()
+	storage, accounts, seen, err := partition()
 	if err != nil {
 		return nil, err
 	}
-	seen = seenKeys
 	root, parts, err := runScheduledPhases(ctx, metered, metered.wrapFactory(t.ctxFactory), storage, accounts, t.scheduleWorkers, t.fanOutMin)
 	if err != nil {
 		return nil, err
@@ -185,8 +145,6 @@ func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProg
 }
 
 func (t *Trie) Release() {
-	if t != nil {
-		t.ctx = nil
-		t.root = nil
-	}
+	t.ctx = nil
+	t.root = nil
 }

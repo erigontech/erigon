@@ -54,7 +54,10 @@ func fold(n *node, depth int) ([32]byte, error) {
 		if err != nil {
 			return [32]byte{}, err
 		}
-		return hash32(ref), nil
+		if len(ref) != 32 {
+			return keccak.Sum256(ref), nil
+		}
+		return [32]byte(ref), nil
 	}
 	if depth == 0 && len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
 		nib := bits.TrailingZeros16(n.childMask)
@@ -103,16 +106,13 @@ func fold(n *node, depth int) ([32]byte, error) {
 
 func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, error) {
 	suffixCount := 64 - depth - 1
-	suffix := n.leafSuffixAt(nib)
+	suffix, payload := n.leafAt(nib)
 	if len(suffix) != packedLen(suffixCount) {
 		return nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
 	}
 	var keyScratch [65]byte
 	key := keyScratch[:0]
-	if n.plane == planeStorage && (includeNib || !n.storageRoot) {
-		key = append(key, n.path...)
-		key = append(key, byte(nib))
-	} else if includeNib {
+	if includeNib {
 		key = append(key, byte(nib))
 	}
 	start := len(key)
@@ -122,7 +122,6 @@ func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, err
 	var compactScratch [34]byte
 	compact := nibbles.HexToCompactInto(compactScratch[:0], key)
 	var encScratch [leafRefScratch]byte
-	payload := n.leafValueAt(nib)
 	if n.plane == planeAccount {
 		nonce, balance, codeHash, storageRoot, err := decodeAccountLeaf(payload)
 		if err != nil {
@@ -136,6 +135,7 @@ func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, err
 }
 
 func foldBranchChild(parent *node, nib, depth int) ([]byte, error) {
+	var ext, hash []byte
 	if child := parent.child(nib); child != nil {
 		if len(child.path) <= depth || !bytes.HasPrefix(child.path, parent.path) || child.path[depth] != byte(nib) {
 			return nil, fmt.Errorf("%w: child %d path", errFoldNode, nib)
@@ -144,27 +144,15 @@ func foldBranchChild(parent *node, nib, depth int) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		ext := child.path[depth+1:]
-		if len(ext) != 0 {
-			wrapped := extensionRef(ext, childHash[:])
-			return wrapped[:], nil
-		}
-		return childHash[:], nil
-	}
-	if !parent.hasChildHash(nib) {
+		ext, hash = child.path[depth+1:], childHash[:]
+	} else if !parent.hasChildHash(nib) {
 		return nil, fmt.Errorf("%w: child %d hash", errFoldNode, nib)
+	} else {
+		ext, hash = parent.childExtAt(nib), parent.childHashAt(nib)
 	}
-	ext := parent.childExtAt(nib)
 	if len(ext) == 0 {
-		return parent.childHashAt(nib), nil
+		return hash, nil
 	}
-	wrapped := extensionRef(ext, parent.childHashAt(nib))
+	wrapped := extensionRef(ext, hash)
 	return wrapped[:], nil
-}
-
-func hash32(ref []byte) [32]byte {
-	if len(ref) != 32 {
-		return keccak.Sum256(ref)
-	}
-	return [32]byte(ref)
 }

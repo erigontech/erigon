@@ -37,15 +37,6 @@ func TestInitializeTrieAndUpdatesV4(t *testing.T) {
 	require.Equal(t, commitment.VariantCommitmentV4, trie.Variant())
 }
 
-func TestInitializeTrieAndUpdatesV4RejectsV2Keys(t *testing.T) {
-	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = commitment.VariantCommitmentV4
-	cfg.NibblesV2 = true
-	require.PanicsWithValue(t, ErrV4RequiresV1Keyed, func() {
-		commitment.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
-	})
-}
-
 func TestTrieProcessDoesNotReadState(t *testing.T) {
 	trie, updates := NewTrie(t.TempDir(), commitment.TrieConfig{})
 	ctx := newMockContext()

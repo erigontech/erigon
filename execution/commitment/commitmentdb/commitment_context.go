@@ -972,8 +972,8 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 }
 
 func (sdc *SharedDomainsCommitmentContext) commitmentStateKey() []byte {
-	if trie, ok := sdc.patriciaTrie.(commitment.TrieStateCodec); ok {
-		return trie.StateKey()
+	if _, ok := sdc.patriciaTrie.(commitment.TrieStateCodec); ok {
+		return KeyCommitmentV4State
 	}
 	return KeyCommitmentState
 }

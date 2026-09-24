@@ -32,7 +32,7 @@ import (
 
 type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
 
-type WarmupKeyFunc func(hashedKey []byte, depth int, dst []byte) ([]byte, bool)
+type WarmupKeyFunc func(hashedKey []byte, depth int, dst []byte) []byte
 
 type WarmupStepFunc func(record, hashedKey []byte, depth int) (nextDepth int, stop bool)
 
@@ -191,11 +191,7 @@ func (w *Warmuper) WarmSorted(n int, key func(i int) []byte) {
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int, buf []byte) {
 	depth := startDepth
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix, ok := w.key(hashedKey, depth, buf)
-		if !ok {
-			break
-		}
-
+		prefix := w.key(hashedKey, depth, buf)
 		branchData, _, err := trieCtx.Branch(prefix)
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),

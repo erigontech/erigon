@@ -104,7 +104,7 @@ func TestSelfDestructOnlyWriteSetCreatesStorageWipe(t *testing.T) {
 	require.NoError(t, err)
 	_, err = runStorageTask(ctx, storage[0])
 	require.NoError(t, err)
-	require.Empty(t, ctx.branches[string(StorageRootKey(storage[0].addrHash))])
+	require.Empty(t, ctx.branches[string(StorageNodeKey(storage[0].addrHash, nil, nil))])
 }
 
 func TestWipeStorageRecordsFromMasks(t *testing.T) {
@@ -133,7 +133,7 @@ func TestWipeStorageRecordsFromMasks(t *testing.T) {
 		require.Contains(t, ctx.branches, key)
 		require.Empty(t, ctx.branches[key])
 	}
-	require.Contains(t, ctx.branches, string(StorageRootKey(address)))
+	require.Contains(t, ctx.branches, string(StorageNodeKey(address, nil, nil)))
 	require.Zero(t, ctx.accountCalls)
 	require.Zero(t, ctx.storageCalls)
 	require.NotEmpty(t, ctx.branchCalls)
@@ -155,7 +155,7 @@ func TestWipeRejectsMalformedChildRecord(t *testing.T) {
 	root.setStoredChild(2, bytes.Repeat([]byte{1}, 32), nil)
 	root.setStoredChild(3, bytes.Repeat([]byte{2}, 32), nil)
 	ctx := newMockContext()
-	ctx.branches[string(StorageRootKey(address))] = encodeRecord(root, 0, nil)
+	ctx.branches[string(StorageNodeKey(address, nil, nil))] = encodeRecord(root, 0, nil)
 	ctx.branches[string(StorageNodeKey(address, []byte{2}, nil))] = []byte{recordFormat}
 
 	_, err := runStorageTask(ctx, storageTask{addrHash: address, wipe: true})

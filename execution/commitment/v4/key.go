@@ -16,17 +16,12 @@
 
 package v4
 
-import (
-	"errors"
-	"slices"
-)
+import "slices"
 
 const (
 	tagAccountNode byte = 0x40
 	tagStorageNode byte = 0x41
 )
-
-var ErrV4RequiresV1Keyed = errors.New("commitment v4: requires a V1-keyed commitment domain")
 
 func AccountNodeKey(path []byte, dst []byte) []byte {
 	return nodeKey(tagAccountNode, nil, path, dst)
@@ -34,10 +29,6 @@ func AccountNodeKey(path []byte, dst []byte) []byte {
 
 func StorageNodeKey(addrHash [32]byte, path []byte, dst []byte) []byte {
 	return nodeKey(tagStorageNode, addrHash[:], path, dst)
-}
-
-func StorageRootKey(addrHash [32]byte) []byte {
-	return StorageNodeKey(addrHash, nil, nil)
 }
 
 func nodeKey(tag byte, addrHash, path, dst []byte) []byte {

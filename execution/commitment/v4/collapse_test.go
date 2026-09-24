@@ -54,10 +54,11 @@ func TestRemovePromotesSoleLeafSurvivor(t *testing.T) {
 	require.NoError(t, removeErr(parent, removed))
 	require.NotZero(t, parent.leafMask&(1<<0))
 	require.Nil(t, parent.child(0))
-	require.Equal(t, packPath(survivor[len(parent.path)+1:], nil), parent.leafSuffixAt(0))
-	require.Equal(t, []byte{2}, parent.leafValueAt(0))
+	suffix, value := parent.leafAt(0)
+	require.Equal(t, packPath(survivor[len(parent.path)+1:], nil), suffix)
+	require.Equal(t, []byte{2}, value)
 	full := append(append([]byte(nil), parent.path...), byte(0))
-	full = append(full, unpackPath(parent.leafSuffixAt(0), 62, nil)...)
+	full = append(full, unpackPath(suffix, 62, nil)...)
 	require.Equal(t, survivor, full)
 }
 
@@ -155,7 +156,7 @@ func TestRemoveRejectsInvalidAndStoredPaths(t *testing.T) {
 	path := appendPath(nil, 1, bytes.Repeat([]byte{2}, 63))
 	n.setStoredChild(1, bytes.Repeat([]byte{3}, 32), []byte{2})
 
-	require.ErrorIs(t, removeErr(n, []byte{1}), ErrRemovePath)
+	require.ErrorIs(t, removeErr(n, nil), ErrRemovePath)
 	require.ErrorIs(t, removeErr(n, path), ErrRemoveStoredChild)
 }
 

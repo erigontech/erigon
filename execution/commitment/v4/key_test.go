@@ -61,7 +61,7 @@ func TestRootKeys(t *testing.T) {
 	addrHash[0] = 0xab
 
 	require.Equal(t, []byte{tagAccountNode, 0}, AccountNodeKey(nil, nil))
-	require.Equal(t, append([]byte{tagStorageNode}, append(addrHash[:], 0)...), StorageRootKey(addrHash))
+	require.Equal(t, append([]byte{tagStorageNode}, append(addrHash[:], 0)...), StorageNodeKey(addrHash, nil, nil))
 }
 
 func TestNodeKeyUsesDestination(t *testing.T) {

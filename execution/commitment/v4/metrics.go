@@ -33,10 +33,6 @@ type meteredContext struct {
 	*meterCounts
 }
 
-func newMeteredContext(inner commitment.PatriciaContext) *meteredContext {
-	return &meteredContext{inner, new(meterCounts)}
-}
-
 func (c *meteredContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	data, step, err := c.PatriciaContext.Branch(prefix)
 	if len(data) != 0 {

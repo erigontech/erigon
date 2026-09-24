@@ -139,7 +139,7 @@ func accountLeafFromParityContext(t *testing.T, ctx *parityContext, path []byte)
 	t.Helper()
 	root, err := unfold(ctx, nil, planeAccount, nil)
 	require.NoError(t, err)
-	value, ok := accountLeafAt(root, path)
+	value, ok, _ := accountLeafAt(root, path)
 	require.True(t, ok)
 	return value
 }

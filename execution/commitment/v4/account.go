@@ -51,10 +51,7 @@ func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []b
 	if u.Nonce != 0 {
 		flags |= accountHasNonce
 	}
-	codeHash := u.CodeHash
-	if codeHash == (common.Hash{}) || codeHash == empty.CodeHash {
-		codeHash = common.Hash{}
-	} else {
+	if u.CodeHash != (common.Hash{}) && u.CodeHash != empty.CodeHash {
 		flags |= accountHasCodeHash
 	}
 	if !isEmptyStorageRoot(storageRoot) {
@@ -67,7 +64,7 @@ func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []b
 		dst = append(dst, nonceBuf[:binary.PutUvarint(nonceBuf[:], u.Nonce)]...)
 	}
 	if flags&accountHasCodeHash != 0 {
-		dst = append(dst, codeHash[:]...)
+		dst = append(dst, u.CodeHash[:]...)
 	}
 	if flags&accountHasStorage != 0 {
 		dst = append(dst, storageRoot...)
@@ -108,7 +105,7 @@ func decodeAccountLeaf(b []byte) (nonce uint64, balance uint256.Int, codeHash []
 			return 0, balance, nil, nil, errAccountLeafTruncated
 		}
 		codeHash = b[pos : pos+length.Hash]
-		if isEmptyCodeHash(codeHash) {
+		if h := (*common.Hash)(codeHash); *h == empty.CodeHash || *h == (common.Hash{}) {
 			return 0, balance, nil, nil, fmt.Errorf("%w: empty code hash is present", errAccountLeafFlags)
 		}
 		pos += length.Hash
@@ -168,12 +165,4 @@ func isEmptyStorageRoot(root []byte) bool {
 	}
 	h := (*common.Hash)(root)
 	return *h == empty.RootHash || *h == (common.Hash{})
-}
-
-func isEmptyCodeHash(codeHash []byte) bool {
-	if len(codeHash) != length.Hash {
-		return false
-	}
-	h := (*common.Hash)(codeHash)
-	return *h == empty.CodeHash || *h == (common.Hash{})
 }

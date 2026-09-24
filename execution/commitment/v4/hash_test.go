@@ -21,9 +21,11 @@ import (
 	"encoding/hex"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/rlp"
 )
 
 func mustDecodeHex(t *testing.T, value string) []byte {
@@ -83,5 +85,26 @@ func TestBranchRefAllowsOrdinaryBranches(t *testing.T) {
 			}
 			require.NotPanics(t, func() { branchRef(&refs) })
 		})
+	}
+}
+
+func TestStorageLeafRefMatchesRLP(t *testing.T) {
+	payloads := [][]byte{{}, {0x00}, {0x7f}, {0x80}, {0xff}}
+	for n := 2; n <= 32; n++ {
+		payloads = append(payloads, bytes.Repeat([]byte{0xaa}, n))
+	}
+	for _, keyLen := range []int{0, 1, 2, 30, 62, 63, 64} {
+		suffix := nibbles.HexToCompact(append(bytes.Repeat([]byte{0x0c}, keyLen), nibbles.Terminator))
+		for _, payload := range payloads {
+			inner, err := rlp.EncodeToBytes(payload)
+			require.NoError(t, err)
+			want, err := rlp.EncodeToBytes([][]byte{suffix, inner})
+			require.NoError(t, err)
+			if len(want) >= 32 {
+				hash := keccak.Sum256(want)
+				want = hash[:]
+			}
+			require.Equal(t, want, storageLeafRef(suffix, payload, nil), "key %d payload %x", keyLen, payload)
+		}
 	}
 }

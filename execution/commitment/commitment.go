@@ -103,7 +103,6 @@ type Trie interface {
 }
 
 type TrieStateCodec interface {
-	StateKey() []byte
 	EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error)
 	RestoreState(value []byte) (blockNum, txNum uint64, err error)
 }

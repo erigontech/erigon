@@ -23,26 +23,22 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-var (
-	errWipeRecord = errors.New("commitment v4: invalid wipe record")
-	errWipePath   = errors.New("commitment v4: invalid wipe path")
-)
+var errWipeRecord = errors.New("commitment v4: invalid wipe record")
 
 func enumerateStorageRecords(ctx commitment.PatriciaContext, addrHash [32]byte) ([]recordDelta, error) {
-	rootKey := StorageRootKey(addrHash)
+	rootKey := StorageNodeKey(addrHash, nil, nil)
 	data, _, err := branchOwned(ctx, rootKey)
 	if err != nil || len(data) == 0 {
 		return nil, err
 	}
 	records := []recordDelta{{Key: rootKey, Data: []byte{}, Prev: data}}
-	seen := map[string]struct{}{string(rootKey): {}}
-	if err := enumerateRecordChildren(ctx, addrHash, nil, records[0].Prev, 0, &records, seen); err != nil {
+	if err := enumerateRecordChildren(ctx, addrHash, nil, records[0].Prev, 0, &records); err != nil {
 		return nil, err
 	}
 	return records, nil
 }
 
-func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, path, data []byte, depth int, records *[]recordDelta, seen map[string]struct{}) error {
+func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, path, data []byte, depth int, records *[]recordDelta) error {
 	if err := Validate(data, depth); err != nil {
 		return err
 	}
@@ -56,15 +52,8 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 		if l.child&bit == 0 || l.leaf&bit != 0 {
 			continue
 		}
-		childPath, err := childRecordPath(record, l, path, nib)
-		if err != nil {
-			return err
-		}
+		childPath := childRecordPath(record, l, path, nib)
 		key := StorageNodeKey(addrHash, childPath, nil)
-		if _, ok := seen[string(key)]; ok {
-			return fmt.Errorf("%w: repeated child key", errWipeRecord)
-		}
-		seen[string(key)] = struct{}{}
 		childData, _, err := branchOwned(ctx, key)
 		if err != nil {
 			return err
@@ -73,21 +62,17 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 			return fmt.Errorf("%w: missing child at depth %d", errWipeRecord, len(childPath))
 		}
 		*records = append(*records, recordDelta{Key: key, Data: []byte{}, Prev: childData})
-		if err := enumerateRecordChildren(ctx, addrHash, childPath, childData, len(childPath), records, seen); err != nil {
+		if err := enumerateRecordChildren(ctx, addrHash, childPath, childData, len(childPath), records); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func childRecordPath(record Record, l layout, path []byte, nib int) ([]byte, error) {
+func childRecordPath(record Record, l layout, path []byte, nib int) []byte {
 	if selfExt := record.SelfExt(); len(path) == 0 && len(selfExt) != 0 {
-		return unpackPath(selfExt[1:], int(selfExt[0]), nil), nil
+		return unpackPath(selfExt[1:], int(selfExt[0]), nil)
 	}
 	childPath := append(append([]byte(nil), path...), byte(nib))
-	childPath = append(childPath, decodeExtension(record.extAt(l, nib))...)
-	if len(childPath) > 63 {
-		return nil, errWipePath
-	}
-	return childPath, nil
+	return append(childPath, decodeExtension(record.extAt(l, nib))...)
 }

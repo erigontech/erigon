@@ -32,7 +32,8 @@ func collectPaths(t *testing.T, ctx *mockContext, addr [32]byte, n *node, out *[
 		}
 		if n.leafMask&bit != 0 {
 			full := append(append([]byte(nil), n.path...), byte(nib))
-			full = append(full, unpackPath(n.leafSuffixAt(nib), 64-len(n.path)-1, nil)...)
+			suffix, _ := n.leafAt(nib)
+			full = append(full, unpackPath(suffix, 64-len(n.path)-1, nil)...)
 			*out = append(*out, full)
 			continue
 		}

@@ -52,10 +52,8 @@ func TestFoldSingleLeafMatchesHexPatriciaHashed(t *testing.T) {
 		n.plane = plane
 		require.NoError(t, insert(n, path, value))
 
-		got, err := fold(n, 0)
-		require.NoError(t, err)
 		want := hexPatriciaRoot(t, plane, [][]byte{key}, [][]byte{path}, []commitment.Update{foldUpdate(plane, 1)})
-		require.Equal(t, want, got[:])
+		require.Equal(t, want, foldPlaneRoot(t, n))
 	}
 }
 
@@ -72,18 +70,18 @@ func TestFoldMatchesHexPatriciaHashedForEachPlane(t *testing.T) {
 					value := foldValue(plane, i+1)
 					require.NoError(t, insert(n, path, value))
 				}
-				got, err := fold(n, 0)
-				require.NoError(t, err)
 				want := hexPatriciaRoot(t, plane, keys, paths, updates)
 				if plane == planeStorage && count == 2 {
 					var refs [16][]byte
 					for i, path := range paths {
-						key := append(append([]byte(nil), path...), nibbles.Terminator)
+						key := append(append([]byte(nil), path[1:]...), nibbles.Terminator)
 						refs[path[0]] = storageLeafRef(nibbles.HexToCompact(key), foldValue(plane, i+1), nil)
 					}
+					got, err := fold(n, 0)
+					require.NoError(t, err)
 					require.Equal(t, branchRef(&refs), got)
 				}
-				require.Equal(t, want, got[:])
+				require.Equal(t, want, foldPlaneRoot(t, n))
 			})
 		}
 	}
@@ -99,10 +97,8 @@ func TestFoldMatchesHexPatriciaHashedMixedPlanes(t *testing.T) {
 			updates[i] = foldUpdate(plane, i+1)
 			require.NoError(t, insert(n, path, foldValue(plane, i+1)))
 		}
-		got, err := fold(n, 0)
-		require.NoError(t, err)
 		want := hexPatriciaRoot(t, plane, keys, paths, updates)
-		require.Equal(t, want, got[:])
+		require.Equal(t, want, foldPlaneRoot(t, n))
 	}
 }
 
@@ -120,7 +116,7 @@ func TestFoldUsesStoredChildHashWithoutStateReads(t *testing.T) {
 	var refs [16][]byte
 	wrapped := extensionRef([]byte{3, 4}, stored)
 	refs[2] = wrapped[:]
-	refs[5] = storageLeafRef(mustCompact(append(append([]byte(nil), path...), nibbles.Terminator)), []byte{7}, nil)
+	refs[5] = storageLeafRef(mustCompact(append(append([]byte(nil), path[1:]...), nibbles.Terminator)), []byte{7}, nil)
 	want := branchRef(&refs)
 	require.Equal(t, want, got)
 	require.Empty(t, ctx.accountCalls)
@@ -161,18 +157,40 @@ func (c *foldContext) Storage([]byte) (*commitment.Update, error) {
 	return &commitment.Update{}, nil
 }
 
+var foldStorageAddr = bytes.Repeat([]byte{0x5a}, length.Addr)
+
+func foldPlaneRoot(t *testing.T, n *node) []byte {
+	t.Helper()
+	got, err := fold(n, 0)
+	require.NoError(t, err)
+	if n.plane != planeStorage {
+		return got[:]
+	}
+	owner := foldUpdate(planeAccount, 1)
+	account := fork(nil)
+	account.plane = planeAccount
+	require.NoError(t, insert(account, commitment.KeyToHexNibbleHash(foldStorageAddr), encodeAccountLeaf(&owner, got[:], nil)))
+	root, err := fold(account, 0)
+	require.NoError(t, err)
+	return root[:]
+}
+
 func hexPatriciaRoot(t *testing.T, plane byte, keys, paths [][]byte, updates []commitment.Update) []byte {
 	t.Helper()
 	ctx := &foldContext{branches: make(map[string][]byte)}
-	accountKeyLen := int16(length.Addr)
-	if plane == planeStorage {
-		accountKeyLen = 0
-	}
-	trie := commitment.NewHexPatriciaHashed(accountKeyLen, ctx, commitment.TrieConfig{DeferBranchUpdates: false})
+	trie := commitment.NewHexPatriciaHashed(length.Addr, ctx, commitment.TrieConfig{DeferBranchUpdates: false})
 	defer trie.Release()
 	batch := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
 	for i := range paths {
-		batch.TouchPlainKeyDirect(string(keys[i]), &updates[i])
+		key := keys[i]
+		if plane == planeStorage {
+			key = append(bytes.Clone(foldStorageAddr), key...)
+		}
+		batch.TouchPlainKeyDirect(string(key), &updates[i])
+	}
+	if plane == planeStorage {
+		owner := foldUpdate(planeAccount, 1)
+		batch.TouchPlainKeyDirect(string(foldStorageAddr), &owner)
 	}
 	got, err := trie.Process(context.Background(), batch, "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)

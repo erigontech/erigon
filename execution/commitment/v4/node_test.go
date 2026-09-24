@@ -31,8 +31,9 @@ func TestNodeMutationsKeepMasksConsistent(t *testing.T) {
 
 	n.setLeaf(3, []byte{4, 5}, []byte{6})
 	assertNodeSlot(t, n, 3, true, true)
-	require.Equal(t, []byte{4, 5}, n.leafSuffixAt(3))
-	require.Equal(t, []byte{6}, n.leafValueAt(3))
+	suffix, value := n.leafAt(3)
+	require.Equal(t, []byte{4, 5}, suffix)
+	require.Equal(t, []byte{6}, value)
 
 	child := fork([]byte{1, 2, 3})
 	n.setChild(3, child)
@@ -40,8 +41,9 @@ func TestNodeMutationsKeepMasksConsistent(t *testing.T) {
 	require.Same(t, child, n.child(3))
 	require.Nil(t, n.childHashAt(3))
 	require.Nil(t, n.childExtAt(3))
-	require.Nil(t, n.leafSuffixAt(3))
-	require.Nil(t, n.leafValueAt(3))
+	suffix, value = n.leafAt(3)
+	require.Nil(t, suffix)
+	require.Nil(t, value)
 
 	hash := bytes.Repeat([]byte{0xab}, 32)
 	ext := []byte{7, 8}
@@ -56,16 +58,18 @@ func TestNodeMutationsKeepMasksConsistent(t *testing.T) {
 	require.Nil(t, n.child(3))
 	require.Nil(t, n.childHashAt(3))
 	require.Nil(t, n.childExtAt(3))
-	require.Equal(t, []byte{9}, n.leafSuffixAt(3))
-	require.Equal(t, []byte{10, 11}, n.leafValueAt(3))
+	suffix, value = n.leafAt(3)
+	require.Equal(t, []byte{9}, suffix)
+	require.Equal(t, []byte{10, 11}, value)
 
 	n.clear(3)
 	assertNodeSlot(t, n, 3, false, false)
 	require.Nil(t, n.child(3))
 	require.Nil(t, n.childHashAt(3))
 	require.Nil(t, n.childExtAt(3))
-	require.Nil(t, n.leafSuffixAt(3))
-	require.Nil(t, n.leafValueAt(3))
+	suffix, value = n.leafAt(3)
+	require.Nil(t, suffix)
+	require.Nil(t, value)
 }
 
 func TestNodeMutationsCoverEveryNibble(t *testing.T) {

@@ -44,7 +44,7 @@ func TestCommitmentV4StateDispatch(t *testing.T) {
 	state, err := sdc.encodeCommitmentState(12, 34)
 	require.NoError(t, err)
 	require.Equal(t, commitment.CommitmentV4StateMarker, state[0])
-	require.Equal(t, []byte{0x42}, sdc.commitmentStateKey())
+	require.Equal(t, KeyCommitmentV4State, sdc.commitmentStateKey())
 
 	blockNum, txNum, err := sdc.restorePatriciaState(state)
 	require.NoError(t, err)
@@ -100,8 +100,6 @@ func (*stateCodecTrie) RootHash() ([]byte, error) { return nil, nil }
 func (*stateCodecTrie) SetTraceWriter(io.Writer) {}
 
 func (*stateCodecTrie) Variant() commitment.TrieVariant { return commitment.VariantCommitmentV4 }
-
-func (*stateCodecTrie) StateKey() []byte { return []byte{0x42} }
 
 func (*stateCodecTrie) Reset() {}
 

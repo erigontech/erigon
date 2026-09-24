@@ -24,17 +24,11 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-var (
-	ErrUnfoldPlane   = errors.New("commitment v4: invalid unfold plane")
-	ErrUnfoldAddress = errors.New("commitment v4: invalid storage address hash")
-)
+var ErrUnfoldAddress = errors.New("commitment v4: invalid storage address hash")
 
 func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []byte) (*node, error) {
 	if ctx == nil {
 		return nil, errors.New("commitment v4: nil unfold context")
-	}
-	if plane != planeAccount && plane != planeStorage {
-		return nil, fmt.Errorf("%w: 0x%02x", ErrUnfoldPlane, plane)
 	}
 	if len(path) > 63 {
 		return nil, fmt.Errorf("commitment v4: path depth %d", len(path))
@@ -63,15 +57,13 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	record := NewRecord(n.raw, len(path))
 	n.loaded = true
 	n.plane = plane
-	n.storageRoot = plane == planeStorage && len(path) == 0
 	if data[0]&hdrHasSelfExt != 0 {
 		n.path = unpackPath(record.SelfExt()[1:], int(data[1]), nil)
 	}
 	l := record.layout()
 	if record.isLeafRoot() {
-		hashedKey, value := record.LeafRootBody()
-		fullPath := unpackPath(hashedKey, 64, nil)
-		n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), value)
+		fullPath := unpackPath(data[1:33], 64, nil)
+		n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), data[34:])
 		return n, nil
 	}
 

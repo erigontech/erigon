@@ -158,8 +158,7 @@ func TestWarmupV4KeyAndStepAccountDescent(t *testing.T) {
 	var scratch [66]byte
 	var gotKeys [][]byte
 	for depth := 0; ; {
-		key, ok := warmupKeyV4(hashedKey, depth, scratch[:])
-		require.True(t, ok)
+		key := warmupKeyV4(hashedKey, depth, scratch[:])
 		gotKeys = append(gotKeys, bytes.Clone(key))
 		nextDepth, stop := warmupStepV4(records[string(key)], hashedKey, depth)
 		if stop {
@@ -182,24 +181,19 @@ func TestWarmupV4KeyPlaneCrossing(t *testing.T) {
 	var scratch [66]byte
 
 	for depth := range 64 {
-		got, ok := warmupKeyV4(hashedKey, depth, scratch[:])
-		require.True(t, ok)
+		got := warmupKeyV4(hashedKey, depth, scratch[:])
 		require.Equal(t, AccountNodeKey(accountPath[:depth], nil), got)
 	}
-	got, ok := warmupKeyV4(hashedKey, 64, scratch[:])
-	require.True(t, ok)
+	got := warmupKeyV4(hashedKey, 64, scratch[:])
 	require.Equal(t, StorageNodeKey(addrHash, nil, nil), got)
-	got, ok = warmupKeyV4(hashedKey, 65, scratch[:])
-	require.True(t, ok)
+	got = warmupKeyV4(hashedKey, 65, scratch[:])
 	require.Equal(t, StorageNodeKey(addrHash, storagePath[:1], nil), got)
 
 	accountOnly := accountPath[:64]
-	got, ok = warmupKeyV4(accountOnly, 64, scratch[:])
-	require.True(t, ok)
+	got = warmupKeyV4(accountOnly, 64, scratch[:])
 	require.Equal(t, AccountNodeKey(accountOnly, nil), got)
 
-	got, ok = warmupKeyV4(hashedKey, 64, scratch[:])
-	require.True(t, ok)
+	got = warmupKeyV4(hashedKey, 64, scratch[:])
 	require.Equal(t, tagStorageNode, got[0])
 }
 
@@ -248,8 +242,7 @@ func TestWarmupV4KeyShapes(t *testing.T) {
 	hashedKey := bytes.Repeat([]byte{0x0b}, 128)
 	var scratch [66]byte
 	for _, depth := range []int{1, 2, 63, 64, 65, 128} {
-		got, ok := warmupKeyV4(hashedKey, depth, scratch[:])
-		require.True(t, ok)
+		got := warmupKeyV4(hashedKey, depth, scratch[:])
 		var want []byte
 		if depth < 64 {
 			want = AccountNodeKey(hashedKey[:depth], nil)

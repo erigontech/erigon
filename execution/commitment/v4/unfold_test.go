@@ -44,7 +44,8 @@ func TestUnfoldReadsOneExactRecordWithoutStateReads(t *testing.T) {
 	require.Equal(t, path, got.path)
 	require.Equal(t, hash, got.childHashAt(2))
 	require.Equal(t, []byte{4, 5, 6}, got.childExtAt(2))
-	require.Equal(t, []byte{0x42}, got.leafValueAt(7))
+	_, value := got.leafAt(7)
+	require.Equal(t, []byte{0x42}, value)
 }
 
 func TestUnfoldStorageUsesAddressQualifiedKey(t *testing.T) {
@@ -74,8 +75,9 @@ func TestUnfoldRootForms(t *testing.T) {
 
 		got, err := unfold(ctx, nil, planeAccount, nil)
 		require.NoError(t, err)
-		require.Equal(t, []byte{0x01, 0x02}, got.leafValueAt(3))
-		require.Equal(t, packPath(fullPath[1:], nil), got.leafSuffixAt(3))
+		suffix, value := got.leafAt(3)
+		require.Equal(t, []byte{0x01, 0x02}, value)
+		require.Equal(t, packPath(fullPath[1:], nil), suffix)
 	})
 
 	t.Run("extension root", func(t *testing.T) {
@@ -115,11 +117,9 @@ func TestUnfoldRejectsMalformedRecord(t *testing.T) {
 	require.Nil(t, got)
 }
 
-func TestUnfoldRejectsInvalidPlaneAndAddress(t *testing.T) {
+func TestUnfoldRejectsInvalidAddress(t *testing.T) {
 	ctx := newMockContext()
-	_, err := unfold(ctx, nil, 0xff, nil)
-	require.Error(t, err)
-	_, err = unfold(ctx, nil, planeStorage, nil)
+	_, err := unfold(ctx, nil, planeStorage, nil)
 	require.Error(t, err)
 	require.True(t, errors.Is(err, ErrUnfoldAddress))
 }
@@ -138,10 +138,10 @@ func TestUnfoldKeepsOwnedBranchBytes(t *testing.T) {
 		entryOf(append([]byte{3}, bytes.Repeat([]byte{4}, 63)...), phaseAStorageUpdate([]byte{2})),
 	}})
 	require.NoError(t, err)
-	stored := m.branches[string(StorageRootKey(address))]
+	stored := m.branches[string(StorageNodeKey(address, nil, nil))]
 	require.NotEmpty(t, stored)
 
-	for _, ctx := range []commitment.PatriciaContext{ownedBranchContext{m}, newMeteredContext(ownedBranchContext{m})} {
+	for _, ctx := range []commitment.PatriciaContext{ownedBranchContext{m}, &meteredContext{ownedBranchContext{m}, new(meterCounts)}} {
 		n, err := unfold(ctx, nil, planeStorage, address[:])
 		require.NoError(t, err)
 		require.Same(t, &stored[0], &n.raw[0])

@@ -24,9 +24,6 @@ import (
 )
 
 func (t *Trie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
-	if t == nil {
-		return nil, errTrieReleased
-	}
 	root, err := t.RootHash()
 	if err != nil {
 		return nil, err
@@ -35,9 +32,6 @@ func (t *Trie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
 }
 
 func (t *Trie) RestoreState(value []byte) (uint64, uint64, error) {
-	if t == nil {
-		return 0, 0, errTrieReleased
-	}
 	if value == nil {
 		t.root = nil
 		return 0, 0, nil

@@ -744,8 +744,8 @@ func skipCellFields(data []byte, pos int, fieldBits byte) int {
 	return pos
 }
 
-func HexPatriciaWarmupKey(hashedKey []byte, depth int, dst []byte) ([]byte, bool) {
-	return nibbles.HexToCompactInto(dst, hashedKey[:depth]), true
+func HexPatriciaWarmupKey(hashedKey []byte, depth int, dst []byte) []byte {
+	return nibbles.HexToCompactInto(dst, hashedKey[:depth])
 }
 
 func HexPatriciaWarmupStep(record, hashedKey []byte, depth int) (nextDepth int, stop bool) {

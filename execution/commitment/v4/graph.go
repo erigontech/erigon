@@ -53,7 +53,22 @@ func (g graph) loadRoot(ctx commitment.PatriciaContext) (*node, error) {
 		root.loaded = true
 	}
 	root.plane = g.plane
-	return root, g.materializeRootExtension(ctx, root)
+	if len(root.path) == 0 || root.leafMask != 0 || bits.OnesCount16(root.childMask) != 1 {
+		return root, nil
+	}
+	nib := bits.TrailingZeros16(root.childMask)
+	if root.child(nib) != nil {
+		return root, nil
+	}
+	if !root.hasChildHash(nib) {
+		return root, g.errNode
+	}
+	child, err := g.unfoldChild(ctx, root.path)
+	if err != nil {
+		return root, err
+	}
+	root.setChild(nib, child)
+	return root, nil
 }
 
 func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, error) {
@@ -79,29 +94,7 @@ func rootExtensionChild(n *node) *node {
 	return child
 }
 
-func (g graph) materializeRootExtension(ctx commitment.PatriciaContext, root *node) error {
-	if root == nil || len(root.path) == 0 || root.leafMask != 0 || bits.OnesCount16(root.childMask) != 1 {
-		return nil
-	}
-	nib := bits.TrailingZeros16(root.childMask)
-	if root.child(nib) != nil {
-		return nil
-	}
-	if !root.hasChildHash(nib) {
-		return g.errNode
-	}
-	child, err := g.unfoldChild(ctx, root.path)
-	if err != nil {
-		return err
-	}
-	root.setChild(nib, child)
-	return nil
-}
-
 func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) error {
-	if n == nil {
-		return fmt.Errorf("%w: nil node", g.errKey)
-	}
 	if len(path) != 64 || !bytes.HasPrefix(path, n.path) {
 		return fmt.Errorf("%w: node path %x", g.errKey, n.path)
 	}
@@ -137,8 +130,7 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	if !n.hasChildHash(nib) {
 		return g.errNode
 	}
-	childPath := append(append([]byte(nil), n.path...), byte(nib))
-	childPath = append(childPath, n.childExtAt(nib)...)
+	childPath := n.childPath(nib, nil)
 	if !bytes.HasPrefix(path, childPath) {
 		return nil
 	}
@@ -194,11 +186,22 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *d
 		path = nil
 		depth = 0
 	}
-	hash, delta, err := foldAndEncodeRecord(ctx, n, depth, nodeKey(g.plane, g.addrHash, path, nil))
+	hash, err := fold(n, depth)
 	if err != nil {
 		return [32]byte{}, err
 	}
-	acc.add(delta)
+	key := nodeKey(g.plane, g.addrHash, path, nil)
+	prev := n.raw
+	if !n.loaded {
+		if prev, _, err = branchOwned(ctx, key); err != nil {
+			return [32]byte{}, err
+		}
+	}
+	data := encodeRecord(n, depth, make([]byte, 0, len(prev)+encodeSlack))
+	if prev == nil {
+		prev = []byte{}
+	}
+	acc.add(recordDelta{Key: key, Data: data, Prev: prev})
 	return hash, nil
 }
 
@@ -217,7 +220,7 @@ type foldPlan struct {
 }
 
 func (p foldPlan) parallel() bool {
-	return p.factory != nil && p.workers > 1 && p.ctx != nil
+	return p.factory != nil && p.workers > 1
 }
 
 func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts, error) {

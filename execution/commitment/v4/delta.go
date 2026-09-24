@@ -22,24 +22,6 @@ import (
 
 type recordDelta = commitment.BranchDelta
 
-func foldAndEncodeRecord(ctx commitment.PatriciaContext, n *node, depth int, key []byte) ([32]byte, recordDelta, error) {
-	hash, err := fold(n, depth)
-	if err != nil {
-		return [32]byte{}, recordDelta{}, err
-	}
-	prev := n.raw
-	if !n.loaded {
-		if prev, _, err = branchOwned(ctx, key); err != nil {
-			return [32]byte{}, recordDelta{}, err
-		}
-	}
-	data := encodeRecord(n, depth, make([]byte, 0, len(prev)+encodeSlack))
-	if prev == nil {
-		prev = []byte{}
-	}
-	return hash, recordDelta{Key: key, Data: data, Prev: prev}, nil
-}
-
 const encodeSlack = 96
 
 func applyDeltas(parts deltaParts, putBranch func(key, data, prev []byte) error) error {
