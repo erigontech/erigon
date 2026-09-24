@@ -162,7 +162,9 @@ func writeFields(w *bytes.Buffer, st *ast.StructType, structs map[string]*ast.St
 			if _, named := tag.Lookup("json"); named {
 				return fmt.Errorf("embedded %s has a json tag, which encoding/json nests", typeString(f.Type))
 			}
-			embedded, ok := structs[typeString(f.Type)]
+			// encoding/json flattens an embedded pointer the same as a value, so the fields
+			// are reached through it without any change to what is written.
+			embedded, ok := structs[strings.TrimPrefix(typeString(f.Type), "*")]
 			if !ok {
 				return fmt.Errorf("embedded %s is not a struct in this package", typeString(f.Type))
 			}
