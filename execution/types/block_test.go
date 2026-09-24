@@ -866,6 +866,11 @@ func TestHeaderMarshalFastJSONTo(t *testing.T) {
 			got, err := jsonstream.Marshal(h)
 			require.NoError(t, err)
 			require.Equal(t, string(want), string(got))
+
+			// gen_header_json.go is hand-maintained, so hold it to the tags as well.
+			generated, err := json.Marshal(h)
+			require.NoError(t, err)
+			require.JSONEq(t, string(want), string(generated))
 		})
 	}
 }
