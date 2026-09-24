@@ -429,7 +429,7 @@ func TestAppendFilteredLogs(t *testing.T) {
 	require.Len(t, rpcLogs, len(logs))
 	for i, rpcLog := range rpcLogs {
 		require.Equal(t, hexutil.Uint64(1900000000), rpcLog.BlockTimestamp)
-		require.Equal(t, *stamped(logs[i], 1900000000), *rpcLog)
+		require.Equal(t, *StampedLog(logs[i], 1900000000), *rpcLog)
 	}
 }
 
@@ -481,7 +481,7 @@ func TestAppendFilteredLogsMatchesFilter(t *testing.T) {
 
 			var want Logs
 			for _, l := range logs.FilterWithTopicMap(addrMap, topicMap, 0) {
-				want = append(want, stamped(l, 7))
+				want = append(want, StampedLog(l, 7))
 			}
 			require.Equal(t, want, logs.AppendFilteredLogs(nil, addrMap, topicMap, 7, 0))
 
@@ -637,11 +637,4 @@ func TestLogMatchesItsTags(t *testing.T) {
 			require.Equal(t, string(want), string(got))
 		})
 	}
-}
-
-// stamped is a log copy carrying a block timestamp, as a reply builds it.
-func stamped(l *Log, timestamp hexutil.Uint64) *Log {
-	out := *l
-	out.BlockTimestamp = timestamp
-	return &out
 }

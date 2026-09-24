@@ -316,7 +316,7 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 		}
 	})
 
-	rpcLog := stamped(log, hexutil.Uint64(1700000000))
+	rpcLog := StampedLog(log, 1700000000)
 	rpcEncoded, err := json.Marshal(rpcLog)
 	require.NoError(b, err)
 	var rpcSink Log

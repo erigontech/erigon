@@ -72,7 +72,7 @@ func legacyMarshalReceipt(
 		if receipt.Logs != nil {
 			rpcLogs := make([]*types.Log, 0, len(receipt.Logs))
 			for _, l := range receipt.Logs {
-				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
+				rpcLogs = append(rpcLogs, types.StampedLog(l, header.Time))
 			}
 			logsToMarshal = rpcLogs
 		} else {

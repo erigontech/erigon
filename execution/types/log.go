@@ -63,7 +63,7 @@ type Log struct {
 	// You must pay attention to this field if you receive logs through a filter query.
 	Removed bool `json:"removed" ethjson:"bool" codec:"-"`
 
-	// timestamp of the block, omitted by the replies that do not fill it in
+	// zero for the replies that do not stamp it
 	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp,omitempty" ethjson:"quantity" codec:"-"`
 }
 
@@ -158,11 +158,11 @@ func (logs Logs) Copy() Logs {
 	return out
 }
 
-// ToRPCTransactionLog copies the log with the block's timestamp filled in, so a reply carries it
-// without writing to the log the caller holds.
-func ToRPCTransactionLog(log *Log, header *Header) *Log {
+// StampedLog copies the log with the block's timestamp filled in, so a reply carries it without
+// writing to the log the caller holds.
+func StampedLog(log *Log, timestamp uint64) *Log {
 	stamped := *log
-	stamped.BlockTimestamp = hexutil.Uint64(header.Time)
+	stamped.BlockTimestamp = hexutil.Uint64(timestamp)
 	return &stamped
 }
 
@@ -235,9 +235,7 @@ func (logs Logs) AppendFilteredLogs(dst Logs, addrMap map[common.Address]struct{
 			break
 		}
 		if _, matched := l.matchFilter(addrMap, topicMap); matched {
-			stamped := *l
-			stamped.BlockTimestamp = hexutil.Uint64(timestamp)
-			dst = append(dst, &stamped)
+			dst = append(dst, StampedLog(l, timestamp))
 		}
 	}
 	return dst

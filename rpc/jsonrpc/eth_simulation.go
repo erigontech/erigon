@@ -835,7 +835,7 @@ func (s *simulator) simulateCall(
 	callResult := ethapi.CallResult{GasUsed: hexutil.Uint64(result.ReceiptGasUsed), MaxUsedGas: hexutil.Uint64(result.MaxGasUsed)}
 	callResult.Logs = make([]*types.Log, 0, len(logs))
 	for _, l := range logs {
-		callResult.Logs = append(callResult.Logs, types.ToRPCTransactionLog(l, header))
+		callResult.Logs = append(callResult.Logs, types.StampedLog(l, header.Time))
 	}
 	if len(result.ReturnData) > s.returnDataLimit {
 		callResult.Status = hexutil.Uint64(types.ReceiptStatusFailed)

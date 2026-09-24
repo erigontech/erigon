@@ -85,7 +85,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([]t
 	for i, receipt := range receipts {
 		logs[i] = make(types.Logs, len(receipt.Logs))
 		for j, log := range receipt.Logs {
-			logs[i][j] = types.ToRPCTransactionLog(log, header)
+			logs[i][j] = types.StampedLog(log, header.Time)
 		}
 	}
 	return logs, nil
@@ -359,9 +359,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			if txi >= len(body.Transactions) {
 				return nil, fmt.Errorf("log txIndex %d out of range in block %d with %d txns", txi, blockNum, len(body.Transactions))
 			}
-			stamped := *log
-			stamped.BlockTimestamp = hexutil.Uint64(timestamp)
-			rpcLog := &stamped
+			rpcLog := types.StampedLog(log, timestamp)
 			rpcLog.BlockNumber = hexutil.Uint64(blockNum)
 			rpcLog.BlockHash = blockHash
 			rpcLog.TxHash = body.Transactions[txi].Hash()
