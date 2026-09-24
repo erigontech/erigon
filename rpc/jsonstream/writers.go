@@ -114,12 +114,16 @@ func appendOwnText[T hexType](s *StackStream, buf []byte, v *T) []byte {
 // writes its own text.
 func bytesOf[T hexType](v *T) (b []byte, ok bool) {
 	if isByteArray[T]() {
-		return unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v)), true
+		return arrayBytes(v), true
 	}
 	if b, ok := any(v).(*hexutil.Bytes); ok {
 		return *b, true
 	}
 	return nil, false
+}
+
+func arrayBytes[T hexType](v *T) []byte {
+	return unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v))
 }
 
 // isByteArray is fixed for each instantiation, so the compiler drops the branch it guards: of
@@ -160,8 +164,7 @@ func HexesValue[S ~[]E, E hexType](s *StackStream, items S) {
 			if i > 0 {
 				buf = append(buf, ',')
 			}
-			b, _ := bytesOf(&items[i])
-			buf = hexutil.AppendQuoted(buf, b)
+			buf = hexutil.AppendQuoted(buf, arrayBytes(&items[i]))
 		}
 		s.stream.SetBuffer(append(buf, ']'))
 		s.afterValue()
