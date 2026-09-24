@@ -81,8 +81,6 @@ func MarshalReceipt(
 		from = &address
 	}
 
-	logsBloom := receipt.LogsBloom()
-
 	var logsToMarshal any
 
 	if withBlockTimestamp {
@@ -114,7 +112,7 @@ func MarshalReceipt(
 		GasUsed:           hexutil.Uint64(receipt.GasUsed),
 		CumulativeGasUsed: hexutil.Uint64(receipt.CumulativeGasUsed),
 		Logs:              logsToMarshal,
-		LogsBloom:         &logsBloom,
+		LogsBloom:         receipt.LogsBloom(),
 	}
 
 	if !chainConfig.IsLondon(header.Number.Uint64()) {
