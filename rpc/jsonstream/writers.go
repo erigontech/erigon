@@ -92,14 +92,24 @@ func hexField[T hexType](s *StackStream, name string, v *T) {
 // appendHex appends v's hex text. A failing AppendText appends nothing and latches its error,
 // which keeps the JSON well-formed and stops it reaching the client.
 func appendHex[T hexType](s *StackStream, buf []byte, v *T) []byte {
-	var text []byte
-	var err error
+	if ownText(v) {
+		return appendOwnText(s, buf, v)
+	}
+	return appendBytes(buf, v)
+}
+
+// ownText reports whether v is one of the hexutil types, which write their own text; the rest
+// are byte arrays.
+func ownText[T hexType](v *T) bool {
 	switch any(v).(type) {
 	case *hexutil.Uint64, *hexutil.Uint, *hexutil.Int64, *hexutil.U256, *hexutil.Big, *hexutil.Bytes:
-		text, err = (*v).AppendText(buf)
-	default: // a byte array
-		text = hex.AppendEncode(append(buf, "0x"...), unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v)))
+		return true
 	}
+	return false
+}
+
+func appendOwnText[T hexType](s *StackStream, buf []byte, v *T) []byte {
+	text, err := (*v).AppendText(buf)
 	if err != nil {
 		if s.stream.Error == nil {
 			s.stream.Error = err
@@ -107,6 +117,10 @@ func appendHex[T hexType](s *StackStream, buf []byte, v *T) []byte {
 		return buf
 	}
 	return text
+}
+
+func appendBytes[T hexType](buf []byte, v *T) []byte {
+	return hex.AppendEncode(append(buf, "0x"...), unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v)))
 }
 
 // Hexes writes a slice field, null for a nil slice.
@@ -135,16 +149,25 @@ func HexesValue[S ~[]E, E hexType](s *StackStream, items S) {
 	s.beforeValue()
 	// exact for the fixed-size types, a first guess for Bytes and Big; no further than the flush
 	size := 2 + len(items)*(hexutil.QuotedLen(int(unsafe.Sizeof(*new(E))))+1)
-	s.stream.SetBuffer(append(slices.Grow(s.stream.Buffer(), min(size, FlushThreshold)), '['))
+	buf := append(slices.Grow(s.stream.Buffer(), min(size, FlushThreshold)), '[')
+	own := len(items) > 0 && ownText(&items[0])
 	for i := range items {
-		buf := s.stream.Buffer()
 		if i > 0 {
 			buf = append(buf, ',')
 		}
-		s.stream.SetBuffer(append(appendHex(s, append(buf, '"'), &items[i]), '"'))
-		flushIfFull(s.stream) // blob arrays reach megabytes
+		if own {
+			buf = appendOwnText(s, append(buf, '"'), &items[i])
+		} else {
+			buf = appendBytes(append(buf, '"'), &items[i])
+		}
+		buf = append(buf, '"')
+		if len(buf) >= FlushThreshold { // blob arrays reach megabytes
+			s.stream.SetBuffer(buf)
+			flushFull(s.stream)
+			buf = s.stream.Buffer()
+		}
 	}
-	s.stream.SetBuffer(append(s.stream.Buffer(), ']'))
+	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
 }
 
