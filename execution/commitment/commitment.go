@@ -145,13 +145,10 @@ func EncodeCommitmentV4State(root []byte, blockNum, txNum uint64, dst []byte) ([
 	if len(root) != length.Hash {
 		return nil, ErrCommitmentV4StateSize
 	}
-	dst = append(dst, make([]byte, CommitmentV4StateSize)...)
-	body := dst[len(dst)-CommitmentV4StateSize:]
-	body[0] = CommitmentV4StateMarker
-	binary.BigEndian.PutUint64(body[1:9], txNum)
-	binary.BigEndian.PutUint64(body[9:17], blockNum)
-	copy(body[17:], root)
-	return dst, nil
+	dst = append(slices.Grow(dst, CommitmentV4StateSize), CommitmentV4StateMarker)
+	dst = binary.BigEndian.AppendUint64(dst, txNum)
+	dst = binary.BigEndian.AppendUint64(dst, blockNum)
+	return append(dst, root...), nil
 }
 
 func DecodeCommitmentV4State(value []byte) (blockNum, txNum uint64, root []byte, err error) {
@@ -1648,14 +1645,12 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 		}
 		t.parallel.Insert(hashedKey, ik, u)
 	case ModeCollect:
-		existing, ok := t.treeIdx[key]
-		if !ok {
-			existing = &KeyUpdate{plainKey: key, update: new(Update)}
-			t.treeIdx[key] = existing
-			*existing.update = *update
+		if existing, ok := t.treeIdx[key]; ok {
+			mergeUpdateInto(existing.update, update)
 			return
 		}
-		mergeUpdateInto(existing.update, update)
+		u := *update
+		t.treeIdx[key] = &KeyUpdate{plainKey: key, update: &u}
 	default:
 	}
 }

@@ -221,7 +221,7 @@ func latestCommitmentStateFromFiles(tx kv.TemporalTx, maxTxNum uint64) (stateKey
 }
 
 func ExtractCommitmentStateRoot(stateKey, value []byte) ([]byte, uint64, uint64, error) {
-	if bytes.Equal(stateKey, commitmentdb.KeyCommitmentV4State) {
+	if bytes.Equal(stateKey, commitment.KeyCommitmentV4State) {
 		blockNum, txNum, root, err := commitment.DecodeCommitmentV4State(value)
 		return root, blockNum, txNum, err
 	}

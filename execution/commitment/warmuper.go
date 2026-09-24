@@ -22,12 +22,12 @@ import (
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
 type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
@@ -51,7 +51,6 @@ const warmupKeyScratchLen = maxCompactKeyLen + 1
 
 type WarmupStats struct {
 	KeysProcessed uint64
-	Duration      time.Duration
 }
 
 type Warmuper struct {
@@ -68,7 +67,6 @@ type Warmuper struct {
 	g    *errgroup.Group
 
 	keysProcessed atomic.Uint64
-	startTime     atomic.Int64
 
 	outstanding [arenaRingSize]atomic.Int64
 	mu          sync.Mutex
@@ -104,7 +102,6 @@ func (w *Warmuper) begin() bool {
 	if w.started.Swap(true) {
 		return false
 	}
-	w.startTime.Store(time.Now().UnixNano())
 	if w.numWorkers <= 0 {
 		return false
 	}
@@ -180,10 +177,7 @@ func (w *Warmuper) WarmSorted(n int, key func(i int) []byte) {
 				var prev []byte
 				for i := lo; i < min(lo+warmSortedChunk, n); i++ {
 					hk := key(i)
-					depth := 0
-					for depth < min(len(prev), len(hk)) && prev[depth] == hk[depth] {
-						depth++
-					}
+					depth := nibbles.CommonPrefixLen(prev, hk)
 					w.warmupKey(trieCtx, hk, depth, buf)
 					w.keysProcessed.Add(1)
 					prev = hk
@@ -255,14 +249,7 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 }
 
 func (w *Warmuper) Stats() WarmupStats {
-	var duration time.Duration
-	if startTime := w.startTime.Load(); startTime != 0 {
-		duration = time.Duration(time.Now().UnixNano() - startTime)
-	}
-	return WarmupStats{
-		KeysProcessed: w.keysProcessed.Load(),
-		Duration:      duration,
-	}
+	return WarmupStats{KeysProcessed: w.keysProcessed.Load()}
 }
 
 func (w *Warmuper) DrainPending() {

@@ -110,9 +110,6 @@ func (p *branchPrefetcher) resume() {
 }
 
 func (p *branchPrefetcher) close() {
-	if p == nil {
-		return
-	}
 	p.drain()
 	close(p.work)
 	p.wg.Wait()

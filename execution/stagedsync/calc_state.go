@@ -28,7 +28,6 @@ type calcAccountState struct {
 	Deleted     bool
 	// dirty tracks whether this account was modified in the current block
 	dirty bool
-	fed   bool
 	hash  [32]byte
 }
 
@@ -425,16 +424,14 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 		account := commitment.FeedAccount{Hash: st.hash, Slots: cs.feedSlots[start:len(cs.feedSlots):len(cs.feedSlots)]}
 		if acc := cs.accounts[addr]; acc != nil && acc.dirty {
 			account.Update = cs.feedUpdate(acc)
-			acc.fed = true
 		}
 		feed.Accounts = append(feed.Accounts, account)
 	}
 	for _, addr := range cs.dirtyAccounts {
-		acc := cs.accounts[addr]
-		if acc.fed {
-			acc.fed = false
+		if len(cs.storageDirty[addr]) != 0 {
 			continue
 		}
+		acc := cs.accounts[addr]
 		feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: acc.hash, Update: cs.feedUpdate(acc)})
 	}
 }

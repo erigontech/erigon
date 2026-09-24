@@ -338,9 +338,7 @@ func (c *BranchCache) storageRoute(prefix []byte, create bool, nibBuf *[4]byte) 
 	}
 	var mapKey [33]byte
 	if len(prefix) > 0 && prefix[0] == 0x41 {
-		var valid bool
-		n, valid = v4KeyPath(prefix, 33, nibBuf)
-		if !valid {
+		if n, ok = v4KeyPath(prefix, 33, nibBuf); !ok {
 			return nil, 0, false
 		}
 		copy(mapKey[:], prefix[:33])

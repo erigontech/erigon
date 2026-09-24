@@ -356,18 +356,6 @@ func TestWarmupKeyStopsOnBackwardsStep(t *testing.T) {
 	})
 }
 
-func TestWarmuperStatsDurationStartsWithWarmuper(t *testing.T) {
-	w := NewWarmuper(context.Background(), WarmupConfig{
-		MaxDepth: WarmupMaxDepth,
-		Key:      HexPatriciaWarmupKey,
-		Step:     HexPatriciaWarmupStep,
-	})
-	require.Zero(t, w.Stats().Duration)
-	w.Start()
-	w.CloseAndWait()
-	require.NotZero(t, w.startTime.Load())
-}
-
 func TestWarmuperStatsConcurrentWithStart(t *testing.T) {
 	for range 100 {
 		w := NewWarmuper(context.Background(), WarmupConfig{

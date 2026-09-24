@@ -91,16 +91,10 @@ type SharedDomainsCommitmentContext struct {
 	warnedUnwired  sync.Once
 }
 
-type feedTrie interface {
+type v4Trie interface {
 	ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error)
-}
-
-type deferredCommitmentTrie interface {
 	SetDeferCommitmentUpdates(bool)
 	TakeDeferredDeltas() [][]commitment.BranchDelta
-}
-
-type storageFanOutTrie interface {
 	SetStorageFanOutMin(int)
 }
 
@@ -241,7 +235,7 @@ func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Update
 }
 
 func (sdc *SharedDomainsCommitmentContext) AcceptsFeed() bool {
-	_, ok := sdc.patriciaTrie.(feedTrie)
+	_, ok := sdc.patriciaTrie.(v4Trie)
 	return ok
 }
 
@@ -648,16 +642,16 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		ptrie.SetLeaveDeferredForCaller(true)
 		defer ptrie.SetLeaveDeferredForCaller(false)
 	}
-	if trie, ok := sdc.patriciaTrie.(deferredCommitmentTrie); ok && sdc.deferCommitmentUpdates {
+	if trie, ok := sdc.patriciaTrie.(v4Trie); ok && sdc.deferCommitmentUpdates {
 		trie.SetDeferCommitmentUpdates(true)
 		defer trie.SetDeferCommitmentUpdates(false)
 	}
-	if trie, ok := sdc.patriciaTrie.(storageFanOutTrie); ok {
+	if trie, ok := sdc.patriciaTrie.(v4Trie); ok {
 		trie.SetStorageFanOutMin(sdc.storageFanOutMin)
 	}
 
 	if feed != nil {
-		rootHash, err = sdc.patriciaTrie.(feedTrie).ProcessFeed(ctx, feed, onProgress)
+		rootHash, err = sdc.patriciaTrie.(v4Trie).ProcessFeed(ctx, feed, onProgress)
 	} else {
 		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 	}
@@ -712,7 +706,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			}
 		}
 	}
-	if trie, ok := sdc.patriciaTrie.(deferredCommitmentTrie); ok && sdc.deferCommitmentUpdates {
+	if trie, ok := sdc.patriciaTrie.(v4Trie); ok && sdc.deferCommitmentUpdates {
 		if deltas := trie.TakeDeferredDeltas(); deltas != nil {
 			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
 				BlockNum: blockNum,
@@ -870,9 +864,7 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 // truth so BranchCache can exclude it by construction.
 var KeyCommitmentState = commitment.KeyCommitmentState
 
-var KeyCommitmentV4State = commitment.KeyCommitmentV4State
-
-var CommitmentStateKeys = [][]byte{KeyCommitmentV4State, KeyCommitmentState}
+var CommitmentStateKeys = [][]byte{commitment.KeyCommitmentV4State, KeyCommitmentState}
 
 var ErrBehindCommitment = errors.New("behind commitment")
 
@@ -884,9 +876,6 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
 	tv := sdc.patriciaTrie.Variant()
-	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantCommitmentV4 {
-		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
-	}
 	var step kv.Step
 
 	state, step, err = trieContext.Branch(sdc.commitmentStateKey())
@@ -1277,7 +1266,7 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	v, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentV4State, kv.GetLatestOptions{})
+	v, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV4State, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, err
 	}

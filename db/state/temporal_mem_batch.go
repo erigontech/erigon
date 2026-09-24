@@ -171,19 +171,15 @@ func (sd *TemporalMemBatch) addPutMetrics(domain kv.Domain, puts int64, putKeySi
 	sd.metrics.CachePutSize += putKeySize + putValueSize
 	sd.metrics.CachePutKeySize += putKeySize
 	sd.metrics.CachePutValueSize += putValueSize
-	if dm, ok := sd.metrics.Domains[domain]; ok {
-		dm.CachePutCount += puts
-		dm.CachePutSize += putKeySize + putValueSize
-		dm.CachePutKeySize += putKeySize
-		dm.CachePutValueSize += putValueSize
-		return
+	dm, ok := sd.metrics.Domains[domain]
+	if !ok {
+		dm = &kvmetrics.DomainIOMetrics{}
+		sd.metrics.Domains[domain] = dm
 	}
-	sd.metrics.Domains[domain] = &kvmetrics.DomainIOMetrics{
-		CachePutCount:     puts,
-		CachePutSize:      putKeySize + putValueSize,
-		CachePutKeySize:   putKeySize,
-		CachePutValueSize: putValueSize,
-	}
+	dm.CachePutCount += puts
+	dm.CachePutSize += putKeySize + putValueSize
+	dm.CachePutKeySize += putKeySize
+	dm.CachePutValueSize += putValueSize
 }
 
 func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
@@ -210,15 +206,15 @@ func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.Bran
 		}()
 		err = sd.writeCommitmentOps(flat, sameTxNum, ready, txNum, diff)
 	}()
-	puts, putKeySize, putValueSize := sd.insertOwnedCommitmentBranches(flat, sameTxNum, make([]dataWithTxNum, count), txNum, ready)
+	putKeySize, putValueSize := sd.insertOwnedCommitmentBranches(flat, sameTxNum, make([]dataWithTxNum, count), txNum, ready)
 	err := <-written
-	sd.addPutMetrics(kv.CommitmentDomain, puts, putKeySize, putValueSize)
+	sd.addPutMetrics(kv.CommitmentDomain, int64(len(flat)), putKeySize, putValueSize)
 	return err
 }
 
 const commitmentWriteChunk = 8192
 
-func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.BranchDelta, sameTxNum []bool, versions []dataWithTxNum, txNum uint64, ready chan<- int) (puts int64, putKeySize, putValueSize int) {
+func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.BranchDelta, sameTxNum []bool, versions []dataWithTxNum, txNum uint64, ready chan<- int) (putKeySize, putValueSize int) {
 	const domain = kv.CommitmentDomain
 	defer close(ready)
 	sd.latestStateLocks[domain].Lock()
@@ -258,10 +254,9 @@ func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.Bra
 			putKeySize += len(key)
 			putValueSize += len(d.Data)
 		}
-		puts++
 	}
 	ready <- len(flat)
-	return puts, putKeySize, putValueSize
+	return putKeySize, putValueSize
 }
 
 func (sd *TemporalMemBatch) writeCommitmentOps(flat []*commitment.BranchDelta, sameTxNum []bool, ready <-chan int, txNum uint64, diff *kv.DomainDiff) error {
