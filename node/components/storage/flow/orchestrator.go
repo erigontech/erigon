@@ -28,6 +28,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/components/storage/validation"
@@ -1403,6 +1404,15 @@ func fileRole(name string) string {
 	}
 	ext := name[extIdx+1:]
 	base := name[:extIdx]
+
+	// State names put the type before the dotted range
+	// (v3.0-logaddrs.330-331.ef), so the dash scan below reads a range
+	// digit and degrades to the bare extension. Everything the inventory
+	// cannot attribute to a domain shares one coverage bucket, where that
+	// makes each standalone index indistinguishable from every other.
+	if info, _, _ := snaptype.ParseFileName("", name); info.TypeString != "" && info.To > 0 {
+		return info.TypeString + "." + ext
+	}
 
 	dashIdx := strings.LastIndexByte(base, '-')
 	if dashIdx < 0 {

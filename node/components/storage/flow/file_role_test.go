@@ -24,10 +24,20 @@ func TestFileRole(t *testing.T) {
 		in   string
 		want string
 	}{
-		// Domain files: extension alone is the role.
-		{"kv domain file", "v1.0-accounts.0-256.kv", "kv"},
-		{"kvi domain file", "v1.0-accounts.0-256.kvi", "kvi"},
-		{"storage kv", "v1.0-storage.0-512.kv", "kv"},
+		// State files: the role names the index, not just the extension.
+		// Files the inventory cannot attribute to a domain all share the
+		// blocks bucket, so a role of "ef" alone makes every standalone
+		// index look like coverage of every other at the same step range,
+		// and only the first-sorted one is ever requested.
+		{"kv domain file", "v1.0-accounts.0-256.kv", "accounts.kv"},
+		{"kvi domain file", "v1.0-accounts.0-256.kvi", "accounts.kvi"},
+		{"storage kv", "v1.0-storage.0-512.kv", "storage.kv"},
+		{"logaddrs ef", "v3.0-logaddrs.330-331.ef", "logaddrs.ef"},
+		{"logtopics ef", "v3.0-logtopics.330-331.ef", "logtopics.ef"},
+		{"logaddrs efi accessor", "accessor/v2.1-logaddrs.330-331.efi", "logaddrs.efi"},
+		{"rcache efi accessor", "accessor/v2.0-rcache.330-331.efi", "rcache.efi"},
+		{"rcache history", "history/v3.1-rcache.330-331.v", "rcache.v"},
+		{"v4 txnum-named kv", "v4.0-code.126593796-126953125.kv", "code.kv"},
 
 		// Block files: alphabetic segment before extension is part of role.
 		{"headers seg", "v1.0-000000-000500-headers.seg", "headers.seg"},
