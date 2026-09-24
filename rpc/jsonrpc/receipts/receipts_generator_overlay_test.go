@@ -124,7 +124,7 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	require.Len(t, receipt.Logs, 1)
 	require.True(t, receipt.Bloom.IsEmpty(), "a receipt served from the persistent cache must not derive its bloom")
 
-	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, txn.Hash(), true, true)
+	served := ethutils.MarshalReceipt(receipt, txn, m.ChainConfig, header, true, true)
 	bloom := types.CreateBloom(types.Receipts{receipt})
 	require.Equal(t, &bloom, served.LogsBloom)
 }
