@@ -82,9 +82,9 @@ type PayloadAttributes struct {
 //go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type BlobsBundle
 
 type BlobsBundle struct {
-	Commitments []hexutil.Bytes       `json:"commitments" ethjson:"datas"`
-	Proofs      []hexutil.Bytes       `json:"proofs" ethjson:"datas"`
-	Blobs       []hexutil.Bytes       `json:"blobs" ethjson:"datas"`
+	Commitments []hexutil.Bytes       `json:"commitments" ethjson:"datalist"`
+	Proofs      []hexutil.Bytes       `json:"proofs" ethjson:"datalist"`
+	Blobs       []hexutil.Bytes       `json:"blobs" ethjson:"datalist"`
 	SSZVersion  clparams.StateVersion `json:"-"`
 }
 

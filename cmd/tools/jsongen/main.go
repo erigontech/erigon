@@ -286,10 +286,15 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 			return "", fmt.Errorf(`ethjson:%q cannot be omitempty on %s`, form, t)
 		}
 	case "datalist":
-		write = fmt.Sprintf("ethjson.DataList(s, %q, %s)", name, ref)
-		present = fmt.Sprintf("len(%s) > 0", ref)
-	case "datas":
-		write = fmt.Sprintf("ethjson.Datas(s, %q, %s)", name, ref)
+		// A hash-sized element grows the buffer once for the whole array; one of its own
+		// length cannot, so the two have separate writers behind one form.
+		writer := "Datas"
+		if slice, ok := t.Underlying().(*types.Slice); ok {
+			if _, fixed := slice.Elem().Underlying().(*types.Array); fixed {
+				writer = "DataList"
+			}
+		}
+		write = fmt.Sprintf("ethjson.%s(s, %q, %s)", writer, name, ref)
 		present = fmt.Sprintf("len(%s) > 0", ref)
 	case "data":
 		// Slicing reads the same on an array and on a pointer to one, but a pointer to a slice

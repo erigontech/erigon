@@ -15,9 +15,17 @@ func (x *BlobsBundle) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
+	if err := x.writeJSONFields(s); err != nil {
+		return err
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+// writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
+func (x *BlobsBundle) writeJSONFields(s *jsonstream.StackStream) error {
 	ethjson.Datas(s, "commitments", x.Commitments)
 	ethjson.Datas(s, "proofs", x.Proofs)
 	ethjson.Datas(s, "blobs", x.Blobs)
-	s.WriteObjectEnd()
 	return nil
 }
