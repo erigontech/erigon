@@ -43,7 +43,8 @@ type Computed struct {
 // ExpectedJSON encodes v the way its tags declare: the json tag gives each field's name, its
 // position and whether it may be omitted, and the ethjson tag gives the hex form the JSON-RPC
 // spec uses for it — "quantity" for a number, "data" for bytes, "datalist" for an array of
-// them, "bool" for a field the spec writes as a plain JSON bool. A field without an ethjson tag
+// them, "bool" for a plain JSON bool, "objects"
+// for an array of values that declare themselves. A field without an ethjson tag
 // A field without an ethjson tag is an error: nothing would say which form it is. An embedded
 // field is flattened, as encoding/json flattens an anonymous one.
 func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
@@ -136,8 +137,8 @@ func jsonrpcValue(v reflect.Value, form string) ([]byte, error) {
 		// with the encoder often enough to hide a forgotten tag.
 		return nil, errors.New("no ethjson tag")
 	case "quantity":
-		if v.Type() == u256 {
-			n := v.Interface().(uint256.Int)
+		if v.Type() == u256 || (v.Type().ConvertibleTo(u256) && u256.ConvertibleTo(v.Type())) {
+			n := v.Convert(u256).Interface().(uint256.Int)
 			return json.Marshal((*hexutil.U256)(&n))
 		}
 		switch v.Kind() {
@@ -156,6 +157,28 @@ func jsonrpcValue(v reflect.Value, form string) ([]byte, error) {
 			return nil, fmt.Errorf("ethjson:\"bool\" on %v", v.Type())
 		}
 		return json.Marshal(v.Bool())
+	case "objects":
+		if v.Kind() == reflect.Interface {
+			if v.IsNil() {
+				return []byte("null"), nil
+			}
+			v = v.Elem()
+		}
+		if v.Kind() == reflect.Slice && v.IsNil() {
+			return []byte("null"), nil
+		}
+		buf := []byte{'['}
+		for i := range v.Len() {
+			if i > 0 {
+				buf = append(buf, ',')
+			}
+			encoded, err := ExpectedJSON(v.Index(i).Interface())
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, encoded...)
+		}
+		return append(buf, ']'), nil
 	case "datalist":
 		if v.IsNil() {
 			return []byte("null"), nil
