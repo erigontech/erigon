@@ -18,7 +18,6 @@ package types
 
 import (
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -42,29 +41,29 @@ func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	s.Field("transactionsRoot").WriteHex(h.TxHash[:])
 	s.Field("receiptsRoot").WriteHex(h.ReceiptHash[:])
 	s.Field("logsBloom").WriteHex(h.Bloom[:])
-	jsonstream.Text(s, "difficulty", (*hexutil.U256)(&h.Difficulty))
-	jsonstream.Text(s, "number", (*hexutil.U256)(&h.Number))
-	jsonstream.Text(s, "gasLimit", (*hexutil.Uint64)(&h.GasLimit))
-	jsonstream.Text(s, "gasUsed", (*hexutil.Uint64)(&h.GasUsed))
-	jsonstream.Text(s, "timestamp", (*hexutil.Uint64)(&h.Time))
-	s.Field("extraData").WriteHex(h.Extra)
+	jsonstream.Quantity256(s, "difficulty", &h.Difficulty)
+	jsonstream.Quantity256(s, "number", &h.Number)
+	jsonstream.Quantity(s, "gasLimit", h.GasLimit)
+	jsonstream.Quantity(s, "gasUsed", h.GasUsed)
+	jsonstream.Quantity(s, "timestamp", h.Time)
+	jsonstream.Data(s, "extraData", h.Extra)
 	s.Field("mixHash").WriteHex(h.MixDigest[:])
 	s.Field("nonce").WriteHex(h.Nonce[:])
 	if h.AuRaStep != 0 {
-		jsonstream.Text(s, "auraStep", (*hexutil.Uint64)(&h.AuRaStep))
+		jsonstream.Quantity(s, "auraStep", h.AuRaStep)
 	}
 	if len(h.AuRaSeal) != 0 {
-		s.Field("auraSeal").WriteHex(h.AuRaSeal)
+		jsonstream.Data(s, "auraSeal", h.AuRaSeal)
 	}
-	jsonstream.Text(s, "baseFeePerGas", (*hexutil.U256)(h.BaseFee))
+	jsonstream.Quantity256(s, "baseFeePerGas", h.BaseFee)
 	writeHashField(s, "withdrawalsRoot", h.WithdrawalsHash)
-	jsonstream.Text(s, "blobGasUsed", (*hexutil.Uint64)(h.BlobGasUsed))
-	jsonstream.Text(s, "excessBlobGas", (*hexutil.Uint64)(h.ExcessBlobGas))
+	jsonstream.QuantityOrNull(s, "blobGasUsed", h.BlobGasUsed)
+	jsonstream.QuantityOrNull(s, "excessBlobGas", h.ExcessBlobGas)
 	writeHashField(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot)
 	writeHashField(s, "requestsHash", h.RequestsHash)
 	writeHashField(s, "blockAccessListHash", h.BlockAccessListHash)
 	if h.SlotNumber != nil {
-		jsonstream.Text(s, "slotNumber", (*hexutil.Uint64)(h.SlotNumber))
+		jsonstream.Quantity(s, "slotNumber", *h.SlotNumber)
 	}
 	hash := h.Hash()
 	s.Field("hash").WriteHex(hash[:])
