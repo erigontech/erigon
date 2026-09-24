@@ -19,6 +19,7 @@ package gossip
 import (
 	"context"
 	"errors"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -984,14 +985,25 @@ func TestPublishBackground_NoStrandedJobsUnderConcurrentClose(t *testing.T) {
 	}
 }
 
-// TestPublishBackground_DrainsBufferedJobsOnShutdown deterministically forces
-// the interleaving TestPublishBackground_NoStrandedJobsUnderConcurrentClose
-// can only hit probabilistically: a job sits buffered in the queue at the
-// exact moment the worker observes shutdown, so it must choose, in a single
-// select, between that buffered job and ctx.Done(). Repeated many times so
-// an implementation that doesn't also drain what's left when it happens to
+// TestPublishBackground_DrainsBufferedJobsOnParentContextCancellation
+// deterministically forces the interleaving
+// TestPublishBackground_NoStrandedJobsUnderConcurrentClose can only hit
+// probabilistically: a job sits buffered in the queue at the exact moment
+// the worker observes shutdown, so it must choose, in a single select,
+// between that buffered job and ctx.Done(). Repeated many times so an
+// implementation that doesn't also drain what's left when it happens to
 // pick ctx.Done() fails reliably, not just occasionally.
-func TestPublishBackground_DrainsBufferedJobsOnShutdown(t *testing.T) {
+//
+// Uses the parent context passed into NewGossipManager, not Close, because
+// that is the path production code actually exercises: cmd/caplin/caplin1/run.go
+// never calls Close, only the node's service context gets cancelled on
+// shutdown. Close reduces to a plain context cancellation with no
+// distinguishing logic of its own (see its own tests
+// TestPublishBackground_DropsAfterClose and
+// TestPublishBackground_NoStrandedJobsUnderConcurrentClose), so a
+// Close-triggered variant of this test would exercise the same code path
+// twice for no added coverage.
+func TestPublishBackground_DrainsBufferedJobsOnParentContextCancellation(t *testing.T) {
 	for range 100 {
 		ctrl := gomock.NewController(t)
 		mockClock := eth_clock.NewMockEthereumClock(ctrl)
@@ -1000,8 +1012,9 @@ func TestPublishBackground_DrainsBufferedJobsOnShutdown(t *testing.T) {
 		mockP2P.EXPECT().Host().Return(nil).AnyTimes()
 		mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
 
+		parentCtx, parentCancel := context.WithCancel(context.Background())
 		beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
-		gm := NewGossipManager(context.Background(), mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		gm := NewGossipManager(parentCtx, mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
 			false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
 
 		occupyEntered := make(chan struct{})
@@ -1014,8 +1027,6 @@ func TestPublishBackground_DrainsBufferedJobsOnShutdown(t *testing.T) {
 			}
 		}
 
-		// Occupy the single worker so the next job is left buffered, not yet
-		// dequeued.
 		gm.PublishBackground("occupy", nil)
 		select {
 		case <-occupyEntered:
@@ -1024,17 +1035,80 @@ func TestPublishBackground_DrainsBufferedJobsOnShutdown(t *testing.T) {
 		}
 
 		gm.PublishBackground("buffered", nil)
-		require.NoError(t, gm.Close())
+		parentCancel()
 
-		// Let the worker finish the occupying job; on its next loop
-		// iteration it faces ctx.Done() and the buffered job ready at once.
 		close(unblockOccupy)
 
 		require.Eventually(t, func() bool {
 			return len(gm.publishQueue) == 0
 		}, 2*time.Second, time.Millisecond,
-			"a job already buffered when shutdown is observed must still be drained, not stranded")
+			"a job buffered when the parent context is cancelled must still be drained, not stranded")
 	}
+}
+
+// TestPublishBackground_NoAdmissionAfterParentContextCancellation
+// reproduces the race both reviewers identified precisely: a producer that
+// has already passed PublishBackground's shutdown check pauses immediately
+// before its enqueue send; the parent context (the one production code
+// actually cancels on shutdown - cmd/caplin/caplin1/run.go never calls
+// Close) is cancelled and the worker is given every opportunity to run its
+// shutdown drain while the producer is still paused; only then does the
+// producer resume and send. With the fix, the drain cannot complete until
+// that send has happened (shutdownMu serializes them), so the message is
+// never left stranded once everything settles.
+func TestPublishBackground_NoAdmissionAfterParentContextCancellation(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+	mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+	mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+	gm := NewGossipManager(parentCtx, mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+
+	enqueueEntered := make(chan struct{})
+	resumeEnqueue := make(chan struct{})
+	gm.enqueueHookForTest = func() {
+		close(enqueueEntered)
+		<-resumeEnqueue
+	}
+
+	done := make(chan struct{})
+	go func() {
+		gm.PublishBackground("racy", []byte("data"))
+		close(done)
+	}()
+
+	select {
+	case <-enqueueEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PublishBackground never reached the enqueue hook")
+	}
+
+	parentCancel()
+	// Yield repeatedly to maximize the chance the worker observes
+	// cancellation and runs its shutdown drain while the producer is still
+	// paused above - this only affects how reliably a regression is caught,
+	// not what correctness means: the assertion below is a structural
+	// invariant, not a timing threshold.
+	for range 1000 {
+		runtime.Gosched()
+	}
+
+	close(resumeEnqueue)
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("PublishBackground never returned")
+	}
+
+	require.Eventually(t, func() bool {
+		return len(gm.publishQueue) == 0
+	}, 2*time.Second, time.Millisecond,
+		"a message admitted while racing parent-context cancellation must not be left stranded")
 }
 
 func TestGossipManager(t *testing.T) {

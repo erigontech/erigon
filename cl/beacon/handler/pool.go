@@ -486,9 +486,9 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}
-			// Published in the background: publishing is real network I/O that
-			// must not be tied to this request's context, which net/http cancels
-			// the instant this handler returns.
+			// Published in the background so the gossip validation/publish
+			// pipeline's latency isn't added to this request's response time,
+			// and so a failure is observable instead of swallowed at Debug.
 			a.gossipManager.PublishBackground(
 				gossip.TopicNameSyncCommittee(int(subnetId)), encodedSSZ,
 				"validatorIndex", v.ValidatorIndex, "subnet", subnetId, "slot", v.Slot,

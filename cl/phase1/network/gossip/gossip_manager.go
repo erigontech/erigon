@@ -60,11 +60,7 @@ const minPublishQueueSize = 64
 // the queue must comfortably absorb up to SyncCommitteeSize jobs arriving
 // at once while the worker is still draining the previous slot's burst.
 func publishQueueSizeFor(cfg *clparams.BeaconChainConfig) int {
-	size := int(cfg.SyncCommitteeSize)
-	if size < minPublishQueueSize {
-		return minPublishQueueSize
-	}
-	return size
+	return max(int(cfg.SyncCommitteeSize), minPublishQueueSize)
 }
 
 var publishQueueDroppedCounter = metrics.GetOrCreateCounterVec(
@@ -102,15 +98,16 @@ type GossipManager struct {
 	// immediately before the real Publish call. Tests use it to observe or
 	// pause a queued job at a known point.
 	publishHookForTest func(name string, data []byte)
+	// enqueueHookForTest, when non-nil, runs inside PublishBackground
+	// immediately before it enqueues, while still holding shutdownMu's
+	// RLock. Tests use it to pause a producer at the exact point a shutdown
+	// race must close.
+	enqueueHookForTest func()
 
-	// lifetimeCtx is cancelled by Close, under shutdownMu, while
-	// PublishBackground checks it and enqueues under the same lock's RLock.
-	// That pairing guarantees any successful enqueue happens-before the
-	// cancellation the worker observes - Close cannot finish cancelling
-	// until every in-flight PublishBackground call has released the lock -
-	// so nothing can be admitted into the queue after the worker has
-	// already stopped draining it. Whatever is left buffered at that point
-	// is handled by the worker's own shutdown drain.
+	// lifetimeCtx is the context the worker watches, cancelled by Close or
+	// by NewGossipManager's parent context ending. shutdownMu pairs
+	// PublishBackground's check against it with the worker's shutdown
+	// drain; see drainPublishQueueOnShutdown for why.
 	lifetimeCtx context.Context
 	shutdownMu  sync.RWMutex
 	// For graceful shutdown
@@ -158,12 +155,10 @@ func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
 	g.peerBanner = pb
 }
 
-// Close gracefully shuts down the GossipManager and all its goroutines.
-// Cancelling under shutdownMu's exclusive lock is what makes PublishBackground's
-// admission check race-free: see the field comment on lifetimeCtx.
+// Close gracefully shuts down the GossipManager and all its goroutines. See
+// drainPublishQueueOnShutdown for why the race-free admission guarantee
+// lives there rather than here.
 func (g *GossipManager) Close() error {
-	g.shutdownMu.Lock()
-	defer g.shutdownMu.Unlock()
 	g.cancel()
 	return nil
 }
@@ -361,14 +356,11 @@ func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.B
 // PublishBackground queues data for asynchronous publish to the given gossip
 // topic without blocking the caller: the actual network I/O runs on this
 // GossipManager's own background worker, decoupled from whatever triggered
-// the call (in particular, an HTTP request's context, which net/http cancels
-// the instant the handler returns). The fork digest is resolved now, at
-// enqueue time, and carried with the job - not re-resolved when the worker
-// gets to it - so a message accepted just before a fork activates still
-// publishes to the topic it was actually validated against, rather than
-// whatever fork happens to be current once the queue drains. If the worker
-// is busy and the queue is full, the message is dropped and logged rather
-// than blocking - callers must not rely on this call for backpressure.
+// the call. The fork digest is captured now, at enqueue time, rather than
+// re-resolved when the worker drains the job, so a message accepted just
+// before a fork activates still publishes to the topic it was validated
+// against. Never blocks: a full queue or a shutdown in progress drops the
+// message (observably - see publishQueueDroppedCounter) instead.
 func (g *GossipManager) PublishBackground(name string, data []byte, logCtx ...any) {
 	g.shutdownMu.RLock()
 	defer g.shutdownMu.RUnlock()
@@ -380,9 +372,13 @@ func (g *GossipManager) PublishBackground(name string, data []byte, logCtx ...an
 	}
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
+		publishQueueDroppedCounter.WithLabelValues(name, "fork_digest_error").Inc()
 		fields := append([]any{"topic", name, "err", err}, logCtx...)
 		log.Warn("[GossipManager] failed to resolve fork digest, dropping message", fields...)
 		return
+	}
+	if g.enqueueHookForTest != nil {
+		g.enqueueHookForTest()
 	}
 	select {
 	case g.publishQueue <- publishJob{name: name, data: data, forkDigest: forkDigest, logCtx: logCtx}:
@@ -406,11 +402,16 @@ func (g *GossipManager) publishWorker(ctx context.Context) {
 }
 
 // drainPublishQueueOnShutdown accounts for whatever is left buffered in the
-// queue once the worker stops: shutdownMu guarantees nothing can be admitted
-// after Close begins (see the lifetimeCtx field comment), so anything found
-// here is final - drop it observably rather than leaving it stranded with no
-// consumer.
+// queue once the worker stops. Taking shutdownMu's exclusive lock here -
+// rather than in Close, which production code never even calls; see the
+// lifetimeCtx field comment - is what makes this race-free regardless of
+// why ctx was cancelled: the lock cannot be acquired until every in-flight
+// PublishBackground call has finished enqueueing, so anything still found
+// here is truly final. Drop it observably rather than leaving it stranded
+// with no consumer.
 func (g *GossipManager) drainPublishQueueOnShutdown() {
+	g.shutdownMu.Lock()
+	defer g.shutdownMu.Unlock()
 	for {
 		select {
 		case job := <-g.publishQueue:
