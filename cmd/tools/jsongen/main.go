@@ -36,6 +36,7 @@ import (
 	"go/types"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 
 	"golang.org/x/tools/go/packages"
@@ -135,16 +136,35 @@ func load() (*packages.Package, error) {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
 	for _, e := range pkgs[0].Errors {
-		if strings.Contains(e.Msg, method) {
+		if strings.Contains(e.Msg, missingMethod) {
 			continue
 		}
-		file, _, _ := strings.Cut(e.Pos, ":")
-		content, err := os.ReadFile(file)
+		content, err := os.ReadFile(positionFile(e.Pos))
 		if err != nil || !bytes.HasPrefix(content, []byte(marker)) {
 			return nil, e
 		}
 	}
 	return pkgs[0], nil
+}
+
+// missingMethod is how the compiler words a call to the method this writes, before it exists.
+// Matching the whole phrase keeps any other mention of the name an error.
+const missingMethod = "has no field or method " + method
+
+// positionFile takes the file out of a packages.Error position. Cutting at the first colon
+// would keep only the drive letter of a Windows path, so the line and column come off the right.
+func positionFile(pos string) string {
+	for range 2 {
+		i := strings.LastIndex(pos, ":")
+		if i < 0 {
+			break
+		}
+		if _, err := strconv.Atoi(pos[i+1:]); err != nil {
+			break
+		}
+		pos = pos[:i]
+	}
+	return pos
 }
 
 // writeFields emits one statement per field. An embedded struct is flattened, the way

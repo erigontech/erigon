@@ -78,7 +78,7 @@ func TestGenerateOverStaleOutput(t *testing.T) {
 	const dir = "testdata/stale"
 	require.NoError(t, os.CopyFS(dir, os.DirFS("testdata/sample")))
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	for name, recv := range map[string]string{"gen_sample_json.go": "Sample", "gen_inner_json.go": "Inner"} {
+	for name, recv := range map[string]string{"gen_sample_json.go": "Sample", "gen_left_json.go": "Left"} {
 		stale := marker + " DO NOT EDIT.\n\npackage sample\n\n" +
 			"import \"github.com/erigontech/erigon/rpc/jsonstream\"\n\nfunc (x *" + recv +
 			") MarshalFastJSONTo(s *jsonstream.StackStream) error {\n\t_ = x.SinceRenamed\n\treturn nil\n}\n"
@@ -102,4 +102,17 @@ func TestGenerateRefusesBrokenPackage(t *testing.T) {
 
 	t.Chdir(dir)
 	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON"), "undefinedHere")
+}
+
+// A Windows path carries a colon of its own, and CI runs there.
+func TestPositionFile(t *testing.T) {
+	for pos, want := range map[string]string{
+		`C:\repo\gen_x.go:12:3`: `C:\repo\gen_x.go`,
+		"/repo/gen_x.go:12:3":   "/repo/gen_x.go",
+		"/repo/gen_x.go:12":     "/repo/gen_x.go",
+		"gen_x.go":              "gen_x.go",
+		"-":                     "-",
+	} {
+		require.Equal(t, want, positionFile(pos), pos)
+	}
 }
