@@ -252,8 +252,9 @@ func fieldStatement(ref, name, form, goType string, omitempty bool, used map[str
 		case is256(bare):
 			used["ethjson"], used["uint256"] = true, true
 			write = fmt.Sprintf("ethjson.Quantity256(s, %q, (*uint256.Int)(&%s))", name, ref)
-			used["uint256"] = true
-			present = fmt.Sprintf("!(*uint256.Int)(&%s).IsZero()", ref)
+			// uint256.Int is an array of four words, and encoding/json never calls an array
+			// empty, so omitempty cannot leave a zero one out.
+			omitempty = false
 		case pointer:
 			used["ethjson"] = true
 			write = fmt.Sprintf("ethjson.Quantity(s, %q, *%s)", name, ref)
