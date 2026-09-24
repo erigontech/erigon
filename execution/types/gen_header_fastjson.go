@@ -4,9 +4,10 @@
 package types
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
-	"github.com/holiman/uint256"
 )
 
 // MarshalFastJSONTo writes the fields Header declares, in that order.

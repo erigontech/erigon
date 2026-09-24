@@ -87,7 +87,9 @@ func run(typeName, out, computed string) error {
 
 	var file bytes.Buffer
 	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String(), method)
-	// imports.Process adds what the body uses and gofmts in one step.
+	// imports.Process drops what the body does not use and gofmts in one step. The header names
+	// uint256 rather than leaving it to be resolved, because more than one module supplies that
+	// package name and the choice would then follow whoever ran the tool.
 	formatted, err := imports.Process(out, file.Bytes(), nil)
 	if err != nil {
 		return fmt.Errorf("%s: %w\n%s", typeName, err, file.String())
@@ -106,6 +108,8 @@ const header = marker + ` DO NOT EDIT.
 package %[1]s
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -206,7 +210,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 			return fmt.Errorf("%s: no json tag", f.Name())
 		}
 		name, opts, _ := strings.Cut(jsonTag, ",")
-		if name == "-" {
+		if jsonTag == "-" { // a lone dash skips the field; `-,` names it "-"
 			continue
 		}
 		omitempty := false
