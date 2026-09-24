@@ -16,6 +16,8 @@
 
 package v4
 
+import "github.com/erigontech/erigon/execution/commitment/nibbles"
+
 func warmupKeyV4(hashedKey []byte, depth int, dst []byte) []byte {
 	if len(hashedKey) > 64 && depth >= 64 {
 		addrHash := hashAddressPath(hashedKey[:64])
@@ -88,10 +90,46 @@ func PrefetchPath(read func(key []byte) []byte, addrHash, slotHash []byte, depth
 		if len(data) == 0 {
 			return
 		}
+		if split := splitDepthV4(data, hashedKey, depth); split != 0 {
+			read(warmupKeyV4(hashedKey, split, buf[:0]))
+			return
+		}
 		next, stop := warmupStepV4(data, hashedKey, depth)
 		if stop {
 			return
 		}
 		depth = next
 	}
+}
+
+func splitDepthV4(data, hashedKey []byte, depth int) int {
+	planeDepth, planeEnd := depth, 64
+	if len(hashedKey) > 64 && depth >= 64 {
+		planeDepth, planeEnd = depth-64, 128
+	}
+	record := NewRecord(data, planeDepth)
+	l := record.layout()
+	if !l.ok || planeDepth == 0 && l.selfExtLen != 0 || depth >= planeEnd {
+		return 0
+	}
+	nib := int(hashedKey[depth])
+	bit := uint16(1) << nib
+	rest := hashedKey[depth+1 : planeEnd]
+	var packed []byte
+	count := len(rest)
+	switch {
+	case l.leaf&bit != 0 && planeEnd == len(hashedKey):
+		packed, _ = record.leafAt(l, nib)
+	case l.tree()&bit != 0 && l.ext&bit != 0:
+		ext := record.extAt(l, nib)
+		packed, count = ext[1:], int(ext[0])
+	default:
+		return 0
+	}
+	var scratch [64]byte
+	common := nibbles.CommonPrefixLen(unpackPath(packed, count, scratch[:count:count]), rest)
+	if common == count {
+		return 0
+	}
+	return depth + 1 + common
 }

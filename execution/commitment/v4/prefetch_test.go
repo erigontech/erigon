@@ -43,8 +43,16 @@ func TestPrefetchPathCoversRoundReads(t *testing.T) {
 	_, err := tr.Process(context.Background(), benchUpdatesIn(t.TempDir(), commitment.ModeCollect, seed), "", nil, commitment.WarmupConfig{})
 	require.NoError(t, err)
 
-	for _, i := range []int{7, 1234, 2999} {
-		addr, slot := benchAddr(i), benchSlot(i*2)
+	cases := []struct{ account, slot int }{
+		{7, 14},
+		{1234, 2468},
+		{2999, 5998},
+		{contracts + 5, 0},
+		{11, contracts*2 + 11},
+		{contracts + 17, contracts*2 + 17},
+	}
+	for _, c := range cases {
+		addr, slot := benchAddr(c.account), benchSlot(c.slot)
 		addrHash, slotHash := keccak.Sum256(addr), keccak.Sum256(slot)
 		prefetched := map[string]bool{}
 		read := func(key []byte) []byte {
@@ -56,14 +64,14 @@ func TestPrefetchPathCoversRoundReads(t *testing.T) {
 
 		ctx.branchCalls = nil
 		next := []parityUpdate{
-			{key: addr, update: accountParityUpdate(i + 1)},
-			{key: append(bytes.Clone(addr), slot...), update: storageParityUpdate(i + 5)},
+			{key: addr, update: accountParityUpdate(c.account + 1)},
+			{key: append(bytes.Clone(addr), slot...), update: storageParityUpdate(c.slot + 5)},
 		}
 		_, err := tr.Process(context.Background(), benchUpdatesIn(t.TempDir(), commitment.ModeCollect, next), "", nil, commitment.WarmupConfig{})
 		require.NoError(t, err)
 		require.NotEmpty(t, ctx.branchCalls)
 		for _, key := range ctx.branchCalls {
-			require.Truef(t, prefetched[string(key)], "contract %d: round read %x was not prefetched", i, key)
+			require.Truef(t, prefetched[string(key)], "account %d slot %d: round read %x was not prefetched", c.account, c.slot, key)
 		}
 	}
 }

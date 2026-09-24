@@ -153,7 +153,7 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 				return data
 			}
 			data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
-			if err != nil || len(data) == 0 {
+			if err != nil {
 				return nil
 			}
 			return p.put(key, data, step)
