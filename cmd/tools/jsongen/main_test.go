@@ -34,7 +34,7 @@ func TestGenerateSample(t *testing.T) {
 	const golden = "testdata/sample_golden.go.txt"
 	out := filepath.Join(t.TempDir(), "gen_sample_json.go")
 
-	require.NoError(t, run("Sample", "testdata/sample", out))
+	require.NoError(t, run("Sample", "testdata/sample", out, "writeComputedJSON"))
 	got, err := os.ReadFile(out)
 	require.NoError(t, err)
 
@@ -51,15 +51,36 @@ func TestGenerateSample(t *testing.T) {
 // compile or quietly omits the field.
 func TestGenerateRejects(t *testing.T) {
 	for name, typeName := range map[string]string{
-		"no ethjson tag":   "MissingForm",
-		"form vs type":     "WrongForm",
-		"duplicate name":   "DuplicateName",
-		"tagged embedded":  "TaggedEmbedded",
-		"embedded pointer": "PointerEmbedded",
+		"no ethjson tag":    "MissingForm",
+		"form vs type":      "WrongForm",
+		"duplicate name":    "DuplicateName",
+		"tagged embedded":   "TaggedEmbedded",
+		"embedded pointer":  "PointerEmbedded",
+		"pointer to slice":  "PointerToSlice",
+		"narrow quantity":   "NarrowQuantity",
+		"not a hash slice":  "NotHashSlice",
+		"unknown option":    "UnknownOption",
+		"omitempty objects": "OmitemptyObjects",
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := run(typeName, "testdata/bad", filepath.Join(t.TempDir(), "out.go"))
+			err := run(typeName, "testdata/bad", filepath.Join(t.TempDir(), "out.go"), "")
 			require.Error(t, err)
 		})
 	}
+}
+
+// The output it wrote last time is in the package it type-checks, so a field renamed since
+// then must not be able to lock the generator out of rewriting it.
+func TestGenerateOverStaleOutput(t *testing.T) {
+	// Inside the module, or the go tool has no go.mod to resolve the package against.
+	dir := "testdata/stale"
+	require.NoError(t, os.CopyFS(dir, os.DirFS("testdata/sample")))
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	stale := "package sample\n\nfunc (x *Sample) MarshalFastJSONTo(s *jsonstream.StackStream) error {\n\t_ = x.SinceRenamed\n\treturn nil\n}\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "gen_sample_json.go"), []byte(stale), 0o644))
+
+	require.NoError(t, run("Sample", dir, "gen_sample_json.go", "writeComputedJSON"))
+	got, err := os.ReadFile(filepath.Join(dir, "gen_sample_json.go"))
+	require.NoError(t, err)
+	require.NotContains(t, string(got), "x.SinceRenamed")
 }

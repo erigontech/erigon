@@ -17,7 +17,10 @@
 // Package bad holds one struct per way a declaration can leave the generator no choice.
 package bad
 
-import "github.com/erigontech/erigon/common"
+import (
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+)
 
 type MissingForm struct {
 	Hash common.Hash `json:"hash"`
@@ -54,4 +57,12 @@ type NarrowQuantity struct {
 
 type NotHashSlice struct {
 	Chunks [][]byte `json:"chunks" ethjson:"datalist"`
+}
+
+type UnknownOption struct {
+	Count uint64 `json:"count,omitzero" ethjson:"quantity"`
+}
+
+type OmitemptyObjects struct {
+	Logs jsonstream.Marshaler `json:"logs,omitempty" ethjson:"objects"`
 }

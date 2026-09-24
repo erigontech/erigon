@@ -30,7 +30,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/common/length"
@@ -43,19 +42,24 @@ func main() {
 	typeName := flag.String("type", "", "struct to generate for")
 	dir := flag.String("dir", ".", "package directory holding it")
 	out := flag.String("out", "", "file to write, relative to dir unless absolute")
+	computed := flag.String("computed", "", "method to call for fields the struct does not hold")
 	flag.Parse()
 	if *typeName == "" || *out == "" {
 		flag.Usage()
 		os.Exit(2)
 	}
-	if err := run(*typeName, *dir, *out); err != nil {
+	if err := run(*typeName, *dir, *out, *computed); err != nil {
 		fmt.Fprintln(os.Stderr, "jsongen:", err)
 		os.Exit(1)
 	}
 }
 
-func run(typeName, dir, out string) error {
-	pkg, err := load(dir)
+func run(typeName, dir, out, computed string) error {
+	path := out
+	if !filepath.IsAbs(out) {
+		path = filepath.Join(dir, out)
+	}
+	pkg, err := load(dir, path)
 	if err != nil {
 		return err
 	}
@@ -74,16 +78,15 @@ func run(typeName, dir, out string) error {
 	}
 	// A value the struct does not hold, such as a header's hash, is written by a method the
 	// package declares; the generator only calls it, after the declared fields.
-	if declares(pkg.Types, obj.Type(), "writeComputedJSON") {
-		body.WriteString("\tx.writeComputedJSON(s)\n")
+	if computed != "" {
+		if !declares(pkg.Types, obj.Type(), computed, 0) {
+			return fmt.Errorf("%s has no %s(*jsonstream.StackStream)", typeName, computed)
+		}
+		fmt.Fprintf(&body, "\tx.%s(s)\n", computed)
 	}
 
 	var file bytes.Buffer
 	fmt.Fprintf(&file, header, pkg.Name, typeName, body.String(), method)
-	path := out
-	if !filepath.IsAbs(out) {
-		path = filepath.Join(dir, out)
-	}
 	// imports.Process adds what the body uses and gofmts in one step.
 	formatted, err := imports.Process(path, file.Bytes(), nil)
 	if err != nil {
@@ -115,8 +118,23 @@ func (x *%[2]s) %[4]s(s *jsonstream.StackStream) error {
 }
 `
 
-func load(dir string) (*packages.Package, error) {
-	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedTypes | packages.NeedSyntax, Dir: dir}
+// load type-checks the package with the file being written replaced by a bare package clause.
+// Without that, a field this run renames still has its old name in the checked-in output, and
+// the tool could never regenerate what it wrote.
+func load(dir, out string) (*packages.Package, error) {
+	name, err := packageName(dir)
+	if err != nil {
+		return nil, err
+	}
+	abs, err := filepath.Abs(out)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &packages.Config{
+		Mode:    packages.NeedName | packages.NeedTypes | packages.NeedSyntax,
+		Dir:     dir,
+		Overlay: map[string][]byte{abs: []byte("package " + name + "\n")},
+	}
 	pkgs, err := packages.Load(cfg, ".")
 	if err != nil {
 		return nil, err
@@ -124,15 +142,28 @@ func load(dir string) (*packages.Package, error) {
 	if len(pkgs) != 1 {
 		return nil, fmt.Errorf("%s holds %d packages, want 1", dir, len(pkgs))
 	}
-	// The first run on a package cannot compile it: the method this writes is what the
-	// package is missing. Only that error is tolerated, so a typo elsewhere cannot pass for
-	// it and leave the tags being read different from the ones that will build.
+	// Blanking the output leaves the package without the method this writes, which every
+	// caller of it then reports. Only that error is tolerated, so a typo elsewhere cannot
+	// pass for it and leave the tags being read different from the ones that will build.
 	for _, e := range pkgs[0].Errors {
 		if !strings.Contains(e.Msg, method) {
 			return nil, e
 		}
 	}
 	return pkgs[0], nil
+}
+
+// packageName reads the package clause without type-checking, so a package that does not
+// compile still yields one.
+func packageName(dir string) (string, error) {
+	pkgs, err := packages.Load(&packages.Config{Mode: packages.NeedName, Dir: dir}, ".")
+	if err != nil {
+		return "", err
+	}
+	if len(pkgs) != 1 || pkgs[0].Name == "" {
+		return "", fmt.Errorf("%s has no single package name", dir)
+	}
+	return pkgs[0].Name, nil
 }
 
 // writeFields emits one statement per field. An embedded struct is flattened, the way
@@ -172,6 +203,18 @@ func writeFields(pkg *types.Package, w *bytes.Buffer, st *types.Struct, recv str
 		if name == "-" {
 			continue
 		}
+		omitempty := false
+		for _, opt := range strings.Split(opts, ",") {
+			switch opt {
+			case "":
+			case "omitempty":
+				omitempty = true
+			default:
+				// omitzero and string change what encoding/json writes, so ignoring one
+				// would leave the tags and the bytes disagreeing.
+				return fmt.Errorf("%s: json option %q is not implemented", f.Name(), opt)
+			}
+		}
 		if name == "" {
 			name = f.Name() // what encoding/json falls back to
 		}
@@ -180,7 +223,7 @@ func writeFields(pkg *types.Package, w *bytes.Buffer, st *types.Struct, recv str
 		}
 		written[name] = struct{}{}
 
-		stmt, err := fieldStatement(pkg, recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), slices.Contains(strings.Split(opts, ","), "omitempty"))
+		stmt, err := fieldStatement(pkg, recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), omitempty)
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.Name(), err)
 		}
@@ -208,8 +251,13 @@ func fieldStatement(pkg *types.Package, ref, name, form string, t types.Type, om
 		write = fmt.Sprintf("s.Field(%q).WriteBool(%s)", name, ref)
 		present = ref
 	case "objects":
-		if !declares(pkg, bare, method) {
+		if !declares(pkg, bare, method, 1) {
 			return "", fmt.Errorf(`ethjson:%q on %s, which has no %s`, form, t, method)
+		}
+		if omitempty {
+			// Emptiness is the marshaller's own business, and a struct-backed one cannot
+			// even be compared with nil.
+			return "", fmt.Errorf(`ethjson:%q cannot be omitempty`, form)
 		}
 		write = fmt.Sprintf("s.Field(%q)\nif err := %s.%s(s); err != nil {\nreturn err\n}", name, ref, method)
 		present = ref + " != nil"
@@ -329,10 +377,20 @@ func is256(t types.Type) bool {
 	return the256[named.Obj().Pkg().Path()+"."+named.Obj().Name()]
 }
 
-// declares reports a method the generated code may call. LookupFieldOrMethod answers for a
-// named type and for an interface alike, and pkg is what finds an unexported one.
-func declares(pkg *types.Package, t types.Type, name string) bool {
+// declares reports a method the generated code may call: one taking a stream and returning
+// results many. LookupFieldOrMethod answers for a named type and for an interface alike, and
+// pkg is what finds an unexported one.
+func declares(pkg *types.Package, t types.Type, name string, results int) bool {
 	obj, _, _ := types.LookupFieldOrMethod(t, true, pkg, name)
-	_, ok := obj.(*types.Func)
-	return ok
+	fn, ok := obj.(*types.Func)
+	if !ok {
+		return false
+	}
+	sig := fn.Signature()
+	if sig.Params().Len() != 1 || sig.Results().Len() != results || sig.Variadic() {
+		return false
+	}
+	return sig.Params().At(0).Type().String() == streamType
 }
+
+const streamType = "*github.com/erigontech/erigon/rpc/jsonstream.StackStream"
