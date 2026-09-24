@@ -556,6 +556,16 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 	for name, ts := range map[string]ParityTraces{
 		"nil":   nil,
 		"empty": {},
+		"state gas": {
+			{Action: &CreateTraceAction{StateGas: new(hexutil.Uint64(100))},
+				Result: &CreateTraceResult{StateGasUsed: new(hexutil.Int64(50))}, Type: "create"},
+			{Action: &CallTraceAction{}, Result: &TraceResult{StateGasUsed: new(hexutil.Int64(-50))}, Type: "call"},
+		},
+		"zero state gas": {
+			{Action: &CreateTraceAction{StateGas: new(hexutil.Uint64)},
+				Result: &CreateTraceResult{StateGasUsed: new(hexutil.Int64)}, Type: "create"},
+			{Action: &CallTraceAction{}, Result: &TraceResult{StateGasUsed: new(hexutil.Int64)}, Type: "call"},
+		},
 		"all kinds": {
 			{
 				Action:    &CallTraceAction{From: addr, CallType: "delegatecall", Gas: u(1), Input: hexutil.Bytes{1}, To: addr, Value: u(2)},

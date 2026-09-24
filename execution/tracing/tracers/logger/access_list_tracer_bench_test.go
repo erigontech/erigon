@@ -23,6 +23,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 )
@@ -69,7 +70,7 @@ func BenchmarkAccessListTracerOnOpcode(b *testing.B) {
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {
-		tracer.OnOpcode(uint64(i), benchOpcodes[i%len(benchOpcodes)], 100, 3, scope, nil, 1, nil)
+		tracer.OnOpcodeV2(uint64(i), benchOpcodes[i%len(benchOpcodes)], mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 		i++
 	}
 }

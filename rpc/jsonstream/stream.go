@@ -71,6 +71,8 @@ type Stream interface {
 
 	WriteEmptyArray()
 	WriteEmptyObject()
+	// Open returns the stack stream the value goes to, opening a lazily written field first.
+	Open() *StackStream
 
 	// Extended functionality
 

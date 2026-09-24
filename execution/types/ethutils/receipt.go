@@ -212,7 +212,11 @@ func MarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsReply) *
 	}
 	result.Logs = logs
 
-	if protoReceipt.BaseFee != nil {
+	// A backend that does not send the effective gas price yet leaves the base fee as the
+	// closest approximation it carries.
+	if protoReceipt.EffectiveGasPrice != nil {
+		result.EffectiveGasPrice = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.EffectiveGasPrice))
+	} else if protoReceipt.BaseFee != nil {
 		result.EffectiveGasPrice = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.BaseFee))
 	}
 	if protoReceipt.BlobGasUsed > 0 {

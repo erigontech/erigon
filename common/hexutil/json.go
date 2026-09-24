@@ -33,6 +33,7 @@ import (
 var (
 	bigT    = reflect.TypeFor[*Big]()
 	u256T   = reflect.TypeFor[*U256]()
+	int64T  = reflect.TypeFor[Int64]()
 	uintT   = reflect.TypeFor[Uint]()
 	uint16T = reflect.TypeFor[Uint16]()
 	uint32T = reflect.TypeFor[Uint32]()
@@ -201,6 +202,54 @@ func (b *U256) String() string {
 
 func (b *U256) Uint64() uint64 {
 	return (*uint256.Int)(b).Uint64()
+}
+
+// Int64 encodes signed quantities as "0x..." or "-0x...".
+type Int64 int64
+
+func (b Int64) MarshalText() ([]byte, error) {
+	return b.AppendText(make([]byte, 0, 19))
+}
+
+func (b Int64) AppendText(dst []byte) ([]byte, error) {
+	magnitude := Uint64(b)
+	if b < 0 {
+		dst = append(dst, '-')
+		magnitude = -magnitude
+	}
+	return magnitude.AppendText(dst)
+}
+
+func (b *Int64) UnmarshalJSON(input []byte) error {
+	if !isString(input) {
+		return errNonString(int64T)
+	}
+	return wrapTypeError(b.UnmarshalText(input[1:len(input)-1]), int64T)
+}
+
+func (b *Int64) UnmarshalText(input []byte) error {
+	negative := len(input) > 0 && input[0] == '-'
+	limit := Uint64(1<<63 - 1)
+	if negative {
+		input = input[1:]
+		if len(input) == 0 {
+			return ErrEmptyNumber
+		}
+		limit++
+	}
+	var magnitude Uint64
+	err := magnitude.UnmarshalText(input)
+	if magnitude > limit || errors.Is(err, ErrUint64Range) {
+		return ErrInt64Range
+	}
+	if err != nil {
+		return err
+	}
+	if negative {
+		magnitude = -magnitude
+	}
+	*b = Int64(magnitude)
+	return nil
 }
 
 // Uint64 marshals/unmarshals as a JSON string with 0x prefix.

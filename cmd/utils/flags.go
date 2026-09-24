@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -862,6 +863,11 @@ var (
 		Usage: "Runtime limit of chaindata db size (can change at any time)",
 		Value: (1 * datasize.TB).String(),
 	}
+	DbSafeNoSyncFlag = cli.BoolFlag{
+		Name:  "db.safe.nosync",
+		Usage: "Let writes reach the disk in the background: after a power cut the node resumes from the last flushed point and re-syncs the seconds in between, and the database is intact either way. Disable to flush before every commit returns",
+		Value: true,
+	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
 		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
@@ -1596,6 +1602,9 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)
 	}
 	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
+	if ctx.IsSet(DbSafeNoSyncFlag.Name) { // otherwise the flag's default would undo MDBX_DURABLE
+		mdbx.DefaultSafeNoSync = ctx.Bool(DbSafeNoSyncFlag.Name)
+	}
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
 		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),
