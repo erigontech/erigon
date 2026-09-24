@@ -22,8 +22,13 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// MarshalFastJSONTo writes the fields in the order gen_header_json.go declares them, so the
-// bytes match the generated MarshalJSON exactly.
+// MarshalJSON encodes through MarshalFastJSONTo, so a header inside another value gets the
+// same bytes as the RPC paths that stream it.
+func (h *Header) MarshalJSON() ([]byte, error) {
+	return jsonstream.Marshal(h)
+}
+
+// MarshalFastJSONTo writes the fields in the order headerJSONByDeclaration spells them.
 func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if h == nil {
 		s.WriteNil()

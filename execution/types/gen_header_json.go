@@ -14,67 +14,6 @@ import (
 
 var _ = (*headerMarshaling)(nil)
 
-// MarshalJSON marshals as JSON.
-func (h *Header) MarshalJSON() ([]byte, error) {
-	type Header struct {
-		ParentHash            common.Hash     `json:"parentHash"       gencodec:"required"`
-		UncleHash             common.Hash     `json:"sha3Uncles"       gencodec:"required"`
-		Coinbase              common.Address  `json:"miner"`
-		Root                  common.Hash     `json:"stateRoot"        gencodec:"required"`
-		TxHash                common.Hash     `json:"transactionsRoot" gencodec:"required"`
-		ReceiptHash           common.Hash     `json:"receiptsRoot"     gencodec:"required"`
-		Bloom                 Bloom           `json:"logsBloom"        gencodec:"required"`
-		Difficulty            *hexutil.U256   `json:"difficulty"       gencodec:"required"`
-		Number                *hexutil.U256   `json:"number"           gencodec:"required"`
-		GasLimit              hexutil.Uint64  `json:"gasLimit"         gencodec:"required"`
-		GasUsed               hexutil.Uint64  `json:"gasUsed"          gencodec:"required"`
-		Time                  hexutil.Uint64  `json:"timestamp"        gencodec:"required"`
-		Extra                 hexutil.Bytes   `json:"extraData"        gencodec:"required"`
-		MixDigest             common.Hash     `json:"mixHash"`
-		Nonce                 BlockNonce      `json:"nonce"`
-		AuRaStep              hexutil.Uint64  `json:"auraStep,omitempty"`
-		AuRaSeal              hexutil.Bytes   `json:"auraSeal,omitempty"`
-		BaseFee               *hexutil.U256   `json:"baseFeePerGas"`
-		WithdrawalsHash       *common.Hash    `json:"withdrawalsRoot"`
-		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
-		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
-		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
-		RequestsHash          *common.Hash    `json:"requestsHash"`
-		BlockAccessListHash   *common.Hash    `json:"blockAccessListHash"`
-		// TODO omitempty is temporary until ci is updated to support slotnumber: null
-		SlotNumber *hexutil.Uint64 `json:"slotNumber,omitempty"`
-		Hash       common.Hash     `json:"hash"`
-	}
-	var enc Header
-	enc.ParentHash = h.ParentHash
-	enc.UncleHash = h.UncleHash
-	enc.Coinbase = h.Coinbase
-	enc.Root = h.Root
-	enc.TxHash = h.TxHash
-	enc.ReceiptHash = h.ReceiptHash
-	enc.Bloom = h.Bloom
-	enc.Difficulty = (*hexutil.U256)(&h.Difficulty)
-	enc.Number = (*hexutil.U256)(&h.Number)
-	enc.GasLimit = hexutil.Uint64(h.GasLimit)
-	enc.GasUsed = hexutil.Uint64(h.GasUsed)
-	enc.Time = hexutil.Uint64(h.Time)
-	enc.Extra = h.Extra
-	enc.MixDigest = h.MixDigest
-	enc.Nonce = h.Nonce
-	enc.AuRaSeal = h.AuRaSeal
-	enc.AuRaStep = hexutil.Uint64(h.AuRaStep)
-	enc.BaseFee = (*hexutil.U256)(h.BaseFee)
-	enc.WithdrawalsHash = h.WithdrawalsHash
-	enc.BlobGasUsed = (*hexutil.Uint64)(h.BlobGasUsed)
-	enc.ExcessBlobGas = (*hexutil.Uint64)(h.ExcessBlobGas)
-	enc.ParentBeaconBlockRoot = h.ParentBeaconBlockRoot
-	enc.RequestsHash = h.RequestsHash
-	enc.BlockAccessListHash = h.BlockAccessListHash
-	enc.SlotNumber = (*hexutil.Uint64)(h.SlotNumber)
-	enc.Hash = h.Hash()
-	return json.Marshal(&enc)
-}
-
 // UnmarshalJSON unmarshals from JSON.
 func (h *Header) UnmarshalJSON(input []byte) error {
 	type Header struct {
