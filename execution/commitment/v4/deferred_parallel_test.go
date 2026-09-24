@@ -183,11 +183,11 @@ func TestStorageFanOutMatchesSerial(t *testing.T) {
 	whale := benchAddr(7)
 	slot := func(i int) []byte { return append(bytes.Clone(whale), benchSlot(i)...) }
 	seed := []parityUpdate{{key: whale, update: accountParityUpdate(7)}}
-	for i := range 4 * storageFanOutMin {
+	for i := range 4 * defaultStorageFanOutMin {
 		seed = append(seed, parityUpdate{key: slot(i), update: storageParityUpdate(i)})
 	}
 	next := []parityUpdate{{key: whale, update: accountParityUpdate(8)}}
-	for i := range 4 * storageFanOutMin {
+	for i := range 4 * defaultStorageFanOutMin {
 		switch i % 3 {
 		case 0:
 			next = append(next, parityUpdate{key: slot(i), update: &commitment.Update{Flags: commitment.DeleteUpdate}})
@@ -195,7 +195,7 @@ func TestStorageFanOutMatchesSerial(t *testing.T) {
 			next = append(next, parityUpdate{key: slot(i), update: storageParityUpdate(i + 1)})
 		}
 	}
-	for i := 4 * storageFanOutMin; i < 5*storageFanOutMin; i++ {
+	for i := 4 * defaultStorageFanOutMin; i < 5*defaultStorageFanOutMin; i++ {
 		next = append(next, parityUpdate{key: slot(i), update: storageParityUpdate(i)})
 	}
 

@@ -80,6 +80,7 @@ type SharedDomainsCommitmentContext struct {
 	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
 	deferCommitmentUpdates bool
+	storageFanOutMin       int
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
 
@@ -97,6 +98,10 @@ type feedTrie interface {
 type deferredCommitmentTrie interface {
 	SetDeferCommitmentUpdates(bool)
 	TakeDeferredDeltas() [][]commitment.BranchDelta
+}
+
+type storageFanOutTrie interface {
+	SetStorageFanOutMin(int)
 }
 
 type trieContextFactorySetter interface {
@@ -170,6 +175,10 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 // flushed later via FlushPendingUpdate.
 func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool) {
 	sdc.deferCommitmentUpdates = defer_
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetStorageFanOutMin(n int) {
+	sdc.storageFanOutMin = n
 }
 
 // TakePendingUpdate returns the pending update and clears the field.
@@ -642,6 +651,9 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	if trie, ok := sdc.patriciaTrie.(deferredCommitmentTrie); ok && sdc.deferCommitmentUpdates {
 		trie.SetDeferCommitmentUpdates(true)
 		defer trie.SetDeferCommitmentUpdates(false)
+	}
+	if trie, ok := sdc.patriciaTrie.(storageFanOutTrie); ok {
+		trie.SetStorageFanOutMin(sdc.storageFanOutMin)
 	}
 
 	if feed != nil {

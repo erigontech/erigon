@@ -68,7 +68,7 @@ func TestRunStoragePhaseUsesConfiguredWorkers(t *testing.T) {
 		return newMockContext(), nil
 	}
 
-	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, make([]deltaParts, len(storage)), 4)
+	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, make([]deltaParts, len(storage)), 4, 0)
 	require.NoError(t, err)
 	require.Equal(t, int32(4), factoryCalls.Load())
 }
@@ -142,4 +142,25 @@ func accountLeafFromParityContext(t *testing.T, ctx *parityContext, path []byte)
 	value, ok := accountLeafAt(root, path)
 	require.True(t, ok)
 	return value
+}
+
+func TestRunStoragePhaseHonorsFanOutMin(t *testing.T) {
+	factoryCalls := func(fanOutMin int) int32 {
+		task := storageTask{addrHash: [32]byte{1}}
+		for i := range 64 {
+			path := make([]byte, 64)
+			path[0], path[1] = byte(i%16), byte(i/16)
+			task.entries = append(task.entries, storageEntry{path: path, value: []byte{byte(i + 1)}, op: storagePut})
+		}
+		var calls atomic.Int32
+		factory := func(context.Context) (commitment.PatriciaContext, func()) {
+			calls.Add(1)
+			return newMockContext(), nil
+		}
+		roots := make([][32]byte, 1)
+		require.NoError(t, runStoragePhase(context.Background(), newMockContext(), factory, []storageTask{task}, roots, make([]deltaParts, 1), 2, fanOutMin))
+		return calls.Load()
+	}
+	require.Equal(t, int32(1), factoryCalls(1<<20))
+	require.Greater(t, factoryCalls(16), int32(1))
 }

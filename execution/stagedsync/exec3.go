@@ -106,6 +106,13 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
+func storageFanOutMin(initialCycle bool) int {
+	if initialCycle {
+		return 1024
+	}
+	return 128
+}
+
 func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
 	return dbg.ReadAheadWait && isValidatingBlocks
 }
@@ -211,6 +218,7 @@ func execV3(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+		doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForWarmup(ctx)
@@ -349,6 +357,7 @@ func execV3Serial(ctx context.Context,
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
+	doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForWarmup(ctx)
 	}

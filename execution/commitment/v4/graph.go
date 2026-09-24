@@ -210,9 +210,10 @@ func (g graph) childExt(n, child, root *node) []byte {
 }
 
 type foldPlan struct {
-	ctx     context.Context
-	factory commitment.TrieContextFactory
-	workers int
+	ctx       context.Context
+	factory   commitment.TrieContextFactory
+	workers   int
+	fanOutMin int
 }
 
 func (p foldPlan) parallel() bool {

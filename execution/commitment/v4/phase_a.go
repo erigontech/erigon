@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -135,7 +134,7 @@ func hashAddressPath(path []byte) [32]byte {
 	return addrHash
 }
 
-var storageFanOutMin = dbg.EnvInt("COMMITMENT_V4_STORAGE_FANOUT_MIN", 128)
+const defaultStorageFanOutMin = 1024
 
 func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, plan foldPlan) ([32]byte, deltaParts, error) {
 	if ctx == nil {
@@ -160,7 +159,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	markStorageRoot(root)
 
 	fanned := false
-	if len(task.entries) >= storageFanOutMin {
+	if len(task.entries) >= plan.fanOutMin {
 		fanned, err = g.fanOutRoot(ctx, root, len(task.entries), func(i int) byte { return task.entries[i].path[0] }, plan, func(ctx commitment.PatriciaContext, i int) error {
 			if task.entries[i].op == storageSkip {
 				return nil

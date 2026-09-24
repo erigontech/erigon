@@ -55,7 +55,7 @@ func feedOf(entries []parityUpdate) *commitment.Feed {
 
 func TestProcessFeedMatchesProcess(t *testing.T) {
 	deleted := func() *commitment.Update { return &commitment.Update{Flags: commitment.DeleteUpdate} }
-	seed := append(benchEntries("storage", 300), benchEntries("whale", 3*storageFanOutMin)...)
+	seed := append(benchEntries("storage", 300), benchEntries("whale", 3*defaultStorageFanOutMin)...)
 	var next []parityUpdate
 	for i := range 300 {
 		addr, slot := benchAddr(i), benchSlot(i)
@@ -74,7 +74,7 @@ func TestProcessFeedMatchesProcess(t *testing.T) {
 				parityUpdate{key: append(addr, slot...), update: deleted()})
 		}
 	}
-	whale := benchEntries("whale", 3*storageFanOutMin)
+	whale := benchEntries("whale", 3*defaultStorageFanOutMin)
 	for i := 1; i < len(whale); i += 3 {
 		next = append(next, parityUpdate{key: whale[i].key, update: deleted()})
 	}

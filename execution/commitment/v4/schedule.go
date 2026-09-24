@@ -49,7 +49,7 @@ const (
 	accountPlaneFanout   = 16
 )
 
-func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers int) error {
+func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, roots [][32]byte, parts []deltaParts, workers, fanOutMin int) error {
 	if len(storage) == 0 {
 		return nil
 	}
@@ -70,7 +70,10 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	workers = min(workers, len(storage))
 	var next atomic.Int64
 	g, gCtx := errgroup.WithContext(ctx)
-	taskPlan := foldPlan{ctx: gCtx, factory: factory, workers: accountPlaneFanout}
+	if fanOutMin <= 0 {
+		fanOutMin = defaultStorageFanOutMin
+	}
+	taskPlan := foldPlan{ctx: gCtx, factory: factory, workers: accountPlaneFanout, fanOutMin: fanOutMin}
 	for range workers {
 		g.Go(func() error {
 			workerCtx, cleanup := factory(gCtx)
@@ -96,7 +99,7 @@ func runStoragePhase(ctx context.Context, rawCtx commitment.PatriciaContext, fac
 	return g.Wait()
 }
 
-func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers int) ([32]byte, deltaParts, error) {
+func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, factory commitment.TrieContextFactory, storage []storageTask, accounts []accountEntry, workers, fanOutMin int) ([32]byte, deltaParts, error) {
 	if ctx == nil {
 		ctx = context.Background()
 	}
@@ -113,10 +116,10 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 	storageDone := make(chan error, 1)
 	if overlap {
 		go func() {
-			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers)
+			storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
 		}()
 	} else {
-		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers)
+		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
 	}
 
 	g := accountGraph()

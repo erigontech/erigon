@@ -2077,6 +2077,10 @@ func (sd *SharedDomains) SetDeferCommitmentUpdates(defer_ bool) {
 	sd.sdCtx.SetDeferCommitmentUpdates(defer_)
 }
 
+func (sd *SharedDomains) SetStorageFanOutMin(n int) {
+	sd.sdCtx.SetStorageFanOutMin(n)
+}
+
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.
 func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum, toTxNum uint64) (int, int, error) {
 	var accountChanges, storageChanges int
