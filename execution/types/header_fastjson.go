@@ -49,12 +49,8 @@ func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	jsonstream.Data(s, "extraData", h.Extra)
 	s.Field("mixHash").WriteHex(h.MixDigest[:])
 	s.Field("nonce").WriteHex(h.Nonce[:])
-	if h.AuRaStep != 0 {
-		jsonstream.Quantity(s, "auraStep", h.AuRaStep)
-	}
-	if len(h.AuRaSeal) != 0 {
-		jsonstream.Data(s, "auraSeal", h.AuRaSeal)
-	}
+	jsonstream.QuantityOmitZero(s, "auraStep", h.AuRaStep)
+	jsonstream.DataOmitEmpty(s, "auraSeal", h.AuRaSeal)
 	jsonstream.Quantity256(s, "baseFeePerGas", h.BaseFee)
 	writeHashField(s, "withdrawalsRoot", h.WithdrawalsHash)
 	jsonstream.QuantityOrNull(s, "blobGasUsed", h.BlobGasUsed)
@@ -62,9 +58,7 @@ func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	writeHashField(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot)
 	writeHashField(s, "requestsHash", h.RequestsHash)
 	writeHashField(s, "blockAccessListHash", h.BlockAccessListHash)
-	if h.SlotNumber != nil {
-		jsonstream.Quantity(s, "slotNumber", *h.SlotNumber)
-	}
+	jsonstream.QuantityOmitNil(s, "slotNumber", h.SlotNumber)
 	hash := h.Hash()
 	s.Field("hash").WriteHex(hash[:])
 	s.WriteObjectEnd()

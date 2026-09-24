@@ -82,3 +82,29 @@ func Quantity256(s *StackStream, name string, v *uint256.Int) {
 func Data(s *StackStream, name string, b []byte) {
 	s.Field(name).WriteHex(b)
 }
+
+// QuantityOmitZero leaves the field out when the value is zero, which is what a json tag's
+// omitempty asks for.
+func QuantityOmitZero[T ~uint64 | ~uint](s *StackStream, name string, v T) {
+	if v == 0 {
+		return
+	}
+	Quantity(s, name, v)
+}
+
+// QuantityOmitNil leaves the field out when the header or receipt does not carry it, for a
+// field whose json tag says omitempty rather than null.
+func QuantityOmitNil[T ~uint64 | ~uint](s *StackStream, name string, v *T) {
+	if v == nil {
+		return
+	}
+	Quantity(s, name, *v)
+}
+
+// DataOmitEmpty leaves the field out when there are no bytes.
+func DataOmitEmpty(s *StackStream, name string, b []byte) {
+	if len(b) == 0 {
+		return
+	}
+	Data(s, name, b)
+}
