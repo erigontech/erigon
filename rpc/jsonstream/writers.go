@@ -153,10 +153,9 @@ func HexesValue[S ~[]E, E hexType](s *StackStream, items S) {
 		return
 	}
 	s.beforeValue()
-	// exact for the fixed-size types, a first guess for Bytes and Big; no further than the flush
-	size := 2 + len(items)*(hexutil.QuotedLen(int(unsafe.Sizeof(*new(E))))+1)
-	buf := append(slices.Grow(s.stream.Buffer(), min(size, FlushThreshold)), '[')
-	if isByteArray[E]() && size <= FlushThreshold {
+	buf := append(s.stream.Buffer(), '[')
+	if size := len(items) * (hexutil.QuotedLen(int(unsafe.Sizeof(*new(E)))) + 1); isByteArray[E]() && size <= FlushThreshold {
+		buf = slices.Grow(buf, size)
 		for i := range items {
 			if i > 0 {
 				buf = append(buf, ',')
