@@ -173,7 +173,7 @@ func HexesValue[S ~[]E, E hexType](s *StackStream, items S) {
 			buf = append(buf, ',')
 		}
 		if b, ok := bytesOf(&items[i]); ok {
-			buf = hexutil.AppendQuoted(buf, b)
+			buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
 		} else {
 			buf = append(appendOwnText(s, append(buf, '"'), &items[i]), '"')
 		}
