@@ -2722,6 +2722,10 @@ func (d *Downloader) spawn(f func()) bool {
 func (d *Downloader) DropTorrentByName(name string) {
 	d.lock.Lock()
 	defer d.lock.Unlock()
+	d.dropTorrentByNameLocked(name)
+}
+
+func (d *Downloader) dropTorrentByNameLocked(name string) {
 	t, ok := d.torrentsByName[name]
 	if !ok {
 		return
@@ -2729,6 +2733,24 @@ func (d *Downloader) DropTorrentByName(name string) {
 	t.Drop()
 	g.MustDelete(d.torrentsByName, name)
 	delete(d.downloads, t)
+}
+
+// DropRebuiltByName prepares a file whose producer rebuilt it in place —
+// same name, new info-hash — to be fetched again.
+//
+// Beyond DropTorrentByName's registration drop this removes the metainfo
+// sidecar, which otherwise still describes the previous generation and would
+// be loaded in preference to the new info-hash. Removing it restores the
+// "sidecar exists iff the payload is complete" invariant for a payload that
+// is now stale. The data file is left for the torrent client to verify
+// piece-wise against the new metainfo and refetch what differs.
+func (d *Downloader) DropRebuiltByName(name string) {
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	d.dropTorrentByNameLocked(name)
+	if err := dir.RemoveFile(d.metainfoFilePathForName(name)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		d.log(log.LvlWarn, "could not remove metainfo of rebuilt snapshot", "name", name, "err", err)
+	}
 }
 
 // Delete - stop seeding, remove file, remove .torrent. TODO: Double check the usage of this.

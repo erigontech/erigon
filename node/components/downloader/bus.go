@@ -331,7 +331,13 @@ func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash
 // signature of flow.DownloadRequested consumers for the bus to route to it.
 func (p *Provider) onDownloadRequested(req flow.DownloadRequested) {
 	if p.logger != nil {
-		p.logger.Debug("[downloader-bus] onDownloadRequested", "file", req.FileName)
+		p.logger.Debug("[downloader-bus] onDownloadRequested", "file", req.FileName, "rebuilt", req.Rebuilt)
+	}
+	// The torrent client refuses a second info-hash under a name it already
+	// knows, so a file rebuilt in place is unreachable until the old
+	// registration goes.
+	if req.Rebuilt && p.Downloader != nil {
+		p.Downloader.DropRebuiltByName(req.FileName)
 	}
 	protoReq := &downloaderproto.DownloadRequest{
 		Items: []*downloaderproto.DownloadItem{{

@@ -1093,6 +1093,7 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 			FromPeers: []string{peerID},
 			Domain:    domain,
 			Range:     entry.Range(),
+			Rebuilt:   coordinateIsStale(stale, entry.Name),
 		})
 	}
 }

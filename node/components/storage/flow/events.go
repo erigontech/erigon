@@ -237,6 +237,12 @@ type DownloadRequested struct {
 	FromPeers []string
 	Domain    snapshot.Domain    // empty for block snapshots
 	Range     snapshot.StepRange // zero value for block snapshots
+
+	// Rebuilt marks a file the peer has rebuilt in place: same name, new
+	// info-hash. The torrent client rejects a second info-hash under a name
+	// it already knows, so the old registration has to be dropped before
+	// this request can be served.
+	Rebuilt bool
 }
 
 // DownloadComplete fires when a file has been fully downloaded and content
