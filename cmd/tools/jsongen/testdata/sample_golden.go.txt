@@ -16,8 +16,10 @@ func (x *Sample) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
-	ethjson.Data(s, "address", x.Address[:])
-	ethjson.Quantity(s, "count", x.Count)
+	ethjson.Data(s, "address", x.Inner.Address[:])
+	ethjson.Quantity(s, "count", x.Inner.Count)
+	ethjson.Quantity(s, "leftValue", x.Left.Value)
+	ethjson.Quantity(s, "rightValue", x.Right.Value)
 	ethjson.Data(s, "hash", x.Hash[:])
 	ethjson.Data(s, "bytes", x.Bytes[:])
 	if len(x.OptBytes[:]) > 0 {

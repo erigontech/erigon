@@ -43,3 +43,15 @@ type TaggedEmbedded struct {
 type PointerEmbedded struct {
 	*Named
 }
+
+type PointerToSlice struct {
+	Bytes *[]byte `json:"bytes" ethjson:"data"`
+}
+
+type NarrowQuantity struct {
+	Count uint32 `json:"count" ethjson:"quantity"`
+}
+
+type NotHashSlice struct {
+	Chunks [][]byte `json:"chunks" ethjson:"datalist"`
+}

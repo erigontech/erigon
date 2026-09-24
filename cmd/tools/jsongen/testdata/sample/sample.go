@@ -31,8 +31,20 @@ type Inner struct {
 	Count   uint64         `json:"count" ethjson:"quantity"`
 }
 
+// Left and Right both promote Value, under different JSON names, so encoding/json writes two
+// fields and each generated access has to name the struct it came from.
+type Left struct {
+	Value uint64 `json:"leftValue" ethjson:"quantity"`
+}
+
+type Right struct {
+	Value uint64 `json:"rightValue" ethjson:"quantity"`
+}
+
 type Sample struct {
-	Inner                           // flattened
+	Inner
+	Left
+	Right                           // flattened
 	Hash       common.Hash          `json:"hash" ethjson:"data"`
 	Bytes      []byte               `json:"bytes" ethjson:"data"`
 	OptBytes   hexutil.Bytes        `json:"optBytes,omitempty" ethjson:"data"`
