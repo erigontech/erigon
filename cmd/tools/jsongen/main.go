@@ -136,7 +136,7 @@ func load() (*packages.Package, error) {
 		return nil, fmt.Errorf("%d packages here, want 1", len(pkgs))
 	}
 	for _, e := range pkgs[0].Errors {
-		if strings.Contains(e.Msg, missingMethod) {
+		if strings.Contains(e.Msg, missingCall) || strings.Contains(e.Msg, missingForInterface) {
 			continue
 		}
 		content, err := os.ReadFile(positionFile(e.Pos))
@@ -147,9 +147,13 @@ func load() (*packages.Package, error) {
 	return pkgs[0], nil
 }
 
-// missingMethod is how the compiler words a call to the method this writes, before it exists.
-// Matching the whole phrase keeps any other mention of the name an error.
-const missingMethod = "has no field or method " + method
+// The two ways the compiler words the absence of the method this writes: a call to it, and a
+// value that has to satisfy an interface asking for it. Matching the whole phrase keeps any
+// other mention of the name an error.
+const (
+	missingCall         = "has no field or method " + method
+	missingForInterface = "missing method " + method
+)
 
 // positionFile takes the file out of a packages.Error position. Cutting at the first colon
 // would keep only the drive letter of a Windows path, so the line and column come off the right.

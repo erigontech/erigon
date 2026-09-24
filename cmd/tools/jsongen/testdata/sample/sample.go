@@ -26,6 +26,11 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
+// Left has no encoder, so this assertion never holds. It is here on purpose: an unsatisfied
+// interface is the other wording the compiler uses for the method the generator writes, and a
+// first run has to read past it.
+var _ jsonstream.Marshaler = (*Left)(nil)
+
 type Inner struct {
 	Address common.Address `json:"address" ethjson:"data"`
 	Count   uint64         `json:"count" ethjson:"quantity"`
