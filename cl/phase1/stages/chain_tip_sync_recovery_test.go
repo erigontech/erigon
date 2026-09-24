@@ -66,24 +66,56 @@ func (s *storedParentPayloadTestStore) RequeuePendingELPayload(payload forkchoic
 func TestStoredParentEnvelopesRestoresReadableParents(t *testing.T) {
 	storedRoot := common.Hash{1}
 	mismatchedRoot := common.Hash{2}
+	transientRoot := common.Hash{3}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: storedRoot}}
 	reads := 0
 
 	got, storedRoots := storedParentEnvelopes(
-		[][32]byte{storedRoot, storedRoot, mismatchedRoot},
-		func(root common.Hash) bool { return root == storedRoot || root == mismatchedRoot },
+		[][32]byte{storedRoot, storedRoot, mismatchedRoot, transientRoot},
+		func(root common.Hash) bool {
+			return root == storedRoot || root == mismatchedRoot || root == transientRoot
+		},
 		func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 			reads++
 			if root == storedRoot {
 				return envelope, nil
 			}
+			if root == transientRoot {
+				return nil, context.DeadlineExceeded
+			}
 			return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{9}}}, nil
 		},
 	)
 
-	require.Equal(t, 2, reads)
+	require.Equal(t, 3, reads)
 	require.Equal(t, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{storedRoot: envelope}, got)
-	require.Equal(t, map[common.Hash]struct{}{storedRoot: {}}, storedRoots)
+	require.Equal(t, map[common.Hash]struct{}{storedRoot: {}, mismatchedRoot: {}, transientRoot: {}}, storedRoots)
+}
+
+func TestStoredParentReplayRootsExcludeKnownChildren(t *testing.T) {
+	knownParent := common.Hash{1}
+	unknownParent := common.Hash{2}
+	knownChild := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	knownChild.Block.ParentRoot = knownParent
+	unknownChild := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	unknownChild.Block.ParentRoot = unknownParent
+	knownChildRoot, err := knownChild.Block.HashSSZ()
+	require.NoError(t, err)
+	envelopes := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
+		knownParent:   {},
+		unknownParent: {},
+	}
+	storedRoots := map[common.Hash]struct{}{knownParent: {}, unknownParent: {}}
+
+	got := storedParentReplayRoots(
+		[]*cltypes.SignedBeaconBlock{knownChild, unknownChild},
+		envelopes,
+		storedRoots,
+		func(root common.Hash) bool { return root == common.Hash(knownChildRoot) },
+		func(common.Hash) bool { return false },
+	)
+
+	require.Equal(t, map[common.Hash]struct{}{unknownParent: {}}, got)
 }
 
 func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {

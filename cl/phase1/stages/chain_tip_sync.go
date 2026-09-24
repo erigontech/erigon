@@ -240,9 +240,22 @@ MainLoop:
 			// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
 			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
 			envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
+			storedReplayRoots := storedParentReplayRoots(
+				blocks.Data,
+				envelopes,
+				storedEnvelopeRoots,
+				func(root common.Hash) bool {
+					_, ok := cfg.forkChoice.GetHeader(root)
+					return ok
+				},
+				func(root common.Hash) bool {
+					_, ok := seenBlockRoots[root]
+					return ok
+				},
+			)
 			payloadReplay := storedParentPayloadReplay{
 				budget:    gloasPayloadRetryBudget,
-				remaining: len(storedEnvelopeRoots),
+				remaining: len(storedReplayRoots),
 				results:   make(map[common.Hash]bool),
 			}
 
@@ -450,17 +463,42 @@ func storedParentEnvelopes(
 	storedRoots := make(map[common.Hash]struct{})
 	for _, requested := range roots {
 		root := common.Hash(requested)
-		if _, ok := envelopes[root]; ok || !hasEnvelope(root) {
+		if _, checked := storedRoots[root]; checked || !hasEnvelope(root) {
 			continue
 		}
+		storedRoots[root] = struct{}{}
 		envelope, err := readEnvelope(root)
 		if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.BeaconBlockRoot != root {
 			continue
 		}
 		envelopes[root] = envelope
-		storedRoots[root] = struct{}{}
 	}
 	return envelopes, storedRoots
+}
+
+func storedParentReplayRoots(
+	blocks []*cltypes.SignedBeaconBlock,
+	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	storedRoots map[common.Hash]struct{},
+	knownBlock func(common.Hash) bool,
+	seenBlock func(common.Hash) bool,
+) map[common.Hash]struct{} {
+	replayRoots := make(map[common.Hash]struct{})
+	for _, block := range blocks {
+		if block == nil || block.Block == nil || block.Version() < clparams.GloasVersion {
+			continue
+		}
+		parentRoot := common.Hash(block.Block.ParentRoot)
+		if _, stored := storedRoots[parentRoot]; !stored || envelopes[parentRoot] == nil {
+			continue
+		}
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil || knownBlock(common.Hash(blockRoot)) || seenBlock(common.Hash(blockRoot)) {
+			continue
+		}
+		replayRoots[parentRoot] = struct{}{}
+	}
+	return replayRoots
 }
 
 // recoverMissingEnvelopes incrementally scans from the selected head for missing FULL-block envelopes.
