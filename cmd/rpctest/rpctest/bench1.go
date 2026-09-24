@@ -324,14 +324,14 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 		tmpDir := os.TempDir()
 		fmt.Printf("tmp dir is: %s\n", tmpDir)
 		dir := filepath.Join(tmpDir, "erigon_stress_test")
-		if err = os.MkdirAll(dir, 0770); err != nil {
+		if err = os.MkdirAll(dir, 0o770); err != nil {
 			panic(err)
 		}
 
 		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
 				file := filepath.Join(dir, "results_"+route+"_"+method+".csv")
-				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				files[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 				if err != nil {
 					panic(err)
 				}
@@ -341,7 +341,7 @@ func vegetaWrite(enabled bool, methods []string, resultsCh chan CallResult) {
 		for _, route := range []string{Geth, Erigon} {
 			for _, method := range methods {
 				file := filepath.Join(dir, "vegeta_"+route+"_"+method+".txt")
-				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0644)
+				vegetaFiles[route][method], err = os.OpenFile(file, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o644)
 				if err != nil {
 					panic(err)
 				}

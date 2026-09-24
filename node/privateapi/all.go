@@ -31,7 +31,8 @@ import (
 
 func StartGrpc(ctx context.Context, kv *remotedbserver.KvServer, ethBackendSrv *EthBackendServer, txPoolServer txpoolproto.TxpoolServer,
 	miningServer txpoolproto.MiningServer,
-	addr string, rateLimit uint32, creds credentials.TransportCredentials, healthCheck bool, logger log.Logger) (*grpc.Server, error) {
+	addr string, rateLimit uint32, creds credentials.TransportCredentials, healthCheck bool, logger log.Logger,
+) (*grpc.Server, error) {
 	logger.Info("Starting private RPC server", "on", addr)
 
 	grpcServer := grpcutil.NewServer(rateLimit, creds)

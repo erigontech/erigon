@@ -47,6 +47,7 @@ func (g *RequestGenerator) blockNumber() string {
 	const template = `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`
 	return fmt.Sprintf(template, g.reqID.Add(1))
 }
+
 func (g *RequestGenerator) getBlockByNumber(blockNum uint64, withTxs bool) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",%t],"id":%d}`
 	return fmt.Sprintf(template, blockNum, withTxs, g.reqID.Add(1))
@@ -109,10 +110,12 @@ func (g *RequestGenerator) getLogs(prevBn uint64, bn uint64, account common.Addr
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": "0x%x"}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, account, g.reqID.Add(1))
 }
+
 func (g *RequestGenerator) getLogsNoFilters(prevBn uint64, bn uint64) string {
 	const template = `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x"}],"id":%d}`
 	return fmt.Sprintf(template, prevBn, bn, g.reqID.Add(1))
 }
+
 func (g *RequestGenerator) getLogsForAddresses(prevBn uint64, bn uint64, accounts []common.Address) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, `{"jsonrpc":"2.0","method":"eth_getLogs","params":[{"fromBlock": "0x%x", "toBlock": "0x%x", "address": [`, prevBn, bn)
@@ -188,7 +191,7 @@ func (g *RequestGenerator) getProof(bn uint64, account common.Address, storageLi
 	} else {
 		template = `{ "jsonrpc": "2.0", "method": "eth_getProof", "params": ["0x%x", [%s], "0x%x"], "id":%d}`
 	}
-	var storageStr = make([]string, len(storageList))
+	storageStr := make([]string, len(storageList))
 	for i, location := range storageList {
 		storageStr[i] = fmt.Sprintf(`"0x%x"`, location)
 	}
@@ -313,6 +316,7 @@ func (g *RequestGenerator) ethCallLatest(from common.Address, to *common.Address
 	fmt.Fprintf(&sb, `,"latest"], "id":%d}`, g.reqID.Add(1))
 	return sb.String()
 }
+
 func (g *RequestGenerator) otsGetBlockTransactions(block_number uint64, page_number uint64, page_size uint64) string {
 	const template = `{"id":1,"jsonrpc":"2.0","method":"ots_getBlockTransactions","params":[%d, %d, %d]}`
 	return fmt.Sprintf(template, block_number, page_number, page_size)

@@ -48,7 +48,8 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 		for range 2 {
 			txn, err := types.SignTx(
 				types.NewTransaction(block.TxNonce(testAddr), testAddr, uint256.NewInt(1), params.TxGas, nil, nil),
-				*signer, testKey)
+				*signer, testKey,
+			)
 			require.NoError(t, err)
 			block.AddTx(txn)
 		}
@@ -99,7 +100,8 @@ func TestGetReceiptSkipsBloomOfPersistedReceipt(t *testing.T) {
 	m := mockWithGenerator(t, 1, func(i int, block *blockgen.BlockGen) {
 		txn, err := types.SignTx(
 			types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate),
-			*signer, testKey)
+			*signer, testKey,
+		)
 		require.NoError(t, err)
 		block.AddTx(txn)
 	}, execmoduletester.WithEnableDomain(kv.RCacheDomain))

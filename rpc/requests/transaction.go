@@ -65,7 +65,6 @@ func (reqGen *requestGenerator) EstimateGas(args bind.CallMsg, blockRef BlockNum
 		Data:                 data,
 		AccessList:           &args.AccessList,
 	})
-
 	if err != nil {
 		return 0, err
 	}
