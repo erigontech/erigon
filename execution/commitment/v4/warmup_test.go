@@ -22,6 +22,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -117,26 +118,28 @@ func TestTrieProcessStartsWarmuperWhenEnabled(t *testing.T) {
 }
 
 func TestPartitionUpdatesDrivesWarmuper(t *testing.T) {
-	updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-	address := make([]byte, 20)
-	address[0] = 1
-	update := fullAccountUpdate(1, 2, common.Hash{})
-	updates.TouchPlainKeyDirect(string(address), &update)
+	for _, n := range []int{1, 2 * hashParallelMin} {
+		updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+		for i := range n {
+			update := fullAccountUpdate(1, 2, common.Hash{})
+			updates.TouchPlainKeyDirect(string(benchAddr(i)), &update)
+		}
 
-	warmupCtx := newMockContext()
-	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
-		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return warmupCtx, nil },
-		NumWorkers: 1,
-		MaxDepth:   commitment.WarmupMaxDepth,
-		Key:        warmupKeyV4,
-		Step:       warmupStepV4,
-	})
-	w.Start()
-	_, _, _, err := partitionUpdates(context.Background(), updates, 1, w)
-	require.NoError(t, err)
-	require.NoError(t, w.WaitBufferFree(0))
-	w.CloseAndWait()
-	require.NotEmpty(t, warmupCtx.branchCalls)
+		warmupCtx := newMockContext()
+		w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
+			CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return warmupCtx, nil },
+			NumWorkers: 1,
+			MaxDepth:   commitment.WarmupMaxDepth,
+			Key:        warmupKeyV4,
+			Step:       warmupStepV4,
+		})
+		w.Start()
+		_, _, _, err := partitionUpdates(context.Background(), updates, 4, w)
+		require.NoError(t, err)
+		require.Eventually(t, func() bool { return w.Stats().KeysProcessed == uint64(n) }, 10*time.Second, time.Millisecond)
+		w.CloseAndWait()
+		require.NotEmpty(t, warmupCtx.branchCalls)
+	}
 }
 
 func TestWarmupV4KeyAndStepAccountDescent(t *testing.T) {
@@ -393,7 +396,7 @@ func TestWarmupV4StorageDescentReachesBeyondRoot(t *testing.T) {
 	w.Start()
 	_, _, _, err = partitionUpdates(context.Background(), next, 4, w)
 	require.NoError(t, err)
-	require.NoError(t, w.WaitBufferFree(0))
+	require.Eventually(t, func() bool { return w.Stats().KeysProcessed == uint64(1+len(storageKeys)) }, 10*time.Second, time.Millisecond)
 	w.CloseAndWait()
 
 	maxStorageDepth := 0

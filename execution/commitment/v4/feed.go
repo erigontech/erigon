@@ -97,8 +97,8 @@ func compareFeed(a, b feedEntry) int {
 	return strings.Compare(a.plainKey, b.plainKey)
 }
 
-func bucketFeed(items []feedEntry) ([]feedEntry, [257]int) {
-	bucket := func(e feedEntry) int {
+func bucketFeed(items []feedEntry) [257]int {
+	bucket := func(e *feedEntry) int {
 		if len(e.hashedKey) < 2 {
 			return 0
 		}
@@ -106,40 +106,47 @@ func bucketFeed(items []feedEntry) ([]feedEntry, [257]int) {
 	}
 	var bounds [257]int
 	for i := range items {
-		bounds[bucket(items[i])+1]++
+		bounds[bucket(&items[i])+1]++
 	}
 	for b := 1; b < len(bounds); b++ {
 		bounds[b] += bounds[b-1]
 	}
 	next := bounds
-	sorted := make([]feedEntry, len(items))
-	for _, e := range items {
-		b := bucket(e)
-		sorted[next[b]] = e
-		next[b]++
+	for b := range 256 {
+		for next[b] < bounds[b+1] {
+			for c := bucket(&items[next[b]]); c != b; c = bucket(&items[next[b]]) {
+				items[next[b]], items[next[c]] = items[next[c]], items[next[b]]
+				next[c]++
+			}
+			next[b]++
+		}
 	}
-	return sorted, bounds
+	return bounds
 }
 
-func sortFeed(items []feedEntry, workers int) []feedEntry {
-	if workers <= 1 || len(items) < hashParallelMin {
-		slices.SortFunc(items, compareFeed)
-		return items
+func warmFeed(warmuper *commitment.Warmuper, items []feedEntry) {
+	var prev []byte
+	for i := range items {
+		hk := items[i].hashedKey
+		depth := 0
+		for depth < min(len(prev), len(hk)) && prev[depth] == hk[depth] {
+			depth++
+		}
+		warmuper.WarmKey(hk, depth, 0)
+		prev = hk
 	}
-	sorted, bounds := bucketFeed(items)
-	parallelFor(256, workers, 1, func(b int) {
-		slices.SortFunc(sorted[bounds[b]:bounds[b+1]], compareFeed)
-	})
-	return sorted
 }
 
-func partitionFeed(items []feedEntry, workers int) ([]storageTask, []accountEntry, int, error) {
-	sorted, bounds := bucketFeed(items)
+func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper) ([]storageTask, []accountEntry, int, error) {
+	bounds := bucketFeed(items)
 	var parts [256]*partitioner
 	var errs [256]error
 	parallelFor(256, workers, 1, func(b int) {
-		bucket := sorted[bounds[b]:bounds[b+1]]
+		bucket := items[bounds[b]:bounds[b+1]]
 		slices.SortFunc(bucket, compareFeed)
+		if warmuper != nil && len(bucket) != 0 {
+			go warmFeed(warmuper, bucket)
+		}
 		p := newPartitioner()
 		for i := range bucket {
 			if err := p.add(bucket[i].hashedKey, common.ToBytesZeroCopy(bucket[i].plainKey), bucket[i].update); err != nil {
@@ -149,19 +156,17 @@ func partitionFeed(items []feedEntry, workers int) ([]storageTask, []accountEntr
 		}
 		parts[b] = p
 	})
-	var storage []storageTask
-	var accounts []accountEntry
+	var storage [256][]storageTask
+	var accounts [256][]accountEntry
 	seen := 0
 	for b := range parts {
 		if errs[b] != nil {
 			return nil, nil, 0, errs[b]
 		}
-		s, a := parts[b].done()
-		storage = append(storage, s...)
-		accounts = append(accounts, a...)
+		storage[b], accounts[b] = parts[b].done()
 		seen += parts[b].seen
 	}
-	return storage, accounts, seen, nil
+	return slices.Concat(storage[:]...), slices.Concat(accounts[:]...), seen, nil
 }
 
 func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, warmuper *commitment.Warmuper) ([]storageTask, []accountEntry, int, error) {
@@ -180,26 +185,16 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 	}
 
 	hashFeed(items, workers)
-	if warmuper == nil && workers > 1 && len(items) >= hashParallelMin {
-		return partitionFeed(items, workers)
+	if workers > 1 && len(items) >= hashParallelMin {
+		return partitionFeed(items, workers, warmuper)
 	}
-	items = sortFeed(items, workers)
+	slices.SortFunc(items, compareFeed)
+	if warmuper != nil {
+		go warmFeed(warmuper, items)
+	}
 
 	p := newPartitioner()
-	var prevKey []byte
 	for i := range items {
-		if warmuper != nil {
-			hk := items[i].hashedKey
-			startDepth := 0
-			if prevKey != nil {
-				minLen := min(len(prevKey), len(hk))
-				for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
-					startDepth++
-				}
-			}
-			warmuper.WarmKey(hk, startDepth, 0)
-			prevKey = hk
-		}
 		if err := p.add(items[i].hashedKey, common.ToBytesZeroCopy(items[i].plainKey), items[i].update); err != nil {
 			return nil, nil, 0, err
 		}

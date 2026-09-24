@@ -131,29 +131,6 @@ func BenchmarkZZFeed(b *testing.B) {
 	})
 }
 
-func TestSortFeedMatchesSerialSort(t *testing.T) {
-	items := make([]feedEntry, 0, 3*hashParallelMin)
-	for i := range 3 * hashParallelMin {
-		key := string(benchAddr(i % 997))
-		if i%3 != 0 {
-			key += string(benchSlot(i))
-		}
-		items = append(items, feedEntry{plainKey: key})
-	}
-	hashFeed(items, 1)
-	want := slices.Clone(items)
-	slices.SortFunc(want, compareFeed)
-	got := sortFeed(slices.Clone(items), 8)
-	if len(got) != len(want) {
-		t.Fatalf("sortFeed returned %d items, want %d", len(got), len(want))
-	}
-	for i := range want {
-		if got[i].plainKey != want[i].plainKey {
-			t.Fatalf("item %d: got %x, want %x", i, got[i].plainKey, want[i].plainKey)
-		}
-	}
-}
-
 func TestPartitionFeedMatchesSerialPartition(t *testing.T) {
 	var items []feedEntry
 	for i := range hashParallelMin {
@@ -169,15 +146,17 @@ func TestPartitionFeedMatchesSerialPartition(t *testing.T) {
 	}
 	hashFeed(items, 1)
 
+	sorted := slices.Clone(items)
+	slices.SortFunc(sorted, compareFeed)
 	serial := newPartitioner()
-	for _, e := range sortFeed(slices.Clone(items), 1) {
+	for _, e := range sorted {
 		if err := serial.add(e.hashedKey, []byte(e.plainKey), e.update); err != nil {
 			t.Fatal(err)
 		}
 	}
 	wantStorage, wantAccounts := serial.done()
 
-	gotStorage, gotAccounts, seen, err := partitionFeed(slices.Clone(items), 8)
+	gotStorage, gotAccounts, seen, err := partitionFeed(slices.Clone(items), 8, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
