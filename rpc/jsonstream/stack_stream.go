@@ -97,10 +97,10 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 	s.afterValue()
 }
 
-// WriteQuantity writes v the way the JSON-RPC spec writes a number: 0x and the shortest
-// lowercase hex. The bytes go straight into the buffer, so no hexutil value is built for the
-// call and nothing can escape.
-func (s *StackStream) WriteQuantity(v uint64) {
+// WriteHexUint64 writes 0x and the shortest lowercase hex of v. The digits go straight into
+// the buffer, so no hexutil value is built for the call and nothing can escape. Which fields
+// are written this way is the caller's rule, not the stream's: see rpc/jsonstream/ethjson.
+func (s *StackStream) WriteHexUint64(v uint64) {
 	s.beforeValue()
 	buf := s.stream.Buffer()
 	start := len(buf)
@@ -109,8 +109,8 @@ func (s *StackStream) WriteQuantity(v uint64) {
 	s.afterValue()
 }
 
-// WriteQuantity256 writes a 256-bit quantity the same way, null when the field is absent.
-func (s *StackStream) WriteQuantity256(v *uint256.Int) {
+// WriteHexUint256 does the same for a 256-bit value, null for a nil one.
+func (s *StackStream) WriteHexUint256(v *uint256.Int) {
 	if v == nil {
 		s.WriteNil()
 		return
