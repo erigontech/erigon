@@ -1356,6 +1356,53 @@ func TestExecutionPayloadBidServiceRechecksHotCacheAfterWaitingForWork(t *testin
 	require.Zero(t, reader.reads.Load())
 }
 
+func TestExecutionPayloadBidServiceRefreshesRetryTimeAfterWaitingForWork(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	root := common.HexToHash("0x01")
+	now := time.Unix(100*12, 0)
+	currentTime := now
+	service.now = func() time.Time { return currentTime }
+	firstLookup := make(chan struct{})
+	var once sync.Once
+	reader := &cachedParentExitReader{
+		countingBidEnvelopeReader: &countingBidEnvelopeReader{ForkChoiceStorageReader: fc},
+		root:                      root,
+		beforeLookup: func() {
+			once.Do(func() { close(firstLookup) })
+		},
+	}
+	reader.unavailable.Store(true)
+	service.forkchoiceStore = reader
+	fc.Envelopes[root] = &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		ExecutionRequests: cltypes.NewExecutionRequests(service.beaconCfg),
+	}}
+	service.parentExitsWork <- struct{}{}
+
+	type result struct {
+		requests []solid.BuilderExitRequest
+		err      error
+	}
+	results := make(chan result, 1)
+	go func() {
+		requests, err := service.parentBuilderExitRequests(t.Context(), root, now)
+		results <- result{requests: requests, err: err}
+	}()
+	<-firstLookup
+	service.parentExitsMu.Lock()
+	service.parentExitsCache.Add(root, parentBuilderExitsResult{
+		err:     errBidDependencyUnavailable,
+		retryAt: now.Add(parentBuilderExitsRetryDelay),
+	})
+	service.parentExitsMu.Unlock()
+	currentTime = now.Add(2 * parentBuilderExitsRetryDelay)
+	<-service.parentExitsWork
+
+	got := <-results
+	require.NoError(t, got.err)
+	require.Empty(t, got.requests)
+	require.Equal(t, int32(1), reader.reads.Load())
+}
+
 func TestExecutionPayloadBidServiceRetriesUnavailableParentExits(t *testing.T) {
 	service, _, clock, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
