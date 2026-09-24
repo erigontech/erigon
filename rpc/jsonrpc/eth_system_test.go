@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonstreamtest"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -723,6 +724,7 @@ func TestFeeHistoryResultFastJSONMatchesEncodingJSON(t *testing.T) {
 		"negative float": {OldestBlock: (*hexutil.Big)(big.NewInt(1)), GasUsedRatio: []float64{-0.75, -3e-9}},
 		"nil result":     nil,
 	}
+	jsonstreamtest.RequireMatchesReflection(t, cases["rewards and blobs"])
 	for name, res := range cases {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(res)

@@ -29,77 +29,54 @@ func (t *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
-	s.Field("blockHash")
-	if t.BlockHash == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(t.BlockHash[:])
-	}
-	jsonstream.Text(s, "blockNumber", t.BlockNumber)
-	jsonstream.Text(s, "blockTimestamp", t.BlockTimestamp)
-	s.Field("from").WriteHex(t.From[:])
-	jsonstream.Text(s, "gas", &t.Gas)
-	jsonstream.Text(s, "gasPrice", t.GasPrice)
-	if t.MaxPriorityFeePerGas != nil {
-		jsonstream.Text(s, "maxPriorityFeePerGas", t.MaxPriorityFeePerGas)
-	}
-	if t.MaxFeePerGas != nil {
-		jsonstream.Text(s, "maxFeePerGas", t.MaxFeePerGas)
-	}
-	s.Field("hash").WriteHex(t.Hash[:])
-	s.Field("input").WriteHex(t.Input)
-	jsonstream.Text(s, "nonce", &t.Nonce)
-	s.Field("to")
-	if t.To == nil {
-		s.WriteNil()
-	} else {
-		s.WriteHex(t.To[:])
-	}
-	jsonstream.Text(s, "transactionIndex", t.TransactionIndex)
-	jsonstream.Text(s, "value", t.Value)
-	jsonstream.Text(s, "type", &t.Type)
+	jsonstream.Hex(s, "blockHash", t.BlockHash)
+	jsonstream.Hex(s, "blockNumber", t.BlockNumber)
+	jsonstream.Hex(s, "blockTimestamp", t.BlockTimestamp)
+	jsonstream.Hex(s, "from", &t.From)
+	jsonstream.Hex(s, "gas", &t.Gas)
+	jsonstream.Hex(s, "gasPrice", t.GasPrice)
+	jsonstream.HexOmitempty(s, "maxPriorityFeePerGas", t.MaxPriorityFeePerGas)
+	jsonstream.HexOmitempty(s, "maxFeePerGas", t.MaxFeePerGas)
+	jsonstream.Hex(s, "hash", &t.Hash)
+	jsonstream.Hex(s, "input", &t.Input)
+	jsonstream.Hex(s, "nonce", &t.Nonce)
+	jsonstream.Hex(s, "to", t.To)
+	jsonstream.Hex(s, "transactionIndex", t.TransactionIndex)
+	jsonstream.Hex(s, "value", t.Value)
+	jsonstream.Hex(s, "type", &t.Type)
 	if t.Accesses != nil {
 		s.Field("accessList")
 		jsonstream.ArrayValue(s, *t.Accesses, writeAccessTuple)
 	}
-	if t.ChainID != nil {
-		jsonstream.Text(s, "chainId", t.ChainID)
-	}
-	if t.MaxFeePerBlobGas != nil {
-		jsonstream.Text(s, "maxFeePerBlobGas", t.MaxFeePerBlobGas)
-	}
-	// A plain slice with omitempty: empty is omitted, not [].
-	if len(t.BlobVersionedHashes) > 0 {
-		jsonstream.HexesField(s, "blobVersionedHashes", t.BlobVersionedHashes)
-	}
+	jsonstream.HexOmitempty(s, "chainId", t.ChainID)
+	jsonstream.HexOmitempty(s, "maxFeePerBlobGas", t.MaxFeePerBlobGas)
+	jsonstream.HexesOmitempty(s, "blobVersionedHashes", t.BlobVersionedHashes)
 	if t.Authorizations != nil {
 		s.Field("authorizationList")
 		jsonstream.ArrayValue(s, *t.Authorizations, writeAuthorization)
 	}
-	jsonstream.Text(s, "v", t.V)
-	if t.YParity != nil {
-		jsonstream.Text(s, "yParity", t.YParity)
-	}
-	jsonstream.Text(s, "r", t.R)
-	jsonstream.Text(s, "s", t.S)
+	jsonstream.Hex(s, "v", t.V)
+	jsonstream.HexOmitempty(s, "yParity", t.YParity)
+	jsonstream.Hex(s, "r", t.R)
+	jsonstream.Hex(s, "s", t.S)
 	s.WriteObjectEnd()
 	return nil
 }
 
 func writeAccessTuple(s *jsonstream.StackStream, a *types.AccessTuple) {
 	s.WriteObjectStart()
-	s.Field("address").WriteHex(a.Address[:])
-	jsonstream.HexesField(s, "storageKeys", a.StorageKeys)
+	jsonstream.Hex(s, "address", &a.Address)
+	jsonstream.Hexes(s, "storageKeys", a.StorageKeys)
 	s.WriteObjectEnd()
 }
 
 func writeAuthorization(s *jsonstream.StackStream, a *types.JsonAuthorization) {
 	s.WriteObjectStart()
-	s.Field("chainId").WriteQuotedText(&a.ChainID)
-	s.Field("address").WriteHex(a.Address[:])
-	jsonstream.Text(s, "nonce", &a.Nonce)
-	jsonstream.Text(s, "yParity", &a.YParity)
-	jsonstream.Text(s, "r", &a.R)
-	jsonstream.Text(s, "s", &a.S)
+	jsonstream.Hex(s, "chainId", &a.ChainID)
+	jsonstream.Hex(s, "address", &a.Address)
+	jsonstream.Hex(s, "nonce", &a.Nonce)
+	jsonstream.Hex(s, "yParity", &a.YParity)
+	jsonstream.Hex(s, "r", &a.R)
+	jsonstream.Hex(s, "s", &a.S)
 	s.WriteObjectEnd()
 }

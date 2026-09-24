@@ -51,8 +51,8 @@ func writeBlobV1(s *jsonstream.StackStream, bp **BlobAndProofV1) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("blob").WriteHex(b.Blob)
-	s.Field("proof").WriteHex(b.Proof)
+	jsonstream.Hex(s, "blob", &b.Blob)
+	jsonstream.Hex(s, "proof", &b.Proof)
 	s.WriteObjectEnd()
 }
 
@@ -63,9 +63,8 @@ func writeBlobV2(s *jsonstream.StackStream, bp **BlobAndProofV2) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("blob").WriteHex(b.Blob)
-	s.Field("proofs")
-	jsonstream.ArrayValue(s, b.CellProofs, writeHex)
+	jsonstream.Hex(s, "blob", &b.Blob)
+	jsonstream.Hexes(s, "proofs", b.CellProofs)
 	s.WriteObjectEnd()
 }
 
@@ -82,10 +81,6 @@ func writeBlobCellsV1(s *jsonstream.StackStream, bp **BlobCellsAndProofsV1) {
 	jsonstream.ArrayValue(s, b.Proofs, writeHexPtr)
 	s.WriteObjectEnd()
 }
-
-// writeHex writes one value per element, so a blob array flushes blob by blob instead of
-// growing one buffer for all of them.
-func writeHex(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func writeHexPtr(s *jsonstream.StackStream, b **hexutil.Bytes) {
 	if *b == nil {

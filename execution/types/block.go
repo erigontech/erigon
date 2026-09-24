@@ -69,6 +69,10 @@ func (n BlockNonce) MarshalText() ([]byte, error) {
 	return hexutil.Bytes(n[:]).MarshalText()
 }
 
+func (n BlockNonce) AppendText(dst []byte) ([]byte, error) {
+	return hexutil.Bytes(n[:]).AppendText(dst)
+}
+
 // UnmarshalText implements encoding.TextUnmarshaler.
 func (n *BlockNonce) UnmarshalText(input []byte) error {
 	return hexutil.UnmarshalFixedText("BlockNonce", input, n[:])

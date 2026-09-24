@@ -545,23 +545,13 @@ func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) er
 		return nil
 	}
 	s.WriteObjectStart()
-	s.Field("state")
-	jsonstream.ArrayValue(s, m.State, writeHexElem)
-	s.Field("codes")
-	jsonstream.ArrayValue(s, m.Codes, writeHexElem)
-	if len(m.Keys) > 0 {
-		s.Field("keys")
-		jsonstream.ArrayValue(s, m.Keys, writeHexElem)
-	}
-	if len(m.Headers) > 0 {
-		s.Field("headers")
-		jsonstream.ArrayValue(s, m.Headers, writeHexElem)
-	}
+	jsonstream.Hexes(s, "state", m.State)
+	jsonstream.Hexes(s, "codes", m.Codes)
+	jsonstream.HexesOmitempty(s, "keys", m.Keys)
+	jsonstream.HexesOmitempty(s, "headers", m.Headers)
 	s.WriteObjectEnd()
 	return nil
 }
-
-func writeHexElem(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
 	if header, ok := m.headerByNumber[blockNum]; ok {

@@ -40,31 +40,22 @@ type StorProofResult struct {
 
 func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	s.WriteObjectStart()
-	s.Field("address").WriteHex(r.Address[:])
-	writeHexArray(s, "accountProof", r.AccountProof)
-	jsonstream.Text(s, "balance", r.Balance)
-	s.Field("codeHash").WriteHex(r.CodeHash[:])
-	jsonstream.Text(s, "nonce", &r.Nonce)
-	s.Field("storageHash").WriteHex(r.StorageHash[:])
+	jsonstream.Hex(s, "address", &r.Address)
+	jsonstream.Hexes(s, "accountProof", r.AccountProof)
+	jsonstream.Hex(s, "balance", r.Balance)
+	jsonstream.Hex(s, "codeHash", &r.CodeHash)
+	jsonstream.Hex(s, "nonce", &r.Nonce)
+	jsonstream.Hex(s, "storageHash", &r.StorageHash)
 	s.Field("storageProof")
 	jsonstream.ArrayValue(s, r.StorageProof, writeStorProofElem)
 	s.WriteObjectEnd()
 	return nil
 }
 
-func writeHexArray(s *jsonstream.StackStream, name string, nodes []hexutil.Bytes) {
-	s.Field(name)
-	if nodes == nil {
-		s.WriteNil()
-		return
-	}
-	jsonstream.WriteHexBytes(s, nodes)
-}
-
 func writeStorProofElem(s *jsonstream.StackStream, sp *StorProofResult) {
 	s.WriteObjectStart()
 	s.Field("key").WriteString(sp.Key)
-	jsonstream.Text(s, "value", sp.Value)
-	writeHexArray(s, "proof", sp.Proof)
+	jsonstream.Hex(s, "value", sp.Value)
+	jsonstream.Hexes(s, "proof", sp.Proof)
 	s.WriteObjectEnd()
 }

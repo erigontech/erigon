@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonstreamtest"
 )
 
 func hashN(n byte) common.Hash {
@@ -143,6 +144,7 @@ func TestExecutionWitnessResultMarshalFastJSONToMatchesReflection(t *testing.T) 
 		"nil element":    {State: []hexutil.Bytes{nil}, Codes: []hexutil.Bytes{nil}},
 		"keys, no heads": {State: []hexutil.Bytes{{1}}, Keys: []hexutil.Bytes{{2}}},
 	} {
+		jsonstreamtest.RequireMatchesReflection(t, w)
 		want, err := json.Marshal(w)
 		require.NoError(t, err, name)
 		got, err := jsonstream.Marshal(w)

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonstreamtest"
 )
 
 func TestBlobsBundleMarshalFastJSONMatchesReflection(t *testing.T) {
@@ -103,6 +104,7 @@ func TestGetPayloadResponseMarshalFastJSONMatchesReflection(t *testing.T) {
 			BlobsBundle: &BlobsBundle{Commitments: []hexutil.Bytes{{0x01}}, Proofs: []hexutil.Bytes{{0x02}}, Blobs: []hexutil.Bytes{{0x03}}},
 		},
 	}
+	jsonstreamtest.RequireMatchesReflection(t, cases["populated payload"])
 	for name, r := range cases {
 		t.Run(name, func(t *testing.T) {
 			want, err := json.Marshal(r)

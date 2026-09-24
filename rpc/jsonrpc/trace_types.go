@@ -92,9 +92,7 @@ func (t *ParityTrace) writeTo(s *jsonstream.StackStream) {
 	default:
 		s.WriteNil()
 	}
-	if t.BlockHash != nil {
-		s.Field("blockHash").WriteHex(t.BlockHash[:])
-	}
+	jsonstream.HexOmitempty(s, "blockHash", t.BlockHash)
 	if t.BlockNumber != nil {
 		s.Field("blockNumber").Uint(*t.BlockNumber)
 	}
@@ -113,9 +111,7 @@ func (t *ParityTrace) writeTo(s *jsonstream.StackStream) {
 	s.Field("subtraces").Int(int64(t.Subtraces))
 	s.Field("traceAddress")
 	jsonstream.ArrayValue(s, t.TraceAddress, writeIntElem)
-	if t.TransactionHash != nil {
-		s.Field("transactionHash").WriteHex(t.TransactionHash[:])
-	}
+	jsonstream.HexOmitempty(s, "transactionHash", t.TransactionHash)
 	if t.TransactionPosition != nil {
 		s.Field("transactionPosition").Uint(*t.TransactionPosition)
 	}
@@ -140,12 +136,12 @@ func (a *CallTraceAction) writeTo(s *jsonstream.StackStream) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("from").WriteHex(a.From[:])
+	jsonstream.Hex(s, "from", &a.From)
 	s.Field("callType").WriteString(a.CallType)
-	jsonstream.Text(s, "gas", &a.Gas)
-	s.Field("input").WriteHex(a.Input)
-	s.Field("to").WriteHex(a.To[:])
-	jsonstream.Text(s, "value", &a.Value)
+	jsonstream.Hex(s, "gas", &a.Gas)
+	jsonstream.Hex(s, "input", &a.Input)
+	jsonstream.Hex(s, "to", &a.To)
+	jsonstream.Hex(s, "value", &a.Value)
 	s.WriteObjectEnd()
 }
 
@@ -164,14 +160,12 @@ func (a *CreateTraceAction) writeTo(s *jsonstream.StackStream) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("from").WriteHex(a.From[:])
+	jsonstream.Hex(s, "from", &a.From)
 	s.Field("creationMethod").WriteString(a.CreationMethod)
-	jsonstream.Text(s, "gas", &a.Gas)
-	if a.StateGas != nil {
-		jsonstream.Text(s, "stateGasReservoir", a.StateGas)
-	}
-	s.Field("init").WriteHex(a.Init)
-	jsonstream.Text(s, "value", &a.Value)
+	jsonstream.Hex(s, "gas", &a.Gas)
+	jsonstream.HexOmitempty(s, "stateGasReservoir", a.StateGas)
+	jsonstream.Hex(s, "init", &a.Init)
+	jsonstream.Hex(s, "value", &a.Value)
 	s.WriteObjectEnd()
 }
 
@@ -187,9 +181,9 @@ func (a *SuicideTraceAction) writeTo(s *jsonstream.StackStream) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("address").WriteHex(a.Address[:])
-	s.Field("refundAddress").WriteHex(a.RefundAddress[:])
-	jsonstream.Text(s, "balance", &a.Balance)
+	jsonstream.Hex(s, "address", &a.Address)
+	jsonstream.Hex(s, "refundAddress", &a.RefundAddress)
+	jsonstream.Hex(s, "balance", &a.Balance)
 	s.WriteObjectEnd()
 }
 
@@ -205,9 +199,9 @@ func (a *RewardTraceAction) writeTo(s *jsonstream.StackStream) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("author").WriteHex(a.Author[:])
+	jsonstream.Hex(s, "author", &a.Author)
 	s.Field("rewardType").WriteString(a.RewardType)
-	jsonstream.Text(s, "value", &a.Value)
+	jsonstream.Hex(s, "value", &a.Value)
 	s.WriteObjectEnd()
 }
 
@@ -225,14 +219,10 @@ func (r *CreateTraceResult) writeTo(s *jsonstream.StackStream) {
 		return
 	}
 	s.WriteObjectStart()
-	if r.Address != nil {
-		s.Field("address").WriteHex(r.Address[:])
-	}
-	s.Field("code").WriteHex(r.Code)
-	jsonstream.Text(s, "gasUsed", r.GasUsed)
-	if r.StateGasUsed != nil {
-		jsonstream.Text(s, "stateGasUsed", r.StateGasUsed)
-	}
+	jsonstream.HexOmitempty(s, "address", r.Address)
+	jsonstream.Hex(s, "code", &r.Code)
+	jsonstream.Hex(s, "gasUsed", r.GasUsed)
+	jsonstream.HexOmitempty(s, "stateGasUsed", r.StateGasUsed)
 	s.WriteObjectEnd()
 }
 
@@ -250,11 +240,9 @@ func (r *TraceResult) writeTo(s *jsonstream.StackStream) {
 		return
 	}
 	s.WriteObjectStart()
-	jsonstream.Text(s, "gasUsed", r.GasUsed)
-	s.Field("output").WriteHex(r.Output)
-	if r.StateGasUsed != nil {
-		jsonstream.Text(s, "stateGasUsed", r.StateGasUsed)
-	}
+	jsonstream.Hex(s, "gasUsed", r.GasUsed)
+	jsonstream.Hex(s, "output", &r.Output)
+	jsonstream.HexOmitempty(s, "stateGasUsed", r.StateGasUsed)
 	s.WriteObjectEnd()
 }
 

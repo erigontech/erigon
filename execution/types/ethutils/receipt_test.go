@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonstreamtest"
 )
 
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
@@ -186,6 +187,12 @@ func TestRPCReceiptMarshalFastJSONToOptionalFields(t *testing.T) {
 	price := hexutil.U256(*uint256.NewInt(7))
 	blobGas := hexutil.Uint64(131072)
 	bloom := types.Bloom{}
+	jsonstreamtest.RequireMatchesReflection(t, &RPCReceipt{
+		BlockHash: common.HexToHash("0x01"), BlockNumber: 2, TransactionHash: common.HexToHash("0x03"),
+		TransactionIndex: 4, From: &addr, To: &addr, Type: 2, GasUsed: 5, CumulativeGasUsed: 6,
+		ContractAddress: &addr, Logs: types.Logs{{Address: addr, Topics: []common.Hash{{}}}}, LogsBloom: &bloom,
+		EffectiveGasPrice: &price, Status: &status, Root: hexutil.Bytes{0x03}, BlobGasPrice: &price, BlobGasUsed: &blobGas,
+	})
 	for _, tc := range []struct {
 		name string
 		r    RPCReceipt

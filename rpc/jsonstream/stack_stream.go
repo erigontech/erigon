@@ -22,12 +22,13 @@ import (
 	"io"
 	"slices"
 	"strings"
+	"unsafe"
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/length"
 )
 
 // InitialStackSize is the initial capacity of the stack
@@ -103,72 +104,62 @@ func (s *StackStream) WriteHex(b []byte) {
 	s.afterValue()
 }
 
-// HexesField writes fixed-size values as one array field: one buffer growth for the whole
-// array, where a value write per element grows once per element. A nil slice is null.
-func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
-	s.Field(name)
-	if items == nil {
-		s.WriteNil()
-		return
-	}
-	s.beforeValue()
-	buf := slices.Grow(s.stream.Buffer(), 2+len(items)*(hexutil.QuotedLen(length.Hash)+1))
-	buf = append(buf, '[')
-	for i := range items {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = hexutil.AppendQuoted(buf, items[i][:])
-	}
-	s.stream.SetBuffer(append(buf, ']'))
-	s.afterValue()
-}
-
-// WriteHexBytes is WriteHexes for elements that are already byte slices, whose lengths vary
-// and so are summed before the single growth.
-func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
-	s.beforeValue()
-	size := 2 + len(items)
-	for i := range items {
-		size += hexutil.QuotedLen(len(items[i]))
-	}
-	buf := slices.Grow(s.stream.Buffer(), size)
-	buf = append(buf, '[')
-	for i := range items {
-		if i > 0 {
-			buf = append(buf, ',')
-		}
-		buf = hexutil.AppendQuoted(buf, items[i])
-	}
-	s.stream.SetBuffer(append(buf, ']'))
-	s.afterValue()
-}
-
 // Open returns the stream the value goes to, which is this one.
 func (s *StackStream) Open() *StackStream { return s }
 
-// WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
-// for hex quantities, which never need escaping.
+// WriteQuotedText writes v's text as a JSON string. Text of the hexutil and common types goes
+// out unscanned, any other type's text is escaped.
 func (s *StackStream) WriteQuotedText(v encoding.TextAppender) {
+	switch v.(type) {
+	case hexutil.Uint64, hexutil.Uint, hexutil.Int64, hexutil.U256, hexutil.Big, hexutil.Bytes,
+		*hexutil.Uint64, *hexutil.Uint, *hexutil.Int64, *hexutil.U256, *hexutil.Big, *hexutil.Bytes,
+		common.Hash, common.Address, *common.Hash, *common.Address:
+		s.writeQuotedText(v)
+	default:
+		s.writeEscapedText(v)
+	}
+}
+
+// writeQuotedText writes v's text as a JSON string without an escape scan, so v must be a hexType.
+func (s *StackStream) writeQuotedText(v encoding.TextAppender) {
 	s.beforeValue()
 	start := len(s.stream.Buffer())
-	buf, err := v.AppendText(append(s.stream.Buffer(), '"'))
-	if err != nil {
-		// An empty string keeps the JSON well-formed; the latched error stops it reaching the client.
-		buf = append(s.stream.Buffer(), '"')
-		if s.stream.Error == nil {
-			s.stream.Error = err
-		}
-	}
+	buf := s.appendText(append(s.stream.Buffer(), '"'), v)
 	assertNoEscapes(buf[start+1:])
 	buf = append(buf, '"')
 	s.commit(buf, start)
 	s.afterValue()
 }
 
-// assertNoEscapes holds WriteQuotedText's caller to its side of the bargain: the text goes out
-// unscanned, so a byte JSON would escape would leave the response malformed. Every appender the
-// RPC can answer with today is a hex quantity; this is what catches the next one that is not.
+func (s *StackStream) writeEscapedText(v encoding.TextAppender) {
+	s.beforeValue()
+	start := len(s.stream.Buffer())
+	buf := s.appendText(append(s.stream.Buffer(), '"'), v)
+	if text := buf[start+1:]; escapeIndex(unsafe.String(unsafe.SliceData(text), len(text))) < len(text) {
+		buf = appendJSONString(buf[:start], string(text)) // string() copies what the append overwrites
+	} else {
+		buf = append(buf, '"')
+	}
+	s.commit(buf, start)
+	s.afterValue()
+}
+
+// appendText appends v's text to buf. On failure it appends nothing: an empty string keeps the
+// JSON well-formed, and the latched error stops it reaching the client.
+func (s *StackStream) appendText(buf []byte, v encoding.TextAppender) []byte {
+	text, err := v.AppendText(buf)
+	if err != nil {
+		if s.stream.Error == nil {
+			s.stream.Error = err
+		}
+		return buf
+	}
+	return text
+}
+
+// assertNoEscapes holds writeQuotedText's caller to its side of the bargain: the text goes out
+// unscanned, so a byte JSON would escape would leave the response malformed. This catches a type
+// added to hexType by mistake.
 func assertNoEscapes(text []byte) {
 	if !dbg.AssertEnabled {
 		return

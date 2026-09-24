@@ -377,21 +377,15 @@ func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return err
 	}
 	s.WriteObjectStart()
-	jsonstream.Text(s, "oldestBlock", r.OldestBlock)
+	jsonstream.Hex(s, "oldestBlock", r.OldestBlock)
 	if len(r.Reward) > 0 {
 		s.Field("reward")
 		jsonstream.ArrayValue(s, r.Reward, writeU256s)
 	}
-	if len(r.BaseFee) > 0 {
-		s.Field("baseFeePerGas")
-		writeU256s(s, &r.BaseFee)
-	}
+	jsonstream.HexesOmitempty(s, "baseFeePerGas", r.BaseFee)
 	s.Field("gasUsedRatio")
 	jsonstream.ArrayValue(s, r.GasUsedRatio, writeJSONFloat)
-	if len(r.BlobBaseFee) > 0 {
-		s.Field("baseFeePerBlobGas")
-		writeU256s(s, &r.BlobBaseFee)
-	}
+	jsonstream.HexesOmitempty(s, "baseFeePerBlobGas", r.BlobBaseFee)
 	if len(r.BlobGasUsedRatio) > 0 {
 		s.Field("blobGasUsedRatio")
 		jsonstream.ArrayValue(s, r.BlobGasUsedRatio, writeJSONFloat)
@@ -400,11 +394,7 @@ func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	return nil
 }
 
-func writeU256s(s *jsonstream.StackStream, vs *[]hexutil.U256) {
-	jsonstream.ArrayValue(s, *vs, writeU256)
-}
-
-func writeU256(s *jsonstream.StackStream, v *hexutil.U256) { s.WriteQuotedText(v) }
+func writeU256s(s *jsonstream.StackStream, vs *[]hexutil.U256) { jsonstream.HexesValue(s, *vs) }
 
 func allFinite(fs []float64) bool {
 	for _, f := range fs {

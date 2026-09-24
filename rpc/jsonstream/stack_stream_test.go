@@ -31,6 +31,7 @@ import (
 
 	jsoniter "github.com/json-iterator/go"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 )
@@ -1086,7 +1087,7 @@ func TestLazyFieldStreamNestedChainsValueOntoExplicitField(t *testing.T) {
 	require.Equal(t, `{"error":"boom"`, string(inner.Buffer()))
 }
 
-// WriteQuotedText writes its text unscanned, so a byte JSON would escape has to be caught
+// writeQuotedText writes its text unscanned, so a byte JSON would escape has to be caught
 // where it is produced rather than reaching a client as malformed JSON.
 func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
@@ -1094,9 +1095,24 @@ func TestWriteQuotedTextRejectsEscapableText(t *testing.T) {
 	s := newStackStream(nil, 64)
 
 	require.PanicsWithValue(t, `jsonstream: quoted text holds '"', which JSON escapes`, func() {
-		s.WriteQuotedText(appenderFunc(`say "hi"`))
+		s.writeQuotedText(appenderFunc(`say "hi"`))
 	})
-	require.NotPanics(t, func() { s.WriteQuotedText(appenderFunc("0xdeadbeef")) })
+	require.NotPanics(t, func() { s.writeQuotedText(appenderFunc("0xdeadbeef")) })
+}
+
+// WriteQuotedText takes any appender, so text of a type outside the hex set is escaped.
+func TestWriteQuotedTextEscapesNonHexText(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	s := newStackStream(nil, 64)
+	s.WriteArrayStart()
+	s.WriteQuotedText(appenderFunc("say \"hi\"\n"))
+	s.WriteQuotedText(appenderFunc("plain"))
+	h := common.HexToHash("0x01")
+	s.WriteQuotedText(h)
+	s.WriteQuotedText(&h)
+	s.WriteArrayEnd()
+	require.Equal(t, `["say \"hi\"\n","plain","`+h.Hex()+`","`+h.Hex()+`"]`, string(s.Buffer()))
 }
 
 type appenderFunc string
@@ -1405,23 +1421,90 @@ func TestLazyFieldStreamAssertsFieldBeforeValue(t *testing.T) {
 	}
 }
 
-// A nil slice is the caller's to write as null: WriteHexBytes always writes an array.
-func TestWriteHexBytes(t *testing.T) {
-	for name, tc := range map[string]struct {
-		items [][]byte
-		want  string
-	}{
-		"nil":           {nil, `[]`},
-		"empty":         {[][]byte{}, `[]`},
-		"empty element": {[][]byte{{}}, `["0x"]`},
-		"multi":         {[][]byte{{0x01}, {0xab, 0xcd}, nil}, `["0x01","0xabcd","0x"]`},
-	} {
-		t.Run(name, func(t *testing.T) {
-			s := Get(nil)
-			defer Put(s)
-			WriteHexBytes(s, tc.items)
-			require.NoError(t, s.Err())
-			require.Equal(t, tc.want, string(s.Buffer()))
-		})
+// Hex and HexOmitempty write what encoding/json writes for a pointer field tagged without and
+// with omitempty.
+func TestHexMatchesReflection(t *testing.T) {
+	hash := common.HexToHash("0xab")
+	addr := common.HexToAddress("0xcd")
+	u64 := hexutil.Uint64(0)
+	b := hexutil.Bytes{}
+	assertHexField(t, &hash)
+	assertHexField(t, (*common.Hash)(nil))
+	assertHexField(t, &addr)
+	assertHexField(t, &u64)
+	assertHexField(t, (*hexutil.Uint64)(nil))
+	assertHexField(t, &b)
+	assertHexField(t, (*hexutil.Bytes)(nil))
+}
+
+func assertHexField[T hexType, P hexPtr[T]](t *testing.T, v P) {
+	t.Helper()
+	assertMatches(t, struct {
+		V P `json:"v"`
+	}{v}, func(s *StackStream) { Hex(s, "v", v) })
+	assertMatches(t, struct {
+		V P `json:"v,omitempty"`
+	}{v}, func(s *StackStream) { HexOmitempty(s, "v", v) })
+}
+
+// Hexes and HexesOmitempty write what encoding/json writes for a slice field tagged without and
+// with omitempty.
+func TestHexesMatchesReflection(t *testing.T) {
+	assertHexesField(t, []common.Hash(nil))
+	assertHexesField(t, []common.Hash{})
+	assertHexesField(t, []common.Hash{common.HexToHash("0x01"), common.HexToHash("0x02")})
+	assertHexesField(t, []hexutil.Bytes{nil, {}, {0xab, 0xcd}})
+	assertHexesField(t, []hexutil.Uint64{0, 7})
+}
+
+func assertHexesField[S ~[]E, E hexType, P hexPtr[E]](t *testing.T, items S) {
+	t.Helper()
+	assertMatches(t, struct {
+		V S `json:"v"`
+	}{items}, func(s *StackStream) { Hexes[S, E, P](s, "v", items) })
+	assertMatches(t, struct {
+		V S `json:"v,omitempty"`
+	}{items}, func(s *StackStream) { HexesOmitempty[S, E, P](s, "v", items) })
+}
+
+func assertMatches(t *testing.T, v any, write func(*StackStream)) {
+	t.Helper()
+	want, err := json.Marshal(v)
+	require.NoError(t, err)
+	s := Get(nil)
+	defer Put(s)
+	s.WriteObjectStart()
+	write(s)
+	s.Field("next").Int(1)
+	s.WriteObjectEnd()
+	require.NoError(t, s.Err())
+	require.Equal(t, string(want[:len(want)-1])+sep(want)+`"next":1}`, string(s.Buffer()))
+}
+
+func sep(obj []byte) string {
+	if len(obj) == 2 {
+		return ""
 	}
+	return ","
+}
+
+// A blob array hands each element to the writer as it goes, so the buffer holds one blob, not all.
+func TestHexesFlushesPerElement(t *testing.T) {
+	blobs := make([]hexutil.Bytes, 16)
+	for i := range blobs {
+		blobs[i] = bytes.Repeat([]byte{byte(i)}, FlushThreshold/2)
+	}
+	var out bytes.Buffer
+	s := New(&out).(*StackStream)
+	s.WriteObjectStart()
+	Hexes(s, "blobs", blobs)
+	s.WriteObjectEnd()
+	require.NoError(t, s.Flush())
+
+	want, err := json.Marshal(struct {
+		Blobs []hexutil.Bytes `json:"blobs"`
+	}{blobs})
+	require.NoError(t, err)
+	require.Equal(t, string(want), out.String())
+	require.LessOrEqual(t, cap(s.Buffer()), maxPooledBufferSize)
 }

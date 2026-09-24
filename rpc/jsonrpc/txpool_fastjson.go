@@ -87,13 +87,7 @@ func (v StorageValues) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteObjectStart()
 	for i := range addrs {
 		// Not Hex(): that is the EIP-55 checksum form, where the key is lowercase.
-		w.Field(hexutil.Encode(addrs[i][:]))
-		slots := v[addrs[i]]
-		if slots == nil {
-			w.WriteNil()
-			continue
-		}
-		jsonstream.WriteHexBytes(w, slots)
+		jsonstream.Hexes(w, hexutil.Encode(addrs[i][:]), v[addrs[i]])
 	}
 	w.WriteObjectEnd()
 	return nil

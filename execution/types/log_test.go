@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonstreamtest"
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/require"
@@ -583,6 +584,7 @@ func TestRPCLogsMarshalFastJSONTo(t *testing.T) {
 		},
 		BlockTimestamp: 0x64,
 	}
+	jsonstreamtest.RequireMatchesReflection(t, full)
 	for name, logs := range map[string]RPCLogs{
 		"nil":          nil,
 		"empty":        {},

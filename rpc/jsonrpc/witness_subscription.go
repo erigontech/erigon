@@ -43,8 +43,8 @@ type WitnessNotification struct {
 
 func (n WitnessNotification) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	s.WriteObjectStart()
-	jsonstream.Text(s, "blockNumber", &n.BlockNumber)
-	s.Field("blockHash").WriteHex(n.BlockHash[:])
+	jsonstream.Hex(s, "blockNumber", &n.BlockNumber)
+	jsonstream.Hex(s, "blockHash", &n.BlockHash)
 	s.Field("witness")
 	if err := n.Witness.MarshalFastJSONTo(s); err != nil {
 		return err

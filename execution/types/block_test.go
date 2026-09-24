@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonstreamtest"
 )
 
 func TestBlockDecodingNestedRLPExtra(t *testing.T) {
@@ -851,6 +852,8 @@ func TestHeaderMarshalFastJSONTo(t *testing.T) {
 		BlockAccessListHash:   &hash,
 		SlotNumber:            &num,
 	}
+	jsonstreamtest.RequireMatchesReflection(t, full)
+	jsonstreamtest.RequireMatchesReflection(t, &Withdrawal{Index: 1, Validator: 2, Address: common.HexToAddress("0x01"), Amount: 3})
 	empty := &Header{}
 	noOptionals := &Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(0), Extra: []byte{}}
 

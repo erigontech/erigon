@@ -34,12 +34,9 @@ func writeBlobsBundle(s *jsonstream.StackStream, b *BlobsBundle) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("commitments")
-	jsonstream.ArrayValue(s, b.Commitments, writeHex)
-	s.Field("proofs")
-	jsonstream.ArrayValue(s, b.Proofs, writeHex)
-	s.Field("blobs")
-	jsonstream.ArrayValue(s, b.Blobs, writeHex)
+	jsonstream.Hexes(s, "commitments", b.Commitments)
+	jsonstream.Hexes(s, "proofs", b.Proofs)
+	jsonstream.Hexes(s, "blobs", b.Blobs)
 	s.WriteObjectEnd()
 }
 
@@ -52,11 +49,10 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error 
 	s.WriteObjectStart()
 	s.Field("executionPayload")
 	r.ExecutionPayload.writeTo(s)
-	jsonstream.Text(s, "blockValue", r.BlockValue)
+	jsonstream.Hex(s, "blockValue", r.BlockValue)
 	s.Field("blobsBundle")
 	writeBlobsBundle(s, r.BlobsBundle)
-	s.Field("executionRequests")
-	jsonstream.ArrayValue(s, r.ExecutionRequests, writeHex)
+	jsonstream.Hexes(s, "executionRequests", r.ExecutionRequests)
 	s.Field("shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
 	s.WriteObjectEnd()
 	return nil
@@ -69,31 +65,26 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.StackStream) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("parentHash").WriteHex(p.ParentHash[:])
-	s.Field("feeRecipient").WriteHex(p.FeeRecipient[:])
-	s.Field("stateRoot").WriteHex(p.StateRoot[:])
-	s.Field("receiptsRoot").WriteHex(p.ReceiptsRoot[:])
-	s.Field("logsBloom").WriteHex(p.LogsBloom)
-	s.Field("prevRandao").WriteHex(p.PrevRandao[:])
-	jsonstream.Text(s, "blockNumber", &p.BlockNumber)
-	jsonstream.Text(s, "gasLimit", &p.GasLimit)
-	jsonstream.Text(s, "gasUsed", &p.GasUsed)
-	jsonstream.Text(s, "timestamp", &p.Timestamp)
-	s.Field("extraData").WriteHex(p.ExtraData)
-	jsonstream.Text(s, "baseFeePerGas", p.BaseFeePerGas)
-	s.Field("blockHash").WriteHex(p.BlockHash[:])
-	s.Field("transactions")
-	jsonstream.ArrayValue(s, p.Transactions, writeHex)
+	jsonstream.Hex(s, "parentHash", &p.ParentHash)
+	jsonstream.Hex(s, "feeRecipient", &p.FeeRecipient)
+	jsonstream.Hex(s, "stateRoot", &p.StateRoot)
+	jsonstream.Hex(s, "receiptsRoot", &p.ReceiptsRoot)
+	jsonstream.Hex(s, "logsBloom", &p.LogsBloom)
+	jsonstream.Hex(s, "prevRandao", &p.PrevRandao)
+	jsonstream.Hex(s, "blockNumber", &p.BlockNumber)
+	jsonstream.Hex(s, "gasLimit", &p.GasLimit)
+	jsonstream.Hex(s, "gasUsed", &p.GasUsed)
+	jsonstream.Hex(s, "timestamp", &p.Timestamp)
+	jsonstream.Hex(s, "extraData", &p.ExtraData)
+	jsonstream.Hex(s, "baseFeePerGas", p.BaseFeePerGas)
+	jsonstream.Hex(s, "blockHash", &p.BlockHash)
+	jsonstream.Hexes(s, "transactions", p.Transactions)
 	s.Field("withdrawals")
 	jsonstream.ArrayValue(s, p.Withdrawals, writeWithdrawal)
-	jsonstream.Text(s, "blobGasUsed", p.BlobGasUsed)
-	jsonstream.Text(s, "excessBlobGas", p.ExcessBlobGas)
-	if p.SlotNumber != nil {
-		jsonstream.Text(s, "slotNumber", p.SlotNumber)
-	}
-	if p.BlockAccessList != nil {
-		s.Field("blockAccessList").WriteHex(*p.BlockAccessList)
-	}
+	jsonstream.Hex(s, "blobGasUsed", p.BlobGasUsed)
+	jsonstream.Hex(s, "excessBlobGas", p.ExcessBlobGas)
+	jsonstream.HexOmitempty(s, "slotNumber", p.SlotNumber)
+	jsonstream.HexOmitempty(s, "blockAccessList", p.BlockAccessList)
 	s.WriteObjectEnd()
 }
 

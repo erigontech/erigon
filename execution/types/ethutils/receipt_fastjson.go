@@ -52,57 +52,28 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	}
 	w.WriteObjectStart()
 
-	w.Field("blockHash").WriteHex(r.BlockHash[:])
-	w.Field("blockNumber").WriteQuotedText(&r.BlockNumber)
-	w.Field("transactionHash").WriteHex(r.TransactionHash[:])
-	w.Field("transactionIndex").WriteQuotedText(&r.TransactionIndex)
-	w.Field("from")
-	if r.From == nil {
-		w.WriteNil()
-	} else {
-		w.WriteHex(r.From[:])
-	}
-	w.Field("to")
-	if r.To == nil {
-		w.WriteNil()
-	} else {
-		w.WriteHex(r.To[:])
-	}
-	w.Field("type").WriteQuotedText(&r.Type)
-	w.Field("gasUsed").WriteQuotedText(&r.GasUsed)
-	w.Field("cumulativeGasUsed").WriteQuotedText(&r.CumulativeGasUsed)
-	w.Field("contractAddress")
-	if r.ContractAddress == nil {
-		w.WriteNil()
-	} else {
-		w.WriteHex(r.ContractAddress[:])
-	}
+	jsonstream.Hex(w, "blockHash", &r.BlockHash)
+	jsonstream.Hex(w, "blockNumber", &r.BlockNumber)
+	jsonstream.Hex(w, "transactionHash", &r.TransactionHash)
+	jsonstream.Hex(w, "transactionIndex", &r.TransactionIndex)
+	jsonstream.Hex(w, "from", r.From)
+	jsonstream.Hex(w, "to", r.To)
+	jsonstream.Hex(w, "type", &r.Type)
+	jsonstream.Hex(w, "gasUsed", &r.GasUsed)
+	jsonstream.Hex(w, "cumulativeGasUsed", &r.CumulativeGasUsed)
+	jsonstream.Hex(w, "contractAddress", r.ContractAddress)
 	w.Field("logs")
 	if err := writeLogs(w, r.Logs); err != nil {
 		return err
 	}
-	w.Field("logsBloom")
-	if r.LogsBloom == nil {
-		w.WriteNil()
-	} else {
-		w.WriteHex(r.LogsBloom[:])
-	}
-
-	if r.EffectiveGasPrice != nil {
-		w.Field("effectiveGasPrice").WriteQuotedText(r.EffectiveGasPrice)
-	}
-	if r.Status != nil {
-		w.Field("status").WriteQuotedText(r.Status)
-	}
+	jsonstream.Hex(w, "logsBloom", r.LogsBloom)
+	jsonstream.HexOmitempty(w, "effectiveGasPrice", r.EffectiveGasPrice)
+	jsonstream.HexOmitempty(w, "status", r.Status)
 	if len(r.Root) > 0 {
-		w.Field("root").WriteHex(r.Root)
+		jsonstream.Hex(w, "root", &r.Root)
 	}
-	if r.BlobGasPrice != nil {
-		w.Field("blobGasPrice").WriteQuotedText(r.BlobGasPrice)
-	}
-	if r.BlobGasUsed != nil {
-		w.Field("blobGasUsed").WriteQuotedText(r.BlobGasUsed)
-	}
+	jsonstream.HexOmitempty(w, "blobGasPrice", r.BlobGasPrice)
+	jsonstream.HexOmitempty(w, "blobGasUsed", r.BlobGasUsed)
 
 	w.WriteObjectEnd()
 	return nil
@@ -138,14 +109,14 @@ func writeLog(w *jsonstream.StackStream, lp **types.Log) {
 		return
 	}
 	w.WriteObjectStart()
-	w.Field("address").WriteHex(l.Address[:])
-	jsonstream.HexesField(w, "topics", l.Topics)
-	w.Field("data").WriteHex(l.Data)
-	w.Field("blockNumber").WriteQuotedText(&l.BlockNumber)
-	w.Field("transactionHash").WriteHex(l.TxHash[:])
-	w.Field("transactionIndex").WriteQuotedText(&l.TxIndex)
-	w.Field("blockHash").WriteHex(l.BlockHash[:])
-	w.Field("logIndex").WriteQuotedText(&l.Index)
+	jsonstream.Hex(w, "address", &l.Address)
+	jsonstream.Hexes(w, "topics", l.Topics)
+	jsonstream.Hex(w, "data", &l.Data)
+	jsonstream.Hex(w, "blockNumber", &l.BlockNumber)
+	jsonstream.Hex(w, "transactionHash", &l.TxHash)
+	jsonstream.Hex(w, "transactionIndex", &l.TxIndex)
+	jsonstream.Hex(w, "blockHash", &l.BlockHash)
+	jsonstream.Hex(w, "logIndex", &l.Index)
 	w.Field("removed").WriteBool(l.Removed)
 	w.WriteObjectEnd()
 }

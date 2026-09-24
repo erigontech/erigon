@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/jsonstreamtest"
 )
 
 func TestNewRPCTransaction_NullSignature(t *testing.T) {
@@ -364,6 +365,7 @@ func fullRPCHeader() *RPCHeader {
 // TestRPCHeaderMarshalFastJSONTo requires the streamed encoding to be byte-identical to
 // the reflection one; that equality is the only thing that makes it safe to swap in.
 func TestRPCHeaderMarshalFastJSONTo(t *testing.T) {
+	jsonstreamtest.RequireMatchesReflection(t, fullRPCHeader())
 	bare := fullRPCHeader()
 	bare.BaseFeePerGas, bare.WithdrawalsRoot, bare.BlobGasUsed, bare.ExcessBlobGas = nil, nil, nil, nil
 	bare.ParentBeaconBlockRoot, bare.RequestsHash, bare.BlockAccessListHash, bare.SlotNumber = nil, nil, nil, nil
@@ -529,6 +531,9 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	emptyAccesses.Accesses = &types.AccessList{}
 	emptyBlobs := base()
 	emptyBlobs.BlobVersionedHashes = []common.Hash{}
+	full := *dynamic
+	full.MaxFeePerBlobGas, full.BlobVersionedHashes, full.Authorizations = blob.MaxFeePerBlobGas, blob.BlobVersionedHashes, setcode.Authorizations
+	jsonstreamtest.RequireMatchesReflection(t, &full)
 
 	for name, txn := range map[string]*RPCTransaction{
 		"zero": {}, "legacy": base(), "dynamic fee": dynamic, "blob": blob,

@@ -28,17 +28,17 @@ func (l *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
-	s.Field("address").WriteHex(l.Address[:])
-	jsonstream.HexesField(s, "topics", l.Topics)
+	jsonstream.Hex(s, "address", &l.Address)
+	jsonstream.Hexes(s, "topics", l.Topics)
 	// A nil Data is "0x", not null.
-	s.Field("data").WriteHex(l.Data)
-	jsonstream.Text(s, "blockNumber", &l.BlockNumber)
-	s.Field("transactionHash").WriteHex(l.TxHash[:])
-	jsonstream.Text(s, "transactionIndex", &l.TxIndex)
-	s.Field("blockHash").WriteHex(l.BlockHash[:])
-	jsonstream.Text(s, "logIndex", &l.Index)
+	jsonstream.Hex(s, "data", &l.Data)
+	jsonstream.Hex(s, "blockNumber", &l.BlockNumber)
+	jsonstream.Hex(s, "transactionHash", &l.TxHash)
+	jsonstream.Hex(s, "transactionIndex", &l.TxIndex)
+	jsonstream.Hex(s, "blockHash", &l.BlockHash)
+	jsonstream.Hex(s, "logIndex", &l.Index)
 	s.Field("removed").WriteBool(l.Removed)
-	jsonstream.Text(s, "blockTimestamp", &l.BlockTimestamp)
+	jsonstream.Hex(s, "blockTimestamp", &l.BlockTimestamp)
 	s.WriteObjectEnd()
 	return nil
 }
