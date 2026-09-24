@@ -821,7 +821,7 @@ func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
 
 // vmTrace attaches a sub only to call and create ops that run a child frame.
 func TestTraceCallVmTraceSubs(t *testing.T) {
-	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
 	api := newTraceApiForTest(m)
 	target := common.HexToAddress("0x00000000000000000000000000000000cafe0004")
 
@@ -838,6 +838,18 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 			pc:     7,
 			frame:  CALL,
 			hasSub: true,
+		},
+		{
+			name:  "call with insufficient balance",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.GAS), byte(vm.CALL), byte(vm.STOP)},
+			pc:    8,
+			frame: CALL,
+		},
+		{
+			name:  "create with insufficient balance",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE), byte(vm.STOP)},
+			pc:    4,
+			frame: CREATE,
 		},
 		{
 			name:  "selfdestruct",

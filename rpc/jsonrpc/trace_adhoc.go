@@ -503,6 +503,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
 			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+			// A call or create that fails its depth or balance check runs no code, so it gets no sub.
+			if errors.Is(err, vm.ErrDepth) || errors.Is(err, vm.ErrInsufficientBalance) {
+				ot.lastOffStack.Sub = nil
+			}
 		}
 		if !ot.compat && deep {
 			ot.idx = ot.idx[:len(ot.idx)-1]
