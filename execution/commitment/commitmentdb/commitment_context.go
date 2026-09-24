@@ -63,6 +63,7 @@ type sd interface {
 type SharedDomainsCommitmentContext struct {
 	sharedDomains sd
 	updates       *commitment.Updates
+	feed          *commitment.Feed
 	patriciaTrie  commitment.Trie
 	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
 	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
@@ -87,6 +88,10 @@ type SharedDomainsCommitmentContext struct {
 	pendingVariant commitment.TrieVariant
 	pendingCfg     commitment.TrieConfig
 	warnedUnwired  sync.Once
+}
+
+type feedTrie interface {
+	ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error)
 }
 
 type deferredCommitmentTrie interface {
@@ -230,6 +235,15 @@ func (sdc *SharedDomainsCommitmentContext) GetUpdates() *commitment.Updates {
 // to install its accumulated touches before calling ComputeCommitment.
 func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Updates) {
 	sdc.updates = updates
+}
+
+func (sdc *SharedDomainsCommitmentContext) AcceptsFeed() bool {
+	_, ok := sdc.patriciaTrie.(feedTrie)
+	return ok
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetFeed(feed *commitment.Feed) {
+	sdc.feed = feed
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
@@ -487,7 +501,12 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		defer mxCommitmentTook.ObserveDuration(time.Now())
 	}
 
+	feed := sdc.feed
+	sdc.feed = nil
 	updateCount := sdc.updates.Size()
+	if feed != nil {
+		updateCount = uint64(feed.Keys)
+	}
 	start := time.Now()
 	defer func() {
 		took := time.Since(start)
@@ -634,7 +653,11 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		defer trie.SetDeferCommitmentUpdates(false)
 	}
 
-	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+	if feed != nil {
+		rootHash, err = sdc.patriciaTrie.(feedTrie).ProcessFeed(ctx, feed, onProgress)
+	} else {
+		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+	}
 
 	if err != nil {
 		if drainCollectors != nil {

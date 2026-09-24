@@ -100,7 +100,7 @@ func TestSelfDestructOnlyWriteSetCreatesStorageWipe(t *testing.T) {
 
 	ctx := newMockContext()
 	path := append([]byte{1}, bytes.Repeat([]byte{2}, 63)...)
-	_, err = runStorageTask(ctx, storageTask{addrHash: storage[0].addrHash, entries: []storageEntry{{path: path, update: phaseAStorageUpdate([]byte{1})}}})
+	_, err = runStorageTask(ctx, storageTask{addrHash: storage[0].addrHash, entries: []storageEntry{entryOf(path, phaseAStorageUpdate([]byte{1}))}})
 	require.NoError(t, err)
 	_, err = runStorageTask(ctx, storage[0])
 	require.NoError(t, err)
@@ -114,8 +114,8 @@ func TestWipeStorageRecordsFromMasks(t *testing.T) {
 	pathB := append([]byte{2, 5}, bytes.Repeat([]byte{6}, 62)...)
 	ctx := newMockContext()
 	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: pathA, update: phaseAStorageUpdate([]byte{1})},
-		{path: pathB, update: phaseAStorageUpdate([]byte{2})},
+		entryOf(pathA, phaseAStorageUpdate([]byte{1})),
+		entryOf(pathB, phaseAStorageUpdate([]byte{2})),
 	}})
 	require.NoError(t, err)
 
@@ -175,7 +175,7 @@ func TestWipeEnumeratesAllBranchChildrenUnderAliasingContext(t *testing.T) {
 	}
 	entries := make([]storageEntry, len(paths))
 	for i, p := range paths {
-		entries[i] = storageEntry{path: p, update: phaseAStorageUpdate(bytes.Repeat([]byte{byte(i + 1)}, 32))}
+		entries[i] = entryOf(p, phaseAStorageUpdate(bytes.Repeat([]byte{byte(i + 1)}, 32)))
 	}
 	ctx := newMockContext()
 	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: entries})

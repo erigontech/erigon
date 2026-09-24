@@ -33,9 +33,30 @@ var (
 	errPhaseAOrder   = errors.New("commitment v4: phase A input is not sorted by hashed key")
 )
 
+type storageOp uint8
+
+const (
+	storageSkip storageOp = iota
+	storagePut
+	storageDelete
+)
+
 type storageEntry struct {
-	path   []byte
-	update *commitment.Update
+	path  []byte
+	value []byte
+	op    storageOp
+}
+
+func storageEntryOf(path []byte, update *commitment.Update) (storageEntry, error) {
+	switch {
+	case update == nil || update.Flags == 0:
+		return storageEntry{path: path}, nil
+	case update.Deleted():
+		return storageEntry{path: path, op: storageDelete}, nil
+	case update.Flags&commitment.StorageUpdate == 0 || update.StorageLen < 0:
+		return storageEntry{}, errPhaseAUpdate
+	}
+	return storageEntry{path: path, value: update.Storage[:update.StorageLen], op: storagePut}, nil
 }
 
 type storageTask struct {
@@ -46,7 +67,6 @@ type storageTask struct {
 
 type accountEntry struct {
 	hashedKey    []byte
-	plainKey     []byte
 	update       *commitment.Update
 	storageDirty bool
 }
@@ -63,7 +83,7 @@ func newPartitioner() *partitioner {
 	return &partitioner{storageIndex: -1}
 }
 
-func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update) error {
+func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
 	p.seen++
 	if len(hashedKey) != 64 && len(hashedKey) != 128 {
 		return nil
@@ -75,10 +95,7 @@ func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update)
 
 	accountHash := hashedKey[:64:64]
 	if len(p.accounts) == 0 || !bytes.Equal(p.accounts[len(p.accounts)-1].hashedKey, accountHash) {
-		p.accounts = append(p.accounts, accountEntry{
-			hashedKey: accountHash,
-			plainKey:  prefix(plainKey, 20),
-		})
+		p.accounts = append(p.accounts, accountEntry{hashedKey: accountHash})
 		p.storageIndex = -1
 	}
 	current := &p.accounts[len(p.accounts)-1]
@@ -93,10 +110,11 @@ func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update)
 		p.storage = append(p.storage, storageTask{addrHash: hashAddressPath(current.hashedKey)})
 	}
 	current.storageDirty = true
-	p.storage[p.storageIndex].entries = append(p.storage[p.storageIndex].entries, storageEntry{
-		path:   hashedKey[64:128:128],
-		update: update,
-	})
+	entry, err := storageEntryOf(hashedKey[64:128:128], update)
+	if err != nil {
+		return err
+	}
+	p.storage[p.storageIndex].entries = append(p.storage[p.storageIndex].entries, entry)
 	return nil
 }
 
@@ -115,11 +133,6 @@ func hashAddressPath(path []byte) [32]byte {
 	var addrHash [32]byte
 	packPath(path, addrHash[:0])
 	return addrHash
-}
-
-func prefix(src []byte, n int) []byte {
-	n = min(n, len(src))
-	return src[:n:n]
 }
 
 var storageFanOutMin = dbg.EnvInt("COMMITMENT_V4_STORAGE_FANOUT_MIN", 128)
@@ -168,7 +181,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	fanned := false
 	if len(task.entries) >= storageFanOutMin {
 		fanned, err = g.fanOutRoot(ctx, root, len(task.entries), func(i int) byte { return task.entries[i].path[0] }, plan, func(ctx commitment.PatriciaContext, i int) error {
-			if u := task.entries[i].update; u == nil || u.Flags == 0 {
+			if task.entries[i].op == storageSkip {
 				return nil
 			}
 			return g.ensurePath(ctx, root, task.entries[i].path)
@@ -182,7 +195,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 	}
 
 	for _, entry := range task.entries {
-		if entry.update == nil || entry.update.Flags == 0 {
+		if entry.op == storageSkip {
 			continue
 		}
 		if !fanned && (len(root.path) == 0 || bytes.HasPrefix(entry.path, root.path)) {
@@ -190,7 +203,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 				return [32]byte{}, nil, err
 			}
 		}
-		if entry.update.Deleted() {
+		if entry.op == storageDelete {
 			if err := removeRoot(root, entry.path); err != nil {
 				if errors.Is(err, ErrRemoveNotFound) {
 					continue
@@ -199,10 +212,7 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 			}
 			continue
 		}
-		if entry.update.Flags&commitment.StorageUpdate == 0 || entry.update.StorageLen < 0 {
-			return [32]byte{}, nil, errPhaseAUpdate
-		}
-		if err := insertRoot(root, entry.path, entry.update.Storage[:entry.update.StorageLen]); err != nil {
+		if err := insertRoot(root, entry.path, entry.value); err != nil {
 			return [32]byte{}, nil, err
 		}
 	}

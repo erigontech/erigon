@@ -98,12 +98,15 @@ func compareFeed(a, b feedEntry) int {
 }
 
 func bucketFeed(items []feedEntry) [257]int {
-	bucket := func(e *feedEntry) int {
+	return bucketBy(items, func(e *feedEntry) int {
 		if len(e.hashedKey) < 2 {
 			return 0
 		}
 		return int(e.hashedKey[0])<<4 | int(e.hashedKey[1])
-	}
+	})
+}
+
+func bucketBy[T any](items []T, bucket func(*T) int) [257]int {
 	var bounds [257]int
 	for i := range items {
 		bounds[bucket(&items[i])+1]++
@@ -139,7 +142,7 @@ func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper
 		slices.SortFunc(bucket, compareFeed)
 		p := newPartitioner()
 		for i := range bucket {
-			if err := p.add(bucket[i].hashedKey, common.ToBytesZeroCopy(bucket[i].plainKey), bucket[i].update); err != nil {
+			if err := p.add(bucket[i].hashedKey, bucket[i].update); err != nil {
 				errs[b] = err
 				return
 			}
@@ -184,10 +187,58 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 
 	p := newPartitioner()
 	for i := range items {
-		if err := p.add(items[i].hashedKey, common.ToBytesZeroCopy(items[i].plainKey), items[i].update); err != nil {
+		if err := p.add(items[i].hashedKey, items[i].update); err != nil {
 			return nil, nil, 0, err
 		}
 	}
 	storage, accounts := p.done()
 	return storage, accounts, p.seen, nil
+}
+
+func partitionAccounts(feed []commitment.FeedAccount, workers int) ([]storageTask, []accountEntry) {
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+	bounds := bucketBy(feed, func(a *commitment.FeedAccount) int { return int(a.Hash[0]) })
+	var storage [256][]storageTask
+	var accounts [256][]accountEntry
+	parallelFor(256, workers, 1, func(b int) {
+		bucket := feed[bounds[b]:bounds[b+1]]
+		if len(bucket) == 0 {
+			return
+		}
+		slices.SortFunc(bucket, func(x, y commitment.FeedAccount) int { return bytes.Compare(x.Hash[:], y.Hash[:]) })
+		keys := len(bucket)
+		for i := range bucket {
+			keys += len(bucket[i].Slots)
+		}
+		nibs := make([]byte, 64*keys)
+		entries := make([]storageEntry, keys-len(bucket))
+		expand := func(hash *[32]byte) []byte {
+			out := nibs[:64:64]
+			nibs = nibs[64:]
+			nibbles.Expand(hash[:], out)
+			return out
+		}
+		p := &partitioner{accounts: make([]accountEntry, len(bucket))}
+		for i := range bucket {
+			fa := &bucket[i]
+			p.accounts[i] = accountEntry{hashedKey: expand(&fa.Hash), update: fa.Update, storageDirty: len(fa.Slots) != 0}
+			if len(fa.Slots) == 0 {
+				continue
+			}
+			slices.SortFunc(fa.Slots, func(x, y commitment.FeedSlot) int { return bytes.Compare(x.Hash[:], y.Hash[:]) })
+			task := storageTask{addrHash: fa.Hash, entries: entries[:len(fa.Slots):len(fa.Slots)]}
+			entries = entries[len(fa.Slots):]
+			for j := range fa.Slots {
+				task.entries[j] = storageEntry{path: expand(&fa.Slots[j].Hash), value: fa.Slots[j].Value, op: storagePut}
+				if len(fa.Slots[j].Value) == 0 {
+					task.entries[j].op = storageDelete
+				}
+			}
+			p.storage = append(p.storage, task)
+		}
+		storage[b], accounts[b] = p.done()
+	})
+	return slices.Concat(storage[:]...), slices.Concat(accounts[:]...)
 }

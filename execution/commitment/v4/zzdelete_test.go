@@ -62,7 +62,7 @@ func seedStorage(t *testing.T, ctx *mockContext, addr [32]byte, paths [][]byte) 
 	t.Helper()
 	entries := make([]storageEntry, 0, len(paths))
 	for _, p := range paths {
-		entries = append(entries, storageEntry{path: p, update: phaseAStorageUpdate(slotValue(p))})
+		entries = append(entries, entryOf(p, phaseAStorageUpdate(slotValue(p))))
 	}
 	root, err := runStorageTask(ctx, storageTask{addrHash: addr, entries: entries})
 	require.NoError(t, err)
@@ -97,7 +97,7 @@ func TestPhaseAStorageDeleteMatchesFreshTrie(t *testing.T) {
 			seedStorage(t, staged, addr, tc.seed)
 			deletes := make([]storageEntry, 0, len(tc.drop))
 			for _, i := range tc.drop {
-				deletes = append(deletes, storageEntry{path: tc.seed[i], update: &commitment.Update{Flags: commitment.DeleteUpdate}})
+				deletes = append(deletes, entryOf(tc.seed[i], &commitment.Update{Flags: commitment.DeleteUpdate}))
 			}
 			got, err := runStorageTask(staged, storageTask{addrHash: addr, entries: deletes})
 			require.NoError(t, err)
@@ -127,12 +127,12 @@ func TestPhaseAStorageDeleteThenReinsertRoundTrips(t *testing.T) {
 	beforeRecords := liveRecords(ctx)
 
 	_, err := runStorageTask(ctx, storageTask{addrHash: addr, entries: []storageEntry{
-		{path: paths[1], update: &commitment.Update{Flags: commitment.DeleteUpdate}},
+		entryOf(paths[1], &commitment.Update{Flags: commitment.DeleteUpdate}),
 	}})
 	require.NoError(t, err)
 
 	after, err := runStorageTask(ctx, storageTask{addrHash: addr, entries: []storageEntry{
-		{path: paths[1], update: phaseAStorageUpdate(slotValue(paths[1]))},
+		entryOf(paths[1], phaseAStorageUpdate(slotValue(paths[1]))),
 	}})
 	require.NoError(t, err)
 

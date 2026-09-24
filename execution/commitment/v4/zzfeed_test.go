@@ -150,7 +150,7 @@ func TestPartitionFeedMatchesSerialPartition(t *testing.T) {
 	slices.SortFunc(sorted, compareFeed)
 	serial := newPartitioner()
 	for _, e := range sorted {
-		if err := serial.add(e.hashedKey, []byte(e.plainKey), e.update); err != nil {
+		if err := serial.add(e.hashedKey, e.update); err != nil {
 			t.Fatal(err)
 		}
 	}

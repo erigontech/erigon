@@ -93,7 +93,7 @@ func partition(stream []phaseAInput) ([]storageTask, []accountEntry) {
 	})
 	p := newPartitioner()
 	for _, item := range sorted {
-		if err := p.add(item.hashedKey, item.plainKey, item.update); err != nil {
+		if err := p.add(item.hashedKey, item.update); err != nil {
 			panic(err)
 		}
 	}

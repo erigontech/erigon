@@ -65,17 +65,14 @@ func TestCompleteDeltasCarryEveryChangedRecordPreviousValue(t *testing.T) {
 	pathA := append([]byte{2}, bytes.Repeat([]byte{3}, 63)...)
 	pathB := append([]byte{9}, bytes.Repeat([]byte{4}, 63)...)
 	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: pathA, update: phaseAStorageUpdate([]byte{1})},
-		{path: pathB, update: phaseAStorageUpdate([]byte{2})},
+		entryOf(pathA, phaseAStorageUpdate([]byte{1})),
+		entryOf(pathB, phaseAStorageUpdate([]byte{2})),
 	}})
 	require.NoError(t, err)
 	previous := ctx.snapshot()
 	ctx.deltas = nil
 
-	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{
-		path:   pathA,
-		update: phaseAStorageUpdate([]byte{3}),
-	}}})
+	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathA, phaseAStorageUpdate([]byte{3}))}})
 	require.NoError(t, err)
 	require.NotEmpty(t, ctx.deltas)
 	for _, delta := range ctx.deltas {
@@ -91,8 +88,8 @@ func TestCompleteDeltasTombstoneWipedStorageSubtree(t *testing.T) {
 	pathB := append([]byte{2, 5}, bytes.Repeat([]byte{6}, 62)...)
 	ctx := newDeltaContext()
 	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: pathA, update: phaseAStorageUpdate([]byte{1})},
-		{path: pathB, update: phaseAStorageUpdate([]byte{2})},
+		entryOf(pathA, phaseAStorageUpdate([]byte{1})),
+		entryOf(pathB, phaseAStorageUpdate([]byte{2})),
 	}})
 	require.NoError(t, err)
 	previous := ctx.snapshot()
@@ -115,15 +112,15 @@ func TestCompleteDeltasReplayAndReloadRecovery(t *testing.T) {
 	pathC := append([]byte{13}, bytes.Repeat([]byte{4}, 63)...)
 	ctx := newDeltaContext()
 	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: pathA, update: phaseAStorageUpdate([]byte{1})},
-		{path: pathB, update: phaseAStorageUpdate([]byte{2})},
+		entryOf(pathA, phaseAStorageUpdate([]byte{1})),
+		entryOf(pathB, phaseAStorageUpdate([]byte{2})),
 	}})
 	require.NoError(t, err)
 	firstDeltas := append([]recordDelta(nil), ctx.deltas...)
 	ctx.deltas = nil
 	root, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: pathA, update: &commitment.Update{Flags: commitment.DeleteUpdate}},
-		{path: pathC, update: phaseAStorageUpdate([]byte{3})},
+		entryOf(pathA, &commitment.Update{Flags: commitment.DeleteUpdate}),
+		entryOf(pathC, phaseAStorageUpdate([]byte{3})),
 	}})
 	require.NoError(t, err)
 	secondDeltas := append([]recordDelta(nil), ctx.deltas...)

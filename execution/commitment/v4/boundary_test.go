@@ -30,12 +30,12 @@ func TestPlanesRejectNonNibblePaths(t *testing.T) {
 	t.Run("storage", func(t *testing.T) {
 		ctx := newDeltaContext()
 		_, err := runStorageTask(ctx, storageTask{addrHash: [32]byte{1}, entries: []storageEntry{
-			{path: bad, update: phaseAStorageUpdate([]byte{1})},
+			entryOf(bad, phaseAStorageUpdate([]byte{1})),
 		}})
 		require.ErrorIs(t, err, errPhaseAUpdate)
 
 		_, err = runStorageTask(ctx, storageTask{addrHash: [32]byte{1}, entries: []storageEntry{
-			{path: good, update: phaseAStorageUpdate([]byte{1})},
+			entryOf(good, phaseAStorageUpdate([]byte{1})),
 		}})
 		require.NoError(t, err)
 	})

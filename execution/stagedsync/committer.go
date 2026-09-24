@@ -89,6 +89,7 @@ type commitmentCalculator struct {
 	// updates to the commitment context and rotates this one in; the context
 	// drains its buffer synchronously, so by the next rotation it is idle.
 	spare *commitment.Updates
+	feed  commitment.Feed
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
 	// instead of reallocated — reuse keeps the arena's grown slabs and ext chunks.
@@ -910,11 +911,15 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			err: fmt.Errorf("commitmentCalculator: %slazy-load failed: %w", m.label, err)})
 		return
 	}
-	cc.state.FlushToUpdates(cc.updates)
-	cc.state.ResetBlockFlags()
-
 	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.handOffUpdates())
+	if sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
+		cc.state.FlushToFeed(&cc.feed)
+		sdCtx.SetFeed(&cc.feed)
+	} else {
+		cc.state.FlushToUpdates(cc.updates)
+		sdCtx.SetUpdates(cc.handOffUpdates())
+	}
+	cc.state.ResetBlockFlags()
 
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)

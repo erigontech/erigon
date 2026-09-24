@@ -113,24 +113,12 @@ func (t *Trie) Process(
 	onProgress func(*commitment.CommitProgress),
 	warmup commitment.WarmupConfig,
 ) ([]byte, error) {
-	if t == nil {
-		return nil, errTrieReleased
-	}
-	if t.ctx == nil {
-		return nil, errTrieContext
-	}
 	if updates == nil {
 		return nil, errors.New("commitment v4: nil updates")
 	}
 	if updates.Mode() != commitment.ModeCollect {
 		return nil, errors.New("commitment v4: Process requires ModeCollect updates")
 	}
-
-	roundStart := time.Now()
-	metered := newMeteredContext(t.ctx)
-	var seen int
-	defer func() { metered.publish(roundStart, uint64(seen)) }()
-
 	var warmuper *commitment.Warmuper
 	if warmup.Enabled {
 		warmup.Key = warmupKeyV4
@@ -138,11 +126,37 @@ func (t *Trie) Process(
 		warmuper = commitment.NewWarmuper(ctx, warmup)
 		defer warmuper.CloseAndWait()
 	}
+	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
+		return partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper)
+	})
+}
 
+func (t *Trie) ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
+	if feed == nil {
+		return nil, errors.New("commitment v4: nil feed")
+	}
+	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
+		storage, accounts := partitionAccounts(feed.Accounts, t.scheduleWorkers)
+		return storage, accounts, feed.Keys, nil
+	})
+}
+
+func (t *Trie) round(ctx context.Context, onProgress func(*commitment.CommitProgress), partition func() ([]storageTask, []accountEntry, int, error)) ([]byte, error) {
+	if t == nil {
+		return nil, errTrieReleased
+	}
+	if t.ctx == nil {
+		return nil, errTrieContext
+	}
 	if t.deferUpdates && len(t.deferred) != 0 {
 		return nil, errors.New("commitment v4: deferred updates were not taken")
 	}
-	storage, accounts, seenKeys, err := partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper)
+	roundStart := time.Now()
+	metered := newMeteredContext(t.ctx)
+	var seen int
+	defer func() { metered.publish(roundStart, uint64(seen)) }()
+
+	storage, accounts, seenKeys, err := partition()
 	if err != nil {
 		return nil, err
 	}

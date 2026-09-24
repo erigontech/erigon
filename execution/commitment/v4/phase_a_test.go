@@ -74,26 +74,26 @@ func TestPhaseAStorageTransitions(t *testing.T) {
 	pathA := append([]byte{1}, bytes.Repeat([]byte{2}, 63)...)
 	pathB := append([]byte{1}, bytes.Repeat([]byte{3}, 63)...)
 
-	root, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: pathA, update: phaseAStorageUpdate([]byte{1})}}})
+	root, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathA, phaseAStorageUpdate([]byte{1}))}})
 	require.NoError(t, err)
 	require.NotEqual(t, empty.RootHash, root)
 	rootData := ctx.branches[string(StorageRootKey(address))]
 	require.NoError(t, Validate(rootData, 0))
 	require.True(t, NewRecord(rootData, 0).isLeafRoot())
 
-	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: pathB, update: phaseAStorageUpdate([]byte{2})}}})
+	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathB, phaseAStorageUpdate([]byte{2}))}})
 	require.NoError(t, err)
 	rootData = ctx.branches[string(StorageRootKey(address))]
 	require.NoError(t, Validate(rootData, 0))
 	require.False(t, NewRecord(rootData, 0).isLeafRoot())
 
-	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: pathB, update: &commitment.Update{Flags: commitment.DeleteUpdate}}}})
+	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathB, &commitment.Update{Flags: commitment.DeleteUpdate})}})
 	require.NoError(t, err)
 	rootData = ctx.branches[string(StorageRootKey(address))]
 	require.NoError(t, Validate(rootData, 0))
 	require.True(t, NewRecord(rootData, 0).isLeafRoot())
 
-	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: pathA, update: &commitment.Update{Flags: commitment.DeleteUpdate}}}})
+	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathA, &commitment.Update{Flags: commitment.DeleteUpdate})}})
 	require.NoError(t, err)
 	require.Empty(t, ctx.branches[string(StorageRootKey(address))])
 }
@@ -103,7 +103,7 @@ func TestPhaseAIgnoresAbsentStorageDelete(t *testing.T) {
 	var address [32]byte
 	path := append([]byte{1}, bytes.Repeat([]byte{2}, 63)...)
 
-	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: path, update: &commitment.Update{Flags: commitment.DeleteUpdate}}}})
+	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(path, &commitment.Update{Flags: commitment.DeleteUpdate})}})
 	require.NoError(t, err)
 	require.Empty(t, ctx.branches[string(StorageRootKey(address))])
 }
@@ -117,13 +117,13 @@ func TestPhaseAIgnoresStorageDeleteCollidingWithAnotherLeaf(t *testing.T) {
 	absent := append([]byte{1}, bytes.Repeat([]byte{3}, 63)...)
 
 	seeded, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: kept, update: phaseAStorageUpdate([]byte{1})},
-		{path: sibling, update: phaseAStorageUpdate([]byte{2})},
+		entryOf(kept, phaseAStorageUpdate([]byte{1})),
+		entryOf(sibling, phaseAStorageUpdate([]byte{2})),
 	}})
 	require.NoError(t, err)
 
 	after, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: absent, update: &commitment.Update{Flags: commitment.DeleteUpdate}},
+		entryOf(absent, &commitment.Update{Flags: commitment.DeleteUpdate}),
 	}})
 	require.NoError(t, err)
 	require.Equal(t, seeded, after)
@@ -145,13 +145,13 @@ func TestPhaseAD10StorageRootIsIndependentOfTheCurrentBatch(t *testing.T) {
 	pathA := append([]byte{4}, bytes.Repeat([]byte{5}, 63)...)
 	pathB := append([]byte{6}, bytes.Repeat([]byte{7}, 63)...)
 	ctx := newMockContext()
-	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: pathA, update: phaseAStorageUpdate([]byte{1})}}})
+	_, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathA, phaseAStorageUpdate([]byte{1}))}})
 	require.NoError(t, err)
-	secondRoot, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: pathB, update: phaseAStorageUpdate([]byte{2})}}})
+	secondRoot, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathB, phaseAStorageUpdate([]byte{2}))}})
 	require.NoError(t, err)
 
 	bulk := newMockContext()
-	bulkRoot, err := runStorageTask(bulk, storageTask{addrHash: address, entries: []storageEntry{{path: pathA, update: phaseAStorageUpdate([]byte{1})}, {path: pathB, update: phaseAStorageUpdate([]byte{2})}}})
+	bulkRoot, err := runStorageTask(bulk, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathA, phaseAStorageUpdate([]byte{1})), entryOf(pathB, phaseAStorageUpdate([]byte{2}))}})
 	require.NoError(t, err)
 	require.Equal(t, bulkRoot, secondRoot)
 	require.Equal(t, bulk.branches[string(StorageRootKey(address))], ctx.branches[string(StorageRootKey(address))])
@@ -162,11 +162,11 @@ func TestPhaseAStorageWipeThenReinsert(t *testing.T) {
 	address[0] = 0x37
 	path := append([]byte{8}, bytes.Repeat([]byte{9}, 63)...)
 	ctx := newMockContext()
-	initial, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{{path: path, update: phaseAStorageUpdate([]byte{0x11})}}})
+	initial, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(path, phaseAStorageUpdate([]byte{0x11}))}})
 	require.NoError(t, err)
 	final, err := runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{
-		{path: path, update: &commitment.Update{Flags: commitment.DeleteUpdate}},
-		{path: path, update: phaseAStorageUpdate([]byte{0x22})},
+		entryOf(path, &commitment.Update{Flags: commitment.DeleteUpdate}),
+		entryOf(path, phaseAStorageUpdate([]byte{0x22})),
 	}})
 	require.NoError(t, err)
 	require.NotEqual(t, initial, final)
@@ -179,12 +179,21 @@ func TestPhaseAStorageWipeThenReinsert(t *testing.T) {
 func TestPartitionRejectsUnsortedInput(t *testing.T) {
 	p := newPartitioner()
 	update := &commitment.Update{Flags: commitment.BalanceUpdate}
-	require.NoError(t, p.add(bytes.Repeat([]byte{5}, 64), nil, update))
-	require.ErrorIs(t, p.add(bytes.Repeat([]byte{4}, 64), nil, update), errPhaseAOrder)
+	require.NoError(t, p.add(bytes.Repeat([]byte{5}, 64), update))
+	require.ErrorIs(t, p.add(bytes.Repeat([]byte{4}, 64), update), errPhaseAOrder)
 
 	q := newPartitioner()
 	account := bytes.Repeat([]byte{7}, 64)
-	require.NoError(t, q.add(account, nil, update))
-	require.NoError(t, q.add(append(bytes.Clone(account), bytes.Repeat([]byte{9}, 64)...), nil, update))
-	require.ErrorIs(t, q.add(append(bytes.Clone(account), bytes.Repeat([]byte{8}, 64)...), nil, update), errPhaseAOrder)
+	require.NoError(t, q.add(account, update))
+	slot := phaseAStorageUpdate([]byte{1})
+	require.NoError(t, q.add(append(bytes.Clone(account), bytes.Repeat([]byte{9}, 64)...), slot))
+	require.ErrorIs(t, q.add(append(bytes.Clone(account), bytes.Repeat([]byte{8}, 64)...), slot), errPhaseAOrder)
+}
+
+func entryOf(path []byte, update *commitment.Update) storageEntry {
+	entry, err := storageEntryOf(path, update)
+	if err != nil {
+		panic(err)
+	}
+	return entry
 }
