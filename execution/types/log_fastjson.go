@@ -18,31 +18,7 @@ package types
 
 import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
-
-// MarshalFastJSONTo writes the log in the order RPCLog declares its fields, straight into
-// the response stream, so a result never needs a buffer of its own.
-func (l *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if l == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteObjectStart()
-	ethjson.Data(s, "address", l.Address[:])
-	ethjson.DataList(s, "topics", l.Topics)
-	// A nil Data is "0x", not null.
-	ethjson.Data(s, "data", l.Data)
-	ethjson.Quantity(s, "blockNumber", l.BlockNumber)
-	ethjson.Data(s, "transactionHash", l.TxHash[:])
-	ethjson.Quantity(s, "transactionIndex", l.TxIndex)
-	ethjson.Data(s, "blockHash", l.BlockHash[:])
-	ethjson.Quantity(s, "logIndex", l.Index)
-	s.Field("removed").WriteBool(l.Removed)
-	ethjson.Quantity(s, "blockTimestamp", l.BlockTimestamp)
-	s.WriteObjectEnd()
-	return nil
-}
 
 // MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
 // pointer method RPCLogs itself would not satisfy the fast-JSON interface.

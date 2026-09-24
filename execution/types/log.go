@@ -116,6 +116,8 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 type Logs []*Log
 
 // RPCLog Extends `types.Log` and add BlockTimestamp field
+//
+//go:generate go run ../../cmd/ethjsongen -type RPCLog -dir . -out log_ethjson_gen.go
 type RPCLog struct {
 	Log
 	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" ethjson:"quantity" codec:"-"`
