@@ -110,17 +110,23 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	return w
 }
 
-func (w *Warmuper) Start() {
+func (w *Warmuper) begin() bool {
 	if w.started.Swap(true) {
-		return
+		return false
 	}
 	w.startTime.Store(time.Now().UnixNano())
 	if w.numWorkers <= 0 {
-		return
+		return false
 	}
-
 	w.work = make(chan warmupWorkItem, w.numWorkers*64)
 	w.g, w.ctx = errgroup.WithContext(w.ctx)
+	return true
+}
+
+func (w *Warmuper) Start() {
+	if !w.begin() {
+		return
+	}
 
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
@@ -160,6 +166,49 @@ func (w *Warmuper) Start() {
 		w.mu.Unlock()
 		return nil
 	})
+}
+
+const warmSortedChunk = 256
+
+func (w *Warmuper) WarmSorted(n int, key func(i int) []byte) {
+	w.begin()
+	if w.g == nil || w.closed.Load() {
+		return
+	}
+	var next atomic.Int64
+	for range w.numWorkers {
+		w.g.Go(func() error {
+			trieCtx, cleanup := w.ctxFactory(w.ctx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if trieCtx == nil {
+				if err := w.ctx.Err(); err != nil {
+					return err
+				}
+				return errors.New("warmup trie context factory returned nil PatriciaContext")
+			}
+			buf := make([]byte, warmupKeyScratchLen)
+			for w.ctx.Err() == nil {
+				lo := int(next.Add(warmSortedChunk)) - warmSortedChunk
+				if lo >= n {
+					return nil
+				}
+				var prev []byte
+				for i := lo; i < min(lo+warmSortedChunk, n); i++ {
+					hk := key(i)
+					depth := 0
+					for depth < min(len(prev), len(hk)) && prev[depth] == hk[depth] {
+						depth++
+					}
+					w.warmupKey(trieCtx, hk, depth, buf)
+					w.keysProcessed.Add(1)
+					prev = hk
+				}
+			}
+			return nil
+		})
+	}
 }
 
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int, buf []byte) {

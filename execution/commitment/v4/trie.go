@@ -202,7 +202,6 @@ func (t *Trie) Process(
 		warmup.Key = warmupKeyV4
 		warmup.Step = warmupStepV4
 		warmuper = commitment.NewWarmuper(ctx, warmup)
-		warmuper.Start()
 		defer warmuper.CloseAndWait()
 	}
 

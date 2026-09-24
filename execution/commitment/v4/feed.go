@@ -124,16 +124,9 @@ func bucketFeed(items []feedEntry) [257]int {
 	return bounds
 }
 
-func warmFeed(warmuper *commitment.Warmuper, items []feedEntry) {
-	var prev []byte
-	for i := range items {
-		hk := items[i].hashedKey
-		depth := 0
-		for depth < min(len(prev), len(hk)) && prev[depth] == hk[depth] {
-			depth++
-		}
-		warmuper.WarmKey(hk, depth, 0)
-		prev = hk
+func warmSorted(warmuper *commitment.Warmuper, items []feedEntry) {
+	if warmuper != nil {
+		warmuper.WarmSorted(len(items), func(i int) []byte { return items[i].hashedKey })
 	}
 }
 
@@ -144,9 +137,6 @@ func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper
 	parallelFor(256, workers, 1, func(b int) {
 		bucket := items[bounds[b]:bounds[b+1]]
 		slices.SortFunc(bucket, compareFeed)
-		if warmuper != nil && len(bucket) != 0 {
-			go warmFeed(warmuper, bucket)
-		}
 		p := newPartitioner()
 		for i := range bucket {
 			if err := p.add(bucket[i].hashedKey, common.ToBytesZeroCopy(bucket[i].plainKey), bucket[i].update); err != nil {
@@ -156,6 +146,7 @@ func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper
 		}
 		parts[b] = p
 	})
+	warmSorted(warmuper, items)
 	var storage [256][]storageTask
 	var accounts [256][]accountEntry
 	seen := 0
@@ -189,9 +180,7 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 		return partitionFeed(items, workers, warmuper)
 	}
 	slices.SortFunc(items, compareFeed)
-	if warmuper != nil {
-		go warmFeed(warmuper, items)
-	}
+	warmSorted(warmuper, items)
 
 	p := newPartitioner()
 	for i := range items {
