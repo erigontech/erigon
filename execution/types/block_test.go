@@ -26,6 +26,7 @@ import (
 	"errors"
 	"math/big"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/go-test/deep"
@@ -882,22 +883,68 @@ func headerJSONByDeclaration(h *Header) ([]byte, error) {
 	return json.Marshal(&enc)
 }
 
-// Header carries its own JSON types nowhere: MarshalFastJSONTo does the hexutil casts by
-// hand, so a new field must be added to the declaration above and to the encoder. The count
-// fails first and names both.
-func TestHeaderFieldCountIsPinned(t *testing.T) {
+// The json tags on Header declare the field names, their order and which ones may be
+// omitted. The encoder writes them by hand, so a renamed key, a reordered field or a new
+// field nobody encodes shows up here. Only the representation is left to the oracle above.
+func TestHeaderJSONKeysMatchItsTags(t *testing.T) {
 	t.Parallel()
-	require.Equal(t, 25, reflect.TypeFor[Header]().NumField()-2,
-		"a Header field was added or removed: update headerJSONByDeclaration and MarshalFastJSONTo")
+	// slotNumber is tagged without omitempty because null is the intended form, but the
+	// encoder still omits it until CI accepts that; see gen_header_json.go's note.
+	const omittedDespiteItsTag = "slotNumber"
+
+	keysFromTags := func(populated bool) []string {
+		typ := reflect.TypeFor[Header]()
+		var want []string
+		for i := range typ.NumField() {
+			tag, ok := typ.Field(i).Tag.Lookup("json")
+			if !ok {
+				continue
+			}
+			name, opts, _ := strings.Cut(tag, ",")
+			if name == "-" {
+				continue
+			}
+			if !populated && (strings.Contains(opts, "omitempty") || name == omittedDespiteItsTag) {
+				continue
+			}
+			want = append(want, name)
+		}
+		return append(want, "hash") // computed, so it has no field to carry a tag
+	}
+
+	for name, tc := range map[string]struct {
+		h         *Header
+		populated bool
+	}{
+		"every field set": {headerWithEveryFieldSet(), true},
+		"empty":           {&Header{}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			enc, err := jsonstream.Marshal(tc.h)
+			require.NoError(t, err)
+			var got []string
+			dec := json.NewDecoder(bytes.NewReader(enc))
+			_, err = dec.Token() // {
+			require.NoError(t, err)
+			for dec.More() {
+				key, err := dec.Token()
+				require.NoError(t, err)
+				got = append(got, key.(string))
+				var skip json.RawMessage
+				require.NoError(t, dec.Decode(&skip))
+			}
+			require.Equal(t, keysFromTags(tc.populated), got)
+		})
+	}
 }
 
 // MarshalFastJSONTo is the only header encoder in production, so every field, including the
 // optional ones, must come out exactly as the declaration above spells it.
-func TestHeaderMarshalFastJSONTo(t *testing.T) {
-	t.Parallel()
+// headerWithEveryFieldSet fills every field, so no optional one is skipped.
+func headerWithEveryFieldSet() *Header {
 	hash := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
 	num := uint64(7)
-	full := &Header{
+	return &Header{
 		ParentHash:            hash,
 		UncleHash:             hash,
 		Coinbase:              common.HexToAddress("0x1234567890123456789012345678901234567890"),
@@ -924,6 +971,11 @@ func TestHeaderMarshalFastJSONTo(t *testing.T) {
 		BlockAccessListHash:   &hash,
 		SlotNumber:            &num,
 	}
+}
+
+func TestHeaderMarshalFastJSONTo(t *testing.T) {
+	t.Parallel()
+	full := headerWithEveryFieldSet()
 	empty := &Header{}
 	noOptionals := &Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(0), Extra: []byte{}}
 
