@@ -103,6 +103,12 @@ type GossipManager struct {
 	// RLock. Tests use it to pause a producer at the exact point a shutdown
 	// race must close.
 	enqueueHookForTest func()
+	// shutdownObservedHookForTest, when non-nil, runs inside publishWorker
+	// the instant it observes ctx.Done(), before it contends for
+	// shutdownMu in drainPublishQueueOnShutdown. Tests use it as a
+	// deterministic signal that the worker has committed to shutdown,
+	// instead of yielding the scheduler and hoping.
+	shutdownObservedHookForTest func()
 
 	// lifetimeCtx is the context the worker watches, cancelled by Close or
 	// by NewGossipManager's parent context ending. shutdownMu pairs
@@ -393,6 +399,9 @@ func (g *GossipManager) publishWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			if g.shutdownObservedHookForTest != nil {
+				g.shutdownObservedHookForTest()
+			}
 			g.drainPublishQueueOnShutdown()
 			return
 		case job := <-g.publishQueue:
@@ -427,7 +436,8 @@ func (g *GossipManager) drainPublishQueueOnShutdown() {
 func (g *GossipManager) runPublishJob(ctx context.Context, job publishJob) {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Error("[GossipManager] panic in background publish, dropping message", "err", r, "topic", job.name)
+			fields := append([]any{"err", r, "topic", job.name}, job.logCtx...)
+			log.Error("[GossipManager] panic in background publish, dropping message", fields...)
 		}
 	}()
 	if g.publishHookForTest != nil {

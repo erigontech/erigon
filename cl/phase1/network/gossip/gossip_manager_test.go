@@ -19,7 +19,6 @@ package gossip
 import (
 	"context"
 	"errors"
-	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -31,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
+	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/libp2p/go-libp2p"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	pb "github.com/libp2p/go-libp2p-pubsub/pb"
@@ -780,6 +780,39 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_RecoversFromPan
 	}
 }
 
+// TestPublishBackground_PanicLogIncludesJobContext proves a panic recovered
+// while processing a queued job still logs the caller-supplied context
+// (validator/subnet/slot for the sync-committee path), the same way the
+// ordinary publish-failure path already does - otherwise a panic on a
+// background publish can't be correlated to which duty it was.
+func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PanicLogIncludesJobContext() {
+	records := make(chan *log.Record, 64)
+	prevHandler := log.Root().GetHandler()
+	log.Root().SetHandler(log.ChannelHandler(records))
+	defer log.Root().SetHandler(prevHandler)
+
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		panic("boom")
+	}
+
+	s.gm.PublishBackground("job-with-context", nil, "validatorIndex", 42)
+
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case r := <-records:
+			if r.Msg == "[GossipManager] panic in background publish, dropping message" {
+				s.Contains(r.Ctx, "validatorIndex")
+				s.Contains(r.Ctx, 42)
+				return
+			}
+		case <-deadline:
+			s.FailNow("panic recovery log was never captured")
+			return
+		}
+	}
+}
+
 // TestPublishBackground_PublishesToRealTopic proves a queued message reaches
 // the real gossip Publish path end-to-end: it subscribes to the topic on the
 // same pubsub instance and asserts the published bytes are actually
@@ -1051,11 +1084,12 @@ func TestPublishBackground_DrainsBufferedJobsOnParentContextCancellation(t *test
 // has already passed PublishBackground's shutdown check pauses immediately
 // before its enqueue send; the parent context (the one production code
 // actually cancels on shutdown - cmd/caplin/caplin1/run.go never calls
-// Close) is cancelled and the worker is given every opportunity to run its
-// shutdown drain while the producer is still paused; only then does the
-// producer resume and send. With the fix, the drain cannot complete until
-// that send has happened (shutdownMu serializes them), so the message is
-// never left stranded once everything settles.
+// Close) is cancelled, and shutdownObservedHookForTest gives a deterministic
+// signal that the worker has committed to its shutdown path and is
+// contending for shutdownMu - only then does the producer resume and send.
+// With the fix, the drain cannot complete until that send has happened
+// (shutdownMu serializes them), so the message is never left stranded once
+// everything settles.
 func TestPublishBackground_NoAdmissionAfterParentContextCancellation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockClock := eth_clock.NewMockEthereumClock(ctrl)
@@ -1075,6 +1109,10 @@ func TestPublishBackground_NoAdmissionAfterParentContextCancellation(t *testing.
 		close(enqueueEntered)
 		<-resumeEnqueue
 	}
+	shutdownObserved := make(chan struct{})
+	gm.shutdownObservedHookForTest = func() {
+		close(shutdownObserved)
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -1089,13 +1127,10 @@ func TestPublishBackground_NoAdmissionAfterParentContextCancellation(t *testing.
 	}
 
 	parentCancel()
-	// Yield repeatedly to maximize the chance the worker observes
-	// cancellation and runs its shutdown drain while the producer is still
-	// paused above - this only affects how reliably a regression is caught,
-	// not what correctness means: the assertion below is a structural
-	// invariant, not a timing threshold.
-	for range 1000 {
-		runtime.Gosched()
+	select {
+	case <-shutdownObserved:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never observed the parent context cancellation")
 	}
 
 	close(resumeEnqueue)
