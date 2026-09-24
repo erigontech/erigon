@@ -18,7 +18,6 @@ package jsonstream
 
 import (
 	"encoding"
-	"encoding/hex"
 	"slices"
 	"unsafe"
 
@@ -84,18 +83,16 @@ func hexField[T hexType](s *StackStream, name string, v *T) {
 		return
 	}
 	s.beforeValue()
-	start := len(s.stream.Buffer())
-	s.commit(append(appendHex(s, append(s.stream.Buffer(), '"'), v), '"'), start)
-	s.afterValue()
-}
-
-// appendHex appends v's hex text. A failing AppendText appends nothing and latches its error,
-// which keeps the JSON well-formed and stops it reaching the client.
-func appendHex[T hexType](s *StackStream, buf []byte, v *T) []byte {
+	buf := s.stream.Buffer()
+	start := len(buf)
 	if ownText(v) {
-		return appendOwnText(s, buf, v)
+		buf = append(appendOwnText(s, append(buf, '"'), v), '"')
+	} else {
+		b := bytesOf(v)
+		buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
 	}
-	return appendBytes(buf, v)
+	s.commit(buf, start)
+	s.afterValue()
 }
 
 // ownText reports whether v is one of the hexutil types, which write their own text; the rest
@@ -108,6 +105,8 @@ func ownText[T hexType](v *T) bool {
 	return false
 }
 
+// appendOwnText appends v's text. On failure it appends nothing and latches the error, which
+// keeps the JSON well-formed and stops it reaching the client.
 func appendOwnText[T hexType](s *StackStream, buf []byte, v *T) []byte {
 	text, err := (*v).AppendText(buf)
 	if err != nil {
@@ -119,8 +118,8 @@ func appendOwnText[T hexType](s *StackStream, buf []byte, v *T) []byte {
 	return text
 }
 
-func appendBytes[T hexType](buf []byte, v *T) []byte {
-	return hex.AppendEncode(append(buf, "0x"...), unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v)))
+func bytesOf[T hexType](v *T) []byte {
+	return unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v))
 }
 
 // Hexes writes a slice field, null for a nil slice.
@@ -156,11 +155,10 @@ func HexesValue[S ~[]E, E hexType](s *StackStream, items S) {
 			buf = append(buf, ',')
 		}
 		if own {
-			buf = appendOwnText(s, append(buf, '"'), &items[i])
+			buf = append(appendOwnText(s, append(buf, '"'), &items[i]), '"')
 		} else {
-			buf = appendBytes(append(buf, '"'), &items[i])
+			buf = hexutil.AppendQuoted(buf, bytesOf(&items[i]))
 		}
-		buf = append(buf, '"')
 		if len(buf) >= FlushThreshold { // blob arrays reach megabytes
 			s.stream.SetBuffer(buf)
 			flushFull(s.stream)
