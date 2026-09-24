@@ -329,6 +329,11 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 // always include the full current state (all fields) so the trie sees
 // complete values.
 func (cs *calcState) FlushToUpdates(updates *commitment.Updates) {
+	n := len(cs.dirtyAccounts)
+	for _, dirtySlots := range cs.storageDirty {
+		n += len(dirtySlots)
+	}
+	updates.Grow(n)
 	for _, addr := range cs.dirtyAccounts {
 		acc := cs.accounts[addr]
 		address := addr.Value()

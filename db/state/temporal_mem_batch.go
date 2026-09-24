@@ -188,20 +188,11 @@ func (sd *TemporalMemBatch) addPutMetrics(domain kv.Domain, puts int64, putKeySi
 }
 
 func (sd *TemporalMemBatch) PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
-	count, keyBytes := 0, 0
+	count := 0
 	for _, part := range parts {
 		count += len(part)
-		for i := range part {
-			keyBytes += len(part[i].Key)
-		}
 	}
-	keys := make([]byte, 0, keyBytes)
-	for _, part := range parts {
-		for i := range part {
-			keys = append(keys, part[i].Key...)
-		}
-	}
-	puts, putKeySize, putValueSize, err := sd.applyOwnedCommitmentBranches(parts, keys, make([]dataWithTxNum, count), txNum, diff)
+	puts, putKeySize, putValueSize, err := sd.applyOwnedCommitmentBranches(parts, make([]dataWithTxNum, count), txNum, diff)
 	sd.addPutMetrics(kv.CommitmentDomain, puts, putKeySize, putValueSize)
 	return err
 }
@@ -214,7 +205,7 @@ const (
 	commitmentWriteChunk = 8192
 )
 
-func (sd *TemporalMemBatch) applyOwnedCommitmentBranches(parts [][]commitment.BranchDelta, keys []byte, versions []dataWithTxNum, txNum uint64, diff *kv.DomainDiff) (puts int64, putKeySize, putValueSize int, err error) {
+func (sd *TemporalMemBatch) applyOwnedCommitmentBranches(parts [][]commitment.BranchDelta, versions []dataWithTxNum, txNum uint64, diff *kv.DomainDiff) (puts int64, putKeySize, putValueSize int, err error) {
 	flat := make([]*commitment.BranchDelta, 0, len(versions))
 	for _, part := range parts {
 		for i := range part {
@@ -234,11 +225,11 @@ func (sd *TemporalMemBatch) applyOwnedCommitmentBranches(parts [][]commitment.Br
 		}()
 		err = sd.writeCommitmentOps(flat, ops, ready, txNum, diff)
 	}()
-	puts, putKeySize, putValueSize = sd.insertOwnedCommitmentBranches(flat, ops, keys, versions, txNum, ready)
+	puts, putKeySize, putValueSize = sd.insertOwnedCommitmentBranches(flat, ops, versions, txNum, ready)
 	return puts, putKeySize, putValueSize, <-written
 }
 
-func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.BranchDelta, ops []uint8, keys []byte, versions []dataWithTxNum, txNum uint64, ready chan<- int) (puts int64, putKeySize, putValueSize int) {
+func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.BranchDelta, ops []uint8, versions []dataWithTxNum, txNum uint64, ready chan<- int) (puts int64, putKeySize, putValueSize int) {
 	const domain = kv.CommitmentDomain
 	defer close(ready)
 	sd.latestStateLocks[domain].Lock()
@@ -250,10 +241,9 @@ func (sd *TemporalMemBatch) insertOwnedCommitmentBranches(flat []*commitment.Bra
 		latest = grown
 		sd.domains[domain] = latest
 	}
-	off, slot := 0, 0
+	slot := 0
 	for i, d := range flat {
-		key := common.ToStringZeroCopy(keys[off : off+len(d.Key)])
-		off += len(d.Key)
+		key := common.ToStringZeroCopy(d.Key)
 		if i > 0 && i%commitmentWriteChunk == 0 {
 			ready <- i
 		}

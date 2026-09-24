@@ -1610,6 +1610,12 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 	}
 }
 
+func (t *Updates) Grow(n int) {
+	if t.mode == ModeCollect {
+		t.collected = slices.Grow(t.collected, n)
+	}
+}
+
 func (t *Updates) TouchPlainKeyUnique(key string, update *Update) {
 	if t.mode != ModeCollect {
 		t.TouchPlainKeyDirect(key, update)

@@ -140,7 +140,23 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	return g.ensurePath(ctx, child, path)
 }
 
-func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *[]recordDelta) ([32]byte, error) {
+const deltaChunk = 1024
+
+type deltaParts [][]recordDelta
+
+func (p *deltaParts) add(d recordDelta) {
+	n := len(*p)
+	switch {
+	case n == 0:
+		*p = append(*p, nil)
+	case len((*p)[n-1]) == deltaChunk:
+		*p = append(*p, make([]recordDelta, 0, deltaChunk))
+	}
+	last := &(*p)[len(*p)-1]
+	*last = append(*last, d)
+}
+
+func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *deltaParts) ([32]byte, error) {
 	if n == nil {
 		return [32]byte{}, g.errNode
 	}
@@ -172,7 +188,7 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *[
 	if err != nil {
 		return [32]byte{}, err
 	}
-	*acc = append(*acc, delta)
+	acc.add(delta)
 	return hash, nil
 }
 
@@ -193,7 +209,7 @@ func (p foldPlan) parallel() bool {
 	return p.factory != nil && p.workers > 1 && p.ctx != nil
 }
 
-func (g graph) materializeRootChildren(root *node, plan foldPlan) ([][]recordDelta, error) {
+func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts, error) {
 	nibs := make([]int, 0, 16)
 	for nib := range 16 {
 		bit := uint16(1) << nib
@@ -208,7 +224,7 @@ func (g graph) materializeRootChildren(root *node, plan foldPlan) ([][]recordDel
 		return nil, nil
 	}
 
-	accs := make([][]recordDelta, len(nibs))
+	accs := make([]deltaParts, len(nibs))
 	hashes := make([][32]byte, len(nibs))
 	eg, egCtx := errgroup.WithContext(plan.ctx)
 	eg.SetLimit(min(plan.workers, len(nibs)))
@@ -242,20 +258,22 @@ func (g graph) persistGraph(ctx commitment.PatriciaContext, root *node, plan fol
 	if err := promoteRootExtension(root); err != nil {
 		return err
 	}
-	var accs [][]recordDelta
+	var accs []deltaParts
 	if plan.parallel() && len(root.path) == 0 {
 		var err error
 		if accs, err = g.materializeRootChildren(root, plan); err != nil {
 			return err
 		}
 	}
-	var acc []recordDelta
+	var acc deltaParts
 	if _, err := g.materialize(ctx, root, root, &acc); err != nil {
 		return err
 	}
-	for _, part := range append(accs, acc) {
-		if err := putDeltas(ctx, part); err != nil {
-			return err
+	for _, parts := range append(accs, acc) {
+		for _, part := range parts {
+			if err := putDeltas(ctx, part); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

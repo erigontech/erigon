@@ -367,7 +367,7 @@ func TestWarmupKeyStopsOnBackwardsStep(t *testing.T) {
 	}
 	ctx := &warmupRecordContext{record: record}
 	require.NotPanics(t, func() {
-		w.warmupKey(ctx, []byte{6, 6, 3}, 2)
+		w.warmupKey(ctx, []byte{6, 6, 3}, 2, make([]byte, warmupKeyScratchLen))
 	})
 }
 
@@ -420,6 +420,6 @@ func TestWarmuperRecordsFoundIgnoresFailedRead(t *testing.T) {
 		},
 	}
 	ctx := &warmupRecordContext{record: []byte{1}, err: context.Canceled}
-	w.warmupKey(ctx, []byte{0}, 0)
+	w.warmupKey(ctx, []byte{0}, 0, make([]byte, warmupKeyScratchLen))
 	require.Zero(t, w.Stats().RecordsFound)
 }

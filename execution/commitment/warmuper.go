@@ -135,6 +135,7 @@ func (w *Warmuper) Start() {
 				return errors.New("warmup trie context factory returned nil PatriciaContext")
 			}
 
+			buf := make([]byte, warmupKeyScratchLen)
 			for {
 				select {
 				case <-w.ctx.Done():
@@ -143,7 +144,7 @@ func (w *Warmuper) Start() {
 					if !ok {
 						return nil
 					}
-					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.warmupKey(trieCtx, item.hashedKey, item.startDepth, buf)
 					w.keysProcessed.Add(1)
 					w.releaseGen(item.gen)
 				}
@@ -161,11 +162,10 @@ func (w *Warmuper) Start() {
 	})
 }
 
-func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
+func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int, buf []byte) {
 	depth := startDepth
-	var compactBuf [warmupKeyScratchLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix, ok := w.key(hashedKey, depth, compactBuf[:])
+		prefix, ok := w.key(hashedKey, depth, buf)
 		if !ok {
 			break
 		}

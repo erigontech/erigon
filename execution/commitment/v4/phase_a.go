@@ -50,28 +50,9 @@ type accountEntry struct {
 	storageDirty bool
 }
 
-type keyArena struct {
-	buf []byte
-}
-
-const keyArenaChunk = 64 * 1024
-
-func (a *keyArena) clone(src []byte) []byte {
-	if len(src) == 0 {
-		return nil
-	}
-	if cap(a.buf)-len(a.buf) < len(src) {
-		a.buf = make([]byte, 0, max(keyArenaChunk, len(src)))
-	}
-	start := len(a.buf)
-	a.buf = append(a.buf, src...)
-	return a.buf[start:len(a.buf):len(a.buf)]
-}
-
 type partitioner struct {
 	storage      []storageTask
 	accounts     []accountEntry
-	keys         keyArena
 	prev         []byte
 	storageIndex int
 	seen         int
@@ -89,13 +70,13 @@ func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update)
 	if p.prev != nil && bytes.Compare(hashedKey, p.prev) < 0 {
 		return fmt.Errorf("%w: %x after %x", errPhaseAOrder, hashedKey, p.prev)
 	}
-	p.prev = append(p.prev[:0], hashedKey...)
+	p.prev = hashedKey
 
-	accountHash := hashedKey[:64]
+	accountHash := hashedKey[:64:64]
 	if len(p.accounts) == 0 || !bytes.Equal(p.accounts[len(p.accounts)-1].hashedKey, accountHash) {
 		p.accounts = append(p.accounts, accountEntry{
-			hashedKey: p.keys.clone(accountHash),
-			plainKey:  p.keys.clone(prefix(plainKey, 20)),
+			hashedKey: accountHash,
+			plainKey:  prefix(plainKey, 20),
 		})
 		p.storageIndex = -1
 	}
@@ -112,7 +93,7 @@ func (p *partitioner) add(hashedKey, plainKey []byte, update *commitment.Update)
 	}
 	current.storageDirty = true
 	p.storage[p.storageIndex].entries = append(p.storage[p.storageIndex].entries, storageEntry{
-		path:   p.keys.clone(hashedKey[64:]),
+		path:   hashedKey[64:128:128],
 		update: update,
 	})
 	return nil
@@ -136,10 +117,8 @@ func hashAddressPath(path []byte) [32]byte {
 }
 
 func prefix(src []byte, n int) []byte {
-	if len(src) < n {
-		return src
-	}
-	return src[:n]
+	n = min(n, len(src))
+	return src[:n:n]
 }
 
 const storageFanOutMin = 1024
