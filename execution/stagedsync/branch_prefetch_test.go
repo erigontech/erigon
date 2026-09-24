@@ -18,6 +18,7 @@ package stagedsync
 
 import (
 	"hash/maphash"
+	"runtime/debug"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -50,4 +51,17 @@ func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	got, _, err = r.Read(kv.CommitmentDomain, absent, 16)
 	require.NoError(t, err)
 	require.Empty(t, got)
+}
+
+func TestRaiseGCPercentRestores(t *testing.T) {
+	prev := debug.SetGCPercent(150)
+	defer debug.SetGCPercent(prev)
+	restore := raiseGCPercent()
+	require.Equal(t, computeGCPercent, debug.SetGCPercent(computeGCPercent))
+	restore()
+	require.Equal(t, 150, debug.SetGCPercent(150))
+
+	debug.SetGCPercent(-1)
+	raiseGCPercent()()
+	require.Equal(t, -1, debug.SetGCPercent(-1))
 }

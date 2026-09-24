@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime/debug"
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
@@ -912,6 +913,17 @@ func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
 	return filled
 }
 
+const computeGCPercent = 400
+
+func raiseGCPercent() (restore func()) {
+	prev := debug.SetGCPercent(computeGCPercent)
+	if prev < 0 || prev > computeGCPercent {
+		debug.SetGCPercent(prev)
+		return func() {}
+	}
+	return func() { debug.SetGCPercent(prev) }
+}
+
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
@@ -922,6 +934,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 	cc.state.prefetch.pause()
 	defer cc.state.prefetch.resume()
+	defer raiseGCPercent()()
 	sdCtx := cc.doms.GetCommitmentContext()
 	if sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
 		cc.state.FlushToFeed(&cc.feed)
