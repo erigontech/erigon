@@ -301,7 +301,6 @@ func NewReusableCaller(
 	chainConfig *chain.Config,
 	callTimeout time.Duration,
 ) (*ReusableCaller, error) {
-	// Every probe of one request reads the same block state, so read it once.
 	stateReader = newMemoReader(stateReader)
 
 	baseFee := header.BaseFee
