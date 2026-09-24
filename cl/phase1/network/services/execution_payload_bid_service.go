@@ -479,37 +479,9 @@ func (s *executionPayloadBidService) validateBidAuthentication(ctx context.Conte
 
 func (s *executionPayloadBidService) parentBuilderExitRequests(ctx context.Context, root common.Hash, now time.Time) ([]solid.BuilderExitRequest, error) {
 	s.parentExitsMu.Lock()
-	var cachedFailure parentBuilderExitsResult
-	hasCachedFailure := false
-	if result, ok := s.parentExitsCache.Get(root); ok {
-		if result.err == nil {
-			s.parentExitsMu.Unlock()
-			return result.requests, nil
-		}
-		if now.Before(result.retryAt) {
-			cachedFailure = result
-			hasCachedFailure = true
-		} else {
-			s.parentExitsCache.Remove(root)
-		}
-	}
-	if reader, ok := s.forkchoiceStore.(cachedParentBuilderExitReader); ok {
-		if requests, ok := reader.GetCachedParentBuilderExitRequests(root); ok {
-			requests = slices.Clone(requests)
-			if uint64(len(requests)) > s.beaconCfg.MaxBuilderExitRequestsPerPayload {
-				err := fmt.Errorf("%w: parent payload has too many builder exits", errBidDependencyUnavailable)
-				s.parentExitsCache.Add(root, parentBuilderExitsResult{err: err, retryAt: now.Add(parentBuilderExitsRetryDelay)})
-				s.parentExitsMu.Unlock()
-				return nil, err
-			}
-			s.parentExitsCache.Add(root, parentBuilderExitsResult{requests: requests})
-			s.parentExitsMu.Unlock()
-			return requests, nil
-		}
-	}
-	if hasCachedFailure {
+	if requests, err, ok := s.cachedParentBuilderExitRequestsLocked(root, now); ok {
 		s.parentExitsMu.Unlock()
-		return cachedFailure.requests, cachedFailure.err
+		return requests, err
 	}
 	if err := ctx.Err(); err != nil {
 		s.parentExitsMu.Unlock()
@@ -529,21 +501,53 @@ func (s *executionPayloadBidService) parentBuilderExitRequests(ctx context.Conte
 	}
 
 	s.parentExitsMu.Lock()
+	if requests, err, ok := s.cachedParentBuilderExitRequestsLocked(root, now); ok {
+		s.parentExitsMu.Unlock()
+		<-work
+		return requests, err
+	}
 	if call := s.parentExitsCalls[root]; call != nil {
 		s.parentExitsMu.Unlock()
 		<-work
 		return waitForParentBuilderExits(ctx, call)
-	}
-	if result, ok := s.parentExitsCache.Get(root); ok && (result.err == nil || now.Before(result.retryAt)) {
-		s.parentExitsMu.Unlock()
-		<-work
-		return result.requests, result.err
 	}
 	call := &parentBuilderExitsCall{done: make(chan struct{})}
 	s.parentExitsCalls[root] = call
 	s.parentExitsMu.Unlock()
 	go s.loadParentBuilderExitRequests(root, call, work)
 	return waitForParentBuilderExits(ctx, call)
+}
+
+func (s *executionPayloadBidService) cachedParentBuilderExitRequestsLocked(root common.Hash, now time.Time) ([]solid.BuilderExitRequest, error, bool) {
+	var cachedFailure parentBuilderExitsResult
+	hasCachedFailure := false
+	if result, ok := s.parentExitsCache.Get(root); ok {
+		if result.err == nil {
+			return result.requests, nil, true
+		}
+		if now.Before(result.retryAt) {
+			cachedFailure = result
+			hasCachedFailure = true
+		} else {
+			s.parentExitsCache.Remove(root)
+		}
+	}
+	if reader, ok := s.forkchoiceStore.(cachedParentBuilderExitReader); ok {
+		if requests, ok := reader.GetCachedParentBuilderExitRequests(root); ok {
+			requests = slices.Clone(requests)
+			if uint64(len(requests)) > s.beaconCfg.MaxBuilderExitRequestsPerPayload {
+				err := fmt.Errorf("%w: parent payload has too many builder exits", errBidDependencyUnavailable)
+				s.parentExitsCache.Add(root, parentBuilderExitsResult{err: err, retryAt: now.Add(parentBuilderExitsRetryDelay)})
+				return nil, err, true
+			}
+			s.parentExitsCache.Add(root, parentBuilderExitsResult{requests: requests})
+			return requests, nil, true
+		}
+	}
+	if hasCachedFailure {
+		return cachedFailure.requests, cachedFailure.err, true
+	}
+	return nil, nil, false
 }
 
 func waitForParentBuilderExits(ctx context.Context, call *parentBuilderExitsCall) ([]solid.BuilderExitRequest, error) {
