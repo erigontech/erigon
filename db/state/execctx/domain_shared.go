@@ -357,7 +357,6 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		useSharedBranchCache: true,
 	}
 	o.trieCfg.Variant = PickTrieVariant()
-	o.trieCfg.EnableTrieWarmup = o.trieCfg.Variant == commitment.VariantCommitmentV4
 	for _, opt := range opts {
 		opt(&o)
 	}
