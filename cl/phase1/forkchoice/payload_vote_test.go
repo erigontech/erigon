@@ -681,6 +681,12 @@ func TestParentPayloadStatusFromBidsRejectsIncompleteBlocks(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(nil, &cltypes.BeaconBlock{}))
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(&cltypes.SignedBeaconBlock{}, &cltypes.BeaconBlock{}))
 	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), nil))
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Body = nil
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(parent, &cltypes.BeaconBlock{}))
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.Body = nil
+	require.Equal(t, cltypes.PayloadStatusEmpty, ParentPayloadStatusFromBids(cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion), child.Block))
 }
 
 func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {

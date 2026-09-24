@@ -120,7 +120,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			break
 		}
 		block, ok := c.forkChoiceReader.GetBlock(root)
-		if !ok || block == nil || block.Block == nil {
+		if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
 			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 		}
 		canonicalBlocks = append(canonicalBlocks, block)
