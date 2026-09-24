@@ -42,8 +42,10 @@ type Computed struct {
 
 // ExpectedJSON encodes v the way its tags declare: the json tag gives each field's name, its
 // position and whether it may be omitted, and the ethjson tag gives the hex form the JSON-RPC
-// spec uses for it — "quantity" for a number, "data" for bytes. A field without an ethjson tag
-// A field without an ethjson tag is an error: nothing would say which form it is.
+// spec uses for it — "quantity" for a number, "data" for bytes, "datalist" for an array of
+// them, "bool" for a field the spec writes as a plain JSON bool. A field without an ethjson tag
+// A field without an ethjson tag is an error: nothing would say which form it is. An embedded
+// field is flattened, as encoding/json flattens an anonymous one.
 func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	rv := reflect.ValueOf(v)
 	for rv.Kind() == reflect.Pointer {
@@ -57,6 +59,14 @@ func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	buf := []byte{'{'}
 	for i := range typ.NumField() {
 		field := typ.Field(i)
+		if field.Anonymous {
+			inner, err := ExpectedJSON(rv.Field(i).Interface())
+			if err != nil {
+				return nil, fmt.Errorf("%s.%s: %w", typ.Name(), field.Name, err)
+			}
+			buf = appendInlined(buf, inner)
+			continue
+		}
 		tag, ok := field.Tag.Lookup("json")
 		if !ok {
 			continue
@@ -89,6 +99,18 @@ func isEmpty(v reflect.Value) bool {
 		return v.Len() == 0
 	}
 	return v.IsZero()
+}
+
+// appendInlined splices an embedded struct's fields in, the way encoding/json flattens an
+// anonymous field.
+func appendInlined(buf []byte, object []byte) []byte {
+	if len(object) <= 2 {
+		return buf
+	}
+	if len(buf) > 1 {
+		buf = append(buf, ',')
+	}
+	return append(buf, object[1:len(object)-1]...)
 }
 
 func appendField(buf []byte, name string, encoded []byte) []byte {
@@ -129,6 +151,31 @@ func jsonrpcValue(v reflect.Value, form string) ([]byte, error) {
 			return nil, err
 		}
 		return json.Marshal(hexutil.Bytes(bytes))
+	case "bool":
+		if v.Kind() != reflect.Bool {
+			return nil, fmt.Errorf("ethjson:\"bool\" on %v", v.Type())
+		}
+		return json.Marshal(v.Bool())
+	case "datalist":
+		if v.IsNil() {
+			return []byte("null"), nil
+		}
+		buf := []byte{'['}
+		for i := range v.Len() {
+			bytes, err := asBytes(v.Index(i))
+			if err != nil {
+				return nil, err
+			}
+			if i > 0 {
+				buf = append(buf, ',')
+			}
+			encoded, err := json.Marshal(hexutil.Bytes(bytes))
+			if err != nil {
+				return nil, err
+			}
+			buf = append(buf, encoded...)
+		}
+		return append(buf, ']'), nil
 	}
 	return nil, fmt.Errorf("unknown ethjson form %q", form)
 }
