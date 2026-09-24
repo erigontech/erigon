@@ -37,13 +37,18 @@ func (*parentSlotProcessor) ProcessExecutionPayloadBid(s abstract.BeaconState, b
 	return nil
 }
 
-func (*parentSlotProcessor) ProcessRandao(abstract.BeaconState, [96]byte, uint64) error { return nil }
+func (*parentSlotProcessor) ProcessRandao(abstract.BeaconState, [96]byte, uint64) error {
+	return nil
+}
+
 func (*parentSlotProcessor) ProcessEth1Data(abstract.BeaconState, *cltypes.Eth1Data) error {
 	return nil
 }
+
 func (*parentSlotProcessor) ProcessSyncAggregate(abstract.BeaconState, *cltypes.SyncAggregate) error {
 	return nil
 }
+
 func (p *parentSlotProcessor) ProcessAttestations(_ abstract.BeaconState, _ *solid.ListSSZ[*solid.Attestation], parentSlot uint64) error {
 	p.attestationParentSlot = parentSlot
 	return nil
