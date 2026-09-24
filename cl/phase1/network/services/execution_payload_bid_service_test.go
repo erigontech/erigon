@@ -1247,12 +1247,17 @@ type countingBidEnvelopeReader struct {
 
 type cachedParentExitReader struct {
 	*countingBidEnvelopeReader
-	root     common.Hash
-	requests []solid.BuilderExitRequest
+	root         common.Hash
+	requests     []solid.BuilderExitRequest
+	unavailable  atomic.Bool
+	beforeLookup func()
 }
 
 func (r *cachedParentExitReader) GetCachedParentBuilderExitRequests(root common.Hash) ([]solid.BuilderExitRequest, bool) {
-	if root != r.root {
+	if r.beforeLookup != nil {
+		r.beforeLookup()
+	}
+	if root != r.root || r.unavailable.Load() {
 		return nil, false
 	}
 	return r.requests, true
@@ -1307,6 +1312,47 @@ func TestExecutionPayloadBidServiceHotCacheSupersedesTransientFailure(t *testing
 	requests, err := service.parentBuilderExitRequests(t.Context(), root, now)
 	require.NoError(t, err)
 	require.Equal(t, reader.requests, requests)
+	require.Zero(t, reader.reads.Load())
+}
+
+func TestExecutionPayloadBidServiceRechecksHotCacheAfterWaitingForWork(t *testing.T) {
+	service, _, _, fc, _ := setupExecutionPayloadBidService(t, gomock.NewController(t))
+	root := common.HexToHash("0x01")
+	now := time.Unix(100*12, 0)
+	service.now = func() time.Time { return now }
+	firstLookup := make(chan struct{})
+	var once sync.Once
+	reader := &cachedParentExitReader{
+		countingBidEnvelopeReader: &countingBidEnvelopeReader{
+			ForkChoiceStorageReader: fc,
+			err:                     errors.New("temporary read failure"),
+		},
+		root:     root,
+		requests: []solid.BuilderExitRequest{{SourceAddress: common.Address{1}}},
+		beforeLookup: func() {
+			once.Do(func() { close(firstLookup) })
+		},
+	}
+	reader.unavailable.Store(true)
+	service.forkchoiceStore = reader
+	service.parentExitsWork <- struct{}{}
+
+	type result struct {
+		requests []solid.BuilderExitRequest
+		err      error
+	}
+	results := make(chan result, 1)
+	go func() {
+		requests, err := service.parentBuilderExitRequests(t.Context(), root, now)
+		results <- result{requests: requests, err: err}
+	}()
+	<-firstLookup
+	reader.unavailable.Store(false)
+	<-service.parentExitsWork
+
+	got := <-results
+	require.NoError(t, got.err)
+	require.Equal(t, reader.requests, got.requests)
 	require.Zero(t, reader.reads.Load())
 }
 
