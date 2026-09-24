@@ -16,13 +16,7 @@
 
 package jsonstream
 
-import (
-	"encoding"
-
-	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon/common/hexutil"
-)
+import "encoding"
 
 type textPtr[T any] interface {
 	*T
@@ -51,34 +45,4 @@ func ArrayValue[S ~[]E, E any](s *StackStream, items S, elem func(*StackStream, 
 		elem(s, &items[i])
 	}
 	s.WriteArrayEnd()
-}
-
-// A JSON-RPC value is either a quantity, `^0x(0|[1-9a-f][0-9a-f]*)$`, or data,
-// `^0x[0-9a-f]*$`, as
-// https://github.com/ethereum/execution-apis/blob/main/src/schemas/base-types.yaml defines
-// them. Which one a field uses follows from its Go type, so these writers take the domain
-// type and hold that mapping in one place: an encoder cannot pass a byte slice where the
-// spec wants a quantity, and no encoder needs to name a hexutil type.
-func Quantity[T ~uint64 | ~uint](s *StackStream, name string, v T) {
-	q := hexutil.Uint64(v)
-	Text(s, name, &q)
-}
-
-// QuantityOrNull writes null for a field the header or receipt does not carry.
-func QuantityOrNull[T ~uint64 | ~uint](s *StackStream, name string, v *T) {
-	if v == nil {
-		s.Field(name).WriteNil()
-		return
-	}
-	Quantity(s, name, *v)
-}
-
-// Quantity256 writes a 256-bit quantity, null when the field is absent.
-func Quantity256(s *StackStream, name string, v *uint256.Int) {
-	Text(s, name, (*hexutil.U256)(v))
-}
-
-// Data writes a byte string whose length is its own, such as extraData or a log's data.
-func Data(s *StackStream, name string, b []byte) {
-	s.Field(name).WriteHex(b)
 }

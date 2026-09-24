@@ -19,6 +19,7 @@ package types
 import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // RPCHeader is a header as a reply spells it: the header itself, borrowed rather than
@@ -48,7 +49,7 @@ func (v *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	}
 	s.WriteObjectStart()
 	v.Header.writeFastJSONFields(s)
-	jsonstream.Data(s, "hash", v.Hash[:])
+	ethjson.Data(s, "hash", v.Hash[:])
 	s.WriteObjectEnd()
 	return nil
 }
@@ -68,37 +69,31 @@ func (h *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 func (h *Header) writeFastJSONFields(s *jsonstream.StackStream) {
-	jsonstream.Data(s, "parentHash", h.ParentHash[:])
-	jsonstream.Data(s, "sha3Uncles", h.UncleHash[:])
-	jsonstream.Data(s, "miner", h.Coinbase[:])
-	jsonstream.Data(s, "stateRoot", h.Root[:])
-	jsonstream.Data(s, "transactionsRoot", h.TxHash[:])
-	jsonstream.Data(s, "receiptsRoot", h.ReceiptHash[:])
-	jsonstream.Data(s, "logsBloom", h.Bloom[:])
-	jsonstream.Quantity256(s, "difficulty", &h.Difficulty)
-	jsonstream.Quantity256(s, "number", &h.Number)
-	jsonstream.Quantity(s, "gasLimit", h.GasLimit)
-	jsonstream.Quantity(s, "gasUsed", h.GasUsed)
-	jsonstream.Quantity(s, "timestamp", h.Time)
-	jsonstream.Data(s, "extraData", h.Extra)
-	jsonstream.Data(s, "mixHash", h.MixDigest[:])
-	jsonstream.Data(s, "nonce", h.Nonce[:])
-	if h.AuRaStep != 0 {
-		jsonstream.Quantity(s, "auraStep", h.AuRaStep)
-	}
-	if len(h.AuRaSeal) != 0 {
-		jsonstream.Data(s, "auraSeal", h.AuRaSeal)
-	}
-	jsonstream.Quantity256(s, "baseFeePerGas", h.BaseFee)
+	ethjson.Data(s, "parentHash", h.ParentHash[:])
+	ethjson.Data(s, "sha3Uncles", h.UncleHash[:])
+	ethjson.Data(s, "miner", h.Coinbase[:])
+	ethjson.Data(s, "stateRoot", h.Root[:])
+	ethjson.Data(s, "transactionsRoot", h.TxHash[:])
+	ethjson.Data(s, "receiptsRoot", h.ReceiptHash[:])
+	ethjson.Data(s, "logsBloom", h.Bloom[:])
+	ethjson.Quantity256(s, "difficulty", &h.Difficulty)
+	ethjson.Quantity256(s, "number", &h.Number)
+	ethjson.Quantity(s, "gasLimit", h.GasLimit)
+	ethjson.Quantity(s, "gasUsed", h.GasUsed)
+	ethjson.Quantity(s, "timestamp", h.Time)
+	ethjson.Data(s, "extraData", h.Extra)
+	ethjson.Data(s, "mixHash", h.MixDigest[:])
+	ethjson.Data(s, "nonce", h.Nonce[:])
+	ethjson.QuantityOmitEmpty(s, "auraStep", h.AuRaStep)
+	ethjson.DataOmitEmpty(s, "auraSeal", h.AuRaSeal)
+	ethjson.Quantity256(s, "baseFeePerGas", h.BaseFee)
 	writeHashField(s, "withdrawalsRoot", h.WithdrawalsHash)
-	jsonstream.QuantityOrNull(s, "blobGasUsed", h.BlobGasUsed)
-	jsonstream.QuantityOrNull(s, "excessBlobGas", h.ExcessBlobGas)
+	ethjson.QuantityOrNull(s, "blobGasUsed", h.BlobGasUsed)
+	ethjson.QuantityOrNull(s, "excessBlobGas", h.ExcessBlobGas)
 	writeHashField(s, "parentBeaconBlockRoot", h.ParentBeaconBlockRoot)
 	writeHashField(s, "requestsHash", h.RequestsHash)
 	writeHashField(s, "blockAccessListHash", h.BlockAccessListHash)
-	if h.SlotNumber != nil {
-		jsonstream.Quantity(s, "slotNumber", *h.SlotNumber)
-	}
+	ethjson.QuantityPtrOmitEmpty(s, "slotNumber", h.SlotNumber)
 }
 
 func writeHashField(s *jsonstream.StackStream, name string, h *common.Hash) {
