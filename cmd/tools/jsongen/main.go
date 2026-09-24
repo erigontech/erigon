@@ -142,6 +142,11 @@ func writeFields(w *bytes.Buffer, st *ast.StructType, structs map[string]*ast.St
 			tag = reflect.StructTag(unquoted)
 		}
 		if len(f.Names) == 0 { // embedded
+			// encoding/json nests an anonymous field that carries a name, and flattens it
+			// only when it does not, so a tagged one is not ours to inline.
+			if _, named := tag.Lookup("json"); named {
+				return fmt.Errorf("embedded %s has a json tag, which encoding/json nests", typeString(f.Type))
+			}
 			embedded, ok := structs[typeString(f.Type)]
 			if !ok {
 				return fmt.Errorf("embedded %s is not a struct in this package", typeString(f.Type))
