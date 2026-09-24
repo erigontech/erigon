@@ -26,7 +26,6 @@ import (
 	"errors"
 	"math/big"
 	"reflect"
-	"strings"
 	"testing"
 
 	"github.com/go-test/deep"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 )
 
 func TestBlockDecodingNestedRLPExtra(t *testing.T) {
@@ -819,127 +819,6 @@ func TestHeaderMarshalJSONQuantities(t *testing.T) {
 	require.Contains(t, string(enc), `"baseFeePerGas":null`)
 }
 
-// headerJSONByDeclaration is the field-by-field JSON form of a Header: the types and tags
-// here are what the wire format is, and the test below requires MarshalFastJSONTo to match
-// it byte for byte. Keep it out of production code — it exists to be the encoder's oracle,
-// so a removed field or a wrong cast fails instead of shipping.
-func headerJSONByDeclaration(h *Header) ([]byte, error) {
-	type Header struct {
-		ParentHash            common.Hash     `json:"parentHash"       gencodec:"required"`
-		UncleHash             common.Hash     `json:"sha3Uncles"       gencodec:"required"`
-		Coinbase              common.Address  `json:"miner"`
-		Root                  common.Hash     `json:"stateRoot"        gencodec:"required"`
-		TxHash                common.Hash     `json:"transactionsRoot" gencodec:"required"`
-		ReceiptHash           common.Hash     `json:"receiptsRoot"     gencodec:"required"`
-		Bloom                 Bloom           `json:"logsBloom"        gencodec:"required"`
-		Difficulty            *hexutil.U256   `json:"difficulty"       gencodec:"required"`
-		Number                *hexutil.U256   `json:"number"           gencodec:"required"`
-		GasLimit              hexutil.Uint64  `json:"gasLimit"         gencodec:"required"`
-		GasUsed               hexutil.Uint64  `json:"gasUsed"          gencodec:"required"`
-		Time                  hexutil.Uint64  `json:"timestamp"        gencodec:"required"`
-		Extra                 hexutil.Bytes   `json:"extraData"        gencodec:"required"`
-		MixDigest             common.Hash     `json:"mixHash"`
-		Nonce                 BlockNonce      `json:"nonce"`
-		AuRaStep              hexutil.Uint64  `json:"auraStep,omitempty"`
-		AuRaSeal              hexutil.Bytes   `json:"auraSeal,omitempty"`
-		BaseFee               *hexutil.U256   `json:"baseFeePerGas"`
-		WithdrawalsHash       *common.Hash    `json:"withdrawalsRoot"`
-		BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed"`
-		ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas"`
-		ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot"`
-		RequestsHash          *common.Hash    `json:"requestsHash"`
-		BlockAccessListHash   *common.Hash    `json:"blockAccessListHash"`
-		// TODO omitempty is temporary until ci is updated to support slotnumber: null
-		SlotNumber *hexutil.Uint64 `json:"slotNumber,omitempty"`
-		Hash       common.Hash     `json:"hash"`
-	}
-	var enc Header
-	enc.ParentHash = h.ParentHash
-	enc.UncleHash = h.UncleHash
-	enc.Coinbase = h.Coinbase
-	enc.Root = h.Root
-	enc.TxHash = h.TxHash
-	enc.ReceiptHash = h.ReceiptHash
-	enc.Bloom = h.Bloom
-	enc.Difficulty = (*hexutil.U256)(&h.Difficulty)
-	enc.Number = (*hexutil.U256)(&h.Number)
-	enc.GasLimit = hexutil.Uint64(h.GasLimit)
-	enc.GasUsed = hexutil.Uint64(h.GasUsed)
-	enc.Time = hexutil.Uint64(h.Time)
-	enc.Extra = h.Extra
-	enc.MixDigest = h.MixDigest
-	enc.Nonce = h.Nonce
-	enc.AuRaSeal = h.AuRaSeal
-	enc.AuRaStep = hexutil.Uint64(h.AuRaStep)
-	enc.BaseFee = (*hexutil.U256)(h.BaseFee)
-	enc.WithdrawalsHash = h.WithdrawalsHash
-	enc.BlobGasUsed = (*hexutil.Uint64)(h.BlobGasUsed)
-	enc.ExcessBlobGas = (*hexutil.Uint64)(h.ExcessBlobGas)
-	enc.ParentBeaconBlockRoot = h.ParentBeaconBlockRoot
-	enc.RequestsHash = h.RequestsHash
-	enc.BlockAccessListHash = h.BlockAccessListHash
-	enc.SlotNumber = (*hexutil.Uint64)(h.SlotNumber)
-	enc.Hash = h.Hash()
-	return json.Marshal(&enc)
-}
-
-// The json tags on Header declare the field names, their order and which ones may be
-// omitted. The encoder writes them by hand, so a renamed key, a reordered field or a new
-// field nobody encodes shows up here. Only the representation is left to the oracle above.
-func TestHeaderJSONKeysMatchItsTags(t *testing.T) {
-	t.Parallel()
-	// slotNumber is tagged without omitempty because null is the intended form, but the
-	// encoder still omits it until CI accepts that; see gen_header_json.go's note.
-	const omittedDespiteItsTag = "slotNumber"
-
-	keysFromTags := func(populated bool) []string {
-		typ := reflect.TypeFor[Header]()
-		var want []string
-		for i := range typ.NumField() {
-			tag, ok := typ.Field(i).Tag.Lookup("json")
-			if !ok {
-				continue
-			}
-			name, opts, _ := strings.Cut(tag, ",")
-			if name == "-" {
-				continue
-			}
-			if !populated && (strings.Contains(opts, "omitempty") || name == omittedDespiteItsTag) {
-				continue
-			}
-			want = append(want, name)
-		}
-		return append(want, "hash") // computed, so it has no field to carry a tag
-	}
-
-	for name, tc := range map[string]struct {
-		h         *Header
-		populated bool
-	}{
-		"every field set": {headerWithEveryFieldSet(), true},
-		"empty":           {&Header{}, false},
-	} {
-		t.Run(name, func(t *testing.T) {
-			enc, err := jsonstream.Marshal(tc.h)
-			require.NoError(t, err)
-			var got []string
-			dec := json.NewDecoder(bytes.NewReader(enc))
-			_, err = dec.Token() // {
-			require.NoError(t, err)
-			for dec.More() {
-				key, err := dec.Token()
-				require.NoError(t, err)
-				got = append(got, key.(string))
-				var skip json.RawMessage
-				require.NoError(t, dec.Decode(&skip))
-			}
-			require.Equal(t, keysFromTags(tc.populated), got)
-		})
-	}
-}
-
-// MarshalFastJSONTo is the only header encoder in production, so every field, including the
-// optional ones, must come out exactly as the declaration above spells it.
 // headerWithEveryFieldSet fills every field, so no optional one is skipped.
 func headerWithEveryFieldSet() *Header {
 	hash := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
@@ -981,7 +860,8 @@ func TestHeaderMarshalFastJSONTo(t *testing.T) {
 
 	for name, h := range map[string]*Header{"full": full, "empty": empty, "noOptionals": noOptionals} {
 		t.Run(name, func(t *testing.T) {
-			want, err := headerJSONByDeclaration(h)
+			hash := h.Hash()
+			want, err := ethjsontest.ExpectedJSON(h, ethjsontest.Computed{Name: "hash", Raw: `"` + hash.Hex() + `"`})
 			require.NoError(t, err)
 			got, err := jsonstream.Marshal(h)
 			require.NoError(t, err)
