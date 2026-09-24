@@ -18,6 +18,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -32,6 +33,8 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
@@ -266,14 +269,34 @@ func (a *ApiHandler) PostEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r 
 	if err := a.voluntaryExitService.ProcessMessage(r.Context(), nil, &services.SignedVoluntaryExitForGossip{
 		SignedVoluntaryExit:   &req,
 		ImmediateVerification: true,
-	}); err != nil && !errors.Is(err, services.ErrIgnore) {
+	}); err != nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 		return
 	}
-	if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameVoluntaryExit, encodedSSZ); err != nil {
-		a.logger.Debug("[Beacon REST] failed to publish voluntary exit to gossip", "err", err)
+	publishKey := common.Hash(crypto.Sha256(encodedSSZ))
+	publishResult := a.voluntaryExitPublishGroup.DoChan(string(publishKey[:]), func() (any, error) {
+		if a.publishedVoluntaryExits.Contains(publishKey) {
+			return nil, nil
+		}
+		publishCtx, cancel := context.WithTimeout(context.Background(), a.voluntaryExitPublishTimeout)
+		defer cancel()
+		if err := a.gossipManager.Publish(publishCtx, gossip.TopicNameVoluntaryExit, encodedSSZ); err != nil {
+			return nil, err
+		}
+		a.publishedVoluntaryExits.Add(publishKey, struct{}{})
+		return nil, nil
+	})
+	select {
+	case <-r.Context().Done():
+		return
+	case result := <-publishResult:
+		err = result.Err
 	}
-	// Only write 200
+	if err != nil {
+		a.logger.Debug("[Beacon REST] failed to publish voluntary exit to gossip", "err", err)
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 }
 
