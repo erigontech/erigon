@@ -16,7 +16,14 @@
 
 package jsonstream
 
-import "encoding"
+import (
+	"encoding"
+	"strconv"
+
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common/hexutil"
+)
 
 type textPtr[T any] interface {
 	*T
@@ -45,4 +52,30 @@ func ArrayValue[S ~[]E, E any](s *StackStream, items S, elem func(*StackStream, 
 		elem(s, &items[i])
 	}
 	s.WriteArrayEnd()
+}
+
+// HexUint64 writes 0x and the shortest lowercase hex of v. The digits go straight into
+// the buffer, so no hexutil value is built for the call and nothing can escape. Which fields
+// are written this way is the caller's rule, not the stream's: see rpc/jsonstream/ethjson.
+func HexUint64(s *StackStream, v uint64) {
+	s.beforeValue()
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
+	s.commit(append(buf, '"'), start)
+	s.afterValue()
+}
+
+// HexUint256 does the same for a 256-bit value, null for a nil one.
+func HexUint256(s *StackStream, v *uint256.Int) {
+	if v == nil {
+		s.WriteNil()
+		return
+	}
+	s.beforeValue()
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf, _ = hexutil.U256(*v).AppendText(append(buf, '"'))
+	s.commit(append(buf, '"'), start)
+	s.afterValue()
 }
