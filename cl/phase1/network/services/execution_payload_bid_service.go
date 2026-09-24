@@ -501,7 +501,7 @@ func (s *executionPayloadBidService) parentBuilderExitRequests(ctx context.Conte
 	}
 
 	s.parentExitsMu.Lock()
-	if requests, err, ok := s.cachedParentBuilderExitRequestsLocked(root, now); ok {
+	if requests, err, ok := s.cachedParentBuilderExitRequestsLocked(root, s.now()); ok {
 		s.parentExitsMu.Unlock()
 		<-work
 		return requests, err
