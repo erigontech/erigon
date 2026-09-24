@@ -69,7 +69,7 @@ func TestStoredParentEnvelopesRestoresReadableParents(t *testing.T) {
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: storedRoot}}
 	reads := 0
 
-	got := storedParentEnvelopes(
+	got, storedRoots := storedParentEnvelopes(
 		[][32]byte{storedRoot, storedRoot, mismatchedRoot},
 		func(root common.Hash) bool { return root == storedRoot || root == mismatchedRoot },
 		func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
@@ -83,6 +83,7 @@ func TestStoredParentEnvelopesRestoresReadableParents(t *testing.T) {
 
 	require.Equal(t, 2, reads)
 	require.Equal(t, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{storedRoot: envelope}, got)
+	require.Equal(t, map[common.Hash]struct{}{storedRoot: {}}, storedRoots)
 }
 
 func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {
@@ -102,6 +103,7 @@ func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {
 	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, true, true))
 	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, false, true))
 	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusInvalidated, true, false))
+	require.False(t, parentEnvelopeNeedsRecovery(child, parent, false, execution_client.PayloadStatusInvalidated, true, false))
 }
 
 func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
@@ -270,7 +272,7 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 	root := common.Hash{1}
 	store := &storedParentPayloadTestStore{has: true, markRetained: true}
-	replay := storedParentPayloadReplay{deadline: time.Now(), results: make(map[common.Hash]bool)}
+	replay := storedParentPayloadReplay{deadline: time.Now(), remaining: 1, results: make(map[common.Hash]bool)}
 
 	accepted := replay.accepted(
 		t.Context(),
@@ -286,4 +288,5 @@ func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 
 	require.False(t, accepted)
 	require.EqualValues(t, execution_client.PayloadStatusNone, store.marked)
+	require.Zero(t, replay.remaining)
 }

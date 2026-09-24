@@ -239,16 +239,10 @@ MainLoop:
 
 			// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
 			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
-			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
-			storedEnvelopeCount := 0
-			for root := range envelopes {
-				if cfg.forkChoice.HasEnvelope(root) {
-					storedEnvelopeCount++
-				}
-			}
+			envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
 			payloadReplay := storedParentPayloadReplay{
 				budget:    gloasPayloadRetryBudget,
-				remaining: storedEnvelopeCount,
+				remaining: len(storedEnvelopeRoots),
 				results:   make(map[common.Hash]bool),
 			}
 
@@ -286,7 +280,7 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						wasStored := cfg.forkChoice.HasEnvelope(common.Hash(parentRoot))
+						_, wasStored := storedEnvelopeRoots[common.Hash(parentRoot)]
 						envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg) && !wasStored)
 						if envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
@@ -392,16 +386,19 @@ func parentEnvelopeRequired(child, parent *cltypes.SignedBeaconBlock) bool {
 }
 
 func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound, gasLimitFound bool) bool {
+	if !parentEnvelopeRequired(child, parent) || (statusFound && status == execution_client.PayloadStatusInvalidated) {
+		return false
+	}
 	gasLimitRequired := status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
-	return parentEnvelopeRequired(child, parent) && (!stored || !statusFound || status == execution_client.PayloadStatusNone || (gasLimitRequired && !gasLimitFound))
+	return !stored || !statusFound || status == execution_client.PayloadStatusNone || (gasLimitRequired && !gasLimitFound)
 }
 
 // fetchParentEnvelopes batch-fetches execution payload envelopes for the given roots.
 // It retries until all envelopes are obtained or the context is cancelled.
-func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
-	envelopes := storedParentEnvelopes(roots, cfg.forkChoice.HasEnvelope, cfg.forkChoice.ReadEnvelopeFromDisk)
+func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, map[common.Hash]struct{}) {
+	envelopes, storedRoots := storedParentEnvelopes(roots, cfg.forkChoice.HasEnvelope, cfg.forkChoice.ReadEnvelopeFromDisk)
 	if len(roots) == 0 {
-		return envelopes
+		return envelopes, storedRoots
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
@@ -417,7 +414,7 @@ func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[c
 	const maxAttempts = 10
 	for attempt := 0; attempt < maxAttempts && len(remaining) > 0; attempt++ {
 		if ctx.Err() != nil {
-			return envelopes
+			return envelopes, storedRoots
 		}
 		result, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, remaining)
 		if err != nil {
@@ -441,15 +438,16 @@ func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[c
 	if len(remaining) > 0 {
 		log.Debug("[chainTipSync] some parent envelopes still missing after retries", "missing", len(remaining))
 	}
-	return envelopes
+	return envelopes, storedRoots
 }
 
 func storedParentEnvelopes(
 	roots [][32]byte,
 	hasEnvelope func(common.Hash) bool,
 	readEnvelope func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error),
-) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, map[common.Hash]struct{}) {
 	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	storedRoots := make(map[common.Hash]struct{})
 	for _, requested := range roots {
 		root := common.Hash(requested)
 		if _, ok := envelopes[root]; ok || !hasEnvelope(root) {
@@ -460,8 +458,9 @@ func storedParentEnvelopes(
 			continue
 		}
 		envelopes[root] = envelope
+		storedRoots[root] = struct{}{}
 	}
-	return envelopes
+	return envelopes, storedRoots
 }
 
 // recoverMissingEnvelopes incrementally scans from the selected head for missing FULL-block envelopes.
@@ -902,6 +901,9 @@ func (r *storedParentPayloadReplay) accepted(
 		r.results = make(map[common.Hash]bool)
 	}
 	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
+		if r.remaining > 0 {
+			r.remaining--
+		}
 		r.results[root] = false
 		return false
 	}
