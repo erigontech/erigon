@@ -253,7 +253,8 @@ func makeKeys(t *testing.T) (*EonPublicKey, *EpochSecretKey, *EpochID) {
 	epochSecretKey, err := ComputeEpochSecretKey(
 		[]int{0, 1},
 		[]*EpochSecretKeyShare{epochSecretKeyShares[0], epochSecretKeyShares[1]},
-		threshold)
+		threshold,
+	)
 	require.NoError(t, err)
 	return eonPublicKey, epochSecretKey, epochID
 }

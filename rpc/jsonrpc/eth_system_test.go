@@ -468,7 +468,6 @@ func TestGasPrice(t *testing.T) {
 			}
 		})
 	}
-
 }
 
 func TestEthConfig(t *testing.T) {
