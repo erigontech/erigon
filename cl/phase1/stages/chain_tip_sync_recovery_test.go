@@ -267,31 +267,6 @@ func TestStoredParentPayloadReplayReservesBudgetForLaterRoots(t *testing.T) {
 	require.Equal(t, []common.Hash{firstPayload.BlockHash, secondPayload.BlockHash}, validator.calls)
 }
 
-func TestStoredParentPayloadReplayBudgetsInitialApply(t *testing.T) {
-	firstRoot := common.Hash{1}
-	secondRoot := common.Hash{2}
-	firstPayload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
-	firstPayload.BlockHash = common.Hash{3}
-	secondPayload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
-	secondPayload.BlockHash = common.Hash{4}
-	validator := &orderedPayloadValidator{slow: firstPayload.BlockHash}
-	replay := storedParentPayloadReplay{
-		budget:    100 * time.Millisecond,
-		remaining: 2,
-	}
-
-	firstCtx, cancelFirst := replay.attemptContext(t.Context(), firstRoot)
-	_, err := validator.NewPayloadWithAdmission(firstCtx, firstPayload, nil, nil, nil)
-	cancelFirst()
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-
-	secondCtx, cancelSecond := replay.attemptContext(t.Context(), secondRoot)
-	status, err := validator.NewPayloadWithAdmission(secondCtx, secondPayload, nil, nil, nil)
-	cancelSecond()
-	require.NoError(t, err)
-	require.EqualValues(t, execution_client.PayloadStatusNotValidated, status)
-}
-
 func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 	root := common.Hash{1}
 	store := &storedParentPayloadTestStore{has: true, markRetained: true}

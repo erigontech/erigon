@@ -1,9 +1,7 @@
 package forkchoice
 
 import (
-	"context"
 	"testing"
-	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -11,30 +9,6 @@ import (
 	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 )
-
-func TestForkChoiceLockAcquisitionHonorsContext(t *testing.T) {
-	f := &ForkChoiceStore{}
-	f.mu.Lock()
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		err := f.lockWithContext(ctx)
-		if err == nil {
-			f.mu.Unlock()
-		}
-		done <- err
-	}()
-
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-	case <-time.After(time.Second):
-		f.mu.Unlock()
-		t.Fatal("lock acquisition ignored context deadline")
-	}
-	f.mu.Unlock()
-}
 
 func TestMarkPayloadStatusAndGasLimitIfRetained(t *testing.T) {
 	root := common.HexToHash("0x1234")

@@ -240,9 +240,15 @@ MainLoop:
 			// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
 			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
 			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
+			storedEnvelopeCount := 0
+			for root := range envelopes {
+				if cfg.forkChoice.HasEnvelope(root) {
+					storedEnvelopeCount++
+				}
+			}
 			payloadReplay := storedParentPayloadReplay{
 				budget:    gloasPayloadRetryBudget,
-				remaining: len(envelopes),
+				remaining: storedEnvelopeCount,
 				results:   make(map[common.Hash]bool),
 			}
 
@@ -281,14 +287,11 @@ MainLoop:
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
 						wasStored := cfg.forkChoice.HasEnvelope(common.Hash(parentRoot))
-						envelopeCtx, cancelEnvelope := payloadReplay.attemptContext(ctx, common.Hash(parentRoot))
-						envErr := cfg.forkChoice.OnExecutionPayload(envelopeCtx, env, false, canValidateGloasPayloads(cfg))
+						envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg) && !wasStored)
 						if envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
-						accepted := !wasStored || payloadReplay.accepted(envelopeCtx, cfg, cfg.forkChoice, common.Hash(parentRoot), env, envErr)
-						cancelEnvelope()
-						if !accepted {
+						if wasStored && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, common.Hash(parentRoot), env, envErr) {
 							continue
 						}
 					}

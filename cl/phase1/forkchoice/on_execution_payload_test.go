@@ -1689,30 +1689,6 @@ func TestExecutionPayloadImportEmitsIntegrationEventsExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestOnExecutionPayloadHonorsContextWhileWaitingForForkChoiceLock(t *testing.T) {
-	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
-	blockRoot := envelope.Message.BeaconBlockRoot
-	f := newPayloadVoteTestStore(t, blockRoot, false, false)
-	f.beaconCfg = cfg
-	f.forkGraph = &persistedEnvelopeForkGraph{dataAvailabilityForkGraph: dataAvailabilityForkGraph{state: blockState, block: block}}
-	f.mu.Lock()
-	ctx, cancel := context.WithTimeout(t.Context(), 20*time.Millisecond)
-	defer cancel()
-	done := make(chan error, 1)
-	go func() {
-		done <- f.OnExecutionPayload(ctx, envelope, false, false)
-	}()
-
-	select {
-	case err := <-done:
-		require.ErrorIs(t, err, context.DeadlineExceeded)
-	case <-time.After(time.Second):
-		f.mu.Unlock()
-		t.Fatal("OnExecutionPayload ignored context while waiting for fork-choice lock")
-	}
-	f.mu.Unlock()
-}
-
 func TestExecutionPayloadIndexRepairEmitsIntegrationEventsExactlyOnce(t *testing.T) {
 	cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 	blockRoot := envelope.Message.BeaconBlockRoot

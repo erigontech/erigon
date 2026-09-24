@@ -741,32 +741,6 @@ const (
 	queueMissingEnvelope missingEnvelopeMode = true
 )
 
-func (f *ForkChoiceStore) lockWithContext(ctx context.Context) error {
-	return waitForLock(ctx, f.mu.TryLock)
-}
-
-func (f *ForkChoiceStore) rlockWithContext(ctx context.Context) error {
-	return waitForLock(ctx, f.mu.TryRLock)
-}
-
-func waitForLock(ctx context.Context, tryLock func() bool) error {
-	retry := time.NewTicker(time.Millisecond)
-	defer retry.Stop()
-	for {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if tryLock() {
-			return nil
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-retry.C:
-		}
-	}
-}
-
 // applyEnvelope processes the envelope under f.mu except while waiting for EL validation.
 // Returns (true, nil) if the envelope was applied,
 // (false, nil) if it was skipped (already processed or block not yet known),
@@ -785,9 +759,7 @@ func (f *ForkChoiceStore) applyEnvelope(
 		return false, fmt.Errorf("%w: signed envelope has nil message", ErrInvalidExecutionPayloadEnvelope)
 	}
 
-	if err := f.lockWithContext(ctx); err != nil {
-		return false, fmt.Errorf("%w: %w", errPayloadValidationAdmission, err)
-	}
+	f.mu.Lock()
 	defer f.mu.Unlock()
 
 	return f.applyEnvelopeCoordinated(ctx, signedEnvelope, checkBlobData, validatePayload, commitmentsValidated, missingMode, receivedAt)
@@ -985,11 +957,9 @@ func (f *ForkChoiceStore) validateEnvelopePersistenceCommitments(block *cltypes.
 	return cltypes.ValidateExecutionPayloadEnvelopeCommitments(f.beaconCfg, block, signedEnvelope)
 }
 
-func (f *ForkChoiceStore) validateKnownEnvelopeCommitments(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, validatePayload bool) (bool, error) {
+func (f *ForkChoiceStore) validateKnownEnvelopeCommitments(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, validatePayload bool) (bool, error) {
 	root := signedEnvelope.Message.BeaconBlockRoot
-	if err := f.rlockWithContext(ctx); err != nil {
-		return false, fmt.Errorf("%w: %w", errPayloadValidationAdmission, err)
-	}
+	f.mu.RLock()
 	block, ok := f.forkGraph.GetBlock(root)
 	f.mu.RUnlock()
 	if !ok || block == nil {
@@ -1387,14 +1357,8 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
-	commitmentsValidated, err := f.validateKnownEnvelopeCommitments(ctx, signedEnvelope, validatePayload)
+	commitmentsValidated, err := f.validateKnownEnvelopeCommitments(signedEnvelope, validatePayload)
 	if err != nil {
-		if errors.Is(err, errPayloadValidationAdmission) {
-			if f.pendingEnvelopes != nil && !f.forkGraph.HasEnvelope(common.Hash(beaconBlockRoot)) {
-				f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
-			}
-			return err
-		}
 		return fmt.Errorf("%w: OnExecutionPayload: invalid execution payload envelope commitments: %w", ErrInvalidExecutionPayloadEnvelope, err)
 	}
 
@@ -1402,8 +1366,7 @@ func (f *ForkChoiceStore) OnExecutionPayloadAt(ctx context.Context, signedEnvelo
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload, commitmentsValidated, queueMissingEnvelope, receivedAt)
 	if err != nil {
-		shouldQueue := errors.Is(err, ErrExecutionPayloadEnvelopePersistenceFailed) || (errors.Is(err, errPayloadValidationAdmission) && !f.forkGraph.HasEnvelope(common.Hash(beaconBlockRoot)))
-		if f.pendingEnvelopes != nil && shouldQueue {
+		if errors.Is(err, ErrExecutionPayloadEnvelopePersistenceFailed) {
 			f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
 		}
 		return err
