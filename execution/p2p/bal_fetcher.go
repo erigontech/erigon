@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"sync"
 	"time"
 
 	"golang.org/x/sync/errgroup"
@@ -127,6 +128,9 @@ const balFetchShardingThreshold = 16
 // has it. The loop stops once covered or when a full-remainder round makes no
 // progress, which proves no connected peer can serve the rest.
 func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash]*types.BlockAccessListSidecar {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	var mu sync.Mutex
 	out := make(map[common.Hash]*types.BlockAccessListSidecar, len(reqs))
 	if len(peerIds) == 0 {
 		return out
@@ -139,28 +143,33 @@ func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, 
 		if shardedFetch {
 			workers = shards
 		}
-		results := make([]map[common.Hash]*types.BlockAccessListSidecar, workers)
 		var eg errgroup.Group
 		eg.SetLimit(maxParallel)
-		for i := 0; i < workers; i++ {
+		for i := 0; i < workers && ctx.Err() == nil; i++ {
 			slice := remaining
 			if shardedFetch {
 				slice = remaining[i*len(remaining)/shards : (i+1)*len(remaining)/shards]
 			}
 			peerId := peerIds[(i+round)%len(peerIds)]
 			eg.Go(func() error {
-				results[i] = fetch(ctx, slice, &peerId)
+				if ctx.Err() != nil {
+					return nil
+				}
+				got := fetch(ctx, slice, &peerId)
+				mu.Lock()
+				defer mu.Unlock()
+				for hash, bal := range got {
+					if _, ok := out[hash]; !ok {
+						out[hash] = bal
+					}
+				}
+				if len(out) == len(reqs) {
+					cancel()
+				}
 				return nil
 			})
 		}
 		_ = eg.Wait()
-		for _, got := range results {
-			for hash, bal := range got {
-				if _, ok := out[hash]; !ok {
-					out[hash] = bal
-				}
-			}
-		}
 		next := make([]BALRequest, 0, len(remaining))
 		for _, r := range remaining {
 			if _, ok := out[r.Hash]; !ok {
