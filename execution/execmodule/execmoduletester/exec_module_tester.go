@@ -130,6 +130,7 @@ type ExecModuleTester struct {
 	ExecModule           *execmodule.ExecModule
 	BlockBuilder         *builder.Builder
 	StateCache           *execmodule.Cache
+	ReadAheader          *exec.BlockReadAheader
 	retirementStart      chan bool
 	retirementDone       chan struct{}
 	stateRetirementStart chan bool
@@ -708,6 +709,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	sealCancel := make(chan struct{})
 
 	readAheader := exec.NewBlockReadAheader()
+	mock.ReadAheader = readAheader
 	blkBuilder := builder.NewBuilder(
 		mock.DB,
 		&cfg.Builder,

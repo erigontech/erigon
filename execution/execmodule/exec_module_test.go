@@ -729,6 +729,38 @@ func TestExecModuleTesterReportsUnknownPayload(t *testing.T) {
 	require.Nil(t, block)
 }
 
+func TestInsertBlocksCachesInclusionList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	il := types.Transactions{types.NewTransaction(0, common.Address{1}, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil)}
+	block := chainPack.Blocks[0].WithInclusionList(il)
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+
+	got, ok := m.ReadAheader.ReadInclusionList(block.Hash())
+	require.True(t, ok)
+	require.Equal(t, il, got)
+}
+
+func TestInsertBlocksWithoutInclusionListCachesNothing(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	block := chainPack.Blocks[0]
+
+	insertRes, err := m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.NoError(t, err)
+	require.Equal(t, execmodule.ExecutionStatusSuccess, insertRes)
+
+	_, ok := m.ReadAheader.ReadInclusionList(block.Hash())
+	require.False(t, ok)
+}
+
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()

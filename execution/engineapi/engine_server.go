@@ -432,7 +432,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	var il types.Transactions
 	if version >= clparams.HezeVersion {
-		if len(inclusionList) == 0 {
+		if len(inclusionList) == 0 || inclusionList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "inclusion list cannot be empty"}
 		}
 
@@ -445,7 +445,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot decode inclusion list: %v", err)}
 		}
 	}
-	_ = il
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
@@ -527,9 +526,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
-
+	block = block.WithInclusionList(il)
+	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if version < clparams.HezeVersion {
-		payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, nil)
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
 				return &engine_types.PayloadStatus{
@@ -549,10 +548,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 
 		return ret, nil
 	} else {
-		payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, il)
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
-				return &engine_types.PayloadStatus{
+				return &engine_types.PayloadStatusV2{
 					Status:          engine_types.InvalidStatus,
 					ValidationError: engine_types.NewStringifiedError(err),
 				}, nil
@@ -1005,7 +1003,6 @@ func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 	versionedHashes []common.Hash,
-	inclusionList types.Transactions,
 ) (any, error) {
 	e.engineLogSpamer.RecordRequest()
 
