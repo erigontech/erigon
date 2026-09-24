@@ -4,9 +4,16 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"net/url"
+	"strings"
 
+	"github.com/erigontech/erigon/cl/utils/bls"
 	params2 "github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/vm/lightclient/iavl"
 	v1 "github.com/erigontech/erigon/execution/vm/lightclient/v1"
+	v2 "github.com/erigontech/erigon/execution/vm/lightclient/v2"
+	"github.com/tendermint/tendermint/crypto/merkle"
+	cmn "github.com/tendermint/tendermint/libs/common"
 )
 
 const (
@@ -145,12 +152,6 @@ func (c *iavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
 
 func (c *iavlMerkleProofValidate) Name() string { return "IAVLMerkleProofValidate" }
 
-func successfulMerkleResult() []byte {
-	result := make([]byte, merkleProofValidateResultLength)
-	binary.BigEndian.PutUint64(result[merkleProofValidateResultLength-uint64TypeLength:], 0x01)
-	return result
-}
-
 // tmHeaderValidateNano implemented as a native contract.
 // (it's disabled at Nano HF)
 type tmHeaderValidateNano struct{}
@@ -181,3 +182,318 @@ func (c *iavlMerkleProofValidateNano) Run(input []byte) (result []byte, err erro
 }
 
 func (c *iavlMerkleProofValidateNano) Name() string { return "IAVLMerkleProofValidateNano" }
+
+// ------------------------------------------------------------------------------------------------------------------------------------------------
+type iavlMerkleProofValidateMoran struct {
+	basicIavlMerkleProofValidate
+}
+
+func (c *iavlMerkleProofValidateMoran) RequiredGas(_ []byte) uint64 {
+	return params2.IAVLMerkleProofValidateGas
+}
+
+func (c *iavlMerkleProofValidateMoran) Run(input []byte) (result []byte, err error) {
+	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
+		forbiddenAbsenceOpVerifier,
+		singleValueOpVerifier,
+		multiStoreOpVerifier,
+		forbiddenSimpleValueOpVerifier,
+	}
+	return c.basicIavlMerkleProofValidate.Run(input)
+}
+
+func (c *iavlMerkleProofValidateMoran) Name() string { return "IAVLMerkleProofValidateMoran" }
+
+type iavlMerkleProofValidatePlanck struct {
+	basicIavlMerkleProofValidate
+}
+
+func (c *iavlMerkleProofValidatePlanck) RequiredGas(_ []byte) uint64 {
+	return params2.IAVLMerkleProofValidateGas
+}
+
+func (c *iavlMerkleProofValidatePlanck) Run(input []byte) (result []byte, err error) {
+	c.basicIavlMerkleProofValidate.proofRuntime = v1.Ics23CompatibleProofRuntime()
+	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
+		forbiddenAbsenceOpVerifier,
+		singleValueOpVerifier,
+		multiStoreOpVerifier,
+		forbiddenSimpleValueOpVerifier,
+	}
+	c.basicIavlMerkleProofValidate.keyVerifier = keyVerifier
+	c.basicIavlMerkleProofValidate.opsVerifier = proofOpsVerifier
+	return c.basicIavlMerkleProofValidate.Run(input)
+}
+
+func (c *iavlMerkleProofValidatePlanck) Name() string { return "IAVLMerkleProofValidatePlanck" }
+
+type iavlMerkleProofValidatePlato struct {
+	basicIavlMerkleProofValidate
+}
+
+func (c *iavlMerkleProofValidatePlato) RequiredGas(_ []byte) uint64 {
+	return params2.IAVLMerkleProofValidateGas
+}
+
+func (c *iavlMerkleProofValidatePlato) Run(input []byte) (result []byte, err error) {
+	c.basicIavlMerkleProofValidate.proofRuntime = v1.Ics23ProofRuntime()
+	c.basicIavlMerkleProofValidate.verifiers = []merkle.ProofOpVerifier{
+		forbiddenAbsenceOpVerifier,
+		singleValueOpVerifier,
+		multiStoreOpVerifier,
+		forbiddenSimpleValueOpVerifier,
+	}
+	c.basicIavlMerkleProofValidate.keyVerifier = keyVerifier
+	c.basicIavlMerkleProofValidate.opsVerifier = proofOpsVerifier
+	return c.basicIavlMerkleProofValidate.Run(input)
+}
+
+func (c *iavlMerkleProofValidatePlato) Name() string { return "IAVLMerkleProofValidatePlato" }
+
+func successfulMerkleResult() []byte {
+	result := make([]byte, merkleProofValidateResultLength)
+	binary.BigEndian.PutUint64(result[merkleProofValidateResultLength-uint64TypeLength:], 0x01)
+	return result
+}
+
+type basicIavlMerkleProofValidate struct {
+	keyVerifier  v1.KeyVerifier
+	opsVerifier  merkle.ProofOpsVerifier
+	verifiers    []merkle.ProofOpVerifier
+	proofRuntime *merkle.ProofRuntime
+}
+
+func (c *basicIavlMerkleProofValidate) Run(input []byte) (result []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("internal error: %v", r)
+		}
+	}()
+
+	if uint64(len(input)) <= precompileContractInputMetaDataLength {
+		return nil, fmt.Errorf("invalid input: input should include %d bytes payload length and payload", precompileContractInputMetaDataLength)
+	}
+
+	payloadLength := binary.BigEndian.Uint64(input[precompileContractInputMetaDataLength-uint64TypeLength : precompileContractInputMetaDataLength])
+	if uint64(len(input)) != payloadLength+precompileContractInputMetaDataLength {
+		return nil, fmt.Errorf("invalid input: input size should be %d, actual the size is %d", payloadLength+precompileContractInputMetaDataLength, len(input))
+	}
+
+	kvmp, err := v1.DecodeKeyValueMerkleProof(input[precompileContractInputMetaDataLength:])
+	if err != nil {
+		return nil, err
+	}
+
+	if c.proofRuntime == nil {
+		kvmp.SetProofRuntime(v1.DefaultProofRuntime())
+	} else {
+		kvmp.SetProofRuntime(c.proofRuntime)
+	}
+	kvmp.SetVerifiers(c.verifiers)
+	kvmp.SetOpsVerifier(c.opsVerifier)
+	kvmp.SetKeyVerifier(c.keyVerifier)
+
+	valid := kvmp.Validate()
+	if !valid {
+		return nil, errors.New("invalid merkle proof")
+	}
+
+	return successfulMerkleResult(), nil
+}
+
+func forbiddenAbsenceOpVerifier(op merkle.ProofOperator) error {
+	if op == nil {
+		return nil
+	}
+	if _, ok := op.(iavl.IAVLAbsenceOp); ok {
+		return cmn.NewError("absence proof suspend")
+	}
+	return nil
+}
+
+func forbiddenSimpleValueOpVerifier(op merkle.ProofOperator) error {
+	if op == nil {
+		return nil
+	}
+	if _, ok := op.(merkle.SimpleValueOp); ok {
+		return cmn.NewError("simple value proof suspend")
+	}
+	return nil
+}
+
+func multiStoreOpVerifier(op merkle.ProofOperator) error {
+	if op == nil {
+		return nil
+	}
+	if mop, ok := op.(v1.MultiStoreProofOp); ok {
+		storeNames := make(map[string]bool, len(mop.Proof.StoreInfos))
+		for _, store := range mop.Proof.StoreInfos {
+			if exist := storeNames[store.Name]; exist {
+				return cmn.NewError("duplicated store")
+			} else {
+				storeNames[store.Name] = true
+			}
+		}
+	}
+	return nil
+}
+
+func singleValueOpVerifier(op merkle.ProofOperator) error {
+	if op == nil {
+		return nil
+	}
+	if valueOp, ok := op.(iavl.IAVLValueOp); ok {
+		if len(valueOp.Proof.Leaves) != 1 {
+			return cmn.NewError("range proof suspended")
+		}
+		for _, innerNode := range valueOp.Proof.LeftPath {
+			if len(innerNode.Right) > 0 && len(innerNode.Left) > 0 {
+				return cmn.NewError("both right and left hash exit!")
+			}
+		}
+	}
+	return nil
+}
+
+func proofOpsVerifier(poz merkle.ProofOperators) error {
+	if len(poz) != 2 {
+		return cmn.NewError("proof ops should be 2")
+	}
+
+	// for legacy proof type
+	if _, ok := poz[1].(v1.MultiStoreProofOp); ok {
+		if _, ok := poz[0].(iavl.IAVLValueOp); !ok {
+			return cmn.NewError("invalid proof op")
+		}
+		return nil
+	}
+
+	// for ics23 proof type
+	if op2, ok := poz[1].(v1.CommitmentOp); ok {
+		if op2.Type != v1.ProofOpSimpleMerkleCommitment {
+			return cmn.NewError("invalid proof op")
+		}
+
+		op1, ok := poz[0].(v1.CommitmentOp)
+		if !ok {
+			return cmn.NewError("invalid proof op")
+		}
+
+		if op1.Type != v1.ProofOpIAVLCommitment {
+			return cmn.NewError("invalid proof op")
+		}
+		return nil
+	}
+
+	return cmn.NewError("invalid proof type")
+}
+
+func keyVerifier(key string) error {
+	// https://github.com/bnb-chain/tendermint/blob/72375a6f3d4a72831cc65e73363db89a0073db38/crypto/merkle/proof_key_path.go#L88
+	// since the upper function is ambiguous, `x:00` can be decoded to both kind of key type
+	// we check the key here to make sure the key will not start from `x:`
+	if strings.HasPrefix(url.PathEscape(key), "x:") {
+		return cmn.NewError("key should not start with x:")
+	}
+	return nil
+}
+
+const (
+	blsMsgHashLength   = uint64(32)
+	blsSignatureLength = uint64(96)
+	blsPubKeyLength    = uint64(48)
+)
+
+// blsSignatureVerify implements the BLS signature verification precompile.
+type blsSignatureVerify struct{}
+
+func (c *blsSignatureVerify) Name() string { return "BLSSignatureVerify" }
+
+func (c *blsSignatureVerify) RequiredGas(input []byte) uint64 {
+	pubKeyNumber, ok := blsPubKeyCount(uint64(len(input)))
+	if !ok {
+		return params2.BlsSignatureVerifyBaseGas
+	}
+	return params2.BlsSignatureVerifyBaseGas + pubKeyNumber*params2.BlsSignatureVerifyPerKeyGas
+}
+
+// Run input:
+// msg      | signature | [{bls pubkey}] |
+// 32 bytes | 96 bytes  | [{48 bytes}]   |
+func (c *blsSignatureVerify) Run(input []byte) ([]byte, error) {
+	pubKeyNumber, ok := blsPubKeyCount(uint64(len(input)))
+	if !ok {
+		return nil, ErrExecutionReverted
+	}
+
+	msgAndSigLength := blsMsgHashLength + blsSignatureLength
+	msg := input[:blsMsgHashLength]
+	sig, err := bls.NewSignatureFromBytes(input[blsMsgHashLength:msgAndSigLength])
+	if err != nil {
+		return nil, ErrExecutionReverted
+	}
+
+	pubKeys := make([]bls.PublicKey, pubKeyNumber)
+	for i := range pubKeyNumber {
+		offset := msgAndSigLength + i*blsPubKeyLength
+		pubKey, err := bls.NewPublicKeyFromBytes(input[offset : offset+blsPubKeyLength])
+		if err != nil {
+			return nil, ErrExecutionReverted
+		}
+		pubKeys[i] = pubKey
+	}
+
+	var verified bool
+	if pubKeyNumber > 1 {
+		verified = sig.VerifyAggregate(msg, pubKeys)
+	} else {
+		verified = sig.Verify(msg, pubKeys[0])
+	}
+	if !verified {
+		return []byte{}, nil
+	}
+	return []byte{1}, nil
+}
+
+func blsPubKeyCount(inputLen uint64) (uint64, bool) {
+	msgAndSigLength := blsMsgHashLength + blsSignatureLength
+	if inputLen <= msgAndSigLength || (inputLen-msgAndSigLength)%blsPubKeyLength != 0 {
+		return 0, false
+	}
+	return (inputLen - msgAndSigLength) / blsPubKeyLength, true
+}
+
+// cometBFTLightBlockValidate validates a CometBFT v0.37.0 light block and returns the
+// resulting consensus state.
+type cometBFTLightBlockValidate struct{}
+
+func (c *cometBFTLightBlockValidate) Name() string { return "CometBFTLightBlockValidate" }
+
+func (c *cometBFTLightBlockValidate) RequiredGas(input []byte) uint64 {
+	return params2.CometBFTLightBlockValidateGas
+}
+
+func (c *cometBFTLightBlockValidate) Run(input []byte) (result []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("internal error: %v", r)
+		}
+	}()
+
+	cs, block, err := v2.DecodeLightBlockValidationInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	validatorSetChanged, err := cs.ApplyLightBlock(block, false)
+	if err != nil {
+		return nil, err
+	}
+
+	consensusStateBytes, err := cs.EncodeConsensusState()
+	if err != nil {
+		return nil, err
+	}
+
+	return v2.EncodeLightBlockValidationResult(validatorSetChanged, consensusStateBytes), nil
+}

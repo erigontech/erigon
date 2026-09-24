@@ -49,6 +49,10 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsAura:             c.Aura != nil,
 		IsParlia:           c.Parlia != nil,
 		IsNano:             c.IsNano(bc.BlockNumber),
+		IsMoran:            c.IsMoran(bc.BlockNumber),
+		IsPlanck:           c.IsPlanck(bc.BlockNumber),
+		IsLuban:            c.IsLuban(bc.BlockNumber),
+		IsPlato:            c.IsPlato(bc.BlockNumber),
 	}
 
 	if c.L2 != nil {

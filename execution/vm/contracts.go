@@ -71,6 +71,14 @@ func ActivePrecompiledContracts(chainRules *chain.Rules) PrecompiledContracts {
 
 func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
+	case chainRules.IsPlato:
+		return PrecompiledContractsPlatoForBSC
+	case chainRules.IsLuban:
+		return PrecompiledContractsLubanForBSC
+	case chainRules.IsPlanck:
+		return PrecompiledContractsPlanckForBSC
+	case chainRules.IsMoran:
+		return PrecompiledContractsMoranForBSC
 	case chainRules.IsNano:
 		return PrecompiledContractsNanoForBSC
 	case chainRules.IsParlia:
@@ -214,6 +222,33 @@ var PrecompiledContractsNanoForBSC = func() PrecompiledContracts {
 	return m
 }()
 
+var PrecompiledContractsMoranForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsIstanbul)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{100}))] = &tmHeaderValidate{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{101}))] = &iavlMerkleProofValidateMoran{}
+	return m
+}()
+
+var PrecompiledContractsPlanckForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsIstanbul)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{100}))] = &tmHeaderValidate{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{101}))] = &iavlMerkleProofValidatePlanck{}
+	return m
+}()
+
+var PrecompiledContractsLubanForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsPlanckForBSC)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{102}))] = &blsSignatureVerify{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{103}))] = &cometBFTLightBlockValidate{}
+	return m
+}()
+
+var PrecompiledContractsPlatoForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsLubanForBSC)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{101}))] = &iavlMerkleProofValidatePlato{}
+	return m
+}()
+
 var (
 	PrecompiledAddressesOsaka          []accounts.Address
 	PrecompiledAddressesPrague         []accounts.Address
@@ -222,6 +257,10 @@ var (
 	PrecompiledAddressesIstanbul       []accounts.Address
 	PrecompiledAddressesIstanbulForBSC []accounts.Address
 	PrecompiledAddressesNanoForBSC     []accounts.Address
+	PrecompiledAddressesMoranForBSC    []accounts.Address
+	PrecompiledAddressesPlanckForBSC   []accounts.Address
+	PrecompiledAddressesLubanForBSC    []accounts.Address
+	PrecompiledAddressesPlatoForBSC    []accounts.Address
 	PrecompiledAddressesByzantium      []accounts.Address
 	PrecompiledAddressesHomestead      []accounts.Address
 )
@@ -242,6 +281,18 @@ func init() {
 	for k := range PrecompiledContractsNanoForBSC {
 		PrecompiledAddressesNanoForBSC = append(PrecompiledAddressesNanoForBSC, k)
 	}
+	for k := range PrecompiledContractsMoranForBSC {
+		PrecompiledAddressesMoranForBSC = append(PrecompiledAddressesMoranForBSC, k)
+	}
+	for k := range PrecompiledContractsPlanckForBSC {
+		PrecompiledAddressesPlanckForBSC = append(PrecompiledAddressesPlanckForBSC, k)
+	}
+	for k := range PrecompiledContractsLubanForBSC {
+		PrecompiledAddressesLubanForBSC = append(PrecompiledAddressesLubanForBSC, k)
+	}
+	for k := range PrecompiledContractsPlatoForBSC {
+		PrecompiledAddressesPlatoForBSC = append(PrecompiledAddressesPlatoForBSC, k)
+	}
 	for k := range PrecompiledContractsBerlin {
 		PrecompiledAddressesBerlin = append(PrecompiledAddressesBerlin, k)
 	}
@@ -259,6 +310,14 @@ func init() {
 // ActivePrecompiles returns the precompiles enabled with the current configuration.
 func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	switch {
+	case rules.IsPlato:
+		return PrecompiledAddressesPlatoForBSC
+	case rules.IsLuban:
+		return PrecompiledAddressesLubanForBSC
+	case rules.IsPlanck:
+		return PrecompiledAddressesPlanckForBSC
+	case rules.IsMoran:
+		return PrecompiledAddressesMoranForBSC
 	case rules.IsNano:
 		return PrecompiledAddressesNanoForBSC
 	case rules.IsParlia:
