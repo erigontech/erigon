@@ -28,13 +28,14 @@ import (
 var update = flag.Bool("update", false, "rewrite the golden file")
 
 // testdata/sample carries one field per branch, so this fails when any of them changes shape:
-// omitempty per kind, a pointer written as null, an embedded struct flattened, a json tag with
-// no name, and the forms a field may declare.
+// omitempty per kind, a pointer written as null, an embedded struct flattened, a promoted name
+// reached through its own selector, a json tag with no name, and the forms a field may declare.
 func TestGenerateSample(t *testing.T) {
-	const golden = "testdata/sample_golden.go.txt"
+	golden, err := filepath.Abs("testdata/sample_golden.go.txt")
+	require.NoError(t, err)
 	out := filepath.Join(t.TempDir(), "gen_sample_json.go")
 
-	require.NoError(t, run("Sample", "testdata/sample", out, "writeComputedJSON"))
+	generateIn(t, "testdata/sample", "Sample", out, "writeComputedJSON")
 	got, err := os.ReadFile(out)
 	require.NoError(t, err)
 
@@ -47,46 +48,64 @@ func TestGenerateSample(t *testing.T) {
 	require.Equal(t, string(want), string(got))
 }
 
-// A field the generator cannot place must stop it, rather than produce a file that does not
-// compile or quietly omits the field.
+// A field the generator cannot place must stop it, rather than produce a file that quietly
+// omits the field or writes what encoding/json would not. A form that does not suit the field's
+// type is not here: the ethjson writers are typed, so the generated file fails to compile.
 func TestGenerateRejects(t *testing.T) {
 	for name, typeName := range map[string]string{
 		"no ethjson tag":    "MissingForm",
-		"form vs type":      "WrongForm",
+		"unknown form":      "UnknownForm",
 		"duplicate name":    "DuplicateName",
 		"tagged embedded":   "TaggedEmbedded",
 		"embedded pointer":  "PointerEmbedded",
-		"pointer to slice":  "PointerToSlice",
-		"narrow quantity":   "NarrowQuantity",
-		"not a hash slice":  "NotHashSlice",
 		"unknown option":    "UnknownOption",
 		"omitempty objects": "OmitemptyObjects",
-		"non-error result":  "WrongResult",
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := run(typeName, "testdata/bad", filepath.Join(t.TempDir(), "out.go"), "")
-			require.Error(t, err)
+			t.Chdir("testdata/bad")
+			require.Error(t, run(typeName, filepath.Join(t.TempDir(), "out.go"), ""))
 		})
 	}
 }
 
-// The output it wrote last time is in the package it type-checks, so a field renamed since
-// then must not be able to lock the generator out of rewriting it.
+// The output it wrote last time is in the package it type-checks, so a field renamed since then
+// must not be able to lock the generator out of rewriting it — nor may a sibling belonging to
+// another type, since go generate runs one directive per type and the first failure stops the
+// package before the run that would fix it.
 func TestGenerateOverStaleOutput(t *testing.T) {
 	// Inside the module, or the go tool has no go.mod to resolve the package against.
-	dir := "testdata/stale"
+	const dir = "testdata/stale"
 	require.NoError(t, os.CopyFS(dir, os.DirFS("testdata/sample")))
 	t.Cleanup(func() { os.RemoveAll(dir) })
-	// The sibling matters as much as the output: go generate runs one directive per type, and
-	// the first run must not fail on a file a later run would rewrite.
 	for name, recv := range map[string]string{"gen_sample_json.go": "Sample", "gen_inner_json.go": "Inner"} {
-		stale := marker + " DO NOT EDIT.\n" + sourceOfTruth + recv + "'s json and ethjson tags.\n\npackage sample\n\nfunc (x *" + recv +
+		stale := marker + " DO NOT EDIT.\n\npackage sample\n\n" +
+			"import \"github.com/erigontech/erigon/rpc/jsonstream\"\n\nfunc (x *" + recv +
 			") MarshalFastJSONTo(s *jsonstream.StackStream) error {\n\t_ = x.SinceRenamed\n\treturn nil\n}\n"
 		require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte(stale), 0o644))
 	}
 
-	require.NoError(t, run("Sample", dir, "gen_sample_json.go", "writeComputedJSON"))
-	got, err := os.ReadFile(filepath.Join(dir, "gen_sample_json.go"))
+	// generateIn leaves the working directory there, so the output is read by its own name.
+	generateIn(t, dir, "Sample", "gen_sample_json.go", "writeComputedJSON")
+	got, err := os.ReadFile("gen_sample_json.go")
 	require.NoError(t, err)
 	require.NotContains(t, string(got), "x.SinceRenamed")
+}
+
+// An error outside a generated file says the tags being read are not the ones that will build,
+// so it must stop the run instead of being skipped along with the stale output.
+func TestGenerateRefusesBrokenPackage(t *testing.T) {
+	const dir = "testdata/broken"
+	require.NoError(t, os.CopyFS(dir, os.DirFS("testdata/sample")))
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "typo.go"), []byte("package sample\n\nvar _ = undefinedHere\n"), 0o644))
+
+	t.Chdir(dir)
+	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON"), "undefinedHere")
+}
+
+// generateIn runs the generator the way go generate does, from the package's own directory.
+func generateIn(t *testing.T, dir, typeName, out, computed string) {
+	t.Helper()
+	t.Chdir(dir)
+	require.NoError(t, run(typeName, out, computed))
 }

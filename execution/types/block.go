@@ -77,7 +77,7 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 }
 
 //()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
-//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type Header -dir . -out gen_header_fastjson.go -computed writeComputedJSON
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type Header -out gen_header_fastjson.go -computed writeComputedJSON
 
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree

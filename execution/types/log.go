@@ -117,7 +117,7 @@ type Logs []*Log
 
 // RPCLog Extends `types.Log` and add BlockTimestamp field
 //
-//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCLog -dir . -out gen_rpclog_json.go
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCLog
 type RPCLog struct {
 	Log
 	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" ethjson:"quantity" codec:"-"`

@@ -33,7 +33,7 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCReceipt -dir . -out gen_rpcreceipt_json.go
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCReceipt
 
 // RPCReceipt is the RPC form of a receipt.
 type RPCReceipt struct {

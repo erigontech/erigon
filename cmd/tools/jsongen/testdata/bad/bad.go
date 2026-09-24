@@ -26,8 +26,8 @@ type MissingForm struct {
 	Hash common.Hash `json:"hash"`
 }
 
-type WrongForm struct {
-	Bytes []byte `json:"bytes" ethjson:"quantity"`
+type UnknownForm struct {
+	Bytes []byte `json:"bytes" ethjson:"bytes32"`
 }
 
 type Named struct {
@@ -47,18 +47,6 @@ type PointerEmbedded struct {
 	*Named
 }
 
-type PointerToSlice struct {
-	Bytes *[]byte `json:"bytes" ethjson:"data"`
-}
-
-type NarrowQuantity struct {
-	Count uint32 `json:"count" ethjson:"quantity"`
-}
-
-type NotHashSlice struct {
-	Chunks [][]byte `json:"chunks" ethjson:"datalist"`
-}
-
 type UnknownOption struct {
 	Count uint64 `json:"count,omitzero" ethjson:"quantity"`
 }
@@ -66,12 +54,3 @@ type UnknownOption struct {
 type OmitemptyObjects struct {
 	Logs jsonstream.Marshaler `json:"logs,omitempty" ethjson:"objects"`
 }
-
-// WrongResult writes itself, but not with the error the generated call checks.
-type WrongResult struct {
-	Logs intMarshaller `json:"logs" ethjson:"objects"`
-}
-
-type intMarshaller struct{}
-
-func (intMarshaller) MarshalFastJSONTo(*jsonstream.StackStream) int { return 0 }
