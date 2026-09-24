@@ -324,7 +324,8 @@ func TestDecryptionKeysValidators(t *testing.T) {
 			wantValidationResult: pubsub.ValidationReject,
 			wantValidationLogMsgs: []string{
 				"rejecting decryption keys msg due to",
-				"slot in the past: msgSlot=6334, currentSlot=6336"},
+				"slot in the past: msgSlot=6334, currentSlot=6336",
+			},
 		},
 		{
 			name:   "slot in the future",

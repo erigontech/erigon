@@ -32,7 +32,7 @@ func fGeneric(h *[8]uint64, m *[16]uint64, c0, c1 uint64, flag uint64, rounds ui
 	v14 ^= flag
 
 	for i := 0; i < int(rounds); i++ {
-		s := &(precomputed[i%sigmaRounds])
+		s := &precomputed[i%sigmaRounds]
 
 		v0 += m[s[0]]
 		v0 += v4

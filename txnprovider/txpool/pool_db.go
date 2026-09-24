@@ -32,11 +32,13 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-var PoolChainConfigKey = []byte("chain_config")
-var PoolLastSeenBlockKey = []byte("last_seen_block")
-var PoolPendingBaseFeeKey = []byte("pending_base_fee")
-var PoolPendingBlobFeeKey = []byte("pending_blob_fee")
-var PoolStateVersion = []byte("state_version")
+var (
+	PoolChainConfigKey    = []byte("chain_config")
+	PoolLastSeenBlockKey  = []byte("last_seen_block")
+	PoolPendingBaseFeeKey = []byte("pending_base_fee")
+	PoolPendingBlobFeeKey = []byte("pending_blob_fee")
+	PoolStateVersion      = []byte("state_version")
+)
 
 func getExecutionProgress(db kv.Getter) (uint64, error) {
 	data, err := db.GetOne(kv.SyncStageProgress, []byte("Execution"))

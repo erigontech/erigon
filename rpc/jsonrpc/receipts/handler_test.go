@@ -169,7 +169,8 @@ func TestGetBlockHeaders(t *testing.T) {
 				blocks[currentBlock.NumberU64()-4].Hash(),
 				blocks[currentBlock.NumberU64()-1].Hash(),
 			},
-		}, {
+		},
+		{
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: 4}, Skip: 2, Amount: 3, Reverse: true},
 			[]common.Hash{
 				blocks[4].Hash(),
@@ -231,7 +232,8 @@ func TestGetBlockHeaders(t *testing.T) {
 		{
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Hash: unknown}, Amount: 1},
 			[]common.Hash{},
-		}, {
+		},
+		{
 			&eth.GetBlockHeadersPacket{Origin: eth.HashOrNumber{Number: currentBlock.NumberU64() + 1}, Amount: 1},
 			[]common.Hash{},
 		},

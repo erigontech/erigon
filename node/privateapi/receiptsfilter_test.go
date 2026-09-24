@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/notifications"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -360,6 +361,78 @@ func TestReceiptsFilter_FlagsLastReceiptOfBlockPerStream(t *testing.T) {
 			if !slices.Equal(got, tc.want) {
 				t.Fatalf("LastInBlock per sent receipt = %v, want %v", got, tc.want)
 			}
+		})
+	}
+}
+
+// The RPC side has no transaction, so the reply must already carry the effective gas price
+// eth_getTransactionReceipt reports, not the block base fee.
+func TestReceiptsFilter_SendsEffectiveGasPrice(t *testing.T) {
+	chainConfig := chain.AllProtocolChanges
+	txn := &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 3, GasLimit: 21000},
+		ChainID:  *chainConfig.ChainID,
+		TipCap:   *uint256.NewInt(2),
+		FeeCap:   *uint256.NewInt(100),
+	}
+	for name, tc := range map[string]struct {
+		baseFee *uint256.Int
+		want    *uint256.Int
+	}{
+		"london":     {uint256.NewInt(7), uint256.NewInt(9)},
+		"pre london": {nil, uint256.NewInt(2)},
+	} {
+		t.Run(name, func(t *testing.T) {
+			agg := NewReceiptsFilterAggregator(shards.NewEvents(), chainConfig)
+			rn := createReceiptNotification(txHash1)
+			rn.Tx = txn
+			rn.Header = &types.Header{Number: *uint256.NewInt(100), BaseFee: tc.baseFee}
+
+			reply := agg.receiptNotificationToProto(rn)
+			require.NotNil(t, reply.EffectiveGasPrice)
+			assert.Equal(t, tc.want, gointerfaces.ConvertH256ToUint256Int(reply.EffectiveGasPrice))
+		})
+	}
+}
+
+// The blob fields are derived from the transaction, the chain config and the header, which the
+// RPC side does not have, and only a blob transaction reports them.
+func TestReceiptsFilter_SendsBlobFields(t *testing.T) {
+	chainConfig := chain.AllProtocolChanges
+	dynamicFee := func() types.DynamicFeeTransaction {
+		return types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: 3, GasLimit: 21000},
+			ChainID:  *chainConfig.ChainID,
+			TipCap:   *uint256.NewInt(2),
+			FeeCap:   *uint256.NewInt(100),
+		}
+	}
+	for name, tc := range map[string]struct {
+		txn         types.Transaction
+		wantPrice   *uint256.Int
+		wantGasUsed uint64
+	}{
+		"blob transaction": {&types.BlobTx{
+			DynamicFeeTransaction: dynamicFee(),
+			BlobVersionedHashes:   []common.Hash{{1}, {2}},
+		}, uint256.NewInt(812), 2 * params.GasPerBlob},
+		"plain transaction": {func() types.Transaction { t := dynamicFee(); return &t }(), nil, 0},
+	} {
+		t.Run(name, func(t *testing.T) {
+			excessBlobGas := uint64(1 << 25)
+			agg := NewReceiptsFilterAggregator(shards.NewEvents(), chainConfig)
+			rn := createReceiptNotification(txHash1)
+			rn.Tx = tc.txn
+			rn.Header = &types.Header{Number: *uint256.NewInt(100), BaseFee: uint256.NewInt(7), ExcessBlobGas: &excessBlobGas}
+
+			reply := agg.receiptNotificationToProto(rn)
+			assert.Equal(t, tc.wantGasUsed, reply.BlobGasUsed)
+			if tc.wantPrice == nil {
+				assert.Nil(t, reply.BlobGasPrice)
+				return
+			}
+			require.NotNil(t, reply.BlobGasPrice)
+			assert.Equal(t, tc.wantPrice, gointerfaces.ConvertH256ToUint256Int(reply.BlobGasPrice))
 		})
 	}
 }

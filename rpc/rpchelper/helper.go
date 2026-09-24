@@ -260,7 +260,6 @@ func (hr *cachedHistoryReaderV3) SetTxNum(txNum uint64) {
 func (hr *cachedHistoryReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addressValue := address.Value()
 	enc, ok, err := hr.cache.GetAsOf(addressValue[:], hr.reader.GetTxNum())
-
 	if err != nil {
 		return nil, err
 	}

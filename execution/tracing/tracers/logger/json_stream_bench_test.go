@@ -27,6 +27,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -47,7 +48,7 @@ func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {
-		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 		i++
 	}
 }
@@ -68,7 +69,7 @@ func BenchmarkOnOpcodeStackDepth(b *testing.B) {
 			b.ReportAllocs()
 			i := 0
 			for b.Loop() {
-				l.OnOpcode(uint64(i), byte(vm.ADD), 100, 3, scope, nil, 1, nil)
+				l.OnOpcodeV2(uint64(i), byte(vm.ADD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 				i++
 				// Nothing else drains this stream, and every iteration appends to it.
 				_ = l.stream.Flush()
@@ -117,12 +118,12 @@ func BenchmarkOnOpcodeStorage(b *testing.B) {
 				key := common.BigToHash(big.NewInt(int64(i + 1)))
 				val := common.BigToHash(big.NewInt(int64(1000 + i)))
 				scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
-				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+				l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 			}
 			b.ReportAllocs()
 			i := 0
 			for b.Loop() {
-				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+				l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 				i++
 				// Nothing else drains this stream, and every iteration appends to it.
 				_ = l.stream.Flush()

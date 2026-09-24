@@ -151,7 +151,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 		nonce = args.Nonce.Uint64()
 	}
 
-	var to = accounts.NilAddress
+	to := accounts.NilAddress
 	if args.To != nil {
 		to = accounts.InternAddress(*args.To)
 	}

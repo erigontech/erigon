@@ -270,8 +270,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		DBReadConcurrency: httpcfg.DefaultDBReadConcurrency(),
 	}
 
-	db, backend, txPool, mining, stateCache, blockReader, engine, ff, err :=
-		rpcdaemoncli.RemoteServices(ctx, cfg, logger, rootCancel)
+	db, backend, txPool, mining, stateCache, blockReader, engine, ff, err := rpcdaemoncli.RemoteServices(ctx, cfg, logger, rootCancel)
 	if err != nil {
 		return fmt.Errorf("failed to initialize datadir services: %w", err)
 	}

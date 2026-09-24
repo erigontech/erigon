@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -862,6 +863,11 @@ var (
 		Usage: "Runtime limit of chaindata db size (can change at any time)",
 		Value: (1 * datasize.TB).String(),
 	}
+	DbSafeNoSyncFlag = cli.BoolFlag{
+		Name:  "db.safe.nosync",
+		Usage: "Let writes reach the disk in the background: after a power cut the node resumes from the last flushed point and re-syncs the seconds in between, and the database is intact either way. Disable to flush before every commit returns",
+		Value: true,
+	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
 		Usage: "Enable WRITE_MAP feature for fast database writes and fast commit times",
@@ -1268,6 +1274,7 @@ func setNodeUserIdent(ctx *cli.Command, cfg *nodecfg.Config) {
 		cfg.UserIdent = identity
 	}
 }
+
 func setNodeUserIdentCobra(f *pflag.FlagSet, cfg *nodecfg.Config) {
 	if identity := f.String(IdentityFlag.Name, IdentityFlag.Value, IdentityFlag.Usage); identity != nil && len(*identity) > 0 {
 		cfg.UserIdent = *identity
@@ -1551,7 +1558,7 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 
 	if ctx.String(ChainFlag.Name) == networkname.Dev {
 		// --dev mode can't use p2p networking.
-		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
+		// cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
 		if !ctx.IsSet(ListenPortFlag.Name) {
 			cfg.ListenAddr = ":0"
 		}
@@ -1595,6 +1602,9 @@ func setDataDir(ctx *cli.Command, cfg *nodecfg.Config) error {
 		return fmt.Errorf("failed to parse --%s: %w", DbSizeLimitFlag.Name, err)
 	}
 	cfg.MdbxWriteMap = ctx.Bool(DbWriteMapFlag.Name)
+	if ctx.IsSet(DbSafeNoSyncFlag.Name) { // otherwise the flag's default would undo MDBX_DURABLE
+		mdbx.DefaultSafeNoSync = ctx.Bool(DbSafeNoSyncFlag.Name)
+	}
 	szLimit := cfg.MdbxDBSizeLimit.Bytes()
 	if szLimit%256 != 0 || szLimit < 256 {
 		return fmt.Errorf("invalid --%s: %s=%d, see: %s", DbSizeLimitFlag.Name, ctx.String(DbSizeLimitFlag.Name),
@@ -2228,7 +2238,8 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 		Fatalf("Failed to derive dev signer key: %v", err)
 	}
 	_ = signerKey // available for future use (e.g., auto-funding txs)
-	logger.Info("Using PoS dev mode",
+	logger.Info(
+		"Using PoS dev mode",
 		"seed", seed,
 		"validators", validatorCount,
 		"signer", signerAddr.Hex(),
@@ -2287,7 +2298,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	}
 	// Write beacon config and genesis state to temp files.
 	tmpDir := filepath.Join(cfg.Dirs.DataDir, "dev-beacon")
-	if err := os.MkdirAll(tmpDir, 0755); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
 		Fatalf("Failed to create dev beacon dir: %v", err)
 	}
 	stateSSZ, err := beaconState.EncodeSSZ(nil)
@@ -2295,7 +2306,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 		Fatalf("Failed to encode dev genesis state: %v", err)
 	}
 	genesisStatePath := filepath.Join(tmpDir, "genesis.ssz")
-	if err := os.WriteFile(genesisStatePath, stateSSZ, 0644); err != nil {
+	if err := os.WriteFile(genesisStatePath, stateSSZ, 0o644); err != nil {
 		Fatalf("Failed to write dev genesis state: %v", err)
 	}
 
@@ -2315,8 +2326,9 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 			"ELECTRA_FORK_EPOCH: 0\n"+
 			"FULU_FORK_EPOCH: 0\n"+
 			"TERMINAL_TOTAL_DIFFICULTY: 0\n",
-		genesisTime, beaconCfg.SecondsPerSlot)
-	if err := os.WriteFile(configPath, []byte(configYAML), 0644); err != nil {
+		genesisTime, beaconCfg.SecondsPerSlot,
+	)
+	if err := os.WriteFile(configPath, []byte(configYAML), 0o644); err != nil {
 		Fatalf("Failed to write dev beacon config: %v", err)
 	}
 
