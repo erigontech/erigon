@@ -60,11 +60,11 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	config := chain.TestChainBerlinConfig
 
-	fields := MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
+	fields := MarshalReceipt(receipt, txn, config, header, false, false)
 	assert.Equal(t, preset, *fields.LogsBloom)
 
 	receipt.Bloom = types.Bloom{}
-	fields = MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
+	fields = MarshalReceipt(receipt, txn, config, header, false, false)
 	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
 }
 
@@ -141,7 +141,7 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 				TransactionIndex:  3,
 			}
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, tc.withBlockTimestamp)
+			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, tc.withBlockTimestamp)
 
 			requireFastJSONMatches(t, r)
 		})

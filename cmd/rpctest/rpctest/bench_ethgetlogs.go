@@ -383,7 +383,8 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 
 			m.Unlock()
 
-			fmt.Printf("Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
+			fmt.Printf(
+				"Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
 				p50,
 				p90,
 				p99,
@@ -391,7 +392,6 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 			)
 
 		}
-
 	}()
 
 	reqQueue := make(chan struct{}, concurentRequests)

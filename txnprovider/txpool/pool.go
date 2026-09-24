@@ -88,8 +88,10 @@ type Pool interface {
 	AddNewGoodPeer(peerID PeerID)
 }
 
-var _ Pool = (*TxPool)(nil) // compile-time interface check
-var _ txnprovider.TxnProvider = (*TxPool)(nil)
+var (
+	_ Pool                    = (*TxPool)(nil) // compile-time interface check
+	_ txnprovider.TxnProvider = (*TxPool)(nil)
+)
 
 // remoteSource carries the peer that delivered a remote txn slot so
 // processRemoteTxns can kick that peer on KZG-verify failure.
@@ -358,7 +360,6 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 
 	pendingPre := p.pending.Len()
 	defer func() {
-
 		p.logger.Debug("[txpool] New block", "block", block,
 			"unwound", len(unwindTxns.Txns), "mined", len(minedTxns.Txns), "blockBaseFee", baseFee,
 			"pending-pre", pendingPre, "pending", p.pending.Len(), "baseFee", p.baseFee.Len(), "queued", p.queued.Len(),
@@ -736,8 +737,8 @@ func (p *TxPool) Started() bool {
 // best returns the highest-priority pending transactions that fit within the given gas and RLP space budgets.
 func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas,
-	yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
-
+	yielded mapset.Set[[32]byte], availableRlpSpace int,
+) (bool, int, error) {
 	// sync.Cond has no notion of a context, so a caller that goes away while parked below would
 	// sleep until the next block broadcast the condition, or forever while the chain is stalled.
 	// Broadcasting on cancellation wakes it; every waiter rechecks its own condition anyway. The
@@ -1512,7 +1513,8 @@ func (p *TxPool) chainDB() (kv.TemporalRoDB, kvcache.Cache) {
 }
 
 func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *sendersBatch,
-	newTxns TxnSlots, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger) (Announcements, []txpoolcfg.DiscardReason, error) {
+	newTxns TxnSlots, pendingBaseFee, pendingBlobFee, blockGasLimit uint64, collect bool, logger log.Logger,
+) (Announcements, []txpoolcfg.DiscardReason, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
@@ -1577,7 +1579,8 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 
 // TODO: Looks like a copy of the above
 func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView, stateChanges *remoteproto.StateChangeBatch,
-	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger) (Announcements, error) {
+	senders *sendersBatch, newTxns TxnSlots, pendingBaseFee uint64, blockGasLimit uint64, logger log.Logger,
+) (Announcements, error) {
 	if dbg.AssertEnabled {
 		for _, txn := range newTxns.Txns {
 			if txn.SenderID == 0 {
@@ -1723,7 +1726,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		priceBump := p.cfg.PriceBump
 
 		if mt.TxnSlot.TxType() == BlobTxnType {
-			//Blob txn threshold checks for replace txn
+			// Blob txn threshold checks for replace txn
 			priceBump = p.cfg.BlobPriceBump
 			blobFeeThreshold, overflow := (&uint256.Int{}).MulDivOverflow(
 				found.TxnSlot.GetBlobFeeCap(),
@@ -1738,7 +1741,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 			}
 		}
 
-		//Regular txn threshold checks
+		// Regular txn threshold checks
 		tipThreshold := uint256.NewInt(0)
 		tipThreshold = tipThreshold.Mul(found.TxnSlot.GetTipCap(), uint256.NewInt(100+priceBump))
 		tipThreshold.Div(tipThreshold, &u256.N100)
@@ -1747,7 +1750,7 @@ func (p *TxPool) addLocked(mt *metaTxn, announcements *Announcements) txpoolcfg.
 		feecapThreshold.Div(feecapThreshold, &u256.N100)
 
 		if mt.TxnSlot.GetValue().Cmp(found.TxnSlot.GetValue()) > 0 {
-			//Potential latent overdraft attack
+			// Potential latent overdraft attack
 			tipThreshold.Mul(tipThreshold, uint256.NewInt(uint64(p.all.count(mt.TxnSlot.SenderID))))
 		}
 		if mt.TxnSlot.GetTipCap().Cmp(tipThreshold) < 0 || mt.TxnSlot.GetFeeCap().Cmp(feecapThreshold) < 0 {
@@ -1924,7 +1927,8 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 			}
 			delete(p.senderLastActivity, senderID)
 			evictedSenders++
-			logger.Debug("[txpool] evicted dormant queued sender",
+			logger.Debug(
+				"[txpool] evicted dormant queued sender",
 				"senderID", senderID,
 				"txns", len(toEvict),
 				"dormantBlocks", currentBlock-lastBlock,
@@ -1944,7 +1948,8 @@ func (p *TxPool) sweepDormantQueued(ctx context.Context, currentBlock uint64, lo
 		// It adapts to real network conditions (e.g. mainnet averages ~13 s/block due to missed slots, not 12 s),
 		// so dormancyBlocks may differ slightly from the naive 3 h / 12 s = 900 value. avgBlockMs is logged
 		// alongside dormancyBlocks so the derivation is transparent without needing to inspect the source.
-		logger.Info("[txpool] dormancy sweep evicted senders from queued pool",
+		logger.Info(
+			"[txpool] dormancy sweep evicted senders from queued pool",
 			"senders", evictedSenders,
 			"block", currentBlock,
 			"dormancyBlocks", dormancyBlocks,
@@ -2119,7 +2124,6 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
 func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
-
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
@@ -2508,7 +2512,7 @@ func (p *TxPool) Run(ctx context.Context) error {
 func (p *TxPool) flushNoFsync(ctx context.Context) (written uint64, err error) {
 	p.lock.Lock()
 	defer p.lock.Unlock()
-	//it's important that write db txn is done inside lock, to make last writes visible for all read operations
+	// it's important that write db txn is done inside lock, to make last writes visible for all read operations
 	if err := p.poolDB.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		err = p.flushLocked(tx)
 		if err != nil {

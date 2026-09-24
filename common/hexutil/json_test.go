@@ -331,7 +331,7 @@ func TestMarshalUint16(t *testing.T) {
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
-			require.Equal(t, test.want, (Uint16)(in).String())
+			require.Equal(t, test.want, Uint16(in).String())
 		})
 	}
 }
@@ -380,7 +380,7 @@ func TestMarshalUint64(t *testing.T) {
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
-			require.Equal(t, test.want, (Uint64)(in).String())
+			require.Equal(t, test.want, Uint64(in).String())
 		})
 	}
 }
@@ -440,7 +440,7 @@ func TestMarshalUint(t *testing.T) {
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
-			require.Equal(t, test.want, (Uint)(in).String())
+			require.Equal(t, test.want, Uint(in).String())
 		})
 	}
 }
@@ -488,7 +488,6 @@ func TestUnmarshalUint(t *testing.T) {
 			if test.want != nil {
 				require.EqualValues(t, test.want, v)
 			}
-
 		})
 	}
 }

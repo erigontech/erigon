@@ -144,7 +144,8 @@ func NewChannelGroup(waitContext context.Context) *ChannelGroup {
 		{
 			Dir:  reflect.SelectRecv,
 			Chan: reflect.ValueOf(mux.context.Done()),
-		}}
+		},
+	}
 
 	return mux
 }
