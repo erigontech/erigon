@@ -23,6 +23,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -102,10 +103,16 @@ type GossipManager struct {
 	// pause a queued job at a known point.
 	publishHookForTest func(name string, data []byte)
 
-	// lifetimeCtx is cancelled by Close. PublishBackground checks it so a
-	// message enqueued after shutdown is dropped observably instead of
-	// sitting in the queue with nothing left to drain it.
+	// lifetimeCtx is cancelled by Close, under shutdownMu, while
+	// PublishBackground checks it and enqueues under the same lock's RLock.
+	// That pairing guarantees any successful enqueue happens-before the
+	// cancellation the worker observes - Close cannot finish cancelling
+	// until every in-flight PublishBackground call has released the lock -
+	// so nothing can be admitted into the queue after the worker has
+	// already stopped draining it. Whatever is left buffered at that point
+	// is handled by the worker's own shutdown drain.
 	lifetimeCtx context.Context
+	shutdownMu  sync.RWMutex
 	// For graceful shutdown
 	cancel context.CancelFunc
 }
@@ -151,8 +158,12 @@ func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
 	g.peerBanner = pb
 }
 
-// Close gracefully shuts down the GossipManager and all its goroutines
+// Close gracefully shuts down the GossipManager and all its goroutines.
+// Cancelling under shutdownMu's exclusive lock is what makes PublishBackground's
+// admission check race-free: see the field comment on lifetimeCtx.
 func (g *GossipManager) Close() error {
+	g.shutdownMu.Lock()
+	defer g.shutdownMu.Unlock()
 	g.cancel()
 	return nil
 }
@@ -359,6 +370,8 @@ func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.B
 // is busy and the queue is full, the message is dropped and logged rather
 // than blocking - callers must not rely on this call for backpressure.
 func (g *GossipManager) PublishBackground(name string, data []byte, logCtx ...any) {
+	g.shutdownMu.RLock()
+	defer g.shutdownMu.RUnlock()
 	if g.lifetimeCtx.Err() != nil {
 		publishQueueDroppedCounter.WithLabelValues(name, "shutdown").Inc()
 		fields := append([]any{"topic", name}, logCtx...)
@@ -384,9 +397,28 @@ func (g *GossipManager) publishWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			g.drainPublishQueueOnShutdown()
 			return
 		case job := <-g.publishQueue:
 			g.runPublishJob(ctx, job)
+		}
+	}
+}
+
+// drainPublishQueueOnShutdown accounts for whatever is left buffered in the
+// queue once the worker stops: shutdownMu guarantees nothing can be admitted
+// after Close begins (see the lifetimeCtx field comment), so anything found
+// here is final - drop it observably rather than leaving it stranded with no
+// consumer.
+func (g *GossipManager) drainPublishQueueOnShutdown() {
+	for {
+		select {
+		case job := <-g.publishQueue:
+			publishQueueDroppedCounter.WithLabelValues(job.name, "shutdown").Inc()
+			fields := append([]any{"topic", job.name}, job.logCtx...)
+			log.Debug("[GossipManager] gossip manager shut down, dropping queued message", fields...)
+		default:
+			return
 		}
 	}
 }

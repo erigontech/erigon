@@ -945,6 +945,98 @@ func TestPublishBackground_DropsAfterClose(t *testing.T) {
 		"a message enqueued after Close must not be left sitting in a queue nothing will ever drain")
 }
 
+// TestPublishBackground_NoStrandedJobsUnderConcurrentClose proves that no
+// job can ever be left stranded in the queue when PublishBackground races
+// with Close: either the worker processes it, or a shutdown drain accounts
+// for it, but it is never silently left in a channel nothing will read
+// from again. Runs many iterations under -race since this is inherently a
+// concurrency scenario, not something a single deterministic ordering can
+// exercise.
+func TestPublishBackground_NoStrandedJobsUnderConcurrentClose(t *testing.T) {
+	for range 200 {
+		ctrl := gomock.NewController(t)
+		mockClock := eth_clock.NewMockEthereumClock(ctrl)
+		mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+		mockP2P := mock_services.NewMockP2PManager(ctrl)
+		mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+		mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+
+		beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+		gm := NewGossipManager(context.Background(), mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+			false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			gm.PublishBackground("topic", []byte("data"))
+		}()
+		go func() {
+			defer wg.Done()
+			gm.Close()
+		}()
+		wg.Wait()
+
+		require.Eventually(t, func() bool {
+			return len(gm.publishQueue) == 0
+		}, 2*time.Second, time.Millisecond,
+			"a job must never be left stranded in the queue with no consumer left to drain it")
+	}
+}
+
+// TestPublishBackground_DrainsBufferedJobsOnShutdown deterministically forces
+// the interleaving TestPublishBackground_NoStrandedJobsUnderConcurrentClose
+// can only hit probabilistically: a job sits buffered in the queue at the
+// exact moment the worker observes shutdown, so it must choose, in a single
+// select, between that buffered job and ctx.Done(). Repeated many times so
+// an implementation that doesn't also drain what's left when it happens to
+// pick ctx.Done() fails reliably, not just occasionally.
+func TestPublishBackground_DrainsBufferedJobsOnShutdown(t *testing.T) {
+	for range 100 {
+		ctrl := gomock.NewController(t)
+		mockClock := eth_clock.NewMockEthereumClock(ctrl)
+		mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+		mockP2P := mock_services.NewMockP2PManager(ctrl)
+		mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+		mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+
+		beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+		gm := NewGossipManager(context.Background(), mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+			false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+
+		occupyEntered := make(chan struct{})
+		unblockOccupy := make(chan struct{})
+		var once sync.Once
+		gm.publishHookForTest = func(name string, data []byte) {
+			if name == "occupy" {
+				once.Do(func() { close(occupyEntered) })
+				<-unblockOccupy
+			}
+		}
+
+		// Occupy the single worker so the next job is left buffered, not yet
+		// dequeued.
+		gm.PublishBackground("occupy", nil)
+		select {
+		case <-occupyEntered:
+		case <-time.After(2 * time.Second):
+			t.Fatal("worker never picked up the occupying job")
+		}
+
+		gm.PublishBackground("buffered", nil)
+		require.NoError(t, gm.Close())
+
+		// Let the worker finish the occupying job; on its next loop
+		// iteration it faces ctx.Done() and the buffered job ready at once.
+		close(unblockOccupy)
+
+		require.Eventually(t, func() bool {
+			return len(gm.publishQueue) == 0
+		}, 2*time.Second, time.Millisecond,
+			"a job already buffered when shutdown is observed must still be drained, not stranded")
+	}
+}
+
 func TestGossipManager(t *testing.T) {
 	suite.Run(t, new(subscribeUpcomingTopicsTestSuite))
 	suite.Run(t, new(newPubsubValidatorTestSuite))
