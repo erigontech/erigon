@@ -44,28 +44,13 @@ func (ct *CallTracer) Found() bool                         { return true }
 
 func (ct *CallTracer) Tracer() *tracers.Tracer {
 	var hooks tracing.Hooks
-
 	if ct.hooks != nil {
 		hooks = *ct.hooks
-
-		if ct.hooks.OnEnter != nil {
-			hooks.OnEnter = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
-				ct.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
-				ct.hooks.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
-			}
-		}
-		if ct.hooks.OnEnterV2 != nil {
-			hooks.OnEnterV2 = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
-				ct.OnEnter(depth, typ, from, to, precompile, input, gas.Execution, value, code)
-				ct.hooks.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
-			}
-		}
 	}
-
-	if hooks.OnEnter == nil {
-		hooks.OnEnter = ct.OnEnter
+	hooks.OnEnterV2 = func(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
+		ct.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
+		ct.hooks.EmitEnter(depth, typ, from, to, precompile, input, gas, value, code)
 	}
-
 	return &tracers.Tracer{
 		Hooks: &hooks,
 	}
@@ -77,7 +62,7 @@ func (ct *CallTracer) Reset() {
 func (ct *CallTracer) Froms() map[accounts.Address]struct{} { return ct.froms }
 func (ct *CallTracer) Tos() map[accounts.Address]struct{}   { return ct.tos }
 
-func (ct *CallTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+func (ct *CallTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if ct.froms == nil {
 		ct.froms = map[accounts.Address]struct{}{}
 		ct.tos = map[accounts.Address]struct{}{}
