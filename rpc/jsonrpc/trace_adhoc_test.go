@@ -819,6 +819,57 @@ func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
 	require.NotContains(t, result.StateDiff, accounts.InternAddress(untouched))
 }
 
+// Call data takes the same data/input precedence as eth_call: input wins when both are set.
+func TestTraceCallInputField(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newTraceApiForTest(m)
+
+	echo := common.HexToAddress("0x00000000000000000000000000000000cafe0003")
+	// CALLDATASIZE, PUSH1 0x00, PUSH1 0x00, CALLDATACOPY, CALLDATASIZE, PUSH1 0x00, RETURN
+	echoCode := hexutil.Bytes{0x36, 0x60, 0x00, 0x60, 0x00, 0x37, 0x36, 0x60, 0x00, 0xf3}
+	traceConfig := &config.TraceConfig{
+		StateOverrides: &ethapi.StateOverrides{
+			accounts.InternAddress(echo): {Code: &echoCode},
+		},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		fields string
+		output string
+	}{
+		{name: "data", fields: `"data":"0xaa"`, output: "0xaa"},
+		{name: "input", fields: `"input":"0xbb"`, output: "0xbb"},
+		{name: "equal", fields: `"data":"0xcc","input":"0xcc"`, output: "0xcc"},
+		{name: "input wins", fields: `"data":"0xaa","input":"0xbb"`, output: "0xbb"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var args TraceCallParam
+			call := fmt.Sprintf(`{"from":%q,"to":%q,%s}`, bankAddr.Hex(), echo.Hex(), tc.fields)
+			require.NoError(t, json.Unmarshal([]byte(call), &args))
+
+			result, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, traceConfig)
+			require.NoError(t, err)
+			require.Equal(t, tc.output, result.Output.String())
+		})
+	}
+}
+
+func TestCallManyInputField(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	// Init code deploys runtime code that returns 42.
+	const deploy = `[[{"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x30000","gasPrice":"0x0","input":"0x600a600c600039600a6000f3602a60005260206000f3"},["trace"]]]`
+	results, err := api.CallMany(context.Background(), json.RawMessage(deploy), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	created, ok := results[0].Trace[0].Result.(*CreateTraceResult)
+	require.True(t, ok)
+	require.Equal(t, "0x602a60005260206000f3", created.Code.String())
+}
+
 // runtimeReturningOpcode returns the given zero-argument opcode's value as a
 // 32-byte word: <opcode>, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN.
 func runtimeReturningOpcode(opcode byte) []byte {
