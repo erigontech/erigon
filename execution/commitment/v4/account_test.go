@@ -39,9 +39,9 @@ func TestAccountLeafRoundTrip(t *testing.T) {
 		wantCode    []byte
 		wantRoot    []byte
 	}{
-		{name: "eoa", update: commitment.Update{CodeHash: empty.CodeHash}, wantCode: empty.CodeHash[:], wantRoot: empty.RootHash[:]},
+		{name: "eoa", update: commitment.Update{CodeHash: empty.CodeHash}, storageRoot: empty.RootHash[:], wantCode: empty.CodeHash[:], wantRoot: empty.RootHash[:]},
 		{name: "contract with storage", update: commitment.Update{Nonce: 3, Balance: *uint256.NewInt(99), CodeHash: codeHash}, storageRoot: storageRoot[:], wantCode: codeHash[:], wantRoot: storageRoot[:]},
-		{name: "contract with code and no storage", update: commitment.Update{Nonce: 7, CodeHash: codeHash}, wantCode: codeHash[:], wantRoot: empty.RootHash[:]},
+		{name: "contract with code and no storage", update: commitment.Update{Nonce: 7, CodeHash: codeHash}, storageRoot: empty.RootHash[:], wantCode: codeHash[:], wantRoot: empty.RootHash[:]},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -61,7 +61,7 @@ func TestAccountLeafElisionFlags(t *testing.T) {
 	for _, balance := range []uint64{0, 99} {
 		for _, code := range []common.Hash{empty.CodeHash, codeHash} {
 			u := &commitment.Update{Balance: *uint256.NewInt(balance), CodeHash: code}
-			encoded := encodeAccountLeaf(u, nil, nil)
+			encoded := encodeAccountLeaf(u, empty.RootHash[:], nil)
 			_, gotBalance, gotCode, _, err := decodeAccountLeaf(encoded)
 			require.NoError(t, err)
 			require.Equal(t, balance, gotBalance.Uint64())
@@ -93,23 +93,23 @@ func TestAccountConsensusRLPMatchesAccountRLP(t *testing.T) {
 }
 
 func TestAccountLeafElidesDefaults(t *testing.T) {
-	require.Equal(t, []byte{0}, encodeAccountLeaf(&commitment.Update{}, nil, nil))
+	require.Equal(t, []byte{0}, encodeAccountLeaf(&commitment.Update{}, empty.RootHash[:], nil))
 	require.Equal(t, []byte{0}, encodeAccountLeaf(&commitment.Update{CodeHash: empty.CodeHash}, empty.RootHash[:], nil))
 	require.Equal(t, []byte{0}, encodeAccountLeaf(&commitment.Update{CodeHash: common.Hash{}}, make([]byte, length.Hash), nil))
 
-	nonceOnly := encodeAccountLeaf(&commitment.Update{Nonce: 1, CodeHash: empty.CodeHash}, nil, nil)
+	nonceOnly := encodeAccountLeaf(&commitment.Update{Nonce: 1, CodeHash: empty.CodeHash}, empty.RootHash[:], nil)
 	require.Equal(t, []byte{accountHasNonce, 1}, nonceOnly)
 
-	balanceOnly := encodeAccountLeaf(&commitment.Update{Balance: *uint256.NewInt(99), CodeHash: empty.CodeHash}, nil, nil)
+	balanceOnly := encodeAccountLeaf(&commitment.Update{Balance: *uint256.NewInt(99), CodeHash: empty.CodeHash}, empty.RootHash[:], nil)
 	require.Equal(t, []byte{0, 99}, balanceOnly)
 
-	full := encodeAccountLeaf(&commitment.Update{Nonce: 1, Balance: *uint256.NewInt(99), CodeHash: common.HexToHash("0x1234")}, nil, nil)
+	full := encodeAccountLeaf(&commitment.Update{Nonce: 1, Balance: *uint256.NewInt(99), CodeHash: common.HexToHash("0x1234")}, empty.RootHash[:], nil)
 	require.Len(t, full, 1+1+length.Hash+1)
 }
 
 func TestDecodeAccountLeafRejectsMalformedBodies(t *testing.T) {
 	u := &commitment.Update{Nonce: 1, CodeHash: common.HexToHash("0x1234")}
-	encoded := encodeAccountLeaf(u, nil, nil)
+	encoded := encodeAccountLeaf(u, empty.RootHash[:], nil)
 	for i := range encoded {
 		_, _, _, _, err := decodeAccountLeaf(encoded[:i])
 		require.Error(t, err, "truncation at %d", i)

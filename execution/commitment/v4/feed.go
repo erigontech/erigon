@@ -102,7 +102,7 @@ func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper
 	parallelFor(256, workers, 1, func(b int) {
 		bucket := items[bounds[b]:bounds[b+1]]
 		slices.SortFunc(bucket, compareFeed)
-		p := newPartitioner()
+		p := &partitioner{}
 		for i := range bucket {
 			if err := p.add(bucket[i].hashedKey, bucket[i].update); err != nil {
 				errs[b] = err
@@ -114,15 +114,13 @@ func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper
 	warmSorted(warmuper, items)
 	var storage [256][]storageTask
 	var accounts [256][]accountEntry
-	seen := 0
 	for b := range parts {
 		if errs[b] != nil {
 			return nil, nil, 0, errs[b]
 		}
 		storage[b], accounts[b] = parts[b].done()
-		seen += parts[b].seen
 	}
-	return slices.Concat(storage[:]...), slices.Concat(accounts[:]...), seen, nil
+	return slices.Concat(storage[:]...), slices.Concat(accounts[:]...), len(items), nil
 }
 
 func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, warmuper *commitment.Warmuper) ([]storageTask, []accountEntry, int, error) {
@@ -147,14 +145,14 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 	slices.SortFunc(items, compareFeed)
 	warmSorted(warmuper, items)
 
-	p := newPartitioner()
+	p := &partitioner{}
 	for i := range items {
 		if err := p.add(items[i].hashedKey, items[i].update); err != nil {
 			return nil, nil, 0, err
 		}
 	}
 	storage, accounts := p.done()
-	return storage, accounts, p.seen, nil
+	return storage, accounts, len(items), nil
 }
 
 func partitionAccounts(feed []commitment.FeedAccount, workers int) ([]storageTask, []accountEntry) {

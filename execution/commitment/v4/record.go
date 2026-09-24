@@ -45,10 +45,6 @@ type Record struct {
 	depth int
 }
 
-func NewRecord(data []byte, depth int) Record {
-	return Record{data: data, depth: depth}
-}
-
 type layout struct {
 	child, leaf, ext uint16
 	slotOff          int
@@ -70,8 +66,6 @@ func (r Record) SelfExt() []byte {
 	}
 	return r.data[1 : 2+n]
 }
-
-func (r Record) ExtAt(nib int) []byte { return r.extAt(r.layout(), nib) }
 
 func (r Record) slotAt(l layout, nib int) []byte {
 	tree := l.tree()
@@ -149,17 +143,6 @@ func (r Record) skipExt(l layout, upto int) (int, bool) {
 	return off, true
 }
 
-func (r Record) LeafRootBody() (hashedKey, value []byte) {
-	if !r.isLeafRoot() || len(r.data) < 34 {
-		return nil, nil
-	}
-	valueEnd := 34 + int(r.data[33])
-	if valueEnd > len(r.data) {
-		return nil, nil
-	}
-	return r.data[1:33], r.data[34:valueEnd]
-}
-
 func Validate(data []byte, depth int) error {
 	if len(data) == 0 {
 		return ErrRecordTruncated
@@ -167,7 +150,7 @@ func Validate(data []byte, depth int) error {
 	if data[0]&(hdrFormatMask|hdrHasEmb) != recordFormat {
 		return ErrRecordFormat
 	}
-	r := NewRecord(data, depth)
+	r := Record{data: data, depth: depth}
 	if r.isLeafRoot() {
 		if data[0]&(hdrHasSelfExt|hdrHasChildExt) != 0 || depth != 0 {
 			return ErrRecordRoot

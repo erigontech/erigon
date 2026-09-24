@@ -62,10 +62,6 @@ func packedMatches(packed []byte, nibbles []byte) bool {
 }
 
 func unpackPath(packed []byte, count int, dst []byte) []byte {
-	need := packedLen(count)
-	if len(packed) < need {
-		panic("packed path is shorter than nibble count")
-	}
 	if cap(dst) < count {
 		dst = make([]byte, count)
 	} else {

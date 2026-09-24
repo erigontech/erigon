@@ -17,25 +17,15 @@
 package v4
 
 import (
-	"errors"
 	"fmt"
 	"math/bits"
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-var ErrUnfoldAddress = errors.New("commitment v4: invalid storage address hash")
-
 func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []byte) (*node, error) {
-	if ctx == nil {
-		return nil, errors.New("commitment v4: nil unfold context")
-	}
 	if len(path) > 63 {
 		return nil, fmt.Errorf("commitment v4: path depth %d", len(path))
-	}
-
-	if plane == planeAccount && len(addrHash) != 0 || plane == planeStorage && len(addrHash) != 32 {
-		return nil, ErrUnfoldAddress
 	}
 
 	data, _, err := branchOwned(ctx, nodeKey(plane, addrHash, path, nil))
@@ -54,7 +44,7 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 
 	n := fork(path)
 	n.raw = data
-	record := NewRecord(n.raw, len(path))
+	record := Record{data: n.raw, depth: len(path)}
 	n.loaded = true
 	n.plane = plane
 	if data[0]&hdrHasSelfExt != 0 {

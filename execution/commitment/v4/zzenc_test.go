@@ -79,8 +79,8 @@ func TestZZAccountLeafFormatsEOAOnly(t *testing.T) {
 	for range n {
 		u, _ := sizeEOA(0, rnd)
 		acc := v3Account(u)
-		v4Bytes += len(encodeAccountLeaf(u, nil, nil))
-		v3Bytes += len(encodeAccountLeafV3(acc, nil))
+		v4Bytes += len(encodeAccountLeaf(u, empty.RootHash[:], nil))
+		v3Bytes += len(encodeAccountLeafV3(acc, empty.RootHash[:]))
 	}
 	t.Logf("EOA-only n=%d", n)
 	t.Logf("  v4 packed        avg %6.3f B/leaf", float64(v4Bytes)/n)

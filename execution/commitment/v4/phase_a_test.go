@@ -79,19 +79,19 @@ func TestPhaseAStorageTransitions(t *testing.T) {
 	require.NotEqual(t, empty.RootHash, root)
 	rootData := ctx.branches[string(StorageNodeKey(address, nil, nil))]
 	require.NoError(t, Validate(rootData, 0))
-	require.True(t, NewRecord(rootData, 0).isLeafRoot())
+	require.True(t, Record{data: rootData, depth: 0}.isLeafRoot())
 
 	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathB, phaseAStorageUpdate([]byte{2}))}})
 	require.NoError(t, err)
 	rootData = ctx.branches[string(StorageNodeKey(address, nil, nil))]
 	require.NoError(t, Validate(rootData, 0))
-	require.False(t, NewRecord(rootData, 0).isLeafRoot())
+	require.False(t, Record{data: rootData, depth: 0}.isLeafRoot())
 
 	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathB, &commitment.Update{Flags: commitment.DeleteUpdate})}})
 	require.NoError(t, err)
 	rootData = ctx.branches[string(StorageNodeKey(address, nil, nil))]
 	require.NoError(t, Validate(rootData, 0))
-	require.True(t, NewRecord(rootData, 0).isLeafRoot())
+	require.True(t, Record{data: rootData, depth: 0}.isLeafRoot())
 
 	_, err = runStorageTask(ctx, storageTask{addrHash: address, entries: []storageEntry{entryOf(pathA, &commitment.Update{Flags: commitment.DeleteUpdate})}})
 	require.NoError(t, err)
@@ -170,10 +170,7 @@ func TestPhaseAStorageWipeThenReinsert(t *testing.T) {
 	}})
 	require.NoError(t, err)
 	require.NotEqual(t, initial, final)
-	require.Equal(t, []byte{0x22}, func() []byte {
-		_, value := NewRecord(ctx.branches[string(StorageNodeKey(address, nil, nil))], 0).LeafRootBody()
-		return value
-	}())
+	require.Equal(t, []byte{0x22}, ctx.branches[string(StorageNodeKey(address, nil, nil))][34:])
 }
 
 func entryOf(path []byte, update *commitment.Update) storageEntry {

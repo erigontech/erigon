@@ -39,7 +39,7 @@ func sizeEOA(i int, rnd *rand.Rand) (*commitment.Update, []byte) {
 	u.Nonce = uint64(rnd.Intn(500))
 	u.Balance = *uint256.NewInt(uint64(rnd.Int63n(4e18)))
 	u.CodeHash = empty.CodeHash
-	return u, nil
+	return u, empty.RootHash[:]
 }
 
 func sizeContract(i int, rnd *rand.Rand) (*commitment.Update, []byte) {
@@ -115,13 +115,13 @@ func TestZZLeafEncodingSize(t *testing.T) {
 func BenchmarkZZAccountLeafCodec(b *testing.B) {
 	rnd := rand.New(rand.NewSource(7))
 	u, _ := sizeEOA(1, rnd)
-	packed := encodeAccountLeaf(u, nil, nil)
+	packed := encodeAccountLeaf(u, empty.RootHash[:], nil)
 	buf := make([]byte, 0, 128)
 
 	b.Run("encode", func(b *testing.B) {
 		b.ReportAllocs()
 		for range b.N {
-			buf = encodeAccountLeaf(u, nil, buf[:0])
+			buf = encodeAccountLeaf(u, empty.RootHash[:], buf[:0])
 		}
 	})
 	b.Run("decode+consensusRLP", func(b *testing.B) {

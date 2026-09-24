@@ -91,7 +91,7 @@ func partition(stream []phaseAInput) ([]storageTask, []accountEntry) {
 	slices.SortStableFunc(sorted, func(a, b phaseAInput) int {
 		return bytes.Compare(a.hashedKey, b.hashedKey)
 	})
-	p := newPartitioner()
+	p := &partitioner{}
 	for _, item := range sorted {
 		if err := p.add(item.hashedKey, item.update); err != nil {
 			panic(err)

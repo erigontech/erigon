@@ -89,7 +89,7 @@ func TestRootCollapseRewritesOnlyTheRoot(t *testing.T) {
 			require.Empty(t, n.childExtAt(3))
 			data := encodeRecord(n, 0, nil)
 			require.NoError(t, Validate(data, 0))
-			require.Equal(t, []byte{3, 4, 5}, unpackPath(NewRecord(data, 0).SelfExt()[1:], 3, nil))
+			require.Equal(t, []byte{3, 4, 5}, unpackPath(Record{data: data, depth: 0}.SelfExt()[1:], 3, nil))
 		})
 	}
 }
@@ -101,7 +101,7 @@ func TestRootTransitionsRejectMalformedShape(t *testing.T) {
 
 	n = fork(nil)
 	n.setChild(1, fork([]byte{2}))
-	require.ErrorIs(t, collapseRoot(n), ErrRootShape)
+	require.ErrorIs(t, promoteRootExtension(n), ErrRootShape)
 }
 
 func TestRootCollapseAdoptsInMemoryChild(t *testing.T) {

@@ -62,7 +62,7 @@ func TestEncodeRecordRoundTrip(t *testing.T) {
 			check: func(t *testing.T, r Record) {
 				l := r.layout()
 				require.Equal(t, uint16(1<<4), l.ext)
-				require.Equal(t, []byte{3, 0x23, 0x40}, r.ExtAt(4))
+				require.Equal(t, []byte{3, 0x23, 0x40}, r.extAt(l, 4))
 				require.Equal(t, hash, r.slotAt(l, 4))
 			},
 		},
@@ -72,7 +72,7 @@ func TestEncodeRecordRoundTrip(t *testing.T) {
 			n := tt.build()
 			data := encodeRecord(n, tt.depth, bytes.Repeat([]byte{0xff}, 8))
 			require.NoError(t, Validate(data, tt.depth))
-			tt.check(t, NewRecord(data, tt.depth))
+			tt.check(t, Record{data: data, depth: tt.depth})
 		})
 	}
 }
@@ -94,7 +94,7 @@ func TestEncodeRecordRootForms(t *testing.T) {
 			check: func(t *testing.T, data []byte) {
 				require.Equal(t, byte(hdrIsLeafRoot), data[0])
 				require.NoError(t, Validate(data, 0))
-				key, value := NewRecord(data, 0).LeafRootBody()
+				key, value := data[1:33], data[34:]
 				require.Equal(t, packPath(append([]byte{4}, bytes.Repeat([]byte{2}, 63)...), nil), key)
 				require.Equal(t, []byte{1, 2}, value)
 			},
@@ -109,7 +109,7 @@ func TestEncodeRecordRootForms(t *testing.T) {
 			check: func(t *testing.T, data []byte) {
 				require.Equal(t, byte(hdrHasSelfExt), data[0])
 				require.NoError(t, Validate(data, 0))
-				r := NewRecord(data, 0)
+				r := Record{data: data, depth: 0}
 				require.Equal(t, []byte{2, 0x12}, r.SelfExt())
 				require.Equal(t, hash, r.slotAt(r.layout(), 3))
 			},
@@ -125,7 +125,7 @@ func TestEncodeRecordRootForms(t *testing.T) {
 			check: func(t *testing.T, data []byte) {
 				require.Equal(t, byte(recordFormat), data[0])
 				require.NoError(t, Validate(data, 0))
-				require.Equal(t, uint16(1<<3|1<<9), NewRecord(data, 0).layout().child)
+				require.Equal(t, uint16(1<<3|1<<9), Record{data: data, depth: 0}.layout().child)
 			},
 		},
 	}

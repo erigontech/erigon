@@ -117,7 +117,7 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 		storageDone <- runStoragePhase(ctx, rawCtx, factory, storage, storageRoots, storageParts, storageWorkers, fanOutMin)
 	}
 
-	g := accountGraph()
+	g := graph{plane: planeAccount}
 	root, plans, planErr := g.planAccounts(rawCtx, accounts, accountFold)
 	if err := <-storageDone; err != nil {
 		return [32]byte{}, nil, err
@@ -142,25 +142,21 @@ func runScheduledPhases(ctx context.Context, rawCtx commitment.PatriciaContext, 
 			var ok bool
 			storageRoot, ok = results[hashAddressPath(plan.entry.hashedKey)]
 			if !ok {
-				accountResults[i].err = errPhaseBRecord
+				accountResults[i].err = errNodeRecord
 				return
 			}
 			if !plan.found && plan.entry.update == nil && storageRoot == empty.RootHash {
 				plan.skip = true
 				return
 			}
-		} else if plan.found {
-			_, _, _, existingRoot, decodeErr := decodeAccountLeaf(plan.oldValue)
-			if decodeErr != nil {
-				accountResults[i].err = fmt.Errorf("%w: %w", errPhaseBRecord, decodeErr)
-				return
-			}
-			copy(storageRoot[:], existingRoot)
 		}
-		update, updateErr := accountUpdate(plan.oldValue, plan.found, plan.entry.update)
+		update, existingRoot, updateErr := accountUpdate(plan.oldValue, plan.found, plan.entry.update)
 		if updateErr != nil {
 			accountResults[i].err = updateErr
 			return
+		}
+		if !plan.entry.storageDirty && plan.found {
+			copy(storageRoot[:], existingRoot)
 		}
 		at := i * accountLeafScratch
 		accountResults[i].value = encodeAccountLeaf(update, storageRoot[:], accountValues[at:at:at+accountLeafScratch])
@@ -266,7 +262,7 @@ func (g graph) accountPlanFor(ctx commitment.PatriciaContext, root *node, entry 
 	oldValue, found, stored := accountLeafAt(root, entry.hashedKey)
 	if stored {
 		if err := g.ensurePath(ctx, root, entry.hashedKey); err != nil {
-			return accountPlan{}, fmt.Errorf("%w: account path %x: %w", errPhaseBRecord, entry.hashedKey, err)
+			return accountPlan{}, fmt.Errorf("%w: account path %x: %w", errNodeRecord, entry.hashedKey, err)
 		}
 		oldValue, found, _ = accountLeafAt(root, entry.hashedKey)
 	}
@@ -290,7 +286,7 @@ func (g graph) ensureRootChildren(ctx commitment.PatriciaContext, root *node, ni
 			continue
 		}
 		if !root.hasChildHash(nib) {
-			return g.errNode
+			return errNodeRecord
 		}
 		child, err := g.unfoldChild(ctx, root.childPath(nib, nil))
 		if err != nil {
@@ -331,7 +327,7 @@ func (g graph) fanOutRoot(ctx commitment.PatriciaContext, root *node, n int, nib
 				defer cleanup()
 			}
 			if workerCtx == nil {
-				return g.errNode
+				return errNodeRecord
 			}
 			for _, i := range groups[nib] {
 				if err := fn(workerCtx, i); err != nil {

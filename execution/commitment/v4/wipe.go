@@ -42,10 +42,7 @@ func enumerateRecordChildren(ctx commitment.PatriciaContext, addrHash [32]byte, 
 	if err := Validate(data, depth); err != nil {
 		return err
 	}
-	record := NewRecord(data, depth)
-	if record.isLeafRoot() {
-		return nil
-	}
+	record := Record{data: data, depth: depth}
 	l := record.layout()
 	for nib := range 16 {
 		bit := uint16(1) << nib

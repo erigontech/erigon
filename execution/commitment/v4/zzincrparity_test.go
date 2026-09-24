@@ -148,9 +148,9 @@ func walkRecords(ctx *parityContext, plane byte, addrHash [32]byte) (leaves map[
 			issues = append(issues, fmt.Sprintf("invalid record at %x: %v", path, err))
 			return
 		}
-		r := NewRecord(data, depth)
+		r := Record{data: data, depth: depth}
 		if r.isLeafRoot() {
-			hashedKey, value := r.LeafRootBody()
+			hashedKey, value := data[1:33], data[34:]
 			leaves[string(unpackPath(hashedKey, 64, nil))] = bytes.Clone(value)
 			return
 		}

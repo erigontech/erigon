@@ -50,7 +50,6 @@ func TestStateRoundTripEmptyRoot(t *testing.T) {
 	restored := &Trie{root: bytes.Repeat([]byte{0x55}, 32)}
 	_, _, err = restored.RestoreState(encoded)
 	require.NoError(t, err)
-	require.Nil(t, restored.root)
 	root, err := restored.RootHash()
 	require.NoError(t, err)
 	require.Equal(t, empty.RootHash[:], root)

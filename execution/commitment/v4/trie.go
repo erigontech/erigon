@@ -54,6 +54,27 @@ func (t *Trie) RootHash() ([]byte, error) {
 	return bytes.Clone(t.root), nil
 }
 
+func (t *Trie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
+	root, err := t.RootHash()
+	if err != nil {
+		return nil, err
+	}
+	return commitment.EncodeCommitmentV4State(root, blockNum, txNum, dst)
+}
+
+func (t *Trie) RestoreState(value []byte) (uint64, uint64, error) {
+	if value == nil {
+		t.root = nil
+		return 0, 0, nil
+	}
+	blockNum, txNum, root, err := commitment.DecodeCommitmentV4State(value)
+	if err != nil {
+		return 0, 0, err
+	}
+	t.root = root
+	return blockNum, txNum, nil
+}
+
 func (t *Trie) SetTraceWriter(io.Writer) {}
 
 func (t *Trie) Variant() commitment.TrieVariant {

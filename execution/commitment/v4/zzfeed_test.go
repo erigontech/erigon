@@ -148,7 +148,7 @@ func TestPartitionFeedMatchesSerialPartition(t *testing.T) {
 
 	sorted := slices.Clone(items)
 	slices.SortFunc(sorted, compareFeed)
-	serial := newPartitioner()
+	serial := &partitioner{}
 	for _, e := range sorted {
 		if err := serial.add(e.hashedKey, e.update); err != nil {
 			t.Fatal(err)
@@ -160,8 +160,8 @@ func TestPartitionFeedMatchesSerialPartition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if seen != serial.seen {
-		t.Fatalf("seen %d, want %d", seen, serial.seen)
+	if seen != len(items) {
+		t.Fatalf("seen %d, want %d", seen, len(items))
 	}
 	if len(gotAccounts) != len(wantAccounts) {
 		t.Fatalf("accounts %d, want %d", len(gotAccounts), len(wantAccounts))

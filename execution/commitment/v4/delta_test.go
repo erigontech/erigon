@@ -48,7 +48,7 @@ func TestMaterializeFoldsAndEncodesRecordInOneWalk(t *testing.T) {
 	n.setLeaf(int(path[0]), packPath(path[1:], nil), []byte{9})
 
 	var acc deltaParts
-	hash, err := storageGraph(make([]byte, 32)).materialize(ctx, n, n, &acc)
+	hash, err := graph{plane: planeStorage, addrHash: make([]byte, 32)}.materialize(ctx, n, n, &acc)
 	require.NoError(t, err)
 	require.Len(t, hash, 32)
 	require.Len(t, acc, 1)
@@ -79,7 +79,7 @@ func TestPersistGraphRetainsOnlyFoldedDeltasAfterChildWalk(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			g := storageGraph(addr[:])
+			g := graph{plane: planeStorage, addrHash: addr[:]}
 			parts, err := g.persistGraph(ctx, root, foldPlan{})
 			require.NoError(t, err)
 			require.NoError(t, applyDeltas(parts, ctx.PutBranch))
@@ -106,7 +106,7 @@ func TestPersistGraphKeepsRecordsThatOnlyMovedDeeper(t *testing.T) {
 	ctx := newMockContext()
 	var addr [32]byte
 	addr[0] = 0x7e
-	g := storageGraph(addr[:])
+	g := graph{plane: planeStorage, addrHash: addr[:]}
 
 	deepPath := []byte{0x0c, 0x06}
 	deepKey := StorageNodeKey(addr, deepPath, nil)

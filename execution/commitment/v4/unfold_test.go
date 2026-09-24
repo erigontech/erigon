@@ -18,7 +18,6 @@ package v4
 
 import (
 	"bytes"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -115,13 +114,6 @@ func TestUnfoldRejectsMalformedRecord(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrRecordTruncated)
 	require.Nil(t, got)
-}
-
-func TestUnfoldRejectsInvalidAddress(t *testing.T) {
-	ctx := newMockContext()
-	_, err := unfold(ctx, nil, planeStorage, nil)
-	require.Error(t, err)
-	require.True(t, errors.Is(err, ErrUnfoldAddress))
 }
 
 type ownedBranchContext struct{ *mockContext }

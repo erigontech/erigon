@@ -33,14 +33,6 @@ type meteredContext struct {
 	*meterCounts
 }
 
-func (c *meteredContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
-	data, step, err := c.PatriciaContext.Branch(prefix)
-	if len(data) != 0 {
-		c.readBytes.Add(uint64(len(data)))
-	}
-	return data, step, err
-}
-
 func (c *meteredContext) BranchOwned(prefix []byte) ([]byte, kv.Step, error) {
 	data, step, err := branchOwned(c.PatriciaContext, prefix)
 	if len(data) != 0 {

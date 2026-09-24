@@ -24,11 +24,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-var (
-	errPhaseAKey     = errors.New("commitment v4: invalid phase A key")
-	errPhaseAUpdate  = errors.New("commitment v4: invalid phase A update")
-	errPhaseAStorage = errors.New("commitment v4: invalid storage task")
-)
+var errPhaseAUpdate = errors.New("commitment v4: invalid phase A update")
 
 type storageOp uint8
 
@@ -69,18 +65,11 @@ type accountEntry struct {
 }
 
 type partitioner struct {
-	storage      []storageTask
-	accounts     []accountEntry
-	storageIndex int
-	seen         int
-}
-
-func newPartitioner() *partitioner {
-	return &partitioner{storageIndex: -1}
+	storage  []storageTask
+	accounts []accountEntry
 }
 
 func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
-	p.seen++
 	if len(hashedKey) != 64 && len(hashedKey) != 128 {
 		return nil
 	}
@@ -88,7 +77,6 @@ func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
 	accountHash := hashedKey[:64:64]
 	if len(p.accounts) == 0 || !bytes.Equal(p.accounts[len(p.accounts)-1].hashedKey, accountHash) {
 		p.accounts = append(p.accounts, accountEntry{hashedKey: accountHash})
-		p.storageIndex = -1
 	}
 	current := &p.accounts[len(p.accounts)-1]
 
@@ -97,16 +85,16 @@ func (p *partitioner) add(hashedKey []byte, update *commitment.Update) error {
 		return nil
 	}
 
-	if p.storageIndex < 0 {
-		p.storageIndex = len(p.storage)
+	if !current.storageDirty {
 		p.storage = append(p.storage, storageTask{addrHash: hashAddressPath(current.hashedKey)})
+		current.storageDirty = true
 	}
-	current.storageDirty = true
 	entry, err := storageEntryOf(hashedKey[64:128:128], update)
 	if err != nil {
 		return err
 	}
-	p.storage[p.storageIndex].entries = append(p.storage[p.storageIndex].entries, entry)
+	task := &p.storage[len(p.storage)-1]
+	task.entries = append(task.entries, entry)
 	return nil
 }
 
@@ -140,11 +128,8 @@ func runStorageTaskWithPlan(ctx commitment.PatriciaContext, task storageTask, pl
 		}
 		return empty.RootHash, deltaParts{records}, nil
 	}
-	if len(task.entries) == 0 {
-		return empty.RootHash, nil, nil
-	}
 
-	g := storageGraph(task.addrHash[:])
+	g := graph{plane: planeStorage, addrHash: task.addrHash[:]}
 	root, err := g.loadRoot(ctx)
 	if err != nil {
 		return [32]byte{}, nil, err

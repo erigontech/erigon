@@ -114,7 +114,7 @@ func TestRecordDecodeHeaderForms(t *testing.T) {
 			if err := Validate(tt.data, tt.depth); err != nil {
 				t.Fatalf("Validate: %v", err)
 			}
-			r := NewRecord(tt.data, tt.depth)
+			r := Record{data: tt.data, depth: tt.depth}
 			if r.data[0]&hdrFormatMask != recordFormat {
 				t.Fatalf("format nibble: %#x", r.data[0]&hdrFormatMask)
 			}
@@ -177,7 +177,7 @@ func TestRecordDecodeAccessors(t *testing.T) {
 	if err := Validate(data, depth); err != nil {
 		t.Fatal(err)
 	}
-	r := NewRecord(data, depth)
+	r := Record{data: data, depth: depth}
 	l := r.layout()
 	if l.child != 0x000f || l.leaf != 0x000a || l.ext != 0x0005 {
 		t.Fatalf("masks: child=%x leaf=%x ext=%x", l.child, l.leaf, l.ext)
@@ -191,13 +191,13 @@ func TestRecordDecodeAccessors(t *testing.T) {
 	if r.slotAt(l, 1) != nil || r.slotAt(l, 3) != nil {
 		t.Fatalf("unexpected non-tree slot")
 	}
-	if got := r.ExtAt(0); !bytes.Equal(got, extension) {
+	if got := r.extAt(l, 0); !bytes.Equal(got, extension) {
 		t.Fatalf("extension 0: %x", got)
 	}
-	if got := r.ExtAt(2); !bytes.Equal(got, second) {
+	if got := r.extAt(l, 2); !bytes.Equal(got, second) {
 		t.Fatalf("extension 2: %x", got)
 	}
-	if r.ExtAt(1) != nil {
+	if r.extAt(l, 1) != nil {
 		t.Fatalf("unexpected extension at 1")
 	}
 	gotSuffix, gotValue := r.leafAt(l, 1)
@@ -209,7 +209,7 @@ func TestRecordDecodeAccessors(t *testing.T) {
 	}
 
 	root := recordFixture(hdrHasSelfExt, 0, 1, 0, 0, extFixture([]byte{1, 2}), nil, nil)
-	if got := NewRecord(root, 0).SelfExt(); !bytes.Equal(got, extFixture([]byte{1, 2})) {
+	if got := (Record{data: root, depth: 0}).SelfExt(); !bytes.Equal(got, extFixture([]byte{1, 2})) {
 		t.Fatalf("self extension: %x", got)
 	}
 }
@@ -223,7 +223,7 @@ func TestRecordDecodeLeafRoot(t *testing.T) {
 	if err := Validate(data, 0); err != nil {
 		t.Fatal(err)
 	}
-	gotKey, gotValue := NewRecord(data, 0).LeafRootBody()
+	gotKey, gotValue := data[1:33], data[34:]
 	if !bytes.Equal(gotKey, key) || !bytes.Equal(gotValue, value) {
 		t.Fatalf("leaf root: key=%x value=%x", gotKey, gotValue)
 	}
@@ -235,11 +235,11 @@ func TestRecordDecodeNoAllocations(t *testing.T) {
 			1: {suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), value: []byte{1}},
 			3: {suffix: packPath(bytes.Repeat([]byte{1}, 60), nil), value: []byte{3}},
 		})
-	r := NewRecord(data, 3)
+	r := Record{data: data, depth: 3}
 	if allocations := testing.AllocsPerRun(100, func() {
 		l := r.layout()
 		_ = r.slotAt(l, 0)
-		_ = r.ExtAt(0)
+		_ = r.extAt(l, 0)
 		_, _ = r.leafAt(l, 1)
 	}); allocations != 0 {
 		t.Fatalf("record accessors allocate: %f", allocations)

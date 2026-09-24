@@ -18,31 +18,27 @@ package v4
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-var (
-	errPhaseBKey    = errors.New("commitment v4: invalid phase B key")
-	errPhaseBRecord = errors.New("commitment v4: invalid account record")
-)
-
-func accountUpdate(value []byte, found bool, update *commitment.Update) (*commitment.Update, error) {
+func accountUpdate(value []byte, found bool, update *commitment.Update) (*commitment.Update, []byte, error) {
 	result := &commitment.Update{CodeHash: empty.CodeHash}
+	var storageRoot []byte
 	if found {
-		nonce, balance, codeHash, _, err := decodeAccountLeaf(value)
+		nonce, balance, codeHash, root, err := decodeAccountLeaf(value)
 		if err != nil {
-			return nil, fmt.Errorf("%w: %w", errPhaseBRecord, err)
+			return nil, nil, fmt.Errorf("%w: %w", errNodeRecord, err)
 		}
+		storageRoot = root
 		result.Nonce = nonce
 		result.Balance.Set(&balance)
 		copy(result.CodeHash[:], codeHash)
 	}
 	if update == nil {
-		return result, nil
+		return result, storageRoot, nil
 	}
 	if update.Flags&commitment.BalanceUpdate != 0 {
 		result.Balance.Set(&update.Balance)
@@ -53,7 +49,7 @@ func accountUpdate(value []byte, found bool, update *commitment.Update) (*commit
 	if update.Flags&commitment.CodeUpdate != 0 {
 		result.CodeHash = update.CodeHash
 	}
-	return result, nil
+	return result, storageRoot, nil
 }
 
 func accountLeafAt(n *node, path []byte) (value []byte, found, stored bool) {

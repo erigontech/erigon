@@ -35,7 +35,7 @@ func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 	if len(hashedKey) > 64 && depth >= 64 {
 		planeDepth -= 64
 	}
-	record := NewRecord(data, planeDepth)
+	record := Record{data: data, depth: planeDepth}
 	l := record.layout()
 	if !l.ok {
 		return 0, true
@@ -64,7 +64,7 @@ func warmupStepV4(data, hashedKey []byte, depth int) (nextDepth int, stop bool) 
 
 	extLen := 0
 	if l.ext&bit != 0 {
-		ext := record.ExtAt(int(hashedKey[branchPoint]))
+		ext := record.extAt(l, int(hashedKey[branchPoint]))
 		if len(ext) == 0 {
 			return 0, true
 		}
@@ -107,9 +107,9 @@ func splitDepthV4(data, hashedKey []byte, depth int) int {
 	if len(hashedKey) > 64 && depth >= 64 {
 		planeDepth, planeEnd = depth-64, 128
 	}
-	record := NewRecord(data, planeDepth)
+	record := Record{data: data, depth: planeDepth}
 	l := record.layout()
-	if !l.ok || planeDepth == 0 && l.selfExtLen != 0 || depth >= planeEnd {
+	if !l.ok || planeDepth == 0 && l.selfExtLen != 0 {
 		return 0
 	}
 	nib := int(hashedKey[depth])

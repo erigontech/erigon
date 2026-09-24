@@ -34,7 +34,7 @@ var (
 )
 
 func fold(n *node, depth int) ([32]byte, error) {
-	if n == nil || depth < 0 || depth > 63 {
+	if n == nil {
 		return [32]byte{}, errFoldNode
 	}
 	if n.childMask == 0 {
@@ -43,14 +43,14 @@ func fold(n *node, depth int) ([32]byte, error) {
 	if n.plane != planeAccount && n.plane != planeStorage {
 		return [32]byte{}, fmt.Errorf("%w: 0x%02x", errFoldPlane, n.plane)
 	}
-	if len(n.path) > 63 || depth != 0 && depth != len(n.path) {
-		return [32]byte{}, fmt.Errorf("%w: depth %d path %d", errFoldNode, depth, len(n.path))
+	if len(n.path) > 63 {
+		return [32]byte{}, fmt.Errorf("%w: path %d", errFoldNode, len(n.path))
 	}
 
 	if depth == 0 && len(n.path) == 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == n.childMask {
 		nib := bits.TrailingZeros16(n.childMask)
 		var rootRef [32]byte
-		ref, err := foldLeaf(n, nib, 0, true, rootRef[:0])
+		ref, err := foldLeaf(n, nib, true, rootRef[:0])
 		if err != nil {
 			return [32]byte{}, err
 		}
@@ -87,9 +87,9 @@ func fold(n *node, depth int) ([32]byte, error) {
 		var ref []byte
 		var err error
 		if n.leafMask&bit != 0 {
-			ref, err = foldLeaf(n, nib, len(n.path), false, refStore[nib][:0])
+			ref, err = foldLeaf(n, nib, false, refStore[nib][:0])
 		} else {
-			ref, err = foldBranchChild(n, nib, len(n.path))
+			ref, err = foldBranchChild(n, nib)
 		}
 		if err != nil {
 			return [32]byte{}, err
@@ -104,8 +104,8 @@ func fold(n *node, depth int) ([32]byte, error) {
 	return branchHash, nil
 }
 
-func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, error) {
-	suffixCount := 64 - depth - 1
+func foldLeaf(n *node, nib int, includeNib bool, out []byte) ([]byte, error) {
+	suffixCount := 64 - len(n.path) - 1
 	suffix, payload := n.leafAt(nib)
 	if len(suffix) != packedLen(suffixCount) {
 		return nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
@@ -134,7 +134,8 @@ func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, err
 	return append(out, storageLeafRef(compact, payload, encScratch[:0])...), nil
 }
 
-func foldBranchChild(parent *node, nib, depth int) ([]byte, error) {
+func foldBranchChild(parent *node, nib int) ([]byte, error) {
+	depth := len(parent.path)
 	var ext, hash []byte
 	if child := parent.child(nib); child != nil {
 		if len(child.path) <= depth || !bytes.HasPrefix(child.path, parent.path) || child.path[depth] != byte(nib) {

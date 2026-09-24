@@ -19,6 +19,7 @@ package v4
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/bits"
 	"slices"
@@ -28,19 +29,14 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
+var (
+	errNodeKey    = errors.New("commitment v4: invalid node key")
+	errNodeRecord = errors.New("commitment v4: invalid node record")
+)
+
 type graph struct {
 	plane    byte
 	addrHash []byte
-	errKey   error
-	errNode  error
-}
-
-func accountGraph() graph {
-	return graph{plane: planeAccount, errKey: errPhaseBKey, errNode: errPhaseBRecord}
-}
-
-func storageGraph(addrHash []byte) graph {
-	return graph{plane: planeStorage, addrHash: addrHash, errKey: errPhaseAKey, errNode: errPhaseAStorage}
 }
 
 func (g graph) loadRoot(ctx commitment.PatriciaContext) (*node, error) {
@@ -61,7 +57,7 @@ func (g graph) loadRoot(ctx commitment.PatriciaContext) (*node, error) {
 		return root, nil
 	}
 	if !root.hasChildHash(nib) {
-		return root, g.errNode
+		return root, errNodeRecord
 	}
 	child, err := g.unfoldChild(ctx, root.path)
 	if err != nil {
@@ -77,9 +73,8 @@ func (g graph) unfoldChild(ctx commitment.PatriciaContext, path []byte) (*node, 
 		return nil, err
 	}
 	if child == nil {
-		return nil, fmt.Errorf("%w: missing child at depth %d", g.errNode, len(path))
+		return nil, fmt.Errorf("%w: missing child at depth %d", errNodeRecord, len(path))
 	}
-	child.plane = g.plane
 	return child, nil
 }
 
@@ -96,7 +91,7 @@ func rootExtensionChild(n *node) *node {
 
 func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) error {
 	if len(path) != 64 || !bytes.HasPrefix(path, n.path) {
-		return fmt.Errorf("%w: node path %x", g.errKey, n.path)
+		return fmt.Errorf("%w: node path %x", errNodeKey, n.path)
 	}
 	if len(n.path) >= 64 {
 		return nil
@@ -109,7 +104,7 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 			return g.ensurePath(ctx, child, path)
 		}
 		if !n.hasChildHash(nib) {
-			return g.errNode
+			return errNodeRecord
 		}
 		child, err := g.unfoldChild(ctx, n.path)
 		if err != nil {
@@ -128,7 +123,7 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 		return g.ensurePath(ctx, child, path)
 	}
 	if !n.hasChildHash(nib) {
-		return g.errNode
+		return errNodeRecord
 	}
 	childPath := n.childPath(nib, nil)
 	if !bytes.HasPrefix(path, childPath) {
@@ -142,7 +137,12 @@ func (g graph) ensurePath(ctx commitment.PatriciaContext, n *node, path []byte) 
 	return g.ensurePath(ctx, child, path)
 }
 
-const deltaChunk = 1024
+const (
+	deltaChunk  = 1024
+	encodeSlack = 96
+)
+
+type recordDelta = commitment.BranchDelta
 
 type deltaParts [][]recordDelta
 
@@ -161,6 +161,17 @@ func (p *deltaParts) add(d recordDelta) {
 	*last = append(*last, d)
 }
 
+func applyDeltas(parts deltaParts, putBranch func(key, data, prev []byte) error) error {
+	for _, part := range parts {
+		for _, delta := range part {
+			if err := putBranch(delta.Key, delta.Data, delta.Prev); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
 func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *deltaParts) ([32]byte, error) {
 	for nib := range 16 {
 		bit := uint16(1) << nib
@@ -170,7 +181,7 @@ func (g graph) materialize(ctx commitment.PatriciaContext, n, root *node, acc *d
 		child := n.child(nib)
 		if child == nil {
 			if !n.hasChildHash(nib) {
-				return [32]byte{}, g.errNode
+				return [32]byte{}, errNodeRecord
 			}
 			continue
 		}
@@ -245,7 +256,7 @@ func (g graph) materializeRootChildren(root *node, plan foldPlan) ([]deltaParts,
 				defer cleanup()
 			}
 			if workerCtx == nil {
-				return g.errNode
+				return errNodeRecord
 			}
 			hash, err := g.materialize(workerCtx, root.child(nib), root, &accs[k])
 			hashes[k] = hash

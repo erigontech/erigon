@@ -157,12 +157,6 @@ func accountConsensusRLP(nonce uint64, balance *uint256.Int, storageRoot, codeHa
 }
 
 func isEmptyStorageRoot(root []byte) bool {
-	if len(root) == 0 {
-		return true
-	}
-	if len(root) != length.Hash {
-		return false
-	}
 	h := (*common.Hash)(root)
 	return *h == empty.RootHash || *h == (common.Hash{})
 }
