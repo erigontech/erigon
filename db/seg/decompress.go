@@ -1036,6 +1036,14 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	return buf, postLoopPos
 }
 
+// PeekSize returns the next word's uncompressed length without advancing the getter.
+func (g *Getter) PeekSize() int {
+	dataP, dataBit := g.dataP, g.dataBit
+	wordLen := g.nextPosClean() - 1
+	g.dataP, g.dataBit = dataP, dataBit
+	return int(wordLen)
+}
+
 func (g *Getter) NextUncompressed() ([]byte, uint64) {
 	wordLen := g.nextPosClean()
 	wordLen-- // because when create huffman tree we do ++ , because 0 is terminator

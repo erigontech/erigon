@@ -18,7 +18,6 @@ package transactions
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -250,12 +249,12 @@ func ExecuteTraceTx(
 		stream.WriteBool(result.Failed())
 		stream.WriteMore()
 		// If the result contains a revert reason, return it.
-		returnVal := hex.EncodeToString(result.Return())
+		ret := result.Return()
 		if len(result.Revert()) > 0 {
-			returnVal = hex.EncodeToString(result.Revert())
+			ret = result.Revert()
 		}
 		stream.WriteObjectField("returnValue")
-		stream.WriteString("0x" + returnVal)
+		stream.WriteHex(ret)
 		stream.WriteObjectEnd()
 	} else {
 		r, err := tracer.GetResult()

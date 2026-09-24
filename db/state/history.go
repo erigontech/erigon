@@ -421,12 +421,12 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		w.historyKey = append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...)
 		historyKey := w.historyKey[:lk+8]
 
-		if err := w.historyVals.Collect(historyKey, original); err != nil {
+		if err := w.valsCollector().Collect(historyKey, original); err != nil {
 			return err
 		}
 
 		if !w.ii.discard {
-			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
+			if err := w.ii.keysCollector().Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
 				return err
 			}
 		}
@@ -445,11 +445,11 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		panic("History value is too large while largeValues=false")
 	}
 
-	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
+	if err := w.valsCollector().Collect(historyKey1, historyVal); err != nil {
 		return err
 	}
 	if !w.ii.discard {
-		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
+		if err := w.ii.keysCollector().Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
 			return err
 		}
 	}
@@ -491,15 +491,10 @@ func (ht *HistoryRoTx) newWriter(tmpdir string, discard bool) *historyBufferedWr
 	w := &historyBufferedWriter{
 		discard: discard,
 
-		historyKey:       make([]byte, 128),
 		largeValues:      ht.h.HistoryLargeValues,
 		historyValsTable: ht.h.ValuesTable,
 
 		ii: ht.iit.newWriter(tmpdir, discard),
-	}
-	if !discard {
-		w.historyVals = etl.NewCollectorWithAllocator(w.ii.filenameBase+".flush.hist", tmpdir, etl.SmallSortableBuffers, ht.h.logger).
-			LogLvl(log.LvlTrace).SortAndFlushInBackground(true)
 	}
 	return w
 }
@@ -515,11 +510,20 @@ func (w *historyBufferedWriter) Flush(ctx context.Context, tx kv.RwTx) error {
 	if err := w.ii.Flush(ctx, tx); err != nil {
 		return err
 	}
-	if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
-		return err
+	if w.historyVals != nil {
+		if err := w.historyVals.Load(tx, w.historyValsTable, loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+			return err
+		}
 	}
 	w.close()
 	return nil
+}
+
+func (w *historyBufferedWriter) valsCollector() *etl.Collector {
+	if w.historyVals == nil {
+		w.historyVals = newWriterCollector(w.ii.filenameBase+".flush.hist", w.ii.tmpdir, w.ii.logger)
+	}
+	return w.historyVals
 }
 
 type HistoryCollation struct {
