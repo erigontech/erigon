@@ -37,7 +37,7 @@ type hexType interface {
 // emptyHexType lists the hexTypes that omitempty can leave out: a zero number, or Bytes with no
 // bytes. encoding/json never leaves out an array or a big number.
 type emptyHexType interface {
-	hexutil.Uint64 | hexutil.Uint | hexutil.Int64 | hexutil.Bytes
+	hexutil.Uint64 | hexutil.Bytes
 	encoding.TextAppender
 }
 
@@ -73,14 +73,6 @@ func hexFieldOmitempty[T emptyHexType](s *StackStream, name string, v *T) {
 		if *x == 0 {
 			return
 		}
-	case *hexutil.Uint:
-		if *x == 0 {
-			return
-		}
-	case *hexutil.Int64:
-		if *x == 0 {
-			return
-		}
 	}
 	hexField(s, name, v)
 }
@@ -102,19 +94,9 @@ func hexField[T hexType](s *StackStream, name string, v *T) {
 func appendHex[T hexType](s *StackStream, buf []byte, v *T) []byte {
 	var text []byte
 	var err error
-	switch x := any(v).(type) {
-	case *hexutil.Uint64:
-		text, err = x.AppendText(buf)
-	case *hexutil.Uint:
-		text, err = x.AppendText(buf)
-	case *hexutil.Int64:
-		text, err = x.AppendText(buf)
-	case *hexutil.U256:
-		text, err = x.AppendText(buf)
-	case *hexutil.Big:
-		text, err = x.AppendText(buf)
-	case *hexutil.Bytes:
-		text, err = x.AppendText(buf)
+	switch any(v).(type) {
+	case *hexutil.Uint64, *hexutil.Uint, *hexutil.Int64, *hexutil.U256, *hexutil.Big, *hexutil.Bytes:
+		text, err = (*v).AppendText(buf)
 	default: // a byte array
 		text = hex.AppendEncode(append(buf, "0x"...), unsafe.Slice((*byte)(unsafe.Pointer(v)), unsafe.Sizeof(*v)))
 	}

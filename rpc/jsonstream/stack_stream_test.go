@@ -1439,8 +1439,6 @@ func TestHexMatchesReflection(t *testing.T) {
 		assertHexOmitempty(t, v)
 		assertHexPtr(t, &v)
 	}
-	assertHexOmitempty(t, hexutil.Int64(0))
-	assertHexOmitempty(t, hexutil.Uint(0))
 }
 
 func assertHex[T hexType](t *testing.T, v T) {
