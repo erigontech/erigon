@@ -280,10 +280,7 @@ func BenchmarkLogJSON(b *testing.B) {
 		}
 	})
 
-	rpcLog := &Log{
-		// stamped from log
-		BlockTimestamp: hexutil.Uint64(1700000000),
-	}
+	rpcLog := StampedLog(log, 1700000000)
 	b.Run("Log/Single", func(b *testing.B) {
 		b.ReportAllocs()
 		for b.Loop() {

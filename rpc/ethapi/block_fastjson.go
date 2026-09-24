@@ -201,7 +201,7 @@ func (r *CallResult) writeTo(s *jsonstream.StackStream, callErr []byte) {
 	s.WriteObjectStart()
 	s.Field("returnData").WriteString(r.ReturnData)
 	s.Field("logs")
-	jsonstream.ArrayValue(s, r.Logs, writeLogElem)
+	_ = r.Logs.MarshalFastJSONTo(s)
 	jsonstream.Text(s, "gasUsed", &r.GasUsed)
 	jsonstream.Text(s, "maxUsedGas", &r.MaxUsedGas)
 	jsonstream.Text(s, "status", &r.Status)
@@ -210,9 +210,6 @@ func (r *CallResult) writeTo(s *jsonstream.StackStream, callErr []byte) {
 	}
 	s.WriteObjectEnd()
 }
-
-// writeLogElem never fails: Log.MarshalFastJSONTo reports no error.
-func writeLogElem(s *jsonstream.StackStream, l **types.Log) { _ = (*l).MarshalFastJSONTo(s) }
 
 // writeTxElem never fails: RPCTransaction.MarshalFastJSONTo reports no error.
 func writeTxElem(s *jsonstream.StackStream, t **RPCTransaction) { _ = (*t).MarshalFastJSONTo(s) }
