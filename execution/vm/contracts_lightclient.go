@@ -7,9 +7,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/erigontech/erigon/cl/utils/bls"
 	params2 "github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/vm/lightclient/iavl"
 	v1 "github.com/erigontech/erigon/execution/vm/lightclient/v1"
+	v2 "github.com/erigontech/erigon/execution/vm/lightclient/v2"
 	"github.com/tendermint/tendermint/crypto/merkle"
 	cmn "github.com/tendermint/tendermint/libs/common"
 )
@@ -394,4 +396,104 @@ func keyVerifier(key string) error {
 		return cmn.NewError("key should not start with x:")
 	}
 	return nil
+}
+
+const (
+	blsMsgHashLength   = uint64(32)
+	blsSignatureLength = uint64(96)
+	blsPubKeyLength    = uint64(48)
+)
+
+// blsSignatureVerify implements the BLS signature verification precompile.
+type blsSignatureVerify struct{}
+
+func (c *blsSignatureVerify) Name() string { return "BLSSignatureVerify" }
+
+func (c *blsSignatureVerify) RequiredGas(input []byte) uint64 {
+	pubKeyNumber, ok := blsPubKeyCount(uint64(len(input)))
+	if !ok {
+		return params2.BlsSignatureVerifyBaseGas
+	}
+	return params2.BlsSignatureVerifyBaseGas + pubKeyNumber*params2.BlsSignatureVerifyPerKeyGas
+}
+
+// Run input:
+// msg      | signature | [{bls pubkey}] |
+// 32 bytes | 96 bytes  | [{48 bytes}]   |
+func (c *blsSignatureVerify) Run(input []byte) ([]byte, error) {
+	pubKeyNumber, ok := blsPubKeyCount(uint64(len(input)))
+	if !ok {
+		return nil, ErrExecutionReverted
+	}
+
+	msgAndSigLength := blsMsgHashLength + blsSignatureLength
+	msg := input[:blsMsgHashLength]
+	sig, err := bls.NewSignatureFromBytes(input[blsMsgHashLength:msgAndSigLength])
+	if err != nil {
+		return nil, ErrExecutionReverted
+	}
+
+	pubKeys := make([]bls.PublicKey, pubKeyNumber)
+	for i := range pubKeyNumber {
+		offset := msgAndSigLength + i*blsPubKeyLength
+		pubKey, err := bls.NewPublicKeyFromBytes(input[offset : offset+blsPubKeyLength])
+		if err != nil {
+			return nil, ErrExecutionReverted
+		}
+		pubKeys[i] = pubKey
+	}
+
+	var verified bool
+	if pubKeyNumber > 1 {
+		verified = sig.VerifyAggregate(msg, pubKeys)
+	} else {
+		verified = sig.Verify(msg, pubKeys[0])
+	}
+	if !verified {
+		return []byte{}, nil
+	}
+	return []byte{1}, nil
+}
+
+func blsPubKeyCount(inputLen uint64) (uint64, bool) {
+	msgAndSigLength := blsMsgHashLength + blsSignatureLength
+	if inputLen <= msgAndSigLength || (inputLen-msgAndSigLength)%blsPubKeyLength != 0 {
+		return 0, false
+	}
+	return (inputLen - msgAndSigLength) / blsPubKeyLength, true
+}
+
+// cometBFTLightBlockValidate validates a CometBFT v0.37.0 light block and returns the
+// resulting consensus state.
+type cometBFTLightBlockValidate struct{}
+
+func (c *cometBFTLightBlockValidate) Name() string { return "CometBFTLightBlockValidate" }
+
+func (c *cometBFTLightBlockValidate) RequiredGas(input []byte) uint64 {
+	return params2.CometBFTLightBlockValidateGas
+}
+
+func (c *cometBFTLightBlockValidate) Run(input []byte) (result []byte, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			err = fmt.Errorf("internal error: %v", r)
+		}
+	}()
+
+	cs, block, err := v2.DecodeLightBlockValidationInput(input)
+	if err != nil {
+		return nil, err
+	}
+
+	validatorSetChanged, err := cs.ApplyLightBlock(block, false)
+	if err != nil {
+		return nil, err
+	}
+
+	consensusStateBytes, err := cs.EncodeConsensusState()
+	if err != nil {
+		return nil, err
+	}
+
+	return v2.EncodeLightBlockValidationResult(validatorSetChanged, consensusStateBytes), nil
 }

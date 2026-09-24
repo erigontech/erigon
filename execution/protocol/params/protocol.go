@@ -154,8 +154,11 @@ const (
 	EcrecoverGas uint64 = 3000 // Elliptic curve sender recovery gas price
 
 	// BSC cross-chain light-client precompiles.
-	TendermintHeaderValidateGas uint64 = 3000
-	IAVLMerkleProofValidateGas  uint64 = 3000
+	TendermintHeaderValidateGas   uint64 = 3000
+	IAVLMerkleProofValidateGas    uint64 = 3000
+	CometBFTLightBlockValidateGas uint64 = 3000
+	BlsSignatureVerifyBaseGas     uint64 = 1000
+	BlsSignatureVerifyPerKeyGas   uint64 = 3500
 
 	Sha256BaseGas       uint64 = 60  // Base price for a SHA256 operation
 	Sha256PerWordGas    uint64 = 12  // Per-word price for a SHA256 operation

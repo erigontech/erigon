@@ -462,6 +462,7 @@ func (c *Config) IsNano(num uint64) bool {
 
 func (c *Config) IsMoran(num uint64) bool  { return isForked(c.MoranBlock, num) }
 func (c *Config) IsPlanck(num uint64) bool { return isForked(c.PlanckBlock, num) }
+func (c *Config) IsLuban(num uint64) bool  { return isForked(c.LubanBlock, num) }
 func (c *Config) IsPlato(num uint64) bool  { return isForked(c.PlatoBlock, num) }
 
 func (c *Config) GetBurntContract(num uint64) accounts.Address {
@@ -764,6 +765,9 @@ func (c *Config) checkCompatible(newcfg *Config, head uint64) *ConfigCompatError
 	if incompatible(c.PlanckBlock, newcfg.PlanckBlock, head) {
 		return newCompatError("Planck fork block", c.PlanckBlock, newcfg.PlanckBlock)
 	}
+	if incompatible(c.LubanBlock, newcfg.LubanBlock, head) {
+		return newCompatError("Luban fork block", c.LubanBlock, newcfg.LubanBlock)
+	}
 	if incompatible(c.PlatoBlock, newcfg.PlatoBlock, head) {
 		return newCompatError("Plato fork block", c.PlatoBlock, newcfg.PlatoBlock)
 	}
@@ -870,7 +874,8 @@ type Rules struct {
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
-	IsParlia, IsNano, IsMoran, IsPlanck, IsPlato      bool
+	IsParlia, IsNano, IsMoran, IsPlanck               bool
+	IsLuban, IsPlato                                  bool
 
 	// L2Version is the L2 stack's own upgrade version (e.g. an ArbOS-style
 	// version ladder), resolved per block by the chain's L2Config oracle.

@@ -51,6 +51,7 @@ func (bc *BlockContext) Rules(c *chain.Config) *chain.Rules {
 		IsNano:             c.IsNano(bc.BlockNumber),
 		IsMoran:            c.IsMoran(bc.BlockNumber),
 		IsPlanck:           c.IsPlanck(bc.BlockNumber),
+		IsLuban:            c.IsLuban(bc.BlockNumber),
 		IsPlato:            c.IsPlato(bc.BlockNumber),
 	}
 

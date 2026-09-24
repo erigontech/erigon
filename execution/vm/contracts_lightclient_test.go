@@ -3,12 +3,16 @@ package vm
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/lightclient/iavl"
 	"github.com/erigontech/erigon/execution/vm/lightclient/v1"
 	"github.com/stretchr/testify/assert"
 	"github.com/tendermint/tendermint/crypto/merkle"
 	cmn "github.com/tendermint/tendermint/libs/common"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -346,4 +350,101 @@ func TestKeyVerifier(t *testing.T) {
 		err := keyVerifier(testCase.key)
 		assert.Equal(t, err, testCase.err)
 	}
+}
+
+func TestBSCForkPrecompileSets(t *testing.T) {
+	addr := func(b byte) accounts.Address { return accounts.InternAddress(common.BytesToAddress([]byte{b})) }
+
+	for _, tc := range []struct {
+		name  string
+		rules chain.Rules
+		bls   bool
+	}{
+		{"planck", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true}, false},
+		{"luban", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true, IsLuban: true}, true},
+		{"plato", chain.Rules{IsParlia: true, IsNano: true, IsMoran: true, IsPlanck: true, IsLuban: true, IsPlato: true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			set := Precompiles(&tc.rules)
+			require.Contains(t, set, addr(100))
+			require.Contains(t, set, addr(101))
+			if !tc.bls {
+				require.NotContains(t, set, addr(102))
+				require.NotContains(t, set, addr(103))
+				return
+			}
+			require.IsType(t, &blsSignatureVerify{}, set[addr(102)])
+			require.IsType(t, &cometBFTLightBlockValidate{}, set[addr(103)])
+			require.Contains(t, ActivePrecompiles(&tc.rules), addr(102))
+			require.Contains(t, ActivePrecompiles(&tc.rules), addr(103))
+		})
+	}
+}
+
+func TestBlsSignatureVerify(t *testing.T) {
+	const (
+		msgHash    = "6377c7e66081cb65e473c1b95db5195a27d04a7108b468890224bedbe1a8a6eb"
+		badMsgHash = "1377c7e66081cb65e473c1b95db5195a27d04a7108b468890224bedbe1a8a6eb"
+
+		singleSig    = "8325fccd4ff01e6e0e73de4955d3cb2c6678c6a6abfc465c2991e375c5cf68841ac7847ac51c32a26bd99828bc99f2f6082c41986097e0f6e6711e57c5bd5b18fa6f8f44bf416617cf192a2ff6d4edf0890315d87e3c04f04f0d1611b64bbe0a"
+		singleKey    = "a842801f14464ce36470737dc159cb13191e3ad8a49f4f3a38e6a94ea5594ff65753f74661fb7ec944b98fc673bb8230"
+		badSingleSig = "1325fccd4ff01e6e0e73de4955d3cb2c6678c6a6abfc465c2991e375c5cf68841ac7847ac51c32a26bd99828bc99f2f6082c41986097e0f6e6711e57c5bd5b18fa6f8f44bf416617cf192a2ff6d4edf0890315d87e3c04f04f0d1611b64bbe0a"
+		badSingleKey = "1842801f14464ce36470737dc159cb13191e3ad8a49f4f3a38e6a94ea5594ff65753f74661fb7ec944b98fc673bb8230"
+
+		aggSig  = "876ac46847e82a2f2887bbeb855916e05bd259086fda5553e4e5e5ee0dcda6869c10e2aa539e265b492015d1bd1b553815a42ea9daf6713b6a0002c6f1aacfa51e55b931745638c0552d7fab4a499bbd6ba71f9be36d35ffa527f77b2a6cebda"
+		aggKey1 = "80223255a26d81a8e1cd94df746f45e87a91d28f408a037804062910b7db68a724cfd204b7f9337bcecac25de86d5515"
+		aggKey2 = "8bec004e938668c67aa0fab6f555282efdf213817e455d9eaa6a0897211eae5f79db5cdc626d1cd5759a0c1c10cf7aa0"
+		aggKey3 = "af952757f442d7240a4cec62de638973a24fde8eb0ad5217be61eea53211c19859c03a299125ea8520f015f6f8865076"
+	)
+
+	build := func(t *testing.T, parts ...string) []byte {
+		t.Helper()
+		input, err := hex.DecodeString(strings.Join(parts, ""))
+		require.NoError(t, err)
+		return input
+	}
+
+	contract := &blsSignatureVerify{}
+
+	for _, tc := range []struct {
+		name    string
+		input   []byte
+		gas     uint64
+		out     []byte
+		wantErr bool
+	}{
+		{"single key", build(t, msgHash, singleSig, singleKey), 4500, []byte{1}, false},
+		{"single key wrong msg", build(t, badMsgHash, singleSig, singleKey), 4500, []byte{}, false},
+		{"single key malformed signature", build(t, msgHash, badSingleSig, singleKey), 4500, nil, true},
+		{"single key malformed pubkey", build(t, msgHash, singleSig, badSingleKey), 4500, nil, true},
+		{"three keys", build(t, msgHash, aggSig, aggKey1, aggKey2, aggKey3), 11500, []byte{1}, false},
+		{"three keys wrong msg", build(t, badMsgHash, aggSig, aggKey1, aggKey2, aggKey3), 11500, []byte{}, false},
+		{"three keys duplicate pubkey", build(t, msgHash, aggSig, aggKey2, aggKey2, aggKey3), 11500, []byte{}, false},
+		{"truncated input", build(t, msgHash, singleSig), 1000, nil, true},
+		{"pubkey not a multiple of 48", build(t, msgHash, singleSig, singleKey, "00"), 1000, nil, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.gas, contract.RequiredGas(tc.input))
+			out, err := contract.Run(tc.input)
+			if tc.wantErr {
+				require.ErrorIs(t, err, ErrExecutionReverted)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.out, out)
+		})
+	}
+}
+
+func TestCometBFTLightBlockValidate(t *testing.T) {
+	inputStr := "000000000000000000000000000000000000000000000000000000000000018c677265656e6669656c645f393030302d3132310000000000000000000000000000000000000000013c350cd55b99dc6c2b7da9bef5410fbfb869fede858e7b95bf7ca294e228bb40e33f6e876d63791ebd05ff617a1b4f4ad1aa2ce65e3c3a9cdfb33e0ffa7e8423000000000098968015154514f68ce65a0d9eecc578c0ab12da0a2a28a0805521b5b7ae56eb3fb24555efbfe59e1622bfe9f7be8c9022e9b3f2442739c1ce870b9adee169afe60f674edd7c86451c5363d89052fde8351895eeea166ce5373c36e31b518ed191d0c599aa0f5b0000000000989680432f6c4908a9aa5f3444421f466b11645235c99b831b2a2de9e504d7ea299e52a202ce529808618eb3bfc0addf13d8c5f2df821d81e18f9bc61583510b322d067d46323b0a572635c06a049c0a2a929e3c8184a50cf6a8b95708c25834ade456f399015a0000000000989680864cb9828254d712f8e59b164fc6a9402dc4e6c59065e38cff24f5323c8c5da888a0f97e5ee4ba1e11b0674b0a0d06204c1dfa247c370cd4be3e799fc4f6f48d977ac7ca0aeb060adb030a02080b1213677265656e6669656c645f393030302d3132311802220c08b2d7f3a10610e8d2adb3032a480a20ec6ecb5db4ffb17fabe40c60ca7b8441e9c5d77585d0831186f3c37aa16e9c15122408011220a2ab9e1eb9ea52812f413526e424b326aff2f258a56e00d690db9f805b60fe7e32200f40aeff672e8309b7b0aefbb9a1ae3d4299b5c445b7d54e8ff398488467f0053a20e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85542203c350cd55b99dc6c2b7da9bef5410fbfb869fede858e7b95bf7ca294e228bb404a203c350cd55b99dc6c2b7da9bef5410fbfb869fede858e7b95bf7ca294e228bb405220294d8fbd0b94b767a7eba9840f299a3586da7fe6b5dead3b7eecba193c400f935a20bc50557c12d7392b0d07d75df0b61232d48f86a74fdea6d1485d9be6317d268c6220e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b8556a20e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85572146699336aa109d1beab3946198c8e59f3b2cbd92f7a4065e3cd89e315ca39d87dee92835b98f8b8ec0861d6d9bb2c60156df5d375b3ceb1fbe71af6a244907d62548a694165caa660fec7a9b4e7b9198191361c71be0b128a0308021a480a20726abd0fdbfb6f779b0483e6e4b4b6f12241f6ea2bf374233ab1a316692b6415122408011220159f10ff15a8b58fc67a92ffd7f33c8cd407d4ce81b04ca79177dfd00ca19a67226808021214050cff76cc632760ba9db796c046004c900967361a0c08b3d7f3a10610808cadba03224080713027ffb776a702d78fd0406205c629ba473e1f8d6af646190f6eb9262cd67d69be90d10e597b91e06d7298eb6fa4b8f1eb7752ebf352a1f51560294548042268080212146699336aa109d1beab3946198c8e59f3b2cbd92f1a0c08b3d7f3a10610b087c1c00322405e2ddb70acfe4904438be3d9f4206c0ace905ac4fc306a42cfc9e86268950a0fbfd6ec5f526d3e41a3ef52bf9f9f358e3cb4c3feac76c762fa3651c1244fe004226808021214c55765fd2d0570e869f6ac22e7f2916a35ea300d1a0c08b3d7f3a10610f0b3d492032240ca17898bd22232fc9374e1188636ee321a396444a5b1a79f7628e4a11f265734b2ab50caf21e8092c55d701248e82b2f011426cb35ba22043b497a6b4661930612a0050aa8010a14050cff76cc632760ba9db796c046004c9009673612220a20e33f6e876d63791ebd05ff617a1b4f4ad1aa2ce65e3c3a9cdfb33e0ffa7e84231880ade2042080a6bbf6ffffffffff012a30a0805521b5b7ae56eb3fb24555efbfe59e1622bfe9f7be8c9022e9b3f2442739c1ce870b9adee169afe60f674edd7c86321415154514f68ce65a0d9eecc578c0ab12da0a2a283a14ee7a2a6a44d427f6949eeb8f12ea9fbb2501da880aa2010a146699336aa109d1beab3946198c8e59f3b2cbd92f12220a20451c5363d89052fde8351895eeea166ce5373c36e31b518ed191d0c599aa0f5b1880ade2042080ade2042a30831b2a2de9e504d7ea299e52a202ce529808618eb3bfc0addf13d8c5f2df821d81e18f9bc61583510b322d067d46323b3214432f6c4908a9aa5f3444421f466b11645235c99b3a14a0a7769429468054e19059af4867da0a495567e50aa2010a14c55765fd2d0570e869f6ac22e7f2916a35ea300d12220a200a572635c06a049c0a2a929e3c8184a50cf6a8b95708c25834ade456f399015a1880ade2042080ade2042a309065e38cff24f5323c8c5da888a0f97e5ee4ba1e11b0674b0a0d06204c1dfa247c370cd4be3e799fc4f6f48d977ac7ca3214864cb9828254d712f8e59b164fc6a9402dc4e6c53a143139916d97df0c589312b89950b6ab9795f34d1a12a8010a14050cff76cc632760ba9db796c046004c9009673612220a20e33f6e876d63791ebd05ff617a1b4f4ad1aa2ce65e3c3a9cdfb33e0ffa7e84231880ade2042080a6bbf6ffffffffff012a30a0805521b5b7ae56eb3fb24555efbfe59e1622bfe9f7be8c9022e9b3f2442739c1ce870b9adee169afe60f674edd7c86321415154514f68ce65a0d9eecc578c0ab12da0a2a283a14ee7a2a6a44d427f6949eeb8f12ea9fbb2501da88"
+	expectOutputStr := "000000000000000000000000000000000000000000000000000000000000018c677265656e6669656c645f393030302d3132310000000000000000000000000000000000000000023c350cd55b99dc6c2b7da9bef5410fbfb869fede858e7b95bf7ca294e228bb40e33f6e876d63791ebd05ff617a1b4f4ad1aa2ce65e3c3a9cdfb33e0ffa7e8423000000000098968015154514f68ce65a0d9eecc578c0ab12da0a2a28a0805521b5b7ae56eb3fb24555efbfe59e1622bfe9f7be8c9022e9b3f2442739c1ce870b9adee169afe60f674edd7c86451c5363d89052fde8351895eeea166ce5373c36e31b518ed191d0c599aa0f5b0000000000989680432f6c4908a9aa5f3444421f466b11645235c99b831b2a2de9e504d7ea299e52a202ce529808618eb3bfc0addf13d8c5f2df821d81e18f9bc61583510b322d067d46323b0a572635c06a049c0a2a929e3c8184a50cf6a8b95708c25834ade456f399015a0000000000989680864cb9828254d712f8e59b164fc6a9402dc4e6c59065e38cff24f5323c8c5da888a0f97e5ee4ba1e11b0674b0a0d06204c1dfa247c370cd4be3e799fc4f6f48d977ac7ca"
+
+	input, err := hex.DecodeString(inputStr)
+	require.NoError(t, err)
+
+	contract := &cometBFTLightBlockValidate{}
+	res, err := contract.Run(input)
+	require.NoError(t, err)
+	require.Equal(t, expectOutputStr, hex.EncodeToString(res))
 }

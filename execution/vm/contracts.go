@@ -73,6 +73,8 @@ func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
 	case chainRules.IsPlato:
 		return PrecompiledContractsPlatoForBSC
+	case chainRules.IsLuban:
+		return PrecompiledContractsLubanForBSC
 	case chainRules.IsPlanck:
 		return PrecompiledContractsPlanckForBSC
 	case chainRules.IsMoran:
@@ -234,9 +236,15 @@ var PrecompiledContractsPlanckForBSC = func() PrecompiledContracts {
 	return m
 }()
 
+var PrecompiledContractsLubanForBSC = func() PrecompiledContracts {
+	m := maps.Clone(PrecompiledContractsPlanckForBSC)
+	m[accounts.InternAddress(common.BytesToAddress([]byte{102}))] = &blsSignatureVerify{}
+	m[accounts.InternAddress(common.BytesToAddress([]byte{103}))] = &cometBFTLightBlockValidate{}
+	return m
+}()
+
 var PrecompiledContractsPlatoForBSC = func() PrecompiledContracts {
-	m := maps.Clone(PrecompiledContractsIstanbul)
-	m[accounts.InternAddress(common.BytesToAddress([]byte{100}))] = &tmHeaderValidate{}
+	m := maps.Clone(PrecompiledContractsLubanForBSC)
 	m[accounts.InternAddress(common.BytesToAddress([]byte{101}))] = &iavlMerkleProofValidatePlato{}
 	return m
 }()
@@ -251,6 +259,7 @@ var (
 	PrecompiledAddressesNanoForBSC     []accounts.Address
 	PrecompiledAddressesMoranForBSC    []accounts.Address
 	PrecompiledAddressesPlanckForBSC   []accounts.Address
+	PrecompiledAddressesLubanForBSC    []accounts.Address
 	PrecompiledAddressesPlatoForBSC    []accounts.Address
 	PrecompiledAddressesByzantium      []accounts.Address
 	PrecompiledAddressesHomestead      []accounts.Address
@@ -278,6 +287,9 @@ func init() {
 	for k := range PrecompiledContractsPlanckForBSC {
 		PrecompiledAddressesPlanckForBSC = append(PrecompiledAddressesPlanckForBSC, k)
 	}
+	for k := range PrecompiledContractsLubanForBSC {
+		PrecompiledAddressesLubanForBSC = append(PrecompiledAddressesLubanForBSC, k)
+	}
 	for k := range PrecompiledContractsPlatoForBSC {
 		PrecompiledAddressesPlatoForBSC = append(PrecompiledAddressesPlatoForBSC, k)
 	}
@@ -300,6 +312,8 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	switch {
 	case rules.IsPlato:
 		return PrecompiledAddressesPlatoForBSC
+	case rules.IsLuban:
+		return PrecompiledAddressesLubanForBSC
 	case rules.IsPlanck:
 		return PrecompiledAddressesPlanckForBSC
 	case rules.IsMoran:
