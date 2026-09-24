@@ -16,7 +16,11 @@
 
 package jsonstream
 
-import "encoding"
+import (
+	"encoding"
+
+	"github.com/holiman/uint256"
+)
 
 type textPtr[T any] interface {
 	*T
@@ -46,3 +50,10 @@ func ArrayValue[S ~[]E, E any](s *StackStream, items S, elem func(*StackStream, 
 	}
 	s.WriteArrayEnd()
 }
+
+// HexUint64 writes 0x and the shortest lowercase hex of v, with no field name. Which fields
+// are written this way is the caller's rule, not the stream's: see rpc/jsonstream/ethjson.
+func HexUint64(s *StackStream, v uint64) { writeHexUint64(s, v) }
+
+// HexUint256 does the same for a 256-bit value, null for a nil one.
+func HexUint256(s *StackStream, v *uint256.Int) { writeHexUint256(s, v) }
