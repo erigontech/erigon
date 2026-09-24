@@ -128,12 +128,12 @@ func makeWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 		return writeU256IntPtr, nil
 	case typ == u256Int:
 		return writeU256IntNoPtr, nil
-	case isNamedU256(typ):
-		return nil, errNamedU256(typ)
 	case kind == reflect.Pointer:
 		return makePtrWriter(typ, ts)
 	case reflect.PointerTo(typ).Implements(encoderInterface):
 		return makeEncoderWriter(typ), nil
+	case isNamedU256(typ):
+		return nil, errNamedU256(typ)
 	case isUint(kind):
 		return writeUint, nil
 	case isInt(kind):

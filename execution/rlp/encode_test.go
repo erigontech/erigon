@@ -633,12 +633,27 @@ func TestNamedUint256IsRefused(t *testing.T) {
 	require.Equal(t, []byte{0x82, 0x12, 0x34}, plain)
 
 	_, err = EncodeToBytes((*hexutil.U256)(n))
-	require.ErrorContains(t, err, "would encode its four words as a list")
+	require.ErrorContains(t, err, "underlying type")
 	_, err = EncodeToBytes(hexutil.U256(*n))
-	require.ErrorContains(t, err, "would encode its four words as a list")
+	require.ErrorContains(t, err, "underlying type")
 	_, err = EncodeToBytes(struct{ N *hexutil.U256 }{(*hexutil.U256)(n)})
-	require.ErrorContains(t, err, "would encode its four words as a list")
+	require.ErrorContains(t, err, "underlying type")
 
 	var into hexutil.U256
-	require.ErrorContains(t, DecodeBytes(plain, &into), "would encode its four words as a list")
+	require.ErrorContains(t, DecodeBytes(plain, &into), "underlying type")
+}
+
+// A type with uint256.Int's underlying type but its own EncodeRLP keeps it: the refusal is for
+// types that would otherwise fall through to the slice writer.
+type ownEncoderU256 uint256.Int
+
+func (v ownEncoderU256) EncodeRLP(w io.Writer) error {
+	_, err := w.Write([]byte{0x2a})
+	return err
+}
+
+func TestNamedUint256WithOwnEncoderIsKept(t *testing.T) {
+	out, err := EncodeToBytes(ownEncoderU256(*uint256.NewInt(7)))
+	require.NoError(t, err)
+	require.Equal(t, []byte{0x2a}, out)
 }
