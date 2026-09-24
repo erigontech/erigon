@@ -3283,8 +3283,8 @@ func computeAttestationReward(
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 	var parentSlot uint64
-	if s.Version() >= clparams.GloasVersion && s.GetLatestExecutionPayloadBid() != nil {
-		parentSlot = s.GetLatestExecutionPayloadBid().Slot
+	if s.Version() >= clparams.GloasVersion {
+		parentSlot = s.LatestBlockHeader().Slot
 	}
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
