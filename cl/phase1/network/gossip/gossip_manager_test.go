@@ -721,7 +721,7 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_DropsWhenQueueF
 
 	// Fill the queue buffer exactly to capacity; each of these must still
 	// enqueue without blocking since capacity remains.
-	for range publishQueueSize {
+	for range cap(s.gm.publishQueue) {
 		done := make(chan struct{})
 		go func() {
 			s.gm.PublishBackground("filler", nil)
@@ -894,6 +894,29 @@ func TestPublishBackground_CapturesForkDigestAtEnqueueTime(t *testing.T) {
 	got, err := utils.DecompressSnappy(msg.GetData(), true)
 	require.NoError(t, err)
 	require.Equal(t, payload, got)
+}
+
+// TestNewGossipManager_SizesPublishQueueToSyncCommittee proves the
+// background publish queue is sized to hold at least one full
+// sync-committee-sized burst without dropping: the validator service
+// batches all of a slot's duties into a single request, so a fixed capacity
+// smaller than SyncCommitteeSize would silently drop the tail of a normal
+// burst under load - exactly the failure this PR fixes.
+func TestNewGossipManager_SizesPublishQueueToSyncCommittee(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+	mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+	mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+
+	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12, SyncCommitteeSize: 512}
+	gm := NewGossipManager(context.Background(), mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+	defer gm.Close()
+
+	require.GreaterOrEqual(t, cap(gm.publishQueue), int(beaconConfig.SyncCommitteeSize),
+		"queue must hold at least one full sync-committee-sized burst without dropping")
 }
 
 func TestGossipManager(t *testing.T) {

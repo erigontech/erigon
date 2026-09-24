@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 // PeerBanner is an interface for banning misbehaving peers.
@@ -47,10 +48,29 @@ type PeerBanner interface {
 	BanPeer(pid string)
 }
 
-// publishQueueSize bounds how many background publishes may be queued behind
-// a busy worker before PublishBackground starts dropping messages instead of
-// blocking its caller.
-const publishQueueSize = 64
+// minPublishQueueSize is the floor for the background-publish queue
+// capacity, used when a chain config's sync committee is smaller than this
+// (e.g. the minimal preset).
+const minPublishQueueSize = 64
+
+// publishQueueSizeFor sizes the background-publish queue to hold at least
+// one full sync-committee-sized burst without dropping: a validator client
+// batches all of a slot's sync-committee duties into a single request, so
+// the queue must comfortably absorb up to SyncCommitteeSize jobs arriving
+// at once while the worker is still draining the previous slot's burst.
+func publishQueueSizeFor(cfg *clparams.BeaconChainConfig) int {
+	size := int(cfg.SyncCommitteeSize)
+	if size < minPublishQueueSize {
+		return minPublishQueueSize
+	}
+	return size
+}
+
+var publishQueueDroppedCounter = metrics.GetOrCreateCounterVec(
+	"caplin_gossip_publish_queue_rejected_total",
+	[]string{"topic"},
+	"Total background gossip publishes dropped because the queue was full",
+)
 
 type publishJob struct {
 	name       string
@@ -110,7 +130,7 @@ func NewGossipManager(
 		subscriptions:      NewTopicSubscriptions(cctx, p2p),
 		subscribeAll:       subscribeAll,
 		activeIndicies:     activeIndicies,
-		publishQueue:       make(chan publishJob, publishQueueSize),
+		publishQueue:       make(chan publishJob, publishQueueSizeFor(beaconConfig)),
 		cancel:             cancel,
 	}
 
@@ -343,6 +363,7 @@ func (g *GossipManager) PublishBackground(name string, data []byte, logCtx ...an
 	select {
 	case g.publishQueue <- publishJob{name: name, data: data, forkDigest: forkDigest, logCtx: logCtx}:
 	default:
+		publishQueueDroppedCounter.WithLabelValues(name).Inc()
 		fields := append([]any{"topic", name}, logCtx...)
 		log.Warn("[GossipManager] publish queue full, dropping message", fields...)
 	}
