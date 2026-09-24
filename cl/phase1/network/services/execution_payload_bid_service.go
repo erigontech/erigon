@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"slices"
 	"sync"
 	"time"
 
@@ -98,21 +99,37 @@ type bidValidationStateKey struct {
 }
 
 type bidValidationStateEntry struct {
-	mu                 sync.Mutex
-	state              *state.CachingBeaconState
-	parentSlot         uint64
-	parentVersion      clparams.StateVersion
-	parentRandao       common.Hash
-	parentExitsMu      sync.Mutex
-	parentBuilderExits []solid.BuilderExitRequest
+	mu            sync.Mutex
+	state         *state.CachingBeaconState
+	parentSlot    uint64
+	parentVersion clparams.StateVersion
+	parentRandao  common.Hash
+}
+
+type parentBuilderExitsCall struct {
+	done   chan struct{}
+	result parentBuilderExitsResult
+}
+
+type parentBuilderExitsResult struct {
+	requests []solid.BuilderExitRequest
+	err      error
+	retryAt  time.Time
+}
+
+type cachedParentBuilderExitReader interface {
+	GetCachedParentBuilderExitRequests(common.Hash) ([]solid.BuilderExitRequest, bool)
 }
 
 var errBidDependencyUnavailable = fmt.Errorf("%w: bid dependency unavailable", ErrIgnore)
 
 const (
-	bidValidationStateCacheSize = 4
-	bidValidationStateTTLSlots  = 2
-	gloasMaximumClockDisparity  = 500 * time.Millisecond
+	bidValidationStateCacheSize   = 4
+	bidValidationStateTTLSlots    = 2
+	maximumGossipClockDisparity   = 500 * time.Millisecond
+	parentBuilderExitsRetryDelay  = 100 * time.Millisecond
+	parentBuilderExitsCacheSize   = 1024
+	parentBuilderExitsMaxInFlight = 1
 )
 
 type executionPayloadBidService struct {
@@ -128,6 +145,10 @@ type executionPayloadBidService struct {
 	bidStoreMu           sync.Mutex
 	validationStateMu    sync.Mutex
 	validationStateCache *lru.CacheWithTTL[bidValidationStateKey, *bidValidationStateEntry]
+	parentExitsMu        sync.Mutex
+	parentExitsCalls     map[common.Hash]*parentBuilderExitsCall
+	parentExitsCache     *lru.Cache[common.Hash, parentBuilderExitsResult]
+	parentExitsWork      chan struct{}
 }
 
 // NewExecutionPayloadBidService creates a new execution payload bid gossip service.
@@ -146,6 +167,13 @@ func NewExecutionPayloadBidService(
 		bidValidationStateCacheSize,
 		bidValidationStateCacheTTL(beaconCfg),
 	)
+	parentExitsCache, err := lru.New[common.Hash, parentBuilderExitsResult](
+		"parent_builder_exit_requests",
+		parentBuilderExitsCacheSize,
+	)
+	if err != nil {
+		panic(err)
+	}
 	s := &executionPayloadBidService{
 		syncedDataManager:    syncedDataManager,
 		forkchoiceStore:      forkchoiceStore,
@@ -156,6 +184,9 @@ func NewExecutionPayloadBidService(
 		now:                  time.Now,
 		seenCache:            newSeenBidStore(),
 		validationStateCache: validationStateCache,
+		parentExitsCalls:     make(map[common.Hash]*parentBuilderExitsCall),
+		parentExitsCache:     parentExitsCache,
+		parentExitsWork:      make(chan struct{}, parentBuilderExitsMaxInFlight),
 	}
 	return s
 }
@@ -192,7 +223,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 
 	now := s.now()
 	// [IGNORE] bid.slot is the current or next slot
-	if !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, now, slot, gloasMaximumClockDisparity) {
+	if !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, now, slot, maximumGossipClockDisparity) {
 		return fmt.Errorf("%w: bid slot %d is not current or next slot", ErrIgnore, slot)
 	}
 	s.epbsPool.HighestBids.PruneSlots(func(entrySlot uint64) bool {
@@ -258,7 +289,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	if err != nil {
 		return err
 	}
-	if err := s.validateBidAuthentication(msg, validationStateEntry); err != nil {
+	if err := s.validateBidAuthentication(ctx, msg, validationStateEntry, now); err != nil {
 		return err
 	}
 	if err := s.storeValidBidAt(msg, now); err != nil {
@@ -270,12 +301,13 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	return nil
 }
 
-func (s *executionPayloadBidService) ValidateBid(_ context.Context, msg *cltypes.SignedExecutionPayloadBid) error {
+func (s *executionPayloadBidService) ValidateBid(ctx context.Context, msg *cltypes.SignedExecutionPayloadBid) error {
 	if msg == nil || msg.Message == nil {
 		return errors.New("nil execution payload bid message")
 	}
 	bid := msg.Message
-	if !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, s.now(), bid.Slot, gloasMaximumClockDisparity) {
+	now := s.now()
+	if !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, now, bid.Slot, maximumGossipClockDisparity) {
 		return fmt.Errorf("%w: bid slot %d is not current or next slot", ErrIgnore, bid.Slot)
 	}
 	parentHeader, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot)
@@ -295,7 +327,7 @@ func (s *executionPayloadBidService) ValidateBid(_ context.Context, msg *cltypes
 	if err != nil {
 		return err
 	}
-	return s.validateBidAuthentication(msg, validationStateEntry)
+	return s.validateBidAuthentication(ctx, msg, validationStateEntry, now)
 }
 
 func isCurrentOrNextSlot(clock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, now time.Time, slot uint64, disparity time.Duration) bool {
@@ -394,7 +426,7 @@ func bidValidationStateCacheTTL(beaconCfg *clparams.BeaconChainConfig) time.Dura
 	return time.Duration(secondsPerSlot*bidValidationStateTTLSlots) * time.Second
 }
 
-func (s *executionPayloadBidService) validateBidAuthentication(msg *cltypes.SignedExecutionPayloadBid, validationStateEntry *bidValidationStateEntry) error {
+func (s *executionPayloadBidService) validateBidAuthentication(ctx context.Context, msg *cltypes.SignedExecutionPayloadBid, validationStateEntry *bidValidationStateEntry, now time.Time) error {
 	bid := msg.Message
 	if bid.Slot <= validationStateEntry.parentSlot {
 		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", bid.Slot, validationStateEntry.parentSlot)
@@ -411,15 +443,24 @@ func (s *executionPayloadBidService) validateBidAuthentication(msg *cltypes.Sign
 	}
 	builderPubkey := builder.Pubkey
 	builderAddress := builder.ExecutionAddress
-	parentPayloadHash := validationStateEntry.state.GetLatestExecutionPayloadBid().BlockHash
+	parentVersion := validationStateEntry.parentVersion
+	var parentPayloadHash common.Hash
+	if parentVersion >= clparams.GloasVersion {
+		parentPayloadBid := validationStateEntry.state.GetLatestExecutionPayloadBid()
+		if parentPayloadBid == nil {
+			validationStateEntry.mu.Unlock()
+			return fmt.Errorf("%w: bid validation failed: latest execution payload bid unavailable", ErrIgnore)
+		}
+		parentPayloadHash = parentPayloadBid.BlockHash
+	}
 	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	domain, err := validationStateEntry.state.GetDomain(s.beaconCfg.DomainBeaconBuilder, epoch)
 	validationStateEntry.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("%w: bid validation failed: failed to get domain: %w", ErrIgnore, err)
 	}
-	if validationStateEntry.parentVersion >= clparams.GloasVersion && bid.ParentBlockHash == parentPayloadHash {
-		exits, err := s.parentBuilderExitRequests(validationStateEntry, bid.ParentBlockRoot)
+	if parentVersion >= clparams.GloasVersion && bid.ParentBlockHash == parentPayloadHash {
+		exits, err := s.parentBuilderExitRequests(ctx, bid.ParentBlockRoot, now)
 		if err != nil {
 			return err
 		}
@@ -436,14 +477,100 @@ func (s *executionPayloadBidService) validateBidAuthentication(msg *cltypes.Sign
 	return nil
 }
 
-func (s *executionPayloadBidService) parentBuilderExitRequests(entry *bidValidationStateEntry, root common.Hash) ([]solid.BuilderExitRequest, error) {
-	entry.parentExitsMu.Lock()
-	defer entry.parentExitsMu.Unlock()
-	if entry.parentBuilderExits != nil {
-		return entry.parentBuilderExits, nil
+func (s *executionPayloadBidService) parentBuilderExitRequests(ctx context.Context, root common.Hash, now time.Time) ([]solid.BuilderExitRequest, error) {
+	s.parentExitsMu.Lock()
+	if result, ok := s.parentExitsCache.Get(root); ok {
+		if result.err == nil || now.Before(result.retryAt) {
+			s.parentExitsMu.Unlock()
+			return result.requests, result.err
+		}
+		s.parentExitsCache.Remove(root)
 	}
+	if reader, ok := s.forkchoiceStore.(cachedParentBuilderExitReader); ok {
+		if requests, ok := reader.GetCachedParentBuilderExitRequests(root); ok {
+			requests = slices.Clone(requests)
+			if uint64(len(requests)) > s.beaconCfg.MaxBuilderExitRequestsPerPayload {
+				err := fmt.Errorf("%w: parent payload has too many builder exits", errBidDependencyUnavailable)
+				s.parentExitsCache.Add(root, parentBuilderExitsResult{err: err, retryAt: now.Add(parentBuilderExitsRetryDelay)})
+				s.parentExitsMu.Unlock()
+				return nil, err
+			}
+			s.parentExitsCache.Add(root, parentBuilderExitsResult{requests: requests})
+			s.parentExitsMu.Unlock()
+			return requests, nil
+		}
+	}
+	if err := ctx.Err(); err != nil {
+		s.parentExitsMu.Unlock()
+		return nil, fmt.Errorf("%w: bid validation canceled: %w", ErrIgnore, err)
+	}
+	if call := s.parentExitsCalls[root]; call != nil {
+		s.parentExitsMu.Unlock()
+		return waitForParentBuilderExits(ctx, call)
+	}
+	work := s.parentExitsWork
+	s.parentExitsMu.Unlock()
+
+	select {
+	case work <- struct{}{}:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: bid validation canceled: %w", ErrIgnore, ctx.Err())
+	}
+
+	s.parentExitsMu.Lock()
+	if call := s.parentExitsCalls[root]; call != nil {
+		s.parentExitsMu.Unlock()
+		<-work
+		return waitForParentBuilderExits(ctx, call)
+	}
+	if result, ok := s.parentExitsCache.Get(root); ok && (result.err == nil || now.Before(result.retryAt)) {
+		s.parentExitsMu.Unlock()
+		<-work
+		return result.requests, result.err
+	}
+	call := &parentBuilderExitsCall{done: make(chan struct{})}
+	s.parentExitsCalls[root] = call
+	s.parentExitsMu.Unlock()
+	go s.loadParentBuilderExitRequests(root, call, work)
+	return waitForParentBuilderExits(ctx, call)
+}
+
+func waitForParentBuilderExits(ctx context.Context, call *parentBuilderExitsCall) ([]solid.BuilderExitRequest, error) {
+	select {
+	case <-ctx.Done():
+		return nil, fmt.Errorf("%w: bid validation canceled: %w", ErrIgnore, ctx.Err())
+	case <-call.done:
+		return call.result.requests, call.result.err
+	}
+}
+
+func (s *executionPayloadBidService) loadParentBuilderExitRequests(root common.Hash, call *parentBuilderExitsCall, work chan struct{}) {
+	defer func() { <-work }()
+	requests, err := s.readParentBuilderExitRequests(root)
+	result := parentBuilderExitsResult{requests: requests, err: err}
+	if err != nil {
+		result.retryAt = s.now().Add(parentBuilderExitsRetryDelay)
+	}
+	s.parentExitsMu.Lock()
+	call.result = result
+	s.parentExitsCache.Add(root, result)
+	if s.parentExitsCalls[root] == call {
+		delete(s.parentExitsCalls, root)
+	}
+	close(call.done)
+	s.parentExitsMu.Unlock()
+}
+
+func (s *executionPayloadBidService) readParentBuilderExitRequests(root common.Hash) ([]solid.BuilderExitRequest, error) {
 	envelope, err := s.forkchoiceStore.ReadEnvelopeFromDisk(root)
-	if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+	if err != nil {
+		return nil, fmt.Errorf("%w: read parent payload execution requests: %w", errBidDependencyUnavailable, err)
+	}
+	if envelope == nil {
+		// Full parents without an envelope remain unavailable pending https://github.com/ethereum/consensus-specs/pull/5125.
+		return nil, fmt.Errorf("%w: parent payload execution requests unavailable", errBidDependencyUnavailable)
+	}
+	if envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
 		return nil, fmt.Errorf("%w: parent payload execution requests unavailable", errBidDependencyUnavailable)
 	}
 	exits := envelope.Message.ExecutionRequests.BuilderExits
@@ -462,7 +589,6 @@ func (s *executionPayloadBidService) parentBuilderExitRequests(entry *bidValidat
 		}
 		requests[i] = *request
 	}
-	entry.parentBuilderExits = requests
 	return requests, nil
 }
 

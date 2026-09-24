@@ -289,8 +289,8 @@ func isPayloadAttestationSlotCurrent(clock eth_clock.EthereumClock, now time.Tim
 	if expectedSlotUnix > math.MaxInt64 || slotUnix != int64(expectedSlotUnix) || uint64(nextSlotUnix)-expectedSlotUnix != secondsPerSlot {
 		return false
 	}
-	lowerBound := slotStart.Add(-gloasMaximumClockDisparity)
-	upperBound := nextSlotStart.Add(gloasMaximumClockDisparity)
+	lowerBound := slotStart.Add(-maximumGossipClockDisparity)
+	upperBound := nextSlotStart.Add(maximumGossipClockDisparity)
 	if lowerBound.After(slotStart) || upperBound.Before(nextSlotStart) {
 		return false
 	}

@@ -491,7 +491,7 @@ func TestPayloadAttestationServiceSlotMismatch(t *testing.T) {
 	blockRoot := common.HexToHash("0x1234")
 	msg := newTestPayloadAttestationMessage(100, 1, blockRoot)
 
-	service.now = func() time.Time { return time.Unix(100*12, 0).Add(-gloasMaximumClockDisparity - time.Millisecond) }
+	service.now = func() time.Time { return time.Unix(100*12, 0).Add(-maximumGossipClockDisparity - time.Millisecond) }
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.Error(t, err)
@@ -504,7 +504,7 @@ func TestPayloadAttestationServiceRejectsTooEarlyNextSlot(t *testing.T) {
 	defer ctrl.Finish()
 
 	service, _, _ := setupPayloadAttestationService(t, ctrl)
-	service.now = func() time.Time { return time.Unix(100*12, 0).Add(-gloasMaximumClockDisparity - time.Millisecond) }
+	service.now = func() time.Time { return time.Unix(100*12, 0).Add(-maximumGossipClockDisparity - time.Millisecond) }
 
 	err := service.ProcessMessage(context.Background(), nil, newTestPayloadAttestationMessage(100, 1, common.HexToHash("0x1234")))
 	require.ErrorIs(t, err, ErrIgnore)
@@ -524,11 +524,11 @@ func TestPayloadAttestationSlotCurrentBoundaries(t *testing.T) {
 		slot uint64
 		want bool
 	}{
-		{name: "too early next slot", now: slotStart.Add(-gloasMaximumClockDisparity - time.Millisecond), slot: 100, want: false},
-		{name: "exact lower boundary", now: slotStart.Add(-gloasMaximumClockDisparity), slot: 100, want: true},
+		{name: "too early next slot", now: slotStart.Add(-maximumGossipClockDisparity - time.Millisecond), slot: 100, want: false},
+		{name: "exact lower boundary", now: slotStart.Add(-maximumGossipClockDisparity), slot: 100, want: true},
 		{name: "current slot interior", now: slotStart.Add(6 * time.Second), slot: 100, want: true},
-		{name: "exact upper boundary", now: nextSlotStart.Add(gloasMaximumClockDisparity), slot: 100, want: true},
-		{name: "too late previous slot", now: nextSlotStart.Add(gloasMaximumClockDisparity + time.Millisecond), slot: 100, want: false},
+		{name: "exact upper boundary", now: nextSlotStart.Add(maximumGossipClockDisparity), slot: 100, want: true},
+		{name: "too late previous slot", now: nextSlotStart.Add(maximumGossipClockDisparity + time.Millisecond), slot: 100, want: false},
 		{name: "slot time overflow", now: slotStart, slot: uint64(math.MaxInt64/12) + 1, want: false},
 		{name: "maximum slot", now: slotStart, slot: math.MaxUint64, want: false},
 	} {
@@ -642,7 +642,7 @@ func TestPayloadAttestationServiceGossipPendingDropsAfterCurrentSlot(t *testing.
 	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, msg), ErrAttestationQueued)
 	require.Equal(t, int32(1), service.pending.count.Load())
 
-	service.now = func() time.Time { return time.Unix(101*12, 0).Add(gloasMaximumClockDisparity + time.Millisecond) }
+	service.now = func() time.Time { return time.Unix(101*12, 0).Add(maximumGossipClockDisparity + time.Millisecond) }
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
 	service.pending.processPending(t.Context())
 
@@ -997,7 +997,7 @@ func TestPayloadAttestationServicePendingSlotMismatch(t *testing.T) {
 	key := mustPendingPayloadAttestationKey(t, blockRoot, msg)
 	storePendingJob(t, service.pending, key, msg, time.Now())
 
-	service.now = func() time.Time { return time.Unix(101*12, 0).Add(gloasMaximumClockDisparity + time.Millisecond) }
+	service.now = func() time.Time { return time.Unix(101*12, 0).Add(maximumGossipClockDisparity + time.Millisecond) }
 	output := captureServiceLogs(t)
 
 	// Process pending - should remove due to slot mismatch

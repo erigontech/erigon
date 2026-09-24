@@ -89,7 +89,7 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"validatorIndex", validatorIndex)
 
 	now := s.now()
-	past, validTime := isPastSlot(s.ethClock, s.beaconCfg, now, proposalSlot, gloasMaximumClockDisparity)
+	past, validTime := isPastSlot(s.ethClock, s.beaconCfg, now, proposalSlot, maximumGossipClockDisparity)
 	if !validTime {
 		return fmt.Errorf("%w: proposal slot %d has no representable time", ErrIgnore, proposalSlot)
 	}
@@ -112,7 +112,7 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	if !ok {
 		return fmt.Errorf("%w: proposer lookahead slot %d has no representable time", ErrIgnore, lookaheadEpochStartSlot)
 	}
-	if now.Add(gloasMaximumClockDisparity).Before(lookaheadEpochStartTime) {
+	if now.Add(maximumGossipClockDisparity).Before(lookaheadEpochStartTime) {
 		return fmt.Errorf("%w: proposer for proposal slot %d is not yet known", ErrIgnore, proposalSlot)
 	}
 	s.epbsPool.ProposerPreferences.PruneSlots(func(entrySlot uint64) bool {
@@ -214,7 +214,7 @@ func isPastBidWindow(clock eth_clock.EthereumClock, beaconCfg *clparams.BeaconCh
 		return true
 	}
 	nextSlotTime, ok := safeSlotTime(clock, beaconCfg, slot+1)
-	return !ok || now.After(nextSlotTime.Add(gloasMaximumClockDisparity))
+	return !ok || now.After(nextSlotTime.Add(maximumGossipClockDisparity))
 }
 
 func (s *proposerPreferencesService) isValidDependentRoot(root common.Hash, epochStartSlot uint64) bool {
