@@ -427,6 +427,9 @@ func declares(pkg *types.Package, t types.Type, name string, results int) bool {
 	if sig.Params().Len() != 1 || sig.Results().Len() != results || sig.Variadic() {
 		return false
 	}
+	if results == 1 && sig.Results().At(0).Type().String() != "error" {
+		return false
+	}
 	return sig.Params().At(0).Type().String() == streamType
 }
 

@@ -61,6 +61,7 @@ func TestGenerateRejects(t *testing.T) {
 		"not a hash slice":  "NotHashSlice",
 		"unknown option":    "UnknownOption",
 		"omitempty objects": "OmitemptyObjects",
+		"non-error result":  "WrongResult",
 	} {
 		t.Run(name, func(t *testing.T) {
 			err := run(typeName, "testdata/bad", filepath.Join(t.TempDir(), "out.go"), "")

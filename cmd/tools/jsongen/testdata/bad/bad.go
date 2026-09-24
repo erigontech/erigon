@@ -66,3 +66,12 @@ type UnknownOption struct {
 type OmitemptyObjects struct {
 	Logs jsonstream.Marshaler `json:"logs,omitempty" ethjson:"objects"`
 }
+
+// WrongResult writes itself, but not with the error the generated call checks.
+type WrongResult struct {
+	Logs intMarshaller `json:"logs" ethjson:"objects"`
+}
+
+type intMarshaller struct{}
+
+func (intMarshaller) MarshalFastJSONTo(*jsonstream.StackStream) int { return 0 }
