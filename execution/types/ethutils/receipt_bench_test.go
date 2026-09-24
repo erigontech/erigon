@@ -55,7 +55,7 @@ func BenchmarkMarshalReceipt(b *testing.B) {
 		b.Run(fmt.Sprintf("logs=%d", logCount), func(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
-				out, err := json.Marshal(MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, true))
+				out, err := json.Marshal(MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, true))
 				if err != nil || len(out) == 0 {
 					b.Fatal(err)
 				}
