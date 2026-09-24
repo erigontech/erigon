@@ -544,6 +544,18 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 	}
 }
 
+// After EIP-2780 a self-transfer costs TX_BASE (12000), so the gas search must
+// be able to go below the legacy 21000.
+func TestSimulatedBackend_EstimateGasEIP2780(t *testing.T) {
+	key, _ := crypto.GenerateKey()
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	sim := NewSimulatedBackendWithConfig(t, types.GenesisAlloc{addr: {Balance: big.NewInt(common.Ether)}}, chain.AllProtocolChanges, 10_000_000)
+
+	gas, err := sim.EstimateGas(context.Background(), bind.CallMsg{From: addr, To: &addr, GasPrice: &u256.Num0})
+	require.NoError(t, err)
+	require.Equal(t, params.TxBaseEIP2780, gas)
+}
+
 func TestSimulatedBackend_EstimateGasWithPrice(t *testing.T) {
 	key, _ := crypto.GenerateKey()
 	addr := crypto.PubkeyToAddress(key.PublicKey)

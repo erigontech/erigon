@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
-	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -298,10 +298,7 @@ func (ba *BlockAssembler) AddTransactions(
 		}
 	}()
 
-	minTxGas := params.TxGas
-	if ba.cfg.ChainConfig.IsAmsterdam(header.Time) {
-		minTxGas = params.TxBaseEIP2780
-	}
+	minTxGas := mdgas.MinTxGas(ba.cfg.ChainConfig.IsAmsterdam(header.Time))
 
 	done := false
 
