@@ -21,6 +21,7 @@ package ethjsontest
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strings"
@@ -42,7 +43,7 @@ type Computed struct {
 // ExpectedJSON encodes v the way its tags declare: the json tag gives each field's name, its
 // position and whether it may be omitted, and the ethjson tag gives the hex form the JSON-RPC
 // spec uses for it — "quantity" for a number, "data" for bytes. A field without an ethjson tag
-// falls back to encoding/json.
+// A field without an ethjson tag is an error: nothing would say which form it is.
 func ExpectedJSON(v any, computed ...Computed) ([]byte, error) {
 	rv := reflect.ValueOf(v)
 	for rv.Kind() == reflect.Pointer {
@@ -109,7 +110,9 @@ func jsonrpcValue(v reflect.Value, form string) ([]byte, error) {
 	}
 	switch form {
 	case "":
-		return json.Marshal(v.Interface())
+		// A field with no ethjson tag would be checked against encoding/json, which agrees
+		// with the encoder often enough to hide a forgotten tag.
+		return nil, errors.New("no ethjson tag")
 	case "quantity":
 		if v.Type() == u256 {
 			n := v.Interface().(uint256.Int)
