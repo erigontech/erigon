@@ -18,41 +18,13 @@ package types
 
 import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
-// pointer method RPCLogs itself would not satisfy the fast-JSON interface.
-func (logs RPCLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+// pointer method Logs itself would not satisfy the fast-JSON interface.
+func (logs Logs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	jsonstream.ArrayValue(s, logs, writeLogElem)
 	return nil
 }
 
-func writeLogElem(s *jsonstream.StackStream, l **RPCLog) { _ = (*l).MarshalFastJSONTo(s) }
-
-// MarshalFastJSONTo writes the logs as a bare array, without a log's block timestamp. The
-// receiver must stay a value, as for RPCLogs.
-func (logs Logs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	jsonstream.ArrayValue(s, logs, writeLog)
-	return nil
-}
-
-// writeLog writes one log in the order Log declares its fields.
-func writeLog(s *jsonstream.StackStream, lp **Log) {
-	l := *lp
-	if l == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	ethjson.Data(s, "address", l.Address[:])
-	ethjson.DataList(s, "topics", l.Topics)
-	ethjson.Data(s, "data", l.Data)
-	ethjson.Quantity(s, "blockNumber", l.BlockNumber)
-	ethjson.Data(s, "transactionHash", l.TxHash[:])
-	ethjson.Quantity(s, "transactionIndex", l.TxIndex)
-	ethjson.Data(s, "blockHash", l.BlockHash[:])
-	ethjson.Quantity(s, "logIndex", l.Index)
-	s.Field("removed").WriteBool(l.Removed)
-	s.WriteObjectEnd()
-}
+func writeLogElem(s *jsonstream.StackStream, l **Log) { _ = (*l).MarshalFastJSONTo(s) }
