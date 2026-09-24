@@ -138,7 +138,7 @@ func BenchmarkZZAccountLeafCodec(b *testing.B) {
 		b.ReportAllocs()
 		bal := u.Balance
 		for range b.N {
-			buf = accountConsensusRLP(u.Nonce, &bal, nil, nil, buf[:0])
+			buf = accountConsensusRLP(u.Nonce, &bal, empty.RootHash[:], empty.CodeHash[:], buf[:0])
 		}
 	})
 }
@@ -155,7 +155,7 @@ func BenchmarkZZStorageLeafRef(b *testing.B) {
 		}
 	})
 	b.Run("leafRef_account", func(b *testing.B) {
-		payload := accountConsensusRLP(3, uint256.NewInt(12345), nil, nil, nil)
+		payload := accountConsensusRLP(3, uint256.NewInt(12345), empty.RootHash[:], empty.CodeHash[:], nil)
 		b.ReportAllocs()
 		for range b.N {
 			_ = leafRef(suffix, payload, buf[:0])

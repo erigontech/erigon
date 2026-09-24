@@ -175,14 +175,7 @@ func walkRecords(ctx *parityContext, plane byte, addrHash [32]byte) (leaves map[
 				continue
 			}
 			childPath := append(append([]byte(nil), path...), byte(nib))
-			if e := r.extAt(l, nib); len(e) != 0 {
-				decoded, err := decodeExtension(e)
-				if err != nil {
-					issues = append(issues, fmt.Sprintf("bad extension at %x nibble %d: %v", path, nib, err))
-					continue
-				}
-				childPath = append(childPath, decoded...)
-			}
+			childPath = append(childPath, decodeExtension(r.extAt(l, nib))...)
 			visit(childPath)
 		}
 	}

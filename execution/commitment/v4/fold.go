@@ -94,7 +94,7 @@ func fold(n *node, depth int) ([32]byte, error) {
 		refs[nib] = ref
 	}
 
-	branchHash := branchRef(&refs, len(n.path))
+	branchHash := branchRef(&refs)
 	if depth == 0 && len(n.path) != 0 {
 		return extensionRef(n.path, branchHash[:]), nil
 	}
@@ -103,7 +103,8 @@ func fold(n *node, depth int) ([32]byte, error) {
 
 func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, error) {
 	suffixCount := 64 - depth - 1
-	if suffixCount < 0 || len(n.leafSuffixAt(nib)) != packedLen(suffixCount) {
+	suffix := n.leafSuffixAt(nib)
+	if len(suffix) != packedLen(suffixCount) {
 		return nil, fmt.Errorf("%w: leaf %d suffix", errFoldNode, nib)
 	}
 	var keyScratch [65]byte
@@ -116,7 +117,7 @@ func foldLeaf(n *node, nib, depth int, includeNib bool, out []byte) ([]byte, err
 	}
 	start := len(key)
 	key = key[:start+suffixCount]
-	unpackPath(n.leafSuffixAt(nib), suffixCount, key[start:start+suffixCount:start+suffixCount])
+	unpackPath(suffix, suffixCount, key[start:start+suffixCount:start+suffixCount])
 	key = append(key, nibbles.Terminator)
 	var compactScratch [34]byte
 	compact := nibbles.HexToCompactInto(compactScratch[:0], key)
@@ -165,7 +166,5 @@ func hash32(ref []byte) [32]byte {
 	if len(ref) != 32 {
 		return keccak.Sum256(ref)
 	}
-	var out [32]byte
-	copy(out[:], ref)
-	return out
+	return [32]byte(ref)
 }

@@ -47,13 +47,6 @@ var (
 const accountLeafScratch = 1 + binary.MaxVarintLen64 + 3*length.Hash
 
 func encodeAccountLeaf(u *commitment.Update, storageRoot []byte, dst []byte) []byte {
-	if u == nil {
-		panic("commitment v4: nil account update")
-	}
-	if len(storageRoot) != 0 && len(storageRoot) != length.Hash {
-		panic(fmt.Sprintf("commitment v4: invalid storage root length %d", len(storageRoot)))
-	}
-
 	flags := byte(0)
 	if u.Nonce != 0 {
 		flags |= accountHasNonce
@@ -119,6 +112,8 @@ func decodeAccountLeaf(b []byte) (nonce uint64, balance uint256.Int, codeHash []
 			return 0, balance, nil, nil, fmt.Errorf("%w: empty code hash is present", errAccountLeafFlags)
 		}
 		pos += length.Hash
+	} else {
+		codeHash = empty.CodeHash[:]
 	}
 
 	if flags&accountHasStorage != 0 {
@@ -144,11 +139,6 @@ func decodeAccountLeaf(b []byte) (nonce uint64, balance uint256.Int, codeHash []
 }
 
 func accountConsensusRLP(nonce uint64, balance *uint256.Int, storageRoot, codeHash []byte, dst []byte) []byte {
-	if balance == nil {
-		balance = new(uint256.Int)
-	}
-	storageRoot = canonicalStorageRoot(storageRoot)
-	codeHash = canonicalCodeHash(codeHash)
 	var balanceBuf [length.Hash]byte
 	balanceBytes := balanceBuf[:balance.ByteLen()]
 	balance.WriteToSlice(balanceBytes)
@@ -167,26 +157,6 @@ func accountConsensusRLP(nonce uint64, balance *uint256.Int, storageRoot, codeHa
 	copy(dst[pos:], codeHash)
 	pos += length.Hash
 	return dst[:pos]
-}
-
-func canonicalStorageRoot(root []byte) []byte {
-	if isEmptyStorageRoot(root) {
-		return empty.RootHash[:]
-	}
-	if len(root) != length.Hash {
-		panic(fmt.Sprintf("commitment v4: invalid storage root length %d", len(root)))
-	}
-	return root
-}
-
-func canonicalCodeHash(codeHash []byte) []byte {
-	if len(codeHash) == 0 || isEmptyCodeHash(codeHash) {
-		return empty.CodeHash[:]
-	}
-	if len(codeHash) != length.Hash {
-		panic(fmt.Sprintf("commitment v4: invalid code hash length %d", len(codeHash)))
-	}
-	return codeHash
 }
 
 func isEmptyStorageRoot(root []byte) bool {

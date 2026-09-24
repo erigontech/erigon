@@ -70,7 +70,7 @@ func TestUnfoldRootForms(t *testing.T) {
 		fullPath := bytes.Repeat([]byte{3}, 64)
 		n := fork(nil)
 		n.setLeaf(int(fullPath[0]), packPath(fullPath[1:], nil), []byte{0x01, 0x02})
-		ctx.branches[string(AccountRootKey())] = encodeRecord(n, 0, nil)
+		ctx.branches[string(AccountNodeKey(nil, nil))] = encodeRecord(n, 0, nil)
 
 		got, err := unfold(ctx, nil, planeAccount, nil)
 		require.NoError(t, err)
@@ -84,7 +84,7 @@ func TestUnfoldRootForms(t *testing.T) {
 		hash := bytes.Repeat([]byte{0x55}, 32)
 		n := fork(ext)
 		n.setStoredChild(4, hash, nil)
-		ctx.branches[string(AccountRootKey())] = encodeRecord(n, 0, nil)
+		ctx.branches[string(AccountNodeKey(nil, nil))] = encodeRecord(n, 0, nil)
 
 		got, err := unfold(ctx, nil, planeAccount, nil)
 		require.NoError(t, err)
@@ -99,7 +99,7 @@ func TestUnfoldMissingAndTombstone(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, got)
 
-	ctx.branches[string(AccountRootKey())] = []byte{}
+	ctx.branches[string(AccountNodeKey(nil, nil))] = []byte{}
 	got, err = unfold(ctx, nil, planeAccount, nil)
 	require.NoError(t, err)
 	require.NotNil(t, got)
@@ -108,7 +108,7 @@ func TestUnfoldMissingAndTombstone(t *testing.T) {
 
 func TestUnfoldRejectsMalformedRecord(t *testing.T) {
 	ctx := newMockContext()
-	ctx.branches[string(AccountRootKey())] = []byte{recordFormat}
+	ctx.branches[string(AccountNodeKey(nil, nil))] = []byte{recordFormat}
 	got, err := unfold(ctx, nil, planeAccount, nil)
 	require.Error(t, err)
 	require.ErrorIs(t, err, ErrRecordTruncated)

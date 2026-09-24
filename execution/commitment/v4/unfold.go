@@ -25,9 +25,8 @@ import (
 )
 
 var (
-	ErrUnfoldPlane    = errors.New("commitment v4: invalid unfold plane")
-	ErrUnfoldAddress  = errors.New("commitment v4: invalid storage address hash")
-	ErrUnfoldEmbedded = errors.New("commitment v4: embedded children are unsupported")
+	ErrUnfoldPlane   = errors.New("commitment v4: invalid unfold plane")
+	ErrUnfoldAddress = errors.New("commitment v4: invalid storage address hash")
 )
 
 func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []byte) (*node, error) {
@@ -41,22 +40,11 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 		return nil, fmt.Errorf("commitment v4: path depth %d", len(path))
 	}
 
-	var key []byte
-	if plane == planeAccount {
-		if len(addrHash) != 0 {
-			return nil, ErrUnfoldAddress
-		}
-		key = AccountNodeKey(path, nil)
-	} else {
-		if len(addrHash) != 32 {
-			return nil, ErrUnfoldAddress
-		}
-		var address [32]byte
-		copy(address[:], addrHash)
-		key = StorageNodeKey(address, path, nil)
+	if plane == planeAccount && len(addrHash) != 0 || plane == planeStorage && len(addrHash) != 32 {
+		return nil, ErrUnfoldAddress
 	}
 
-	data, _, err := branchOwned(ctx, key)
+	data, _, err := branchOwned(ctx, nodeKey(plane, addrHash, path, nil))
 	if err != nil {
 		return nil, err
 	}
@@ -76,13 +64,10 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 	n.loaded = true
 	n.plane = plane
 	n.storageRoot = plane == planeStorage && len(path) == 0
-	if len(path) == 0 && data[0]&hdrHasSelfExt != 0 {
+	if data[0]&hdrHasSelfExt != 0 {
 		n.path = unpackPath(record.SelfExt()[1:], int(data[1]), nil)
 	}
 	l := record.layout()
-	if l.emb != 0 {
-		return nil, ErrUnfoldEmbedded
-	}
 	if record.isLeafRoot() {
 		hashedKey, value := record.LeafRootBody()
 		fullPath := unpackPath(hashedKey, 64, nil)
@@ -107,23 +92,14 @@ func unfold(ctx commitment.PatriciaContext, path []byte, plane byte, addrHash []
 			continue
 		}
 		hash := record.slotAt(l, nib)
-		ext, err := decodeExtension(record.extAt(l, nib))
-		if err != nil {
-			return nil, err
-		}
-		n.setStoredChild(nib, hash, ext)
+		n.setStoredChild(nib, hash, decodeExtension(record.extAt(l, nib)))
 	}
 	return n, nil
 }
 
-func decodeExtension(encoded []byte) ([]byte, error) {
+func decodeExtension(encoded []byte) []byte {
 	if len(encoded) == 0 {
-		return nil, nil
+		return nil
 	}
-	extLen := int(encoded[0])
-	need := 1 + packedLen(extLen)
-	if len(encoded) != need {
-		return nil, ErrRecordTrailer
-	}
-	return unpackPath(encoded[1:], extLen, nil), nil
+	return unpackPath(encoded[1:], int(encoded[0]), nil)
 }

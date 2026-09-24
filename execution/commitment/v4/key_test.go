@@ -17,7 +17,6 @@
 package v4
 
 import (
-	"bytes"
 	"math/rand/v2"
 	"testing"
 
@@ -44,49 +43,25 @@ func TestNodeKeyRoundTrip(t *testing.T) {
 			tag  byte
 			addr []byte
 		}{
-			{name: "account", key: AccountNodeKey(path, nil), tag: tagAccountNode},
+			{name: "account", key: AccountNodeKey(path, nil), tag: tagAccountNode, addr: []byte{}},
 			{name: "storage", key: StorageNodeKey(addrHash, path, nil), tag: tagStorageNode, addr: addrHash[:]},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				tag, gotAddr, gotPath, err := ParseKey(tc.key)
-				require.NoError(t, err)
-				require.Equal(t, tc.tag, tag)
-				require.Equal(t, tc.addr, gotAddr)
-				if count == 0 {
-					require.Empty(t, gotPath)
-				} else {
-					require.Equal(t, path, gotPath)
-				}
+				require.Equal(t, tc.tag, tc.key[0])
+				require.Equal(t, tc.addr, tc.key[1:1+len(tc.addr)])
+				require.Equal(t, byte(count), tc.key[len(tc.key)-1])
+				require.Equal(t, path, unpackPath(tc.key[1+len(tc.addr):len(tc.key)-1], count, []byte{}))
 			})
 		}
 	}
 }
 
-func TestRootAndStateKeys(t *testing.T) {
+func TestRootKeys(t *testing.T) {
 	var addrHash [32]byte
 	addrHash[0] = 0xab
 
-	require.Equal(t, []byte{tagAccountNode, 0}, AccountRootKey())
+	require.Equal(t, []byte{tagAccountNode, 0}, AccountNodeKey(nil, nil))
 	require.Equal(t, append([]byte{tagStorageNode}, append(addrHash[:], 0)...), StorageRootKey(addrHash))
-	require.Equal(t, []byte{tagState}, StateKey())
-
-	tag, addr, path, err := ParseKey(AccountRootKey())
-	require.NoError(t, err)
-	require.Equal(t, tagAccountNode, tag)
-	require.Empty(t, addr)
-	require.Empty(t, path)
-
-	tag, addr, path, err = ParseKey(StorageRootKey(addrHash))
-	require.NoError(t, err)
-	require.Equal(t, tagStorageNode, tag)
-	require.Equal(t, addrHash[:], addr)
-	require.Empty(t, path)
-
-	tag, addr, path, err = ParseKey(StateKey())
-	require.NoError(t, err)
-	require.Equal(t, tagState, tag)
-	require.Empty(t, addr)
-	require.Empty(t, path)
 }
 
 func TestNodeKeyUsesDestination(t *testing.T) {
@@ -94,28 +69,6 @@ func TestNodeKeyUsesDestination(t *testing.T) {
 	key := AccountNodeKey([]byte{1, 2, 3}, dst)
 	require.Equal(t, []byte{0xaa, 0xbb, tagAccountNode, 0x12, 0x30, 3}, key)
 	require.Equal(t, []byte{0xaa, 0xbb}, dst)
-}
-
-func TestParseKeyRejectsMalformedPath(t *testing.T) {
-	valid := AccountNodeKey([]byte{1, 2, 3}, nil)
-	for name, key := range map[string][]byte{
-		"missing length":       {tagAccountNode},
-		"short packed path":    {tagAccountNode, 0x12, 4},
-		"long packed path":     {tagAccountNode, 0x12, 0x30, 2},
-		"non-zero odd padding": {tagAccountNode, 0x12, 0x31, 3},
-		"unknown tag":          {0x43, 0},
-		"state suffix":         {tagState, 0},
-	} {
-		t.Run(name, func(t *testing.T) {
-			_, _, _, err := ParseKey(key)
-			require.Error(t, err)
-		})
-	}
-
-	badCount := bytes.Clone(valid)
-	badCount[len(badCount)-1] = 65
-	_, _, _, err := ParseKey(badCount)
-	require.ErrorIs(t, err, ErrKeyPathLength)
 }
 
 func TestV1KeyedTagDisjointness(t *testing.T) {
@@ -129,10 +82,5 @@ func TestV1KeyedTagDisjointness(t *testing.T) {
 		require.Less(t, compact[0], byte(tagAccountNode))
 	}
 
-	require.Equal(t, AccountRootKey(), nibbles.EncodeKeyV2([]byte{4, 0}))
-}
-
-func TestAssertV1Keyed(t *testing.T) {
-	require.NoError(t, AssertV1Keyed(false))
-	require.ErrorIs(t, AssertV1Keyed(true), ErrV4RequiresV1Keyed)
+	require.Equal(t, AccountNodeKey(nil, nil), nibbles.EncodeKeyV2([]byte{4, 0}))
 }

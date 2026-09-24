@@ -30,14 +30,14 @@ func TestRemoveClearsLeafAndMasks(t *testing.T) {
 	other := appendPath(n.path, 5, bytes.Repeat([]byte{6}, 62))
 	n.setLeaf(5, packPath(other[2:], nil), []byte{2})
 
-	require.NoError(t, remove(n, path))
+	require.NoError(t, removeErr(n, path))
 	require.Zero(t, n.childMask&(1<<3))
 	require.Zero(t, n.leafMask&(1<<3))
 	require.NotZero(t, n.childMask&(1<<5))
 	require.NotZero(t, n.leafMask&(1<<5))
 
-	require.ErrorIs(t, remove(n, path), ErrRemoveNotFound)
-	require.NoError(t, remove(n, other))
+	require.ErrorIs(t, removeErr(n, path), ErrRemoveNotFound)
+	require.NoError(t, removeErr(n, other))
 	require.Zero(t, n.childMask)
 	require.Zero(t, n.leafMask)
 }
@@ -51,7 +51,7 @@ func TestRemovePromotesSoleLeafSurvivor(t *testing.T) {
 	child.setLeaf(6, packPath(survivor[len(child.path)+1:], nil), []byte{2})
 	parent.setChild(0, child)
 
-	require.NoError(t, remove(parent, removed))
+	require.NoError(t, removeErr(parent, removed))
 	require.NotZero(t, parent.leafMask&(1<<0))
 	require.Nil(t, parent.child(0))
 	require.Equal(t, packPath(survivor[len(parent.path)+1:], nil), parent.leafSuffixAt(0))
@@ -68,7 +68,7 @@ func TestRemoveD6CollapseKeepsPreExtensionHash(t *testing.T) {
 	removed := appendPath(parent.path, 1, bytes.Repeat([]byte{3}, 62))
 	parent.setLeaf(1, packPath(removed[len(parent.path)+1:], nil), []byte{9})
 
-	require.NoError(t, remove(parent, removed))
+	require.NoError(t, removeErr(parent, removed))
 	require.Equal(t, uint16(1), parent.childMask)
 	require.Zero(t, parent.leafMask)
 	require.Equal(t, hash, parent.childHashAt(0))
@@ -85,7 +85,7 @@ func TestRemoveCollapseSoleBranchWithoutExtension(t *testing.T) {
 	removed := appendPath(parent.path, 1, bytes.Repeat([]byte{3}, 62))
 	parent.setLeaf(1, packPath(removed[len(parent.path)+1:], nil), []byte{9})
 
-	require.NoError(t, remove(parent, removed))
+	require.NoError(t, removeErr(parent, removed))
 	require.Equal(t, hash, parent.childHashAt(0))
 	require.Empty(t, parent.childExtAt(0))
 	require.Zero(t, parent.leafMask)
@@ -100,7 +100,7 @@ func TestRemoveConcatenatesNestedExtensions(t *testing.T) {
 	child.setLeaf(6, packPath(removed[len(child.path)+1:], nil), []byte{9})
 	parent.setChild(0, child)
 
-	require.NoError(t, remove(parent, removed))
+	require.NoError(t, removeErr(parent, removed))
 	require.Nil(t, parent.child(0))
 	require.Equal(t, hash, parent.childHashAt(0))
 	require.Equal(t, []byte{1, 2, 3, 4, 5}, parent.childExtAt(0))
@@ -117,7 +117,7 @@ func TestRemoveDoesNotReadBranchRecords(t *testing.T) {
 	n.setLeaf(1, packPath(removed[1:], nil), []byte{1})
 	n.setLeaf(3, packPath(survivor[1:], nil), []byte{2})
 
-	require.NoError(t, remove(n, removed))
+	require.NoError(t, removeErr(n, removed))
 	require.Empty(t, ctx.branchCalls)
 	require.Zero(t, ctx.accountCalls)
 	require.Zero(t, ctx.storageCalls)
@@ -128,7 +128,7 @@ func TestRemoveTreatsDivergedPathsAsNotFound(t *testing.T) {
 	kept := appendPath(ext.path, 4, bytes.Repeat([]byte{5}, 60))
 	ext.setLeaf(4, packPath(kept[4:], nil), []byte{1})
 	diverged := appendPath([]byte{1, 2, 9}, 4, bytes.Repeat([]byte{5}, 60))
-	require.ErrorIs(t, remove(ext, diverged), ErrRemoveNotFound)
+	require.ErrorIs(t, removeErr(ext, diverged), ErrRemoveNotFound)
 
 	root := fork(nil)
 	branch := fork([]byte{7, 8, 8})
@@ -136,7 +136,7 @@ func TestRemoveTreatsDivergedPathsAsNotFound(t *testing.T) {
 	branch.setLeaf(1, packPath(branchLeaf[4:], nil), []byte{3})
 	root.setChild(7, branch)
 	pastBranch := appendPath([]byte{7, 8, 9}, 1, bytes.Repeat([]byte{2}, 60))
-	require.ErrorIs(t, remove(root, pastBranch), ErrRemoveNotFound)
+	require.ErrorIs(t, removeErr(root, pastBranch), ErrRemoveNotFound)
 }
 
 func TestRemoveBelowDivergedStoredChildIsNotFound(t *testing.T) {
@@ -144,10 +144,10 @@ func TestRemoveBelowDivergedStoredChildIsNotFound(t *testing.T) {
 	n.setStoredChild(1, bytes.Repeat([]byte{3}, 32), []byte{4, 5})
 
 	diverged := appendPath(nil, 1, append([]byte{9, 9}, bytes.Repeat([]byte{2}, 61)...))
-	require.ErrorIs(t, remove(n, diverged), ErrRemoveNotFound)
+	require.ErrorIs(t, removeErr(n, diverged), ErrRemoveNotFound)
 
 	under := appendPath(nil, 1, append([]byte{4, 5}, bytes.Repeat([]byte{2}, 61)...))
-	require.ErrorIs(t, remove(n, under), ErrRemoveStoredChild)
+	require.ErrorIs(t, removeErr(n, under), ErrRemoveStoredChild)
 }
 
 func TestRemoveRejectsInvalidAndStoredPaths(t *testing.T) {
@@ -155,6 +155,11 @@ func TestRemoveRejectsInvalidAndStoredPaths(t *testing.T) {
 	path := appendPath(nil, 1, bytes.Repeat([]byte{2}, 63))
 	n.setStoredChild(1, bytes.Repeat([]byte{3}, 32), []byte{2})
 
-	require.ErrorIs(t, remove(n, []byte{1}), ErrRemovePath)
-	require.ErrorIs(t, remove(n, path), ErrRemoveStoredChild)
+	require.ErrorIs(t, removeErr(n, []byte{1}), ErrRemovePath)
+	require.ErrorIs(t, removeErr(n, path), ErrRemoveStoredChild)
+}
+
+func removeErr(n *node, path []byte) error {
+	_, err := remove(n, path)
+	return err
 }

@@ -51,26 +51,15 @@ type removalState struct {
 	node  *node
 }
 
-func remove(n *node, path []byte) error {
+func remove(n *node, path []byte) (removalState, error) {
 	if n == nil || len(path) != 64 {
-		return fmt.Errorf("%w: node %v path length %d", ErrRemovePath, n != nil, len(path))
+		return removalState{}, fmt.Errorf("%w: node %v path length %d", ErrRemovePath, n != nil, len(path))
 	}
-	if !bytes.HasPrefix(path, n.path) {
-		return ErrRemoveNotFound
-	}
-	_, err := removeAt(n, path)
-	return err
-}
-
-func removeCollapsing(n *node, path []byte) (removalState, error) {
-	if err := remove(n, path); err != nil {
-		return removalState{}, err
-	}
-	return collapsedState(n), nil
+	return removeAt(n, path)
 }
 
 func removeAt(n *node, path []byte) (removalState, error) {
-	if n == nil || len(n.path) >= len(path) {
+	if len(n.path) >= len(path) {
 		return removalState{}, fmt.Errorf("%w: node depth %d, path length %d", ErrRemovePath, len(n.path), len(path))
 	}
 	if !bytes.HasPrefix(path, n.path) {
@@ -84,7 +73,7 @@ func removeAt(n *node, path []byte) (removalState, error) {
 	}
 
 	if n.leafMask&bit != 0 {
-		if !leafPathMatches(n, nib, path) {
+		if !packedMatches(n.leafSuffixAt(nib), path[depth+1:]) {
 			return removalState{}, ErrRemoveNotFound
 		}
 		n.clear(nib)
@@ -106,6 +95,11 @@ func removeAt(n *node, path []byte) (removalState, error) {
 	if err != nil {
 		return removalState{}, err
 	}
+	applyRemoval(n, nib, state)
+	return collapsedState(n), nil
+}
+
+func applyRemoval(n *node, nib int, state removalState) bool {
 	switch state.kind {
 	case removalEmpty:
 		n.clear(nib)
@@ -115,12 +109,10 @@ func removeAt(n *node, path []byte) (removalState, error) {
 		setBranchPath(n, nib, state.path, state.hash)
 	case removalNode:
 		setNodePath(n, nib, state.node)
+	default:
+		return false
 	}
-	return collapsedState(n), nil
-}
-
-func leafPathMatches(n *node, nib int, path []byte) bool {
-	return len(path) > len(n.path) && packedMatches(n.leafSuffixAt(nib), path[len(n.path)+1:])
+	return true
 }
 
 func collapsedState(n *node) removalState {
@@ -140,19 +132,7 @@ func collapsedState(n *node) removalState {
 		return removalState{kind: removalLeaf, path: path, value: append([]byte(nil), n.leafValueAt(nib)...)}
 	}
 	if child := n.child(nib); child != nil {
-		state := collapsedState(child)
-		switch state.kind {
-		case removalEmpty:
-			n.clear(nib)
-			return collapsedState(n)
-		case removalLeaf:
-			setLeafPath(n, nib, state.path, state.value)
-			return collapsedState(n)
-		case removalBranch:
-			setBranchPath(n, nib, state.path, state.hash)
-			return collapsedState(n)
-		case removalNode:
-			setNodePath(n, nib, state.node)
+		if applyRemoval(n, nib, collapsedState(child)) {
 			return collapsedState(n)
 		}
 		return removalState{kind: removalNode, path: child.path, node: child}
@@ -230,9 +210,6 @@ func splitLeaf(parent *node, nib int, path, suffix, value []byte) error {
 		parent.setLeaf(nib, suffix, value)
 		return nil
 	}
-	if common >= len(path) {
-		return ErrInsertPath
-	}
 
 	branch := fork(oldPath[:common])
 	oldNib := int(oldPath[common])
@@ -249,7 +226,7 @@ func splitChild(parent *node, nib int, child *node, path, value []byte) error {
 	if common == len(child.path) {
 		return insert(child, path, value)
 	}
-	if common < len(parent.path)+1 || common >= len(path) {
+	if common < len(parent.path)+1 {
 		return ErrInsertPath
 	}
 
@@ -272,7 +249,7 @@ func splitStoredChild(parent *node, nib int, path, value []byte) error {
 	if common == len(childPath) {
 		return ErrInsertStoredChild
 	}
-	if common < len(parent.path)+1 || common >= len(path) {
+	if common < len(parent.path)+1 {
 		return ErrInsertPath
 	}
 

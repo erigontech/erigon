@@ -81,7 +81,7 @@ func TestFoldMatchesHexPatriciaHashedForEachPlane(t *testing.T) {
 						key := append(append([]byte(nil), path...), nibbles.Terminator)
 						refs[path[0]] = storageLeafRef(nibbles.HexToCompact(key), foldValue(plane, i+1), nil)
 					}
-					require.Equal(t, branchRef(&refs, 0), got)
+					require.Equal(t, branchRef(&refs), got)
 				}
 				require.Equal(t, want, got[:])
 			})
@@ -121,7 +121,7 @@ func TestFoldUsesStoredChildHashWithoutStateReads(t *testing.T) {
 	wrapped := extensionRef([]byte{3, 4}, stored)
 	refs[2] = wrapped[:]
 	refs[5] = storageLeafRef(mustCompact(append(append([]byte(nil), path...), nibbles.Terminator)), []byte{7}, nil)
-	want := branchRef(&refs, 0)
+	want := branchRef(&refs)
 	require.Equal(t, want, got)
 	require.Empty(t, ctx.accountCalls)
 	require.Empty(t, ctx.storageCalls)

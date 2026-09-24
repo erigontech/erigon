@@ -146,8 +146,8 @@ func TestWarmupV4KeyAndStepAccountDescent(t *testing.T) {
 	hashedKey := make([]byte, 128)
 	hashedKey[0] = 2
 	hashedKey[1] = 3
-	rootRecord := recordFixture(0, 0, 1<<2, 0, 0, 0, nil, nil, nil, nil)
-	childRecord := recordFixture(0, 1, 1<<3, 1<<3, 0, 0, nil, nil, nil, nil)
+	rootRecord := recordFixture(0, 0, 1<<2, 0, 0, nil, nil, nil)
+	childRecord := recordFixture(0, 1, 1<<3, 1<<3, 0, nil, nil, nil)
 	addrHash := hashAddressPath(hashedKey[:64])
 	records := map[string][]byte{
 		string(AccountNodeKey(nil, nil)):           rootRecord,
@@ -204,7 +204,7 @@ func TestWarmupV4KeyPlaneCrossing(t *testing.T) {
 }
 
 func TestWarmupV4StepSelfExtensionAndTruncated(t *testing.T) {
-	record := recordFixture(hdrHasSelfExt, 0, 1<<4, 0, 0, 0, extFixture([]byte{1, 2}), nil, nil, nil)
+	record := recordFixture(hdrHasSelfExt, 0, 1<<4, 0, 0, extFixture([]byte{1, 2}), nil, nil)
 	hashedKey := make([]byte, 64)
 	copy(hashedKey, []byte{1, 2, 4})
 	nextDepth, stop := warmupStepV4(record, hashedKey, 0)
@@ -224,14 +224,14 @@ func TestWarmupV4StepSelfExtensionAndTruncated(t *testing.T) {
 }
 
 func TestWarmupV4StepUsesPlaneDepthAndExtensionLength(t *testing.T) {
-	record := recordFixture(hdrHasChildExt, 0, 1<<4, 0, 1<<4, 0, nil, map[int][]byte{4: extFixture([]byte{1, 2})}, nil, nil)
+	record := recordFixture(hdrHasChildExt, 0, 1<<4, 0, 1<<4, nil, map[int][]byte{4: extFixture([]byte{1, 2})}, nil)
 	hashedKey := make([]byte, 128)
 	hashedKey[64] = 4
 	nextDepth, stop := warmupStepV4(record, hashedKey, 64)
 	require.False(t, stop)
 	require.Equal(t, 67, nextDepth)
 
-	leafRecord := recordFixture(0, 0, 1<<4, 1<<4, 0, 0, nil, nil, nil,
+	leafRecord := recordFixture(0, 0, 1<<4, 1<<4, 0, nil, nil,
 		map[int]leafFixture{4: {suffix: bytes.Repeat([]byte{0x0c}, 31), value: []byte{9}}})
 	nextDepth, stop = warmupStepV4(leafRecord, hashedKey, 64)
 	require.True(t, stop, "a storage-plane leaf must end the descent, not restart it")
@@ -268,8 +268,8 @@ func TestWarmupV4ReadsAccountPlaneRecords(t *testing.T) {
 	ctx := newMockContext()
 	hashedKey := make([]byte, 64)
 	hashedKey[0] = 2
-	ctx.branches[string(AccountNodeKey(nil, nil))] = recordFixture(0, 0, 1<<2, 0, 0, 0, nil, nil, nil, nil)
-	ctx.branches[string(AccountNodeKey([]byte{2}, nil))] = recordFixture(0, 0, 0, 0, 0, 0, nil, nil, nil, nil)
+	ctx.branches[string(AccountNodeKey(nil, nil))] = recordFixture(0, 0, 1<<2, 0, 0, nil, nil, nil)
+	ctx.branches[string(AccountNodeKey([]byte{2}, nil))] = recordFixture(0, 0, 0, 0, 0, nil, nil, nil)
 	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
 		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return ctx, nil },
 		NumWorkers: 1,
@@ -299,10 +299,10 @@ func TestWarmupV4ReadsStoragePlaneRecord(t *testing.T) {
 	hashedKey[65] = 5
 	addrHash := hashAddressPath(hashedKey[:64])
 	ctx := newMockContext()
-	ctx.branches[string(AccountNodeKey(nil, nil))] = recordFixture(0, 0, 1<<2, 0, 0, 0, nil, nil, nil, nil)
-	ctx.branches[string(AccountNodeKey([]byte{2}, nil))] = recordFixture(0, 1, 1<<3, 1<<3, 0, 0, nil, nil, nil, nil)
-	ctx.branches[string(StorageNodeKey(addrHash, nil, nil))] = recordFixture(0, 0, 1<<4, 0, 0, 0, nil, nil, nil, nil)
-	ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = recordFixture(0, 1, 0, 1<<5, 0, 0, nil, nil, nil, nil)
+	ctx.branches[string(AccountNodeKey(nil, nil))] = recordFixture(0, 0, 1<<2, 0, 0, nil, nil, nil)
+	ctx.branches[string(AccountNodeKey([]byte{2}, nil))] = recordFixture(0, 1, 1<<3, 1<<3, 0, nil, nil, nil)
+	ctx.branches[string(StorageNodeKey(addrHash, nil, nil))] = recordFixture(0, 0, 1<<4, 0, 0, nil, nil, nil)
+	ctx.branches[string(StorageNodeKey(addrHash, []byte{4}, nil))] = recordFixture(0, 1, 0, 1<<5, 0, nil, nil, nil)
 	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
 		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return ctx, nil },
 		NumWorkers: 1,

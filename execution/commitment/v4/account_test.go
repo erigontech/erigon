@@ -39,7 +39,7 @@ func TestAccountLeafRoundTrip(t *testing.T) {
 		wantCode    []byte
 		wantRoot    []byte
 	}{
-		{name: "eoa", update: commitment.Update{CodeHash: empty.CodeHash}, wantRoot: empty.RootHash[:]},
+		{name: "eoa", update: commitment.Update{CodeHash: empty.CodeHash}, wantCode: empty.CodeHash[:], wantRoot: empty.RootHash[:]},
 		{name: "contract with storage", update: commitment.Update{Nonce: 3, Balance: *uint256.NewInt(99), CodeHash: codeHash}, storageRoot: storageRoot[:], wantCode: codeHash[:], wantRoot: storageRoot[:]},
 		{name: "contract with code and no storage", update: commitment.Update{Nonce: 7, CodeHash: codeHash}, wantCode: codeHash[:], wantRoot: empty.RootHash[:]},
 	}
@@ -65,11 +65,7 @@ func TestAccountLeafElisionFlags(t *testing.T) {
 			_, gotBalance, gotCode, _, err := decodeAccountLeaf(encoded)
 			require.NoError(t, err)
 			require.Equal(t, balance, gotBalance.Uint64())
-			if code == empty.CodeHash {
-				require.Empty(t, gotCode)
-			} else {
-				require.Equal(t, code[:], gotCode)
-			}
+			require.Equal(t, code[:], gotCode)
 		}
 	}
 }
@@ -90,7 +86,7 @@ func TestAccountConsensusRLPMatchesAccountRLP(t *testing.T) {
 	}
 
 	acc := accounts.NewAccount()
-	got := accountConsensusRLP(0, &acc.Balance, nil, nil, nil)
+	got := accountConsensusRLP(0, &acc.Balance, empty.RootHash[:], empty.CodeHash[:], nil)
 	accRoot := empty.RootHash
 	acc.Root = accRoot
 	require.Equal(t, acc.RLP(), got)

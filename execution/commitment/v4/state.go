@@ -23,27 +23,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-const StateMarker byte = commitment.CommitmentV4StateMarker
-
-const stateSize = commitment.CommitmentV4StateSize
-
-var (
-	ErrStateMarker = commitment.ErrCommitmentV4StateMarker
-	ErrStateSize   = commitment.ErrCommitmentV4StateSize
-)
-
-func IsStateBlob(value []byte) bool {
-	return len(value) > 0 && value[0] == StateMarker
-}
-
-func encodeState(root []byte, blockNum, txNum uint64, dst []byte) ([]byte, error) {
-	return commitment.EncodeCommitmentV4State(root, blockNum, txNum, dst)
-}
-
-func DecodeState(value []byte) (blockNum, txNum uint64, root []byte, err error) {
-	return commitment.DecodeCommitmentV4State(value)
-}
-
 func (t *Trie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
 	if t == nil {
 		return nil, errTrieReleased
@@ -52,7 +31,7 @@ func (t *Trie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return encodeState(root, blockNum, txNum, dst)
+	return commitment.EncodeCommitmentV4State(root, blockNum, txNum, dst)
 }
 
 func (t *Trie) RestoreState(value []byte) (uint64, uint64, error) {
@@ -63,7 +42,7 @@ func (t *Trie) RestoreState(value []byte) (uint64, uint64, error) {
 		t.root = nil
 		return 0, 0, nil
 	}
-	blockNum, txNum, root, err := DecodeState(value)
+	blockNum, txNum, root, err := commitment.DecodeCommitmentV4State(value)
 	if err != nil {
 		return 0, 0, err
 	}

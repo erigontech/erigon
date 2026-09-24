@@ -42,10 +42,11 @@ func TestEncodeRecordRoundTrip(t *testing.T) {
 				return n
 			},
 			check: func(t *testing.T, r Record) {
-				require.Equal(t, uint16(3), r.ChildMask())
-				require.Equal(t, uint16(2), r.LeafMask())
-				require.Equal(t, hash, r.SlotAt(0))
-				gotSuffix, gotValue := r.LeafAt(1)
+				l := r.layout()
+				require.Equal(t, uint16(3), l.child)
+				require.Equal(t, uint16(2), l.leaf)
+				require.Equal(t, hash, r.slotAt(l, 0))
+				gotSuffix, gotValue := r.leafAt(l, 1)
 				require.Equal(t, suffix, gotSuffix)
 				require.Equal(t, []byte{0x42}, gotValue)
 			},
@@ -59,9 +60,10 @@ func TestEncodeRecordRoundTrip(t *testing.T) {
 				return n
 			},
 			check: func(t *testing.T, r Record) {
-				require.Equal(t, uint16(1<<4), r.ExtMask())
+				l := r.layout()
+				require.Equal(t, uint16(1<<4), l.ext)
 				require.Equal(t, []byte{3, 0x23, 0x40}, r.ExtAt(4))
-				require.Equal(t, hash, r.SlotAt(4))
+				require.Equal(t, hash, r.slotAt(l, 4))
 			},
 		},
 	}
@@ -109,7 +111,7 @@ func TestEncodeRecordRootForms(t *testing.T) {
 				require.NoError(t, Validate(data, 0))
 				r := NewRecord(data, 0)
 				require.Equal(t, []byte{2, 0x12}, r.SelfExt())
-				require.Equal(t, hash, r.SlotAt(3))
+				require.Equal(t, hash, r.slotAt(r.layout(), 3))
 			},
 		},
 		{
@@ -123,7 +125,7 @@ func TestEncodeRecordRootForms(t *testing.T) {
 			check: func(t *testing.T, data []byte) {
 				require.Equal(t, byte(recordFormat), data[0])
 				require.NoError(t, Validate(data, 0))
-				require.Equal(t, uint16(1<<3|1<<9), NewRecord(data, 0).ChildMask())
+				require.Equal(t, uint16(1<<3|1<<9), NewRecord(data, 0).layout().child)
 			},
 		},
 	}

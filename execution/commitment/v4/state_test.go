@@ -23,13 +23,14 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func TestStateRoundTrip(t *testing.T) {
 	trie := &Trie{root: bytes.Repeat([]byte{0x37}, 32)}
 	encoded, err := trie.EncodeState(91, 73, []byte{0xaa})
 	require.NoError(t, err)
-	require.Equal(t, StateMarker, encoded[1])
+	require.Equal(t, commitment.CommitmentV4StateMarker, encoded[1])
 
 	restored := &Trie{}
 	blockNum, txNum, err := restored.RestoreState(encoded[1:])
@@ -57,26 +58,23 @@ func TestStateRoundTripEmptyRoot(t *testing.T) {
 
 func TestStateRejectsLegacyAndMalformedBlobs(t *testing.T) {
 	trie := &Trie{}
-	legacy := make([]byte, stateSize)
-	legacy[0] = StateMarker - 1
+	legacy := make([]byte, commitment.CommitmentV4StateSize)
+	legacy[0] = commitment.CommitmentV4StateMarker - 1
 	_, _, err := trie.RestoreState(legacy)
-	require.ErrorIs(t, err, ErrStateMarker)
+	require.ErrorIs(t, err, commitment.ErrCommitmentV4StateMarker)
 
-	for _, value := range [][]byte{nil, []byte{StateMarker}, make([]byte, stateSize-1), make([]byte, stateSize+1)} {
-		if value == nil {
-			continue
-		}
+	for _, value := range [][]byte{{commitment.CommitmentV4StateMarker}, make([]byte, commitment.CommitmentV4StateSize-1), make([]byte, commitment.CommitmentV4StateSize+1)} {
 		_, _, err = trie.RestoreState(value)
-		require.ErrorIs(t, err, ErrStateSize)
+		require.ErrorIs(t, err, commitment.ErrCommitmentV4StateSize)
 	}
 
-	badMarker := make([]byte, stateSize)
-	badMarker[0] = StateMarker + 1
+	badMarker := make([]byte, commitment.CommitmentV4StateSize)
+	badMarker[0] = commitment.CommitmentV4StateMarker + 1
 	_, _, err = trie.RestoreState(badMarker)
-	require.ErrorIs(t, err, ErrStateMarker)
+	require.ErrorIs(t, err, commitment.ErrCommitmentV4StateMarker)
 }
 
 func TestStateEncodeRejectsInvalidRoot(t *testing.T) {
-	_, err := encodeState([]byte{1}, 0, 0, nil)
-	require.ErrorIs(t, err, ErrStateSize)
+	_, err := (&Trie{root: []byte{1}}).EncodeState(0, 0, nil)
+	require.ErrorIs(t, err, commitment.ErrCommitmentV4StateSize)
 }

@@ -61,7 +61,7 @@ func TestBranchRefVector(t *testing.T) {
 	var refs [16][]byte
 	refs[1] = bytes.Repeat([]byte{0x11}, 32)
 	refs[14] = bytes.Repeat([]byte{0x22}, 32)
-	got := branchRef(&refs, 3)
+	got := branchRef(&refs)
 	require.Equal(t, mustDecodeHex(t, "c7c2cc5c8eba62b7ff0b998ee46c6cc41075ee8d2dbefa0fa4b26bdb2530f272"), got[:])
 }
 
@@ -69,8 +69,8 @@ func TestBranchRefRejectsInlinableBranch(t *testing.T) {
 	var refs [16][]byte
 	refs[0] = []byte{0xc1, 0x01}
 	refs[1] = []byte{0xc1, 0x02}
-	require.PanicsWithValue(t, "commitment v4: inlinable branch child at depth 56", func() {
-		branchRef(&refs, 56)
+	require.PanicsWithValue(t, "commitment v4: inlinable branch child", func() {
+		branchRef(&refs)
 	})
 }
 
@@ -81,7 +81,7 @@ func TestBranchRefAllowsOrdinaryBranches(t *testing.T) {
 			for i := range childCount {
 				refs[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
 			}
-			require.NotPanics(t, func() { branchRef(&refs, 3) })
+			require.NotPanics(t, func() { branchRef(&refs) })
 		})
 	}
 }

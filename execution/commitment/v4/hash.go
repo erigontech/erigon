@@ -44,19 +44,14 @@ func leafRef(suffix []byte, payload []byte, dst []byte) []byte {
 	contentLen := rlp.StringLen(suffix) + rlp.StringLen(payload)
 	start := len(dst)
 	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
-	encoded := dst
-	pos := start
-	prefixLen := rlp.EncodeListPrefixToBuf(contentLen, encoded[pos:])
-	pos += prefixLen
-	stringLen := rlp.EncodeStringToBuf(suffix, encoded[pos:])
-	pos += stringLen
-	pos += rlp.EncodeStringToBuf(payload, encoded[pos:])
-	encoded = encoded[:pos]
-	if len(encoded)-start < 32 {
-		return encoded
+	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
+	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
+	pos += rlp.EncodeStringToBuf(payload, dst[pos:])
+	if pos-start < 32 {
+		return dst[:pos]
 	}
-	hash := keccak.Sum256(encoded[start:])
-	return append(encoded[:start], hash[:]...)
+	hash := keccak.Sum256(dst[start:pos])
+	return append(dst[:start], hash[:]...)
 }
 
 func storageLeafRef(suffix []byte, payload []byte, dst []byte) []byte {
@@ -110,11 +105,10 @@ func extensionRef(ext []byte, childHash []byte) [32]byte {
 	pos := rlp.EncodeListPrefixToBuf(contentLen, encoded)
 	pos += rlp.EncodeStringToBuf(compact, encoded[pos:])
 	pos += rlp.EncodeStringToBuf(childHash, encoded[pos:])
-	hash := keccak.Sum256(encoded[:pos])
-	return hash
+	return keccak.Sum256(encoded[:pos])
 }
 
-func branchRef(refs *[16][]byte, depth int) [32]byte {
+func branchRef(refs *[16][]byte) [32]byte {
 	contentLen := 1
 	for _, ref := range refs {
 		switch {
@@ -146,7 +140,7 @@ func branchRef(refs *[16][]byte, depth int) [32]byte {
 	encoded[pos] = 0x80
 	pos++
 	if pos < 32 {
-		panic(fmt.Sprintf("commitment v4: inlinable branch child at depth %d", depth))
+		panic("commitment v4: inlinable branch child")
 	}
 	return keccak.Sum256(encoded[:pos])
 }

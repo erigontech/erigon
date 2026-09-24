@@ -28,10 +28,10 @@ domain and rejects V2-keyed domains.
 
 ## Records
 
-Non-root records start with a format and flag byte, followed by `childMask` and `leafMask`. Optional
-extension and embedded masks follow. Branch-child slots are fixed 32-byte hashes in ascending slot
-order. Extension trailers, embedded trailers, and leaf trailers follow the slots in ascending slot
-order.
+Non-root records start with a format and flag byte, followed by `childMask` and `leafMask`. An
+optional extension mask follows. Branch-child slots are fixed 32-byte hashes in ascending slot
+order. Extension trailers and leaf trailers follow the slots in ascending slot order. The embedded
+flag bit is reserved and rejected.
 
 Leaf entries contain the packed hashed suffix, a one-byte value length, and the value. Root records
 may carry a self-extension inline. A one-slot trie uses the leaf-root form. A zero-length record is

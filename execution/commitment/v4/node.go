@@ -97,11 +97,7 @@ func (n *node) childExtAt(nib int) []byte {
 	if !n.stored(nib) {
 		return nil
 	}
-	ext, err := decodeExtension(n.record.extAt(n.layout, nib))
-	if err != nil {
-		panic(fmt.Sprintf("commitment v4: validated record has a bad extension at %d: %v", nib, err))
-	}
-	return ext
+	return decodeExtension(n.record.extAt(n.layout, nib))
 }
 
 func (n *node) hasChildExt(nib int) bool {
@@ -202,7 +198,7 @@ func (n *node) setStoredChild(nib int, hash []byte, ext []byte) {
 	n.hashMask |= bit
 	s.node = nil
 	copy(s.hash[:], hash)
-	s.ext = appendCopy(s.ext, ext)
+	s.ext = append(s.ext[:0], ext...)
 	s.suffix = nil
 	s.value = nil
 }
@@ -231,12 +227,4 @@ func (n *node) clear(nib int) {
 	n.leafMask &^= bit
 	n.hashMask &^= bit
 	n.slotMask &^= bit
-}
-
-func appendCopy(dst, src []byte) []byte {
-	if src == nil {
-		return nil
-	}
-	dst = append(dst[:0], src...)
-	return dst
 }

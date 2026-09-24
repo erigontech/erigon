@@ -42,8 +42,8 @@ type Trie struct {
 }
 
 func NewTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
-	if err := AssertV1Keyed(cfg.NibblesV2); err != nil {
-		panic(err)
+	if cfg.NibblesV2 {
+		panic(ErrV4RequiresV1Keyed)
 	}
 	return &Trie{}, commitment.NewUpdates(commitment.ModeCollect, tmpdir, commitment.KeyToHexNibbleHash)
 }
