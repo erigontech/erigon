@@ -99,3 +99,44 @@ func TestAccessor_EndToEndRoundTrip(t *testing.T) {
 	require.True(t, blockNames["v1.0-000000-000500-headers.seg"])
 	require.True(t, blockNames["v1.0-000000-000500-headers.idx"], "block .idx accessor must survive the round trip")
 }
+
+// TestBlockList_StateFileKindSurvivesRoundTrip pins that a state file the
+// inventory could not attribute to a known domain still reaches the consumer
+// carrying its Kind.
+//
+// Standalone inverted indices (logaddrs, logtopics) and domains absent from
+// snapshot.AllDomains (rcache) get no Domain from the filename, so the
+// publisher files them under the manifest's block list. BlockFileEntry has no
+// kind field, so the Kind the publisher's own inventory derived is dropped on
+// the wire — and the consumer's KindConsistencyFromName validator then rejects
+// the download, leaving the .ef with no accessor and a files/DB gap.
+func TestBlockList_StateFileKindSurvivesRoundTrip(t *testing.T) {
+	inv := snapshot.NewInventory()
+	add := func(name string, h byte) {
+		require.NoError(t, inv.AddFile(&snapshot.FileEntry{
+			Name: name, TorrentHash: [20]byte{h}, Local: true, Trust: snapshot.TrustVerified,
+		}))
+	}
+	add("v3.0-logaddrs.330-331.ef", 0x30)
+	add("v3.1-rcache.330-331.v", 0x31)
+	add("v1.0-000000-000500-headers.seg", 0x32)
+
+	data, err := downloader.MarshalV2(downloader.GenerateV2(inv))
+	require.NoError(t, err)
+	parsed, err := downloader.ParseV2(data)
+	require.NoError(t, err)
+	peer := v2ToPeerManifest("peer", parsed)
+
+	got := map[string]snapshot.FileKind{}
+	for _, e := range peer.Blocks {
+		got[e.Name] = e.Kind
+	}
+	for name, kind := range got {
+		want, ok := snapshot.InferKind(name)
+		require.True(t, ok, "test names must all be inferable: %s", name)
+		require.Equal(t, want, kind,
+			"%s reached the consumer with Kind=%q; KindConsistencyFromName rejects that, "+
+				"so the download is failed and no accessor is ever built", name, kind)
+	}
+	require.Len(t, got, 3, "all three files must survive to the block list")
+}

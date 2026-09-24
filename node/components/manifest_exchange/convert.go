@@ -92,13 +92,22 @@ func v2ToPeerManifest(peerID string, m *downloader.ChainTomlV2) flow.PeerManifes
 					trust = t
 				}
 			}
-			out.Blocks = append(out.Blocks, &snapshot.FileEntry{
+			entry := &snapshot.FileEntry{
 				Name:        b.Name,
 				TorrentHash: hash,
 				FromStep:    from,
 				ToStep:      to,
 				Trust:       trust,
-			})
+			}
+			// BlockFileEntry has no kind field, so the publisher's Kind is
+			// lost on the wire. Anything the inventory could not attribute
+			// to a known domain lands here — including state files such as
+			// the standalone logaddrs/logtopics indices — and reaches the
+			// consumer's own kind-consistency validator untagged.
+			if kind, ok := snapshot.InferKind(entry.Name); ok {
+				entry.Kind = kind
+			}
+			out.Blocks = append(out.Blocks, entry)
 		}
 	}
 
