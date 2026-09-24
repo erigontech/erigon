@@ -51,6 +51,7 @@ var commitmentStepRangeRe = regexp.MustCompile(`-commitment\.(\d+)-(\d+)\.`)
 type ConvertOpts struct {
 	TargetSqueeze   bool
 	TargetNibblesV2 bool
+	TargetV3        bool
 	// Continue resumes a prior interrupted conversion: input files whose
 	// converted shard already exists in <datadir>/snap/rebuild/domain/ with
 	// every required accessor sibling are skipped. Operator is responsible
@@ -617,6 +618,16 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	at.a.applyReferencesInCommitmentBranches(opts.TargetSqueeze)
 	defer at.a.applyReferencesInCommitmentBranches(prevRefs)
 
+	commitmentDomain := at.d[kv.CommitmentDomain].d
+	requiredAccessors := requiredAccessorsForCommitment(commitmentDomain.Accessors)
+	if opts.TargetV3 {
+		legacyAccessors := commitmentDomain.Accessors
+		statecfg.EnableCommitmentV3Records(&commitmentDomain.DomainCfg)
+		commitmentDomain.Accessors = legacyAccessors
+		commitmentDomain.History.FileVersion.DataV = commitmentDomain.DomainCfg.Hist.FileVersion.DataV
+		requiredAccessors = requiredAccessorsForCommitment(statecfg.CommitmentV3Accessors)
+	}
+
 	dirs := at.Dirs()
 	rebuildDir := filepath.Join(dirs.Snap, "rebuild", "domain")
 	backupDir := filepath.Join(dirs.Snap, "backup", "domains")
@@ -627,7 +638,6 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 
 	// requiredAccessors mirrors the set Phase 2 verifies post-conversion;
 	// preflightResume reuses it to classify shards from prior interrupted runs.
-	requiredAccessors := requiredAccessorsForCommitment(at.d[kv.CommitmentDomain].d)
 	// pendingFiles is the suffix of `files` that still needs Phase 1 work.
 	// `files` itself stays as the full original input list — Phases 2-3 walk
 	// it to identify and back up originals for shards completed in prior
@@ -670,7 +680,15 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 		common.PrettyCounter(processedKeys),
 		time.Since(phaseStart).Round(time.Second), signedByteSizeHR(totalSizeDelta)))
 
-	if processedFiles == 0 && priorCompleteCount == 0 {
+	var historyRanges []commitmentHistoryRange
+	historyStage := newCommitmentV3HistoryStage(dirs)
+	if opts.TargetV3 {
+		if historyRanges, err = convertCommitmentHistoryV3(ctx, at, historyStage, logger); err != nil {
+			return fmt.Errorf("[commitment_convert] phase 1 history: %w", err)
+		}
+	}
+
+	if processedFiles == 0 && priorCompleteCount == 0 && len(historyRanges) == 0 {
 		if rmErr := dir.RemoveAll(rebuildDir); rmErr != nil {
 			logger.Warn("[commitment_convert] failed to remove empty rebuild dir", "path", rebuildDir, "err", rmErr)
 		}
@@ -683,6 +701,9 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	// expected accessor sibling landed in rebuildDir. Walks the full input
 	// list so prior-run shards (those filtered out of pendingFiles) are
 	// included in convertedFiles and reach Phase 3's backup step.
+	if opts.TargetV3 {
+		commitmentDomain.Accessors = statecfg.CommitmentV3Accessors
+	}
 	convertedFiles, err := convertPhase2(at, files, rebuildDir)
 	if err != nil {
 		return err
@@ -720,10 +741,34 @@ func ConvertCommitmentFiles(ctx context.Context, at *AggregatorRoTx, opts Conver
 	cleanupParentIfEmpty(filepath.Dir(rebuildDir), logger)
 	logger.Info(fmt.Sprintf("[commitment_convert] phase 4 promote: %d files moved to %s",
 		promoted, dirs.SnapDomain))
+	if len(historyRanges) > 0 {
+		historyBackup := filepath.Join(dirs.Snap, "backup")
+		movedHistory, err := convertHistoryPhase3(dirs, historyBackup, historyRanges)
+		if err != nil {
+			return fmt.Errorf("[commitment_convert] phase 3 history backup: %w", err)
+		}
+		promotedHistory, err := convertHistoryPhase4(dirs, historyStage)
+		if err != nil {
+			return fmt.Errorf("[commitment_convert] phase 4 history promote: %w", err)
+		}
+		cleanupParentIfEmpty(filepath.Dir(historyStage.history), logger)
+		logger.Info(fmt.Sprintf("[commitment_convert] history: %d originals moved to %s, %d converted files promoted",
+			movedHistory, historyBackup, promotedHistory))
+	}
 
 	// Phase 5: reload aggregator.
 	if reloadErr := at.a.ReloadFiles(); reloadErr != nil {
 		return fmt.Errorf("[commitment_convert] phase 5 ReloadFiles: %w", reloadErr)
+	}
+	if opts.TargetV3 {
+		if err := verifyCommitmentV3Files(ctx, at.a, logger); err != nil {
+			return fmt.Errorf("[commitment_convert] v3 verification: %w", err)
+		}
+		if len(historyRanges) > 0 {
+			if err := verifyCommitmentV3History(ctx, at.a, historyRanges, logger); err != nil {
+				return fmt.Errorf("[commitment_convert] v3 history verification: %w", err)
+			}
+		}
 	}
 
 	doneSummary := fmt.Sprintf("%d files", expectedConverted)
@@ -1009,15 +1054,15 @@ func preflightBackupDir(backupDir string) error {
 //
 // Extracted from convertPhase2 so preflightResume can apply the same
 // completeness check before phase 1 starts.
-func requiredAccessorsForCommitment(d *Domain) []string {
+func requiredAccessorsForCommitment(accessors statecfg.Accessors) []string {
 	var out []string
-	if d.Accessors.Has(statecfg.AccessorBTree) {
+	if accessors.Has(statecfg.AccessorBTree) {
 		out = append(out, ".bt")
 	}
-	if d.Accessors.Has(statecfg.AccessorHashMap) {
+	if accessors.Has(statecfg.AccessorHashMap) {
 		out = append(out, ".kvi")
 	}
-	if d.Accessors.Has(statecfg.AccessorExistence) {
+	if accessors.Has(statecfg.AccessorExistence) {
 		out = append(out, ".kvei")
 	}
 	return out
@@ -1258,7 +1303,14 @@ func convertPhase1(
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return processedFiles, skippedFiles, totalSizeDelta, processedKeys, ctxErr
 		}
-		delta, _, ki, convErr := convertCommitmentFile(ctx, at, f, rebuildDir, opts, i+1, N, grandTotalKeys, processedKeys, logger)
+		var delta int64
+		var ki uint64
+		var convErr error
+		if opts.TargetV3 {
+			delta, ki, convErr = convertCommitmentFileV3(ctx, at, f, rebuildDir, i+1, N, grandTotalKeys, processedKeys, logger)
+		} else {
+			delta, _, ki, convErr = convertCommitmentFile(ctx, at, f, rebuildDir, opts, i+1, N, grandTotalKeys, processedKeys, logger)
+		}
 		if errors.Is(convErr, errSkip) {
 			skippedFiles++
 			processedKeys += at.KeyCountInFiles(kv.CommitmentDomain, f.StartRootNum(), f.EndRootNum())

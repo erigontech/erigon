@@ -83,6 +83,9 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
+	if ExperimentalCommitmentV4 {
+		EnableCommitmentV3Records(&Schema.CommitmentDomain)
+	}
 }
 
 type SchemaGen struct {
@@ -190,6 +193,9 @@ func (s *SchemaGen) GetBlockIdxFilesCfg(name string) BlockIdxFilesCfg {
 // commitmentKVWriteVersion stamps v2.1 on referenced commitment files (matching main's referenced
 // default) and v2.2 on plain ones; the read ceiling (DataKV.Current = v2.2) accepts both.
 func commitmentKVWriteVersion(c *DomainCfg) version.Version {
+	if c.CommitmentV3Records {
+		return version.V3_0
+	}
 	if c.ReferencesInCommitmentBranches {
 		return version.V2_1
 	}
@@ -382,6 +388,17 @@ var Schema = SchemaGen{
 		Name:        kv.TracesToIdx,
 		Accessors:   AccessorHashMap,
 	},
+}
+
+const CommitmentV3Accessors = AccessorBTree | AccessorExistence
+
+func EnableCommitmentV3Records(c *DomainCfg) {
+	c.CommitmentV3Records = true
+	c.Accessors = CommitmentV3Accessors
+	c.FileVersion.DataKV.Current = version.V3_0
+	c.FileVersion.AccessorBT = version.Versions{Current: version.V2_0, MinSupported: version.V1_0}
+	c.FileVersion.AccessorKVEI = version.Versions{Current: version.V1_2, MinSupported: version.V1_0}
+	c.Hist.FileVersion.DataV.Current = version.V3_0
 }
 
 func EnableHistoricalCommitment() {
