@@ -51,7 +51,9 @@ func (b *RPCBlock) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	}
 
 	s.WriteObjectStart()
-	b.RPCHeader.WriteFieldsTo(s)
+	if err := b.RPCHeader.writeJSONFields(s); err != nil {
+		return err
+	}
 
 	jsonstream.Text(s, "size", &b.Size)
 

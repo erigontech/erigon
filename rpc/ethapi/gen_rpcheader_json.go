@@ -17,15 +17,15 @@ func (x *RPCHeader) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
-	if err := x.WriteFieldsTo(s); err != nil {
+	if err := x.writeJSONFields(s); err != nil {
 		return err
 	}
 	s.WriteObjectEnd()
 	return nil
 }
 
-// WriteFieldsTo writes those fields without the enclosing object.
-func (x *RPCHeader) WriteFieldsTo(s *jsonstream.StackStream) error {
+// writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
+func (x *RPCHeader) writeJSONFields(s *jsonstream.StackStream) error {
 	if x.Number == nil {
 		s.Field("number").WriteNil()
 	} else {

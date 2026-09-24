@@ -383,7 +383,7 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 	return logger.FormatLogs(logs)
 }
 
-//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCHeader -out gen_rpcheader_json.go -fields WriteFieldsTo
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCHeader -out gen_rpcheader_json.go
 
 // RPCHeader is the RPC representation of a block header. Quantities, byte slices
 // and optional hashes alias the header they were built from, so the caller must
