@@ -72,7 +72,7 @@ func TestAppendRPCLogs(t *testing.T) {
 			require.Len(t, got, tc.wantLen)
 			for i, l := range got[len(tc.logs):] {
 				assert.Equal(t, tc.receiptLogs[i].Index, l.Index)
-				assert.Equal(t, hexutil.Uint64(blockTime), l.BlockTimestamp)
+				assert.Equal(t, hexutil.Uint64(blockTime), *l.BlockTimestamp)
 			}
 		})
 	}

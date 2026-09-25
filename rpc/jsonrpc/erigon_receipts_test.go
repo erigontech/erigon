@@ -573,7 +573,7 @@ func TestGetLogsByHashIncludesBlockTimestamp(t *testing.T) {
 	for _, txLogs := range byHash {
 		for _, l := range txLogs {
 			require.Equal(t, expected[0].BlockTimestamp, l.BlockTimestamp)
-			require.NotZero(t, l.BlockTimestamp)
+			require.NotZero(t, *l.BlockTimestamp)
 			seen++
 		}
 	}
@@ -608,7 +608,7 @@ func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
 	var seen int
 	for _, txLogs := range cachedLogs {
 		for _, l := range txLogs {
-			require.NotZero(t, l.BlockTimestamp)
+			require.NotZero(t, *l.BlockTimestamp)
 			seen++
 		}
 	}
