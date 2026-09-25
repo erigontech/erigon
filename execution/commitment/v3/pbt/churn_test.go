@@ -178,13 +178,31 @@ func runTrieChurn(t *testing.T, seed int64) {
 }
 
 func churnKeys() ([][]byte, [][]byte) {
-	keys := make([][]byte, 0, 40)
+	keys := make([][]byte, 0, 300)
+	seen := make(map[string]struct{})
+	appendKey := func(key []byte) {
+		if _, ok := seen[string(key)]; ok {
+			return
+		}
+		seen[string(key)] = struct{}{}
+		keys = append(keys, bytes.Clone(key))
+	}
+	appendPair := func(key []byte, bit int) {
+		other := bytes.Clone(key)
+		other[bit/8] ^= 1 << uint(7-bit%8)
+		appendKey(key)
+		appendKey(other)
+	}
 	for stemNibble := range 4 {
 		key := make([]byte, eip8297.AccountKeyLength)
 		key[0] = eip8297.AccountZone
 		key[len(key)-2] = byte(stemNibble)
 		key[len(key)-1] = eip8297.BasicDataLeafKey
-		keys = append(keys, key)
+		appendKey(key)
+	}
+	accountBase := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x45}, 20), eip8297.BasicDataLeafKey)
+	for window := 2; window <= 67; window++ {
+		appendPair(accountBase, window*4+1)
 	}
 	prefixes := make([][]byte, 0, 2)
 	for addressIndex := range 2 {
@@ -193,14 +211,25 @@ func churnKeys() ([][]byte, [][]byte) {
 		prefixes = append(prefixes, bytes.Clone(stem))
 		for _, first := range []byte{0x20, 0x40, 0xc6} {
 			for last := range 8 {
-				keys = append(keys, storageKeyWithSuffix(stem, first, byte(last)))
+				appendKey(storageKeyWithSuffix(stem, first, byte(last)))
 			}
 		}
+		base := eip8297.TreeKeyStorage(address, storageSlot(64))
+		for bit := 264; bit <= 271; bit++ {
+			appendPair(base, bit)
+		}
+		for window := 66; window <= 131; window++ {
+			appendPair(base, window*4+1)
+		}
+	}
+	codeBase := trieCodeKey(0, 0, 1)
+	for window := 2; window <= 67; window++ {
+		appendPair(codeBase, window*4+1)
 	}
 	for _, first := range []byte{0, 0x10} {
 		for _, second := range []byte{0, 8} {
 			for seed := byte(1); seed < 4; seed++ {
-				keys = append(keys, trieCodeKey(first, second, seed))
+				appendKey(trieCodeKey(first, second, seed))
 			}
 		}
 	}
@@ -211,7 +240,7 @@ func churnBatch(rng *rand.Rand, keys, prefixes [][]byte, state map[string]Op) []
 	count := 1 + rng.Intn(6)
 	used := make(map[string]struct{}, count)
 	ops := make([]Op, 0, count+2)
-	if rng.Intn(4) == 0 {
+	if rng.Intn(2) == 0 {
 		prefix := prefixes[rng.Intn(len(prefixes))]
 		used[string(prefix)] = struct{}{}
 		ops = append(ops, Drop(prefix))
@@ -222,7 +251,7 @@ func churnBatch(rng *rand.Rand, keys, prefixes [][]byte, state map[string]Op) []
 			continue
 		}
 		used[string(key)] = struct{}{}
-		if rng.Intn(5) == 0 {
+		if rng.Intn(10) != 0 {
 			ops = append(ops, Op{Key: key})
 		} else {
 			ops = append(ops, Op{Key: key, Value: testTrieValue(byte(rng.Intn(255) + 1))})

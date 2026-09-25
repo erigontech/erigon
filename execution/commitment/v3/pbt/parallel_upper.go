@@ -73,7 +73,10 @@ type phaseBucketResult struct {
 func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask) (phaseBucketResult, error) {
 	base := workerContext
 	if base == nil {
-		base = t.ctx
+		base = t.phaseBase
+		if base == nil {
+			base = t.ctx
+		}
 	}
 	local := &phaseContext{base: base, records: make(map[string][]byte)}
 	bucketTrie, err := newBucketTrie(local, []byte(task.key))
@@ -96,81 +99,146 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 }
 
 func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phasePlan, ops []Op) (common.Hash, error) {
-	if _, err := t.loadRoot(); err != nil {
-		return common.Hash{}, err
-	}
+	base := t.ctx
+	round := &phaseContext{base: base, records: make(map[string][]byte)}
+	t.ctx = round
+	t.phaseBase = base
+	defer func() {
+		t.ctx = base
+		t.phaseBase = nil
+	}()
 	t.roundPrev = make(map[string][]byte)
 	t.deltas = nil
 	t.bucketDirty = make(map[string][]byte)
+	if _, err := t.loadRoot(); err != nil {
+		return common.Hash{}, err
+	}
 	t.rememberPrev(t.rootRecordKey(), t.root.prev)
 	bucketTasks := make([]phaseTask, 0)
-	phaseB := make([]Op, 0, len(ops))
 	for _, task := range plan.tasks {
 		if task.kind == phaseBucket {
 			bucketTasks = append(bucketTasks, task)
 		}
 	}
-	for _, op := range ops {
-		if len(op.Drop) != 0 {
-			continue
-		}
-		if len(op.Key) == eip8297.StorageKeyLength && op.Key[0] == eip8297.StorageZone {
-			continue
-		}
-		phaseB = append(phaseB, op)
-	}
-	sort.SliceStable(bucketTasks, func(i, j int) bool {
-		if len(bucketTasks[i].ops) != len(bucketTasks[j].ops) {
-			return len(bucketTasks[i].ops) > len(bucketTasks[j].ops)
-		}
-		return bytes.Compare([]byte(bucketTasks[i].key), []byte(bucketTasks[j].key)) < 0
-	})
 	results := make([]phaseBucketResult, len(bucketTasks))
-	phasePlan := phasePlan{tasks: bucketTasks}
+	bucketResultIndex := make(map[string]int, len(bucketTasks))
+	for i := range bucketTasks {
+		bucketResultIndex[bucketTasks[i].key] = i
+	}
+	subtaskResults := make([]bool, len(plan.tasks))
+	chainResults := make([][]Op, len(plan.tasks))
 	phaseWorkers := workers
 	factory := t.ctxFactory
 	if factory == nil {
 		phaseWorkers = 1
 	}
-	if err := runPhasePlanWithFactory(ctx, phaseWorkers, phasePlan, factory, func(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask) error {
-		if err := t.phaseHookCall(task, nil); err != nil {
-			return err
-		}
-		result, err := t.runSubtreeTask(workerCtx, workerContext, task)
-		if err != nil {
-			return err
-		}
-		index := 0
-		for i := range bucketTasks {
-			if bucketTasks[i].key == task.key {
-				index = i
-				break
+	var finalRoot common.Hash
+	if err := runPhasePlanWithFactory(ctx, phaseWorkers, plan, factory, func(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask) error {
+		switch task.kind {
+		case phaseBucketSubtask:
+			if err := t.phaseHookCall(task, nil); err != nil {
+				return err
 			}
+			subtaskResults[task.resultIndex] = true
+			return workerCtx.Err()
+		case phaseBucket:
+			if err := t.phaseHookCall(task, nil); err != nil {
+				return err
+			}
+			for _, dependency := range task.dependencies {
+				if !subtaskResults[dependency] {
+					return fmt.Errorf("bucket %x missing subtask result", []byte(task.key))
+				}
+			}
+			result, err := t.runSubtreeTask(workerCtx, workerContext, task)
+			if err != nil {
+				return err
+			}
+			results[bucketResultIndex[task.key]] = result
+			return nil
+		case phaseChain:
+			if err := t.phaseHookCall(task, nil); err != nil {
+				return err
+			}
+			if task.zone == eip8297.StorageZone {
+				return workerCtx.Err()
+			}
+			for i := range task.ops {
+				if err := t.phaseHookCall(task, &task.ops[i]); err != nil {
+					return err
+				}
+			}
+			chainResults[task.resultIndex] = append([]Op(nil), task.ops...)
+			return workerCtx.Err()
+		case phaseJoin:
+			changedBuckets := make(map[string]phaseBucketResult, len(results))
+			for i := range results {
+				result := &results[i]
+				key := bucketTasks[i].key
+				changedBuckets[key] = *result
+				for _, delta := range result.deltas {
+					if _, ok := round.records[string(delta.Key)]; !ok {
+						round.records[string(delta.Key)] = bytes.Clone(delta.Prev)
+					}
+					if err := t.ctx.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
+						return fmt.Errorf("apply phase A delta %x: %w", delta.Key, err)
+					}
+					t.rememberPrev(delta.Key, delta.Prev)
+					t.addDelta(delta.Key, delta.Data, delta.Prev)
+				}
+			}
+			if err := t.phaseHookCall(task, nil); err != nil {
+				return err
+			}
+			var err error
+			phaseB := make([]Op, 0, len(ops))
+			for _, chain := range chainResults {
+				phaseB = append(phaseB, chain...)
+			}
+			finalRoot, err = t.processUpperOps(phaseB, changedBuckets)
+			return err
+		default:
+			return fmt.Errorf("unknown phase task %d", task.kind)
 		}
-		results[index] = result
-		return nil
 	}); err != nil {
 		return common.Hash{}, err
 	}
-	changedBuckets := make(map[string]phaseBucketResult, len(results))
-	for i := range results {
-		result := &results[i]
-		key := bucketTasks[i].key
-		changedBuckets[key] = *result
-		for _, delta := range result.deltas {
-			if err := t.ctx.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
-				return common.Hash{}, fmt.Errorf("apply phase A delta %x: %w", delta.Key, err)
-			}
-			t.rememberPrev(delta.Key, delta.Prev)
-			t.addDelta(delta.Key, delta.Data, delta.Prev)
-		}
-	}
-	for i := range phaseB {
-		if err := t.phaseHookCall(phaseTask{kind: phaseChain, owner: ownerChain}, &phaseB[i]); err != nil {
+	merged := mergeRoundDeltas(t.deltas)
+	t.deltas = merged
+	t.ctx = base
+	for _, delta := range merged {
+		if err := base.PutBranch(delta.Key, delta.Data, delta.Prev); err != nil {
 			return common.Hash{}, err
 		}
 	}
-	return t.processUpperOps(phaseB, changedBuckets)
+	return finalRoot, nil
+}
+
+func mergeRoundDeltas(deltas []commitment.BranchDelta) []commitment.BranchDelta {
+	byKey := make(map[string]commitment.BranchDelta, len(deltas))
+	for _, delta := range deltas {
+		key := string(delta.Key)
+		if existing, ok := byKey[key]; ok {
+			existing.Data = bytes.Clone(delta.Data)
+			byKey[key] = existing
+			continue
+		}
+		byKey[key] = commitment.BranchDelta{Key: bytes.Clone(delta.Key), Data: bytes.Clone(delta.Data), Prev: bytes.Clone(delta.Prev)}
+	}
+	keys := make([]string, 0, len(byKey))
+	for key := range byKey {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]commitment.BranchDelta, 0, len(keys))
+	for _, key := range keys {
+		delta := byKey[key]
+		if bytes.Equal(delta.Data, delta.Prev) {
+			continue
+		}
+		result = append(result, delta)
+	}
+	return result
 }
 
 func (t *Trie) phaseHookCall(task phaseTask, op *Op) error {

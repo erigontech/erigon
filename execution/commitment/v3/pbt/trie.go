@@ -39,6 +39,7 @@ func Drop(prefix []byte) Op { return Op{Drop: bytes.Clone(prefix)} }
 type Trie struct {
 	ctx                    commitment.PatriciaContext
 	ctxFactory             commitment.TrieContextFactory
+	phaseBase              commitment.PatriciaContext
 	phaseHook              func(phaseTask, *Op) error
 	rootKey                []byte
 	rootPath               eip8297.Bitpath
@@ -81,6 +82,7 @@ func (t *Trie) SetPhaseHook(hook func(phaseTask, *Op) error) { t.phaseHook = hoo
 
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.ctx = ctx
+	t.phaseBase = nil
 	t.root = nil
 	t.rootLoaded = false
 	t.rootDirty = false
