@@ -1092,7 +1092,7 @@ func TestPublishBackground_DrainsBufferedJobsOnParentContextCancellation(t *test
 	}
 }
 
-// TestPublishBackground_NoAdmissionAfterParentContextCancellation
+// TestPublishBackground_AdmissionRacingCancellationIsDrainedNotStranded
 // reproduces the race both reviewers identified precisely: a producer that
 // has already passed PublishBackground's shutdown check pauses immediately
 // before its enqueue send; the parent context (the one production code
@@ -1100,10 +1100,11 @@ func TestPublishBackground_DrainsBufferedJobsOnParentContextCancellation(t *test
 // Close) is cancelled, and shutdownObservedHookForTest gives a deterministic
 // signal that the worker has committed to its shutdown path and is
 // contending for shutdownMu - only then does the producer resume and send.
-// With the fix, the drain cannot complete until that send has happened
-// (shutdownMu serializes them), so the message is never left stranded once
-// everything settles.
-func TestPublishBackground_NoAdmissionAfterParentContextCancellation(t *testing.T) {
+// The producer wins this race (it entered the enqueue hook before
+// cancellation, so admission must succeed, not report shutdown), and the
+// drain cannot complete until that send has happened (shutdownMu serializes
+// them), so the message is never left stranded once everything settles.
+func TestPublishBackground_AdmissionRacingCancellationIsDrainedNotStranded(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockClock := eth_clock.NewMockEthereumClock(ctrl)
 	mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
