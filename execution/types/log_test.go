@@ -357,7 +357,7 @@ func TestLogJSONBlockTimestamp(t *testing.T) {
 		Topics:         []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
 		Data:           hexutil.MustDecode("0x112233"),
 		TxHash:         common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
-		BlockTimestamp: hexutil.Uint64(1700000000),
+		BlockTimestamp: at(1700000000),
 	}
 
 	b, err := json.Marshal(el)
@@ -381,7 +381,7 @@ func TestLogUnmarshalJSONBlockTimestamp(t *testing.T) {
 
 	var log Log
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
-	require.Equal(t, hexutil.Uint64(0x60000000), log.BlockTimestamp)
+	require.Equal(t, at(0x60000000), log.BlockTimestamp)
 	require.Equal(t, common.HexToAddress("0x2222222222222222222222222222222222222222"), log.Address)
 }
 
@@ -392,7 +392,7 @@ func TestLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
 
 	var log Log
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
-	require.Equal(t, hexutil.Uint64(0), log.BlockTimestamp)
+	require.Nil(t, log.BlockTimestamp, "the legacy `timestamp` key is not blockTimestamp")
 	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
 }
 
@@ -428,8 +428,13 @@ func TestAppendFilteredLogs(t *testing.T) {
 
 	require.Len(t, rpcLogs, len(logs))
 	for i, rpcLog := range rpcLogs {
-		require.Equal(t, hexutil.Uint64(1900000000), rpcLog.BlockTimestamp)
-		require.Equal(t, *StampedLog(logs[i], 1900000000), *rpcLog)
+		require.Equal(t, at(1900000000), rpcLog.BlockTimestamp)
+		// Stamping must copy: the source keeps no timestamp and the reply is a distinct log.
+		require.Nil(t, logs[i].BlockTimestamp, "the source log must not be stamped in place")
+		require.NotSame(t, logs[i], rpcLog)
+		unstamped := *rpcLog
+		unstamped.BlockTimestamp = nil
+		require.Equal(t, *logs[i], unstamped, "only the timestamp differs")
 	}
 }
 
@@ -531,7 +536,7 @@ func TestLogsMarshalFastJSON(t *testing.T) {
 			BlockHash:      common.HexToHash("0xccdd"),
 			Index:          hexutil.Uint(^uint(0)),
 			Removed:        removed,
-			BlockTimestamp: hexutil.Uint64(^uint64(0)),
+			BlockTimestamp: at(^uint64(0)),
 		}
 	}
 	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
@@ -576,7 +581,7 @@ func TestLogsMarshalFastJSONTo(t *testing.T) {
 		BlockHash:      common.HexToHash("0xdd"),
 		Index:          3,
 		Removed:        true,
-		BlockTimestamp: 0x64,
+		BlockTimestamp: at(0x64),
 	}
 	for name, logs := range map[string]Logs{
 		"nil":          nil,
@@ -625,7 +630,7 @@ func TestLogMatchesItsTags(t *testing.T) {
 			BlockHash:      common.HexToHash("0xccdd"),
 			Index:          hexutil.Uint(^uint(0)),
 			Removed:        true,
-			BlockTimestamp: hexutil.Uint64(^uint64(0)),
+			BlockTimestamp: at(^uint64(0)),
 		},
 		"zero": {},
 	} {
@@ -637,4 +642,10 @@ func TestLogMatchesItsTags(t *testing.T) {
 			require.Equal(t, string(want), string(got))
 		})
 	}
+}
+
+// at is a stamped timestamp, which a reply carries as a pointer so an unstamped log omits the key.
+func at(v uint64) *hexutil.Uint64 {
+	h := hexutil.Uint64(v)
+	return &h
 }

@@ -63,8 +63,8 @@ type Log struct {
 	// You must pay attention to this field if you receive logs through a filter query.
 	Removed bool `json:"removed" ethjson:"bool" codec:"-"`
 
-	// zero for the replies that do not stamp it
-	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp,omitempty" ethjson:"quantity" codec:"-"`
+	// nil for the replies that do not stamp it; a stamped zero still writes 0x0
+	BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp,omitempty" ethjson:"quantity" codec:"-"`
 }
 
 // UnmarshalJSON validates required fields: address, topics, data, transactionHash.
@@ -117,9 +117,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	if dec.Removed != nil {
 		l.Removed = *dec.Removed
 	}
-	if dec.BlockTimestamp != nil {
-		l.BlockTimestamp = *dec.BlockTimestamp
-	}
+	l.BlockTimestamp = dec.BlockTimestamp
 	return nil
 }
 
@@ -162,7 +160,8 @@ func (logs Logs) Copy() Logs {
 // writing to the log the caller holds.
 func StampedLog(log *Log, timestamp uint64) *Log {
 	stamped := *log
-	stamped.BlockTimestamp = hexutil.Uint64(timestamp)
+	at := hexutil.Uint64(timestamp)
+	stamped.BlockTimestamp = &at
 	return &stamped
 }
 
