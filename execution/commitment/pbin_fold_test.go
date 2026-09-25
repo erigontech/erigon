@@ -70,7 +70,7 @@ func (l pbinTestLeaf) cell(t *testing.T, depth int16) pbinCell {
 	full := pbinPathFromBytes(l.treeKey)
 	c := pbinTestEmptyCell()
 	c.kind = pbinNodeLeaf
-	c.prefix = full.slice(depth, full.bitLen)
+	c.prefix = full.Slice(depth, full.BitLen)
 	copy(c.storageAddr[:], l.plainKey)
 	c.storageAddrLen = length.Addr + length.Hash
 	c.Update = l.update()
@@ -119,7 +119,7 @@ func pbinTestBaseStorageKey() []byte {
 
 func pbinTestKeyPrefix(key []byte, bitLen int16) pbinBitpath {
 	full := pbinPathFromBytes(key)
-	return full.slice(0, bitLen)
+	return full.Slice(0, bitLen)
 }
 
 func pbinTestSeedRow(pph *PBinPatriciaHashed, currentKey pbinBitpath, depth int16, cells [2]pbinCell, touchMap, afterMap uint16) {
@@ -140,7 +140,7 @@ func pbinTestFillCell(pph *PBinPatriciaHashed, row int, bit uint64, c pbinCell) 
 func pbinTestBranchOrder(t *testing.T, a, b pbinTestLeaf, divergence int16) (left, right pbinTestLeaf) {
 	t.Helper()
 	path := pbinPathFromBytes(a.treeKey)
-	if path.bit(divergence) == 1 {
+	if path.Bit(divergence) == 1 {
 		return b, a
 	}
 	return a, b
@@ -171,7 +171,7 @@ func TestPBinFoldBranchMatchesOracle(t *testing.T) {
 
 			require.NoError(t, pph.fold())
 			require.Equal(t, 0, pph.grid.activeRows)
-			require.Equal(t, int16(0), pph.currentKey.bitLen)
+			require.Equal(t, int16(0), pph.currentKey.BitLen)
 			require.True(t, pph.rootTouched)
 			require.True(t, pph.rootPresent)
 			require.Zero(t, ctx.branchReads, "a fold of loaded cells reads nothing")
@@ -186,12 +186,12 @@ func TestPBinFoldBranchMatchesOracle(t *testing.T) {
 			require.NotEmpty(t, data, "a branch fold stores its row")
 
 			var stored [2]pbinCell
-			keys := pbinDigestCache{sum: pbinSelectedSum}
+			keys := pbinDigestCache{Sum: pbinSelectedSum}
 			err = pbinDecodeBranch(data, &stored, divergence+1, &keys)
 			require.NoError(t, err)
 			for i := range stored {
-				storageKey := pbinPathFromBytes(keys.storageKey(stored[i].storageAddr[:length.Addr], stored[i].storageAddr[length.Addr:]))
-				require.Equal(t, storageKey.slice(divergence+1, storageKey.bitLen), stored[i].prefix)
+				storageKey := pbinPathFromBytes(keys.StorageKey(stored[i].storageAddr[:length.Addr], stored[i].storageAddr[length.Addr:]))
+				require.Equal(t, storageKey.Slice(divergence+1, storageKey.BitLen), stored[i].prefix)
 			}
 
 			var enc pbinBranchEncoder
@@ -279,7 +279,7 @@ func TestPBinFoldPropagateRestoresDescendedNode(t *testing.T) {
 			u := pph.needUnfolding(&probe)
 			require.Equal(t, pbinUnfolding{action: pbinUnfoldDescend, matched: divergence}, u)
 			require.NoError(t, pph.unfold(&probe, u))
-			require.Equal(t, int16(0), pph.grid.rows[0][probe.bit(divergence-1)].hashLen,
+			require.Equal(t, int16(0), pph.grid.rows[0][probe.Bit(divergence-1)].hashLen,
 				"re-cutting a prefix invalidates the hash it is inside")
 
 			u = pph.needUnfolding(&probe)
@@ -329,7 +329,7 @@ func TestPBinFoldSplitLeafSurvivorReadsNoBranch(t *testing.T) {
 			require.NoError(t, pph.unfold(&probe, u))
 			require.Equal(t, uint64(1), pph.counters.splitsInsidePrefix)
 
-			pbinTestFillCell(pph, 0, probe.bit(divergence), c.cell(t, divergence+1))
+			pbinTestFillCell(pph, 0, probe.Bit(divergence), c.cell(t, divergence+1))
 			require.NoError(t, pph.fold())
 
 			want := pbinOracleRoot([]pbinOracleEntry{a.entry(), c.entry()})
@@ -382,18 +382,18 @@ func TestPBinFoldSplitInsidePrefixMatchesOracle(t *testing.T) {
 			require.NoError(t, pph.unfold(&probe, u))
 			require.Equal(t, uint64(1), pph.counters.splitsInsidePrefix)
 
-			survivorBit := 1 - probe.bit(divergence)
+			survivorBit := 1 - probe.Bit(divergence)
 			survivor := &pph.grid.rows[0][survivorBit]
 			require.Equal(t, pbinNodeBranch, survivor.kind)
-			require.Equal(t, nodePrefix.slice(divergence+1, nodePrefixBits), survivor.prefix)
+			require.Equal(t, nodePrefix.Slice(divergence+1, nodePrefixBits), survivor.prefix)
 			require.Equal(t, int16(0), survivor.hashLen, "a shortened prefix voids the cached hash")
 
-			pbinTestFillCell(pph, 0, probe.bit(divergence), c.cell(t, divergence+1))
+			pbinTestFillCell(pph, 0, probe.Bit(divergence), c.cell(t, divergence+1))
 			require.NoError(t, pph.fold())
 
 			want := pbinOracleRoot([]pbinOracleEntry{a.entry(), b.entry(), c.entry()})
 			require.Equal(t, common.Hash(want), pph.grid.root.hash)
-			require.Equal(t, nodePrefix.slice(0, divergence), pph.grid.root.prefix)
+			require.Equal(t, nodePrefix.Slice(0, divergence), pph.grid.root.prefix)
 			require.Equal(t, uint64(1), pph.counters.materializeReads, "the survivor is rebuilt from one record")
 		})
 	}
@@ -424,7 +424,7 @@ func TestPBinFoldSplitInsidePrefixMissingRecord(t *testing.T) {
 
 	probe := pbinPathFromBytes(c.treeKey)
 	require.NoError(t, pph.unfold(&probe, pph.needUnfolding(&probe)))
-	pbinTestFillCell(pph, 0, probe.bit(divergence), c.cell(t, divergence+1))
+	pbinTestFillCell(pph, 0, probe.Bit(divergence), c.cell(t, divergence+1))
 
 	require.ErrorIs(t, pph.fold(), errPBinMissingBranch)
 }
@@ -500,7 +500,7 @@ func TestPBinFoldOneCellRowWritesNoRecord(t *testing.T) {
 
 			a := pbinTestStorageLeaf(base, 0x77)
 			key := pbinTestKeyPrefix(a.treeKey, depth-1)
-			bit := int(full.bit(depth - 1))
+			bit := int(full.Bit(depth - 1))
 
 			ms := NewMockState(t)
 			pbinTestPutState(t, ms, a)

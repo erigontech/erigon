@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
 // pbinTestCorpus holds plain-key updates and derives the leaf set they must
@@ -90,79 +91,45 @@ func (c *pbinTestCorpus) entries(t *testing.T) []pbinOracleEntry {
 // its code bytes.
 func pbinTestFinalEntries(t *testing.T, batches ...*pbinTestCorpus) []pbinOracleEntry {
 	t.Helper()
-	var zero [pbinValueLength]byte
-	var order []string
-	values := make(map[string][]byte)
-	owners := make(map[string]string)
-	set := func(key []byte, value [pbinValueLength]byte, owner []byte) {
-		k := string(key)
-		if _, seen := values[k]; !seen {
-			order = append(order, k)
-		}
-		if value == zero {
-			values[k] = nil
-		} else {
-			values[k] = bytes.Clone(value[:])
-		}
-		if owner != nil {
-			owners[k] = string(owner)
-		}
-	}
-	for _, b := range batches {
-		last := make(map[string]int, len(b.plainKeys))
-		for i, plainKey := range b.plainKeys {
+	stateBatches := make([][]eip8297.State, 0, len(batches))
+	for _, batch := range batches {
+		last := make(map[string]int, len(batch.plainKeys))
+		for i, plainKey := range batch.plainKeys {
 			last[string(plainKey)] = i
 		}
-		// Removals first: an account's header stem sorts before every other key
-		// it owns, so its drop always lands before the batch's re-inserts.
-		for i, plainKey := range b.plainKeys {
-			if last[string(plainKey)] != i || len(plainKey) != length.Addr || !b.updates[i].Deleted() {
-				continue
-			}
-			for k, owner := range owners {
-				if owner == string(plainKey) {
-					values[k] = nil
-				}
-			}
-		}
-		for i, plainKey := range b.plainKeys {
+		states := make([]eip8297.State, 0, len(last))
+		for i, plainKey := range batch.plainKeys {
 			if last[string(plainKey)] != i {
 				continue
 			}
-			u := &b.updates[i]
+			u := &batch.updates[i]
 			switch len(plainKey) {
 			case length.Addr:
-				if u.Deleted() {
-					continue
+				code := batch.codes[string(plainKey)]
+				if code == nil {
+					code = []byte{}
 				}
-				basic, err := pbinEncodeBasicData(u.Nonce, &u.Balance, u.CodeSize)
-				require.NoError(t, err)
-				set(pbinTreeKeyAccount(plainKey, pbinBasicDataLeafKey), basic, plainKey)
-				if code := b.codes[string(plainKey)]; pbinIsDelegation(code) {
-					set(pbinTreeKeyAccount(plainKey, pbinDelegationLeafKey), pbinEncodeDelegation(code), plainKey)
-					set(pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), zero, plainKey)
-				} else {
-					set(pbinTreeKeyAccount(plainKey, pbinCodeHashLeafKey), pbinCodeHashValue(u.CodeHash), plainKey)
-					set(pbinTreeKeyAccount(plainKey, pbinDelegationLeafKey), zero, plainKey)
-					for j, chunk := range pbinChunkifyCode(code) {
-						set(pbinTreeKeyCodeChunk(u.CodeHash, j), chunk, nil)
-					}
-				}
+				states = append(states, eip8297.State{
+					Address: bytes.Clone(plainKey), Nonce: u.Nonce, Balance: u.Balance,
+					Code: bytes.Clone(code), Deleted: u.Deleted(),
+				})
 			case length.Addr + length.Hash:
-				set(pbinTreeKeyStorage(plainKey[:length.Addr], plainKey[length.Addr:]),
-					pbinEncodeStorageValue(u.Storage[:u.StorageLen]), plainKey[:length.Addr])
+				states = append(states, eip8297.State{
+					Address: bytes.Clone(plainKey[:length.Addr]),
+					Slots:   map[string][]byte{string(plainKey[length.Addr:]): bytes.Clone(u.Storage[:u.StorageLen])},
+				})
 			default:
 				t.Fatalf("plain key of %d bytes is neither an account nor a storage key", len(plainKey))
 			}
 		}
+		stateBatches = append(stateBatches, states)
 	}
-	entries := make([]pbinOracleEntry, 0, len(order))
-	for _, k := range order {
-		if values[k] != nil {
-			entries = append(entries, pbinOracleEntry{key: []byte(k), value: values[k]})
-		}
+	entries := eip8297.EmbedState(stateBatches)
+	result := make([]pbinOracleEntry, 0, len(entries))
+	for _, entry := range entries {
+		result = append(result, pbinOracleEntry{key: entry.Key, value: entry.Value})
 	}
-	return entries
+	return result
 }
 
 func (c *pbinTestCorpus) oracleRoot(t *testing.T) []byte {

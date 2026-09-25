@@ -114,10 +114,10 @@ func TestPBinBranchDecodeAcceptsDescentDepthAndDigestCache(t *testing.T) {
 	t.Parallel()
 
 	var enc pbinBranchEncoder
-	keys := pbinDigestCache{sum: pbinBlake3Hash}
+	keys := pbinDigestCache{Sum: pbinBlake3Hash}
 	storage := pbinTestLeafCell(0x5A, 31)
-	storageKey := pbinPathFromBytes(keys.storageKey(storage.storageAddr[:length.Addr], storage.storageAddr[length.Addr:]))
-	storage.prefix = storageKey.slice(17, storageKey.bitLen)
+	storageKey := pbinPathFromBytes(keys.StorageKey(storage.storageAddr[:length.Addr], storage.storageAddr[length.Addr:]))
+	storage.prefix = storageKey.Slice(17, storageKey.BitLen)
 	want := [2]pbinCell{pbinTestBranchCell(0xA5, 17), storage}
 	record, err := enc.encode(&want)
 	require.NoError(t, err)
@@ -136,10 +136,10 @@ func TestPBinBranchCodecOmitsStoragePrefix(t *testing.T) {
 			t.Parallel()
 
 			// pbinDigestCache memoizes into its own fields, so a parallel subtest needs its own.
-			keys := pbinDigestCache{sum: pbinBlake3Hash}
+			keys := pbinDigestCache{Sum: pbinBlake3Hash}
 			storage := pbinTestLeafCell(0x5A, 0)
-			storageKey := pbinPathFromBytes(keys.storageKey(storage.storageAddr[:length.Addr], storage.storageAddr[length.Addr:]))
-			storage.prefix = storageKey.slice(depth, storageKey.bitLen)
+			storageKey := pbinPathFromBytes(keys.StorageKey(storage.storageAddr[:length.Addr], storage.storageAddr[length.Addr:]))
+			storage.prefix = storageKey.Slice(depth, storageKey.BitLen)
 			other := pbinTestBranchCell(0xA5, 3)
 
 			var enc pbinBranchEncoder
@@ -189,7 +189,7 @@ func TestPBinBranchCodecKeepsAccountPrefix(t *testing.T) {
 	record, err := enc.encode(&[2]pbinCell{account, pbinTestBranchCell(0x11, 0)})
 	require.NoError(t, err)
 	require.Equal(t, byte(pbinFieldLeaf|pbinFieldAccountAddr), record[0])
-	require.Equal(t, byte(account.prefix.bitLen), record[1])
+	require.Equal(t, byte(account.prefix.BitLen), record[1])
 	require.Equal(t, byte(0xA0), record[2])
 }
 
@@ -201,7 +201,7 @@ func TestPBinBranchCodecKeepsCodeChunkPrefix(t *testing.T) {
 	record, err := enc.encode(&[2]pbinCell{chunk, pbinTestBranchCell(0x11, 0)})
 	require.NoError(t, err)
 	require.Equal(t, byte(pbinFieldLeaf|pbinFieldLeafValue|pbinFieldHash), record[0])
-	require.Equal(t, byte(chunk.prefix.bitLen), record[1])
+	require.Equal(t, byte(chunk.prefix.BitLen), record[1])
 	require.Equal(t, byte(0x30), record[2])
 }
 
@@ -462,8 +462,8 @@ func TestPBinBranchCodecDropsLoadedState(t *testing.T) {
 	t.Parallel()
 
 	cells := [2]pbinCell{pbinTestLeafCell(0x2B, 40), pbinTestBranchCell(0x4D, 8)}
-	keys := pbinDigestCache{sum: pbinSelectedSum}
-	storageKey := pbinPathFromBytes(keys.storageKey(cells[0].storageAddr[:length.Addr], cells[0].storageAddr[length.Addr:]))
+	keys := pbinDigestCache{Sum: pbinSelectedSum}
+	storageKey := pbinPathFromBytes(keys.StorageKey(cells[0].storageAddr[:length.Addr], cells[0].storageAddr[length.Addr:]))
 	cells[0].prefix = storageKey
 	cells[0].loaded = cellLoadStorage
 	cells[0].Nonce = 9
@@ -507,8 +507,8 @@ func TestPBinCellReset(t *testing.T) {
 	c.Flags = BalanceUpdate | NonceUpdate
 
 	c.reset()
-	require.Equal(t, int16(0), c.prefix.bitLen)
-	require.Zero(t, c.prefix.w)
+	require.Equal(t, int16(0), c.prefix.BitLen)
+	require.Zero(t, c.prefix.Words)
 	require.Equal(t, empty.CodeHash, c.CodeHash)
 	require.Equal(t, pbinTestEmptyCell(), c)
 }

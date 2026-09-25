@@ -123,7 +123,7 @@ func TestPBinWitnessContextBlindedBranchErrors(t *testing.T) {
 	record, _, err := f.witness.Branch(pbinEncodeBitPath(&path))
 	require.ErrorIs(t, err, ErrPBinWitnessBlinded)
 	require.Empty(t, record)
-	require.Contains(t, err.Error(), hex.EncodeToString(path.appendPackedBits(nil)), "the error does not name the path")
+	require.Contains(t, err.Error(), hex.EncodeToString(path.AppendPackedBits(nil)), "the error does not name the path")
 }
 
 // pbinWitnessBlindedPath walks to the first child the witness has no preimage
@@ -139,13 +139,13 @@ func pbinWitnessBlindedPath(t *testing.T, w *pbinWitnessTree) pbinBitpath {
 		if !present || ok {
 			return
 		}
-		path.append(&node.prefix)
+		path.Append(&node.prefix)
 		if node.isLeaf() {
 			return
 		}
 		for bit := range node.children {
 			child := path
-			child.appendBit(uint64(bit))
+			child.AppendBit(uint64(bit))
 			if _, present := w.nodes[node.children[bit]]; !present {
 				found, ok = child, true
 				return

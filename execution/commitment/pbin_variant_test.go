@@ -138,7 +138,7 @@ func TestPBinResetClearsTrieState(t *testing.T) {
 
 	pph.Reset()
 	require.Equal(t, pbinNodeEmpty, pph.grid.root.kind)
-	require.Zero(t, pph.currentKey.bitLen)
+	require.Zero(t, pph.currentKey.BitLen)
 	require.Zero(t, pph.grid.activeRows)
 	require.False(t, pph.rootChecked)
 	require.False(t, pph.rootTouched)

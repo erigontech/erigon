@@ -28,66 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 )
 
-// TestPBinChunkifyCodePushdataStraddlesBoundary covers PUSHDATA that begins in
-// one chunk and runs into the next: the later chunk's byte 0 counts bytes pushed
-// by an opcode it does not contain, which is what a per-chunk scan gets wrong.
-func TestPBinChunkifyCodePushdataStraddlesBoundary(t *testing.T) {
-	t.Parallel()
-
-	// PUSH32 at offset 30 is the last byte of chunk 0, so its data spans chunks 1 and 2.
-	code := append(make([]byte, 30), pbinPush32)
-	code = append(code, bytes.Repeat([]byte{0xEE}, 32)...)
-
-	chunks := pbinChunkifyCode(code)
-	require.Len(t, chunks, 3)
-	require.EqualValues(t, 0, chunks[0][0], "chunk 0 starts on an opcode")
-	require.EqualValues(t, 31, chunks[1][0], "a full chunk of PUSHDATA saturates at 31")
-	require.EqualValues(t, 1, chunks[2][0], "one PUSHDATA byte carries into chunk 2")
-}
-
-// TestPBinChunkifyCode7702Designator covers the shortest code the tree holds: a
-// 23-byte EIP-7702 designator is one chunk, zero-padded to the full data length.
-func TestPBinChunkifyCode7702Designator(t *testing.T) {
-	t.Parallel()
-
-	designator := append([]byte{0xEF, 0x01, 0x00}, bytes.Repeat([]byte{0xAB}, 20)...)
-	require.Len(t, designator, 23)
-
-	chunks := pbinChunkifyCode(designator)
-	require.Len(t, chunks, 1)
-	require.EqualValues(t, 0, chunks[0][0])
-	require.Equal(t, designator, chunks[0][1:1+len(designator)])
-	require.Equal(t, make([]byte, pbinChunkDataLen-len(designator)), chunks[0][1+len(designator):],
-		"the tail is zero-padded, not left uninitialised")
-}
-
-func TestPBinChunkifyCodeEmpty(t *testing.T) {
-	t.Parallel()
-	require.Empty(t, pbinChunkifyCode(nil))
-	require.Empty(t, pbinChunkifyCode([]byte{}))
-}
-
-// TestPBinChunkifyCodeChunkCount pins the sizing the code grouping rests on:
-// chunks are ceil(len/31), and MaxCodeSize needs more of them than the 256 one
-// code group holds.
-func TestPBinChunkifyCodeChunkCount(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct{ size, chunks int }{
-		{size: 1, chunks: 1},
-		{size: 31, chunks: 1},
-		{size: 32, chunks: 2},
-		{size: pbinStemSubtreeWidth * pbinChunkDataLen, chunks: pbinStemSubtreeWidth},
-		{size: pbinStemSubtreeWidth*pbinChunkDataLen + 1, chunks: pbinStemSubtreeWidth + 1},
-		{size: 24576, chunks: 793},
-	} {
-		require.Len(t, pbinChunkifyCode(make([]byte, tc.size)), tc.chunks, "code of %d bytes", tc.size)
-	}
-}
-
-// pbinTestCode is deterministic filler of a given length. Every byte is below
-// PUSH1, so no chunk carries PUSHDATA, and the fill depends on the length, so
-// two different lengths never share a chunk.
+// pbinTestCode is deterministic filler of a given length.
 func pbinTestCode(n int) []byte {
 	code := make([]byte, n)
 	for i := range code {
@@ -401,23 +342,5 @@ func TestPBinLeafCellHashChecksZoneLength(t *testing.T) {
 			_, err := h.cellHash(&c, &path)
 			require.ErrorIs(t, err, errPBinCellHash)
 		})
-	}
-}
-
-func TestPBinChunkifyCodeEndsInTruncatedPush(t *testing.T) {
-	t.Parallel()
-
-	for _, immediates := range []int{0, 1} {
-		tail := append([]byte{pbinPush1 + 1}, bytes.Repeat([]byte{0xAA}, immediates)...)
-		code := append(bytes.Repeat([]byte{0x5B}, pbinChunkDataLen), tail...)
-		require.Len(t, code, pbinChunkDataLen+1+immediates)
-
-		chunks := pbinChunkifyCode(code)
-		require.Len(t, chunks, 2, "immediates=%d", immediates)
-		require.EqualValues(t, 0, chunks[0][0], "chunk 0 starts on an opcode, immediates=%d", immediates)
-		require.EqualValues(t, 0, chunks[1][0], "the PUSH2 itself opens chunk 1, immediates=%d", immediates)
-		require.Equal(t, tail, chunks[1][1:1+len(tail)], "immediates=%d", immediates)
-		require.Equal(t, make([]byte, pbinChunkDataLen-len(tail)), chunks[1][1+len(tail):],
-			"the immediate the code lacks is zero padding, immediates=%d", immediates)
 	}
 }

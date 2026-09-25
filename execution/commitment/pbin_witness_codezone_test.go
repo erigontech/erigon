@@ -236,11 +236,11 @@ func TestPBinWitnessAccountMissingCodeHashIsMalformed(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(77)
-	keys := pbinDigestCache{sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum}
 	var value [pbinValueLength]byte
 	value[pbinBasicDataNonceOffset+7] = 1
 
-	preimage := append([]byte{pbinLeafTag}, keys.accountKey(addr, pbinBasicDataLeafKey)...)
+	preimage := append([]byte{pbinLeafTag}, keys.AccountKey(addr, pbinBasicDataLeafKey)...)
 	preimage = append(preimage, value[:]...)
 	hasher := pbinHasher{sum: pbinSelectedSum}
 	root := hasher.hash(preimage)
@@ -260,13 +260,13 @@ func TestPBinWitnessZeroCodeSizeNeedsTheEmptyCodeHash(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(79)
-	keys := pbinDigestCache{sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum}
 	hasher := pbinHasher{sum: pbinSelectedSum}
 
 	var codeHash common.Hash
 	codeHash[0] = 0xCC
 	value := pbinCodeHashValue(codeHash)
-	preimage := append([]byte{pbinLeafTag}, keys.accountKey(addr, pbinCodeHashLeafKey)...)
+	preimage := append([]byte{pbinLeafTag}, keys.AccountKey(addr, pbinCodeHashLeafKey)...)
 	preimage = append(preimage, value[:]...)
 	root := hasher.hash(preimage)
 
@@ -284,7 +284,7 @@ func TestPBinWitnessOversizedCodeSizeIsRefused(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(80)
-	keys := pbinDigestCache{sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum}
 	hasher := pbinHasher{sum: pbinSelectedSum}
 
 	leaf := func(key []byte, value [pbinValueLength]byte) ([]byte, common.Hash) {
@@ -292,14 +292,14 @@ func TestPBinWitnessOversizedCodeSizeIsRefused(t *testing.T) {
 		return preimage, hasher.hash(preimage)
 	}
 
-	basicKey := keys.accountKey(addr, pbinBasicDataLeafKey)
+	basicKey := keys.AccountKey(addr, pbinBasicDataLeafKey)
 	basic, err := pbinEncodeBasicData(1, new(uint256.Int), math.MaxUint32)
 	require.NoError(t, err)
 	basicNode, basicHash := leaf(basicKey, basic)
 
 	var codeHash common.Hash
 	codeHash[0] = 0xDD
-	hashNode, hashLeaf := leaf(keys.accountKey(addr, pbinCodeHashLeafKey), pbinCodeHashValue(codeHash))
+	hashNode, hashLeaf := leaf(keys.AccountKey(addr, pbinCodeHashLeafKey), pbinCodeHashValue(codeHash))
 
 	// Sub-indices 0 and 1 diverge on the last bit of the key.
 	prefix := pbinPathFromBits(basicKey, int16(8*len(basicKey)-1))
@@ -325,7 +325,7 @@ func TestPBinWitnessDelegationLeafPinsCodeSize(t *testing.T) {
 
 	addr := pbinOracleAddr(78)
 	indicator := append([]byte{0xEF, 0x01, 0x00}, bytes.Repeat([]byte{0x44}, 20)...)
-	keys := pbinDigestCache{sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum}
 	hasher := pbinHasher{sum: pbinSelectedSum}
 
 	leaf := func(key []byte, value [pbinValueLength]byte) ([]byte, common.Hash) {
@@ -333,13 +333,13 @@ func TestPBinWitnessDelegationLeafPinsCodeSize(t *testing.T) {
 		return preimage, hasher.hash(preimage)
 	}
 
-	basicKey := keys.accountKey(addr, pbinBasicDataLeafKey)
+	basicKey := keys.AccountKey(addr, pbinBasicDataLeafKey)
 	var balance uint256.Int
 	balance.SetUint64(2)
 	basic, err := pbinEncodeBasicData(1, &balance, pbinDelegationCodeLength-1)
 	require.NoError(t, err)
 	basicNode, basicHash := leaf(basicKey, basic)
-	delegNode, delegHash := leaf(keys.accountKey(addr, pbinDelegationLeafKey), pbinEncodeDelegation(indicator))
+	delegNode, delegHash := leaf(keys.AccountKey(addr, pbinDelegationLeafKey), pbinEncodeDelegation(indicator))
 
 	// Sub-indices 0 and 2 diverge two bits before the end of the key.
 	prefix := pbinPathFromBits(basicKey, int16(8*len(basicKey)-2))

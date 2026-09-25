@@ -74,14 +74,14 @@ func TestPBinChunkKeyMatchesSpec(t *testing.T) {
 func TestPBinChunkKeyMatchesVectorIndices(t *testing.T) {
 	e := pbinLoadConformance(t).Embedding
 	codeHash := common.BytesToHash(pbinUnhex(t, e.CodeHash))
-	keys := pbinDigestCache{sum: pbinBlake3Hash}
+	keys := pbinDigestCache{Sum: pbinBlake3Hash}
 
 	wantIDs := []int{0, 1, 255, 256, 257, 511, 512, 2114}
 	require.Len(t, e.CodeChunkKeys, len(wantIDs))
 	for _, id := range wantIDs {
 		want, ok := e.CodeChunkKeys[strconv.Itoa(id)]
 		require.True(t, ok, "the corpus carries no chunk %d", id)
-		require.Equal(t, want, "0x"+hex.EncodeToString(keys.codeChunkKey(codeHash, id)), "chunk %d", id)
+		require.Equal(t, want, "0x"+hex.EncodeToString(keys.CodeChunkKey(codeHash, id)), "chunk %d", id)
 	}
 }
 
@@ -93,13 +93,13 @@ func TestPBinChunkKeyIgnoresAddress(t *testing.T) {
 
 	codeHash := common.Hash{0x82, 0x97}
 	var a, b pbinDigestCache
-	a.accountKey(pbinOracleAddr(60), pbinBasicDataLeafKey)
-	b.accountKey(pbinOracleAddr(61), pbinBasicDataLeafKey)
+	a.AccountKey(pbinOracleAddr(60), pbinBasicDataLeafKey)
+	b.AccountKey(pbinOracleAddr(61), pbinBasicDataLeafKey)
 
 	for _, chunkID := range []int{0, pbinStemSubtreeWidth - 1, pbinStemSubtreeWidth, 2114} {
 		fresh := pbinTreeKeyCodeChunk(codeHash, chunkID)
-		require.Equal(t, fresh, a.codeChunkKey(codeHash, chunkID), "chunk %d", chunkID)
-		require.Equal(t, fresh, b.codeChunkKey(codeHash, chunkID), "chunk %d", chunkID)
+		require.Equal(t, fresh, a.CodeChunkKey(codeHash, chunkID), "chunk %d", chunkID)
+		require.Equal(t, fresh, b.CodeChunkKey(codeHash, chunkID), "chunk %d", chunkID)
 	}
 }
 

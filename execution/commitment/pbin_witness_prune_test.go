@@ -100,7 +100,7 @@ func pbinWitnessOnPathNodes(w *pbinWitnessTree, provedKeys [][]byte) map[common.
 	}
 	onPath := func(arrival *pbinBitpath) bool {
 		for i := range paths {
-			if paths[i].hasPrefix(arrival) {
+			if paths[i].HasPrefix(arrival) {
 				return true
 			}
 		}
@@ -125,8 +125,8 @@ func pbinWitnessOnPathNodes(w *pbinWitnessTree, provedKeys [][]byte) map[common.
 		child := [2]pbinBitpath{}
 		for bit := range node.children {
 			child[bit] = arrival
-			child[bit].append(&node.prefix)
-			child[bit].appendBit(uint64(bit))
+			child[bit].Append(&node.prefix)
+			child[bit].AppendBit(uint64(bit))
 		}
 		for bit := range node.children {
 			if onPath(&child[bit]) {
@@ -225,7 +225,7 @@ func TestPBinWitnessPruneStopsAtBlindedChild(t *testing.T) {
 // walk of that key descends exactly the path.
 func pbinWitnessKeyThrough(t *testing.T, path pbinBitpath) []byte {
 	t.Helper()
-	key := path.appendPackedBits(nil)
+	key := path.AppendPackedBits(nil)
 	require.NotEmpty(t, key)
 	want, known := pbinZoneKeyLength(key[0])
 	require.True(t, known, "path %x leads into no allocated zone", key)

@@ -59,10 +59,10 @@ func (w *pbinWitnessTree) merkelizeFrom(hash common.Hash, depth int16) (common.H
 	if node.isLeaf() {
 		return w.hasher.leafNodeHash(node.key, node.value), nil
 	}
-	next := depth + node.prefix.bitLen + 1
+	next := depth + node.prefix.BitLen + 1
 	if int(next) > pbinMaxPathBits {
 		return common.Hash{}, fmt.Errorf("%w: branch at bit %d with a %d-bit prefix overflows the %d-bit path",
-			errPBinWitnessNode, depth, node.prefix.bitLen, pbinMaxPathBits)
+			errPBinWitnessNode, depth, node.prefix.BitLen, pbinMaxPathBits)
 	}
 	left, err := w.merkelizeFrom(node.children[0], next)
 	if err != nil {
@@ -179,7 +179,7 @@ func TestPBinDecodeWitnessNodeShapes(t *testing.T) {
 
 		node, err := pbinDecodeWitnessNode(preimage)
 		require.NoError(t, err)
-		require.Equal(t, int16(0), node.prefix.bitLen)
+		require.Equal(t, int16(0), node.prefix.BitLen)
 		require.Equal(t, [2]common.Hash{pbinEmptyTreeHash, pbinEmptyTreeHash}, node.children,
 			"an absent child is the empty-tree hash, never omitted")
 	})

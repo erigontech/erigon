@@ -62,7 +62,7 @@ func pbinNewWitnessContext(tree *pbinWitnessTree) *pbinWitnessContext {
 		records: make(map[string][]byte),
 		leaves:  make(map[string]Update),
 		codes:   make(map[string][]byte),
-		keys:    pbinDigestCache{sum: pbinSelectedSum},
+		keys:    pbinDigestCache{Sum: pbinSelectedSum},
 	}
 }
 
@@ -153,14 +153,14 @@ func (c *pbinWitnessContext) rootRecord() ([]byte, error) {
 }
 
 func (c *pbinWitnessContext) branchRecord(node *pbinWitnessNode, path *pbinBitpath) ([]byte, error) {
-	if path.bitLen >= pbinMaxPathBits {
+	if path.BitLen >= pbinMaxPathBits {
 		return nil, fmt.Errorf("%w: a branch at %d bits leaves no room for a child",
-			errPBinWitnessNode, path.bitLen)
+			errPBinWitnessNode, path.BitLen)
 	}
 	var cells [2]pbinCell
 	for bit := range cells {
 		childPath := *path
-		childPath.appendBit(uint64(bit))
+		childPath.AppendBit(uint64(bit))
 		cells[bit].reset()
 		if err := c.fillCell(&cells[bit], node.children[bit], &childPath); err != nil {
 			return nil, err
@@ -181,7 +181,7 @@ func (c *pbinWitnessContext) fillCell(cell *pbinCell, hash common.Hash, path *pb
 	if hash == pbinEmptyTreeHash {
 		// A binary node with one child is a node the fold would collapse, quietly
 		// moving the root.
-		return fmt.Errorf("%w: branch child at bit %d is the empty tree", errPBinWitnessNode, path.bitLen)
+		return fmt.Errorf("%w: branch child at bit %d is the empty tree", errPBinWitnessNode, path.BitLen)
 	}
 	node, ok := c.tree.nodes[hash]
 	if !ok || !node.isLeaf() {
@@ -197,12 +197,12 @@ func (c *pbinWitnessContext) fillCell(cell *pbinCell, hash common.Hash, path *pb
 
 func (c *pbinWitnessContext) fillLeafCell(cell *pbinCell, node *pbinWitnessNode, hash common.Hash, path *pbinBitpath) error {
 	key := pbinPathFromBytes(node.key)
-	if !key.hasPrefix(path) {
+	if !key.HasPrefix(path) {
 		return fmt.Errorf("%w: leaf %x does not sit under the %d-bit path it was reached by",
-			errPBinWitnessNode, node.key, path.bitLen)
+			errPBinWitnessNode, node.key, path.BitLen)
 	}
 	cell.kind = pbinNodeLeaf
-	cell.prefix = key.slice(path.bitLen, key.bitLen)
+	cell.prefix = key.Slice(path.BitLen, key.BitLen)
 
 	// A record holds a leaf value either verbatim or as the account fields it is
 	// packed from. Which one applies is decided by re-encoding, not by zone, so
@@ -271,20 +271,20 @@ func (c *pbinWitnessContext) nodeAt(p *pbinBitpath) (pbinWitnessNode, error) {
 		node, ok := c.tree.nodes[hash]
 		if !ok {
 			return node, fmt.Errorf("%w: no preimage for %x, reached at bit %d of the %d-bit path %x",
-				ErrPBinWitnessBlinded, hash, pos, p.bitLen, p.appendPackedBits(nil))
+				ErrPBinWitnessBlinded, hash, pos, p.BitLen, p.AppendPackedBits(nil))
 		}
 		if node.isLeaf() {
 			return node, fmt.Errorf("%w: a leaf covers bit %d of the %d-bit path %x",
-				errPBinWitnessNode, pos, p.bitLen, p.appendPackedBits(nil))
+				errPBinWitnessNode, pos, p.BitLen, p.AppendPackedBits(nil))
 		}
-		end := pos + node.prefix.bitLen
-		if end > p.bitLen || pbinCommonPrefixBitsAt(p, pos, &node.prefix) != node.prefix.bitLen {
+		end := pos + node.prefix.BitLen
+		if end > p.BitLen || pbinCommonPrefixBitsAt(p, pos, &node.prefix) != node.prefix.BitLen {
 			return node, fmt.Errorf("%w: no node at the %d-bit path %x",
-				errPBinWitnessNode, p.bitLen, p.appendPackedBits(nil))
+				errPBinWitnessNode, p.BitLen, p.AppendPackedBits(nil))
 		}
-		if end == p.bitLen {
+		if end == p.BitLen {
 			return node, nil
 		}
-		hash, pos = node.children[p.bit(end)], end+1
+		hash, pos = node.children[p.Bit(end)], end+1
 	}
 }

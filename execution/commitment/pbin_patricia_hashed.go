@@ -118,7 +118,7 @@ func (pph *PBinPatriciaHashed) Reset() {
 // other. nil is Keccak-256 on both.
 func (pph *PBinPatriciaHashed) setHashSuite(sum pbinHashFn) keyHasher {
 	pph.hasher.sum = sum
-	pph.updateStream.keyDigest = pbinDigestCache{sum: sum}
+	pph.updateStream.keyDigest = pbinDigestCache{Sum: sum}
 	return pbinKeyHasherWith(sum)
 }
 
@@ -210,7 +210,7 @@ func (pph *PBinPatriciaHashed) seek(treeKey []byte) (pbinBitpath, error) {
 	pph.lastKeyLen = int16(copy(pph.lastKey[:], treeKey))
 
 	probe := pbinPathFromBytes(treeKey)
-	for !probe.hasPrefix(&pph.currentKey) {
+	for !probe.HasPrefix(&pph.currentKey) {
 		if err := pph.fold(); err != nil {
 			return probe, err
 		}
@@ -237,10 +237,10 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	} else {
 		row = g.activeRows - 1
 		depth = g.depths[row]
-		if probe.bitLen < depth {
-			return fmt.Errorf("pbin: a %d-bit key cannot be updated in a row at depth %d", probe.bitLen, depth)
+		if probe.BitLen < depth {
+			return fmt.Errorf("pbin: a %d-bit key cannot be updated in a row at depth %d", probe.BitLen, depth)
 		}
-		bit = probe.bit(depth - 1)
+		bit = probe.Bit(depth - 1)
 		c = &g.rows[row][bit]
 	}
 
@@ -263,7 +263,7 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 		}
 		slot := pph.currentKey
 		if g.activeRows != 0 {
-			slot.appendBit(bit)
+			slot.AppendBit(bit)
 		}
 		if err := pph.dropSubtreeRecords(c, &slot); err != nil {
 			return err
@@ -288,10 +288,10 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 	switch c.kind {
 	case pbinNodeEmpty:
 		c.kind = pbinNodeLeaf
-		c.prefix = probe.slice(depth, probe.bitLen)
+		c.prefix = probe.Slice(depth, probe.BitLen)
 	case pbinNodeLeaf:
 	default:
-		return fmt.Errorf("pbin: update for a %d-bit key lands on a branch cell", probe.bitLen)
+		return fmt.Errorf("pbin: update for a %d-bit key lands on a branch cell", probe.BitLen)
 	}
 
 	switch len(plainKey) {
@@ -320,11 +320,11 @@ func (pph *PBinPatriciaHashed) updateCell(plainKey []byte, probe *pbinBitpath, u
 // The path is the whole key, so the value is formed the same way the hasher forms
 // it and the two cannot drift.
 func pbinLeafValueIsZero(path *pbinBitpath, u *Update) (bool, error) {
-	if path.bitLen%8 != 0 {
-		return false, fmt.Errorf("pbin: leaf key of %d bits is not whole bytes", path.bitLen)
+	if path.BitLen%8 != 0 {
+		return false, fmt.Errorf("pbin: leaf key of %d bits is not whole bytes", path.BitLen)
 	}
 	var buf [pbinStorageKeyLength]byte
-	key := path.appendPackedBits(buf[:0])
+	key := path.AppendPackedBits(buf[:0])
 	value, err := pbinLeafValue(key, u)
 	if err != nil {
 		return false, err
@@ -451,16 +451,16 @@ func (pph *PBinPatriciaHashed) needUnfolding(probe *pbinBitpath) pbinUnfolding {
 	} else {
 		row := pph.grid.activeRows - 1
 		depth = pph.grid.depths[row]
-		if probe.bitLen <= depth {
+		if probe.BitLen <= depth {
 			return pbinUnfolding{}
 		}
-		cell = &pph.grid.rows[row][probe.bit(depth-1)]
+		cell = &pph.grid.rows[row][probe.Bit(depth-1)]
 	}
 
 	if cell.kind == pbinNodeEmpty {
 		return pbinUnfolding{}
 	}
-	if cell.prefix.bitLen == 0 {
+	if cell.prefix.BitLen == 0 {
 		if cell.kind == pbinNodeBranch {
 			return pbinUnfolding{action: pbinUnfoldRecord}
 		}
@@ -468,8 +468,8 @@ func (pph *PBinPatriciaHashed) needUnfolding(probe *pbinBitpath) pbinUnfolding {
 	}
 
 	matched := pbinCommonPrefixBitsAt(probe, depth, &cell.prefix)
-	if matched < cell.prefix.bitLen {
-		if depth+matched == probe.bitLen {
+	if matched < cell.prefix.BitLen {
+		if depth+matched == probe.BitLen {
 			// The probe ended inside the cell's prefix without diverging: it names
 			// a subtree wholly containing this node, so the cell itself is the
 			// probe's slot. Only a subtree drop probes short of a whole key.
@@ -502,11 +502,11 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 	} else {
 		upRow := g.activeRows - 1
 		upDepth = g.depths[upRow]
-		upBit := probe.bit(upDepth - 1)
+		upBit := probe.Bit(upDepth - 1)
 		upCell = &g.rows[upRow][upBit]
 		touched = g.touchMap[upRow]&(uint16(1)<<upBit) != 0
 		present = g.afterMap[upRow]&(uint16(1)<<upBit) != 0
-		pph.currentKey.appendBit(upBit)
+		pph.currentKey.AppendBit(upBit)
 	}
 
 	row := g.activeRows
@@ -519,12 +519,12 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 		return pph.unfoldBranchNode(row, upDepth+1, touched && !present)
 	}
 
-	consumed := upCell.prefix.bitLen
+	consumed := upCell.prefix.BitLen
 	if u.action == pbinUnfoldSplit {
 		consumed = u.matched + 1
 		pph.counters.splitsInsidePrefix++
 	}
-	bit := upCell.prefix.bit(consumed - 1)
+	bit := upCell.prefix.Bit(consumed - 1)
 	if touched {
 		g.touchMap[row] = uint16(1) << bit
 	}
@@ -535,8 +535,8 @@ func (pph *PBinPatriciaHashed) unfold(probe *pbinBitpath, u pbinUnfolding) error
 	pph.rehashAfterPrefixChange(&g.rows[row][bit])
 
 	if consumed > 1 {
-		head := upCell.prefix.slice(0, consumed-1)
-		pph.currentKey.append(&head)
+		head := upCell.prefix.Slice(0, consumed-1)
+		pph.currentKey.Append(&head)
 	}
 	g.depths[row] = upDepth + consumed
 	g.activeRows++
@@ -556,7 +556,7 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 		return fmt.Errorf("pbin: read branch at %x: %w", key, err)
 	}
 	if len(data) == 0 {
-		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, pph.currentKey.bitLen)
+		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, pph.currentKey.BitLen)
 	}
 
 	if err = pbinDecodeBranch(data, &g.rows[row], depth, &pph.updateStream.keyDigest); err != nil {
@@ -583,8 +583,8 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 // rehashAfterPrefixChange.
 func (c *pbinCell) fillFromUpperCell(up *pbinCell, skip int16) {
 	c.reset()
-	if skip < up.prefix.bitLen {
-		c.prefix = up.prefix.slice(skip, up.prefix.bitLen)
+	if skip < up.prefix.BitLen {
+		c.prefix = up.prefix.Slice(skip, up.prefix.BitLen)
 	}
 	c.kind = up.kind
 	c.accountAddrLen = up.accountAddrLen
@@ -609,8 +609,8 @@ func (c *pbinCell) fillFromUpperCell(up *pbinCell, skip int16) {
 // descended plus the one the row branched on.
 func (c *pbinCell) fillFromLowerCell(low *pbinCell, head *pbinBitpath, bit uint64) {
 	prefix := *head
-	prefix.appendBit(bit)
-	prefix.append(&low.prefix)
+	prefix.AppendBit(bit)
+	prefix.Append(&low.prefix)
 	*c = *low
 	c.prefix = prefix
 }
@@ -642,8 +642,8 @@ func (pph *PBinPatriciaHashed) fold() error {
 		return err
 	}
 	depth := g.depths[row]
-	if pph.currentKey.bitLen != depth-1 {
-		return fmt.Errorf("pbin: row %d at depth %d folds under a %d-bit key", row, depth, pph.currentKey.bitLen)
+	if pph.currentKey.BitLen != depth-1 {
+		return fmt.Errorf("pbin: row %d at depth %d folds under a %d-bit key", row, depth, pph.currentKey.BitLen)
 	}
 
 	var upCell *pbinCell
@@ -653,7 +653,7 @@ func (pph *PBinPatriciaHashed) fold() error {
 		upCell = &g.root
 	} else {
 		upDepth = g.depths[row-1]
-		bit = pph.currentKey.bit(upDepth - 1)
+		bit = pph.currentKey.Bit(upDepth - 1)
 		upCell = &g.rows[row-1][bit]
 	}
 
@@ -671,7 +671,7 @@ func (pph *PBinPatriciaHashed) fold() error {
 	}
 	g.activeRows--
 	g.prevRecordSet[row] = false
-	pph.currentKey.truncate(max(upDepth-1, 0))
+	pph.currentKey.Truncate(max(upDepth-1, 0))
 	return nil
 }
 
@@ -685,12 +685,12 @@ func (pph *PBinPatriciaHashed) foldBranch(row int, bit uint64, upDepth, depth in
 	pph.propagateTouch(row, bit)
 
 	childPath := pph.currentKey
-	childPath.appendBit(0)
+	childPath.AppendBit(0)
 	left, err := pph.hashRowCell(&g.rows[row][0], &childPath)
 	if err != nil {
 		return err
 	}
-	childPath.setBitAt(depth-1, 1)
+	childPath.SetBitAt(depth-1, 1)
 	right, err := pph.hashRowCell(&g.rows[row][1], &childPath)
 	if err != nil {
 		return err
@@ -705,7 +705,7 @@ func (pph *PBinPatriciaHashed) foldBranch(row int, bit uint64, upDepth, depth in
 		return fmt.Errorf("pbin: write branch at %x: %w", key, err)
 	}
 
-	prefix := pph.currentKey.slice(upDepth, depth-1)
+	prefix := pph.currentKey.Slice(upDepth, depth-1)
 	upCell.reset()
 	upCell.kind = pbinNodeBranch
 	upCell.prefix = prefix
@@ -725,12 +725,12 @@ func (pph *PBinPatriciaHashed) foldPropagate(row int, bit uint64, upDepth, depth
 	childBit := bits.TrailingZeros16(g.afterMap[row])
 	child := &g.rows[row][childBit]
 
-	head := pph.currentKey.slice(upDepth, depth-1)
+	head := pph.currentKey.Slice(upDepth, depth-1)
 	upCell.fillFromLowerCell(child, &head, uint64(childBit))
 	// The row's own branch bit is part of what moves up: dropping it still hashes,
 	// and still gives the wrong root.
-	if want := depth - upDepth + child.prefix.bitLen; upCell.prefix.bitLen != want {
-		return fmt.Errorf("pbin: propagate at row %d formed a %d-bit prefix, want %d", row, upCell.prefix.bitLen, want)
+	if want := depth - upDepth + child.prefix.BitLen; upCell.prefix.BitLen != want {
+		return fmt.Errorf("pbin: propagate at row %d formed a %d-bit prefix, want %d", row, upCell.prefix.BitLen, want)
 	}
 	pph.rehashAfterPrefixChange(upCell)
 	return pph.deleteRowRecord(row)
@@ -771,7 +771,7 @@ func (pph *PBinPatriciaHashed) dropSubtreeRecords(c *pbinCell, slot *pbinBitpath
 	}
 
 	head := *slot
-	head.append(&c.prefix)
+	head.Append(&c.prefix)
 	pending := []pbinBitpath{head}
 	var cells [2]pbinCell
 	for len(pending) > 0 {
@@ -784,9 +784,9 @@ func (pph *PBinPatriciaHashed) dropSubtreeRecords(c *pbinCell, slot *pbinBitpath
 			return fmt.Errorf("pbin: read branch at %x: %w", key, err)
 		}
 		if len(data) == 0 {
-			return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, path.bitLen)
+			return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, path.BitLen)
 		}
-		if err = pbinDecodeBranch(data, &cells, path.bitLen+1, &pph.updateStream.keyDigest); err != nil {
+		if err = pbinDecodeBranch(data, &cells, path.BitLen+1, &pph.updateStream.keyDigest); err != nil {
 			return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 		}
 		for bit := range cells {
@@ -794,8 +794,8 @@ func (pph *PBinPatriciaHashed) dropSubtreeRecords(c *pbinCell, slot *pbinBitpath
 				continue
 			}
 			child := path
-			child.appendBit(uint64(bit))
-			child.append(&cells[bit].prefix)
+			child.AppendBit(uint64(bit))
+			child.Append(&cells[bit].prefix)
 			pending = append(pending, child)
 		}
 		if err = pph.ctx.PutBranch(key, []byte{}, data); err != nil {
@@ -921,11 +921,11 @@ func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath)
 	// A prefix decoded from a witness is bounded on its own, not against the depth
 	// it was reached at, so the sum can overflow where append would panic. A branch
 	// landing exactly on the limit is out too: its children need one bit more.
-	if int(nodeKey.bitLen)+int(c.prefix.bitLen) >= pbinMaxPathBits {
+	if int(nodeKey.BitLen)+int(c.prefix.BitLen) >= pbinMaxPathBits {
 		return fmt.Errorf("%w: branch at %d bits with a %d-bit prefix overflows the path",
-			errPBinCellHash, nodeKey.bitLen, c.prefix.bitLen)
+			errPBinCellHash, nodeKey.BitLen, c.prefix.BitLen)
 	}
-	nodeKey.append(&c.prefix)
+	nodeKey.Append(&c.prefix)
 	key := pph.recordKey(&nodeKey)
 
 	data, _, err := pph.ctx.Branch(key)
@@ -933,21 +933,21 @@ func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath)
 		return fmt.Errorf("pbin: read branch at %x: %w", key, err)
 	}
 	if len(data) == 0 {
-		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, nodeKey.bitLen)
+		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, nodeKey.BitLen)
 	}
 	pph.counters.materializeReads++
 
 	var cells [2]pbinCell
-	if err = pbinDecodeBranch(data, &cells, nodeKey.bitLen+1, &pph.updateStream.keyDigest); err != nil {
+	if err = pbinDecodeBranch(data, &cells, nodeKey.BitLen+1, &pph.updateStream.keyDigest); err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
 	childPath := nodeKey
-	childPath.appendBit(0)
+	childPath.AppendBit(0)
 	left, err := pph.cellHash(&cells[0], &childPath)
 	if err != nil {
 		return err
 	}
-	childPath.setBitAt(nodeKey.bitLen, 1)
+	childPath.SetBitAt(nodeKey.BitLen, 1)
 	right, err := pph.cellHash(&cells[1], &childPath)
 	if err != nil {
 		return err

@@ -63,7 +63,7 @@ func PBinNewWitnessState(nodes [][]byte, root []byte) (*PBinWitnessState, error)
 	return &PBinWitnessState{
 		tree: tree,
 		ctx:  pbinNewWitnessContext(tree),
-		keys: pbinDigestCache{sum: pbinSelectedSum},
+		keys: pbinDigestCache{Sum: pbinSelectedSum},
 	}, nil
 }
 
@@ -77,7 +77,7 @@ func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
 	// while BASIC_DATA is absent for an account whose nonce, balance and
 	// code_size are all zero.
 	var acc PBinAccount
-	basic, hasBasic, err := s.tree.leaf(s.keys.accountKey(addr, pbinBasicDataLeafKey))
+	basic, hasBasic, err := s.tree.leaf(s.keys.AccountKey(addr, pbinBasicDataLeafKey))
 	if err != nil {
 		return PBinAccount{}, false, err
 	}
@@ -87,7 +87,7 @@ func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
 		acc.Balance.SetBytes(basic[pbinBasicDataBalanceOffset:])
 	}
 
-	codeHash, ok, err := s.tree.leaf(s.keys.accountKey(addr, pbinCodeHashLeafKey))
+	codeHash, ok, err := s.tree.leaf(s.keys.AccountKey(addr, pbinCodeHashLeafKey))
 	if err != nil {
 		return PBinAccount{}, false, err
 	}
@@ -115,7 +115,7 @@ func (s *PBinWitnessState) Account(addr []byte) (PBinAccount, bool, error) {
 
 // An absent slot resolves to the zero hash, matching SLOAD's default value.
 func (s *PBinWitnessState) Storage(addr, slot []byte) (common.Hash, bool, error) {
-	value, ok, err := s.tree.leaf(s.keys.storageKey(addr, slot))
+	value, ok, err := s.tree.leaf(s.keys.StorageKey(addr, slot))
 	if err != nil || !ok {
 		return common.Hash{}, false, err
 	}
@@ -131,12 +131,12 @@ func (s *PBinWitnessState) Storage(addr, slot []byte) (common.Hash, bool, error)
 func (s *PBinWitnessState) HasStorage(addr []byte) bool {
 	// Sub-indices 64..127 are the header's storage slots, which is exactly the
 	// header stem extended by the two bits pbinHeaderStorageOffset leads with.
-	stem := s.keys.accountHeaderStem(addr)
+	stem := s.keys.AccountHeaderStem(addr)
 	header := pbinPathFromBits(append(stem, pbinHeaderStorageOffset), int16(8*len(stem)+2))
 	if s.tree.hasSubtree(&header) {
 		return true
 	}
-	zone := pbinPathFromBytes(s.keys.accountStoragePrefix(addr))
+	zone := pbinPathFromBytes(s.keys.AccountStoragePrefix(addr))
 	return s.tree.hasSubtree(&zone)
 }
 
@@ -181,13 +181,13 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 	// An account whose nonce, balance and code_size are all zero stores no
 	// BASIC_DATA leaf, so its absence is zeros rather than an absent account —
 	// the CODE_HASH or DELEGATION leaf is what marks the account present.
-	hashValue, hasCodeHash, err := c.tree.leaf(c.keys.accountKey(addr, pbinCodeHashLeafKey))
+	hashValue, hasCodeHash, err := c.tree.leaf(c.keys.AccountKey(addr, pbinCodeHashLeafKey))
 	if err != nil {
 		return nil, err
 	}
 
 	var size uint64
-	if basic, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinBasicDataLeafKey)); err != nil {
+	if basic, ok, err := c.tree.leaf(c.keys.AccountKey(addr, pbinBasicDataLeafKey)); err != nil {
 		return nil, err
 	} else if ok {
 		size = uint64(binary.BigEndian.Uint32(basic[pbinBasicDataCodeSizeOffset:]))
@@ -213,7 +213,7 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 
 	code := make([]byte, 0, size)
 	for chunk := 0; chunk < pbinCodeChunkCount(size); chunk++ {
-		value, ok, err := c.tree.leaf(c.keys.codeChunkKey(codeHash, chunk))
+		value, ok, err := c.tree.leaf(c.keys.CodeChunkKey(codeHash, chunk))
 		if err != nil {
 			return nil, err
 		}
@@ -239,7 +239,7 @@ func (c *pbinWitnessContext) codeFromLeaves(addr []byte) ([]byte, error) {
 // the root commits the leaf itself — so the leaf's fixed shape is the only thing
 // that can be checked, and code_size has to agree with it.
 func (c *pbinWitnessContext) delegationCode(addr []byte, size uint64) ([]byte, error) {
-	value, ok, err := c.tree.leaf(c.keys.accountKey(addr, pbinDelegationLeafKey))
+	value, ok, err := c.tree.leaf(c.keys.AccountKey(addr, pbinDelegationLeafKey))
 	if err != nil || !ok {
 		return nil, err
 	}
@@ -270,7 +270,7 @@ func (w *pbinWitnessTree) hasSubtree(prefix *pbinBitpath) bool {
 		if hash == pbinEmptyTreeHash {
 			return false
 		}
-		if pos >= prefix.bitLen {
+		if pos >= prefix.BitLen {
 			return true
 		}
 		node, ok := w.nodes[hash]
@@ -279,17 +279,17 @@ func (w *pbinWitnessTree) hasSubtree(prefix *pbinBitpath) bool {
 		}
 		if node.isLeaf() {
 			key := pbinPathFromBytes(node.key)
-			return key.hasPrefix(prefix)
+			return key.HasPrefix(prefix)
 		}
-		limit := min(prefix.bitLen-pos, node.prefix.bitLen)
+		limit := min(prefix.BitLen-pos, node.prefix.BitLen)
 		if pbinCommonPrefixBitsAt(prefix, pos, &node.prefix) != limit {
 			return false
 		}
-		if prefix.bitLen-pos <= node.prefix.bitLen {
+		if prefix.BitLen-pos <= node.prefix.BitLen {
 			return true
 		}
-		end := pos + node.prefix.bitLen
-		hash, pos = node.children[prefix.bit(end)], end+1
+		end := pos + node.prefix.BitLen
+		hash, pos = node.children[prefix.Bit(end)], end+1
 	}
 }
 
@@ -318,10 +318,10 @@ func (w *pbinWitnessTree) leaf(key []byte) ([]byte, bool, error) {
 			}
 			return node.value, true, nil
 		}
-		end := pos + node.prefix.bitLen
-		if end >= path.bitLen || pbinCommonPrefixBitsAt(&path, pos, &node.prefix) != node.prefix.bitLen {
+		end := pos + node.prefix.BitLen
+		if end >= path.BitLen || pbinCommonPrefixBitsAt(&path, pos, &node.prefix) != node.prefix.BitLen {
 			return nil, false, nil
 		}
-		hash, pos = node.children[path.bit(end)], end+1
+		hash, pos = node.children[path.Bit(end)], end+1
 	}
 }

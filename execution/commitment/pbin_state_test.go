@@ -40,7 +40,7 @@ func TestPBinRestartRoundTripDeepPath(t *testing.T) {
 	rootBefore := pbinTestProcess(t, pph, stored.plainKeys, stored.updates)
 
 	require.Equal(t, pbinNodeBranch, pph.grid.root.kind)
-	require.Greater(t, int(pph.grid.root.prefix.bitLen), 256, "the corpus must put the branch past byte-depth range")
+	require.Greater(t, int(pph.grid.root.prefix.BitLen), 256, "the corpus must put the branch past byte-depth range")
 
 	blob, err := pph.EncodeCurrentState(nil)
 	require.NoError(t, err)

@@ -87,13 +87,13 @@ func pbinWitnessCollectOracleNodes(t *testing.T, node pbinOracleNode, out map[st
 	switch n := node.(type) {
 	case *pbinOracleLeaf:
 		preimage = append(preimage, pbinOracleLeafTag)
-		preimage = append(preimage, n.key...)
-		preimage = append(preimage, n.value...)
+		preimage = append(preimage, n.Key...)
+		preimage = append(preimage, n.Value...)
 	case *pbinOracleBranch:
-		left := pbinWitnessCollectOracleNodes(t, n.left, out)
-		right := pbinWitnessCollectOracleNodes(t, n.right, out)
+		left := pbinWitnessCollectOracleNodes(t, n.Left, out)
+		right := pbinWitnessCollectOracleNodes(t, n.Right, out)
 		preimage = append(preimage, pbinOracleBranchTag)
-		preimage = append(preimage, pbinOracleEncodeBitPrefix(n.prefix)...)
+		preimage = append(preimage, pbinOracleEncodeBitPrefix(n.Prefix)...)
 		preimage = append(preimage, left...)
 		preimage = append(preimage, right...)
 	default:

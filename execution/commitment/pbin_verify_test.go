@@ -77,7 +77,7 @@ func (v *pbinVerifier) rootPath() (pbinBitpath, error) {
 	for _, p := range paths {
 		covered := false
 		for _, q := range paths {
-			if q.bitLen < p.bitLen && p.hasPrefix(&q) {
+			if q.BitLen < p.BitLen && p.HasPrefix(&q) {
 				covered = true
 				break
 			}
@@ -130,7 +130,7 @@ func (v *pbinVerifier) nodeHash(nodePath, prefix *pbinBitpath) ([]byte, error) {
 	var children [2][]byte
 	for bit := range children {
 		start := *nodePath
-		start.appendBit(uint64(bit))
+		start.AppendBit(uint64(bit))
 		if children[bit], err = v.cellHash(&start, &cells[bit]); err != nil {
 			return nil, err
 		}
@@ -149,10 +149,10 @@ func (v *pbinVerifier) cellHash(start *pbinBitpath, c *pbinCell) ([]byte, error)
 		return pbinTestKeccak(v.t, []byte{pbinLeafTag}, key, value), nil
 	case pbinNodeBranch:
 		nodePath := *start
-		nodePath.append(&c.prefix)
+		nodePath.Append(&c.prefix)
 		return v.nodeHash(&nodePath, &c.prefix)
 	default:
-		return nil, fmt.Errorf("pbin verify: cell at %d bits has no node kind", start.bitLen)
+		return nil, fmt.Errorf("pbin verify: cell at %d bits has no node kind", start.BitLen)
 	}
 }
 
@@ -160,9 +160,9 @@ func (v *pbinVerifier) cellHash(start *pbinBitpath, c *pbinCell) ([]byte, error)
 // plain key holds in state.
 func (v *pbinVerifier) leaf(start *pbinBitpath, c *pbinCell) (key, value []byte, err error) {
 	full := *start
-	full.append(&c.prefix)
-	if full.bitLen != pbinAccountKeyLength*8 && full.bitLen != pbinStorageKeyLength*8 {
-		return nil, nil, fmt.Errorf("pbin verify: leaf key of %d bits is neither zone length", full.bitLen)
+	full.Append(&c.prefix)
+	if full.BitLen != pbinAccountKeyLength*8 && full.BitLen != pbinStorageKeyLength*8 {
+		return nil, nil, fmt.Errorf("pbin verify: leaf key of %d bits is neither zone length", full.BitLen)
 	}
 	key = pbinVerifyPackBits(pbinVerifyBits(&full))
 
@@ -200,10 +200,10 @@ func (v *pbinVerifier) recordAt(nodePath *pbinBitpath) ([2]pbinCell, error) {
 		return cells, err
 	}
 	if len(data) == 0 {
-		return cells, fmt.Errorf("pbin verify: no record for the %d-bit node at %x", nodePath.bitLen, key)
+		return cells, fmt.Errorf("pbin verify: no record for the %d-bit node at %x", nodePath.BitLen, key)
 	}
-	keys := pbinDigestCache{sum: pbinSelectedSum}
-	if err := pbinDecodeBranch(data, &cells, nodePath.bitLen+1, &keys); err != nil {
+	keys := pbinDigestCache{Sum: pbinSelectedSum}
+	if err := pbinDecodeBranch(data, &cells, nodePath.BitLen+1, &keys); err != nil {
 		return cells, fmt.Errorf("pbin verify: record at %x: %w", key, err)
 	}
 	return cells, nil
@@ -234,7 +234,7 @@ func (v *pbinVerifier) checkCellLeaves(start *pbinBitpath, c *pbinCell) (int, er
 		return 1, nil
 	case pbinNodeBranch:
 		nodePath := *start
-		nodePath.append(&c.prefix)
+		nodePath.Append(&c.prefix)
 		cells, err := v.recordAt(&nodePath)
 		if err != nil {
 			return 0, err
@@ -242,7 +242,7 @@ func (v *pbinVerifier) checkCellLeaves(start *pbinBitpath, c *pbinCell) (int, er
 		leaves := 0
 		for bit := range cells {
 			childStart := nodePath
-			childStart.appendBit(uint64(bit))
+			childStart.AppendBit(uint64(bit))
 			n, err := v.checkCellLeaves(&childStart, &cells[bit])
 			if err != nil {
 				return 0, err
@@ -251,7 +251,7 @@ func (v *pbinVerifier) checkCellLeaves(start *pbinBitpath, c *pbinCell) (int, er
 		}
 		return leaves, nil
 	default:
-		return 0, fmt.Errorf("pbin verify: cell at %d bits has no node kind", start.bitLen)
+		return 0, fmt.Errorf("pbin verify: cell at %d bits has no node kind", start.BitLen)
 	}
 }
 
@@ -304,9 +304,9 @@ func pbinVerifyDerivedKey(c *pbinCell, key []byte) ([]byte, error) {
 // pbinVerifyBits spells a path one bit per byte, the shape the oracle's
 // encode_bit_prefix takes.
 func pbinVerifyBits(p *pbinBitpath) []byte {
-	out := make([]byte, p.bitLen)
+	out := make([]byte, p.BitLen)
 	for i := range out {
-		out[i] = byte(p.bit(int16(i)))
+		out[i] = byte(p.Bit(int16(i)))
 	}
 	return out
 }

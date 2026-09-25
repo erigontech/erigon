@@ -17,7 +17,6 @@ import (
 	"math/big"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -115,56 +114,6 @@ func TestPBinConformanceTrieRoots(t *testing.T) {
 	}
 }
 
-func TestPBinConformanceEmbedding(t *testing.T) {
-	e := pbinLoadConformance(t).Embedding
-	addr := pbinUnhex(t, e.Address20)
-	codeHash := common.BytesToHash(pbinUnhex(t, e.CodeHash))
-	keys := pbinDigestCache{sum: pbinBlake3Hash}
-
-	require.Equal(t, e.Address32, "0x"+hex.EncodeToString(func() []byte {
-		a := pbinRightAlign32(addr)
-		return a[:]
-	}()))
-
-	hexKey := func(k []byte) string { return "0x" + hex.EncodeToString(k) }
-	require.Equal(t, e.BasicDataKey, hexKey(keys.accountKey(addr, pbinBasicDataLeafKey)))
-	require.Equal(t, e.CodeHashKey, hexKey(keys.accountKey(addr, pbinCodeHashLeafKey)))
-	require.Equal(t, e.DelegationKey, hexKey(keys.accountKey(addr, pbinDelegationLeafKey)))
-
-	for slot, want := range e.StorageSlotKeys {
-		require.Equal(t, want, hexKey(keys.storageKey(addr, pbinSlotBytes(t, slot))), "slot %s", slot)
-	}
-
-	for chunk, want := range e.CodeChunkKeys {
-		id, err := strconv.Atoi(chunk)
-		require.NoError(t, err)
-		require.Equal(t, want, hexKey(keys.codeChunkKey(codeHash, id)), "chunk %s", chunk)
-	}
-}
-
-func TestPBinConformanceChunkifyCode(t *testing.T) {
-	for _, c := range pbinLoadConformance(t).ChunkifyCode {
-		t.Run(c.Name, func(t *testing.T) {
-			chunks := pbinChunkifyCode(pbinUnhex(t, c.Code))
-			require.Len(t, chunks, len(c.Chunks))
-			for i, want := range c.Chunks {
-				require.Equal(t, want, "0x"+hex.EncodeToString(chunks[i][:]), "chunk %d", i)
-			}
-		})
-	}
-}
-
-func TestPBinConformanceEncodeBasicData(t *testing.T) {
-	for _, c := range pbinLoadConformance(t).EncodeBasicData {
-		balance, err := uint256.FromHex(c.Balance)
-		require.NoError(t, err)
-		got, err := pbinEncodeBasicData(c.Nonce, balance, c.CodeSize)
-		require.NoError(t, err)
-		require.Equal(t, c.Encoded, "0x"+hex.EncodeToString(got[:]),
-			"code_size=%d nonce=%d balance=%s", c.CodeSize, c.Nonce, c.Balance)
-	}
-}
-
 // TestPBinConformancePBTState rebuilds each reference state leaf by leaf and
 // checks the root, through the oracle and through the engine. Two rules decide
 // what is not written: a leaf whose value is 32 zero bytes is absent, and code
@@ -176,7 +125,7 @@ func TestPBinConformancePBTState(t *testing.T) {
 	var zero [pbinValueLength]byte
 	for _, c := range pbinLoadConformance(t).PBTState {
 		t.Run(c.Name, func(t *testing.T) {
-			keys := pbinDigestCache{sum: pbinBlake3Hash}
+			keys := pbinDigestCache{Sum: pbinBlake3Hash}
 			leaves := map[string][]byte{}
 			put := func(key []byte, value [pbinValueLength]byte) {
 				if value == zero {
@@ -194,18 +143,18 @@ func TestPBinConformancePBTState(t *testing.T) {
 
 				basic, err := pbinEncodeBasicData(acc.Nonce, balance, uint64(len(code)))
 				require.NoError(t, err)
-				put(keys.accountKey(addr, pbinBasicDataLeafKey), basic)
+				put(keys.AccountKey(addr, pbinBasicDataLeafKey), basic)
 				if pbinIsDelegation(code) {
-					put(keys.accountKey(addr, pbinDelegationLeafKey), pbinEncodeDelegation(code))
+					put(keys.AccountKey(addr, pbinDelegationLeafKey), pbinEncodeDelegation(code))
 				} else {
-					put(keys.accountKey(addr, pbinCodeHashLeafKey), pbinCodeHashValue(codeHash))
+					put(keys.AccountKey(addr, pbinCodeHashLeafKey), pbinCodeHashValue(codeHash))
 					for i, chunk := range pbinChunkifyCode(code) {
-						put(keys.codeChunkKey(codeHash, i), chunk)
+						put(keys.CodeChunkKey(codeHash, i), chunk)
 					}
 				}
 
 				for slot, value := range acc.Storage {
-					put(keys.storageKey(addr, pbinSlotBytes(t, slot)),
+					put(keys.StorageKey(addr, pbinSlotBytes(t, slot)),
 						pbinEncodeStorageValue(pbinUnhex(t, value)))
 				}
 			}

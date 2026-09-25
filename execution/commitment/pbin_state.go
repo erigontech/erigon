@@ -50,8 +50,8 @@ var (
 )
 
 func (pph *PBinPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
-	if pph.grid.activeRows != 0 || pph.currentKey.bitLen != 0 {
-		return nil, fmt.Errorf("%w: %d rows, %d-bit key", errPBinStateOpen, pph.grid.activeRows, pph.currentKey.bitLen)
+	if pph.grid.activeRows != 0 || pph.currentKey.BitLen != 0 {
+		return nil, fmt.Errorf("%w: %d rows, %d-bit key", errPBinStateOpen, pph.grid.activeRows, pph.currentKey.BitLen)
 	}
 	var flags byte
 	if pph.rootPresent {

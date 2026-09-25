@@ -93,11 +93,11 @@ func (p *pbinWitnessPruner) walk(key []byte) error {
 		if node.isLeaf() {
 			return nil
 		}
-		end := pos + node.prefix.bitLen
-		if end >= path.bitLen || pbinCommonPrefixBitsAt(&path, pos, &node.prefix) != node.prefix.bitLen {
+		end := pos + node.prefix.BitLen
+		if end >= path.BitLen || pbinCommonPrefixBitsAt(&path, pos, &node.prefix) != node.prefix.BitLen {
 			return nil
 		}
-		bit := path.bit(end)
+		bit := path.Bit(end)
 		p.keepSibling(node.children[1-bit])
 		hash, pos = node.children[bit], end+1
 	}

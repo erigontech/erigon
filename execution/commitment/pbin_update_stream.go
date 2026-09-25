@@ -202,10 +202,10 @@ func (s *pbinUpdateStream) removesAccount(plainKey []byte, update *Update) bool 
 // (eip:"Zero values and deletion").
 func (s *pbinUpdateStream) removeAccount(plainKey []byte) error {
 	drop := Update{Flags: DeleteUpdate}
-	if err := s.emit(s.keyDigest.accountHeaderStem(plainKey), plainKey, &drop); err != nil {
+	if err := s.emit(s.keyDigest.AccountHeaderStem(plainKey), plainKey, &drop); err != nil {
 		return err
 	}
-	s.pendingRemoval = append(s.pendingRemoval, s.keyDigest.accountStoragePrefix(plainKey))
+	s.pendingRemoval = append(s.pendingRemoval, s.keyDigest.AccountStoragePrefix(plainKey))
 	return nil
 }
 
@@ -292,9 +292,9 @@ func (s *pbinUpdateStream) chunkSource(plainKey []byte, update *Update) ([]byte,
 }
 
 func (s *pbinUpdateStream) queueChunks(code []byte, codeHash common.Hash) {
-	for i, chunk := range s.chunkScratch.chunkify(code) {
+	for i, chunk := range s.chunkScratch.Chunkify(code) {
 		var cc pbinCodeChunk
-		copy(cc.key[:], s.keyDigest.codeChunkKey(codeHash, i))
+		copy(cc.key[:], s.keyDigest.CodeChunkKey(codeHash, i))
 		cc.value = chunk
 		s.codeChunks = append(s.codeChunks, cc)
 	}

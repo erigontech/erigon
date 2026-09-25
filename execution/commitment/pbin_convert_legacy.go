@@ -36,7 +36,7 @@ type PBinRecordConverter struct {
 }
 
 func NewPBinRecordConverter() *PBinRecordConverter {
-	return &PBinRecordConverter{keys: pbinDigestCache{sum: pbinSelectedSum}}
+	return &PBinRecordConverter{keys: pbinDigestCache{Sum: pbinSelectedSum}}
 }
 
 // PBinEncodeLegacyRecord rewrites a current branch record in the pre-version
@@ -53,7 +53,7 @@ func PBinEncodeLegacyRecord(key, current []byte) ([]byte, error) {
 	}
 	converter := NewPBinRecordConverter()
 	var cells [2]pbinCell
-	if err = pbinDecodeBranch(current, &cells, path.bitLen+1, &converter.keys); err != nil {
+	if err = pbinDecodeBranch(current, &cells, path.BitLen+1, &converter.keys); err != nil {
 		return nil, fmt.Errorf("pbin encode legacy: record at %x: %w", key, err)
 	}
 
@@ -162,8 +162,8 @@ func pbinEncodeLegacyCell(dst []byte, c *pbinCell) ([]byte, error) {
 	}
 
 	dst = append(dst, byte(fields))
-	dst = binary.AppendUvarint(dst, uint64(c.prefix.bitLen))
-	dst = c.prefix.appendPackedBits(dst)
+	dst = binary.AppendUvarint(dst, uint64(c.prefix.BitLen))
+	dst = c.prefix.AppendPackedBits(dst)
 	appendValue := func(value []byte) {
 		dst = binary.AppendUvarint(dst, uint64(len(value)))
 		dst = append(dst, value...)
@@ -200,7 +200,7 @@ func (c *PBinRecordConverter) ConvertBranch(key, data []byte) ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("pbin convert: record key %x: %w", key, err)
 	}
-	depth := path.bitLen + 1
+	depth := path.BitLen + 1
 
 	var cells [2]pbinCell
 	_, afterMap, err := pbinLegacyDecodeBranch(data, &cells)
@@ -276,7 +276,7 @@ func (c *PBinRecordConverter) CompareLegacy(key, legacy, current []byte) error {
 	}
 
 	var currentCells [2]pbinCell
-	if err = pbinDecodeBranch(current, &currentCells, path.bitLen+1, &c.keys); err != nil {
+	if err = pbinDecodeBranch(current, &currentCells, path.BitLen+1, &c.keys); err != nil {
 		return fmt.Errorf("pbin compare: current record at %x: %w", key, err)
 	}
 	for bit := range legacyCells {
@@ -335,7 +335,7 @@ func (c *PBinRecordConverter) LegacyStateRoot(blob []byte) ([]byte, error) {
 		}
 	}
 
-	hasher := pbinHasher{sum: c.keys.sum}
+	hasher := pbinHasher{sum: c.keys.Sum}
 	hash, err := hasher.cellHash(&root, new(pbinBitpath))
 	if err != nil {
 		return nil, fmt.Errorf("pbin compare: state root: %w", err)
@@ -372,7 +372,7 @@ func (c *PBinRecordConverter) CurrentStateRoot(blob []byte) ([]byte, error) {
 		}
 	}
 
-	hasher := pbinHasher{sum: c.keys.sum}
+	hasher := pbinHasher{sum: c.keys.Sum}
 	hash, err := hasher.cellHash(&root, new(pbinBitpath))
 	if err != nil {
 		return nil, fmt.Errorf("pbin state root: %w", err)

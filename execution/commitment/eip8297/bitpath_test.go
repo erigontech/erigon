@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
+package eip8297
 
 import (
 	"bytes"
@@ -23,15 +23,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func pbinTestPath(t *testing.T, pattern byte, bitLen int16) pbinBitpath {
+func referencePath(t *testing.T, pattern byte, bitLen int16) Bitpath {
 	t.Helper()
-	p := pbinPathFromBits(bytes.Repeat([]byte{pattern}, 66), bitLen)
-	require.Equal(t, bitLen, p.bitLen)
+	p := PathFromBits(bytes.Repeat([]byte{pattern}, 66), bitLen)
+	require.Equal(t, bitLen, p.BitLen)
 	return p
 }
 
-func pbinFlipBit(p pbinBitpath, at int16) pbinBitpath {
-	p.setBitAt(at, p.bit(at)^1)
+func flipBit(p Bitpath, at int16) Bitpath {
+	p.SetBitAt(at, p.Bit(at)^1)
 	return p
 }
 
@@ -60,13 +60,13 @@ func TestPBinCommonPrefixBits(t *testing.T) {
 		{"diff-at-527-len-528", 528, 528, 527, 527},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			a := pbinTestPath(t, 0xA5, tc.aLen)
-			b := pbinTestPath(t, 0xA5, tc.bLen)
+			a := referencePath(t, 0xA5, tc.aLen)
+			b := referencePath(t, 0xA5, tc.bLen)
 			if tc.flipAt >= 0 {
-				b = pbinFlipBit(b, tc.flipAt)
+				b = flipBit(b, tc.flipAt)
 			}
-			require.Equal(t, tc.want, pbinCommonPrefixBitsAt(&a, 0, &b))
-			require.Equal(t, tc.want, pbinCommonPrefixBitsAt(&b, 0, &a))
+			require.Equal(t, tc.want, CommonPrefixBitsAt(&a, 0, &b))
+			require.Equal(t, tc.want, CommonPrefixBitsAt(&b, 0, &a))
 		})
 	}
 }
@@ -76,70 +76,70 @@ func TestPBinCommonPrefixBits(t *testing.T) {
 func TestPBinCommonPrefixBits_ShorterPathIsPrefix(t *testing.T) {
 	t.Parallel()
 
-	long := pbinTestPath(t, 0xAA, 528)
-	short := pbinTestPath(t, 0xAA, 272)
+	long := referencePath(t, 0xAA, 528)
+	short := referencePath(t, 0xAA, 272)
 
-	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&short, 0, &long))
-	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&long, 0, &short))
+	require.Equal(t, int16(272), CommonPrefixBitsAt(&short, 0, &long))
+	require.Equal(t, int16(272), CommonPrefixBitsAt(&long, 0, &short))
 }
 
 // Words carrying set bits beyond bitLen must not be read as real path bits.
 func TestPBinCommonPrefixBits_IgnoresBitsBeyondBitLen(t *testing.T) {
 	t.Parallel()
 
-	long := pbinTestPath(t, 0xAA, 528)
+	long := referencePath(t, 0xAA, 528)
 
-	dirty := pbinTestPath(t, 0xAA, 272)
-	dirty.w[4] |= 0x0000FFFFFFFFFFFF // bits 272..319
-	for i := 5; i < pbinPathWords; i++ {
-		dirty.w[i] = ^uint64(0)
+	dirty := referencePath(t, 0xAA, 272)
+	dirty.Words[4] |= 0x0000FFFFFFFFFFFF // bits 272..319
+	for i := 5; i < PathWords; i++ {
+		dirty.Words[i] = ^uint64(0)
 	}
 
-	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&dirty, 0, &long))
-	require.Equal(t, int16(272), pbinCommonPrefixBitsAt(&long, 0, &dirty))
+	require.Equal(t, int16(272), CommonPrefixBitsAt(&dirty, 0, &long))
+	require.Equal(t, int16(272), CommonPrefixBitsAt(&long, 0, &dirty))
 
-	clean := pbinTestPath(t, 0xAA, 272)
-	dirty.maskTail()
-	require.Equal(t, clean.w, dirty.w)
+	clean := referencePath(t, 0xAA, 272)
+	dirty.MaskTail()
+	require.Equal(t, clean.Words, dirty.Words)
 }
 
 func TestPBinBitpathAccessors(t *testing.T) {
 	t.Parallel()
 
-	p := pbinPathFromBytes([]byte{0b10110001, 0b01000000})
-	require.Equal(t, int16(16), p.bitLen)
+	p := PathFromBytes([]byte{0b10110001, 0b01000000})
+	require.Equal(t, int16(16), p.BitLen)
 	for i, want := range []uint64{1, 0, 1, 1, 0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0} {
-		require.Equalf(t, want, p.bit(int16(i)), "bit %d", i)
+		require.Equalf(t, want, p.Bit(int16(i)), "bit %d", i)
 	}
 
-	mid := p.slice(3, 11)
-	require.Equal(t, int16(8), mid.bitLen)
-	require.Equal(t, pbinPathFromBytes([]byte{0b10001010}), mid)
+	mid := p.Slice(3, 11)
+	require.Equal(t, int16(8), mid.BitLen)
+	require.Equal(t, PathFromBytes([]byte{0b10001010}), mid)
 
-	head, tail := p.slice(0, 3), p.slice(11, 16)
-	head.append(&mid)
-	head.append(&tail)
+	head, tail := p.Slice(0, 3), p.Slice(11, 16)
+	head.Append(&mid)
+	head.Append(&tail)
 	require.Equal(t, p, head)
 
-	empty, short := p.slice(0, 0), p.slice(0, 7)
-	require.True(t, p.hasPrefix(&empty))
-	require.True(t, p.hasPrefix(&short))
-	require.True(t, p.hasPrefix(&p))
+	empty, short := p.Slice(0, 0), p.Slice(0, 7)
+	require.True(t, p.HasPrefix(&empty))
+	require.True(t, p.HasPrefix(&short))
+	require.True(t, p.HasPrefix(&p))
 
-	flipped := pbinFlipBit(p, 5)
-	other := flipped.slice(0, 7)
-	require.False(t, p.hasPrefix(&other))
-	require.False(t, short.hasPrefix(&p))
+	flipped := flipBit(p, 5)
+	other := flipped.Slice(0, 7)
+	require.False(t, p.HasPrefix(&other))
+	require.False(t, short.HasPrefix(&p))
 
-	var appended pbinBitpath
-	for i := int16(0); i < p.bitLen; i++ {
-		appended.appendBit(p.bit(i))
+	var appended Bitpath
+	for i := int16(0); i < p.BitLen; i++ {
+		appended.AppendBit(p.Bit(i))
 	}
 	require.Equal(t, p, appended)
 
 	truncated := p
-	truncated.truncate(4)
-	require.Equal(t, pbinPathFromBits([]byte{0b10110000}, 4), truncated)
+	truncated.Truncate(4)
+	require.Equal(t, PathFromBits([]byte{0b10110000}, 4), truncated)
 }
 
 func TestPBinBitPathCodecRoundTrip(t *testing.T) {
@@ -150,13 +150,13 @@ func TestPBinBitPathCodecRoundTrip(t *testing.T) {
 		src[i] = byte(i*7 + 1)
 	}
 
-	for bitLen := int16(0); bitLen <= pbinMaxPathBits; bitLen++ {
-		p := pbinPathFromBits(src, bitLen)
-		enc := pbinEncodeBitPath(&p)
+	for bitLen := int16(0); bitLen <= MaxPathBits; bitLen++ {
+		p := PathFromBits(src, bitLen)
+		enc := EncodeBitPath(&p)
 		require.Equalf(t, (int(bitLen)+7)/8+1, len(enc), "bitLen %d", bitLen)
 		require.LessOrEqual(t, len(enc), 67)
 
-		got, err := pbinDecodeBitPath(enc)
+		got, err := DecodeBitPath(enc)
 		require.NoErrorf(t, err, "bitLen %d", bitLen)
 		require.Equalf(t, p, got, "bitLen %d", bitLen)
 	}
@@ -165,10 +165,10 @@ func TestPBinBitPathCodecRoundTrip(t *testing.T) {
 func TestPBinBitPathCodecEmpty(t *testing.T) {
 	t.Parallel()
 
-	var empty pbinBitpath
-	require.Equal(t, []byte{0x00}, pbinEncodeBitPath(&empty))
+	var empty Bitpath
+	require.Equal(t, []byte{0x00}, EncodeBitPath(&empty))
 
-	got, err := pbinDecodeBitPath([]byte{0x00})
+	got, err := DecodeBitPath([]byte{0x00})
 	require.NoError(t, err)
 	require.Equal(t, empty, got)
 }
@@ -189,14 +189,14 @@ func TestPBinBitPathCodecRejects(t *testing.T) {
 		{"too-long", append(bytes.Repeat([]byte{0xAA}, 67), 0x00)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			_, err := pbinDecodeBitPath(tc.buf)
+			_, err := DecodeBitPath(tc.buf)
 			require.Error(t, err)
 		})
 	}
 
-	got, err := pbinDecodeBitPath([]byte{0xE0, 0x03})
+	got, err := DecodeBitPath([]byte{0xE0, 0x03})
 	require.NoError(t, err)
-	require.Equal(t, pbinPathFromBits([]byte{0xE0}, 3), got)
+	require.Equal(t, PathFromBits([]byte{0xE0}, 3), got)
 }
 
 // The commitment domain stores its state blob under the literal key "state", so
@@ -204,13 +204,13 @@ func TestPBinBitPathCodecRejects(t *testing.T) {
 func TestPBinBitPathNeverEncodesToStateKey(t *testing.T) {
 	t.Parallel()
 
-	_, err := pbinDecodeBitPath(KeyCommitmentState)
+	_, err := DecodeBitPath([]byte("state"))
 	require.Error(t, err)
 
 	src := bytes.Repeat([]byte{0x74}, 66)
-	for bitLen := int16(0); bitLen <= pbinMaxPathBits; bitLen++ {
-		p := pbinPathFromBits(src, bitLen)
-		require.NotEqualf(t, KeyCommitmentState, pbinEncodeBitPath(&p), "bitLen %d", bitLen)
+	for bitLen := int16(0); bitLen <= MaxPathBits; bitLen++ {
+		p := PathFromBits(src, bitLen)
+		require.NotEqualf(t, []byte("state"), EncodeBitPath(&p), "bitLen %d", bitLen)
 	}
 }
 
@@ -222,18 +222,18 @@ func FuzzPBinBitPathCodec(f *testing.F) {
 	f.Add([]byte{0xFF, 0x03}, uint16(3))
 
 	f.Fuzz(func(t *testing.T, data []byte, n uint16) {
-		bitLen := int16(int(n) % (pbinMaxPathBits + 1))
-		p := pbinPathFromBits(data, bitLen)
+		bitLen := int16(int(n) % (MaxPathBits + 1))
+		p := PathFromBits(data, bitLen)
 
-		enc := pbinEncodeBitPath(&p)
-		got, err := pbinDecodeBitPath(enc)
+		enc := EncodeBitPath(&p)
+		got, err := DecodeBitPath(enc)
 		require.NoError(t, err)
 		require.Equal(t, p, got)
 
 		// Decoding is total and canonical: anything that decodes must re-encode
 		// to the very bytes it came from, so one bit path has one DB key.
-		if q, err := pbinDecodeBitPath(data); err == nil {
-			require.Equal(t, data, pbinEncodeBitPath(&q))
+		if q, err := DecodeBitPath(data); err == nil {
+			require.Equal(t, data, EncodeBitPath(&q))
 		}
 	})
 }
@@ -243,25 +243,25 @@ func FuzzPBinBitPathCodec(f *testing.F) {
 func TestPBinCommonPrefixBitsAt_MatchesNaiveScan(t *testing.T) {
 	t.Parallel()
 
-	naive := func(key *pbinBitpath, from int16, prefix *pbinBitpath) int16 {
-		limit := min(key.bitLen-from, prefix.bitLen)
+	naive := func(key *Bitpath, from int16, prefix *Bitpath) int16 {
+		limit := min(key.BitLen-from, prefix.BitLen)
 		n := int16(0)
-		for n < limit && key.bit(from+n) == prefix.bit(n) {
+		for n < limit && key.Bit(from+n) == prefix.Bit(n) {
 			n++
 		}
 		return n
 	}
 
-	key := pbinTestPath(t, 0x6D, pbinMaxPathBits)
+	key := referencePath(t, 0x6D, MaxPathBits)
 	for _, from := range []int16{0, 1, 7, 63, 64, 65, 127, 128, 271, 272, 511, 512, 527, 528} {
 		for _, want := range []int16{0, 1, 63, 64, 65, 128, 271} {
-			p := key.slice(from, min(from+want, key.bitLen))
-			require.Equalf(t, naive(&key, from, &p), pbinCommonPrefixBitsAt(&key, from, &p),
-				"from %d, %d-bit prefix", from, p.bitLen)
-			for flip := int16(0); flip < p.bitLen; flip++ {
-				d := pbinFlipBit(p, flip)
-				require.Equalf(t, naive(&key, from, &d), pbinCommonPrefixBitsAt(&key, from, &d),
-					"from %d, %d-bit prefix flipped at %d", from, p.bitLen, flip)
+			p := key.Slice(from, min(from+want, key.BitLen))
+			require.Equalf(t, naive(&key, from, &p), CommonPrefixBitsAt(&key, from, &p),
+				"from %d, %d-bit prefix", from, p.BitLen)
+			for flip := int16(0); flip < p.BitLen; flip++ {
+				d := flipBit(p, flip)
+				require.Equalf(t, naive(&key, from, &d), CommonPrefixBitsAt(&key, from, &d),
+					"from %d, %d-bit prefix flipped at %d", from, p.BitLen, flip)
 			}
 		}
 	}

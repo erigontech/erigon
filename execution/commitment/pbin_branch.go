@@ -99,8 +99,8 @@ func pbinAppendCell(dst []byte, c *pbinCell, omitStoragePrefix bool) ([]byte, er
 
 	dst = append(dst, byte(fields))
 	if !omitStoragePrefix || fields&pbinFieldStorageAddr == 0 {
-		dst = binary.AppendUvarint(dst, uint64(c.prefix.bitLen))
-		dst = c.prefix.appendPackedBits(dst)
+		dst = binary.AppendUvarint(dst, uint64(c.prefix.BitLen))
+		dst = c.prefix.AppendPackedBits(dst)
 	}
 
 	if fields&pbinFieldAccountAddr != 0 {
@@ -193,11 +193,11 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell, depth int16, keys *pbinDi
 			if keys == nil {
 				return 0, fmt.Errorf("%w: storage leaf prefix needs a digest cache", errPBinMalformedBranch)
 			}
-			storageKey := pbinPathFromBytes(keys.storageKey(c.storageAddr[:length.Addr], c.storageAddr[length.Addr:]))
-			if depth < 0 || depth > storageKey.bitLen {
-				return 0, fmt.Errorf("%w: storage leaf at depth %d exceeds its %d-bit key", errPBinMalformedBranch, depth, storageKey.bitLen)
+			storageKey := pbinPathFromBytes(keys.StorageKey(c.storageAddr[:length.Addr], c.storageAddr[length.Addr:]))
+			if depth < 0 || depth > storageKey.BitLen {
+				return 0, fmt.Errorf("%w: storage leaf at depth %d exceeds its %d-bit key", errPBinMalformedBranch, depth, storageKey.BitLen)
 			}
-			c.prefix = storageKey.slice(depth, storageKey.bitLen)
+			c.prefix = storageKey.Slice(depth, storageKey.BitLen)
 		}
 	}
 	if fields&pbinFieldLeafValue != 0 {

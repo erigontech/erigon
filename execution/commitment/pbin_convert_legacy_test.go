@@ -55,8 +55,8 @@ func pbinTestLegacyAppendCell(dst []byte, c *pbinCell) []byte {
 		return append(binary.AppendUvarint(dst, uint64(len(v))), v...)
 	}
 	dst = append(dst, byte(fields))
-	dst = binary.AppendUvarint(dst, uint64(c.prefix.bitLen))
-	dst = c.prefix.appendPackedBits(dst)
+	dst = binary.AppendUvarint(dst, uint64(c.prefix.BitLen))
+	dst = c.prefix.AppendPackedBits(dst)
 	if fields&pbinFieldAccountAddr != 0 {
 		dst = lenAndVal(dst, c.accountAddr[:c.accountAddrLen])
 	}

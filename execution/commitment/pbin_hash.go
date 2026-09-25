@@ -17,70 +17,19 @@
 package commitment
 
 import (
-	"encoding/binary"
 	"errors"
 	"fmt"
 
 	keccak "github.com/erigontech/fastkeccak"
-	"lukechampine.com/blake3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
-// Node tags separating the two preimage shapes EIP-8297 defines (eip:"Node merkelization").
-const (
-	pbinLeafTag   = 0x00
-	pbinBranchTag = 0x01
-
-	// pbinHashBufLen is the longest preimage either shape produces: tag, bit count,
-	// packed prefix, both child hashes.
-	pbinHashBufLen = 1 + 2 + (pbinMaxPathBits+7)/8 + 2*length.Hash
-)
-
-// pbinEmptyTreeHash is the hash of an absent subtree: 32 zero bytes
-// (eip:"Node merkelization").
-// Not empty.RootHash — the RLP empty-string MPT root would build a different tree.
-var pbinEmptyTreeHash common.Hash
+const pbinHashBufLen = 1 + 2 + (pbinMaxPathBits+7)/8 + 2*length.Hash
 
 var errPBinCellHash = errors.New("pbin: cell cannot be hashed")
-
-// pbinHashFn is H, which EIP-8297 leaves open
-// (eip:"SNARK friendliness and post-quantum security"). Tree-key derivation
-// hashes with H too, so a suite is only fully swapped when pbinDigestCache is
-// swapped with it.
-type pbinHashFn func([]byte) common.Hash
-
-// Names for H, as the --experimental.bin-commitment.hash flag spells them.
-const (
-	PBinHashKeccak = "keccak"
-	PBinHashBlake3 = "blake3"
-)
-
-// pbinSelectedSum is H for every binary-trie engine this process builds; nil is
-// Keccak-256.
-var pbinSelectedSum pbinHashFn
-
-// SetPBinHashSuite selects H by name. Call it before the first engine is built:
-// roots already computed under the previous suite do not match.
-func SetPBinHashSuite(name string) error {
-	switch name {
-	case "", PBinHashKeccak:
-		pbinSelectedSum = nil
-	case PBinHashBlake3:
-		pbinSelectedSum = func(b []byte) common.Hash { return common.Hash(blake3.Sum256(b)) }
-	default:
-		return fmt.Errorf("unknown bin commitment hash %q, want %q or %q", name, PBinHashKeccak, PBinHashBlake3)
-	}
-	return nil
-}
-
-func PBinHashSuiteName() string {
-	if pbinSelectedSum == nil {
-		return PBinHashKeccak
-	}
-	return PBinHashBlake3
-}
 
 // pbinHasher applies H to node preimages. Its zero value is ready and hashes with
 // Keccak-256.
@@ -101,15 +50,13 @@ func (h *pbinHasher) hash(preimage []byte) common.Hash {
 // bit count is what keeps a 7-bit prefix distinct from an 8-bit one that agrees
 // with it on the pad bit.
 func pbinAppendBitPrefix(dst []byte, p *pbinBitpath) []byte {
-	return p.appendPackedBits(binary.BigEndian.AppendUint16(dst, uint16(p.bitLen)))
+	return eip8297.AppendBitPrefix(dst, p)
 }
 
 // branchHash is H(0x01 || encode_bit_prefix(prefix) || left || right); an absent
 // child passes pbinEmptyTreeHash rather than being omitted.
 func (h *pbinHasher) branchHash(prefix *pbinBitpath, left, right *common.Hash) common.Hash {
-	buf := pbinAppendBitPrefix(append(h.buf[:0], pbinBranchTag), prefix)
-	buf = append(buf, left[:]...)
-	buf = append(buf, right[:]...)
+	buf := eip8297.BranchPreimage(h.buf[:0], prefix, left, right)
 	hash := h.hash(buf)
 	h.emitNode(buf, &hash)
 	return hash
@@ -141,16 +88,16 @@ func (h *pbinHasher) cellHash(c *pbinCell, path *pbinBitpath) (common.Hash, erro
 
 func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, error) {
 	full := *path
-	if int(full.bitLen)+int(c.prefix.bitLen) > pbinMaxPathBits {
-		return common.Hash{}, fmt.Errorf("%w: leaf key of %d+%d bits overflows", errPBinCellHash, full.bitLen, c.prefix.bitLen)
+	if int(full.BitLen)+int(c.prefix.BitLen) > pbinMaxPathBits {
+		return common.Hash{}, fmt.Errorf("%w: leaf key of %d+%d bits overflows", errPBinCellHash, full.BitLen, c.prefix.BitLen)
 	}
-	full.append(&c.prefix)
-	if full.bitLen%8 != 0 {
-		return common.Hash{}, fmt.Errorf("%w: leaf key of %d bits is not whole bytes", errPBinCellHash, full.bitLen)
+	full.Append(&c.prefix)
+	if full.BitLen%8 != 0 {
+		return common.Hash{}, fmt.Errorf("%w: leaf key of %d bits is not whole bytes", errPBinCellHash, full.BitLen)
 	}
 
-	buf := full.appendPackedBits(append(h.buf[:0], pbinLeafTag))
-	key := buf[1:]
+	var keyBuf [pbinHashBufLen]byte
+	key := full.AppendPackedBits(keyBuf[:0])
 	// Key length is fixed per zone, which is what keeps the key space prefix-free
 	// (eip:"Tree embedding").
 	if want, known := pbinZoneKeyLength(key[0]); !known || len(key) != want {
@@ -160,7 +107,7 @@ func (h *pbinHasher) leafCellHash(c *pbinCell, path *pbinBitpath) (common.Hash, 
 	if err != nil {
 		return common.Hash{}, err
 	}
-	buf = append(buf, value[:]...)
+	buf := eip8297.LeafPreimage(h.buf[:0], key, value[:])
 	hash := h.hash(buf)
 	h.emitNode(buf, &hash)
 	return hash, nil

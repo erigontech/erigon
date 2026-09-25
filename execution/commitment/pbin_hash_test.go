@@ -50,9 +50,9 @@ func pbinTestPathFromBits(t *testing.T, bits []byte) pbinBitpath {
 	require.LessOrEqual(t, len(bits), pbinMaxPathBits)
 	var p pbinBitpath
 	for i, b := range bits {
-		p.setBitAt(int16(i), uint64(b))
+		p.SetBitAt(int16(i), uint64(b))
 	}
-	p.bitLen = int16(len(bits))
+	p.BitLen = int16(len(bits))
 	return p
 }
 
@@ -81,13 +81,6 @@ func pbinTestBitPattern(n int) []byte {
 	return bits
 }
 
-func pbinTestOracleLeaf(addr, slot uint64) *pbinOracleLeaf {
-	return &pbinOracleLeaf{
-		key:   pbinTreeKeyStorage(pbinOracleAddr(addr), pbinOracleSlot(slot)),
-		value: pbinOracleValue(addr*1000 + slot),
-	}
-}
-
 // EIP-8297's empty subtree is 32 zero bytes (eip:"Node merkelization"), not the empty-MPT root
 // the rest of erigon reaches for.
 func TestPBinEmptyTreeHash(t *testing.T) {
@@ -103,111 +96,6 @@ func TestPBinEmptyTreeHash(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, pbinEmptyTreeHash, got)
 	require.NotEqual(t, empty.RootHash, got)
-}
-
-// The lengths below are the ones where bit-prefix padding can go wrong.
-func TestPBinAppendBitPrefixMatchesOracle(t *testing.T) {
-	t.Parallel()
-
-	for _, n := range []int{0, 1, 7, 8, 9, 15, 16, 17, 63, 64, 65, 255, 256, 271, 272, 527, pbinMaxPathBits} {
-		bits := pbinTestBitPattern(n)
-		path := pbinTestPathFromBits(t, bits)
-		require.Equal(t, pbinOracleEncodeBitPrefix(bits), pbinAppendBitPrefix(nil, &path), "%d bits", n)
-	}
-}
-
-func TestPBinLeafHashMatchesOracle(t *testing.T) {
-	t.Parallel()
-
-	var h pbinHasher
-	for _, tc := range []struct {
-		name string
-		leaf *pbinOracleLeaf
-	}{
-		{
-			name: "account key",
-			leaf: &pbinOracleLeaf{
-				key:   pbinTreeKeyAccount(pbinOracleAddr(1), pbinBasicDataLeafKey),
-				value: pbinOracleValue(1),
-			},
-		},
-		{
-			name: "storage key",
-			leaf: pbinTestOracleLeaf(2, 1000),
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			want := pbinOracleMerkelize(tc.leaf)
-			require.Equal(t, common.Hash(want), h.leafHash(tc.leaf.key, tc.leaf.value))
-		})
-	}
-}
-
-func TestPBinBranchHashMatchesOracle(t *testing.T) {
-	t.Parallel()
-
-	var h pbinHasher
-	left, right := pbinTestOracleLeaf(1, 0), pbinTestOracleLeaf(2, 0)
-	leftHash := h.leafHash(left.key, left.value)
-	rightHash := h.leafHash(right.key, right.value)
-
-	for _, tc := range []struct {
-		name string
-		bits []byte
-	}{
-		{name: "empty prefix", bits: nil},
-		{name: "one bit", bits: pbinTestBitSpec(t, "1")},
-		{name: "seven bits", bits: pbinTestBitSpec(t, "1011010")},
-		{name: "eight bits", bits: pbinTestBitSpec(t, "10110101")},
-		{name: "nine bits", bits: pbinTestBitSpec(t, "101101011")},
-		{name: "one word", bits: pbinTestBitPattern(64)},
-		{name: "past one word", bits: pbinTestBitPattern(65)},
-		{name: "deepest branch a 528-bit key admits", bits: pbinTestBitPattern(pbinMaxPathBits - 1)},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			want := pbinOracleMerkelize(&pbinOracleBranch{prefix: tc.bits, left: left, right: right})
-			path := pbinTestPathFromBits(t, tc.bits)
-			require.Equal(t, common.Hash(want), h.branchHash(&path, &leftHash, &rightHash))
-		})
-	}
-}
-
-// Covers a branch hash feeding another branch, not just a branch over leaves.
-func TestPBinNestedBranchHashMatchesOracle(t *testing.T) {
-	t.Parallel()
-
-	var h pbinHasher
-	a, b, c := pbinTestOracleLeaf(1, 0), pbinTestOracleLeaf(2, 0), pbinTestOracleLeaf(3, 0)
-	innerBits := pbinTestBitSpec(t, "10110")
-	outerBits := pbinTestBitSpec(t, "011")
-
-	inner := &pbinOracleBranch{prefix: innerBits, left: a, right: b}
-	outer := &pbinOracleBranch{prefix: outerBits, left: inner, right: c}
-	want := pbinOracleMerkelize(outer)
-
-	aHash := h.leafHash(a.key, a.value)
-	bHash := h.leafHash(b.key, b.value)
-	cHash := h.leafHash(c.key, c.value)
-	innerPath := pbinTestPathFromBits(t, innerBits)
-	innerHash := h.branchHash(&innerPath, &aHash, &bHash)
-	outerPath := pbinTestPathFromBits(t, outerBits)
-
-	require.Equal(t, common.Hash(want), h.branchHash(&outerPath, &innerHash, &cHash))
-}
-
-// An absent child contributes the empty-subtree constant rather than being
-// skipped.
-func TestPBinBranchHashEmptyChild(t *testing.T) {
-	t.Parallel()
-
-	var h pbinHasher
-	leaf := pbinTestOracleLeaf(4, 7)
-	leafHash := h.leafHash(leaf.key, leaf.value)
-	bits := pbinTestBitSpec(t, "0101")
-
-	want := pbinOracleMerkelize(&pbinOracleBranch{prefix: bits, left: leaf, right: nil})
-	path := pbinTestPathFromBits(t, bits)
-	require.Equal(t, common.Hash(want), h.branchHash(&path, &leafHash, &pbinEmptyTreeHash))
 }
 
 func TestPBinCellHashBranch(t *testing.T) {
@@ -279,15 +167,15 @@ func TestPBinCellHashLeaf(t *testing.T) {
 			// Split the key so that both the descent path and the cell prefix carry
 			// real bits: the complete key is their concatenation, not either alone.
 			const split = 100
-			path := full.slice(0, split)
+			path := full.Slice(0, split)
 			cell := tc.cell
 			cell.kind = pbinNodeLeaf
-			cell.prefix = full.slice(split, full.bitLen)
+			cell.prefix = full.Slice(split, full.BitLen)
 
 			got, err := h.cellHash(&cell, &path)
 			require.NoError(t, err)
 
-			want := pbinOracleMerkelize(&pbinOracleLeaf{key: tc.key, value: tc.value[:]})
+			want := pbinOracleMerkelize(&pbinOracleLeaf{Key: tc.key, Value: tc.value[:]})
 			require.Equal(t, common.Hash(want), got)
 		})
 	}
@@ -301,15 +189,15 @@ func TestPBinCellHashRejectsMalformedLeaf(t *testing.T) {
 	full := pbinPathFromBytes(key)
 
 	t.Run("key of neither zone length", func(t *testing.T) {
-		path := full.slice(0, 100)
-		c := pbinCell{kind: pbinNodeLeaf, prefix: full.slice(100, full.bitLen-1)}
+		path := full.Slice(0, 100)
+		c := pbinCell{kind: pbinNodeLeaf, prefix: full.Slice(100, full.BitLen-1)}
 		_, err := h.cellHash(&c, &path)
 		require.ErrorIs(t, err, errPBinCellHash)
 	})
 	t.Run("account-zone sub-index naming no leaf", func(t *testing.T) {
 		bad := pbinPathFromBytes(pbinTreeKey(pbinAccountZone, make([]byte, 32), pbinHeaderStorageOffset+pbinHeaderStorageSlots))
-		path := bad.slice(0, 100)
-		c := pbinCell{kind: pbinNodeLeaf, prefix: bad.slice(100, bad.bitLen)}
+		path := bad.Slice(0, 100)
+		c := pbinCell{kind: pbinNodeLeaf, prefix: bad.Slice(100, bad.BitLen)}
 		_, err := h.cellHash(&c, &path)
 		require.ErrorIs(t, err, errPBinCellHash)
 	})
@@ -331,10 +219,10 @@ func TestPBinCellHashBuildsCorpusRoots(t *testing.T) {
 
 			aPath, bPath := pbinPathFromBytes(a.key), pbinPathFromBytes(b.key)
 			shared := pbinCommonPrefixBitsAt(&aPath, 0, &bPath)
-			prefix := aPath.slice(0, shared)
+			prefix := aPath.Slice(0, shared)
 
 			left, right := a, b
-			if aPath.bit(shared) == 1 {
+			if aPath.Bit(shared) == 1 {
 				left, right = b, a
 			}
 			leftHash := h.leafHash(left.key, left.value)

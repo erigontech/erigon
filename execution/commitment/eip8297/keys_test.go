@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
+package eip8297
 
 import (
 	"encoding/binary"
@@ -30,7 +30,7 @@ import (
 // pbinTestKeccak is an independent Keccak-256 (x/crypto, not the fastkeccak the
 // engine uses), so the vectors below are pinned against the spec rather than
 // against the code under test.
-func pbinTestKeccak(t *testing.T, parts ...[]byte) []byte {
+func referenceKeccak(t *testing.T, parts ...[]byte) []byte {
 	t.Helper()
 	h := sha3.NewLegacyKeccak256()
 	for _, p := range parts {
@@ -40,7 +40,7 @@ func pbinTestKeccak(t *testing.T, parts ...[]byte) []byte {
 	return h.Sum(nil)
 }
 
-func pbinTestAddr(t *testing.T, s string) []byte {
+func referenceAddressHex(t *testing.T, s string) []byte {
 	t.Helper()
 	b, err := hex.DecodeString(s)
 	require.NoError(t, err)
@@ -49,21 +49,21 @@ func pbinTestAddr(t *testing.T, s string) []byte {
 }
 
 // pbinTestAddress32 is the spec's address20_to_address32 (eip:"Tree embedding").
-func pbinTestAddress32(addr []byte) []byte {
+func referenceAddress32(addr []byte) []byte {
 	a := make([]byte, 32)
 	copy(a[32-len(addr):], addr)
 	return a
 }
 
-func pbinTestBE32(v uint64) []byte {
+func referenceBE32(v uint64) []byte {
 	b := make([]byte, 32)
 	binary.BigEndian.PutUint64(b[24:], v)
 	return b
 }
 
-func pbinTestSlot(v uint64) []byte { return pbinTestBE32(v) }
+func referenceSlotBytes(v uint64) []byte { return referenceBE32(v) }
 
-func pbinTestConcat(parts ...[]byte) []byte {
+func referenceConcat(parts ...[]byte) []byte {
 	var out []byte
 	for _, p := range parts {
 		out = append(out, p...)
@@ -75,33 +75,33 @@ func pbinTestConcat(parts ...[]byte) []byte {
 func TestPBinTreeKeyEIPVectors(t *testing.T) {
 	t.Parallel()
 
-	addr := pbinTestAddr(t, "0102030405060708090a0b0c0d0e0f1011121314")
-	addr32 := pbinTestAddress32(addr)
-	stem := pbinTestKeccak(t, addr32)
+	addr := referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314")
+	addr32 := referenceAddress32(addr)
+	stem := referenceKeccak(t, addr32)
 
 	t.Run("basic-data", func(t *testing.T) {
-		got := pbinTreeKeyAccount(addr, pbinBasicDataLeafKey)
-		require.Len(t, got, pbinAccountKeyLength)
-		require.Equal(t, pbinTestConcat([]byte{0x00}, stem, []byte{0x00}), got)
+		got := TreeKeyAccount(addr, BasicDataLeafKey)
+		require.Len(t, got, AccountKeyLength)
+		require.Equal(t, referenceConcat([]byte{0x00}, stem, []byte{0x00}), got)
 	})
 
 	t.Run("code-hash", func(t *testing.T) {
-		got := pbinTreeKeyAccount(addr, pbinCodeHashLeafKey)
-		require.Len(t, got, pbinAccountKeyLength)
-		require.Equal(t, pbinTestConcat([]byte{0x00}, stem, []byte{0x01}), got)
+		got := TreeKeyAccount(addr, CodeHashLeafKey)
+		require.Len(t, got, AccountKeyLength)
+		require.Equal(t, referenceConcat([]byte{0x00}, stem, []byte{0x01}), got)
 	})
 
 	t.Run("slot-5-in-header", func(t *testing.T) {
-		got := pbinTreeKeyStorage(addr, pbinTestSlot(5))
-		require.Len(t, got, pbinAccountKeyLength)
-		require.Equal(t, pbinTestConcat([]byte{0x00}, stem, []byte{0x45}), got)
+		got := TreeKeyStorage(addr, referenceSlotBytes(5))
+		require.Len(t, got, AccountKeyLength)
+		require.Equal(t, referenceConcat([]byte{0x00}, stem, []byte{0x45}), got)
 	})
 
 	t.Run("slot-1000-in-storage-zone", func(t *testing.T) {
-		suffix := pbinTestKeccak(t, addr32, pbinTestBE32(3))
-		got := pbinTreeKeyStorage(addr, pbinTestSlot(1000))
-		require.Len(t, got, pbinStorageKeyLength)
-		require.Equal(t, pbinTestConcat([]byte{0xFF}, stem, suffix, []byte{0xE8}), got)
+		suffix := referenceKeccak(t, addr32, referenceBE32(3))
+		got := TreeKeyStorage(addr, referenceSlotBytes(1000))
+		require.Len(t, got, StorageKeyLength)
+		require.Equal(t, referenceConcat([]byte{0xFF}, stem, suffix, []byte{0xE8}), got)
 	})
 }
 
@@ -110,9 +110,9 @@ func TestPBinTreeKeyEIPVectors(t *testing.T) {
 func TestPBinStorageZoneRouting(t *testing.T) {
 	t.Parallel()
 
-	addr := pbinTestAddr(t, "cafebabe000000000000000000000000deadbeef")
-	addr32 := pbinTestAddress32(addr)
-	stem := pbinTestKeccak(t, addr32)
+	addr := referenceAddressHex(t, "cafebabe000000000000000000000000deadbeef")
+	addr32 := referenceAddress32(addr)
+	stem := referenceKeccak(t, addr32)
 
 	for _, tc := range []struct {
 		name      string
@@ -129,15 +129,15 @@ func TestPBinStorageZoneRouting(t *testing.T) {
 		{name: "slot-257", slot: 257, treeIndex: 1, subIndex: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := pbinTreeKeyStorage(addr, pbinTestSlot(tc.slot))
+			got := TreeKeyStorage(addr, referenceSlotBytes(tc.slot))
 			if tc.inHeader {
-				require.Len(t, got, pbinAccountKeyLength)
-				require.Equal(t, pbinTestConcat([]byte{0x00}, stem, []byte{tc.subIndex}), got)
+				require.Len(t, got, AccountKeyLength)
+				require.Equal(t, referenceConcat([]byte{0x00}, stem, []byte{tc.subIndex}), got)
 				return
 			}
-			suffix := pbinTestKeccak(t, addr32, pbinTestBE32(tc.treeIndex))
-			require.Len(t, got, pbinStorageKeyLength)
-			require.Equal(t, pbinTestConcat([]byte{0xFF}, stem, suffix, []byte{tc.subIndex}), got)
+			suffix := referenceKeccak(t, addr32, referenceBE32(tc.treeIndex))
+			require.Len(t, got, StorageKeyLength)
+			require.Equal(t, referenceConcat([]byte{0xFF}, stem, suffix, []byte{tc.subIndex}), got)
 		})
 	}
 }
@@ -145,10 +145,10 @@ func TestPBinStorageZoneRouting(t *testing.T) {
 func TestPBinStorageZoneKeysAreDistinct(t *testing.T) {
 	t.Parallel()
 
-	addr := pbinTestAddr(t, "cafebabe000000000000000000000000deadbeef")
+	addr := referenceAddressHex(t, "cafebabe000000000000000000000000deadbeef")
 	seen := make(map[string]uint64)
 	for _, slot := range []uint64{0, 1, 62, 63, 64, 65, 254, 255, 256, 257, 511, 512, 1000} {
-		key := string(pbinTreeKeyStorage(addr, pbinTestSlot(slot)))
+		key := string(TreeKeyStorage(addr, referenceSlotBytes(slot)))
 		if prev, ok := seen[key]; ok {
 			t.Fatalf("slots %d and %d derive the same tree key", prev, slot)
 		}
@@ -161,83 +161,80 @@ func TestPBinStorageZoneKeysAreDistinct(t *testing.T) {
 func TestPBinHighSlotRouting(t *testing.T) {
 	t.Parallel()
 
-	addr := pbinTestAddr(t, "0102030405060708090a0b0c0d0e0f1011121314")
-	addr32 := pbinTestAddress32(addr)
-	stem := pbinTestKeccak(t, addr32)
+	addr := referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314")
+	addr32 := referenceAddress32(addr)
+	stem := referenceKeccak(t, addr32)
 
 	slot := make([]byte, 32)
 	for i := range slot {
 		slot[i] = byte(i + 1)
 	}
 	treeIndex := append([]byte{0x00}, slot[:31]...)
-	suffix := pbinTestKeccak(t, addr32, treeIndex)
+	suffix := referenceKeccak(t, addr32, treeIndex)
 
-	got := pbinTreeKeyStorage(addr, slot)
-	require.Len(t, got, pbinStorageKeyLength)
-	require.Equal(t, pbinTestConcat([]byte{0xFF}, stem, suffix, []byte{slot[31]}), got)
+	got := TreeKeyStorage(addr, slot)
+	require.Len(t, got, StorageKeyLength)
+	require.Equal(t, referenceConcat([]byte{0xFF}, stem, suffix, []byte{slot[31]}), got)
 }
 
 // The stem digest covers the 32-byte address, not the 20-byte one.
 func TestPBinAddr32Padding(t *testing.T) {
 	t.Parallel()
 
-	addr := pbinTestAddr(t, "0102030405060708090a0b0c0d0e0f1011121314")
-	a32 := pbinRightAlign32(addr)
+	addr := referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314")
+	a32 := RightAlign32(addr)
 	require.Equal(t, make([]byte, 12), a32[:12])
 	require.Equal(t, addr, a32[12:])
 
-	key := pbinTreeKeyAccount(addr, pbinBasicDataLeafKey)
-	require.Equal(t, pbinTestKeccak(t, pbinTestAddress32(addr)), key[1:33])
-	require.NotEqual(t, pbinTestKeccak(t, addr), key[1:33])
+	key := TreeKeyAccount(addr, BasicDataLeafKey)
+	require.Equal(t, referenceKeccak(t, referenceAddress32(addr)), key[1:33])
+	require.NotEqual(t, referenceKeccak(t, addr), key[1:33])
 }
 
 // The keyHasher contract: the primary leaf's tree key, sized 34 or 66 by zone.
 func TestPBinKeyHasherPrimaryLeaf(t *testing.T) {
 	t.Parallel()
 
-	hasher := pbinKeyHasher()
-	addr := pbinTestAddr(t, "0102030405060708090a0b0c0d0e0f1011121314")
+	hasher := KeyHasher()
+	addr := referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314")
 
 	got := hasher(addr)
-	require.Len(t, got, pbinAccountKeyLength)
-	require.Equal(t, pbinTreeKeyAccount(addr, pbinBasicDataLeafKey), got)
+	require.Len(t, got, AccountKeyLength)
+	require.Equal(t, TreeKeyAccount(addr, BasicDataLeafKey), got)
 
-	got = hasher(pbinTestConcat(addr, pbinTestSlot(1000)))
-	require.Len(t, got, pbinStorageKeyLength)
-	require.Equal(t, pbinTreeKeyStorage(addr, pbinTestSlot(1000)), got)
+	got = hasher(referenceConcat(addr, referenceSlotBytes(1000)))
+	require.Len(t, got, StorageKeyLength)
+	require.Equal(t, TreeKeyStorage(addr, referenceSlotBytes(1000)), got)
 }
 
 func TestPBinKeyHasherRejectsMalformedPlainKey(t *testing.T) {
 	t.Parallel()
 
-	hasher := pbinKeyHasher()
+	hasher := KeyHasher()
 	require.Panics(t, func() { hasher(make([]byte, 33)) })
 	require.Panics(t, func() { hasher(nil) })
 }
 
-// Two Updates buffers share one hasher value, since Updates.NewEmpty copies it.
-// Under -race this fails if the hasher keeps a cache both copies can write.
 func TestPBinKeyHasherSharedAcrossBuffers(t *testing.T) {
 	t.Parallel()
 
 	addrs := [][]byte{
-		pbinTestAddr(t, "0102030405060708090a0b0c0d0e0f1011121314"),
-		pbinTestAddr(t, "cafebabe000000000000000000000000deadbeef"),
+		referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314"),
+		referenceAddressHex(t, "cafebabe000000000000000000000000deadbeef"),
 	}
 	slots := []uint64{0, 64, 256, 1000}
 
-	base := NewUpdates(ModeDirect, t.TempDir(), pbinKeyHasher())
-	clone := base.NewEmpty()
+	hashers := []KeyHasherFunc{KeyHasher(), KeyHasher()}
 
 	var wg sync.WaitGroup
-	for _, buf := range []*Updates{base, clone} {
+	for _, hasher := range hashers {
 		wg.Go(func() {
 			for range 50 {
 				for _, addr := range addrs {
-					assert.Equal(t, pbinTreeKeyAccount(addr, pbinBasicDataLeafKey), buf.hashKey(addr))
+					assert.Equal(t, TreeKeyAccount(addr, BasicDataLeafKey), hasher(addr))
 					for _, slot := range slots {
-						plainKey := pbinTestConcat(addr, pbinTestSlot(slot))
-						assert.Equal(t, pbinTreeKeyStorage(addr, pbinTestSlot(slot)), buf.hashKey(plainKey),
+						plainKey := referenceConcat(addr, referenceSlotBytes(slot))
+						assert.Equal(t, TreeKeyStorage(addr, referenceSlotBytes(slot)), hasher(plainKey),
 							"addr %x slot %d", addr, slot)
 					}
 				}
@@ -253,18 +250,18 @@ func TestPBinDigestCacheMatchesFreshDerivation(t *testing.T) {
 	t.Parallel()
 
 	addrs := [][]byte{
-		pbinTestAddr(t, "0102030405060708090a0b0c0d0e0f1011121314"),
-		pbinTestAddr(t, "cafebabe000000000000000000000000deadbeef"),
+		referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314"),
+		referenceAddressHex(t, "cafebabe000000000000000000000000deadbeef"),
 	}
 	slots := []uint64{0, 63, 64, 255, 256, 257, 1000, 100000}
 
-	hasher := pbinKeyHasher()
+	hasher := KeyHasher()
 	for range 3 {
 		for _, addr := range addrs {
-			require.Equal(t, pbinTreeKeyAccount(addr, pbinBasicDataLeafKey), hasher(addr))
+			require.Equal(t, TreeKeyAccount(addr, BasicDataLeafKey), hasher(addr))
 			for _, slot := range slots {
-				plainKey := pbinTestConcat(addr, pbinTestSlot(slot))
-				require.Equal(t, pbinTreeKeyStorage(addr, pbinTestSlot(slot)), hasher(plainKey),
+				plainKey := referenceConcat(addr, referenceSlotBytes(slot))
+				require.Equal(t, TreeKeyStorage(addr, referenceSlotBytes(slot)), hasher(plainKey),
 					"addr %x slot %d", addr, slot)
 			}
 		}
@@ -280,34 +277,34 @@ func TestPBinLeafSuffixBits(t *testing.T) {
 		recordKeyBits int
 		want          int
 	}{
-		{name: "account start", zone: pbinAccountZone, recordKeyBits: 0, want: 271},
-		{name: "account header slot zero", zone: pbinAccountZone, recordKeyBits: 265, want: 6},
-		{name: "account seven bits", zone: pbinAccountZone, recordKeyBits: 264, want: 7},
-		{name: "account last branch", zone: pbinAccountZone, recordKeyBits: 271, want: 0},
-		{name: "code start", zone: pbinCodeZone, recordKeyBits: 0, want: 271},
-		{name: "code last branch", zone: pbinCodeZone, recordKeyBits: 271, want: 0},
-		{name: "storage start", zone: pbinStorageZone, recordKeyBits: 0, want: 527},
-		{name: "storage around record depth", zone: pbinStorageZone, recordKeyBits: 275, want: 252},
-		{name: "storage two hundred forty-eight bits", zone: pbinStorageZone, recordKeyBits: 279, want: 248},
+		{name: "account start", zone: AccountZone, recordKeyBits: 0, want: 271},
+		{name: "account header slot zero", zone: AccountZone, recordKeyBits: 265, want: 6},
+		{name: "account seven bits", zone: AccountZone, recordKeyBits: 264, want: 7},
+		{name: "account last branch", zone: AccountZone, recordKeyBits: 271, want: 0},
+		{name: "code start", zone: CodeZone, recordKeyBits: 0, want: 271},
+		{name: "code last branch", zone: CodeZone, recordKeyBits: 271, want: 0},
+		{name: "storage start", zone: StorageZone, recordKeyBits: 0, want: 527},
+		{name: "storage around record depth", zone: StorageZone, recordKeyBits: 275, want: 252},
+		{name: "storage two hundred forty-eight bits", zone: StorageZone, recordKeyBits: 279, want: 248},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got, err := pbinLeafSuffixBits(tc.zone, tc.recordKeyBits)
+			got, err := LeafSuffixBits(tc.zone, tc.recordKeyBits)
 			require.NoError(t, err)
 			require.Equal(t, tc.want, got)
-			keyLen, known := pbinZoneKeyLength(tc.zone)
+			keyLen, known := ZoneKeyLength(tc.zone)
 			require.True(t, known)
 			key := make([]byte, keyLen)
 			for i := range key {
 				key[i] = byte(i*17 + 3)
 			}
 			key[0] = tc.zone
-			path := pbinPathFromBytes(key)
-			prefix := path.slice(0, int16(tc.recordKeyBits))
-			branch := path.slice(int16(tc.recordKeyBits), int16(tc.recordKeyBits+1))
-			suffix := path.slice(int16(tc.recordKeyBits+1), int16(tc.recordKeyBits+1+got))
-			prefix.append(&branch)
-			prefix.append(&suffix)
+			path := PathFromBytes(key)
+			prefix := path.Slice(0, int16(tc.recordKeyBits))
+			branch := path.Slice(int16(tc.recordKeyBits), int16(tc.recordKeyBits+1))
+			suffix := path.Slice(int16(tc.recordKeyBits+1), int16(tc.recordKeyBits+1+got))
+			prefix.Append(&branch)
+			prefix.Append(&suffix)
 			require.Equal(t, path, prefix)
 		})
 	}
@@ -321,16 +318,16 @@ func TestPBinLeafSuffixBitsRejectsInvalidDepth(t *testing.T) {
 		zone          byte
 		recordKeyBits int
 	}{
-		{name: "account at key length", zone: pbinAccountZone, recordKeyBits: pbinAccountKeyLength * 8},
-		{name: "account past key length", zone: pbinAccountZone, recordKeyBits: pbinAccountKeyLength*8 + 1},
-		{name: "code at key length", zone: pbinCodeZone, recordKeyBits: pbinCodeKeyLength * 8},
-		{name: "storage at key length", zone: pbinStorageZone, recordKeyBits: pbinStorageKeyLength * 8},
-		{name: "negative depth", zone: pbinAccountZone, recordKeyBits: -1},
+		{name: "account at key length", zone: AccountZone, recordKeyBits: AccountKeyLength * 8},
+		{name: "account past key length", zone: AccountZone, recordKeyBits: AccountKeyLength*8 + 1},
+		{name: "code at key length", zone: CodeZone, recordKeyBits: CodeKeyLength * 8},
+		{name: "storage at key length", zone: StorageZone, recordKeyBits: StorageKeyLength * 8},
+		{name: "negative depth", zone: AccountZone, recordKeyBits: -1},
 		{name: "unknown zone", zone: 0x02, recordKeyBits: 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := pbinLeafSuffixBits(tc.zone, tc.recordKeyBits)
+			_, err := LeafSuffixBits(tc.zone, tc.recordKeyBits)
 			require.Error(t, err)
 		})
 	}

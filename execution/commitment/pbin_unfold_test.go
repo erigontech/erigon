@@ -279,7 +279,7 @@ func TestPBinUnfoldSplitsInsidePrefix(t *testing.T) {
 			pph.rootPresent = true
 
 			probe := full
-			probe.setBitAt(divergence, full.bit(divergence)^1)
+			probe.SetBitAt(divergence, full.Bit(divergence)^1)
 
 			u := pph.needUnfolding(&probe)
 			require.Equal(t, pbinUnfolding{action: pbinUnfoldSplit, matched: divergence}, u)
@@ -287,12 +287,12 @@ func TestPBinUnfoldSplitsInsidePrefix(t *testing.T) {
 
 			require.Equal(t, 1, pph.grid.activeRows)
 			require.Equal(t, divergence+1, pph.grid.depths[0])
-			require.Equal(t, full.slice(0, divergence), pph.currentKey)
+			require.Equal(t, full.Slice(0, divergence), pph.currentKey)
 
-			survivorBit := full.bit(divergence)
+			survivorBit := full.Bit(divergence)
 			survivor := &pph.grid.rows[0][survivorBit]
 			require.Equal(t, pbinNodeLeaf, survivor.kind)
-			require.Equal(t, full.slice(divergence+1, full.bitLen), survivor.prefix,
+			require.Equal(t, full.Slice(divergence+1, full.BitLen), survivor.prefix,
 				"the survivor drops the bit the new row branches on")
 			require.Equal(t, pbinNodeEmpty, pph.grid.rows[0][1-survivorBit].kind,
 				"the probe's own side is left for updateCell to fill")
@@ -315,7 +315,7 @@ func TestPBinUnfoldDescendsThroughPrefix(t *testing.T) {
 		t.Run(fmt.Sprintf("%d-bit prefix", prefixBits), func(t *testing.T) {
 			t.Parallel()
 
-			childPath := full.slice(0, prefixBits)
+			childPath := full.Slice(0, prefixBits)
 			childCells := [2]pbinCell{
 				pbinTestSpecCell(t, pbinNodeLeaf, "0101"),
 				pbinTestSpecCell(t, pbinNodeLeaf, "1100"),
@@ -336,13 +336,13 @@ func TestPBinUnfoldDescendsThroughPrefix(t *testing.T) {
 
 			require.Equal(t, 1, pph.grid.activeRows)
 			require.Equal(t, prefixBits, pph.grid.depths[0])
-			require.Equal(t, full.slice(0, prefixBits-1), pph.currentKey)
+			require.Equal(t, full.Slice(0, prefixBits-1), pph.currentKey)
 			require.False(t, pph.grid.branchBefore[0], "materializing a prefix reads nothing")
 
-			branchBit := full.bit(prefixBits - 1)
+			branchBit := full.Bit(prefixBits - 1)
 			cell := &pph.grid.rows[0][branchBit]
 			require.Equal(t, pbinNodeBranch, cell.kind)
-			require.Equal(t, int16(0), cell.prefix.bitLen, "the whole prefix moved into the descent key")
+			require.Equal(t, int16(0), cell.prefix.BitLen, "the whole prefix moved into the descent key")
 			require.Equal(t, int16(0), cell.hashLen,
 				"the prefix is inside the branch hash, so moving it out of the cell invalidates it")
 
