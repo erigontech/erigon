@@ -168,7 +168,7 @@ func (t *Trie) bucketRecordPrevious(key []byte) ([]byte, error) {
 	if data, ok := t.roundPrev[string(key)]; ok {
 		return bytes.Clone(data), nil
 	}
-	data, _, err := t.ctx.Branch(key)
+	data, err := t.bucketRecord(key)
 	if err != nil {
 		return nil, err
 	}
@@ -176,8 +176,16 @@ func (t *Trie) bucketRecordPrevious(key []byte) ([]byte, error) {
 	return data, nil
 }
 
-func (t *Trie) bucketKeysFromRecord(key []byte) ([][]byte, error) {
+func (t *Trie) bucketRecord(key []byte) ([]byte, error) {
+	if data, ok := t.scheduledBucketRecords[string(key)]; ok {
+		return bytes.Clone(data), nil
+	}
 	data, _, err := t.ctx.Branch(key)
+	return data, err
+}
+
+func (t *Trie) bucketKeysFromRecord(key []byte) ([][]byte, error) {
+	data, err := t.bucketRecord(key)
 	if err != nil {
 		return nil, err
 	}

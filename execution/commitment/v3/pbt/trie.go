@@ -37,15 +37,16 @@ var errOperationOrder = fmt.Errorf("operation list must be sorted by key with at
 func Drop(prefix []byte) Op { return Op{Drop: bytes.Clone(prefix)} }
 
 type Trie struct {
-	ctx         commitment.PatriciaContext
-	root        *treeRoot
-	rootLoaded  bool
-	rootDirty   bool
-	rows        map[string]*rowNode
-	dirtyRows   map[string]*rowNode
-	bucketDirty map[string][]byte
-	deltas      []commitment.BranchDelta
-	roundPrev   map[string][]byte
+	ctx                    commitment.PatriciaContext
+	root                   *treeRoot
+	rootLoaded             bool
+	rootDirty              bool
+	rows                   map[string]*rowNode
+	dirtyRows              map[string]*rowNode
+	bucketDirty            map[string][]byte
+	scheduledBucketRecords map[string][]byte
+	deltas                 []commitment.BranchDelta
+	roundPrev              map[string][]byte
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {
@@ -60,6 +61,7 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.rows = make(map[string]*rowNode)
 	t.dirtyRows = make(map[string]*rowNode)
 	t.bucketDirty = make(map[string][]byte)
+	t.scheduledBucketRecords = nil
 	t.deltas = nil
 	t.roundPrev = nil
 }

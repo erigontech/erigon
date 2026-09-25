@@ -155,6 +155,23 @@ func TestBuiltPlanStorageChainWaitsForItsBucket(t *testing.T) {
 	require.False(t, chainBeforeBucket.Load())
 }
 
+func TestTrieParallelBucketTaskReadsRootOnce(t *testing.T) {
+	address := bytes.Repeat([]byte{0x42}, 20)
+	key := eip8297.TreeKeyStorage(address, storageSlot(64))
+	bucketKey, err := bucketKeyForStorage(key)
+	require.NoError(t, err)
+	ctx := newTrieTestContext()
+	_, err = NewTrie(ctx).ProcessParallel([]Op{{Key: key, Value: testTrieValue(1)}}, 2)
+	require.NoError(t, err)
+	reads := 0
+	for _, read := range ctx.reads {
+		if bytes.Equal(read, bucketKey) {
+			reads++
+		}
+	}
+	require.Equal(t, 1, reads)
+}
+
 func TestTrieParallelParityWithWhaleBuckets(t *testing.T) {
 	address := bytes.Repeat([]byte{0x31}, 20)
 	initial := []Op{{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: testTrieValue(1)}}

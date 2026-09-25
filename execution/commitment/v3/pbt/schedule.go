@@ -193,6 +193,8 @@ func (t *Trie) ProcessParallelContext(ctx context.Context, ops []Op, workers int
 	if t.ctx == nil {
 		return t.Process(ops)
 	}
+	t.scheduledBucketRecords = make(map[string][]byte)
+	defer func() { t.scheduledBucketRecords = nil }()
 	var readMu sync.Mutex
 	if err := runPhasePlan(ctx, workers, plan, func(task phaseTask) error {
 		if task.kind != phaseBucket {
@@ -200,7 +202,10 @@ func (t *Trie) ProcessParallelContext(ctx context.Context, ops []Op, workers int
 		}
 		readMu.Lock()
 		defer readMu.Unlock()
-		_, _, err := t.ctx.Branch([]byte(task.key))
+		data, _, err := t.ctx.Branch([]byte(task.key))
+		if err == nil {
+			t.scheduledBucketRecords[task.key] = bytes.Clone(data)
+		}
 		return err
 	}); err != nil {
 		return common.Hash{}, err
