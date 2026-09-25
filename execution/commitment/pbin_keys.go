@@ -61,6 +61,18 @@ func pbinZoneKeyLength(zone byte) (int, bool) {
 	}
 }
 
+func pbinLeafSuffixBits(zone byte, recordKeyBits int) (int, error) {
+	keyBytes, known := pbinZoneKeyLength(zone)
+	if !known {
+		return 0, fmt.Errorf("pbin: zone %#x names no key space", zone)
+	}
+	zoneBits := keyBytes * 8
+	if recordKeyBits < 0 || recordKeyBits >= zoneBits {
+		return 0, fmt.Errorf("pbin: record key depth %d is outside zone %#x key length %d", recordKeyBits, zone, zoneBits)
+	}
+	return zoneBits - recordKeyBits - 1, nil
+}
+
 // pbinRightAlign32 widens a legacy address or storage slot to the spec's Address32 (eip:"Tree embedding").
 func pbinRightAlign32(b []byte) [32]byte {
 	if len(b) > 32 {

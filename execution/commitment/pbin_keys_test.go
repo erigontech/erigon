@@ -270,3 +270,68 @@ func TestPBinDigestCacheMatchesFreshDerivation(t *testing.T) {
 		}
 	}
 }
+
+func TestPBinLeafSuffixBits(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name          string
+		zone          byte
+		recordKeyBits int
+		want          int
+	}{
+		{name: "account start", zone: pbinAccountZone, recordKeyBits: 0, want: 271},
+		{name: "account header slot zero", zone: pbinAccountZone, recordKeyBits: 265, want: 6},
+		{name: "account seven bits", zone: pbinAccountZone, recordKeyBits: 264, want: 7},
+		{name: "account last branch", zone: pbinAccountZone, recordKeyBits: 271, want: 0},
+		{name: "code start", zone: pbinCodeZone, recordKeyBits: 0, want: 271},
+		{name: "code last branch", zone: pbinCodeZone, recordKeyBits: 271, want: 0},
+		{name: "storage start", zone: pbinStorageZone, recordKeyBits: 0, want: 527},
+		{name: "storage around record depth", zone: pbinStorageZone, recordKeyBits: 275, want: 252},
+		{name: "storage two hundred forty-eight bits", zone: pbinStorageZone, recordKeyBits: 279, want: 248},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := pbinLeafSuffixBits(tc.zone, tc.recordKeyBits)
+			require.NoError(t, err)
+			require.Equal(t, tc.want, got)
+			keyLen, known := pbinZoneKeyLength(tc.zone)
+			require.True(t, known)
+			key := make([]byte, keyLen)
+			for i := range key {
+				key[i] = byte(i*17 + 3)
+			}
+			key[0] = tc.zone
+			path := pbinPathFromBytes(key)
+			prefix := path.slice(0, int16(tc.recordKeyBits))
+			branch := path.slice(int16(tc.recordKeyBits), int16(tc.recordKeyBits+1))
+			suffix := path.slice(int16(tc.recordKeyBits+1), int16(tc.recordKeyBits+1+got))
+			prefix.append(&branch)
+			prefix.append(&suffix)
+			require.Equal(t, path, prefix)
+		})
+	}
+}
+
+func TestPBinLeafSuffixBitsRejectsInvalidDepth(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name          string
+		zone          byte
+		recordKeyBits int
+	}{
+		{name: "account at key length", zone: pbinAccountZone, recordKeyBits: pbinAccountKeyLength * 8},
+		{name: "account past key length", zone: pbinAccountZone, recordKeyBits: pbinAccountKeyLength*8 + 1},
+		{name: "code at key length", zone: pbinCodeZone, recordKeyBits: pbinCodeKeyLength * 8},
+		{name: "storage at key length", zone: pbinStorageZone, recordKeyBits: pbinStorageKeyLength * 8},
+		{name: "negative depth", zone: pbinAccountZone, recordKeyBits: -1},
+		{name: "unknown zone", zone: 0x02, recordKeyBits: 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := pbinLeafSuffixBits(tc.zone, tc.recordKeyBits)
+			require.Error(t, err)
+		})
+	}
+}
