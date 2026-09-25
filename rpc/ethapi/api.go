@@ -438,12 +438,12 @@ type RPCBlock struct {
 
 // CallResult represents the result of a single call in the simulation.
 type CallResult struct {
-	ReturnData string          `json:"returnData"`
-	Logs       []*types.RPCLog `json:"logs"`
-	GasUsed    hexutil.Uint64  `json:"gasUsed"`
-	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
-	Status     hexutil.Uint64  `json:"status"`
-	Error      any             `json:"error,omitempty"`
+	ReturnData string         `json:"returnData"`
+	Logs       types.Logs     `json:"logs"`
+	GasUsed    hexutil.Uint64 `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64 `json:"maxUsedGas"`
+	Status     hexutil.Uint64 `json:"status"`
+	Error      any            `json:"error,omitempty"`
 }
 
 // MarkPending nils the fields a pending block does not have yet.

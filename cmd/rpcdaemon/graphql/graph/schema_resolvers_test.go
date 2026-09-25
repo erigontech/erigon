@@ -196,8 +196,8 @@ func TestRpcLogsToModel(t *testing.T) {
 	txHash := common.HexToHash("0x" + strings.Repeat("cc", 32))
 	topic := common.HexToHash("0x" + strings.Repeat("dd", 32))
 
-	logs := types.RPCLogs{
-		{Log: types.Log{
+	logs := types.Logs{
+		{
 			Address:     addr,
 			Topics:      []common.Hash{topic},
 			Data:        hexutil.Bytes{0x01, 0x02},
@@ -205,7 +205,7 @@ func TestRpcLogsToModel(t *testing.T) {
 			BlockHash:   blockHash,
 			TxHash:      txHash,
 			Index:       3,
-		}},
+		},
 	}
 	result = rpcLogsToModel(logs)
 	if len(result) != 1 {
@@ -235,7 +235,7 @@ func TestRpcLogsToModel(t *testing.T) {
 // mockGraphQLAPI is a minimal stub of jsonrpc.GraphQLAPI for resolver-level tests.
 type mockGraphQLAPI struct {
 	getLogsCrit   filters.FilterCriteria
-	getLogsResult types.RPCLogs
+	getLogsResult types.Logs
 	getLogsErr    error
 
 	callBlockNum rpc.BlockNumber
@@ -310,7 +310,7 @@ func (m *mockGraphQLAPI) GasPrice(_ context.Context) (string, error) {
 	return m.gasPriceResult, m.gasPriceErr
 }
 
-func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
+func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	m.getLogsCrit = crit
 	return m.getLogsResult, m.getLogsErr
 }
@@ -326,13 +326,13 @@ func TestBlockResolver_Logs(t *testing.T) {
 
 	t.Run("success — criteria and result", func(t *testing.T) {
 		mock := &mockGraphQLAPI{
-			getLogsResult: types.RPCLogs{
-				{Log: types.Log{
+			getLogsResult: types.Logs{
+				{
 					Address:     common.HexToAddress(addr),
 					BlockNumber: 10,
 					BlockHash:   common.HexToHash(blockHash),
 					TxHash:      common.HexToHash("0x" + strings.Repeat("cc", 32)),
-				}},
+				},
 			},
 		}
 		r := &blockResolver{&Resolver{GraphQLAPI: mock}}
