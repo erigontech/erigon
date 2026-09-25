@@ -571,6 +571,8 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 			require.Equal(t, string(want), fastJSON(t, txn))
 		})
 	}
+	require.Contains(t, fastJSON(t, emptyAuths), `"authorizationList":[]`)
+	require.Contains(t, fastJSON(t, emptyAccesses), `"accessList":[]`)
 }
 
 // ots_getBlockDetails and ots_getBlockTransactions write transactionCount as a JSON number.
