@@ -32,7 +32,7 @@ func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
 	}
-	r := &asOfStateReader{sd: doms, roTx: tx, prefetched: p}
+	r := &asOfStateReader{sd: doms, roTx: tx, commitmentDomain: kv.CommitmentDomain, prefetched: p}
 
 	flushed, untouched, absent := []byte{0x40, 0x12, 0x02}, []byte{0x40, 0x34, 0x02}, []byte{0x40, 0x56, 0x02}
 	p.put(flushed, []byte("prefetched-flushed"), 3)
