@@ -140,6 +140,52 @@ func TestSharedDomainsHexOnlyUsesConfiguredV3(t *testing.T) {
 	require.Equal(t, commitment.VariantCommitmentV3, sd.GetCommitmentCtx().Trie().Variant())
 }
 
+func TestSharedDomainsV3SeekRestoresCommittedPosition(t *testing.T) {
+	originalV3 := statecfg.ExperimentalCommitmentV3
+	originalParallel := statecfg.ExperimentalParallelCommitment
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.ExperimentalParallelCommitment = originalParallel
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	key := bytes.Repeat([]byte{0x42}, 20)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, encAccount(1), 59, nil))
+	_, err = sd.ComputeCommitment(t.Context(), rwTx, true, 5, 59, "test", nil)
+	require.NoError(t, err)
+	require.NoError(t, rawdbv3.TxNums.Append(rwTx, 5, 59))
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+	sd.Close()
+
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	restored, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer restored.Close()
+
+	txNum, blockNum, err := restored.SeekCommitment(t.Context(), roTx)
+	require.NoError(t, err)
+	require.EqualValues(t, 59, txNum)
+	require.EqualValues(t, 5, blockNum)
+}
+
 func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 	originalBin := statecfg.ExperimentalBinCommitment
 	originalHexBin := statecfg.ExperimentalHexBinCommitment

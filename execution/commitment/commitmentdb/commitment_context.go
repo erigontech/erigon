@@ -1002,7 +1002,11 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 	}
 
 	if len(state) != 0 && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
-		return 0, 0, bytes.Clone(state), nil
+		blockNum, txNum, _, err := commitment.DecodeCommitmentV3State(state)
+		if err != nil {
+			return 0, 0, nil, err
+		}
+		return blockNum, txNum, bytes.Clone(state), nil
 	}
 	if len(state) < 16 {
 		return 0, 0, nil, nil
