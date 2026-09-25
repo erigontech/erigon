@@ -32,6 +32,7 @@ import (
 	mdbxgo "github.com/erigontech/mdbx-go/mdbx"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -1297,4 +1298,24 @@ func TestInMemKeepsUtterlyNoSync(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint(mdbxgo.UtterlyNoSync), flags&mdbxgo.UtterlyNoSync,
 		"utterly-nosync lost a bit, and without all of them mdbx flushes on commit")
+}
+
+func TestPooledTxnHoldsNoRoTxsLimiterSlot(t *testing.T) {
+	opts := mdbx.New(dbcfg.ChainDB, log.New()).RoTxsLimiter(semaphore.NewWeighted(1))
+	db := mdbxtest.InMem(t, opts, t.TempDir()).MustOpen()
+	t.Cleanup(db.Close)
+	ctx := kv.WithNonBlockingAcquire(t.Context())
+
+	first, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer first.Rollback() // a safety net: the explicit rollback below is what the test exercises
+	first.Rollback()
+
+	pooled, err := db.BeginRo(ctx)
+	require.NoError(t, err)
+	defer pooled.Rollback()
+
+	limited, err := db.BeginRo(ctx)
+	require.NoError(t, err, "a txn renewed from the pool must leave the limiter slot free")
+	defer limited.Rollback()
 }

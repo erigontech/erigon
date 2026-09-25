@@ -46,4 +46,19 @@ func BenchmarkBeginTemporalRo(b *testing.B) {
 		db := temporaltest.NewTestDB(b, dirs)
 		loop(b, db)
 	})
+	b.Run("Parallel", func(b *testing.B) {
+		db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+		b.ReportAllocs()
+		b.ResetTimer()
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic // benchmark loop; explicit Rollback below
+				if err != nil {
+					b.Error(err)
+					return
+				}
+				tx.Rollback()
+			}
+		})
+	})
 }

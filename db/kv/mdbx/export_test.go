@@ -16,4 +16,4 @@
 
 package mdbx
 
-func RoTxPoolLen(db *MdbxKV) int { return len(db.roTxPool) }
+func RoTxPoolLen(db *MdbxKV) int { return db.roTxPool.idleLen() }

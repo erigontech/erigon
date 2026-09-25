@@ -445,8 +445,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		opts.roTxsLimiter = semaphore.NewWeighted(targetSemCount) // 1 less than max to allow unlocking to happen
 	}
 
-	txsCountMutex := &sync.Mutex{}
-
 	db := &MdbxKV{
 		opts:         opts,
 		env:          env,
@@ -454,10 +452,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		buckets:      kv.TableCfg{},
 		txSize:       dirtyPagesLimit * opts.pageSize.Bytes(),
 		roTxsLimiter: opts.roTxsLimiter,
-		roTxPool:     make(chan *mdbx.Txn, roTxPoolSize),
-
-		txsCountMutex:         txsCountMutex,
-		txsAllDoneOnCloseCond: sync.NewCond(txsCountMutex),
+		roTxPool:     newRoTxPool(roTxPoolSize),
 
 		liveTxs: make(map[*MdbxTx]liveTxInfo),
 
@@ -553,7 +548,7 @@ type MdbxKV struct {
 	buckets      kv.TableCfg
 	roTxsLimiter *semaphore.Weighted // does limit amount of concurrent Ro transactions - in most casess runtime.NumCPU() is good value for this channel capacity - this channel can be shared with other components (like Decompressor)
 	// roTxPool holds reset read txns: Renew reuses their bound reader slot, BeginTxn locks the reader table to bind one.
-	roTxPool chan *mdbx.Txn
+	roTxPool *roTxPool
 	opts     MdbxOpts
 	txSize   uint64
 	closed   atomic.Bool
@@ -562,9 +557,8 @@ type MdbxKV struct {
 	syncerStop chan struct{}
 	syncerDone chan struct{} // nil when no background flush runs; closed when it has returned
 
-	txsCount              uint
-	txsCountMutex         *sync.Mutex
-	txsAllDoneOnCloseCond *sync.Cond
+	openTxs       sync.RWMutex
+	txsCountMutex sync.Mutex
 
 	// liveTxs tracks all currently-open chaindata txs so we can dump the
 	// stacks of concurrent txs when a commit observes openTxs > 1 — answering
@@ -649,15 +643,16 @@ type liveTxInfo struct {
 	stack    string
 }
 
+// trackTxBegin holds a read lock of openTxs for the tx lifetime; Close takes the write lock to wait for all txs.
 func (db *MdbxKV) trackTxBegin() bool {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
-	isOpen := !db.closed.Load()
-	if isOpen {
-		db.txsCount++
+	if !db.openTxs.TryRLock() {
+		return false
 	}
-	return isOpen
+	if db.closed.Load() {
+		db.openTxs.RUnlock()
+		return false
+	}
+	return true
 }
 
 // registerLiveTx records an open chaindata tx with its stack so concurrent-tx
@@ -683,7 +678,7 @@ func (db *MdbxKV) registerLiveTx(tx *MdbxTx, readOnly bool) {
 		openedAt: openedAt,
 		stack:    stack,
 	}
-	count := db.txsCount
+	count := len(db.liveTxs)
 	db.txsCountMutex.Unlock()
 
 	db.log.Trace("MDBX_TX_OPEN", "id", id, "kind", kind, "count", count, "stack", stack)
@@ -700,7 +695,7 @@ func (db *MdbxKV) unregisterLiveTx(tx *MdbxTx, event string) {
 	if ok {
 		delete(db.liveTxs, tx)
 	}
-	count := db.txsCount
+	count := len(db.liveTxs)
 	db.txsCountMutex.Unlock()
 
 	if !ok {
@@ -736,32 +731,11 @@ func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
 	}
 }
 
-func (db *MdbxKV) hasTxsAllDoneAndClosed() bool {
-	return (db.txsCount == 0) && db.closed.Load()
-}
-
-func (db *MdbxKV) trackTxEnd() {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
-	if db.txsCount > 0 {
-		db.txsCount--
-	} else {
-		panic("MdbxKV: unmatched trackTxEnd")
-	}
-
-	if db.hasTxsAllDoneAndClosed() {
-		db.txsAllDoneOnCloseCond.Signal()
-	}
-}
+func (db *MdbxKV) trackTxEnd() { db.openTxs.RUnlock() }
 
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
-	db.txsCountMutex.Lock()
-	defer db.txsCountMutex.Unlock()
-
-	for !db.hasTxsAllDoneAndClosed() {
-		db.txsAllDoneOnCloseCond.Wait()
-	}
+	db.openTxs.Lock()
+	db.openTxs.Unlock() //nolint:staticcheck
 }
 
 // syncPoller enforces the sync deadline once writes stop: mdbx checks it only inside
@@ -801,7 +775,7 @@ func (db *MdbxKV) Close() {
 			db.log.Warn("[db] final flush", "label", db.opts.label, "err", err)
 		}
 	}
-	db.drainRoTxPool()
+	db.roTxPool.drain()
 
 	if db.env != nil {
 		db.env.Close()
@@ -828,29 +802,12 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	if kv.IsNonBlockingAcquire(ctx) {
-		if !db.roTxsLimiter.TryAcquire(1) {
+	tx, shard := db.renewPooledTxn()
+	if tx == nil {
+		if tx, err = db.beginLimitedTxn(ctx); err != nil {
 			db.trackTxEnd()
-			dbRoTxOverloaded.Inc()
-			return nil, kv.ErrReadTxLimitExceeded
+			return nil, err
 		}
-	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
-		db.trackTxEnd()
-		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
-	}
-
-	defer func() {
-		if txn == nil {
-			// on error, or if there is whatever reason that we don't return a tx,
-			// we need to free up the limiter slot, otherwise it could lead to deadlocks
-			db.roTxsLimiter.Release(1)
-			db.trackTxEnd()
-		}
-	}()
-
-	tx, err := db.beginRoTxn()
-	if err != nil {
-		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
 	}
 
 	mt := &MdbxTx{
@@ -858,44 +815,65 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		db:       db,
 		tx:       tx,
 		readOnly: true,
+		roShard:  shard,
 		traceID:  db.leakDetector.Add(),
 	}
 	db.registerLiveTx(mt, true)
 	return mt, nil
 }
 
-func (db *MdbxKV) beginRoTxn() (*mdbx.Txn, error) {
-	select {
-	case tx := <-db.roTxPool:
-		if err := tx.Renew(); err == nil {
-			return tx, nil
-		}
+// renewPooledTxn takes an owned txn from the pool; it bypasses roTxsLimiter.
+func (db *MdbxKV) renewPooledTxn() (*mdbx.Txn, *roTxPoolShard) {
+	tx, shard := db.roTxPool.get()
+	if tx == nil {
+		return nil, nil
+	}
+	if err := tx.Renew(); err != nil {
 		tx.Abort()
-	default:
+		shard.disown()
+		return nil, nil
 	}
-	return db.env.BeginTxn(nil, mdbx.Readonly)
+	return tx, shard
 }
 
-func (db *MdbxKV) drainRoTxPool() {
-	for {
-		select {
-		case tx := <-db.roTxPool:
-			tx.Abort()
-		default:
+func (db *MdbxKV) beginLimitedTxn(ctx context.Context) (*mdbx.Txn, error) {
+	if kv.IsNonBlockingAcquire(ctx) {
+		if !db.roTxsLimiter.TryAcquire(1) {
+			dbRoTxOverloaded.Inc()
+			return nil, kv.ErrReadTxLimitExceeded
+		}
+	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
+		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
+	}
+	tx, err := db.env.BeginTxn(nil, mdbx.Readonly)
+	if err != nil {
+		db.roTxsLimiter.Release(1)
+		return nil, fmt.Errorf("%w, label: %s, trace: %s", err, db.opts.label, stack2.Trace().String())
+	}
+	return tx, nil
+}
+
+// endRoTxn resets tx back into the pool when it can; otherwise it aborts tx.
+// ended is true when tx was already finished by Commit.
+func (db *MdbxKV) endRoTxn(tx *mdbx.Txn, shard *roTxPoolShard, ended bool) {
+	if shard == nil {
+		db.roTxsLimiter.Release(1)
+	}
+	if !ended && tx.Reset() == nil {
+		if shard != nil {
+			shard.put(tx)
+			return
+		}
+		if db.roTxPool.adopt(tx) {
 			return
 		}
 	}
-}
-
-func (db *MdbxKV) releaseRoTxn(tx *mdbx.Txn) {
-	if cap(db.roTxPool) > 0 && tx.Reset() == nil {
-		select {
-		case db.roTxPool <- tx:
-			return
-		default:
-		}
+	if !ended {
+		tx.Abort()
 	}
-	tx.Abort()
+	if shard != nil {
+		shard.disown()
+	}
 }
 
 func (db *MdbxKV) BeginRw(ctx context.Context) (kv.RwTx, error) {
@@ -947,6 +925,7 @@ type MdbxTx struct {
 	db               *MdbxKV
 	statelessCursors map[string]kv.RwCursor
 	readOnly         bool
+	roShard          *roTxPoolShard // non-nil: the txn is pool-owned and holds no roTxsLimiter slot
 	ctx              context.Context
 
 	toCloseMap map[uint64]kv.Closer
@@ -1429,11 +1408,12 @@ func (tx *MdbxTx) Commit() error {
 	}
 	defer func() {
 		tx.db.unregisterLiveTx(tx, "COMMIT")
+		if tx.readOnly {
+			tx.db.endRoTxn(tx.tx, tx.roShard, true)
+		}
 		tx.tx = nil
 		tx.db.trackTxEnd()
-		if tx.readOnly {
-			tx.db.roTxsLimiter.Release(1)
-		} else {
+		if !tx.readOnly {
 			runtime.UnlockOSThread()
 		}
 		tx.db.leakDetector.Del(tx.traceID)
@@ -1459,7 +1439,9 @@ func (tx *MdbxTx) Commit() error {
 	// investigating GC / openTxs behavior. Gated behind the same env var so
 	// production runs don't get a log line per chaindata commit.
 	if mdbxTraceTx && tx.db.opts.label == dbcfg.ChainDB {
-		openTxs := tx.db.txsCount
+		tx.db.txsCountMutex.Lock()
+		openTxs := len(tx.db.liveTxs)
+		tx.db.txsCountMutex.Unlock()
 		tx.db.opts.log.Info(
 			"[mdbx] commit",
 			"whole", latency.Whole,
@@ -1500,15 +1482,13 @@ func (tx *MdbxTx) Rollback() {
 	// The pool send stays ahead of trackTxEnd: Close waits on that count before closing
 	// the env, and mdbx Reset has no close guard of its own.
 	if tx.readOnly {
-		tx.db.releaseRoTxn(t)
+		tx.db.endRoTxn(t, tx.roShard, false)
 	} else {
 		t.Abort()
 	}
 	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.db.trackTxEnd()
-	if tx.readOnly {
-		tx.db.roTxsLimiter.Release(1)
-	} else {
+	if !tx.readOnly {
 		runtime.UnlockOSThread()
 	}
 	tx.db.leakDetector.Del(tx.traceID)
