@@ -607,7 +607,7 @@ type RPCTransaction struct {
 	BlockTimestamp       *hexutil.Uint64          `json:"blockTimestamp" ethjson:"quantity"`
 	From                 common.Address           `json:"from" ethjson:"data"`
 	Gas                  hexutil.Uint64           `json:"gas" ethjson:"quantity"`
-	GasPrice             *hexutil.U256            `json:"gasPrice" ethjson:"quantity"`
+	GasPrice             hexutil.U256             `json:"gasPrice" ethjson:"quantity"`
 	MaxPriorityFeePerGas *hexutil.U256            `json:"maxPriorityFeePerGas,omitempty" ethjson:"quantity"`
 	MaxFeePerGas         *hexutil.U256            `json:"maxFeePerGas,omitempty" ethjson:"quantity"`
 	Hash                 common.Hash              `json:"hash" ethjson:"data"`
@@ -617,7 +617,7 @@ type RPCTransaction struct {
 	TransactionIndex     *hexutil.Uint64          `json:"transactionIndex" ethjson:"quantity"`
 	Value                *hexutil.U256            `json:"value" ethjson:"quantity"`
 	Type                 hexutil.Uint64           `json:"type" ethjson:"quantity"`
-	Accesses             *types.AccessList        `json:"accessList,omitempty" ethjson:"objects"`
+	Accesses             types.AccessList         `json:"accessList,omitzero" ethjson:"objects"`
 	ChainID              *hexutil.U256            `json:"chainId,omitempty" ethjson:"quantity"`
 	MaxFeePerBlobGas     *hexutil.U256            `json:"maxFeePerBlobGas,omitempty" ethjson:"quantity"`
 	BlobVersionedHashes  []common.Hash            `json:"blobVersionedHashes,omitempty" ethjson:"datalist"`
@@ -677,16 +677,18 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 				result.ChainID = (*hexutil.U256)(chainId)
 			}
 		}
-		result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
+		result.GasPrice = hexutil.U256(*txn.GetTipCap())
 	} else {
 		chainId = txn.GetChainID()
 		result.ChainID = (*hexutil.U256)(chainId)
 		result.YParity = (*hexutil.U256)(v)
-		acl := txn.GetAccessList()
-		result.Accesses = &acl
+		result.Accesses = txn.GetAccessList()
+		if result.Accesses == nil { // nil leaves the key out, and a typed transaction writes []
+			result.Accesses = types.AccessList{}
+		}
 
 		if txn.Type() == types.AccessListTxType {
-			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
+			result.GasPrice = hexutil.U256(*txn.GetTipCap())
 		} else {
 			result.GasPrice = computeGasPrice(txn, baseFee)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
@@ -731,11 +733,10 @@ func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransact
 
 // computeGasPrice reports the effective gas price of a transaction already in a
 // block, and the fee cap of a pending one, as the execution-apis spec requires.
-func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) *hexutil.U256 {
+func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) hexutil.U256 {
 	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
-		return (*hexutil.U256)(&price)
+		return hexutil.U256(u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap()))
 	}
-	return (*hexutil.U256)(txn.GetFeeCap())
+	return hexutil.U256(*txn.GetFeeCap())
 }

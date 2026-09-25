@@ -128,8 +128,7 @@ func TestRPCMarshalBlockAllocsPerTransaction(t *testing.T) {
 		block.Hash()
 		return testing.AllocsPerRun(100, func() { RPCMarshalBlock(block, true, true) })
 	}
-	// the result, its access list and its gas price
-	require.Equal(t, 3.0, blockAllocs(2)-blockAllocs(1))
+	require.Equal(t, 1.0, blockAllocs(2)-blockAllocs(1))
 }
 
 func txFields(t *testing.T, r SignTransactionResult) map[string]json.RawMessage {
@@ -521,7 +520,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	base := func() *RPCTransaction {
 		return &RPCTransaction{
 			BlockHash: &hash, BlockNumber: u(0x1234), BlockTimestamp: q(0x64),
-			From: to, Gas: 0x5208, GasPrice: u(0x9), Hash: hash,
+			From: to, Gas: 0x5208, GasPrice: *u(0x9), Hash: hash,
 			Input: hexutil.Bytes{0xde, 0xad}, Nonce: 3, To: &to,
 			TransactionIndex: q(2), Value: u(0x100), Type: 0,
 			V: u(0x1b), R: u(0xaa), S: u(0xbb),
@@ -530,7 +529,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	dynamic := base()
 	dynamic.Type, dynamic.MaxPriorityFeePerGas, dynamic.MaxFeePerGas = 2, u(0x1), u(0x2)
 	dynamic.ChainID, dynamic.YParity = u(1), u(0)
-	dynamic.Accesses = &types.AccessList{
+	dynamic.Accesses = types.AccessList{
 		{Address: to, StorageKeys: []common.Hash{hash, {}}},
 		{Address: common.Address{}, StorageKeys: nil},
 		{Address: to, StorageKeys: []common.Hash{}},
@@ -557,7 +556,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	noTo := base()
 	noTo.To, noTo.Input = nil, nil
 	emptyAccesses := base()
-	emptyAccesses.Accesses = &types.AccessList{}
+	emptyAccesses.Accesses = types.AccessList{}
 	emptyBlobs := base()
 	emptyBlobs.BlobVersionedHashes = []common.Hash{}
 
