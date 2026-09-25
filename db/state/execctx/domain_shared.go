@@ -349,6 +349,9 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	for _, opt := range opts {
 		opt(&o)
 	}
+	if o.trieCfg.Variant == commitment.VariantCommitmentV3 {
+		o.useSharedBranchCache = false
+	}
 	trieCfg := o.trieCfg
 
 	generationTx := cacheGenerationTx(tx)
