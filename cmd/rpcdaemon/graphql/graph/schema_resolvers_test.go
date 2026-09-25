@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -973,7 +972,6 @@ func TestQueryResolver_BlockTransactionsBySelection(t *testing.T) {
 	to := common.HexToAddress("0xAbCdEf0123456789aBcDeF0123456789AbCdEf04")
 	header := &types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(50)}
 	txn := &types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21000, To: &to, Value: *uint256.NewInt(5)}, GasPrice: *uint256.NewInt(60)}
-	txn.SetSender(accounts.InternAddress(to))
 	block := types.NewBlockFromStorage(header.Hash(), header, []types.Transaction{txn}, nil, nil, nil)
 	receipt := &types.Receipt{Status: types.ReceiptStatusSuccessful, TxHash: txn.Hash(), GasUsed: 21000, BlockNumber: uint256.NewInt(7)}
 	mock := &mockGraphQLAPI{
