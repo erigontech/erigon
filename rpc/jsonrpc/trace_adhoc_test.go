@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/big"
 	"os"
 	"path/filepath"
 	"strings"
@@ -34,6 +35,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
@@ -904,6 +906,57 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 	}
 }
 
+// Call data takes the same data/input precedence as eth_call: input wins when both are set.
+func TestTraceCallInputField(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	api := newTraceApiForTest(m)
+
+	echo := common.HexToAddress("0x00000000000000000000000000000000cafe0003")
+	// CALLDATASIZE, PUSH1 0x00, PUSH1 0x00, CALLDATACOPY, CALLDATASIZE, PUSH1 0x00, RETURN
+	echoCode := hexutil.Bytes{0x36, 0x60, 0x00, 0x60, 0x00, 0x37, 0x36, 0x60, 0x00, 0xf3}
+	traceConfig := &config.TraceConfig{
+		StateOverrides: &ethapi.StateOverrides{
+			accounts.InternAddress(echo): {Code: &echoCode},
+		},
+	}
+
+	for _, tc := range []struct {
+		name   string
+		fields string
+		output string
+	}{
+		{name: "data", fields: `"data":"0xaa"`, output: "0xaa"},
+		{name: "input", fields: `"input":"0xbb"`, output: "0xbb"},
+		{name: "equal", fields: `"data":"0xcc","input":"0xcc"`, output: "0xcc"},
+		{name: "input wins", fields: `"data":"0xaa","input":"0xbb"`, output: "0xbb"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var args TraceCallParam
+			call := fmt.Sprintf(`{"from":%q,"to":%q,%s}`, bankAddr.Hex(), echo.Hex(), tc.fields)
+			require.NoError(t, json.Unmarshal([]byte(call), &args))
+
+			result, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, traceConfig)
+			require.NoError(t, err)
+			require.Equal(t, tc.output, result.Output.String())
+		})
+	}
+}
+
+func TestCallManyInputField(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	// Init code deploys runtime code that returns 42.
+	const deploy = `[[{"from":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x30000","gasPrice":"0x0","input":"0x600a600c600039600a6000f3602a60005260206000f3"},["trace"]]]`
+	results, err := api.CallMany(context.Background(), json.RawMessage(deploy), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 1)
+	created, ok := results[0].Trace[0].Result.(*CreateTraceResult)
+	require.True(t, ok)
+	require.Equal(t, "0x602a60005260206000f3", created.Code.String())
+}
+
 // runtimeReturningOpcode returns the given zero-argument opcode's value as a
 // 32-byte word: <opcode>, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN.
 func runtimeReturningOpcode(opcode byte) []byte {
@@ -1691,6 +1744,148 @@ func TestOeTracerCoversInstructionSet(t *testing.T) {
 			default:
 				require.Equal(t, jt[op].UsesMemory(), ex.Mem != nil)
 			}
+		})
+	}
+}
+
+// traceCallFieldsCall is an EIP-1559-priced call from the bank. Tests add fields to it.
+const traceCallFieldsCall = `{"from":%q,"to":%q,"gas":"0x493e0","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x77359400","data":"0x"%s}`
+
+// TestTraceCallParamCallArgsFields checks that TraceCallParam converts nonce, chainId,
+// blobVersionedHashes and authorizationList the way eth_call's CallArgs does.
+func TestTraceCallParamCallArgsFields(t *testing.T) {
+	from, to := common.HexToAddress("0xb0b"), common.HexToAddress("0xca11")
+	auth := `{"chainId":"0x539","address":"0x0000000000000000000000000000000000001002","nonce":"0x3","yParity":"0x1","r":"0x1111","s":"0x2222"}`
+	for _, tc := range []struct {
+		name   string
+		fields string
+	}{
+		{name: "nonce", fields: `,"nonce":"0x7"`},
+		{name: "chainId", fields: `,"chainId":"0x539"`},
+		{name: "blobVersionedHashes", fields: `,"blobVersionedHashes":["0x0100000000000000000000000000000000000000000000000000000000000001"],"maxFeePerBlobGas":"0x2"`},
+		{name: "authorizationList", fields: `,"authorizationList":[` + auth + `]`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			call := []byte(fmt.Sprintf(traceCallFieldsCall, from.Hex(), to.Hex(), tc.fields))
+			var traceArgs TraceCallParam
+			require.NoError(t, json.Unmarshal(call, &traceArgs))
+			var callArgs ethapi.CallArgs
+			require.NoError(t, json.Unmarshal(call, &callArgs))
+			baseFee := uint256.NewInt(params.InitialBaseFee)
+
+			traceMsg, err := traceArgs.ToMessage(0, baseFee)
+			require.NoError(t, err)
+			callMsg, err := callArgs.ToMessage(0, baseFee)
+			require.NoError(t, err)
+			require.Equal(t, callMsg.Nonce(), traceMsg.Nonce())
+			require.Equal(t, callMsg.BlobHashes(), traceMsg.BlobHashes())
+			require.Equal(t, callMsg.Authorizations(), traceMsg.Authorizations())
+
+			traceTxn, err := traceArgs.ToTransaction(0, baseFee)
+			require.NoError(t, err)
+			callTxn, err := callArgs.ToTransaction(0, baseFee)
+			require.NoError(t, err)
+			require.Equal(t, callTxn.Type(), traceTxn.Type())
+			require.Equal(t, callTxn.GetNonce(), traceTxn.GetNonce())
+			require.Equal(t, callTxn.GetChainID(), traceTxn.GetChainID())
+			require.Equal(t, callTxn.GetBlobHashes(), traceTxn.GetBlobHashes())
+			require.Equal(t, callTxn.GetAuthorizations(), traceTxn.GetAuthorizations())
+		})
+	}
+}
+
+// TestTraceCallFields runs call objects with nonce, chainId, blobVersionedHashes and
+// authorizationList through trace_call and trace_callMany.
+func TestTraceCallFields(t *testing.T) {
+	marker := common.HexToAddress("0x1002")
+	blobHashReader := common.HexToAddress("0x1003")
+	bankKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	bank := crypto.PubkeyToAddress(bankKey.PublicKey)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainOsakaConfig.Copy(),
+		Alloc: types.GenesisAlloc{
+			bank: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil)},
+			// PUSH1 42, PUSH0, MSTORE, PUSH1 32, PUSH0, RETURN
+			marker: {Code: []byte{0x60, 0x2a, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}},
+			// PUSH0, BLOBHASH, PUSH0, MSTORE, PUSH1 32, PUSH0, RETURN
+			blobHashReader: {Code: []byte{0x5f, 0x49, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}},
+		},
+	}), execmoduletester.WithKey(bankKey))
+	api := newTraceApiForTest(m)
+	word42 := common.BigToHash(big.NewInt(42)).Hex()
+
+	authorityKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+	signed, err := types.SignAuthorization(authorityKey, *chain.TestChainOsakaConfig.ChainID, marker, 0)
+	require.NoError(t, err)
+	authJSON, err := json.Marshal([]types.JsonAuthorization{types.JsonAuthorization{}.FromAuthorization(signed)})
+	require.NoError(t, err)
+	authorizationList := `,"authorizationList":` + string(authJSON)
+
+	callObject := func(to common.Address, fields string) string {
+		return fmt.Sprintf(traceCallFieldsCall, bank.Hex(), to.Hex(), fields)
+	}
+	traceCall := func(t *testing.T, call string) *TraceCallResult {
+		t.Helper()
+		var args TraceCallParam
+		require.NoError(t, json.Unmarshal([]byte(call), &args))
+		res, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, nil)
+		require.NoError(t, err)
+		return res
+	}
+	traceCallMany := func(t *testing.T, calls ...string) []*TraceCallResult {
+		t.Helper()
+		items := make([]string, len(calls))
+		for i, call := range calls {
+			items[i] = "[" + call + `,["trace"]]`
+		}
+		res, err := api.CallMany(context.Background(), json.RawMessage("["+strings.Join(items, ",")+"]"), nil, nil)
+		require.NoError(t, err)
+		require.Len(t, res, len(calls))
+		return res
+	}
+	rootGas := func(res *TraceCallResult) uint64 {
+		return res.Trace[0].Action.(*CallTraceAction).Gas.Uint64()
+	}
+
+	t.Run("authorizationList", func(t *testing.T) {
+		absent := traceCall(t, callObject(authority, ""))
+		require.Equal(t, "0x", absent.Output.String(), "without the list the call reaches an account with no code")
+
+		delegated := traceCall(t, callObject(authority, authorizationList))
+		require.Equal(t, word42, delegated.Output.String(), "the authorization delegates the authority to the marker")
+		require.Equal(t, rootGas(absent)-params.PerEmptyAccountCost, rootGas(delegated), "intrinsic gas charges the authorization")
+	})
+
+	t.Run("authorizationList in trace_callMany", func(t *testing.T) {
+		res := traceCallMany(t, callObject(authority, authorizationList), callObject(authority, ""))
+		require.Equal(t, word42, res[0].Output.String(), "the authorization delegates the authority to the marker")
+		require.Equal(t, word42, res[1].Output.String(), "the delegation persists to the next call in the bundle")
+
+		absent := traceCallMany(t, callObject(authority, ""))
+		require.Equal(t, "0x", absent[0].Output.String())
+	})
+
+	t.Run("blobVersionedHashes", func(t *testing.T) {
+		hash := "0x0100000000000000000000000000000000000000000000000000000000000001"
+		withHash := traceCall(t, callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400","blobVersionedHashes":["`+hash+`"]`))
+		require.Equal(t, hash, withHash.Output.String(), "BLOBHASH reads the supplied versioned hash")
+
+		withoutHash := traceCall(t, callObject(blobHashReader, `,"maxFeePerBlobGas":"0x77359400"`))
+		require.Equal(t, common.Hash{}.Hex(), withoutHash.Output.String())
+	})
+
+	// As in eth_call, the nonce and chainId are not checked against the state or the chain,
+	// so neither changes how the call runs.
+	for _, tc := range []struct{ name, fields string }{
+		{name: "nonce", fields: `,"nonce":"0x7"`},
+		{name: "chainId", fields: `,"chainId":"0x1"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, word42, traceCall(t, callObject(marker, tc.fields)).Output.String())
+			require.Equal(t, word42, traceCallMany(t, callObject(marker, tc.fields))[0].Output.String())
 		})
 	}
 }

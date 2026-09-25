@@ -36,15 +36,6 @@ func Quantity[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v T) {
 	jsonstream.HexUint64(s, uint64(v))
 }
 
-// QuantityOrNull writes null for a field the header or receipt does not carry.
-func QuantityOrNull[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v *T) {
-	if v == nil {
-		s.Field(name).WriteNil()
-		return
-	}
-	Quantity(s, name, *v)
-}
-
 // Quantity256 writes a 256-bit quantity, null when the field is absent.
 func Quantity256(s *jsonstream.StackStream, name string, v *uint256.Int) {
 	s.Field(name)
@@ -62,3 +53,13 @@ func Data(s *jsonstream.StackStream, name string, b []byte) {
 func DataList[S ~[]E, E ~[length.Hash]byte](s *jsonstream.StackStream, name string, items S) {
 	jsonstream.HexesField(s, name, items)
 }
+
+// Datas writes variable-length byte strings as one array field, one value at a time so a large
+// array flushes element by element rather than growing one buffer for all of it. A nil slice is
+// null.
+func Datas[S ~[]E, E ~[]byte](s *jsonstream.StackStream, name string, items S) {
+	s.Field(name)
+	jsonstream.ArrayValue(s, items, writeHexElem[E])
+}
+
+func writeHexElem[E ~[]byte](s *jsonstream.StackStream, b *E) { s.WriteHex(*b) }

@@ -25,11 +25,11 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-func BenchmarkRPCLogsMarshalFastJSON(b *testing.B) {
+func BenchmarkLogsMarshalFastJSON(b *testing.B) {
 	topic := common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")
-	logs := make(RPCLogs, 1000)
+	logs := make(Logs, 1000)
 	for i := range logs {
-		logs[i] = &RPCLog{Log: Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}}
+		logs[i] = &Log{Topics: []common.Hash{topic, {}, {}}, Data: make([]byte, 32)}
 	}
 	b.Run("stream", func(b *testing.B) {
 		b.ReportAllocs()
