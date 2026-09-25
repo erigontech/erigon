@@ -486,8 +486,8 @@ func TestRPCBlockMarshalFastJSONTo(t *testing.T) {
 		{"simulate shape", func() *RPCBlock {
 			b := RPCMarshalBlock(withTx, true, false)
 			b.Calls = []CallResult{
-				{ReturnData: "0x01", Logs: []*types.RPCLog{{Log: types.Log{Topics: []common.Hash{{1}}, Data: []byte{2}}}}, GasUsed: 0x5208, MaxUsedGas: 0x5300, Status: 1},
-				{ReturnData: "0x", Logs: []*types.RPCLog{}, Error: map[string]any{"code": 3, "message": "execution reverted", "data": "0x<&>"}},
+				{ReturnData: "0x01", Logs: []*types.Log{{Topics: []common.Hash{{1}}, Data: []byte{2}}}, GasUsed: 0x5208, MaxUsedGas: 0x5300, Status: 1},
+				{ReturnData: "0x", Logs: []*types.Log{}, Error: map[string]any{"code": 3, "message": "execution reverted", "data": "0x<&>"}},
 			}
 			return b
 		}()},

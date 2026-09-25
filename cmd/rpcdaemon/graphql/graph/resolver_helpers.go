@@ -296,7 +296,7 @@ func topicsFromModel(topicSets [][]string) ([][]common.Hash, error) {
 	return result, nil
 }
 
-func rpcLogsToModel(logs types.RPCLogs) []*model.Log {
+func rpcLogsToModel(logs types.Logs) []*model.Log {
 	result := make([]*model.Log, 0, len(logs))
 	for _, l := range logs {
 		ml := &model.Log{

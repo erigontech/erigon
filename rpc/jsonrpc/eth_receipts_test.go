@@ -37,20 +37,12 @@ func logsWithIndexes(n int) types.Logs {
 	return logs
 }
 
-func rpcLogsWithIndexes(n int) types.RPCLogs {
-	logs := make(types.RPCLogs, n)
-	for i, l := range logsWithIndexes(n) {
-		logs[i] = &types.RPCLog{Log: *l}
-	}
-	return logs
-}
-
 func TestAppendRPCLogs(t *testing.T) {
 	const blockTime = 42
 
 	cases := []struct {
 		name        string
-		logs        types.RPCLogs
+		logs        types.Logs
 		receiptLogs types.Logs
 		maxResults  int
 		wantLen     int
@@ -60,8 +52,8 @@ func TestAppendRPCLogs(t *testing.T) {
 		{name: "below limit", receiptLogs: logsWithIndexes(3), maxResults: 5, wantLen: 3},
 		{name: "at limit", receiptLogs: logsWithIndexes(3), maxResults: 3, wantLen: 3},
 		{name: "above limit", receiptLogs: logsWithIndexes(4), maxResults: 3, wantErr: true},
-		{name: "limit counts logs appended earlier", logs: rpcLogsWithIndexes(2), receiptLogs: logsWithIndexes(2), maxResults: 3, wantErr: true},
-		{name: "nothing to append at limit", logs: rpcLogsWithIndexes(2), maxResults: 2, wantLen: 2},
+		{name: "limit counts logs appended earlier", logs: logsWithIndexes(2), receiptLogs: logsWithIndexes(2), maxResults: 3, wantErr: true},
+		{name: "nothing to append at limit", logs: logsWithIndexes(2), maxResults: 2, wantLen: 2},
 		{name: "cap at math.MaxInt", receiptLogs: logsWithIndexes(3), maxResults: math.MaxInt, wantLen: 3},
 	}
 
@@ -79,8 +71,8 @@ func TestAppendRPCLogs(t *testing.T) {
 			require.NoError(t, err)
 			require.Len(t, got, tc.wantLen)
 			for i, l := range got[len(tc.logs):] {
-				assert.Equal(t, tc.receiptLogs[i].Index, l.Log.Index)
-				assert.Equal(t, hexutil.Uint64(blockTime), l.BlockTimestamp)
+				assert.Equal(t, tc.receiptLogs[i].Index, l.Index)
+				assert.Equal(t, hexutil.Uint64(blockTime), *l.BlockTimestamp)
 			}
 		})
 	}

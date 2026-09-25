@@ -470,8 +470,8 @@ func TestErrorHelpers(t *testing.T) {
 func TestRepairLogs(t *testing.T) {
 	hash := common.HexToHash("0xdeadbeef")
 	calls := []ethapi.CallResult{
-		{Logs: []*types.RPCLog{{}, {}}},
-		{Logs: []*types.RPCLog{{}}},
+		{Logs: []*types.Log{{}, {}}},
+		{Logs: []*types.Log{{}}},
 		{Logs: nil},
 	}
 	repairLogs(calls, hash)

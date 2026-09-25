@@ -204,6 +204,57 @@ func TestFilterNoAddresses(t *testing.T) {
 	}
 }
 
+// TestFilterGenesisHasNoReward checks that trace_filter reports no block reward for the genesis
+// block, which is not mined, in agreement with trace_block.
+func TestFilterGenesisHasNoReward(t *testing.T) {
+	m := execmoduletester.New(t)
+	miner := common.Address{1}
+	chain, err := m.GenerateChain(3, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(miner)
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chain))
+	api := newTraceApiForTest(m)
+
+	genesisTraces, err := api.Block(context.Background(), 0, new(bool), nil)
+	require.NoError(t, err)
+	require.Empty(t, genesisTraces)
+
+	genesisAuthor := m.Genesis.Coinbase()
+	filter := func(t *testing.T, from, to rpc.BlockNumber, toAddress []*common.Address, after, count *uint64) []int {
+		t.Helper()
+		stream := jsonstream.New(nil)
+		req := TraceFilterRequest{
+			FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+			ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+			ToAddress: toAddress,
+			After:     after,
+			Count:     count,
+		}
+		require.NoError(t, api.Filter(context.Background(), req, new(bool), nil, stream))
+		return blockNumbersFromTraces(t, stream.Buffer())
+	}
+	one := uint64(1)
+
+	t.Run("genesis", func(t *testing.T) {
+		require.Empty(t, filter(t, 0, 0, nil, nil, nil))
+	})
+	t.Run("genesis author", func(t *testing.T) {
+		require.Empty(t, filter(t, 0, 0, []*common.Address{&genesisAuthor}, nil, nil))
+	})
+	t.Run("from genesis", func(t *testing.T) {
+		require.Equal(t, []int{1, 2, 3}, filter(t, 0, 3, nil, nil, nil))
+	})
+	t.Run("from genesis by author", func(t *testing.T) {
+		require.Equal(t, []int{1, 2, 3}, filter(t, 0, 3, []*common.Address{&miner, &genesisAuthor}, nil, nil))
+	})
+	t.Run("from genesis paginated", func(t *testing.T) {
+		zero := uint64(0)
+		require.Equal(t, []int{1}, filter(t, 0, 3, nil, &zero, &one))
+		require.Equal(t, []int{2}, filter(t, 0, 3, nil, &one, &one))
+	})
+}
+
 func TestFilterAddressIntersection(t *testing.T) {
 	m := execmoduletester.New(t)
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
