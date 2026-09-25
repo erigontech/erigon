@@ -57,7 +57,7 @@ type BlockGetter interface {
 // ComputeBlockContext returns the execution environment of a certain block.
 func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
 	headerReader dbservices.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
-	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
+	txIndex int, opts ...state.Option) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
 	var reader state.StateReader
 	if stateCache != nil {
 		cacheView, err := stateCache.View(ctx, dbtx)
@@ -77,7 +77,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 	}
 
 	// Create the parent state database
-	statedb := state.New(reader)
+	statedb := state.New(reader, opts...)
 
 	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 		return headerReader.HeaderByNumber(ctx, dbtx, n)
@@ -95,7 +95,6 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 // ComputeTxContext returns the execution environment of a certain transaction.
 func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (protocol.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
-	statedb.SetStorageOverrides(engine)
 	statedb.SetTxContext(block.NumberU64(), txIndex)
 	msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 	if err != nil {
