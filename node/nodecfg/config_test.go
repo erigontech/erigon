@@ -64,13 +64,15 @@ func TestDataDirCreation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to create temporary file: %v", err)
 	}
-	dir2.RemoveFile(file.Name())
+	if err := dir2.RemoveFile(file.Name()); err != nil {
+		t.Fatalf("failed to remove temporary file: %v", err)
+	}
 }
 
 // Tests that IPC paths are correctly resolved to valid endpoints of different
 // platforms.
 func TestIPCPathResolution(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		DataDir  string
 		IPCPath  string
 		Windows  bool

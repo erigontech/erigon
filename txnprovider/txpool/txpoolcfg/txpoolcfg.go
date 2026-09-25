@@ -21,12 +21,7 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-
-	"github.com/erigontech/erigon/common"
 )
-
-// BorDefaultTxPoolPriceLimit defines the minimum gas price limit for bor to enforce txns acceptance into the pool.
-const BorDefaultTxPoolPriceLimit = 25 * common.GWei
 
 type Config struct {
 	Disable             bool
@@ -40,7 +35,7 @@ type Config struct {
 	BlobSlots           uint64 // Total number of blobs (not txns) allowed per account
 	TotalBlobPoolLimit  uint64 // Total number of blobs (not txns) allowed within the txpool
 	PriceBump           uint64 // Price bump percentage to replace an already existing transaction
-	BlobPriceBump       uint64 //Price bump percentage to replace an existing 4844 blob txn (type-3)
+	BlobPriceBump       uint64 // Price bump percentage to replace an existing 4844 blob txn (type-3)
 	// MaxNonceGap is the maximum allowed gap between a sender's on-chain nonce and the nonce of a
 	// queued transaction. Transactions whose nonce exceeds the on-chain nonce by more than this
 	// value are considered "zombie" transactions that can never become pending (they would require
@@ -60,7 +55,7 @@ type Config struct {
 	CommitEvery            time.Duration
 	LogEvery               time.Duration
 
-	//txpool db
+	// txpool db
 	MdbxPageSize    datasize.ByteSize
 	MdbxDBSizeLimit datasize.ByteSize
 	MdbxGrowthStep  datasize.ByteSize
@@ -141,6 +136,8 @@ const (
 	QueuedDormant        DiscardReason = 38 // Sender had no on-chain state change for longer than QueuedDormancyDuration
 	ErrGetSenderInfo     DiscardReason = 39 // Error getting sender nonce/balance from state during validation
 	TipAboveFeeCap       DiscardReason = 40 // EIP-1559: max priority fee per gas cannot exceed max fee per gas
+	DelegatedNonceGap    DiscardReason = 41 // Delegated account transaction nonce is not currently executable
+	DelegatedTxnLimit    DiscardReason = 42 // Delegated account already has an executable transaction
 )
 
 func (r DiscardReason) String() string {
@@ -227,6 +224,10 @@ func (r DiscardReason) String() string {
 		return "error getting sender state during tx validation"
 	case TipAboveFeeCap:
 		return "max priority fee per gas higher than max fee per gas"
+	case DelegatedNonceGap:
+		return "gapped-nonce transaction from delegated account"
+	case DelegatedTxnLimit:
+		return "in-flight transaction limit reached for delegated account"
 	default:
 		panic(fmt.Sprintf("discard reason: %d", r))
 	}

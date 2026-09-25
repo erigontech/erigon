@@ -49,21 +49,82 @@ func TestChiadoDoesNotConfigureStaticPeers(t *testing.T) {
 	require.Empty(t, network.StaticPeers)
 }
 
-func TestChiadoConfiguresSuppliedBootstrapNodes(t *testing.T) {
-	network, _ := GetConfigsByNetwork(chainspec.ChiadoChainID)
+func TestGnosisNetworksUseConfiguredBlockRequestWindow(t *testing.T) {
+	gnosis := BeaconConfigs[chainspec.GnosisChainID]
+	chiado := BeaconConfigs[chainspec.ChiadoChainID]
+	require.Equal(t, uint64(33_024), gnosis.MinEpochsForBlockRequests())
+	require.Equal(t, uint64(33_024), chiado.MinEpochsForBlockRequests())
+}
 
-	require.Subset(t, network.BootNodes, []string{
-		"/ip4/57.131.40.177/tcp/9000/p2p/16Uiu2HAm6HQoX8sEJxr58GkuM9FPWkgLdCs71vz5qcu7hyisYRLS",
-		"/ip4/45.79.214.176/tcp/9000/p2p/16Uiu2HAm7jUXmkWrC5cTwSa9bVtzeAwUXu3MZZnhcsY5QTAiNmyL",
-		"/ip4/51.210.221.124/tcp/9500/p2p/16Uiu2HAmSnLLjZfkFCythED8tQS5kP4NJKBuMdd1FYE23ZymKwL6",
-		"/ip4/57.129.122.18/tcp/9000/p2p/16Uiu2HAmALSWURS5G4Qsmm7eFbH5oXxoFJEQuVdhAZ1MMcE9XjrU",
-		"/ip4/51.210.221.124/tcp/9100/p2p/16Uiu2HAmUhn8VR7HFY7SLPqbBhnTT1yfjKBJQKSodUkWsE5adNNu",
-		"/ip4/137.74.112.3/tcp/9000/p2p/16Uiu2HAm1merr7djndkMFf2TxacP53tA6rFoU4tXD5NNPGYz6RPa",
-		"/ip4/65.21.231.153/tcp/9009/p2p/16Uiu2HAm5tjLaFaGnEwtrB7sRynYs5VpE3hjT7G4tkKhTEU2pcaf",
-		"/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
-		"/ip4/139.144.16.95/tcp/9000/p2p/16Uiu2HAmH5pPnGrQEq7Q6McNA24ExRKRyaRzmJ44M1kAvvHYAeer",
-		"/ip4/65.109.101.48/tcp/9000/p2p/16Uiu2HAm98ceLNE6X3mjVcsu6ZAaKZPPcqKmeofidTDy7UCHyTtY",
-	})
+func TestBlockRequestWindowFallsBackToSpecFormula(t *testing.T) {
+	cfg := BeaconChainConfig{MinValidatorWithdrawabilityDelay: 256, ChurnLimitQuotient: 65_536}
+	require.Equal(t, uint64(33_024), cfg.MinEpochsForBlockRequests())
+}
+
+func TestCustomConfigUsesConfiguredBlockRequestWindow(t *testing.T) {
+	configPath := filepath.Join(t.TempDir(), "config.yaml")
+	require.NoError(t, os.WriteFile(configPath, []byte("MIN_EPOCHS_FOR_BLOCK_REQUESTS: 12345\n"), 0o644))
+
+	beaconCfg, _, err := CustomConfig(configPath)
+	require.NoError(t, err)
+	require.Equal(t, uint64(12_345), beaconCfg.MinEpochsForBlockRequests())
+}
+
+func TestBlobSidecarServeRangeStartSlotUsesEpochBoundary(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: 4_096,
+	}
+
+	require.Equal(t, uint64(9_984), cfg.BlobSidecarServeRangeStartSlot(141_087))
+}
+
+func TestBlobSidecarServeRangeStartSlotDoesNotCrossDenebFork(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: 4,
+		DenebForkEpoch:                   10,
+	}
+
+	tests := []struct {
+		name         string
+		currentEpoch uint64
+		wantEpoch    uint64
+	}{
+		{name: "before Deneb", currentEpoch: 9, wantEpoch: 0},
+		{name: "at Deneb", currentEpoch: 10, wantEpoch: 10},
+		{name: "after Deneb", currentEpoch: 11, wantEpoch: 10},
+		{name: "window reaches Deneb", currentEpoch: 14, wantEpoch: 10},
+		{name: "window starts after Deneb", currentEpoch: 15, wantEpoch: 11},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.wantEpoch*cfg.SlotsPerEpoch, cfg.BlobSidecarServeRangeStartSlot(test.currentEpoch*cfg.SlotsPerEpoch))
+		})
+	}
+}
+
+func TestBlobSidecarServeRangeStartSlotHandlesShortAndInvalidChains(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                    32,
+		MinEpochsForBlobSidecarsRequests: math.MaxUint64,
+	}
+
+	require.Zero(t, cfg.BlobSidecarServeRangeStartSlot(141_087))
+	cfg.SlotsPerEpoch = 0
+	require.Zero(t, cfg.BlobSidecarServeRangeStartSlot(math.MaxUint64))
+}
+
+func TestDataColumnSidecarServeRangeStartSlotUsesFuluEpochBoundary(t *testing.T) {
+	cfg := BeaconChainConfig{
+		SlotsPerEpoch:                          16,
+		FuluForkEpoch:                          100,
+		MinEpochsForDataColumnSidecarsRequests: 4_096,
+	}
+
+	require.Zero(t, cfg.DataColumnSidecarServeRangeStartSlot(99*cfg.SlotsPerEpoch))
+	require.Equal(t, uint64(100*16), cfg.DataColumnSidecarServeRangeStartSlot(100*cfg.SlotsPerEpoch))
+	require.Equal(t, uint64(904*16), cfg.DataColumnSidecarServeRangeStartSlot(5_000*cfg.SlotsPerEpoch+15))
 }
 
 func TestCaplinConfigCanSetStaticPeers(t *testing.T) {

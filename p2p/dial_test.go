@@ -297,7 +297,9 @@ func TestDialSchedRemoveStatic(t *testing.T) {
 			},
 		},
 		// Since all static nodes are removed, they should not be dialed again.
-		{}, {}, {},
+		{},
+		{},
+		{},
 	})
 }
 

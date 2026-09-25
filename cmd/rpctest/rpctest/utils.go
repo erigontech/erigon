@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,7 +47,7 @@ func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer,
 	if errorFileName != "" {
 		f, err := os.Create(errorFileName)
 		if err != nil {
-			return nil, nil, cleanup, fmt.Errorf("cannot create file %s: %v", errorFileName, err)
+			return nil, nil, cleanup, fmt.Errorf("cannot create file %s: %w", errorFileName, err)
 		}
 		errs = bufio.NewWriter(f)
 		closers = append(closers, func() { errs.Flush(); f.Close() })
@@ -55,7 +56,7 @@ func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer,
 		f, err := os.Create(recordFileName)
 		if err != nil {
 			cleanup() // close any files already opened above
-			return nil, nil, nil, fmt.Errorf("cannot create file %s: %v", recordFileName, err)
+			return nil, nil, nil, fmt.Errorf("cannot create file %s: %w", recordFileName, err)
 		}
 		rec = bufio.NewWriter(f)
 		closers = append(closers, func() { rec.Flush(); f.Close() })
@@ -69,7 +70,7 @@ func fetchBlock(reqGen *RequestGenerator, bn uint64, needCompare bool, rec *bufi
 	b = new(EthBlockByNumber)
 	res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true), b)
 	if res.Err != nil {
-		return nil, false, fmt.Errorf("could not retrieve block (Erigon) %d: %v", bn, res.Err)
+		return nil, false, fmt.Errorf("could not retrieve block (Erigon) %d: %w", bn, res.Err)
 	}
 	if b.Error != nil {
 		return nil, false, fmt.Errorf("error retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
@@ -78,7 +79,7 @@ func fetchBlock(reqGen *RequestGenerator, bn uint64, needCompare bool, rec *bufi
 		var bg EthBlockByNumber
 		res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true), &bg)
 		if res.Err != nil {
-			return nil, false, fmt.Errorf("could not retrieve block (geth) %d: %v", bn, res.Err)
+			return nil, false, fmt.Errorf("could not retrieve block (geth) %d: %w", bn, res.Err)
 		}
 		if bg.Error != nil {
 			return nil, false, fmt.Errorf("error retrieving block (geth): %d %s", bg.Error.Code, bg.Error.Message)
@@ -167,8 +168,8 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 }
 
 func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
-	var vType = fastjson.TypeNull
-	var vgType = fastjson.TypeNull
+	vType := fastjson.TypeNull
+	vgType := fastjson.TypeNull
 	if v != nil {
 		vType = v.Type()
 	}
@@ -348,7 +349,7 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
 					oeRespFile.Write(resg.Response)                        //nolint:errcheck
 					oeRespFile.Close()                                     //nolint:errcheck
-					return fmt.Errorf("different results for method %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
+					return fmt.Errorf("different results for method %s, errCtx %s: %w\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
 				}
 			}
 		} else {
@@ -403,11 +404,11 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
 					oeRespFile.Write(resg.Response)                        //nolint:errcheck
 					oeRespFile.Close()                                     //nolint:errcheck
-					return fmt.Errorf("different results for methods %s, %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodNameA, methodNameB, errCtx, err)
+					return fmt.Errorf("different results for methods %s, %s, errCtx %s: %w\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodNameA, methodNameB, errCtx, err)
 				}
 			}
 		} else {
-			//TODO fix for two methods
+			// TODO fix for two methods
 			return compareErrors(errVal, errValg, methodNameA, errCtx, errs)
 		}
 	} else if channel != nil && (!insertOnlyIfSuccess || errVal == nil) {
@@ -482,13 +483,13 @@ func compareStorageRanges(sm, smg map[common.Hash]storageEntry) bool {
 	// block in which the transaction was included
 	BlockNumber hexutil.Uint64 `json:"blockNumber"`
 	// hash of the transaction
-	TxHash common.Hash    `json:"transactionHash" gencodec:"required"`
+	TxHash common.Hash    `json:"transactionHash"`
 	// index of the transaction in the block
-	TxIndex hexutil.Uint  `json:"transactionIndex" gencodec:"required"`
+	TxIndex hexutil.Uint  `json:"transactionIndex"`
 	// hash of the block in which the transaction was included
 	BlockHash common.Hash `json:"blockHash"`
 	// index of the log in the receipt
-	Index hexutil.Uint    `json:"logIndex" gencodec:"required"`
+	Index hexutil.Uint    `json:"logIndex"`
 
 	// The Removed field is true if this log was reverted due to a chain reorganisation.
 	// You must pay attention to this field if you receive logs through a filter query.
@@ -631,7 +632,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	/*
 	   	Address      common.Address  `json:"address"`
 	   	AccountProof []string        `json:"accountProof"`
-	   	Balance      *hexutil.Big    `json:"balance"`
+	   	Balance      *hexutil.U256    `json:"balance"`
 	   	CodeHash     common.Hash     `json:"codeHash"`
 	   	Nonce        hexutil.Uint64  `json:"nonce"`
 	   	StorageHash  common.Hash     `json:"storageHash"`
@@ -639,7 +640,7 @@ func compareProofs(proof, gethProof *EthGetProof) bool {
 	   }
 	   type StorageResult struct {
 	   	Key   string       `json:"key"`
-	   	Value *hexutil.Big `json:"value"`
+	   	Value *hexutil.U256 `json:"value"`
 	   	Proof []string     `json:"proof"`
 	*/
 	equal := true
@@ -769,7 +770,7 @@ func printRPCRequest(client *http.Client, url, request string) {
 	fmt.Printf("ContentLength: %d\n", r.ContentLength)
 	buf := make([]byte, 2000000)
 	l, err := r.Body.Read(buf)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		fmt.Printf("Could not read response: %v\n", err)
 		return
 	}

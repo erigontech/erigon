@@ -41,13 +41,16 @@ type LatestBatchCache struct {
 	accounts map[common.Address][]byte // address → latest serialised account
 }
 
-var _ Cache = (*LatestBatchCache)(nil)    // compile-time interface check
-var _ CacheView = (*LatestBatchView)(nil) // compile-time interface check
+var (
+	_ Cache     = (*LatestBatchCache)(nil) // compile-time interface check
+	_ CacheView = (*LatestBatchView)(nil)  // compile-time interface check
+)
 
 func NewLatestBatchCache() *LatestBatchCache { return &LatestBatchCache{} }
 func (c *LatestBatchCache) View(_ context.Context, tx kv.TemporalTx) (CacheView, error) {
 	return &LatestBatchView{cache: c, tx: tx}, nil
 }
+
 func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 	if sc == nil {
 		return
@@ -74,11 +77,13 @@ func (c *LatestBatchCache) OnNewBlock(sc *remoteproto.StateChangeBatch) {
 		}
 	}
 }
+
 func (c *LatestBatchCache) Len() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.accounts)
 }
+
 func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
 	// Check the in-memory account cache first (populated by OnNewBlock).
 	if len(k) == 20 {
@@ -88,16 +93,18 @@ func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, e
 			return bytes.Clone(v), nil
 		}
 		c.mu.RUnlock()
-		v, _, err := tx.GetLatest(kv.AccountsDomain, k)
+		v, _, err := tx.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 		return v, err
 	}
-	v, _, err := tx.GetLatest(kv.StorageDomain, k)
+	v, _, err := tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
+
 func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
-	v, _, err := tx.GetLatest(kv.CodeDomain, k)
+	v, _, err := tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
+
 func (c *LatestBatchCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {
 	return &CacheValidationResult{Enabled: false}, nil
 }
@@ -114,7 +121,3 @@ func (c *LatestBatchView) GetAsOf(key []byte, ts uint64) (v []byte, ok bool, err
 	return nil, false, nil
 }
 func (c *LatestBatchView) GetCode(k []byte) ([]byte, error) { return c.cache.GetCode(k, c.tx, 0) }
-func (c *LatestBatchView) HasStorage(address common.Address) (bool, error) {
-	_, _, hasStorage, err := c.tx.HasPrefix(kv.StorageDomain, address[:])
-	return hasStorage, err
-}

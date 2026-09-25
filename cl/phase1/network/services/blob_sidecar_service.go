@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
@@ -41,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
-	"github.com/erigontech/erigon/common/log/v3"
 )
 
 type blobSidecarService struct {
@@ -51,13 +49,7 @@ type blobSidecarService struct {
 	ethClock          eth_clock.EthereumClock
 	emitters          *beaconevents.EventEmitter
 
-	blobSidecarsScheduledForLaterExecution sync.Map
-	test                                   bool
-}
-
-type blobSidecarJob struct {
-	blobSidecar  *cltypes.BlobSidecar
-	creationTime time.Time
+	test bool
 }
 
 // NewBlobSidecarService creates a new blob sidecar service
@@ -78,7 +70,6 @@ func NewBlobSidecarService(
 		ethClock:          ethClock,
 		emitters:          emitters,
 	}
-	// go b.loop(ctx)
 	return b
 }
 
@@ -143,7 +134,6 @@ func (b *blobSidecarService) ProcessMessage(ctx context.Context, subnetId *uint6
 
 	parentHeader, has := b.forkchoiceStore.GetHeader(msg.SignedBlockHeader.Header.ParentRoot)
 	if !has {
-		b.scheduleBlobSidecarForLaterExecution(msg)
 		return ErrIgnore
 	}
 	if msg.SignedBlockHeader.Header.Slot <= parentHeader.Slot {
@@ -167,7 +157,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar)
 
 	start := time.Now()
 	if err := kzgCtx.VerifyBlobKZGProof((*goethkzg.Blob)(&msg.Blob), goethkzg.KZGCommitment(msg.KzgCommitment), goethkzg.KZGProof(msg.KzgProof)); err != nil {
-		return fmt.Errorf("blob KZG proof verification failed: %v", err)
+		return fmt.Errorf("blob KZG proof verification failed: %w", err)
 	}
 
 	if !b.test {
@@ -221,57 +211,4 @@ func (b *blobSidecarService) verifySidecarsSignature(header *cltypes.SignedBeaco
 		return errors.New("blob signature validation: signature not valid")
 	}
 	return nil
-}
-
-func (b *blobSidecarService) scheduleBlobSidecarForLaterExecution(blobSidecar *cltypes.BlobSidecar) {
-	blobSidecarJob := &blobSidecarJob{
-		blobSidecar:  blobSidecar,
-		creationTime: time.Now(),
-	}
-	blobSidecarHash, err := blobSidecar.HashSSZ()
-	if err != nil {
-		return
-	}
-	b.blobSidecarsScheduledForLaterExecution.Store(blobSidecarHash, blobSidecarJob)
-}
-
-// loop is the main loop of the block service
-func (b *blobSidecarService) loop(ctx context.Context) {
-	ticker := time.NewTicker(blobJobsIntervalTick)
-	defer ticker.Stop()
-	if b.test {
-		return
-	}
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-
-		b.blobSidecarsScheduledForLaterExecution.Range(func(key, value any) bool {
-			job := value.(*blobSidecarJob)
-			// check if it has expired
-			if time.Since(job.creationTime) > blobJobExpiry {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			blockRoot, err := job.blobSidecar.SignedBlockHeader.Header.HashSSZ()
-			if err != nil {
-				log.Debug("blob sidecar verification failed", "err", err)
-				return true
-			}
-			if _, has := b.forkchoiceStore.GetHeader(blockRoot); has {
-				b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			if err := b.verifyAndStoreBlobSidecar(job.blobSidecar); err != nil {
-				log.Trace("blob sidecar verification failed", "err", err,
-					"slot", job.blobSidecar.SignedBlockHeader.Header.Slot)
-				return true
-			}
-			b.blobSidecarsScheduledForLaterExecution.Delete(key.([32]byte))
-			return true
-		})
-	}
 }

@@ -31,6 +31,10 @@ Erigon follows the GraphQL schema maintained in [`ethereum/execution-apis`](http
 
 The schema includes queries for blocks, transactions, accounts, logs, and pending state, as well as the `sendRawTransaction` mutation.
 
+## Pending calls
+
+The GraphQL `call` field does not support execution against a pending block. Erigon returns `pending state is not supported` because it cannot currently acquire a pending block header and matching state in one view. Other pending-state fields keep their existing behavior.
+
 ## Example Query
 
 ```graphql

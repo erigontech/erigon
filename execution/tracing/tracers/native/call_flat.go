@@ -20,7 +20,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"strings"
 	"sync/atomic"
@@ -29,18 +28,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
-	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
-
-//go:generate go run github.com/fjl/gencodec -type flatCallAction -field-override flatCallActionMarshaling -out gen_flatcallaction_json.go
-//go:generate go run github.com/fjl/gencodec -type flatCallResult -field-override flatCallResultMarshaling -out gen_flatcallresult_json.go
-//go:generate go run github.com/fjl/gencodec -type flatCallFrame -out gen_flatcallframe_json.go
 
 func init() {
 	register("flatCallTracer", newFlatCallTracer)
@@ -83,37 +77,27 @@ type flatCallAction struct {
 	Author         *common.Address `json:"author,omitempty"`
 	RewardType     string          `json:"rewardType,omitempty"`
 	SelfDestructed *common.Address `json:"address,omitempty"`
-	Balance        *big.Int        `json:"balance,omitempty"`
+	Balance        *hexutil.U256   `json:"balance,omitempty"`
 	CallType       string          `json:"callType,omitempty"`
 	CreationMethod string          `json:"creationMethod,omitempty"`
 	From           *common.Address `json:"from,omitempty"`
 	Gas            *hexutil.Uint64 `json:"gas,omitempty"`
-	Init           *[]byte         `json:"init,omitempty"`
-	Input          *[]byte         `json:"input,omitempty"`
+	StateGas       hexutil.Uint64  `json:"stateGasReservoir,omitempty"`
+	Init           *hexutil.Bytes  `json:"init,omitempty"`
+	Input          *hexutil.Bytes  `json:"input,omitempty"`
 	RefundAddress  *common.Address `json:"refundAddress,omitempty"`
 	To             *common.Address `json:"to,omitempty"`
-	Value          *big.Int        `json:"value,omitempty"`
-}
-
-type flatCallActionMarshaling struct {
-	Balance *hexutil.Big
-	Gas     *hexutil.Uint64
-	Init    *hexutil.Bytes
-	Input   *hexutil.Bytes
-	Value   *hexutil.Big
+	Value          *hexutil.U256   `json:"value,omitempty"`
 }
 
 type flatCallResult struct {
-	Address *common.Address `json:"address,omitempty"`
-	Code    *[]byte         `json:"code,omitempty"`
-	GasUsed *hexutil.Uint64 `json:"gasUsed,omitempty"`
-	Output  *[]byte         `json:"output,omitempty"`
-}
-
-type flatCallResultMarshaling struct {
-	Code    *hexutil.Bytes
-	GasUsed *hexutil.Uint64
-	Output  *hexutil.Bytes
+	Address        *common.Address `json:"address,omitempty"`
+	Code           *hexutil.Bytes  `json:"code,omitempty"`
+	GasUsed        *hexutil.Uint64 `json:"gasUsed,omitempty"`        // root frame: receipt gas after refund and floor; child frame: execution gas.
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty"` // amsterdam root frame: execution block contribution before refunds, with calldata floor.
+	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed,omitempty"`   // amsterdam root frame: nonnegative block contribution; child frame: signed net state usage.
+	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty"`
+	Output         *hexutil.Bytes  `json:"output,omitempty"`
 }
 
 // flatCallTracer reports call frame information of a tx in a flat format, i.e.
@@ -121,7 +105,6 @@ type flatCallResultMarshaling struct {
 type flatCallTracer struct {
 	tracer            *callTracer
 	config            flatCallTracerConfig
-	chainConfig       *chain.Config
 	ctx               *tracers.Context   // Holds tracer context data
 	interrupt         atomic.Bool        // Atomic flag to signal execution interruption
 	activePrecompiles []accounts.Address // Updated on tx start based on given rules
@@ -160,21 +143,21 @@ func newFlatCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
 			OnTxStart: ft.OnTxStart,
-			OnTxEnd:   ft.OnTxEnd,
-			OnEnter:   ft.OnEnter,
-			OnExit:    ft.OnExit,
+			OnTxEndV2: ft.OnTxEndV2,
+			OnEnterV2: ft.OnEnterV2,
+			OnExitV2:  ft.OnExitV2,
 		},
 		Stop:      ft.Stop,
 		GetResult: ft.GetResult,
 	}, nil
 }
 
-// CaptureEnter is clled when EVM enters a new scope (via call, create or selfdestruct).
-func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
+// OnEnterV2 is called when EVM enters a new scope (via call, create or selfdestruct).
+func (t *flatCallTracer) OnEnterV2(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas mdgas.MdGas, value uint256.Int, code []byte) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.tracer.OnEnter(depth, typ, from, to, precompile, input, gas, value, code)
+	t.tracer.OnEnterV2(depth, typ, from, to, precompile, input, gas, value, code)
 
 	if depth == 0 {
 		return
@@ -182,16 +165,16 @@ func (t *flatCallTracer) OnEnter(depth int, typ byte, from accounts.Address, to 
 	// Child calls must have a value, even if it's zero.
 	// Practically speaking, only STATICCALL has nil value. Set it to zero.
 	if t.tracer.callstack[len(t.tracer.callstack)-1].Value == nil && value.IsZero() {
-		t.tracer.callstack[len(t.tracer.callstack)-1].Value = big.NewInt(0)
+		t.tracer.callstack[len(t.tracer.callstack)-1].Value = new(hexutil.U256)
 	}
 }
 
-// OnExit is called when EVM exits a scope, even if the scope didn't execute any code.
-func (t *flatCallTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+// OnExitV2 is called when EVM exits a scope, even if the scope didn't execute any code.
+func (t *flatCallTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.tracer.OnExit(depth, output, gasUsed, err, reverted)
+	t.tracer.OnExitV2(depth, output, gasUsed, err, reverted)
 
 	if depth == 0 {
 		return
@@ -212,7 +195,7 @@ func (t *flatCallTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 		to   = call.To
 	)
 	if typ == vm.CALL || typ == vm.STATICCALL {
-		if t.isPrecompiled(to) {
+		if to != nil && t.isPrecompiled(*to) {
 			t.tracer.callstack[len(t.tracer.callstack)-1].Calls = parent.Calls[:len(parent.Calls)-1]
 		}
 	}
@@ -223,20 +206,14 @@ func (t *flatCallTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 		return
 	}
 	t.tracer.OnTxStart(env, tx, from)
-	blockContext := evmtypes.BlockContext{
-		BlockNumber: env.BlockNumber,
-		Time:        env.Time,
-	}
-	// Update list of precompiles based on current block
-	rules := blockContext.Rules(env.ChainConfig)
-	t.activePrecompiles = vm.ActivePrecompiles(rules)
+	t.activePrecompiles = vm.ActivePrecompiles(env.Rules)
 }
 
-func (t *flatCallTracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *flatCallTracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if t.interrupt.Load() {
 		return
 	}
-	t.tracer.OnTxEnd(receipt, err)
+	t.tracer.OnTxEndV2(receipt, txnGasUsage, err)
 }
 
 // GetResult returns an empty json object.
@@ -318,47 +295,45 @@ func toHexUint64Ptr(v uint64) *hexutil.Uint64 {
 }
 
 func newFlatCreate(input *callFrame) *flatCallFrame {
-	var (
-		actionInit = input.Input
-		resultCode = input.Output
-	)
-
 	return &flatCallFrame{
 		Type: strings.ToLower(vm.CREATE.String()),
 		Action: flatCallAction{
 			CreationMethod: strings.ToLower(input.Type.String()),
 			From:           &input.From,
-			Gas:            toHexUint64Ptr(input.Gas),
+			Gas:            toHexUint64Ptr(uint64(input.Gas)),
+			StateGas:       input.StateGas,
 			Value:          input.Value,
-			Init:           &actionInit,
+			Init:           &input.Input,
 		},
 		Result: &flatCallResult{
-			GasUsed: toHexUint64Ptr(input.GasUsed),
-			Address: &input.To,
-			Code:    &resultCode,
+			GasUsed:        toHexUint64Ptr(uint64(input.GasUsed)),
+			RegularGasUsed: input.RegularGasUsed,
+			StateGasUsed:   input.StateGasUsed,
+			GasRefund:      input.GasRefund,
+			Address:        input.To,
+			Code:           &input.Output,
 		},
 	}
 }
 
 func newFlatCall(input *callFrame) *flatCallFrame {
-	var (
-		actionInput  = input.Input
-		resultOutput = input.Output
-	)
-
 	return &flatCallFrame{
 		Type: strings.ToLower(vm.CALL.String()),
 		Action: flatCallAction{
 			From:     &input.From,
-			To:       &input.To,
-			Gas:      toHexUint64Ptr(input.Gas),
+			To:       input.To,
+			Gas:      toHexUint64Ptr(uint64(input.Gas)),
+			StateGas: input.StateGas,
 			Value:    input.Value,
 			CallType: strings.ToLower(input.Type.String()),
-			Input:    &actionInput,
+			Input:    &input.Input,
 		},
 		Result: &flatCallResult{
-			GasUsed: toHexUint64Ptr(input.GasUsed),
-			Output:  &resultOutput,
+			GasUsed:        toHexUint64Ptr(uint64(input.GasUsed)),
+			RegularGasUsed: input.RegularGasUsed,
+			StateGasUsed:   input.StateGasUsed,
+			GasRefund:      input.GasRefund,
+			Output:         &input.Output,
 		},
 	}
 }
@@ -369,7 +344,7 @@ func newFlatSelfdestruct(input *callFrame) *flatCallFrame {
 		Action: flatCallAction{
 			SelfDestructed: &input.From,
 			Balance:        input.Value,
-			RefundAddress:  &input.To,
+			RefundAddress:  input.To,
 		},
 	}
 }

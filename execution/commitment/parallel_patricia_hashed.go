@@ -21,11 +21,17 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/bits"
 	"runtime"
 	"sync"
 	"sync/atomic"
+	"time"
+
+	"golang.org/x/sync/errgroup"
 )
+
+const deferredWritesPerWorker = 4096
+
+var defaultParallelCommitmentWorkers = max(1, runtime.GOMAXPROCS(0))
 
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
@@ -37,34 +43,60 @@ type ParallelPatriciaHashed struct {
 
 	rootHash atomic.Pointer[[]byte]
 
-	deepLocalFolds atomic.Uint64
+	forks     atomic.Uint64
+	forkGrain uint32
 
-	leaveDeferredForCaller bool
-	deferredForCaller      []*DeferredBranchUpdate
+	deferredForCaller []*DeferredBranchUpdate
+
+	// metrics is the round's aggregate: each mount worker counts into its own
+	// Metrics and merges here when it finishes, so the fold loop never touches
+	// a shared cache line.
+	metrics *Metrics
 }
 
-func (p *ParallelPatriciaHashed) DeepLocalFolds() uint64 { return p.deepLocalFolds.Load() }
+func (p *ParallelPatriciaHashed) Forks() uint64 { return p.forks.Load() }
+
+func (p *ParallelPatriciaHashed) SetForkGrain(g uint32) { p.forkGrain = g }
+
+func (p *ParallelPatriciaHashed) grainFor(roundKeys uint64, concurrency int) uint32 {
+	if p.forkGrain != 0 {
+		return p.forkGrain
+	}
+	return forkGrainFor(int(roundKeys), concurrency)
+}
+
+// Metrics exposes the round's counters; see HexPatriciaHashed.Metrics.
+func (p *ParallelPatriciaHashed) Metrics() *Metrics { return p.metrics }
 
 func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *ParallelPatriciaHashed {
 	p := &ParallelPatriciaHashed{
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
 		trieCtxFactory: ctxFactory,
 		accountKeyLen:  accountKeyLen,
-		numWorkers:     runtime.NumCPU(),
+		numWorkers:     defaultParallelCommitmentWorkers,
 		cfg:            cfg,
 	}
+	// Its own, not the template's: the template traverses the skeleton over the
+	// same keys the workers do, so aliasing them counts every key twice.
+	p.metrics = NewMetrics("")
 	return p
+}
+
+// ParallelCommitmentReadTxs returns the maximum read transactions held by nested parallel trie workers.
+// One per leased execution context, plus the base trie's own; a parked walker holds no lease.
+func ParallelCommitmentReadTxs() int {
+	return parallelMountConcurrency(defaultParallelCommitmentWorkers) + 1
 }
 
 func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 	if n <= 0 {
-		n = runtime.NumCPU()
+		n = defaultParallelCommitmentWorkers
 	}
 	p.numWorkers = n
 }
 
 func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
-	p.leaveDeferredForCaller = leave
+	p.cfg.LeaveDeferredForCaller = leave
 }
 
 func (p *ParallelPatriciaHashed) HasPendingDeferredUpdates() bool {
@@ -90,7 +122,7 @@ func (p *ParallelPatriciaHashed) Reset() {
 		p.template.Reset()
 	}
 	p.rootHash.Store(nil)
-	p.deepLocalFolds.Store(0)
+	p.forks.Store(0)
 }
 
 func (p *ParallelPatriciaHashed) Release() {
@@ -211,7 +243,14 @@ func (p *ParallelPatriciaHashed) Process(
 	}
 
 	p.rootHash.Store(nil)
-	p.deepLocalFolds.Store(0)
+	p.forks.Store(0)
+
+	// Per-round, matching HexPatriciaHashed.Process: the counters published for
+	// a round have to describe that round alone.
+	p.metrics.Reset()
+	p.metrics.AddRoundKeys(updates.Size())
+	roundStart := time.Now()
+	defer func() { observeRound(p.metrics, roundStart) }()
 
 	pu := updates.parallel
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
@@ -224,23 +263,28 @@ func (p *ParallelPatriciaHashed) Process(
 		return rh, nil
 	}
 
+	savedRoot, savedTouched := p.template.root, p.template.rootTouched
+	savedChecked, savedPresent := p.template.rootChecked, p.template.rootPresent
+	restoreTemplate := func() {
+		p.template.branchEncoder.ClearDeferred()
+		p.template.root, p.template.rootTouched = savedRoot, savedTouched
+		p.template.rootChecked, p.template.rootPresent = savedChecked, savedPresent
+		p.template.activeRows, p.template.currentKeyLen = 0, 0
+	}
 	rh, mErr := p.processMounted(ctx, updates)
 	if mErr != nil {
-		pu.deferredMu.Lock()
-		for _, upd := range pu.deferredCombined {
-			putDeferredUpdate(upd)
-		}
-		pu.deferredCombined = pu.deferredCombined[:0]
-		pu.deferredMu.Unlock()
+		restoreTemplate()
+		pu.drainDeferred()
 		return nil, mErr
 	}
 
-	if p.leaveDeferredForCaller {
+	if p.cfg.LeaveDeferredForCaller {
 		pu.deferredMu.Lock()
 		p.deferredForCaller = pu.deferredCombined
 		pu.deferredCombined = nil
 		pu.deferredMu.Unlock()
 	} else if aErr := p.applyDeferredUpdates(ctx, pu); aErr != nil {
+		restoreTemplate()
 		return nil, aErr
 	}
 
@@ -250,36 +294,11 @@ func (p *ParallelPatriciaHashed) Process(
 	copy(out, rh)
 	p.rootHash.Store(&out)
 	flushTrieStateRates()
+	if onProgress != nil && p.metrics != nil {
+		n := updates.Size()
+		onProgress(&CommitProgress{KeyIndex: n, UpdateCount: n, Metrics: p.metrics.AsValues()})
+	}
 	return out, nil
-}
-
-// hashedKey passed to fn is mutated in place and must not be retained.
-func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
-	if node == nil {
-		return nil
-	}
-	if node.plainKey != nil {
-		if err := fn(path, node.plainKey, node.update); err != nil {
-			return err
-		}
-	} else if node.bitmap == 0 {
-		return errors.New("ParallelPatriciaHashed: trie leaf without a plainKey")
-	}
-	childIdx := 0
-	for bm := node.bitmap; bm != 0; {
-		nib := byte(bits.TrailingZeros16(bm))
-		child := node.children[childIdx]
-		base := len(path)
-		path = append(path, nib)
-		path = append(path, child.ext...)
-		if err := dfsSubtree(child, path, fn); err != nil {
-			return err
-		}
-		path = path[:base]
-		childIdx++
-		bm &^= uint16(1) << nib
-	}
-	return nil
 }
 
 func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *parallelUpdate) error {
@@ -297,15 +316,50 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		}
 	}()
 
-	applyCtx, cleanup := p.trieCtxFactory(ctx)
-	if cleanup != nil {
-		defer cleanup()
+	// This path calls PutBranch directly rather than through a BranchEncoder,
+	// so it is the only place the parallel engine's branch writes get counted.
+	workers := min(max(p.numWorkers, 1), 1+len(deferred)/deferredWritesPerWorker)
+	var claimed, written, bytesOut atomic.Int64
+	var g errgroup.Group
+	for range workers {
+		g.Go(func() error {
+			var n, size int64
+			defer func() {
+				written.Add(n)
+				bytesOut.Add(size)
+			}()
+			wctx, cleanup := p.trieCtxFactory(ctx)
+			if cleanup != nil {
+				defer cleanup()
+			}
+			if wctx == nil {
+				return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
+			}
+			merger := workerMergerPool.Get().(*BranchMerger)
+			defer workerMergerPool.Put(merger)
+			for {
+				i := int(claimed.Add(1)) - 1
+				if i >= len(deferred) {
+					return nil
+				}
+				upd := deferred[i]
+				if err := mergeDeferredUpdate(upd, merger); err != nil {
+					return err
+				}
+				if upd.encoded == nil {
+					continue
+				}
+				if err := wctx.PutBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+					return err
+				}
+				n++
+				size += int64(len(upd.encoded))
+			}
+		})
 	}
-	if applyCtx == nil {
-		return errors.New("ParallelPatriciaHashed: trieCtxFactory returned nil context for deferred apply")
-	}
-
-	if _, err := ApplyDeferredBranchUpdates(deferred, p.numWorkers, applyCtx.PutBranch); err != nil {
+	err := g.Wait()
+	publishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
+	if err != nil {
 		return fmt.Errorf("apply deferred branch updates: %w", err)
 	}
 	return nil

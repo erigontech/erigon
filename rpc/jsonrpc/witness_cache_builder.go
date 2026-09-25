@@ -221,13 +221,13 @@ func NewWitnessCacheBuilderAPI(
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader dbservices.FullBlockReader, cfg *httpcfg.HttpCfg,
-	engine rules.Engine, bridgeReader bridgeReader,
+	engine rules.Engine,
 ) (*witnessResultCache, *DebugAPIImpl) {
 	if !enable {
 		return nil, nil
 	}
 	cache := newWitnessResultCache(cfg.WitnessCacheBlocks, witnessCacheMaxBytes(cfg.WitnessCacheMaxMB), headCapture, headCapture)
-	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
+	base := NewBaseApi(filters, stateCache, blockReader, engine, NewBaseApiConfig(cfg))
 	impl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
 	impl.witnessCache = cache
 	return cache, impl
@@ -395,13 +395,7 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		return false
 	}
 	witnessCacheBuildDuration.ObserveDuration(start)
-	enc, err := result.MarshalFastJSON()
-	if err != nil {
-		witnessCacheBuildFailOtherCounter.Inc()
-		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
-		return false
-	}
-	api.storeWitness(num, hash, enc)
+	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }
@@ -485,18 +479,12 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		return false
 	}
 	witnessCacheBuildDuration.ObserveDuration(start)
-	enc, err := result.MarshalFastJSON()
-	if err != nil {
-		witnessCacheBuildFailOtherCounter.Inc()
-		log.Warn("[witness-cache] marshal witness", "block", num, "err", err)
-		return false
-	}
-	api.storeWitness(num, hash, enc)
+	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true
 }
 
-func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, enc []byte) {
-	api.witnessCache.store(num, hash, enc)
+func (api *DebugAPIImpl) storeWitness(num uint64, hash common.Hash, result *ExecutionWitnessResult) {
+	api.witnessCache.store(num, hash, result)
 	witnessCacheEntriesResidentGauge.SetInt(api.witnessCache.Len())
 }

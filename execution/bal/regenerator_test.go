@@ -80,8 +80,10 @@ func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
 	require.NoError(t, err)
 	defer ttx.Rollback()
 	for _, block := range chainPack.Blocks {
-		expected := block.BlockAccessList()
-		require.NotEmpty(t, expected, "block %d should have a canonical BAL", block.NumberU64())
+		expectedBAL := block.BlockAccessList()
+		require.NotNil(t, expectedBAL, "block %d should have a canonical BAL", block.NumberU64())
+		expected, err := types.EncodeBlockAccessListBytes(expectedBAL)
+		require.NoError(t, err)
 		got, err := gen.GetBlockAccessListBytes(ctx, m.ChainConfig, ttx, block.Hash(), block.NumberU64())
 		require.NoError(t, err, "block %d", block.NumberU64())
 		require.Equal(t, expected, got, "block %d", block.NumberU64())
@@ -89,7 +91,8 @@ func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
 		require.NoError(t, err)
 		header := block.Header()
 		require.NotNil(t, header.BlockAccessListHash)
-		require.Equal(t, *header.BlockAccessListHash, decoded.Hash())
+		require.Equal(t, *header.BlockAccessListHash, expectedBAL.Hash())
+		require.Equal(t, expectedBAL, decoded)
 	}
 }
 

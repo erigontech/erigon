@@ -71,7 +71,7 @@ func TestIsHexAddress(t *testing.T) {
 }
 
 func TestHashJsonValidation(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		Prefix string
 		Size   int
 		Error  string
@@ -100,7 +100,7 @@ func TestHashJsonValidation(t *testing.T) {
 }
 
 func TestAddressUnmarshalJSON(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		Input     string
 		ShouldErr bool
 		Output    *big.Int
@@ -131,7 +131,7 @@ func TestAddressUnmarshalJSON(t *testing.T) {
 }
 
 func TestAddressHexChecksum(t *testing.T) {
-	var tests = []struct {
+	tests := []struct {
 		Input  string
 		Output string
 	}{
@@ -154,15 +154,7 @@ func TestAddressHexChecksum(t *testing.T) {
 	}
 }
 
-func BenchmarkAddressHex(b *testing.B) {
-	testAddr := HexToAddress("0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed")
-	for b.Loop() {
-		testAddr.Hex()
-	}
-}
-
 func TestMixedcaseAccount_Address(t *testing.T) {
-
 	// https://github.com/ethereum/EIPs/blob/master/EIPS/eip-55.md
 	// Note: 0X{checksum_addr} is not valid according to spec above
 
@@ -185,7 +177,7 @@ func TestMixedcaseAccount_Address(t *testing.T) {
 		}
 	}
 
-	//These should throw exceptions:
+	// These should throw exceptions:
 	var r2 []MixedcaseAddress
 	for _, r := range []string{
 		`["0x11111111111111111111122222222222233333"]`,     // Too short
@@ -199,9 +191,7 @@ func TestMixedcaseAccount_Address(t *testing.T) {
 		if err := json.Unmarshal([]byte(r), &r2); err == nil {
 			t.Errorf("Expected failure, input %v", r)
 		}
-
 	}
-
 }
 
 func TestHash_Scan(t *testing.T) {

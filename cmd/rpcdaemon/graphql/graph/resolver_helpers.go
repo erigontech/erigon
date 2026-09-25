@@ -5,12 +5,15 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql/graph/model"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	ethapi "github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonrpc"
 )
 
 func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, defaultBlock uint64, override *uint64) (*model.Account, error) {
@@ -32,6 +35,8 @@ func (r *Resolver) resolveAccountAtBlock(ctx context.Context, address string, de
 	}, nil
 }
 
+func ptr[T any](v T) *T { return &v }
+
 func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	block := &model.Block{}
 	absBlk := res["block"]
@@ -39,41 +44,63 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 		return block, nil
 	}
 
-	blk := absBlk.(map[string]any)
+	blk, ok := absBlk.(*ethapi.RPCBlock)
+	if !ok {
+		return nil, fmt.Errorf("unexpected block type %T", absBlk)
+	}
 
-	block.Difficulty = *convertDataToStringP(blk, "difficulty")
-	block.TotalDifficulty = *convertDataToStringP(blk, "totalDifficulty")
-	block.ExtraData = *convertDataToStringP(blk, "extraData")
-	block.GasLimit = uint64(*convertDataToUint64P(blk, "gasLimit"))
-	block.GasUsed = *convertDataToUint64P(blk, "gasUsed")
-	block.Hash = *convertDataToStringP(blk, "hash")
+	hexU256 := func(v *hexutil.U256) string {
+		if v == nil {
+			return ""
+		}
+		return v.String()
+	}
+
+	block.Difficulty = hexU256(blk.Difficulty)
+	block.TotalDifficulty = hexU256(blk.TotalDifficulty)
+	block.ExtraData = blk.ExtraData.String()
+	block.GasLimit = uint64(blk.GasLimit)
+	block.GasUsed = uint64(blk.GasUsed)
 	block.Miner = &model.Account{}
-	if address := convertDataToStringP(blk, "miner"); address != nil {
-		block.Miner.Address = strings.ToLower(*address)
+	// A pending block has no hash, miner or nonce yet; MarkPending nils them.
+	if blk.Hash != nil {
+		block.Hash = blk.Hash.Hex()
 	}
-	if mixHash := convertDataToStringP(blk, "mixHash"); mixHash != nil {
-		block.MixHash = *mixHash
+	if blk.Miner != nil {
+		block.Miner.Address = hexutil.Encode(blk.Miner[:])
 	}
-	if blockNonce := convertDataToStringP(blk, "nonce"); blockNonce != nil {
-		block.Nonce = *blockNonce
+	if blk.Nonce != nil {
+		block.Nonce = hexutil.Encode(blk.Nonce[:])
 	}
-	block.Number = *convertDataToUint64P(blk, "number")
+	block.MixHash = blk.MixHash.Hex()
+	block.Number = (*uint256.Int)(blk.Number).Uint64()
 	block.Miner.BlockNum = block.Number
-	block.Parent = &model.Block{}
-	block.Parent.Hash = *convertDataToStringP(blk, "parentHash")
-	block.ReceiptsRoot = *convertDataToStringP(blk, "receiptsRoot")
-	block.StateRoot = *convertDataToStringP(blk, "stateRoot")
-	block.Timestamp = *convertDataToStringP(blk, "timestamp")
-	block.TransactionCount = convertDataToUint64P(blk, "transactionCount")
-	block.TransactionsRoot = *convertDataToStringP(blk, "transactionsRoot")
-	block.BaseFeePerGas = convertDataToStringP(blk, "baseFeePerGas")
-	block.LogsBloom = "0x" + *convertDataToStringP(blk, "logsBloom")
-	block.OmmerHash = *convertDataToStringP(blk, "sha3Uncles")
-	block.WithdrawalsRoot = convertDataToStringP(blk, "withdrawalsRoot")
-	block.BlobGasUsed = convertDataToUint64P(blk, "blobGasUsed")
-	block.ExcessBlobGas = convertDataToUint64P(blk, "excessBlobGas")
+	block.Parent = &model.Block{Hash: blk.ParentHash.Hex()}
+	block.ReceiptsRoot = blk.ReceiptsRoot.Hex()
+	block.StateRoot = blk.StateRoot.Hex()
+	block.Timestamp = hexutil.Uint64(blk.Timestamp).String()
+	block.TransactionsRoot = blk.TransactionsRoot.Hex()
+	block.OmmerHash = blk.Sha3Uncles.Hex()
+	if blk.LogsBloom != nil {
+		block.LogsBloom = hexutil.Encode(blk.LogsBloom[:])
+	}
+	if blk.BaseFeePerGas != nil {
+		block.BaseFeePerGas = ptr(blk.BaseFeePerGas.String())
+	}
+	if blk.WithdrawalsRoot != nil {
+		block.WithdrawalsRoot = ptr(blk.WithdrawalsRoot.Hex())
+	}
+	if blk.BlobGasUsed != nil {
+		block.BlobGasUsed = ptr(uint64(*blk.BlobGasUsed))
+	}
+	if blk.ExcessBlobGas != nil {
+		block.ExcessBlobGas = ptr(uint64(*blk.ExcessBlobGas))
+	}
+	if blk.TransactionCount != nil {
+		block.TransactionCount = ptr(*blk.TransactionCount)
+	}
 
-	uncles := blk["uncles"].([]common.Hash)
+	uncles := blk.Uncles
 	block.Ommers = make([]*model.Block, 0, len(uncles))
 	for _, ommerHash := range uncles {
 		block.Ommers = append(block.Ommers, &model.Block{Hash: ommerHash.String()})
@@ -81,7 +108,10 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	ommerCount := uint64(len(block.Ommers))
 	block.OmmerCount = &ommerCount
 
-	rcp := res["receipts"].([]map[string]any)
+	rcp, ok := res["receipts"].([]*jsonrpc.GraphQLReceipt)
+	if !ok {
+		return nil, fmt.Errorf("unexpected receipts type %T", res["receipts"])
+	}
 	block.Transactions = make([]*model.Transaction, 0, len(rcp))
 	for _, transReceipt := range rcp {
 		trans := r.buildTransaction(block, transReceipt)
@@ -89,55 +119,68 @@ func (r *queryResolver) buildBlock(res map[string]any) (*model.Block, error) {
 	}
 
 	if block.WithdrawalsRoot != nil {
-		withdrawals, _ := res["withdrawals"].([]map[string]any)
+		withdrawals, ok := res["withdrawals"].([]jsonrpc.GraphQLWithdrawal)
+		if !ok {
+			return nil, fmt.Errorf("unexpected withdrawals type %T", res["withdrawals"])
+		}
 		block.Withdrawals = make([]*model.Withdrawal, 0, len(withdrawals))
 		for _, withdrawal := range withdrawals {
-			w := &model.Withdrawal{}
-			w.Index = *convertDataToUint64P(withdrawal, "index")
-			w.Validator = *convertDataToUint64P(withdrawal, "validator")
-			w.Address = strings.ToLower(*convertDataToStringP(withdrawal, "address"))
-			w.Amount = *convertDataToStringP(withdrawal, "amount")
-			block.Withdrawals = append(block.Withdrawals, w)
+			block.Withdrawals = append(block.Withdrawals, &model.Withdrawal{
+				Index:     uint64(withdrawal.Index),
+				Validator: uint64(withdrawal.Validator),
+				Address:   hexutil.Encode(withdrawal.Address[:]),
+				Amount:    withdrawal.Amount.String(),
+			})
 		}
 	}
 
 	return block, nil
 }
 
-func (r *queryResolver) buildTransaction(block *model.Block, transReceipt map[string]any) *model.Transaction {
-	trans := &model.Transaction{}
-	trans.Block = block
-	trans.CumulativeGasUsed = convertDataToUint64P(transReceipt, "cumulativeGasUsed")
-	trans.Gas = *convertDataToUint64P(transReceipt, "gas")
-	trans.InputData = *convertDataToStringP(transReceipt, "data")
-	trans.EffectiveGasPrice = convertDataToStringP(transReceipt, "effectiveGasPrice")
-	if trans.EffectiveGasPrice != nil {
+func (r *queryResolver) buildTransaction(block *model.Block, receipt *jsonrpc.GraphQLReceipt) *model.Transaction {
+	trans := &model.Transaction{
+		Block:             block,
+		CumulativeGasUsed: ptr(uint64(receipt.CumulativeGasUsed)),
+		Gas:               receipt.Gas,
+		InputData:         hexutil.Encode(receipt.Data),
+		GasUsed:           ptr(uint64(receipt.GasUsed)),
+		Hash:              receipt.TransactionHash.String(),
+		Index:             ptr(uint64(receipt.TransactionIndex)),
+		Nonce:             hexutil.EncodeUint64(receipt.Nonce),
+		Type:              ptr(uint64(receipt.Type)),
+		Value:             receipt.Value.Hex(),
+	}
+	if receipt.EffectiveGasPrice != nil {
+		trans.EffectiveGasPrice = ptr(receipt.EffectiveGasPrice.String())
 		trans.GasPrice = *trans.EffectiveGasPrice
 	}
-	trans.GasUsed = convertDataToUint64P(transReceipt, "gasUsed")
-	trans.Hash = *convertDataToStringP(transReceipt, "transactionHash")
-	trans.Index = convertDataToUint64P(transReceipt, "transactionIndex")
-	trans.MaxFeePerGas = convertDataToStringP(transReceipt, "maxFeePerGas")
-	trans.MaxPriorityFeePerGas = convertDataToStringP(transReceipt, "maxPriorityFeePerGas")
-	trans.MaxFeePerBlobGas = convertDataToStringP(transReceipt, "maxFeePerBlobGas")
-	trans.BlobGasUsed = convertDataToUint64P(transReceipt, "blobGasUsed")
-	trans.BlobGasPrice = convertDataToStringP(transReceipt, "blobGasPrice")
-	if transNonce := convertDataToStringP(transReceipt, "nonce"); transNonce != nil {
-		trans.Nonce = *transNonce
+	if receipt.MaxFeePerGas != nil {
+		trans.MaxFeePerGas = ptr(receipt.MaxFeePerGas.Hex())
 	}
-	trans.Status = convertDataToUint64P(transReceipt, "status")
-	trans.Type = convertDataToUint64P(transReceipt, "type")
-	trans.Value = *convertDataToStringP(transReceipt, "value")
+	if receipt.MaxPriorityFeePerGas != nil {
+		trans.MaxPriorityFeePerGas = ptr(receipt.MaxPriorityFeePerGas.Hex())
+	}
+	if receipt.MaxFeePerBlobGas != nil {
+		trans.MaxFeePerBlobGas = ptr(receipt.MaxFeePerBlobGas.String())
+	}
+	if receipt.BlobGasUsed != nil {
+		trans.BlobGasUsed = ptr(uint64(*receipt.BlobGasUsed))
+	}
+	if receipt.BlobGasPrice != nil {
+		trans.BlobGasPrice = ptr(receipt.BlobGasPrice.String())
+	}
+	if receipt.Status != nil {
+		trans.Status = ptr(uint64(*receipt.Status))
+	}
 
-	logs := transReceipt["logs"].(types.Logs)
-	trans.Logs = make([]*model.Log, 0, len(logs))
-	for _, rlog := range logs {
+	trans.Logs = make([]*model.Log, 0, len(receipt.Logs))
+	for _, rlog := range receipt.Logs {
 		tlog := model.Log{
 			Index: uint64(rlog.Index),
 			Data:  hexutil.Encode(rlog.Data),
 		}
 		tlog.Account = model.NewAccountAtBlock(block.Number)
-		tlog.Account.Address = strings.ToLower(rlog.Address.String())
+		tlog.Account.Address = hexutil.Encode(rlog.Address[:])
 		tlog.Topics = make([]string, 0, len(rlog.Topics))
 		for _, rtopic := range rlog.Topics {
 			tlog.Topics = append(tlog.Topics, rtopic.String())
@@ -146,29 +189,29 @@ func (r *queryResolver) buildTransaction(block *model.Block, transReceipt map[st
 	}
 
 	trans.From = model.NewAccountAtBlock(block.Number)
-	trans.From.Address = strings.ToLower(*convertDataToStringP(transReceipt, "from"))
+	if receipt.From != nil {
+		trans.From.Address = hexutil.Encode(receipt.From[:])
+	}
 
-	if toAddress := convertDataToStringP(transReceipt, "to"); toAddress != nil {
+	if receipt.To != nil {
 		trans.To = model.NewAccountAtBlock(block.Number)
-		trans.To.Address = strings.ToLower(*toAddress)
+		trans.To.Address = hexutil.Encode(receipt.To[:])
 	}
 
-	if contractAddr := convertDataToStringP(transReceipt, "contractAddress"); contractAddr != nil {
+	if receipt.ContractAddress != nil {
 		trans.CreatedContract = model.NewAccountAtBlock(block.Number)
-		trans.CreatedContract.Address = strings.ToLower(*contractAddr)
+		trans.CreatedContract.Address = hexutil.Encode(receipt.ContractAddress[:])
 	}
 
-	if al, ok := transReceipt["accessList"].(types.AccessList); ok {
-		trans.AccessList = make([]*model.AccessTuple, len(al))
-		for i, entry := range al {
-			keys := make([]string, len(entry.StorageKeys))
-			for j, k := range entry.StorageKeys {
-				keys[j] = k.Hex()
-			}
-			trans.AccessList[i] = &model.AccessTuple{
-				Address:     strings.ToLower(entry.Address.String()),
-				StorageKeys: keys,
-			}
+	trans.AccessList = make([]*model.AccessTuple, len(receipt.AccessList))
+	for i, entry := range receipt.AccessList {
+		keys := make([]string, len(entry.StorageKeys))
+		for j, k := range entry.StorageKeys {
+			keys[j] = k.Hex()
+		}
+		trans.AccessList[i] = &model.AccessTuple{
+			Address:     hexutil.Encode(entry.Address[:]),
+			StorageKeys: keys,
 		}
 	}
 
@@ -201,7 +244,7 @@ func topicsFromModel(topicSets [][]string) ([][]common.Hash, error) {
 	return result, nil
 }
 
-func rpcLogsToModel(logs types.RPCLogs) []*model.Log {
+func rpcLogsToModel(logs types.Logs) []*model.Log {
 	result := make([]*model.Log, 0, len(logs))
 	for _, l := range logs {
 		ml := &model.Log{
@@ -209,7 +252,7 @@ func rpcLogsToModel(logs types.RPCLogs) []*model.Log {
 			Data:  hexutil.Encode(l.Data),
 		}
 		ml.Account = &model.Account{
-			Address:  strings.ToLower(l.Address.Hex()),
+			Address:  hexutil.Encode(l.Address[:]),
 			BlockNum: uint64(l.BlockNumber),
 		}
 		ml.Topics = make([]string, len(l.Topics))
@@ -239,15 +282,15 @@ func decodeOptionalAddress(s *string, fieldName string) (*common.Address, error)
 	return &addr, nil
 }
 
-func decodeOptionalBig(s *string, fieldName string) (*hexutil.Big, error) {
+func decodeOptionalU256(s *string, fieldName string) (*hexutil.U256, error) {
 	if s == nil {
 		return nil, nil
 	}
-	b, err := hexutil.DecodeBig(*s)
+	u, err := hexutil.DecodeU256(*s)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s: %w", fieldName, err)
 	}
-	return (*hexutil.Big)(b), nil
+	return (*hexutil.U256)(&u), nil
 }
 
 func callDataToArgs(data model.CallData) (ethapi.CallArgs, error) {
@@ -265,16 +308,16 @@ func callDataToArgs(data model.CallData) (ethapi.CallArgs, error) {
 		gas := hexutil.Uint64(*data.Gas)
 		args.Gas = &gas
 	}
-	if args.GasPrice, err = decodeOptionalBig(data.GasPrice, "gasPrice"); err != nil {
+	if args.GasPrice, err = decodeOptionalU256(data.GasPrice, "gasPrice"); err != nil {
 		return args, err
 	}
-	if args.MaxFeePerGas, err = decodeOptionalBig(data.MaxFeePerGas, "maxFeePerGas"); err != nil {
+	if args.MaxFeePerGas, err = decodeOptionalU256(data.MaxFeePerGas, "maxFeePerGas"); err != nil {
 		return args, err
 	}
-	if args.MaxPriorityFeePerGas, err = decodeOptionalBig(data.MaxPriorityFeePerGas, "maxPriorityFeePerGas"); err != nil {
+	if args.MaxPriorityFeePerGas, err = decodeOptionalU256(data.MaxPriorityFeePerGas, "maxPriorityFeePerGas"); err != nil {
 		return args, err
 	}
-	if args.Value, err = decodeOptionalBig(data.Value, "value"); err != nil {
+	if args.Value, err = decodeOptionalU256(data.Value, "value"); err != nil {
 		return args, err
 	}
 	if data.Data != nil {

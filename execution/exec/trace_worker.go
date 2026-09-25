@@ -118,13 +118,14 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 	if e.vmConfig.TraceJumpDest {
 		txContext.TxHash = txn.Hash()
 	}
-	e.evm.ResetBetweenBlocks(*e.blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
+	blockCtx := vm.ZeroUnpricedBaseFee(*e.blockCtx, txContext, *e.vmConfig)
+	e.evm.ResetBetweenBlocks(blockCtx, txContext, e.ibs, *e.vmConfig, e.rules)
 
 	gp := new(protocol.GasPool).AddGas(txn.GetGasLimit()).AddBlobGas(txn.GetBlobGas())
 
 	if txn.Type() == types.AccountAbstractionTxType {
 		aaTxn := txn.(*types.AccountAbstractionTransaction)
-		evm := vm.NewEVM(*e.blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
+		evm := vm.NewEVM(blockCtx, txContext, e.ibs, e.chainConfig, *e.vmConfig)
 		paymasterContext, validationGasUsed, err := aa.ValidateAATransaction(aaTxn, e.ibs, gp, e.header, evm, e.chainConfig)
 		if err != nil {
 			return err
@@ -140,7 +141,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 			if result == nil {
 				return fmt.Errorf("%w: blockNum=%d, txNum=%d", err, e.blockNum, txNum)
 			}
-			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, result.Err)
+			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %w", err, e.blockNum, txNum, result.Err)
 		}
 	}
 

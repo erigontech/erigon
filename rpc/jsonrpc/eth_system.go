@@ -18,16 +18,23 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
+	"strconv"
 
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -39,6 +46,8 @@ import (
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -82,6 +91,33 @@ type CapabilitiesResult struct {
 	StateProofs CapabilityField `json:"stateproofs"`
 }
 
+// stricterRetention returns the policy that bounds availability more and
+// widerRetention the one that bounds it less. The oldest blocks alone cannot rank
+// them: a window that has not started pruning reports zero like keep-all, so a tie
+// there is resolved on the retention the policies will apply.
+func stricterRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
+	if oldestA > oldestB || (oldestA == oldestB && retentionBlocks(a) <= retentionBlocks(b)) {
+		return oldestA, a
+	}
+	return oldestB, b
+}
+
+func widerRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
+	if oldestA < oldestB || (oldestA == oldestB && retentionBlocks(a) >= retentionBlocks(b)) {
+		return oldestA, a
+	}
+	return oldestB, b
+}
+
+// retentionBlocks measures a policy by the window it keeps, every sentinel counting
+// as unbounded.
+func retentionBlocks(amount prune.BlockAmount) uint64 {
+	if d, ok := amount.(prune.Distance); ok && d.Enabled() {
+		return uint64(d)
+	}
+	return math.MaxUint64
+}
+
 // Capabilities implements eth_capabilities.
 // stateproofs is only available when --prune.include-commitment-history was set at node startup;
 // otherwise it is disabled regardless of prune mode.
@@ -123,7 +159,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	avail := func(oldest uint64, dist prune.BlockAmount) CapabilityField {
 		o := hexutil.Uint64(oldest)
 		f := CapabilityField{OldestBlock: &o}
-		if d, ok := dist.(prune.Distance); ok && d != prune.KeepPostMergeBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
+		if d, ok := dist.(prune.Distance); ok && d.Enabled() {
 			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: hexutil.Uint64(d)}
 		}
 		return f
@@ -135,11 +171,16 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	// adjusted below using MergeHeight where applicable.
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
-	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains that have
-	// MergeHeight set (mainnet, sepolia, gnosis…), pre-merge blocks/tx segments are
-	// never downloaded, so the oldest available block is the merge point, not 0.
-	if pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && chainConfig.MergeHeight != nil {
-		blocksOldest = *chainConfig.MergeHeight
+	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains with
+	// MergeHeight set, pre-merge transaction segments are not downloaded, except the one
+	// spanning the merge, which reaches below it. The same sentinel also covers a legacy
+	// archive datadir, so the field follows the boundary the gate resolves.
+	expiry, expiryFrom, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if expiry && expiryFrom != nil {
+		blocksOldest = *expiryFrom
 	}
 
 	var stateproofs CapabilityField
@@ -157,27 +198,49 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	stateField := avail(stateOldest, pruneMode.History)
 	blocksField := avail(blocksOldest, pruneMode.Blocks)
 
-	var receiptsField CapabilityField
-	if persistReceipts {
-		// --prune.include-receipts widens past state-history pruning (receipts are written to
-		// RCacheDomain at execution time, not re-derived from state). The remaining bound
-		// is block-body availability: eth_getBlockReceipts walks block.Transactions(), and
-		// getLogsV3 reads log indexes whose snapshots follow prune.Blocks (see
-		// isReceiptsSegmentPruned in db/snapshotsync). So receipts/logs fall back to
-		// blocksOldest with the same DeleteStrategy as blocks.
-		receiptsField = avail(blocksOldest, pruneMode.Blocks)
-	} else {
-		// Without --prune.include-receipts, receipts are re-executed on demand, requiring both state
-		// history and the block body. Use the more restrictive of the two oldest-block bounds.
-		if blocksOldest > stateOldest {
-			receiptsField = avail(blocksOldest, pruneMode.Blocks)
-		} else {
-			receiptsField = stateField
+	// The receipt cache exists on disk only with --prune.include-receipts, and enabling
+	// it says nothing about how much is kept: RCacheDomain is retired on its own
+	// --prune.receipts.distance window when one is set, and alongside history otherwise.
+	// Below a window of its own the read falls back to re-execution, which reaches as far
+	// as history, so the wider of the two decides. This mirrors checkReceiptsAvailable.
+	receiptsOldest, receiptsAmount := stateOldest, pruneMode.History
+	if persistReceipts && receipts.PersistedReceiptsServed() {
+		switch amount := pruneMode.ReceiptsAmount(); {
+		case amount == prune.KeepAllReceiptsPruneMode:
+			receiptsOldest, receiptsAmount = 0, amount
+		case !amount.Enabled():
+		default:
+			receiptsOldest, receiptsAmount = widerRetention(amount.PruneTo(headBlock), amount, stateOldest, pruneMode.History)
 		}
 	}
-	// getLogsV3 uses log indexes scoped to prune.Blocks; matches in pruned blocks are silently
-	// dropped, so the effective oldest for logs equals receipts in both branches.
-	logsField := receiptsField
+	// Below Byzantium the receipt carries a post state the cache does not store, so
+	// those blocks are re-executed and reach only as far as history. This mirrors
+	// postStateCalculated, down to the shape that computes the post state at all and
+	// to a chain that never reaches the fork.
+	byzantium := uint64(math.MaxUint64)
+	if chainConfig.ByzantiumBlock != nil {
+		byzantium = *chainConfig.ByzantiumBlock
+	}
+	if receipts.PostStateCalculated(chainConfig, receiptsOldest, keepExecutionProofs, api._blockReader) {
+		if stateOldest < byzantium {
+			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
+		} else {
+			// A fork height is not a window: keeping the amount would advertise a
+			// retention whose head - retentionBlocks lands below this oldest block.
+			receiptsOldest, receiptsAmount = byzantium, prune.KeepAllBlocksPruneMode
+		}
+	}
+	// Reading the receipts of a block needs its body too: the stored receipt carries no
+	// TxHash, so it is derived from the block's transaction.
+	receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, blocksOldest, pruneMode.Blocks)
+	receiptsField := avail(receiptsOldest, receiptsAmount)
+
+	// A log query filtered by address or topic searches LogAddrIdx and LogTopicIdx,
+	// standalone indices retired at the history cutoff whatever the receipt retention is.
+	// The field takes that stricter form: an unfiltered query reads straight from the
+	// receipts and reaches further back than advertised.
+	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
+	logsField := avail(logsOldest, logsAmount)
 
 	return &CapabilitiesResult{
 		Head:        CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},
@@ -192,12 +255,12 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 // BlockNumber implements eth_blockNumber. Returns the block number of most recent block.
 func (api *APIImpl) BlockNumber(ctx context.Context) (hexutil.Uint64, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
-	blockNum, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+	blockNum, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return 0, err
 	}
@@ -219,7 +282,7 @@ func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 	currentBlock := reply.CurrentBlock
 
 	return map[string]any{
-		"startingBlock": "0x0", // 0x0 is a placeholder, I do not think it matters what we return here
+		"startingBlock": hexutil.Uint64(startingBlock(reply)),
 		"currentBlock":  hexutil.Uint64(currentBlock),
 		"highestBlock":  hexutil.Uint64(highestBlock),
 		"stages":        stagesFromReply(reply.Stages),
@@ -228,6 +291,9 @@ func (api *APIImpl) Syncing(ctx context.Context) (any, error) {
 
 // ChainId implements eth_chainId. Returns the current ethereum chainId.
 func (api *APIImpl) ChainId(ctx context.Context) (hexutil.Uint64, error) {
+	if cc, ok := api.tryChainConfig(); ok {
+		return hexutil.Uint64(cc.ChainID.Uint64()), nil
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return 0, err
@@ -256,8 +322,8 @@ func (api *APIImpl) ProtocolVersion(ctx context.Context) (hexutil.Uint, error) {
 }
 
 // GasPrice implements eth_gasPrice. Returns the current price per gas in wei.
-func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.U256, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -269,17 +335,16 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	}
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	if head := rawdb.ReadCurrentHeader(overlayTx); head != nil && head.BaseFee != nil {
+	if head := rawdb.ReadCurrentHeader(tx); head != nil && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
-	return (*hexutil.Big)(gasResult.ToBig()), err
+	return (*hexutil.U256)(gasResult), err
 }
 
 // MaxPriorityFeePerGas returns a suggestion for a gas tip cap for dynamic fee transactions.
-func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -289,20 +354,85 @@ func (api *APIImpl) MaxPriorityFeePerGas(ctx context.Context) (*hexutil.Big, err
 	if err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(tipcap.ToBig()), err
+	return (*hexutil.U256)(new(uint256.Int).Set(tipcap)), err
 }
 
 type feeHistoryResult struct {
 	OldestBlock      *hexutil.Big     `json:"oldestBlock"`
-	Reward           [][]*hexutil.Big `json:"reward,omitempty"`
-	BaseFee          []*hexutil.Big   `json:"baseFeePerGas,omitempty"`
+	Reward           [][]hexutil.U256 `json:"reward,omitempty"`
+	BaseFee          []hexutil.U256   `json:"baseFeePerGas,omitempty"`
 	GasUsedRatio     []float64        `json:"gasUsedRatio"`
-	BlobBaseFee      []*hexutil.Big   `json:"baseFeePerBlobGas,omitempty"`
+	BlobBaseFee      []hexutil.U256   `json:"baseFeePerBlobGas,omitempty"`
 	BlobGasUsedRatio []float64        `json:"blobGasUsedRatio,omitempty"`
 }
 
+// MarshalFastJSONTo writes r in encoding/json's field order and number forms.
+func (r *feeHistoryResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if r == nil {
+		s.WriteNil()
+		return nil
+	}
+	if !allFinite(r.GasUsedRatio) || !allFinite(r.BlobGasUsedRatio) {
+		_, err := json.Marshal(r) // encoding/json's error for NaN or Inf, reported before the first write
+		return err
+	}
+	s.WriteObjectStart()
+	jsonstream.Text(s, "oldestBlock", r.OldestBlock)
+	if len(r.Reward) > 0 {
+		s.Field("reward")
+		jsonstream.ArrayValue(s, r.Reward, writeU256s)
+	}
+	if len(r.BaseFee) > 0 {
+		s.Field("baseFeePerGas")
+		writeU256s(s, &r.BaseFee)
+	}
+	s.Field("gasUsedRatio")
+	jsonstream.ArrayValue(s, r.GasUsedRatio, writeJSONFloat)
+	if len(r.BlobBaseFee) > 0 {
+		s.Field("baseFeePerBlobGas")
+		writeU256s(s, &r.BlobBaseFee)
+	}
+	if len(r.BlobGasUsedRatio) > 0 {
+		s.Field("blobGasUsedRatio")
+		jsonstream.ArrayValue(s, r.BlobGasUsedRatio, writeJSONFloat)
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+func writeU256s(s *jsonstream.StackStream, vs *[]hexutil.U256) {
+	jsonstream.ArrayValue(s, *vs, writeU256)
+}
+
+func writeU256(s *jsonstream.StackStream, v *hexutil.U256) { s.WriteQuotedText(v) }
+
+func allFinite(fs []float64) bool {
+	for _, f := range fs {
+		if math.IsNaN(f) || math.IsInf(f, 0) {
+			return false
+		}
+	}
+	return true
+}
+
+// writeJSONFloat writes f as encoding/json does: 'e' notation outside [1e-6, 1e21), and no
+// leading zero in a negative exponent.
+func writeJSONFloat(s *jsonstream.StackStream, f *float64) {
+	format := byte('f')
+	if abs := math.Abs(*f); abs != 0 && (abs < 1e-6 || abs >= 1e21) {
+		format = 'e'
+	}
+	var buf [32]byte
+	b := strconv.AppendFloat(buf[:0], *f, format, -1, 64)
+	if n := len(b); format == 'e' && b[n-4] == 'e' && b[n-3] == '-' && b[n-2] == '0' {
+		b[n-2] = b[n-1] // e-09 -> e-9
+		b = b[:n-1]
+	}
+	s.WriteRawBytes(b)
+}
+
 func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex, lastBlock rpc.BlockNumber, rewardPercentiles []float64) (*feeHistoryResult, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
@@ -313,46 +443,24 @@ func (api *APIImpl) FeeHistory(ctx context.Context, blockCount rpc.DecimalOrHex,
 	if err != nil {
 		return nil, err
 	}
-	results := &feeHistoryResult{
-		OldestBlock:  (*hexutil.Big)(oldest),
-		GasUsedRatio: gasUsed,
-	}
-	if reward != nil {
-		results.Reward = make([][]*hexutil.Big, len(reward))
-		for i, w := range reward {
-			results.Reward[i] = make([]*hexutil.Big, len(w))
-			for j, v := range w {
-				results.Reward[i][j] = (*hexutil.Big)(v)
-			}
-		}
-	}
-	if baseFee != nil {
-		results.BaseFee = make([]*hexutil.Big, len(baseFee))
-		for i, v := range baseFee {
-			results.BaseFee[i] = (*hexutil.Big)(v.ToBig())
-		}
-	}
-	if blobBaseFee != nil {
-		results.BlobBaseFee = make([]*hexutil.Big, len(blobBaseFee))
-		for i, v := range blobBaseFee {
-			results.BlobBaseFee[i] = (*hexutil.Big)(v.ToBig())
-		}
-	}
-	if blobGasUsedRatio != nil {
-		results.BlobGasUsedRatio = blobGasUsedRatio
-	}
-	return results, nil
+	return &feeHistoryResult{
+		OldestBlock:      (*hexutil.Big)(oldest),
+		Reward:           reward,
+		BaseFee:          baseFee,
+		GasUsedRatio:     gasUsed,
+		BlobBaseFee:      blobBaseFee,
+		BlobGasUsedRatio: blobGasUsedRatio,
+	}, nil
 }
 
 // BlobBaseFee returns the base fee for blob gas at the current head.
-func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.U256, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	header := rawdb.ReadCurrentHeader(overlayTx)
+	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
@@ -368,18 +476,17 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	if err != nil {
 		return nil, err
 	}
-	return (*hexutil.Big)(ret256.ToBig()), nil
+	return (*hexutil.U256)(&ret256), nil
 }
 
 // BaseFee returns the base fee at the current head.
-func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
-	tx, err := api.db.BeginTemporalRo(ctx)
+func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.U256, error) {
+	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-	overlayTx := api.filters.WithTemporalOverlay(tx)
-	header := rawdb.ReadCurrentHeader(overlayTx)
+	header := rawdb.ReadCurrentHeader(tx)
 	if header == nil {
 		return nil, nil
 	}
@@ -391,7 +498,7 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 		return nil, nil
 	}
 	baseFee := misc.CalcBaseFee(config, header)
-	return (*hexutil.Big)(baseFee.ToBig()), nil
+	return (*hexutil.U256)(baseFee), nil
 }
 
 // EthHardForkConfig represents config of a hard-fork
@@ -493,25 +600,171 @@ func fillForkConfig(chainConfig *chain.Config, forkId [4]byte, activationTime ui
 
 type GasPriceOracleBackend struct {
 	db      kv.TemporalRoDB // nil if Fork is not supported
-	tx      kv.TemporalTx
+	tx      kv.TemporalTx   // always a pinned view; carries the request's overlay resolution
 	baseApi *BaseAPI
+
+	parentViewID uint64
+	parentTip    canonicalMarker
+	parentTipErr error
+	forkPrepared bool
 }
 
+// canonicalMarker is one entry of the canonical number-to-hash mapping.
+type canonicalMarker struct {
+	number uint64
+	hash   common.Hash
+}
+
+// NewGasPriceOracleBackend requires a tx already pinned at acquisition (see
+// rpchelper.BeginTemporalRoWithOverlay): resolving the overlay here, after
+// the caller opened the tx, would re-open the torn (tx, overlay) window the
+// pinned acquisition exists to close.
 func NewGasPriceOracleBackend(db kv.TemporalRoDB, tx kv.TemporalTx, baseApi *BaseAPI) *GasPriceOracleBackend {
-	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi}
+	if !membatchwithdb.CarriesOverlayView(tx) {
+		panic("NewGasPriceOracleBackend: tx must be pinned via rpchelper.BeginTemporalRoWithOverlay or PinToOverlay")
+	}
+	return &GasPriceOracleBackend{db: db, tx: tx, baseApi: baseApi, parentViewID: tx.ViewID()}
+}
+
+// PrepareFork resolves the canonical marker the parent snapshot ends on, which
+// Fork compares a fresh snapshot against. Resolving it lazily keeps the scan —
+// a remote round trip in rpcdaemon mode — off the requests the tip cache answers.
+func (b *GasPriceOracleBackend) PrepareFork(context.Context) error {
+	if b.forkPrepared {
+		return b.parentTipErr
+	}
+	b.forkPrepared = true
+	b.parentTip, b.parentTipErr = tipCanonicalMarker(b.tx)
+	return b.parentTipErr
+}
+
+// tipCanonicalMarker reads the canonical marker the database snapshot ends on,
+// bypassing the overlay: parent and fork share the overlay, so a view read
+// would mask what this identity exists to detect.
+func tipCanonicalMarker(tx kv.TemporalTx) (canonicalMarker, error) {
+	raw := tx
+	if u, ok := tx.(interface{ UnderlyingTx() kv.TemporalTx }); ok {
+		if under := u.UnderlyingTx(); under != nil {
+			raw = under
+		}
+	}
+	it, err := raw.Range(kv.HeaderCanonical, nil, nil, order.Desc, 1)
+	if err != nil {
+		return canonicalMarker{}, err
+	}
+	defer it.Close()
+	if !it.HasNext() {
+		return canonicalMarker{}, nil
+	}
+	k, v, err := it.Next()
+	if err != nil {
+		return canonicalMarker{}, err
+	}
+	if len(k) != 8 || len(v) != length.Hash {
+		return canonicalMarker{}, nil
+	}
+	return canonicalMarker{number: binary.BigEndian.Uint64(k), hash: common.BytesToHash(v)}, nil
+}
+
+func canonicalHashAt(tx kv.Tx, number uint64) (common.Hash, error) {
+	v, err := tx.GetOne(kv.HeaderCanonical, hexutil.EncodeTs(number))
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if len(v) != length.Hash {
+		return common.Hash{}, nil
+	}
+	return common.BytesToHash(v), nil
+}
+
+// keepsParentIdentities reports whether tx's snapshot still holds the canonical
+// marker the parent's snapshot ended on. A block appended since then keeps it,
+// while a reorg rewrites or truncates it — and rewriting a lower height implies
+// the markers above were unwound first, so the tip alone covers the range.
+func (b *GasPriceOracleBackend) keepsParentIdentities(tx kv.TemporalTx) (bool, error) {
+	if b.parentTip.hash == (common.Hash{}) {
+		return false, nil
+	}
+	hash, err := canonicalHashAt(tx, b.parentTip.number)
+	if err != nil {
+		return false, err
+	}
+	return hash == b.parentTip.hash, nil
 }
 
 func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBackend, func(), error) {
 	if b.db == nil {
 		return nil, nil, nil // Fork not supported; caller falls back to sequential
 	}
+	if !b.forkPrepared {
+		return nil, nil, errors.New("GasPriceOracleBackend.Fork: PrepareFork must run on the caller's goroutine first")
+	}
+	if b.parentTipErr != nil {
+		return nil, nil, nil
+	}
 	tx, err := b.db.BeginTemporalRo(ctx) //nolint:gocritic
 	if err != nil {
-		return nil, nil, err
+		log.Debug("gas price: fork tx unavailable, serving sequentially", "err", err)
+		return nil, nil, nil
 	}
-	return &GasPriceOracleBackend{db: b.db, tx: tx, baseApi: b.baseApi},
+	// A fresh tx takes its own database snapshot, which can already carry a
+	// reorg the parent never saw: the pin only aligns the overlay layer. Serving
+	// one request from two chains is worse than losing the parallelism, so a
+	// snapshot that disagrees — or that the check cannot read — degrades to
+	// sequential reads on the parent. An identical view id means the same
+	// snapshot, which needs no marker lookup.
+	if tx.ViewID() != b.parentViewID {
+		keeps, err := b.keepsParentIdentities(tx)
+		if err != nil || !keeps {
+			log.Debug("gas price: fork snapshot unusable, serving sequentially", "keepsParentIdentities", keeps, "err", err)
+			tx.Rollback()
+			return nil, nil, nil
+		}
+	}
+	// Reuse the parent's pin (rationale on rpchelper.PinToOverlay).
+	overlay, _ := membatchwithdb.ViewOverlay(b.tx)
+	return &GasPriceOracleBackend{db: b.db, tx: rpchelper.PinToOverlay(tx, overlay), baseApi: b.baseApi, parentViewID: tx.ViewID(), parentTip: b.parentTip, forkPrepared: true},
 		func() { tx.Rollback() },
 		nil
+}
+
+// CanonicalHashes scans the canonical markers of [from, to] on the pinned tx:
+// resolving through the block reader would hit a live service in rpcdaemon
+// mode, un-pinning the fee-history cache key, and a per-height read there is a
+// round trip each. Callers only ask for unfrozen heights, whose markers are
+// always in the db.
+func (b *GasPriceOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
+	hashes := make([]common.Hash, to-from+1)
+	it, err := b.tx.Range(kv.HeaderCanonical, hexutil.EncodeTs(from), hexutil.EncodeTs(to+1), order.Asc, kv.Unlim)
+	if err != nil {
+		return nil, err
+	}
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if len(k) != 8 || len(v) != length.Hash {
+			continue
+		}
+		hashes[binary.BigEndian.Uint64(k)-from] = common.BytesToHash(v)
+	}
+	return hashes, nil
+}
+
+// FrozenBlocks returns the boundary at and below which the canonical mapping can
+// no longer change, because unwinding into the snapshots is not allowed.
+func (b *GasPriceOracleBackend) FrozenBlocks() uint64 {
+	return b.baseApi._blockReader.FrozenBlocks()
+}
+
+func (b *GasPriceOracleBackend) HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
+	return b.baseApi._blockReader.Header(ctx, b.tx, hash, number)
+}
+
+func (b *GasPriceOracleBackend) BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error) {
+	return b.baseApi.blockWithSenders(ctx, b.tx, hash, number)
 }
 
 func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Header, error) {
@@ -526,7 +779,7 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 }
 
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByNumberWithSenders(ctx, b.tx, number.Uint64())
+	return b.baseApi.blockByNumberWithSenders(ctx, b.baseApi.filters.WithOverlay(b.tx), number.Uint64())
 }
 
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
@@ -561,7 +814,7 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 	if err != nil {
 		return nil, nil
 	}
-	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.tx, latestNum)
+	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.baseApi.filters.WithOverlay(b.tx), latestNum)
 	if err != nil || block == nil {
 		return nil, nil
 	}
@@ -574,4 +827,8 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 
 func (b *GasPriceOracleBackend) GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error) {
 	return b.baseApi.getReceiptsGasUsed(ctx, b.tx, block)
+}
+
+func (b *GasPriceOracleBackend) CheckBlockRewardsAvailable(ctx context.Context, blockNumber uint64) error {
+	return b.baseApi.checkBlockHistoryAvailable(ctx, b.tx, blockNumber)
 }

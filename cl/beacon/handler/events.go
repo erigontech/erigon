@@ -44,6 +44,9 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.OpPayloadAttestationMessage: {},
 	event.OpExecutionPayloadBid:       {},
 	event.OpExecutionPayloadAvailable: {},
+	event.OpExecutionPayload:          {},
+	event.OpExecutionPayloadGossip:    {},
+	event.OpProposerPreferences:       {},
 	// state events
 	event.StateBlock:                       {},
 	event.StateBlockGossip:                 {},
@@ -51,6 +54,7 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.StateLightClientFinalityUpdate:   {},
 	event.StateFinalizedCheckpoint:         {},
 	event.StateHead:                        {},
+	event.StateHeadV2:                      {},
 	event.StateLightClientOptimisticUpdate: {},
 	event.StatePayloadAttributes:           {},
 }
@@ -118,10 +122,10 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			w.(http.Flusher).Flush()
 		case err := <-stateSub.Err():
 			log.Warn("event error", "err", err)
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %v", err)).WriteTo(w)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %w", err)).WriteTo(w)
 		case err := <-opSub.Err():
 			log.Warn("event error", "err", err)
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %v", err)).WriteTo(w)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %w", err)).WriteTo(w)
 			return
 		case <-r.Context().Done():
 			log.Info("Client disconnected from event stream")

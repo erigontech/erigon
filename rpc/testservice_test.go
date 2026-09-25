@@ -131,29 +131,6 @@ func (s *testService) ReturnNull() any {
 	return nil
 }
 
-func (s *testService) CallMeBack(ctx context.Context, method string, args []any) (any, error) {
-	c, ok := ClientFromContext(ctx, log.New())
-	if !ok {
-		return nil, errors.New("no client")
-	}
-	var result any
-	err := c.Call(&result, method, args...)
-	return result, err
-}
-
-func (s *testService) CallMeBackLater(ctx context.Context, method string, args []any) error {
-	c, ok := ClientFromContext(ctx, log.New())
-	if !ok {
-		return errors.New("no client")
-	}
-	go func() {
-		<-ctx.Done()
-		var result any
-		c.Call(&result, method, args...)
-	}()
-	return nil
-}
-
 func (s *testService) Subscription(ctx context.Context) (*Subscription, error) {
 	return nil, nil
 }
@@ -212,7 +189,7 @@ func (s *notificationTestService) HangSubscription(ctx context.Context, val int)
 	subscription := notifier.CreateSubscription()
 
 	go func() {
-		notifier.Notify(subscription.ID, val)
+		_ = notifier.Notify(subscription.ID, val)
 	}()
 	return subscription, nil
 }

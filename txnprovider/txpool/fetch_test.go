@@ -57,7 +57,7 @@ func TestFetch(t *testing.T) {
 	pool.EXPECT().Started().Return(true)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
 	var wg sync.WaitGroup
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, remoteKvClient, nil, u256.N1, log.New(), WithP2PFetcherWg(&wg))
@@ -102,11 +102,13 @@ func TestSendTxnPropagate(t *testing.T) {
 						Peer: &typesproto.PeerInfo{
 							Id:   r.PeerId.String(),
 							Caps: []string{"eth/68"},
-						}}, nil
-				}).AnyTimes()
+						},
+					}, nil
+				},
+			).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
@@ -138,7 +140,7 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		list := make(Hashes, p2pTxPacketLimit*3)
@@ -175,7 +177,7 @@ func TestSendTxnPropagate(t *testing.T) {
 			Times(times)
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		send.BroadcastPooledTxns(testRlps(2), 100)
@@ -213,11 +215,13 @@ func TestSendTxnPropagate(t *testing.T) {
 						Peer: &typesproto.PeerInfo{
 							Id:   r.PeerId.String(),
 							Caps: []string{"eth/68"},
-						}}, nil
-				}).AnyTimes()
+						},
+					}, nil
+				},
+			).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
-		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 		require.NoError(t, err)
 		send := NewSend(ctx, []sentryproto.SentryClient{sentryClient}, log.New())
 		expectPeers := toPeerIDs(1, 2, 42)
@@ -336,9 +340,11 @@ func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
 func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	return &sentryproto.SetStatusReply{}, nil
 }
+
 func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
+
 func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
 	ms.lock.Lock()
 	if ms.streams == nil {
@@ -427,7 +433,7 @@ func TestPenalizePeerForMalformedMessages(t *testing.T) {
 				Times(1)
 
 			m := NewMockSentry(ctx, sentryServer)
-			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 			require.NoError(t, err)
 
 			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
@@ -498,7 +504,7 @@ func TestOversizedHashAnnouncement(t *testing.T) {
 				Times(1)
 
 			m := NewMockSentry(ctx, sentryServer)
-			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+			sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 			require.NoError(t, err)
 
 			fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
@@ -525,7 +531,7 @@ func TestCheckPooledTxnAnnouncement(t *testing.T) {
 	pool := NewMockPool(ctrl)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
 
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
@@ -631,7 +637,7 @@ func TestCheckBlobSidecar(t *testing.T) {
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
 
@@ -681,7 +687,7 @@ func TestNoPenaltyOnInternalDBError(t *testing.T) {
 	sentryServer.EXPECT().PenalizePeer(gomock.Any(), gomock.Any()).Times(0)
 
 	m := NewMockSentry(ctx, sentryServer)
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
 	require.NoError(t, err)
 
 	fetch := NewFetch(ctx, []sentryproto.SentryClient{sentryClient}, pool, nil, nil, u256.N1, log.New())
@@ -710,7 +716,7 @@ func TestFetchConnectGoroutinesExitOnCancel(t *testing.T) {
 	// Mock sentry server: HandShake returns io.EOF, forcing receiveMessageLoop
 	// and receivePeerLoop into retry-with-backoff loops.
 	srv := &retrySentryServer{}
-	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, srv, nil)
+	sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, srv)
 	require.NoError(t, err)
 
 	// Mock state changes client: StateChanges returns io.EOF, forcing the

@@ -64,7 +64,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 		}
 	}).MustOpen()
 	salt := uint32(1)
-	cfg := statecfg.InvIdxCfg{FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
+	cfg := statecfg.InvIdxCfg{Enabled: true, FilenameBase: "inv", KeysTable: keysTable, ValuesTable: indexTable, FileVersion: statecfg.IIVersionTypes{DataEF: version.V1_0_standart, AccessorEFI: version.V1_0_standart}}
 	cfg.Accessors = statecfg.AccessorHashMap
 	ii, err := NewInvertedIndex(cfg, aggStep, config3.DefaultStepsInFrozenFile, dirs, logger)
 	require.NoError(tb, err)
@@ -256,7 +256,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			// If we would prune by txnum then txTo prune should be available after prune is finished
 			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
 		})
-
 	}) // hash_prune
 
 	t.Run("scan_prune", func(t *testing.T) {
@@ -427,7 +426,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			require.NoError(t, err)
 			require.EqualValues(t, pruneTo, binary.BigEndian.Uint64(txn))
 		})
-
 	}) // scan_prune
 }
 
@@ -1082,7 +1080,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	err := dir.RemoveFile(fn)
 	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	err = os.WriteFile(fn, make([]byte, 33), 0o644)
 	require.NoError(t, err)
 
 	scanDirsRes, err := scanDirs(ii.dirs)
@@ -1265,4 +1263,32 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 		wantDesc[i], wantDesc[j] = wantDesc[j], wantDesc[i]
 	}
 	require.Equal(wantDesc, gotDesc, "descending: rogue DB entry in file range must be invisible")
+}
+
+// TestInvertedIndexDisabledDiscardsWrites pins that Enabled=false is a real
+// master switch: a writer taken from a disabled index must drop everything
+// instead of quietly collecting and flushing into the DB tables.
+func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
+	logger := log.New()
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	ii.Enabled = false
+	ctx := t.Context()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+	w := ic.NewWriter()
+	defer w.close()
+
+	require.NoError(t, w.Add([]byte("key1"), 2))
+	require.NoError(t, w.Flush(ctx, tx))
+
+	for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
+		n, err := tx.Count(table)
+		require.NoError(t, err)
+		require.Zerof(t, n, "table %s must stay empty", table)
+	}
 }

@@ -22,6 +22,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
@@ -223,7 +224,7 @@ func init() {
 func main() {
 	if err := app.Run(context.Background(), os.Args); err != nil {
 		code := 1
-		if ec, ok := err.(*t8ntool.NumberedError); ok {
+		if ec, ok := errors.AsType[*t8ntool.NumberedError](err); ok {
 			code = ec.ExitCode()
 		}
 		_, printErr := fmt.Fprintln(os.Stderr, err)

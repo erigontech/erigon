@@ -108,20 +108,30 @@ func TestViewHeadStateWithIdentityStaysInOneGeneration(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	manager.headState = state.New(&clparams.MainnetBeaconConfig)
 	manager.stateHead.Store(&headIdentity{root: common.Hash{0xaa}, slot: 100})
-	manager.headState.SetSlot(100)
+	require.NoError(t, manager.headState.SetSlot(100))
+
+	// The writer holds manager.mu, so it must not use require: a failed assertion calls
+	// runtime.Goexit and would leave the mutex locked, hanging every reader.
+	setHead := func(slot uint64, root common.Hash) error {
+		manager.mu.Lock()
+		defer manager.mu.Unlock()
+		if err := manager.headState.SetSlot(slot); err != nil {
+			return err
+		}
+		manager.stateHead.Store(&headIdentity{root: root, slot: slot})
+		return nil
+	}
 
 	var writers sync.WaitGroup
+	var writerErr error
 	writers.Go(func() {
 		for range 10_000 {
-			manager.mu.Lock()
-			manager.headState.SetSlot(99)
-			manager.stateHead.Store(&headIdentity{root: common.Hash{0xbb}, slot: 99})
-			manager.mu.Unlock()
-
-			manager.mu.Lock()
-			manager.headState.SetSlot(100)
-			manager.stateHead.Store(&headIdentity{root: common.Hash{0xaa}, slot: 100})
-			manager.mu.Unlock()
+			if writerErr = setHead(99, common.Hash{0xbb}); writerErr != nil {
+				return
+			}
+			if writerErr = setHead(100, common.Hash{0xaa}); writerErr != nil {
+				return
+			}
 		}
 	})
 
@@ -133,6 +143,7 @@ func TestViewHeadStateWithIdentityStaysInOneGeneration(t *testing.T) {
 		}))
 	}
 	writers.Wait()
+	require.NoError(t, writerErr)
 }
 
 func TestViewHeadStateRejectsMissingStateAfterReadinessPublished(t *testing.T) {

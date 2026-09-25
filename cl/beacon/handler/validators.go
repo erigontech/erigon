@@ -31,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
@@ -42,7 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-var stringsBuilderPool = sync.Pool{
+var stringsBuilderPool = &sync.Pool{
 	New: func() any {
 		return new(strings.Builder)
 	},
@@ -378,7 +379,7 @@ func parseQueryValidatorIndex(syncedData synced_data.SyncedData, id string) (uin
 		}
 		idx, has, err := syncedData.ValidatorIndexByPublicKey(b48)
 		if err != nil {
-			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found: %s", err))
+			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found: %w", err))
 		}
 		if !has {
 			return math.MaxUint64, nil
@@ -605,8 +606,10 @@ func (d directString) MarshalJSON() ([]byte, error) {
 func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
 	// todo: refactor this function
 	b := stringsBuilderPool.Get().(*strings.Builder)
-	defer stringsBuilderPool.Put(b)
-	b.Reset()
+	defer func() {
+		b.Reset()
+		stringsBuilderPool.Put(b)
+	}()
 
 	var isOptimistic string = "false"
 	if optimistic {
@@ -775,16 +778,24 @@ func (a *ApiHandler) GetEthV2ValidatorAggregateAttestation(w http.ResponseWriter
 	}
 
 	attDataRootHash := common.HexToHash(attDataRoot)
-	att := a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
+	version := a.ethClock.StateVersionByEpoch(slotNum / a.beaconChainCfg.SlotsPerEpoch)
+	var att *solid.Attestation
+	if version.Before(clparams.ElectraVersion) {
+		att = a.aggregatePool.GetAggregatationByRoot(attDataRootHash)
+	} else {
+		att = a.aggregatePool.GetAggregatationByRootAndCommittee(attDataRootHash, committeeIndexNum)
+	}
 	if att == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("attestation %s not found", attDataRoot))
+	}
+	if version.Before(clparams.ElectraVersion) && committeeIndexNum != att.Data.CommitteeIndex {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation committee index mismatch"))
 	}
 	if slotNum != att.Data.Slot {
 		log.Debug("attestation slot does not match", "attestation_data_root", attDataRoot, "slot_inquire", slot)
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("attestation slot mismatch"))
 	}
 
-	version := a.ethClock.StateVersionByEpoch(slotNum / a.beaconChainCfg.SlotsPerEpoch)
 	return newBeaconResponse(att).WithVersion(version), nil
 }
 

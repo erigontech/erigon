@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -384,40 +385,6 @@ func TestValidateRead_ChangedValueInvalidatesStorageRead(t *testing.T) {
 	}
 }
 
-func BenchmarkWriteTimeSameLocationDifferentTxIdx(b *testing.B) {
-	mvh2 := NewVersionMap(nil)
-	ap2 := getAddress(2)
-
-	const n = 10000
-	randInts := make([]int, n)
-	for i := range randInts {
-		randInts[i] = rand.Intn(1000000000000000)
-	}
-
-	for i := 0; b.Loop(); i++ {
-		idx := randInts[i%n]
-		writeFor(mvh2, ap2, AddressPath, accounts.NilKey, Version{0, 0, idx, 1}, valueFor(AddressPath, idx, 1), true)
-	}
-}
-
-func BenchmarkReadTimeSameLocationDifferentTxIdx(b *testing.B) {
-	mvh2 := NewVersionMap(nil)
-	ap2 := getAddress(2)
-	txIdxSlice := []int{}
-
-	for b.Loop() {
-		txIdx := rand.Intn(1000000000000000)
-		txIdxSlice = append(txIdxSlice, txIdx)
-		writeFor(mvh2, ap2, AddressPath, accounts.NilKey, Version{0, 0, txIdx, 1}, valueFor(AddressPath, txIdx, 1), true)
-	}
-
-	b.ResetTimer()
-
-	for _, value := range txIdxSlice {
-		readFor(mvh2, ap2, AddressPath, accounts.NilKey, value)
-	}
-}
-
 func TestTimeComplexity(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -672,7 +639,7 @@ func TestValidateRead_SDStaleness_RevivalDoesNotResurrectPreDestructRead(t *test
 func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	vm := NewVersionMap(nil)
-	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), vm)
 	defer ibs.Close()
 	ibs.SetTxContext(0, 3)
 
@@ -905,18 +872,18 @@ func TestGetVersionedAccount_SynthesizesCreatedFromBAL(t *testing.T) {
 // land, so the recorded read is non-nil and survives both validation and the
 // mid-execution dependency re-check once the creator flushes.
 func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
-	balFedChanges := func(addr accounts.Address) []*types.AccountChanges {
-		return []*types.AccountChanges{{
-			Address: addr,
+	balFedChanges := func(addr accounts.Address) types.BlockAccessList {
+		return []types.AccountChanges{{
+			Address: addr.Value(),
 			BalanceChanges: []*types.BalanceChange{{
 				Index: 1,
 				Value: *uint256.NewInt(53771),
 			}},
 		}}
 	}
-	contractFedChanges := func(addr accounts.Address) []*types.AccountChanges {
-		return []*types.AccountChanges{{
-			Address: addr,
+	contractFedChanges := func(addr accounts.Address) types.BlockAccessList {
+		return []types.AccountChanges{{
+			Address: addr.Value(),
 			NonceChanges: []*types.NonceChange{{
 				Index: 1,
 				Value: 1,
@@ -973,7 +940,7 @@ func TestBALFedReaderDoesNotRaceCreatorFlush(t *testing.T) {
 	}
 	feeds := []struct {
 		name    string
-		changes func(accounts.Address) []*types.AccountChanges
+		changes func(accounts.Address) types.BlockAccessList
 		balance uint64
 		nonce   uint64
 	}{
@@ -1361,8 +1328,8 @@ func TestSynthesizedAccountRecordsNoIncarnationGuess(t *testing.T) {
 		}
 		return VersionInvalid
 	}
-	vm := NewVersionMap([]*types.AccountChanges{{
-		Address:      addr,
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:      addr.Value(),
 		NonceChanges: []*types.NonceChange{{Index: 227, Value: 1}},
 	}})
 	ibs := NewWithVersionMap(&emptyReader{}, vm)
@@ -1398,8 +1365,8 @@ func TestDBLoadedAccountRecordsNoIncarnationDefault(t *testing.T) {
 	}
 	deployed := accounts.NewCode([]byte{0x60, 0x80, 0x60, 0x40})
 	reader := &codeReader{addr: addr, account: &accounts.Account{Balance: *uint256.NewInt(9), CodeHash: accounts.EmptyCodeHash}}
-	vm := NewVersionMap([]*types.AccountChanges{{
-		Address:      addr,
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:      addr.Value(),
 		NonceChanges: []*types.NonceChange{{Index: 227, Value: 1}},
 		CodeChanges:  []*types.CodeChange{{Index: 227, Bytecode: deployed.Bytes}},
 	}})
@@ -1427,8 +1394,8 @@ func TestDBLoadedAccountRecordsNoIncarnationDefault(t *testing.T) {
 func TestBALPrePopulatesDerivedCodeCells(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x01})
 	bytecode := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
-	vm := NewVersionMap([]*types.AccountChanges{{
-		Address:     addr,
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
 		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: bytecode}},
 	}})
 	size, sres, ok := vm.ReadCodeSize(addr, 5)
@@ -1445,8 +1412,8 @@ func TestBALPrePopulatesDerivedCodeCells(t *testing.T) {
 
 func TestBALPrePopulatesDerivedCodeCells_ClearedCode(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xcd, 0x02})
-	vm := NewVersionMap([]*types.AccountChanges{{
-		Address:     addr,
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address:     addr.Value(),
 		CodeChanges: []*types.CodeChange{{Index: 3, Bytecode: nil}},
 	}})
 	size, sres, ok := vm.ReadCodeSize(addr, 5)
@@ -1499,8 +1466,8 @@ func TestAbsentConclusionThenCreatorFlushAborts(t *testing.T) {
 // EVM, so the load re-reads the fresh cells and reconciles the record.
 func TestBALFedReaderSurvivesCreatorFlushMidLoad(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xfd, 0x01})
-	vm := NewVersionMap([]*types.AccountChanges{{
-		Address: addr,
+	vm := NewVersionMap([]types.AccountChanges{{
+		Address: addr.Value(),
 		NonceChanges: []*types.NonceChange{{
 			Index: 1,
 			Value: 1,
@@ -2131,4 +2098,43 @@ func TestValidateRead_DistinctDestructWitnessesBothValidated(t *testing.T) {
 	t.Run("the tx20 destruct re-executed away must invalidate", func(t *testing.T) {
 		require.Equal(t, VersionInvalid, newVM(false).ValidateVersion(30, newIO(), validateEqualVersion, true, false, false, ""))
 	})
+}
+
+func TestCodeHashReadAfterSelfDestruct(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		eip8246          bool
+		preservedBalance uint64
+		want             VersionValidity
+	}{
+		{"pre_amsterdam", false, 0, VersionInvalid},
+		{"amsterdam_deleted", true, 0, VersionInvalid},
+		{"amsterdam_preserved", true, 7, VersionValid},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr := accounts.InternAddress([20]byte{0xc0, 1})
+			vm := NewVersionMap(nil)
+			account := accounts.NewAccount()
+			account.Balance.SetUint64(5)
+			vm.WriteAddress(addr, Version{TxIndex: 0}, &account, true)
+			vm.WriteBalance(addr, Version{TxIndex: 0}, account.Balance, true)
+			vm.WriteCodeHash(addr, Version{TxIndex: 0}, accounts.EmptyCodeHash, true)
+
+			ibs := NewWithVersionMap(&minimalStateReader{}, vm)
+			t.Cleanup(ibs.Close)
+			ibs.SetNoMaterialize(true)
+			ibs.SetTxContext(1, 2)
+			ibs.eip8246 = tc.eip8246
+			codeHash, err := ibs.GetCodeHash(addr)
+			require.NoError(t, err)
+			require.Equal(t, accounts.EmptyCodeHash, codeHash)
+
+			io := NewVersionedIO(3)
+			io.RecordReads(Version{TxIndex: 2}, ibs.VersionedReads())
+			vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+			vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(tc.preservedBalance), true)
+
+			require.Equal(t, tc.want, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+		})
+	}
 }

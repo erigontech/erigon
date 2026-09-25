@@ -128,12 +128,6 @@ type Config struct {
 	// enode database. Not used in external-sentry mode.
 	NodesDir string
 
-	// EnableWitProtocol toggles the WIT sideprotocol on the direct
-	// sentry clients we build locally. Sourced from
-	// stack.Config().P2P.EnableWitProtocol. Not used in
-	// external-sentry mode.
-	EnableWitProtocol bool
-
 	// Events is the node-level shards.Events instance. Start subscribes to
 	// AddHeaderSubscription + AddNewSnapshotSubscription on it so
 	// StatusDataProvider can refresh on chain head / snapshot changes.
@@ -162,7 +156,7 @@ type Provider struct {
 	Sentries []sentryproto.SentryClient
 
 	// Multiplexer is a single SentryClient that fans out calls across all
-	// Sentries. Used by the execution-P2P layer and by polygon sync.
+	// Sentries. Used by the execution-P2P layer.
 	Multiplexer sentryproto.SentryClient
 
 	// Client is the multi-sentry client — ownership of the header and body
@@ -266,9 +260,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 
 	// Create one GrpcServer per protocol version. Each instance keeps its own
 	// statusData / message streams so the MultiClient can address them by
-	// protocol; the per-peer state lives in a shared PeerStore that
-	// startSharedP2PServer injects below (so wit/0, deduped to one sentry,
-	// shares PeerInfo with the eth Run that ran on a different sentry).
+	// protocol; startSharedP2PServer injects their shared peer store.
 	for _, protocol := range p.cfg.P2P.ProtocolVersion {
 		// Pass the shared p2p.Config to NewGrpcServer. The sentry will not
 		// build its own Server (SetP2PServer below blocks the lazy path), but
@@ -277,11 +269,7 @@ func (p *Provider) Initialize(ctx context.Context) error {
 		server := sentry.NewGrpcServer(p.cfg.SentryCtx, nil, readNodeInfo, &cfgCopy, protocol, p.logger, chainBootnodes, chainDNSNetwork)
 		p.Servers = append(p.Servers, server)
 
-		var sideProtocols []sentryproto.Protocol
-		if p.cfg.EnableWitProtocol {
-			sideProtocols = append(sideProtocols, sentryproto.Protocol_WIT0)
-		}
-		sentryClient, err := direct.NewSentryClientDirect(protocol, server, sideProtocols)
+		sentryClient, err := direct.NewSentryClientDirect(protocol, server)
 		if err != nil {
 			return fmt.Errorf("failed to create sentry client: %w", err)
 		}
@@ -313,16 +301,11 @@ func (p *Provider) buildSharedP2PConfig() p2p.Config {
 
 // startSharedP2PServer collects the per-protocol Protocols registered by each
 // GrpcServer, builds one p2p.Server with the union (deduplicated by
-// name+version so sideprotocols like wit aren't registered N times), starts
-// it, and injects it back into every GrpcServer.
+// name+version), starts it, and injects it back into every GrpcServer.
 //
-// All GrpcServers are wired to one shared sentry.PeerStore so wit/0 (which
-// is deduped to a single GrpcServer here) and the negotiated eth/* (which
-// fires on a different GrpcServer per peer) see the same PeerInfo and
-// share its eth-ready signal. Each GrpcServer still reports peers filtered
-// by its own eth protocol version, so admin_peers aggregation across
-// sentries is non-duplicating and the multi-sentry message router maps
-// each peer to the correct sentry's gRPC client.
+// All GrpcServers use one sentry.PeerStore. Each GrpcServer reports peers
+// filtered by its own ETH protocol version, so admin_peers aggregation does
+// not duplicate peers and the message router selects the correct client.
 func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string, chainDNSNetwork string) error {
 	if len(p.Servers) == 0 {
 		return errors.New("sentry provider: no GrpcServers to back with a shared p2p.Server")
@@ -377,14 +360,8 @@ func (p *Provider) startSharedP2PServer(cfg *p2p.Config, chainBootnodes []string
 		}
 	}
 
-	// Wire the shared PeerStore + Server reference into every GrpcServer
-	// BEFORE srv.Start. Once the listener is up peers can connect and
-	// Protocol.Run fires immediately; if SetSharedPeerStore happened later
-	// the early Runs would land in per-sentry stores and wit/0's
-	// WaitForEth would never see the eth handshake complete (it lives on
-	// a different sentry post-dedup), disconnecting the peer after
-	// ethProtocolTimeout. The shared store keeps one PeerInfo per peer
-	// across sentries.
+	// Install the shared store before starting the listener, because a
+	// Protocol.Run may create peer state as soon as a connection arrives.
 	shared := sentry.NewPeerStore()
 	for _, ss := range p.Servers {
 		ss.SetSharedPeerStore(shared)
@@ -434,14 +411,14 @@ func (p *Provider) buildStatusAndExecutionP2P() {
 // MultiClientDeps gathers the late-binding inputs needed to construct the
 // multi-sentry Client. These aren't known at Configure/Initialize time
 // because the consensus engine and the per-chain max-peers callback are
-// built AFTER sentries (polygon heimdall + engine rules come between).
+// built AFTER sentries (engine rules come between).
 // Callers run BuildMultiClient once those are ready.
 type MultiClientDeps struct {
 	// Dirs is the datadir root; the MultiClient uses it for per-sentry
 	// peer persistence and any local caches.
 	Dirs datadir.Dirs
 
-	// Engine is the consensus engine (ethash, clique, Bor, Aura, etc).
+	// Engine is the consensus engine (ethash, clique, Aura, etc).
 	// The MultiClient uses it to validate incoming headers during
 	// anchor-based backward download.
 	Engine rules.Engine
@@ -465,7 +442,6 @@ func (p *Provider) BuildMultiClient(deps MultiClientDeps) error {
 		p.cfg.BlockReader,
 		p.StatusDataProvider,
 		deps.LogPeerInfo,
-		p.cfg.EnableWitProtocol,
 		p.logger,
 	)
 	if err != nil {

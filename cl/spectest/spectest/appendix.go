@@ -15,10 +15,3 @@ func (a Appendix) Add(name string) *Format {
 type RunDirectoryOptions struct {
 	FS fs.FS
 }
-
-type formatRoot struct {
-	rawpath     string
-	handlername string
-	format      *Format
-	root        fs.DirEntry
-}

@@ -23,13 +23,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -38,24 +38,24 @@ type txJSON struct {
 
 	// Common transaction fields:
 	Nonce                *hexutil.Uint64 `json:"nonce"`
-	GasPrice             *hexutil.Big    `json:"gasPrice"`
-	MaxFeePerGas         *hexutil.Big    `json:"maxFeePerGas"`
-	MaxPriorityFeePerGas *hexutil.Big    `json:"maxPriorityFeePerGas"`
+	GasPrice             *hexutil.U256   `json:"gasPrice"`
+	MaxFeePerGas         *hexutil.U256   `json:"maxFeePerGas"`
+	MaxPriorityFeePerGas *hexutil.U256   `json:"maxPriorityFeePerGas"`
 	Gas                  *hexutil.Uint64 `json:"gas"`
-	Value                *hexutil.Big    `json:"value"`
+	Value                *hexutil.U256   `json:"value"`
 	Data                 *hexutil.Bytes  `json:"input"`
-	V                    *hexutil.Big    `json:"v"`
-	R                    *hexutil.Big    `json:"r"`
-	S                    *hexutil.Big    `json:"s"`
+	V                    *hexutil.U256   `json:"v"`
+	R                    *hexutil.U256   `json:"r"`
+	S                    *hexutil.U256   `json:"s"`
 	To                   *common.Address `json:"to"`
 
 	// Access list transaction fields:
-	ChainID        *hexutil.Big         `json:"chainId,omitempty"`
+	ChainID        *hexutil.U256        `json:"chainId,omitempty"`
 	AccessList     *AccessList          `json:"accessList,omitempty"`
 	Authorizations *[]JsonAuthorization `json:"authorizationList,omitempty"`
 
 	// Blob transaction fields:
-	MaxFeePerBlobGas    *hexutil.Big  `json:"maxFeePerBlobGas,omitempty"`
+	MaxFeePerBlobGas    *hexutil.U256 `json:"maxFeePerBlobGas,omitempty"`
 	BlobVersionedHashes []common.Hash `json:"blobVersionedHashes,omitempty"`
 	// Blob wrapper fields:
 	Blobs       Blobs     `json:"blobs,omitempty"`
@@ -66,23 +66,40 @@ type txJSON struct {
 	Hash common.Hash `json:"hash"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type JsonAuthorization
+
 type JsonAuthorization struct {
-	ChainID hexutil.Big    `json:"chainId"`
-	Address common.Address `json:"address"`
-	Nonce   hexutil.Uint64 `json:"nonce"`
-	YParity hexutil.Uint64 `json:"yParity"`
-	R       hexutil.Big    `json:"r"`
-	S       hexutil.Big    `json:"s"`
+	ChainID hexutil.U256   `json:"chainId" ethjson:"quantity"`
+	Address common.Address `json:"address" ethjson:"data"`
+	Nonce   hexutil.Uint64 `json:"nonce" ethjson:"quantity"`
+	YParity hexutil.Uint64 `json:"yParity" ethjson:"quantity"`
+	R       hexutil.U256   `json:"r" ethjson:"quantity"`
+	S       hexutil.U256   `json:"s" ethjson:"quantity"`
+}
+
+// AuthorizationList is a set-code transaction's authorizations in a reply. An absent list is
+// omitted rather than written as an empty array.
+type AuthorizationList []JsonAuthorization
+
+// MarshalFastJSONTo writes the list as a bare array. The receiver must stay a value, so the
+// type itself satisfies the fast-JSON interface.
+func (l AuthorizationList) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	jsonstream.ArrayValue(s, l, writeAuthorizationElem)
+	return nil
+}
+
+func writeAuthorizationElem(s *jsonstream.StackStream, a *JsonAuthorization) {
+	_ = a.MarshalFastJSONTo(s)
 }
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
-	a.ChainID = hexutil.Big(*authorization.ChainID.ToBig())
+	a.ChainID = hexutil.U256(authorization.ChainID)
 	a.Address = authorization.Address
-	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
+	a.Nonce = hexutil.Uint64(authorization.Nonce)
 
-	a.YParity = (hexutil.Uint64)(authorization.YParity)
-	a.R = hexutil.Big(*authorization.R.ToBig())
-	a.S = hexutil.Big(*authorization.S.ToBig())
+	a.YParity = hexutil.Uint64(authorization.YParity)
+	a.R = hexutil.U256(authorization.R)
+	a.S = hexutil.U256(authorization.S)
 	return a
 }
 
@@ -90,27 +107,15 @@ func (a JsonAuthorization) ToAuthorization() (Authorization, error) {
 	auth := Authorization{
 		Address: a.Address,
 		Nonce:   a.Nonce.Uint64(),
+		ChainID: uint256.Int(a.ChainID),
+		R:       uint256.Int(a.R),
+		S:       uint256.Int(a.S),
 	}
-	chainId, overflow := uint256.FromBig((*big.Int)(&a.ChainID))
-	if overflow {
-		return auth, errors.New("chainId in authorization does not fit in 256 bits")
-	}
-	auth.ChainID = *chainId
 	yParity := a.YParity.Uint64()
 	if yParity >= 1<<8 {
 		return auth, errors.New("y parity in authorization does not fit in 8 bits")
 	}
 	auth.YParity = uint8(yParity)
-	r, overflow := uint256.FromBig((*big.Int)(&a.R))
-	if overflow {
-		return auth, errors.New("r in authorization does not fit in 256 bits")
-	}
-	auth.R = *r
-	s, overflow := uint256.FromBig((*big.Int)(&a.S))
-	if overflow {
-		return auth, errors.New("s in authorization does not fit in 256 bits")
-	}
-	auth.S = *s
 	return auth, nil
 }
 
@@ -121,15 +126,15 @@ func (tx *LegacyTx) MarshalJSON() ([]byte, error) {
 	enc.Type = hexutil.Uint64(tx.Type())
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
 	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
-	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
-	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
+	enc.GasPrice = (*hexutil.U256)(&tx.GasPrice)
+	enc.Value = (*hexutil.U256)(&tx.Value)
 	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
-	enc.V = (*hexutil.Big)(tx.V.ToBig())
-	enc.R = (*hexutil.Big)(tx.R.ToBig())
-	enc.S = (*hexutil.Big)(tx.S.ToBig())
+	enc.V = (*hexutil.U256)(&tx.V)
+	enc.R = (*hexutil.U256)(&tx.R)
+	enc.S = (*hexutil.U256)(&tx.S)
 	if tx.Protected() {
-		enc.ChainID = (*hexutil.Big)(tx.GetChainID().ToBig())
+		enc.ChainID = (*hexutil.U256)(tx.GetChainID())
 	}
 	return json.Marshal(&enc)
 }
@@ -139,17 +144,17 @@ func (tx *AccessListTx) MarshalJSON() ([]byte, error) {
 	// These are set for all txn types.
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
-	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
+	enc.ChainID = (*hexutil.U256)(&tx.ChainID)
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
 	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
-	enc.GasPrice = (*hexutil.Big)(tx.GasPrice.ToBig())
-	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
+	enc.GasPrice = (*hexutil.U256)(&tx.GasPrice)
+	enc.Value = (*hexutil.U256)(&tx.Value)
 	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
-	enc.V = (*hexutil.Big)(tx.V.ToBig())
-	enc.R = (*hexutil.Big)(tx.R.ToBig())
-	enc.S = (*hexutil.Big)(tx.S.ToBig())
+	enc.V = (*hexutil.U256)(&tx.V)
+	enc.R = (*hexutil.U256)(&tx.R)
+	enc.S = (*hexutil.U256)(&tx.S)
 	return json.Marshal(&enc)
 }
 
@@ -158,18 +163,18 @@ func (tx *DynamicFeeTransaction) MarshalJSON() ([]byte, error) {
 	// These are set for all txn types.
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
-	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
+	enc.ChainID = (*hexutil.U256)(&tx.ChainID)
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
 	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
-	enc.MaxFeePerGas = (*hexutil.Big)(tx.FeeCap.ToBig())
-	enc.MaxPriorityFeePerGas = (*hexutil.Big)(tx.TipCap.ToBig())
-	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
+	enc.MaxFeePerGas = (*hexutil.U256)(&tx.FeeCap)
+	enc.MaxPriorityFeePerGas = (*hexutil.U256)(&tx.TipCap)
+	enc.Value = (*hexutil.U256)(&tx.Value)
 	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
-	enc.V = (*hexutil.Big)(tx.V.ToBig())
-	enc.R = (*hexutil.Big)(tx.R.ToBig())
-	enc.S = (*hexutil.Big)(tx.S.ToBig())
+	enc.V = (*hexutil.U256)(&tx.V)
+	enc.R = (*hexutil.U256)(&tx.R)
+	enc.S = (*hexutil.U256)(&tx.S)
 	return json.Marshal(&enc)
 }
 
@@ -178,19 +183,19 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	// These are set for all txn types.
 	enc.Hash = tx.Hash()
 	enc.Type = hexutil.Uint64(tx.Type())
-	enc.ChainID = (*hexutil.Big)(tx.ChainID.ToBig())
+	enc.ChainID = (*hexutil.U256)(&tx.ChainID)
 	enc.AccessList = &tx.AccessList
 	enc.Nonce = (*hexutil.Uint64)(&tx.Nonce)
 	enc.Gas = (*hexutil.Uint64)(&tx.GasLimit)
-	enc.MaxFeePerGas = (*hexutil.Big)(tx.FeeCap.ToBig())
-	enc.MaxPriorityFeePerGas = (*hexutil.Big)(tx.TipCap.ToBig())
-	enc.Value = (*hexutil.Big)(tx.Value.ToBig())
+	enc.MaxFeePerGas = (*hexutil.U256)(&tx.FeeCap)
+	enc.MaxPriorityFeePerGas = (*hexutil.U256)(&tx.TipCap)
+	enc.Value = (*hexutil.U256)(&tx.Value)
 	enc.Data = (*hexutil.Bytes)(&tx.Data)
 	enc.To = tx.To
-	enc.V = (*hexutil.Big)(tx.V.ToBig())
-	enc.R = (*hexutil.Big)(tx.R.ToBig())
-	enc.S = (*hexutil.Big)(tx.S.ToBig())
-	enc.MaxFeePerBlobGas = (*hexutil.Big)(tx.MaxFeePerBlobGas.ToBig())
+	enc.V = (*hexutil.U256)(&tx.V)
+	enc.R = (*hexutil.U256)(&tx.R)
+	enc.S = (*hexutil.U256)(&tx.S)
+	enc.MaxFeePerBlobGas = (*hexutil.U256)(&tx.MaxFeePerBlobGas)
 	enc.BlobVersionedHashes = tx.GetBlobHashes()
 	return &enc
 }
@@ -280,11 +285,7 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.GasPrice == nil {
 		return errors.New("missing required field 'gasPrice' in transaction")
 	}
-	gasPrice, overflow := uint256.FromBig(dec.GasPrice.ToInt())
-	if overflow {
-		return errors.New("'gasPrice' in transaction does not fit in 256 bits")
-	}
-	tx.GasPrice = *gasPrice
+	tx.GasPrice = uint256.Int(*dec.GasPrice)
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
@@ -292,11 +293,7 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
-	val, overflow := uint256.FromBig(dec.Value.ToInt())
-	if overflow {
-		return errors.New("'value' in transaction does not fit in 256 bits")
-	}
-	tx.Value = *val
+	tx.Value = uint256.Int(*dec.Value)
 	if dec.Data == nil {
 		return errors.New("missing required field 'input' in transaction")
 	}
@@ -304,27 +301,15 @@ func (tx *LegacyTx) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	overflow = tx.V.SetFromBig(dec.V.ToInt())
-	if overflow {
-		return errors.New("dec.V higher than 2^256-1")
-	}
+	tx.V = uint256.Int(*dec.V)
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	overflow = tx.R.SetFromBig(dec.R.ToInt())
-	if overflow {
-		return errors.New("dec.R higher than 2^256-1")
-	}
+	tx.R = uint256.Int(*dec.R)
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	overflow = tx.S.SetFromBig(dec.S.ToInt())
-	if overflow {
-		return errors.New("dec.S higher than 2^256-1")
-	}
-	if overflow {
-		return errors.New("'s' in transaction does not fit in 256 bits")
-	}
+	tx.S = uint256.Int(*dec.S)
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
 		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, true); err != nil {
@@ -346,11 +331,7 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.ChainID == nil {
 		return errors.New("missing required field 'chainId' in transaction")
 	}
-	chainID, overflow := uint256.FromBig(dec.ChainID.ToInt())
-	if overflow {
-		return errors.New("'chainId' in transaction does not fit in 256 bits")
-	}
-	tx.ChainID = *chainID
+	tx.ChainID = uint256.Int(*dec.ChainID)
 	if dec.To != nil {
 		tx.To = dec.To
 	}
@@ -361,11 +342,7 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.GasPrice == nil {
 		return errors.New("missing required field 'gasPrice' in transaction")
 	}
-	gasPrice, overflow := uint256.FromBig(dec.GasPrice.ToInt())
-	if overflow {
-		return errors.New("'gasPrice' in transaction does not fit in 256 bits")
-	}
-	tx.GasPrice = *gasPrice
+	tx.GasPrice = uint256.Int(*dec.GasPrice)
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
@@ -373,11 +350,7 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
-	val, overflow := uint256.FromBig(dec.Value.ToInt())
-	if overflow {
-		return errors.New("'value' in transaction does not fit in 256 bits")
-	}
-	tx.Value = *val
+	tx.Value = uint256.Int(*dec.Value)
 	if dec.Data == nil {
 		return errors.New("missing required field 'input' in transaction")
 	}
@@ -385,24 +358,15 @@ func (tx *AccessListTx) UnmarshalJSON(input []byte) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	overflow = tx.V.SetFromBig(dec.V.ToInt())
-	if overflow {
-		return errors.New("dec.V higher than 2^256-1")
-	}
+	tx.V = uint256.Int(*dec.V)
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	overflow = tx.R.SetFromBig(dec.R.ToInt())
-	if overflow {
-		return errors.New("dec.R higher than 2^256-1")
-	}
+	tx.R = uint256.Int(*dec.R)
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	overflow = tx.S.SetFromBig(dec.S.ToInt())
-	if overflow {
-		return errors.New("dec.S higher than 2^256-1")
-	}
+	tx.S = uint256.Int(*dec.S)
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
 		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
@@ -420,11 +384,7 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	if dec.ChainID == nil {
 		return errors.New("missing required field 'chainId' in transaction")
 	}
-	chainID, overflow := uint256.FromBig(dec.ChainID.ToInt())
-	if overflow {
-		return errors.New("'chainId' in transaction does not fit in 256 bits")
-	}
-	tx.ChainID = *chainID
+	tx.ChainID = uint256.Int(*dec.ChainID)
 	if dec.To != nil {
 		tx.To = dec.To
 	}
@@ -432,19 +392,14 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 		return errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Nonce = uint64(*dec.Nonce)
-	if dec.GasPrice == nil {
-		return errors.New("missing required field 'gasPrice' in transaction")
+	if dec.MaxPriorityFeePerGas == nil {
+		return errors.New("missing required field 'maxPriorityFeePerGas' in transaction")
 	}
-	tipCap, overflow := uint256.FromBig(dec.MaxPriorityFeePerGas.ToInt())
-	if overflow {
-		return errors.New("'tip' in transaction does not fit in 256 bits")
+	tx.TipCap = uint256.Int(*dec.MaxPriorityFeePerGas)
+	if dec.MaxFeePerGas == nil {
+		return errors.New("missing required field 'maxFeePerGas' in transaction")
 	}
-	tx.TipCap = *tipCap
-	feeCap, overflow := uint256.FromBig(dec.MaxFeePerGas.ToInt())
-	if overflow {
-		return errors.New("'feeCap' in transaction does not fit in 256 bits")
-	}
-	tx.FeeCap = *feeCap
+	tx.FeeCap = uint256.Int(*dec.MaxFeePerGas)
 	if dec.Gas == nil {
 		return errors.New("missing required field 'gas' in transaction")
 	}
@@ -452,11 +407,7 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	if dec.Value == nil {
 		return errors.New("missing required field 'value' in transaction")
 	}
-	val, overflow := uint256.FromBig(dec.Value.ToInt())
-	if overflow {
-		return errors.New("'value' in transaction does not fit in 256 bits")
-	}
-	tx.Value = *val
+	tx.Value = uint256.Int(*dec.Value)
 	if dec.Data == nil {
 		return errors.New("missing required field 'input' in transaction")
 	}
@@ -464,27 +415,15 @@ func (tx *DynamicFeeTransaction) unmarshalJson(dec txJSON) error {
 	if dec.V == nil {
 		return errors.New("missing required field 'v' in transaction")
 	}
-	overflow = tx.V.SetFromBig(dec.V.ToInt())
-	if overflow {
-		return errors.New("dec.V higher than 2^256-1")
-	}
+	tx.V = uint256.Int(*dec.V)
 	if dec.R == nil {
 		return errors.New("missing required field 'r' in transaction")
 	}
-	overflow = tx.R.SetFromBig(dec.R.ToInt())
-	if overflow {
-		return errors.New("dec.R higher than 2^256-1")
-	}
+	tx.R = uint256.Int(*dec.R)
 	if dec.S == nil {
 		return errors.New("missing required field 's' in transaction")
 	}
-	overflow = tx.S.SetFromBig(dec.S.ToInt())
-	if overflow {
-		return errors.New("dec.S higher than 2^256-1")
-	}
-	if overflow {
-		return errors.New("'s' in transaction does not fit in 256 bits")
-	}
+	tx.S = uint256.Int(*dec.S)
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {
 		if err := sanityCheckSignature(&tx.V, &tx.R, &tx.S, false); err != nil {
@@ -512,6 +451,9 @@ func (tx *SetCodeTransaction) UnmarshalJSON(input []byte) error {
 	if err := tx.unmarshalJson(dec); err != nil {
 		return err
 	}
+	if dec.Authorizations == nil {
+		return errors.New("missing required field 'authorizationList' in transaction")
+	}
 	auths := *dec.Authorizations
 	tx.Authorizations = make([]Authorization, len(auths))
 	for i := range auths {
@@ -538,11 +480,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.ChainID == nil {
 		return nil, errors.New("missing required field 'chainId' in transaction")
 	}
-	chainID, overflow := uint256.FromBig(dec.ChainID.ToInt())
-	if overflow {
-		return nil, errors.New("'chainId' in transaction does not fit in 256 bits")
-	}
-	tx.ChainID = *chainID
+	tx.ChainID = uint256.Int(*dec.ChainID)
 	if dec.To != nil {
 		tx.To = dec.To
 	}
@@ -550,16 +488,14 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		return nil, errors.New("missing required field 'nonce' in transaction")
 	}
 	tx.Nonce = uint64(*dec.Nonce)
-	tipCap, overflow := uint256.FromBig(dec.MaxPriorityFeePerGas.ToInt())
-	if overflow {
-		return nil, errors.New("'tip' in transaction does not fit in 256 bits")
+	if dec.MaxPriorityFeePerGas == nil {
+		return nil, errors.New("missing required field 'maxPriorityFeePerGas' in transaction")
 	}
-	tx.TipCap = *tipCap
-	feeCap, overflow := uint256.FromBig(dec.MaxFeePerGas.ToInt())
-	if overflow {
-		return nil, errors.New("'feeCap' in transaction does not fit in 256 bits")
+	tx.TipCap = uint256.Int(*dec.MaxPriorityFeePerGas)
+	if dec.MaxFeePerGas == nil {
+		return nil, errors.New("missing required field 'maxFeePerGas' in transaction")
 	}
-	tx.FeeCap = *feeCap
+	tx.FeeCap = uint256.Int(*dec.MaxFeePerGas)
 	if dec.Gas == nil {
 		return nil, errors.New("missing required field 'gas' in transaction")
 	}
@@ -567,11 +503,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.Value == nil {
 		return nil, errors.New("missing required field 'value' in transaction")
 	}
-	val, overflow := uint256.FromBig(dec.Value.ToInt())
-	if overflow {
-		return nil, errors.New("'value' in transaction does not fit in 256 bits")
-	}
-	tx.Value = *val
+	tx.Value = uint256.Int(*dec.Value)
 	if dec.Data == nil {
 		return nil, errors.New("missing required field 'input' in transaction")
 	}
@@ -581,11 +513,7 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 		return nil, errors.New("missing required field 'maxFeePerBlobGas' in transaction")
 	}
 
-	maxFeePerBlobGas, overflow := uint256.FromBig(dec.MaxFeePerBlobGas.ToInt())
-	if overflow {
-		return nil, errors.New("'maxFeePerBlobGas' in transaction does not fit in 256 bits")
-	}
-	tx.MaxFeePerBlobGas = *maxFeePerBlobGas
+	tx.MaxFeePerBlobGas = uint256.Int(*dec.MaxFeePerBlobGas)
 
 	if dec.BlobVersionedHashes != nil {
 		tx.BlobVersionedHashes = dec.BlobVersionedHashes
@@ -596,24 +524,15 @@ func UnmarshalBlobTxJSON(input []byte) (Transaction, error) {
 	if dec.V == nil {
 		return nil, errors.New("missing required field 'v' in transaction")
 	}
-	overflow = tx.V.SetFromBig(dec.V.ToInt())
-	if overflow {
-		return nil, errors.New("dec.V higher than 2^256-1")
-	}
+	tx.V = uint256.Int(*dec.V)
 	if dec.R == nil {
 		return nil, errors.New("missing required field 'r' in transaction")
 	}
-	overflow = tx.R.SetFromBig(dec.R.ToInt())
-	if overflow {
-		return nil, errors.New("dec.R higher than 2^256-1")
-	}
+	tx.R = uint256.Int(*dec.R)
 	if dec.S == nil {
 		return nil, errors.New("missing required field 's' in transaction")
 	}
-	overflow = tx.S.SetFromBig(dec.S.ToInt())
-	if overflow {
-		return nil, errors.New("dec.S higher than 2^256-1")
-	}
+	tx.S = uint256.Int(*dec.S)
 
 	withSignature := !tx.V.IsZero() || !tx.R.IsZero() || !tx.S.IsZero()
 	if withSignature {

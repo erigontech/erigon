@@ -61,7 +61,10 @@ func (v *View) Txs() []*snapshotsync.VisibleSegment {
 func (v *View) Segment(t snaptype.Type, blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(t, blockNum)
 }
+
 func (v *View) Segments(t snaptype.Type) []*snapshotsync.VisibleSegment { return v.base.Segments(t) }
+
+func (v *View) BlocksAvailable() uint64 { return v.base.BlocksAvailable() }
 
 func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(snaptype2.Headers, blockNum)
@@ -70,6 +73,7 @@ func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bo
 func (v *View) BodiesSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(snaptype2.Bodies, blockNum)
 }
+
 func (v *View) TxsSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(snaptype2.Transactions, blockNum)
 }

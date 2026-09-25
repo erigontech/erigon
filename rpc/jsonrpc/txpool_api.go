@@ -23,9 +23,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -34,41 +31,39 @@ import (
 
 // TxPoolAPI the interface for the txpool_ RPC commands
 type TxPoolAPI interface {
-	Content(ctx context.Context) (map[string]map[string]map[string]*ethapi.RPCTransaction, error)
-	ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error)
+	Content(ctx context.Context) (TxPoolContent, error)
+	ContentFrom(ctx context.Context, addr common.Address) (TxPoolContentFrom, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
 type TxPoolAPIImpl struct {
 	*BaseAPI
 	pool txpoolproto.TxpoolClient
-	db   kv.TemporalRoDB
 }
 
 // NewTxPoolAPI returns NetAPIImplImpl instance
-func NewTxPoolAPI(base *BaseAPI, db kv.TemporalRoDB, pool txpoolproto.TxpoolClient) *TxPoolAPIImpl {
+func NewTxPoolAPI(base *BaseAPI, pool txpoolproto.TxpoolClient) *TxPoolAPIImpl {
 	return &TxPoolAPIImpl{
 		BaseAPI: base,
 		pool:    pool,
-		db:      db,
 	}
 }
 
-func flattenTxs(txs []types.Transaction, curHeader *types.Header, cc *chain.Config) map[string]*ethapi.RPCTransaction {
+func flattenTxs(txs []types.Transaction) map[string]*ethapi.RPCTransaction {
 	dump := make(map[string]*ethapi.RPCTransaction, len(txs))
 	for _, txn := range txs {
-		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, curHeader, cc)
+		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn)
 	}
 	return dump
 }
 
-func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]map[string]*ethapi.RPCTransaction, error) {
+func (api *TxPoolAPIImpl) Content(ctx context.Context) (TxPoolContent, error) {
 	reply, err := api.pool.All(ctx, &txpoolproto.AllRequest{})
 	if err != nil {
 		return nil, err
 	}
 
-	content := map[string]map[string]map[string]*ethapi.RPCTransaction{
+	content := TxPoolContent{
 		"pending": make(map[string]map[string]*ethapi.RPCTransaction),
 		"queued":  make(map[string]map[string]*ethapi.RPCTransaction),
 	}
@@ -87,7 +82,9 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		}
 		addr := gointerfaces.ConvertH160toAddress(reply.Txs[i].Sender)
 		switch reply.Txs[i].TxnType {
-		case txpoolproto.AllReply_PENDING:
+		// Base fee sub-pool transactions are nonce-ready and otherwise valid, waiting only for the
+		// base fee to drop, which is what Geth keeps in its pending list, so they are pending here too.
+		case txpoolproto.AllReply_PENDING, txpoolproto.AllReply_BASE_FEE:
 			if _, ok := pending[addr]; !ok {
 				pending[addr] = make([]types.Transaction, 0, 4)
 			}
@@ -100,36 +97,22 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		}
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	cc, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
-	if curHeader == nil {
-		return nil, nil
-	}
 	for account, txs := range pending {
-		content["pending"][account.Hex()] = flattenTxs(txs, curHeader, cc)
+		content["pending"][account.Hex()] = flattenTxs(txs)
 	}
 	for account, txs := range queued {
-		content["queued"][account.Hex()] = flattenTxs(txs, curHeader, cc)
+		content["queued"][account.Hex()] = flattenTxs(txs)
 	}
 	return content, nil
 }
 
-func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error) {
+func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) (TxPoolContentFrom, error) {
 	reply, err := api.pool.All(ctx, &txpoolproto.AllRequest{})
 	if err != nil {
 		return nil, err
 	}
 
-	content := map[string]map[string]*ethapi.RPCTransaction{
+	content := TxPoolContentFrom{
 		"pending": make(map[string]*ethapi.RPCTransaction),
 		"queued":  make(map[string]*ethapi.RPCTransaction),
 	}
@@ -152,29 +135,15 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		}
 
 		switch reply.Txs[i].TxnType {
-		case txpoolproto.AllReply_PENDING:
+		case txpoolproto.AllReply_PENDING, txpoolproto.AllReply_BASE_FEE:
 			pending = append(pending, txn)
 		case txpoolproto.AllReply_QUEUED:
 			queued = append(queued, txn)
 		}
 	}
 
-	tx, err := api.db.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-	cc, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
-	if curHeader == nil {
-		return nil, nil
-	}
-	content["pending"] = flattenTxs(pending, curHeader, cc)
-	content["queued"] = flattenTxs(queued, curHeader, cc)
+	content["pending"] = flattenTxs(pending)
+	content["queued"] = flattenTxs(queued)
 	return content, nil
 }
 
@@ -185,7 +154,7 @@ func (api *TxPoolAPIImpl) Status(ctx context.Context) (map[string]hexutil.Uint, 
 		return nil, err
 	}
 	return map[string]hexutil.Uint{
-		"pending": hexutil.Uint(reply.PendingCount),
+		"pending": hexutil.Uint(uint64(reply.PendingCount) + uint64(reply.BaseFeeCount)),
 		"queued":  hexutil.Uint(reply.QueuedCount),
 	}, nil
 }

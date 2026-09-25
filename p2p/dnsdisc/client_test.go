@@ -22,6 +22,7 @@ package dnsdisc
 import (
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"maps"
 	"net"
 	"reflect"
@@ -99,7 +100,7 @@ func TestClientSyncTreeBadNode(t *testing.T) {
 	c := NewClient(Config{Resolver: r, Logger: testlog.Logger(t, log.LvlTrace)})
 	_, err := c.SyncTree("enrtree://AKPYQIUQIL7PSIACI32J7FGZW56E5FKHEFCCOFHILBIMW3M6LWXS2@n")
 	wantErr := nameError{name: "INDMVBZEEQ4ESVYAKGIYU74EAA.n", err: entryError{typ: "enr", err: errInvalidENR}}
-	if err != wantErr {
+	if !errors.Is(err, wantErr) {
 		t.Fatalf("expected sync error %q, got %q", wantErr, err)
 	}
 }
@@ -321,7 +322,7 @@ func updateSomeNodes(keys []*ecdsa.PrivateKey, nodes []*enode.Node) {
 		r := n.Record()
 		r.Set(enr.IP{127, 0, 0, 1})
 		r.SetSeq(55)
-		enode.SignV4(r, keys[i])
+		_ = enode.SignV4(r, keys[i])
 		n2, _ := enode.New(enode.ValidSchemes, r)
 		nodes[i] = n2
 	}
@@ -431,7 +432,9 @@ func testNodes(keys []*ecdsa.PrivateKey) []*enode.Node {
 	for i, key := range keys {
 		record := new(enr.Record)
 		record.SetSeq(uint64(i))
-		enode.SignV4(record, key)
+		if err := enode.SignV4(record, key); err != nil {
+			panic(err)
+		}
 		n, err := enode.New(enode.ValidSchemes, record)
 		if err != nil {
 			panic(err)

@@ -274,6 +274,12 @@ func Test_CompressWithMetadata(t *testing.T) {
 	d := prepareDictMetadata(t, 1, true, metadata, 100)
 	defer d.Close()
 	require.Equal(t, metadata, d.GetMetadata())
+	prefixLen := uint64(2 + 4 + len(metadata))
+	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
+		prefixLen++
+	}
+	require.Equal(t, prefixLen+d.wordsStart, d.wordsFileOffset)
+	require.Equal(t, d.wordsFileOffset, d.MakeGetter().dataOffset)
 	g := d.MakeGetter()
 	i := 0
 	g.Reset(0)
@@ -352,7 +358,8 @@ func TestCompressNoWordPatterns(t *testing.T) {
 	}
 	for i := range 100 {
 		// Semantic: "empty word" means "found key with empty value". "nil" - means key was deleted - not encodable by compressor
-		words = append(words,
+		words = append(
+			words,
 			nil,
 			[]byte{},
 
@@ -448,4 +455,22 @@ func TestCompressorCloseReleasesWorkers(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Close() returned while pattern workers are still running")
 	}
+}
+
+func TestParseFileCompression(t *testing.T) {
+	for _, tc := range []struct {
+		in   string
+		want FileCompression
+	}{
+		{"none", CompressNone},
+		{"k", CompressKeys},
+		{"v", CompressVals},
+		{"kv", CompressKeys | CompressVals},
+	} {
+		got, err := ParseFileCompression(tc.in)
+		require.NoError(t, err)
+		require.Equalf(t, tc.want, got, "%q", tc.in)
+	}
+	_, err := ParseFileCompression("zstd")
+	require.Error(t, err)
 }

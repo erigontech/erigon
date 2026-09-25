@@ -32,6 +32,34 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
+func TestNewKeepsMissingUnwindStagesAsNil(t *testing.T) {
+	headerStage := &Stage{ID: stages.Headers}
+	state := New(
+		ethconfig.Defaults.Sync,
+		[]*Stage{headerStage},
+		UnwindOrder{stages.Bodies, stages.Headers},
+		nil,
+		log.New(),
+		stages.ModeApplyingBlocks,
+	)
+
+	require.Equal(t, []*Stage{nil, headerStage}, state.unwindOrder)
+}
+
+func TestNewKeepsMissingPruneStagesAsNil(t *testing.T) {
+	headerStage := &Stage{ID: stages.Headers}
+	state := New(
+		ethconfig.Defaults.Sync,
+		[]*Stage{headerStage},
+		nil,
+		PruneOrder{stages.Bodies, stages.Headers},
+		log.New(),
+		stages.ModeApplyingBlocks,
+	)
+
+	require.Equal(t, []*Stage{nil, headerStage}, state.pruningOrder)
+}
+
 func TestStagesSuccess(t *testing.T) {
 	flow := make([]stages.SyncStage, 0)
 	s := []*Stage{
@@ -311,7 +339,7 @@ func TestUnwind(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 500, int(stageState.BlockNumber))
 
-	//check that at unwind disabled stage not appear
+	// check that at unwind disabled stage not appear
 	flow = flow[:0]
 	state.unwindOrder = []*Stage{s[2], s[1], s[0]}
 	_ = state.UnwindTo(100, UnwindReason{}, tx)
@@ -324,7 +352,6 @@ func TestUnwind(t *testing.T) {
 	}
 
 	assert.Equal(t, expectedFlow, flow)
-
 }
 
 func TestUnwindEmptyUnwinder(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -34,15 +35,17 @@ func TestStateLogger(t *testing.T) {
 
 	cases := []struct {
 		name                    string
-		run                     func(state *IntraBlockState)
+		run                     func(state *IntraBlockState) error
 		checker                 func(t *testing.T, state *IntraBlockState)
 		wantBalanceChangeTraces []balanceChangeTrace
 	}{
 		{
 			name: "multiple add balance",
-			run: func(state *IntraBlockState) {
-				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+			run: func(state *IntraBlockState) error {
+				if err := state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified); err != nil {
+					return err
+				}
+				return state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				if len(stateDB.journal.entries) != 3 {
@@ -81,9 +84,11 @@ func TestStateLogger(t *testing.T) {
 		},
 		{
 			name: "sub balance",
-			run: func(state *IntraBlockState) {
-				state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified)
-				state.SubBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
+			run: func(state *IntraBlockState) error {
+				if err := state.AddBalance(accounts.ZeroAddress, *uint256.NewInt(2), tracing.BalanceChangeUnspecified); err != nil {
+					return err
+				}
+				return state.SubBalance(accounts.ZeroAddress, *uint256.NewInt(1), tracing.BalanceChangeUnspecified)
 			},
 			checker: func(t *testing.T, stateDB *IntraBlockState) {
 				so, err := stateDB.GetOrNewStateObject(accounts.ZeroAddress)
@@ -110,11 +115,11 @@ func TestStateLogger(t *testing.T) {
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(tx))
+			state := New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
 			defer state.Close()
 			state.SetHooks(mt.Hooks())
 
-			tt.run(state)
+			require.NoError(t, tt.run(state))
 			tt.checker(t, state)
 			require.Equal(t, tt.wantBalanceChangeTraces, mt.balanceChangeTraces)
 		})

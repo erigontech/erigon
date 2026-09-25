@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -28,13 +29,14 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -51,6 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -64,8 +67,10 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
-var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+var (
+	caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
+	errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+)
 
 type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
@@ -131,6 +136,16 @@ func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfi
 	e.beaconCfg.Store(beaconCfg)
 }
 
+func (e *EngineServer) engineAPI() rpc.API {
+	return rpc.API{
+		Namespace: "engine",
+		Public:    true,
+		Service:   engineRPC(e),
+		Iface:     reflect.TypeFor[engineRPC](),
+		Version:   "1.0",
+	}
+}
+
 func (e *EngineServer) Start(
 	ctx context.Context,
 	httpConfig *httpcfg.HttpCfg,
@@ -155,7 +170,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, nil, jsonrpc.NewBaseApiConfig(httpConfig))
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, jsonrpc.NewBaseApiConfig(httpConfig))
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{
@@ -164,12 +179,9 @@ func (e *EngineServer) Start(
 			Public:    true,
 			Service:   jsonrpc.EthAPI(ethImpl),
 			Version:   "1.0",
-		}, {
-			Namespace: "engine",
-			Public:    true,
-			Service:   EngineAPI(e),
-			Version:   "1.0",
-		}}
+		},
+		e.engineAPI(),
+	}
 
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
@@ -287,17 +299,50 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
-	txs := make([][]byte, 0, len(req.Transactions))
-	for _, transaction := range req.Transactions {
-		txs = append(txs, transaction)
+	var err error
+	txs := make([][]byte, len(req.Transactions))
+	transactions := make([]types.Transaction, len(req.Transactions))
+	var invalidTransactionStatus *engine_types.PayloadStatus
+	for i, transaction := range req.Transactions {
+		txs[i] = transaction
+		if invalidTransactionStatus != nil {
+			continue
+		}
+		if types.TypedTransactionMarshalledAsRlpString(transaction) {
+			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
+			invalidTransactionStatus = &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
+			}
+			continue
+		}
+		transactions[i], err = types.UnmarshalTransactionFromBinary(transaction, false /* blobTxnsAreWrappedWithBlobs */)
+		if err != nil {
+			s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
+			invalidTransactionStatus = &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedError(err),
+			}
+			continue
+		}
+		if transactions[i].GetGasLimit() > uint64(req.GasLimit) {
+			invalidTransactionStatus = &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedError(protocol.ErrGasLimitReached),
+			}
+		}
 	}
 
+	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
+	if req.BaseFeePerGas != nil {
+		baseFee = new(uint256.Int).Set((*uint256.Int)(req.BaseFeePerGas))
+	}
 	header := types.Header{
 		ParentHash:  req.ParentHash,
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
 		Bloom:       bloom,
-		BaseFee:     uint256.MustFromBig(req.BaseFeePerGas.ToInt()),
+		BaseFee:     baseFee,
 		Extra:       req.ExtraData,
 		Number:      *uint256.NewInt(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),
@@ -359,8 +404,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	var blockAccessListBytes []byte
-	var err error
+	var blockAccessList *types.BlockAccessListSidecar
 	if version < clparams.GloasVersion && req.SlotNumber != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected slotNumber before engine_newPayloadV5"}
 	}
@@ -375,24 +419,20 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		bal := *req.BlockAccessList
-		// Decode fully validates EIP-7928 structure, ordering and limits; the raw
-		// bytes are what we hash and store, so the decoded value itself is discarded.
-		if _, err = types.DecodeBlockAccessListBytes(bal); err != nil {
-			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(bal))
-			// A decodable list that violates EIP-7928 rules is an invalid
-			// block; undecodable bytes are a malformed request (-32602).
-			if errors.Is(err, types.ErrInvalidBlockAccessList) {
-				return &engine_types.PayloadStatus{
-					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
-				}, nil
-			}
-			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
+		balBytes := *req.BlockAccessList
+		blockAccessList, err = types.DecodeBlockAccessListSidecarOwned(balBytes)
+		if err != nil {
+			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, err)),
+			}, nil
 		}
-		hash := crypto.Keccak256Hash(bal)
+		hash, err := blockAccessList.Hash()
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot hash blockAccessList: %v", err)}
+		}
 		header.BlockAccessListHash = &hash
-		blockAccessListBytes = bal
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
 			header.SlotNumber = &slotNumber
@@ -424,24 +464,16 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
 		}, nil
 	}
-
-	for _, txn := range req.Transactions {
-		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
+	if invalidTransactionStatus != nil {
+		return invalidTransactionStatus, nil
+	}
+	if blockAccessList != nil {
+		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
+				ValidationError: engine_types.NewStringifiedError(err),
 			}, nil
 		}
-	}
-
-	transactions, err := types.DecodeTransactions(txs)
-	if err != nil {
-		s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
-		return &engine_types.PayloadStatus{
-			Status:          engine_types.InvalidStatus,
-			ValidationError: engine_types.NewStringifiedError(err),
-		}, nil
 	}
 
 	if version >= clparams.DenebVersion {
@@ -486,8 +518,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// inside InsertBlocks doesn't re-encode every tx
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
-	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessListBytes)
-	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
+	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
+	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -676,7 +708,6 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		}
 		return assembled.Busy, nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
@@ -939,7 +970,6 @@ func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 	versionedHashes []common.Hash,
-	blockAccessListBytes []byte,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 
@@ -1012,7 +1042,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
-		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
+		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
@@ -1101,7 +1131,7 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Time),
 		ExtraData:     header.Extra,
-		BaseFeePerGas: (*hexutil.Big)(header.BaseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(header.BaseFee),
 		BlockHash:     block.Hash(),
 		Transactions:  txs,
 	}
@@ -1120,12 +1150,13 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		sn := hexutil.Uint64(*header.SlotNumber)
 		ep.SlotNumber = &sn
 	}
-	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
-		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
-		if encErr == nil {
-			bal := hexutil.Bytes(encoded)
-			ep.BlockAccessList = &bal
+	if header.BlockAccessListHash != nil && block.BlockAccessListSidecar() != nil {
+		encoded, err := block.BlockAccessListSidecar().Bytes()
+		if err != nil {
+			return nil, fmt.Errorf("encode block access list: %w", err)
 		}
+		bal := hexutil.Bytes(encoded)
+		ep.BlockAccessList = &bal
 	}
 
 	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())
@@ -1146,7 +1177,7 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 
 	return &engine_types.GetPayloadResponse{
 		ExecutionPayload:  ep,
-		BlockValue:        (*hexutil.Big)(blockValue.ToBig()),
+		BlockValue:        (*hexutil.U256)(blockValue),
 		BlobsBundle:       blobsBundle,
 		ExecutionRequests: executionRequests,
 	}, nil
@@ -1222,9 +1253,12 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion) (any, error) {
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion, cellIndices hexutil.Bytes) (any, error) {
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	if version == clparams.GloasVersion && len(cellIndices) != goethkzg.CellsPerExtBlob/8 {
+		return nil, &rpc.InvalidParamsError{Message: "indices_bitarray must be 16 bytes"}
 	}
 	if e.blobGetter == nil {
 		return nil, txpool.ErrPoolDisabled
@@ -1238,6 +1272,40 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 
 	switch version {
+	case clparams.GloasVersion:
+		indices := make([]int, 0, goethkzg.CellsPerExtBlob)
+		for i := range goethkzg.CellsPerExtBlob {
+			if cellIndices[i/8]&(1<<(i%8)) != 0 {
+				indices = append(indices, i)
+			}
+		}
+		ret := make([]*engine_types.BlobCellsAndProofsV1, len(blobHashes))
+		for i, bundle := range bundles {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if len(bundle.Blob) != len(goethkzg.Blob{}) || len(bundle.Proofs) != goethkzg.CellsPerExtBlob {
+				continue
+			}
+			ret[i] = &engine_types.BlobCellsAndProofsV1{
+				BlobCells: make([]*hexutil.Bytes, len(indices)),
+				Proofs:    make([]*hexutil.Bytes, len(indices)),
+			}
+			if len(indices) == 0 {
+				continue
+			}
+			cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
+			if err != nil {
+				return nil, fmt.Errorf("compute cells for blob %s: %w", blobHashes[i], err)
+			}
+			for j, index := range indices {
+				cell := hexutil.Bytes(cells[index][:])
+				proof := hexutil.Bytes(bundle.Proofs[index][:])
+				ret[i].BlobCells[j] = &cell
+				ret[i].Proofs[j] = &proof
+			}
+		}
+		return ret, nil
 	case clparams.FuluVersion: // GetBlobsV3
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
 		for i, bb := range bundles {

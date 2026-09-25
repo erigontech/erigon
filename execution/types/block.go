@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 const (
@@ -75,47 +77,54 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 }
 
 //()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type Header -out gen_header_fastjson.go -computed writeComputedJSON
 
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
 type Header struct {
-	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required"`
-	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required"`
-	Coinbase    common.Address `json:"miner"`
-	Root        common.Hash    `json:"stateRoot"        gencodec:"required"`
-	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required"`
-	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required"`
-	Bloom       Bloom          `json:"logsBloom"        gencodec:"required"`
-	Difficulty  uint256.Int    `json:"difficulty"       gencodec:"required"`
-	Number      uint256.Int    `json:"number"           gencodec:"required"`
-	GasLimit    uint64         `json:"gasLimit"         gencodec:"required"`
-	GasUsed     uint64         `json:"gasUsed"          gencodec:"required"`
-	Time        uint64         `json:"timestamp"        gencodec:"required"`
-	Extra       []byte         `json:"extraData"        gencodec:"required"`
-	MixDigest   common.Hash    `json:"mixHash"` // prevRandao after EIP-4399
-	Nonce       BlockNonce     `json:"nonce"`
+	ParentHash  common.Hash    `json:"parentHash"       gencodec:"required" ethjson:"data"`
+	UncleHash   common.Hash    `json:"sha3Uncles"       gencodec:"required" ethjson:"data"`
+	Coinbase    common.Address `json:"miner" ethjson:"data"`
+	Root        common.Hash    `json:"stateRoot"        gencodec:"required" ethjson:"data"`
+	TxHash      common.Hash    `json:"transactionsRoot" gencodec:"required" ethjson:"data"`
+	ReceiptHash common.Hash    `json:"receiptsRoot"     gencodec:"required" ethjson:"data"`
+	Bloom       Bloom          `json:"logsBloom"        gencodec:"required" ethjson:"data"`
+	Difficulty  uint256.Int    `json:"difficulty"       gencodec:"required" ethjson:"quantity"`
+	Number      uint256.Int    `json:"number"           gencodec:"required" ethjson:"quantity"`
+	GasLimit    uint64         `json:"gasLimit"         gencodec:"required" ethjson:"quantity"`
+	GasUsed     uint64         `json:"gasUsed"          gencodec:"required" ethjson:"quantity"`
+	Time        uint64         `json:"timestamp"        gencodec:"required" ethjson:"quantity"`
+	Extra       []byte         `json:"extraData"        gencodec:"required" ethjson:"data"`
+	MixDigest   common.Hash    `json:"mixHash" ethjson:"data"` // prevRandao after EIP-4399
+	Nonce       BlockNonce     `json:"nonce" ethjson:"data"`
 	// AuRa extensions (alternative to MixDigest & Nonce)
-	AuRaStep uint64 `json:"auraStep,omitempty"`
-	AuRaSeal []byte `json:"auraSeal,omitempty"`
+	AuRaStep uint64 `json:"auraStep,omitempty" ethjson:"quantity"`
+	AuRaSeal []byte `json:"auraSeal,omitempty" ethjson:"data"`
 
-	BaseFee         *uint256.Int `json:"baseFeePerGas"`   // EIP-1559
-	WithdrawalsHash *common.Hash `json:"withdrawalsRoot"` // EIP-4895
+	BaseFee         *uint256.Int `json:"baseFeePerGas" ethjson:"quantity"` // EIP-1559
+	WithdrawalsHash *common.Hash `json:"withdrawalsRoot" ethjson:"data"`   // EIP-4895
 
 	// BlobGasUsed & ExcessBlobGas were added by EIP-4844 and are ignored in legacy headers.
-	BlobGasUsed   *uint64 `json:"blobGasUsed"`
-	ExcessBlobGas *uint64 `json:"excessBlobGas"`
+	BlobGasUsed   *uint64 `json:"blobGasUsed" ethjson:"quantity"`
+	ExcessBlobGas *uint64 `json:"excessBlobGas" ethjson:"quantity"`
 
-	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot"` // EIP-4788
+	ParentBeaconBlockRoot *common.Hash `json:"parentBeaconBlockRoot" ethjson:"data"` // EIP-4788
 
-	RequestsHash        *common.Hash `json:"requestsHash"`        // EIP-7685
-	BlockAccessListHash *common.Hash `json:"blockAccessListHash"` // EIP-7928
+	RequestsHash        *common.Hash `json:"requestsHash" ethjson:"data"`        // EIP-7685
+	BlockAccessListHash *common.Hash `json:"blockAccessListHash" ethjson:"data"` // EIP-7928
 
-	SlotNumber *uint64 `json:"slotNumber"` // EIP-7843
+	SlotNumber *uint64 `json:"slotNumber,omitempty" ethjson:"quantity"` // EIP-7843
 	// by default all headers are immutable
 	// but assembling/mining may use `NewEmptyHeaderForAssembling` to create temporary mutable Header object
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
 	mutable bool
 	hash    atomic.Pointer[common.Hash]
+}
+
+// writeComputedJSON writes the reply's hash, which Header derives rather than stores.
+func (h *Header) writeComputedJSON(s *jsonstream.StackStream) {
+	hash := h.Hash()
+	ethjson.Data(s, "hash", hash[:])
 }
 
 // NewEmptyHeaderForAssembling - returns mutable header object - for assembling/sealing/etc...
@@ -534,13 +543,13 @@ func (h *Header) DecodeRLP(s *rlp.Stream) error {
 
 // field type overrides for gencodec
 type headerMarshaling struct {
-	Difficulty    *hexutil.Big
-	Number        *hexutil.Big
+	Difficulty    *hexutil.U256
+	Number        *hexutil.U256
 	GasLimit      hexutil.Uint64
 	GasUsed       hexutil.Uint64
 	Time          hexutil.Uint64
 	Extra         hexutil.Bytes
-	BaseFee       *hexutil.Big
+	BaseFee       *hexutil.U256
 	BlobGasUsed   *hexutil.Uint64
 	ExcessBlobGas *hexutil.Uint64
 	Hash          common.Hash `json:"hash"` // adds call to Hash() in MarshalJSON
@@ -821,11 +830,9 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
-	// bal is the RLP-encoded EIP-7928 Block Access List sidecar
-	// carried with the payload (nil pre-Amsterdam). It is NOT part of the block's
-	// RLP/consensus encoding or hash — never add it to EncodeRLP/DecodeRLP/
-	// payloadSize. The header's BlockAccessListHash is the consensus commitment.
-	bal []byte
+	// bal is the EIP-7928 sidecar. The header carries its commitment; the
+	// sidecar itself is not part of the block's RLP encoding or hash.
+	bal *BlockAccessListSidecar
 
 	// binaryTransactions optionally caches the transactions' encodings (e.g. from
 	// an engine_newPayload payload) so RawBody() can skip re-encoding them.
@@ -1095,14 +1102,14 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-// NewBlock creates a new block. The input data is copied,
-// changes to header and to the field values will not affect the block.
+// NewBlock creates a new block. Header and body inputs are copied, while the
+// immutable BAL sidecar is retained.
 //
 // The values of TxHash, UncleHash, ReceiptHash, Bloom, and WithdrawalHash
 // in the header are ignored and set to the values derived from
 // the given txs, uncles, receipts, and withdrawals.
-func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
-	b := &Block{header: CopyHeader(header)}
+func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {
+	b := &Block{header: CopyHeader(header), bal: bal}
 
 	// TODO: panic if len(txs) != len(receipts)
 	if len(txs) == 0 {
@@ -1148,21 +1155,27 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	}
 
 	b.header.ParentBeaconBlockRoot = header.ParentBeaconBlockRoot
-	b.header.mutable = false //Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
+	b.header.mutable = false // Force immutability of block and header. Use `NewBlockForAsembling` if you need mutable block
 	return b
 }
 
 // NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
-func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, bal []byte) *Block {
-	b := NewBlock(header, txs, uncles, receipts, withdrawals)
-	b.bal = bal
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {
+	b := NewBlock(header, txs, uncles, receipts, withdrawals, bal)
 	b.header.mutable = true
 	return b
 }
 
+// NewHeaderFromStorage caches hash, the key the header was read under, so Hash() does not hash
+// the RLP again.
+func NewHeaderFromStorage(hash common.Hash, header *Header) *Header {
+	header.hash.Store(&hash)
+	return header
+}
+
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, bal []byte) *Block {
+func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {
 	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, bal: bal}
 	return b
@@ -1170,7 +1183,7 @@ func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, un
 
 // NewBlockFromStorageWithBinaryTxs is NewBlockFromStorage with a binaryTxs cache
 // (its length must match txs) that lets RawBody() skip re-encoding the transactions.
-func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal, bal []byte) *Block {
+func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {
 	header.hash.Store(&hash)
 	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals, bal: bal}
 	return b
@@ -1179,13 +1192,13 @@ func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Tr
 // NewBlockWithHeader creates a block with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
-func NewBlockWithHeader(header *Header) *Block {
-	return &Block{header: CopyHeader(header)}
+func NewBlockWithHeader(header *Header, bal *BlockAccessListSidecar) *Block {
+	return &Block{header: CopyHeader(header), bal: bal}
 }
 
 // NewBlockFromNetwork like NewBlock but used to create Block object when assembled from devp2p network messages
 // when there is no reason to copy parts, or re-calculate headers fields.
-func NewBlockFromNetwork(header *Header, body *Body, bal []byte) *Block {
+func NewBlockFromNetwork(header *Header, body *Body, bal *BlockAccessListSidecar) *Block {
 	b := &Block{
 		header:       header,
 		transactions: body.Transactions,
@@ -1391,10 +1404,11 @@ func (b *Block) ParentBeaconBlockRoot() *common.Hash { return b.header.ParentBea
 func (b *Block) RequestsHash() *common.Hash          { return b.header.RequestsHash }
 func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAccessListHash }
 
-// BlockAccessList returns the RLP-encoded EIP-7928 BAL sidecar carried with the
-// payload (nil when absent). It is not part of the block's RLP encoding or hash.
-// Constructors retain the supplied slice, and this method returns it without copying.
-func (b *Block) BlockAccessList() []byte { return b.bal }
+// BlockAccessList returns the decoded EIP-7928 BAL sidecar.
+func (b *Block) BlockAccessList() BlockAccessList { return b.bal.BlockAccessList() }
+
+// BlockAccessListSidecar returns the block's immutable EIP-7928 sidecar.
+func (b *Block) BlockAccessListSidecar() *BlockAccessListSidecar { return b.bal }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1406,6 +1420,7 @@ func (b *Block) Body() *Body {
 	bd.SendersFromTxs()
 	return bd
 }
+
 func (b *Block) SendersToTxs(senders []common.Address) {
 	if len(senders) == 0 {
 		return
@@ -1469,7 +1484,7 @@ func (b *Block) Size() common.StorageSize {
 		return common.StorageSize(size)
 	}
 	c := writeCounter(0)
-	rlp.Encode(&c, b)
+	_ = rlp.Encode(&c, b)
 	b.size.Store(uint64(c))
 	return common.StorageSize(c)
 }
@@ -1560,7 +1575,7 @@ func (b *Block) Copy() *Block {
 		uncles:       uncles,
 		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
-		bal:          bytes.Clone(b.bal),
+		bal:          b.bal.copy(),
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1580,6 +1595,20 @@ func (b *Block) WithSeal(header *Header) *Block {
 		withdrawals:  b.withdrawals,
 		bal:          b.bal,
 	}
+}
+
+// WithBlockAccessListSidecar returns a block sharing b's immutable data with the supplied sidecar.
+func (b *Block) WithBlockAccessListSidecar(bal *BlockAccessListSidecar) *Block {
+	newB := &Block{
+		header:             b.header,
+		transactions:       b.transactions,
+		uncles:             b.uncles,
+		withdrawals:        b.withdrawals,
+		bal:                bal,
+		binaryTransactions: b.binaryTransactions,
+	}
+	newB.size.Store(b.size.Load())
+	return newB
 }
 
 // Hash returns the keccak256 hash of b's header.
@@ -1655,48 +1684,33 @@ func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
 }
 
 func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		return err
 	}
-	for err == nil {
+	for s.MoreDataInList() {
 		var u Header
-		if err = u.DecodeRLP(s); err != nil {
-			break
+		if err := u.DecodeRLP(s); err != nil {
+			return err
 		}
 		*appendList = append(*appendList, &u)
 	}
-	return checkErrListEnd(s, err)
+	return s.ListEnd()
 }
 
 func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		if errors.Is(err, rlp.EOL) {
 			*appendList = nil
 			return nil // EOL, check for ListEnd is in calling function
 		}
 		return fmt.Errorf("read Withdrawals: %w", err)
 	}
-	for err == nil {
+	for s.MoreDataInList() {
 		var w Withdrawal
-		if err = w.DecodeRLP(s); err != nil {
-			break
+		if err := w.DecodeRLP(s); err != nil {
+			return err
 		}
 		*appendList = append(*appendList, &w)
 	}
-	return checkErrListEnd(s, err)
-}
-
-func checkErrListEnd(s *rlp.Stream, err error) error {
-	// Match the bare EOL sentinel only. A wrapped EOL (e.g. a nested decoder
-	// returning fmt.Errorf("...: %w", rlp.EOL) on malformed input) is a real
-	// error and must propagate, not be treated as a clean end-of-list.
-	if err != rlp.EOL {
-		return err
-	}
-	if err := s.ListEnd(); err != nil {
-		return err
-	}
-	return nil
+	return s.ListEnd()
 }

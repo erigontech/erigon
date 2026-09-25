@@ -19,14 +19,17 @@ package logger
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
-	"errors"
+	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -42,6 +45,7 @@ type mockOpContext struct {
 
 func (m *mockOpContext) MemoryData() []byte          { return m.memory }
 func (m *mockOpContext) StackData() []uint256.Int    { return m.stack }
+func (m *mockOpContext) Gas() mdgas.MdGas            { return mdgas.MdGas{} }
 func (m *mockOpContext) Caller() accounts.Address    { return m.address }
 func (m *mockOpContext) Address() accounts.Address   { return m.address }
 func (m *mockOpContext) CallValue() uint256.Int      { return uint256.Int{} }
@@ -58,13 +62,14 @@ func (m *mockIBS) GetCode(accounts.Address) ([]byte, error)         { return nil
 func (m *mockIBS) GetCodeHash(accounts.Address) (accounts.CodeHash, error) {
 	return accounts.NilCodeHash, nil
 }
+
 func (m *mockIBS) GetState(accounts.Address, accounts.StorageKey) (uint256.Int, error) {
 	return uint256.Int{}, nil
 }
 func (m *mockIBS) Exist(accounts.Address) (bool, error) { return false, nil }
 func (m *mockIBS) GetRefund() uint64                    { return 0 }
 
-// captureOnOpcode runs a single OnOpcode call and returns the parsed structLog entry.
+// captureOnOpcode runs a single OnOpcodeV2 call and returns the parsed structLog entry.
 // It closes the stream the same way ExecuteTraceTx does after execution.
 // storageKey/storageVal are pushed onto the stack for SSTORE (top=key, below=val).
 func captureOnOpcode(t *testing.T, cfg *LogConfig, memory []byte, storageKey, storageVal *common.Hash) map[string]json.RawMessage {
@@ -90,7 +95,7 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 		scope.stack = []uint256.Int{val, key} // bottom=val, top=key
 	}
 
-	l.OnOpcode(0, byte(op), 100, 3, scope, rData, 1, nil)
+	l.OnOpcodeV2(0, byte(op), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, rData, 1, nil)
 
 	// Mirror what ExecuteTraceTx does to close the stream after execution.
 	stream.WriteArrayEnd()
@@ -110,7 +115,7 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 	return outer.StructLogs[0]
 }
 
-// captureOnOpcodes runs n OnOpcode calls through a single logger and returns every
+// captureOnOpcodes runs n OnOpcodeV2 calls through a single logger and returns every
 // structLog entry that made it to the stream. The pc of each step is set to its
 // index so callers can assert which steps were kept.
 func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.RawMessage {
@@ -122,7 +127,7 @@ func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.Raw
 
 	scope := &mockOpContext{}
 	for i := range n {
-		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 	}
 
 	// Mirror what ExecuteTraceTx does to close the stream after execution.
@@ -191,7 +196,7 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 
 	scope := &mockOpContext{}
 	for i := range 4 {
-		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 	}
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
@@ -200,6 +205,101 @@ func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
 	if !json.Valid(buf.Bytes()) {
 		t.Fatalf("output is not valid JSON: %s", buf.Bytes())
 	}
+}
+
+// closeStreamLikeCaller writes the tail ExecuteTraceTx appends once execution is
+// over: exactly one array end and one object end, whatever the logger emitted.
+func closeStreamLikeCaller(stream jsonstream.Stream) {
+	stream.WriteArrayEnd()
+	stream.Field("gas")
+	stream.Uint(0)
+	stream.Field("failed")
+	stream.WriteBool(false)
+	stream.WriteObjectEnd()
+}
+
+func TestJsonStreamLoggerStateGasCost(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{DisableStack: true, DisableStorage: true}, t.Context(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+	scope := &mockOpContext{}
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 10, State: 30}, scope, nil, 1, nil)
+	l.OnOpcodeV2(1, byte(vm.STOP), mdgas.MdGas{Execution: 60}, mdgas.MdGas{}, scope, nil, 1, nil)
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+	var result struct {
+		StructLogs []map[string]json.RawMessage `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &result))
+	require.Len(t, result.StructLogs, 2)
+	require.Contains(t, result.StructLogs[0], "stateGasCost")
+	require.JSONEq(t, `30`, string(result.StructLogs[0]["stateGasCost"]))
+	require.JSONEq(t, `10`, string(result.StructLogs[0]["gasCost"]))
+	require.NotContains(t, result.StructLogs[1], "stateGasCost")
+}
+
+// The structLogs prologue must be written at most once. OnExitV2 opens it too, for
+// traces that captured no step, and the caller closes exactly one object and one
+// array however many frames exited.
+func TestJsonStreamLogger_PrologueWrittenOnce(t *testing.T) {
+	dead, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	tests := []struct {
+		name    string
+		cfg     *LogConfig
+		ctx     context.Context
+		opcodes int
+	}{
+		{"a negative limit suppresses every step", &LogConfig{Limit: -1}, context.Background(), 3},
+		{"a dead context suppresses every step", &LogConfig{}, dead, 3},
+		{"nothing to capture", &LogConfig{}, context.Background(), 0},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			l := NewJsonStreamLogger(tt.cfg, tt.ctx, stream)
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+			scope := &mockOpContext{}
+			for i := range tt.opcodes {
+				l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+			}
+			// Two frames exit, as in any trace of a transaction that makes a call.
+			l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false)
+			l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
+
+			closeStreamLikeCaller(stream)
+			require.NoError(t, stream.Flush())
+			require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+		})
+	}
+}
+
+// A step recorded after a frame exit must land in the array that exit opened.
+// The separator has to follow the steps written, not the prologue: keyed on the
+// prologue it would put a comma into an array still empty.
+func TestJsonStreamLogger_SeparatorFollowsStepsNotPrologue(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{DisableStack: true, DisableStorage: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	l.OnExitV2(1, nil, mdgas.MdGasUsage{}, nil, false)
+	l.OnOpcodeV2(0, byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, &mockOpContext{}, nil, 1, nil)
+	l.OnExitV2(0, nil, mdgas.MdGasUsage{}, nil, false)
+
+	closeStreamLikeCaller(stream)
+	require.NoError(t, stream.Flush())
+
+	var decoded struct {
+		StructLogs []map[string]any `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &decoded), "produced %s", buf.Bytes())
+	require.Len(t, decoded.StructLogs, 1)
 }
 
 // TestJsonStreamLogger_MemoryEncoding verifies that memory words are emitted as
@@ -354,44 +454,175 @@ func TestJsonStreamLogger_EnableReturnData(t *testing.T) {
 	})
 }
 
-// TestStructLog_ErrorOmitempty verifies that the 'error' field is omitted from
-// MarshalJSON output when there is no error, and present when there is.
-func TestStructLog_ErrorOmitempty(t *testing.T) {
-	t.Run("no error omitted", func(t *testing.T) {
-		log := StructLog{Pc: 1, Op: vm.STOP, Gas: 10, GasCost: 1, Depth: 1}
-		b, err := log.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
-		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(b, &obj); err != nil {
-			t.Fatal(err)
-		}
-		if _, found := obj["error"]; found {
-			t.Errorf("expected 'error' field to be absent, but it was present: %s", obj["error"])
-		}
-	})
+// TestJsonStreamLogger_StorageEncodingManyKeys covers the separator handling when
+// more than one slot is emitted; a single-entry object never writes one.
+func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
 
-	t.Run("error included when present", func(t *testing.T) {
-		log := StructLog{Pc: 1, Op: vm.STOP, Gas: 10, GasCost: 1, Depth: 1, Err: errors.New("out of gas")}
-		b, err := log.MarshalJSON()
-		if err != nil {
-			t.Fatal(err)
+	scope := &mockOpContext{}
+	want := map[string]string{}
+	for i := range 4 {
+		key := common.BigToHash(big.NewInt(int64(i + 1)))
+		val := common.BigToHash(big.NewInt(int64(100 + i)))
+		scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
+		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+		want["0x"+hex.EncodeToString(key[:])] = "0x" + hex.EncodeToString(val[:])
+	}
+
+	// Close the way the production epilogue does: ClosePending would repair an
+	// imbalance into valid JSON and hide exactly what this pins.
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+
+	var out struct {
+		StructLogs []struct {
+			Storage map[string]string `json:"storage"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	require.NotEmpty(t, out.StructLogs)
+
+	// Storage accumulates, so the last step carries every pair and exercises
+	// three separators.
+	require.Equal(t, want, out.StructLogs[len(out.StructLogs)-1].Storage)
+}
+
+// TestJsonStreamLogger_StorageWithMemory drives both users of hexEncodeBuf in a
+// single step, which is what the aliasing in hexWithPrefix depends on.
+func TestJsonStreamLogger_StorageWithMemory(t *testing.T) {
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xcd}, 64),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+	l.OnOpcodeV2(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+
+	var out struct {
+		StructLogs []struct {
+			Memory  []string          `json:"memory"`
+			Storage map[string]string `json:"storage"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out), "output: %s", buf.Bytes())
+	require.Len(t, out.StructLogs, 1)
+
+	word := "0x" + strings.Repeat("cd", 32)
+	require.Equal(t, []string{word, word}, out.StructLogs[0].Memory)
+	require.Equal(t, map[string]string{
+		"0x" + hex.EncodeToString(key[:]): "0x" + hex.EncodeToString(val[:]),
+	}, out.StructLogs[0].Storage)
+}
+
+// TestJsonStreamLogger_ClosePendingAfterMemory pins that writing memory words keeps
+// the stream's auto-close stack balanced: one word spans three stream calls, and
+// only the first may consume a pending comma or field.
+func TestJsonStreamLogger_ClosePendingAfterMemory(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 32*4)}
+	for i := range 3 {
+		l.OnOpcodeV2(uint64(i), byte(vm.MLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+	}
+
+	require.NoError(t, stream.ClosePending(0))
+	require.NoError(t, stream.Flush())
+	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+}
+
+// countingWriter discards but records how much a response actually produced,
+// and how many separate Write calls it took to deliver it.
+type countingWriter struct {
+	n      int64
+	writes int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.n += int64(len(p))
+	w.writes++
+	return len(p), nil
+}
+
+// largeTrace drives the logger over enough opcodes to produce a response far
+// larger than any buffer, reporting the bytes written, the peak buffer, and
+// how many separate writes reached the underlying io.Writer.
+func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakBuffer, writes int) {
+	tb.Helper()
+	var out countingWriter
+	stream := jsonstream.New(&out)
+	l := NewJsonStreamLogger(cfg, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xab}, 4096),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+	for i := range steps {
+		l.OnOpcodeV2(uint64(i), byte(vm.SSTORE), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+		if n := len(stream.Buffer()); n > peakBuffer {
+			peakBuffer = n
 		}
-		var obj map[string]json.RawMessage
-		if err := json.Unmarshal(b, &obj); err != nil {
-			t.Fatal(err)
-		}
-		raw, found := obj["error"]
-		if !found {
-			t.Fatal("expected 'error' field but it was absent")
-		}
-		var msg string
-		if err := json.Unmarshal(raw, &msg); err != nil {
-			t.Fatalf("cannot parse error field: %v", err)
-		}
-		if msg != "out of gas" {
-			t.Errorf("error message: got %q, want %q", msg, "out of gas")
-		}
-	})
+	}
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(tb, stream.Flush())
+	return out.n, peakBuffer, out.writes
+}
+
+// TestJsonStreamLogger_LargeTraceStaysBounded covers the case streaming exists
+// for: one transaction whose trace dwarfs any buffer. Nothing in the RPC layer
+// flushes inside a transaction, so the stream has to do it. Memory tracing used
+// to bound it by accident, because memory words went through Write, which
+// flushed per 32-byte word; with memory off nothing drained at all.
+func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
+	for name, cfg := range map[string]*LogConfig{
+		"storage only":   {},
+		"memory enabled": {EnableMemory: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			steps := 20_000
+			produced, peak, writes := largeTrace(t, steps, cfg)
+			require.Greater(t, produced, int64(1<<20), "the trace must dwarf the buffer to mean anything")
+			require.Less(t, peak, 4*jsonstream.FlushThreshold,
+				"buffer peaked at %d for a %dMB response", peak, produced>>20)
+			require.Less(t, writes, steps,
+				"%d writes for %d steps: memory words must batch through the buffer, not forward one write per word", writes, steps)
+		})
+	}
+}
+
+// TestHexQuotedMatchesUint256Hex pins the stack encoding against uint256.Hex,
+// which the RPC output has to stay byte-identical to. The interesting cases are
+// the nibble boundaries: Hex counts nibbles, not bytes, so 0xf is one digit and
+// 0x10 is two.
+func TestHexQuotedMatchesUint256Hex(t *testing.T) {
+	l := &JsonStreamLogger{}
+	for _, str := range []string{
+		"0", "1", "f", "10", "ff", "100",
+		"1234567890abcdef",
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		"0000000000000000000000000000000000000000000000000000000000000001",
+		"8000000000000000000000000000000000000000000000000000000000000000",
+	} {
+		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
+		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
+	}
 }

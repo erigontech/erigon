@@ -232,7 +232,7 @@ func (c *BoundContract) transact(opts *TransactOpts, contract *common.Address, i
 	if gasPriceBig == nil {
 		gasPriceBig, err = c.transactor.SuggestGasPrice(ensureContext(opts.Context))
 		if err != nil {
-			return nil, fmt.Errorf("failed to suggest gas price: %v", err)
+			return nil, fmt.Errorf("failed to suggest gas price: %w", err)
 		}
 	}
 	gasPrice, overflow := uint256.FromBig(gasPriceBig)

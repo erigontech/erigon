@@ -31,6 +31,9 @@ var (
 	rpcMetricsLabels   = map[bool]map[string]string{}
 	rpcRequestGauge    = metrics.GetOrCreateCounter("rpc_total")
 	failedReqeustGauge = metrics.GetOrCreateCounter("rpc_failure")
+	// A streamed response the client did not receive in full. Batch and
+	// non-streaming replies never touch the stream, so they are not counted.
+	undeliveredGauge = metrics.GetOrCreateCounter("rpc_undelivered_total")
 )
 
 // PreAllocateRPCMetricLabels pre-allocates labels for all rpc methods inside API List
@@ -60,8 +63,10 @@ func getRPCMethodNames(apiList []API) (methods []string) {
 	for _, api := range apiList {
 		apiType := reflect.TypeOf(api.Service)
 
-		for i := 0; i < apiType.NumMethod(); i++ {
-			method := apiType.Method(i)
+		for method := range apiType.Methods() {
+			if !servedByIface(api.Iface, method.Name) {
+				continue
+			}
 			rpcMethod := fmt.Sprintf("%s_%s", api.Namespace, pascalToCamel(method.Name))
 			methods = append(methods, rpcMethod)
 		}
@@ -85,7 +90,6 @@ func createRPCMetricsLabel(method string, valid bool) string {
 	}
 
 	return fmt.Sprintf(`rpc_duration_seconds{method=%q,success=%q}`, method, status)
-
 }
 
 func newRPCServingTimerMS(method string, valid bool) metrics.Summary {

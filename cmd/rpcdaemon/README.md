@@ -205,9 +205,10 @@ If the `--http.url` flag is set, then `--http.addr` and `--http.port` with both 
 
 note that this is NOT geth-style IPC. for that, read the next section, IPC endpoint(geth-compatible)
 
-### HTTPS, HTTP2, and H2C
+### HTTPS and HTTP2
 
-Erigon supports HTTPS, HTTP2, and H2C out of the box. H2C is served by the default HTTP handler.
+Erigon serves HTTP/1.1 on the plain HTTP port and negotiates HTTP/2 over TLS via ALPN. Cleartext HTTP/2 is not
+served: a client that offers it, such as `curl --http2`, is answered on HTTP/1.1.
 
 To enable the HTTPS+HTTP2 server, add flag `--https.enabled`, along with providing flags `--https.cert="/path/to.cert"`
 and `--https.key=/path/to.key`
@@ -265,6 +266,8 @@ The following table shows the current implementation status of Erigon's RPC daem
 |                                            |         |                                                       |
 | eth_getBlockByHash                         | Yes     |                                                       |
 | eth_getBlockByNumber                       | Yes     |                                                       |
+| eth_getHeaderByHash                        | Yes     |                                                       |
+| eth_getHeaderByNumber                      | Yes     |                                                       |
 | eth_getBlockTransactionCountByHash         | Yes     |                                                       |
 | eth_getBlockTransactionCountByNumber       | Yes     |                                                       |
 | eth_getUncleByBlockHashAndIndex            | Yes     |                                                       |
@@ -352,6 +355,7 @@ The following table shows the current implementation status of Erigon's RPC daem
 | engine_getBlobsV1                          | Yes     |                                                       |
 | engine_getBlobsV2                          | Yes     | Added in Fusaka                                       |
 | engine_getBlobsV3                          | Yes     | Added with BPO3                                       |
+| engine_getBlobsV4                          | Yes     | Added in Amsterdam                                   |
 |                                            |         |                                                       |
 | testing_buildBlockV1                       | Yes     | Testing environments only, disabled by default        |
 | testing_commitBlockV1                      | Yes     | Testing environments only, disabled by default        |
@@ -415,18 +419,6 @@ The following table shows the current implementation status of Erigon's RPC daem
 | erigon_forks                               | Yes     | Erigon only                                           |
 | erigon_nodeInfo                            | Yes     | Erigon only                                           |
 | erigon_cacheCheck                          | Yes     | Erigon only                                           |
-|                                            |         |                                                       |
-| bor_getSnapshot                            | Yes     | Bor only                                              |
-| bor_getAuthor                              | Yes     | Bor only                                              |
-| bor_getSnapshotAtHash                      | Yes     | Bor only                                              |
-| bor_getSigners                             | Yes     | Bor only                                              |
-| bor_getSignersAtHash                       | Yes     | Bor only                                              |
-| bor_getCurrentProposer                     | Yes     | Bor only                                              |
-| bor_getCurrentValidators                   | Yes     | Bor only                                              |
-| bor_getSnapshotProposer                    | Yes     | Bor only                                              |
-| bor_getSnapshotProposerSequence            | Yes     | Bor only                                              |
-| bor_getRootHash                            | Yes     | Bor only                                              |
-| bor_getVoteOnHash                          | Yes     | Bor only                                              |
 |                                            |         |                                                       |
 | ots_getApiLevel                            | Yes     | Otterscan                                             |
 | ots_getInternalOperations                  | Yes     | Otterscan                                             |

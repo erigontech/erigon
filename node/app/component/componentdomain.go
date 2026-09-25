@@ -30,8 +30,10 @@ import (
 
 var rootComponentDomain *componentDomain
 
-const POOL_LOAD_FACTOR = 4
-const MIN_POOL_SIZE = 8
+const (
+	POOL_LOAD_FACTOR = 4
+	MIN_POOL_SIZE    = 8
+)
 
 func init() {
 	poolSize := runtime.NumCPU() * POOL_LOAD_FACTOR
@@ -93,7 +95,8 @@ func WithDependentDomain(dependent ComponentDomain) app.Option {
 			}
 			o.dependent = cd
 			return true
-		})
+		},
+	)
 }
 
 func WithExecPoolSize(execPoolSize int) app.Option {
@@ -101,7 +104,8 @@ func WithExecPoolSize(execPoolSize int) app.Option {
 		func(o *domainOptions) bool {
 			o.execPoolSize = &execPoolSize
 			return true
-		})
+		},
+	)
 }
 
 // NewComponentDomain creates a new component manager which will manage the lifecycle (activation and deactivation)
@@ -168,7 +172,6 @@ func NewComponentDomain(context context.Context, id string, options ...app.Optio
 			WithDependent(opts.dependent.component),
 			WithProvider(cd),
 			WithId(id))...)
-
 	if err != nil {
 		return nil, err
 	}
@@ -199,11 +202,12 @@ func (cd *componentDomain) Activate(ctx context.Context, handler ...ActivityHand
 }
 
 func (cd *componentDomain) Deactivate(ctx context.Context, handler ...ActivityHandler[ComponentDomain]) error {
-	return cd.component.deactivate(ctx, func(ctx context.Context, c *component, err error) {
+	cd.component.deactivate(ctx, func(ctx context.Context, c *component, err error) {
 		if len(handler) > 0 {
 			handler[0].OnActivity(ctx, typedComponent[ComponentDomain]{cd.component}, c.State(), err)
 		}
 	})
+	return nil
 }
 
 // Exec executes a task in the mamagers workerpool.  This is primarily used for event processing

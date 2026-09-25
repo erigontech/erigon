@@ -164,19 +164,19 @@ func TestDecodeOptionalAddress(t *testing.T) {
 }
 
 func TestDecodeOptionalBig(t *testing.T) {
-	b, err := decodeOptionalBig(nil, "gasPrice")
+	b, err := decodeOptionalU256(nil, "gasPrice")
 	if err != nil || b != nil {
 		t.Fatal("expected nil, nil for nil input")
 	}
 
 	invalid := "not-hex"
-	_, err = decodeOptionalBig(&invalid, "gasPrice")
+	_, err = decodeOptionalU256(&invalid, "gasPrice")
 	if err == nil {
 		t.Fatal("expected error for invalid hex")
 	}
 
 	valid := "0x1234"
-	b, err = decodeOptionalBig(&valid, "gasPrice")
+	b, err = decodeOptionalU256(&valid, "gasPrice")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,8 +196,8 @@ func TestRpcLogsToModel(t *testing.T) {
 	txHash := common.HexToHash("0x" + strings.Repeat("cc", 32))
 	topic := common.HexToHash("0x" + strings.Repeat("dd", 32))
 
-	logs := types.RPCLogs{
-		{Log: types.Log{
+	logs := types.Logs{
+		{
 			Address:     addr,
 			Topics:      []common.Hash{topic},
 			Data:        hexutil.Bytes{0x01, 0x02},
@@ -205,7 +205,7 @@ func TestRpcLogsToModel(t *testing.T) {
 			BlockHash:   blockHash,
 			TxHash:      txHash,
 			Index:       3,
-		}},
+		},
 	}
 	result = rpcLogsToModel(logs)
 	if len(result) != 1 {
@@ -235,7 +235,7 @@ func TestRpcLogsToModel(t *testing.T) {
 // mockGraphQLAPI is a minimal stub of jsonrpc.GraphQLAPI for resolver-level tests.
 type mockGraphQLAPI struct {
 	getLogsCrit   filters.FilterCriteria
-	getLogsResult types.RPCLogs
+	getLogsResult types.Logs
 	getLogsErr    error
 
 	callBlockNum rpc.BlockNumber
@@ -269,6 +269,7 @@ type mockGraphQLAPI struct {
 func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber) (map[string]any, error) {
 	return nil, nil
 }
+
 func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash) (map[string]any, error) {
 	return nil, nil
 }
@@ -279,33 +280,41 @@ func (m *mockGraphQLAPI) GetAccountInfo(_ context.Context, addr common.Address, 
 	m.accountInfoBlockNum = blockNum
 	return m.accountBalance, m.accountNonce, m.accountCode, m.accountInfoErr
 }
+
 func (m *mockGraphQLAPI) GetAccountStorage(_ context.Context, _ common.Address, _ string, _ rpc.BlockNumber) (string, error) {
 	return "", nil
 }
+
 func (m *mockGraphQLAPI) GetBlockNumberForTx(_ context.Context, _ common.Hash) (uint64, bool, error) {
 	return 0, false, nil
 }
+
 func (m *mockGraphQLAPI) SendRawTransaction(_ context.Context, data hexutil.Bytes) (common.Hash, error) {
 	m.sendRawTx = data
 	return m.sendRawResult, m.sendRawErr
 }
+
 func (m *mockGraphQLAPI) Call(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*jsonrpc.GraphQLCallResult, error) {
 	m.callBlockNum = blockNumber
 	m.callArgs = args
 	return m.callResult, m.callErr
 }
+
 func (m *mockGraphQLAPI) EstimateGas(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error) {
 	m.estimateGasBlockNum = blockNumber
 	m.estimateGasArgs = args
 	return m.estimateGasResult, m.estimateGasErr
 }
+
 func (m *mockGraphQLAPI) GasPrice(_ context.Context) (string, error) {
 	return m.gasPriceResult, m.gasPriceErr
 }
-func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
+
+func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	m.getLogsCrit = crit
 	return m.getLogsResult, m.getLogsErr
 }
+
 func (m *mockGraphQLAPI) GetPendingTransactions(_ context.Context) ([]types.Transaction, error) {
 	return m.pendingTxns, m.pendingErr
 }
@@ -317,13 +326,13 @@ func TestBlockResolver_Logs(t *testing.T) {
 
 	t.Run("success — criteria and result", func(t *testing.T) {
 		mock := &mockGraphQLAPI{
-			getLogsResult: types.RPCLogs{
-				{Log: types.Log{
+			getLogsResult: types.Logs{
+				{
 					Address:     common.HexToAddress(addr),
 					BlockNumber: 10,
 					BlockHash:   common.HexToHash(blockHash),
 					TxHash:      common.HexToHash("0x" + strings.Repeat("cc", 32)),
-				}},
+				},
 			},
 		}
 		r := &blockResolver{&Resolver{GraphQLAPI: mock}}

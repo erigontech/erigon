@@ -94,9 +94,11 @@ func adjustBlockPrune(blocks, minBlocksToDownload uint64) uint64 {
 func isStateSnapshot(name string) bool {
 	return isStateHistory(name) || strings.HasPrefix(name, "domain")
 }
+
 func isStateHistory(name string) bool {
 	return strings.HasPrefix(name, "idx") || strings.HasPrefix(name, "history") || strings.HasPrefix(name, "accessor")
 }
+
 func canSnapshotBePruned(name string) bool {
 	return isStateHistory(name) || strings.Contains(name, "transactions")
 }
@@ -112,7 +114,6 @@ func buildBlackListForPruning(
 	historyStepPrune, minCommitmentHistoryStep, minReceiptsStep kv.Step, minBlockToDownload, blockPrune uint64,
 	preverified snapcfg.Preverified,
 ) (map[string]struct{}, error) {
-
 	blackList := make(map[string]struct{})
 
 	historyEnabled := pruneMode.History.Enabled()
@@ -187,7 +188,6 @@ func buildBlackListForPruning(
 
 type blockReader interface {
 	Snapshots() dbservices.BlockSnapshots
-	BorSnapshots() dbservices.BlockSnapshots
 	IterateFrozenBodies(tx kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type
@@ -346,10 +346,16 @@ func historyRetentionCutoff(pruneMode prune.Mode, head uint64) uint64 {
 }
 
 // receiptsSegmentRetentionCutoff picks the download cutoff for a receipt-related
-// segment: rcache history follows state history (so download agrees with rcache
-// retirement in historyRetireCutoffs), log indexes follow block data.
+// segment, matching what historyRetireCutoffs later retires it by: rcache
+// history follows state history, and so do the log indexes, which are plain
+// inverted indexes and take RetireCutoffs.Default. Downloading them on the
+// block window instead would fetch a keep-all node's full history only to
+// delete everything outside the state-history window.
 func receiptsSegmentRetentionCutoff(pruneMode prune.Mode, cc *chain.Config, head uint64, name string) uint64 {
-	if pruneMode.ReceiptsFollowHistory() && strings.Contains(name, kv.RCacheDomain.String()) {
+	isLogIndex := strings.Contains(name, kv.LogAddrIdx.String()) ||
+		strings.Contains(name, kv.LogTopicIdx.String())
+	isRcacheHistory := pruneMode.ReceiptsFollowHistory() && strings.Contains(name, kv.RCacheDomain.String())
+	if isLogIndex || isRcacheHistory {
 		return historyRetentionCutoff(pruneMode, head)
 	}
 	return blocksRetentionCutoff(pruneMode, cc, head)
@@ -448,7 +454,7 @@ func SyncSnapshots(
 		log.Info(fmt.Sprintf("[%s] Preparing snapshots request for %s", logPrefix, task))
 
 		frozenBlocks := blockReader.Snapshots().SegmentsMax()
-		//Corner cases:
+		// Corner cases:
 		// - Erigon generated file X with hash H1. User upgraded Erigon. New version has preverified file X with hash H2. Must ignore H2 (don't send to Downloader)
 		// - Erigon "download once": means restart/upgrade/downgrade must not download files (and will be fast)
 		// - After "download once" - Erigon will produce and seed new files
@@ -468,7 +474,8 @@ func SyncSnapshots(
 			commitmentHistoryPrune := prune.CommitmentHistoryAmount().PruneTo(frozenBlocks)
 			receiptsPrune := prune.ReceiptsAmount().PruneTo(frozenBlocks)
 			minBlockToDownload, minHistoryStep, minCommitmentHistoryStep, minReceiptsStep, err := getMinimumBlocksToDownload(
-				ctx, blockReader, tx, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune, receiptsPrune)
+				ctx, blockReader, tx, maxStateStep, stepSize, historyPrune, commitmentHistoryPrune, receiptsPrune,
+			)
 			if err != nil {
 				return err
 			}
@@ -587,6 +594,14 @@ func SyncSnapshots(
 	return nil
 }
 
+// BlockFileRetainedUnderCap reports whether a block-segment file ending at
+// `to` survives a download capped at toBlock; toBlock == 0 means no cap.
+// Callers deriving a block target must use this same rule, so the target and
+// the downloaded byte total describe the same file set.
+func BlockFileRetainedUnderCap(to, toBlock uint64) bool {
+	return toBlock == 0 || to <= toBlock
+}
+
 func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool) bool {
 	if toBlock == 0 {
 		return false // toBlock filtering is not enabled
@@ -609,5 +624,5 @@ func filterToBlock(name string, toBlock uint64, toStep kv.Step, headerchain bool
 		// so that we can correctly calculate its maxTxNum from the body segment files (we will later on delete this file)
 		return fileInfo.From > toBlock
 	}
-	return fileInfo.To > toBlock
+	return !BlockFileRetainedUnderCap(fileInfo.To, toBlock)
 }

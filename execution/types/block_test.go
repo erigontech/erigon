@@ -28,66 +28,20 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/go-test/deep"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 )
 
-// the following 2 functions are replica for the test
-// This is a replica of `bor.GetValidatorBytes` function
-// This was needed because currently, `IsNapoli` will always return false.
-func GetValidatorBytesTest(h *Header) []byte {
-	if len(h.Extra) < ExtraVanityLength+ExtraSealLength {
-		log.Error("length of extra is less than vanity and seal")
-		return nil
-	}
-
-	var blockExtraData BlockExtraDataTest
-	if err := rlp.DecodeBytes(h.Extra[ExtraVanityLength:len(h.Extra)-ExtraSealLength], &blockExtraData); err != nil {
-		log.Error("error while decoding block extra data", "err", err)
-		return nil
-	}
-
-	return blockExtraData.ValidatorBytes
-}
-
-func GetTxDependencyTest(b *Block) [][]uint64 {
-	if len(b.header.Extra) < ExtraVanityLength+ExtraSealLength {
-		log.Error("length of extra less is than vanity and seal")
-		return nil
-	}
-
-	var blockExtraData BlockExtraDataTest
-	if err := rlp.DecodeBytes(b.header.Extra[ExtraVanityLength:len(b.header.Extra)-ExtraSealLength], &blockExtraData); err != nil {
-		log.Error("error while decoding block extra data", "err", err)
-		return nil
-	}
-
-	return blockExtraData.TxDependency
-}
-
-type BlockExtraDataTest struct {
-	// Validator bytes of bor
-	ValidatorBytes []byte
-
-	// length of TxDependency          ->   n (n = number of transactions in the block)
-	// length of TxDependency[i]       ->   k (k = a whole number)
-	// k elements in TxDependency[i]   ->   transaction indexes on which transaction i is dependent on
-	TxDependency [][]uint64
-}
-
-func TestTxDependencyBlockDecoding(t *testing.T) {
+func TestBlockDecodingNestedRLPExtra(t *testing.T) {
 	t.Parallel()
 
 	blockEnc := common.FromHex("f90270f9026ba00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000948888f1f195afa192cfee860698584c030f4c9db1a0ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080832fefd8825208845506eb07b8710000000000000000000000000000000000000000000000000000000000000000cf8776616c20736574c6c20201c201800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498880000000000000000c0c0")
@@ -108,14 +62,7 @@ func TestTxDependencyBlockDecoding(t *testing.T) {
 	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
 	check("Time", block.Time(), uint64(1426516743))
 
-	validatorBytes := GetValidatorBytesTest(block.header)
-	txDependency := GetTxDependencyTest(&block)
-
-	check("validatorBytes", validatorBytes, []byte("val set"))
-	check("txDependency", txDependency, [][]uint64{{2, 1}, {1, 0}})
-
 	ourBlockEnc, err := rlp.EncodeToBytes(&block)
-
 	if err != nil {
 		t.Fatal("encode error: ", err)
 	}
@@ -173,10 +120,10 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 	}
 
 	hashBefore := decoded.Hash()
-	bal := []byte{0x01, 0x02, 0x03}
-	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), bal)
-	if got := block.BlockAccessList(); !bytes.Equal(got, bal) {
-		t.Errorf("BAL mismatch: got %x want %x", got, bal)
+	bal := BlockAccessList{{Address: common.Address{1}}}
+	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), NewBlockAccessListSidecar(bal))
+	if got := block.BlockAccessList(); !reflect.DeepEqual(got, bal) {
+		t.Errorf("BAL mismatch: got %v want %v", got, bal)
 	}
 	if got := block.Hash(); got != hashBefore {
 		t.Errorf("BAL changed block hash: got %x want %x", got, hashBefore)
@@ -194,8 +141,47 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 	if roundTrip.BlockAccessList() != nil {
-		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %x", roundTrip.BlockAccessList())
+		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %v", roundTrip.BlockAccessList())
 	}
+}
+
+func TestBlockCarriesBlockAccessListSidecar(t *testing.T) {
+	raw := []byte{0xc0}
+	sidecar, err := DecodeBlockAccessListSidecar(raw)
+	if err != nil {
+		t.Fatalf("decode BAL sidecar: %v", err)
+	}
+	block := NewBlockFromNetwork(&Header{}, &Body{}, sidecar)
+	if block.BlockAccessListSidecar() != sidecar {
+		t.Fatal("block did not retain BAL sidecar")
+	}
+	if block.BlockAccessList() == nil {
+		t.Fatal("block lost empty BAL")
+	}
+	gotRaw, err := block.BlockAccessListSidecar().Bytes()
+	if err != nil {
+		t.Fatalf("sidecar bytes: %v", err)
+	}
+	if !bytes.Equal(gotRaw, raw) {
+		t.Fatalf("sidecar RLP differs: got %x, want %x", gotRaw, raw)
+	}
+}
+
+func TestWithBlockAccessListSidecarPreservesCaches(t *testing.T) {
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, nil)
+	block.binaryTransactions = BinaryTransactions{{1, 2, 3}}
+	block.size.Store(123)
+	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
+		Address: common.Address{1},
+	}})
+
+	withSidecar := block.WithBlockAccessListSidecar(sidecar)
+
+	require.Same(t, sidecar, withSidecar.BlockAccessListSidecar())
+	require.Nil(t, block.BlockAccessListSidecar())
+	require.Same(t, block.header, withSidecar.header)
+	require.Equal(t, block.binaryTransactions, withSidecar.binaryTransactions)
+	require.Equal(t, block.size.Load(), withSidecar.size.Load())
 }
 
 func TestEIP1559BlockEncoding(t *testing.T) {
@@ -346,28 +332,6 @@ func TestUncleHash(t *testing.T) {
 	}
 }
 
-var benchBuffer = bytes.NewBuffer(make([]byte, 0, 32000))
-
-func BenchmarkEncodeBlock(b *testing.B) {
-	block := makeBenchBlock()
-
-	for b.Loop() {
-		benchBuffer.Reset()
-		if err := rlp.Encode(benchBuffer, block); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func encodedBenchBody(b *testing.B) []byte {
-	b.Helper()
-	var buf bytes.Buffer
-	if err := rlp.Encode(&buf, &BodyForStorage{BaseTxnID: BaseTxnID(1234567), TxCount: 250}); err != nil {
-		b.Fatal(err)
-	}
-	return buf.Bytes()
-}
-
 // TestBodyOnlyTxnDecodeRLPBytes pins the contract that makes DecodeRLPBytes exist:
 // it reads the leading txn fields of a full BodyForStorage encoding and tolerates
 // the unread tail, which rlp.DecodeBytes rejects.
@@ -416,93 +380,6 @@ func TestBodyOnlyTxnDecodeRLPBytesErrors(t *testing.T) {
 			}
 		})
 	}
-}
-
-func BenchmarkBodyOnlyTxnDecodeRLPBytes(b *testing.B) {
-	enc := encodedBenchBody(b)
-
-	var out BodyOnlyTxn
-	b.ReportAllocs()
-	for b.Loop() {
-		if err := out.DecodeRLPBytes(enc); err != nil {
-			b.Fatal(err)
-		}
-	}
-	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
-		b.Fatalf("unexpected decode result: %+v", out)
-	}
-}
-
-func BenchmarkBodyForStorageDecodeBytes(b *testing.B) {
-	enc := encodedBenchBody(b)
-
-	var out BodyForStorage
-	b.ReportAllocs()
-	for b.Loop() {
-		if err := rlp.DecodeBytes(enc, &out); err != nil {
-			b.Fatal(err)
-		}
-	}
-	if out.BaseTxnID != BaseTxnID(1234567) || out.TxCount != 250 {
-		b.Fatalf("unexpected decode result: %+v", out)
-	}
-}
-
-func BenchmarkDecodeBlock(b *testing.B) {
-	block := makeBenchBlock()
-	encoded, err := rlp.EncodeToBytes(block)
-	if err != nil {
-		b.Fatal(err)
-	}
-	b.ResetTimer()
-
-	for b.Loop() {
-		var decoded Block
-		if err := rlp.DecodeBytes(encoded, &decoded); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func makeBenchBlock() *Block {
-	var (
-		key, _   = crypto.GenerateKey()
-		txs      = make([]Transaction, 70)
-		receipts = make([]*Receipt, len(txs))
-		signer   = LatestSigner(chain.AllProtocolChanges)
-		uncles   = make([]*Header, 3)
-	)
-	header := &Header{
-		Difficulty: *uint256.NewInt(285311670611), // 11^11
-		Number:     *uint256.NewInt(0x200),        // 2^9
-		GasLimit:   12345678,
-		GasUsed:    1476322,
-		Time:       9876543,
-		Extra:      []byte("coolest block on chain"),
-	}
-	for i := range txs {
-		amount, _ := uint256.FromBig(math.BigPow(2, int64(i)))
-		price := uint256.NewInt(300000)
-		data := make([]byte, 100)
-		tx := NewTransaction(uint64(i), common.Address{}, amount, 123457, price, data)
-		signedTx, err := SignTx(tx, *signer, key)
-		if err != nil {
-			panic(err)
-		}
-		txs[i] = signedTx
-		receipts[i] = NewReceipt(false, tx.GetGasLimit())
-	}
-	for i := range uncles {
-		uncles[i] = &Header{
-			Difficulty: *uint256.NewInt(285311670611), // 11^11
-			Number:     *uint256.NewInt(0x200),        // 2^9
-			GasLimit:   12345678,
-			GasUsed:    1476322,
-			Time:       9876543,
-			Extra:      []byte("benchmark uncle"),
-		}
-	}
-	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
@@ -617,8 +494,7 @@ func TestAuRaHeaderEncoding(t *testing.T) {
 	var decoded Header
 	require.NoError(t, rlp.DecodeBytes(encoded, &decoded))
 
-	deep.CompareUnexportedFields = true
-	require.Nil(t, deep.Equal(&header, &decoded))
+	require.Equal(t, &header, &decoded)
 }
 
 // TestDecodeHeader_HoistedReuseAcrossAuRaTransition exercises the hoisted
@@ -729,7 +605,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		Amount:    5_000_000_000,
 	}
 
-	block := NewBlock(&header, nil, nil, nil, withdrawals)
+	block := NewBlock(&header, nil, nil, nil, withdrawals, nil)
 	_ = block.Size()
 
 	encoded, err := rlp.EncodeToBytes(block)
@@ -741,7 +617,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	assert.Equal(t, block.Hash(), decoded.Hash())
 
 	// Now test with empty withdrawals
-	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
+	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{}, nil)
 	_ = block2.Size()
 
 	encoded2, err := rlp.EncodeToBytes(block2)
@@ -757,11 +633,11 @@ func TestBlockRawBodyPreShanghai(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	const rawBodyForStorageRlp = "f901f4c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0"
+	const rawBodyForStorageRlp = "f901f4c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000"
 	bstring, _ := hex.DecodeString(rawBodyForStorageRlp)
 
 	body := new(RawBody)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.Nil(body.Withdrawals)
 	require.Len(body.Uncles, 1)
@@ -772,11 +648,11 @@ func TestBlockRawBodyPostShanghaiNoWithdrawals(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	const rawBodyForStorageRlp = "f901f5c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0c0"
+	const rawBodyForStorageRlp = "f901f5c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000c0"
 	bstring, _ := hex.DecodeString(rawBodyForStorageRlp)
 
 	body := new(RawBody)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.NotNil(body.Withdrawals)
 	require.Empty(body.Withdrawals)
@@ -788,12 +664,12 @@ func TestBlockRawBodyPostShanghaiWithdrawals(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	const rawBodyForStorageRlp = "f90230c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f83adc0f82157c94ff000000000000000000000000000000000000008203e8dc1082157d94ff000000000000000000000000000000000000008203e9c0"
+	const rawBodyForStorageRlp = "f90230c0f901f0f901eda00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000940000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b9010000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000808080808080a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f83adc0f82157c94ff000000000000000000000000000000000000008203e8dc1082157d94ff000000000000000000000000000000000000008203e9"
 
 	bstring, _ := hex.DecodeString(rawBodyForStorageRlp)
 
 	body := new(RawBody)
-	rlp.DecodeBytes(bstring, body)
+	require.NoError(rlp.DecodeBytes(bstring, body))
 
 	require.NotNil(body.Withdrawals)
 	require.Len(body.Uncles, 1)
@@ -923,4 +799,76 @@ func TestBodyDecodeRejectsWrappedLegacyTransaction(t *testing.T) {
 	var body Body
 	err = rlp.DecodeBytes(bodyRLP, &body)
 	require.ErrorIs(t, err, ErrInvalidTxType)
+}
+
+func TestHeaderMarshalJSONQuantities(t *testing.T) {
+	h := &Header{Number: *uint256.NewInt(0x18c5467), Difficulty: *uint256.NewInt(0), BaseFee: uint256.NewInt(1_000_000_000)}
+	enc, err := json.Marshal(h)
+	require.NoError(t, err)
+	var got map[string]any
+	require.NoError(t, json.Unmarshal(enc, &got))
+	require.Equal(t, "0x18c5467", got["number"])
+	require.Equal(t, "0x0", got["difficulty"])
+	require.Equal(t, "0x3b9aca00", got["baseFeePerGas"])
+
+	h.BaseFee = nil
+	enc, err = json.Marshal(h)
+	require.NoError(t, err)
+	require.Contains(t, string(enc), `"baseFeePerGas":null`)
+}
+
+// headerWithEveryFieldSet fills every field, so no optional one is skipped.
+func headerWithEveryFieldSet() *Header {
+	hash := common.HexToHash("0x0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+	num := uint64(7)
+	return &Header{
+		ParentHash:            hash,
+		UncleHash:             hash,
+		Coinbase:              common.HexToAddress("0x1234567890123456789012345678901234567890"),
+		Root:                  hash,
+		TxHash:                hash,
+		ReceiptHash:           hash,
+		Bloom:                 Bloom{1, 2, 3},
+		Difficulty:            *uint256.NewInt(0x2000),
+		Number:                *uint256.NewInt(0x18c5467),
+		GasLimit:              30_000_000,
+		GasUsed:               21_000,
+		Time:                  1_700_000_000,
+		Extra:                 []byte{0xde, 0xad},
+		MixDigest:             hash,
+		Nonce:                 EncodeNonce(42),
+		AuRaStep:              5,
+		AuRaSeal:              []byte{9, 9},
+		BaseFee:               uint256.NewInt(1_000_000_000),
+		WithdrawalsHash:       &hash,
+		BlobGasUsed:           &num,
+		ExcessBlobGas:         &num,
+		ParentBeaconBlockRoot: &hash,
+		RequestsHash:          &hash,
+		BlockAccessListHash:   &hash,
+		SlotNumber:            &num,
+	}
+}
+
+func TestHeaderMarshalFastJSONTo(t *testing.T) {
+	t.Parallel()
+	full := headerWithEveryFieldSet()
+	empty := &Header{}
+	noOptionals := &Header{Number: *uint256.NewInt(1), Difficulty: *uint256.NewInt(0), Extra: []byte{}, AuRaSeal: []byte{}}
+
+	for name, h := range map[string]*Header{"full": full, "empty": empty, "noOptionals": noOptionals} {
+		t.Run(name, func(t *testing.T) {
+			hash := h.Hash()
+			want, err := ethjsontest.ExpectedJSON(h, ethjsontest.Computed{Name: "hash", Raw: `"` + hash.Hex() + `"`})
+			require.NoError(t, err)
+			got, err := jsonstream.Marshal(h)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+
+			// gen_header_json.go is hand-maintained, so hold it to the tags as well.
+			generated, err := json.Marshal(h)
+			require.NoError(t, err)
+			require.JSONEq(t, string(want), string(generated))
+		})
+	}
 }

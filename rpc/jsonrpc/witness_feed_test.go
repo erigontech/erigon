@@ -17,21 +17,20 @@
 package jsonrpc
 
 import (
-	"encoding/json"
-	"fmt"
 	"reflect"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 func mkPush(n uint64) witnessPush {
 	return witnessPush{
-		num:  n,
-		hash: common.Hash{byte(n)},
-		json: json.RawMessage(fmt.Sprintf(`{"n":%d}`, n)),
+		num:    n,
+		hash:   common.Hash{byte(n)},
+		result: &ExecutionWitnessResult{State: []hexutil.Bytes{{byte(n)}}},
 	}
 }
 

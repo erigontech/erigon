@@ -24,9 +24,30 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc"
 )
+
+func TestFilterCriteriaValidateTopicPositions(t *testing.T) {
+	criteria := FilterCriteria{
+		Topics: [][]common.Hash{
+			{{1}, {2}},
+			{{3}, {4}},
+			{{5}, {6}},
+			{{7}, {8}},
+		},
+	}
+	require.NoError(t, criteria.ValidateTopicPositions())
+
+	criteria.Topics = append(criteria.Topics, []common.Hash{{9}})
+	err := criteria.ValidateTopicPositions()
+	var invalidParams *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &invalidParams)
+	require.Equal(t, rpc.ErrCodeInvalidParams, invalidParams.ErrorCode())
+	require.EqualError(t, err, "query exceeds the maximum of 4 topics")
+}
 
 func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 	var (
@@ -175,7 +196,8 @@ func TestUnmarshalJSONNewFilterArgs(t *testing.T) {
 		t.Fatalf("expected 2 topics, got %d topics", len(test7.Topics[0]))
 	}
 	if test7.Topics[0][0] != topic0 || test7.Topics[0][1] != topic1 {
-		t.Fatalf("invalid topics expected [%x,%x], got [%x,%x]",
+		t.Fatalf(
+			"invalid topics expected [%x,%x], got [%x,%x]",
 			topic0, topic1, test7.Topics[0][0], test7.Topics[0][1],
 		)
 	}

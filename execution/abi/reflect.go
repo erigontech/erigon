@@ -188,15 +188,15 @@ func mapArgNamesToStructFields(argNames []string, value reflect.Value) (map[stri
 	struct2abi := make(map[string]string)
 
 	// first round ~~~
-	for i := 0; i < typ.NumField(); i++ {
-		structFieldName := typ.Field(i).Name
+	for field := range typ.Fields() {
+		structFieldName := field.Name
 
 		// skip private struct fields.
 		if structFieldName[:1] != strings.ToUpper(structFieldName[:1]) {
 			continue
 		}
 		// skip fields that have no abi:"" tag.
-		tagName, ok := typ.Field(i).Tag.Lookup("abi")
+		tagName, ok := field.Tag.Lookup("abi")
 		if !ok {
 			continue
 		}

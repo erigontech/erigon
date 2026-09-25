@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -91,7 +92,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 
 	current := cfg.builder.BuiltBlock
 	*current = exec.AssembledBlock{}    // always start with a clean state
-	var txPoolLocals []accounts.Address //txPoolV2 has no concept of local addresses (yet?)
+	var txPoolLocals []accounts.Address // txPoolV2 has no concept of local addresses (yet?)
 	coinbase := accounts.InternAddress(cfg.builder.BuilderConfig.Etherbase)
 
 	const (
@@ -123,7 +124,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 		return err
 	}
 	chain := stagedsync.ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
-	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
+	GetBlocksFromHash := func(hash common.Hash, n int) (blocks []*types.Block) {
 		number, _ := cfg.blockReader.HeaderNumber(context.Background(), tx, hash)
 		if number == nil {
 			return nil
@@ -182,7 +183,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer ibs.Close()
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {
@@ -219,7 +220,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	}
 
 	// analog of miner.Worker.updateSnapshot
-	var makeUncles = func(proposedUncles mapset.Set[common.Hash]) []*types.Header {
+	makeUncles := func(proposedUncles mapset.Set[common.Hash]) []*types.Header {
 		var uncles []*types.Header
 		proposedUncles.Each(func(hash common.Hash) bool {
 			uncle, exist := localUncles[hash]
@@ -301,7 +302,6 @@ func readNonCanonicalHeaders(tx kv.Tx, blockNum uint64, engine rules.Engine, coi
 		} else {
 			remoteUncles[u.Hash()] = u
 		}
-
 	}
 	return
 }

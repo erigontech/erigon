@@ -142,16 +142,6 @@ func TestUnmarshalBig(t *testing.T) {
 	}
 }
 
-func BenchmarkUnmarshalBig(b *testing.B) {
-	input := []byte(`"0x123456789abcdef123456789abcdef"`)
-	for b.Loop() {
-		var v Big
-		if err := v.UnmarshalJSON(input); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 func TestMarshalBig(t *testing.T) {
 	for idx, test := range encodeBigTests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
@@ -341,7 +331,7 @@ func TestMarshalUint16(t *testing.T) {
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
-			require.Equal(t, test.want, (Uint16)(in).String())
+			require.Equal(t, test.want, Uint16(in).String())
 		})
 	}
 }
@@ -382,14 +372,6 @@ func TestUnmarshalUint64(t *testing.T) {
 	}
 }
 
-func BenchmarkUnmarshalUint64(b *testing.B) {
-	input := []byte(`"0x123456789abcdf"`)
-	for b.Loop() {
-		var v Uint64
-		_ = v.UnmarshalJSON(input)
-	}
-}
-
 func TestMarshalUint64(t *testing.T) {
 	for idx, test := range encodeUint64Tests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
@@ -398,7 +380,54 @@ func TestMarshalUint64(t *testing.T) {
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
-			require.Equal(t, test.want, (Uint64)(in).String())
+			require.Equal(t, test.want, Uint64(in).String())
+		})
+	}
+}
+
+func TestInt64JSON(t *testing.T) {
+	for _, tc := range []struct {
+		value Int64
+		json  string
+	}{
+		{0, `"0x0"`},
+		{30, `"0x1e"`},
+		{-30, `"-0x1e"`},
+		{1<<63 - 1, `"0x7fffffffffffffff"`},
+		{-1 << 63, `"-0x8000000000000000"`},
+	} {
+		t.Run(tc.json, func(t *testing.T) {
+			encoded, err := json.Marshal(tc.value)
+			require.NoError(t, err)
+			require.Equal(t, tc.json, string(encoded))
+			var decoded Int64
+			require.NoError(t, json.Unmarshal(encoded, &decoded))
+			require.Equal(t, tc.value, decoded)
+			appended, err := tc.value.AppendText([]byte("prefix-"))
+			require.NoError(t, err)
+			require.Equal(t, "prefix-"+tc.json[1:len(tc.json)-1], string(appended))
+		})
+	}
+}
+
+func TestUnmarshalInt64(t *testing.T) {
+	for _, tc := range []unmarshalTest{
+		{input: `null`, wantErr: errNonString(int64T)},
+		{input: `10`, wantErr: errNonString(int64T)},
+		{input: `"-"`, wantErr: wrapTypeError(ErrEmptyNumber, int64T)},
+		{input: `"-1"`, wantErr: wrapTypeError(ErrMissingPrefix, int64T)},
+		{input: `"0x"`, wantErr: wrapTypeError(ErrEmptyNumber, int64T)},
+		{input: `"-0x01"`, wantErr: wrapTypeError(ErrLeadingZero, int64T)},
+		{input: `"-0xz"`, wantErr: wrapTypeError(ErrSyntax, int64T)},
+		{input: `"0x8000000000000000"`, wantErr: wrapTypeError(ErrInt64Range, int64T)},
+		{input: `"-0x8000000000000001"`, wantErr: wrapTypeError(ErrInt64Range, int64T)},
+		{input: `"0x10000000000000000"`, wantErr: wrapTypeError(ErrInt64Range, int64T)},
+	} {
+		t.Run(tc.input, func(t *testing.T) {
+			value := Int64(42)
+			err := json.Unmarshal([]byte(tc.input), &value)
+			checkError(t, tc.input, err, tc.wantErr)
+			require.Equal(t, Int64(42), value)
 		})
 	}
 }
@@ -411,7 +440,7 @@ func TestMarshalUint(t *testing.T) {
 			require.NoError(t, err)
 			want := `"` + test.want + `"`
 			require.Equal(t, want, string(out))
-			require.Equal(t, test.want, (Uint)(in).String())
+			require.Equal(t, test.want, Uint(in).String())
 		})
 	}
 }
@@ -459,7 +488,6 @@ func TestUnmarshalUint(t *testing.T) {
 			if test.want != nil {
 				require.EqualValues(t, test.want, v)
 			}
-
 		})
 	}
 }

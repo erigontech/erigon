@@ -73,7 +73,7 @@ type callTrace struct {
 	From     common.Address  `json:"from"`
 	Gas      *hexutil.Uint64 `json:"gas"`
 	GasUsed  *hexutil.Uint64 `json:"gasUsed"`
-	To       common.Address  `json:"to,omitempty"`
+	To       *common.Address `json:"to,omitempty"`
 	Input    hexutil.Bytes   `json:"input"`
 	Output   hexutil.Bytes   `json:"output,omitempty"`
 	Error    string          `json:"error,omitempty"`
@@ -131,9 +131,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 		t.Run(camel(strings.TrimSuffix(file.Name(), ".json")), func(t *testing.T) {
 			t.Parallel()
 
-			var (
-				test = new(callTracerTest)
-			)
+			test := new(callTracerTest)
 			// Call tracer test found, read if from disk
 			if blob, err := os.ReadFile(filepath.Join("testdata", dirPath, file.Name())); err != nil {
 				t.Fatalf("failed to read testcase: %v", err)
@@ -167,7 +165,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 			require.NoError(t, err)
 			defer dbTx.Rollback()
-			statedb, err := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
+			statedb, err := testutil.MakePreState(rules, m.DB, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
 			require.NoError(t, err)
 			tracer, err := tracers.New(tracerName, new(tracers.Context), test.TracerConfig)
 			if err != nil {
@@ -185,7 +183,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 			// Retrieve the trace result and compare against the expected.
 			res, err := tracer.GetResult()
 			if err != nil {
@@ -307,7 +305,7 @@ func TestCallTracerWithLogPositionAfterRevert(t *testing.T) {
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
-	statedb, _ := testutil.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+	statedb, _ := testutil.MakePreState(rules, m.DB, dbTx, alloc, context.BlockNumber)
 
 	tracer, err := tracers.New("callTracer", nil, json.RawMessage(`{"withLog":true}`))
 	if err != nil {
@@ -325,7 +323,7 @@ func TestCallTracerWithLogPositionAfterRevert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -401,7 +399,7 @@ func TestCallTracerWithLogPositionMixedSubcalls(t *testing.T) {
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
-	statedb, _ := testutil.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+	statedb, _ := testutil.MakePreState(rules, m.DB, dbTx, alloc, context.BlockNumber)
 
 	tracer, err := tracers.New("callTracer", nil, json.RawMessage(`{"withLog":true}`))
 	if err != nil {
@@ -419,7 +417,7 @@ func TestCallTracerWithLogPositionMixedSubcalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -509,7 +507,7 @@ func TestCallTracerWithLogPositionInCreate(t *testing.T) {
 	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
 	require.NoError(t, err)
 	defer dbTx.Rollback()
-	statedb, _ := testutil.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+	statedb, _ := testutil.MakePreState(rules, m.DB, dbTx, alloc, context.BlockNumber)
 
 	tracer, err := tracers.New("callTracer", nil, json.RawMessage(`{"withLog":true}`))
 	if err != nil {
@@ -527,7 +525,7 @@ func TestCallTracerWithLogPositionInCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -546,88 +544,11 @@ func TestCallTracerWithLogPositionInCreate(t *testing.T) {
 	require.Equal(t, hexutil.Uint(1), createFrame.Logs[1].Position, "LOG_B in CREATE: after subcall, position should be 0x1")
 }
 
-func BenchmarkTracers(b *testing.B) {
-	files, err := dir.ReadDir(filepath.Join("testdata", "call_tracer"))
-	if err != nil {
-		b.Fatalf("failed to retrieve tracer test suite: %v", err)
-	}
-	for _, file := range files {
-		if !strings.HasSuffix(file.Name(), ".json") {
-			continue
-		}
-		file := file // capture range variable
-		b.Run(camel(strings.TrimSuffix(file.Name(), ".json")), func(b *testing.B) {
-			blob, err := os.ReadFile(filepath.Join("testdata", "call_tracer", file.Name()))
-			if err != nil {
-				b.Fatalf("failed to read testcase: %v", err)
-			}
-			test := new(callTracerTest)
-			if err := json.Unmarshal(blob, test); err != nil {
-				b.Fatalf("failed to parse testcase: %v", err)
-			}
-			benchTracer(b, "callTracer", test)
-		})
-	}
-}
-
-func benchTracer(b *testing.B, tracerName string, test *callTracerTest) {
-	// Configure a blockchain with the given prestate
-	tx, err := types.DecodeTransaction(common.FromHex(test.Input))
-	if err != nil {
-		b.Fatalf("failed to parse testcase input: %v", err)
-	}
-	signer := types.MakeSigner(test.Genesis.Config, uint64(test.Context.Number), uint64(test.Context.Time))
-	context := evmtypes.BlockContext{
-		CanTransfer: protocol.CanTransfer,
-		Transfer:    misc.Transfer,
-		Coinbase:    accounts.InternAddress(test.Context.Miner),
-		BlockNumber: uint64(test.Context.Number),
-		Time:        uint64(test.Context.Time),
-		Difficulty:  *test.Context.Difficulty,
-		GasLimit:    uint64(test.Context.GasLimit),
-	}
-	rules := context.Rules(test.Genesis.Config)
-	msg, err := tx.AsMessage(*signer, nil, rules)
-	if err != nil {
-		b.Fatalf("failed to prepare transaction for tracing: %v", err)
-	}
-	origin, _ := signer.Sender(tx)
-	baseFee := test.Context.BaseFee
-	txContext := evmtypes.TxContext{
-		Origin:   origin,
-		GasPrice: tx.GetEffectiveGasTip(baseFee),
-	}
-	m := execmoduletester.New(b)
-	dbTx, err := m.DB.BeginTemporalRw(m.Ctx)
-	require.NoError(b, err)
-	defer dbTx.Rollback()
-	statedb, _ := testutil.MakePreState(rules, dbTx, test.Genesis.Alloc, uint64(test.Context.Number))
-
-	b.ReportAllocs()
-	for b.Loop() {
-		tracer, err := tracers.New(tracerName, new(tracers.Context), nil)
-		if err != nil {
-			b.Fatalf("failed to create call tracer: %v", err)
-		}
-		evm := vm.NewEVM(context, txContext, statedb, test.Genesis.Config, vm.Config{Tracer: tracer.Hooks})
-		snap := statedb.PushSnapshot()
-		st := protocol.NewTxnExecutor(evm, msg, new(protocol.GasPool).AddGas(tx.GetGasLimit()).AddBlobGas(tx.GetBlobGas()))
-		if _, err = st.Execute(true /* refunds */, false /* gasBailout */); err != nil {
-			b.Fatalf("failed to execute transaction: %v", err)
-		}
-		if _, err = tracer.GetResult(); err != nil {
-			b.Fatal(err)
-		}
-		statedb.RevertToSnapshot(snap, nil)
-		statedb.PopSnapshot(snap)
-	}
-}
-
 // TestZeroValueToNotExitCall tests the calltracer(s) on the following:
 // txn to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
-	var to = common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	to := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
 	if err != nil {
 		t.Fatalf("err %v", err)
@@ -657,12 +578,12 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		Difficulty:  *uint256.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 	}
-	var code = []byte{
+	code := []byte{
 		byte(vm.PUSH1), 0x0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1), // in and outs zero
 		byte(vm.DUP1), byte(vm.PUSH1), 0xff, byte(vm.GAS), // value=0,address=0xff, gas=GAS
 		byte(vm.CALL),
 	}
-	var alloc = types.GenesisAlloc{
+	alloc := types.GenesisAlloc{
 		to: types.GenesisAccount{
 			Nonce: 1,
 			Code:  code,
@@ -678,7 +599,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	require.NoError(t, err)
 	defer dbTx.Rollback()
 
-	statedb, _ := testutil.MakePreState(rules, dbTx, alloc, context.BlockNumber)
+	statedb, _ := testutil.MakePreState(rules, m.DB, dbTx, alloc, context.BlockNumber)
 	// Create the tracer, the EVM environment and run it
 	tracer, err := tracers.New("callTracer", nil, nil)
 	if err != nil {
@@ -696,7 +617,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {

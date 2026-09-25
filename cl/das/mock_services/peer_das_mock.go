@@ -273,40 +273,40 @@ func (c *MockPeerDasIsDataAvailableCall) DoAndReturn(f func(uint64, common.Hash)
 	return c
 }
 
-// Prune mocks base method.
-func (m *MockPeerDas) Prune(keepSlotDistance uint64) error {
+// PruneBelow mocks base method.
+func (m *MockPeerDas) PruneBelow(slot uint64) error {
 	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "Prune", keepSlotDistance)
+	ret := m.ctrl.Call(m, "PruneBelow", slot)
 	ret0, _ := ret[0].(error)
 	return ret0
 }
 
-// Prune indicates an expected call of Prune.
-func (mr *MockPeerDasMockRecorder) Prune(keepSlotDistance any) *MockPeerDasPruneCall {
+// PruneBelow indicates an expected call of PruneBelow.
+func (mr *MockPeerDasMockRecorder) PruneBelow(slot any) *MockPeerDasPruneBelowCall {
 	mr.mock.ctrl.T.Helper()
-	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Prune", reflect.TypeOf((*MockPeerDas)(nil).Prune), keepSlotDistance)
-	return &MockPeerDasPruneCall{Call: call}
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PruneBelow", reflect.TypeOf((*MockPeerDas)(nil).PruneBelow), slot)
+	return &MockPeerDasPruneBelowCall{Call: call}
 }
 
-// MockPeerDasPruneCall wrap *gomock.Call
-type MockPeerDasPruneCall struct {
+// MockPeerDasPruneBelowCall wrap *gomock.Call
+type MockPeerDasPruneBelowCall struct {
 	*gomock.Call
 }
 
 // Return rewrite *gomock.Call.Return
-func (c *MockPeerDasPruneCall) Return(arg0 error) *MockPeerDasPruneCall {
+func (c *MockPeerDasPruneBelowCall) Return(arg0 error) *MockPeerDasPruneBelowCall {
 	c.Call = c.Call.Return(arg0)
 	return c
 }
 
 // Do rewrite *gomock.Call.Do
-func (c *MockPeerDasPruneCall) Do(f func(uint64) error) *MockPeerDasPruneCall {
+func (c *MockPeerDasPruneBelowCall) Do(f func(uint64) error) *MockPeerDasPruneBelowCall {
 	c.Call = c.Call.Do(f)
 	return c
 }
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
-func (c *MockPeerDasPruneCall) DoAndReturn(f func(uint64) error) *MockPeerDasPruneCall {
+func (c *MockPeerDasPruneBelowCall) DoAndReturn(f func(uint64) error) *MockPeerDasPruneBelowCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
@@ -343,6 +343,42 @@ func (c *MockPeerDasSetForkChoiceCall) Do(f func(das.BlockGetter)) *MockPeerDasS
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockPeerDasSetForkChoiceCall) DoAndReturn(f func(das.BlockGetter)) *MockPeerDasSetForkChoiceCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// Start mocks base method.
+func (m *MockPeerDas) Start(ctx context.Context) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "Start", ctx)
+}
+
+// Start indicates an expected call of Start.
+func (mr *MockPeerDasMockRecorder) Start(ctx any) *MockPeerDasStartCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Start", reflect.TypeOf((*MockPeerDas)(nil).Start), ctx)
+	return &MockPeerDasStartCall{Call: call}
+}
+
+// MockPeerDasStartCall wrap *gomock.Call
+type MockPeerDasStartCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockPeerDasStartCall) Return() *MockPeerDasStartCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockPeerDasStartCall) Do(f func(context.Context)) *MockPeerDasStartCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockPeerDasStartCall) DoAndReturn(f func(context.Context)) *MockPeerDasStartCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }

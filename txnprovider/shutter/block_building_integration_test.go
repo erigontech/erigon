@@ -70,7 +70,6 @@ func TestShutterBlockBuilding(t *testing.T) {
 	amount := big.NewInt(1)
 	// amount of blocks it takes to deploy a new keyper set based on contractsDeployer.DeployKeyperSet
 	keyperSetDeploymentBlocks := uint64(4)
-	txnPointer := uint64(0)
 
 	// deploy initial eon 0
 	currentBlock, err := uni.rpcApiClient.BlockNumber()
@@ -82,6 +81,7 @@ func TestShutterBlockBuilding(t *testing.T) {
 
 	t.Run("eon 0", func(t *testing.T) {
 		require.Equal(t, shutter.EonIndex(0), ekg.EonIndex)
+		txnPointer := uint64(0)
 
 		t.Run("build shutter block", func(t *testing.T) {
 			// submit 1 shutter txn
@@ -169,6 +169,8 @@ func TestShutterBlockBuilding(t *testing.T) {
 		_, _, err = uni.contractsDeployer.DeployKeyperSet(ctx, uni.contractsDeployment, ekg)
 		require.NoError(t, err)
 		require.Equal(t, shutter.EonIndex(1), ekg.EonIndex)
+		// the sequencer contract numbers submissions per eon, so the keyper txn pointer restarts at 0
+		txnPointer := uint64(0)
 
 		t.Run("build shutter block", func(t *testing.T) {
 			// submit 1 shutter txn using the new eon

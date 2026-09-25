@@ -242,9 +242,7 @@ func addSszTests() {
 			cltypes.NewPartialDataColumnSidecar, runAfterVersion(clparams.FuluVersion),
 		)).
 		With("PartialDataColumnPartsMetadata", sszStaticTestNewObjectByFunc(
-			func(v clparams.StateVersion) *cltypes.PartialDataColumnPartsMetadata {
-				return cltypes.NewPartialDataColumnPartsMetadata()
-			}, runAfterVersion(clparams.FuluVersion),
+			cltypes.NewPartialDataColumnPartsMetadata, runAfterVersion(clparams.FuluVersion),
 		)).
 		// [New in Gloas:EIP7732] GLOAS SSZ types
 		With("Builder", sszStaticTestByEmptyObject(&cltypes.Builder{}, runAfterVersion(clparams.GloasVersion))).

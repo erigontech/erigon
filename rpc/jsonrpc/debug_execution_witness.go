@@ -3,7 +3,6 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"slices"
@@ -34,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -56,8 +56,10 @@ type RecordingState struct {
 	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
 	// already created in-block is redundant in the witness (the verifier replays the create).
 	createdCodeHashes map[common.Hash]struct{}
+	// codeHashes is keyed by the code itself: one code is recorded under several maps and addresses.
+	codeHashes map[string]common.Hash
 
-	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
+	// HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
 	// In-memory state overlay (writes)
 	accountOverlay map[common.Address]*accounts.Account // non-nil = updated, entry present with nil value=deleted
@@ -90,6 +92,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		AccessedCode:          make(map[common.Address][]byte),
 		PreStateCode:          make(map[common.Address][]byte),
 		createdCodeHashes:     make(map[common.Hash]struct{}),
+		codeHashes:            make(map[string]common.Hash),
 		accountOverlay:        make(map[common.Address]*accounts.Account),
 		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
 		codeOverlay:           make(map[common.Address][]byte),
@@ -216,33 +219,6 @@ func (s *RecordingState) ReadAccountStorage(address accounts.Address, key accoun
 	return val, ok, err
 }
 
-func (s *RecordingState) HasStorage(address accounts.Address) (bool, error) {
-	addr := address.Value()
-	s.AccessedAccounts[addr] = struct{}{}
-	// Check overlay for any non-zero storage
-	if mods, ok := s.storageOverlay[addr]; ok {
-		for _, val := range mods {
-			if !val.IsZero() {
-				if s.tracing(addr) {
-					fmt.Printf("[TRACE] HasStorage %s -> overlay true\n", addr.Hex())
-				}
-				return true, nil
-			}
-		}
-	}
-	if _, deleted := s.DeletedAccounts[addr]; deleted {
-		if s.tracing(addr) {
-			fmt.Printf("[TRACE] HasStorage %s -> deleted false\n", addr.Hex())
-		}
-		return false, nil
-	}
-	has, err := s.inner.HasStorage(address)
-	if s.tracing(addr) {
-		fmt.Printf("[TRACE] HasStorage %s -> inner %v (err=%v)\n", addr.Hex(), has, err)
-	}
-	return has, err
-}
-
 func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addr := address.Value()
 	s.AccessedAccounts[addr] = struct{}{}
@@ -268,7 +244,7 @@ func (s *RecordingState) ReadAccountCode(address accounts.Address) ([]byte, erro
 	if len(code) > 0 {
 		s.AccessedCode[addr] = code
 		if _, already := s.PreStateCode[addr]; !already {
-			if _, created := s.createdCodeHashes[crypto.Keccak256Hash(code)]; !created {
+			if _, created := s.createdCodeHashes[s.codeHash(code)]; !created {
 				s.PreStateCode[addr] = code
 			}
 		}
@@ -346,6 +322,15 @@ func (s *RecordingState) UpdateAccountData(address accounts.Address, original, a
 		fmt.Printf("[TRACE] UpdateAccountData %s nonce=%d balance=%d codeHash=%x\n", addr.Hex(), account.Nonce, &account.Balance, account.CodeHash)
 	}
 	return nil
+}
+
+func (s *RecordingState) codeHash(code []byte) common.Hash {
+	if h, ok := s.codeHashes[string(code)]; ok {
+		return h
+	}
+	h := crypto.Keccak256Hash(code)
+	s.codeHashes[string(code)] = h
+	return h
 }
 
 func (s *RecordingState) UpdateAccountCode(address accounts.Address, incarnation uint64, codeHash accounts.CodeHash, code []byte) error {
@@ -551,22 +536,32 @@ type ExecutionWitnessResult struct {
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
-
-	// cachedJSON, when non-nil, is this result's pre-marshaled JSON. The eager
-	// witness cache stores a shell carrying only this, so a hit serves the bytes
-	// verbatim via MarshalFastJSON instead of re-marshaling the struct.
-	cachedJSON []byte
 }
 
-// MarshalFastJSON is the rpc fast-result path (rpc.fastJSONResult): a cache shell
-// returns its stored bytes verbatim; a freshly built result marshals its exported
-// fields, byte-identical to the cached form so both paths agree.
-func (m *ExecutionWitnessResult) MarshalFastJSON() ([]byte, error) {
-	if m.cachedJSON != nil {
-		return m.cachedJSON, nil
+// MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
+func (m *ExecutionWitnessResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if m == nil {
+		s.WriteNil()
+		return nil
 	}
-	return json.Marshal(m)
+	s.WriteObjectStart()
+	s.Field("state")
+	jsonstream.ArrayValue(s, m.State, writeHexElem)
+	s.Field("codes")
+	jsonstream.ArrayValue(s, m.Codes, writeHexElem)
+	if len(m.Keys) > 0 {
+		s.Field("keys")
+		jsonstream.ArrayValue(s, m.Keys, writeHexElem)
+	}
+	if len(m.Headers) > 0 {
+		s.Field("headers")
+		jsonstream.ArrayValue(s, m.Headers, writeHexElem)
+	}
+	s.WriteObjectEnd()
+	return nil
 }
+
+func writeHexElem(s *jsonstream.StackStream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func (m *ExecutionWitnessResult) getHashFn(blockNum uint64) (common.Hash, error) {
 	if header, ok := m.headerByNumber[blockNum]; ok {
@@ -714,6 +709,9 @@ func (api *BaseAPI) buildAccessedState(
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
 func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 	resolvedMode, err := resolveWitnessMode(mode)
 	if err != nil {
 		return nil, err
@@ -777,7 +775,7 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	// orphan into a plain miss and losing the reorged-away signal.
 	resolve := blockNrOrHash
 	resolve.RequireCanonical = false
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, api.filters)
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false, false
@@ -822,10 +820,9 @@ var (
 	errWitnessCanonicalUnavailable = errors.New("canonical witness mode is unavailable on a cache-only node (serves legacy only)")
 )
 
-// headCaptureSource carries the pinned-parent commitment plane for a minimal-node
-// witness build: pinnedParentTx's commitment-latest is parent(B) commitment, read
-// directly via tx.GetLatest so it bypasses the build's own commitment fold and the
-// aggregator-shared branch cache (which the fold mutates).
+// headCaptureSource carries the pinned parent's commitment state for a minimal-node
+// witness build. Direct tx.GetLatest reads keep it independent of the build's
+// in-memory commitment fold.
 type headCaptureSource struct {
 	pinnedParentTx kv.TemporalTx
 }
@@ -855,9 +852,8 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, firstTxNumInBlock ui
 // from a pinned RO snapshot (pinnedParentTx's commitment-latest) instead of commitment
 // history, for minimal nodes that keep no commitment history. Plain account/storage/code
 // state is read from committedTx's history exactly as the durable path does; only the
-// commitment source changes. The pinned commitment plane is read directly via
-// tx.GetLatest so the build's own fold and the aggregator-shared branch cache cannot
-// perturb it.
+// commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
+// state independent of the build's in-memory commitment fold.
 func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
 	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
@@ -900,7 +896,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New())
 	if err != nil {
 		return nil, err
 	}
@@ -1158,7 +1154,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		// canonical: only pre-state bytecode (excludes in-block-created), non-empty.
 		for _, code := range rs.GetPreStateCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 	default:
@@ -1168,17 +1164,17 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		// by its resolved target code and survives only in PreStateCode.
 		for _, code := range rs.GetAccessedCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		for _, code := range rs.GetModifiedCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		for _, code := range rs.GetPreStateCode() {
 			if len(code) > 0 {
-				allCodesByHash[crypto.Keccak256Hash(code)] = code
+				allCodesByHash[rs.codeHash(code)] = code
 			}
 		}
 		emptyEntry = rs.emptyCodeAccessed
@@ -1199,7 +1195,7 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	preCode := rs.GetPreStateCode()
 	for addr, code := range preCode {
 		if len(code) > 0 {
-			codeHash := crypto.Keccak256Hash(code)
+			codeHash := rs.codeHash(code)
 			addrHash := crypto.Keccak256Hash(addr[:])
 			out.CodeReads[addrHash] = witnesstypes.CodeWithHash{
 				Code:     code,
@@ -1238,7 +1234,7 @@ func detectCollapseSiblings(
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
 	// so branch updates are written using PutBranch().
 	splitStateReader := collapseReaderFor(hc, tx, firstTxNumInBlock, endTxNum)
-	sdCtx.SetCustomHistoryStateReader(splitStateReader)
+	sdCtx.SetStateReader(splitStateReader)
 	_, seekBlockNum, err := domains.SeekCommitment(ctx, tx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to re-seek commitment for collapse detection: %w", err)
@@ -1250,7 +1246,8 @@ func detectCollapseSiblings(
 		return nil, fmt.Errorf(
 			"debug_executionWitness: commitment trie for block %d is at block %d instead of parent %d; "+
 				"commitment history may be pruned for this block range",
-			blockNum, seekBlockNum, parentNum)
+			blockNum, seekBlockNum, parentNum,
+		)
 	}
 
 	preReader := commitmentdb.NewHistoryStateReader(tx, firstTxNumInBlock)
@@ -1271,7 +1268,7 @@ func detectCollapseSiblings(
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
+		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w\n", err)
 	}
 
 	if common.Hash(computedRootHash) != expectedBlockRoot {
@@ -1285,7 +1282,7 @@ func detectCollapseSiblings(
 	siblingPaths = make([][]byte, 0, len(candidates))
 	for _, c := range candidates {
 		if mode == witnessModeCanonical {
-			childCount, err := sdCtx.BranchChildCount(tx, c.branchPrefix)
+			childCount, err := sdCtx.BranchChildCount(c.branchPrefix)
 			if err != nil {
 				return nil, fmt.Errorf("[debug_executionWitness] read post-state branch for collapse filter: %w", err)
 			}
@@ -1317,7 +1314,7 @@ func buildWitnessTrie(
 ) (encodedNodes []hexutil.Bytes, err error) {
 	encodedNodes = []hexutil.Bytes{}
 
-	sdCtx.SetCustomHistoryStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
+	sdCtx.SetStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
 	if _, _, err := domains.SeekCommitment(ctx, tx); err != nil {
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
@@ -1333,7 +1330,7 @@ func buildWitnessTrie(
 		}
 	}
 
-	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs, "debug_executionWitness_witness_construction")
+	witnessNodes, witnessRoot, err := sdCtx.WitnessNodes(ctx, produceExclusionProofs)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate witness: %w", err)
 	}
@@ -1356,8 +1353,15 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	tx kv.TemporalTx,
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// TxNums and commitment history must describe the same block view.
+	blockNum, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader)
 	if err != nil {
+		return nil, err
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
+		return nil, err
+	}
+	if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
 		return nil, err
 	}
 
@@ -1447,9 +1451,10 @@ func (api *BaseAPI) collectAccessedHeaders(
 	return headers, byNumber, nil
 }
 
-// verifyWitnessStateless optionally re-executes the block statelessly against the
-// generated witness and asserts the resulting state root matches. Verification is
-// a no-op when ERIGON_WITNESS_NO_VERIFY=true (it roughly doubles execution cost).
+// verifyWitnessStateless re-executes the block from the witness alone and checks the post-state root and
+// result.Keys. It runs only under ERIGON_ASSERT. Without it a build still checks the parent state root, and
+// for a non-empty accessed set the block-end commitment as well; what the gate removes is the stateless
+// replay, which is what covers Codes, Keys and node sufficiency.
 func (api *DebugAPIImpl) verifyWitnessStateless(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1457,7 +1462,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	block *types.Block,
 	fullEngine rules.Engine,
 ) error {
-	if dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+	if !dbg.AssertEnabled {
 		return nil
 	}
 
@@ -1572,8 +1577,10 @@ func (s *witnessStateless) tracing(addr common.Address) bool {
 }
 
 // Ensure witnessStateless implements both interfaces
-var _ state.StateReader = (*witnessStateless)(nil)
-var _ state.StateWriter = (*witnessStateless)(nil)
+var (
+	_ state.StateReader = (*witnessStateless)(nil)
+	_ state.StateWriter = (*witnessStateless)(nil)
+)
 
 // newWitnessStateless creates a new witnessStateless from ExecutionWitnessResult
 func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, error) {
@@ -1591,8 +1598,7 @@ func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, err
 	// Build code map from codes list
 	codeMap := make(map[common.Hash][]byte)
 	for _, code := range result.Codes {
-		codeHash := crypto.Keccak256Hash(code)
-		codeMap[codeHash] = code
+		codeMap[crypto.Keccak256Hash(code)] = code
 	}
 
 	return &witnessStateless{
@@ -1787,43 +1793,6 @@ func (s *witnessStateless) ReadAccountIncarnation(address accounts.Address) (uin
 	return 0, nil
 }
 
-func (s *witnessStateless) HasStorage(address accounts.Address) (bool, error) {
-	addr := address.Value()
-	addrHash := crypto.Keccak256Hash(addr[:])
-	// Check if account has been deleted
-	if _, ok := s.deleted[addr]; ok {
-		if s.tracing(addr) {
-			fmt.Printf("[TRACE-S] HasStorage %s -> deleted false\n", addr.Hex())
-		}
-		return false, nil
-	}
-
-	// Check if we know about any storage updates with non-empty values
-	for _, v := range s.storageWrites[addr] {
-		if !v.IsZero() {
-			if s.tracing(addr) {
-				fmt.Printf("[TRACE-S] HasStorage %s -> writes true\n", addr.Hex())
-			}
-			return true, nil
-		}
-	}
-
-	// Check account in trie
-	acc, ok := s.t.GetAccount(addrHash[:])
-	if !ok {
-		if s.tracing(addr) {
-			fmt.Printf("[TRACE-S] HasStorage %s -> trie not found false\n", addr.Hex())
-		}
-		return false, nil
-	}
-
-	has := acc != nil && acc.Root != trie.EmptyRoot
-	if s.tracing(addr) {
-		fmt.Printf("[TRACE-S] HasStorage %s -> trie root=%x has=%v\n", addr.Hex(), acc.Root, has)
-	}
-	return has, nil
-}
-
 // StateWriter interface implementation
 
 func (s *witnessStateless) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
@@ -1965,7 +1934,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
 			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
 			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
-				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %v\n", addr, err)
+				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %w\n", addr, err)
 			}
 		}
 	}
@@ -1984,7 +1953,9 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 			cKey := dbutils.GenerateCompositeTrieKey(addrHash, keyHash)
 			// fmt.Printf("  Storage write: account=%x, key=%x, value=%x\n", addr[:8], key[:8], v.Bytes())
 			s.t.Update(cKey, v.Bytes())
-			s.t.DeepHash(addrHash[:])
+			if _, _, err := s.t.DeepHash(addrHash[:]); err != nil {
+				return common.Hash{}, err
+			}
 		}
 	}
 
@@ -2008,7 +1979,10 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 	for addr := range updatedAccounts {
 		if account, ok := s.accountUpdates[addr]; ok && account != nil {
 			addrHash := crypto.Keccak256Hash(addr[:])
-			gotRoot, root := s.t.DeepHash(addrHash[:])
+			gotRoot, root, err := s.t.DeepHash(addrHash[:])
+			if err != nil {
+				return common.Hash{}, err
+			}
 			if gotRoot {
 				// Update the account's storage root and re-apply to trie
 				account.Root = root
@@ -2114,9 +2088,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	allLogs := ibs.Logs()
 	statelessReceipts := types.Receipts{&types.Receipt{Logs: allLogs}}
 
-	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
-	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
-	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
+	// only the AuRa engine uses ChainReader, and only to read headers, so its witness may need
+	// augmenting with headers accessed during engine.Finalize(). ChainReader = nil is sufficient
+	// for Ethereum.
 	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root())
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)

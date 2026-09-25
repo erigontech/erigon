@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -70,7 +71,7 @@ var runCommand = cli.Command{
 // the initialized Genesis structure
 func readGenesis(genesisPath string) *types.Genesis {
 	// Make sure we have a valid genesis JSON
-	//genesisPath := ctx.Args().First()
+	// genesisPath := ctx.Args().First()
 	if len(genesisPath) == 0 {
 		utils.Fatalf("Must supply path to genesis JSON file")
 	}
@@ -181,7 +182,11 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 	if err != nil {
 		return err
 	}
-	defer dir.RemoveAll(tmpDir)
+	defer func() {
+		if err := dir.RemoveAll(tmpDir); err != nil {
+			log.Warn("failed to remove temp dir", "dir", tmpDir, "err", err)
+		}
+	}()
 	db := temporaltest.NewTestDB(nil, datadir.New(tmpDir))
 	defer db.Close()
 	if ctx.String(GenesisFlag.Name) != "" {
@@ -204,12 +209,14 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
 	}
-	statedb.CreateAccount(sender, true)
+	if err := statedb.CreateAccount(sender, true); err != nil {
+		return err
+	}
 
 	if ctx.String(ReceiverFlag.Name) != "" {
 		receiver = accounts.InternAddress(common.HexToAddress(ctx.String(ReceiverFlag.Name)))
@@ -226,7 +233,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 			var err error
 			// If - is specified, it means that code comes from stdin
 			if codeFileFlag == "-" {
-				//Try reading from stdin
+				// Try reading from stdin
 				if hexcode, err = io.ReadAll(os.Stdin); err != nil {
 					return fmt.Errorf("could not load code from stdin: %w", err)
 				}
@@ -316,7 +323,9 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		}
 	} else {
 		if len(code) > 0 {
-			statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified)
+			if err := statedb.SetCode(receiver, code, tracing.CodeChangeUnspecified); err != nil {
+				return err
+			}
 		}
 		execFunc = func() ([]byte, uint64, error) {
 			output, gasLeft, err := runtime.Call(receiver, input, &runtimeConfig)

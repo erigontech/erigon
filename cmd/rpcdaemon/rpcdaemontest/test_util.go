@@ -61,8 +61,10 @@ type testAddresses struct {
 	address2 common.Address
 }
 
-var randSrc = rand.New(rand.NewSource(42)) // fixed seed
-var randMu sync.Mutex
+var (
+	randSrc = rand.New(rand.NewSource(42)) // fixed seed
+	randMu  sync.Mutex
+)
 
 var sameStoragePrefixAddresses []common.Address // plain keys with same balanceOf storage mapping (of address1)
 
@@ -433,7 +435,7 @@ func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (con
 	server := grpc.NewServer()
 
 	remoteproto.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
-		m.BlockReader, nil, log.New(), builder.NewLatestBlockBuiltStore(), nil))
+		m.BlockReader, log.New(), builder.NewLatestBlockBuiltStore(), m.ChainConfig))
 	txpoolproto.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
 	txpoolproto.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, privateapi.NoMining{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)

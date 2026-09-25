@@ -2,7 +2,6 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 import "types/types.proto";
-import "remote/bor.proto";
 
 package remote;
 
@@ -70,15 +69,13 @@ service ETHBACKEND {
   // PendingBlock returns latest built block.
   rpc PendingBlock(google.protobuf.Empty) returns (PendingBlockReply);
 
-  rpc BorTxnLookup(BorTxnLookupRequest) returns (BorTxnLookupReply);
-
-  rpc BorEvents(BorEventsRequest) returns (BorEventsReply);
-
   rpc AAValidation(AAValidationRequest) returns (AAValidationReply);
 
   rpc BlockForTxNum(BlockForTxNumRequest) returns(BlockForTxNumResponse);
 
   rpc MinimumBlockAvailable(google.protobuf.Empty) returns (MinimumBlockAvailableReply);
+
+  rpc FrozenBlocks(google.protobuf.Empty) returns (FrozenBlocksReply);
 
   rpc SetHead(SetHeadRequest) returns (SetHeadReply);
 }
@@ -115,7 +112,11 @@ message SyncingReply {
     uint64 block_number = 2;
   }
   repeated StageProgress stages = 5;
-  
+
+  // Block this sync session started from. Held for the session, lowered when an
+  // unwind takes execution below it. Absent from nodes predating the field,
+  // which the interface version does not separate from a genesis pin.
+  optional uint64 starting_block = 6;
 }
 
 message NetPeerCountRequest {}
@@ -180,6 +181,7 @@ message SubscribeLogsReply {
   types.H256 transaction_hash = 7;
   uint64 transaction_index = 8;
   bool removed = 9;
+  uint64 block_timestamp = 10;
 }
 
 message ReceiptsFilterRequest {
@@ -207,6 +209,8 @@ message SubscribeReceiptsReply {
   uint64 excess_blob_gas = 17;
   uint64 blob_gas_used = 18;
   types.H256 blob_gas_price = 19;
+  bool last_in_block = 20; // the last receipt of its block sent on this stream
+  types.H256 effective_gas_price = 21;
 }
 
 message BlockRequest {
@@ -288,6 +292,10 @@ message BlockForTxNumResponse {
 
 message MinimumBlockAvailableReply {
   uint64 block_num = 1;
+}
+
+message FrozenBlocksReply {
+  uint64 frozen_blocks = 1;
 }
 
 message SetHeadRequest {

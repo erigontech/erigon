@@ -245,15 +245,6 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 	return nil
 }
 
-func (w *Warmuper) Wait() error {
-	if !w.started.Load() || w.numWorkers <= 0 {
-		return nil
-	}
-	w.Close()
-	w.g.Wait()
-	return nil
-}
-
 func (w *Warmuper) Stats() WarmupStats {
 	duration := time.Duration(0)
 	if !w.startTime.IsZero() {
@@ -290,8 +281,7 @@ func (w *Warmuper) Close() {
 	if w.closed.Swap(true) {
 		return
 	}
+	// w.work is never closed: that would race a concurrent WarmKey send into a
+	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
-	if w.work != nil {
-		close(w.work)
-	}
 }
