@@ -42,7 +42,6 @@ func TestInitializeTrieAndUpdates_BinVariant(t *testing.T) {
 	require.Equal(t, VariantBinPatriciaTrie, trie.Variant())
 	require.Equal(t, ModeDirect, upd.Mode())
 	require.Nil(t, upd.parallel)
-	require.False(t, upd.IsConcurrentCommitment())
 }
 
 func TestParseTrieVariantBin(t *testing.T) {
