@@ -1317,5 +1317,5 @@ func TestPooledTxnHoldsNoRoTxsLimiterSlot(t *testing.T) {
 
 	limited, err := db.BeginRo(ctx)
 	require.NoError(t, err, "a txn renewed from the pool must leave the limiter slot free")
-	defer limited.Rollback()
+	t.Cleanup(limited.Rollback)
 }

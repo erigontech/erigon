@@ -733,9 +733,9 @@ func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
 
 func (db *MdbxKV) trackTxEnd() { db.openTxs.RUnlock() }
 
+// waitTxsAllDoneOnClose keeps the write lock: a closed db must refuse every later trackTxBegin.
 func (db *MdbxKV) waitTxsAllDoneOnClose() {
 	db.openTxs.Lock()
-	db.openTxs.Unlock() //nolint:staticcheck
 }
 
 // syncPoller enforces the sync deadline once writes stop: mdbx checks it only inside
