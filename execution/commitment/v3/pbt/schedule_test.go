@@ -150,6 +150,31 @@ func TestTrieParallelParityWorkerCounts(t *testing.T) {
 	}
 }
 
+func TestTrieParallelChurnParity(t *testing.T) {
+	keys, prefixes := churnKeys()
+	for _, workers := range []int{1, 2, 8} {
+		t.Run(fmt.Sprintf("workers-%d", workers), func(t *testing.T) {
+			serialContext := newTrieTestContext()
+			parallelContext := newTrieTestContext()
+			state := make(map[string]Op)
+			rng := rand.New(rand.NewSource(0x51d734 + int64(workers)))
+			for batch := range 64 {
+				ops := churnBatch(rng, keys, prefixes, state)
+				serialRoot, err := NewTrie(serialContext).Process(ops)
+				require.NoError(t, err, "batch=%d", batch)
+				parallelRoot, err := NewTrie(parallelContext).ProcessParallel(ops, workers)
+				require.NoError(t, err, "batch=%d", batch)
+				require.Equal(t, serialRoot, parallelRoot, "batch=%d", batch)
+				require.Equal(t, serialContext.records, parallelContext.records, "batch=%d", batch)
+				updateChurnState(state, ops)
+				entries := churnEntries(state)
+				require.Equal(t, eip8297.StateRootWithHash(entriesFromOps(entries), eip8297.SelectedHash()), parallelRoot, "batch=%d", batch)
+				assertPersistedTrie(t, parallelContext, entries)
+			}
+		})
+	}
+}
+
 func TestBuildPhasePlanOwnsChainsAndBucketDependencies(t *testing.T) {
 	addressA := bytes.Repeat([]byte{0x11}, 20)
 	addressB := bytes.Repeat([]byte{0x22}, 20)
@@ -289,6 +314,52 @@ func TestTrieParallelBucketTaskReadsRootOnce(t *testing.T) {
 		}
 	}
 	require.Equal(t, 1, reads)
+}
+
+func TestTrieParallelPhaseBDoesNotReadBucketRows(t *testing.T) {
+	address := bytes.Repeat([]byte{0x46}, 20)
+	account := eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)
+	first := eip8297.TreeKeyStorage(address, storageSlot(64))
+	second := eip8297.TreeKeyStorage(address, storageSlot(65))
+	initial := []Op{
+		{Key: account, Value: testTrieValue(1)},
+		{Key: first, Value: testTrieValue(2)},
+		{Key: second, Value: testTrieValue(3)},
+	}
+	sort.Slice(initial, func(i, j int) bool { return bytes.Compare(initial[i].Key, initial[j].Key) < 0 })
+	ctx := newTrieTestContext()
+	requireProcess(t, ctx, initial)
+	ctx.reads = nil
+	_, err := NewTrie(ctx).ProcessParallel([]Op{{Key: account, Value: testTrieValue(4)}}, 1)
+	require.NoError(t, err)
+	for _, key := range ctx.reads {
+		path, err := eip8297.DecodeBitPath(key)
+		if err == nil {
+			require.LessOrEqual(t, path.BitLen, int16(264), "%x", key)
+		}
+	}
+}
+
+func TestTrieParallelUpperReadsDoNotGrowWithTree(t *testing.T) {
+	build := func(extra int) *trieTestContext {
+		ctx := newTrieTestContext()
+		target := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x01}, 20), eip8297.BasicDataLeafKey)
+		entries := []Op{{Key: target, Value: testTrieValue(1)}}
+		for i := range extra {
+			entries = append(entries, Op{Key: trieCodeKey(byte(i>>8), byte(i), byte(i+1)), Value: testTrieValue(byte(i + 2))})
+		}
+		sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
+		requireProcess(t, ctx, entries)
+		ctx.reads = nil
+		_, err := NewTrie(ctx).ProcessParallel([]Op{{Key: target, Value: testTrieValue(9)}}, 1)
+		require.NoError(t, err)
+		return ctx
+	}
+	small := build(1)
+	large := build(512)
+	require.Equal(t, 2, len(small.reads))
+	require.Equal(t, 2, len(large.reads))
+	require.Equal(t, len(small.reads), len(large.reads))
 }
 
 func TestTrieParallelParityWithWhaleBuckets(t *testing.T) {

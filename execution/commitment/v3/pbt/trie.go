@@ -43,6 +43,7 @@ type Trie struct {
 	rootKey                []byte
 	rootPath               eip8297.Bitpath
 	bucketMode             bool
+	upperOnly              bool
 	root                   *treeRoot
 	rootLoaded             bool
 	rootDirty              bool

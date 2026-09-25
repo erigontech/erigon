@@ -31,11 +31,13 @@ import (
 )
 
 type trieTestContext struct {
-	mu            sync.Mutex
-	records       map[string][]byte
-	reads         [][]byte
-	writes        []trieTestWrite
-	rejectNilPrev bool
+	mu             sync.Mutex
+	records        map[string][]byte
+	reads          [][]byte
+	writes         []trieTestWrite
+	rejectNilPrev  bool
+	keepTombstones bool
+	readHook       func([]byte)
 }
 
 type trieTestWrite struct {
@@ -50,9 +52,14 @@ func newTrieTestContext() *trieTestContext {
 
 func (c *trieTestContext) Branch(key []byte) ([]byte, kv.Step, error) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	c.reads = append(c.reads, bytes.Clone(key))
-	return bytes.Clone(c.records[string(key)]), 0, nil
+	data := bytes.Clone(c.records[string(key)])
+	hook := c.readHook
+	c.mu.Unlock()
+	if hook != nil {
+		hook(bytes.Clone(key))
+	}
+	return data, 0, nil
 }
 
 func (c *trieTestContext) PutBranch(key, data, prev []byte) error {
@@ -66,7 +73,7 @@ func (c *trieTestContext) PutBranch(key, data, prev []byte) error {
 		return fmt.Errorf("previous record mismatch for %x", key)
 	}
 	c.writes = append(c.writes, trieTestWrite{key: bytes.Clone(key), data: bytes.Clone(data), prev: bytes.Clone(prev)})
-	if len(data) == 0 {
+	if len(data) == 0 && !c.keepTombstones {
 		delete(c.records, string(key))
 	} else {
 		c.records[string(key)] = bytes.Clone(data)

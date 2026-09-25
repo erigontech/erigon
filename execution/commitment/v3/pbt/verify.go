@@ -163,7 +163,10 @@ func (t *Trie) verifyBuckets() error {
 		}
 	}
 	if lister, ok := t.ctx.(interface{ Records() map[string][]byte }); ok {
-		for key := range lister.Records() {
+		for key, data := range lister.Records() {
+			if len(data) == 0 {
+				continue
+			}
 			if _, err := bucketPathForKey([]byte(key)); err == nil {
 				if _, ok := want[key]; !ok {
 					return fmt.Errorf("orphan bucket record %x", []byte(key))

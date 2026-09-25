@@ -101,3 +101,15 @@ func TestVerifyRejectsOrphanBucketRecordBesideLiveState(t *testing.T) {
 	require.Error(t, err)
 	require.ErrorContains(t, err, "orphan bucket record")
 }
+
+func TestVerifyIgnoresTombstoneBucketRecord(t *testing.T) {
+	address := bytes.Repeat([]byte{0x66}, 20)
+	key := eip8297.TreeKeyStorage(address, storageSlot(64))
+	ctx := newTrieTestContext()
+	ctx.keepTombstones = true
+	_, err := NewTrie(ctx).Process([]Op{{Key: key, Value: eip8297.EncodeStorageValue([]byte{1})}})
+	require.NoError(t, err)
+	_, err = NewTrie(ctx).Process([]Op{{Key: key}})
+	require.NoError(t, err)
+	require.NoError(t, NewTrie(ctx).Verify())
+}

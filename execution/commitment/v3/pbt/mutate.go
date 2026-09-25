@@ -298,6 +298,9 @@ func (t *Trie) refreshRouting() error {
 	case RowRoot:
 		return nil
 	case ExtRoot:
+		if t.upperOnly && t.root.self.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&t.root.self) {
+			return nil
+		}
 		row, err := t.extTopRow(t.root)
 		if err != nil {
 			return err
@@ -395,6 +398,9 @@ func (t *Trie) normalize() error {
 		}
 		return t.normalizeRootRow(root, root.row)
 	case ExtRoot:
+		if t.upperOnly && root.self.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&root.self) {
+			return nil
+		}
 		row, err := t.extTopRow(root)
 		if err != nil {
 			return err
@@ -450,6 +456,9 @@ func (t *Trie) normalizeChildren(row *rowNode) error {
 	for slot := range row.cells {
 		cell := row.cell(slot)
 		if cell.Kind != BranchCell || cell.child == nil {
+			continue
+		}
+		if t.upperOnly && cell.child.path.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&cell.child.path) {
 			continue
 		}
 		if err := t.normalizeRow(cell.child); err != nil {
