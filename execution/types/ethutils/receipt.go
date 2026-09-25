@@ -46,7 +46,7 @@ type RPCReceipt struct {
 	ContractAddress   *common.Address `json:"contractAddress" ethjson:"data"`
 	Logs              any             `json:"logs" ethjson:"objects"`
 	LogsBloom         *types.Bloom    `json:"logsBloom" ethjson:"data"`
-	EffectiveGasPrice *hexutil.U256   `json:"effectiveGasPrice,omitempty" ethjson:"quantity"`
+	EffectiveGasPrice *hexutil.U256   `json:"effectiveGasPrice" ethjson:"quantity"`
 
 	Status       *hexutil.Uint64 `json:"status,omitempty" ethjson:"quantity"`
 	Root         hexutil.Bytes   `json:"root,omitempty" ethjson:"data"`
