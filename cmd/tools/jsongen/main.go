@@ -308,7 +308,7 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty, omitzero bo
 	case omitzero:
 		// encoding/json asks an IsZero method first, and a nil test is only its answer
 		// for a type without one.
-		if omitempty || !(pointer || iface || isLenable(t)) || types.NewMethodSet(t).Lookup(nil, "IsZero") != nil {
+		if !(pointer || iface || isLenable(t)) || types.NewMethodSet(t).Lookup(nil, "IsZero") != nil {
 			return "", fmt.Errorf("omitzero is implemented for a nil-able type without IsZero only, not %s", t)
 		}
 		return fmt.Sprintf("\tif %s != nil {\n\t\t%s\n\t}\n", ref, write), nil

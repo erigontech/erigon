@@ -540,11 +540,11 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	// An empty list still writes [], because SetCodeTransaction's decoder requires the key.
 	emptyAuths := base()
 	emptyAuths.Type = 4
-	emptyAuths.Authorizations = &types.AuthorizationList{}
+	emptyAuths.Authorizations = types.AuthorizationList{}
 
 	setcode := base()
 	setcode.Type = 4
-	setcode.Authorizations = &types.AuthorizationList{
+	setcode.Authorizations = types.AuthorizationList{
 		{
 			ChainID: hexutil.U256(*uint256.NewInt(1)), Address: to, Nonce: 1, YParity: 0,
 			R: hexutil.U256(*uint256.NewInt(0xaa)), S: hexutil.U256(*uint256.NewInt(0xbb)),
