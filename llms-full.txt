@@ -105,7 +105,7 @@ A locally mounted **SSD** (Solid-State Drive) or **NVMe** (Non-Volatile Memory E
 | Disk Configuration | A single NVMe device is enough for any pruning mode. | An archive node fits on one 4 TB drive, so RAID 0 striping is not needed. For failure protection, use a mirrored array, not RAID 0. See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem). |
 | Filesystem | ext4 or XFS | See [Filesystem](https://docs.erigon.tech/get-started/hardware-requirements#filesystem) below. |
 | RAM | Adequate memory is crucial | Reduces bottlenecks during sync and improves performance under load. |
-| CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. |
+| CPU | 4–8 cores for Full nodes, 8–16 cores for Archive nodes | More cores are generally better for intense sync and query operations. On amd64, the CPU must support the `x86-64-v2` baseline (SSE4.2, POPCNT): Intel Nehalem (2008), AMD Bulldozer (2011) or newer. |
 | Linux | Kernel version > v4 | A modern Linux distribution is required. |
 
 ## Filesystem
@@ -160,7 +160,7 @@ If you must split the datadir across a fast and a slow device, see [Optimizing S
 
 ## Disk Size and RAM Requirements
 
-The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise.
+The amount of disk space recommended and RAM you need depends on the [pruning mode](https://docs.erigon.tech/fundamentals/pruning-modes) you want to run. **Current Disk Usage** values listed below are obtained using the standard Erigon + [Caplin](https://docs.erigon.tech/fundamentals/caplin) configuration, varying only the `--prune.mode` flag unless a tab notes otherwise. Each figure is the size of the whole datadir with the node stopped, excluding the transient `temp/` directory.
 
 :::note
 These nodes were measured before the receipts cache was on by default. From 3.7 it is on, which adds about 441 GB on a mainnet archive node and a few GB on full and minimal nodes, whose receipts follow their history window. See [Database](https://docs.erigon.tech/fundamentals/database). The recommended disk sizes below already leave room for it.
@@ -170,45 +170,51 @@ These nodes were measured before the receipts cache was on by default. From 3.7 
 
 | Pruning Mode | Current Disk Usage | Disk Size (Recommended) | RAM (Required) | RAM (Recommended) |
 | --- | --- | --- | --- | --- |
-| Archive | 2.03 TB | 4 TB | 32 GB | 64 GB |
-| Full (Default) | 419.04 GB | 2 TB | 16 GB | 32 GB |
-| Minimal | 478.40 GB | 1 TB | 16 GB | 64 GB |
+| Archive | 2.25 TB | 4 TB | 32 GB | 64 GB |
+| Full (Default) | 534.94 GB | 2 TB | 16 GB | 32 GB |
+| Minimal | 510.82 GB | 1 TB | 16 GB | 64 GB |
 
-*Current Disk Usage measured as of 2026-07-19; usage grows over time as the chain grows.*
+*Current Disk Usage measured as of 2026-09-17, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 **Gnosis Chain**
 
 | **Pruning Mode** | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | --- | --- | --- | --- | --- |
-| Archive | 673.59 GB | 1 TB | 16 GB | 32 GB |
-| Full (Default) | 220.10 GB | 1 TB | 8 GB | 16 GB |
-| Minimal | 304.67 GB | 500 GB | 8 GB | 16 GB |
+| Archive | 803.35 GB | 1 TB | 16 GB | 32 GB |
+| Full (Default) | 314.35 GB | 1 TB | 8 GB | 16 GB |
+| Minimal | 311.75 GB | 500 GB | 8 GB | 16 GB |
 
-*Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows.*
+*Current Disk Usage measured as of 2026-09-19, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 **Sepolia**
 
 | **Pruning Mode** | **Current Disk Usage** |
 | --- | --- |
-| Archive | 1.10 TB |
+| Archive | 1.12 TB |
+| Full (Default) | 301.82 GB |
+| Minimal | 272.59 GB |
 
-*Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network.*
+*Current Disk Usage measured as of 2026-09-18, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 **Hoodi**
 
 | **Pruning Mode** | **Current Disk Usage** |
 | --- | --- |
-| Archive | 133.73 GB |
+| Archive | 132.92 GB |
+| Full (Default) | 62.86 GB |
+| Minimal | 58.89 GB |
 
-*Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network.*
+*Current Disk Usage measured as of 2026-09-20, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 **Chiado**
 
 | **Pruning Mode** | **Current Disk Usage** |
 | --- | --- |
-| Archive | 29.64 GB |
+| Archive | 29.98 GB |
+| Full (Default) | 16.07 GB |
+| Minimal | 16.00 GB |
 
-*Current Disk Usage measured as of 2026-07-29; usage grows over time as the chain grows. Execution layer only — full and minimal modes are not measured for this network.*
+*Current Disk Usage measured as of 2026-09-20, the oldest of the measurements in this table; usage grows over time as the chain grows.*
 
 :::tip
 See also how you can [optimize storage](https://docs.erigon.tech/fundamentals/optimizing-storage).
@@ -229,11 +235,15 @@ Approximate times to sync from scratch to the tip of the chain.
 
 | Chain | Archive | Full (Default) | Minimal |
 | --- | --- | --- | --- |
-| Ethereum | ~8 h | ~4–6 h | ~2 h |
-| Gnosis | ~2 h | ~1–2 h | ~30 m |
+| Ethereum | ~14 h 20 m | ~5 h 40 m | ~5 h 20 m |
+| Gnosis | ~5 h 15 m | ~2 h 50 m | ~2 h 50 m |
 
 :::info
-These figures are indicative and are **not measured by CI** — read them as an order of magnitude, not a target. Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](https://docs.erigon.tech/get-started/hardware-requirements#bandwidth-requirements) influences the result more than CPU does: expect proportionally faster syncs on a well-connected host and slower ones on a constrained link.
+Measured on Erigon 3.6.1 in September 2026, syncing each node from an empty datadir on one machine (16-core Intel Core Ultra 9 185H, 93 GB RAM, NVMe SSD on ext4), one node at a time. Time is measured from process start to the first report of a head at the chain tip.
+
+**The download rate was capped at 400 Mbps, and that cap — not the hardware — is what set these times.** Most of the elapsed time is snapshot download rather than block execution, so your available [bandwidth](https://docs.erigon.tech/get-started/hardware-requirements#bandwidth-requirements) influences the result far more than CPU does. Note that 400 Mbps is eight times the 50 Mbps recommended above for a staking node: on a link at that recommended speed, expect these times to be several times longer, with block execution rather than download eventually setting the floor. Treat them as an order of magnitude, not a target — they are a single sample per configuration, with no variance estimate, and sync time also depends on peer quality and chain activity on the day.
+
+Note that full and minimal land within a few percent of each other on both chains. The gap between them is small; the gap to archive is about 1.9× on Gnosis and 2.5× on Ethereum.
 :::
 
 ---
@@ -857,6 +867,17 @@ Updating to the latest version of Erigon gives you access to the latest features
 - **Read Release Notes**: Carefully review the [Release Notes](https://github.com/erigontech/erigon/releases) for breaking changes and new features relevant to your setup.
 - **Terminate your Erigon**: End your current Erigon session by pressing `CTRL+C`.
 - **Backup**: Always back up your `datadir` before performing major upgrades.
+
+## Upgrading from 3.6 to 3.7
+
+A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-sync. Before restarting on the new version, check the following:
+
+- **CPU baseline**: amd64 binaries and Docker images now require the `x86-64-v2` baseline (SSE4.2, POPCNT). The separate `amd64v2` tarball and `linux/amd64/v2` Docker platform are gone; use the standard amd64 artifacts. Building from source requires Go 1.26 or newer. See [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements).
+- **Removed flags**: `--fcu.background.commit` and `--experimental.streaming-commitment` now prevent startup. Remove them from your startup arguments.
+- **Caplin with checkpoint sync disabled**: nodes running `--caplin.checkpoint-sync.disable` re-sync Caplin from genesis on upgrade unless a finalized state is saved locally. Allow checkpoint sync during the upgrade to avoid the replay.
+- **Receipts**: fresh datadirs now keep receipts by default (`--prune.include-receipts`). An existing datadir keeps the setting it was created with; changing it requires a fresh datadir. See [Pruning Modes](https://docs.erigon.tech/fundamentals/pruning-modes).
+- **Polygon**: Polygon chain names, datadirs and `--bor.*` / `--polygon.*` flags are no longer accepted. Use [0xPolygon/erigon](https://github.com/0xPolygon/erigon).
+- **JSON-RPC**: several endpoints are stricter or return renamed fields. Review the [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) if you run applications against the RPC.
 
 ## Managing your Data
 
