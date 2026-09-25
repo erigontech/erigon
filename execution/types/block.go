@@ -38,6 +38,8 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 const (
@@ -75,6 +77,7 @@ func (n *BlockNonce) UnmarshalText(input []byte) error {
 }
 
 //()go:generate gencodec -type Header -field-override headerMarshaling -out gen_header_json.go
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type Header -out gen_header_fastjson.go -computed writeComputedJSON
 
 // Header represents a block header in the Ethereum blockchain.
 // DESCRIBED: docs/programmers_guide/guide.md#organising-ethereum-state-into-a-merkle-tree
@@ -116,6 +119,12 @@ type Header struct {
 	// then pass it to `block.WithSeal(header)` - to produce new block with immutable `Header`
 	mutable bool
 	hash    atomic.Pointer[common.Hash]
+}
+
+// writeComputedJSON writes the reply's hash, which Header derives rather than stores.
+func (h *Header) writeComputedJSON(s *jsonstream.StackStream) {
+	hash := h.Hash()
+	ethjson.Data(s, "hash", hash[:])
 }
 
 // NewEmptyHeaderForAssembling - returns mutable header object - for assembling/sealing/etc...
