@@ -16,4 +16,12 @@
 
 package mdbx
 
-func RoTxPoolLen(db *MdbxKV) int { return db.roTxPool.idleLen() }
+func RoTxPoolLen(db *MdbxKV) (l int) {
+	for i := range db.roTxPool.shards {
+		s := &db.roTxPool.shards[i]
+		s.mu.Lock()
+		l += len(s.idle)
+		s.mu.Unlock()
+	}
+	return l
+}

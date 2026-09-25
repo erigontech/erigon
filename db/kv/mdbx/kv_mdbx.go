@@ -733,11 +733,6 @@ func (db *MdbxKV) dumpConcurrentTxs(committer *MdbxTx) {
 
 func (db *MdbxKV) trackTxEnd() { db.openTxs.RUnlock() }
 
-// waitTxsAllDoneOnClose keeps the write lock: a closed db must refuse every later trackTxBegin.
-func (db *MdbxKV) waitTxsAllDoneOnClose() {
-	db.openTxs.Lock()
-}
-
 // syncPoller enforces the sync deadline once writes stop: mdbx checks it only inside
 // mdbx_txn_commit and mdbx_env_sync.
 func (db *MdbxKV) syncPoller(interval time.Duration) {
@@ -765,7 +760,8 @@ func (db *MdbxKV) Close() {
 	if ok := db.closed.CompareAndSwap(false, true); !ok {
 		return
 	}
-	db.waitTxsAllDoneOnClose()
+	// Kept locked: a closed db must refuse every later trackTxBegin.
+	db.openTxs.Lock()
 	// Only now is there nothing left to flush: stop the background flush, then take the one
 	// it may have skipped while a writer held the lock.
 	if db.syncerDone != nil {
@@ -854,12 +850,11 @@ func (db *MdbxKV) beginLimitedTxn(ctx context.Context) (*mdbx.Txn, error) {
 }
 
 // endRoTxn resets tx back into the pool when it can; otherwise it aborts tx.
-// ended is true when tx was already finished by Commit.
-func (db *MdbxKV) endRoTxn(tx *mdbx.Txn, shard *roTxPoolShard, ended bool) {
+func (db *MdbxKV) endRoTxn(tx *mdbx.Txn, shard *roTxPoolShard) {
 	if shard == nil {
 		db.roTxsLimiter.Release(1)
 	}
-	if !ended && tx.Reset() == nil {
+	if tx.Reset() == nil {
 		if shard != nil {
 			shard.put(tx)
 			return
@@ -868,9 +863,7 @@ func (db *MdbxKV) endRoTxn(tx *mdbx.Txn, shard *roTxPoolShard, ended bool) {
 			return
 		}
 	}
-	if !ended {
-		tx.Abort()
-	}
+	tx.Abort()
 	if shard != nil {
 		shard.disown()
 	}
@@ -1408,8 +1401,10 @@ func (tx *MdbxTx) Commit() error {
 	}
 	defer func() {
 		tx.db.unregisterLiveTx(tx, "COMMIT")
-		if tx.readOnly {
-			tx.db.endRoTxn(tx.tx, tx.roShard, true)
+		if s := tx.roShard; s != nil {
+			s.disown()
+		} else if tx.readOnly {
+			tx.db.roTxsLimiter.Release(1)
 		}
 		tx.tx = nil
 		tx.db.trackTxEnd()
@@ -1482,7 +1477,7 @@ func (tx *MdbxTx) Rollback() {
 	// The pool send stays ahead of trackTxEnd: Close waits on that count before closing
 	// the env, and mdbx Reset has no close guard of its own.
 	if tx.readOnly {
-		tx.db.endRoTxn(t, tx.roShard, false)
+		tx.db.endRoTxn(t, tx.roShard)
 	} else {
 		t.Abort()
 	}

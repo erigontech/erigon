@@ -48,19 +48,9 @@ func newRoTxPool(size int) *roTxPool {
 	}
 	p := &roTxPool{shards: make([]roTxPoolShard, n), mask: uint32(n - 1)}
 	for i := range p.shards {
-		p.shards[i].size = size / n
-		if i < size%n {
-			p.shards[i].size++
-		}
+		p.shards[i].size = (size + i) / n
 	}
 	return p
-}
-
-func (p *roTxPool) idleLen() (l int) {
-	for i := range p.shards {
-		l += p.shards[i].idleLen()
-	}
-	return l
 }
 
 // get returns an idle txn together with its owning shard, or nil.
@@ -90,12 +80,6 @@ func (p *roTxPool) drain() {
 	for i := range p.shards {
 		p.shards[i].drain()
 	}
-}
-
-func (s *roTxPoolShard) idleLen() int {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	return len(s.idle)
 }
 
 func (s *roTxPoolShard) pop() *mdbx.Txn {
@@ -142,6 +126,5 @@ func (s *roTxPoolShard) drain() {
 	for _, tx := range s.idle {
 		tx.Abort()
 	}
-	s.owned -= len(s.idle)
 	s.idle = nil
 }
