@@ -788,6 +788,8 @@ func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
 			recipients[i] = proxies[i]
 			values[i] = creditWei.ToBig()
 		}
+		// The proxies must be funded while still empty, before CREATE2 in the same block.
+		// Nonces do not enforce order across independent senders, so funding has a higher fee.
 		disperseAuth, err := bind.NewKeyedTransactorWithChainID(disperserKey, chainID)
 		require.NoError(t, err)
 		disperseAuth.GasLimit = 3_000_000
@@ -801,7 +803,7 @@ func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
 			_, err = factory.CreateProxy(deployAuth, salts[i])
 			require.NoError(t, err)
 		}
-		// Submit funding last to make the test depend on fee priority.
+		// Submit funding last to verify that fees enforce the required block order.
 		_, err = disperse.DisperseEther(disperseAuth, recipients, values)
 		require.NoError(t, err)
 		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
