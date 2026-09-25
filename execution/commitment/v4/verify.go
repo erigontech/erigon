@@ -172,6 +172,8 @@ type RecordMatcher struct {
 	accountRoot   [32]byte
 	records       uint64
 	orphanStorage uint64
+	trie          [32]byte
+	inTrie, live  bool
 }
 
 func NewRecordMatcher() *RecordMatcher {
@@ -193,7 +195,29 @@ func (m *RecordMatcher) Expect(key, hash []byte) error {
 		m.roots = append(m.roots, e)
 		return nil
 	}
+	if key[0] == tagStorageNode {
+		if err := m.enterTrie(key[1:33]); err != nil || !m.live {
+			return err
+		}
+	}
 	return m.match(key, (*[32]byte)(hash), true)
+}
+
+func (m *RecordMatcher) enterTrie(addrHash []byte) error {
+	if m.inTrie && bytes.Equal(m.trie[:], addrHash) {
+		return nil
+	}
+	if !m.storagePlane {
+		m.storagePlane = true
+		slices.SortFunc(m.roots, func(a, b storageRootExpectation) int { return bytes.Compare(a.addrHash[:], b.addrHash[:]) })
+	}
+	if m.rootsPos < len(m.roots) && bytes.Compare(m.roots[m.rootsPos].addrHash[:], addrHash) < 0 {
+		return fmt.Errorf("%w: account %x has storage root %x but no storage trie", errVerifyRecords, m.roots[m.rootsPos].addrHash, m.roots[m.rootsPos].root)
+	}
+	copy(m.trie[:], addrHash)
+	m.inTrie = true
+	m.live = m.rootsPos < len(m.roots) && bytes.Equal(m.roots[m.rootsPos].addrHash[:], addrHash)
+	return nil
 }
 
 func (m *RecordMatcher) Record(key []byte, hash [32]byte) error {
@@ -202,21 +226,19 @@ func (m *RecordMatcher) Record(key []byte, hash [32]byte) error {
 	case len(key) == 2 && key[0] == tagAccountNode && key[1] == 0:
 		m.accountRoot = hash
 		return nil
-	case isStorageRootKey(key):
-		if !m.storagePlane {
-			m.storagePlane = true
-			slices.SortFunc(m.roots, func(a, b storageRootExpectation) int { return bytes.Compare(a.addrHash[:], b.addrHash[:]) })
+	case key[0] == tagStorageNode:
+		if err := m.enterTrie(key[1:33]); err != nil {
+			return err
 		}
-		addrHash := key[1:33]
-		if m.rootsPos < len(m.roots) && bytes.Compare(m.roots[m.rootsPos].addrHash[:], addrHash) < 0 {
-			return fmt.Errorf("%w: account %x has storage root %x but no storage trie", errVerifyRecords, m.roots[m.rootsPos].addrHash, m.roots[m.rootsPos].root)
-		}
-		if m.rootsPos == len(m.roots) || !bytes.Equal(m.roots[m.rootsPos].addrHash[:], addrHash) {
+		if !m.live {
 			m.orphanStorage++
 			return nil
 		}
+		if !isStorageRootKey(key) {
+			return m.match(key, &hash, false)
+		}
 		if m.roots[m.rootsPos].root != hash {
-			return fmt.Errorf("%w: account %x stores storage root %x, storage trie folds to %x", errVerifyRecords, addrHash, m.roots[m.rootsPos].root, hash)
+			return fmt.Errorf("%w: account %x stores storage root %x, storage trie folds to %x", errVerifyRecords, key[1:33], m.roots[m.rootsPos].root, hash)
 		}
 		m.rootsPos++
 		return nil

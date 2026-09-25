@@ -41,3 +41,29 @@ func TestRecordHasherExpectsEveryExtensionChild(t *testing.T) {
 	require.Equal(t, want, got)
 	require.Equal(t, [][]byte{AccountNodeKey([]byte{1, 2, 3}, nil), AccountNodeKey([]byte{4, 5, 6, 7}, nil)}, keys)
 }
+
+func TestRecordMatcherChecksOnlyReferencedStorageTries(t *testing.T) {
+	var addrHash [32]byte
+	addrHash[0] = 0xe7
+	child := StorageNodeKey(addrHash, []byte{8, 2}, nil)
+	parent := StorageNodeKey(addrHash, []byte{8}, nil)
+
+	dead := NewRecordMatcher()
+	require.NoError(t, dead.Record(AccountNodeKey(nil, nil), [32]byte{1}))
+	require.NoError(t, dead.Expect(child, bytes.Repeat([]byte{0x22}, 32)))
+	require.NoError(t, dead.Record(parent, [32]byte{8}))
+	_, _, orphans, err := dead.Finish()
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), orphans)
+
+	var root [32]byte
+	copy(root[:], bytes.Repeat([]byte{0x77}, 32))
+	live := NewRecordMatcher()
+	require.NoError(t, live.Expect(StorageNodeKey(addrHash, nil, nil), root[:]))
+	require.NoError(t, live.Record(AccountNodeKey(nil, nil), [32]byte{1}))
+	require.NoError(t, live.Record(StorageNodeKey(addrHash, nil, nil), root))
+	require.NoError(t, live.Expect(child, bytes.Repeat([]byte{0x22}, 32)))
+	require.NoError(t, live.Record(parent, [32]byte{8}))
+	_, _, _, err = live.Finish()
+	require.ErrorContains(t, err, "is referenced but missing")
+}
