@@ -97,6 +97,22 @@ func TestMarshalSubscribeReceiptKeepsZeroSender(t *testing.T) {
 	assert.Equal(t, common.Address{}, *receipt.From)
 }
 
+// A transfer to the zero address must not look like a contract creation: only an
+// unset "to" marshals to null.
+func TestMarshalSubscribeReceiptKeepsZeroRecipient(t *testing.T) {
+	reply := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+		TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+		To:              gointerfaces.ConvertAddressToH160(common.Address{}),
+	}
+	receipt := MarshalSubscribeReceipt(reply)
+	require.NotNil(t, receipt.To)
+	assert.Equal(t, common.Address{}, *receipt.To)
+
+	reply.To = nil
+	assert.Nil(t, MarshalSubscribeReceipt(reply).To)
+}
+
 // The fast marshaller has to produce the bytes encoding/json produced, field order and
 // omitempty included, for both log shapes MarshalReceipt can put in Logs.
 func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
@@ -149,17 +165,15 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 }
 
 // Every Logs shape against encoding/json. MarshalReceipt never builds a nil slice, so only a
-// direct construction reaches the typed-nil branches.
+// direct construction reaches the nil branches.
 func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	for name, logs := range map[string]any{
+	for name, logs := range map[string]jsonstream.Marshaler{
 		"nil types.Logs":    types.Logs(nil),
-		"nil []*Log":        []*types.Log(nil),
-		"nil []*RPCLog":     []*types.RPCLog(nil),
+		"nil types.RPCLogs": types.RPCLogs(nil),
 		"untyped nil":       nil,
 		"nil in types.Logs": types.Logs{nil, {Address: to}},
-		"nil in []*Log":     []*types.Log{{Address: to}, nil},
-		"unknown shape":     []string{"a"},
+		"nil in RPCLogs":    types.RPCLogs{nil, {Log: types.Log{Address: to}}},
 	} {
 		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
 	}
@@ -248,7 +262,7 @@ func TestMarshalSubscribeReceiptFullLogs(t *testing.T) {
 			BlockTimestamp:   99,
 		}},
 	})
-	require.Equal(t, []*types.RPCLog{{
+	require.Equal(t, types.RPCLogs{{
 		Log: types.Log{
 			Address: addr, Topics: []common.Hash{topic}, Data: []byte{0x2a}, BlockNumber: 7,
 			TxHash: txHash, TxIndex: 2, BlockHash: blockHash, Index: 3, Removed: true,
@@ -299,7 +313,7 @@ func TestRPCReceiptMatchesItsTags(t *testing.T) {
 	status := hexutil.Uint64(1)
 	price := hexutil.U256(*uint256.NewInt(7))
 	blobGas := hexutil.Uint64(9)
-	logs := []*types.RPCLog{{Log: types.Log{
+	logs := types.RPCLogs{{Log: types.Log{
 		Address: addr, Topics: []common.Hash{{0x01}}, Data: []byte{1, 2},
 		BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3,
 		BlockHash: common.HexToHash("0xb10c"), Index: 4, Removed: true,
@@ -314,7 +328,7 @@ func TestRPCReceiptMatchesItsTags(t *testing.T) {
 			EffectiveGasPrice: &price, Status: &status, Root: hexutil.Bytes{9},
 			BlobGasPrice: &price, BlobGasUsed: &blobGas,
 		},
-		"optional fields absent": {Logs: []*types.RPCLog{}},
+		"optional fields absent": {Logs: types.RPCLogs{}},
 		// The timestamp-less shape goes through its own writer, held to the same tags.
 		"plain logs": {Logs: types.Logs{{
 			Address: addr, Topics: []common.Hash{{0x01}}, Data: []byte{1, 2},
