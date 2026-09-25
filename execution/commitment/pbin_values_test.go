@@ -17,6 +17,7 @@
 package commitment
 
 import (
+	"encoding/binary"
 	"encoding/hex"
 	"testing"
 
@@ -24,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 )
 
 // The expectations are hand-written hex, never the encoder's own output: the
@@ -197,4 +199,234 @@ func TestPBinEncodeStorageValueRejectsOversizedValue(t *testing.T) {
 	t.Parallel()
 
 	require.Panics(t, func() { pbinEncodeStorageValue(make([]byte, 33)) })
+}
+
+func TestPBinLeafValueCodecRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	basic := [pbinValueLength]byte{
+		5: 0x01, 6: 0x02, 7: 0x03,
+		12: 0x04, 13: 0x05, 14: 0x06, 15: 0x07,
+		27: 0x08, 28: 0x09, 29: 0x0a, 30: 0x0b, 31: 0x0c,
+	}
+	codeHash := [pbinValueLength]byte{0x01, 0x02, 0x03}
+	delegation := [pbinValueLength]byte{0xef, 0x01, 0x00}
+	copy(delegation[3:23], []byte{
+		0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a,
+		0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10, 0x11, 0x12, 0x13, 0x14,
+	})
+	header := [pbinValueLength]byte{31: 0x2a}
+	reserved := [pbinValueLength]byte{0x01, 0x02, 0x03}
+	chunk := [pbinValueLength]byte{0x01, 0x60, 0x02}
+	storage := [pbinValueLength]byte{29: 0x2a, 30: 0xbb, 31: 0xcc}
+
+	for _, tc := range []struct {
+		name string
+		key  []byte
+		word [pbinValueLength]byte
+		enc  string
+	}{
+		{
+			name: "basic data",
+			key:  pbinLeafCodecKey(pbinAccountZone, pbinBasicDataLeafKey),
+			word: basic,
+			enc:  "06850102030405060708090a0b0c",
+		},
+		{
+			name: "code hash",
+			key:  pbinLeafCodecKey(pbinAccountZone, pbinCodeHashLeafKey),
+			word: codeHash,
+			enc:  hex.EncodeToString(codeHash[:]),
+		},
+		{
+			name: "delegation",
+			key:  pbinLeafCodecKey(pbinAccountZone, pbinDelegationLeafKey),
+			word: delegation,
+			enc:  "0102030405060708090a0b0c0d0e0f1011121314",
+		},
+		{
+			name: "header storage",
+			key:  pbinLeafCodecKey(pbinAccountZone, pbinHeaderStorageOffset),
+			word: header,
+			enc:  "2a",
+		},
+		{
+			name: "reserved low sub-index",
+			key:  pbinLeafCodecKey(pbinAccountZone, 3),
+			word: reserved,
+			enc:  hex.EncodeToString(reserved[:]),
+		},
+		{
+			name: "reserved high sub-index",
+			key:  pbinLeafCodecKey(pbinAccountZone, 128),
+			word: reserved,
+			enc:  hex.EncodeToString(reserved[:]),
+		},
+		{
+			name: "code chunk",
+			key:  pbinLeafCodecKey(pbinCodeZone, 7),
+			word: chunk,
+			enc:  "016002",
+		},
+		{
+			name: "storage slot",
+			key:  pbinLeafCodecKey(pbinStorageZone, 7),
+			word: storage,
+			enc:  "2abbcc",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			enc, err := pbinEncodeLeafValue(tc.key, &tc.word)
+			require.NoError(t, err)
+			require.Equal(t, tc.enc, hex.EncodeToString(enc))
+			got, err := pbinDecodeLeafValue(tc.key, enc)
+			require.NoError(t, err)
+			require.Equal(t, tc.word, got)
+		})
+	}
+}
+
+func TestPBinLeafValueCodecZeroLength(t *testing.T) {
+	t.Parallel()
+
+	codeHashKey := pbinLeafCodecKey(pbinAccountZone, pbinCodeHashLeafKey)
+	got, err := pbinDecodeLeafValue(codeHashKey, nil)
+	require.NoError(t, err)
+	require.Equal(t, [pbinValueLength]byte(empty.CodeHash), got)
+
+	storageKey := pbinLeafCodecKey(pbinStorageZone, 7)
+	_, err = pbinDecodeLeafValue(storageKey, nil)
+	require.Error(t, err)
+
+	zero := [pbinValueLength]byte{}
+	_, err = pbinEncodeLeafValue(storageKey, &zero)
+	require.Error(t, err)
+
+	codeKey := pbinLeafCodecKey(pbinCodeZone, 7)
+	_, err = pbinEncodeLeafValue(codeKey, &zero)
+	require.Error(t, err)
+	_, err = pbinDecodeLeafValue(codeKey, nil)
+	require.Error(t, err)
+}
+
+func TestPBinLeafValueCodecDirection(t *testing.T) {
+	t.Parallel()
+
+	chunkKey := pbinLeafCodecKey(pbinCodeZone, 7)
+	chunk := [pbinValueLength]byte{0x01, 0x02, 0x03}
+	chunkEnc, err := pbinEncodeLeafValue(chunkKey, &chunk)
+	require.NoError(t, err)
+	wordKey := pbinLeafCodecKey(pbinAccountZone, pbinHeaderStorageOffset)
+	got, err := pbinDecodeLeafValue(wordKey, chunkEnc)
+	require.NoError(t, err)
+	require.NotEqual(t, chunk, got)
+
+	word := [pbinValueLength]byte{29: 0x01, 30: 0x02, 31: 0x03}
+	wordEnc, err := pbinEncodeLeafValue(wordKey, &word)
+	require.NoError(t, err)
+	got, err = pbinDecodeLeafValue(chunkKey, wordEnc)
+	require.NoError(t, err)
+	require.NotEqual(t, word, got)
+}
+
+func TestPBinLeafValueCodecRejectsMalformedBasicData(t *testing.T) {
+	t.Parallel()
+
+	key := pbinLeafCodecKey(pbinAccountZone, pbinBasicDataLeafKey)
+	for _, tc := range []struct {
+		name string
+		word [pbinValueLength]byte
+	}{
+		{
+			name: "non-zero version",
+			word: [pbinValueLength]byte{0: 1},
+		},
+		{
+			name: "non-zero reserved byte",
+			word: [pbinValueLength]byte{1: 1},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := pbinEncodeLeafValue(key, &tc.word)
+			require.Error(t, err, tc.name)
+		})
+	}
+}
+
+func TestPBinLeafValueCodecRejectsMalformedDelegation(t *testing.T) {
+	t.Parallel()
+
+	key := pbinLeafCodecKey(pbinAccountZone, pbinDelegationLeafKey)
+	for _, tc := range []struct {
+		name string
+		word [pbinValueLength]byte
+	}{
+		{
+			name: "wrong marker",
+			word: [pbinValueLength]byte{0xEF, 0x01, 0x01},
+		},
+		{
+			name: "non-zero trailing byte",
+			word: [pbinValueLength]byte{0xEF, 0x01, 0x00, 31: 1},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := pbinEncodeLeafValue(key, &tc.word)
+			require.Error(t, err, tc.name)
+		})
+	}
+}
+
+func FuzzPBinLeafValueCodec(f *testing.F) {
+	words := []struct {
+		zone byte
+		sub  byte
+		word [pbinValueLength]byte
+	}{
+		{zone: pbinAccountZone, sub: pbinBasicDataLeafKey, word: [pbinValueLength]byte{5: 1, 12: 2, 31: 3}},
+		{zone: pbinAccountZone, sub: pbinCodeHashLeafKey, word: [pbinValueLength]byte{0x01}},
+		{zone: pbinAccountZone, sub: pbinDelegationLeafKey, word: [pbinValueLength]byte{0xEF, 0x01, 0x00, 3: 1}},
+		{zone: pbinAccountZone, sub: pbinHeaderStorageOffset, word: [pbinValueLength]byte{31: 1}},
+		{zone: pbinAccountZone, sub: 3, word: [pbinValueLength]byte{0x01}},
+		{zone: pbinCodeZone, sub: 7, word: [pbinValueLength]byte{0x01, 0x02}},
+		{zone: pbinStorageZone, sub: 7, word: [pbinValueLength]byte{31: 1}},
+	}
+	for _, seed := range words {
+		f.Add(seed.zone, seed.sub,
+			binary.BigEndian.Uint64(seed.word[0:8]),
+			binary.BigEndian.Uint64(seed.word[8:16]),
+			binary.BigEndian.Uint64(seed.word[16:24]),
+			binary.BigEndian.Uint64(seed.word[24:32]))
+	}
+
+	f.Fuzz(func(t *testing.T, zone, sub byte, a, b, c, d uint64) {
+		key := pbinLeafCodecKey(zone, sub)
+		word := [pbinValueLength]byte{}
+		binary.BigEndian.PutUint64(word[0:8], a)
+		binary.BigEndian.PutUint64(word[8:16], b)
+		binary.BigEndian.PutUint64(word[16:24], c)
+		binary.BigEndian.PutUint64(word[24:32], d)
+
+		enc, err := pbinEncodeLeafValue(key, &word)
+		if err != nil {
+			return
+		}
+		got, err := pbinDecodeLeafValue(key, enc)
+		require.NoError(t, err)
+		require.Equal(t, word, got)
+	})
+}
+
+func pbinLeafCodecKey(zone, sub byte) []byte {
+	keyLen, known := pbinZoneKeyLength(zone)
+	if !known {
+		keyLen = pbinAccountKeyLength
+	}
+	key := make([]byte, keyLen)
+	key[0] = zone
+	key[len(key)-1] = sub
+	return key
 }

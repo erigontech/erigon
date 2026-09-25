@@ -42,6 +42,7 @@ const (
 var (
 	errPBinBalanceOverflow  = errors.New("pbin: balance does not fit the 16-byte BASIC_DATA field")
 	errPBinCodeSizeOverflow = errors.New("pbin: code size does not fit the 4-byte BASIC_DATA field")
+	errPBinLeafValue        = errors.New("pbin: invalid leaf value")
 )
 
 // pbinEncodeBasicData packs code_size, nonce and balance big-endian into the
@@ -107,4 +108,192 @@ func pbinEncodeStorageValue(value []byte) [pbinValueLength]byte {
 	var v [pbinValueLength]byte
 	copy(v[pbinValueLength-len(value):], value)
 	return v
+}
+
+func pbinEncodeLeafValue(treeKey []byte, val *[pbinValueLength]byte) ([]byte, error) {
+	if len(treeKey) == 0 {
+		return nil, fmt.Errorf("%w: empty tree key", errPBinLeafValue)
+	}
+	zone := treeKey[0]
+	want, known := pbinZoneKeyLength(zone)
+	if !known || len(treeKey) != want {
+		return nil, fmt.Errorf("%w: tree key %#x has invalid zone or length", errPBinLeafValue, treeKey)
+	}
+
+	switch zone {
+	case pbinStorageZone:
+		first := 0
+		for first < pbinValueLength && val[first] == 0 {
+			first++
+		}
+		if first == pbinValueLength {
+			return nil, fmt.Errorf("%w: zero storage value", errPBinLeafValue)
+		}
+		return append([]byte(nil), val[first:]...), nil
+	case pbinCodeZone:
+		last := pbinValueLength
+		for last > 0 && val[last-1] == 0 {
+			last--
+		}
+		if last == 0 {
+			return nil, fmt.Errorf("%w: zero code chunk", errPBinLeafValue)
+		}
+		return append([]byte(nil), val[:last]...), nil
+	case pbinAccountZone:
+	default:
+		return nil, fmt.Errorf("%w: zone %#x names no leaf", errPBinLeafValue, zone)
+	}
+
+	switch subIndex := treeKey[len(treeKey)-1]; {
+	case subIndex == pbinBasicDataLeafKey:
+		if val[0] != 0 || val[1] != 0 || val[2] != 0 || val[3] != 0 {
+			return nil, fmt.Errorf("%w: BASIC_DATA version or reserved bytes are non-zero", errPBinLeafValue)
+		}
+		codeSizeLen := 4
+		for codeSizeLen > 0 && val[pbinBasicDataCodeSizeOffset+4-codeSizeLen] == 0 {
+			codeSizeLen--
+		}
+		nonceLen := 8
+		for nonceLen > 0 && val[pbinBasicDataNonceOffset+8-nonceLen] == 0 {
+			nonceLen--
+		}
+		balanceLen := 16
+		for balanceLen > 0 && val[pbinBasicDataBalanceOffset+16-balanceLen] == 0 {
+			balanceLen--
+		}
+		widths := uint16(codeSizeLen)<<9 | uint16(nonceLen)<<5 | uint16(balanceLen)
+		enc := make([]byte, 0, 2+codeSizeLen+nonceLen+balanceLen)
+		enc = binary.BigEndian.AppendUint16(enc, widths)
+		enc = append(enc, val[pbinBasicDataCodeSizeOffset+4-codeSizeLen:pbinBasicDataCodeSizeOffset+4]...)
+		enc = append(enc, val[pbinBasicDataNonceOffset+8-nonceLen:pbinBasicDataNonceOffset+8]...)
+		enc = append(enc, val[pbinBasicDataBalanceOffset+16-balanceLen:pbinBasicDataBalanceOffset+16]...)
+		return enc, nil
+	case subIndex == pbinCodeHashLeafKey:
+		if *val == [pbinValueLength]byte(empty.CodeHash) {
+			return nil, nil
+		}
+		return append([]byte(nil), val[:]...), nil
+	case subIndex == pbinDelegationLeafKey:
+		if val[0] != pbinDelegationMarker[0] || val[1] != pbinDelegationMarker[1] || val[2] != pbinDelegationMarker[2] {
+			return nil, fmt.Errorf("%w: DELEGATION marker is invalid", errPBinLeafValue)
+		}
+		for _, b := range val[23:] {
+			if b != 0 {
+				return nil, fmt.Errorf("%w: DELEGATION trailing bytes are non-zero", errPBinLeafValue)
+			}
+		}
+		return append([]byte(nil), val[3:23]...), nil
+	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinHeaderStorageOffset+pbinHeaderStorageSlots:
+		first := 0
+		for first < pbinValueLength && val[first] == 0 {
+			first++
+		}
+		if first == pbinValueLength {
+			return nil, fmt.Errorf("%w: zero header storage value", errPBinLeafValue)
+		}
+		return append([]byte(nil), val[first:]...), nil
+	default:
+		return append([]byte(nil), val[:]...), nil
+	}
+}
+
+func pbinDecodeLeafValue(treeKey []byte, enc []byte) ([pbinValueLength]byte, error) {
+	var val [pbinValueLength]byte
+	if len(treeKey) == 0 {
+		return val, fmt.Errorf("%w: empty tree key", errPBinLeafValue)
+	}
+	zone := treeKey[0]
+	want, known := pbinZoneKeyLength(zone)
+	if !known || len(treeKey) != want {
+		return val, fmt.Errorf("%w: tree key %#x has invalid zone or length", errPBinLeafValue, treeKey)
+	}
+
+	switch zone {
+	case pbinStorageZone:
+		if len(enc) == 0 || len(enc) > pbinValueLength || enc[0] == 0 {
+			return val, fmt.Errorf("%w: storage value has invalid length", errPBinLeafValue)
+		}
+		copy(val[pbinValueLength-len(enc):], enc)
+		return val, nil
+	case pbinCodeZone:
+		if len(enc) == 0 || len(enc) > pbinValueLength || enc[len(enc)-1] == 0 {
+			return val, fmt.Errorf("%w: code chunk has invalid length", errPBinLeafValue)
+		}
+		copy(val[:], enc)
+		return val, nil
+	case pbinAccountZone:
+	default:
+		return val, fmt.Errorf("%w: zone %#x names no leaf", errPBinLeafValue, zone)
+	}
+
+	switch subIndex := treeKey[len(treeKey)-1]; {
+	case subIndex == pbinBasicDataLeafKey:
+		if len(enc) < 2 {
+			return val, fmt.Errorf("%w: BASIC_DATA value is shorter than widths", errPBinLeafValue)
+		}
+		widths := binary.BigEndian.Uint16(enc[:2])
+		if widths>>12 != 0 {
+			return val, fmt.Errorf("%w: BASIC_DATA widths have reserved bits", errPBinLeafValue)
+		}
+		codeSizeLen := int((widths >> 9) & 0x7)
+		nonceLen := int((widths >> 5) & 0xf)
+		balanceLen := int(widths & 0x1f)
+		if codeSizeLen > 4 || nonceLen > 8 || balanceLen > 16 {
+			return val, fmt.Errorf("%w: BASIC_DATA field width exceeds its field", errPBinLeafValue)
+		}
+		if len(enc) != 2+codeSizeLen+nonceLen+balanceLen {
+			return val, fmt.Errorf("%w: BASIC_DATA length does not match widths", errPBinLeafValue)
+		}
+		pos := 2
+		if codeSizeLen > 0 {
+			if enc[pos] == 0 {
+				return val, fmt.Errorf("%w: BASIC_DATA code size is not minimal", errPBinLeafValue)
+			}
+			copy(val[pbinBasicDataCodeSizeOffset+4-codeSizeLen:pbinBasicDataCodeSizeOffset+4], enc[pos:pos+codeSizeLen])
+			pos += codeSizeLen
+		}
+		if nonceLen > 0 {
+			if enc[pos] == 0 {
+				return val, fmt.Errorf("%w: BASIC_DATA nonce is not minimal", errPBinLeafValue)
+			}
+			copy(val[pbinBasicDataNonceOffset+8-nonceLen:pbinBasicDataNonceOffset+8], enc[pos:pos+nonceLen])
+			pos += nonceLen
+		}
+		if balanceLen > 0 {
+			if enc[pos] == 0 {
+				return val, fmt.Errorf("%w: BASIC_DATA balance is not minimal", errPBinLeafValue)
+			}
+			copy(val[pbinBasicDataBalanceOffset+16-balanceLen:pbinBasicDataBalanceOffset+16], enc[pos:pos+balanceLen])
+		}
+		return val, nil
+	case subIndex == pbinCodeHashLeafKey:
+		switch len(enc) {
+		case 0:
+			return [pbinValueLength]byte(empty.CodeHash), nil
+		case pbinValueLength:
+			copy(val[:], enc)
+			return val, nil
+		default:
+			return val, fmt.Errorf("%w: CODE_HASH value has length %d", errPBinLeafValue, len(enc))
+		}
+	case subIndex == pbinDelegationLeafKey:
+		if len(enc) != 20 {
+			return val, fmt.Errorf("%w: DELEGATION target has length %d", errPBinLeafValue, len(enc))
+		}
+		copy(val[:3], pbinDelegationMarker[:])
+		copy(val[3:23], enc)
+		return val, nil
+	case subIndex >= pbinHeaderStorageOffset && subIndex < pbinHeaderStorageOffset+pbinHeaderStorageSlots:
+		if len(enc) == 0 || len(enc) > pbinValueLength || enc[0] == 0 {
+			return val, fmt.Errorf("%w: header storage value has invalid length", errPBinLeafValue)
+		}
+		copy(val[pbinValueLength-len(enc):], enc)
+		return val, nil
+	default:
+		if len(enc) != pbinValueLength {
+			return val, fmt.Errorf("%w: reserved account value has length %d", errPBinLeafValue, len(enc))
+		}
+		copy(val[:], enc)
+		return val, nil
+	}
 }
