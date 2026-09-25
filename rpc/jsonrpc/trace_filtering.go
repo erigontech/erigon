@@ -1136,7 +1136,7 @@ func (api *TraceAPIImpl) callTransaction(
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
-	ibs := state.New(cachedReader)
+	ibs := state.New(cachedReader, state.WithStorageOverrides(engine))
 	defer ibs.Close()
 
 	logger := log.New("trace_filtering")

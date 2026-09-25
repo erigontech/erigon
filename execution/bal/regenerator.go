@@ -119,7 +119,7 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if err != nil {
 		return nil, err
 	}
-	ibs := state.New(reader)
+	ibs := state.New(reader, state.WithStorageOverrides(g.engine))
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {

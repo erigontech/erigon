@@ -78,7 +78,6 @@ func RederiveBlockAccessList(
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
 	vmCfg := vm.Config{}
 	receipts := make(types.Receipts, 0, len(txns))
-	ibs.SetStorageOverrides(engine)
 	for i, txn := range txns {
 		select {
 		case <-ctx.Done():

@@ -2613,6 +2613,7 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
+	sdb.storageOverrides = nil
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			if _, err := sdb.getStateObject(addr, true); err != nil {

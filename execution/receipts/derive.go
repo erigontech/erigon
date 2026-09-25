@@ -77,7 +77,6 @@ func DeriveForRange(
 
 	// If starting mid-block, we need to replay 0..fromIdx-1 first to get
 	// cumulative gas and state to the right point. We discard those receipts.
-	ibs.SetStorageOverrides(engine)
 	for i := 0; i < fromIdx; i++ {
 		select {
 		case <-ctx.Done():

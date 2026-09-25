@@ -75,7 +75,7 @@ func TestDeriveBlockReceiptsAppliesStorageOverrides(t *testing.T) {
 		overrides: []state.StorageOverride{{Address: contract, Key: accounts.ZeroKey, Value: *uint256.NewInt(5)}},
 	}
 
-	ibs := state.New(state.NewNoopReader())
+	ibs := state.New(state.NewNoopReader(), state.WithStorageOverrides(engine))
 	defer ibs.Close()
 	require.NoError(t, ibs.CreateAccount(contract, true))
 	require.NoError(t, ibs.SetCode(contract, code, tracing.CodeChangeUnspecified))

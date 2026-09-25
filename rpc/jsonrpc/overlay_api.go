@@ -329,7 +329,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
 				}
-				statedb := state.New(stateReader)
+				statedb := state.New(stateReader, state.WithStorageOverrides(api.engine()))
 				func() {
 					defer statedb.Close()
 					if hasStateOverrides {
@@ -427,7 +427,6 @@ func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.H
 }
 
 func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, replayFailedTxns bool) ([]*types.Log, error) {
-	statedb.SetStorageOverrides(api.engine())
 	log.Debug("[replayBlock] begin", "block", blockNum)
 	var (
 		hash               common.Hash

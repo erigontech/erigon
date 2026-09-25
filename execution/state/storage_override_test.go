@@ -8,6 +8,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -58,14 +59,12 @@ func TestStorageOverride(t *testing.T) {
 
 type storageChange struct{ prev, new uint256.Int }
 
-func newOverrideTestIBS(t *testing.T, versioned bool) *state.IntraBlockState {
+func newOverrideTestIBS(t *testing.T, versioned bool, opts ...state.Option) *state.IntraBlockState {
 	_, tx, sd := state.NewTestRwTx(t)
 	reader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
-	var ibs *state.IntraBlockState
+	ibs := state.New(reader, opts...)
 	if versioned {
-		ibs = state.NewWithVersionMap(reader, state.NewVersionMap(nil))
-	} else {
-		ibs = state.New(reader)
+		ibs.SetVersionMap(state.NewVersionMap(nil))
 	}
 	t.Cleanup(ibs.Close)
 	return ibs
@@ -115,9 +114,8 @@ func TestStorageOverrideEndsWithTheTransaction(t *testing.T) {
 			ibs.SetTxContext(35547779, 197)
 			return nil
 		},
-		"detach": func(ibs *state.IntraBlockState) error {
-			ibs.SetStorageOverrides(nil)
-			return nil
+		"FinalizeTx": func(ibs *state.IntraBlockState) error {
+			return ibs.FinalizeTx(&chain.Rules{}, state.NewNoopWriter())
 		},
 		"Reset": func(ibs *state.IntraBlockState) error {
 			ibs.Reset()
@@ -181,10 +179,9 @@ func TestSetTxContextInstallsAttachedOverrides(t *testing.T) {
 		return v
 	}
 
-	ibs := newOverrideTestIBS(t, false)
-	ibs.SetStorageOverrides(fixedOverrider{
+	ibs := newOverrideTestIBS(t, false, state.WithStorageOverrides(fixedOverrider{
 		{BlockNum: 35547779, TxIndex: 196}: {{Address: addr, Key: key, Value: value}},
-	})
+	}))
 
 	ibs.SetTxContext(35547779, 196)
 	require.Equal(t, value, committed(ibs))
@@ -196,7 +193,4 @@ func TestSetTxContextInstallsAttachedOverrides(t *testing.T) {
 	ibs.SetTxContext(35547779, 196)
 	require.Equal(t, value, committed(ibs), "the overrider survives Reset")
 
-	ibs.SetStorageOverrides(nil)
-	ibs.SetTxContext(35547779, 196)
-	require.Equal(t, uint256.Int{}, committed(ibs), "detaching stops the overrides")
 }

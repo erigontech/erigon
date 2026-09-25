@@ -209,7 +209,6 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 	}
-	st.SetStorageOverrides(nil)
 
 	// after replaying the txns, we want to overload the state
 	// overload state

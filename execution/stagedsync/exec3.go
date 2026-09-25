@@ -566,7 +566,7 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 // and the block's own receipts and cumulative gas stay correct — only the prior
 // receipts are absent (block then left not receipts-complete).
 func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.TemporalTx, header *types.Header, txs types.Transactions, startTxIndex int, blockStartTxNum uint64) (types.Receipts, error) {
-	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
+	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum), state.WithStorageOverrides(te.cfg.engine))
 	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
 	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {

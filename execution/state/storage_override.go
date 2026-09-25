@@ -39,20 +39,12 @@ type StorageOverrider interface {
 // Option configures an IntraBlockState at construction.
 type Option func(*IntraBlockState)
 
-// WithStorageOverrides attaches o's table at construction; see
-// SetStorageOverrides.
+// WithStorageOverrides attaches o's table, which SetTxContext consults for every
+// transaction. The table is keyed on block and tx index only, so attach it only
+// to an IBS that executes canonical transactions: a user call run at the same
+// position would pick the overrides up too. Survives Reset.
 func WithStorageOverrides(o StorageOverrider) Option {
 	return func(sdb *IntraBlockState) { sdb.storageOverrideTable = storageOverrideTable(o) }
-}
-
-// SetStorageOverrides attaches o's table, which SetTxContext consults for every
-// transaction; nil detaches it. The table is keyed on block and tx index only, so
-// attach it only to an IBS that executes canonical transactions: a user call run
-// at the same position would pick the overrides up too. Changing it drops the
-// overrides already installed for the current transaction. Survives Reset.
-func (sdb *IntraBlockState) SetStorageOverrides(o StorageOverrider) {
-	sdb.storageOverrideTable = storageOverrideTable(o)
-	sdb.storageOverrides = nil
 }
 
 func storageOverrideTable(o StorageOverrider) StorageOverrideTable {
@@ -66,7 +58,8 @@ func storageOverrideTable(o StorageOverrider) StorageOverrideTable {
 // current transaction, so a replay can reproduce storage a canonical chain
 // committed through a cache bug in the client that sealed it. The transaction
 // reads the override, prices SSTORE against it and skips writes equal to it;
-// its own writes shadow it. Replaced at the next SetTxContext, cleared by Reset.
+// its own writes shadow it. Cleared when the transaction ends (FinalizeTx), at the
+// next SetTxContext and by Reset.
 func (sdb *IntraBlockState) SetStorageOverride(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
 	if sdb.storageOverrides == nil {
 		sdb.storageOverrides = map[storageOverrideKey]uint256.Int{}
