@@ -133,6 +133,19 @@ func TestTrieBucketEarlySplitUsesRowRecord(t *testing.T) {
 	require.NoError(t, NewTrie(ctx).Verify())
 }
 
+func TestTrieBucketEarlyRootSplitUsesRowRecord(t *testing.T) {
+	address := bytes.Repeat([]byte{0x86}, 20)
+	stem := eip8297.TreeKeyStorage(address, storageSlot(64))[:33]
+	keyA := storageKeyWithSuffix(stem, 0x20, 0)
+	keyB := storageKeyWithSuffix(stem, 0x40, 0)
+	ctx := newTrieTestContext()
+	_, err := NewTrie(ctx).Process([]Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}})
+	require.NoError(t, err)
+	record := requireBucketRecord(t, ctx, address)
+	require.Equal(t, RowRoot, record.Form)
+	require.NoError(t, NewTrie(ctx).Verify())
+}
+
 func TestTrieHeaderAndOverflowShareOneBatch(t *testing.T) {
 	address := bytes.Repeat([]byte{0x83}, 20)
 	account := eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)
