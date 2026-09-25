@@ -526,7 +526,7 @@ func (api *BaseAPI) readStateHistoryStartBlock(ctx context.Context, tx kv.Tx, he
 	if !ok {
 		return 0, nil
 	}
-	startTxNum, err := stateHistoryStartTxNum(ttx.Debug())
+	startTxNum, err := state.StateHistoryStartTxNum(ttx)
 	if err != nil {
 		return 0, err
 	}
@@ -549,34 +549,6 @@ func (api *BaseAPI) readStateHistoryStartBlock(ctx context.Context, tx kv.Tx, he
 	}
 	// No historical block can be proven available; the current state remains readable.
 	return head, nil
-}
-
-// historyStartFromWithError distinguishes an empty history from a backend failure.
-type historyStartFromWithError interface {
-	HistoryStartFromWithError(kv.Domain) (uint64, error)
-}
-
-func stateHistoryStartTxNum(tx kv.TemporalDebugTx) (uint64, error) {
-	var start uint64
-	// A later first entry can mean that a domain had no earlier changes, rather
-	// than that its history was pruned. Sparse domains must not move the common
-	// history floor forward.
-	for i, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
-		var domainStart uint64
-		if withErr, ok := tx.(historyStartFromWithError); ok {
-			var err error
-			domainStart, err = withErr.HistoryStartFromWithError(domain)
-			if err != nil {
-				return 0, err
-			}
-		} else {
-			domainStart = tx.HistoryStartFrom(domain)
-		}
-		if i == 0 || domainStart < start {
-			start = domainStart
-		}
-	}
-	return start, nil
 }
 
 func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {

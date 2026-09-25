@@ -559,7 +559,16 @@ func TestPruneModeEndpointGating(t *testing.T) {
 				for _, leg := range legs {
 					t.Run(ep.name+"/"+leg.name, func(t *testing.T) {
 						res, err := ep.call(t.Context(), apis, leg.ref)
-						if pruneGateFires(ep.boundary, cfg, leg.ref.num, chainInfo.head) {
+						pruned := pruneGateFires(ep.boundary, cfg, leg.ref.num, chainInfo.head)
+						if feeHistory, ok := res.(*feeHistoryResult); ok {
+							require.NoError(t, err)
+							require.NotNil(t, feeHistory)
+							blocks := 1
+							if pruned {
+								blocks = 0
+							}
+							require.Len(t, feeHistory.GasUsedRatio, blocks)
+						} else if pruned {
 							require.ErrorIs(t, err, state.PrunedError)
 						} else {
 							require.NoError(t, err)
@@ -812,7 +821,9 @@ func requireRetiredAbove(t *testing.T, m *execmoduletester.ExecModuleTester, dom
 	defer tx.Rollback()
 	maxTxNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, blockNum)
 	require.NoError(t, err)
-	require.Greater(t, tx.Debug().HistoryStartFrom(domain), maxTxNum,
+	historyStart, err := tx.Debug().HistoryStartFrom(domain)
+	require.NoError(t, err)
+	require.Greater(t, historyStart, maxTxNum,
 		"%s must be retired above block %d for the fixture to mean anything", domain, blockNum)
 }
 
@@ -897,7 +908,9 @@ type historyFloorDebugTx struct {
 	startTxNum uint64
 }
 
-func (tx historyFloorDebugTx) HistoryStartFrom(kv.Domain) uint64 { return tx.startTxNum }
+func (tx historyFloorDebugTx) HistoryStartFrom(kv.Domain) (uint64, error) {
+	return tx.startTxNum, nil
+}
 
 // TestGetBlockByTimestampGatesGenesisBranch pins the gate on the branch that answers
 // a timestamp at or before the genesis one: the block it resolves is block 0, which a

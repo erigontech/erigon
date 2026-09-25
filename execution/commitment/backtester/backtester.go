@@ -372,7 +372,10 @@ func checkDataAvailable(ctx context.Context, tx kv.TemporalTx, fromBlock uint64,
 	if err != nil {
 		return err
 	}
-	historyAvailableFromTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	historyAvailableFromTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if err != nil {
+		return err
+	}
 	if fromTxNum < historyAvailableFromTxNum {
 		return fmt.Errorf("history not available for given start: %d < %d", fromTxNum, historyAvailableFromTxNum)
 	}

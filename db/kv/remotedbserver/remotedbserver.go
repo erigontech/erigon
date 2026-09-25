@@ -767,8 +767,9 @@ func (s *KvServer) Range(_ context.Context, req *remoteproto.RangeReq) (*remotep
 func (s *KvServer) HistoryStartFrom(_ context.Context, req *remoteproto.HistoryStartFromReq) (reply *remoteproto.HistoryStartFromReply, err error) {
 	reply = &remoteproto.HistoryStartFromReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
-		reply.StartFrom = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
-		return nil
+		var err error
+		reply.StartFrom, err = tx.Debug().HistoryStartFrom(kv.Domain(req.Domain))
+		return err
 	}); err != nil {
 		return nil, err
 	}

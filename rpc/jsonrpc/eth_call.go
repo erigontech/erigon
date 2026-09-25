@@ -513,7 +513,10 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			return nil, err
 		}
-		commitmentStartingTxNum := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		commitmentStartingTxNum, err := roTx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, err
+		}
 		if lastTxnInBlock < commitmentStartingTxNum {
 			return nil, fmt.Errorf("%w: commitment start: %d, last tx: %d", state.PrunedError, commitmentStartingTxNum, lastTxnInBlock)
 		}
@@ -700,7 +703,10 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	endTxNum := lastTxNumInBlock + 1
 	parentNum := blockNr - 1
 
-	commitmentStartingTxNum := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+	if err != nil {
+		return nil, err
+	}
 	if firstTxNumInBlock < commitmentStartingTxNum {
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}

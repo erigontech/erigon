@@ -38,7 +38,7 @@ func TestMaxPrunableStepsBacklog(t *testing.T) {
 	require.Equal(t, uint64(123), db.MaxPrunableStepsBacklog())
 }
 
-func TestHistoryStartFromWithErrorPreservesFloor(t *testing.T) {
+func TestHistoryStartFromPreservesFloor(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	client := remoteproto.NewMockKVClient(ctrl)
 	client.EXPECT().HistoryStartFrom(t.Context(), &remoteproto.HistoryStartFromReq{
@@ -46,19 +46,19 @@ func TestHistoryStartFromWithErrorPreservesFloor(t *testing.T) {
 	}).Return(&remoteproto.HistoryStartFromReply{StartFrom: 123}, nil)
 	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
 
-	start, err := tx.HistoryStartFromWithError(kv.StorageDomain)
+	start, err := tx.HistoryStartFrom(kv.StorageDomain)
 	require.NoError(t, err)
 	require.Equal(t, uint64(123), start)
 }
 
-func TestHistoryStartFromWithErrorPropagatesTransportError(t *testing.T) {
+func TestHistoryStartFromPropagatesTransportError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	client := remoteproto.NewMockKVClient(ctrl)
 	wantErr := status.Error(codes.Unavailable, "history unavailable")
 	client.EXPECT().HistoryStartFrom(gomock.Any(), gomock.Any()).Return(nil, wantErr)
 	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
 
-	start, err := tx.HistoryStartFromWithError(kv.StorageDomain)
+	start, err := tx.HistoryStartFrom(kv.StorageDomain)
 	require.ErrorIs(t, err, wantErr)
 	require.Zero(t, start)
 }

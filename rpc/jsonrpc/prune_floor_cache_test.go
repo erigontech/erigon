@@ -98,6 +98,25 @@ func TestPruneFloorCacheRefreshesAtSameHeadAfterExpiry(t *testing.T) {
 	require.Equal(t, uint64(2), reads.Load())
 }
 
+func TestPruneFloorCacheFailedRefreshDoesNotRenewExpiredValue(t *testing.T) {
+	t.Parallel()
+
+	now := time.Unix(1, 0)
+	cache := pruneFloorCache{ttl: time.Second, now: func() time.Time { return now }}
+	floor, err := cache.get(t.Context(), 10, func() (uint64, error) { return 7, nil })
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), floor)
+
+	now = now.Add(time.Second)
+	wantErr := errors.New("refresh failed")
+	_, err = cache.get(t.Context(), 10, func() (uint64, error) { return 0, wantErr })
+	require.ErrorIs(t, err, wantErr)
+
+	floor, err = cache.get(t.Context(), 10, func() (uint64, error) { return 8, nil })
+	require.NoError(t, err)
+	require.Equal(t, uint64(8), floor)
+}
+
 func TestPruneFloorCacheCoalescesConcurrentReadsAtSameHead(t *testing.T) {
 	t.Parallel()
 
@@ -277,4 +296,19 @@ func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {
 		close(release)
 	}
 	require.ErrorIs(t, <-returned, context.Canceled)
+}
+
+func TestPruneFloorCacheRecoversAfterReadPanic(t *testing.T) {
+	cache := pruneFloorCache{ttl: time.Hour}
+	require.PanicsWithValue(t, "read failed", func() {
+		_, _ = cache.get(t.Context(), 10, func() (uint64, error) {
+			panic("read failed")
+		})
+	})
+
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	floor, err := cache.get(ctx, 10, func() (uint64, error) { return 7, nil })
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), floor)
 }

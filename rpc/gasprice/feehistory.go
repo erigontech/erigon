@@ -35,6 +35,7 @@ import (
 	commonlru "github.com/erigontech/erigon/common/lru"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
@@ -337,6 +338,12 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// a lower bound, so the oldest block of the range decides for all of it.
 	if len(rewardPercentiles) != 0 {
 		if err := oracle.backend.CheckBlockRewardsAvailable(ctx, oldestBlock); err != nil {
+			// Fee history stops at the first unavailable block rather than skipping
+			// to newer blocks. If the oldest block is pruned, return an empty result,
+			// matching the missing-block path below.
+			if errors.Is(err, state.PrunedError) {
+				err = nil
+			}
 			return common.Big0, nil, nil, nil, nil, nil, err
 		}
 	}

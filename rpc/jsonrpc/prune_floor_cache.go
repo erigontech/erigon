@@ -20,6 +20,9 @@ import (
 	"context"
 	"sync"
 	"time"
+
+	"github.com/erigontech/erigon/common/concurrent"
+	"github.com/erigontech/erigon/common/lru"
 )
 
 type pruneFloorValue struct {
@@ -27,18 +30,15 @@ type pruneFloorValue struct {
 	expiresAt time.Time
 }
 
-type pruneFloorLoad struct {
-	done  chan struct{}
-	floor uint64
-	err   error
-}
-
 type pruneFloorCacheKey struct {
 	head               uint64
 	snapshotGeneration uint64
 }
 
-const defaultPruneFloorCacheTTL = time.Second
+const (
+	defaultPruneFloorCacheTTL = time.Second
+	pruneFloorCacheSize       = 64
+)
 
 // pruneFloorCache caches successful floor reads and coalesces concurrent loads
 // by key. Every key contains the exact chain head; local block-floor keys also
@@ -47,8 +47,7 @@ const defaultPruneFloorCacheTTL = time.Second
 // cannot identify.
 type pruneFloorCache struct {
 	mu     sync.Mutex
-	values map[pruneFloorCacheKey]pruneFloorValue
-	loads  map[pruneFloorCacheKey]*pruneFloorLoad
+	values *lru.BasicLRU[pruneFloorCacheKey, *concurrent.CachedValue[pruneFloorValue]]
 	ttl    time.Duration
 	now    func() time.Time
 }
@@ -72,79 +71,51 @@ func (c *pruneFloorCache) get(ctx context.Context, head uint64, read func() (uin
 }
 
 func (c *pruneFloorCache) getForKey(ctx context.Context, key pruneFloorCacheKey, read func() (uint64, error)) (uint64, error) {
+	cell := c.valueForKey(key)
 	for {
 		if err := ctx.Err(); err != nil {
 			return 0, err
 		}
-
-		floor, cached, load, leader := c.join(key)
-		if cached {
-			return floor, nil
+		// CachedValue measures freshness from the last attempt, including failures.
+		// Only a successful read may extend this floor's lifetime.
+		if value, observed, _ := cell.Load(); observed && c.timeNow().Before(value.expiresAt) {
+			return value.floor, nil
 		}
-		if leader {
+		// Produce runs read synchronously so it cannot outlive the caller's
+		// transaction. Waiters can cancel without interrupting that read.
+		value, ran, err := cell.Produce(ctx, func() (pruneFloorValue, bool, error) {
+			// Another producer may have refreshed the value before we claimed this load.
+			if value, observed, _ := cell.Load(); observed && c.timeNow().Before(value.expiresAt) {
+				return value, false, nil
+			}
 			floor, err := read()
-			c.finish(key, load, floor, err)
-			if err != nil {
-				return 0, err
-			}
-			if err := ctx.Err(); err != nil {
-				return 0, err
-			}
-			return floor, nil
+			return pruneFloorValue{floor: floor, expiresAt: c.timeNow().Add(c.cacheTTL())}, true, err
+		})
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return 0, ctxErr
 		}
-
-		select {
-		case <-load.done:
-			if err := ctx.Err(); err != nil {
-				return 0, err
-			}
-			if load.err != nil {
-				// The leader's failure may be specific to its context. Retry this
-				// caller's read instead of inheriting that failure.
-				continue
-			}
-			return load.floor, nil
-		case <-ctx.Done():
-			return 0, ctx.Err()
+		if err == nil {
+			return value.floor, nil
 		}
+		if ran {
+			return 0, err
+		}
+		// A shared failure may belong to the producer's context or transaction.
+		// Retry through this caller's read instead of inheriting that failure.
 	}
 }
 
-func (c *pruneFloorCache) join(key pruneFloorCacheKey) (floor uint64, cached bool, load *pruneFloorLoad, leader bool) {
-	now := c.timeNow()
+func (c *pruneFloorCache) valueForKey(key pruneFloorCacheKey) *concurrent.CachedValue[pruneFloorValue] {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	if value, ok := c.values[key]; ok && now.Before(value.expiresAt) {
-		return value.floor, true, nil, false
+	if c.values == nil {
+		values := lru.NewBasicLRU[pruneFloorCacheKey, *concurrent.CachedValue[pruneFloorValue]](pruneFloorCacheSize)
+		c.values = &values
 	}
-	if load := c.loads[key]; load != nil {
-		return 0, false, load, false
+	if value, ok := c.values.Get(key); ok {
+		return value
 	}
-	if c.loads == nil {
-		c.loads = make(map[pruneFloorCacheKey]*pruneFloorLoad)
-	}
-	load = &pruneFloorLoad{done: make(chan struct{})}
-	c.loads[key] = load
-	return 0, false, load, true
-}
-
-func (c *pruneFloorCache) finish(key pruneFloorCacheKey, load *pruneFloorLoad, floor uint64, err error) {
-	now := c.timeNow()
-	c.mu.Lock()
-	load.floor, load.err = floor, err
-	delete(c.loads, key)
-	if err == nil {
-		if c.values == nil {
-			c.values = make(map[pruneFloorCacheKey]pruneFloorValue)
-		}
-		for cachedKey, value := range c.values {
-			if !now.Before(value.expiresAt) {
-				delete(c.values, cachedKey)
-			}
-		}
-		c.values[key] = pruneFloorValue{floor: floor, expiresAt: now.Add(c.cacheTTL())}
-	}
-	c.mu.Unlock()
-	close(load.done)
+	value := new(concurrent.CachedValue[pruneFloorValue])
+	c.values.Add(key, value)
+	return value
 }

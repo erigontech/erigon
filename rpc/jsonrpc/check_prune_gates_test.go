@@ -331,7 +331,7 @@ func TestBlocksGateUsesOnDiskFloor(t *testing.T) {
 	require.ErrorIs(t, err, state.PrunedError)
 }
 
-func TestFeeHistoryRewardsRespectPhysicalTransactionFloor(t *testing.T) {
+func TestFeeHistoryTruncatesAtPhysicalTransactionFloor(t *testing.T) {
 	t.Parallel()
 
 	wide := prune.Distance(pruneGatingChainLen * 3)
@@ -340,10 +340,16 @@ func TestFeeHistoryRewardsRespectPhysicalTransactionFloor(t *testing.T) {
 	})
 	apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: chainInfo.old.num + 1}
 
-	_, err := apis.eth.FeeHistory(t.Context(), 1, rpc.BlockNumber(chainInfo.old.num), []float64{50})
-	require.ErrorIs(t, err, state.PrunedError)
+	result, err := apis.eth.FeeHistory(t.Context(), 1, rpc.BlockNumber(chainInfo.old.num), []float64{50})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, result.Reward)
+	require.Empty(t, result.BaseFee)
+	require.Empty(t, result.GasUsedRatio)
+	require.Empty(t, result.BlobBaseFee)
+	require.Empty(t, result.BlobGasUsedRatio)
 
-	result, err := apis.eth.FeeHistory(t.Context(), 1, rpc.BlockNumber(chainInfo.old.num), nil)
+	result, err = apis.eth.FeeHistory(t.Context(), 1, rpc.BlockNumber(chainInfo.old.num), nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.Empty(t, result.Reward)
@@ -2052,7 +2058,9 @@ type prunedHistoryDebugTx struct {
 	kv.TemporalDebugTx
 }
 
-func (prunedHistoryDebugTx) HistoryStartFrom(kv.Domain) uint64 { return math.MaxUint64 }
+func (prunedHistoryDebugTx) HistoryStartFrom(kv.Domain) (uint64, error) {
+	return math.MaxUint64, nil
+}
 
 type countingHistoryFloorTx struct {
 	kv.TemporalTx
@@ -2068,7 +2076,7 @@ type countingHistoryFloorDebugTx struct {
 	calls *atomic.Int64
 }
 
-func (tx countingHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) uint64 {
+func (tx countingHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64, error) {
 	tx.calls.Add(1)
 	return tx.TemporalDebugTx.HistoryStartFrom(domain)
 }
@@ -2093,11 +2101,7 @@ type domainHistoryFloorDebugTx struct {
 	err    error
 }
 
-func (tx domainHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) uint64 {
-	return tx.starts[domain]
-}
-
-func (tx domainHistoryFloorDebugTx) HistoryStartFromWithError(domain kv.Domain) (uint64, error) {
+func (tx domainHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64, error) {
 	return tx.starts[domain], tx.err
 }
 
@@ -2154,11 +2158,10 @@ func TestEmptyBlockReceiptsNeedNoStateHistory(t *testing.T) {
 	require.ErrorIs(t, err, state.PrunedError, "the control block must reach the unavailable history")
 }
 
-// TestFeeHistoryGateTakesTheOldestBlockOfTheRange pins that the reward-percentile gate
-// looks at where the requested range starts, not where it ends: a range that reaches
-// below the cutoff is refused even when its newest block is retained. The header series
-// is served for the same range.
-func TestFeeHistoryGateTakesTheOldestBlockOfTheRange(t *testing.T) {
+// Truncation keeps only blocks before the first unavailable one. If the oldest
+// requested block is pruned, rewards are empty even when newer blocks are retained;
+// a header-only request still serves the same range.
+func TestFeeHistoryTruncationTakesTheOldestBlockOfTheRange(t *testing.T) {
 	t.Parallel()
 
 	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
@@ -2169,14 +2172,15 @@ func TestFeeHistoryGateTakesTheOldestBlockOfTheRange(t *testing.T) {
 	oldest := pruneGatingDistance.PruneTo(head)
 	retained := rpc.DecimalOrHex(head - oldest + 1)
 
-	_, err := apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), []float64{50})
-	require.ErrorIs(t, err, state.PrunedError)
-	require.Contains(t, err.Error(), "blocks are available")
+	res, err := apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), []float64{50})
+	require.NoError(t, err)
+	require.Empty(t, res.Reward)
+	require.Empty(t, res.GasUsedRatio)
 
 	_, err = apis.eth.FeeHistory(ctx, retained+1, rpc.BlockNumber(head), nil)
 	require.NoError(t, err, "the header series reaches past the blocks cutoff")
 
-	res, err := apis.eth.FeeHistory(ctx, retained, rpc.BlockNumber(head), []float64{50})
+	res, err = apis.eth.FeeHistory(ctx, retained, rpc.BlockNumber(head), []float64{50})
 	require.NoError(t, err)
 	require.Equal(t, oldest, res.OldestBlock.ToInt().Uint64())
 }
