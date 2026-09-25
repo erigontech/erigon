@@ -53,6 +53,7 @@ type Sample struct {
 	Hash       common.Hash          `json:"hash" ethjson:"data"`
 	Bytes      []byte               `json:"bytes" ethjson:"data"`
 	OptBytes   hexutil.Bytes        `json:"optBytes,omitempty" ethjson:"data"`
+	PtrBytes   *hexutil.Bytes       `json:"ptrBytes" ethjson:"data"`
 	PtrHash    *common.Hash         `json:"ptrHash" ethjson:"data"`
 	Topics     []common.Hash        `json:"topics" ethjson:"datalist"`
 	OptTopics  []common.Hash        `json:"optTopics,omitempty" ethjson:"datalist"`
