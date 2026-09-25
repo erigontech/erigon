@@ -301,6 +301,8 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 	}
 	receipt["logs"] = logs
 
+	// Always present, null when the backend sends neither, as geth's receipt has it.
+	receipt["effectiveGasPrice"] = nil
 	if protoReceipt.EffectiveGasPrice != nil {
 		receipt["effectiveGasPrice"] = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.EffectiveGasPrice))
 	} else if protoReceipt.BaseFee != nil {
