@@ -142,11 +142,10 @@ func convertCommitmentFileV3(
 	if !ok || vf.src == nil || vf.src.decompressor == nil {
 		return 0, 0, fmt.Errorf("convertCommitmentFileV3 %q: source has no decompressor", file.Fullpath())
 	}
-	d := at.d[kv.CommitmentDomain].d
-	srcCompression := d.Compression
-	if vf.src.StepCount(stepSize) < DomainMinStepsToCompress {
-		srcCompression = seg.CompressNone
-	}
+	dt := at.d[kv.CommitmentDomain]
+	d := dt.d
+	srcCompression := commitmentFileCompression(d, vf, stepSize)
+	lastStep := kv.Step(dt.files[len(dt.files)-1].endTxNum / stepSize)
 
 	baseName := filepath.Base(file.Fullpath())
 	fileStart := time.Now()
@@ -156,6 +155,7 @@ func convertCommitmentFileV3(
 	in := make(chan *kvBatch, workers*2)
 	out := make(chan *convertedBatch, workers*2)
 	var read atomic.Uint64
+	var shadowed uint64
 
 	g, gctx := errgroup.WithContext(ctx)
 	g.Go(func() error {
@@ -164,6 +164,7 @@ func convertCommitmentFileV3(
 		defer logEvery.Stop()
 		reader := seg.NewReader(vf.src.decompressor.MakeGetter(), srcCompression)
 		keysCompressed, valsCompressed := srcCompression.Has(seg.CompressKeys), srcCompression.Has(seg.CompressVals)
+		newer := newNewerCommitmentKeys(dt, endTxNum, stepSize)
 		batch := kvBatchPool.Get().(*kvBatch)
 		batch.reset()
 		send := func() error {
@@ -177,16 +178,23 @@ func convertCommitmentFileV3(
 			}
 		}
 		for reader.HasNext() {
+			mark := len(batch.buf)
 			k := readOwned(reader, batch, keysCompressed)
 			if !reader.HasNext() {
 				return fmt.Errorf("truncated at key %x", k)
 			}
-			v := readOwned(reader, batch, valsCompressed)
-			batch.pairs = append(batch.pairs, [2][]byte{k, v})
 			n := read.Add(1)
-			if len(batch.pairs) == commitmentV3Batch {
-				if sendErr := send(); sendErr != nil {
-					return sendErr
+			if newer.contains(k) {
+				reader.Skip()
+				batch.buf = batch.buf[:mark]
+				shadowed++
+			} else {
+				v := readOwned(reader, batch, valsCompressed)
+				batch.pairs = append(batch.pairs, [2][]byte{k, v})
+				if len(batch.pairs) == commitmentV3Batch {
+					if sendErr := send(); sendErr != nil {
+						return sendErr
+					}
 				}
 			}
 			select {
@@ -211,7 +219,7 @@ func convertCommitmentFileV3(
 			defer converting.Done()
 			wat := at.a.BeginFilesRo()
 			defer wat.Close()
-			vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: stepTo - 1}
+			vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: lastStep - 1}
 			conv := v4.NewLegacyConverter(vals, st.keysV2, incremental)
 			prevs := wat.d[kv.CommitmentDomain]
 			for batch := range in {
@@ -316,12 +324,58 @@ func convertCommitmentFileV3(
 	}
 	elapsed := time.Since(fileStart)
 	logger.Info(fmt.Sprintf(
-		"[commitment_convert] v3 file done %s legacy=%s records=%s sizeDelta=%.1f%% in %s (%s key/s) collect=%s write=%s build=%s %s",
-		baseName, common.PrettyCounter(ki), common.PrettyCounter(written), pct,
+		"[commitment_convert] v3 file done %s legacy=%s shadowed=%s records=%s sizeDelta=%.1f%% in %s (%s key/s) collect=%s write=%s build=%s %s",
+		baseName, common.PrettyCounter(ki), common.PrettyCounter(shadowed), common.PrettyCounter(written), pct,
 		elapsed.Round(time.Millisecond), formatRate(ki, elapsed),
 		collected.Sub(fileStart).Round(time.Millisecond), resolved.Sub(collected).Round(time.Millisecond), time.Since(resolved).Round(time.Millisecond),
 		buildPhase1Prefix(fileIdx, fileTotal, processedKeys+ki, grandTotalKeys)))
 	return delta, ki, nil
+}
+
+func commitmentFileCompression(d *Domain, f visibleFile, stepSize uint64) seg.FileCompression {
+	if f.src.StepCount(stepSize) < DomainMinStepsToCompress {
+		return seg.CompressNone
+	}
+	return d.Compression
+}
+
+type newerCommitmentKeys struct {
+	readers []*seg.Reader
+	keys    [][]byte
+}
+
+func newNewerCommitmentKeys(dt *DomainRoTx, fromTxNum, stepSize uint64) *newerCommitmentKeys {
+	s := &newerCommitmentKeys{}
+	for _, f := range dt.files {
+		if f.startTxNum < fromTxNum {
+			continue
+		}
+		s.readers = append(s.readers, seg.NewReader(f.src.decompressor.MakeGetter(), commitmentFileCompression(dt.d, f, stepSize)))
+		s.keys = append(s.keys, nil)
+		s.advance(len(s.readers) - 1)
+	}
+	return s
+}
+
+func (s *newerCommitmentKeys) advance(i int) {
+	if !s.readers[i].HasNext() {
+		s.readers[i] = nil
+		return
+	}
+	s.keys[i], _ = s.readers[i].Next(s.keys[i][:0])
+	s.readers[i].Skip()
+}
+
+func (s *newerCommitmentKeys) contains(k []byte) bool {
+	for i := range s.readers {
+		for s.readers[i] != nil && bytes.Compare(s.keys[i], k) < 0 {
+			s.advance(i)
+		}
+		if s.readers[i] != nil && bytes.Equal(s.keys[i], k) {
+			return true
+		}
+	}
+	return false
 }
 
 func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
