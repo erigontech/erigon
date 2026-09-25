@@ -206,8 +206,20 @@ func TestFoldRowsMatchReferenceSubtrees(t *testing.T) {
 		require.NoError(t, err)
 		branch, ok := built.referenceNodes[key]
 		require.True(t, ok)
-		expected := referenceFoldResult(branch, recordPath([]byte(key)), nil)
+		expected := referenceFoldResult(branch, built.referenceSplits[key], nil)
 		require.Equal(t, expected, result)
+	}
+}
+
+func TestFoldEveryGeneratedRowMatchesReference(t *testing.T) {
+	entries := randomEntries(0xC011A, 64)
+	built := buildReferenceRows(entries, nil, eip8297.Bitpath{})
+	require.Greater(t, len(built.rows), 1)
+	for key, record := range built.rows {
+		got, err := FoldRow([]byte(key), &record)
+		require.NoError(t, err)
+		want := referenceFoldResult(built.referenceNodes[key], built.referenceSplits[key], nil)
+		require.Equal(t, want, got, "row %x", key)
 	}
 }
 
@@ -233,10 +245,11 @@ func TestFoldPropertyMatchesReference(t *testing.T) {
 }
 
 type referenceRows struct {
-	root           Record
-	rootKey        []byte
-	rows           map[string]Record
-	referenceNodes map[string]eip8297.Node
+	root            Record
+	rootKey         []byte
+	rows            map[string]Record
+	referenceNodes  map[string]eip8297.Node
+	referenceSplits map[string]int16
 }
 
 func buildReferenceRows(entries []eip8297.Entry, sum eip8297.HashFn, rootPath eip8297.Bitpath) referenceRows {
@@ -247,9 +260,10 @@ func buildReferenceRows(entries []eip8297.Entry, sum eip8297.HashFn, rootPath ei
 		tree.Insert(entry.Key, entry.Value)
 	}
 	result := referenceRows{
-		rootKey:        rootKey(rootPath),
-		rows:           make(map[string]Record),
-		referenceNodes: make(map[string]eip8297.Node),
+		rootKey:         rootKey(rootPath),
+		rows:            make(map[string]Record),
+		referenceNodes:  make(map[string]eip8297.Node),
+		referenceSplits: make(map[string]int16),
 	}
 	if tree.Root == nil {
 		return result
@@ -297,6 +311,7 @@ func (r *referenceRows) addRow(node eip8297.Node, depth int16, sum eip8297.HashF
 	if _, exists := r.rows[string(key)]; !exists {
 		r.rows[string(key)] = record
 		r.referenceNodes[string(key)] = node
+		r.referenceSplits[string(key)] = split
 	}
 }
 
@@ -470,8 +485,7 @@ func recordPath(key []byte) eip8297.Bitpath {
 	return path
 }
 
-func referenceFoldResult(node eip8297.Node, _ eip8297.Bitpath, sum eip8297.HashFn) FoldResult {
+func referenceFoldResult(node eip8297.Node, split int16, sum eip8297.HashFn) FoldResult {
 	branch := node.(*eip8297.Branch)
-	split := int16(len(branch.Prefix))
 	return FoldResult{Split: split, Left: eip8297.MerkelizeWith(branch.Left, sum), Right: eip8297.MerkelizeWith(branch.Right, sum)}
 }

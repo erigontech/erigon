@@ -217,6 +217,15 @@ func TestRecordRoundTripsLongestLegalExtensions(t *testing.T) {
 	got, err = DecodeRecord(GlobalRootKey(), data)
 	require.NoError(t, err)
 	require.Equal(t, ext, got)
+
+	bucket, err := BucketRootKey(bytes.Repeat([]byte{0x33}, 20))
+	require.NoError(t, err)
+	bucketExt := Record{Form: ExtRoot, SelfExt: eip8297.PathFromBits(make([]byte, 33), 263), Left: hash(1), Right: hash(2)}
+	data, err = EncodeRecord(bucket, &bucketExt)
+	require.NoError(t, err)
+	got, err = DecodeRecord(bucket, data)
+	require.NoError(t, err)
+	require.Equal(t, bucketExt, got)
 }
 
 func TestRecordTombstone(t *testing.T) {
@@ -290,6 +299,7 @@ func TestRecordRejectsNonCanonical(t *testing.T) {
 		{name: "one cell", key: validKey, data: validSingleLeafRow(), want: CellCountError},
 		{name: "extension length", key: validKey, data: append(append([]byte{0x20, 0, 3, 0, 2, 0, 1}, make([]byte, 64)...), 0, 0), want: ExtensionLengthError},
 		{name: "self extension length", key: globalKey, data: selfExt, want: SelfExtensionLengthError},
+		{name: "self extension beyond global key", key: globalKey, data: rootExtensionBody(529), want: SelfExtensionLengthError},
 		{name: "self extension padding", key: globalKey, data: append([]byte{0x10, 0, 4, 0xaf}, make([]byte, 64)...), want: PaddingError},
 		{name: "extension padding", key: validKey, data: extensionPadRow(), want: PaddingError},
 		{name: "suffix padding", key: validKey, data: suffixPadRow(), want: PaddingError},
@@ -315,10 +325,23 @@ func TestRecordRejectsNonCanonical(t *testing.T) {
 	}
 }
 
+func TestRecordRejectsBucketExtensionsAtAndPastTheKeyLength(t *testing.T) {
+	key, err := BucketRootKey(bytes.Repeat([]byte{0x44}, 20))
+	require.NoError(t, err)
+	for _, bitLen := range []int{264, 527} {
+		t.Run(string(rune('a'+bitLen-264)), func(t *testing.T) {
+			require.NotPanics(t, func() {
+				_, err := DecodeRecord(key, rootExtensionBody(bitLen))
+				require.ErrorIs(t, err, errorRule(SelfExtensionLengthError))
+			})
+		})
+	}
+}
+
 var fuzzRecordBodies atomic.Uint64
 
 func FuzzRecordDecodeCanonical(f *testing.F) {
-	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}} {
+	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}, rootExtensionBody(529)} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -328,10 +351,10 @@ func FuzzRecordDecodeCanonical(f *testing.F) {
 
 func TestRecordFuzzSeeds(t *testing.T) {
 	fuzzRecordBodies.Store(0)
-	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}} {
+	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}, rootExtensionBody(529)} {
 		runRecordFuzzBody(seed)
 	}
-	require.Equal(t, uint64(4), fuzzRecordBodies.Load())
+	require.Equal(t, uint64(5), fuzzRecordBodies.Load())
 }
 
 func sixteenCellRecord() Record {
@@ -462,6 +485,12 @@ func compactValueRow() []byte {
 	out = append([]byte(nil), out[:len(out)-6]...)
 	out = append(out, 2, 0, 1)
 	return out
+}
+
+func rootExtensionBody(bitLen int) []byte {
+	packed := make([]byte, (bitLen+7)/8)
+	out := append([]byte{0x10, byte(bitLen >> 8), byte(bitLen)}, packed...)
+	return append(out, make([]byte, 64)...)
 }
 
 func reservedZoneRow() []byte {

@@ -30,12 +30,15 @@ type rowCell struct {
 }
 
 type rowNode struct {
-	path  eip8297.Bitpath
-	key   []byte
-	raw   []byte
-	prev  []byte
-	dirty bool
-	cells [maxCells]rowCell
+	path       eip8297.Bitpath
+	key        []byte
+	raw        []byte
+	prev       []byte
+	dirty      bool
+	tombstone  bool
+	parent     *rowNode
+	parentSlot int
+	cells      [maxCells]rowCell
 }
 
 type treeRoot struct {

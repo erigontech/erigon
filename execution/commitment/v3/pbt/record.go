@@ -433,28 +433,31 @@ func decodeExtRoot(k recordKey, data []byte) (Record, error) {
 	if len(data) < 3 {
 		return Record{}, recordError(LengthError, "root extension is truncated")
 	}
-	bitLen := int16(binary.BigEndian.Uint16(data[1:3]))
+	bitLen := int(binary.BigEndian.Uint16(data[1:3]))
 	if bitLen < 4 {
 		return Record{}, recordError(SelfExtensionLengthError, "root extension bit length must be at least four")
 	}
-	packed := packedLen(bitLen)
+	packed := packedLen(int16(bitLen))
 	if len(data) != 3+packed+64 {
 		return Record{}, recordError(LengthError, "root extension length is not exact")
 	}
-	if !canonicalPadding(data[3:3+packed], bitLen) {
+	if !canonicalPadding(data[3:3+packed], int16(bitLen)) {
 		return Record{}, recordError(PaddingError, "root extension has non-zero padding")
 	}
-	selfExt := eip8297.PathFromBits(data[3:3+packed], bitLen)
+	if bitLen > eip8297.MaxPathBits {
+		return Record{}, recordError(SelfExtensionLengthError, "root extension exceeds the key length")
+	}
+	selfExt := eip8297.PathFromBits(data[3:3+packed], int16(bitLen))
 	maxLen, keyErr := rootExtensionKeyLength(k, &selfExt)
 	if keyErr != nil {
 		return Record{}, keyErr
 	}
-	if int(bitLen) >= maxLen {
+	if bitLen >= maxLen {
 		return Record{}, recordError(SelfExtensionLengthError, "root extension ends at the key length")
 	}
 	var record Record
 	record.Form = ExtRoot
-	record.SelfExt = eip8297.PathFromBits(data[3:3+packed], bitLen)
+	record.SelfExt = eip8297.PathFromBits(data[3:3+packed], int16(bitLen))
 	copy(record.Left[:], data[3+packed:3+packed+32])
 	copy(record.Right[:], data[3+packed+32:])
 	return record, nil
@@ -638,7 +641,7 @@ func validateRowPath(path *eip8297.Bitpath) error {
 
 func rootExtensionKeyLength(k recordKey, path *eip8297.Bitpath) (int, error) {
 	if !k.global {
-		return eip8297.StorageKeyLength * 8, nil
+		return eip8297.StorageKeyLength*8 - int(k.path.BitLen), nil
 	}
 	if path.BitLen < 4 {
 		return 0, recordError(ZoneError, "root extension does not identify a zone")

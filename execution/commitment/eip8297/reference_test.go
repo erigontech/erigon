@@ -312,6 +312,49 @@ func TestEmbedStateRemovalsRunBeforeBatchUpdates(t *testing.T) {
 	require.Equal(t, StateRoot(want), StateRoot(entries))
 }
 
+func TestEmbedStateLastAccountDeletionWins(t *testing.T) {
+	address := referenceAddress(10)
+	entries := EmbedState([][]State{{
+		{Address: address, Nonce: 1},
+		{Address: address, Deleted: true},
+	}})
+	require.Empty(t, entries)
+	require.Equal(t, common.Hash{}, StateRoot(entries))
+}
+
+func TestEmbedStateAccountRewriteKeepsEarlierSlots(t *testing.T) {
+	address := referenceAddress(11)
+	slot := referenceSlot(65)
+	encoded := EncodeStorageValue([]byte{0x42})
+	wantSlot := Entry{Key: TreeKeyStorage(address, slot), Value: encoded[:]}
+	entries := EmbedState([][]State{
+		{{Address: address, Nonce: 1, Slots: map[string][]byte{string(slot): {0x42}}}},
+		{
+			{Address: address, Deleted: true},
+			{Address: address, Nonce: 2},
+		},
+	})
+	found := false
+	for _, entry := range entries {
+		if bytes.Equal(entry.Key, wantSlot.Key) {
+			found = true
+			require.Equal(t, wantSlot.Value, entry.Value)
+		}
+	}
+	require.True(t, found)
+}
+
+func TestReferenceDelegationHelpersUseSpecBytes(t *testing.T) {
+	code := append([]byte{0xEF, 0x01, 0x00}, bytes.Repeat([]byte{0xAB}, 20)...)
+	require.True(t, IsDelegation(code))
+	require.False(t, IsDelegation(code[:22]))
+	got := EncodeDelegation(code)
+	want := [ValueLength]byte{}
+	copy(want[:], []byte{0xEF, 0x01, 0x00})
+	copy(want[3:], bytes.Repeat([]byte{0xAB}, 20))
+	require.Equal(t, want, got)
+}
+
 func treeHash(node Node) common.Hash {
 	return (&Tree{Root: node}).RootHash()
 }

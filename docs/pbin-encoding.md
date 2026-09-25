@@ -14,7 +14,7 @@ Everything below was produced by running the engine. Hex is real.
 
 ## 1. Tree keys
 
-A tree key is `zone(1) || treePosition || subIndex(1)`, assembled by `pbinTreeKey`
+A tree key is `zone(1) || treePosition || subIndex(1)`, assembled by `TreeKey`
 (`execution/commitment/eip8297/keys.go`). Three zones exist, each admitting exactly one key length
 (`ZoneKeyLength`, `execution/commitment/eip8297/keys.go`):
 
@@ -35,7 +35,7 @@ naturally-sized values — both are exactly 64 bytes, with the index widened to 
 
 The trailing `subIndex` byte is `chunkID % 256` for code and `slot & 0xFF` for storage.
 
-Zones `0x02..0xFE` have no length and `pbinTreeKey` panics on them. The fixed length per zone *is*
+Zones `0x02..0xFE` have no length and `TreeKey` panics on them. The fixed length per zone *is*
 the prefix-free invariant, and it is re-asserted at hash time from the key's own first byte
 (`leafCellHash`, `pbin_hash.go`) so a malformed key cannot reach the hasher.
 

@@ -206,6 +206,8 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 		prefix := path.Slice(row.path.BitLen+4, result.Split)
 		setBranch(row, slot, branchCell(prefix, result.Left, result.Right))
 		row.cell(slot).child = child
+		child.parent = row
+		child.parentSlot = slot
 		t.registerRow(child)
 		return nil
 	case BranchCell:
@@ -247,8 +249,274 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 	prefix := full.Slice(row.path.BitLen+4, result.Split)
 	setBranch(row, slot, branchCell(prefix, result.Left, result.Right))
 	row.cell(slot).child = child
+	child.parent = row
+	child.parentSlot = slot
 	t.registerRow(child)
 	return nil
+}
+
+func (t *Trie) remove(key []byte) error {
+	path, err := keyPath(key)
+	if err != nil {
+		return err
+	}
+	root, err := t.loadRoot()
+	if err != nil {
+		return err
+	}
+	switch root.form {
+	case RowRoot:
+		if root.row == nil {
+			return nil
+		}
+		if found, err := t.removeFromRow(root.row, path, key); err != nil {
+			return err
+		} else if !found {
+			return nil
+		}
+		return nil
+	case LeafRoot:
+		if !bytes.Equal(root.leaf.Key, key) {
+			return nil
+		}
+		root.form = RowRoot
+		root.leaf = Cell{}
+		return nil
+	case ExtRoot:
+		if firstDifference(&root.self, &path) < root.self.BitLen {
+			return nil
+		}
+		row, err := t.extTopRow(root)
+		if err != nil {
+			return err
+		}
+		found, err := t.removeFromRow(row, path, key)
+		if err != nil || !found {
+			return err
+		}
+		return nil
+	default:
+		return fmt.Errorf("unknown root form %d", root.form)
+	}
+}
+
+func (t *Trie) removeFromRow(row *rowNode, path eip8297.Bitpath, key []byte) (bool, error) {
+	if path.BitLen <= row.path.BitLen || eip8297.CommonPrefixBitsAt(&path, 0, &row.path) != row.path.BitLen {
+		return false, nil
+	}
+	slot := int(keyBit(row.path.BitLen, key))
+	cell := row.cell(slot)
+	switch cell.Kind {
+	case EmptyCell:
+		return false, nil
+	case LeafCell:
+		if !bytes.Equal(cell.Key, key) {
+			return false, nil
+		}
+		row.cells[slot] = rowCell{}
+		row.markDirty()
+		t.registerRow(row)
+		return true, nil
+	case BranchCell:
+		branchPath := branchPath(row, slot, cell)
+		if firstDifference(&branchPath, &path) < branchPath.BitLen {
+			return false, nil
+		}
+		child, err := t.loadBranchChild(row, slot)
+		if err != nil {
+			return false, err
+		}
+		found, err := t.removeFromRow(child, path, key)
+		if found {
+			row.markDirty()
+			t.registerRow(row)
+		}
+		return found, err
+	default:
+		return false, errInsertKey
+	}
+}
+
+func (t *Trie) normalize() error {
+	root, err := t.loadRoot()
+	if err != nil {
+		return err
+	}
+	switch root.form {
+	case RowRoot:
+		if root.row == nil {
+			return nil
+		}
+		return t.normalizeRootRow(root, root.row)
+	case ExtRoot:
+		row, err := t.extTopRow(root)
+		if err != nil {
+			return err
+		}
+		return t.normalizeRootRow(root, row)
+	default:
+		return nil
+	}
+}
+
+func (t *Trie) normalizeRootRow(root *treeRoot, row *rowNode) error {
+	if err := t.normalizeChildren(row); err != nil {
+		return err
+	}
+	slots := row.occupied()
+	if len(slots) >= 2 {
+		if root.form == ExtRoot {
+			return t.refreshRootFromRow(root, row)
+		}
+		return nil
+	}
+	t.rootDirty = true
+	if row.path.BitLen == 0 {
+		delete(t.dirtyRows, string(GlobalRootKey()))
+	} else {
+		row.tombstone = true
+		row.markDirty()
+		t.registerRow(row)
+	}
+	if len(slots) == 0 {
+		root.form = RowRoot
+		root.row = nil
+		root.topRow = nil
+		root.self = eip8297.Bitpath{}
+		root.left, root.right = common.Hash{}, common.Hash{}
+		return nil
+	}
+	cell := row.cell(slots[0])
+	if cell.Kind == LeafCell {
+		root.form = LeafRoot
+		root.leaf = cell.Cell
+	} else {
+		full := branchPath(row, slots[0], cell)
+		root.form = ExtRoot
+		root.self = full
+		root.left, root.right = cell.Left, cell.Right
+	}
+	root.row = nil
+	root.topRow = nil
+	return nil
+}
+
+func (t *Trie) normalizeChildren(row *rowNode) error {
+	for slot := range row.cells {
+		cell := row.cell(slot)
+		if cell.Kind != BranchCell || cell.child == nil {
+			continue
+		}
+		if err := t.normalizeRow(cell.child); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *Trie) normalizeRow(row *rowNode) error {
+	if err := t.normalizeChildren(row); err != nil {
+		return err
+	}
+	if !row.dirty {
+		return nil
+	}
+	slots := row.occupied()
+	if len(slots) >= 2 {
+		if row.parent == nil {
+			return nil
+		}
+		return t.refreshBranch(row.parent, row.parentSlot, row)
+	}
+	row.tombstone = true
+	row.markDirty()
+	t.registerRow(row)
+	parent := row.parent
+	if parent == nil {
+		return nil
+	}
+	if len(slots) == 0 {
+		parent.cells[row.parentSlot] = rowCell{}
+	} else {
+		cell := *row.cell(slots[0])
+		cell.child = nil
+		if cell.Kind == BranchCell {
+			full := branchPath(row, slots[0], row.cell(slots[0]))
+			start := parent.path.BitLen + 4
+			if full.BitLen < start {
+				return errInsertKey
+			}
+			cell.Prefix = full.Slice(start, full.BitLen)
+		}
+		parent.cells[row.parentSlot] = cell
+	}
+	parent.markDirty()
+	t.registerRow(parent)
+	return nil
+}
+
+func (t *Trie) dropPrefix(prefix []byte) error {
+	if len(prefix) != 33 || prefix[0] != eip8297.StorageZone {
+		return errInsertKey
+	}
+	keys, err := t.allKeys()
+	if err != nil {
+		return err
+	}
+	for _, key := range keys {
+		if bytes.HasPrefix(key, prefix) {
+			if err := t.remove(key); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func (t *Trie) allKeys() ([][]byte, error) {
+	root, err := t.loadRoot()
+	if err != nil {
+		return nil, err
+	}
+	var keys [][]byte
+	var visit func(*rowNode) error
+	visit = func(row *rowNode) error {
+		for slot := range row.cells {
+			cell := row.cell(slot)
+			switch cell.Kind {
+			case LeafCell:
+				keys = append(keys, bytes.Clone(cell.Key))
+			case BranchCell:
+				child, err := t.loadBranchChild(row, slot)
+				if err != nil {
+					return err
+				}
+				if err := visit(child); err != nil {
+					return err
+				}
+			}
+		}
+		return nil
+	}
+	switch root.form {
+	case LeafRoot:
+		keys = append(keys, bytes.Clone(root.leaf.Key))
+	case ExtRoot:
+		row, err := t.extTopRow(root)
+		if err != nil {
+			return nil, err
+		}
+		if err := visit(row); err != nil {
+			return nil, err
+		}
+	case RowRoot:
+		if root.row != nil {
+			if err := visit(root.row); err != nil {
+				return nil, err
+			}
+		}
+	}
+	return keys, nil
 }
 
 func (t *Trie) refreshBranch(parent *rowNode, slot int, child *rowNode) error {

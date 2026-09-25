@@ -170,40 +170,55 @@ func EmbedState(batches [][]State) []Entry {
 		}
 	}
 	for _, batch := range batches {
-		for _, state := range batch {
-			if state.Deleted {
-				address := slices.Clone(state.Address)
+		lastAccounts := make(map[string]int)
+		lastSlots := make(map[string]map[string][]byte)
+		lastSlotWrites := make(map[string]int)
+		for index, state := range batch {
+			address := string(state.Address)
+			if state.Deleted || state.Code != nil || state.Nonce != 0 || !state.Balance.IsZero() {
+				lastAccounts[address] = index
+			}
+			if lastSlots[address] == nil {
+				lastSlots[address] = make(map[string][]byte)
+			}
+			for slot, value := range state.Slots {
+				lastSlots[address][slot] = slices.Clone(value)
+				lastSlotWrites[address] = index
+			}
+		}
+		for address, index := range lastAccounts {
+			if batch[index].Deleted {
 				for key, owner := range owners {
-					if owner == string(address) {
+					if owner == address {
 						values[key] = nil
 					}
 				}
 			}
 		}
-		for _, state := range batch {
-			address := slices.Clone(state.Address)
-			if state.Deleted {
-				continue
-			}
-			if state.Code != nil || state.Nonce != 0 || !state.Balance.IsZero() {
+		for index, state := range batch {
+			address := string(state.Address)
+			addressBytes := []byte(address)
+			if lastAccounts[address] == index && !state.Deleted {
 				basic, err := EncodeBasicData(state.Nonce, &state.Balance, uint64(len(state.Code)))
 				if err != nil {
 					panic(err)
 				}
-				set(TreeKeyAccount(address, BasicDataLeafKey), basic, address)
+				set(TreeKeyAccount(addressBytes, BasicDataLeafKey), basic, addressBytes)
 				if IsDelegation(state.Code) {
-					set(TreeKeyAccount(address, DelegationLeafKey), EncodeDelegation(state.Code), address)
-					set(TreeKeyAccount(address, CodeHashLeafKey), [ValueLength]byte{}, address)
+					set(TreeKeyAccount(addressBytes, DelegationLeafKey), EncodeDelegation(state.Code), addressBytes)
+					set(TreeKeyAccount(addressBytes, CodeHashLeafKey), [ValueLength]byte{}, addressBytes)
 				} else {
-					set(TreeKeyAccount(address, CodeHashLeafKey), CodeHashValue(keccak.Sum256(state.Code)), address)
-					set(TreeKeyAccount(address, DelegationLeafKey), [ValueLength]byte{}, address)
+					set(TreeKeyAccount(addressBytes, CodeHashLeafKey), CodeHashValue(keccak.Sum256(state.Code)), addressBytes)
+					set(TreeKeyAccount(addressBytes, DelegationLeafKey), [ValueLength]byte{}, addressBytes)
 					for index, chunk := range ChunkifyCode(state.Code) {
 						set(TreeKeyCodeChunk(keccak.Sum256(state.Code), index), chunk, nil)
 					}
 				}
 			}
-			for slot, value := range state.Slots {
-				set(TreeKeyStorage(address, []byte(slot)), EncodeStorageValue(value), address)
+			if lastSlotWrites[address] == index {
+				for slot, value := range lastSlots[address] {
+					set(TreeKeyStorage(addressBytes, []byte(slot)), EncodeStorageValue(value), addressBytes)
+				}
 			}
 		}
 	}
@@ -256,7 +271,7 @@ func merkelize(node Node, sum HashFn) common.Hash {
 		left := merkelize(current.Left, sum)
 		right := merkelize(current.Right, sum)
 		preimage = append(preimage, BranchTag)
-		preimage = append(preimage, encodeReferenceBitPrefix(current.Prefix)...)
+		preimage = append(preimage, EncodeBitPrefix(current.Prefix)...)
 		preimage = append(preimage, left[:]...)
 		preimage = append(preimage, right[:]...)
 	}
@@ -266,18 +281,6 @@ func merkelize(node Node, sum HashFn) common.Hash {
 	h := sha3.NewLegacyKeccak256()
 	_, _ = h.Write(preimage)
 	return common.BytesToHash(h.Sum(nil))
-}
-
-func encodeReferenceBitPrefix(prefix []byte) []byte {
-	if len(prefix) >= 1<<16 {
-		panic(fmt.Sprintf("eip8297: prefix of %d bits exceeds the encodable count", len(prefix)))
-	}
-	out := make([]byte, 2+(len(prefix)+7)/8)
-	binary.BigEndian.PutUint16(out, uint16(len(prefix)))
-	for i, bit := range prefix {
-		out[2+i/8] |= bit << (7 - i%8)
-	}
-	return out
 }
 
 func MerkelizeWith(node Node, sum HashFn) common.Hash {

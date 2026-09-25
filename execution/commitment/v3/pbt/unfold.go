@@ -104,5 +104,7 @@ func (t *Trie) loadBranchChild(parent *rowNode, slot int) (*rowNode, error) {
 		return nil, err
 	}
 	cell.child = child
+	child.parent = parent
+	child.parentSlot = slot
 	return child, nil
 }
