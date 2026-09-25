@@ -8,10 +8,13 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/preverified"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/version"
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
@@ -42,49 +45,112 @@ type Reset struct {
 	}
 }
 
-// stateKVName matches a domain data file, capturing the domain and its step range.
-var stateKVName = regexp.MustCompile(`^v[0-9]+\.[0-9]+-(accounts|storage|commitment)\.([0-9]+-[0-9]+)\.kv$`)
+// stateKVName matches a domain data file, capturing its version, domain and step range.
+var stateKVName = regexp.MustCompile(`^(v[0-9]+\.[0-9]+)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
+
+// domainBuild is what a step range will hold for one domain once reset is done and the downloader
+// has fetched what the manifest describes.
+type domainBuild struct {
+	fromManifest  bool
+	retainedLocal bool
+	ver           version.Version
+	fromStep      uint64
+	toStep        uint64
+}
+
+func (b *domainBuild) present() bool { return b.fromManifest || b.retainedLocal }
+
+// referenced reports whether a commitment file of this version and span stores shortened keys,
+// which are the byte offsets that a differing build invalidates. Steps are passed with a step size
+// of one, since the file name already counts in steps.
+func (b *domainBuild) referenced() bool {
+	return state.CommitmentBranchReferenced(b.ver, 1, b.fromStep, b.toStep)
+}
 
 // checkStateBuilds reports step ranges whose commitment file would end up from a different build
 // than its accounts/storage files.
 //
 // Commitment values address accounts and storage records by byte offset into the .kv of the same
-// step range, so the two only agree when they come from the same build. Reset normalises files the
-// preverified set knows about and leaves the rest untouched, so a range holding one of each ends up
-// with offsets pointing into bytes that moved.
+// step range, so the two only agree when they come from the same build. Reset normalises whatever
+// the manifest describes and leaves the rest untouched, so a range holding one of each ends up with
+// offsets pointing into bytes that moved.
 func (reset *Reset) checkStateBuilds() error {
-	entries, err := os.ReadDir(reset.Dirs.SnapDomain)
-	if err != nil {
-		if errors.Is(err, fs.ErrNotExist) {
+	// Everything the manifest does not describe is about to be removed, so no local build survives
+	// to be paired with a canonical one.
+	if reset.RemoveUnknown {
+		return nil
+	}
+
+	builds := map[string]map[string]*domainBuild{}
+	record := func(fileName string) *domainBuild {
+		m := stateKVName.FindStringSubmatch(fileName)
+		if m == nil {
 			return nil
 		}
+		ver, err := version.ParseVersion(m[1])
+		if err != nil {
+			return nil
+		}
+		fromStep, err := strconv.ParseUint(m[3], 10, 64)
+		if err != nil {
+			return nil
+		}
+		toStep, err := strconv.ParseUint(m[4], 10, 64)
+		if err != nil {
+			return nil
+		}
+		stepRange, domain := m[3]+"-"+m[4], m[2]
+		if builds[stepRange] == nil {
+			builds[stepRange] = map[string]*domainBuild{}
+		}
+		b := builds[stepRange][domain]
+		if b == nil {
+			b = &domainBuild{ver: ver, fromStep: fromStep, toStep: toStep}
+			builds[stepRange][domain] = b
+		}
+		return b
+	}
+
+	// A file the manifest describes ends up canonical whether or not it is on disk now: reset drops
+	// the lock file, and the next sync fetches or repairs it.
+	for _, item := range reset.PreverifiedSnapshots {
+		name, ok := strings.CutPrefix(item.Name, "domain/")
+		if !ok {
+			continue
+		}
+		if b := record(name); b != nil {
+			b.fromManifest = true
+		}
+	}
+
+	entries, err := os.ReadDir(reset.Dirs.SnapDomain)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
-	canonical := map[string]map[string]bool{}
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
-		m := stateKVName.FindStringSubmatch(entry.Name())
-		if m == nil {
+		if _, known := reset.PreverifiedSnapshots.Get("domain/" + entry.Name()); known {
 			continue
 		}
-		domain, stepRange := m[1], m[2]
-		_, known := reset.PreverifiedSnapshots.Get("domain/" + entry.Name())
-		if canonical[stepRange] == nil {
-			canonical[stepRange] = map[string]bool{}
+		if b := record(entry.Name()); b != nil {
+			b.retainedLocal = true
 		}
-		canonical[stepRange][domain] = known
 	}
 
 	var mixed []string
-	for stepRange, domains := range canonical {
-		commitment, ok := domains["commitment"]
-		if !ok {
+	for stepRange, domains := range builds {
+		commitment := domains["commitment"]
+		if commitment == nil || !commitment.present() || !commitment.referenced() {
 			continue
 		}
 		for _, domain := range []string{"accounts", "storage"} {
-			if state, ok := domains[domain]; ok && state != commitment {
+			st := domains[domain]
+			if st == nil || !st.present() {
+				continue
+			}
+			if st.retainedLocal != commitment.retainedLocal {
 				mixed = append(mixed, stepRange)
 				break
 			}

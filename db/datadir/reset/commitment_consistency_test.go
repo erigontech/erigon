@@ -119,3 +119,70 @@ func TestResetRefusalRemovesNothing(t *testing.T) {
 		}
 	})
 }
+
+// The default --local=true removes everything the manifest does not describe, so nothing local
+// survives to be mixed with a canonical file.
+func TestResetSkipsCheckWhenUnknownFilesAreRemoved(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{
+			{Name: "snapshots/domain/v1.0-accounts.0-256.kv"},
+			{Name: "snapshots/domain/v1.0-commitment.0-256.kv"},
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = true, true
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.0-256.kv"}}
+		r.PreverifiedSnapshots.Sort()
+		qt.Assert(t, qt.IsNil(r.Run()))
+	})
+}
+
+// Reset drops the lock file and the next sync fetches whatever the manifest describes, so a file
+// absent from disk today can still be canonical tomorrow.
+func TestResetCountsPreverifiedFilesNotYetOnDisk(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-accounts.0-256.kv"}}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		// Only the commitment file is described, so it arrives canonical beside a local accounts.
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-commitment.0-256.kv"}}
+		r.PreverifiedSnapshots.Sort()
+		err := r.Run()
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+	})
+}
+
+// From v2.2 a commitment file stores plain keys, so its bytes do not depend on where accounts and
+// storage records happen to sit.
+func TestResetAllowsMixedBuildsForPlainCommitment(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{
+			{Name: "snapshots/domain/v2.2-accounts.0-256.kv"},
+			{Name: "snapshots/domain/v2.2-commitment.0-256.kv"},
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v2.2-accounts.0-256.kv"}}
+		r.PreverifiedSnapshots.Sort()
+		qt.Assert(t, qt.IsNil(r.Run()))
+	})
+}
+
+// Below the referencing threshold a commitment file holds plain keys whatever its version.
+func TestResetAllowsMixedBuildsBelowReferencingThreshold(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{
+			{Name: "snapshots/domain/v1.0-accounts.0-1.kv"},
+			{Name: "snapshots/domain/v1.0-commitment.0-1.kv"},
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.0-1.kv"}}
+		r.PreverifiedSnapshots.Sort()
+		qt.Assert(t, qt.IsNil(r.Run()))
+	})
+}
