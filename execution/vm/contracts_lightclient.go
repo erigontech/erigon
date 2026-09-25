@@ -1,18 +1,25 @@
 package vm
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math/big"
 	"net/url"
 	"strings"
 
+	"github.com/erigontech/erigon/bsc/parlia/seal"
 	"github.com/erigontech/erigon/cl/utils/bls"
+	"github.com/erigontech/erigon/common/crypto"
 	params2 "github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/lightclient/iavl"
 	v1 "github.com/erigontech/erigon/execution/vm/lightclient/v1"
 	v2 "github.com/erigontech/erigon/execution/vm/lightclient/v2"
 	"github.com/tendermint/tendermint/crypto/merkle"
+	tmsecp256k1 "github.com/tendermint/tendermint/crypto/secp256k1"
 	cmn "github.com/tendermint/tendermint/libs/common"
 )
 
@@ -513,4 +520,107 @@ func (c *cometBFTLightBlockValidateHertz) Name() string { return "CometBFTLightB
 
 func (c *cometBFTLightBlockValidateHertz) Run(input []byte) (result []byte, err error) {
 	return c.run(input, true)
+}
+
+type verifyDoubleSignEvidence struct{}
+
+func (c *verifyDoubleSignEvidence) RequiredGas(input []byte) uint64 {
+	return params2.DoubleSignEvidenceVerifyGas
+}
+
+func (c *verifyDoubleSignEvidence) Name() string { return "VerifyDoubleSignEvidence" }
+
+type doubleSignEvidence struct {
+	ChainID      []byte
+	HeaderBytes1 []byte
+	HeaderBytes2 []byte
+}
+
+var errInvalidEvidence = errors.New("invalid double sign evidence")
+
+// Run takes an RLP-encoded doubleSignEvidence and returns the signer address (20 bytes)
+// followed by the block number (32 bytes).
+func (c *verifyDoubleSignEvidence) Run(input []byte) ([]byte, error) {
+	var evidence doubleSignEvidence
+	if err := rlp.DecodeBytes(input, &evidence); err != nil {
+		return nil, ErrExecutionReverted
+	}
+	// The reference decodes ChainID as an unbounded big integer, which rejects leading zeros.
+	if len(evidence.ChainID) > 0 && evidence.ChainID[0] == 0 {
+		return nil, ErrExecutionReverted
+	}
+	var header1, header2 types.Header
+	if err := rlp.DecodeBytes(evidence.HeaderBytes1, &header1); err != nil {
+		return nil, ErrExecutionReverted
+	}
+	if err := rlp.DecodeBytes(evidence.HeaderBytes2, &header2); err != nil {
+		return nil, ErrExecutionReverted
+	}
+
+	if header1.Number != header2.Number || header1.ParentHash != header2.ParentHash {
+		return nil, errInvalidEvidence
+	}
+	if len(header1.Extra) < crypto.SignatureLength || len(header2.Extra) < crypto.SignatureLength {
+		return nil, errInvalidEvidence
+	}
+	sig1 := header1.Extra[len(header1.Extra)-crypto.SignatureLength:]
+	sig2 := header2.Extra[len(header2.Extra)-crypto.SignatureLength:]
+	if bytes.Equal(sig1, sig2) {
+		return nil, errInvalidEvidence
+	}
+
+	chainID := new(big.Int).SetBytes(evidence.ChainID)
+	sealHash1, err := seal.Hash(&header1, chainID)
+	if err != nil {
+		return nil, err
+	}
+	sealHash2, err := seal.Hash(&header2, chainID)
+	if err != nil {
+		return nil, err
+	}
+	if sealHash1 == sealHash2 {
+		return nil, errInvalidEvidence
+	}
+	pubkey1, err := crypto.Ecrecover(sealHash1[:], sig1)
+	if err != nil {
+		return nil, ErrExecutionReverted
+	}
+	pubkey2, err := crypto.Ecrecover(sealHash2[:], sig2)
+	if err != nil {
+		return nil, ErrExecutionReverted
+	}
+	if !bytes.Equal(pubkey1, pubkey2) {
+		return nil, errInvalidEvidence
+	}
+
+	number := header1.Number.Bytes32()
+	return append(crypto.Keccak256(pubkey1[1:])[12:], number[:]...), nil
+}
+
+type secp256k1SignatureRecover struct{}
+
+func (c *secp256k1SignatureRecover) RequiredGas(input []byte) uint64 {
+	return params2.EcrecoverGas
+}
+
+func (c *secp256k1SignatureRecover) Name() string { return "Secp256k1SignatureRecover" }
+
+const (
+	secp256k1PubKeyLength    = 33
+	secp256k1SignatureLength = 64
+	secp256k1MsgHashLength   = 32
+)
+
+// Run takes a compressed public key (33 bytes), an R || S signature (64 bytes) and a
+// message hash (32 bytes), and returns the key's Tendermint address.
+func (c *secp256k1SignatureRecover) Run(input []byte) ([]byte, error) {
+	if len(input) != secp256k1PubKeyLength+secp256k1SignatureLength+secp256k1MsgHashLength {
+		return nil, errors.New("invalid input")
+	}
+	pubKey := tmsecp256k1.PubKeySecp256k1(input[:secp256k1PubKeyLength])
+	sig := input[secp256k1PubKeyLength : secp256k1PubKeyLength+secp256k1SignatureLength]
+	if !pubKey.VerifyBytesWithMsgHash(input[secp256k1PubKeyLength+secp256k1SignatureLength:], sig) {
+		return nil, errors.New("invalid signature")
+	}
+	return pubKey.Address().Bytes(), nil
 }
