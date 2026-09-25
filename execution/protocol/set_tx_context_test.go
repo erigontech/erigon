@@ -18,25 +18,25 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type baselineEngine struct {
+type overrideEngine struct {
 	rules.EngineReader
 	blockNum  uint64
 	txIndex   int
 	txHash    common.Hash
-	baselines []rules.StorageBaseline
+	overrides []rules.StorageOverride
 }
 
-func (e baselineEngine) StorageBaselines(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageBaseline {
+func (e overrideEngine) StorageOverrides(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageOverride {
 	if blockNum != e.blockNum || txIndex != e.txIndex || txHash != e.txHash {
 		return nil
 	}
-	return e.baselines
+	return e.overrides
 }
 
-// TestSetTxContextInstallsStorageBaselines covers the replay paths: they set the
+// TestSetTxContextInstallsStorageOverrides covers the replay paths: they set the
 // tx context and then call ApplyMessage, so the engine's overrides have to ride
 // along with the tx context or they are silently skipped.
-func TestSetTxContextInstallsStorageBaselines(t *testing.T) {
+func TestSetTxContextInstallsStorageOverrides(t *testing.T) {
 	t.Parallel()
 
 	contract := accounts.InternAddress(common.HexToAddress("0x89791428868131eb109e42340ad01eb8987526b2"))
@@ -44,11 +44,11 @@ func TestSetTxContextInstallsStorageBaselines(t *testing.T) {
 	value := uint256.MustFromHex("0xf6a7831804efd2cd0a")
 	txHash := common.HexToHash("0x7ce9a3cf77108fcc85c1e84e88e363e3335eca515dfcf2feb2011729878b13a7")
 
-	engine := baselineEngine{
+	engine := overrideEngine{
 		blockNum:  35547779,
 		txIndex:   196,
 		txHash:    txHash,
-		baselines: []rules.StorageBaseline{{Address: contract, Key: key, Value: *value}},
+		overrides: []rules.StorageOverride{{Address: contract, Key: key, Value: *value}},
 	}
 
 	dirs := datadir.New(t.TempDir())
@@ -72,9 +72,13 @@ func TestSetTxContextInstallsStorageBaselines(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, committed.IsZero())
 
-	// An engine without baselines is left alone.
-	protocol.SetTxContext(ibs, struct{ rules.EngineReader }{}, 35547779, 196, txHash)
-	committed, err = ibs.GetCommittedState(contract, key)
-	require.NoError(t, err)
-	require.True(t, committed.IsZero())
+	for name, noOverrides := range map[string]rules.EngineReader{
+		"engine without overrides": overrideEngine{},
+		"nil engine":               nil,
+	} {
+		protocol.SetTxContext(ibs, noOverrides, 35547779, 196, txHash)
+		committed, err = ibs.GetCommittedState(contract, key)
+		require.NoError(t, err, name)
+		require.True(t, committed.IsZero(), name)
+	}
 }

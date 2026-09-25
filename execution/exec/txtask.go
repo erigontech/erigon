@@ -62,7 +62,7 @@ type Task interface {
 	GetBlockStateCache() *state.BlockStateCache
 	VersionedReads(ibs *state.IntraBlockState) state.ReadSet
 	VersionedWrites(ibs *state.IntraBlockState) *state.WriteSet
-	Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
+	Reset(evm *vm.EVM, engine rules.EngineReader, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error
 	ResetGasPool(*protocol.GasPool)
 
 	Tx() types.Transaction
@@ -465,10 +465,10 @@ func (t *TxTask) IsHistoric() bool {
 	return t.HistoryExecution
 }
 
-func (t *TxTask) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
+func (t *TxTask) Reset(evm *vm.EVM, engine rules.EngineReader, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
 	t.BalanceIncreaseSet = nil
 	ibs.Reset()
-	ibs.SetTxContext(t.BlockNumber(), t.TxIndex)
+	protocol.SetTxContext(ibs, engine, t.BlockNumber(), t.TxIndex, t.TxHash())
 
 	if t.TxIndex != -1 && !t.IsBlockEnd() {
 		var vmCfg vm.Config
@@ -556,8 +556,6 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
-		protocol.ApplyStorageBaselines(ibs, engine, txTask.BlockNumber(), txTask.TxIndex, txTask.TxHash())
-
 		if txTask.isSystemTx {
 			result = *txTask.executeSystemTx(engine, evm, ibs)
 			break

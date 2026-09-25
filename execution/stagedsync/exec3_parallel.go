@@ -2292,8 +2292,8 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	return result
 }
 
-func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
-	if err := ev.execTask.Reset(evm, ibs, callTracer); err != nil {
+func (ev *taskVersion) Reset(evm *vm.EVM, engine rules.EngineReader, ibs *state.IntraBlockState, callTracer *calltracer.CallTracer) error {
+	if err := ev.execTask.Reset(evm, engine, ibs, callTracer); err != nil {
 		return err
 	}
 	ibs.SetVersionMap(ev.versionMap)

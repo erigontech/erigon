@@ -1070,6 +1070,14 @@ func (e *remoteRulesEngine) Initialize(config *chain.Config, chain rules.ChainHe
 	return e.engine.Initialize(config, chain, header, state, syscall, logger, tracer)
 }
 
+func (e *remoteRulesEngine) StorageOverrides(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageOverride {
+	if err := e.validateEngineReady(); err != nil {
+		panic(err)
+	}
+
+	return e.engine.StorageOverrides(blockNum, txIndex, txHash)
+}
+
 func (e *remoteRulesEngine) GetTransferFunc() evmtypes.TransferFunc {
 	if err := e.validateEngineReady(); err != nil {
 		panic(err)

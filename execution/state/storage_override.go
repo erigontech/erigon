@@ -6,34 +6,34 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type storageBaselineKey struct {
+type storageOverrideKey struct {
 	addr accounts.Address
 	key  accounts.StorageKey
 }
 
-// SetStorageBaseline overrides the committed value of one storage slot for the
+// SetStorageOverride overrides the committed value of one storage slot for the
 // current transaction, so a replay can reproduce storage a canonical chain
 // committed through a cache bug in the client that sealed it. The transaction
-// reads the baseline, prices SSTORE against it and skips writes equal to it;
+// reads the override, prices SSTORE against it and skips writes equal to it;
 // its own writes shadow it. Cleared at the transaction boundary: SetTxContext,
 // FinalizeTx and Reset.
-func (sdb *IntraBlockState) SetStorageBaseline(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
-	if sdb.storageBaselines == nil {
-		sdb.storageBaselines = map[storageBaselineKey]uint256.Int{}
+func (sdb *IntraBlockState) SetStorageOverride(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
+	if sdb.storageOverrides == nil {
+		sdb.storageOverrides = map[storageOverrideKey]uint256.Int{}
 	}
-	sdb.storageBaselines[storageBaselineKey{addr, key}] = value
+	sdb.storageOverrides[storageOverrideKey{addr, key}] = value
 }
 
-func (sdb *IntraBlockState) storageBaseline(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
-	if len(sdb.storageBaselines) == 0 {
+func (sdb *IntraBlockState) storageOverride(addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	if len(sdb.storageOverrides) == 0 {
 		return uint256.Int{}, false
 	}
-	value, ok := sdb.storageBaselines[storageBaselineKey{addr, key}]
+	value, ok := sdb.storageOverrides[storageOverrideKey{addr, key}]
 	return value, ok
 }
 
 // wroteStorage reports whether the current transaction has written the slot, in
-// which case a baseline must not shadow that write.
+// which case an override must not shadow that write.
 func (sdb *IntraBlockState) wroteStorage(addr accounts.Address, key accounts.StorageKey) bool {
 	if sdb.versionMap != nil {
 		if _, ok := sdb.versionedWrites.GetStorage(addr, key); ok {

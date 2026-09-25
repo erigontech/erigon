@@ -161,8 +161,8 @@ type IntraBlockState struct {
 	accessList accessList
 
 	// Engine-supplied committed values for individual storage slots, valid for
-	// the current transaction only. See SetStorageBaseline.
-	storageBaselines map[storageBaselineKey]uint256.Int
+	// the current transaction only. See SetStorageOverride.
+	storageOverrides map[storageOverrideKey]uint256.Int
 
 	// Transient storage
 	transientStorage transientStorage
@@ -400,7 +400,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.clearJournalAndRefund()
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
-	sdb.storageBaselines = nil
+	sdb.storageOverrides = nil
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -960,8 +960,8 @@ func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	versionedValue, source, _, err := readCommittedState(sdb, addr, key)
 	if err == nil {
-		if baseline, ok := sdb.storageBaseline(addr, key); ok {
-			versionedValue = baseline
+		if override, ok := sdb.storageOverride(addr, key); ok {
+			versionedValue = override
 		}
 	}
 
@@ -2609,7 +2609,7 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
-	sdb.storageBaselines = nil
+	sdb.storageOverrides = nil
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			if _, err := sdb.getStateObject(addr, true); err != nil {
@@ -2863,7 +2863,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	sdb.txIndex = ti
 	sdb.blockNum = bn
 	sdb.sdProbeEpoch++
-	sdb.storageBaselines = nil
+	sdb.storageOverrides = nil
 }
 
 // no not lock

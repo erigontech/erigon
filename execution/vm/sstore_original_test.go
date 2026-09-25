@@ -56,11 +56,11 @@ func TestSStoreOriginalValueSource(t *testing.T) {
 			wantUsed: sloadAddSstoreOverhead,
 		},
 		{
-			// An engine-supplied baseline makes the stale value the transaction's
+			// An engine-supplied override makes the stale value the transaction's
 			// committed original, which is how both reference clients price it.
-			name: "stale value installed as the committed baseline",
+			name: "stale value installed as the committed override",
 			setup: func(t *testing.T, s *state.IntraBlockState) {
-				s.SetStorageBaseline(address, accounts.ZeroKey, *stale)
+				s.SetStorageOverride(address, accounts.ZeroKey, *stale)
 			},
 			wantUsed: sloadAddSstoreOverhead + params.SstoreWriteExistingEIP2929,
 		},

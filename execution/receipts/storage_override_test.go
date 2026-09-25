@@ -36,24 +36,24 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type baselineEngine struct {
+type overrideEngine struct {
 	rules.Engine
 	blockNum  uint64
 	txIndex   int
 	txHash    common.Hash
-	baselines []rules.StorageBaseline
+	overrides []rules.StorageOverride
 }
 
-func (e baselineEngine) StorageBaselines(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageBaseline {
+func (e overrideEngine) StorageOverrides(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageOverride {
 	if blockNum != e.blockNum || txIndex != e.txIndex || txHash != e.txHash {
 		return nil
 	}
-	return e.baselines
+	return e.overrides
 }
 
 // A regenerated receipt must reproduce a patched transaction's canonical gas,
 // and the transaction after it must see the state the patched one left behind.
-func TestDeriveBlockReceiptsAppliesStorageBaselines(t *testing.T) {
+func TestDeriveBlockReceiptsAppliesStorageOverrides(t *testing.T) {
 	t.Parallel()
 
 	// slot[0] += 1: PUSH1 0, SLOAD, PUSH1 1, ADD, PUSH1 0, SSTORE.
@@ -72,12 +72,12 @@ func TestDeriveBlockReceiptsAppliesStorageBaselines(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	engine := baselineEngine{
+	engine := overrideEngine{
 		Engine:    ethash.NewFaker(),
 		blockNum:  1,
 		txIndex:   0,
 		txHash:    txns[0].Hash(),
-		baselines: []rules.StorageBaseline{{Address: contract, Key: accounts.ZeroKey, Value: *uint256.NewInt(5)}},
+		overrides: []rules.StorageOverride{{Address: contract, Key: accounts.ZeroKey, Value: *uint256.NewInt(5)}},
 	}
 
 	ibs := state.New(state.NewNoopReader())
@@ -92,7 +92,7 @@ func TestDeriveBlockReceiptsAppliesStorageBaselines(t *testing.T) {
 	require.Len(t, got, 2)
 
 	// Both transactions reset a non-zero slot to another non-zero value; without
-	// the baseline the first one would pay for setting a zero slot instead.
+	// the override the first one would pay for setting a zero slot instead.
 	require.Equal(t, got[1].GasUsed, got[0].GasUsed)
 	require.Equal(t, 2*got[0].GasUsed, got[1].CumulativeGasUsed)
 

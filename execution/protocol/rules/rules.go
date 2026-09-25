@@ -91,20 +91,13 @@ type SystemTxEngine interface {
 	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error
 }
 
-// StorageBaseline overrides the committed value of one storage slot for one
-// transaction.
-type StorageBaseline struct {
+// StorageOverride replaces the committed (tx-start) value of one storage slot
+// for one transaction. It changes what SSTORE prices against, unlike an eth_call
+// state override, which replaces the current value.
+type StorageOverride struct {
 	Address accounts.Address
 	Key     accounts.StorageKey
 	Value   uint256.Int
-}
-
-// StorageBaselineEngine is implemented by engines (Parlia) whose canonical chain
-// committed the output of a storage-cache bug in the client that sealed it: one
-// transaction observed committed storage that correct execution does not
-// produce. The executor installs the returned slots for that transaction only.
-type StorageBaselineEngine interface {
-	StorageBaselines(blockNum uint64, txIndex int, txHash common.Hash) []StorageBaseline
 }
 
 // RewardKind - The kind of block reward.
@@ -159,6 +152,11 @@ type EngineReader interface {
 	GetTransferFunc() evmtypes.TransferFunc
 
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
+
+	// StorageOverrides returns the committed-storage overrides for one canonical
+	// transaction, for chains whose sealing client canonicalized a storage bug.
+	// Engines without such history return nil.
+	StorageOverrides(blockNum uint64, txIndex int, txHash common.Hash) []StorageOverride
 
 	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,

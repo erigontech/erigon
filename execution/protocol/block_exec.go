@@ -200,26 +200,18 @@ func ExecuteBlockEphemerally(
 	return execRs, nil
 }
 
-// SetTxContext prepares ibs for one transaction: its tx context plus any
-// committed storage the engine overrides for it. Every path that executes or
-// re-executes a canonical transaction uses this instead of
-// IntraBlockState.SetTxContext, otherwise the overrides are silently skipped and
-// the transaction — and every later one in the block — replays differently from
-// the canonical chain.
+// SetTxContext sets the tx context and installs the engine's storage overrides
+// for that transaction. Every path that executes or re-executes a canonical
+// transaction must use it instead of IntraBlockState.SetTxContext: skipped
+// overrides make that transaction, and every later one in the block, replay
+// differently from the canonical chain.
 func SetTxContext(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int, txHash common.Hash) {
 	ibs.SetTxContext(blockNum, txIndex)
-	ApplyStorageBaselines(ibs, engine, blockNum, txIndex, txHash)
-}
-
-// ApplyStorageBaselines is SetTxContext for callers that already set the tx
-// context themselves.
-func ApplyStorageBaselines(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int, txHash common.Hash) {
-	baselineEngine, ok := engine.(rules.StorageBaselineEngine)
-	if !ok {
+	if engine == nil {
 		return
 	}
-	for _, baseline := range baselineEngine.StorageBaselines(blockNum, txIndex, txHash) {
-		ibs.SetStorageBaseline(baseline.Address, baseline.Key, baseline.Value)
+	for _, override := range engine.StorageOverrides(blockNum, txIndex, txHash) {
+		ibs.SetStorageOverride(override.Address, override.Key, override.Value)
 	}
 }
 

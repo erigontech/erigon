@@ -23,6 +23,7 @@ package ethash
 import (
 	"errors"
 	"fmt"
+	"github.com/erigontech/erigon/common"
 	"math/big"
 	"math/rand"
 	"os"
@@ -603,6 +604,10 @@ func SeedHash(block uint64) []byte {
 
 func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
 	return misc.Transfer
+}
+
+func (ethash *Ethash) StorageOverrides(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageOverride {
+	return nil
 }
 
 func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {

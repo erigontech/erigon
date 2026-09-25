@@ -551,7 +551,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 
 	rw.resetTxNum(txTask.Version().TxNum)
 
-	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
+	if err := txTask.Reset(rw.evm, rw.engine, rw.ibs, callTracer); err != nil {
 		return &TxResult{
 			Task: txTask,
 			Err:  err,

@@ -1539,8 +1539,8 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
 	v, source, version, clean, err := readStorageForSet(s, addr, key)
 	if err == nil {
-		if baseline, ok := s.storageBaseline(addr, key); ok && !s.wroteStorage(addr, key) {
-			v = baseline
+		if override, ok := s.storageOverride(addr, key); ok && !s.wroteStorage(addr, key) {
+			v = override
 		}
 	}
 	return v, source, version, clean, err

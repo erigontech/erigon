@@ -492,6 +492,10 @@ func (s *Merge) GetTransferFunc() evmtypes.TransferFunc {
 	return s.eth1Engine.GetTransferFunc()
 }
 
+func (s *Merge) StorageOverrides(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageOverride {
+	return s.eth1Engine.StorageOverrides(blockNum, txIndex, txHash)
+}
+
 func (s *Merge) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return s.eth1Engine.GetPostApplyMessageFunc()
 }
