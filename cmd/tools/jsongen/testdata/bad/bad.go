@@ -14,26 +14,43 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package types
+// Package bad holds one struct per way a declaration can leave the generator no choice.
+package bad
 
 import (
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
-// pointer method RPCLogs itself would not satisfy the fast-JSON interface.
-func (logs RPCLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	jsonstream.ArrayValue(s, logs, writeLogElem)
-	return nil
+type MissingForm struct {
+	Hash common.Hash `json:"hash"`
 }
 
-func writeLogElem(s *jsonstream.StackStream, l **RPCLog) { _ = (*l).MarshalFastJSONTo(s) }
-
-// MarshalFastJSONTo writes the logs as a bare array, without a log's block timestamp. The
-// receiver must stay a value, as for RPCLogs.
-func (logs Logs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	jsonstream.ArrayValue(s, logs, writeLog)
-	return nil
+type UnknownForm struct {
+	Bytes []byte `json:"bytes" ethjson:"bytes32"`
 }
 
-func writeLog(s *jsonstream.StackStream, l **Log) { _ = (*l).MarshalFastJSONTo(s) }
+type Named struct {
+	Hash common.Hash `json:"hash" ethjson:"data"`
+}
+
+type DuplicateName struct {
+	Named
+	Hash common.Hash `json:"hash" ethjson:"data"`
+}
+
+type TaggedEmbedded struct {
+	Named `json:"named"`
+}
+
+type PointerEmbedded struct {
+	*Named
+}
+
+type UnknownOption struct {
+	Count uint64 `json:"count,omitzero" ethjson:"quantity"`
+}
+
+type OmitemptyObjects struct {
+	Logs jsonstream.Marshaler `json:"logs,omitempty" ethjson:"objects"`
+}
