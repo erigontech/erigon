@@ -248,8 +248,8 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 }
 
 // fieldStatement picks the writer for one field from its declared form. A field its json tag
-// lets omit is wrapped in the presence test encoding/json would apply; without omitempty, an
-// absent value is written as null.
+// lets omit is wrapped in the presence test encoding/json would apply; without omitempty, a nil
+// pointer or interface is written as null, while a nil slice keeps its form's empty value.
 func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (string, error) {
 	_, pointer := t.Underlying().(*types.Pointer)
 	_, iface := t.Underlying().(*types.Interface)
