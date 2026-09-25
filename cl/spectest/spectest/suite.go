@@ -16,7 +16,6 @@ func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs
 	runLevel(t, cases, 0, func(t *testing.T, value TestCase) {
 		if value.ForkPhaseName == "whisk" || value.ForkPhaseName == "eip7594" || value.ForkPhaseName == "heze" {
 			t.Skipf("skipping %s", value.ForkPhaseName)
-			return
 		}
 		t.Run(value.CaseName, func(t *testing.T) {
 			require.NotPanics(t, func() {
