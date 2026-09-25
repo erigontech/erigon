@@ -825,6 +825,9 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 	}
 }
 
+// Start building a block, then accept a competing block with the same parent.
+// The original build must still produce a valid block. Also run without the
+// competing commit as a control.
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	original := statecfg.ExperimentalParallelCommitment
 	statecfg.ExperimentalParallelCommitment = true
@@ -867,7 +870,6 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(parentChain))
 	parent := parentChain.TopBlock
-	// Touch enough accounts to split the parallel fold with its default grain.
 	builderTxs := make([]types.Transaction, 256)
 	for i := range builderTxs {
 		address := common.BigToAddress(big.NewInt(int64(4096 + i)))
@@ -879,6 +881,8 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 		tx.SetSender(accounts.InternAddress(m.Address))
 		builderTxs[i] = tx
 	}
+	// The competing block pays an account that none of the payload transactions
+	// touch. Its transfer must not affect the balances in the built block.
 	siblingTx, err := types.SignTx(
 		types.NewTransaction(1, common.BigToAddress(big.NewInt(4496)), uint256.NewInt(30_000), 50_000, uint256.NewInt(parent.BaseFee().Uint64()), nil),
 		*types.LatestSignerForChainID(m.ChainConfig.ChainID),
@@ -920,6 +924,7 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 		t.Fatal("builder did not reach transaction selection")
 	}
 	if commitSibling {
+		// Make the competing block the chain head before the original build finishes.
 		require.NoError(t, m.InsertValidateAndUfc1By1(ctx, siblingChain.Blocks))
 	}
 	provider.release <- struct{}{}
@@ -936,6 +941,7 @@ func testAssembleBlockWithSiblingCommit(t *testing.T, commitSibling bool) {
 	status, err := m.InsertBlocks(ctx, []*types.Block{built})
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
+	// Check that the built block is valid on its original parent, even if the head changed.
 	validation, err := m.ValidateChain(ctx, built.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, validation.ValidationStatus, validation.ValidationError)
