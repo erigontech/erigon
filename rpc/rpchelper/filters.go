@@ -340,8 +340,7 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 	return ff.pendingBlock
 }
 
-// LastHeader returns the newest header the node has announced, or nil before the first one. A
-// pending transaction is priced against the block that would follow it.
+// LastHeader returns the newest header the node has announced, or nil before the first one.
 func (ff *Filters) LastHeader() *types.Header {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
@@ -975,10 +974,7 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 		return fmt.Errorf("unprocessable payload: %w", err)
 	}
 
-	ff.invalidateStalePendingBlock(&header)
-	ff.mu.Lock()
-	ff.lastHeader = &header
-	ff.mu.Unlock()
+	ff.onHead(&header)
 
 	ev := &Shared[*types.Header]{Value: &header}
 	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*Shared[*types.Header]]) error {
@@ -987,13 +983,14 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 	})
 }
 
-// invalidateStalePendingBlock drops the cached pending block once the chain
+// onHead records the new head and drops the cached pending block once the chain
 // moves on without it: a header at or above its height, or a competing block
 // replacing its parent. A stale pending block would otherwise pin "pending"
 // reads to an outdated height until this node builds a payload again.
-func (ff *Filters) invalidateStalePendingBlock(header *types.Header) {
+func (ff *Filters) onHead(header *types.Header) {
 	ff.mu.Lock()
 	defer ff.mu.Unlock()
+	ff.lastHeader = header
 	if ff.pendingBlock == nil {
 		return
 	}
