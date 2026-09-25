@@ -346,6 +346,37 @@ func TestRebuildCommitmentFilesDefaultTargetIsProcessVariant(t *testing.T) {
 	require.Equal(t, binRoot, pickedRoot, "with no target named the rebuild must follow the process variant")
 }
 
+func TestRebuildCommitmentFilesV3Target(t *testing.T) {
+	originalV3 := statecfg.ExperimentalCommitmentV3
+	originalParallel := statecfg.ExperimentalParallelCommitment
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.ExperimentalParallelCommitment = originalParallel
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+
+	target, err := state.DefaultRebuildTarget().Resolve()
+	require.NoError(t, err)
+	require.Equal(t, commitment.VariantCommitmentV3, target.Variant)
+
+	db, agg, dirs := rebuildVariantDatadir(t)
+	root, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, target)
+	require.NoError(t, err)
+	rebuildVariantReportCounts(t, report, root, commitment.VariantCommitmentV3)
+	require.Equal(t, root, rebuildVariantRestoredRoot(t, db, agg, commitment.VariantCommitmentV3))
+	rebuildVariantSettingsStayHex(t, dirs)
+}
+
 func TestRebuildCommitmentFilesBinTargetBindsHashSuite(t *testing.T) {
 	keccakDB, _, _ := rebuildVariantDatadir(t)
 	keccakRoot, _, err := state.RebuildCommitmentFiles(t.Context(), keccakDB, &rawdbv3.TxNums, log.New(), false,

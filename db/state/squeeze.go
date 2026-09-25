@@ -918,7 +918,7 @@ func (t RebuildTarget) Resolve() (RebuildTarget, error) {
 		if t.HashName != commitment.PBinHashKeccak && t.HashName != commitment.PBinHashBlake3 {
 			return RebuildTarget{}, fmt.Errorf("commitment rebuild: unknown hash suite %q", t.HashName)
 		}
-	case commitment.VariantHexPatriciaTrie, commitment.VariantParallelHexPatricia:
+	case commitment.VariantCommitmentV3, commitment.VariantHexPatriciaTrie, commitment.VariantParallelHexPatricia:
 		if t.HashName != "" {
 			return RebuildTarget{}, fmt.Errorf("commitment rebuild: hash suite %q needs the bin trie target", t.HashName)
 		}
