@@ -260,6 +260,9 @@ type mockGraphQLAPI struct {
 	gasPriceResult string
 	gasPriceErr    error
 
+	maxPriorityFeeResult string
+	maxPriorityFeeErr    error
+
 	sendRawTx     hexutil.Bytes
 	sendRawResult common.Hash
 	sendRawErr    error
@@ -321,6 +324,10 @@ func (m *mockGraphQLAPI) EstimateGas(_ context.Context, blockNumber rpc.BlockNum
 
 func (m *mockGraphQLAPI) GasPrice(_ context.Context) (string, error) {
 	return m.gasPriceResult, m.gasPriceErr
+}
+
+func (m *mockGraphQLAPI) MaxPriorityFeePerGas(_ context.Context) (string, error) {
+	return m.maxPriorityFeeResult, m.maxPriorityFeeErr
 }
 
 func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
@@ -633,6 +640,17 @@ func TestQueryResolver_GasPrice(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+func TestQueryResolver_MaxPriorityFeePerGas(t *testing.T) {
+	r := &queryResolver{&Resolver{GraphQLAPI: &mockGraphQLAPI{maxPriorityFeeResult: "0x3b9aca00"}}}
+	got, err := r.MaxPriorityFeePerGas(context.Background())
+	require.NoError(t, err)
+	require.Equal(t, "0x3b9aca00", got)
+
+	r = &queryResolver{&Resolver{GraphQLAPI: &mockGraphQLAPI{maxPriorityFeeErr: errors.New("node not ready")}}}
+	_, err = r.MaxPriorityFeePerGas(context.Background())
+	require.Error(t, err)
 }
 
 func TestAccountResolver_Storage(t *testing.T) {

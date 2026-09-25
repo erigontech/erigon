@@ -302,7 +302,7 @@ func (r *queryResolver) GasPrice(ctx context.Context) (string, error) {
 
 // MaxPriorityFeePerGas is the resolver for the maxPriorityFeePerGas field.
 func (r *queryResolver) MaxPriorityFeePerGas(ctx context.Context) (string, error) {
-	panic("not implemented: MaxPriorityFeePerGas - maxPriorityFeePerGas")
+	return r.GraphQLAPI.MaxPriorityFeePerGas(ctx)
 }
 
 // Syncing is the resolver for the syncing field.

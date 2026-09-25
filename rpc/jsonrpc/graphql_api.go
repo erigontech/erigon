@@ -103,6 +103,7 @@ type GraphQLAPI interface {
 	Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error)
 	EstimateGas(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error)
 	GasPrice(ctx context.Context) (string, error)
+	MaxPriorityFeePerGas(ctx context.Context) (string, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
 	GetPendingTransactions(ctx context.Context) ([]types.Transaction, error)
 }
@@ -497,6 +498,14 @@ func (api *GraphQLAPIImpl) GasPrice(ctx context.Context) (string, error) {
 		return "0x0", nil
 	}
 	return price.String(), nil
+}
+
+func (api *GraphQLAPIImpl) MaxPriorityFeePerGas(ctx context.Context) (string, error) {
+	tip, err := api.eth.MaxPriorityFeePerGas(ctx)
+	if err != nil {
+		return "", err
+	}
+	return tip.String(), nil
 }
 
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
