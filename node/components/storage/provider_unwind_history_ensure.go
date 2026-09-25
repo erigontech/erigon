@@ -125,6 +125,10 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 		return noop, nil
 	}
 
+	if !walkNeedsHistoryFiles(baselineStep*stepSize, walkDomainHistoryStart(opts.Tx.Debug())) {
+		return noop, nil
+	}
+
 	// Contiguity extension. The compute walks (baselineStep, walkEndStep]
 	// but the visible-set gap between our walk range and any locally-built
 	// tip .v file (from forward execution before the unwind) corrupts
@@ -278,6 +282,26 @@ func (p *Provider) discardDownloadedHistory(ctx context.Context, paths []string,
 // consumer below then reports the walk as needing nothing.
 func walkEndStepFor(targetTxNum, stepSize uint64) uint64 {
 	return targetTxNum/stepSize + 1
+}
+
+// walkNeedsHistoryFiles reports whether the compute's walk starts below what
+// is already readable. The compute reads history from snapshot files AND from
+// MDBX, so a walk inside the step the node is currently executing needs no
+// file — and no publisher can have one for a step still being produced.
+func walkNeedsHistoryFiles(walkStartTxNum, historyStartTxNum uint64) bool {
+	return walkStartTxNum < historyStartTxNum
+}
+
+// walkDomainHistoryStart is the lowest txNum from which every walk domain is
+// readable. The walk needs all of them, so the highest per-domain start binds.
+func walkDomainHistoryStart(tx kv.TemporalDebugTx) uint64 {
+	var start uint64
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.ReceiptDomain} {
+		if s := tx.HistoryStartFrom(d); s > start {
+			start = s
+		}
+	}
+	return start
 }
 
 func localHistoryCoversWalk(snapDir string, baselineStep, walkEndStep, stepSize uint64) bool {

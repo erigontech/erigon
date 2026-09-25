@@ -405,3 +405,25 @@ func TestWalkEndStepFor(t *testing.T) {
 	require.Equal(t, uint64(332), walkEndStepFor(331*step, step),
 		"the first txNum of step 331 moves the end on")
 }
+
+// TestWalkNeedsHistoryFiles pins what the ensure step is actually for.
+//
+// The compute reads history from snapshot files AND from MDBX. Files are only
+// needed for a walk starting below what is already readable. A shallow unwind
+// lands in the step the node is currently executing, whose history lives in
+// MDBX and which no publisher can have a file for — demanding one there is
+// starvation that can never be satisfied.
+func TestWalkNeedsHistoryFiles(t *testing.T) {
+	t.Parallel()
+
+	const historyStart = uint64(129_296_875) // first txNum readable
+
+	require.False(t, walkNeedsHistoryFiles(129_687_500, historyStart),
+		"a walk in the current step is readable from MDBX; no file exists or ever will")
+	require.False(t, walkNeedsHistoryFiles(historyStart, historyStart),
+		"a walk starting exactly where history begins is readable")
+	require.True(t, walkNeedsHistoryFiles(128_906_250, historyStart),
+		"the deep mode-C case: the walk starts below what files+DB provide")
+	require.True(t, walkNeedsHistoryFiles(0, historyStart),
+		"a walk from genesis needs files")
+}
