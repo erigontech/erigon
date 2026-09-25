@@ -87,7 +87,9 @@ func (r *RPCReceipt) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 		ethjson.Data(w, "logsBloom", r.LogsBloom[:])
 	}
 
-	if r.EffectiveGasPrice != nil {
+	if r.EffectiveGasPrice == nil {
+		w.Field("effectiveGasPrice").WriteNil()
+	} else {
 		ethjson.Quantity256(w, "effectiveGasPrice", (*uint256.Int)(r.EffectiveGasPrice))
 	}
 	if r.Status != nil {
