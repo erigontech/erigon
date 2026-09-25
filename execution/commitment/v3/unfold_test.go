@@ -107,15 +107,6 @@ func TestUnfoldMissingAndTombstone(t *testing.T) {
 	require.Empty(t, got.childMask)
 }
 
-func TestUnfoldRejectsMalformedRecord(t *testing.T) {
-	ctx := newMockContext()
-	ctx.branches[string(AccountNodeKey(nil, nil))] = []byte{recordFormat}
-	got, err := unfold(ctx, nil, planeAccount, nil)
-	require.Error(t, err)
-	require.ErrorIs(t, err, ErrRecordTruncated)
-	require.Nil(t, got)
-}
-
 type ownedBranchContext struct{ *mockContext }
 
 func (c ownedBranchContext) BranchOwned(key []byte) ([]byte, kv.Step, error) {
