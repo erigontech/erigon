@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -208,6 +209,12 @@ func (p *Provider) unwindDBPastBlock(ctx context.Context, tx kv.TemporalRwTx, to
 		}
 		if err := p.Aggregator.WipeWritableShadowPast(ctx, tx, lastTxNum); err != nil {
 			return fmt.Errorf("WipeWritableShadowPast(lastTxNum=%d): %w", lastTxNum, err)
+		}
+		// The files this unwind trimmed no longer reach the txNum the
+		// recorded prune progress claims to have pruned to, and that range
+		// then exists in neither files nor DB.
+		if err := dbstate.ClampPruneProgressTo(tx, lastTxNum); err != nil {
+			return fmt.Errorf("ClampPruneProgressTo(lastTxNum=%d): %w", lastTxNum, err)
 		}
 	}
 

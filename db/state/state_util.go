@@ -17,6 +17,7 @@
 package state
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 
@@ -133,4 +134,38 @@ func GetPruneValProgress(db kv.Getter, tbl []byte) (*prune.Stat, error) {
 	}
 
 	return st, nil
+}
+
+// ClampPruneProgressTo rewinds recorded prune progress that claims to have
+// pruned past txNum, which is what an unwind leaves behind when it trims
+// snapshot files back without touching the DB's bookkeeping. The range
+// between the new file tip and the stale progress then exists in neither
+// files nor DB, and CheckFilesDBGap treats that as a corrupt datadir.
+//
+// Entries are discovered by walking the progress table rather than a list of
+// domains, so a table added later is covered without a second edit.
+func ClampPruneProgressTo(tx kv.RwTx, txNum uint64) error {
+	const rangeSuffix = "range"
+	var stale []string
+	if err := tx.ForEach(kv.TblPruningValsProg, nil, func(k, v []byte) error {
+		if !bytes.HasSuffix(k, []byte(rangeSuffix)) {
+			return nil
+		}
+		_, txTo, err := decodeRange(v)
+		if err != nil {
+			return err
+		}
+		if txTo > txNum {
+			stale = append(stale, string(k[:len(k)-len(rangeSuffix)]))
+		}
+		return nil
+	}); err != nil {
+		return err
+	}
+	for _, table := range stale {
+		if err := InvalidatePruneProgress(tx, table); err != nil {
+			return err
+		}
+	}
+	return nil
 }
