@@ -477,8 +477,13 @@ func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
 // ping sends a ping frame once the connection has been idle for wsPingInterval.
 func (wc *websocketCodec) ping() {
 	pingCtx, cancel := context.WithTimeout(context.Background(), wsPingWriteTimeout)
-	wc.conn.Ping(pingCtx) //nolint:errcheck
+	err := wc.conn.Ping(pingCtx)
 	cancel()
+	if err != nil {
+		// coder/websocket leaves the connection open when the pong does not arrive in time.
+		_ = wc.conn.CloseNow()
+		return
+	}
 	wc.resetPing()
 }
 

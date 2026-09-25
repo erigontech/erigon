@@ -595,6 +595,46 @@ func TestWebsocketIdlePing(t *testing.T) {
 	}
 }
 
+func TestWebsocketUnansweredPingClosesConn(t *testing.T) {
+	t.Parallel()
+
+	closed := make(chan struct{})
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
+			OnPingReceived: func(context.Context, []byte) bool { return false },
+		})
+		if err != nil {
+			return
+		}
+		defer func() { _ = conn.CloseNow() }()
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				close(closed)
+				return
+			}
+		}
+	}))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	wc := NewWebsocketCodec(conn, "", nil, "").(*websocketCodec)
+	defer wc.Close()
+	go conn.Read(context.Background()) //nolint:errcheck
+
+	wc.pingTimer.Reset(time.Millisecond)
+	select {
+	case <-closed:
+	case <-time.After(wsPingWriteTimeout + 5*time.Second):
+		t.Fatal("the connection to a peer that does not answer pings was not closed")
+	}
+}
+
 type writeCountingConn struct {
 	net.Conn
 	writes *atomic.Int64
