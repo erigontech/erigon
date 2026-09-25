@@ -17,6 +17,7 @@
 package pbt
 
 import (
+	"bytes"
 	"slices"
 	"testing"
 
@@ -27,7 +28,7 @@ import (
 
 func TestTrieCancelsDeleteRewriteDelta(t *testing.T) {
 	ctx := newTrieTestContext()
-	key := trieCodeKey(0, 0, 1)
+	key := eip8297.TreeKeyStorage(bytes.Repeat([]byte{0x71}, 20), storageSlot(64))
 	value := testTrieValue(1)
 	entries := []Op{{Key: key, Value: value}}
 	_, err := NewTrie(ctx).Process(entries)
@@ -36,7 +37,7 @@ func TestTrieCancelsDeleteRewriteDelta(t *testing.T) {
 	ctx.writes = nil
 
 	trie := NewTrie(ctx)
-	_, err = trie.Process([]Op{{Key: key, Value: [32]byte{}}, {Key: key, Value: value}})
+	_, err = trie.Process([]Op{Drop(bytes.Clone(key[:33])), {Key: key, Value: value}})
 	require.NoError(t, err)
 	require.Empty(t, trie.TakeDeltas())
 	require.Empty(t, ctx.writes)
@@ -79,7 +80,7 @@ func TestTrieRootFormChangeKeepsRoundStartPreviousRecord(t *testing.T) {
 	start := cloneRecords(ctx.records)
 	trie := NewTrie(ctx)
 	rewrite := testTrieValue(2)
-	_, err := trie.Process([]Op{{Key: key, Value: [32]byte{}}, {Key: key, Value: rewrite}, {Key: storage, Value: testTrieValue(3)}})
+	_, err := trie.Process([]Op{{Key: key, Value: rewrite}, {Key: storage, Value: testTrieValue(3)}})
 	require.NoError(t, err)
 	deltas := trie.TakeDeltas()
 	for _, delta := range deltas {

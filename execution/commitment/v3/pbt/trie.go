@@ -32,6 +32,8 @@ type Op struct {
 	Value [eip8297.ValueLength]byte
 }
 
+var errOperationOrder = fmt.Errorf("operation list must be sorted by key with at most one operation per key; drops must precede writes under their prefix")
+
 func Drop(prefix []byte) Op { return Op{Drop: bytes.Clone(prefix)} }
 
 type Trie struct {
@@ -66,6 +68,9 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if t.ctx == nil {
 		return common.Hash{}, fmt.Errorf("nil Patricia context")
 	}
+	if err := validateOps(ops); err != nil {
+		return common.Hash{}, err
+	}
 	t.roundPrev = make(map[string][]byte)
 	t.bucketDirty = make(map[string][]byte)
 	if _, err := t.loadRoot(); err != nil {
@@ -73,25 +78,12 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	}
 	t.rememberPrev(GlobalRootKey(), t.root.prev)
 	t.deltas = nil
-	ordered := make([]Op, len(ops))
-	copy(ordered, ops)
-	sort.SliceStable(ordered, func(i, j int) bool {
-		key := func(op Op) []byte {
-			switch {
-			case len(op.Drop) != 0:
-				return op.Drop
-			default:
-				return op.Key
-			}
-		}
-		return bytes.Compare(key(ordered[i]), key(ordered[j])) < 0
-	})
-	for i := range ordered {
+	for i := range ops {
 		var err error
 		switch {
-		case len(ordered[i].Drop) != 0:
+		case len(ops[i].Drop) != 0:
 			var bucketKey []byte
-			bucketKey, err = bucketKeyForPrefix(ordered[i].Drop)
+			bucketKey, err = bucketKeyForPrefix(ops[i].Drop)
 			if err == nil {
 				t.touchBucket(bucketKey)
 			}
@@ -99,11 +91,11 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 				err = errInsertKey
 				break
 			}
-			err = t.dropPrefix(ordered[i].Drop)
-		case ordered[i].Value == ([eip8297.ValueLength]byte{}):
-			if len(ordered[i].Key) == eip8297.StorageKeyLength && ordered[i].Key[0] == eip8297.StorageZone {
+			err = t.dropPrefix(ops[i].Drop)
+		case ops[i].Value == ([eip8297.ValueLength]byte{}):
+			if len(ops[i].Key) == eip8297.StorageKeyLength && ops[i].Key[0] == eip8297.StorageZone {
 				var bucketKey []byte
-				bucketKey, err = bucketKeyForStorage(ordered[i].Key)
+				bucketKey, err = bucketKeyForStorage(ops[i].Key)
 				if err == nil {
 					t.touchBucket(bucketKey)
 				}
@@ -111,11 +103,11 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 			if err != nil {
 				break
 			}
-			err = t.remove(ordered[i].Key)
+			err = t.remove(ops[i].Key)
 		default:
-			if len(ordered[i].Key) == eip8297.StorageKeyLength && ordered[i].Key[0] == eip8297.StorageZone {
+			if len(ops[i].Key) == eip8297.StorageKeyLength && ops[i].Key[0] == eip8297.StorageZone {
 				var bucketKey []byte
-				bucketKey, err = bucketKeyForStorage(ordered[i].Key)
+				bucketKey, err = bucketKeyForStorage(ops[i].Key)
 				if err == nil {
 					t.touchBucket(bucketKey)
 				}
@@ -123,9 +115,12 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 			if err != nil {
 				break
 			}
-			err = t.insert(ordered[i].Key, ordered[i].Value)
+			err = t.insert(ops[i].Key, ops[i].Value)
 		}
 		if err != nil {
+			return common.Hash{}, err
+		}
+		if err := t.refreshRouting(); err != nil {
 			return common.Hash{}, err
 		}
 		t.rootDirty = true
@@ -273,7 +268,9 @@ func (t *Trie) registerRow(row *rowNode) {
 		}
 		row.key = key
 	}
-	t.rememberPrev(row.key, row.prev)
+	if len(row.prev) != 0 {
+		t.rememberPrev(row.key, row.prev)
+	}
 	t.rows[string(row.key)] = row
 	if row.dirty {
 		t.dirtyRows[string(row.key)] = row
@@ -292,6 +289,21 @@ func (t *Trie) rememberPrev(key, data []byte) {
 
 func (t *Trie) touchBucket(key []byte) {
 	t.bucketDirty[string(key)] = bytes.Clone(key)
+}
+
+func validateOps(ops []Op) error {
+	var previous []byte
+	for i, op := range ops {
+		key := op.Key
+		if len(op.Drop) != 0 {
+			key = op.Drop
+		}
+		if i != 0 && bytes.Compare(previous, key) >= 0 {
+			return errOperationOrder
+		}
+		previous = key
+	}
+	return nil
 }
 
 func (t *Trie) previousRecord(key, fallback []byte) []byte {

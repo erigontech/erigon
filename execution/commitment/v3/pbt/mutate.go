@@ -19,6 +19,7 @@ package pbt
 import (
 	"bytes"
 	"fmt"
+	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -230,6 +231,7 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 
 func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []byte, value [eip8297.ValueLength]byte) error {
 	cell := row.cell(slot)
+	oldChild := cell.child
 	branchPath := branchPath(row, slot, cell)
 	d := firstDifference(&branchPath, &path)
 	split := branchSplit(row, slot, cell)
@@ -263,8 +265,46 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 	row.cell(slot).child = child
 	child.parent = row
 	child.parentSlot = slot
+	oldSlot := slotAt(&branchPath, child.path.BitLen)
+	if oldChild != nil {
+		child.cell(oldSlot).child = oldChild
+		oldChild.parent = child
+		oldChild.parentSlot = oldSlot
+	}
 	t.registerRow(child)
 	t.markDirty(row)
+	return nil
+}
+
+func (t *Trie) refreshRouting() error {
+	if t.root == nil {
+		return nil
+	}
+	dirty := make([]*rowNode, 0, len(t.dirtyRows))
+	for _, row := range t.dirtyRows {
+		dirty = append(dirty, row)
+	}
+	sort.SliceStable(dirty, func(i, j int) bool { return dirty[i].path.BitLen > dirty[j].path.BitLen })
+	for _, row := range dirty {
+		if row.parent == nil || row.parent.cell(row.parentSlot).child != row || len(row.occupied()) < 2 {
+			continue
+		}
+		if err := t.refreshBranch(row.parent, row.parentSlot, row); err != nil {
+			return err
+		}
+	}
+	switch t.root.form {
+	case RowRoot:
+		return nil
+	case ExtRoot:
+		row, err := t.extTopRow(t.root)
+		if err != nil {
+			return err
+		}
+		if len(row.occupied()) >= 2 {
+			return t.refreshRootFromRow(t.root, row)
+		}
+	}
 	return nil
 }
 

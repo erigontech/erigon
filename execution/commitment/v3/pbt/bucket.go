@@ -95,7 +95,7 @@ func (t *Trie) bucketDescriptor(key []byte) (bucketDescriptor, bool, error) {
 		}
 	case ExtRoot:
 		if root.self.BitLen >= bucketPath.BitLen && pathHasPrefix(&root.self, &bucketPath) {
-			if root.self.BitLen == bucketPath.BitLen {
+			if root.self.BitLen < bucketPath.BitLen+4 {
 				row, err := t.extTopRow(root)
 				if err != nil {
 					return bucketDescriptor{}, false, err
@@ -144,7 +144,7 @@ func (t *Trie) bucketDescriptorInRow(row *rowNode, bucketPath *eip8297.Bitpath) 
 	case BranchCell:
 		full := branchPath(row, slot, cell)
 		if full.BitLen >= bucketPath.BitLen && pathHasPrefix(&full, bucketPath) {
-			if full.BitLen == bucketPath.BitLen {
+			if full.BitLen < bucketPath.BitLen+4 {
 				child, err := t.loadBranchChild(row, slot)
 				if err != nil {
 					return bucketDescriptor{}, false, err
@@ -268,7 +268,7 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 				full := branchPath(row, slot, cell)
 				if full.BitLen >= 264 && pathByte(&full, 0) == eip8297.StorageZone {
 					bucketPath := full.Slice(0, 264)
-					if full.BitLen == 264 {
+					if full.BitLen < 268 {
 						child, err := t.loadBranchChild(row, slot)
 						if err != nil {
 							return err
@@ -313,7 +313,7 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 	case ExtRoot:
 		if root.self.BitLen >= 264 && pathByte(&root.self, 0) == eip8297.StorageZone {
 			bucketPath := root.self.Slice(0, 264)
-			if root.self.BitLen == 264 {
+			if root.self.BitLen < 268 {
 				row, err := t.extTopRow(root)
 				if err != nil {
 					return nil, err

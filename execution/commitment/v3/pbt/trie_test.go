@@ -19,6 +19,7 @@ package pbt
 import (
 	"bytes"
 	"fmt"
+	"sort"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -79,11 +80,13 @@ var _ commitment.PatriciaContext = (*trieTestContext)(nil)
 
 func assertPersistedTrie(t *testing.T, ctx *trieTestContext, entries []Op) {
 	t.Helper()
-	wantEntries := make([]eip8297.Entry, len(entries))
-	for i, entry := range entries {
+	ordered := append([]Op(nil), entries...)
+	sort.Slice(ordered, func(i, j int) bool { return bytes.Compare(ordered[i].Key, ordered[j].Key) < 0 })
+	wantEntries := make([]eip8297.Entry, len(ordered))
+	for i, entry := range ordered {
 		wantEntries[i] = eip8297.Entry{Key: entry.Key, Value: entry.Value[:]}
 	}
-	wantRoot := eip8297.StateRoot(wantEntries)
+	wantRoot := eip8297.StateRootWithHash(wantEntries, eip8297.SelectedHash())
 
 	reopened := NewTrie(ctx)
 	gotRoot := eip8297.EmptyTreeHash
@@ -96,7 +99,7 @@ func assertPersistedTrie(t *testing.T, ctx *trieTestContext, entries []Op) {
 	require.NoError(t, reopened.Verify())
 
 	freshContext := newTrieTestContext()
-	freshRoot, err := NewTrie(freshContext).Process(entries)
+	freshRoot, err := NewTrie(freshContext).Process(ordered)
 	require.NoError(t, err)
 	require.Equal(t, wantRoot, freshRoot)
 	require.Equal(t, freshContext.records, ctx.records)
