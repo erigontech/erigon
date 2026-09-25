@@ -104,8 +104,9 @@ reported. How they appear depends on the method:
 `gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
 `trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
 `trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
-`trace_call`, `trace_callMany` and `trace_rawTransaction` take no such parameter and
-always enable it internally, so everything below applies to them unconditionally.
+`trace_call` and `trace_callMany` take no such parameter and always enable it
+internally, so everything below applies to them unconditionally. `trace_rawTransaction`
+never enables it: a signed transaction pays for its gas as it would in a block.
 
 :::warning
 `gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It

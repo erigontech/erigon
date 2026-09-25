@@ -652,6 +652,96 @@ func TestRawTransactionAllTraceTypes(t *testing.T) {
 	require.NotNil(t, result.VmTrace, "VmTrace must be initialised")
 }
 
+// stateDiffBalanceDelta returns an account's balance change (to - from) as
+// reported in a trace stateDiff.
+func stateDiffBalanceDelta(t *testing.T, diff map[accounts.Address]*StateDiffAccount, addr common.Address) *big.Int {
+	t.Helper()
+	acc, ok := diff[accounts.InternAddress(addr)]
+	require.True(t, ok, "%x must appear in stateDiff", addr)
+	switch v := acc.Balance.(type) {
+	case string:
+		require.Equal(t, "=", v)
+		return new(big.Int)
+	case map[string]*StateDiffBalance:
+		return new(big.Int).Sub(v["*"].To.ToInt(), v["*"].From.ToInt())
+	case map[string]*hexutil.U256:
+		if born, ok := v["+"]; ok {
+			return born.ToInt()
+		}
+		return new(big.Int).Neg(v["-"].ToInt())
+	default:
+		t.Fatalf("unexpected balance diff type %T", acc.Balance)
+		return nil
+	}
+}
+
+// TestRawTransactionStateDiffChargesFees checks that a signed transaction's
+// stateDiff is the transaction's actual transition: the sender pays value plus
+// gasUsed times the effective gas price, the fee recipient gets the tip, the
+// base fee is burned, and no other ether appears or disappears. A sender that
+// cannot pay for its gas is rejected.
+func TestRawTransactionStateDiffChargesFees(t *testing.T) {
+	c := newBaseFeeTestChain(t, chain.TestChainOsakaConfig)
+	coinbase := common.HexToAddress("0xc0ffee")
+	c.mineBlock(t, func(block *blockgen.BlockGen) { block.SetCoinbase(coinbase) })
+	baseFee := c.head.BaseFee()
+	require.Positive(t, baseFee.Sign())
+
+	recipient := common.HexToAddress("0x1234")
+	tipCap := uint256.NewInt(2_000_000_000)
+	rawTransfer := func(value *uint256.Int) []byte {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    0,
+				To:       &recipient,
+				Value:    *value,
+				GasLimit: 50_000, // above the 21000 used, so unused gas must not be charged
+			},
+			ChainID: *c.signer.ChainID(),
+			TipCap:  *tipCap,
+			FeeCap:  *uint256.NewInt(100_000_000_000),
+		}, *c.signer, c.bankKey)
+		require.NoError(t, err)
+		var buf bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&buf))
+		return buf.Bytes()
+	}
+
+	t.Run("stateDiff is the real transition", func(t *testing.T) {
+		value := uint256.NewInt(1)
+		result, err := c.traceAPI().RawTransaction(context.Background(), rawTransfer(value), []string{TraceTypeStateDiff})
+		require.NoError(t, err)
+
+		const gasUsed = 21_000
+		tip := new(big.Int).Mul(big.NewInt(gasUsed), tipCap.ToBig())
+		burn := new(big.Int).Mul(big.NewInt(gasUsed), baseFee.ToBig())
+		senderPays := new(big.Int).Add(value.ToBig(), tip)
+		senderPays.Add(senderPays, burn)
+
+		sender := stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress)
+		require.Equal(t, new(big.Int).Neg(senderPays).String(), sender.String(), "sender pays value + gasUsed * effective gas price")
+		require.Equal(t, tip.String(), stateDiffBalanceDelta(t, result.StateDiff, coinbase).String(), "fee recipient gets the tip")
+		require.Equal(t, value.ToBig().String(), stateDiffBalanceDelta(t, result.StateDiff, recipient).String())
+
+		total := new(big.Int)
+		for addr := range result.StateDiff {
+			total.Add(total, stateDiffBalanceDelta(t, result.StateDiff, addr.Value()))
+		}
+		require.Equal(t, new(big.Int).Neg(burn).String(), total.String(), "only the base fee leaves circulation")
+	})
+
+	t.Run("sender that cannot pay gas limit * fee cap is rejected", func(t *testing.T) {
+		// 100 ether in the bank, minus 0.001 ether: enough for value + 50000 gas at the
+		// effective price (under 3 gwei), not enough for 50000 gas at the 100 gwei fee cap.
+		value, overflow := uint256.FromBig(new(big.Int).Sub(new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), big.NewInt(1e15)))
+		require.False(t, overflow)
+		require.Less(t, new(uint256.Int).Add(baseFee, tipCap).Uint64(), uint64(3_000_000_000))
+		result, err := c.traceAPI().RawTransaction(context.Background(), rawTransfer(value), []string{TraceTypeTrace})
+		require.ErrorIs(t, err, protocol.ErrInsufficientFunds)
+		require.Nil(t, result)
+	})
+}
+
 func TestParseOeTracerConfigRejectsCustomTracer(t *testing.T) {
 	tracer := "callTracer"
 	_, err := parseOeTracerConfig(&config.TraceConfig{Tracer: &tracer})
