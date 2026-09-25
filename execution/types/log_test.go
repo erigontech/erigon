@@ -58,6 +58,19 @@ func TestLogsCopyPreservesNilEntries(t *testing.T) {
 	require.Equal(t, hexutil.Bytes{1, 2}, cp[1].Data)
 }
 
+// A copy owns its timestamp, so writing through one log's pointer cannot reach the other.
+func TestLogCopyOwnsItsTimestamp(t *testing.T) {
+	src := &Log{Address: common.HexToAddress("0x1"), BlockTimestamp: at(7)}
+
+	for name, cp := range map[string]*Log{"Log.Copy": src.Copy(), "Logs.Copy": Logs{src}.Copy()[0]} {
+		t.Run(name, func(t *testing.T) {
+			require.NotSame(t, src.BlockTimestamp, cp.BlockTimestamp)
+			*cp.BlockTimestamp = 9
+			require.Equal(t, at(7), src.BlockTimestamp)
+		})
+	}
+}
+
 // A LOG0 entry carries nil Topics. Both copy paths normalize that to an empty
 // slice, which is what keeps the JSON at `"topics":[]`.
 func TestLogCopyNormalizesNilTopics(t *testing.T) {
