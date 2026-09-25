@@ -174,48 +174,7 @@ func (r *pendingResolver) EstimateGas(ctx context.Context, obj *model.Pending, d
 
 // Block is the resolver for the block field.
 func (r *queryResolver) Block(ctx context.Context, number *string, hash *string) (*model.Block, error) {
-	if number != nil && hash != nil {
-		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
-	}
-
-	if hash != nil {
-		blockHash := common.HexToHash(*hash)
-		res, err := r.GraphQLAPI.GetBlockDetailsByHash(ctx, blockHash)
-		if err != nil {
-			return nil, err
-		}
-		if res == nil {
-			return nil, nil
-		}
-		return r.buildBlock(res)
-	}
-
-	var blockNumber rpc.BlockNumber
-
-	if number != nil {
-		bNum, err := strconv.ParseUint(*number, 10, 64)
-		if err == nil {
-			blockNumber = rpc.BlockNumber(bNum)
-		} else {
-			bNum, err := hexutil.DecodeUint64(*number)
-			if err == nil {
-				blockNumber = rpc.BlockNumber(bNum)
-			} else {
-				return nil, fmt.Errorf("invalid block number: %s", *number)
-			}
-		}
-	} else {
-		blockNumber = rpc.LatestBlockNumber
-	}
-
-	res, err := r.GraphQLAPI.GetBlockDetails(ctx, blockNumber)
-	if err != nil {
-		return nil, err
-	}
-	if res == nil {
-		return nil, nil
-	}
-	return r.buildBlock(res)
+	return r.block(ctx, number, hash, blockTxsRequested(ctx))
 }
 
 // Blocks is the resolver for the blocks field.
@@ -242,10 +201,11 @@ func (r *queryResolver) Blocks(ctx context.Context, from uint64, to *uint64) ([]
 		return nil, &rpc.InvalidParamsError{Message: "Invalid params"}
 	}
 
+	withTxs := blockTxsRequested(ctx)
 	blocks := make([]*model.Block, 0, toBlockNumber-fromBlockNumber+1)
 	for i := fromBlockNumber; i <= toBlockNumber; i++ {
 		blockNumberStr := strconv.FormatUint(i, 10)
-		block, err := r.Block(ctx, &blockNumberStr, nil)
+		block, err := r.block(ctx, &blockNumberStr, nil, withTxs)
 		if err != nil {
 			return nil, err
 		}
@@ -295,7 +255,7 @@ func (r *queryResolver) Transaction(ctx context.Context, hash string) (*model.Tr
 	}
 
 	blockNumberStr := strconv.FormatUint(blockNum, 10)
-	block, err := r.Block(ctx, &blockNumberStr, nil)
+	block, err := r.block(ctx, &blockNumberStr, nil, true)
 	if err != nil {
 		return nil, err
 	}
