@@ -50,7 +50,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/rpc/transactions"
 )
@@ -88,24 +87,7 @@ type SimulatedBlock struct {
 type SimulatedBlockResult = *ethapi.RPCBlock
 
 // SimulationResult represents the result contained in an eth_simulateV1 response.
-type SimulationResult []SimulatedBlockResult
-
-// MarshalFastJSONTo exists because the RPC encoder only consults the top-level result for a
-// fast marshaller: a plain slice of blocks would take the reflection path.
-func (r SimulationResult) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if r == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteArrayStart()
-	for _, b := range r {
-		if err := b.MarshalFastJSONTo(s); err != nil {
-			return err
-		}
-	}
-	s.WriteArrayEnd()
-	return nil
-}
+type SimulationResult = ethapi.RPCBlocks
 
 // SimulateV1 implements the eth_simulateV1 JSON-RPC method.
 func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, blockParameter rpc.BlockNumberOrHash) (SimulationResult, error) {
