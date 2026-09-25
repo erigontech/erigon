@@ -38,6 +38,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -78,6 +79,63 @@ func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Equal(t, "gloas", recorder.Header().Get("Eth-Consensus-Version"))
 	require.Contains(t, recorder.Body.String(), `"slot":"64"`)
+}
+
+func TestPostPtcDutiesDeduplicatesRepeatedCommitteeSeats(t *testing.T) {
+	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	postState.SetVersion(clparams.GloasVersion)
+
+	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
+	ptcWindow := solid.NewUint64VectorOfVectors(
+		int((2+handler.beaconChainCfg.MinSeedLookahead)*slotsPerEpoch),
+		int(handler.beaconChainCfg.PtcSize),
+	)
+	ptcWindow.Get(int(slotsPerEpoch)).Set(0, 3)
+	secondSlotPTC := ptcWindow.Get(int(slotsPerEpoch + 1))
+	for i := 0; i < secondSlotPTC.Length(); i++ {
+		secondSlotPTC.Set(i, 1)
+	}
+	postState.SetPtcWindow(ptcWindow)
+
+	manager, ok := syncedData.(*synced_data.SyncedDataManager)
+	require.True(t, ok)
+	require.NoError(t, manager.OnHeadStateWithBlockRoot(postState, common.Hash{0x42}))
+
+	epoch := state.Epoch(postState)
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		fmt.Sprintf("/eth/v1/validator/duties/ptc/%d", epoch),
+		strings.NewReader(`["0","2","3"]`),
+	)
+	recorder := httptest.NewRecorder()
+	handler.mux.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	var response struct {
+		Data []ptcDutyResponse `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+
+	startSlot := epoch * slotsPerEpoch
+	expected := make(map[[2]uint64]struct{}, slotsPerEpoch)
+	for slotOffset := range slotsPerEpoch {
+		if slotOffset != 1 {
+			expected[[2]uint64{0, startSlot + slotOffset}] = struct{}{}
+		}
+	}
+	expected[[2]uint64{3, startSlot}] = struct{}{}
+	require.Len(t, response.Data, len(expected))
+
+	seen := make(map[[2]uint64]struct{}, len(response.Data))
+	for _, duty := range response.Data {
+		key := [2]uint64{duty.ValidatorIndex, duty.Slot}
+		require.Contains(t, expected, key)
+		require.NotContains(t, seen, key)
+		seen[key] = struct{}{}
+	}
+	require.Equal(t, expected, seen)
 }
 
 func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
