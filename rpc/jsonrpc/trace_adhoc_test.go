@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -828,6 +829,8 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		code   []byte
+		nonce  hexutil.Uint64
+		extra  ethapi.StateOverrides
 		pc     int
 		frame  string
 		hasSub bool
@@ -852,6 +855,23 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 			frame: CREATE,
 		},
 		{
+			name:  "create with nonce overflow",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE), byte(vm.STOP)},
+			nonce: math.MaxUint64,
+			pc:    3,
+			frame: CREATE,
+		},
+		{
+			name: "create with address collision",
+			code: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE), byte(vm.STOP)},
+			extra: ethapi.StateOverrides{
+				accounts.InternAddress(types.CreateAddress(target, 0)): {Nonce: new(hexutil.Uint64(1))},
+			},
+			pc:     3,
+			frame:  CREATE,
+			hasSub: true,
+		},
+		{
 			name:  "selfdestruct",
 			code:  []byte{byte(vm.PUSH0), byte(vm.SELFDESTRUCT)},
 			pc:    1,
@@ -860,12 +880,10 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code := hexutil.Bytes(tc.code)
+			overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code, Nonce: &tc.nonce}}
+			maps.Copy(overrides, tc.extra)
 			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
-				[]string{TraceTypeTrace, TraceTypeVmTrace}, nil, &config.TraceConfig{
-					StateOverrides: &ethapi.StateOverrides{
-						accounts.InternAddress(target): {Code: &code},
-					},
-				})
+				[]string{TraceTypeTrace, TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
 			require.NoError(t, err)
 			require.Len(t, result.Trace, 2)
 			require.Equal(t, tc.frame, result.Trace[1].Type)
