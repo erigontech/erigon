@@ -48,8 +48,8 @@ func TestIsBlobBacklog(t *testing.T) {
 	}
 }
 
-// to can trail from between the guard in antiquateBlobs and this call; an underflowing
-// subtraction would otherwise read as an enormous backlog.
+// The span is an unsigned subtraction, so a range that does not advance has to be rejected before
+// it wraps into an enormous one.
 func TestIsBlobBacklogHandlesNonAdvancingRange(t *testing.T) {
 	require.False(t, isBlobBacklog(1_000_000, 1_000_000))
 	require.False(t, isBlobBacklog(1_000_000, 999_999))

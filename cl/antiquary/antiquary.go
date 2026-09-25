@@ -550,9 +550,13 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 
 	// now, we need to retire the blobs
-	compressWorkers, releaseBuildSlot := a.blobCompressWorkers(currentBlobsProgress, to)
-	defer releaseBuildSlot()
-	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, compressWorkers, blobCountFn, log.LvlDebug, a.logger); err != nil {
+	// The build slot is held for the compression only: opening the folder, seeding and pruning
+	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
+	if err := func() error {
+		compressWorkers, releaseBuildSlot := a.blobCompressWorkers(currentBlobsProgress, to)
+		defer releaseBuildSlot()
+		return freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, compressWorkers, blobCountFn, log.LvlDebug, a.logger)
+	}(); err != nil {
 		return err
 	}
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
