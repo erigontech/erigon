@@ -30,14 +30,17 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
 	"github.com/erigontech/erigon/cl/phase1/network/gossip"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {
@@ -557,6 +560,79 @@ func TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure(t *testing.
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusBadRequest, resp.StatusCode,
 		"a validation failure must take precedence over an admission failure in the response")
+}
+
+// TestSyncCommitteeMessageExpiry pins the formula directly: slot end (the
+// start of the next slot) plus the network config's maximum gossip clock
+// disparity. Every existing handler test that exercises PublishBackground
+// matches the expiry argument with gomock.Any(), so an off-by-one on
+// slot+1 or a wrong disparity conversion would not be caught anywhere else.
+func TestSyncCommitteeMessageExpiry(t *testing.T) {
+	bcfg := clparams.MainnetBeaconConfig
+	bcfg.InitializeForkSchedule()
+	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
+	netCfg := &clparams.NetworkConfig{MaximumGossipClockDisparity: clparams.ConfigDurationMSec(500 * time.Millisecond)}
+
+	const slot = 12345
+	got := syncCommitteeMessageExpiry(ethClock, netCfg, slot)
+	want := ethClock.GetSlotTime(slot + 1).Add(500 * time.Millisecond)
+	require.Equal(t, want, got)
+	require.NotEqual(t, ethClock.GetSlotTime(slot).Add(500*time.Millisecond), got,
+		"sanity: must be keyed off slot+1 (slot end), not slot (slot start)")
+}
+
+// TestPoolSyncCommitteesUsesCalculatedExpiry proves the handler actually
+// wires syncCommitteeMessageExpiry's result into PublishBackground for the
+// message's own slot, not just that it calls PublishBackground at all.
+func TestPoolSyncCommitteesUsesCalculatedExpiry(t *testing.T) {
+	const msgSlot = 1
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            msgSlot,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	wantExpiry := syncCommitteeMessageExpiry(handler.ethClock, handler.netConfig, msgSlot)
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	gotExpiry := make(chan time.Time, 1)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(name string, data []byte, expiry time.Time, logCtx ...any) error {
+			select {
+			case gotExpiry <- expiry:
+			default:
+			}
+			return nil
+		},
+	).MinTimes(1)
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+
+	select {
+	case got := <-gotExpiry:
+		require.Equal(t, wantExpiry, got)
+	case <-time.After(2 * time.Second):
+		t.Fatal("PublishBackground was never called")
+	}
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {
