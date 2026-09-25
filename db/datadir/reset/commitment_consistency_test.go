@@ -186,3 +186,19 @@ func TestResetAllowsMixedBuildsBelowReferencingThreshold(t *testing.T) {
 		qt.Assert(t, qt.IsNil(r.Run()))
 	})
 }
+
+// Legacy files carry a bare major version, which RenameOldVersions rewrites to the dotted spelling
+// — but reset does not run that first, so it has to recognise both.
+func TestResetRefusesMixedBuildsWithLegacyVersionNames(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{{Name: "snapshots/domain/v1-commitment.0-256.kv"}}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.0-256.kv"}}
+		r.PreverifiedSnapshots.Sort()
+		err := r.Run()
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+	})
+}

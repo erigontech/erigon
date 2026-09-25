@@ -45,8 +45,10 @@ type Reset struct {
 	}
 }
 
-// stateKVName matches a domain data file, capturing its version, domain and step range.
-var stateKVName = regexp.MustCompile(`^(v[0-9]+\.[0-9]+)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
+// stateKVName matches a domain data file, capturing its version, domain and step range. The minor
+// component is optional because a datadir can still hold legacy "v1-" names: RenameOldVersions
+// rewrites them to the dotted spelling, and reset does not run it first.
+var stateKVName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
 
 // domainBuild is what a step range will hold for one domain once reset is done and the downloader
 // has fetched what the manifest describes.
