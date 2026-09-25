@@ -793,7 +793,7 @@ func rpcToolCalls() []toolCall {
 				{name: "toBlock", desc: "End block", kind: pString},
 				{name: "fromAddress", desc: "Sender address(es), single or JSON array", kind: pString},
 				{name: "toAddress", desc: "Recipient address(es), single or JSON array", kind: pString},
-				{name: "mode", desc: "Address filter mode: union (default) or intersection", kind: pString},
+				{name: "mode", desc: "Address filter mode: intersection (default) or union", kind: pString},
 				{name: "count", desc: "Maximum traces to return (default: 100, max: 1000)", kind: pInt, defInt: 100},
 			},
 			build:  buildTraceFilter,

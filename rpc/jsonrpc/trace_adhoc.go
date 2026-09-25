@@ -74,9 +74,16 @@ type TraceCallParam struct {
 	MaxFeePerBlobGas     *hexutil.U256     `json:"maxFeePerBlobGas"`
 	Value                *hexutil.U256     `json:"value"`
 	Data                 hexutil.Bytes     `json:"data"`
+	Input                hexutil.Bytes     `json:"input"`
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
 	traceTypes           []string
+
+	// Converted as ethapi.CallArgs converts them for eth_call.
+	Nonce               *hexutil.Uint64           `json:"nonce"`
+	ChainID             *hexutil.U256             `json:"chainId"`
+	BlobVersionedHashes []common.Hash             `json:"blobVersionedHashes"`
+	AuthorizationList   []types.JsonAuthorization `json:"authorizationList"`
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -219,7 +226,9 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 		value.Set((*uint256.Int)(args.Value))
 	}
 	var data []byte
-	if args.Data != nil {
+	if args.Input != nil {
+		data = args.Input
+	} else if args.Data != nil {
 		data = args.Data
 	}
 	var accessList types.AccessList
@@ -231,7 +240,24 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	if args.To != nil {
 		to = accounts.InternAddress(*args.To)
 	}
-	msg := types.NewMessage(addr, to, 0, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
+	var nonce uint64
+	if args.Nonce != nil {
+		nonce = uint64(*args.Nonce)
+	}
+	msg := types.NewMessage(addr, to, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
+	if args.BlobVersionedHashes != nil {
+		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
+	}
+	if args.AuthorizationList != nil {
+		authorizations := make([]types.Authorization, len(args.AuthorizationList))
+		for i := range args.AuthorizationList {
+			var err error
+			if authorizations[i], err = args.AuthorizationList[i].ToAuthorization(); err != nil {
+				return nil, err
+			}
+		}
+		msg.SetAuthorizations(authorizations)
+	}
 	return msg, nil
 }
 
@@ -305,6 +331,11 @@ type OeTracer struct {
 
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
 func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
+	var chainID uint256.Int
+	if args.ChainID != nil {
+		chainID = uint256.Int(*args.ChainID)
+	}
+
 	msg, err := args.ToMessage(globalGasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -312,6 +343,53 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 
 	var tx types.Transaction
 	switch {
+	case args.AuthorizationList != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		tx = &types.SetCodeTransaction{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    *msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     *msg.FeeCap(),
+				TipCap:     *msg.TipCap(),
+				AccessList: al,
+			},
+			Authorizations: msg.Authorizations(),
+		}
+	case args.BlobVersionedHashes != nil:
+		al := types.AccessList{}
+		if args.AccessList != nil {
+			al = *args.AccessList
+		}
+		var maxFeePerBlobGas uint256.Int
+		if args.MaxFeePerBlobGas != nil {
+			maxFeePerBlobGas = uint256.Int(*args.MaxFeePerBlobGas)
+		}
+		tx = &types.BlobTx{
+			DynamicFeeTransaction: types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{
+					Nonce:    msg.Nonce(),
+					GasLimit: msg.Gas(),
+					To:       args.To,
+					Value:    *msg.Value(),
+					Data:     msg.Data(),
+				},
+				ChainID:    chainID,
+				FeeCap:     *msg.FeeCap(),
+				TipCap:     *msg.TipCap(),
+				AccessList: al,
+			},
+			MaxFeePerBlobGas:    maxFeePerBlobGas,
+			BlobVersionedHashes: args.BlobVersionedHashes,
+		}
 	case args.MaxFeePerGas != nil:
 		al := types.AccessList{}
 		if args.AccessList != nil {
@@ -325,6 +403,7 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 				Value:    *msg.Value(),
 				Data:     msg.Data(),
 			},
+			ChainID:    chainID,
 			FeeCap:     *msg.FeeCap(),
 			TipCap:     *msg.TipCap(),
 			AccessList: al,
@@ -341,6 +420,7 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 				},
 				GasPrice: *msg.GasPrice(),
 			},
+			ChainID:    chainID,
 			AccessList: *args.AccessList,
 		}
 	default:
