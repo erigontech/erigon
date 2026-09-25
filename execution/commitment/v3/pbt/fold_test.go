@@ -254,6 +254,25 @@ func foldReferenceRows(t *testing.T, built *referenceRows, sum eip8297.HashFn) {
 	slices.SortFunc(keys, func(a, b string) int {
 		return int(recordPath([]byte(b)).BitLen - recordPath([]byte(a)).BitLen)
 	})
+	type parentLink struct {
+		key  string
+		slot int
+	}
+	parents := make(map[string][]parentLink, len(keys))
+	for parentKey, parent := range built.rows {
+		parentPath := recordPath([]byte(parentKey))
+		for slot := range parent.Cells {
+			cell := &parent.Cells[slot]
+			if cell.Kind != BranchCell {
+				continue
+			}
+			split := branchSplit(&rowNode{path: parentPath}, slot, &rowCell{Cell: *cell})
+			childPath, err := rowChildPath(&rowNode{path: parentPath}, slot, cell.Prefix, split)
+			require.NoError(t, err)
+			childKey := string(rootKey(childPath))
+			parents[childKey] = append(parents[childKey], parentLink{key: parentKey, slot: slot})
+		}
+	}
 	results := make(map[string]FoldResult, len(keys))
 	for _, key := range keys {
 		record := built.rows[key]
@@ -262,22 +281,10 @@ func foldReferenceRows(t *testing.T, built *referenceRows, sum eip8297.HashFn) {
 		want := referenceFoldResult(built.referenceNodes[key], built.referenceSplits[key], sum)
 		require.Equalf(t, want, got, "row %x", key)
 		results[key] = got
-		for parentKey, parent := range built.rows {
-			parentPath := recordPath([]byte(parentKey))
-			for slot := range parent.Cells {
-				cell := &parent.Cells[slot]
-				if cell.Kind != BranchCell {
-					continue
-				}
-				split := branchSplit(&rowNode{path: parentPath}, slot, &rowCell{Cell: *cell})
-				childPath, err := rowChildPath(&rowNode{path: parentPath}, slot, cell.Prefix, split)
-				require.NoError(t, err)
-				if string(rootKey(childPath)) != key {
-					continue
-				}
-				cell.Left, cell.Right = got.Left, got.Right
-				built.rows[parentKey] = parent
-			}
+		for _, link := range parents[key] {
+			parent := built.rows[link.key]
+			parent.Cells[link.slot].Left, parent.Cells[link.slot].Right = got.Left, got.Right
+			built.rows[link.key] = parent
 		}
 	}
 	if built.root.Form == RowRoot {
