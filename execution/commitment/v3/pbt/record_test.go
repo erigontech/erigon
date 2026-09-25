@@ -311,11 +311,11 @@ func TestRecordRejectsNonCanonical(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			require.NotPanics(t, func() {
+				_, err = DecodeRecord(tt.key, tt.data)
+			})
 			var got *RecordError
-			err := func() error {
-				_, err := DecodeRecord(tt.key, tt.data)
-				return err
-			}()
 			require.ErrorAs(t, err, &got)
 			require.Equal(t, tt.want, got.Rule)
 			if tt.want == FormatError {
