@@ -135,6 +135,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	require.NotNil(t, actual)
 	assert.Equal(expectedRPCLogs, actual)
 
+	stampedAt := hexutil.Uint64(100)
 	expectedLog := &types.Log{
 		Address:        common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
 		Topics:         []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
@@ -145,7 +146,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		BlockHash:      common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
 		Index:          0,
 		Removed:        false,
-		BlockTimestamp: 100,
+		BlockTimestamp: &stampedAt,
 	}
 	assert.Equal(expectedLog, actual[0])
 }
