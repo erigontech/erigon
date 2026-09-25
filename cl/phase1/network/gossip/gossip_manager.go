@@ -70,6 +70,7 @@ var (
 	ErrPublishQueueFull      = errors.New("gossip: publish queue full")
 	ErrGossipManagerShutdown = errors.New("gossip: manager shut down")
 	ErrPublishJobExpired     = errors.New("gossip: message expired before publish")
+	ErrPublishForkDigest     = errors.New("gossip: failed to resolve fork digest")
 )
 
 // publishQueueDroppedCounter counts messages that were never admitted to
@@ -439,7 +440,7 @@ func (g *GossipManager) PublishBackground(name string, data []byte, expiry time.
 		publishQueueDroppedCounter.WithLabelValues(name, "fork_digest_error").Inc()
 		fields := append([]any{"topic", name, "err", err}, logCtx...)
 		log.Warn("[GossipManager] failed to resolve fork digest, dropping message", fields...)
-		return fmt.Errorf("resolve fork digest: %w", err)
+		return fmt.Errorf("%w: %w", ErrPublishForkDigest, err)
 	}
 	if g.enqueueHookForTest != nil {
 		g.enqueueHookForTest()

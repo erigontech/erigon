@@ -1228,6 +1228,36 @@ func (s *subscribeUpcomingTopicsTestSuite) TestRunPublishJob_DropsExpiredJobWith
 		"the fresh job must not be dropped as expired just because it was queued behind one that was")
 }
 
+// TestPublishBackground_ForkDigestFailureIsStableSentinel proves a
+// fork-digest resolution failure at admission can be classified by callers
+// via errors.Is, the same way the other admission failures already can -
+// wrapping only the clock's own error would make that depend on whatever
+// error type the clock implementation happens to return.
+//
+// Builds the GossipManager directly rather than through NewGossipManager:
+// goCheckForkAndResubscribe makes its own eager, unrelated CurrentForkDigest
+// call at startup and panics on error, which a mock clock that always
+// errors would otherwise trigger as an unrelated side effect of this test.
+// PublishBackground doesn't need any of that constructor's background
+// goroutines - it fails before ever touching the queue a worker would drain.
+func TestPublishBackground_ForkDigestFailureIsStableSentinel(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+	clockErr := errors.New("boom: clock unavailable")
+	mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{}, clockErr).AnyTimes()
+
+	gm := &GossipManager{
+		ethClock:     mockClock,
+		lifetimeCtx:  context.Background(),
+		publishQueue: make(chan publishJob, 1),
+		nowFunc:      time.Now,
+	}
+
+	err := gm.PublishBackground("topic", nil, time.Time{})
+	require.ErrorIs(t, err, ErrPublishForkDigest)
+	require.ErrorIs(t, err, clockErr, "the underlying clock error should still be inspectable, not just the sentinel")
+}
+
 // TestPublishBackground_ExpiryBoundary proves the exact inclusive boundary
 // the consensus spec's gossip validation uses is preserved: admission is
 // rejected only once now strictly exceeds the expiry deadline, not at or
