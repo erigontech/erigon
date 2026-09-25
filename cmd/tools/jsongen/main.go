@@ -232,15 +232,17 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 		if jsonTag == "-" { // a lone dash skips the field; `-,` names it "-"
 			continue
 		}
-		omitempty := false
+		omitempty, omitzero := false, false
 		for opt := range strings.SplitSeq(opts, ",") {
 			switch opt {
 			case "":
 			case "omitempty":
 				omitempty = true
+			case "omitzero":
+				omitzero = true
 			default:
-				// omitzero and string change what encoding/json writes, so ignoring one
-				// would leave the tags and the bytes disagreeing.
+				// string changes what encoding/json writes, so ignoring it would leave the
+				// tags and the bytes disagreeing.
 				return fmt.Errorf("%s: json option %q is not implemented", f.Name(), opt)
 			}
 		}
@@ -257,7 +259,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 		}
 		written[name] = struct{}{}
 
-		stmt, err := fieldStatement(recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), omitempty)
+		stmt, err := fieldStatement(recv+"."+f.Name(), name, tag.Get("ethjson"), f.Type(), omitempty, omitzero)
 		if err != nil {
 			return fmt.Errorf("%s: %w", f.Name(), err)
 		}
@@ -269,7 +271,7 @@ func writeFields(w *bytes.Buffer, st *types.Struct, recv string, written map[str
 // fieldStatement picks the writer for one field from its declared form. A field its json tag
 // lets omit is wrapped in the presence test encoding/json would apply; without omitempty, a nil
 // pointer or interface is written as null, while a nil slice keeps its form's empty value.
-func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (string, error) {
+func fieldStatement(ref, name, form string, t types.Type, omitempty, omitzero bool) (string, error) {
 	_, pointer := t.Underlying().(*types.Pointer)
 	_, iface := t.Underlying().(*types.Interface)
 
@@ -339,6 +341,13 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 	}
 
 	switch {
+	case omitzero:
+		// encoding/json asks an IsZero method first, and a nil test is only its answer
+		// for a type without one.
+		if !(pointer || iface || isLenable(t)) || types.NewMethodSet(t).Lookup(nil, "IsZero") != nil {
+			return "", fmt.Errorf("omitzero is implemented for a nil-able type without IsZero only, not %s", t)
+		}
+		return fmt.Sprintf("\tif %s != nil {\n\t\t%s\n\t}\n", ref, write), nil
 	case omitempty:
 		return fmt.Sprintf("\tif %s {\n\t\t%s\n\t}\n", present, write), nil
 	case pointer || iface: // absent, and the tag does not allow leaving it out

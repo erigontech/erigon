@@ -73,6 +73,7 @@ type Sample struct {
 	OptNested  *Inner               `json:"optNested,omitempty" ethjson:"objects"`
 	Inners     Inners               `json:"inners" ethjson:"objects"`
 	OptInners  Inners               `json:"optInners,omitempty" ethjson:"objects"`
+	ZeroInners Inners               `json:"zeroInners,omitzero" ethjson:"objects"`
 	Renamed    uint64               `json:",omitempty" ethjson:"quantity"`
 	Skipped    string               `json:"-"`
 	unexported int                  //nolint:unused

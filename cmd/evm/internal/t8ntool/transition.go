@@ -425,7 +425,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 		return uint256.Int(*b)
 	}
 	value := deref(txJson.Value)
-	gasPrice := deref(txJson.GasPrice)
+	gasPrice := uint256.Int(txJson.GasPrice)
 	chainId := deref(txJson.ChainID)
 	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 
@@ -462,7 +462,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				GasPrice: gasPrice,
 			},
 			ChainID:    chainId,
-			AccessList: *txJson.Accesses,
+			AccessList: txJson.Accesses,
 		}, nil
 	case txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType:
 		tipCap := deref(txJson.MaxPriorityFeePerGas)
@@ -483,7 +483,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
-				AccessList: *txJson.Accesses,
+				AccessList: txJson.Accesses,
 			}, nil
 		}
 
@@ -513,7 +513,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 				ChainID:    chainId,
 				TipCap:     tipCap,
 				FeeCap:     feeCap,
-				AccessList: *txJson.Accesses,
+				AccessList: txJson.Accesses,
 			},
 			Authorizations: auths,
 		}, nil
