@@ -144,6 +144,11 @@ type EngineReader interface {
 
 	GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc
 
+	// StorageOverrides returns the committed-storage overrides of every canonical
+	// transaction that needs them, for chains whose sealing client canonicalized a
+	// storage bug. Engines without such history return nil.
+	StorageOverrides() state.StorageOverrideTable
+
 	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
 		receipts types.Receipts, txns types.Transactions, logger log.Logger) error

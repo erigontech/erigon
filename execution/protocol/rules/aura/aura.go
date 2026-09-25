@@ -1200,6 +1200,10 @@ func (c *AuRa) GetTransferFunc() evmtypes.TransferFunc {
 	return misc.Transfer
 }
 
+func (c *AuRa) StorageOverrides() state.StorageOverrideTable {
+	return nil
+}
+
 func (c *AuRa) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
 }

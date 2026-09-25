@@ -626,7 +626,7 @@ func (api *BaseAPI) buildAccessedState(
 	})
 
 	// Create the in-block state with the recording state as reader
-	ibs := state.New(recordingState)
+	ibs := state.New(recordingState, state.WithStorageOverrides(engine))
 	defer ibs.Close()
 
 	// Get header for block context
@@ -2058,7 +2058,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	})
 
 	// Create the in-block state with the witness stateless as reader
-	ibs := state.New(stateless)
+	ibs := state.New(stateless, state.WithStorageOverrides(engine))
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()

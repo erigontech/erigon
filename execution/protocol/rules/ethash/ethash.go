@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash/ethashcfg"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/rpc"
@@ -603,6 +604,10 @@ func SeedHash(block uint64) []byte {
 
 func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
 	return misc.Transfer
+}
+
+func (ethash *Ethash) StorageOverrides() state.StorageOverrideTable {
+	return nil
 }
 
 func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {

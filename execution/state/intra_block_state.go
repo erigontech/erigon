@@ -160,6 +160,11 @@ type IntraBlockState struct {
 	// Per-transaction access list
 	accessList accessList
 
+	// Engine-supplied committed values for individual storage slots, valid for
+	// the current transaction only. See SetStorageOverride.
+	storageOverrides     map[storageOverrideKey]uint256.Int
+	storageOverrideTable StorageOverrideTable
+
 	// Transient storage
 	transientStorage transientStorage
 
@@ -235,7 +240,7 @@ type sdProbeEntry struct {
 }
 
 // Create a new state from a given trie
-func New(stateReader StateReader) *IntraBlockState {
+func New(stateReader StateReader, opts ...Option) *IntraBlockState {
 	ibs := &IntraBlockState{
 		stateReader:       stateReader,
 		stateObjects:      map[accounts.Address]*stateObject{},
@@ -251,6 +256,9 @@ func New(stateReader StateReader) *IntraBlockState {
 		dep:               UnknownDep,
 	}
 	ibs.revisions.init()
+	for _, opt := range opts {
+		opt(ibs)
+	}
 	return ibs
 }
 
@@ -396,6 +404,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.clearJournalAndRefund()
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
+	sdb.storageOverrides = nil
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -954,6 +963,11 @@ func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.Storage
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetCommittedState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	versionedValue, source, _, err := readCommittedState(sdb, addr, key)
+	if err == nil {
+		if override, ok := sdb.storageOverride(addr, key); ok {
+			versionedValue = override
+		}
+	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		fmt.Printf("%d (%d.%d) GetCommittedState (%s) %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, versionedValue.Hex()[2:])
@@ -2599,6 +2613,7 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
+	sdb.storageOverrides = nil
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			if _, err := sdb.getStateObject(addr, true); err != nil {
@@ -2852,6 +2867,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	sdb.txIndex = ti
 	sdb.blockNum = bn
 	sdb.sdProbeEpoch++
+	sdb.installStorageOverrides()
 }
 
 // no not lock

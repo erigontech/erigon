@@ -165,7 +165,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	statedb := state.New(stateReader)
+	statedb := state.New(stateReader, state.WithStorageOverrides(api.engine()))
 	defer statedb.Close()
 
 	header := block.HeaderNoCopy()
@@ -329,7 +329,7 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 					results[task.idx] = &blockReplayResult{BlockNumber: task.BlockNumber, Error: err.Error()}
 					continue
 				}
-				statedb := state.New(stateReader)
+				statedb := state.New(stateReader, state.WithStorageOverrides(api.engine()))
 				func() {
 					defer statedb.Close()
 					if hasStateOverrides {

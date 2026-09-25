@@ -54,7 +54,9 @@ type BlockGetter interface {
 	GetBlock(hash common.Hash, number uint64) *types.Block
 }
 
-// ComputeBlockContext returns the execution environment of a certain block.
+// ComputeBlockContext returns the execution environment of a certain block. The
+// IBS carries the chain's storage overrides, so it is only for replaying the
+// block's own transactions.
 func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header *types.Header, cfg *chain.Config,
 	headerReader dbservices.HeaderReader, stateCache kvcache.Cache, txNumsReader rawdbv3.TxNumsReader, dbtx kv.TemporalTx,
 	txIndex int) (*state.IntraBlockState, evmtypes.BlockContext, state.StateReader, *chain.Rules, *types.Signer, error) {
@@ -77,7 +79,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 	}
 
 	// Create the parent state database
-	statedb := state.New(reader)
+	statedb := state.New(reader, state.WithStorageOverrides(engine))
 
 	getHeader := func(hash common.Hash, n uint64) (*types.Header, error) {
 		return headerReader.HeaderByNumber(ctx, dbtx, n)

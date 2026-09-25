@@ -78,12 +78,17 @@ type Parlia struct {
 	signer      *types.Signer
 	logger      log.Logger
 	upgrades    []systemContractUpgrade
+
+	storageOverrides state.StorageOverrideTable
 }
 
 func New(chainConfig *chain.Config, logger log.Logger) *Parlia {
 	p := &Parlia{chainConfig: chainConfig, signer: types.LatestSigner(chainConfig), logger: logger}
 	if chainConfig.Parlia != nil {
 		p.upgrades = parseSystemContractUpgrades(chainConfig.Parlia.BlockAlloc)
+	}
+	if chainConfig.ChainID != nil {
+		p.storageOverrides = hertzFixPatches[chainConfig.ChainID.Uint64()]
 	}
 	return p
 }
