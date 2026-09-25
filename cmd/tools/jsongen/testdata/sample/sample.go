@@ -65,11 +65,21 @@ type Sample struct {
 	Flag       bool                 `json:"flag" ethjson:"bool"`
 	OptFlag    bool                 `json:"optFlag,omitempty" ethjson:"bool"`
 	Logs       jsonstream.Marshaler `json:"logs" ethjson:"objects"`
+	OptLogs    jsonstream.Marshaler `json:"optLogs,omitempty" ethjson:"objects"`
 	Nested     *Inner               `json:"nested" ethjson:"objects"`
+	OptNested  *Inner               `json:"optNested,omitempty" ethjson:"objects"`
+	Inners     Inners               `json:"inners" ethjson:"objects"`
+	OptInners  Inners               `json:"optInners,omitempty" ethjson:"objects"`
+	ZeroInners Inners               `json:"zeroInners,omitzero" ethjson:"objects"`
 	Renamed    uint64               `json:",omitempty" ethjson:"quantity"`
 	Skipped    string               `json:"-"`
 	unexported int                  //nolint:unused
 }
+
+// Inners is a named slice, whose emptiness len reports, so it may be omitempty.
+type Inners []Inner
+
+func (in Inners) MarshalFastJSONTo(s *jsonstream.StackStream) error { return nil }
 
 // Inner writes itself, which is what an objects field needs of its type.
 func (x *Inner) MarshalFastJSONTo(s *jsonstream.StackStream) error { return nil }
