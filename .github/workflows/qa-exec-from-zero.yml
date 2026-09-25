@@ -40,7 +40,11 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - chain: gnosis   # Chain name as specified on the erigon command line
+        #  - chain: hoodi   # Chain name as specified on the erigon command line
+        #    tracking_time_seconds: 3600
+        #    total_time_seconds: 43200  # 12 hours
+        #    timeout_minutes: 840       # 14 hours
+          - chain: gnosis
             tracking_time_seconds: 7200
             total_time_seconds: 2937600  # 34 days
             timeout_minutes: 50400       # 35 days, the workflow-run limit
@@ -52,10 +56,6 @@ jobs:
         #    tracking_time_seconds: 7200
         #    total_time_seconds: 151200 # 42 hours
         #    timeout_minutes: 2760      # 46 hours
-        #  - chain: hoodi
-        #    tracking_time_seconds: 3600
-        #    total_time_seconds: 43200  # 12 hours
-        #    timeout_minutes: 840       # 14 hours
         #  - chain: chiado
         #    tracking_time_seconds: 3600
         #    total_time_seconds: 21600  # 6 hours
@@ -166,10 +166,51 @@ jobs:
         name: fd-leak-analysis-${{ env.CHAIN }}-exec-from-zero
         path: ${{ github.workspace }}/fd-leak-analysis-${{ env.CHAIN }}.md
 
-    # Erigon has stopped by now, so the .torrent files it wrote for the state
-    # snapshots it built are final. Their infohashes are what the published
-    # preverified.toml lists, which makes the comparison a plain name-to-hash
-    # lookup rather than a re-hash of the datadir.
+    - name: List the files in the Erigon data directory
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      run: |
+        python3 "$GITHUB_WORKSPACE/.github/workflows/scripts/list_datadir_files.py" \
+          "$ERIGON_DATA_DIR" "$GITHUB_WORKSPACE/datadir-files-$CHAIN-before-retire.txt"
+
+    # The node stops wherever the tracking window ended, leaving state in the DB
+    # and merges pending. Merge order compounds that: a domain merges its history
+    # only once its own value merges are done, and the standalone inverted indexes
+    # merge only once no domain merge is pending, so an interrupted node leaves
+    # history and idx as small files whose names match nothing published. seg
+    # retire is what the publishing pipeline runs on a stopped node: it flushes
+    # the DB to files and drains the merges.
+    #
+    # The published sets are built with the domain merge cap lifted, so their
+    # domain files span more steps than erigondb.toml allows (mainnet publishes
+    # 1024- and 8192-step domain files against a 256-step cap on history and
+    # idx). Inf reproduces that here: without it no domain file name would ever
+    # line up and the whole domain side would go uncompared.
+    - name: Flush and merge the state snapshots before comparing
+      if: ${{ steps.test_step.outputs.TEST_RESULT == 'success' }}
+      run: |
+        "$GITHUB_WORKSPACE/build/bin/erigon" seg retire --datadir "$ERIGON_DATA_DIR" \
+          --erigondb.domain.steps-in-frozen-file=Inf
+
+    - name: List the files in the Erigon data directory after the merge
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      run: |
+        python3 "$GITHUB_WORKSPACE/.github/workflows/scripts/list_datadir_files.py" \
+          "$ERIGON_DATA_DIR" "$GITHUB_WORKSPACE/datadir-files-$CHAIN-after-retire.txt"
+
+    - name: Upload the Erigon data directory file lists
+      if: ${{ always() && steps.test_step.outputs.test_executed == 'true' }}
+      uses: actions/upload-artifact@v7
+      with:
+        name: datadir-files-${{ env.CHAIN }}-exec-from-zero
+        path: |
+          ${{ github.workspace }}/datadir-files-${{ env.CHAIN }}-*-retire.txt
+          ${{ env.ERIGON_DATA_DIR }}/snapshots/preverified.toml
+          ${{ env.ERIGON_DATA_DIR }}/snapshots/erigondb.toml
+
+    # Without --rebuild, torrent_hashes reads only the .torrent files already in
+    # the datadir, which need not cover every snapshot on disk. --rebuild recreates
+    # them from the snapshot files, so every built snapshot gets an infohash
+    # comparable with the ones in the published preverified.toml.
     #
     # Restricted to the data files: accessors and indexes are salt-seeded and so
     # are not comparable across nodes (see STATE_DATA_EXTS in the compare script).
@@ -179,7 +220,7 @@ jobs:
       run: |
         set +e # Disable exit on error
 
-        "$GITHUB_WORKSPACE/build/bin/downloader" torrent_hashes \
+        "$GITHUB_WORKSPACE/build/bin/downloader" torrent_hashes --rebuild \
           --datadir "$ERIGON_DATA_DIR" --chain "$CHAIN" > "$GITHUB_WORKSPACE/hashes-$CHAIN.txt"
         hashes_exit_status=$?
 

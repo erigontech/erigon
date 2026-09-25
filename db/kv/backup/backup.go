@@ -133,38 +133,33 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	}
 	// 0700: the copy holds the db's contents for the whole run, before the
 	// original's mode is applied to it.
-	if err := os.MkdirAll(tmpDir, 0700); err != nil {
+	if err := os.MkdirAll(tmpDir, 0o700); err != nil {
 		return err
 	}
 	defer dir.RemoveAll(tmpDir) //nolint:errcheck
 
-	logger.Info("[compact] compacting", "label", label, "db", dbDir, "size", common.ByteCount(uint64(before.Size())))
-	if err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger); err != nil {
+	start := time.Now()
+	src, err := copyToDir(ctx, dbDir, tmpDir, label, growthStepFor(before.Size()), logger)
+	if err != nil {
 		return err
 	}
-
-	// Mode and owner are applied before the rename, the last step that may fail.
-	copied := filepath.Join(tmpDir, dataFileName)
-	if err := os.Chmod(copied, before.Mode().Perm()); err != nil {
-		return err
-	}
-	if err := restoreOwner(before, copied); err != nil {
-		return err
-	}
-	if err := os.Rename(copied, dataFile); err != nil {
+	closeBeforeRename(src)
+	err = moveOver(filepath.Join(tmpDir, dataFileName), dataFile, before)
+	src.Close()
+	if err != nil {
 		return err
 	}
 
 	// The db is compacted from here on, so nothing below may fail the call: an
 	// error would report a successful compaction as failed and make CompactDatadir
 	// skip the datadir's remaining databases.
+	if err := restoreOwner(before, filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
+		logger.Warn("[compact] restore lock file owner", "db", dbDir, "err", err)
+	}
 	if err := dir.FsyncDir(dbDir); err != nil {
 		logger.Warn("[compact] fsync dir", "db", dbDir, "err", err)
 	}
-	if err := dir.RemoveFile(filepath.Join(dbDir, lockFileName)); err != nil && !os.IsNotExist(err) {
-		logger.Warn("[compact] stale lock file left behind", "db", dbDir, "err", err)
-	}
-	args := []any{"label", label, "db", dbDir, "before", common.ByteCount(uint64(before.Size()))}
+	args := []any{"label", label, "db", dbDir, "took", time.Since(start), "before", common.ByteCount(uint64(before.Size()))}
 	if after, err := os.Stat(dataFile); err == nil {
 		args = append(args, "after", common.ByteCount(uint64(after.Size())))
 	} else {
@@ -174,16 +169,30 @@ func CompactInPlace(ctx context.Context, dbDir string, label kv.Label, logger lo
 	return nil
 }
 
-// copyToDir closes both databases before it returns: the caller moves the copy,
-// which must not happen while mdbx still holds the file open.
-func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep datasize.ByteSize, logger log.Logger) error {
-	src, dst, err := openPair(ctx, from, to, label, true, 0, growthStep, nil, logger)
-	if err != nil {
+// moveOver gives the copy the mode and owner of the original, then renames it over the original.
+func moveOver(copied, original string, before os.FileInfo) error {
+	if err := os.Chmod(copied, before.Mode().Perm()); err != nil {
 		return err
 	}
-	defer src.Close()
-	defer dst.Close()
-	return Kv2kv(ctx, src, dst, nil, logger)
+	if err := restoreOwner(before, copied); err != nil {
+		return err
+	}
+	return os.Rename(copied, original)
+}
+
+// copyToDir closes the copy before it returns and returns src still open.
+func copyToDir(ctx context.Context, from, to string, label kv.Label, growthStep datasize.ByteSize, logger log.Logger) (kv.RoDB, error) {
+	src, dst, err := openPair(ctx, from, to, label, true, 0, growthStep, nil, logger)
+	if err != nil {
+		return nil, err
+	}
+	err = Kv2kv(ctx, src, dst, nil, logger)
+	dst.Close()
+	if err != nil {
+		src.Close()
+		return nil, err
+	}
+	return src, nil
 }
 
 // tablesOnDisk opens every table the file actually holds and reads back the flags
@@ -247,7 +256,7 @@ func Kv2kv(ctx context.Context, src kv.RoDB, dst kv.RwDB, tables []string, logge
 			copiedRows += rows
 		}
 	}
-	logger.Info("[db-copy] done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
+	logger.Debug("[db-copy] done", "tablesWithData", copiedTables, "rows", common.PrettyCounter(copiedRows))
 	return nil
 }
 
@@ -266,12 +275,7 @@ func backupTable(ctx context.Context, src kv.RoDB, srcTx kv.Tx, dst kv.RwDB, tab
 	if err != nil {
 		return 0, err
 	}
-	if total > 0 {
-		logger.Info("[db-copy] copying", "table", table, "rows", common.PrettyCounter(total), "size", common.ByteCount(size))
-	}
-
-	// Read-ahead warms pages (values too — the copy reads them) just ahead of the
-	// copy cursor. No-op unless WARMUP_TABLE_WORKERS is set.
+	// Read-ahead warms pages (values too) just ahead of the copy cursor.
 	var ra *kv.ReadAhead
 	if workers := int(dbg.WarmupTableWorkers); workers > 0 && total > 0 {
 		bounds, _, err := kv.DistributeBounds(srcTx, table)
@@ -408,7 +412,8 @@ func clearTable(ctx context.Context, db kv.RoDB, tx kv.RwTx, table string) error
 			}
 			now := time.Now()
 			secs := now.Sub(lastLog).Seconds()
-			log.Info("[clear]", "table", table,
+			log.Info(
+				"[clear]", "table", table,
 				"speed", common.ByteCount(uint64(float64(lastSize-remaining)/secs))+"/s",
 				"keys", common.PrettyCounter(uint64(float64(deleted-lastDeleted)/secs))+"/s",
 				"remaining", common.ByteCount(remaining),

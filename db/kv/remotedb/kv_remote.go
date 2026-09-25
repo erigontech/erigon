@@ -50,8 +50,10 @@ type remoteOpts struct {
 	version     gointerfaces.Version
 }
 
-var _ kv.TemporalTx = (*tx)(nil)
-var _ kv.TemporalRoDB = (*DB)(nil)
+var (
+	_ kv.TemporalTx   = (*tx)(nil)
+	_ kv.TemporalRoDB = (*DB)(nil)
+)
 
 type DB struct {
 	remoteKV     remoteproto.KVClient
@@ -910,15 +912,6 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v [
 func (tx *tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
 	v, _, err := tx.GetLatest(name, k, kv.GetLatestOptions{})
 	return len(v), len(v) > 0, err
-}
-
-func (tx *tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	req := &remoteproto.HasPrefixReq{TxId: tx.id, Table: name.String(), Prefix: prefix}
-	reply, err := tx.db.remoteKV.HasPrefix(tx.ctx, req)
-	if err != nil {
-		return nil, nil, false, err
-	}
-	return reply.FirstKey, reply.FirstVal, reply.HasPrefix, nil
 }
 
 func (tx *tx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uint64, asc order.By, limit int) (it stream.KV, err error) {

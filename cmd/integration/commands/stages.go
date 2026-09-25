@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal"
@@ -251,6 +252,12 @@ var cmdRunMigrations = &cobra.Command{
 	Short: "",
 	Run: func(cmd *cobra.Command, args []string) {
 		logger := debug.SetupCobra(cmd, "integration")
+		if isDefaultChaindata(chaindata, datadirCli) {
+			if err := backup.ApplyMigrations(cmd.Context(), datadir.New(datadirCli), logger); err != nil {
+				logger.Error("Apply migrations", "error", err)
+				return
+			}
+		}
 		migrateDB := func(label kv.Label, path string) {
 			if err := runMigrationsForDB(label, path, logger); err != nil {
 				logger.Error("Opening DB", "error", err)
@@ -409,10 +416,6 @@ func stageSnapshots(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) 
 
 func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	br, bw := blocksIO(db, logger)
 
 	if integritySlow {
@@ -568,7 +571,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			if err != nil {
 				return err
 			}
-			withoutSenders.Body().SendersFromTxs() //remove senders info from txs
+			withoutSenders.Body().SendersFromTxs() // remove senders info from txs
 			txs := withoutSenders.Transactions()
 			if txs.Len() != len(senders) {
 				logger.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
@@ -697,10 +700,6 @@ func resolveExecTarget(block, limit, execProgress, sendersProgress uint64) (targ
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	defer startExecProfiling(dirs, logger)()
-
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
 
 	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
@@ -831,15 +830,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if dbg.UseStateCache {
 		execStateCache = cache.NewDefaultStateCache()
 	}
-	var execCodeStore *cache.CodeStore
-	if dbg.UseCodeStore {
-		execCodeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
-	}
 
 	collateAndPrune := func() error {
 		_, _, err := temporalDB.CollateAndPrune(ctx, func(tx kv.TemporalRwTx) (kv.FinalityContext, error) {
-			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle,
-				execfinality.WithoutFinalisedBlock(), execfinality.WithTxNumsReader(db, br.TxnumReader()))
+			finalityCtx, err := execfinality.Resolve(tx, sync.Cfg().MaxReorgDepth, s.CurrentSyncCycle.IsInitialCycle, br.TxnumReader(), execfinality.WithoutFinalisedBlock())
 			if err != nil {
 				return nil, err
 			}
@@ -858,7 +852,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		// so starting at execProgress would re-target a block already executed
 		// and stopping below block would never execute the last one.
 		for bn := execProgress + 1; bn <= block; bn++ {
-			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, execStateCache, execCodeStore, logger); err != nil {
+			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, execStateCache, logger); err != nil {
 				return err
 			}
 			if err := collateAndPrune(); err != nil {
@@ -878,7 +872,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg.LockWorkersEditing()
 
 	for {
-		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, true, execStateCache, execCodeStore, logger)
+		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, true, execStateCache, logger)
 		if err != nil {
 			return err
 		}
@@ -899,7 +893,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 // SharedDomains per call avoids reusing a committed (spent) one. Pruning and
 // file-building are the caller's job (agg.CollateAndPrune). Returns the Execution
 // stage progress after the batch.
-func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, stateCache *cache.StateCache, codeStore *cache.CodeStore, logger log.Logger) (uint64, error) {
+func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, stateCache *cache.StateCache, logger log.Logger) (uint64, error) {
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
 		return 0, err
@@ -913,7 +907,6 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
 	doms.SetStateCache(stateCache)
-	doms.SetCodeStore(codeStore)
 	execctx.GuardAggregatorForCache(db, stateCache)
 
 	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
@@ -922,7 +915,7 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	}
 
 	if err := stagedsync.SpawnExecuteBlocksStage(s, st, doms, tx, toBlock, ctx, cfg, logger); err != nil {
-		if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+		if !stagedsync.IsOnlyLoopExhausted(err) {
 			return 0, err
 		}
 	}
@@ -978,10 +971,6 @@ func captureBlock(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 // it only replays execution for measurement, testing, or side-effect generation.
 func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	must(sync.SetCurrentStage(stages.Execution))
@@ -1028,7 +1017,8 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 			txTask := result.Task.(*exec.TxTask)
 			lastBlockNum = txTask.BlockNumber()
 			return nil
-		})
+		},
+	)
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1050,10 +1040,6 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 
 func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
-		return err
-	}
-
 	br, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	defer engine.Close()
@@ -1155,7 +1141,7 @@ func printAppliedMigrations(migrationsDB kv.RwDB, ctx context.Context, logger lo
 		if err != nil {
 			return err
 		}
-		var appliedStrs = make([]string, len(applied))
+		appliedStrs := make([]string, len(applied))
 		i := 0
 		for k := range applied {
 			appliedStrs[i] = k
@@ -1173,9 +1159,11 @@ func removeMigration(migrationsDB kv.RwDB, ctx context.Context) error {
 	})
 }
 
-var openSnapshotOnce sync.Once
-var _allSnapshotsSingleton *blocksnapshots.RoSnapshots
-var _allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
+var (
+	openSnapshotOnce             sync.Once
+	_allSnapshotsSingleton       *blocksnapshots.RoSnapshots
+	_allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
+)
 
 func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.TemporalRwDB, error) {
 	var err error
@@ -1257,9 +1245,11 @@ func logSnapshotStats(ctx context.Context, db kv.TemporalRoDB, blockSnaps *block
 	})
 }
 
-var openBlockReaderOnce sync.Once
-var _blockReaderSingleton dbservices.FullBlockReader
-var _blockWriterSingleton *blockio.BlockWriter
+var (
+	openBlockReaderOnce   sync.Once
+	_blockReaderSingleton dbservices.FullBlockReader
+	_blockWriterSingleton *blockio.BlockWriter
+)
 
 func blocksIO(db kv.TemporalRwDB, logger log.Logger) (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {

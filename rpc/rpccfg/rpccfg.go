@@ -57,15 +57,16 @@ var DefaultHTTPTimeouts = HTTPTimeouts{
 	IdleTimeout:  120 * time.Second,
 }
 
-const DefaultEvmCallTimeout = 5 * time.Minute
-const DefaultOverlayGetLogsTimeout = 5 * time.Minute
-const DefaultOverlayReplayBlockTimeout = 10 * time.Second
-const DefaultRpcTxSyncDefaultTimeout = 25 * time.Second
-const DefaultRpcTxSyncMaxTimeout = 1 * time.Minute
-const DefaultGasCap = 50_000_000
+const (
+	DefaultEvmCallTimeout            = 5 * time.Minute
+	DefaultOverlayGetLogsTimeout     = 5 * time.Minute
+	DefaultOverlayReplayBlockTimeout = 10 * time.Second
+	DefaultRpcTxSyncDefaultTimeout   = 25 * time.Second
+	DefaultRpcTxSyncMaxTimeout       = 1 * time.Minute
+	DefaultGasCap                    = 50_000_000
+)
 
 type BaseApiConfig struct {
-	SingleNodeMode    bool
 	EvmCallTimeout    time.Duration // 0 → DefaultEvmCallTimeout
 	Dirs              datadir.Dirs
 	BlockRangeLimit   int
@@ -118,7 +119,7 @@ type OverlayApiConfig struct {
 }
 
 var SlowLogBlackList = []string{
-	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_blockNumber",
+	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_getHeaderByNumber", "eth_getHeaderByHash", "eth_blockNumber",
 	"erigon_blockNumber", "erigon_getHeaderByNumber", "erigon_getHeaderByHash", "erigon_getBlockByTimestamp",
 	"eth_call",
 }

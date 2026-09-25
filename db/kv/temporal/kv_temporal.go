@@ -40,7 +40,7 @@ var ( // Compile time interface checks
 	_ kv.TemporalDebugTx = (*Tx)(nil)
 )
 
-//Variables Naming:
+// Variables Naming:
 //  tx - Database Transaction
 //  txn - Ethereum Transaction (and TxNum - is also number of Ethereum Transaction)
 //  RoTx - Read-Only Database Transaction. RwTx - read-write
@@ -49,12 +49,12 @@ var ( // Compile time interface checks
 //  Cursor - low-level mdbx-tide api to navigate over Table
 //  Iter - high-level iterator-like api over Table/InvertedIndex/History/Domain. Server-side-streaming friendly - less methods than Cursor, but constructor is powerful as `SELECT key, value FROM table WHERE key BETWEEN x1 AND x2 ORDER DESC LIMIT n`.
 
-//Methods Naming:
+// Methods Naming:
 //  Get: exact match of criteria
 //  Range: [from, to). from=nil means StartOfTable, to=nil means EndOfTable, rangeLimit=-1 means Unlimited
 //  Prefix: `Range(Table, prefix, kv.NextSubtree(prefix))`
 
-//Abstraction Layers:
+// Abstraction Layers:
 // LowLevel:
 //      1. DB/Tx - low-level key-value database
 //      2. Snapshots/Freeze - immutable files with historical data. May be downloaded at first App
@@ -541,7 +541,9 @@ func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 				aggtx:   rwtx.aggtx,
 				blocktx: rwtx.blocktx,
 				ctx:     rwtx.ctx,
-			}}}
+			},
+		},
+	}
 }
 
 func (tx *asyncClone) ApplyChan() mdbx.TxApplyChan {
@@ -604,38 +606,6 @@ func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte, opts kv.GetLatestO
 
 func (tx *tx) getLatestValSize(name kv.Domain, dbTx kv.Tx, k []byte) (size int, found bool, err error) {
 	return tx.aggtx.GetLatestValSize(name, k, dbTx)
-}
-
-func (tx *Tx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return tx.hasPrefix(name, tx.Tx, prefix)
-}
-
-func (tx *RwTx) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return tx.hasPrefix(name, tx.RwTx, prefix)
-}
-
-func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []byte, bool, error) {
-	to, ok := kv.NextSubtree(prefix)
-	if !ok {
-		to = nil
-	}
-
-	it, err := tx.rangeLatest(name, dbTx, prefix, to, 1)
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	defer it.Close()
-	if !it.HasNext() {
-		return nil, nil, false, nil
-	}
-
-	k, v, err := it.Next()
-	if err != nil {
-		return nil, nil, false, err
-	}
-
-	return k, v, true, nil
 }
 
 func (tx *Tx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v []byte, step kv.Step, err error) {

@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -396,8 +397,12 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		statedb.RevertToSnapshot(snapshot, err)
 	}
 	statedb.PopSnapshot(snapshot)
-	if vmconfig.Tracer != nil && vmconfig.Tracer.OnTxEnd != nil {
-		vmconfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: gasUsed}, nil)
+	if vmconfig.Tracer.HasTxEndHook() {
+		var txnGasUsage mdgas.TxnGasUsage
+		if res != nil {
+			txnGasUsage = res.TxnGasUsage
+		}
+		vmconfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: gasUsed}, txnGasUsage, err)
 	}
 	if err != nil {
 		return statedb, root, gasUsed, err
@@ -407,7 +412,9 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	// where the coinbase self-destructed or the tx didn't pay any fees; in
 	// those cases the coinbase isn't otherwise created and needs to be
 	// touched. Matches go-ethereum's state-test runner.
-	statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified)
+	if err := statedb.AddBalance(accounts.InternAddress(t.Json.Env.Coinbase), *uint256.NewInt(0), tracing.BalanceChangeUnspecified); err != nil {
+		return statedb, root, gasUsed, err
+	}
 
 	if err := statedb.FinalizeTx(evm.ChainRules(), w); err != nil {
 		return nil, root, gasUsed, err
@@ -445,20 +452,30 @@ func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.Tempo
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {
 		address := accounts.InternAddress(addr)
-		statedb.SetCode(address, a.Code, tracing.CodeChangeGenesis)
-		statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis)
+		if err := statedb.SetCode(address, a.Code, tracing.CodeChangeGenesis); err != nil {
+			return nil, err
+		}
+		if err := statedb.SetNonce(address, a.Nonce, tracing.NonceChangeGenesis); err != nil {
+			return nil, err
+		}
 		var balance uint256.Int
 		if a.Balance != nil {
 			_ = balance.SetFromBig(a.Balance)
 		}
-		statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance)
+		if err := statedb.SetBalance(address, balance, tracing.BalanceIncreaseGenesisBalance); err != nil {
+			return nil, err
+		}
 		for k, v := range a.Storage {
 			key := accounts.InternKey(k)
 			val := uint256.NewInt(0).SetBytes(v[:])
-			statedb.SetState(address, key, *val)
+			if err := statedb.SetState(address, key, *val); err != nil {
+				return nil, err
+			}
 		}
 		if len(a.Code) > 0 || len(a.Storage) > 0 {
-			statedb.SetIncarnation(address, state.FirstContractIncarnation)
+			if err := statedb.SetIncarnation(address, state.FirstContractIncarnation); err != nil {
+				return nil, err
+			}
 		}
 	}
 

@@ -322,7 +322,7 @@ func TestDecodeErrorsV5(t *testing.T) {
 
 		testDataFile := filepath.Join("testdata", "v5.1-ping-handshake"+".txt")
 		enc := hexFile(testDataFile)
-		//delete some byte from handshake to make it invalid
+		// delete some byte from handshake to make it invalid
 		enc = enc[:len(enc)-requiredNumber]
 		net.nodeB.expectDecodeErr(t, errMsgTooShort, enc)
 	})
@@ -334,12 +334,12 @@ func TestDecodeErrorsV5(t *testing.T) {
 			file := filepath.Join("testdata", name+".txt")
 			enc := hexFile(file)
 			if counter == 0 {
-				//make whoareyou header
+				// make whoareyou header
 				testPacket = enc[:sizeofStaticPacketData-1]
 				testPacket = append(testPacket, 255)
 			}
 			if counter == 1 {
-				//append invalid auth size
+				// append invalid auth size
 				testPacket = append(testPacket, enc[sizeofStaticPacketData:]...)
 			}
 		}
@@ -408,7 +408,9 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge0A,
 			prep: func(net *handshakeTest) {
 				// Update challenge.Header.AuthData.
-				net.nodeA.c.Encode(idB, addr, &challenge0A, nil)
+				if _, _, err := net.nodeA.c.Encode(idB, addr, &challenge0A, nil); err != nil {
+					t.Fatal(err)
+				}
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge0A)
 			},
 		},
@@ -421,7 +423,9 @@ func TestTestVectorsV5(t *testing.T) {
 			challenge: &challenge1A,
 			prep: func(net *handshakeTest) {
 				// Update challenge data.
-				net.nodeA.c.Encode(idB, addr, &challenge1A, nil)
+				if _, _, err := net.nodeA.c.Encode(idB, addr, &challenge1A, nil); err != nil {
+					t.Fatal(err)
+				}
 				net.nodeB.c.sc.storeSentHandshake(idA, addr, &challenge1A)
 			},
 		},
@@ -619,7 +623,7 @@ func hexFile(file string) []byte {
 
 // writeTestVector writes a test vector file with the given commentary and binary data.
 func writeTestVector(file, comment string, data []byte) {
-	fd, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	fd, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
 	if err != nil {
 		panic(err)
 	}

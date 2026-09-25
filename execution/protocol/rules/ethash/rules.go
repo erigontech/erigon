@@ -406,7 +406,8 @@ func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Heade
 }
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
-	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
+	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+) error {
 	if config.DAOForkBlock != nil && header.Number.Uint64() == *config.DAOForkBlock {
 		if err := misc.ApplyDAOHardFork(state); err != nil {
 			return err
@@ -422,7 +423,9 @@ func (ethash *Ethash) Finalize(config *chain.Config, header *types.Header, state
 	chain rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
 ) (types.FlatRequests, error) {
 	// Accumulate any block and uncle rewards and commit the final state root
-	accumulateRewards(config, state, header, uncles)
+	if err := accumulateRewards(config, state, header, uncles); err != nil {
+		return nil, err
+	}
 	return nil, nil
 }
 
@@ -432,7 +435,6 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 	txs types.Transactions, uncles []*types.Header, r types.Receipts, withdrawals []*types.Withdrawal,
 	chain rules.ChainReader, syscall rules.SystemCall, call rules.Call, logger log.Logger,
 ) (*types.Block, types.FlatRequests, error) {
-
 	// Finalize block
 	_, err := ethash.Finalize(chainConfig, header, state, uncles, r, withdrawals, chain, syscall, false, logger)
 	if err != nil {
@@ -444,7 +446,8 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 
 func (ethash *Ethash) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 	gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,
-	receipts types.Receipts, txns types.Transactions, logger log.Logger) error {
+	receipts types.Receipts, txns types.Transactions, logger log.Logger,
+) error {
 	return rules.DefaultBlockPostValidation(chainConfig, header, gasUsed, blobGasUsed, checkReceipts, checkBloom, receipts, txns, logger)
 }
 
@@ -470,7 +473,7 @@ func (ethash *Ethash) SealHash(header *types.Header) (hash common.Hash) {
 	if header.BaseFee != nil {
 		enc = append(enc, header.BaseFee)
 	}
-	rlp.Encode(hasher, enc)
+	_ = rlp.Encode(hasher, enc)
 	hasher.Sum(hash[:0])
 	return hash
 }
@@ -524,12 +527,14 @@ func AccumulateRewards(config *chain.Config, header *types.Header, uncles []*typ
 }
 
 // accumulateRewards retrieves rewards for a block and applies them to the coinbase accounts for miner and uncle miners
-func accumulateRewards(config *chain.Config, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) {
+func accumulateRewards(config *chain.Config, state *state.IntraBlockState, header *types.Header, uncles []*types.Header) error {
 	minerReward, uncleRewards := AccumulateRewards(config, header, uncles)
 	for i, uncle := range uncles {
 		if i < len(uncleRewards) {
-			state.AddBalance(accounts.InternAddress(uncle.Coinbase), uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle)
+			if err := state.AddBalance(accounts.InternAddress(uncle.Coinbase), uncleRewards[i], tracing.BalanceIncreaseRewardMineUncle); err != nil {
+				return err
+			}
 		}
 	}
-	state.AddBalance(accounts.InternAddress(header.Coinbase), minerReward, tracing.BalanceIncreaseRewardMineBlock)
+	return state.AddBalance(accounts.InternAddress(header.Coinbase), minerReward, tracing.BalanceIncreaseRewardMineBlock)
 }

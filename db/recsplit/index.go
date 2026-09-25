@@ -69,8 +69,10 @@ const (
 )
 
 // SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
-var SupportedFeatures = []Features{Enums, LessFalsePositives}
-var IncompatibleErr = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+var (
+	SupportedFeatures = []Features{Enums, LessFalsePositives}
+	IncompatibleErr   = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+)
 
 // Index implements index lookup from the file created by the RecSplit
 type Index struct {
@@ -166,7 +168,7 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 }
 
 func (idx *Index) init() (err error) {
-	var validationPassed = false
+	validationPassed := false
 	defer func() {
 		// recover from panic if one occurred. Set err to nil if no panic
 		if rec := recover(); rec != nil {
@@ -294,13 +296,13 @@ func (idx *Index) init() (err error) {
 
 	l := binary.BigEndian.Uint64(idx.data[offset:])
 	offset += 8
-	p := (*[maxDataSize / 8]uint64)(unsafe.Pointer(&idx.data[offset]))
-	idx.grData = p[:l]
+	idx.grData = unsafe.Slice((*uint64)(unsafe.Pointer(&idx.data[offset])), l)
 	offset += 8 * int(l)
 	idx.ef.Read(idx.data[offset:])
 	validationPassed = true
 	return nil
 }
+
 func (idx *Index) ForceExistenceFilterWillNeed() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -328,6 +330,7 @@ func (idx *Index) ForceExistenceFilterNormal() {
 		idx.existenceV2.MadvNormal()
 	}
 }
+
 func (idx *Index) ForceExistenceFilterRandom() {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -341,6 +344,7 @@ func (idx *Index) ForceExistenceFilterRandom() {
 		idx.existenceV2.MadvRandom()
 	}
 }
+
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -587,6 +591,7 @@ func (idx *Index) DisableReadAhead() {
 		log.Warn("read-ahead negative counter", "file", idx.FileName())
 	}
 }
+
 func (idx *Index) MadvSequential() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -595,6 +600,7 @@ func (idx *Index) MadvSequential() *Index {
 	_ = mmap.MadviseSequential(idx.mmapHandle1)
 	return idx
 }
+
 func (idx *Index) MadvNormal() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx
@@ -603,6 +609,7 @@ func (idx *Index) MadvNormal() *Index {
 	_ = mmap.MadviseNormal(idx.mmapHandle1)
 	return idx
 }
+
 func (idx *Index) MadvWillNeed() *Index {
 	if idx == nil || idx.mmapHandle1 == nil {
 		return idx

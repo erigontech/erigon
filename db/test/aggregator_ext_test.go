@@ -53,7 +53,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(math.MaxUint64, math.MaxUint64, 0, false)
+var unboundedFinalityCtx = execfinality.NewContext(math.MaxUint64, math.MaxUint64, 0, false, rawdbv3.TxNums)
 
 func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	if testing.Short() {
@@ -230,7 +230,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		return nil
 	}
 
-	txs := (aggStep) * config3.DefaultStepsInFrozenFile
+	txs := aggStep * config3.DefaultStepsInFrozenFile
 	t.Logf("step=%d tx_count=%d", aggStep, txs)
 
 	rnd := newRnd(0)
@@ -375,7 +375,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	err = rwTx.Commit()
 	require.NoError(t, err)
 
-	mustSeeFile := func(files []string, folderName, fileNameWithoutVersion string) bool { //file-version agnostic
+	mustSeeFile := func(files []string, folderName, fileNameWithoutVersion string) bool { // file-version agnostic
 		for _, f := range files {
 			if strings.HasPrefix(f, folderName) && strings.HasSuffix(f, fileNameWithoutVersion) {
 				return true
@@ -413,7 +413,7 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.Equal(t, 6, onChangeCalls)
 	require.Equal(t, 7, onDelCalls)
 
-	{ //prune
+	{ // prune
 		rwTx, err = db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer rwTx.Rollback()
@@ -571,7 +571,6 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 		compareMapsBytes(t, storageHistRange, storageHistRangeAfter)
 		compareMapsBytes(t, codeHistRange, codeHistRangeAfter)
 	}
-
 }
 
 func TestSharedDomain_CommitmentKeyReplacement(t *testing.T) {
@@ -673,7 +672,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 
 	// keys are encodings of numbers 1..31
 	// each key changes value on every txNum which is multiple of the key
-	//var maxWrite, otherMaxWrite uint64
+	// var maxWrite, otherMaxWrite uint64
 	for txNum := uint64(1); txNum <= txs; txNum++ {
 
 		addr, loc := make([]byte, length.Addr), make([]byte, length.Hash)
@@ -774,7 +773,7 @@ func testAggregatorV3BuildFilesWithFinalityContext(t *testing.T, buildFiles2 boo
 	require.NoError(t, err)
 	err = tx.Commit()
 	require.NoError(t, err)
-	finalityCtx := execfinality.NewContext(blocks, 0, 5, true)
+	finalityCtx := execfinality.NewContext(blocks, 0, 5, true, rawdbv3.TxNums)
 	if buildFiles2 {
 		err = agg.BuildFiles2(ctx, tdb, 0, kv.Step(txnNums/agg.StepSize()), finalityCtx, true)
 		agg.WaitForFiles()

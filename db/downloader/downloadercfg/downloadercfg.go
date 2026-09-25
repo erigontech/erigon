@@ -126,10 +126,10 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 	// better don't increase because erigon periodically producing "new seedable files" - and adding them to downloader.
 	// it must not impact chain tip sync - so, limit resources to minimum by default.
 	// but when downloader is started as a separated process - rise it to max
-	//torrentConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", min(16, max(2, runtime.NumCPU()-2)))
+	// torrentConfig.PieceHashersPerTorrent = dbg.EnvInt("DL_HASHERS", min(16, max(2, runtime.NumCPU()-2)))
 
-	torrentConfig.MinDialTimeout = 6 * time.Second    //default: 3s
-	torrentConfig.HandshakesTimeout = 8 * time.Second //default: 4s
+	torrentConfig.MinDialTimeout = 6 * time.Second    // default: 3s
+	torrentConfig.HandshakesTimeout = 8 * time.Second // default: 4s
 
 	// This needs to be at least the chunk size of requests we expect to service for peers. This has
 	// been as high as 8 MiB unintentionally, but the piece size for all previous torrents has been
@@ -152,6 +152,7 @@ func defaultTorrentClientConfig() *torrent.ClientConfig {
 type NewCfgOpts struct {
 	// If set, clobber the default torrent config value.
 	DisableTrackers          g.Option[bool]
+	DisableTCP               g.Option[bool]
 	Verify                   bool
 	UploadRateLimit          g.Option[rate.Limit]
 	DownloadRateLimit        g.Option[rate.Limit]
@@ -210,6 +211,10 @@ func New(
 		torrentConfig.DisableTrackers = value
 	}
 
+	for value := range opts.DisableTCP.Iter {
+		torrentConfig.DisableTCP = value
+	}
+
 	var analogLevel analog.Level
 	analogLevel, torrentConfig.Debug, err = erigonToAnalogLevel(verbosity)
 	if err != nil {
@@ -238,7 +243,8 @@ func New(
 	var torrentLogCloser io.Closer
 	torrentLogFile, err := os.OpenFile(
 		filepath.Join(dirs.DataDir, "logs", "torrent.log"),
-		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644,
+	)
 	if err == nil {
 		sw := &safeWriter{w: torrentLogFile}
 		torrentLogCloser = sw
@@ -248,7 +254,8 @@ func New(
 				AddSource:   true,
 				Level:       min(erigonToSlogLevel(verbosity), slog.LevelWarn),
 				ReplaceAttr: nil,
-			}))
+			}),
+		)
 	} else {
 		log.Error("error opening torrent log file", "err", err)
 	}
@@ -258,9 +265,9 @@ func New(
 	// Check torrent slogger levels and how they route through to erigon log, and anywhere else.
 	for _, level := range []slog.Level{
 		slog.LevelDebug,
-		//slog.LevelInfo,
-		//slog.LevelWarn,
-		//slog.LevelError,
+		// slog.LevelInfo,
+		// slog.LevelWarn,
+		// slog.LevelError,
 	} {
 		err = torrentConfig.Slogger.Handler().Handle(ctx, slog.NewRecord(time.Now(), level, "test torrent config slogger level", 0))
 		if err != nil {
@@ -274,7 +281,8 @@ func New(
 		// Only for deprecated analog.Logger stuff, if it comes up.
 		"anacrolix", analogLevel.LogString(),
 		// This should be the one applied to more modern logging in anacrolix/torrent.
-		"slog", slogLevel)
+		"slog", slogLevel,
+	)
 
 	cfg := Cfg{
 		Dirs:              dirs,

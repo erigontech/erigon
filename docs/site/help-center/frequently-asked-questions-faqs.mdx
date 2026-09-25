@@ -91,7 +91,7 @@ This list addresses the most common inquiries from the Erigon community, offerin
         http://localhost:8545
       ```
 
-      While syncing the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (per-stage progress, matching the log prefix); once fully synced it is simply `false`. (`startingBlock` is also returned but is hardcoded to `"0x0"`.)
+      While syncing the result is an object with `currentBlock`, `highestBlock`, and a `stages` array (per-stage progress, matching the log prefix); once fully synced it is simply `false`. (`startingBlock` reports the block the current sync session started from.)
     * **Ask an AI assistant via MCP** — Erigon's built-in [MCP server](/fundamentals/mcp) (default `127.0.0.1:8553`) lets a connected assistant like Claude Desktop answer questions like *"Is my node synced? How many blocks behind am I?"* in plain language by querying the same data the JSON-RPC exposes. Useful when you'd rather not parse logs or `eth_syncing` output by hand.
 17. **Can I use Erigon with Docker?** Yes, Erigon provides official Docker images on Dockerhub. See the [Installation](/get-started/installation) guide for the Docker setup instructions.
 18. **Does Erigon support other chains besides Ethereum?** Yes, Erigon is an EVM-compatible client and supports other networks like Gnosis. You can specify the chain with the `--chain` flag. See [Supported Networks](/fundamentals/supported-networks) and the [Easy Nodes](/get-started/easy-nodes) guides for chain-specific setup.

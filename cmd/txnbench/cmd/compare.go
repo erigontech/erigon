@@ -4,8 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/cmd/txnbench/internal/bench"
 	"os"
+
+	"github.com/erigontech/erigon/cmd/txnbench/internal/bench"
 
 	"github.com/spf13/cobra"
 )

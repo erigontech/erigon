@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -42,6 +43,44 @@ import (
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 )
+
+// TestGetLogsFromPersistedReceipts serves eth_getLogs from the persistent receipt cache, where
+// a receipt read for the wrong txNum would still carry the requested transaction's hash.
+func TestGetLogsFromPersistedReceipts(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = false // assertions re-execute instead of serving the persistent cache
+
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+		execmoduletester.WithEnableDomain(kv.RCacheDomain),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	topics := []common.Hash{{0x11}, {0x22}, {0x33}}
+	c, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		for _, topic := range topics {
+			logOnCreate := append(append([]byte{0x7f}, topic[:]...), 0x60, 0x00, 0x60, 0x00, 0xa1, 0x00) // PUSH32 topic PUSH1 0 PUSH1 0 LOG1 STOP
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(testAddr), uint256.NewInt(0), 100_000, uint256.NewInt(1), logOnCreate), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(1), ToBlock: big.NewInt(1)})
+	require.NoError(t, err)
+	require.Len(t, logs, len(topics))
+	for i, l := range logs {
+		require.Equal(t, c.Blocks[0].Transactions()[i].Hash(), l.TxHash)
+		require.Equal(t, []common.Hash{topics[i]}, l.Topics)
+	}
+}
 
 func TestGetLogs(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
@@ -83,7 +122,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
+	expectedRPCLogs := make(types.Logs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
@@ -96,19 +135,18 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	require.NotNil(t, actual)
 	assert.Equal(expectedRPCLogs, actual)
 
-	expectedLog := &types.RPCLog{
-		Log: types.Log{
-			Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
-			Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
-			Data:        []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
-			BlockNumber: 10,
-			TxHash:      common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
-			TxIndex:     0,
-			BlockHash:   common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
-			Index:       0,
-			Removed:     false,
-		},
-		BlockTimestamp: 100,
+	stampedAt := hexutil.Uint64(100)
+	expectedLog := &types.Log{
+		Address:        common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
+		Topics:         []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
+		Data:           []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
+		BlockNumber:    10,
+		TxHash:         common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
+		TxIndex:        0,
+		BlockHash:      common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
+		Index:          0,
+		Removed:        false,
+		BlockTimestamp: &stampedAt,
 	}
 	assert.Equal(expectedLog, actual[0])
 }
@@ -120,7 +158,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
+	expectedRPCLogs := make(types.Logs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
@@ -516,4 +554,63 @@ func TestErigonGetLogsByBlockHashRequiresACanonicalBlock(t *testing.T) {
 	logs, err = api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &orphaned})
 	require.ErrorContains(t, err, "block not found")
 	require.Nil(t, logs)
+}
+
+// TestGetLogsByHashIncludesBlockTimestamp pins that erigon_getLogsByHash reports the
+// same blockTimestamp erigon_getLogs reports for the same log.
+func TestGetLogsByHashIncludesBlockTimestamp(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	expected, err := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	require.NoError(t, err)
+	require.NotEmpty(t, expected)
+
+	byHash, err := api.GetLogsByHash(m.Ctx, expected[0].BlockHash)
+	require.NoError(t, err)
+
+	var seen int
+	for _, txLogs := range byHash {
+		for _, l := range txLogs {
+			require.Equal(t, expected[0].BlockTimestamp, l.BlockTimestamp)
+			require.NotZero(t, *l.BlockTimestamp)
+			seen++
+		}
+	}
+	require.NotZero(t, seen)
+}
+
+// TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp pins that a call served from the
+// block receipts cache reports the same logs, and the same blockTimestamp, as the call
+// that filled the cache.
+func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	probe := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	withLogs, err := probe.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
+	require.NoError(t, err)
+	require.NotEmpty(t, withLogs)
+	hash := withLogs[0].BlockHash
+
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	_, cached := api.getCachedReceipts(m.Ctx, hash)
+	require.False(t, cached)
+
+	uncachedLogs, err := api.GetLogsByHash(m.Ctx, hash)
+	require.NoError(t, err)
+	_, cached = api.getCachedReceipts(m.Ctx, hash)
+	require.True(t, cached)
+
+	cachedLogs, err := api.GetLogsByHash(m.Ctx, hash)
+	require.NoError(t, err)
+	require.Equal(t, uncachedLogs, cachedLogs)
+
+	var seen int
+	for _, txLogs := range cachedLogs {
+		for _, l := range txLogs {
+			require.NotZero(t, *l.BlockTimestamp)
+			seen++
+		}
+	}
+	require.NotZero(t, seen)
 }

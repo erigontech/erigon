@@ -26,8 +26,10 @@ type plainKeyArena struct {
 
 // Grows geometrically for the same reason the prefix arena does: a fresh buffer is
 // built per block, so a block touching two keys must not pay the full chunk.
-const plainKeyArenaChunkMin = 1024
-const plainKeyArenaChunkMax = 64 * 1024
+const (
+	plainKeyArenaChunkMin = 1024
+	plainKeyArenaChunkMax = 64 * 1024
+)
 
 func (a *plainKeyArena) intern(b []byte) []byte {
 	if len(b) > plainKeyArenaChunkMax {
@@ -68,27 +70,26 @@ func (pu *parallelUpdate) internKey(plainKey []byte) []byte {
 	return pu.keyArena.intern(plainKey)
 }
 
-func (pu *parallelUpdate) Reset() {
-	if pu.trie != nil {
-		pu.trie.Reset()
-	}
+func (pu *parallelUpdate) drainDeferred() {
 	pu.deferredMu.Lock()
 	for _, upd := range pu.deferredCombined {
 		putDeferredUpdate(upd)
 	}
 	pu.deferredCombined = nil
 	pu.deferredMu.Unlock()
+}
+
+func (pu *parallelUpdate) Reset() {
+	if pu.trie != nil {
+		pu.trie.Reset()
+	}
+	pu.drainDeferred()
 	pu.keyArena.reset()
 }
 
 func (pu *parallelUpdate) Close() {
 	pu.trie = nil
-	pu.deferredMu.Lock()
-	for _, upd := range pu.deferredCombined {
-		putDeferredUpdate(upd)
-	}
-	pu.deferredCombined = nil
-	pu.deferredMu.Unlock()
+	pu.drainDeferred()
 	pu.keyArena.reset()
 }
 

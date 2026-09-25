@@ -63,7 +63,6 @@ service KV {
   rpc IndexRange(IndexRangeReq) returns (IndexRangeReply);
   rpc HistoryRange(HistoryRangeReq) returns (Pairs);
   rpc RangeAsOf(RangeAsOfReq) returns (Pairs);
-  rpc HasPrefix(HasPrefixReq) returns (HasPrefixReply);
   rpc HistoryStartFrom(HistoryStartFromReq) returns (HistoryStartFromReply);
   rpc CurrentDomainVersion(CurrentDomainVersionReq) returns (CurrentDomainVersionReply);
   rpc StepSize(StepSizeReq) returns (StepSizeReply);
@@ -304,18 +303,6 @@ message PairsPagination {
 message IndexPagination {
   sint64 next_time_stamp = 1;
   sint64 limit = 2;
-}
-
-message HasPrefixReq {
-  uint64 tx_id = 1;
-  string table = 2;
-  bytes prefix = 3;
-}
-
-message HasPrefixReply {
-  bytes first_key = 1;
-  bytes first_val = 2;
-  bool has_prefix = 3;
 }
 
 message HistoryStartFromReq {

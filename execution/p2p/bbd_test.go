@@ -22,6 +22,7 @@ import (
 	"slices"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -83,7 +84,8 @@ func TestBackwardBlockDownloader_GapBehindCurrentHead_FailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	feed, err := bbd.DownloadBlocksBackwards(ctx, initialHeader.Hash(), stubBbdHeaderReader{},
+	feed, err := bbd.DownloadBlocksBackwards(
+		ctx, initialHeader.Hash(), stubBbdHeaderReader{},
 		WithChainLengthLimit(96),
 		WithChainLengthCurrentHead(100),
 	)
@@ -125,6 +127,85 @@ type countingBALFetcher struct {
 func (s *countingBALFetcher) Fetch(_ context.Context, reqs []BALRequest, _ *PeerId, _ []PeerId, _ time.Duration, _ time.Duration) map[common.Hash]*types.BlockAccessListSidecar {
 	s.calls.Add(1)
 	return nil
+}
+
+type retryingBbdFetcher struct {
+	bodyServingBbdFetcher
+	balStarted <-chan struct{}
+	peers      []PeerId
+}
+
+func (s *retryingBbdFetcher) FetchBodies(ctx context.Context, headers []*types.Header, peerId *PeerId, opts ...FetcherOption) (FetcherResponse[[]*types.Body], error) {
+	s.peers = append(s.peers, *peerId)
+	if len(s.peers) == 1 {
+		<-s.balStarted
+		return FetcherResponse[[]*types.Body]{}, NewErrMissingBodies(headers)
+	}
+	return s.bodyServingBbdFetcher.FetchBodies(ctx, headers, peerId, opts...)
+}
+
+type balFetcherFunc func(context.Context, []BALRequest) map[common.Hash]*types.BlockAccessListSidecar
+
+func (f balFetcherFunc) Fetch(ctx context.Context, reqs []BALRequest, _ *PeerId, _ []PeerId, _ time.Duration, _ time.Duration) map[common.Hash]*types.BlockAccessListSidecar {
+	return f(ctx, reqs)
+}
+
+func TestBackwardBlockDownloader_CancelsBALFetchOnBodyFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		started := make(chan struct{})
+		var balCalls int
+		bal := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: common.Address{1}}})
+		balHash, err := bal.Hash()
+		require.NoError(t, err)
+		balFetcher := balFetcherFunc(func(ctx context.Context, reqs []BALRequest) map[common.Hash]*types.BlockAccessListSidecar {
+			balCalls++
+			if balCalls == 1 {
+				close(started)
+				<-ctx.Done()
+				err = ctx.Err()
+				return nil
+			}
+			return map[common.Hash]*types.BlockAccessListSidecar{reqs[0].Hash: bal}
+		})
+		fetcher := &retryingBbdFetcher{balStarted: started}
+		bbd := newTestBbd(t, fetcher)
+		bbd.peerTracker.PeerConnected(PeerIdFromUint64(2))
+		bbd.balFetcher = balFetcher
+		withdrawalsHash := empty.RootHash
+		header := &types.Header{
+			Number:              *uint256.NewInt(1),
+			TxHash:              empty.RootHash,
+			UncleHash:           empty.UncleHash,
+			WithdrawalsHash:     &withdrawalsHash,
+			BlockAccessListHash: &balHash,
+		}
+		feed := BbdResultFeed{ch: make(chan BlockBatchResult, 1)}
+		ticker := time.NewTicker(time.Hour)
+		defer ticker.Stop()
+		result := make(chan error, 1)
+		go func() {
+			result <- bbd.downloadBlocksForHeaders(ctx, []*types.Header{header}, peersContext{}, defaultBbdRequestConfig, ticker, feed)
+		}()
+		synctest.Wait()
+		select {
+		case err := <-result:
+			require.NoError(t, err)
+		default:
+			t.Fatal("body retry is still waiting for the failed batch's BAL fetch")
+		}
+		require.ErrorIs(t, err, context.Canceled)
+		require.NoError(t, ctx.Err())
+		require.Equal(t, 2, balCalls)
+		require.Len(t, fetcher.peers, 2)
+		require.NotEqual(t, fetcher.peers[0], fetcher.peers[1])
+		batch, err := feed.Next(ctx)
+		require.NoError(t, err)
+		require.Len(t, batch.Blocks, 1)
+		require.Equal(t, header.Hash(), batch.Blocks[0].Hash())
+		require.Same(t, bal, batch.Blocks[0].BlockAccessListSidecar())
+	})
 }
 
 // A persistent full BAL deficit must not fail the download: the blocks are
@@ -210,7 +291,8 @@ func TestBackwardBlockDownloader_GapAheadOfCurrentHead_FailsFast(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	defer cancel()
 
-	feed, err := bbd.DownloadBlocksBackwards(ctx, initialHeader.Hash(), stubBbdHeaderReader{},
+	feed, err := bbd.DownloadBlocksBackwards(
+		ctx, initialHeader.Hash(), stubBbdHeaderReader{},
 		WithChainLengthLimit(96),
 		WithChainLengthCurrentHead(500),
 	)

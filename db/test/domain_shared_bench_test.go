@@ -91,7 +91,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	keys := make([][]byte, 8)
 	for i := range keys {
 		keys[i] = make([]byte, length.Addr)
-		rnd.Read(keys[i])
+		_, _ = rnd.Read(keys[i])
 	}
 
 	var txNum, blockNum uint64
@@ -262,13 +262,14 @@ func generateTestDataForDomainCommitment(tb testing.TB, keySize1, keySize2, tota
 
 	return doms
 }
+
 func generateRandomKey(r *rndGen, size uint64) string {
 	return string(generateRandomKeyBytes(r, size))
 }
 
 func generateRandomKeyBytes(r *rndGen, size uint64) []byte {
 	key := make([]byte, size)
-	r.Read(key)
+	_, _ = r.Read(key)
 	return key
 }
 
@@ -304,7 +305,7 @@ func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint
 		txNum := generateRandomTxNum(r, totalTx, usedTxNums)
 
 		value := make([]byte, r.IntN(int(maxSize)))
-		r.Read(value)
+		_, _ = r.Read(value)
 
 		updates = append(updates, upd{txNum: txNum, value: value})
 		usedTxNums[txNum] = true
@@ -313,6 +314,7 @@ func generateArbitraryValueUpdates(r *rndGen, totalTx, keyTxsLimit, maxSize uint
 
 	return updates
 }
+
 func generateRandomTxNum(r *rndGen, maxTxNum uint64, usedTxNums map[uint64]bool) uint64 {
 	txNum := uint64(r.IntN(int(maxTxNum)))
 	for usedTxNums[txNum] {
@@ -430,7 +432,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 
 		case r > 33 && r <= 66:
 			codeUpd := make([]byte, rnd.IntN(24576))
-			rnd.Read(codeUpd)
+			_, _ = rnd.Read(codeUpd)
 			for limit := 1000; len(key) > length.Addr && limit > 0; limit-- {
 				key, existed = getKey() //nolint
 				if !existed {
@@ -476,7 +478,7 @@ func generateSharedDomainsUpdatesForBench(b *testing.B, domains *execctx.SharedD
 
 			sk := make([]byte, length.Addr+length.Hash)
 			copy(sk, key)
-			rnd.Read(sk[length.Addr:])
+			_, _ = rnd.Read(sk[length.Addr:])
 
 			prev, _, err = domains.GetLatest(kv.StorageDomain, tx, sk)
 			require.NoError(b, err)

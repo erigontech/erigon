@@ -379,29 +379,53 @@ func (m *MemoryMutation) Prefix(table string, prefix []byte) (stream.KV, error) 
 	}
 	return m.Range(table, prefix, nextPrefix, order.Asc, kv.Unlim)
 }
+
 func (m *MemoryMutation) Stream(table string, fromPrefix, toPrefix []byte) (stream.KV, error) {
 	panic("please implement me")
 }
+
 func (m *MemoryMutation) StreamAscend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
+
 func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte, limit int) (stream.KV, error) {
 	panic("please implement me")
 }
 
+// Range merges the db side and the overlay by key, so on a DupSort table a db
+// value is dropped when the overlay holds another value under the same key.
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil {
-		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
-			return s, err
+	m.mu.RLock()
+	cleared := m.isTableCleared(table)
+	// Hidden rows don't count against limit, so the db side must be free to
+	// look past them; the merge below still stops at limit.
+	hidden := len(m.deletedEntries[table]) > 0 || len(m.deletedDups[table]) > 0
+	m.mu.RUnlock()
+	if m.readTx != nil && !cleared {
+		dbLimit := limit
+		if hidden {
+			dbLimit = kv.Unlim
+		}
+		if s.iterDb, err = m.readTx.Range(table, fromPrefix, toPrefix, asc, dbLimit); err != nil {
+			s.Close()
+			return nil, err
+		}
+		if hidden {
+			s.iterDb = stream.FilterKV(s.iterDb, func(k, v []byte) bool {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+				return !m.isEntryDeleted(table, k) && !m.isDupDeleted(table, k, v)
+			})
 		}
 	}
 	if s.iterMem, err = m.memTx.Range(table, fromPrefix, toPrefix, asc, limit); err != nil {
-		return s, err
+		s.Close()
+		return nil, err
 	}
 	if _, err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -425,8 +449,9 @@ func (s *rangeIter) Close() {
 		s.iterMem = nil
 	}
 }
+
 func (s *rangeIter) init() (*rangeIter, error) {
-	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
@@ -448,24 +473,28 @@ func (s *rangeIter) HasNext() bool {
 	}
 	return s.hasNextDb || s.hasNextMem
 }
+
 func (s *rangeIter) Next() (k, v []byte, err error) {
 	s.limit--
+	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
 	c := bytes.Compare(s.nextKdb, s.nextKmem)
-	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
+	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
+		k = s.nextKdb
+		v = s.nextVdb
+		s.hasNextDb = s.iterDb.HasNext()
+		s.nextKdb, s.nextVdb = nil, nil
 		if s.hasNextDb {
-			k = s.nextKdb
-			v = s.nextVdb
-			s.hasNextDb = s.iterDb.HasNext()
 			if s.nextKdb, s.nextVdb, err = s.iterDb.Next(); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
-	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
+	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
+		k = s.nextKmem
+		v = s.nextVmem
+		s.hasNextMem = s.iterMem.HasNext()
+		s.nextKmem, s.nextVmem = nil, nil
 		if s.hasNextMem {
-			k = s.nextKmem
-			v = s.nextVmem
-			s.hasNextMem = s.iterMem.HasNext()
 			if s.nextKmem, s.nextVmem, err = s.iterMem.Next(); err != nil {
 				return nil, nil, err
 			}
@@ -477,16 +506,33 @@ func (s *rangeIter) Next() (k, v []byte, err error) {
 func (m *MemoryMutation) RangeDupSort(table string, key []byte, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
 	s := &rangeDupSortIter{key: key, orderAscend: bool(asc), limit: int64(limit)}
 	var err error
-	if m.readTx != nil {
-		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
-			return s, err
+	m.mu.RLock()
+	skipDb := m.isTableCleared(table) || m.isEntryDeleted(table, key)
+	hidden := len(m.deletedDups[table][string(key)]) > 0
+	m.mu.RUnlock()
+	if m.readTx != nil && !skipDb {
+		dbLimit := limit
+		if hidden {
+			dbLimit = kv.Unlim
+		}
+		if s.iterDb, err = m.readTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, dbLimit); err != nil {
+			s.Close()
+			return nil, err
+		}
+		if hidden {
+			s.iterDb = stream.FilterKV(s.iterDb, func(_, v []byte) bool {
+				m.mu.RLock()
+				defer m.mu.RUnlock()
+				return !m.isDupDeleted(table, key, v)
+			})
 		}
 	}
 	if s.iterMem, err = m.memTx.RangeDupSort(table, key, fromPrefix, toPrefix, asc, limit); err != nil {
-		return s, err
+		s.Close()
+		return nil, err
 	}
 	if err := s.init(); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -513,7 +559,7 @@ func (s *rangeDupSortIter) Close() {
 }
 
 func (s *rangeDupSortIter) init() error {
-	s.hasNextDb = s.iterDb.HasNext()
+	s.hasNextDb = s.iterDb != nil && s.iterDb.HasNext()
 	s.hasNextMem = s.iterMem.HasNext()
 	var err error
 	if s.hasNextDb {
@@ -535,23 +581,27 @@ func (s *rangeDupSortIter) HasNext() bool {
 	}
 	return s.hasNextDb || s.hasNextMem
 }
+
 func (s *rangeDupSortIter) Next() (k, v []byte, err error) {
 	s.limit--
 	k = s.key
+	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
 	c := bytes.Compare(s.nextVdb, s.nextVmem)
-	if !s.hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0 {
+	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
+		v = s.nextVdb
+		s.hasNextDb = s.iterDb.HasNext()
+		s.nextVdb = nil
 		if s.hasNextDb {
-			v = s.nextVdb
-			s.hasNextDb = s.iterDb.HasNext()
 			if _, s.nextVdb, err = s.iterDb.Next(); err != nil {
 				return nil, nil, err
 			}
 		}
 	}
-	if !s.hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0 {
+	if hasNextMem && (!hasNextDb || c == 1 && s.orderAscend || c == -1 && !s.orderAscend || c == 0) {
+		v = s.nextVmem
+		s.hasNextMem = s.iterMem.HasNext()
+		s.nextVmem = nil
 		if s.hasNextMem {
-			v = s.nextVmem
-			s.hasNextMem = s.iterMem.HasNext()
 			if _, s.nextVmem, err = s.iterMem.Next(); err != nil {
 				return nil, nil, err
 			}
@@ -573,6 +623,8 @@ func (m *MemoryMutation) Delete(table string, k []byte) error {
 }
 
 func (m *MemoryMutation) deleteDup(table string, k, v []byte) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	t, ok := m.deletedDups[table]
 	if !ok {
 		t = map[string]map[string]struct{}{}
@@ -980,7 +1032,7 @@ func (m *MemoryMutation) GetLatestValSize(name kv.Domain, k []byte) (size int, f
 func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
 		val, ok, err := m.DomainReader.GetAsOf(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -991,13 +1043,6 @@ func (m *MemoryMutation) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte,
 		return nil, false, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
 	}
 	return m.db.GetAsOf(name, k, ts)
-}
-
-func (m *MemoryMutation) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	if m.db == nil {
-		return nil, nil, false, nil
-	}
-	return m.db.HasPrefix(name, prefix)
 }
 
 func (m *MemoryMutation) StepsInFiles(entitySet ...kv.Domain) kv.Step {
@@ -1017,7 +1062,7 @@ func (m *MemoryMutation) RangeAsOf(name kv.Domain, fromKey, toKey []byte, ts uin
 func (m *MemoryMutation) HistorySeek(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, err error) {
 	if m.DomainReader != nil {
 		val, ok, err := m.DomainReader.HistorySeek(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1050,9 +1095,11 @@ func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
 	}
 	return m.db.Debug().HistoryStartFrom(name)
 }
+
 func (m *MemoryMutation) FreezeInfo() kv.FreezeInfo {
 	panic("not supported")
 }
+
 func (m *MemoryMutation) Debug() kv.TemporalDebugTx {
 	if m.db == nil {
 		return nil
@@ -1198,10 +1245,6 @@ func (v *OverlayTemporalReadView) GetLatestValSize(name kv.Domain, k []byte) (in
 	return v.temporalTx.GetLatestValSize(name, k)
 }
 
-func (v *OverlayTemporalReadView) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
-	return v.temporalTx.HasPrefix(name, prefix)
-}
-
 func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return v.temporalTx.StepsInFiles(entitySet...)
 }
@@ -1209,7 +1252,7 @@ func (v *OverlayTemporalReadView) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 func (v *OverlayTemporalReadView) GetAsOf(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
 		val, ok, err := v.MemoryMutation.DomainReader.GetAsOf(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1230,7 +1273,7 @@ func (v *OverlayTemporalReadView) IndexRange(name kv.InvertedIdx, k []byte, from
 func (v *OverlayTemporalReadView) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
 	if v.MemoryMutation != nil && v.MemoryMutation.DomainReader != nil {
 		val, ok, err := v.MemoryMutation.DomainReader.HistorySeek(name, k, ts)
-		if err != nil {
+		if err != nil && !errors.Is(err, kv.ErrInMemHistoryDisabled) {
 			return nil, false, err
 		}
 		if ok {
@@ -1345,9 +1388,11 @@ func (td temporaldb) ReadOnly() bool {
 func (td temporaldb) Update(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return td.memoryMutation.memDb.Update(ctx, f)
 }
+
 func (td temporaldb) UpdateNosync(ctx context.Context, f func(tx kv.RwTx) error) error {
 	return td.memoryMutation.memDb.UpdateNosync(ctx, f)
 }
+
 func (td temporaldb) View(ctx context.Context, f func(tx kv.Tx) error) error {
 	return td.memoryMutation.memDb.View(ctx, f)
 }

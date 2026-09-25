@@ -412,8 +412,8 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrent
 			}
 			t, complete, new, err := d.addTorrentIfComplete(name)
 			if err != nil {
-				err = fmt.Errorf("adding torrent for %v: %w", path, err)
-				return err
+				d.log(log.LvlWarn, "add torrents from disk: skipping malformed torrent", "path", path, "err", err)
+				return nil
 			}
 			if !complete {
 				d.log(log.LvlDebug, "add torrents from disk: skipping incomplete torrent",
@@ -695,7 +695,6 @@ func (d *Downloader) VerifyData(
 	whiteList []string,
 	failFast bool,
 ) error {
-
 	var totalBytes int64
 	allTorrents := d.torrentClient.Torrents()
 	toVerify := make([]*torrent.Torrent, 0, len(allTorrents))
@@ -737,7 +736,8 @@ func (d *Downloader) VerifyData(
 					case <-ctx.Done():
 						return
 					case <-logEvery.C:
-						d.log(log.LvlInfo, "Verify",
+						d.log(
+							log.LvlInfo, "Verify",
 							"progress", fmt.Sprintf("%.2f%%", 100*float64(completedBytes.Load())/float64(totalBytes)),
 							"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
 							"sz_gib", completedBytes.Load()>>30,
@@ -776,7 +776,8 @@ func (d *Downloader) VerifyData(
 				case <-ctx.Done():
 					return
 				case <-logEvery.C:
-					d.log(log.LvlInfo, "Verify",
+					d.log(
+						log.LvlInfo, "Verify",
 						"progress", fmt.Sprintf("%.2f%%", 100*float64(verifiedBytes.Load())/float64(totalBytes)),
 						"files", fmt.Sprintf("%d/%d", completedFiles.Load(), len(toVerify)),
 						// GB not GiB?
@@ -1340,7 +1341,6 @@ func (d *Downloader) addedFirstDownloader(
 	} else {
 		return func() { d.afterAddForDownloadHadMetainfo(t) }
 	}
-
 }
 
 func (d *Downloader) addTorrentFromMetainfo(
@@ -1661,7 +1661,8 @@ func newTorrentClient(
 // parameters.
 func (d *Downloader) logConfig() {
 	cfg := d.cfg.ClientConfig
-	d.log(log.LvlInfo,
+	d.log(
+		log.LvlInfo,
 		"Torrent config",
 		"ipv6-enabled", !cfg.DisableIPv6,
 		"ipv4-enabled", !cfg.DisableIPv4,
@@ -1794,14 +1795,14 @@ func (d *Downloader) HandleTorrentClientStatus(debugMux *http.ServeMux) {
 		d.log(log.LvlDebug, "compressed torrent client status", "size", buf.Len(), "Accept-Encoding", h)
 		if strings.Contains(h, "gzip") {
 			w.Header().Set("Content-Encoding", "gzip")
-			w.Write(buf.Bytes())
+			_, _ = w.Write(buf.Bytes())
 		} else {
 			gzR, err := gzip.NewReader(&buf)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			io.Copy(w, gzR)
+			_, _ = io.Copy(w, gzR)
 			gzR.Close()
 		}
 	})
