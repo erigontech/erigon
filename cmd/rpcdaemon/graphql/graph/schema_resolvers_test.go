@@ -277,23 +277,18 @@ type mockGraphQLAPI struct {
 	accountInfoErr      error
 
 	blockDetails map[string]any
+	withTxs      *bool
 	txBlockNum   uint64
 	txFound      bool
 }
 
-func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber) (map[string]any, error) {
+func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber, withTxs *bool) (map[string]any, error) {
+	m.withTxs = withTxs
 	return m.blockDetails, nil
 }
 
-func (m *mockGraphQLAPI) GetBlockDetailsWithTxs(_ context.Context, _ rpc.BlockNumber, _ bool) (map[string]any, error) {
-	return m.blockDetails, nil
-}
-
-func (m *mockGraphQLAPI) GetBlockDetailsByHashWithTxs(_ context.Context, _ common.Hash, _ bool) (map[string]any, error) {
-	return nil, nil
-}
-
-func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash) (map[string]any, error) {
+func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash, withTxs *bool) (map[string]any, error) {
+	m.withTxs = withTxs
 	return nil, nil
 }
 func (m *mockGraphQLAPI) GetLatestBlockNumber(_ context.Context) (uint64, error) { return 0, nil }
@@ -1004,6 +999,7 @@ func TestQueryResolver_BlockTransactionsBySelection(t *testing.T) {
 	}
 
 	require.JSONEq(t, `{"data":{"block":{"number":"0x7"}}}`, query(`{block(number:7){number}}`))
+	require.Equal(t, ptr(false), mock.withTxs, "a number-only query must not ask for the transactions")
 	hash := txn.Hash().Hex()
 	for _, q := range []string{
 		`{block(number:7){transactions{hash}}}`,
@@ -1013,5 +1009,6 @@ func TestQueryResolver_BlockTransactionsBySelection(t *testing.T) {
 		`{transaction(hash:"` + hash + `"){hash}}`,
 	} {
 		require.Contains(t, query(q), hash, q)
+		require.Equal(t, ptr(true), mock.withTxs, q)
 	}
 }

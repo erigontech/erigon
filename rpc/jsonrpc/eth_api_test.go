@@ -595,14 +595,15 @@ func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
 
-	withTxs, err := api.GetBlockDetailsWithTxs(m.Ctx, 1, true)
+	yes, no := true, false
+	withTxs, err := api.GetBlockDetails(m.Ctx, 1, &yes)
 	require.NoError(t, err)
 	require.NotEmpty(t, withTxs["receipts"])
 
 	hash := withTxs["block"].(*ethapi.RPCBlock).Hash
 	for _, details := range []func() (map[string]any, error){
-		func() (map[string]any, error) { return api.GetBlockDetailsWithTxs(m.Ctx, 1, false) },
-		func() (map[string]any, error) { return api.GetBlockDetailsByHashWithTxs(m.Ctx, *hash, false) },
+		func() (map[string]any, error) { return api.GetBlockDetails(m.Ctx, 1, &no) },
+		func() (map[string]any, error) { return api.GetBlockDetailsByHash(m.Ctx, *hash, &no) },
 	} {
 		got, err := details()
 		require.NoError(t, err)
