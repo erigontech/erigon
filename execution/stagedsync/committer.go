@@ -945,7 +945,9 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		cc.state.FlushToUpdates(cc.updates)
 		sdCtx.SetUpdates(cc.handOffUpdates())
 	}
-	cc.state.ResetBlockFlags()
+	if !m.midBlock {
+		cc.state.ResetBlockFlags()
+	}
 
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
