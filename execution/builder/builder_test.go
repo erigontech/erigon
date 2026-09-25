@@ -100,6 +100,7 @@ func TestBuilderSharedDomainsUsesSequentialCommitment(t *testing.T) {
 	defer sd.Close()
 	sd.EnableParaTrieDB(db)
 
+	// Check after wiring the DB: it can activate a pending parallel trie.
 	require.Equal(t, commitment.VariantHexPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
 }
 

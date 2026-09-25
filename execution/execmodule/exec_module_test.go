@@ -828,6 +828,8 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 // Start building a block, then accept a competing block with the same parent.
 // The original build must still produce a valid block. Also run without the
 // competing commit as a control.
+// The 256 recipients must exceed commitment.minForkGrain (currently 128)
+// to exercise parallel worker reads when the builder override is removed.
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 	original := statecfg.ExperimentalParallelCommitment
 	statecfg.ExperimentalParallelCommitment = true
