@@ -46,6 +46,13 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 		ethjson.Data(s, "ptrHash", x.PtrHash[:])
 	}
 	ethjson.DataList(s, "topics", x.Topics)
+	if len(x.OptTopics) > 0 {
+		ethjson.DataList(s, "optTopics", x.OptTopics)
+	}
+	ethjson.Datas(s, "blobs", x.Blobs)
+	if len(x.OptBlobs) > 0 {
+		ethjson.Datas(s, "optBlobs", x.OptBlobs)
+	}
 	ethjson.Quantity(s, "num", x.Num)
 	if x.OptNum != 0 {
 		ethjson.Quantity(s, "optNum", x.OptNum)
