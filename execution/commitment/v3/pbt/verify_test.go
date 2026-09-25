@@ -64,3 +64,40 @@ func TestTrieVerifyRejectsWrongRootSelfExtensionBits(t *testing.T) {
 
 	require.Error(t, NewTrie(ctx).Verify())
 }
+
+func TestVerifyRejectsOrphanBucketRecordInEmptyTrie(t *testing.T) {
+	address := bytes.Repeat([]byte{0x44}, 20)
+	key := eip8297.TreeKeyStorage(address, storageSlot(64))
+	value := eip8297.EncodeStorageValue([]byte{1})
+	ctx := newTrieTestContext()
+	_, err := NewTrie(ctx).Process([]Op{{Key: key, Value: value}})
+	require.NoError(t, err)
+	bucketKey, err := bucketKeyForStorage(key)
+	require.NoError(t, err)
+	bucketRecord := bytes.Clone(ctx.records[string(bucketKey)])
+	ctx.records = map[string][]byte{string(bucketKey): bucketRecord}
+
+	err = NewTrie(ctx).Verify()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "orphan bucket record")
+}
+
+func TestVerifyRejectsOrphanBucketRecordBesideLiveState(t *testing.T) {
+	address := bytes.Repeat([]byte{0x55}, 20)
+	key := accountKey(0, eip8297.BasicDataLeafKey)
+	ctx := newTrieTestContext()
+	_, err := NewTrie(ctx).Process([]Op{{Key: key, Value: testTrieValue(1)}})
+	require.NoError(t, err)
+
+	orphanContext := newTrieTestContext()
+	orphanKey := eip8297.TreeKeyStorage(address, storageSlot(64))
+	_, err = NewTrie(orphanContext).Process([]Op{{Key: orphanKey, Value: eip8297.EncodeStorageValue([]byte{2})}})
+	require.NoError(t, err)
+	orphanBucket, err := bucketKeyForStorage(orphanKey)
+	require.NoError(t, err)
+	ctx.records[string(orphanBucket)] = bytes.Clone(orphanContext.records[string(orphanBucket)])
+
+	err = NewTrie(ctx).Verify()
+	require.Error(t, err)
+	require.ErrorContains(t, err, "orphan bucket record")
+}

@@ -18,6 +18,7 @@ package pbt
 
 import (
 	"bytes"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -185,4 +186,53 @@ func TestTrieVerifyRejectsStaleBucketRecord(t *testing.T) {
 	require.NoError(t, err)
 	ctx.records[string(bucketKey)] = stale
 	require.Error(t, NewTrie(ctx).Verify())
+}
+
+func TestTrieBucketRecordPrevAcrossReopenAndFormChanges(t *testing.T) {
+	address := bytes.Repeat([]byte{0x01}, 20)
+	key64 := eip8297.TreeKeyStorage(address, storageSlot(64))
+	key256 := eip8297.TreeKeyStorage(address, storageSlot256())
+	ctx := newTrieTestContext()
+	ctx.rejectNilPrev = true
+	value64 := testTrieValue(1)
+	value256 := testTrieValue(2)
+	requireProcess(t, ctx, []Op{{Key: key64, Value: value64}})
+	start := cloneRecords(ctx.records)
+
+	trie := NewTrie(ctx)
+	_, err := trie.Process([]Op{{Key: key256, Value: value256}})
+	require.NoError(t, err)
+	deltas := trie.TakeDeltas()
+	for _, delta := range deltas {
+		require.Equal(t, start[string(delta.Key)], delta.Prev, "delta %x", delta.Key)
+	}
+	for i := len(deltas) - 1; i >= 0; i-- {
+		delta := deltas[i]
+		require.NoError(t, ctx.PutBranch(delta.Key, delta.Prev, delta.Data))
+	}
+
+	require.Equal(t, start, ctx.records)
+	require.NoError(t, NewTrie(ctx).Verify())
+}
+
+func TestTrieRepeatedAddressesOverflowForms(t *testing.T) {
+	for _, byteValue := range []byte{0x06, 0x03, 0x0d} {
+		t.Run(fmt.Sprintf("%02x", byteValue), func(t *testing.T) {
+			address := bytes.Repeat([]byte{byteValue}, 20)
+			key64 := eip8297.TreeKeyStorage(address, storageSlot(64))
+			key256 := eip8297.TreeKeyStorage(address, storageSlot256())
+			ctx := newTrieTestContext()
+			_, err := NewTrie(ctx).Process([]Op{{Key: key64, Value: testTrieValue(1)}})
+			require.NoError(t, err)
+			_, err = NewTrie(ctx).Process([]Op{{Key: key256, Value: testTrieValue(2)}})
+			require.NoError(t, err)
+			require.NoError(t, NewTrie(ctx).Verify())
+		})
+	}
+}
+
+func storageSlot256() []byte {
+	slot := make([]byte, 32)
+	slot[30] = 1
+	return slot
 }

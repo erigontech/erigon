@@ -68,6 +68,10 @@ func (c *trieTestContext) PutBranch(key, data, prev []byte) error {
 	return nil
 }
 
+func (c *trieTestContext) Records() map[string][]byte {
+	return c.records
+}
+
 func (c *trieTestContext) Account([]byte) (*commitment.Update, error) {
 	return nil, fmt.Errorf("unexpected account read")
 }
