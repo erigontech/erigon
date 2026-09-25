@@ -132,3 +132,22 @@ func marshalIfSet(v any) ([]byte, error) {
 	}
 	return json.Marshal(v)
 }
+
+// RPCBlocks is a list of blocks as a reply carries it. The RPC encoder only consults the
+// top-level result for a fast marshaller, so a plain slice would take the reflection path.
+type RPCBlocks []*RPCBlock
+
+func (bs RPCBlocks) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if bs == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteArrayStart()
+	for _, b := range bs {
+		if err := b.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.WriteArrayEnd()
+	return nil
+}
