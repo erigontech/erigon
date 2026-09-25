@@ -60,16 +60,14 @@ var (
 	mxRetiredHistoryFiles  = metrics.GetOrCreateCounter("domain_retired_history_files")
 )
 
-var (
-	branchKeyDerefSpent = []metrics.Summary{
-		metrics.GetOrCreateSummary(`branch_key_deref{level="L0"}`),
-		metrics.GetOrCreateSummary(`branch_key_deref{level="L1"}`),
-		metrics.GetOrCreateSummary(`branch_key_deref{level="L2"}`),
-		metrics.GetOrCreateSummary(`branch_key_deref{level="L3"}`),
-		metrics.GetOrCreateSummary(`branch_key_deref{level="L4"}`),
-		metrics.GetOrCreateSummary(`branch_key_deref{level="recent"}`),
-	}
-)
+var branchKeyDerefSpent = []metrics.Summary{
+	metrics.GetOrCreateSummary(`branch_key_deref{level="L0"}`),
+	metrics.GetOrCreateSummary(`branch_key_deref{level="L1"}`),
+	metrics.GetOrCreateSummary(`branch_key_deref{level="L2"}`),
+	metrics.GetOrCreateSummary(`branch_key_deref{level="L3"}`),
+	metrics.GetOrCreateSummary(`branch_key_deref{level="L4"}`),
+	metrics.GetOrCreateSummary(`branch_key_deref{level="recent"}`),
+}
 
 var (
 	mxsKVGet = [kv.DomainLen][]metrics.Summary{

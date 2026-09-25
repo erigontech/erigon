@@ -2,10 +2,10 @@
 
 ## Release branches
 
-- `release/3.4` — Stable 3.4.x
-- `release/3.5` — Stable 3.5.x (previous stable line)
-- `release/3.6` — Stable 3.6.x (current — v3.6.0 is the Latest release)
-- `main` — Next feature release (3.7)
+- `release/3.5` — Stable 3.5.x
+- `release/3.6` — Stable 3.6.x (previous stable line — v3.6.1 is the Latest release)
+- `release/3.7` — Stable 3.7.x (current — freshly forked from `main`, no tagged release yet)
+- `main` — Next feature release (3.8)
 
 The "current" marker goes stale: before choosing a backport base, verify against `gh release list --repo erigontech/erigon --limit 5` (the Latest tag) and the recent `[rX.Y]`-prefixed PR stream, and update this file if it disagrees.
 
@@ -24,7 +24,7 @@ When creating a branch for someone else, sample their recent branches first (`gi
 
 ### Optional variants
 
-Some contributors append a release-number suffix to mark which release the branch targets — Alex's convention is `alex/<short_desc>_<release_num>[_suffix]` (e.g. `alex/seg_header_meta2_34`, `alex/all7_34_dbg`). Release number is two digits without the dot: `34` = release/3.4, `35` = release/3.5, `36` = release/3.6, `37` = main. Suffixes: `_dbg` (debug), `_auto` (automated), `_<n>` (revision). This is one contributor's personal scheme — do not apply it to others.
+Some contributors append a release-number suffix to mark which release the branch targets — Alex's convention is `alex/<short_desc>_<release_num>[_suffix]` (e.g. `alex/seg_header_meta2_34`, `alex/all7_34_dbg`). Release number is two digits without the dot: `35` = release/3.5, `36` = release/3.6, `37` = release/3.7, `38` = main. Suffixes: `_dbg` (debug), `_auto` (automated), `_<n>` (revision). This is one contributor's personal scheme — do not apply it to others.
 
 Non-personal prefixes that show up for cross-cutting work:
 
@@ -34,7 +34,7 @@ Non-personal prefixes that show up for cross-cutting work:
 
 ## Choosing a base branch
 
-- Bug for current stable release → base on `release/3.6`
+- Bug for current stable release → base on `release/3.7`
 - New feature → base on `main`
-- Backport / cherry-pick → branch off the target release branch, prefix the PR title with `[rX.Y]` (e.g. `[r3.6]`)
+- Backport / cherry-pick → branch off the target release branch, prefix the PR title with `[rX.Y]` (e.g. `[r3.7]`)
 - A bug present on several maintained release lines may need a backport per line — check each `release/X.Y` for the affected code before assuming one backport covers it

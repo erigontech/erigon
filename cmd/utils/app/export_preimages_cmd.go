@@ -39,12 +39,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -116,14 +116,22 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer tx.Rollback()
 
-	commitmentState, _, ok, err := aggTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, tx, kv.GetLatestOptions{})
-	if err != nil {
-		return fmt.Errorf("read commitment state: %w", err)
+	var commitmentState, stateKey []byte
+	var ok bool
+	for _, key := range commitmentdb.CommitmentStateKeys {
+		commitmentState, _, ok, err = aggTx.GetLatest(kv.CommitmentDomain, key, tx, kv.GetLatestOptions{})
+		if err != nil {
+			return fmt.Errorf("read commitment state: %w", err)
+		}
+		if ok {
+			stateKey = key
+			break
+		}
 	}
-	if !ok {
+	if len(stateKey) == 0 {
 		return fmt.Errorf("commitment state record not found in %s", dirs.DataDir)
 	}
-	rootBytes, blockNum, txNum, err := commitment.HexTrieExtractStateRoot(commitmentState)
+	rootBytes, blockNum, txNum, err := integrity.ExtractCommitmentStateRoot(stateKey, commitmentState)
 	if err != nil {
 		return fmt.Errorf("extract state root: %w", err)
 	}

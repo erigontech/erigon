@@ -471,6 +471,7 @@ type GetLatestOptions struct {
 	maxStep     Step
 	hasMaxStep  bool
 	branchCache bool
+	owned       bool
 	buf         []byte
 }
 
@@ -498,6 +499,15 @@ func (opts GetLatestOptions) WithMaxStep(maxStep Step) GetLatestOptions {
 func (opts GetLatestOptions) WithBranchCache() GetLatestOptions {
 	opts.branchCache = true
 	return opts
+}
+
+func (opts GetLatestOptions) WithOwned() GetLatestOptions {
+	opts.owned = true
+	return opts
+}
+
+func (opts GetLatestOptions) Owned() bool {
+	return opts.owned
 }
 
 func (opts GetLatestOptions) Metrics() (GetLatestMetrics, time.Time) {
@@ -626,8 +636,8 @@ type FlushConfig struct {
 	// tuple during Flush so a downstream cache (e.g. the BranchCache) can stay in
 	// sync. txNum is the value's write txNum, for tx-precise unwind invalidation.
 	//
-	// k belongs to the callback; v is the batch's own storage, which is never
-	// rewritten in place, so a consumer may retain it.
+	// k and v are the batch's own storage, which is never rewritten in place,
+	// so a consumer may retain them but must not write to them.
 	DomainCallbacks map[Domain]func(k []byte, v []byte, step Step, txNum uint64)
 }
 
@@ -897,6 +907,11 @@ var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutil
 // ErrReadTxLimitExceeded is returned by BeginRo when the read-tx semaphore is full and no slot is
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
 var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
+
+// ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
+// the latest value per key, so no historical answer exists in memory. Overlay read views treat it as
+// a miss and fall through to their backing transaction; every other reader error stays fatal.
+var ErrInMemHistoryDisabled = errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
 
 type nonBlockingAcquireKey struct{}
 

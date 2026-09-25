@@ -147,6 +147,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.SnapDownloadToBlockFlag,
 	&utils.DbPageSizeFlag,
 	&utils.DbSizeLimitFlag,
+	&utils.DbSafeNoSyncFlag,
 	&utils.DbWriteMapFlag,
 	&utils.TorrentPortFlag,
 	&utils.TorrentMaxPeersFlag,
@@ -210,6 +211,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,
 	&utils.CaplinDiscoveryTCPPortFlag,
+	&utils.CaplinDiscoveryQUICPortFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.CaplinSubscribeAllTopicsFlag,
 	&utils.CaplinMaxPeerCount,
@@ -275,6 +277,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.ExperimentalParallelCommitmentFlag,
 	&utils.ExperimentalBinCommitmentFlag,
 	&utils.ExperimentalBinCommitmentHashFlag,
+	&utils.ExperimentalCommitmentV3Flag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,

@@ -17,7 +17,6 @@
 package jsonrpc
 
 import (
-	"encoding/json"
 	"fmt"
 	"net/http/httptest"
 	"testing"
@@ -45,20 +44,6 @@ func BenchmarkWitnessServeOnDemand(b *testing.B) {
 	for _, mb := range []int{6, 15, 25} {
 		w := syntheticWitness(mb*1_000_000, 200)
 		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) { serveWitness(b, w) })
-	}
-}
-
-// BenchmarkWitnessServeCacheHit is what a cache hit serves: the builder marshaled
-// the JSON once (off-path), so MarshalFastJSONTo on the stored shell writes those
-// bytes verbatim — no per-hit marshal.
-func BenchmarkWitnessServeCacheHit(b *testing.B) {
-	for _, mb := range []int{6, 15, 25} {
-		enc, err := json.Marshal(syntheticWitness(mb*1_000_000, 200))
-		if err != nil {
-			b.Fatal(err)
-		}
-		shell := &ExecutionWitnessResult{cachedJSON: enc}
-		b.Run(fmt.Sprintf("%dMB", mb), func(b *testing.B) { serveWitness(b, shell) })
 	}
 }
 

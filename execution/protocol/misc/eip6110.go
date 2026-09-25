@@ -41,12 +41,14 @@ var (
 	// DepositABI is an ABI instance of beacon chain deposit events.
 	DepositABI   = abi.ABI{Events: map[string]abi.Event{"DepositEvent": depositEvent}}
 	bytesT, _    = abi.NewType("bytes", "", nil)
-	depositEvent = abi.NewEvent("DepositEvent", "DepositEvent", false, abi.Arguments{
-		{Name: "pubkey", Type: bytesT, Indexed: false},
-		{Name: "withdrawal_credentials", Type: bytesT, Indexed: false},
-		{Name: "amount", Type: bytesT, Indexed: false},
-		{Name: "signature", Type: bytesT, Indexed: false},
-		{Name: "index", Type: bytesT, Indexed: false}},
+	depositEvent = abi.NewEvent(
+		"DepositEvent", "DepositEvent", false, abi.Arguments{
+			{Name: "pubkey", Type: bytesT, Indexed: false},
+			{Name: "withdrawal_credentials", Type: bytesT, Indexed: false},
+			{Name: "amount", Type: bytesT, Indexed: false},
+			{Name: "signature", Type: bytesT, Indexed: false},
+			{Name: "index", Type: bytesT, Indexed: false},
+		},
 	)
 )
 

@@ -567,7 +567,8 @@ func TestEngineApiMultipleSendersInBlock(t *testing.T) {
 
 		// Verify both sender nonces advanced.
 		coinbaseNonce, err := eat.RpcApiClient.GetTransactionCount(
-			crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey), rpc.LatestBlock)
+			crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey), rpc.LatestBlock,
+		)
 		require.NoError(t, err)
 		require.Equal(t, uint64(1), coinbaseNonce.Uint64())
 

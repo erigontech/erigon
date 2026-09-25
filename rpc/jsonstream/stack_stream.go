@@ -106,7 +106,7 @@ func (s *StackStream) WriteHex(b []byte) {
 // HexesField writes fixed-size values as one array field: one buffer growth for the whole
 // array, where a value write per element grows once per element. A nil slice is null.
 func HexesField[S ~[]E, E ~[length.Hash]byte](s *StackStream, name string, items S) {
-	Field(s, name)
+	s.Field(name)
 	if items == nil {
 		s.WriteNil()
 		return
@@ -143,6 +143,9 @@ func WriteHexBytes[S ~[]E, E ~[]byte](s *StackStream, items S) {
 	s.stream.SetBuffer(append(buf, ']'))
 	s.afterValue()
 }
+
+// Open returns the stream the value goes to, which is this one.
+func (s *StackStream) Open() *StackStream { return s }
 
 // WriteQuotedText writes v.AppendText's output as a JSON string, without an escape scan: it is
 // for hex quantities, which never need escaping.
@@ -241,71 +244,15 @@ func (s *StackStream) WriteBool(val bool) {
 	s.afterValue()
 }
 
-// WriteInt writes an int value to the stream
-func (s *StackStream) WriteInt(val int) {
-	s.beforeValue()
-	s.stream.WriteInt(val)
-	s.afterValue()
-}
-
-// WriteInt8 writes an int8 value to the stream
-func (s *StackStream) WriteInt8(val int8) {
-	s.beforeValue()
-	s.stream.WriteInt8(val)
-	s.afterValue()
-}
-
-// WriteInt16 writes an int16 value to the stream
-func (s *StackStream) WriteInt16(val int16) {
-	s.beforeValue()
-	s.stream.WriteInt16(val)
-	s.afterValue()
-}
-
-// WriteInt32 writes an int32 value to the stream
-func (s *StackStream) WriteInt32(val int32) {
-	s.beforeValue()
-	s.stream.WriteInt32(val)
-	s.afterValue()
-}
-
-// WriteInt64 writes an int64 value to the stream
-func (s *StackStream) WriteInt64(val int64) {
+// Int writes a signed integer. Narrower signed types widen to it without changing the digits.
+func (s *StackStream) Int(val int64) {
 	s.beforeValue()
 	s.stream.WriteInt64(val)
 	s.afterValue()
 }
 
-// WriteUint writes an uint value to the stream
-func (s *StackStream) WriteUint(val uint) {
-	s.beforeValue()
-	s.stream.WriteUint(val)
-	s.afterValue()
-}
-
-// WriteUint8 writes an uint8 value to the stream
-func (s *StackStream) WriteUint8(val uint8) {
-	s.beforeValue()
-	s.stream.WriteUint8(val)
-	s.afterValue()
-}
-
-// WriteUint16 writes an uint16 value to the stream
-func (s *StackStream) WriteUint16(val uint16) {
-	s.beforeValue()
-	s.stream.WriteUint16(val)
-	s.afterValue()
-}
-
-// WriteUint32 writes an uint32 value to the stream
-func (s *StackStream) WriteUint32(val uint32) {
-	s.beforeValue()
-	s.stream.WriteUint32(val)
-	s.afterValue()
-}
-
-// WriteUint64 writes an uint64 value to the stream
-func (s *StackStream) WriteUint64(val uint64) {
+// Uint writes an unsigned integer. Narrower unsigned types widen to it without changing the digits.
+func (s *StackStream) Uint(val uint64) {
 	s.beforeValue()
 	s.stream.WriteUint64(val)
 	s.afterValue()
@@ -364,8 +311,8 @@ func (s *StackStream) WriteArrayEnd() {
 	s.afterValue()
 }
 
-// WriteObjectField writes a field name for an object and adds it to the stack
-func (s *StackStream) WriteObjectField(fieldName string) *StackStream {
+// Field writes a field name for an object and adds it to the stack.
+func (s *StackStream) Field(fieldName string) *StackStream {
 	s.beforeValue()
 	writeObjectFieldFast(s.stream, fieldName)
 	s.push(ItemField)

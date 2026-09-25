@@ -151,7 +151,7 @@ func TestDomain_OpenFolder(t *testing.T) {
 
 	err = dir.RemoveFile(fn)
 	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	err = os.WriteFile(fn, make([]byte, 33), 0o644)
 	require.NoError(t, err)
 
 	scanDirsRes, err := scanDirs(d.dirs)
@@ -246,7 +246,7 @@ func testCollationBuild(t *testing.T, compressDomainVals bool) {
 		}
 		require.Equal(t, []string{"key1", "value1.2", "key2", "value2.1"}, words)
 		// Check index
-		//require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
+		// require.Equal(t, 2, int(sf.valuesIdx.KeyCount()))
 		require.Equal(t, 2, int(sf.valuesBt.KeyCount()))
 
 		//r := recsplit.NewIndexReader(sf.valuesIdx)
@@ -1293,7 +1293,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 				}
 				continue
 				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
-			} else { //warm data
+			} else { // warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
 				}
@@ -1322,7 +1322,7 @@ func TestDomain_Prune_AfterAllWrites(t *testing.T) {
 		}
 	}
 
-	//warm keys
+	// warm keys
 	binary.BigEndian.PutUint64(v[:], txCount)
 	for keyNum := uint64(2); keyNum < keyCount; keyNum++ {
 		label := fmt.Sprintf("txNum=%d, keyNum=%d\n", txCount-1, keyNum)
@@ -1444,7 +1444,6 @@ func TestDomain_PruneOnWrite(t *testing.T) {
 	from, to := domainRoTx.stepsRangeInDB(tx)
 	require.Equal(t, 3, int(from))
 	require.Equal(t, 4, int(to))
-
 }
 
 func TestDomain_OpenFilesWithDeletions(t *testing.T) {
@@ -1717,7 +1716,6 @@ func TestDomainContext_getFromFiles(t *testing.T) {
 	defer func(t time.Time) { fmt.Printf("domain_test.go:1217: %s\n", time.Since(t)) }(time.Now())
 	var prev []byte
 	for i = range vals {
-
 		for j := 0; j < len(keys); j++ {
 			acc := accounts3.Account{
 				Nonce:       uint64(i),
@@ -1834,7 +1832,7 @@ func filledDomainFixedSize(t *testing.T, keysCount, txCount, aggStep uint64, log
 					continue
 				}
 				//fmt.Printf("Put frozen: %d, step=%d, %d\n", keyNum, step, frozenFileNum)
-			} else { //warm data
+			} else { // warm data
 				if keyNum == 0 || keyNum == 1 {
 					continue
 				}
@@ -3324,7 +3322,7 @@ func TestDomain_DebugRangeLatestFromFiles(t *testing.T) {
 	writer = domainRoTx.NewWriter()
 	defer writer.Close()
 
-	dbOnlyKeyNums := make(map[uint64]bool) //keys only in MDBX
+	dbOnlyKeyNums := make(map[uint64]bool) // keys only in MDBX
 	dbTxNum := txs + 1
 	for keyNum := uint64(11); keyNum <= uint64(20); keyNum++ {
 		var k [8]byte

@@ -169,6 +169,14 @@ var messageCorpus = []string{
 	// empty and odd values
 	`{"method":"","id":1}`,
 	`{"":1,"method":"m"}`,
+	// string fields that are not plain ASCII text, or not strings at all
+	`{"method":"a","method":null,"id":1}`,
+	`{"jsonrpc":"2.0","jsonrpc":null}`,
+	`{"method":5,"id":1}`,
+	`{"jsonrpc":2.0,"method":["m"]}`,
+	`{"method":"caf\u00e9","id":1}`,
+	"{\"method\":\"caf\u00e9\",\"id\":1}",
+	"{\"method\":\"\xff\",\"id\":1}",
 	// not an object at all
 	`1`,
 	`"str"`,
@@ -209,32 +217,46 @@ func TestParseMessage(t *testing.T) {
 		want  []*jsonrpcMessage
 	}{
 		{"empty object", `{}`, false, []*jsonrpcMessage{zero()}},
-		{"call", `{"jsonrpc":"2.0","id":1,"method":"m","params":[1,2]}`, false,
-			[]*jsonrpcMessage{testMessage("2.0", "m", "1", "[1,2]")}},
+		{
+			"call", `{"jsonrpc":"2.0","id":1,"method":"m","params":[1,2]}`, false,
+			[]*jsonrpcMessage{testMessage("2.0", "m", "1", "[1,2]")},
+		},
 		{"null message", `null`, false, []*jsonrpcMessage{nil}},
 		{"not an object", `1`, false, []*jsonrpcMessage{zero()}},
 		{"string", `"str"`, false, []*jsonrpcMessage{zero()}},
 		{"empty batch", `[]`, true, nil},
-		{"batch", `[{"method":"a","id":1},{"method":"b","id":2}]`, true,
-			[]*jsonrpcMessage{testMessage("", "a", "1", ""), testMessage("", "b", "2", "")}},
-		{"batch with null", `[{"method":"a","id":1},null]`, true,
-			[]*jsonrpcMessage{testMessage("", "a", "1", ""), nil}},
-		{"duplicate key, last wins", `{"method":"first","method":"second","id":1}`, false,
-			[]*jsonrpcMessage{testMessage("", "second", "1", "")}},
+		{
+			"batch", `[{"method":"a","id":1},{"method":"b","id":2}]`, true,
+			[]*jsonrpcMessage{testMessage("", "a", "1", ""), testMessage("", "b", "2", "")},
+		},
+		{
+			"batch with null", `[{"method":"a","id":1},null]`, true,
+			[]*jsonrpcMessage{testMessage("", "a", "1", ""), nil},
+		},
+		{
+			"duplicate key, last wins", `{"method":"first","method":"second","id":1}`, false,
+			[]*jsonrpcMessage{testMessage("", "second", "1", "")},
+		},
 
 		// field names have one spelling in the spec; any other spelling is an
 		// unknown key, but unicode escapes are unescaped first so they match the
 		// same way encoding/json map keys do
 		{"cased keys ignored", `{"Method":"m","ID":1,"Params":[1]}`, false, []*jsonrpcMessage{zero()}},
-		{"unicode-escaped method key", "{\"metho\\u0064\":\"m\",\"i\\u0064\":7}", false,
-			[]*jsonrpcMessage{testMessage("", "m", "7", "")}},
+		{
+			"unicode-escaped method key", "{\"metho\\u0064\":\"m\",\"i\\u0064\":7}", false,
+			[]*jsonrpcMessage{testMessage("", "m", "7", "")},
+		},
 		{"double-escaped key is not method", `{"metho\\u0064":"x"}`, false, []*jsonrpcMessage{zero()}},
 
 		// a string holding structural bytes must not end the value early
-		{"structural bytes in a string", `{"method":"m","params":["a\"},{\"b"],"id":1}`, false,
-			[]*jsonrpcMessage{testMessage("", "m", "1", `["a\"},{\"b"]`)}},
-		{"batch element with a brace in a string", `[{"method":"m","params":["},{"]}]`, true,
-			[]*jsonrpcMessage{testMessage("", "m", "", `["},{"]`)}},
+		{
+			"structural bytes in a string", `{"method":"m","params":["a\"},{\"b"],"id":1}`, false,
+			[]*jsonrpcMessage{testMessage("", "m", "1", `["a\"},{\"b"]`)},
+		},
+		{
+			"batch element with a brace in a string", `[{"method":"m","params":["},{"]}]`, true,
+			[]*jsonrpcMessage{testMessage("", "m", "", `["},{"]`)},
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -538,16 +560,12 @@ func TestResponseNilResultEmitsNull(t *testing.T) {
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
 
-type emptyFastJSON struct{}
-
-func (emptyFastJSON) MarshalFastJSON() ([]byte, error) { return nil, nil }
-
-func TestResponseEmptyFastJSONEmitsNull(t *testing.T) {
+func TestResponseEmptyStreamedEmitsNull(t *testing.T) {
 	var out bytes.Buffer
 	s := jsonstream.Get(&out)
 	defer jsonstream.Put(s)
 
-	respond(s, json.RawMessage(`7`), emptyFastJSON{})
+	respond(s, json.RawMessage(`7`), emptyStreamed{})
 	require.NoError(t, s.Flush())
 	require.Equal(t, `{"jsonrpc":"2.0","id":7,"result":null}`, out.String())
 }
@@ -653,7 +671,7 @@ func TestLargeResultStreamsAndStaysPoolable(t *testing.T) {
 
 	s2 := jsonstream.Get(&got)
 	respond(s2, id, res)
-	require.LessOrEqual(t, cap(s2.Buffer()), 16*jsonstream.FlushThreshold,
+	require.LessOrEqual(t, cap(s2.Buffer()), jsonstream.MaxPooledBufferSize(),
 		"the result grew the stream buffer past the pool limit")
 	_ = s2.Flush()
 
@@ -692,7 +710,6 @@ func TestHugeRequestIDStillProducesValidJSON(t *testing.T) {
 		require.Contains(t, back, "error")
 		require.NotContains(t, back, "result")
 	}
-
 }
 
 type failingAppender struct{}
@@ -703,7 +720,7 @@ type failingMidWrite struct{}
 
 func (failingMidWrite) MarshalFastJSONTo(w *jsonstream.StackStream) error {
 	w.WriteObjectStart()
-	w.WriteObjectField("balance")
+	w.Field("balance")
 	w.WriteQuotedText(failingAppender{})
 	w.WriteObjectEnd()
 	return nil
@@ -746,4 +763,16 @@ func TestCodecCoalescedMessagesLeaveInOneWrite(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(1), writes.Load(), "3 coalesced messages, socket writes")
 	require.Equal(t, "0\n1\n2\n", <-read)
+}
+
+func TestDecodeStringFieldMatchesUnmarshal(t *testing.T) {
+	t.Parallel()
+	for _, in := range []string{`"eth_chainId`, `"eth_chainId"`, `"a\"b"`, `null`, `"é"`, `"`} {
+		var want, got string = "prev", "prev"
+		if json.Unmarshal([]byte(in), &want) != nil {
+			want = ""
+		}
+		decodeStringField([]byte(in), &got)
+		require.Equal(t, want, got, in)
+	}
 }

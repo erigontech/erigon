@@ -269,6 +269,7 @@ type mockGraphQLAPI struct {
 func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber) (map[string]any, error) {
 	return nil, nil
 }
+
 func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash) (map[string]any, error) {
 	return nil, nil
 }
@@ -279,33 +280,41 @@ func (m *mockGraphQLAPI) GetAccountInfo(_ context.Context, addr common.Address, 
 	m.accountInfoBlockNum = blockNum
 	return m.accountBalance, m.accountNonce, m.accountCode, m.accountInfoErr
 }
+
 func (m *mockGraphQLAPI) GetAccountStorage(_ context.Context, _ common.Address, _ string, _ rpc.BlockNumber) (string, error) {
 	return "", nil
 }
+
 func (m *mockGraphQLAPI) GetBlockNumberForTx(_ context.Context, _ common.Hash) (uint64, bool, error) {
 	return 0, false, nil
 }
+
 func (m *mockGraphQLAPI) SendRawTransaction(_ context.Context, data hexutil.Bytes) (common.Hash, error) {
 	m.sendRawTx = data
 	return m.sendRawResult, m.sendRawErr
 }
+
 func (m *mockGraphQLAPI) Call(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*jsonrpc.GraphQLCallResult, error) {
 	m.callBlockNum = blockNumber
 	m.callArgs = args
 	return m.callResult, m.callErr
 }
+
 func (m *mockGraphQLAPI) EstimateGas(_ context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error) {
 	m.estimateGasBlockNum = blockNumber
 	m.estimateGasArgs = args
 	return m.estimateGasResult, m.estimateGasErr
 }
+
 func (m *mockGraphQLAPI) GasPrice(_ context.Context) (string, error) {
 	return m.gasPriceResult, m.gasPriceErr
 }
+
 func (m *mockGraphQLAPI) GetLogs(_ context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
 	m.getLogsCrit = crit
 	return m.getLogsResult, m.getLogsErr
 }
+
 func (m *mockGraphQLAPI) GetPendingTransactions(_ context.Context) ([]types.Transaction, error) {
 	return m.pendingTxns, m.pendingErr
 }

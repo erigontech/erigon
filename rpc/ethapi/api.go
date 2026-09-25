@@ -151,7 +151,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 		nonce = args.Nonce.Uint64()
 	}
 
-	var to = accounts.NilAddress
+	to := accounts.NilAddress
 	if args.To != nil {
 		to = accounts.InternAddress(*args.To)
 	}
@@ -429,9 +429,19 @@ type RPCBlock struct {
 	Uncles       []common.Hash      `json:"uncles"`
 	Withdrawals  *types.Withdrawals `json:"withdrawals,omitempty"`
 
-	TransactionCount any           `json:"transactionCount,omitempty"`
+	TransactionCount *uint64       `json:"transactionCount,omitempty"`
 	TotalDifficulty  *hexutil.U256 `json:"totalDifficulty,omitempty"`
-	Calls            any           `json:"calls,omitempty"`
+	Calls            []CallResult  `json:"calls,omitzero"`
+}
+
+// CallResult represents the result of a single call in the simulation.
+type CallResult struct {
+	ReturnData string          `json:"returnData"`
+	Logs       []*types.RPCLog `json:"logs"`
+	GasUsed    hexutil.Uint64  `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
+	Status     hexutil.Uint64  `json:"status"`
+	Error      any             `json:"error,omitempty"`
 }
 
 // MarkPending nils the fields a pending block does not have yet.
@@ -443,7 +453,13 @@ func (b *RPCBlock) MarkPending() {
 // in because types.Block hands out header copies that drop the memoized hash, and
 // recomputing it costs an RLP encode plus a keccak per call.
 func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
-	result := &RPCHeader{
+	result := &RPCHeader{}
+	marshalHeaderInto(result, head, hash)
+	return result
+}
+
+func marshalHeaderInto(result *RPCHeader, head *types.Header, hash common.Hash) {
+	*result = RPCHeader{
 		Number:           (*hexutil.U256)(&head.Number),
 		Hash:             &hash,
 		ParentHash:       head.ParentHash,
@@ -475,7 +491,6 @@ func RPCMarshalHeader(head *types.Header, hash common.Hash) *RPCHeader {
 		result.AuraSeal = &seal
 		result.AuraStep = (*hexutil.Uint64)(&head.AuRaStep)
 	}
-	return result
 }
 
 // Each mode keeps the element type its populated form has, for callers that type-assert
@@ -518,11 +533,11 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 	}
 
 	result := &RPCBlock{
-		RPCHeader:    *RPCMarshalHeader(block.Header(), block.Hash()),
 		Size:         hexutil.Uint64(block.Size()),
 		Transactions: transactions,
 		Uncles:       uncleHashes,
 	}
+	marshalHeaderInto(&result.RPCHeader, block.Header(), block.Hash())
 	if w := block.Withdrawals(); w != nil {
 		result.Withdrawals = &w
 	}

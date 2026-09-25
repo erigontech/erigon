@@ -115,7 +115,8 @@ func TestFindMergeRange(t *testing.T) {
 			NewRange(0, 500000),
 			NewRange(500000, 1000000),
 			NewRange(1000000, 1500000),
-			NewRange(1500000, 2000000)}
+			NewRange(1500000, 2000000),
+		}
 		require.Equal(t, expect.String(), Ranges(found).String())
 
 		var RangesNew []Range
@@ -158,7 +159,6 @@ func TestFindMergeRange(t *testing.T) {
 
 		require.Equal(t, expect.String(), Ranges(found).String())
 	})
-
 }
 
 func TestMergeSnapshots(t *testing.T) {
@@ -536,7 +536,7 @@ func TestRetireFilesAbove(t *testing.T) {
 }
 
 func TestRemoveOverlaps(t *testing.T) {
-	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { //file-version agnostic
+	mustSeeFile := func(files []string, fileNameWithoutVersion string) bool { // file-version agnostic
 		for _, f := range files {
 			if strings.HasSuffix(f, fileNameWithoutVersion) {
 				return true
@@ -586,7 +586,7 @@ func TestRemoveOverlaps(t *testing.T) {
 	require.NoError(err)
 	require.Len(list, 60)
 
-	//corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
+	// corner case: small header.seg was removed, but header.idx left as garbage. such garbage must be cleaned.
 	require.NoError(dir2.RemoveFile(filepath.Join(s.Dir(), list[15].Name())))
 
 	require.NoError(s.OpenSegments(snaptype2.BlockSnapshotTypes, true))
@@ -657,7 +657,6 @@ func TestRemoveOverlaps_CrossingTypeString(t *testing.T) {
 	list, err = snaptype.IdxFiles(s.Dir())
 	require.NoError(err)
 	require.Equal(4, len(list))
-
 }
 
 func TestRemoveOverlapsKeepsSecondIdxTheSurvivorResolvesTo(t *testing.T) {

@@ -73,6 +73,7 @@ var (
 	convertNibblesV2 bool
 	convertRestore   bool
 	convertContinue  bool
+	convertV3        bool
 )
 
 func must(err error) {
@@ -120,6 +121,7 @@ func withLimit(cmd *cobra.Command) {
 func withUnwind(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwind, "unwind", 0, "how much blocks unwind on each iteration")
 }
+
 func withUnwindEvery(cmd *cobra.Command) {
 	cmd.Flags().Uint64Var(&unwindEvery, "unwind.every", 0, "each iteration test will move forward `--unwind.every` blocks, then unwind `--unwind` blocks")
 }
@@ -140,6 +142,7 @@ func withConvertFlags(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&convertSqueeze, "squeeze", false, "target state for the value squeeze axis: true = squeezed (offsets), false = unsqueezed (plain keys inline)")
 	cmd.Flags().BoolVar(&convertNibblesV2, "nibbles.v2", false, "target state for the key encoding axis: true = V2 (prefix-sort trie locality), false = V1 (compact bytes)")
 	cmd.Flags().BoolVar(&convertRestore, "restore", false, "restore commitment files from snapshots/backup/domains/ (mutually exclusive with --squeeze/--nibbles.v2)")
+	cmd.Flags().BoolVar(&convertV3, "v3", false, "convert legacy hex-patricia commitment files into commitment v3 records (v3.0 .kv with .bt and .kvei); files must be unsqueezed; verifies every reachable record against the state root after the swap")
 	cmd.Flags().BoolVar(&convertContinue, "continue", false, "Resume a prior interrupted conversion. Skips files whose converted shard already exists in <datadir>/snap/rebuild/domain/. Flags --squeeze and --nibbles.v2 MUST match the original interrupted run; mismatch produces mixed-encoding output. Mutually exclusive with --restore.")
 }
 

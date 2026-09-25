@@ -35,12 +35,12 @@ const ChangeSets3 = "ChangeSets3"
 
 const (
 
-	//HashedAccounts
+	// HashedAccounts
 	// key - address hash
 	// value - account encoded for storage
 	// Contains Storage:
-	//key - address hash + incarnation + storage key hash
-	//value - storage value(common.hash)
+	// key - address hash + incarnation + storage key hash
+	// value - storage value(common.hash)
 	HashedAccountsDeprecated = "HashedAccount"
 	HashedStorageDeprecated  = "HashedStorage"
 )
@@ -265,7 +265,7 @@ const (
 	StatesProcessingProgress = "StatesProcessingProgress"
 	StatesPruneProgress      = "StatesPruneProgress" // table name => slot
 
-	//Diagnostics tables
+	// Diagnostics tables
 	DiagSystemInfo = "DiagSystemInfo"
 	DiagSyncStages = "DiagSyncStages"
 )
@@ -446,15 +446,19 @@ var TxPoolTables = []string{
 	PoolInfo,
 	SenderLastActivity,
 }
+
 var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = ChaindataTables
-var DownloaderTables = []string{
-	BittorrentCompletion,
-	BittorrentInfo,
-}
+
+var (
+	ConsensusTables  = ChaindataTables
+	DownloaderTables = []string{
+		BittorrentCompletion,
+		BittorrentInfo,
+	}
+)
 
 // ChaindataDeprecatedTables - list of buckets which can be programmatically deleted - for example after migration
 var ChaindataDeprecatedTables = []string{
@@ -483,11 +487,15 @@ var DiagnosticsTables = []string{
 
 type CmpFunc func(k1, k2, v1, v2 []byte) int
 
-type TableCfg map[string]TableCfgItem
-type Bucket string
+type (
+	TableCfg map[string]TableCfgItem
+	Bucket   string
+)
 
-type DBI uint32
-type TableFlags uint
+type (
+	DBI        uint32
+	TableFlags uint
+)
 
 const (
 	Default    TableFlags = 0x00
@@ -561,16 +569,18 @@ var AuRaTablesCfg = TableCfg{
 	PendingEpoch: {},
 }
 
-var TxpoolTablesCfg = TableCfg{}
-var SentryTablesCfg = TableCfg{}
-var ConsensusTablesCfg = TableCfg{}
-var DownloaderTablesCfg = TableCfg{}
-var DiagnosticsTablesCfg = TableCfg{}
-var MigrationsTablesCfg = TableCfg{Migrations: {}}
+var (
+	TxpoolTablesCfg      = TableCfg{}
+	SentryTablesCfg      = TableCfg{}
+	ConsensusTablesCfg   = TableCfg{}
+	DownloaderTablesCfg  = TableCfg{}
+	DiagnosticsTablesCfg = TableCfg{}
+	MigrationsTablesCfg  = TableCfg{Migrations: {}}
+)
 
 func TablesCfgByLabel(label Label) TableCfg {
 	switch label {
-	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: //TODO: move caplindb tables to own table config
+	case dbcfg.ChainDB, dbcfg.TemporaryDB, dbcfg.CaplinDB: // TODO: move caplindb tables to own table config
 		return ChaindataTablesCfg
 	case dbcfg.MigrationsDB:
 		return MigrationsTablesCfg
@@ -588,6 +598,7 @@ func TablesCfgByLabel(label Label) TableCfg {
 		panic(fmt.Sprintf("unexpected label: %s", label))
 	}
 }
+
 func sortBuckets() {
 	slices.Sort(ChaindataTables)
 }

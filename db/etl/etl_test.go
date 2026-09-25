@@ -726,7 +726,6 @@ func TestSortable(t *testing.T) {
 
 	require.Equal([][]byte{{1}, {1}, {1}, {1}, {1}, {1}, {1}, {2}, {2}, {2}}, keys)
 	require.Equal([][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}, {1}, {20}, nil}, vals)
-
 }
 
 // drainBuffer reads what the buffer has left, in the order it hands it back.
@@ -1553,4 +1552,27 @@ func TestAllocatorFillHintsAreBounded(t *testing.T) {
 	}
 	require.Equal(t, 1, allocator.lastFill("index-0"), "an established name survives one-shot name churn")
 	require.Zero(t, allocator.lastFill(fmt.Sprintf("index-%d", 2*maxFillHints-1)), "a new name is refused once the table is full")
+}
+
+func TestMergeLoadInterleavesCollectors(t *testing.T) {
+	logger := log.New()
+	tmp := t.TempDir()
+	onDisk := NewCollector(t.Name(), tmp, NewSortableBuffer(1), logger)
+	inRAM := NewCollector(t.Name(), tmp, NewSortableBuffer(BufferOptimalSize), logger)
+	defer onDisk.Close()
+	defer inRAM.Close()
+	for i := range 20 {
+		c := inRAM
+		if i%2 == 0 {
+			c = onDisk
+		}
+		require.NoError(t, c.Collect([]byte{byte(19 - i)}, []byte{byte(i)}))
+	}
+	var keys []byte
+	require.NoError(t, MergeLoad(t.Name(), []*Collector{onDisk, inRAM}, func(k, v []byte) error {
+		require.Equal(t, 19-k[0], v[0])
+		keys = append(keys, k[0])
+		return nil
+	}, TransformArgs{}))
+	require.Equal(t, []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19}, keys)
 }

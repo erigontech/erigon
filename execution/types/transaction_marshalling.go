@@ -77,9 +77,9 @@ type JsonAuthorization struct {
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
 	a.ChainID = hexutil.U256(authorization.ChainID)
 	a.Address = authorization.Address
-	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
+	a.Nonce = hexutil.Uint64(authorization.Nonce)
 
-	a.YParity = (hexutil.Uint64)(authorization.YParity)
+	a.YParity = hexutil.Uint64(authorization.YParity)
 	a.R = hexutil.U256(authorization.R)
 	a.S = hexutil.U256(authorization.S)
 	return a

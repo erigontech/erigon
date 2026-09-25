@@ -511,7 +511,8 @@ func TestProposerPreferencesServiceConcurrentFirstValidCommit(t *testing.T) {
 
 func TestSeenProposerPreferencesKeyUsesRootAndSlot(t *testing.T) {
 	root := common.HexToHash("0x11")
-	require.Equal(t,
+	require.Equal(
+		t,
 		seenProposerPreferencesKey{slot: 100, dependentRoot: root},
 		newSeenProposerPreferencesKey(&cltypes.ProposerPreferences{ProposalSlot: 100, ValidatorIndex: 42, DependentRoot: root}),
 	)

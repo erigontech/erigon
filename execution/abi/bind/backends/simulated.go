@@ -97,7 +97,7 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	default:
 		engine = ethash.NewFaker()
 	}
-	//SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
+	// SimulatedBackend - it's remote blockchain node. This is reason why it has own `MockSentry` and own `DB` (even if external unit-test have one already)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&genesis), execmoduletester.WithEngine(engine))
 
 	backend := &SimulatedBackend{
@@ -698,7 +698,6 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 	for lo+1 < hi {
 		mid := (hi + lo) / 2
 		failed, _, err := executable(mid)
-
 		// If the error is not nil(consensus error), it means the provided message
 		// call or transaction will never be accepted no matter how much gas it is
 		// assigned. Return the error directly, don't struggle any more
@@ -810,7 +809,8 @@ func (b *SimulatedBackend) SendTransaction(ctx context.Context, txn types.Transa
 		b.pendingState, state.NewNoopWriter(),
 		b.pendingHeader, txn,
 		b.pendingGasUsed,
-		vm.Config{}); err != nil {
+		vm.Config{},
+	); err != nil {
 		return err
 	}
 	protocol.SetGasUsed(b.pendingHeader, b.pendingGasUsed)

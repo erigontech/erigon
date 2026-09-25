@@ -148,7 +148,7 @@ func writeErigonDBSettings(path string, s *ErigonDBSettings) error {
 	if err != nil {
 		return err
 	}
-	return dir.WriteFileWithFsync(path, data, 0644)
+	return dir.WriteFileWithFsync(path, data, 0o644)
 }
 
 // ResolveErigonDBSettings determines the active ErigonDB settings:

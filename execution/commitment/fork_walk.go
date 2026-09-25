@@ -321,7 +321,8 @@ func (fw *forkWalk) fork(ctx context.Context, wk *walker, node *prefixNode, path
 }
 
 func (fw *forkWalk) runChild(ctx context.Context, base *HexPatriciaHashed, cw *walker, node *prefixNode,
-	idx, nib int, path []byte, cells *[16]cell, touched, present *atomic.Uint32) error {
+	idx, nib int, path []byte, cells *[16]cell, touched, present *atomic.Uint32,
+) error {
 	child := node.children[idx]
 	childPath := make([]byte, 0, max(len(path)+1+len(child.ext), forkPathCap))
 	childPath = append(childPath, path...)

@@ -244,6 +244,7 @@ linters:
 formatters:
   enable:
     - gofmt
+    - gofumpt
   settings:
     gofmt:
       simplify: false

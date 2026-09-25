@@ -17,7 +17,6 @@
 package state
 
 import (
-	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -33,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 type commitmentFileDependencies struct {
@@ -153,7 +151,7 @@ func (at *AggregatorRoTx) replaceShortenedKeysInBranch(prefix []byte, branch com
 	logger := log.Root()
 	aggTx := at
 
-	if at.a.trieVariant == TrieVariantBin || len(branch) == 0 || bytes.Equal(prefix, commitmentdb.KeyCommitmentState) ||
+	if at.a.trieVariant == TrieVariantBin || len(branch) == 0 || commitment.IsCommitmentStateKey(prefix) ||
 		aggTx.TxNumsInFiles(kv.StateDomains(kv.CommitmentDomain)...) == 0 {
 
 		return branch, nil // do not transform, return as is
@@ -433,7 +431,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					var found bool
 					auxBuf, found = storage.lookupByShortenedKey(key, sig)
 					if !found {
-						dt.d.logger.Crit("valTransform: lost storage full key",
+						dt.d.logger.Crit(
+							"valTransform: lost storage full key",
 							"shortened", hex.EncodeToString(key),
 							"merging", rng.String("", dt.d.stepSize),
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
@@ -482,7 +481,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				var found bool
 				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
 				if !found {
-					dt.d.logger.Crit("valTransform: lost account full key",
+					dt.d.logger.Crit(
+						"valTransform: lost account full key",
 						"shortened", hex.EncodeToString(key),
 						"merging", rng.String("", dt.d.stepSize),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),

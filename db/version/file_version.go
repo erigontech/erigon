@@ -48,8 +48,10 @@ type Version struct {
 	Minor uint64
 }
 
-var ErrVersionIsNotSupported error = errors.New("this version is not supported")
-var ErrInvalidVersion = errors.New("invalid version")
+var (
+	ErrVersionIsNotSupported error = errors.New("this version is not supported")
+	ErrInvalidVersion              = errors.New("invalid version")
+)
 
 var (
 	ZeroVersion                  = Version{}
@@ -61,6 +63,7 @@ var (
 	V2_0                Version  = Version{2, 0}
 	V2_1                Version  = Version{2, 1}
 	V2_2                Version  = Version{2, 2}
+	V3_0                Version  = Version{3, 0}
 	V1_0_standart       Versions = Versions{V1_0, V1_0}
 	V1_1_standart       Versions = Versions{V1_1, V1_0}
 	V1_2_standart       Versions = Versions{V1_2, V1_0}

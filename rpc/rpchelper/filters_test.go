@@ -312,7 +312,6 @@ func TestFilters_ThreeSubscriptionsWithDifferentCriteria(t *testing.T) {
 	if len(chan3) != 1 {
 		t.Error("expected the third channel to still have 1 as the address didn't match in the third log")
 	}
-
 }
 
 func TestFilters_SubscribeLogsGeneratesCorrectLogFilterRequest(t *testing.T) {

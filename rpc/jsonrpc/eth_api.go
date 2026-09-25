@@ -21,11 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/common/dbg"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon/common/dbg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -159,6 +160,11 @@ type BaseAPI struct {
 	// _preMergeData is kept for a TTL rather than settled once: it reads live snapshot
 	// availability, which widens as segments arrive.
 	_preMergeData concurrent.CachedValue[preMergeBlockData]
+	// _preMergeUnsettled is what a probe answered without settling the question. It
+	// stands in for another walk over the same absent block data, for a TTL of its own:
+	// shorter than the verdict's, since the data it waits for can arrive at any time.
+	_preMergeUnsettled    atomic.Pointer[unsettledProbe]
+	_preMergeUnsettledTTL time.Duration
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -218,6 +224,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		logQueryLimit:     conf.LogQueryLimit,
 	}
 	api._preMergeData.SetTTL(defaultPreMergeDataTTL)
+	api._preMergeUnsettledTTL = defaultUnsettledPreMergeTTL
 	return api
 }
 
@@ -397,7 +404,6 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 		return 0, errors.New("header number not found")
 	}
 	return *number, nil
-
 }
 
 // canonicalHeaderByNumberOrHash resolves the selector and header through tx.
@@ -450,6 +456,8 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 }
 
 const defaultPreMergeDataTTL = 30 * time.Second
+
+const defaultUnsettledPreMergeTTL = time.Second
 
 // systemTxsPerBlock is the pair of system entries every block carries in the txnum
 // sequence, which a stored TxCount includes.
@@ -512,6 +520,12 @@ type preMergeBlockData struct {
 	oldest uint64
 }
 
+// unsettledProbe is what a probe answered without settling the question, and when.
+type unsettledProbe struct {
+	data preMergeBlockData
+	at   time.Time
+}
+
 // holdsPreMergeBlockData reports whether the datadir holds full blocks below the merge
 // point, which tells a legacy archive from chain-history expiry where the stored prune
 // mode carries the same sentinel for both. Only a readable transaction of an early block
@@ -522,8 +536,15 @@ func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeH
 		if data, observed, fresh := api._preMergeData.Load(); observed && fresh {
 			return data, nil
 		}
+		if unsettled := api._preMergeUnsettled.Load(); unsettled != nil && time.Since(unsettled.at) < api._preMergeUnsettledTTL {
+			return unsettled.data, nil
+		}
 		data, ran, err := api._preMergeData.Produce(ctx, func() (preMergeBlockData, bool, error) {
-			return api.probePreMergeBlockData(ctx, tx, mergeHeight)
+			data, decided, err := api.probePreMergeBlockData(ctx, tx, mergeHeight)
+			if err == nil && !decided {
+				api._preMergeUnsettled.Store(&unsettledProbe{data: data, at: time.Now()})
+			}
+			return data, decided, err
 		})
 		switch {
 		case err == nil:

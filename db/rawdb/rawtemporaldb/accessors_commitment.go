@@ -15,7 +15,11 @@ func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
 		return 0, err
 	}
 	if minUnwindable == math.MaxUint64 { // no unwindable block found
-		minUnwindable, err = commitmentdb.LatestBlockNumWithCommitment(tx)
+		domain := kv.CommitmentDomain
+		if provider, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
+			domain = provider.CanonicalCommitmentDomain()
+		}
+		minUnwindable, err = commitmentdb.LatestBlockNumWithCommitment(tx, domain)
 		log.Warn("no unwindable block found from changesets, falling back to latest with commitment", "block", minUnwindable, "err", err)
 		return minUnwindable, err
 	}

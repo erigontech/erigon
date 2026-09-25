@@ -65,7 +65,7 @@ func (t *Tracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		// VM events
 		OnTxStart:     t.OnTxStart,
-		OnTxEnd:       t.OnTxEnd,
+		OnTxEndV2:     t.OnTxEndV2,
 		OnEnterV2:     t.OnEnterV2,
 		OnExitV2:      t.OnExitV2,
 		OnOpcodeV2:    t.OnOpcodeV2,
@@ -105,13 +105,13 @@ func (t *Tracer) OnTxStart(vm *tracing.VMContext, txn types.Transaction, from ac
 	})
 }
 
-func (t *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
+func (t *Tracer) OnTxEndV2(receipt *types.Receipt, txnGasUsage mdgas.TxnGasUsage, err error) {
 	if t.recordOptions.DisableOnTxEndRecording {
 		return
 	}
 
-	if t.wrapped != nil && t.wrapped.OnTxEnd != nil {
-		t.wrapped.OnTxEnd(receipt, err)
+	if t.wrapped != nil {
+		t.wrapped.Hooks.EmitTxEnd(receipt, txnGasUsage, err)
 	}
 
 	var errStr string
@@ -120,8 +120,9 @@ func (t *Tracer) OnTxEnd(receipt *types.Receipt, err error) {
 	}
 
 	t.traces.Append(Trace{
-		OnTxEnd: &OnTxEndTrace{
+		OnTxEndV2: &OnTxEndTraceV2{
 			Receipt: receipt,
+			GasUsed: txnGasUsage,
 			Error:   errStr,
 		},
 	})
@@ -509,7 +510,7 @@ func (t *Tracer) flushToFile(filePath string) error {
 	dir := path.Dir(filePath)
 	info, err := os.Stat(dir)
 	if os.IsNotExist(err) {
-		err := os.MkdirAll(dir, 0755)
+		err := os.MkdirAll(dir, 0o755)
 		if err != nil {
 			return fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
@@ -517,7 +518,7 @@ func (t *Tracer) flushToFile(filePath string) error {
 		return fmt.Errorf("%s exists but is not a directory or encountered an error: %w", dir, err)
 	}
 
-	err = os.WriteFile(filePath, b, 0644)
+	err = os.WriteFile(filePath, b, 0o644)
 	if err != nil {
 		return err
 	}
@@ -587,7 +588,7 @@ func (t *Traces) Append(trace Trace) {
 type Trace struct {
 	// VM events
 	OnTxStart     *OnTxStartTrace     `json:"onTxStart,omitempty"`
-	OnTxEnd       *OnTxEndTrace       `json:"onTxEnd,omitempty"`
+	OnTxEndV2     *OnTxEndTraceV2     `json:"onTxEndV2,omitempty"`
 	OnEnterV2     *OnEnterTraceV2     `json:"onEnterV2,omitempty"`
 	OnExitV2      *OnExitTraceV2      `json:"onExitV2,omitempty"`
 	OnOpcodeV2    *OnOpcodeTraceV2    `json:"onOpcodeV2,omitempty"`
@@ -614,9 +615,10 @@ type OnTxStartTrace struct {
 	From        common.Address     `json:"from,omitempty"`
 }
 
-type OnTxEndTrace struct {
-	Receipt *types.Receipt `json:"receipt,omitempty"`
-	Error   string         `json:"error,omitempty"`
+type OnTxEndTraceV2 struct {
+	Receipt *types.Receipt    `json:"receipt,omitempty"`
+	GasUsed mdgas.TxnGasUsage `json:"gasUsed"`
+	Error   string            `json:"error,omitempty"`
 }
 
 type OnEnterTraceV2 struct {

@@ -47,7 +47,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 	defer cleanup()
 
 	var teeToVegeta chan CallResult
-	var nTransactions = 0
+	nTransactions := 0
 
 	if !needCompare {
 		teeToVegeta = make(chan CallResult, 1000)

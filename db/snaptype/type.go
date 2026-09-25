@@ -40,8 +40,10 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-type Version = version.Version
-type Versions = version.Versions
+type (
+	Version  = version.Version
+	Versions = version.Versions
+)
 
 type FirstKeyGetter func(ctx context.Context) uint64
 
@@ -69,8 +71,10 @@ func (f IndexBuilderFunc) Build(ctx context.Context, info FileInfo, salt uint32,
 	return f(ctx, info, salt, chainConfig, tmpDir, p, lvl, logger)
 }
 
-var saltMap = map[string]uint32{}
-var saltLock sync.RWMutex
+var (
+	saltMap  = map[string]uint32{}
+	saltLock sync.RWMutex
+)
 
 func LoadSalt(baseDir string, autoCreate bool, logger log.Logger) (*uint32, error) {
 	// issue: https://github.com/erigontech/erigon/issues/14300
@@ -193,7 +197,6 @@ func (i Index) HasFile(info FileInfo, dirEntries []string, logger log.Logger) bo
 	}
 
 	idx, err := recsplit.OpenIndex(fPath)
-
 	if err != nil {
 		logger.Debug("[ind] HasFile: opening index", "path", fPath, "err", err)
 		return false
@@ -232,8 +235,10 @@ type SnapType struct {
 // These are raw maps with no mutex protection becuase they are
 // expected to be written to once during program initialization
 // and them be readonly
-var registeredTypes = map[Enum]Type{}
-var namedTypes = map[string]Type{}
+var (
+	registeredTypes = map[Enum]Type{}
+	namedTypes      = map[string]Type{}
+)
 
 func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
 	if enum >= MinCaplinEnum && enum < MaxCaplinEnum {
@@ -342,7 +347,6 @@ func (s SnapType) Indexes() []Index {
 
 func (s SnapType) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	salt, err := GetIndexSalt(info.Dir(), logger)
-
 	if err != nil {
 		return err
 	}
@@ -410,9 +414,11 @@ type Enums struct {
 	Unknown Enum
 }
 
-const MinCoreEnum = 1
-const MaxCaplinEnum = 50 // exclusive upper bound of the caplin enum range
-const MinCaplinEnum = 10
+const (
+	MinCoreEnum   = 1
+	MaxCaplinEnum = 50 // exclusive upper bound of the caplin enum range
+	MinCaplinEnum = 10
+)
 
 // MinCaplinStateEnum is the first beacon-state type; BeaconBlocks and BlobSidecars occupy
 // the two slots below it, so a new caplin block type must go here, not at a free tail slot.
@@ -614,7 +620,6 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 	var lastKeyValue uint64
 
 	sn, err := seg.NewCompressor(ctx, "Snapshot "+f.Type.Name(), f.Path, tmpDir, seg.DefaultCfg, lvl, logger)
-
 	if err != nil {
 		return lastKeyValue, err
 	}
@@ -623,7 +628,6 @@ func ExtractRange(ctx context.Context, f FileInfo, extractor RangeExtractor, ind
 	lastKeyValue, err = extractor.Extract(ctx, f.From, f.To, firstKey, chainDB, chainConfig, func(v []byte) error {
 		return sn.AddWord(v)
 	}, workers, lvl, logger, hashResolver)
-
 	if err != nil {
 		return lastKeyValue, fmt.Errorf("ExtractRange: %w", err)
 	}

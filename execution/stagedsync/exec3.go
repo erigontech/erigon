@@ -55,8 +55,8 @@ import (
 //  1. Snapshots > ExecutionStage: snapshots can have half-block data `10.4`. Get right txNum from SharedDomains (after SeekCommitment)
 //  2. ExecutionStage > Snapshots: no half-block data possible. Rely on DB.
 func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, currentTxNum uint64, maxBlockNum uint64) (
-	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, blockNum uint64, err error) {
-
+	inputTxNum uint64, maxTxNum uint64, offsetFromBlockBeginning uint64, blockNum uint64, err error,
+) {
 	txNumsReader := cfg.blockReader.TxnumReader()
 
 	inputTxNum = currentTxNum
@@ -129,6 +129,13 @@ func deferCommitmentUpdates(variant commitment.TrieVariant, isForkValidation, pa
 	return isForkValidation || (parallel && isApplyingBlocks)
 }
 
+func storageFanOutMin(initialCycle bool) int {
+	if initialCycle {
+		return 1024
+	}
+	return 128
+}
+
 func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
 	return dbg.ReadAheadWait && isValidatingBlocks
 }
@@ -176,8 +183,8 @@ func execV3(ctx context.Context,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
 	syncMode stages.Mode, initialCycle bool, logPrefix string,
 	rng execRange, blockSrc blockSource,
-	logger log.Logger) (out execV3Outcome, execErr error) {
-
+	logger log.Logger,
+) (out execV3Outcome, execErr error) {
 	isForkValidation := syncMode == stages.ModeForkValidation
 	isApplyingBlocks := syncMode == stages.ModeApplyingBlocks
 	hooks := cfg.vmConfig.Tracer
@@ -224,7 +231,6 @@ func execV3(ctx context.Context,
 	// would panic on the dropped sequential-buffer keys (ERIGON_COMMITMENT_PARALLEL).
 	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
-		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
 		// Enable deferred commitment updates for fork validation and parallel initial sync.
 		// Deferred updates batch commitment calculations to block boundaries rather than
@@ -235,6 +241,7 @@ func execV3(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+		doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForWarmup(ctx)
@@ -325,8 +332,8 @@ func haltOnBadBlockDebug(cfg ExecuteBlockCfg, logPrefix string, cause error, log
 func execV3Serial(ctx context.Context,
 	execStage *StageState, u Unwinder, cfg ExecuteBlockCfg,
 	doms *execctx.SharedDomains, rwTx kv.TemporalRwTx,
-	rng execRange, logger log.Logger) (execErr error) {
-
+	rng execRange, logger log.Logger,
+) (execErr error) {
 	isForkValidation := execStage.SyncMode() == stages.ModeForkValidation
 	isApplyingBlocks := execStage.SyncMode() == stages.ModeApplyingBlocks
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
@@ -368,12 +375,12 @@ func execV3Serial(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
 	doms.SetDeferCommitmentUpdates(false)
 	if deferCommitmentUpdates(doms.GetCommitmentCtx().Trie().Variant(), isForkValidation, false, isApplyingBlocks) {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
+	doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForWarmup(ctx)
 	}
@@ -398,7 +405,8 @@ func execV3Serial(ctx context.Context,
 			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, execStage.LogPrefix(), logger),
 			enableChaosMonkey: initialCycle,
 			hooks:             hooks,
-		}}
+		},
+	}
 	se.lastCommittedTxNum.Store(inputTxNum)
 	se.lastCommittedBlockNum.Store(blockNum)
 
@@ -439,7 +447,8 @@ func execV3Serial(ctx context.Context,
 				}
 			case errors.Is(execErr, ErrWrongTrieRoot):
 				execErr = handleIncorrectRootHashError(
-					lastHeader.Number.Uint64(), lastHeader.Hash(), applyTx, cfg, execStage, logger, u)
+					lastHeader.Number.Uint64(), lastHeader.Hash(), applyTx, cfg, execStage, logger, u,
+				)
 			default:
 				return execErr
 			}
@@ -468,8 +477,8 @@ func execV3Serial(ctx context.Context,
 // block-progress notification. It never unwinds — that is the caller's job.
 func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, doms *execctx.SharedDomains,
 	lastCommittedTxNum, lastCommittedBlockNum uint64, lastHeader *types.Header,
-	shouldReportToTxPool bool, logPrefix string, logger log.Logger) error {
-
+	shouldReportToTxPool bool, logPrefix string, logger log.Logger,
+) error {
 	// If execution failed with ErrInvalidBlock, skip the step-frozen check and
 	// propagate the error so the caller can unwind. The step-frozen check only
 	// makes sense when execution succeeded and we need to persist the commitment.
@@ -591,7 +600,6 @@ func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number ui
 			h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
 			return err
 		})
-
 		if err != nil {
 			return nil, err
 		}
@@ -996,7 +1004,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		return false, times, err
 	}
 	return true, times, nil
-
 }
 
 // shouldMarkExhaustedAtBlock decides whether the per-cycle block-limit

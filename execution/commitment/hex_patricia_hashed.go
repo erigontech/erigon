@@ -175,7 +175,7 @@ type HexPatriciaHashed struct {
 
 	memoizationOff  bool // if true, do not rely on memoized hashes
 	readOnlyWitness bool // proofs only: off-path cells keep their stored hashes and no branch is written
-	//temp buffers
+	// temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
@@ -186,7 +186,7 @@ type HexPatriciaHashed struct {
 
 	cfg TrieConfig // static config, set at construction
 
-	//processing metrics
+	// processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 
@@ -756,6 +756,55 @@ func skipCellFields(data []byte, pos int, fieldBits byte) int {
 	return pos
 }
 
+func HexPatriciaWarmupKey(hashedKey []byte, depth int, dst []byte) []byte {
+	return nibbles.HexToCompactInto(dst, hashedKey[:depth])
+}
+
+func HexPatriciaWarmupStep(record, hashedKey []byte, depth int) (nextDepth int, stop bool) {
+	if len(record) < 4 || depth >= len(hashedKey) {
+		return 0, true
+	}
+
+	branchData := record[2:]
+	nextNibble := int(hashedKey[depth])
+	bitmap := binary.BigEndian.Uint16(branchData[0:2])
+	childBit := uint16(1) << nextNibble
+	if bitmap&childBit == 0 {
+		return 0, true
+	}
+
+	pos := 2
+	for n := range nextNibble {
+		if bitmap&(uint16(1)<<n) != 0 {
+			if pos >= len(branchData) {
+				return 0, true
+			}
+			fieldBits := branchData[pos]
+			pos++
+			pos = skipCellFields(branchData, pos, fieldBits)
+		}
+	}
+
+	if pos >= len(branchData) {
+		return 0, true
+	}
+
+	fieldBits := branchData[pos]
+	pos++
+	if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
+		return 0, true
+	}
+
+	if fieldBits&1 != 0 && pos < len(branchData) {
+		extLen, n := binary.Uvarint(branchData[pos:])
+		if n > 0 && extLen > 0 {
+			return depth + int(extLen), false
+		}
+	}
+
+	return depth + 1, false
+}
+
 func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) int {
 	balanceBytes := 0
 	if !cell.Balance.LtUint64(128) {
@@ -769,7 +818,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 		nonceBytes = common.BitLenToByteLen(bits.Len64(cell.Nonce))
 	}
 
-	var structLength = uint(balanceBytes + nonceBytes + 2)
+	structLength := uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
 	var pos int
@@ -793,7 +842,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 		buffer[pos] = byte(cell.Nonce)
 	} else {
 		buffer[pos] = byte(128 + nonceBytes)
-		var nonce = cell.Nonce
+		nonce := cell.Nonce
 		for i := nonceBytes; i > 0; i-- {
 			buffer[pos+i] = byte(nonce)
 			nonce >>= 8
@@ -2631,7 +2680,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	hph.metrics.updates.Store(updatesCount)
 	hph.metrics.AddRoundKeys(updatesCount)
 	roundStart := time.Now()
-	defer func() { observeRound(hph.metrics, roundStart) }()
+	defer func() { ObserveRound(hph.metrics, roundStart) }()
 	if hph.metrics.collectCommitmentMetrics {
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)
@@ -2644,6 +2693,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	// Setup warmup if configured
 	var warmuper *Warmuper
 	if warmup.Enabled {
+		warmup.Key = HexPatriciaWarmupKey
+		warmup.Step = HexPatriciaWarmupStep
 		warmuper = NewWarmuper(ctx, warmup)
 		warmuper.Start()
 		defer warmuper.CloseAndWait()
@@ -2952,7 +3003,7 @@ func (s *state) Decode(buf []byte) error {
 }
 
 func (cell *cell) Encode() []byte {
-	var pos = int16(1)
+	pos := int16(1)
 	size := pos + 5 + cell.hashLen + cell.accountAddrLen + cell.storageAddrLen + cell.hashedExtLen + cell.extLen // max size
 	buf := make([]byte, size)
 

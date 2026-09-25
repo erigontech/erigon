@@ -127,7 +127,7 @@ func TestErigonDBSettingsFrozenCommitmentSurvivesAggregatorOpen(t *testing.T) {
 func TestErigonDBSettingsAbsentFieldUnmarshalsNil(t *testing.T) {
 	t.Parallel()
 	path := filepath.Join(t.TempDir(), "erigondb.toml")
-	require.NoError(t, os.WriteFile(path, []byte("step_size = 100\nsteps_in_frozen_file = 8\n"), 0644))
+	require.NoError(t, os.WriteFile(path, []byte("step_size = 100\nsteps_in_frozen_file = 8\n"), 0o644))
 
 	got, err := readErigonDBSettings(path)
 	require.NoError(t, err)
@@ -140,7 +140,7 @@ func TestResolveErigonDBSettingsExistingFileAbsentFieldResolvesToDefault(t *test
 	dirs := datadir.New(t.TempDir())
 	path := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
 	content := []byte("step_size = 390625\nsteps_in_frozen_file = 256\n")
-	require.NoError(t, os.WriteFile(path, content, 0644))
+	require.NoError(t, os.WriteFile(path, content, 0o644))
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
@@ -157,7 +157,7 @@ func TestResolveErigonDBSettingsExistingFileExplicitFalseHonored(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	path := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
 	content := []byte("step_size = 390625\nsteps_in_frozen_file = 256\nreferences_in_commitment_branches = false\n")
-	require.NoError(t, os.WriteFile(path, content, 0644))
+	require.NoError(t, os.WriteFile(path, content, 0o644))
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
@@ -173,7 +173,7 @@ func TestResolveErigonDBSettingsExistingFileExplicitTrueHonored(t *testing.T) {
 	t.Parallel()
 	dirs := datadir.New(t.TempDir())
 	path := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
-	require.NoError(t, os.WriteFile(path, []byte("references_in_commitment_branches = true\n"), 0644))
+	require.NoError(t, os.WriteFile(path, []byte("references_in_commitment_branches = true\n"), 0o644))
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
@@ -184,7 +184,7 @@ func TestResolveErigonDBSettingsExistingFileExplicitTrueHonored(t *testing.T) {
 func TestResolveErigonDBSettingsLegacyWritesDefault(t *testing.T) {
 	t.Parallel()
 	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0o644))
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
@@ -254,7 +254,7 @@ func TestResolveErigonDBSettingsWithRefsDefaultFreshNoDownloader(t *testing.T) {
 func TestResolveErigonDBSettingsWithRefsDefaultLegacyWritesChosen(t *testing.T) {
 	t.Parallel()
 	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0o644))
 
 	fa := false
 	settings, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), false, &fa)
@@ -272,7 +272,7 @@ func TestResolveErigonDBSettingsWithRefsDefaultExistingFileIgnoresFlag(t *testin
 	dirs := datadir.New(t.TempDir())
 	path := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
 	content := []byte("step_size = 390625\nsteps_in_frozen_file = 256\nreferences_in_commitment_branches = true\n")
-	require.NoError(t, os.WriteFile(path, content, 0644))
+	require.NoError(t, os.WriteFile(path, content, 0o644))
 
 	fa := false
 	settings, err := ResolveErigonDBSettingsWithRefsDefault(dirs, log.New(), false, &fa)

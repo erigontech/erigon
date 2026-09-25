@@ -64,6 +64,7 @@ func newMockBackwardChunkProvider(chunks [][]byte) ChunkProvider {
 		return chunk, true, nil
 	}
 }
+
 func TestBackwardBlockProviderWith1Chunk(t *testing.T) {
 	// Mocks 1 chunk
 	chunk1 := createBitmap(t, []uint64{1000, 1005, 1010})

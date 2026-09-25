@@ -51,8 +51,8 @@ func writeBlobV1(s *jsonstream.StackStream, bp **BlobAndProofV1) {
 		return
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("blob").WriteHex(b.Blob)
-	jsonstream.Field(s, "proof").WriteHex(b.Proof)
+	s.Field("blob").WriteHex(b.Blob)
+	s.Field("proof").WriteHex(b.Proof)
 	s.WriteObjectEnd()
 }
 
@@ -63,8 +63,8 @@ func writeBlobV2(s *jsonstream.StackStream, bp **BlobAndProofV2) {
 		return
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("blob").WriteHex(b.Blob)
-	jsonstream.Field(s, "proofs")
+	s.Field("blob").WriteHex(b.Blob)
+	s.Field("proofs")
 	jsonstream.ArrayValue(s, b.CellProofs, writeHex)
 	s.WriteObjectEnd()
 }
@@ -76,9 +76,9 @@ func writeBlobCellsV1(s *jsonstream.StackStream, bp **BlobCellsAndProofsV1) {
 		return
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("blob_cells")
+	s.Field("blob_cells")
 	jsonstream.ArrayValue(s, b.BlobCells, writeHexPtr)
-	jsonstream.Field(s, "proofs")
+	s.Field("proofs")
 	jsonstream.ArrayValue(s, b.Proofs, writeHexPtr)
 	s.WriteObjectEnd()
 }

@@ -170,7 +170,7 @@ func (c relations) Add(r relation) relations {
 		return relations{component}
 	}
 
-	var i = l
+	i := l
 	for index := range l {
 		if cmp(c[index], component) && (index == l-1 || !cmp(c[index+1], component)) {
 			i = index
@@ -251,7 +251,7 @@ func (c relations) Contains(r relation) bool {
 		return false
 	}
 
-	var i = l
+	i := l
 	for index := range l {
 		if cmp(c[index], component) && (index == l-1 || !cmp(c[index+1], component)) {
 			i = index + 1
@@ -345,7 +345,8 @@ func WithFlag[F cli.Flag, T any](flag F, setter func(f F, t *T) bool) app.Option
 			default:
 				return false
 			}
-		})
+		},
+	)
 }
 
 func WithName(name string) app.Option {
@@ -353,7 +354,8 @@ func WithName(name string) app.Option {
 		func(c *component) bool {
 			c.name = name
 			return true
-		})
+		},
+	)
 }
 
 type ProviderFactory[P any] interface {
@@ -371,7 +373,8 @@ func WithProvider[P any](p *P) app.Option {
 		func(c *component) bool {
 			c.provider = p
 			return true
-		})
+		},
+	)
 }
 
 type componentOptions struct {
@@ -388,7 +391,8 @@ func WithLogLevel(lvl liblog.Lvl) app.Option {
 		func(c *componentOptions) bool {
 			c.logLvl = lvl
 			return true
-		})
+		},
+	)
 }
 
 func WithLogLabels(labels ...string) app.Option {
@@ -396,7 +400,8 @@ func WithLogLabels(labels ...string) app.Option {
 		func(c *componentOptions) bool {
 			c.logLabels = labels
 			return true
-		})
+		},
+	)
 }
 
 func WithLogCtx(ctx ...any) app.Option {
@@ -404,7 +409,8 @@ func WithLogCtx(ctx ...any) app.Option {
 		func(c *componentOptions) bool {
 			c.logCtx = ctx
 			return true
-		})
+		},
+	)
 }
 
 func WithId(id string) app.Option {
@@ -412,7 +418,8 @@ func WithId(id string) app.Option {
 		func(c *componentOptions) bool {
 			c.id = id
 			return true
-		})
+		},
+	)
 }
 
 func WithDependencies(dependencies ...relation) app.Option {
@@ -424,7 +431,8 @@ func WithDependencies(dependencies ...relation) app.Option {
 				}
 			}
 			return true
-		})
+		},
+	)
 }
 
 func WithDependent(dependent relation) app.Option {
@@ -434,7 +442,8 @@ func WithDependent(dependent relation) app.Option {
 				c.dependents = append(c.dependents, unwrapped)
 			}
 			return true
-		})
+		},
+	)
 }
 
 func WithDomain(dependent ComponentDomain) app.Option {
@@ -442,7 +451,8 @@ func WithDomain(dependent ComponentDomain) app.Option {
 		func(c *componentOptions) bool {
 			c.dependents = append(c.dependents, dependent.(*componentDomain).component)
 			return true
-		})
+		},
+	)
 }
 
 func WithProviderFactory[P any](p ProviderFactory[P]) app.Option {
@@ -450,7 +460,8 @@ func WithProviderFactory[P any](p ProviderFactory[P]) app.Option {
 		func(c *component) bool {
 			c.provider = p.New()
 			return true
-		})
+		},
+	)
 }
 
 func NewComponent[P any](parentCtx context.Context, options ...app.Option) (Component[P], error) {
@@ -630,7 +641,6 @@ func (c *component) AwaitState(ctx context.Context, state State) (State, error) 
 	}
 
 	err := c.serviceBus().Register(c, subscriber)
-
 	if err != nil {
 		return Unknown, err
 	}
@@ -748,7 +758,6 @@ func (c *component) configure(ctx context.Context, force bool, activationLocked 
 
 							return asComponent(dependency).configure(ctx, force, true, noopHanlder, options...)
 						}()
-
 						if err != nil {
 							errs = append(errs, err)
 							continue
@@ -760,12 +769,12 @@ func (c *component) configure(ctx context.Context, force bool, activationLocked 
 
 		if len(errs) > 0 {
 			return errors.Join(append(
-				[]error{fmt.Errorf("depenccy configure failed for: %s", c.id)}, errs...)...)
+				[]error{fmt.Errorf("depenccy configure failed for: %s", c.id)}, errs...,
+			)...)
 		}
 
 		return nil
 	}()
-
 	if err != nil {
 		return err
 	}
@@ -786,7 +795,8 @@ func (c *component) configureProvider(ctx context.Context, onActivity onActivity
 	if configurable, ok := c.provider.(Configurable); ok {
 		if _, ok := c.provider.(*componentDomain); !ok {
 			if err := configurable.Configure(
-				withComponent(ctx, c), append(c.options, options...)...); err != nil {
+				withComponent(ctx, c), append(c.options, options...)...,
+			); err != nil {
 				return err
 			}
 		}
@@ -836,7 +846,6 @@ func (c *component) initialize(ctx context.Context, activationLocked bool, onAct
 
 							return asComponent(dependency).initialize(ctx, true, noopHanlder, options...)
 						}()
-
 						if err != nil {
 							errs = append(errs, err)
 							continue
@@ -848,12 +857,12 @@ func (c *component) initialize(ctx context.Context, activationLocked bool, onAct
 
 		if len(errs) > 0 {
 			return errors.Join(append(
-				[]error{fmt.Errorf("dependency initialize failed for: %s", c.id)}, errs...)...)
+				[]error{fmt.Errorf("dependency initialize failed for: %s", c.id)}, errs...,
+			)...)
 		}
 
 		return nil
 	}()
-
 	if err != nil {
 		return err
 	}
@@ -929,7 +938,6 @@ func (c *component) doActivate(ctx context.Context, onActivity onActivity) error
 
 		return nil
 	}()
-
 	if err != nil {
 		return err
 	}
@@ -990,7 +998,6 @@ func (c *component) activateProvider(ctx context.Context, onActivity onActivity)
 
 	if activatable, ok := c.provider.(Activatable); ok {
 		err := activatable.Activate(withComponent(ctx, c))
-
 		if err != nil {
 			c.setState(Failed, false)
 			onActivity(ctx, c, err)
@@ -1049,7 +1056,8 @@ func awaitDeactivationChannels() {
 					c.deactivate(context.Background(), noopHanlder)
 				}
 				return false, false
-			}, nil)
+			}, nil,
+		)
 	}()
 }
 
@@ -1125,7 +1133,7 @@ DEPENDENCIES:
 
 func (c *component) deactivateProvider(ctx context.Context, onActivity onActivity) error {
 	c.RLock()
-	isActive := !(c.State().IsDeactivated())
+	isActive := !c.State().IsDeactivated()
 	c.RUnlock()
 
 	if isActive {
@@ -1136,7 +1144,6 @@ func (c *component) deactivateProvider(ctx context.Context, onActivity onActivit
 
 		if deactivatable, ok := c.provider.(Deactivatable); ok {
 			err := deactivatable.Deactivate(withComponent(ctx, c))
-
 			if err != nil {
 				c.setState(Failed, false)
 				onActivity(ctx, c, err)
@@ -1164,7 +1171,7 @@ func (c *component) EventBus(key any) *event.ManagedEventBus {
 }
 
 func (c *component) serviceBus() *event.ServiceBus {
-	if domain, isDomain := (c.provider.(ComponentDomain)); isDomain {
+	if domain, isDomain := c.provider.(ComponentDomain); isDomain {
 		return domain.serviceBus()
 	}
 	if c.componentDomain != nil {
@@ -1374,7 +1381,6 @@ func (c *component) onDependenciesActive(ctx context.Context, onActivity onActiv
 
 	if recoverable, ok := c.provider.(Recoverable); ok {
 		err := recoverable.Recover(withComponent(ctx, c))
-
 		if err != nil {
 			c.setState(Failed, false)
 			if onActivity != nil {
@@ -1395,7 +1401,6 @@ func (c *component) onDependenciesDeactivated(_ context.Context) {
 }
 
 func (c *component) addDependency(dependency *component, locked bool) (*component, error) {
-
 	if !locked {
 		c.Lock()
 		defer c.Unlock()
@@ -1439,7 +1444,6 @@ func (c *component) HasDependencies() bool {
 }
 
 func (c *component) GetDependency(context context.Context, selector app.TypedSelector) relation {
-
 	c.RLock()
 	defer c.RUnlock()
 

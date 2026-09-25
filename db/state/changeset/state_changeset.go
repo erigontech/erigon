@@ -429,8 +429,9 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 	return diffs, true, nil
 }
+
 func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
-	//TODO: move this function somewhere from `commitment`/`state` pkg
+	// TODO: move this function somewhere from `commitment`/`state` pkg
 	changesetsCursor, err := tx.Cursor(kv.ChangeSets3)
 	if err != nil {
 		return 0, err
@@ -464,5 +465,4 @@ func ReadLowestUnwindableBlock(tx kv.Tx) (uint64, error) {
 		return 0, err
 	}
 	return blockNumber, nil
-
 }

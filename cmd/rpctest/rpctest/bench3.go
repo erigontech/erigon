@@ -27,7 +27,6 @@ import (
 )
 
 func Bench3(erigon_url, geth_url string) error {
-
 	blockhash := common.HexToHash("0xdf15213766f00680c6a20ba76ba2cc9534435e19bc490039f3a7ef42095c8d13")
 	req_id := 1
 
@@ -156,5 +155,4 @@ func Bench3(erigon_url, geth_url string) error {
 	}
 
 	return nil
-
 }

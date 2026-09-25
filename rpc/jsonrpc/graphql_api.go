@@ -71,7 +71,7 @@ func (r GraphQLReceipt) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 
 func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfig *chain.Config, header *types.Header) *GraphQLReceipt {
 	transaction := &GraphQLReceipt{
-		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, txn.Hash(), true, false),
+		RPCReceipt: ethutils.MarshalReceipt(receipt, txn, chainConfig, header, true, false),
 		Nonce:      txn.GetNonce(),
 		Value:      txn.GetValue(),
 		Data:       txn.GetData(),
@@ -407,7 +407,8 @@ func (api *GraphQLAPIImpl) delegateGetBlockByNumber(tx kv.Tx, b *types.Block, nu
 	if !inclTx {
 		response.Transactions = nil // workaround for https://github.com/erigontech/erigon/issues/4989#issuecomment-1218415666
 	}
-	response.TransactionCount = hexutil.Uint64(b.Transactions().Len())
+	txCount := uint64(b.Transactions().Len())
+	response.TransactionCount = &txCount
 
 	if number == rpc.PendingBlockNumber {
 		response.MarkPending()

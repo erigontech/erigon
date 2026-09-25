@@ -1187,6 +1187,7 @@ type SubscribeReceiptsReply struct {
 	BlobGasUsed       uint64                 `protobuf:"varint,18,opt,name=blob_gas_used,json=blobGasUsed,proto3" json:"blob_gas_used,omitempty"`
 	BlobGasPrice      *typesproto.H256       `protobuf:"bytes,19,opt,name=blob_gas_price,json=blobGasPrice,proto3" json:"blob_gas_price,omitempty"`
 	LastInBlock       bool                   `protobuf:"varint,20,opt,name=last_in_block,json=lastInBlock,proto3" json:"last_in_block,omitempty"` // the last receipt of its block sent on this stream
+	EffectiveGasPrice *typesproto.H256       `protobuf:"bytes,21,opt,name=effective_gas_price,json=effectiveGasPrice,proto3" json:"effective_gas_price,omitempty"`
 	unknownFields     protoimpl.UnknownFields
 	sizeCache         protoimpl.SizeCache
 }
@@ -1359,6 +1360,13 @@ func (x *SubscribeReceiptsReply) GetLastInBlock() bool {
 		return x.LastInBlock
 	}
 	return false
+}
+
+func (x *SubscribeReceiptsReply) GetEffectiveGasPrice() *typesproto.H256 {
+	if x != nil {
+		return x.EffectiveGasPrice
+	}
+	return nil
 }
 
 type BlockRequest struct {
@@ -2492,7 +2500,7 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	" \x01(\x04R\x0eblockTimestamp\"~\n" +
 	"\x15ReceiptsFilterRequest\x12)\n" +
 	"\x10all_transactions\x18\x01 \x01(\bR\x0fallTransactions\x12:\n" +
-	"\x12transaction_hashes\x18\x02 \x03(\v2\v.types.H256R\x11transactionHashes\"\x8b\x06\n" +
+	"\x12transaction_hashes\x18\x02 \x03(\v2\v.types.H256R\x11transactionHashes\"\xc8\x06\n" +
 	"\x16SubscribeReceiptsReply\x12*\n" +
 	"\n" +
 	"block_hash\x18\x01 \x01(\v2\v.types.H256R\tblockHash\x12!\n" +
@@ -2517,7 +2525,8 @@ const file_remote_ethbackend_proto_rawDesc = "" +
 	"\x0fexcess_blob_gas\x18\x11 \x01(\x04R\rexcessBlobGas\x12\"\n" +
 	"\rblob_gas_used\x18\x12 \x01(\x04R\vblobGasUsed\x121\n" +
 	"\x0eblob_gas_price\x18\x13 \x01(\v2\v.types.H256R\fblobGasPrice\x12\"\n" +
-	"\rlast_in_block\x18\x14 \x01(\bR\vlastInBlock\"]\n" +
+	"\rlast_in_block\x18\x14 \x01(\bR\vlastInBlock\x12;\n" +
+	"\x13effective_gas_price\x18\x15 \x01(\v2\v.types.H256R\x11effectiveGasPrice\"]\n" +
 	"\fBlockRequest\x12!\n" +
 	"\fblock_height\x18\x02 \x01(\x04R\vblockHeight\x12*\n" +
 	"\n" +
@@ -2702,71 +2711,72 @@ var file_remote_ethbackend_proto_depIdxs = []int32{
 	47, // 18: remote.SubscribeReceiptsReply.to:type_name -> types.H160
 	48, // 19: remote.SubscribeReceiptsReply.base_fee:type_name -> types.H256
 	48, // 20: remote.SubscribeReceiptsReply.blob_gas_price:type_name -> types.H256
-	48, // 21: remote.BlockRequest.block_hash:type_name -> types.H256
-	48, // 22: remote.TxnLookupRequest.txn_hash:type_name -> types.H256
-	49, // 23: remote.NodesInfoReply.nodes_info:type_name -> types.NodeInfoReply
-	50, // 24: remote.PeersReply.peers:type_name -> types.PeerInfo
-	48, // 25: remote.EngineGetPayloadBodiesByHashV1Request.hashes:type_name -> types.H256
-	51, // 26: remote.AAValidationRequest.tx:type_name -> types.AccountAbstractionTransaction
-	1,  // 27: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
-	3,  // 28: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
-	6,  // 29: remote.ETHBACKEND.NetPeerCount:input_type -> remote.NetPeerCountRequest
-	52, // 30: remote.ETHBACKEND.Version:input_type -> google.protobuf.Empty
-	52, // 31: remote.ETHBACKEND.Syncing:input_type -> google.protobuf.Empty
-	8,  // 32: remote.ETHBACKEND.ProtocolVersion:input_type -> remote.ProtocolVersionRequest
-	10, // 33: remote.ETHBACKEND.ClientVersion:input_type -> remote.ClientVersionRequest
-	18, // 34: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
-	20, // 35: remote.ETHBACKEND.SubscribeLogs:input_type -> remote.LogsFilterRequest
-	22, // 36: remote.ETHBACKEND.SubscribeReceipts:input_type -> remote.ReceiptsFilterRequest
-	24, // 37: remote.ETHBACKEND.Block:input_type -> remote.BlockRequest
-	16, // 38: remote.ETHBACKEND.CanonicalBodyForStorage:input_type -> remote.CanonicalBodyForStorageRequest
-	12, // 39: remote.ETHBACKEND.CanonicalHash:input_type -> remote.CanonicalHashRequest
-	14, // 40: remote.ETHBACKEND.HeaderNumber:input_type -> remote.HeaderNumberRequest
-	26, // 41: remote.ETHBACKEND.TxnLookup:input_type -> remote.TxnLookupRequest
-	28, // 42: remote.ETHBACKEND.NodeInfo:input_type -> remote.NodesInfoRequest
-	52, // 43: remote.ETHBACKEND.Peers:input_type -> google.protobuf.Empty
-	29, // 44: remote.ETHBACKEND.AddPeer:input_type -> remote.AddPeerRequest
-	30, // 45: remote.ETHBACKEND.RemovePeer:input_type -> remote.RemovePeerRequest
-	29, // 46: remote.ETHBACKEND.AddTrustedPeer:input_type -> remote.AddPeerRequest
-	30, // 47: remote.ETHBACKEND.RemoveTrustedPeer:input_type -> remote.RemovePeerRequest
-	52, // 48: remote.ETHBACKEND.PendingBlock:input_type -> google.protobuf.Empty
-	38, // 49: remote.ETHBACKEND.AAValidation:input_type -> remote.AAValidationRequest
-	40, // 50: remote.ETHBACKEND.BlockForTxNum:input_type -> remote.BlockForTxNumRequest
-	52, // 51: remote.ETHBACKEND.MinimumBlockAvailable:input_type -> google.protobuf.Empty
-	52, // 52: remote.ETHBACKEND.FrozenBlocks:input_type -> google.protobuf.Empty
-	44, // 53: remote.ETHBACKEND.SetHead:input_type -> remote.SetHeadRequest
-	2,  // 54: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
-	4,  // 55: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
-	7,  // 56: remote.ETHBACKEND.NetPeerCount:output_type -> remote.NetPeerCountReply
-	53, // 57: remote.ETHBACKEND.Version:output_type -> types.VersionReply
-	5,  // 58: remote.ETHBACKEND.Syncing:output_type -> remote.SyncingReply
-	9,  // 59: remote.ETHBACKEND.ProtocolVersion:output_type -> remote.ProtocolVersionReply
-	11, // 60: remote.ETHBACKEND.ClientVersion:output_type -> remote.ClientVersionReply
-	19, // 61: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
-	21, // 62: remote.ETHBACKEND.SubscribeLogs:output_type -> remote.SubscribeLogsReply
-	23, // 63: remote.ETHBACKEND.SubscribeReceipts:output_type -> remote.SubscribeReceiptsReply
-	25, // 64: remote.ETHBACKEND.Block:output_type -> remote.BlockReply
-	17, // 65: remote.ETHBACKEND.CanonicalBodyForStorage:output_type -> remote.CanonicalBodyForStorageReply
-	13, // 66: remote.ETHBACKEND.CanonicalHash:output_type -> remote.CanonicalHashReply
-	15, // 67: remote.ETHBACKEND.HeaderNumber:output_type -> remote.HeaderNumberReply
-	27, // 68: remote.ETHBACKEND.TxnLookup:output_type -> remote.TxnLookupReply
-	31, // 69: remote.ETHBACKEND.NodeInfo:output_type -> remote.NodesInfoReply
-	32, // 70: remote.ETHBACKEND.Peers:output_type -> remote.PeersReply
-	33, // 71: remote.ETHBACKEND.AddPeer:output_type -> remote.AddPeerReply
-	34, // 72: remote.ETHBACKEND.RemovePeer:output_type -> remote.RemovePeerReply
-	33, // 73: remote.ETHBACKEND.AddTrustedPeer:output_type -> remote.AddPeerReply
-	34, // 74: remote.ETHBACKEND.RemoveTrustedPeer:output_type -> remote.RemovePeerReply
-	35, // 75: remote.ETHBACKEND.PendingBlock:output_type -> remote.PendingBlockReply
-	39, // 76: remote.ETHBACKEND.AAValidation:output_type -> remote.AAValidationReply
-	41, // 77: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
-	42, // 78: remote.ETHBACKEND.MinimumBlockAvailable:output_type -> remote.MinimumBlockAvailableReply
-	43, // 79: remote.ETHBACKEND.FrozenBlocks:output_type -> remote.FrozenBlocksReply
-	45, // 80: remote.ETHBACKEND.SetHead:output_type -> remote.SetHeadReply
-	54, // [54:81] is the sub-list for method output_type
-	27, // [27:54] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	48, // 21: remote.SubscribeReceiptsReply.effective_gas_price:type_name -> types.H256
+	48, // 22: remote.BlockRequest.block_hash:type_name -> types.H256
+	48, // 23: remote.TxnLookupRequest.txn_hash:type_name -> types.H256
+	49, // 24: remote.NodesInfoReply.nodes_info:type_name -> types.NodeInfoReply
+	50, // 25: remote.PeersReply.peers:type_name -> types.PeerInfo
+	48, // 26: remote.EngineGetPayloadBodiesByHashV1Request.hashes:type_name -> types.H256
+	51, // 27: remote.AAValidationRequest.tx:type_name -> types.AccountAbstractionTransaction
+	1,  // 28: remote.ETHBACKEND.Etherbase:input_type -> remote.EtherbaseRequest
+	3,  // 29: remote.ETHBACKEND.NetVersion:input_type -> remote.NetVersionRequest
+	6,  // 30: remote.ETHBACKEND.NetPeerCount:input_type -> remote.NetPeerCountRequest
+	52, // 31: remote.ETHBACKEND.Version:input_type -> google.protobuf.Empty
+	52, // 32: remote.ETHBACKEND.Syncing:input_type -> google.protobuf.Empty
+	8,  // 33: remote.ETHBACKEND.ProtocolVersion:input_type -> remote.ProtocolVersionRequest
+	10, // 34: remote.ETHBACKEND.ClientVersion:input_type -> remote.ClientVersionRequest
+	18, // 35: remote.ETHBACKEND.Subscribe:input_type -> remote.SubscribeRequest
+	20, // 36: remote.ETHBACKEND.SubscribeLogs:input_type -> remote.LogsFilterRequest
+	22, // 37: remote.ETHBACKEND.SubscribeReceipts:input_type -> remote.ReceiptsFilterRequest
+	24, // 38: remote.ETHBACKEND.Block:input_type -> remote.BlockRequest
+	16, // 39: remote.ETHBACKEND.CanonicalBodyForStorage:input_type -> remote.CanonicalBodyForStorageRequest
+	12, // 40: remote.ETHBACKEND.CanonicalHash:input_type -> remote.CanonicalHashRequest
+	14, // 41: remote.ETHBACKEND.HeaderNumber:input_type -> remote.HeaderNumberRequest
+	26, // 42: remote.ETHBACKEND.TxnLookup:input_type -> remote.TxnLookupRequest
+	28, // 43: remote.ETHBACKEND.NodeInfo:input_type -> remote.NodesInfoRequest
+	52, // 44: remote.ETHBACKEND.Peers:input_type -> google.protobuf.Empty
+	29, // 45: remote.ETHBACKEND.AddPeer:input_type -> remote.AddPeerRequest
+	30, // 46: remote.ETHBACKEND.RemovePeer:input_type -> remote.RemovePeerRequest
+	29, // 47: remote.ETHBACKEND.AddTrustedPeer:input_type -> remote.AddPeerRequest
+	30, // 48: remote.ETHBACKEND.RemoveTrustedPeer:input_type -> remote.RemovePeerRequest
+	52, // 49: remote.ETHBACKEND.PendingBlock:input_type -> google.protobuf.Empty
+	38, // 50: remote.ETHBACKEND.AAValidation:input_type -> remote.AAValidationRequest
+	40, // 51: remote.ETHBACKEND.BlockForTxNum:input_type -> remote.BlockForTxNumRequest
+	52, // 52: remote.ETHBACKEND.MinimumBlockAvailable:input_type -> google.protobuf.Empty
+	52, // 53: remote.ETHBACKEND.FrozenBlocks:input_type -> google.protobuf.Empty
+	44, // 54: remote.ETHBACKEND.SetHead:input_type -> remote.SetHeadRequest
+	2,  // 55: remote.ETHBACKEND.Etherbase:output_type -> remote.EtherbaseReply
+	4,  // 56: remote.ETHBACKEND.NetVersion:output_type -> remote.NetVersionReply
+	7,  // 57: remote.ETHBACKEND.NetPeerCount:output_type -> remote.NetPeerCountReply
+	53, // 58: remote.ETHBACKEND.Version:output_type -> types.VersionReply
+	5,  // 59: remote.ETHBACKEND.Syncing:output_type -> remote.SyncingReply
+	9,  // 60: remote.ETHBACKEND.ProtocolVersion:output_type -> remote.ProtocolVersionReply
+	11, // 61: remote.ETHBACKEND.ClientVersion:output_type -> remote.ClientVersionReply
+	19, // 62: remote.ETHBACKEND.Subscribe:output_type -> remote.SubscribeReply
+	21, // 63: remote.ETHBACKEND.SubscribeLogs:output_type -> remote.SubscribeLogsReply
+	23, // 64: remote.ETHBACKEND.SubscribeReceipts:output_type -> remote.SubscribeReceiptsReply
+	25, // 65: remote.ETHBACKEND.Block:output_type -> remote.BlockReply
+	17, // 66: remote.ETHBACKEND.CanonicalBodyForStorage:output_type -> remote.CanonicalBodyForStorageReply
+	13, // 67: remote.ETHBACKEND.CanonicalHash:output_type -> remote.CanonicalHashReply
+	15, // 68: remote.ETHBACKEND.HeaderNumber:output_type -> remote.HeaderNumberReply
+	27, // 69: remote.ETHBACKEND.TxnLookup:output_type -> remote.TxnLookupReply
+	31, // 70: remote.ETHBACKEND.NodeInfo:output_type -> remote.NodesInfoReply
+	32, // 71: remote.ETHBACKEND.Peers:output_type -> remote.PeersReply
+	33, // 72: remote.ETHBACKEND.AddPeer:output_type -> remote.AddPeerReply
+	34, // 73: remote.ETHBACKEND.RemovePeer:output_type -> remote.RemovePeerReply
+	33, // 74: remote.ETHBACKEND.AddTrustedPeer:output_type -> remote.AddPeerReply
+	34, // 75: remote.ETHBACKEND.RemoveTrustedPeer:output_type -> remote.RemovePeerReply
+	35, // 76: remote.ETHBACKEND.PendingBlock:output_type -> remote.PendingBlockReply
+	39, // 77: remote.ETHBACKEND.AAValidation:output_type -> remote.AAValidationReply
+	41, // 78: remote.ETHBACKEND.BlockForTxNum:output_type -> remote.BlockForTxNumResponse
+	42, // 79: remote.ETHBACKEND.MinimumBlockAvailable:output_type -> remote.MinimumBlockAvailableReply
+	43, // 80: remote.ETHBACKEND.FrozenBlocks:output_type -> remote.FrozenBlocksReply
+	45, // 81: remote.ETHBACKEND.SetHead:output_type -> remote.SetHeadReply
+	55, // [55:82] is the sub-list for method output_type
+	28, // [28:55] is the sub-list for method input_type
+	28, // [28:28] is the sub-list for extension type_name
+	28, // [28:28] is the sub-list for extension extendee
+	0,  // [0:28] is the sub-list for field type_name
 }
 
 func init() { file_remote_ethbackend_proto_init() }

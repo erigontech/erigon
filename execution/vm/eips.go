@@ -62,6 +62,7 @@ func ValidEip(eipNum int) bool {
 	_, ok := activators[eipNum]
 	return ok
 }
+
 func ActivateableEips() []string {
 	var nums []string //nolint:prealloc
 	for k := range activators {

@@ -277,7 +277,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 			}
 		}()
 
-		if !reflect.ValueOf(mining).IsNil() { //https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
+		if !reflect.ValueOf(mining).IsNil() { // https://groups.google.com/g/golang-nuts/c/wnH302gBa4I
 			go func() {
 				activeSubscriptionsLogsClientGauge.With(prometheus.Labels{clientLabelName: "txPool_PendingBlock"}).Inc()
 				for {

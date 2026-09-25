@@ -32,6 +32,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -226,10 +227,14 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 }
 
 func writeNotificationResult(s *jsonstream.StackStream, data any) error {
-	if fm, ok := data.(fastJSONMarshalerTo); ok && !isNilPointer(data) {
+	if fm, ok := data.(jsonstream.Marshaler); ok && !isNilPointer(data) {
 		if err := fm.MarshalFastJSONTo(s); err != nil {
 			return err
 		}
+		return s.Err()
+	}
+	if h, ok := data.(common.Hash); ok { // pending-tx hashes, sent to every subscriber
+		s.WriteHex(h[:])
 		return s.Err()
 	}
 	enc, err := json.Marshal(data)

@@ -53,8 +53,10 @@ type txPool interface {
 	GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle)
 }
 
-var _ txpoolproto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
-var _ txpoolproto.TxpoolServer = (*GrpcDisabled)(nil) // compile-time interface check
+var (
+	_ txpoolproto.TxpoolServer = (*GrpcServer)(nil)   // compile-time interface check
+	_ txpoolproto.TxpoolServer = (*GrpcDisabled)(nil) // compile-time interface check
+)
 
 var ErrPoolDisabled = errors.New("TxPool Disabled")
 
@@ -65,30 +67,39 @@ type GrpcDisabled struct {
 func (*GrpcDisabled) Version(ctx context.Context, empty *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return nil, ErrPoolDisabled
 }
+
 func (*GrpcDisabled) FindUnknown(ctx context.Context, hashes *txpoolproto.TxHashes) (*txpoolproto.TxHashes, error) {
 	return nil, ErrPoolDisabled
 }
+
 func (*GrpcDisabled) Add(ctx context.Context, request *txpoolproto.AddRequest) (*txpoolproto.AddReply, error) {
 	return nil, ErrPoolDisabled
 }
+
 func (*GrpcDisabled) Transactions(ctx context.Context, request *txpoolproto.TransactionsRequest) (*txpoolproto.TransactionsReply, error) {
 	return nil, ErrPoolDisabled
 }
+
 func (*GrpcDisabled) All(ctx context.Context, request *txpoolproto.AllRequest) (*txpoolproto.AllReply, error) {
 	return nil, ErrPoolDisabled
 }
+
 func (*GrpcDisabled) Pending(ctx context.Context, empty *emptypb.Empty) (*txpoolproto.PendingReply, error) {
 	return nil, ErrPoolDisabled
 }
+
 func (*GrpcDisabled) OnAdd(request *txpoolproto.OnAddRequest, server txpoolproto.Txpool_OnAddServer) error {
 	return ErrPoolDisabled
 }
+
 func (*GrpcDisabled) Status(ctx context.Context, request *txpoolproto.StatusRequest) (*txpoolproto.StatusReply, error) {
 	return nil, ErrPoolDisabled
 }
+
 func (*GrpcDisabled) Nonce(ctx context.Context, request *txpoolproto.NonceRequest) (*txpoolproto.NonceReply, error) {
 	return nil, ErrPoolDisabled
 }
+
 func (*GrpcDisabled) GetBlobs(ctx context.Context, request *txpoolproto.GetBlobsRequest) (*txpoolproto.GetBlobsReply, error) {
 	return nil, ErrPoolDisabled
 }
@@ -111,6 +122,7 @@ func NewGrpcServer(ctx context.Context, txPool txPool, db kv.RoDB, newSlotsStrea
 func (s *GrpcServer) Version(context.Context, *emptypb.Empty) (*typesproto.VersionReply, error) {
 	return TxPoolAPIVersion, nil
 }
+
 func convertSubPoolType(t SubPoolType) txpoolproto.AllReply_TxnType {
 	switch t {
 	case PendingSubPool:
@@ -123,6 +135,7 @@ func convertSubPoolType(t SubPoolType) txpoolproto.AllReply_TxnType {
 		panic("unknown")
 	}
 }
+
 func (s *GrpcServer) All(ctx context.Context, _ *txpoolproto.AllRequest) (*txpoolproto.AllReply, error) {
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
@@ -312,7 +325,8 @@ func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*
 type NewSlotsStreams = grpcutil.StreamBroadcaster[txpoolproto.OnAddReply]
 
 func StartGrpc(ctx context.Context, txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
-	grpcServer := grpcutil.NewServerWithOpts(creds,
+	grpcServer := grpcutil.NewServerWithOpts(
+		creds,
 		grpc.ReadBufferSize(0),  // reduce buffers to save mem
 		grpc.WriteBufferSize(0), // reduce buffers to save mem
 	)

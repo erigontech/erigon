@@ -318,7 +318,7 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 	defer tx.Rollback()
 
 	var blockHash common.Hash
-	var blockHeight = req.BlockHeight
+	blockHeight := req.BlockHeight
 	if req.BlockHash != nil {
 		blockHash = gointerfaces.ConvertH256ToHash(req.BlockHash)
 	} else if req.BlockHeight > 0 {

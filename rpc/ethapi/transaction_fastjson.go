@@ -29,7 +29,7 @@ func (t *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
-	s.WriteObjectField("blockHash")
+	s.Field("blockHash")
 	if t.BlockHash == nil {
 		s.WriteNil()
 	} else {
@@ -37,7 +37,7 @@ func (t *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	}
 	jsonstream.Text(s, "blockNumber", t.BlockNumber)
 	jsonstream.Text(s, "blockTimestamp", t.BlockTimestamp)
-	jsonstream.Field(s, "from").WriteHex(t.From[:])
+	s.Field("from").WriteHex(t.From[:])
 	jsonstream.Text(s, "gas", &t.Gas)
 	jsonstream.Text(s, "gasPrice", t.GasPrice)
 	if t.MaxPriorityFeePerGas != nil {
@@ -46,10 +46,10 @@ func (t *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if t.MaxFeePerGas != nil {
 		jsonstream.Text(s, "maxFeePerGas", t.MaxFeePerGas)
 	}
-	jsonstream.Field(s, "hash").WriteHex(t.Hash[:])
-	jsonstream.Field(s, "input").WriteHex(t.Input)
+	s.Field("hash").WriteHex(t.Hash[:])
+	s.Field("input").WriteHex(t.Input)
 	jsonstream.Text(s, "nonce", &t.Nonce)
-	jsonstream.Field(s, "to")
+	s.Field("to")
 	if t.To == nil {
 		s.WriteNil()
 	} else {
@@ -59,7 +59,7 @@ func (t *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	jsonstream.Text(s, "value", t.Value)
 	jsonstream.Text(s, "type", &t.Type)
 	if t.Accesses != nil {
-		jsonstream.Field(s, "accessList")
+		s.Field("accessList")
 		jsonstream.ArrayValue(s, *t.Accesses, writeAccessTuple)
 	}
 	if t.ChainID != nil {
@@ -73,7 +73,7 @@ func (t *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		jsonstream.HexesField(s, "blobVersionedHashes", t.BlobVersionedHashes)
 	}
 	if t.Authorizations != nil {
-		jsonstream.Field(s, "authorizationList")
+		s.Field("authorizationList")
 		jsonstream.ArrayValue(s, *t.Authorizations, writeAuthorization)
 	}
 	jsonstream.Text(s, "v", t.V)
@@ -88,15 +88,15 @@ func (t *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 
 func writeAccessTuple(s *jsonstream.StackStream, a *types.AccessTuple) {
 	s.WriteObjectStart()
-	s.WriteObjectField("address").WriteHex(a.Address[:])
+	s.Field("address").WriteHex(a.Address[:])
 	jsonstream.HexesField(s, "storageKeys", a.StorageKeys)
 	s.WriteObjectEnd()
 }
 
 func writeAuthorization(s *jsonstream.StackStream, a *types.JsonAuthorization) {
 	s.WriteObjectStart()
-	s.WriteObjectField("chainId").WriteQuotedText(&a.ChainID)
-	jsonstream.Field(s, "address").WriteHex(a.Address[:])
+	s.Field("chainId").WriteQuotedText(&a.ChainID)
+	s.Field("address").WriteHex(a.Address[:])
 	jsonstream.Text(s, "nonce", &a.Nonce)
 	jsonstream.Text(s, "yParity", &a.YParity)
 	jsonstream.Text(s, "r", &a.R)

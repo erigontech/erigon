@@ -113,7 +113,6 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	}
 
 	argsVal, err := json.Marshal(args)
-
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +122,6 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	}
 
 	optsVal, err := json.Marshal(traceOpts)
-
 	if err != nil {
 		return nil, err
 	}

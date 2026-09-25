@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/ecdsa"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -39,7 +40,10 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -57,7 +61,7 @@ func TestEmptyQuery(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest = rpc.LatestBlockNumber
+	latest := rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage("[]"), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
@@ -69,11 +73,12 @@ func TestEmptyQuery(t *testing.T) {
 		t.Errorf("expected empty array, got %d elements", len(results))
 	}
 }
+
 func TestCoinbaseBalance(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest = rpc.LatestBlockNumber
+	latest := rpc.LatestBlockNumber
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e","gas":"0x15f90","gasPrice":"0x4a817c800","value":"0x1"},["trace", "stateDiff"]],
@@ -103,14 +108,7 @@ func TestSwapBalance(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest = rpc.LatestBlockNumber
-	results, err := api.CallMany(context.Background(), json.RawMessage(`
-[
-	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
-	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
-]
-`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
-
+	latest := rpc.LatestBlockNumber
 	/*
 		Let's assume A - 0x71562b71999873db5b286df957af199ec94617f7 B - 0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b
 		A has big balance.
@@ -119,6 +117,12 @@ func TestSwapBalance(t *testing.T) {
 		Balance new: 1 wei
 		Balance old diff is 1 wei.
 	*/
+	results, err := api.CallMany(context.Background(), json.RawMessage(`
+[
+	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","gas":"0x5208","gasPrice":"0x0","value":"0x2"},["trace", "stateDiff"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
+]
+`), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
@@ -191,7 +195,7 @@ func TestSwapBalance(t *testing.T) {
 func TestCallManyMixedTraceTypesKeepSequentialState(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
-	var latest = rpc.LatestBlockNumber
+	latest := rpc.LatestBlockNumber
 	parent := &rpc.BlockNumberOrHash{BlockNumber: &latest}
 
 	const swap = `[
@@ -216,7 +220,7 @@ func TestCallManyMixedTraceTypesKeepSequentialState(t *testing.T) {
 func TestCallManyTraceOnlyKeepsSequentialState(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
-	var latest = rpc.LatestBlockNumber
+	latest := rpc.LatestBlockNumber
 	parent := &rpc.BlockNumberOrHash{BlockNumber: &latest}
 
 	// Init code deploys runtime code that returns 42.
@@ -244,7 +248,12 @@ func TestCorrectStateDiff(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 	// Call GetTransactionReceipt for transaction which is not in the database
-	var latest = rpc.LatestBlockNumber
+	latest := rpc.LatestBlockNumber
+	/*
+		C->D 1 wei
+		A->B 2 wei
+		B->A 1 wei
+	*/
 	results, err := api.CallMany(context.Background(), json.RawMessage(`
 [
 	[{"from":"0x0D3ab14BBaD3D99F4203bd7a11aCB94882050E7e","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]],
@@ -252,12 +261,6 @@ func TestCorrectStateDiff(t *testing.T) {
 	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x71562b71999873db5b286df957af199ec94617f7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace", "stateDiff"]]
 ]
 `), &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
-
-	/*
-		C->D 1 wei
-		A->B 2 wei
-		B->A 1 wei
-	*/
 	if err != nil {
 		t.Errorf("calling CallMany: %v", err)
 	}
@@ -666,7 +669,7 @@ func TestTraceCallRejectsCustomTracer(t *testing.T) {
 	api := newTraceApiForTest(m)
 
 	tracer := "callTracer"
-	var latest = rpc.LatestBlockNumber
+	latest := rpc.LatestBlockNumber
 	_, err := api.Call(context.Background(), TraceCallParam{}, []string{TraceTypeTrace}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, &config.TraceConfig{Tracer: &tracer})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "trace_*")
@@ -1402,6 +1405,170 @@ func TestOeTracerMcopyMemory(t *testing.T) {
 	}
 }
 
+func TestOeTracerStateGasUsage(t *testing.T) {
+	result := &TraceCallResult{}
+	tracer := &OeTracer{r: result}
+	hooks := tracer.Tracer().Hooks
+	hooks.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: true}},
+		types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, 100_000, nil, nil), accounts.ZeroAddress)
+	hooks.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil,
+		mdgas.MdGas{Execution: 1000, State: 200}, uint256.Int{}, nil)
+	hooks.EmitEnter(1, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil,
+		mdgas.MdGas{Execution: 800, State: 200}, uint256.Int{}, nil)
+	hooks.EmitExit(1, nil, mdgas.MdGasUsage{Execution: 20, State: -30}, nil, false)
+	hooks.EmitExit(0, nil, mdgas.MdGasUsage{Execution: 100, State: 50}, nil, false)
+	hooks.EmitTxEnd(&types.Receipt{GasUsed: 37_000},
+		mdgas.TxnGasUsage{BlockExecutionGasUsed: 30_000, BlockStateGasUsed: 12_000, GasRefund: 5_000}, nil)
+	encoded, err := json.Marshal(result.Trace)
+	require.NoError(t, err)
+	var frames []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(encoded, &frames))
+	require.Len(t, frames, 2)
+	require.JSONEq(t, `{"gasUsed":"0x64","stateGasUsed":"0x32","output":"0x"}`, string(frames[0]["result"]))
+	require.JSONEq(t, `{"gasUsed":"0x14","stateGasUsed":"-0x1e","output":"0x"}`, string(frames[1]["result"]))
+	for _, field := range []string{"regularGasUsed", "stateGasUsed", "gasRefund"} {
+		require.NotContains(t, frames[0], field)
+		require.NotContains(t, frames[1], field)
+	}
+}
+
+func TestOeTracerStateGasUsagePresence(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+		frameErr  error
+	}{
+		{name: "pre-Amsterdam"},
+		{name: "zero usage", amsterdam: true},
+		{name: "reverted creation", amsterdam: true, frameErr: vm.ErrExecutionReverted},
+		{name: "failed creation", amsterdam: true, frameErr: vm.ErrOutOfGas},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			result := &TraceCallResult{}
+			tracer := &OeTracer{r: result}
+			hooks := tracer.Tracer().Hooks
+			hooks.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{IsAmsterdam: tc.amsterdam}},
+				types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, 100_000, nil, nil), accounts.ZeroAddress)
+			hooks.EmitEnter(0, byte(vm.CREATE), accounts.ZeroAddress, accounts.ZeroAddress, false, nil,
+				mdgas.MdGas{Execution: 1000, State: 200}, uint256.Int{}, nil)
+			hooks.EmitExit(0, nil, mdgas.MdGasUsage{Execution: 100}, tc.frameErr, tc.frameErr != nil)
+			encoded, err := json.Marshal(result.Trace[0])
+			require.NoError(t, err)
+			var frame map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(encoded, &frame))
+			for _, field := range []string{"regularGasUsed", "stateGasUsed", "gasRefund"} {
+				require.NotContains(t, frame, field)
+			}
+			var action map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(frame["action"], &action))
+			if tc.amsterdam {
+				require.JSONEq(t, `"0xc8"`, string(action["stateGasReservoir"]))
+			} else {
+				require.NotContains(t, action, "stateGasReservoir")
+			}
+			if errors.Is(tc.frameErr, vm.ErrOutOfGas) {
+				require.JSONEq(t, `null`, string(frame["result"]))
+				return
+			}
+			var resultFields map[string]json.RawMessage
+			require.NoError(t, json.Unmarshal(frame["result"], &resultFields))
+			if tc.amsterdam {
+				require.JSONEq(t, `"0x0"`, string(resultFields["stateGasUsed"]))
+			} else {
+				require.NotContains(t, resultFields, "stateGasUsed")
+			}
+		})
+	}
+}
+
+func TestOeTracerStateGasAfterCall(t *testing.T) {
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+	parent := accounts.InternAddress(common.HexToAddress("0x2000"))
+	child := accounts.InternAddress(common.HexToAddress("0x1000"))
+	require.NoError(t, ibs.SetCode(parent, []byte{
+		byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0),
+		byte(vm.PUSH2), 0x10, 0x00, byte(vm.GAS), byte(vm.CALL), byte(vm.POP), byte(vm.STOP),
+	}, tracing.CodeChangeUnspecified))
+	require.NoError(t, ibs.SetCode(child, []byte{
+		byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+	}, tracing.CodeChangeUnspecified))
+	result := &TraceCallResult{VmTrace: &VmTrace{}}
+	tracer := &OeTracer{r: result}
+	hooks := tracer.Tracer().Hooks
+	env := vm.NewEVM(evmtypes.BlockContext{Transfer: misc.Transfer}, evmtypes.TxContext{}, ibs,
+		chain.AllProtocolChanges, vm.Config{Tracer: hooks})
+	hooks.OnTxStart(env.GetVMContext(), nil, accounts.ZeroAddress)
+	_, remaining, _, err := env.Call(accounts.ZeroAddress, parent, nil,
+		mdgas.MdGas{Execution: 500_000, State: 2 * params.StateGasPerStorageSet}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.EqualValues(t, params.StateGasPerStorageSet, remaining.State)
+	call := result.VmTrace.Ops[len(result.VmTrace.Ops)-3]
+	require.Equal(t, "CALL", call.Op)
+	require.Equal(t, remaining.State, call.Ex.StateGasRemaining)
+}
+
+func TestOeTracerStateGasRemaining(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		executionGas uint64
+		refill       bool
+		wantErr      error
+	}{
+		{name: "spill", executionGas: 500_000},
+		{name: "refill", executionGas: 500_000, refill: true},
+		{name: "failed state charge", executionGas: 13_000, wantErr: vm.ErrOutOfGas},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ibs := state.New(state.NewNoopReader())
+			t.Cleanup(ibs.Close)
+			result := &TraceCallResult{VmTrace: &VmTrace{}}
+			tracer := &OeTracer{r: result}
+			env := vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges,
+				vm.Config{Tracer: tracer.Tracer().Hooks})
+			contract := *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{})
+			contract.Code = []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE)}
+			if tc.refill {
+				contract.Code = append(contract.Code, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.SSTORE))
+			}
+			contract.Code = append(contract.Code, byte(vm.STOP))
+			_, remaining, used, err := env.Run(contract,
+				mdgas.MdGas{Execution: tc.executionGas, State: params.StateGasPerStorageSet / 2}, nil, false)
+			if tc.wantErr != nil {
+				require.ErrorIs(t, err, tc.wantErr)
+			} else {
+				require.NoError(t, err)
+			}
+			if tc.refill || tc.wantErr != nil {
+				require.Zero(t, used.StateSpill)
+			} else {
+				require.Positive(t, used.StateSpill)
+			}
+			lastStore := result.VmTrace.Ops[2]
+			if tc.refill {
+				lastStore = result.VmTrace.Ops[len(result.VmTrace.Ops)-2]
+			}
+			require.Equal(t, "SSTORE", lastStore.Op)
+			require.EqualValues(t, remaining.Execution, lastStore.Ex.GasRemaining)
+			encoded, err := json.Marshal(result.VmTrace.Ops[2])
+			require.NoError(t, err)
+			var step map[string]any
+			require.NoError(t, json.Unmarshal(encoded, &step))
+			require.EqualValues(t, params.StateGasPerStorageSet, step["stateGasCost"])
+			require.NotContains(t, step, "stateGasSpill")
+			encoded, err = json.Marshal(lastStore.Ex)
+			require.NoError(t, err)
+			var ex map[string]any
+			require.NoError(t, json.Unmarshal(encoded, &ex))
+			if remaining.State == 0 {
+				require.NotContains(t, ex, "stateUsed")
+			} else {
+				require.EqualValues(t, remaining.State, ex["stateUsed"])
+			}
+		})
+	}
+}
+
 type vmTraceOpContext struct {
 	tracing.OpContext
 	stack  []uint256.Int
@@ -1410,6 +1577,7 @@ type vmTraceOpContext struct {
 
 func (c *vmTraceOpContext) StackData() []uint256.Int { return c.stack }
 func (c *vmTraceOpContext) MemoryData() []byte       { return c.memory }
+func (c *vmTraceOpContext) Gas() mdgas.MdGas         { return mdgas.MdGas{Execution: 1000} }
 
 // TestOeTracerCoversInstructionSet fails when an opcode of the latest fork
 // pushes or writes memory but vmTrace does not report it.
@@ -1428,7 +1596,7 @@ func TestOeTracerCoversInstructionSet(t *testing.T) {
 		t.Run(op.String(), func(t *testing.T) {
 			tracer := &OeTracer{r: &TraceCallResult{VmTrace: &VmTrace{}}}
 			for pc, o := range []vm.OpCode{vm.JUMPDEST, op, vm.JUMPDEST} {
-				tracer.OnOpcode(uint64(pc), byte(o), 1000, 0, scope, nil, 0, nil)
+				tracer.OnOpcodeV2(uint64(pc), byte(o), mdgas.MdGas{Execution: 1000}, mdgas.MdGas{}, scope, nil, 0, nil)
 			}
 			ex := tracer.r.VmTrace.Ops[1].Ex
 			require.Len(t, ex.Push, jt[op].NumPush())

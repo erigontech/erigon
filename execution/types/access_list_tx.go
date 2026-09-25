@@ -246,7 +246,6 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	return nil
-
 }
 
 // EncodeRLP implements rlp.Encoder
@@ -473,7 +472,8 @@ func (tx *AccessListTx) SigningHash(chainID *uint256.Int) common.Hash {
 			Value:      &tx.Value,
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
-		})
+		},
+	)
 }
 
 func (tx *AccessListTx) Type() byte { return AccessListTxType }

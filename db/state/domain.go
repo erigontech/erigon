@@ -139,6 +139,7 @@ func NewDomain(cfg statecfg.DomainCfg, stepSize, stepsInFrozenFile uint64, dirs 
 
 	return d, nil
 }
+
 func (d *Domain) SetChecker(checker *DependencyIntegrityChecker) {
 	d.checker = checker
 }
@@ -167,12 +168,15 @@ func (d *Domain) kvWriteVersion() version.Version {
 func (d *Domain) kvNewFilePath(fromStep, toStep kv.Step) string {
 	return d.kvNewFilePathIn("", fromStep, toStep)
 }
+
 func (d *Domain) kviAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return d.kviAccessorNewFilePathIn("", fromStep, toStep)
 }
+
 func (d *Domain) kvExistenceIdxNewFilePath(fromStep, toStep kv.Step) string {
 	return d.kvExistenceIdxNewFilePathIn("", fromStep, toStep)
 }
+
 func (d *Domain) kvBtAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return d.kvBtAccessorNewFilePathIn("", fromStep, toStep)
 }
@@ -184,18 +188,21 @@ func (d *Domain) kvNewFilePathIn(baseDir string, fromStep, toStep kv.Step) strin
 	}
 	return filepath.Join(baseDir, fmt.Sprintf("%s-%s.%d-%d.kv", d.kvWriteVersion().String(), d.FilenameBase, fromStep, toStep))
 }
+
 func (d *Domain) kviAccessorNewFilePathIn(baseDir string, fromStep, toStep kv.Step) string {
 	if baseDir == "" {
 		baseDir = d.dirs.SnapDomain
 	}
 	return filepath.Join(baseDir, fmt.Sprintf("%s-%s.%d-%d.kvi", d.FileVersion.AccessorKVI.String(), d.FilenameBase, fromStep, toStep))
 }
+
 func (d *Domain) kvExistenceIdxNewFilePathIn(baseDir string, fromStep, toStep kv.Step) string {
 	if baseDir == "" {
 		baseDir = d.dirs.SnapDomain
 	}
 	return filepath.Join(baseDir, fmt.Sprintf("%s-%s.%d-%d.kvei", d.FileVersion.AccessorKVEI.String(), d.FilenameBase, fromStep, toStep))
 }
+
 func (d *Domain) kvBtAccessorNewFilePathIn(baseDir string, fromStep, toStep kv.Step) string {
 	if baseDir == "" {
 		baseDir = d.dirs.SnapDomain
@@ -203,10 +210,12 @@ func (d *Domain) kvBtAccessorNewFilePathIn(baseDir string, fromStep, toStep kv.S
 	return filepath.Join(baseDir, fmt.Sprintf("%s-%s.%d-%d.bt", d.FileVersion.AccessorBT.String(), d.FilenameBase, fromStep, toStep))
 }
 
-var domainExistenceForceInMem = dbg.EnvStrings("DOMAIN_EXISTENCE_MEM", ",", nil)
-var domainExistenceForceWillNeed = dbg.EnvStrings("DOMAIN_EXISTENCE_WILLNEED", ",", nil)
-var domainExistenceForceNormal = dbg.EnvStrings("DOMAIN_EXISTENCE_NORMAL", ",", nil)
-var domainExistenceForceRandom = dbg.EnvStrings("DOMAIN_EXISTENCE_RANDOM", ",", nil)
+var (
+	domainExistenceForceInMem    = dbg.EnvStrings("DOMAIN_EXISTENCE_MEM", ",", nil)
+	domainExistenceForceWillNeed = dbg.EnvStrings("DOMAIN_EXISTENCE_WILLNEED", ",", nil)
+	domainExistenceForceNormal   = dbg.EnvStrings("DOMAIN_EXISTENCE_NORMAL", ",", nil)
+	domainExistenceForceRandom   = dbg.EnvStrings("DOMAIN_EXISTENCE_RANDOM", ",", nil)
+)
 
 func (d *Domain) existenceFilterMode() statecfg.ExistenceFilterMode {
 	name := d.Name.String()
@@ -265,12 +274,15 @@ func (d *Domain) openExistenceFilter(fPath string) (*existence.Filter, error) {
 func (d *Domain) kvFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, fromStep, toStep)
 }
+
 func (d *Domain) kviAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.kvi", d.FilenameBase, fromStep, toStep)
 }
+
 func (d *Domain) kvExistenceIdxFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.kvei", d.FilenameBase, fromStep, toStep)
 }
+
 func (d *Domain) kvBtAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep)
 }
@@ -657,7 +669,6 @@ func (dt *DomainRoTx) getLatestFromFile(i int, filekey, buf []byte, hi, lo uint6
 		return v, true, 0, nil
 	}
 	return nil, false, 0, errors.New("no index defined")
-
 }
 
 func (dt *DomainRoTx) getLatestFromFileValSize(i int, filekey []byte, hi, lo uint64) (size int, ok bool, err error) {
@@ -706,15 +717,13 @@ func (d *Domain) beginFilesRo(dv *domainVisible, hf visibleFiles, hiv *iiVisible
 // generation, else the read is torn across entities.
 func (d *Domain) initFilesRo(dt *DomainRoTx, ht *HistoryRoTx, iit *InvertedIndexRoTx, dv *domainVisible, hf visibleFiles, hiv *iiVisible) {
 	d.History.initFilesRo(ht, iit, hf, hiv)
-	*dt = DomainRoTx{
-		name:     d.Name,
-		stepSize: d.stepSize,
-		d:        d,
-		ht:       ht,
-		visible:  dv,
-		files:    dv.files,
-		salt:     d.salt.Load(),
-	}
+	dt.name = d.Name
+	dt.stepSize = d.stepSize
+	dt.d = d
+	dt.ht = ht
+	dt.visible = dv
+	dt.files = dv.files
+	dt.salt = d.salt.Load()
 }
 
 func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
@@ -804,7 +813,7 @@ func (d *Domain) collateETL(ctx context.Context, stepFrom, stepTo kv.Step, wal *
 
 	// Don't use `d.compress` config in collate. Because collat+build must be very-very fast (to keep db small).
 	// Compress files only in `merge` which ok to be slow.
-	//comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
+	// comp := seg.NewWriter(coll.valuesComp, seg.CompressNone) //
 	compress := seg.CompressNone
 	if stepTo-stepFrom > DomainMinStepsToCompress {
 		compress = d.Compression
@@ -865,7 +874,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		return Collation{}, nil
 	}
 
-	{ //assert
+	{ // assert
 		if txFrom%d.stepSize != 0 {
 			panic(fmt.Errorf("assert: unexpected txFrom=%d", txFrom))
 		}
@@ -1702,6 +1711,7 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 	}
 	return seg.NewReader(g, d.Compression)
 }
+
 func (d *Domain) dataWriter(f *seg.Compressor, forceNoCompress bool) *seg.Writer {
 	if !strings.Contains(f.FileName(), ".kv") {
 		panic("assert: miss-use " + f.FileName())
@@ -1787,7 +1797,6 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) (
 	}
 
 	valsC, err := dt.valsCursor(roTx)
-
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -1925,7 +1934,7 @@ func (dt *DomainRoTx) DebugRangeLatest(roTx kv.Tx, fromKey, toKey []byte, limit 
 		h:           &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil
@@ -1943,7 +1952,7 @@ func (dt *DomainRoTx) DebugRangeLatestFromFiles(fromKey, toKey []byte, limit int
 		h:           &CursorHeap{},
 	}
 	if err := s.init(dt); err != nil {
-		s.Close() //it's responsibility of constructor (our) to close resource on error
+		s.Close() // it's responsibility of constructor (our) to close resource on error
 		return nil, err
 	}
 	return s, nil

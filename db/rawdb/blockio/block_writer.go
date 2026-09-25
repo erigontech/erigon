@@ -34,13 +34,12 @@ import (
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-//Naming:
+// Naming:
 //  Prune: delete old data
 //  Unwind: delete recent data
 
 // BlockWriter can write blocks from db and snapshots
-type BlockWriter struct {
-}
+type BlockWriter struct{}
 
 func NewBlockWriter() *BlockWriter {
 	return &BlockWriter{}
@@ -79,6 +78,7 @@ func (w *BlockWriter) MakeBodiesCanonical(tx kv.RwTx, from uint64) error {
 	}
 	return nil
 }
+
 func (w *BlockWriter) MakeBodiesNonCanonical(tx kv.RwTx, from uint64) error {
 	if err := rawdbv3.TxNums.Truncate(tx, from); err != nil {
 		return err
@@ -110,9 +110,7 @@ func (w *BlockWriter) TruncateBodies(db kv.RoDB, tx kv.RwTx, from uint64) error 
 	return nil
 }
 
-var (
-	mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
-)
+var mxPruneTookBlocks = metrics.GetOrCreateSummary(`prune_seconds{type="blocks"}`)
 
 // PruneBlocks - [1, to) old blocks after moving it to snapshots.
 // keeps genesis in db

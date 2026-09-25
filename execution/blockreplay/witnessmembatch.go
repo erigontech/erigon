@@ -220,15 +220,19 @@ type changesetHolder interface {
 func (w *witnessMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
 	return w.TemporalMemBatch.(changesetHolder).GetChangesetByBlockNum(blockNumber)
 }
+
 func (w *witnessMemBatch) GetChangesetByHash(blockNumber uint64, blockHash common.Hash) *changeset.StateChangeSet {
 	return w.TemporalMemBatch.(changesetHolder).GetChangesetByHash(blockNumber, blockHash)
 }
+
 func (w *witnessMemBatch) GetChangesetAccumulator() *changeset.StateChangeSet {
 	return w.TemporalMemBatch.(changesetHolder).GetChangesetAccumulator()
 }
+
 func (w *witnessMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet) {
 	w.TemporalMemBatch.(changesetHolder).SetChangesetAccumulator(acc)
 }
+
 func (w *witnessMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	w.TemporalMemBatch.(changesetHolder).SavePastChangesetAccumulator(blockHash, blockNumber, acc)
 }

@@ -67,6 +67,7 @@ func (m *addMockTxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]t
 	m.addLocalSlotsLen = len(newTxns.Txns)
 	return m.addReasons, nil
 }
+
 func (m *addMockTxPool) deprecatedForEach(f func(rlp []byte, sender common.Address, t SubPoolType), tx kv.Tx) {
 }
 func (m *addMockTxPool) CountContent() (int, int, int) { return 0, 0, 0 }
@@ -78,7 +79,9 @@ func (m *addMockTxPool) IdHashKnown(tx kv.Tx, hash []byte) (bool, error) {
 	}
 	return false, nil
 }
-func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool)       { return 0, false }
+
+func (m *addMockTxPool) NonceFromAddress(addr [20]byte) (nonce uint64, inPool bool) { return 0, false }
+
 func (m *addMockTxPool) GetBlobs(blobhashes []common.Hash) (blobBundles []PoolBlobBundle) { return nil }
 
 func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {

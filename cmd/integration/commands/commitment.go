@@ -336,7 +336,8 @@ Examples:
 
 func readBranch(stateReader commitmentdb.StateReader, prefix []byte, stepSize uint64, logger interface {
 	Info(msg string, ctx ...any)
-}) error {
+},
+) error {
 	compactKey := nibbles.HexToCompact(prefix)
 	val, step, err := stateReader.Read(kv.CommitmentDomain, compactKey, stepSize)
 	if err != nil {
@@ -1177,11 +1178,16 @@ Examples:
   integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true
   integration commitment convert --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
   integration commitment convert --continue --datadir /path/to/datadir --chain mainnet --squeeze=true --nibbles.v2=true
-  integration commitment convert --restore --datadir /path/to/datadir --chain mainnet`,
+  integration commitment convert --restore --datadir /path/to/datadir --chain mainnet
+  integration commitment convert --v3 --datadir /path/to/datadir --chain mainnet`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		if convertRestore && (cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
 			logger.Error("--restore is mutually exclusive with --squeeze/--nibbles.v2")
+			return
+		}
+		if convertV3 && (convertRestore || cmd.Flags().Changed("squeeze") || cmd.Flags().Changed("nibbles.v2")) {
+			logger.Error("--v3 is mutually exclusive with --restore/--squeeze/--nibbles.v2")
 			return
 		}
 		if convertRestore && convertContinue {
@@ -1202,6 +1208,17 @@ Examples:
 			return
 		}
 
+		if convertV3 {
+			legacyHistory, err := filepath.Glob(filepath.Join(datadir.New(datadirCli).SnapHistory, "*-commitment.*.v"))
+			if err != nil {
+				logger.Error("Listing commitment history", "error", err)
+				return
+			}
+			if len(legacyHistory) > 0 {
+				statecfg.EnableHistoricalCommitment()
+			}
+		}
+
 		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
@@ -1213,6 +1230,7 @@ Examples:
 			TargetSqueeze:   convertSqueeze,
 			TargetNibblesV2: convertNibblesV2,
 			Continue:        convertContinue,
+			TargetV3:        convertV3,
 		}
 		if err := commitmentConvert(db, cmd.Context(), logger, opts); err != nil {
 			if !errors.Is(err, context.Canceled) {

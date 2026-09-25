@@ -329,6 +329,7 @@ func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
 		context.Background(), root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
 	))
 }
+
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,

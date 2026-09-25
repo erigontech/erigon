@@ -81,10 +81,12 @@ const (
 	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
 )
 
-var errBuilderNotEnabled = errors.New("builder is not enabled")
-var errPublishedBlockValidation = errors.New("published block validation failed")
-var errPublishedBlockDataStorage = errors.New("published block data storage failed")
-var errPublishedBlockAccepted = errors.New("published block broadcast before integration rejection")
+var (
+	errBuilderNotEnabled         = errors.New("builder is not enabled")
+	errPublishedBlockValidation  = errors.New("published block validation failed")
+	errPublishedBlockDataStorage = errors.New("published block data storage failed")
+	errPublishedBlockAccepted    = errors.New("published block broadcast before integration rejection")
+)
 
 const (
 	caplinClientCode = "CN"

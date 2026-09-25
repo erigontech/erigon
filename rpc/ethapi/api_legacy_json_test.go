@@ -62,7 +62,7 @@ func legacyRPCMarshalHeader(head *types.Header) map[string]any {
 	}
 	if head.AuRaSeal != nil {
 		result["auraSeal"] = hexutil.Bytes(head.AuRaSeal)
-		result["auraStep"] = (hexutil.Uint64)(head.AuRaStep)
+		result["auraStep"] = hexutil.Uint64(head.AuRaStep)
 	}
 	return result
 }

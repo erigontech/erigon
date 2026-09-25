@@ -652,7 +652,6 @@ func TestNewUpdates(t *testing.T) {
 		require.NotNil(t, ut.keys)
 		require.Equal(t, ModeDirect, ut.mode)
 	})
-
 }
 
 func TestUpdates_TouchPlainKey(t *testing.T) {
@@ -964,7 +963,7 @@ func TestUpdatesModeParallel_NewAllocates(t *testing.T) {
 	require.Nil(t, ut.tree)
 	require.Nil(t, ut.treeIdx)
 	require.Nil(t, ut.etl, "ModeParallel uses the prefix trie, not any ETL collector")
-	require.True(t, ut.IsConcurrentCommitment(), "IsConcurrentCommitment must report true for ModeParallel")
+	require.Equal(t, ModeParallel, ut.Mode(), "collection must stay in ModeParallel")
 	require.Equal(t, uint64(0), ut.Size())
 }
 
@@ -1109,7 +1108,7 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 	require.Equal(t, VariantParallelHexPatricia, trie.Variant())
 	require.Equal(t, ModeParallel, upd.Mode())
 	require.NotNil(t, upd.parallel)
-	require.True(t, upd.IsConcurrentCommitment())
+	require.Equal(t, ModeParallel, upd.Mode())
 }
 
 func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {

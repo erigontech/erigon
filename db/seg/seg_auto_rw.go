@@ -27,9 +27,8 @@ import (
 	"github.com/c2h5oh/datasize"
 )
 
-//Reader and Writer - decorators on Getter and Compressor - which
-//can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
-
+// Reader and Writer - decorators on Getter and Compressor - which
+// can auto-use Next/NextUncompressed and Write/AddUncompressedWord - based on `FileCompression` passed to constructor
 type Reader struct {
 	*Getter
 	nextValue bool            // if nextValue true then getter.Next() expected to return value
@@ -86,6 +85,7 @@ func (g *Reader) MadvNormal() MadvDisabler {
 	g.d.MadvNormal()
 	return g
 }
+
 func (g *Reader) MadvSequential() MadvDisabler {
 	g.d.MadvSequential()
 	return g
@@ -111,6 +111,7 @@ func (g *Reader) Reset(offset uint64) {
 	g.nextValue = false
 	g.Getter.Reset(offset)
 }
+
 func (g *Reader) Skip() (uint64, int) {
 	fl := CompressKeys
 	if g.nextValue {
@@ -124,7 +125,6 @@ func (g *Reader) Skip() (uint64, int) {
 		return g.Getter.Skip()
 	}
 	return g.Getter.SkipUncompressed()
-
 }
 
 type Writer struct {

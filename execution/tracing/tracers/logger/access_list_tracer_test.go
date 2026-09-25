@@ -24,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -99,34 +100,48 @@ func TestTracer_AccessList_Equal(t *testing.T) {
 		equal bool
 	}{
 		{"empty", func(accessList) {}, func(accessList) {}, true},
-		{"same slots inserted in a different order",
+		{
+			"same slots inserted in a different order",
 			oneAddrTwoSlots,
 			func(al accessList) { al.addSlot(addr, slot2); al.addSlot(addr, slot1) },
-			true},
-		{"other has an extra address",
+			true,
+		},
+		{
+			"other has an extra address",
 			oneAddrTwoSlots,
 			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
-			false},
-		{"receiver has an extra address",
+			false,
+		},
+		{
+			"receiver has an extra address",
 			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
 			oneAddrTwoSlots,
-			false},
-		{"same address count, different addresses",
+			false,
+		},
+		{
+			"same address count, different addresses",
 			func(al accessList) { al.addAddress(addr) },
 			func(al accessList) { al.addAddress(addr2) },
-			false},
-		{"same slot count, different slots",
+			false,
+		},
+		{
+			"same slot count, different slots",
 			oneAddrTwoSlots,
 			func(al accessList) { al.addSlot(addr, slot1); al.addSlot(addr, slot3) },
-			false},
-		{"other has an extra slot",
+			false,
+		},
+		{
+			"other has an extra slot",
 			func(al accessList) { al.addSlot(addr, slot1) },
 			oneAddrTwoSlots,
-			false},
-		{"address-only vs address with a slot",
+			false,
+		},
+		{
+			"address-only vs address with a slot",
 			func(al accessList) { al.addAddress(addr) },
 			func(al accessList) { al.addSlot(addr, slot1) },
-			false},
+			false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, b := build(tc.a), build(tc.b)
@@ -185,7 +200,7 @@ func TestOnOpcodeReadsStackOnlyWhenUsed(t *testing.T) {
 				address: accounts.InternAddress(addr),
 				stack:   make([]uint256.Int, 8),
 			}}
-			NewAccessListTracer(nil, nil, nil).OnOpcode(0, byte(tc.op), 100, 3, scope, nil, 1, nil)
+			NewAccessListTracer(nil, nil, nil).OnOpcodeV2(0, byte(tc.op), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 			require.Equal(t, tc.reads, scope.stackReads)
 		})
 	}
@@ -306,7 +321,7 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 		address: accounts.InternAddress(addr),
 		stack:   []uint256.Int{*new(uint256.Int).SetBytes(slot2[:])},
 	}
-	seeded.OnOpcode(0, byte(vm.SLOAD), 100, 3, scope, nil, 1, nil)
+	seeded.OnOpcodeV2(0, byte(vm.SLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 
 	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot1, slot2}}}, seeded.AccessList())
 	require.True(t, seeded.UsedBeforeCreation(addr))

@@ -69,6 +69,7 @@ type SharedDomainsCommitmentContext struct {
 	sharedDomains    sd
 	commitmentDomain kv.Domain
 	updates          *commitment.Updates
+	feed             *commitment.Feed
 	patriciaTrie     commitment.Trie
 	variant          commitment.TrieVariant
 	justRestored     atomic.Bool
@@ -76,8 +77,6 @@ type SharedDomainsCommitmentContext struct {
 	stateReader      StateReader
 	paraTrieDB       kv.TemporalRoDB
 	// warmupBase holds the construction-time portion of the per-call WarmupConfig.
-	// Enabled is toggled by EnableTrieWarmup at runtime. NumWorkers holds the resolved
-	// worker count from WarmupNumWorkersOrDefault.
 	// CtxFactory / MaxDepth / LogPrefix are per-call and filled in ComputeCommitment.
 	warmupBase commitment.WarmupConfig
 	tmpDir     string // temp directory for ETL collectors
@@ -85,6 +84,7 @@ type SharedDomainsCommitmentContext struct {
 	// deferCommitmentUpdates when true, deferred branch updates are stored as a pending update
 	// instead of being applied inline after Process(). Used during fork validation.
 	deferCommitmentUpdates bool
+	storageFanOutMin       int
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
 
@@ -93,6 +93,17 @@ type SharedDomainsCommitmentContext struct {
 	pendingVariant commitment.TrieVariant
 	pendingCfg     commitment.TrieConfig
 	warnedUnwired  sync.Once
+}
+
+type v3Trie interface {
+	ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error)
+	SetDeferCommitmentUpdates(bool)
+	TakeDeferredDeltas() [][]commitment.BranchDelta
+	SetStorageFanOutMin(int)
+}
+
+type trieContextFactorySetter interface {
+	SetTrieContextFactory(commitment.TrieContextFactory)
 }
 
 // checkParaTrieWired reports a context that selected the parallel trie and never
@@ -156,12 +167,6 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 	}
 }
 
-// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
-// It requires a DB to be set by calling EnableParaTrieDB
-func (sdc *SharedDomainsCommitmentContext) EnableTrieWarmup(trieWarmup bool) {
-	sdc.warmupBase.Enabled = trieWarmup
-}
-
 // SetDeferCommitmentUpdates enables or disables deferred commitment updates.
 // When enabled, branch updates from Process() are stored as a pending update
 // instead of being applied inline. Used during fork validation where the update is
@@ -178,6 +183,10 @@ func (sdc *SharedDomainsCommitmentContext) SetDeferCommitmentUpdates(defer_ bool
 // asking for one under the bin variant fails instead of yielding a zero value.
 func pbinUnsupported(what string) error {
 	return fmt.Errorf("%w: %s", commitment.ErrPBinUnsupported, what)
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetStorageFanOutMin(n int) {
+	sdc.storageFanOutMin = n
 }
 
 // TakePendingUpdate returns the pending update and clears the field.
@@ -243,12 +252,19 @@ func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Update
 	sdc.updates = updates
 }
 
-func (sdc *SharedDomainsCommitmentContext) EnableCsvMetrics(filePathPrefix string) {
-	sdc.patriciaTrie.EnableCsvMetrics(filePathPrefix)
+func (sdc *SharedDomainsCommitmentContext) AcceptsFeed() bool {
+	_, ok := sdc.patriciaTrie.(v3Trie)
+	return ok
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetFeed(feed *commitment.Feed) {
+	sdc.feed = feed
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetMetricsEnabled(enabled bool) {
-	sdc.patriciaTrie.SetMetricsEnabled(enabled)
+	if trie, ok := sdc.patriciaTrie.(interface{ SetMetricsEnabled(bool) }); ok {
+		trie.SetMetricsEnabled(enabled)
+	}
 }
 
 func NewSharedDomainsCommitmentContext(sd sd, commitmentDomain kv.Domain, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
@@ -364,7 +380,7 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
 	case kv.StorageDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)
-	//case kv.CommitmentDomain, kv.ReceiptDomain:
+	// case kv.CommitmentDomain, kv.ReceiptDomain:
 	default:
 		//panic(fmt.Errorf("TouchKey: unknown domain %s", d))
 	}
@@ -587,7 +603,12 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		defer mxCommitmentTook.ObserveDuration(time.Now())
 	}
 
+	feed := sdc.feed
+	sdc.feed = nil
 	updateCount := sdc.updates.Size()
+	if feed != nil {
+		updateCount = uint64(feed.Keys)
+	}
 	start := time.Now()
 	defer func() {
 		took := time.Since(start)
@@ -686,8 +707,8 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		warmupConfig = sdc.warmupBase
 		warmupConfig.MaxDepth = commitment.WarmupMaxDepth
 		warmupConfig.LogPrefix = logPrefix
-		switch trie := sdc.patriciaTrie.(type) {
-		case *commitment.ParallelPatriciaHashed:
+		warmupConfig.CtxFactory = sdc.warmupTrieContextFactory(sdc.paraTrieDB, txNum)
+		if trie, ok := sdc.patriciaTrie.(trieContextFactorySetter); ok {
 			// The parallel fold workers compute the root, so they must read the same
 			// file generation the main tx was built against: pin it and open worker
 			// txns from that pin. Otherwise a worker could pin a newer generation and
@@ -707,12 +728,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			// after Process and merged into the main writer below.
 			var concurrentFactory commitment.TrieContextFactory
 			concurrentFactory, drainCollectors = sdc.concurrentTrieContextFactory(sdc.paraTrieDB, workerPin, txNum)
-			warmupConfig.CtxFactory = concurrentFactory
 			trie.SetTrieContextFactory(concurrentFactory)
-		default:
-			// Serial: this factory only serves page-cache warmup, which does not
-			// compute the root, so its reads need no generation pin.
-			warmupConfig.CtxFactory = sdc.warmupTrieContextFactory(sdc.paraTrieDB, txNum)
 		}
 	}
 
@@ -730,9 +746,19 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		ptrie.SetLeaveDeferredForCaller(true)
 		defer ptrie.SetLeaveDeferredForCaller(false)
 	}
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
+		trie.SetDeferCommitmentUpdates(true)
+		defer trie.SetDeferCommitmentUpdates(false)
+	}
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok {
+		trie.SetStorageFanOutMin(sdc.storageFanOutMin)
+	}
 
-	rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
-
+	if feed != nil {
+		rootHash, err = sdc.patriciaTrie.(v3Trie).ProcessFeed(ctx, feed, onProgress)
+	} else {
+		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+	}
 	if err != nil {
 		if drainCollectors != nil {
 			for _, c := range drainCollectors() {
@@ -780,6 +806,15 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 				TxNum:    txNum,
 				Deferred: trie.TakeDeferredUpdates(),
 				Metrics:  trie.Metrics(),
+			}
+		}
+	}
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
+		if deltas := trie.TakeDeferredDeltas(); deltas != nil {
+			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
+				BlockNum: blockNum,
+				TxNum:    txNum,
+				Deltas:   deltas,
 			}
 		}
 	}
@@ -936,6 +971,8 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 // truth so BranchCache can exclude it by construction.
 var KeyCommitmentState = commitment.KeyCommitmentState
 
+var CommitmentStateKeys = [][]byte{commitment.KeyCommitmentV3State, KeyCommitmentState}
+
 var ErrBehindCommitment = errors.New("behind commitment")
 var ErrTornCommitmentDatadir = errors.New("torn commitment datadir")
 
@@ -947,11 +984,13 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
 	if _, ok := sdc.patriciaTrie.(commitment.StatefulTrie); !ok {
-		return 0, 0, nil, fmt.Errorf("commitment state is not supported by trie %T", sdc.patriciaTrie)
+		if _, ok := sdc.patriciaTrie.(commitment.TrieStateCodec); !ok {
+			return 0, 0, nil, fmt.Errorf("commitment state is not supported by trie %T", sdc.patriciaTrie)
+		}
 	}
 	var step kv.Step
 
-	state, step, err = trieContext.Branch(KeyCommitmentState)
+	state, step, err = trieContext.Branch(sdc.commitmentStateKey())
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -960,6 +999,9 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
+	if len(state) != 0 && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
+		return 0, 0, bytes.Clone(state), nil
+	}
 	if len(state) < 16 {
 		return 0, 0, nil, nil
 	}
@@ -1096,7 +1138,8 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	if err != nil {
 		return err
 	}
-	prevState, _, err := trieContext.Branch(KeyCommitmentState)
+	stateKey := sdc.commitmentStateKey()
+	prevState, _, err := trieContext.Branch(stateKey)
 	if err != nil {
 		return err
 	}
@@ -1106,16 +1149,26 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 	// state could be equal but txnum/blocknum could be different.
 	// We do skip only full matches
 	if bytes.Equal(prevState, encodedState) {
-		//fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",/
+		// fmt.Printf("[commitment] skip store txn %d block %d (prev b=%d t=%d) rh %x\n",/
 		//	binary.BigEndian.Uint64(prevState[8:16]), binary.BigEndian.Uint64(prevState[:8]), dc.ht.iit.txNum, blockNum, rh)
 		return nil
 	}
 
-	return trieContext.PutBranch(KeyCommitmentState, encodedState, prevState)
+	return trieContext.PutBranch(stateKey, encodedState, prevState)
+}
+
+func (sdc *SharedDomainsCommitmentContext) commitmentStateKey() []byte {
+	if _, ok := sdc.patriciaTrie.(commitment.TrieStateCodec); ok {
+		return commitment.KeyCommitmentV3State
+	}
+	return KeyCommitmentState
 }
 
 // Encodes current trie state and returns it
 func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum uint64) ([]byte, error) {
+	if trie, ok := sdc.patriciaTrie.(commitment.TrieStateCodec); ok {
+		return trie.EncodeState(blockNum, txNum, nil)
+	}
 	st, ok := sdc.patriciaTrie.(commitment.StatefulTrie)
 	if !ok {
 		return nil, fmt.Errorf("unsupported state storing for patricia trie type: %T", sdc.patriciaTrie)
@@ -1136,6 +1189,14 @@ func (sdc *SharedDomainsCommitmentContext) encodeCommitmentState(blockNum, txNum
 // After commitment state is retored, method .Reset() should NOT be called until new updates.
 // Otherwise state should be restorePatriciaState()d again.
 func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (uint64, uint64, error) {
+	if trie, ok := sdc.patriciaTrie.(commitment.TrieStateCodec); ok {
+		blockNum, txNum, err := trie.RestoreState(value)
+		if err != nil {
+			return 0, 0, fmt.Errorf("failed restore v3 state: %w", err)
+		}
+		sdc.justRestored.Store(true)
+		return blockNum, txNum, nil
+	}
 	cs := new(commitmentState)
 	if err := cs.Decode(value); err != nil {
 		if len(value) > 0 {
@@ -1210,6 +1271,38 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	}
 	sdc.branchBuf = append(sdc.branchBuf[:0], enc...)
 	return sdc.branchBuf, step, nil
+}
+
+type ownedBranchReader interface {
+	ReadsOwnedBranches()
+}
+
+type leafRefReader interface {
+	LeafRefs(key, data []byte) *commitment.LeafRefs
+}
+
+func (sdc *TrieContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	if r, ok := sdc.stateReader.(leafRefReader); ok {
+		return r.LeafRefs(key, data)
+	}
+	return nil
+}
+
+func (sdc *TrieContext) BranchOwned(pref []byte) ([]byte, kv.Step, error) {
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
+	if sdc.traceW != nil {
+		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
+	}
+	if enc == nil {
+		return nil, step, nil
+	}
+	if _, ok := sdc.stateReader.(ownedBranchReader); !ok {
+		enc = bytes.Clone(enc)
+	}
+	return enc, step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
@@ -1370,14 +1463,24 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
-func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
-	if err != nil {
-		return 0, err
+func LatestBlockNumWithCommitment(tx kv.TemporalGetter, domain kv.Domain) (uint64, error) {
+	for _, key := range CommitmentStateKeys {
+		v, _, err := tx.GetLatest(domain, key, kv.GetLatestOptions{})
+		if err != nil {
+			return 0, err
+		}
+		if len(v) == 0 {
+			continue
+		}
+		if bytes.Equal(key, commitment.KeyCommitmentV3State) {
+			blockNum, _, _, err := commitment.DecodeCommitmentV3State(v)
+			return blockNum, err
+		}
+		if len(v) < 16 {
+			return 0, nil
+		}
+		_, minUnwindable := DecodeTxBlockNums(v)
+		return minUnwindable, nil
 	}
-	if len(stateVal) < 16 {
-		return 0, nil
-	}
-	_, minUnwindable := DecodeTxBlockNums(stateVal)
-	return minUnwindable, nil
+	return 0, nil
 }

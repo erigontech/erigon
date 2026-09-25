@@ -24,7 +24,6 @@ import (
 )
 
 func Bench2(erigon_url string) error {
-
 	setRoutes(erigon_url, "")
 	reqGen := &RequestGenerator{}
 
@@ -66,9 +65,9 @@ func Bench2(erigon_url string) error {
 							case v.Key == nil:
 								fmt.Printf("No key for sec key: %x\n", k)
 							case k != crypto.Keccak256Hash(v.Key[:]):
-								fmt.Printf("Different sec key: %x %x (%x), value %x\n", k, crypto.Keccak256Hash(v.Key[:]), *(v.Key), v.Value)
+								fmt.Printf("Different sec key: %x %x (%x), value %x\n", k, crypto.Keccak256Hash(v.Key[:]), *v.Key, v.Value)
 							default:
-								fmt.Printf("Keys: %x %x, value %x\n", *(v.Key), k, v.Value)
+								fmt.Printf("Keys: %x %x, value %x\n", *v.Key, k, v.Value)
 							}
 						}
 					}

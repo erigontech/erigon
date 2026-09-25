@@ -38,7 +38,7 @@ func BenchEthCall(erigonURL, gethURL string, needCompare, latest bool, blockFrom
 	defer cleanup()
 
 	var resultsCh chan CallResult = nil
-	var nTransactions = 0
+	nTransactions := 0
 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)

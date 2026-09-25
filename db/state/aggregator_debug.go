@@ -85,6 +85,7 @@ func (ac *aggDirtyFilesRoTx) MadvNormal() *aggDirtyFilesRoTx {
 	}
 	return ac
 }
+
 func (ac *aggDirtyFilesRoTx) DisableReadAhead() {
 	for _, d := range ac.domain {
 		if d == nil {
@@ -295,11 +296,13 @@ func (a *Aggregator) PeriodicalyPrintProcessSet(ctx context.Context) {
 }
 
 // fileItems collection of missed files
-type MissedFilesMap map[statecfg.Accessors][]*FilesItem
-type MissedAccessorAggFiles struct {
-	domain map[kv.Domain]*MissedAccessorDomainFiles
-	ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
-}
+type (
+	MissedFilesMap         map[statecfg.Accessors][]*FilesItem
+	MissedAccessorAggFiles struct {
+		domain map[kv.Domain]*MissedAccessorDomainFiles
+		ii     map[kv.InvertedIdx]*MissedAccessorIIFiles
+	}
+)
 
 func (m MissedFilesMap) IsEmpty() bool {
 	for _, v := range m {

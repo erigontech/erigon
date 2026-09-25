@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -66,8 +67,10 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
-var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+var (
+	caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
+	errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+)
 
 type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
@@ -133,6 +136,16 @@ func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfi
 	e.beaconCfg.Store(beaconCfg)
 }
 
+func (e *EngineServer) engineAPI() rpc.API {
+	return rpc.API{
+		Namespace: "engine",
+		Public:    true,
+		Service:   engineRPC(e),
+		Iface:     reflect.TypeFor[engineRPC](),
+		Version:   "1.0",
+	}
+}
+
 func (e *EngineServer) Start(
 	ctx context.Context,
 	httpConfig *httpcfg.HttpCfg,
@@ -166,12 +179,9 @@ func (e *EngineServer) Start(
 			Public:    true,
 			Service:   jsonrpc.EthAPI(ethImpl),
 			Version:   "1.0",
-		}, {
-			Namespace: "engine",
-			Public:    true,
-			Service:   EngineAPI(e),
-			Version:   "1.0",
-		}}
+		},
+		e.engineAPI(),
+	}
 
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
@@ -698,7 +708,6 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 		}
 		return assembled.Busy, nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
