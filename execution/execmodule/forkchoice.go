@@ -80,22 +80,13 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 	if err != nil {
 		return false, err
 	}
-	if headNumber == nil {
-		return false, nil
-	}
 	finalizedNumber, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
 	if err != nil {
 		return false, err
 	}
-	if finalizedHash != (common.Hash{}) && finalizedHash != blockHash && finalizedNumber == nil {
-		return false, nil
-	}
 	safeNumber, err := e.blockReader.HeaderNumber(ctx, tx, safeHash)
 	if err != nil {
 		return false, err
-	}
-	if safeHash != (common.Hash{}) && safeHash != blockHash && safeNumber == nil {
-		return false, nil
 	}
 
 	if finalizedHash != (common.Hash{}) && finalizedHash != blockHash {

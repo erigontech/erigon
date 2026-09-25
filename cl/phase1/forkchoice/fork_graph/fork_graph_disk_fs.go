@@ -245,20 +245,14 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		return nil, fmt.Errorf("failed to read envelope version: %w, root: %x", err, blockRoot)
 	}
 	version := clparams.StateVersion(versionBytes[0])
-	legacyFraming := false
-	lengthBytes := make([]byte, 8)
 	if versionErr := cltypes.ValidateExecutionPayloadEnvelopeVersion(version); versionErr != nil {
-		if versionBytes[0] != 0 {
-			corrupt = true
-			return nil, fmt.Errorf("corrupt envelope file: %w, root: %x", versionErr, blockRoot)
-		}
-		legacyFraming = true
-		version = clparams.GloasVersion
-		lengthBytes[0] = versionBytes[0]
-		_, err = io.ReadFull(sr, lengthBytes[1:])
-	} else {
-		_, err = io.ReadFull(sr, lengthBytes)
+		corrupt = true
+		return nil, fmt.Errorf("corrupt envelope file: %w, root: %x", versionErr, blockRoot)
 	}
+
+	// Read the length
+	lengthBytes := make([]byte, 8)
+	_, err = io.ReadFull(sr, lengthBytes)
 	if err != nil {
 		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
@@ -289,12 +283,7 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(f.beaconCfg, version),
 	}
-	if legacyFraming {
-		err = envelope.DecodeSSZ(f.sszBuffer, int(version))
-	} else {
-		err = envelope.DecodeSSZStrict(f.sszBuffer, int(version))
-	}
-	if err != nil {
+	if err = envelope.DecodeSSZStrict(f.sszBuffer, int(version)); err != nil {
 		corrupt = true
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
 	}
