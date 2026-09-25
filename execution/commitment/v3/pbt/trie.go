@@ -62,6 +62,9 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if t.ctx == nil {
 		return common.Hash{}, fmt.Errorf("nil Patricia context")
 	}
+	if _, err := t.loadRoot(); err != nil {
+		return common.Hash{}, err
+	}
 	t.deltas = nil
 	ordered := make([]Op, len(ops))
 	copy(ordered, ops)
@@ -214,5 +217,13 @@ func (t *Trie) registerRow(row *rowNode) {
 	t.rows[string(row.key)] = row
 	if row.dirty {
 		t.dirtyRows[string(row.key)] = row
+	}
+}
+
+func (t *Trie) markDirty(row *rowNode) {
+	for row != nil {
+		row.markDirty()
+		t.registerRow(row)
+		row = row.parent
 	}
 }

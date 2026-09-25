@@ -73,6 +73,110 @@ func (c *trieTestContext) Storage([]byte) (*commitment.Update, error) {
 
 var _ commitment.PatriciaContext = (*trieTestContext)(nil)
 
+func assertPersistedTrie(t *testing.T, ctx *trieTestContext, entries []Op) {
+	t.Helper()
+	wantEntries := make([]eip8297.Entry, len(entries))
+	for i, entry := range entries {
+		wantEntries[i] = eip8297.Entry{Key: entry.Key, Value: entry.Value[:]}
+	}
+	wantRoot := eip8297.StateRoot(wantEntries)
+
+	reopened := NewTrie(ctx)
+	gotRoot := eip8297.EmptyTreeHash
+	var err error
+	require.NotPanics(t, func() {
+		gotRoot, err = reopened.Process(nil)
+	})
+	require.NoError(t, err)
+	require.Equal(t, wantRoot, gotRoot)
+	require.NoError(t, reopened.Verify())
+
+	freshContext := newTrieTestContext()
+	freshRoot, err := NewTrie(freshContext).Process(entries)
+	require.NoError(t, err)
+	require.Equal(t, wantRoot, freshRoot)
+	require.Equal(t, freshContext.records, ctx.records)
+}
+
+func TestTriePersistsEveryChangedRow(t *testing.T) {
+	keyA := trieCodeKey(0, 0, 1)
+	keyB := trieCodeKey(2, 0, 2)
+	keyC := trieCodeKey(1, 0, 3)
+	keyD := trieCodeKey(0, 1, 4)
+	entries := []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}}
+	ctx := newTrieTestContext()
+
+	_, err := NewTrie(ctx).Process(entries)
+	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
+
+	entries = append(entries, Op{Key: keyC, Value: testTrieValue(3)})
+	_, err = NewTrie(ctx).Process(entries[2:])
+	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
+
+	entries[0].Value = testTrieValue(5)
+	_, err = NewTrie(ctx).Process([]Op{entries[0]})
+	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
+
+	entries = append(entries, Op{Key: keyD, Value: testTrieValue(4)})
+	_, err = NewTrie(ctx).Process(entries[3:])
+	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
+}
+
+func TestTriePersistsPrefixSplitRows(t *testing.T) {
+	tests := []struct {
+		name    string
+		initial []Op
+		insert  Op
+	}{
+		{
+			name:    "bit 12",
+			initial: []Op{{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(1)}, {Key: trieCodeKey(0x10, 0, 2), Value: testTrieValue(2)}},
+			insert:  Op{Key: trieCodeKey(0x08, 0, 3), Value: testTrieValue(3)},
+		},
+		{
+			name:    "bit 16",
+			initial: []Op{{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(1)}, {Key: trieCodeKey(0x10, 0, 2), Value: testTrieValue(2)}},
+			insert:  Op{Key: trieCodeKey(0, 0x80, 3), Value: testTrieValue(3)},
+		},
+		{
+			name:    "bit 8 then bit 271",
+			initial: []Op{{Key: trieCodeKey(0, 0, 0), Value: testTrieValue(1)}, {Key: trieCodeKey(0x80, 0, 2), Value: testTrieValue(2)}},
+			insert:  Op{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(3)},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := newTrieTestContext()
+			_, err := NewTrie(ctx).Process(tt.initial)
+			require.NoError(t, err)
+			assertPersistedTrie(t, ctx, tt.initial)
+
+			entries := append(append([]Op(nil), tt.initial...), tt.insert)
+			_, err = NewTrie(ctx).Process([]Op{tt.insert})
+			require.NoError(t, err)
+			assertPersistedTrie(t, ctx, entries)
+		})
+	}
+
+	address := bytes.Repeat([]byte{0x72}, 20)
+	account := accountKey(0, eip8297.BasicDataLeafKey)
+	first := eip8297.TreeKeyStorage(address, storageSlot(64))
+	second := eip8297.TreeKeyStorage(address, storageSlot(65))
+	initial := []Op{{Key: account, Value: testTrieValue(1)}, {Key: first, Value: testTrieValue(2)}}
+	ctx := newTrieTestContext()
+	_, err := NewTrie(ctx).Process(initial)
+	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, initial)
+	entries := append(append([]Op(nil), initial...), Op{Key: second, Value: testTrieValue(3)})
+	_, err = NewTrie(ctx).Process([]Op{entries[2]})
+	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
+}
+
 func TestTrieSerialInsertsPersistedBatches(t *testing.T) {
 	ctx := newTrieTestContext()
 	first := []byte{eip8297.CodeZone, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1}
@@ -86,6 +190,8 @@ func TestTrieSerialInsertsPersistedBatches(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRoot([]eip8297.Entry{{Key: first, Value: testTrieValueBytes(1)}}), root)
 	require.NoError(t, trie.Verify())
+	entries := []Op{{Key: first, Value: testTrieValue(1)}}
+	assertPersistedTrie(t, ctx, entries)
 
 	ctx.reads = nil
 	trie = NewTrie(ctx)
@@ -96,6 +202,8 @@ func TestTrieSerialInsertsPersistedBatches(t *testing.T) {
 		{Key: second, Value: testTrieValueBytes(2)},
 	}), root)
 	require.NoError(t, trie.Verify())
+	entries = append(entries, Op{Key: second, Value: testTrieValue(2)})
+	assertPersistedTrie(t, ctx, entries)
 
 	ctx.reads = nil
 	trie = NewTrie(ctx)
@@ -107,6 +215,8 @@ func TestTrieSerialInsertsPersistedBatches(t *testing.T) {
 		{Key: third, Value: testTrieValueBytes(3)},
 	}), root)
 	require.NoError(t, trie.Verify())
+	entries = append(entries, Op{Key: third, Value: testTrieValue(3)})
+	assertPersistedTrie(t, ctx, entries)
 }
 
 func TestTrieRootForms(t *testing.T) {
@@ -117,6 +227,8 @@ func TestTrieRootForms(t *testing.T) {
 	root, err := trie.Process([]Op{{Key: account, Value: testTrieValue(1)}})
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRoot([]eip8297.Entry{{Key: account, Value: testTrieValueBytes(1)}}), root)
+	entries := []Op{{Key: account, Value: testTrieValue(1)}}
+	assertPersistedTrie(t, ctx, entries)
 	root, err = trie.Process([]Op{{Key: storage, Value: testTrieValue(2)}})
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRoot([]eip8297.Entry{
@@ -124,6 +236,8 @@ func TestTrieRootForms(t *testing.T) {
 		{Key: storage, Value: testTrieValueBytes(2)},
 	}), root)
 	require.NoError(t, trie.Verify())
+	entries = append(entries, Op{Key: storage, Value: testTrieValue(2)})
+	assertPersistedTrie(t, ctx, entries)
 }
 
 func TestTrieFoldDoesNotReadState(t *testing.T) {
@@ -147,11 +261,15 @@ func TestTrieBranchInsertJoinAndNewRow(t *testing.T) {
 	seed := func() *trieTestContext {
 		ctx := newTrieTestContext()
 		trie := NewTrie(ctx)
-		_, err := trie.Process([]Op{{Key: a, Value: testTrieValue(1)}, {Key: b, Value: testTrieValue(2)}})
+		entries := []Op{{Key: a, Value: testTrieValue(1)}, {Key: b, Value: testTrieValue(2)}}
+		_, err := trie.Process(entries)
 		require.NoError(t, err)
+		assertPersistedTrie(t, ctx, entries)
 		trie = NewTrie(ctx)
 		_, err = trie.Process([]Op{{Key: storage, Value: storageValue}})
 		require.NoError(t, err)
+		entries = append(entries, Op{Key: storage, Value: storageValue})
+		assertPersistedTrie(t, ctx, entries)
 		return ctx
 	}
 	ctx := seed()
@@ -172,6 +290,7 @@ func TestTrieBranchInsertJoinAndNewRow(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, [][]byte{GlobalRootKey(), childKey}, ctx.reads)
 	require.NoError(t, trie.Verify())
+	assertPersistedTrie(t, ctx, []Op{{Key: a, Value: testTrieValue(1)}, {Key: b, Value: testTrieValue(2)}, {Key: storage, Value: storageValue}, {Key: join, Value: testTrieValue(3)}})
 
 	newRow := trieCodeKey(0x10, 0, 4)
 	ctx = seed()
@@ -187,15 +306,21 @@ func TestTrieBranchInsertJoinAndNewRow(t *testing.T) {
 	}), root)
 	require.Equal(t, [][]byte{GlobalRootKey()}, ctx.reads)
 	require.NoError(t, trie.Verify())
+	assertPersistedTrie(t, ctx, []Op{{Key: a, Value: testTrieValue(1)}, {Key: b, Value: testTrieValue(2)}, {Key: storage, Value: storageValue}, {Key: newRow, Value: testTrieValue(4)}})
 }
 
 func TestTrieRootFormsPersisted(t *testing.T) {
 	ctx := newTrieTestContext()
 	trie := NewTrie(ctx)
-	root, err := trie.Process(nil)
+	root := eip8297.EmptyTreeHash
+	var err error
+	require.NotPanics(t, func() {
+		root, err = trie.Process(nil)
+	})
 	require.NoError(t, err)
 	require.Equal(t, eip8297.EmptyTreeHash, root)
 	require.Empty(t, ctx.records)
+	assertPersistedTrie(t, ctx, nil)
 
 	keyA := trieCodeKey(0, 0, 1)
 	keyB := trieCodeKey(0, 2, 2)
@@ -205,6 +330,7 @@ func TestTrieRootFormsPersisted(t *testing.T) {
 	record, err := DecodeRecord(GlobalRootKey(), ctx.records[string(GlobalRootKey())])
 	require.NoError(t, err)
 	require.Equal(t, LeafRoot, record.Form)
+	assertPersistedTrie(t, ctx, []Op{{Key: keyA, Value: testTrieValue(1)}})
 
 	trie = NewTrie(ctx)
 	_, err = trie.Process([]Op{{Key: keyB, Value: testTrieValue(2)}})
@@ -212,6 +338,7 @@ func TestTrieRootFormsPersisted(t *testing.T) {
 	record, err = DecodeRecord(GlobalRootKey(), ctx.records[string(GlobalRootKey())])
 	require.NoError(t, err)
 	require.Equal(t, ExtRoot, record.Form)
+	assertPersistedTrie(t, ctx, []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}})
 
 	rowKey := eip8297.TreeKeyStorage(bytes.Repeat([]byte{1}, 20), storageSlotKey())
 	trie = NewTrie(ctx)
@@ -220,6 +347,21 @@ func TestTrieRootFormsPersisted(t *testing.T) {
 	record, err = DecodeRecord(GlobalRootKey(), ctx.records[string(GlobalRootKey())])
 	require.NoError(t, err)
 	require.Equal(t, RowRoot, record.Form)
+	assertPersistedTrie(t, ctx, []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}, {Key: rowKey, Value: eip8297.EncodeStorageValue([]byte{3})}})
+}
+
+func TestTrieProcessEmptyLoadsPersistedRoot(t *testing.T) {
+	ctx := newTrieTestContext()
+	key := trieCodeKey(0, 0, 1)
+	_, err := NewTrie(ctx).Process([]Op{{Key: key, Value: testTrieValue(1)}})
+	require.NoError(t, err)
+
+	root := eip8297.EmptyTreeHash
+	require.NotPanics(t, func() {
+		root, err = NewTrie(ctx).Process(nil)
+	})
+	require.NoError(t, err)
+	require.Equal(t, eip8297.StateRoot([]eip8297.Entry{{Key: key, Value: testTrieValueBytes(1)}}), root)
 }
 
 func TestTrieIncrementalRecordParity(t *testing.T) {
@@ -237,6 +379,7 @@ func TestTrieIncrementalRecordParity(t *testing.T) {
 		incrementalRoot, err := trie.Process(ops[i : i+1])
 		require.NoError(t, err)
 		require.NoError(t, trie.Verify())
+		assertPersistedTrie(t, incrementalContext, ops[:i+1])
 
 		freshContext := newTrieTestContext()
 		freshRoot, err := NewTrie(freshContext).Process(ops[:i+1])

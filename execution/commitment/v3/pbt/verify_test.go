@@ -46,3 +46,21 @@ func TestTrieVerifyRejectsStaleBranchHash(t *testing.T) {
 
 	require.Error(t, NewTrie(ctx).Verify())
 }
+
+func TestTrieVerifyRejectsWrongRootSelfExtensionBits(t *testing.T) {
+	ctx := newTrieTestContext()
+	a := trieCodeKey(0, 0, 1)
+	b := trieCodeKey(0, 1, 2)
+	_, err := NewTrie(ctx).Process([]Op{{Key: a, Value: testTrieValue(1)}, {Key: b, Value: testTrieValue(2)}})
+	require.NoError(t, err)
+
+	record, err := DecodeRecord(GlobalRootKey(), ctx.records[string(GlobalRootKey())])
+	require.NoError(t, err)
+	require.Equal(t, ExtRoot, record.Form)
+	record.SelfExt.SetBitAt(20, record.SelfExt.Bit(20)^1)
+	data, err := EncodeRecord(GlobalRootKey(), &record)
+	require.NoError(t, err)
+	ctx.records[string(GlobalRootKey())] = data
+
+	require.Error(t, NewTrie(ctx).Verify())
+}

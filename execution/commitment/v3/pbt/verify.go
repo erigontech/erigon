@@ -51,6 +51,13 @@ func (t *Trie) Verify() error {
 		if result.Split != root.self.BitLen || result.Left != root.left || result.Right != root.right {
 			return fmt.Errorf("root extension does not match its top row")
 		}
+		wantSelf, err := rowTopPrefix(row, result.Split)
+		if err != nil {
+			return err
+		}
+		if root.self != wantSelf {
+			return fmt.Errorf("root extension prefix does not match its top row")
+		}
 		return nil
 	case RowRoot:
 		_, err := t.verifyRow(root.row)

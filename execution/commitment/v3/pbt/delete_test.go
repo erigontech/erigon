@@ -31,20 +31,25 @@ func TestTrieZeroValueDeletesAndCollapses(t *testing.T) {
 	keyB := trieCodeKey(0, 2, 2)
 	valueA := testTrieValue(1)
 	valueB := testTrieValue(2)
+	entries := []Op{{Key: keyA, Value: valueA}, {Key: keyB, Value: valueB}}
 	trie := NewTrie(ctx)
-	_, err := trie.Process([]Op{{Key: keyA, Value: valueA}, {Key: keyB, Value: valueB}})
+	_, err := trie.Process(entries)
 	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
 
 	delTrie := NewTrie(ctx)
 	root, err := delTrie.Process([]Op{{Key: keyB, Value: [eip8297.ValueLength]byte{}}})
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRoot([]eip8297.Entry{{Key: keyA, Value: valueA[:]}}), root)
 	require.NoError(t, NewTrie(ctx).Verify())
+	entries = []Op{{Key: keyA, Value: valueA}}
+	assertPersistedTrie(t, ctx, entries)
 
 	root, err = NewTrie(ctx).Process([]Op{{Key: keyA, Value: [eip8297.ValueLength]byte{}}})
 	require.NoError(t, err)
 	require.Equal(t, eip8297.EmptyTreeHash, root)
 	require.Empty(t, ctx.records)
+	assertPersistedTrie(t, ctx, nil)
 }
 
 func TestTrieDropStoragePrefix(t *testing.T) {
@@ -53,12 +58,14 @@ func TestTrieDropStoragePrefix(t *testing.T) {
 	keyB := eip8297.TreeKeyStorage(address, storageSlot(65))
 	account := accountKey(0, eip8297.BasicDataLeafKey)
 	ctx := newTrieTestContext()
-	_, err := NewTrie(ctx).Process([]Op{
+	entries := []Op{
 		{Key: account, Value: testTrieValue(1)},
 		{Key: keyA, Value: testTrieValue(2)},
 		{Key: keyB, Value: testTrieValue(3)},
-	})
+	}
+	_, err := NewTrie(ctx).Process(entries)
 	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
 
 	prefix := bytes.Clone(keyA[:33])
 	root, err := NewTrie(ctx).Process([]Op{Drop(prefix)})
@@ -68,6 +75,7 @@ func TestTrieDropStoragePrefix(t *testing.T) {
 	for key := range ctx.records {
 		require.False(t, bytes.HasPrefix([]byte(key), prefix))
 	}
+	assertPersistedTrie(t, ctx, []Op{{Key: account, Value: testTrieValue(1)}})
 }
 
 func TestTrieCollapseMovesStorageSplitToLastBit(t *testing.T) {
@@ -79,13 +87,15 @@ func TestTrieCollapseMovesStorageSplitToLastBit(t *testing.T) {
 	account := accountKey(0, eip8297.BasicDataLeafKey)
 	value := testTrieValue(1)
 	ctx := newTrieTestContext()
-	_, err := NewTrie(ctx).Process([]Op{
+	entries := []Op{
 		{Key: account, Value: testTrieValue(4)},
 		{Key: k0, Value: value},
 		{Key: k1, Value: testTrieValue(2)},
 		{Key: k2, Value: testTrieValue(3)},
-	})
+	}
+	_, err := NewTrie(ctx).Process(entries)
 	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
 	ctx.reads = nil
 	root, err := NewTrie(ctx).Process([]Op{{Key: k0, Value: [32]byte{}}})
 	require.NoError(t, err)
@@ -100,6 +110,7 @@ func TestTrieCollapseMovesStorageSplitToLastBit(t *testing.T) {
 	require.Equal(t, RowRoot, record.Form)
 	require.Equal(t, int16(523), record.Cells[15].Prefix.BitLen)
 	require.NoError(t, NewTrie(ctx).Verify())
+	assertPersistedTrie(t, ctx, []Op{{Key: account, Value: testTrieValue(4)}, {Key: k1, Value: testTrieValue(2)}, {Key: k2, Value: testTrieValue(3)}})
 }
 
 func TestTrieCollapseThenInsertInOneBatch(t *testing.T) {
@@ -107,8 +118,10 @@ func TestTrieCollapseThenInsertInOneBatch(t *testing.T) {
 	keyB := trieCodeKey(0, 2, 2)
 	keyC := trieCodeKey(0, 8, 3)
 	ctx := newTrieTestContext()
-	_, err := NewTrie(ctx).Process([]Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}})
+	entries := []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}}
+	_, err := NewTrie(ctx).Process(entries)
 	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
 	root, err := NewTrie(ctx).Process([]Op{
 		{Key: keyB, Value: [32]byte{}},
 		{Key: keyC, Value: testTrieValue(3)},
@@ -119,14 +132,17 @@ func TestTrieCollapseThenInsertInOneBatch(t *testing.T) {
 		{Key: keyC, Value: testTrieValueBytes(3)},
 	}), root)
 	require.NoError(t, NewTrie(ctx).Verify())
+	assertPersistedTrie(t, ctx, []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyC, Value: testTrieValue(3)}})
 }
 
 func TestTrieDeletesAllCellsInOneBatch(t *testing.T) {
 	account := accountKey(0, eip8297.BasicDataLeafKey)
 	storage := eip8297.TreeKeyStorage(bytes.Repeat([]byte{0x71}, 20), storageSlot(64))
 	ctx := newTrieTestContext()
-	_, err := NewTrie(ctx).Process([]Op{{Key: account, Value: testTrieValue(1)}, {Key: storage, Value: testTrieValue(2)}})
+	entries := []Op{{Key: account, Value: testTrieValue(1)}, {Key: storage, Value: testTrieValue(2)}}
+	_, err := NewTrie(ctx).Process(entries)
 	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
 	root, err := NewTrie(ctx).Process([]Op{
 		{Key: account, Value: [32]byte{}},
 		{Key: storage, Value: [32]byte{}},
@@ -134,6 +150,7 @@ func TestTrieDeletesAllCellsInOneBatch(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, eip8297.EmptyTreeHash, root)
 	require.Empty(t, ctx.records)
+	assertPersistedTrie(t, ctx, nil)
 }
 
 func storageSlot(value byte) []byte {

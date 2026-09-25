@@ -110,12 +110,10 @@ func rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNo
 
 func setLeaf(n *rowNode, slot int, key []byte, value [eip8297.ValueLength]byte) {
 	n.cells[slot] = leafCell(key, value)
-	n.markDirty()
 }
 
 func setBranch(n *rowNode, slot int, cell rowCell) {
 	n.cells[slot] = cell
-	n.markDirty()
 }
 
 func rowFoldResult(n *rowNode) (FoldResult, error) {

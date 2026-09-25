@@ -176,7 +176,7 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 	switch cell.Kind {
 	case EmptyCell:
 		setLeaf(row, slot, key, value)
-		t.registerRow(row)
+		t.markDirty(row)
 		return nil
 	case LeafCell:
 		oldPath, err := keyPath(cell.Key)
@@ -186,11 +186,13 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 		d := firstDifference(&oldPath, &path)
 		if oldPath.BitLen == path.BitLen && d == oldPath.BitLen {
 			setLeaf(row, slot, key, value)
+			t.markDirty(row)
 			return nil
 		}
 		if d/4 == row.path.BitLen/4 {
 			newSlot := int(path.Bit(row.path.BitLen)*8 + path.Bit(row.path.BitLen+1)*4 + path.Bit(row.path.BitLen+2)*2 + path.Bit(row.path.BitLen+3))
 			setLeaf(row, newSlot, key, value)
+			t.markDirty(row)
 			return nil
 		}
 		window := (d / 4) * 4
@@ -209,6 +211,7 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 		child.parent = row
 		child.parentSlot = slot
 		t.registerRow(child)
+		t.markDirty(row)
 		return nil
 	case BranchCell:
 		return t.insertBranch(row, slot, path, key, value)
@@ -252,6 +255,7 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 	child.parent = row
 	child.parentSlot = slot
 	t.registerRow(child)
+	t.markDirty(row)
 	return nil
 }
 
@@ -314,8 +318,7 @@ func (t *Trie) removeFromRow(row *rowNode, path eip8297.Bitpath, key []byte) (bo
 			return false, nil
 		}
 		row.cells[slot] = rowCell{}
-		row.markDirty()
-		t.registerRow(row)
+		t.markDirty(row)
 		return true, nil
 	case BranchCell:
 		branchPath := branchPath(row, slot, cell)
@@ -327,10 +330,6 @@ func (t *Trie) removeFromRow(row *rowNode, path eip8297.Bitpath, key []byte) (bo
 			return false, err
 		}
 		found, err := t.removeFromRow(child, path, key)
-		if found {
-			row.markDirty()
-			t.registerRow(row)
-		}
 		return found, err
 	default:
 		return false, errInsertKey
@@ -338,10 +337,7 @@ func (t *Trie) removeFromRow(row *rowNode, path eip8297.Bitpath, key []byte) (bo
 }
 
 func (t *Trie) normalize() error {
-	root, err := t.loadRoot()
-	if err != nil {
-		return err
-	}
+	root := t.root
 	switch root.form {
 	case RowRoot:
 		if root.row == nil {
@@ -375,8 +371,7 @@ func (t *Trie) normalizeRootRow(root *treeRoot, row *rowNode) error {
 		delete(t.dirtyRows, string(GlobalRootKey()))
 	} else {
 		row.tombstone = true
-		row.markDirty()
-		t.registerRow(row)
+		t.markDirty(row)
 	}
 	if len(slots) == 0 {
 		root.form = RowRoot
@@ -429,8 +424,7 @@ func (t *Trie) normalizeRow(row *rowNode) error {
 		return t.refreshBranch(row.parent, row.parentSlot, row)
 	}
 	row.tombstone = true
-	row.markDirty()
-	t.registerRow(row)
+	t.markDirty(row)
 	parent := row.parent
 	if parent == nil {
 		return nil
@@ -450,8 +444,7 @@ func (t *Trie) normalizeRow(row *rowNode) error {
 		}
 		parent.cells[row.parentSlot] = cell
 	}
-	parent.markDirty()
-	t.registerRow(parent)
+	t.markDirty(parent)
 	return nil
 }
 
@@ -536,8 +529,7 @@ func (t *Trie) refreshBranch(parent *rowNode, slot int, child *rowNode) error {
 	cell.Prefix = full.Slice(start, result.Split)
 	cell.Left, cell.Right = result.Left, result.Right
 	cell.child = child
-	parent.markDirty()
-	t.registerRow(parent)
+	t.markDirty(parent)
 	return nil
 }
 

@@ -27,8 +27,10 @@ func TestTrieCancelsDeleteRewriteDelta(t *testing.T) {
 	ctx := newTrieTestContext()
 	key := trieCodeKey(0, 0, 1)
 	value := testTrieValue(1)
-	_, err := NewTrie(ctx).Process([]Op{{Key: key, Value: value}})
+	entries := []Op{{Key: key, Value: value}}
+	_, err := NewTrie(ctx).Process(entries)
 	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
 	ctx.writes = nil
 
 	trie := NewTrie(ctx)
@@ -37,14 +39,17 @@ func TestTrieCancelsDeleteRewriteDelta(t *testing.T) {
 	require.Empty(t, trie.TakeDeltas())
 	require.Empty(t, ctx.writes)
 	require.NotEmpty(t, ctx.records[string(GlobalRootKey())])
+	assertPersistedTrie(t, ctx, entries)
 }
 
 func TestTrieDeltasRestoreRoundStartRecords(t *testing.T) {
 	ctx := newTrieTestContext()
 	keyA := trieCodeKey(0, 0, 1)
 	keyB := trieCodeKey(0, 2, 2)
-	_, err := NewTrie(ctx).Process([]Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}})
+	entries := []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}}
+	_, err := NewTrie(ctx).Process(entries)
 	require.NoError(t, err)
+	assertPersistedTrie(t, ctx, entries)
 	start := cloneRecords(ctx.records)
 
 	trie := NewTrie(ctx)
@@ -55,6 +60,7 @@ func TestTrieDeltasRestoreRoundStartRecords(t *testing.T) {
 	for _, delta := range deltas {
 		require.Equal(t, start[string(delta.Key)], delta.Prev)
 	}
+	assertPersistedTrie(t, ctx, []Op{{Key: keyA, Value: testTrieValue(3)}})
 	for _, delta := range slices.Backward(deltas) {
 		require.NoError(t, ctx.PutBranch(delta.Key, delta.Prev, delta.Data))
 	}
