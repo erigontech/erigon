@@ -50,17 +50,15 @@ type Reset struct {
 // rewrites them to the dotted spelling, and reset does not run it first.
 var stateKVName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-(accounts|storage|commitment)\.([0-9]+)-([0-9]+)\.kv$`)
 
-// domainBuild is what a step range will hold for one domain once reset is done and the downloader
-// has fetched what the manifest describes.
+// domainBuild is the file a step range will hold for one domain once reset is done and the
+// downloader has fetched what the manifest describes. Only the highest version of a logical file is
+// opened, so that is the one recorded.
 type domainBuild struct {
-	fromManifest  bool
 	retainedLocal bool
 	ver           version.Version
 	fromStep      uint64
 	toStep        uint64
 }
-
-func (b *domainBuild) present() bool { return b.fromManifest || b.retainedLocal }
 
 // referenced reports whether a commitment file of this version and span stores shortened keys,
 // which are the byte offsets that a differing build invalidates. Steps are passed with a step size
@@ -84,33 +82,36 @@ func (reset *Reset) checkStateBuilds() error {
 	}
 
 	builds := map[string]map[string]*domainBuild{}
-	record := func(fileName string) *domainBuild {
+	record := func(fileName string, retainedLocal bool) {
 		m := stateKVName.FindStringSubmatch(fileName)
 		if m == nil {
-			return nil
+			return
 		}
 		ver, err := version.ParseVersion(m[1])
 		if err != nil {
-			return nil
+			return
 		}
 		fromStep, err := strconv.ParseUint(m[3], 10, 64)
 		if err != nil {
-			return nil
+			return
 		}
 		toStep, err := strconv.ParseUint(m[4], 10, 64)
 		if err != nil {
-			return nil
+			return
 		}
 		stepRange, domain := m[3]+"-"+m[4], m[2]
 		if builds[stepRange] == nil {
 			builds[stepRange] = map[string]*domainBuild{}
 		}
-		b := builds[stepRange][domain]
-		if b == nil {
-			b = &domainBuild{ver: ver, fromStep: fromStep, toStep: toStep}
-			builds[stepRange][domain] = b
+		if b := builds[stepRange][domain]; b != nil && b.ver.Cmp(ver) >= 0 {
+			return
 		}
-		return b
+		builds[stepRange][domain] = &domainBuild{
+			retainedLocal: retainedLocal,
+			ver:           ver,
+			fromStep:      fromStep,
+			toStep:        toStep,
+		}
 	}
 
 	// A file the manifest describes ends up canonical whether or not it is on disk now: reset drops
@@ -120,9 +121,7 @@ func (reset *Reset) checkStateBuilds() error {
 		if !ok {
 			continue
 		}
-		if b := record(name); b != nil {
-			b.fromManifest = true
-		}
+		record(name, false)
 	}
 
 	entries, err := os.ReadDir(reset.Dirs.SnapDomain)
@@ -136,20 +135,18 @@ func (reset *Reset) checkStateBuilds() error {
 		if _, known := reset.PreverifiedSnapshots.Get("domain/" + entry.Name()); known {
 			continue
 		}
-		if b := record(entry.Name()); b != nil {
-			b.retainedLocal = true
-		}
+		record(entry.Name(), true)
 	}
 
 	var mixed []string
 	for stepRange, domains := range builds {
 		commitment := domains["commitment"]
-		if commitment == nil || !commitment.present() || !commitment.referenced() {
+		if commitment == nil || !commitment.referenced() {
 			continue
 		}
 		for _, domain := range []string{"accounts", "storage"} {
 			st := domains[domain]
-			if st == nil || !st.present() {
+			if st == nil {
 				continue
 			}
 			if st.retainedLocal != commitment.retainedLocal {

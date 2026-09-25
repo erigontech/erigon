@@ -202,3 +202,26 @@ func TestResetRefusesMixedBuildsWithLegacyVersionNames(t *testing.T) {
 		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
 	})
 }
+
+// Several versions of one logical file can sit in the directory together, and only the highest is
+// opened. Judging a domain by the union of its versions hides the pair that is actually loaded:
+// here every domain holds both a canonical and a local file, yet the v1.1 pair that wins is mixed.
+func TestResetJudgesTheHighestVersionOfEachDomain(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{
+			{Name: "snapshots/domain/v1.0-accounts.0-256.kv"},   // local, superseded
+			{Name: "snapshots/domain/v1.1-commitment.0-256.kv"}, // local, and the one that wins
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{
+			{Name: "domain/v1.1-accounts.0-256.kv"},   // canonical, and the one that wins
+			{Name: "domain/v1.0-commitment.0-256.kv"}, // canonical, superseded
+		}
+		r.PreverifiedSnapshots.Sort()
+		err := r.Run()
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+	})
+}
