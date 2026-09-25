@@ -61,24 +61,3 @@ type Case struct {
 	Records    []RecordSpec
 	Assertions Assertions
 }
-
-func Corpus() []Case {
-	cases := make([]Case, 0, 3)
-	for _, shape := range []string{"accounts", "storage"} {
-		c, err := Generate(MathRand(0), SequenceSpec{Kind: shape, Count: 100000})
-		if err != nil {
-			panic(err)
-		}
-		c.ID = "E102/process-100k-" + shape
-		c.Assertions.ProcessNoError = true
-		cases = append(cases, c)
-	}
-	c, err := Generate(MathRand(0), SequenceSpec{Kind: "incremental"})
-	if err != nil {
-		panic(err)
-	}
-	c.ID = "E103/differential-zero-state-reads"
-	c.Assertions = Assertions{ProcessNoError: true, ZeroAccountReads: true, ZeroStorageReads: true, StateReadEngines: []string{"v3"}}
-	cases = append(cases, c)
-	return cases
-}

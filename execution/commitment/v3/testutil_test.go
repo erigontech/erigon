@@ -17,7 +17,9 @@
 package v3
 
 import (
+	"bytes"
 	"context"
+	"math/bits"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/commitment"
@@ -62,8 +64,20 @@ func openTestTrie(ctx context.Context, spec runner.RunSpec) (runner.Engine, erro
 }
 
 func TestSharedRunnerCatalogue(t *testing.T) {
-	for _, c := range commitmenttest.Corpus() {
-		t.Run(c.ID, func(t *testing.T) {
+	for _, tc := range []struct {
+		id    string
+		kind  string
+		count int
+	}{
+		{"E102/process-100k-accounts", "accounts", 100000},
+		{"E102/process-100k-storage", "storage", 100000},
+		{"E103/differential-zero-state-reads", "incremental", 0},
+	} {
+		t.Run(tc.id, func(t *testing.T) {
+			c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: tc.kind, Count: tc.count})
+			require.NoError(t, err)
+			c.ID = tc.id
+			c.Assertions = commitmenttest.Assertions{ProcessNoError: true, ZeroAccountReads: tc.kind == "incremental", ZeroStorageReads: tc.kind == "incremental", StateReadEngines: []string{"v3"}}
 			require.True(t, c.Assertions.ProcessNoError)
 			runner.Run(t, c, runner.RunSpec{Name: "v3", Mode: commitment.ModeCollect, Context: runner.ContextSpec{ForbidStateReads: true}}, openTestTrie)
 		})
@@ -127,4 +141,127 @@ func materializeNode(path []byte, plane byte, spec *commitmenttest.RecordSpec) *
 		}
 	}
 	return n
+}
+
+func runStorageTask(ctx commitment.PatriciaContext, task storageTask) ([32]byte, error) {
+	root, parts, err := runStorageTaskWithPlan(ctx, task, foldPlan{})
+	if err != nil {
+		return [32]byte{}, err
+	}
+	return root, applyDeltas(parts, ctx.PutBranch)
+}
+
+func entryOf(path []byte, update *commitment.Update) storageEntry {
+	entry, err := storageEntryOf(path, update)
+	if err != nil {
+		panic(err)
+	}
+	return entry
+}
+
+func slotPath(prefix ...byte) []byte {
+	paths, err := commitmenttest.Paths(commitmenttest.Shape{Plane: "storage", Prefixes: [][]byte{prefix}})
+	if err != nil {
+		panic(err)
+	}
+	return paths[0]
+}
+
+func slotValue(path []byte) []byte {
+	return commitmenttest.Storage(commitmenttest.StorageSpec{Path: path})
+}
+
+func phaseAStorageUpdate(value []byte) *commitment.Update { return storageUpdate(value) }
+
+func storageTaskFor(addr [32]byte, ops []commitmenttest.Op) storageTask {
+	task := storageTask{addrHash: addr, entries: make([]storageEntry, len(ops))}
+	for i, op := range ops {
+		task.entries[i] = entryOf(op.Key, runner.Update(op))
+	}
+	return task
+}
+
+func storageRound(t *testing.T, ctx commitment.PatriciaContext, addr [32]byte, ops []commitmenttest.Op) [32]byte {
+	t.Helper()
+	root, err := runStorageTask(ctx, storageTaskFor(addr, ops))
+	require.NoError(t, err)
+	return root
+}
+
+func storageOps(paths [][]byte) []commitmenttest.Op {
+	ops := make([]commitmenttest.Op, len(paths))
+	for i, path := range paths {
+		ops[i] = commitmenttest.Op{Key: path, Storage: slotValue(path)}
+	}
+	return ops
+}
+
+func exactStorage(t *testing.T, ctx commitment.PatriciaContext, addr [32]byte) map[string][]byte {
+	t.Helper()
+	out := make(map[string][]byte)
+	var walk func(*node)
+	walk = func(n *node) {
+		if n == nil {
+			return
+		}
+		for nib := range 16 {
+			bit := uint16(1) << nib
+			if n.childMask&bit == 0 {
+				continue
+			}
+			path := append(bytes.Clone(n.path), byte(nib))
+			if n.leafMask&bit != 0 {
+				suffix, value := n.leafAt(nib)
+				path = append(path, unpackPath(suffix, 64-len(n.path)-1, nil)...)
+				require.NotContains(t, out, string(path))
+				out[string(path)] = bytes.Clone(value)
+				continue
+			}
+			child := n.child(nib)
+			if child == nil {
+				path = append(path, n.childExtAt(nib)...)
+				if len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
+					path = bytes.Clone(n.path)
+				}
+				loaded, err := unfold(ctx, path, planeStorage, addr[:])
+				require.NoError(t, err, "unfold %x", path)
+				require.NotNil(t, loaded, "unfold %x", path)
+				loaded.path = path
+				child = loaded
+			}
+			walk(child)
+		}
+	}
+	root, err := unfold(ctx, nil, planeStorage, addr[:])
+	require.NoError(t, err)
+	walk(root)
+	return out
+}
+
+func liveStorageRecords(records map[string][]byte) map[string][]byte {
+	for key, value := range records {
+		if len(value) == 0 {
+			delete(records, key)
+		}
+	}
+	return records
+}
+
+func testUpdates(t *testing.T, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {
+	t.Helper()
+	updates := commitment.NewUpdates(mode, t.TempDir(), commitment.KeyToHexNibbleHash)
+	t.Cleanup(updates.Close)
+	for _, op := range ops {
+		updates.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
+	}
+	return updates
+}
+
+func requireStorageState(t *testing.T, ctx commitment.PatriciaContext, addr [32]byte, state commitmenttest.State) {
+	t.Helper()
+	want := make(map[string][]byte, len(state))
+	for _, op := range state.Ops() {
+		want[string(op.Key)] = op.Storage
+	}
+	require.Equal(t, want, exactStorage(t, ctx, addr))
 }
