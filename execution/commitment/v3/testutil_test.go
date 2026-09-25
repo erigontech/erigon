@@ -19,9 +19,14 @@ package v3
 import (
 	"bytes"
 	"context"
-	"math/bits"
+	"maps"
+	"slices"
+	"sync/atomic"
 	"testing"
 
+	keccak "github.com/erigontech/fastkeccak"
+
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/erigontech/erigon/internal/commitmenttest/runner"
@@ -52,7 +57,7 @@ func incrementalEntries(ops []commitmenttest.Op) []incrementalOp {
 	return entries
 }
 
-func openTestTrie(ctx context.Context, spec runner.RunSpec) (runner.Engine, error) {
+func openTestTrie(ctx context.Context, spec runner.RunSpec) (commitment.Trie, error) {
 	if spec.Mode != commitment.ModeCollect {
 		return runner.OpenHPH(ctx, spec)
 	}
@@ -198,43 +203,54 @@ func storageOps(paths [][]byte) []commitmenttest.Op {
 
 func exactStorage(t *testing.T, ctx commitment.PatriciaContext, addr [32]byte) map[string][]byte {
 	t.Helper()
+	return exactLeaves(t, ctx, planeStorage, addr)
+}
+
+func exactLeaves(t *testing.T, ctx commitment.PatriciaContext, plane byte, addr [32]byte) map[string][]byte {
+	t.Helper()
 	out := make(map[string][]byte)
-	var walk func(*node)
-	walk = func(n *node) {
-		if n == nil {
+	var visit func([]byte)
+	visit = func(path []byte) {
+		key := AccountNodeKey(path, nil)
+		if plane == planeStorage {
+			key = StorageNodeKey(addr, path, nil)
+		}
+		data, _, err := ctx.Branch(key)
+		data = bytes.Clone(data)
+		require.NoError(t, err)
+		if len(data) == 0 {
+			require.Empty(t, path, "missing record at path %x", path)
+			return
+		}
+		depth := len(path)
+		require.NoError(t, Validate(data, depth), "invalid record at %x", path)
+		r := Record{data: data, depth: depth}
+		if r.isLeafRoot() {
+			out[string(unpackPath(data[1:33], 64, nil))] = bytes.Clone(data[34:])
+			return
+		}
+		l := r.layout()
+		if depth == 0 && l.selfExtLen != 0 {
+			visit(unpackPath(r.SelfExt()[1:], l.selfExtLen, nil))
 			return
 		}
 		for nib := range 16 {
 			bit := uint16(1) << nib
-			if n.childMask&bit == 0 {
+			if l.child&bit == 0 {
 				continue
 			}
-			path := append(bytes.Clone(n.path), byte(nib))
-			if n.leafMask&bit != 0 {
-				suffix, value := n.leafAt(nib)
-				path = append(path, unpackPath(suffix, 64-len(n.path)-1, nil)...)
-				require.NotContains(t, out, string(path))
-				out[string(path)] = bytes.Clone(value)
+			child := append(bytes.Clone(path), byte(nib))
+			if l.leaf&bit == 0 {
+				visit(append(child, decodeExtension(r.extAt(l, nib))...))
 				continue
 			}
-			child := n.child(nib)
-			if child == nil {
-				path = append(path, n.childExtAt(nib)...)
-				if len(n.path) != 0 && bits.OnesCount16(n.childMask) == 1 && n.leafMask == 0 {
-					path = bytes.Clone(n.path)
-				}
-				loaded, err := unfold(ctx, path, planeStorage, addr[:])
-				require.NoError(t, err, "unfold %x", path)
-				require.NotNil(t, loaded, "unfold %x", path)
-				loaded.path = path
-				child = loaded
-			}
-			walk(child)
+			suffix, value := r.leafAt(l, nib)
+			child = append(child, unpackPath(suffix, 64-depth-1, nil)...)
+			require.NotContains(t, out, string(child), "duplicate leaf %x", child)
+			out[string(child)] = bytes.Clone(value)
 		}
 	}
-	root, err := unfold(ctx, nil, planeStorage, addr[:])
-	require.NoError(t, err)
-	walk(root)
+	visit(nil)
 	return out
 }
 
@@ -264,4 +280,121 @@ func requireStorageState(t *testing.T, ctx commitment.PatriciaContext, addr [32]
 		want[string(op.Key)] = op.Storage
 	}
 	require.Equal(t, want, exactStorage(t, ctx, addr))
+}
+
+func feedOf(entries []parityUpdate) *commitment.Feed {
+	feed := &commitment.Feed{Keys: len(entries)}
+	index := make(map[string]int)
+	for _, e := range entries {
+		addr := string(e.key[:length.Addr])
+		at, ok := index[addr]
+		if !ok {
+			at = len(feed.Accounts)
+			index[addr] = at
+			feed.Accounts = append(feed.Accounts, commitment.FeedAccount{Hash: keccak.Sum256(e.key[:length.Addr])})
+		}
+		account := &feed.Accounts[at]
+		if len(e.key) == length.Addr {
+			account.Update = e.update
+			continue
+		}
+		slot := commitment.FeedSlot{Hash: keccak.Sum256(e.key[length.Addr:])}
+		if !e.update.Deleted() {
+			slot.Value = e.update.Storage[:e.update.StorageLen]
+		}
+		account.Slots = append(account.Slots, slot)
+	}
+	return feed
+}
+
+type v3Config struct {
+	trie     *Trie
+	workers  int
+	deferred bool
+	feed     bool
+	wrap     func(commitment.PatriciaContext) commitment.PatriciaContext
+}
+
+func runV3(t *testing.T, ctx commitment.PatriciaContext, cfg v3Config, rounds ...[]parityUpdate) ([][]byte, []string, int32) {
+	t.Helper()
+	var calls atomic.Int32
+	tr := cfg.trie
+	if tr == nil {
+		tr = &Trie{}
+		defer tr.Release()
+	}
+	tr.scheduleWorkers = cfg.workers
+	tr.ResetContext(ctx)
+	tr.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) {
+		calls.Add(1)
+		if cfg.wrap != nil {
+			return cfg.wrap(ctx), nil
+		}
+		return ctx, nil
+	})
+	tr.SetDeferCommitmentUpdates(cfg.deferred)
+	var roots [][]byte
+	var deltas []string
+	for _, round := range rounds {
+		var root []byte
+		var err error
+		if cfg.feed {
+			root, err = tr.ProcessFeed(context.Background(), feedOf(round), nil)
+		} else {
+			updates := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, round)
+			root, err = tr.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
+			updates.Close()
+		}
+		require.NoError(t, err)
+		roots = append(roots, root)
+		taken := len(deltas)
+		for _, part := range tr.TakeDeferredDeltas() {
+			for _, d := range part {
+				deltas = append(deltas, string(d.Key)+"|"+string(d.Data)+"|"+string(d.Prev))
+				require.NoError(t, ctx.PutBranch(d.Key, d.Data, d.Prev))
+			}
+		}
+		require.Equal(t, cfg.deferred, len(deltas) > taken)
+	}
+	slices.Sort(deltas)
+	return roots, deltas, calls.Load()
+}
+
+func storeSnapshot(c *shardedContext) map[string]string {
+	out := make(map[string]string)
+	for i := range c.shards {
+		c.shards[i].mu.Lock()
+		for k, v := range c.shards[i].branches {
+			out[k] = string(v)
+		}
+		c.shards[i].mu.Unlock()
+	}
+	return out
+}
+
+func requireSameRuns(t *testing.T, base []parityUpdate, a, b v3Config, rounds ...[]parityUpdate) [][]byte {
+	t.Helper()
+	seeded := newShardedContext()
+	if base != nil {
+		runV3(t, seeded, v3Config{workers: 1}, base)
+	}
+	run := func(cfg v3Config) ([][]byte, map[string]string, []string) {
+		c := newShardedContext()
+		for i := range c.shards {
+			c.shards[i].branches = maps.Clone(seeded.shards[i].branches)
+		}
+		roots, deltas, _ := runV3(t, c, cfg, rounds...)
+		return roots, storeSnapshot(c), deltas
+	}
+	rootsA, storeA, deltasA := run(a)
+	rootsB, storeB, deltasB := run(b)
+	for i := 1; i < len(rootsA); i++ {
+		require.NotEqual(t, rootsA[i-1], rootsA[i])
+	}
+	require.Equal(t, rootsA, rootsB)
+	require.Equal(t, storeA, storeB)
+	if a.deferred == b.deferred {
+		require.Equal(t, deltasA, deltasB)
+	}
+	return rootsA
 }

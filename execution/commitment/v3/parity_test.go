@@ -18,20 +18,20 @@ package v3
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest"
+	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
 
 type parityUpdate struct {
@@ -39,22 +39,18 @@ type parityUpdate struct {
 	update *commitment.Update
 }
 
-type parityContext struct {
-	mu           sync.Mutex
-	branches     map[string][]byte
-	accounts     map[string]*commitment.Update
-	storage      map[string]*commitment.Update
-	accountCalls int
-	storageCalls int
+type incrementalOp struct {
+	key    []byte
+	update *commitment.Update
+	read   bool
 }
 
-func newParityContext() *parityContext {
-	return &parityContext{
-		branches: make(map[string][]byte),
-		accounts: make(map[string]*commitment.Update),
-		storage:  make(map[string]*commitment.Update),
-	}
+type parityContext struct {
+	mu       sync.Mutex
+	branches map[string][]byte
 }
+
+func newParityContext() *parityContext { return &parityContext{branches: make(map[string][]byte)} }
 
 func (p *parityContext) Branch(key []byte) ([]byte, kv.Step, error) {
 	p.mu.Lock()
@@ -69,29 +65,13 @@ func (p *parityContext) PutBranch(key, data, _ []byte) error {
 	return nil
 }
 
-func (p *parityContext) Account(key []byte) (*commitment.Update, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.accountCalls++
-	if update, ok := p.accounts[string(key)]; ok {
-		return update.Copy(), nil
-	}
+func (p *parityContext) Account([]byte) (*commitment.Update, error) {
 	return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
 }
 
-func (p *parityContext) Storage(key []byte) (*commitment.Update, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	p.storageCalls++
-	if update, ok := p.storage[string(key)]; ok {
-		return update.Copy(), nil
-	}
+func (p *parityContext) Storage([]byte) (*commitment.Update, error) {
 	return &commitment.Update{Flags: commitment.DeleteUpdate}, nil
 }
-
-func (p *parityContext) factory(context.Context) (commitment.PatriciaContext, func()) { return p, nil }
-
-var _ commitment.PatriciaContext = (*parityContext)(nil)
 
 func accountParityUpdate(i int) *commitment.Update {
 	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "parity", Number: i}))
@@ -109,146 +89,290 @@ func paritySlot(i int) []byte {
 	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "wrapping-slot", Size: 32}, i)
 }
 
-func makeParityUpdates(t *testing.T, mode commitment.Mode, entries []parityUpdate) *commitment.Updates {
-	t.Helper()
-	updates := commitment.NewUpdates(mode, t.TempDir(), commitment.KeyToHexNibbleHash)
-	for _, entry := range entries {
-		updates.TouchPlainKeyDirect(string(entry.key), entry.update)
-	}
-	return updates
+func parityFuzzAddress(i int) []byte { return incrAddress(i) }
+
+func incrAddress(i int) []byte {
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 20}, i)
 }
 
-func parityRoots(t *testing.T, initial, entries []parityUpdate) ([3][]byte, *parityContext) {
-	t.Helper()
-	ctxV3 := newParityContext()
-	ctxHPH := newParityContext()
-	ctxParallel := newParityContext()
-	for _, entry := range initial {
-		if len(entry.key) == length.Addr {
-			ctxHPH.accounts[string(entry.key)] = entry.update.Copy()
-			ctxParallel.accounts[string(entry.key)] = entry.update.Copy()
-		}
-	}
+func incrSlot(addr []byte, j int) []byte {
+	return slotKey(addr, commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 32}, j))
+}
 
-	v3 := &Trie{}
-	v3.ResetContext(ctxV3)
-	v3.SetTrieContextFactory(ctxV3.factory)
-	hph := commitment.NewHexPatriciaHashed(length.Addr, ctxHPH, commitment.DefaultTrieConfig())
-	parallel := commitment.NewParallelPatriciaHashed(func(context.Context) (commitment.PatriciaContext, func()) {
-		return ctxParallel, nil
-	}, length.Addr, commitment.DefaultTrieConfig())
-	t.Cleanup(func() {
-		v3.Release()
-		hph.Release()
-		parallel.Release()
+func slotKey(addr, slot []byte) []byte { return append(bytes.Clone(addr), slot...) }
+
+func plainAccount(i int) *commitment.Update {
+	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "plain", Number: i}))
+}
+
+func incrAccountUpdate(rng *rand.Rand) *commitment.Update {
+	return testAccountUpdate(commitmenttest.RandomAccount(rng))
+}
+
+func incrStorageUpdate(rng *rand.Rand) *commitment.Update {
+	return storageUpdate(commitmenttest.RandomStorage(rng))
+}
+
+func incrementalAccountUpdate(nonce, balance uint64) *commitment.Update {
+	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: common.HexToHash("0x1234")}))
+}
+
+func incrementalStorageUpdate(value byte) *commitment.Update {
+	return storageUpdate(commitmenttest.Storage(commitmenttest.StorageSpec{Value: []byte{value}}))
+}
+
+func incrementalDeleteUpdate() *commitment.Update {
+	return &commitment.Update{Flags: commitment.DeleteUpdate}
+}
+
+func incrementalBatches() ([][]incrementalOp, []incrementalOp) {
+	c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
+	if err != nil {
+		panic(err)
+	}
+	batches := make([][]incrementalOp, len(c.Rounds))
+	state := make(commitmenttest.State)
+	for i, round := range c.Rounds {
+		batches[i] = incrementalEntries(round)
+		state.Apply(round)
+	}
+	return batches, incrementalEntries(state.Ops())
+}
+
+func accountOp(key []byte, spec commitmenttest.AccountSpec) commitmenttest.Op {
+	value := commitmenttest.Account(spec)
+	return commitmenttest.Op{Key: key, Account: &value}
+}
+
+func slotOp(key []byte, number int) commitmenttest.Op {
+	return commitmenttest.Op{Key: key, Storage: commitmenttest.Storage(commitmenttest.StorageSpec{Number: number})}
+}
+
+var (
+	parityEngines = []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect}, {Name: "hph", Mode: commitment.ModeUpdate}, {Name: "parallel", Mode: commitment.ModeParallel}}
+	serialEngines = []runner.RunSpec{{Name: "v3", Mode: commitment.ModeCollect, Workers: 1}, {Name: "hph", Mode: commitment.ModeUpdate}}
+)
+
+func differential(t *testing.T, c commitmenttest.Case, specs []runner.RunSpec) ([][]byte, map[string][]byte, []int) {
+	t.Helper()
+	c.Assertions = commitmenttest.Assertions{TolerateHPHDrift: c.Assertions.TolerateHPHDrift, ProcessNoError: true, ZeroAccountReads: true, ZeroStorageReads: true, StateReadEngines: []string{"v3", "v3-reload", "fresh-v3"}}
+	modes := []runner.RunSpec{specs[0], {Name: "fresh-v3", Mode: commitment.ModeCollect, Workers: 1, Fresh: true}, {Name: "fresh-hph", Mode: commitment.ModeUpdate, Fresh: true}}
+	got := runner.Compare(t, c, append(modes, specs[1:]...), openTestTrie)
+	roots := make([][]byte, len(c.Rounds))
+	state := make(commitmenttest.State)
+	for i := range got[0].Rounds {
+		round := &got[0].Rounds[i]
+		roots[i] = round.Root
+		state.Apply(c.Rounds[i])
+		checkDifferentialRecords(t, state, round.Records, fmt.Sprintf("case=%s seed=%+v round=%d", c.ID, c.Seed, i))
+	}
+	var hphDrift []int
+	for _, run := range got {
+		hphDrift = append(hphDrift, run.HPHDrift...)
+	}
+	return roots, got[0].Rounds[len(c.Rounds)-1].Records, hphDrift
+}
+
+func withInitial(initial, ops []commitmenttest.Op) [][]commitmenttest.Op {
+	if len(initial) == 0 {
+		return [][]commitmenttest.Op{ops}
+	}
+	return [][]commitmenttest.Op{initial, ops}
+}
+
+func TestDifferential(t *testing.T) {
+	parity := func(i int) commitmenttest.Op {
+		return accountOp(parityAddress(i), commitmenttest.AccountSpec{Kind: "parity", Number: i})
+	}
+	t.Run("bulk", func(t *testing.T) {
+		for _, kind := range []string{"accounts", "storage", "mixed"} {
+			for _, count := range []int{1, 2, 16, 1000, 100000} {
+				var initial, ops []commitmenttest.Op
+				for i := range count {
+					slot := slotOp(slotKey(parityAddress(i), paritySlot(i)), i)
+					switch kind {
+					case "accounts":
+						ops = append(ops, parity(i))
+					case "storage":
+						initial, ops = append(initial, parity(i)), append(ops, slot)
+					default:
+						ops = append(ops, parity(i), slot)
+					}
+				}
+				differential(t, commitmenttest.Case{ID: fmt.Sprintf("%s/%d", kind, count), Rounds: withInitial(initial, ops)}, parityEngines)
+			}
+		}
 	})
 
-	if err := processParityBatch(t, v3, hph, parallel, initial); err != nil {
-		t.Fatal(err)
-	}
-	rootV3, err := v3.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	rootHPH, err := hph.Process(context.Background(), makeParityUpdates(t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	rootParallel, err := parallel.Process(context.Background(), makeParityUpdates(t, commitment.ModeParallel, entries), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	require.Zero(t, ctxV3.accountCalls)
-	require.Zero(t, ctxV3.storageCalls)
-	require.Equal(t, rootHPH, rootV3)
-	require.Equal(t, rootHPH, rootParallel)
-	return [3][]byte{rootV3, rootHPH, rootParallel}, ctxV3
-}
+	t.Run("correctness", func(t *testing.T) {
+		address := parityAddress(7)
+		slotA, slotB := slotKey(address, paritySlot(8)), slotKey(address, paritySlot(9))
+		account := []commitmenttest.Op{parity(7)}
+		fields := func(spec commitmenttest.AccountSpec) commitmenttest.Op {
+			spec.CodeHash = empty.CodeHash
+			return accountOp(address, spec)
+		}
+		for _, tc := range []struct {
+			name         string
+			initial, ops []commitmenttest.Op
+		}{
+			{"account", nil, account},
+			{"slot_after_account", account, []commitmenttest.Op{slotOp(slotA, 8)}},
+			{"two_slots_after_account", account, []commitmenttest.Op{slotOp(slotA, 8), slotOp(slotB, 9)}},
+			{"account_with_slot", nil, []commitmenttest.Op{parity(7), slotOp(slotA, 8)}},
+			{"account_with_other_slot", nil, []commitmenttest.Op{accountOp(address, commitmenttest.AccountSpec{Kind: "parity", Number: 12}), slotOp(slotB, 13)}},
+			{"delete_absent_account", nil, []commitmenttest.Op{{Key: address, Delete: true}}},
+			{"zeroed_account", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{})}},
+			{"zeroed_account_with_neighbour", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{}), parity(9)}},
+			{"nonce_only", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{Nonce: 1})}},
+			{"balance_only", nil, []commitmenttest.Op{fields(commitmenttest.AccountSpec{Balance: 5})}},
+		} {
+			differential(t, commitmenttest.Case{ID: tc.name, Rounds: withInitial(tc.initial, tc.ops)}, parityEngines)
+		}
+	})
 
-func processParityBatch(t *testing.T, v3 *Trie, hph *commitment.HexPatriciaHashed, parallel *commitment.ParallelPatriciaHashed, entries []parityUpdate) error {
-	t.Helper()
-	if len(entries) == 0 {
-		return nil
-	}
-	ctx := context.Background()
-	if _, err := v3.Process(ctx, makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{}); err != nil {
-		return err
-	}
-	if _, err := hph.Process(ctx, makeParityUpdates(t, commitment.ModeUpdate, entries), "", nil, commitment.WarmupConfig{}); err != nil {
-		return err
-	}
-	_, err := parallel.Process(ctx, makeParityUpdates(t, commitment.ModeParallel, entries), "", nil, commitment.WarmupConfig{})
-	return err
-}
+	t.Run("incremental", func(t *testing.T) {
+		c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
+		require.NoError(t, err)
+		state := make(commitmenttest.State)
+		for _, round := range c.Rounds {
+			state.Apply(round)
+		}
+		final := state.Ops()
+		reload := runner.RunSpec{Name: "v3-reload", Mode: commitment.ModeCollect, Workers: 1, Reload: true}
+		roots, records, _ := differential(t, c, []runner.RunSpec{serialEngines[0], reload, serialEngines[1]})
+		bulkRoots, bulkRecords, _ := differential(t, commitmenttest.Case{ID: "incremental/bulk", Rounds: [][]commitmenttest.Op{final}}, serialEngines[:1])
+		require.Equal(t, liveStorageRecords(records), liveStorageRecords(bulkRecords))
+		require.Equal(t, roots[len(roots)-1], bulkRoots[0])
 
-func TestParityAccountsStorageAndMixed(t *testing.T) {
-	for _, tc := range []struct {
-		name   string
-		build  func(int) []parityUpdate
-		counts []int
-	}{
-		{name: "accounts", build: func(n int) []parityUpdate {
-			entries := make([]parityUpdate, n)
-			for i := range entries {
-				entries[i] = parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)}
+		deletes := make([]commitmenttest.Op, len(final))
+		for i, op := range final {
+			deletes[i] = commitmenttest.Op{Key: op.Key, Delete: true}
+		}
+		roots, _, _ = differential(t, commitmenttest.Case{ID: "incremental/unwind", Rounds: [][]commitmenttest.Op{final, deletes, final}}, serialEngines)
+		require.Equal(t, empty.RootHash[:], roots[1])
+		require.Equal(t, roots[0], roots[2])
+	})
+
+	t.Run("feed", func(t *testing.T) {
+		storage, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "storage", Count: 300})
+		require.NoError(t, err)
+		whale, err := commitmenttest.Generate(commitmenttest.MathRand(424242), commitmenttest.SequenceSpec{Kind: "whale", Count: 3 * defaultStorageFanOutMin})
+		require.NoError(t, err)
+		seed := storage.Rounds[0]
+		seed = append(seed, whale.Rounds[0]...)
+		var next []commitmenttest.Op
+		for i := range 300 {
+			addr, slot := benchAddr(i), slotKey(benchAddr(i), benchSlot(i))
+			switch i % 5 {
+			case 0:
+				next = append(next, accountOp(addr, commitmenttest.AccountSpec{Kind: "parity", Number: i + 1000}))
+			case 1:
+				next = append(next, slotOp(slot, i+1000))
+			case 2:
+				next = append(next, commitmenttest.Op{Key: slot, Delete: true})
+			case 3:
+				next = append(next, commitmenttest.Op{Key: addr, Delete: true})
+			default:
+				next = append(next, commitmenttest.Op{Key: addr, Delete: true}, commitmenttest.Op{Key: slot, Delete: true})
 			}
-			return entries
-		}, counts: []int{1, 2, 16, 1000, 100000}},
-		{name: "storage", build: func(n int) []parityUpdate {
-			entries := make([]parityUpdate, n)
-			for i := range entries {
-				key := append(parityAddress(i), paritySlot(i)...)
-				entries[i] = parityUpdate{key: key, update: storageParityUpdate(i)}
+		}
+		for i := 1; i < len(whale.Rounds[0]); i += 3 {
+			next = append(next, commitmenttest.Op{Key: whale.Rounds[0][i].Key, Delete: true})
+		}
+		want, _, _ := differential(t, commitmenttest.Case{ID: "feed", Rounds: [][]commitmenttest.Op{seed, next}}, serialEngines)
+		for _, deferred := range []bool{false, true} {
+			roots := requireSameRuns(t, nil, v3Config{deferred: deferred}, v3Config{deferred: deferred, feed: true}, parityEntries(seed), parityEntries(next))
+			require.Equal(t, want, roots)
+		}
+	})
+
+	t.Run("whale_batches", func(t *testing.T) {
+		for seed := int64(1); seed <= 40; seed++ {
+			for _, b1 := range []int{2, 3, 5} {
+				for _, b2 := range []int{1, 2, 3} {
+					c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", BatchSizes: []int{b1, b2}})
+					require.NoError(t, err)
+					c.ID = fmt.Sprintf("whale/%d+%d", b1, b2)
+					differential(t, c, serialEngines)
+				}
 			}
-			return entries
-		}, counts: []int{1, 2, 16, 1000, 100000}},
-		{name: "mixed", build: func(n int) []parityUpdate {
-			entries := make([]parityUpdate, 0, n*2)
-			for i := range n {
-				entries = append(entries,
-					parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)},
-					parityUpdate{key: append(parityAddress(i), paritySlot(i)...), update: storageParityUpdate(i)},
-				)
-			}
-			return entries
-		}, counts: []int{1, 2, 16, 1000, 100000}},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			for _, count := range tc.counts {
-				t.Run(fmt.Sprint(count), func(t *testing.T) {
-					initial := []parityUpdate(nil)
-					if tc.name == "storage" {
-						initial = make([]parityUpdate, count)
-						for i := range initial {
-							initial[i] = parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)}
-						}
+		}
+	})
+
+	t.Run("one_slot_per_account", func(t *testing.T) {
+		for _, rewrite := range []bool{false, true} {
+			for seed := int64(1); seed <= 40; seed++ {
+				for _, n1 := range []int{2, 5, 20} {
+					for _, n2 := range []int{1, 2, 5} {
+						c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "one-slot", BatchSizes: []int{n1, n2}, Rewrite: rewrite})
+						require.NoError(t, err)
+						c.ID = fmt.Sprintf("one-slot/%d+%d/rewrite=%t", n1, n2, rewrite)
+						differential(t, c, serialEngines)
 					}
-					parityRoots(t, initial, tc.build(count))
-				})
+				}
 			}
-		})
-	}
-}
+		}
+	})
 
-func TestParityCorrectnessCases(t *testing.T) {
-	address := parityAddress(7)
-	slotA := append(append([]byte(nil), address...), paritySlot(8)...)
-	slotB := append(append([]byte(nil), address...), paritySlot(9)...)
-	account := []parityUpdate{{key: address, update: accountParityUpdate(7)}}
-	parityRoots(t, nil, account)
-	parityRoots(t, account, []parityUpdate{{key: slotA, update: storageParityUpdate(8)}})
-	parityRoots(t, account, []parityUpdate{{key: slotA, update: storageParityUpdate(8)}, {key: slotB, update: storageParityUpdate(9)}})
-	parityRoots(t, nil, []parityUpdate{{key: address, update: accountParityUpdate(7)}, {key: slotA, update: storageParityUpdate(8)}})
-	parityRoots(t, nil, []parityUpdate{{key: address, update: accountParityUpdate(12)}, {key: slotB, update: storageParityUpdate(13)}})
-	parityRoots(t, nil, []parityUpdate{{key: address, update: &commitment.Update{Flags: commitment.DeleteUpdate}}})
+	t.Run("slot_threshold", func(t *testing.T) {
+		for _, seed := range []int64{424242, 1, 2, 3, 7, 99, 12345, 777, 31337, 5150} {
+			for n := 1; n <= 80; n++ {
+				c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: n})
+				require.NoError(t, err)
+				c.ID = fmt.Sprintf("slot-threshold/%d", n)
+				differential(t, c, serialEngines[:1])
+			}
+		}
+	})
 
-	zeroed := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, CodeHash: empty.CodeHash}
-	parityRoots(t, nil, []parityUpdate{{key: address, update: zeroed}})
-	parityRoots(t, nil, []parityUpdate{{key: address, update: zeroed}, {key: parityAddress(9), update: accountParityUpdate(9)}})
+	t.Run("stress", func(t *testing.T) {
+		for _, spec := range []commitmenttest.SequenceSpec{
+			{Kind: "stress", Rounds: 120, Accounts: 6, Slots: 4, OpsPerRound: 3},
+			{Kind: "stress", Rounds: 120, Accounts: 24, Slots: 10, OpsPerRound: 5},
+			{Kind: "stress", Rounds: 60, Accounts: 200, Slots: 40, OpsPerRound: 8},
+		} {
+			runWorlds(t, spec, 4)
+		}
+	})
 
-	nonceOnly := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Nonce: 1, CodeHash: empty.CodeHash}
-	parityRoots(t, nil, []parityUpdate{{key: address, update: nonceOnly}})
+	t.Run("root_collapse", func(t *testing.T) {
+		for _, accounts := range []int{2, 3, 5, 8} {
+			runWorlds(t, commitmenttest.SequenceSpec{Kind: "root-collapse", Rounds: 120, Accounts: accounts}, 30)
+		}
+	})
 
-	balanceOnly := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Balance: *uint256.NewInt(5), CodeHash: empty.CodeHash}
-	parityRoots(t, nil, []parityUpdate{{key: address, update: balanceOnly}})
-}
-
-func parityFuzzAddress(i int) []byte {
-	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 20}, i)
+	t.Run("literal", func(t *testing.T) {
+		account := func(id, number int) commitmenttest.Op {
+			return accountOp(incrAddress(id), commitmenttest.AccountSpec{Kind: "plain", Number: number})
+		}
+		accounts := func(ids ...int) []commitmenttest.Op {
+			ops := make([]commitmenttest.Op, len(ids))
+			for i, id := range ids {
+				ops[i] = account(id, id)
+			}
+			return ops
+		}
+		slot := func(id, slot int, value byte) commitmenttest.Op {
+			return commitmenttest.Op{Key: incrSlot(incrAddress(id), slot), Storage: []byte{value}}
+		}
+		remove := func(id int) commitmenttest.Op { return commitmenttest.Op{Key: incrAddress(id), Delete: true} }
+		for _, tc := range []struct {
+			name   string
+			rounds [][]commitmenttest.Op
+		}{
+			{"account_root_extension", [][]commitmenttest.Op{accounts(0, 3), accounts(1)}},
+			{"account_root_extension_pair", [][]commitmenttest.Op{accounts(0, 3), accounts(1, 2)}},
+			{"insert_under_shared_prefix", [][]commitmenttest.Op{accounts(5), accounts(8), accounts(15)}},
+			{"update_keeps_storage_root", [][]commitmenttest.Op{{account(5, 5), slot(5, 1, 0x11), slot(5, 2, 0x22)}, accounts(8), {account(5, 50)}}},
+			{"delete_under_shared_prefix", [][]commitmenttest.Op{accounts(5), accounts(8), accounts(15, 31), {remove(5)}}},
+			{"delete_collapses_branch_below_root", [][]commitmenttest.Op{accounts(5), accounts(8), {account(15, 15), remove(8)}}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				differential(t, commitmenttest.Case{ID: tc.name, Rounds: tc.rounds}, parityEngines[:2])
+			})
+		}
+	})
 }
 
 func FuzzParityRandomSequences(f *testing.F) {
@@ -257,26 +381,62 @@ func FuzzParityRandomSequences(f *testing.F) {
 	}
 	f.Fuzz(func(t *testing.T, seed uint64) {
 		rng := rand.New(rand.NewSource(int64(seed)))
-		state := make(map[string]parityUpdate)
+		state := make(commitmenttest.State)
 		for step := range 24 {
-			account := int(rng.Intn(8))
-			address := parityFuzzAddress(account)
-			if rng.Intn(4) == 0 {
-				delete(state, string(address))
-			} else {
-				state[string(address)] = parityUpdate{key: address, update: accountParityUpdate(step + account)}
+			account := rng.Intn(8)
+			op := commitmenttest.Op{Key: parityFuzzAddress(account), Delete: true}
+			if rng.Intn(4) != 0 {
+				op = accountOp(op.Key, commitmenttest.AccountSpec{Kind: "parity", Number: step + account})
 			}
-			parityRoots(t, nil, parityStateAccounts(state))
+			state.Apply([]commitmenttest.Op{op})
+			differential(t, commitmenttest.Case{ID: fmt.Sprintf("fuzz/%d/%d", seed, step), Rounds: [][]commitmenttest.Op{state.Ops()}}, parityEngines)
 		}
 	})
 }
 
-func parityStateAccounts(state map[string]parityUpdate) []parityUpdate {
-	entries := make([]parityUpdate, 0, len(state))
-	for _, entry := range state {
-		if len(entry.key) == length.Addr {
-			entries = append(entries, entry)
-		}
+func runWorlds(t *testing.T, spec commitmenttest.SequenceSpec, seeds int64) {
+	t.Helper()
+	rounds, drifts := 0, 0
+	for seed := int64(1); seed <= seeds; seed++ {
+		t.Run(fmt.Sprintf("a%d_s%d/seed%d", spec.Accounts, spec.Slots, seed), func(t *testing.T) {
+			c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), spec)
+			require.NoError(t, err)
+			c.Assertions.TolerateHPHDrift = true
+			roots, _, hphDrift := differential(t, c, parityEngines[:2])
+			require.Len(t, roots, spec.Rounds, "every configured round must be checked against v3")
+			rounds += len(roots)
+			drifts += len(hphDrift)
+		})
 	}
-	return entries
+	require.Equal(t, int(seeds)*spec.Rounds, rounds)
+	t.Logf("%s accounts=%d slots=%d: %d seeds, %d rounds checked against v3, %d HexPatriciaHashed drifts rebuilt", spec.Kind, spec.Accounts, spec.Slots, seeds, rounds, drifts)
+}
+
+func checkDifferentialRecords(t *testing.T, state commitmenttest.State, records map[string][]byte, label string) {
+	t.Helper()
+	want := map[string]map[string]struct{}{"": {}}
+	for key := range state {
+		hashed := string(commitment.KeyToHexNibbleHash([]byte(key)))
+		owner, leaf := "", hashed
+		if len(key) != length.Addr {
+			owner, leaf = hashed[:64], hashed[64:]
+		}
+		if want[owner] == nil {
+			want[owner] = make(map[string]struct{})
+		}
+		want[owner][leaf] = struct{}{}
+	}
+	ctx := newMockContext()
+	ctx.branches = records
+	for owner, leaves := range want {
+		plane, addrHash := planeAccount, [32]byte{}
+		if len(owner) != 0 {
+			plane, addrHash = planeStorage, hashAddressPath([]byte(owner))
+		}
+		got := make(map[string]struct{})
+		for path := range exactLeaves(t, ctx, plane, addrHash) {
+			got[path] = struct{}{}
+		}
+		require.Equal(t, leaves, got, "%s: record integrity of owner %x", label, owner)
+	}
 }

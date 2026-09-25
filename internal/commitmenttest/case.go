@@ -47,6 +47,7 @@ type Op struct {
 }
 
 type Assertions struct {
+	TolerateHPHDrift bool
 	StateReadEngines []string
 	ProcessNoError   bool
 	ZeroAccountReads bool

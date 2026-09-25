@@ -19,6 +19,7 @@ package runner
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/commitment"
@@ -35,7 +36,73 @@ func TestRunRounds(t *testing.T) {
 	require.NotEqual(t, got.Rounds[1].Root, got.Rounds[2].Root)
 }
 
-type failEngine struct{ Engine }
+func TestCompareRepairsHPHDrift(t *testing.T) {
+	c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
+	require.NoError(t, err)
+	for _, tolerant := range []bool{false, true} {
+		t.Run(fmt.Sprintf("tolerant=%t", tolerant), func(t *testing.T) {
+			c.Assertions.TolerateHPHDrift = tolerant
+			opened := 0
+			recorder := &failureRecorder{TB: t}
+			run := func() []observation {
+				return Compare(recorder, c, []RunSpec{{Name: "fresh", Mode: commitment.ModeUpdate, Fresh: true}, {Name: "hph", Mode: commitment.ModeUpdate}}, func(ctx context.Context, spec RunSpec) (commitment.Trie, error) {
+					engine, err := OpenHPH(ctx, spec)
+					if spec.Name == "hph" {
+						opened++
+						if opened == 1 {
+							return driftEngine{engine}, err
+						}
+					}
+					return engine, err
+				})
+			}
+			if !tolerant {
+				require.PanicsWithValue(t, "test failure", func() { run() })
+				require.Contains(t, recorder.failure, "round=0")
+				require.Contains(t, recorder.failure, "HPH drift")
+				require.Empty(t, recorder.logs)
+				require.Equal(t, 1, opened)
+				return
+			}
+			got := run()
+			require.Empty(t, recorder.failure)
+			require.Len(t, recorder.logs, 1)
+			require.Len(t, got[1].Rounds, len(c.Rounds))
+			require.Equal(t, []int{0}, got[1].HPHDrift)
+			require.Equal(t, 2, opened)
+			for i, round := range got[1].Rounds {
+				require.Equal(t, got[0].Rounds[i].Root, round.Root)
+			}
+		})
+	}
+}
+
+type failureRecorder struct {
+	testing.TB
+	failure string
+	logs    []string
+}
+
+func (r *failureRecorder) Errorf(format string, args ...any) {
+	r.failure += fmt.Sprintf(format, args...)
+}
+
+func (r *failureRecorder) FailNow() { panic("test failure") }
+
+func (r *failureRecorder) Logf(format string, args ...any) {
+	r.logs = append(r.logs, fmt.Sprintf(format, args...))
+}
+
+type driftEngine struct{ commitment.Trie }
+
+func (e driftEngine) Process(ctx context.Context, updates *commitment.Updates, prefix string, progress func(*commitment.CommitProgress), warmup commitment.WarmupConfig) ([]byte, error) {
+	root, err := e.Trie.Process(ctx, updates, prefix, progress, warmup)
+	root = append([]byte(nil), root...)
+	root[0] ^= 1
+	return root, err
+}
+
+type failEngine struct{ commitment.Trie }
 
 func (e failEngine) Process(context.Context, *commitment.Updates, string, func(*commitment.CommitProgress), commitment.WarmupConfig) ([]byte, error) {
 	return nil, errors.New("injected process failure")
@@ -45,7 +112,7 @@ func TestRunContinuesAfterFailure(t *testing.T) {
 	c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
 	require.NoError(t, err)
 	opened := 0
-	got := execute(t, c, RunSpec{Name: "hph", Mode: commitment.ModeUpdate}, func(ctx context.Context, spec RunSpec) (Engine, error) {
+	got := execute(t, c, RunSpec{Name: "hph", Mode: commitment.ModeUpdate}, func(ctx context.Context, spec RunSpec) (commitment.Trie, error) {
 		engine, err := OpenHPH(ctx, spec)
 		opened++
 		if opened == 1 {

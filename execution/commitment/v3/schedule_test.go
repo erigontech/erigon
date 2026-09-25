@@ -17,157 +17,143 @@
 package v3
 
 import (
-	"bytes"
 	"context"
-	"maps"
+	"fmt"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func TestScheduleWorkerBoundDuringTrieProcess(t *testing.T) {
-	first := commitment.KeyToHexNibbleHash(parityAddress(0))[0]
-	entries := make([]parityUpdate, 0, 16)
-	for i := 0; i < 256 && len(entries) < 16; i++ {
-		address := parityAddress(i)
-		if commitment.KeyToHexNibbleHash(address)[0] != first {
-			continue
+type barrierContext struct {
+	commitment.PatriciaContext
+	arrived bool
+	want    int32
+	seen    *atomic.Int32
+	release chan struct{}
+}
+
+func (c *barrierContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	if !c.arrived {
+		c.arrived = true
+		if c.seen.Add(1) == c.want {
+			close(c.release)
 		}
-		entries = append(entries, parityUpdate{key: address, update: accountParityUpdate(i)}, parityUpdate{
-			key:    append(append([]byte(nil), address...), paritySlot(i)...),
-			update: storageParityUpdate(i),
-		})
+		select {
+		case <-c.release:
+		case <-time.After(15 * time.Second):
+			return nil, 0, fmt.Errorf("only %d of %d storage workers ever claimed a task", c.seen.Load(), c.want)
+		}
 	}
-	require.Len(t, entries, 16)
-	ctx := newParityContext()
-	var factoryCalls atomic.Int32
-	trie := &Trie{scheduleWorkers: 2}
-	trie.ResetContext(ctx)
-	trie.SetTrieContextFactory(func(c context.Context) (commitment.PatriciaContext, func()) {
-		factoryCalls.Add(1)
-		return ctx.factory(c)
+	return c.PatriciaContext.Branch(key)
+}
+
+func TestScheduling(t *testing.T) {
+	storage := benchEntries("storage", 256)
+	t.Run("deferred_builds_worker_contexts", func(t *testing.T) {
+		_, _, calls := runV3(t, newShardedContext(), v3Config{deferred: true}, storage)
+		require.Greater(t, calls, int32(1), "deferred rounds must still build per-worker contexts for the storage phase")
 	})
-	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	require.Equal(t, int32(2), factoryCalls.Load())
-	trie.Release()
-}
 
-func TestRunStoragePhaseUsesConfiguredWorkers(t *testing.T) {
-	storage := make([]storageTask, 64)
-	for i := range storage {
-		storage[i].wipe = true
-		storage[i].addrHash[0] = byte(i)
+	t.Run("worker_bound_during_trie_process", func(t *testing.T) {
+		first := commitment.KeyToHexNibbleHash(parityAddress(0))[0]
+		entries := make([]parityUpdate, 0, 16)
+		for i := 0; i < 256 && len(entries) < 16; i++ {
+			address := parityAddress(i)
+			if commitment.KeyToHexNibbleHash(address)[0] != first {
+				continue
+			}
+			entries = append(entries, parityUpdate{key: address, update: accountParityUpdate(i)}, parityUpdate{key: slotKey(address, paritySlot(i)), update: storageParityUpdate(i)})
+		}
+		require.Len(t, entries, 16)
+		_, _, calls := runV3(t, newShardedContext(), v3Config{workers: 2}, entries)
+		require.Equal(t, int32(2), calls)
+	})
+
+	t.Run("storage_phase_spreads_tasks_across_workers", func(t *testing.T) {
+		const workers = 4
+		var seen atomic.Int32
+		release := make(chan struct{})
+		runV3(t, newShardedContext(), v3Config{workers: workers, wrap: func(ctx commitment.PatriciaContext) commitment.PatriciaContext {
+			return &barrierContext{PatriciaContext: ctx, want: workers, seen: &seen, release: release}
+		}}, benchEntries("storage", 2*workers))
+	})
+
+	t.Run("storage_phase_worker_contexts", func(t *testing.T) {
+		calls := func(tasks []storageTask, workers, fanOutMin int) int32 {
+			var calls atomic.Int32
+			factory := func(context.Context) (commitment.PatriciaContext, func()) {
+				calls.Add(1)
+				return newMockContext(), nil
+			}
+			require.NoError(t, runStoragePhase(context.Background(), newMockContext(), factory, tasks, make([][32]byte, len(tasks)), make([]deltaParts, len(tasks)), workers, fanOutMin))
+			return calls.Load()
+		}
+		wipes := make([]storageTask, 64)
+		for i := range wipes {
+			wipes[i].wipe = true
+			wipes[i].addrHash[0] = byte(i)
+		}
+		wide := func() []storageTask {
+			task := storageTask{addrHash: [32]byte{1}}
+			for i := range 64 {
+				path := make([]byte, 64)
+				path[0], path[1] = byte(i%16), byte(i/16)
+				task.entries = append(task.entries, storageEntry{path: path, value: []byte{byte(i + 1)}, op: storagePut})
+			}
+			return []storageTask{task}
+		}
+		require.Equal(t, int32(4), calls(wipes, 4, 0))
+		require.Equal(t, int32(1), calls(wide(), 2, 1<<20))
+		require.Greater(t, calls(wide(), 2, 16), int32(1))
+	})
+
+	t.Run("field_update_preserves_storage_root", func(t *testing.T) {
+		address := parityAddress(3)
+		ctx := newShardedContext()
+		storageRoot := func() []byte {
+			root, err := unfold(ctx, nil, planeAccount, nil)
+			require.NoError(t, err)
+			value, ok, _ := accountLeafAt(root, commitment.KeyToHexNibbleHash(address))
+			require.True(t, ok)
+			_, _, _, storageRoot, err := decodeAccountLeaf(value)
+			require.NoError(t, err)
+			return storageRoot
+		}
+		runV3(t, ctx, v3Config{workers: 1}, []parityUpdate{{key: address, update: accountParityUpdate(3)}, {key: slotKey(address, paritySlot(3)), update: storageParityUpdate(3)}})
+		before := storageRoot()
+		runV3(t, ctx, v3Config{workers: 1}, []parityUpdate{{key: address, update: &commitment.Update{Flags: commitment.BalanceUpdate, Balance: *uint256.NewInt(99)}}})
+		require.Equal(t, before, storageRoot())
+	})
+
+	whale := benchAddr(7)
+	whaleSeed := []parityUpdate{{key: whale, update: accountParityUpdate(7)}}
+	whaleNext := []parityUpdate{{key: whale, update: accountParityUpdate(8)}}
+	for i := range 5 * defaultStorageFanOutMin {
+		slot := slotKey(whale, benchSlot(i))
+		switch {
+		case i >= 4*defaultStorageFanOutMin:
+			whaleNext = append(whaleNext, parityUpdate{key: slot, update: storageParityUpdate(i)})
+		case i%3 == 0:
+			whaleNext = append(whaleNext, parityUpdate{key: slot, update: &commitment.Update{Flags: commitment.DeleteUpdate}})
+		case i%3 == 1:
+			whaleNext = append(whaleNext, parityUpdate{key: slot, update: storageParityUpdate(i + 1)})
+		}
+		if i < 4*defaultStorageFanOutMin {
+			whaleSeed = append(whaleSeed, parityUpdate{key: slot, update: storageParityUpdate(i)})
+		}
 	}
-	roots := make([][32]byte, len(storage))
-	var factoryCalls atomic.Int32
-	factory := func(context.Context) (commitment.PatriciaContext, func()) {
-		factoryCalls.Add(1)
-		return newMockContext(), nil
-	}
 
-	err := runStoragePhase(context.Background(), newMockContext(), factory, storage, roots, make([]deltaParts, len(storage)), 4, 0)
-	require.NoError(t, err)
-	require.Equal(t, int32(4), factoryCalls.Load())
-}
-
-func TestScheduleSerialAndParallelRootsAgreeForManyContracts(t *testing.T) {
-	entries := make([]parityUpdate, 0, 64)
+	contracts := make([]parityUpdate, 0, 64)
 	for i := range 32 {
-		address := parityAddress(i)
-		entries = append(entries,
-			parityUpdate{key: address, update: accountParityUpdate(i)},
-			parityUpdate{
-				key:    append(append([]byte(nil), address...), paritySlot(i)...),
-				update: storageParityUpdate(i),
-			},
-		)
+		contracts = append(contracts, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)}, parityUpdate{key: slotKey(parityAddress(i), paritySlot(i)), update: storageParityUpdate(i)})
 	}
 
-	serial := &Trie{scheduleWorkers: 1}
-	serialCtx := newParityContext()
-	serial.ResetContext(serialCtx)
-	serialRoot, err := serial.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	serial.Release()
-
-	parallel := &Trie{scheduleWorkers: 4}
-	parallelCtx := newParityContext()
-	parallel.ResetContext(parallelCtx)
-	parallel.SetTrieContextFactory(parallelCtx.factory)
-	parallelRoot, err := parallel.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, entries), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	parallel.Release()
-
-	require.Equal(t, serialRoot, parallelRoot)
-}
-
-func TestScheduledFieldUpdatePreservesStorageRoot(t *testing.T) {
-	address := parityAddress(3)
-	ctx := newParityContext()
-	trie := &Trie{scheduleWorkers: 1}
-	trie.ResetContext(ctx)
-	initial := []parityUpdate{
-		{key: address, update: accountParityUpdate(3)},
-		{key: append(append([]byte(nil), address...), paritySlot(3)...), update: storageParityUpdate(3)},
-	}
-	_, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, initial), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	path := commitment.KeyToHexNibbleHash(address)
-	_, _, _, before, err := decodeAccountLeaf(accountLeafFromParityContext(t, ctx, path))
-	require.NoError(t, err)
-
-	partial := &commitment.Update{Flags: commitment.BalanceUpdate, Balance: *uint256.NewInt(99)}
-	_, err = trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, []parityUpdate{{key: address, update: partial}}), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-	_, _, _, after, err := decodeAccountLeaf(accountLeafFromParityContext(t, ctx, path))
-	require.NoError(t, err)
-	require.Equal(t, before, after)
-}
-
-func storageTaskLengths(tasks []storageTask) []int {
-	lengths := make([]int, len(tasks))
-	for i := range tasks {
-		lengths[i] = len(tasks[i].entries)
-	}
-	return lengths
-}
-
-func accountLeafFromParityContext(t *testing.T, ctx *parityContext, path []byte) []byte {
-	t.Helper()
-	root, err := unfold(ctx, nil, planeAccount, nil)
-	require.NoError(t, err)
-	value, ok, _ := accountLeafAt(root, path)
-	require.True(t, ok)
-	return value
-}
-
-func TestRunStoragePhaseHonorsFanOutMin(t *testing.T) {
-	factoryCalls := func(fanOutMin int) int32 {
-		task := storageTask{addrHash: [32]byte{1}}
-		for i := range 64 {
-			path := make([]byte, 64)
-			path[0], path[1] = byte(i%16), byte(i/16)
-			task.entries = append(task.entries, storageEntry{path: path, value: []byte{byte(i + 1)}, op: storagePut})
-		}
-		var calls atomic.Int32
-		factory := func(context.Context) (commitment.PatriciaContext, func()) {
-			calls.Add(1)
-			return newMockContext(), nil
-		}
-		roots := make([][32]byte, 1)
-		require.NoError(t, runStoragePhase(context.Background(), newMockContext(), factory, []storageTask{task}, roots, make([]deltaParts, 1), 2, fanOutMin))
-		return calls.Load()
-	}
-	require.Equal(t, int32(1), factoryCalls(1<<20))
-	require.Greater(t, factoryCalls(16), int32(1))
-}
-
-func TestPipelinedAccountGroupsMatchSerial(t *testing.T) {
 	var sparse, dense []int
 	for i := 0; len(dense) < 1500 || len(sparse) < 2; i++ {
 		h := commitment.KeyToHexNibbleHash(parityAddress(i))
@@ -182,48 +168,39 @@ func TestPipelinedAccountGroupsMatchSerial(t *testing.T) {
 			sparse = append(sparse, i)
 		}
 	}
-	deleted := &commitment.Update{Flags: commitment.DeleteUpdate}
-	seed := make([]parityUpdate, 0, 2*len(dense))
+	groupSeed := make([]parityUpdate, 0, 2*len(dense))
 	for _, i := range append(append([]int(nil), dense...), sparse...) {
-		address := parityAddress(i)
-		seed = append(seed, parityUpdate{key: address, update: accountParityUpdate(i)})
+		groupSeed = append(groupSeed, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)})
 		if i%3 == 0 {
-			seed = append(seed, parityUpdate{key: append(bytes.Clone(address), paritySlot(i)...), update: storageParityUpdate(i)})
+			groupSeed = append(groupSeed, parityUpdate{key: slotKey(parityAddress(i), paritySlot(i)), update: storageParityUpdate(i)})
 		}
 	}
-	base := newParityContext()
-	seeder := &Trie{scheduleWorkers: 1}
-	seeder.ResetContext(base)
-	_, err := seeder.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, seed), "", nil, commitment.WarmupConfig{})
-	require.NoError(t, err)
-
-	next := []parityUpdate{{key: parityAddress(sparse[0]), update: deleted}, {key: parityAddress(dense[3]), update: deleted}}
+	deleted := &commitment.Update{Flags: commitment.DeleteUpdate}
+	groupNext := []parityUpdate{{key: parityAddress(sparse[0]), update: deleted}, {key: parityAddress(dense[3]), update: deleted}}
 	for k, i := range dense[10:400] {
-		address := parityAddress(i)
-		next = append(next, parityUpdate{key: address, update: accountParityUpdate(i + 1)})
+		groupNext = append(groupNext, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i + 1)})
 		if k%4 == 0 {
-			next = append(next, parityUpdate{key: append(bytes.Clone(address), paritySlot(i+7)...), update: storageParityUpdate(i + 2)})
+			groupNext = append(groupNext, parityUpdate{key: slotKey(parityAddress(i), paritySlot(i+7)), update: storageParityUpdate(i + 2)})
 		}
 	}
 	for i := 100000; i < 100200; i++ {
 		if commitment.KeyToHexNibbleHash(parityAddress(i))[0] != 0 {
-			next = append(next, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)})
+			groupNext = append(groupNext, parityUpdate{key: parityAddress(i), update: accountParityUpdate(i)})
 		}
 	}
-	run := func(workers int) ([]byte, map[string][]byte) {
-		ctx := newParityContext()
-		maps.Copy(ctx.branches, base.branches)
-		trie := &Trie{scheduleWorkers: workers}
-		trie.ResetContext(ctx)
-		if workers > 1 {
-			trie.SetTrieContextFactory(ctx.factory)
-		}
-		root, err := trie.Process(context.Background(), makeParityUpdates(t, commitment.ModeCollect, next), "", nil, commitment.WarmupConfig{})
-		require.NoError(t, err)
-		return root, ctx.branches
+
+	for _, tc := range []struct {
+		name   string
+		base   []parityUpdate
+		rounds [][]parityUpdate
+		a, b   v3Config
+	}{
+		{"deferred_matches_inline", nil, [][]parityUpdate{storage}, v3Config{}, v3Config{deferred: true}},
+		{"account_fold_parallel_matches_serial", nil, [][]parityUpdate{benchEntries("storage", 512)}, v3Config{workers: 1}, v3Config{workers: 8}},
+		{"storage_fan_out_matches_serial", nil, [][]parityUpdate{whaleSeed, whaleNext}, v3Config{workers: 1}, v3Config{workers: 8}},
+		{"many_contracts_match_serial", nil, [][]parityUpdate{contracts}, v3Config{workers: 1}, v3Config{workers: 4}},
+		{"pipelined_account_groups_match_serial", groupSeed, [][]parityUpdate{groupNext}, v3Config{workers: 1}, v3Config{workers: 4}},
+	} {
+		t.Run(tc.name, func(t *testing.T) { requireSameRuns(t, tc.base, tc.a, tc.b, tc.rounds...) })
 	}
-	serialRoot, serialBranches := run(1)
-	parallelRoot, parallelBranches := run(4)
-	require.Equal(t, serialRoot, parallelRoot)
-	require.Equal(t, serialBranches, parallelBranches)
 }

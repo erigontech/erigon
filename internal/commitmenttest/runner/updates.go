@@ -18,7 +18,6 @@ package runner
 
 import (
 	"fmt"
-	"testing"
 
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/internal/commitmenttest"
@@ -55,20 +54,6 @@ func Update(op commitmenttest.Op) *commitment.Update {
 		copy(u.Storage[:], op.Storage)
 	}
 	return u
-}
-
-func updatesFor(tb testing.TB, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {
-	tb.Helper()
-	updates := commitment.NewUpdates(mode, tb.TempDir(), commitment.KeyToHexNibbleHash)
-	tb.Cleanup(updates.Close)
-	for _, op := range ops {
-		if op.Read {
-			updates.TouchPlainKey(string(op.Key), nil, func(*commitment.KeyUpdate, []byte) {})
-			continue
-		}
-		updates.TouchPlainKeyDirect(string(op.Key), Update(op))
-	}
-	return updates
 }
 
 func Feed(ops []commitmenttest.Op) (*commitment.Feed, error) {

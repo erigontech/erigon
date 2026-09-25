@@ -28,18 +28,17 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-type (
-	Engine   = commitment.Trie
-	openFunc func(context.Context, RunSpec) (Engine, error)
-)
+type openFunc func(context.Context, RunSpec) (commitment.Trie, error)
 
 type RunSpec struct {
-	Name    string
-	Mode    commitment.Mode
-	Workers int
-	Reload  bool
-	Context ContextSpec
-	Memory  *Memory
+	Name     string
+	Mode     commitment.Mode
+	Workers  int
+	Reload   bool
+	Fresh    bool
+	Context  ContextSpec
+	Memory   *Memory
+	expected []roundResult
 }
 
 type roundResult struct {
@@ -55,11 +54,12 @@ type roundResult struct {
 }
 
 type observation struct {
-	Name   string
-	Rounds []roundResult
+	Name     string
+	Rounds   []roundResult
+	HPHDrift []int
 }
 
-func OpenHPH(ctx context.Context, spec RunSpec) (Engine, error) {
+func OpenHPH(ctx context.Context, spec RunSpec) (commitment.Trie, error) {
 	if spec.Mode == commitment.ModeParallel {
 		return commitment.NewParallelPatriciaHashed(spec.Memory.Open, 20, commitment.DefaultTrieConfig()), nil
 	}
@@ -74,7 +74,8 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) 
 	tb.Helper()
 	got := observation{Name: spec.Name, Rounds: make([]roundResult, 0, len(c.Rounds))}
 	state := make(commitmenttest.State)
-	var engine Engine
+	dir := tb.TempDir()
+	var engine commitment.Trie
 	defer func() {
 		if engine != nil {
 			engine.Release()
@@ -82,20 +83,43 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) 
 	}()
 	for i, ops := range c.Rounds {
 		state.Apply(ops)
+		label := fmt.Sprintf("case=%s seed=%+v engine=%s round=%d", c.ID, c.Seed, spec.Name, i)
+		if spec.Fresh && engine != nil {
+			engine.Release()
+			engine = nil
+		}
 		round := roundResult{Rebuilt: engine == nil && i != 0}
 		if engine == nil {
 			spec.Memory = NewMemory(spec.Context)
 			engine, round.Err = open(context.Background(), spec)
-			if round.Rebuilt {
+			if round.Rebuilt || spec.Fresh {
 				ops = state.Ops()
 			}
 		}
 		spec.Memory.Apply(ops)
 		if round.Err == nil {
-			updates := updatesFor(tb, spec.Mode, ops)
-			round.Root, round.Err = engine.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
-			updates.Close()
+			round.Root, round.Err = process(engine, spec.Mode, dir, ops)
 			round.Root = bytes.Clone(round.Root)
+			if round.Err == nil && spec.Mode == commitment.ModeCollect {
+				root, err := engine.RootHash()
+				require.NoError(tb, err, label)
+				require.Equal(tb, round.Root, root, label)
+			}
+		}
+		if round.Err == nil && spec.expected != nil && !bytes.Equal(round.Root, spec.expected[i].Root) {
+			if !c.Assertions.TolerateHPHDrift {
+				require.Equal(tb, spec.expected[i].Root, round.Root, "%s: HPH drift: hph %x expected %x", label, round.Root, spec.expected[i].Root)
+			}
+			tb.Logf("%s: HexPatriciaHashed drifted from ground truth (hph %x); v3 matched a fresh rebuild; HexPatriciaHashed rebuilt from state", label, round.Root)
+			got.HPHDrift = append(got.HPHDrift, i)
+			engine.Release()
+			spec.Memory = NewMemory(spec.Context)
+			engine, round.Err = open(context.Background(), spec)
+			require.NoError(tb, round.Err, label)
+			spec.Memory.Apply(state.Ops())
+			round.Root, round.Err = process(engine, spec.Mode, dir, state.Ops())
+			require.NoError(tb, round.Err, label)
+			require.Equal(tb, spec.expected[i].Root, round.Root, "%s: rebuilt HPH disagrees", label)
 		}
 		if round.Err == nil && spec.Reload {
 			engine = reload(tb, engine, spec, open, &round, uint64(i+1))
@@ -110,7 +134,7 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) 
 	return got
 }
 
-func reload(tb testing.TB, engine Engine, spec RunSpec, open openFunc, round *roundResult, number uint64) Engine {
+func reload(tb testing.TB, engine commitment.Trie, spec RunSpec, open openFunc, round *roundResult, number uint64) commitment.Trie {
 	tb.Helper()
 	codec, ok := engine.(commitment.TrieStateCodec)
 	if !ok {
@@ -131,9 +155,7 @@ func reload(tb testing.TB, engine Engine, spec RunSpec, open openFunc, round *ro
 	if round.Err != nil {
 		return engine
 	}
-	updates := updatesFor(tb, spec.Mode, nil)
-	root, err := engine.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
-	updates.Close()
+	root, err := process(engine, spec.Mode, tb.TempDir(), nil)
 	round.Err = err
 	if err == nil && (!bytes.Equal(root, round.Root) || round.BlockNum != number || round.TxNum != number) {
 		round.Err = fmt.Errorf("restored root or metadata differs")
@@ -166,18 +188,39 @@ func Run(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) obse
 	return got
 }
 
-func Compare(tb testing.TB, c commitmenttest.Case, runs []RunSpec, open openFunc) {
+func Compare(tb testing.TB, c commitmenttest.Case, runs []RunSpec, open openFunc) []observation {
 	tb.Helper()
 	observations := make([]observation, 0, len(runs))
-	for _, spec := range runs {
-		observations = append(observations, execute(tb, c, spec, open))
+	verifiedFresh := false
+	for i, spec := range runs {
+		if verifiedFresh && spec.Mode == commitment.ModeUpdate && !spec.Fresh {
+			spec.expected = observations[0].Rounds
+		}
+		got := execute(tb, c, spec, open)
+		check(tb, c, got)
+		if i != 0 {
+			for round := range c.Rounds {
+				if spec.Fresh && !bytes.Equal(observations[0].Rounds[round].Root, got.Rounds[round].Root) {
+					tb.Fatalf("case=%s seed=%+v round=%d: v3 root differs from a trie rebuilt from the same state\n v3 %x\n fresh %x\nhistory: %+v", c.ID, c.Seed, round, observations[0].Rounds[round].Root, got.Rounds[round].Root, c.Rounds[:round+1])
+				}
+				require.Equal(tb, observations[0].Rounds[round].Root, got.Rounds[round].Root, "case=%s seed=%+v round=%d %s/%s", c.ID, c.Seed, round, runs[0].Name, spec.Name)
+			}
+		}
+		verifiedFresh = verifiedFresh || spec.Fresh
+		observations = append(observations, got)
 	}
-	for _, observation := range observations {
-		check(tb, c, observation)
-	}
-	for i := 1; i < len(observations); i++ {
-		for round := range c.Rounds {
-			require.True(tb, bytes.Equal(observations[0].Rounds[round].Root, observations[i].Rounds[round].Root), "case=%s seed=%+v round=%d %s/%s", c.ID, c.Seed, round, runs[0].Name, runs[i].Name)
+	return observations
+}
+
+func process(engine commitment.Trie, mode commitment.Mode, dir string, ops []commitmenttest.Op) ([]byte, error) {
+	updates := commitment.NewUpdates(mode, dir, commitment.KeyToHexNibbleHash)
+	defer updates.Close()
+	for _, op := range ops {
+		if op.Read {
+			updates.TouchPlainKey(string(op.Key), nil, func(*commitment.KeyUpdate, []byte) {})
+		} else {
+			updates.TouchPlainKeyDirect(string(op.Key), Update(op))
 		}
 	}
+	return engine.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
 }
