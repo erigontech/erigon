@@ -17,6 +17,15 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
+	if err := x.writeJSONFields(s); err != nil {
+		return err
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+// writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
+func (x *RPCTransaction) writeJSONFields(s *jsonstream.StackStream) error {
 	if x.BlockHash == nil {
 		s.Field("blockHash").WriteNil()
 	} else {
@@ -99,6 +108,5 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	} else {
 		ethjson.Quantity256(s, "s", (*uint256.Int)(x.S))
 	}
-	s.WriteObjectEnd()
 	return nil
 }
