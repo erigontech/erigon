@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -285,12 +286,9 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 		}
 	}
 
-	switch req.Mode {
-	case TraceFilterModeIntersection:
+	if req.Mode != TraceFilterModeUnion && len(fromAddresses) > 0 && len(toAddresses) > 0 {
 		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
-	case TraceFilterModeUnion:
-		fallthrough
-	default:
+	} else {
 		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
 	}
 
@@ -585,6 +583,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if isPos {
 				continue
 			}
+			// the genesis block is not mined, so it pays no rewards
+			if blockNum == 0 {
+				continue
+			}
 
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
@@ -643,7 +645,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err != nil {
 			return err
 		}
-		isIntersectionMode := req.Mode == TraceFilterModeIntersection
+		isIntersectionMode := req.Mode != TraceFilterModeUnion
 		for _, pt := range traceResult.Trace {
 			if includeAll || filterTrace(pt, fromAddresses, toAddresses, isIntersectionMode) {
 				pt.BlockHash = &lastBlockHash
@@ -688,7 +690,7 @@ func filterTrace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toA
 	}
 
 	if isIntersectionMode {
-		return f && t
+		return (len(fromAddresses) == 0 || f) && (len(toAddresses) == 0 || t)
 	} else {
 		return f || t
 	}
@@ -1085,7 +1087,7 @@ type TraceFilterRequest struct {
 	ToBlock     *rpc.BlockNumberOrHash `json:"toBlock"`
 	FromAddress []*common.Address      `json:"fromAddress"`
 	ToAddress   []*common.Address      `json:"toAddress"`
-	Mode        TraceFilterMode        `json:"mode"`
+	Mode        TraceFilterMode        `json:"mode,omitempty"`
 	After       *uint64                `json:"after"`
 	Count       *uint64                `json:"count"`
 }
@@ -1093,9 +1095,22 @@ type TraceFilterRequest struct {
 type TraceFilterMode string
 
 const (
-	// TraceFilterModeUnion is default mode for TraceFilter.
-	// Unions results referred to addresses from FromAddress or ToAddress
+	// TraceFilterModeUnion matches either populated address list.
 	TraceFilterModeUnion = "union"
-	// TraceFilterModeIntersection retrieves results referred to addresses provided both in FromAddress and ToAddress
+	// TraceFilterModeIntersection is the default and matches every populated address list.
 	TraceFilterModeIntersection = "intersection"
 )
+
+func (m *TraceFilterMode) UnmarshalJSON(data []byte) error {
+	var mode string
+	if err := json.Unmarshal(data, &mode); err != nil {
+		return err
+	}
+	switch mode {
+	case TraceFilterModeUnion, TraceFilterModeIntersection:
+		*m = TraceFilterMode(mode)
+		return nil
+	default:
+		return fmt.Errorf("invalid trace filter mode %q: want union or intersection", mode)
+	}
+}

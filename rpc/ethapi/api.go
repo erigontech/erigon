@@ -383,40 +383,42 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 	return logger.FormatLogs(logs)
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCHeader -out gen_rpcheader_json.go
+
 // RPCHeader is the RPC representation of a block header. Quantities, byte slices
 // and optional hashes alias the header they were built from, so the caller must
 // pass a header nobody will mutate and must not write through the fields.
 // Hash, Nonce, Miner and LogsBloom are pointers because some namespaces null them.
 type RPCHeader struct {
-	Number           *hexutil.U256     `json:"number"`
-	Hash             *common.Hash      `json:"hash"`
-	ParentHash       common.Hash       `json:"parentHash"`
-	Nonce            *types.BlockNonce `json:"nonce"`
-	MixHash          common.Hash       `json:"mixHash"`
-	Sha3Uncles       common.Hash       `json:"sha3Uncles"`
-	LogsBloom        *types.Bloom      `json:"logsBloom"`
-	StateRoot        common.Hash       `json:"stateRoot"`
-	Miner            *common.Address   `json:"miner"`
-	Difficulty       *hexutil.U256     `json:"difficulty"`
-	ExtraData        hexutil.Bytes     `json:"extraData"`
-	GasLimit         hexutil.Uint64    `json:"gasLimit"`
-	GasUsed          hexutil.Uint64    `json:"gasUsed"`
-	Timestamp        hexutil.Uint64    `json:"timestamp"`
-	TransactionsRoot common.Hash       `json:"transactionsRoot"`
-	ReceiptsRoot     common.Hash       `json:"receiptsRoot"`
+	Number           *hexutil.U256     `json:"number" ethjson:"quantity"`
+	Hash             *common.Hash      `json:"hash" ethjson:"data"`
+	ParentHash       common.Hash       `json:"parentHash" ethjson:"data"`
+	Nonce            *types.BlockNonce `json:"nonce" ethjson:"data"`
+	MixHash          common.Hash       `json:"mixHash" ethjson:"data"`
+	Sha3Uncles       common.Hash       `json:"sha3Uncles" ethjson:"data"`
+	LogsBloom        *types.Bloom      `json:"logsBloom" ethjson:"data"`
+	StateRoot        common.Hash       `json:"stateRoot" ethjson:"data"`
+	Miner            *common.Address   `json:"miner" ethjson:"data"`
+	Difficulty       *hexutil.U256     `json:"difficulty" ethjson:"quantity"`
+	ExtraData        hexutil.Bytes     `json:"extraData" ethjson:"data"`
+	GasLimit         hexutil.Uint64    `json:"gasLimit" ethjson:"quantity"`
+	GasUsed          hexutil.Uint64    `json:"gasUsed" ethjson:"quantity"`
+	Timestamp        hexutil.Uint64    `json:"timestamp" ethjson:"quantity"`
+	TransactionsRoot common.Hash       `json:"transactionsRoot" ethjson:"data"`
+	ReceiptsRoot     common.Hash       `json:"receiptsRoot" ethjson:"data"`
 
-	BaseFeePerGas         *hexutil.U256   `json:"baseFeePerGas,omitempty"`
-	WithdrawalsRoot       *common.Hash    `json:"withdrawalsRoot,omitempty"`
-	BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed,omitempty"`
-	ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas,omitempty"`
-	ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot,omitempty"`
-	RequestsHash          *common.Hash    `json:"requestsHash,omitempty"`
-	BlockAccessListHash   *common.Hash    `json:"blockAccessListHash,omitempty"`
-	SlotNumber            *hexutil.Uint64 `json:"slotNumber,omitempty"`
+	BaseFeePerGas         *hexutil.U256   `json:"baseFeePerGas,omitempty" ethjson:"quantity"`
+	WithdrawalsRoot       *common.Hash    `json:"withdrawalsRoot,omitempty" ethjson:"data"`
+	BlobGasUsed           *hexutil.Uint64 `json:"blobGasUsed,omitempty" ethjson:"quantity"`
+	ExcessBlobGas         *hexutil.Uint64 `json:"excessBlobGas,omitempty" ethjson:"quantity"`
+	ParentBeaconBlockRoot *common.Hash    `json:"parentBeaconBlockRoot,omitempty" ethjson:"data"`
+	RequestsHash          *common.Hash    `json:"requestsHash,omitempty" ethjson:"data"`
+	BlockAccessListHash   *common.Hash    `json:"blockAccessListHash,omitempty" ethjson:"data"`
+	SlotNumber            *hexutil.Uint64 `json:"slotNumber,omitempty" ethjson:"quantity"`
 
 	// For Gnosis only
-	AuraSeal *hexutil.Bytes  `json:"auraSeal,omitempty"`
-	AuraStep *hexutil.Uint64 `json:"auraStep,omitempty"`
+	AuraSeal *hexutil.Bytes  `json:"auraSeal,omitempty" ethjson:"data"`
+	AuraStep *hexutil.Uint64 `json:"auraStep,omitempty" ethjson:"quantity"`
 }
 
 // RPCBlock is the RPC representation of a block. TransactionCount, TotalDifficulty
@@ -436,12 +438,12 @@ type RPCBlock struct {
 
 // CallResult represents the result of a single call in the simulation.
 type CallResult struct {
-	ReturnData string          `json:"returnData"`
-	Logs       []*types.RPCLog `json:"logs"`
-	GasUsed    hexutil.Uint64  `json:"gasUsed"`
-	MaxUsedGas hexutil.Uint64  `json:"maxUsedGas"`
-	Status     hexutil.Uint64  `json:"status"`
-	Error      any             `json:"error,omitempty"`
+	ReturnData string         `json:"returnData"`
+	Logs       types.Logs     `json:"logs"`
+	GasUsed    hexutil.Uint64 `json:"gasUsed"`
+	MaxUsedGas hexutil.Uint64 `json:"maxUsedGas"`
+	Status     hexutil.Uint64 `json:"status"`
+	Error      any            `json:"error,omitempty"`
 }
 
 // MarkPending nils the fields a pending block does not have yet.
@@ -513,8 +515,13 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 	if txs := block.Transactions(); inclTx && len(txs) > 0 {
 		if fullTx {
 			full := make([]*RPCTransaction, len(txs))
+			hash, number, time := block.Hash(), hexutil.U256(*uint256.NewInt(block.NumberU64())), hexutil.Uint64(block.Time())
+			indexes := make([]hexutil.Uint64, len(txs))
+			baseFee := block.BaseFee()
 			for i, txn := range txs {
-				full[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
+				indexes[i] = hexutil.Uint64(i)
+				full[i] = newRPCTransaction(txn, baseFee)
+				full[i].BlockHash, full[i].BlockNumber, full[i].BlockTimestamp, full[i].TransactionIndex = &hash, &number, &time, &indexes[i]
 			}
 			transactions = full
 		} else {
@@ -592,43 +599,52 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	return json.Marshal(plain{Raw: r.Raw, Tx: stripped})
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCTransaction -out gen_rpctransaction_json.go
+
 // RPCTransaction represents a transaction that will serialize to the RPC representation of a transaction.
 // Numeric fields may alias the source transaction; they are read-only after construction.
 type RPCTransaction struct {
-	BlockHash            *common.Hash               `json:"blockHash"`
-	BlockNumber          *hexutil.U256              `json:"blockNumber"`
-	BlockTimestamp       *hexutil.Uint64            `json:"blockTimestamp"`
-	From                 common.Address             `json:"from"`
-	Gas                  hexutil.Uint64             `json:"gas"`
-	GasPrice             *hexutil.U256              `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.U256              `json:"maxPriorityFeePerGas,omitempty"`
-	MaxFeePerGas         *hexutil.U256              `json:"maxFeePerGas,omitempty"`
-	Hash                 common.Hash                `json:"hash"`
-	Input                hexutil.Bytes              `json:"input"`
-	Nonce                hexutil.Uint64             `json:"nonce"`
-	To                   *common.Address            `json:"to"`
-	TransactionIndex     *hexutil.Uint64            `json:"transactionIndex"`
-	Value                *hexutil.U256              `json:"value"`
-	Type                 hexutil.Uint64             `json:"type"`
-	Accesses             *types.AccessList          `json:"accessList,omitempty"`
-	ChainID              *hexutil.U256              `json:"chainId,omitempty"`
-	MaxFeePerBlobGas     *hexutil.U256              `json:"maxFeePerBlobGas,omitempty"`
-	BlobVersionedHashes  []common.Hash              `json:"blobVersionedHashes,omitempty"`
-	Authorizations       *[]types.JsonAuthorization `json:"authorizationList,omitempty"`
-	V                    *hexutil.U256              `json:"v"`
-	YParity              *hexutil.U256              `json:"yParity,omitempty"`
-	R                    *hexutil.U256              `json:"r"`
-	S                    *hexutil.U256              `json:"s"`
+	BlockHash            *common.Hash            `json:"blockHash" ethjson:"data"`
+	BlockNumber          *hexutil.U256           `json:"blockNumber" ethjson:"quantity"`
+	BlockTimestamp       *hexutil.Uint64         `json:"blockTimestamp" ethjson:"quantity"`
+	From                 common.Address          `json:"from" ethjson:"data"`
+	Gas                  hexutil.Uint64          `json:"gas" ethjson:"quantity"`
+	GasPrice             hexutil.U256            `json:"gasPrice" ethjson:"quantity"`
+	MaxPriorityFeePerGas *hexutil.U256           `json:"maxPriorityFeePerGas,omitempty" ethjson:"quantity"`
+	MaxFeePerGas         *hexutil.U256           `json:"maxFeePerGas,omitempty" ethjson:"quantity"`
+	Hash                 common.Hash             `json:"hash" ethjson:"data"`
+	Input                hexutil.Bytes           `json:"input" ethjson:"data"`
+	Nonce                hexutil.Uint64          `json:"nonce" ethjson:"quantity"`
+	To                   *common.Address         `json:"to" ethjson:"data"`
+	TransactionIndex     *hexutil.Uint64         `json:"transactionIndex" ethjson:"quantity"`
+	Value                *hexutil.U256           `json:"value" ethjson:"quantity"`
+	Type                 hexutil.Uint64          `json:"type" ethjson:"quantity"`
+	Accesses             types.AccessList        `json:"accessList,omitzero" ethjson:"objects"`
+	ChainID              *hexutil.U256           `json:"chainId,omitempty" ethjson:"quantity"`
+	MaxFeePerBlobGas     *hexutil.U256           `json:"maxFeePerBlobGas,omitempty" ethjson:"quantity"`
+	BlobVersionedHashes  []common.Hash           `json:"blobVersionedHashes,omitempty" ethjson:"datalist"`
+	Authorizations       types.AuthorizationList `json:"authorizationList,omitzero" ethjson:"objects"`
+	V                    *hexutil.U256           `json:"v" ethjson:"quantity"`
+	YParity              *hexutil.U256           `json:"yParity,omitempty" ethjson:"quantity"`
+	R                    *hexutil.U256           `json:"r" ethjson:"quantity"`
+	S                    *hexutil.U256           `json:"s" ethjson:"quantity"`
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
-	// Determine the signer. For replay-protected transactions, use the most permissive
-	// signer, because we assume that signers are backwards-compatible with old
-	// transactions. For non-protected transactions, the homestead signer is used
-	// because the return value of ChainId is zero for those transactions.
-	chainId := new(uint256.Int)
+	result := newRPCTransaction(txn, baseFee)
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
+		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
+func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransaction {
+	var chainId *uint256.Int
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(txn.Type()),
 		Gas:   hexutil.Uint64(txn.GetGasLimit()),
@@ -663,16 +679,18 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 				result.ChainID = (*hexutil.U256)(chainId)
 			}
 		}
-		result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
+		result.GasPrice = hexutil.U256(*txn.GetTipCap())
 	} else {
 		chainId = txn.GetChainID()
 		result.ChainID = (*hexutil.U256)(chainId)
 		result.YParity = (*hexutil.U256)(v)
-		acl := txn.GetAccessList()
-		result.Accesses = &acl
+		result.Accesses = txn.GetAccessList()
+		if result.Accesses == nil { // nil leaves the key out, and a typed transaction writes []
+			result.Accesses = types.AccessList{}
+		}
 
 		if txn.Type() == types.AccessListTxType {
-			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
+			result.GasPrice = hexutil.U256(*txn.GetTipCap())
 		} else {
 			result.GasPrice = computeGasPrice(txn, baseFee)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
@@ -686,43 +704,39 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		} else if txn.Type() == types.SetCodeTxType {
 			setCodeTx := txn.(*types.SetCodeTransaction)
 			auths := setCodeTx.GetAuthorizations()
-			ats := make([]types.JsonAuthorization, len(auths))
+			ats := make(types.AuthorizationList, len(auths))
 			for i := range auths {
 				ats[i] = types.JsonAuthorization{}.FromAuthorization(auths[i])
 			}
-			result.Authorizations = &ats
+			result.Authorizations = ats
 		}
 	}
 
-	signer := types.LatestSignerForChainID(chainId)
-	from, err := txn.Sender(*signer)
-	if err != nil {
-		log.Warn("sender recovery", "err", err)
-	} else {
+	if from, ok := txn.GetSender(); ok && !from.IsZero() {
 		result.From = from.Value()
-	}
-
-	if blockHash != (common.Hash{}) {
-		result.BlockHash = &blockHash
-		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
-		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
-		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	} else {
+		// For replay-protected transactions, use the most permissive signer, because we assume
+		// that signers are backwards-compatible with old transactions. For non-protected
+		// transactions, the homestead signer is used because their ChainId is zero.
+		if chainId == nil {
+			chainId = new(uint256.Int)
+		}
+		from, err := txn.Sender(*types.LatestSignerForChainID(chainId))
+		if err != nil {
+			log.Warn("sender recovery", "err", err)
+		} else {
+			result.From = from.Value()
+		}
 	}
 	return result
 }
 
 // computeGasPrice reports the effective gas price of a transaction already in a
 // block, and the fee cap of a pending one, as the execution-apis spec requires.
-func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) *hexutil.U256 {
+func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) hexutil.U256 {
 	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
-		return (*hexutil.U256)(&price)
+		return hexutil.U256(u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap()))
 	}
-	return (*hexutil.U256)(txn.GetFeeCap())
-}
-
-// newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return NewRPCTransaction(txn, b.Hash(), b.Time(), b.NumberU64(), index, b.BaseFee())
+	return hexutil.U256(*txn.GetFeeCap())
 }
