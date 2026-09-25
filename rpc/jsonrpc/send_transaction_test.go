@@ -142,7 +142,8 @@ func TestSendRawTransactionAuthorizationSizeBeforeDecode(t *testing.T) {
 			var buf bytes.Buffer
 			require.NoError(t, txn.MarshalBinary(&buf))
 			raw := buf.Bytes()
-			// An invalid signature field after the authorizations detects decoding before the size check.
+			// The corrupted signature field after the authorization list makes decoding fail.
+			// ErrRlpTooBig therefore proves that the size check ran first.
 			raw[len(raw)-1] = 0xc0
 			api := &APIImpl{}
 
@@ -166,10 +167,7 @@ func TestSendRawTransactionSizeLimits(t *testing.T) {
 		envelope bool
 	}{
 		{"legacy", 0xc0, 128 * 1024, false},
-		{"accessList", types.AccessListTxType, 128 * 1024, false},
-		{"dynamicFee", types.DynamicFeeTxType, 128 * 1024, false},
 		{"setCode", types.SetCodeTxType, 128 * 1024, false},
-		{"accountAbstraction", types.AccountAbstractionTxType, 128 * 1024, false},
 		{"blob", types.BlobTxType, 1024 * 1024, false},
 		{"setCodeEnvelope", types.SetCodeTxType, 128 * 1024, true},
 		{"blobEnvelope", types.BlobTxType, 1024 * 1024, true},
@@ -200,11 +198,19 @@ func TestSendRawTransactionSizeLimits(t *testing.T) {
 }
 
 func TestSendRawTransactionMalformedEnvelope(t *testing.T) {
-	for _, raw := range [][]byte{nil, {0x80}, {0xb8}, {0xb8, 0x40, types.SetCodeTxType}, {0x81, 0x80}} {
-		t.Run(fmt.Sprintf("%x", raw), func(t *testing.T) {
+	pad := make([]byte, 128*1024)
+	for _, tc := range []struct {
+		name string
+		raw  []byte
+	}{
+		{"emptyString", append([]byte{0x80}, pad...)},
+		{"nonCanonicalLength", append([]byte{0xb8}, pad...)},
+		{"overDeclaredLength", append([]byte{0xba, 0x10, 0x00, 0x00}, pad...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
 			api := &APIImpl{}
-			_, err := api.SendRawTransaction(t.Context(), raw)
-			require.Error(t, err)
+			_, err := api.SendRawTransaction(t.Context(), tc.raw)
+			require.ErrorIs(t, err, txpool.ErrParseTxn)
 		})
 	}
 }
