@@ -97,6 +97,22 @@ func TestMarshalSubscribeReceiptKeepsZeroSender(t *testing.T) {
 	assert.Equal(t, common.Address{}, *receipt.From)
 }
 
+// A transfer to the zero address must not look like a contract creation: only an
+// unset "to" marshals to null.
+func TestMarshalSubscribeReceiptKeepsZeroRecipient(t *testing.T) {
+	reply := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+		TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+		To:              gointerfaces.ConvertAddressToH160(common.Address{}),
+	}
+	receipt := MarshalSubscribeReceipt(reply)
+	require.NotNil(t, receipt.To)
+	assert.Equal(t, common.Address{}, *receipt.To)
+
+	reply.To = nil
+	assert.Nil(t, MarshalSubscribeReceipt(reply).To)
+}
+
 // The fast marshaller has to produce the bytes encoding/json produced, field order and
 // omitempty included, for both log shapes MarshalReceipt can put in Logs.
 func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
