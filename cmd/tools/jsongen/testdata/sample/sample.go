@@ -53,6 +53,7 @@ type Sample struct {
 	Hash       common.Hash          `json:"hash" ethjson:"data"`
 	Bytes      []byte               `json:"bytes" ethjson:"data"`
 	OptBytes   hexutil.Bytes        `json:"optBytes,omitempty" ethjson:"data"`
+	PtrBytes   *hexutil.Bytes       `json:"ptrBytes" ethjson:"data"`
 	PtrHash    *common.Hash         `json:"ptrHash" ethjson:"data"`
 	Topics     []common.Hash        `json:"topics" ethjson:"datalist"`
 	OptTopics  []common.Hash        `json:"optTopics,omitempty" ethjson:"datalist"`
@@ -73,6 +74,7 @@ type Sample struct {
 	OptNested  *Inner               `json:"optNested,omitempty" ethjson:"objects"`
 	Inners     Inners               `json:"inners" ethjson:"objects"`
 	OptInners  Inners               `json:"optInners,omitempty" ethjson:"objects"`
+	ZeroInners Inners               `json:"zeroInners,omitzero" ethjson:"objects"`
 	Renamed    uint64               `json:",omitempty" ethjson:"quantity"`
 	Skipped    string               `json:"-"`
 	unexported int                  //nolint:unused

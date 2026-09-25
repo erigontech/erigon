@@ -35,6 +35,11 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 	if len(x.OptBytes) > 0 {
 		ethjson.Data(s, "optBytes", x.OptBytes[:])
 	}
+	if x.PtrBytes == nil {
+		s.Field("ptrBytes").WriteNil()
+	} else {
+		ethjson.Data(s, "ptrBytes", (*x.PtrBytes)[:])
+	}
 	if x.PtrHash == nil {
 		s.Field("ptrHash").WriteNil()
 	} else {
@@ -106,6 +111,12 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 	if len(x.OptInners) > 0 {
 		s.Field("optInners")
 		if err := x.OptInners.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	if x.ZeroInners != nil {
+		s.Field("zeroInners")
+		if err := x.ZeroInners.MarshalFastJSONTo(s); err != nil {
 			return err
 		}
 	}
