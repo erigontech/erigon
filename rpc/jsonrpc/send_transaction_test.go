@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -29,11 +30,13 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
 
@@ -116,6 +119,92 @@ func TestSendRawTransactionUnprotected(t *testing.T) {
 		jsonTx, err := api.GetTransactionByHash(ctx, txHash)
 		require.NoError(err)
 		require.Equal(expectedTxValue, jsonTx.Value.Uint64())
+	}
+}
+
+func TestSendRawTransactionAuthorizationSizeBeforeDecode(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		authorizations int
+		wantErr        error
+	}{
+		{"small", 1, rlp.ErrExpectedString},
+		{"oversized", 5000, txpool.ErrRlpTooBig},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			txn := &types.SetCodeTransaction{
+				DynamicFeeTransaction: types.DynamicFeeTransaction{
+					CommonTx: types.CommonTx{To: &common.Address{1}},
+				},
+				Authorizations: make([]types.Authorization, tc.authorizations),
+			}
+			var buf bytes.Buffer
+			require.NoError(t, txn.MarshalBinary(&buf))
+			raw := buf.Bytes()
+			// An invalid signature field after the authorizations detects decoding before the size check.
+			raw[len(raw)-1] = 0xc0
+			api := &APIImpl{}
+
+			t.Run("async", func(t *testing.T) {
+				_, err := api.SendRawTransaction(t.Context(), raw)
+				require.ErrorIs(t, err, tc.wantErr)
+			})
+			t.Run("sync", func(t *testing.T) {
+				_, err := api.SendRawTransactionSync(t.Context(), raw, nil)
+				require.ErrorIs(t, err, tc.wantErr)
+			})
+		})
+	}
+}
+
+func TestSendRawTransactionSizeLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		prefix   byte
+		limit    int
+		envelope bool
+	}{
+		{"legacy", 0xc0, 128 * 1024, false},
+		{"accessList", types.AccessListTxType, 128 * 1024, false},
+		{"dynamicFee", types.DynamicFeeTxType, 128 * 1024, false},
+		{"setCode", types.SetCodeTxType, 128 * 1024, false},
+		{"accountAbstraction", types.AccountAbstractionTxType, 128 * 1024, false},
+		{"blob", types.BlobTxType, 1024 * 1024, false},
+		{"setCodeEnvelope", types.SetCodeTxType, 128 * 1024, true},
+		{"blobEnvelope", types.BlobTxType, 1024 * 1024, true},
+	} {
+		for _, delta := range []int{-1, 0, 1} {
+			t.Run(fmt.Sprintf("%s/%d", tc.name, delta), func(t *testing.T) {
+				raw := make([]byte, tc.limit+delta)
+				raw[0] = tc.prefix
+				if tc.envelope {
+					var err error
+					raw, err = rlp.EncodeToBytes(raw)
+					require.NoError(t, err)
+				}
+				api := &APIImpl{}
+				_, err := api.SendRawTransaction(t.Context(), raw)
+				if delta > 0 {
+					require.ErrorIs(t, err, txpool.ErrRlpTooBig)
+				} else {
+					wantErr := rlp.ErrExpectedList
+					if tc.prefix == 0xc0 {
+						wantErr = rlp.EOL
+					}
+					require.ErrorIs(t, err, wantErr)
+				}
+			})
+		}
+	}
+}
+
+func TestSendRawTransactionMalformedEnvelope(t *testing.T) {
+	for _, raw := range [][]byte{nil, {0x80}, {0xb8}, {0xb8, 0x40, types.SetCodeTxType}, {0x81, 0x80}} {
+		t.Run(fmt.Sprintf("%x", raw), func(t *testing.T) {
+			api := &APIImpl{}
+			_, err := api.SendRawTransaction(t.Context(), raw)
+			require.Error(t, err)
+		})
 	}
 }
 

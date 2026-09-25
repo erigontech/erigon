@@ -15,10 +15,14 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
 // SendRawTransaction implements eth_sendRawTransaction. Creates a new message call or contract creation for a previously signed transaction.
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
+	if err := txpool.ValidateSerializedTxn(encodedTx); err != nil {
+		return common.Hash{}, err
+	}
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
 		return common.Hash{}, err

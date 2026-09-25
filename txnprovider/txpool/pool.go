@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -1328,8 +1329,11 @@ func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
-// Check that the serialized txn should not exceed a certain max size
 func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
+	return ValidateSerializedTxn(serializedTxn)
+}
+
+func ValidateSerializedTxn(serializedTxn []byte) error {
 	const (
 		// txnSlotSize is used to calculate how many data slots a single transaction
 		// takes up based on its size. The slots are used as DoS protection, ensuring
@@ -1346,9 +1350,19 @@ func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
 		// Should be enough for a transaction with 6 blobs
 		blobTxnMaxSize = 1024 * 1024
 	)
-	txnType, err := PeekTransactionType(serializedTxn)
+	dataPos, dataLen, legacy, err := rlp.Prefix(serializedTxn, 0)
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrParseTxn, err)
+	}
+	txnType := LegacyTxnType
+	if !legacy {
+		if dataLen == 0 {
+			return fmt.Errorf("%w: empty transaction", ErrParseTxn)
+		}
+		txnType = serializedTxn[dataPos]
+		if dataPos > 0 {
+			serializedTxn = serializedTxn[dataPos : dataPos+dataLen]
+		}
 	}
 	maxSize := txnMaxSize
 	if txnType == BlobTxnType {
