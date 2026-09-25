@@ -1066,7 +1066,7 @@ func TestTraceRawTransactionUsesHeaderCacheInCommittedView(t *testing.T) {
 		err:             errors.New("unexpected header database read"),
 	}
 
-	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	encoded, _, _ := signedTransferAtLatest(t, m)
 	result, err := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{}).RawTransaction(m.Ctx, encoded, []string{TraceTypeTrace})
 	require.NoError(t, err)
 	require.NotNil(t, result)

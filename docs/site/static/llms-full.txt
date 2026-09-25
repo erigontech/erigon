@@ -6387,7 +6387,7 @@ The default is off — omit the object, or leave the field out, and withdrawals 
 
 ## The gasBailOut option
 
-`gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by `trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`, `trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each. `trace_call`, `trace_callMany` and `trace_rawTransaction` take no such parameter and always enable it internally, so everything below applies to them unconditionally.
+`gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by `trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`, `trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each. `trace_call` and `trace_callMany` take no such parameter and always enable it internally, so everything below applies to them unconditionally. `trace_rawTransaction` never enables it: a signed transaction pays for its gas as it would in a block.
 
 :::warning
 `gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It changes replayed state in ways that make the output unsuitable for reconstructing balances:
@@ -6674,6 +6674,8 @@ Response
 ### trace_rawTransaction
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces
+
+The transaction runs against the latest state and must be valid there: its nonce must equal the sender's nonce, the sender must afford value plus gas limit times fee cap (plus blob gas times blob fee cap), and the sender must have no code other than an EIP-7702 delegation. An invalid transaction returns an error instead of a trace. To trace a transaction that is already mined, use `trace_replayTransaction`.
 
 #### Parameters
 

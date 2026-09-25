@@ -1862,13 +1862,13 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	rules := blockCtx.Rules(chainConfig)
 
+	// Keep the nonce, EIP-3607 sender-code and EIP-7825 gas-limit checks that
+	// AsMessage enables: a signed transaction is traced only if it is valid at
+	// the latest state.
 	msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 	if err != nil {
 		return nil, err
 	}
-	msg.SetCheckNonce(false)
-	msg.SetCheckTransaction(false)
-	msg.SetCheckGas(false)
 
 	txCtx := protocol.NewEVMTxContext(msg)
 
@@ -1886,7 +1886,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+	// A signed transaction pays for its own gas, so no gas bailout: the sender
+	// is charged for value and gas as it would be in a block.
+	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
