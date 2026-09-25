@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -204,6 +205,22 @@ func TestSendRawTransactionMalformedEnvelope(t *testing.T) {
 			api := &APIImpl{}
 			_, err := api.SendRawTransaction(t.Context(), raw)
 			require.Error(t, err)
+		})
+	}
+}
+
+func TestSendRawTransactionInvalidRLPError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{"truncatedList", "0xd4"},
+		{"largeListLength", "0xff63808459682f07825208943d504cb2b11a45e7d1f9646ede40c60d52deec2580802da0e06b96410c954281132f2b403c0d25e0b04dd83f4ac5dffef07eb800c01718b7a07dc8bc872a54a40547c033b78081fd417e64bb96cae12ed5ad50b82f951636dd"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api := &APIImpl{}
+			_, err := api.SendRawTransaction(t.Context(), hexutil.MustDecodeHex(tc.raw))
+			require.EqualError(t, err, rlp.ErrValueTooLarge.Error())
 		})
 	}
 }

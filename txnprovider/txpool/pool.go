@@ -1350,6 +1350,9 @@ func ValidateSerializedTxn(serializedTxn []byte) error {
 		// Should be enough for a transaction with 6 blobs
 		blobTxnMaxSize = 1024 * 1024
 	)
+	if len(serializedTxn) <= txnMaxSize {
+		return nil
+	}
 	dataPos, dataLen, legacy, err := rlp.Prefix(serializedTxn, 0)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrParseTxn, err)
