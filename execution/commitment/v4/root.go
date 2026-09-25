@@ -106,7 +106,7 @@ func insertLeafRoot(n *node, path, value []byte) error {
 	branch.setLeaf(int(oldPath[common]), packPath(oldPath[common+1:], packScratch[:0]), oldValue)
 	root := fork(oldPath[:common])
 	root.plane = n.plane
-	root.setChild(int(oldPath[common]), branch)
+	root.setChild(int(oldPath[0]), branch)
 	*n = *root
 	return nil
 }

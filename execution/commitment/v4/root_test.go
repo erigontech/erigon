@@ -125,3 +125,29 @@ func TestRootCollapseAdoptsInMemoryChild(t *testing.T) {
 		})
 	}
 }
+
+func TestRootExtensionKeepsItsChildUnderTheFirstNibble(t *testing.T) {
+	for _, plane := range []byte{planeAccount, planeStorage} {
+		t.Run(fmtPlane(plane), func(t *testing.T) {
+			a := appendPath(nil, 5, append([]byte{5, 1}, bytes.Repeat([]byte{4}, 61)...))
+			b := appendPath(nil, 5, append([]byte{5, 2}, bytes.Repeat([]byte{4}, 61)...))
+			c := appendPath(nil, 6, bytes.Repeat([]byte{4}, 63))
+
+			viaLeafRoot := fork(nil)
+			viaLeafRoot.plane = plane
+			require.NoError(t, insertRoot(viaLeafRoot, a, []byte{1}))
+			require.NoError(t, insertRoot(viaLeafRoot, b, []byte{2}))
+
+			viaCollapse := fork(nil)
+			viaCollapse.plane = plane
+			require.NoError(t, insertRoot(viaCollapse, a, []byte{1}))
+			require.NoError(t, insertRoot(viaCollapse, c, []byte{3}))
+			require.NoError(t, insertRoot(viaCollapse, b, []byte{2}))
+			require.NoError(t, removeRoot(viaCollapse, c))
+
+			require.Equal(t, []byte{5, 5}, viaCollapse.path)
+			require.Equal(t, viaCollapse.path, viaLeafRoot.path)
+			require.Equal(t, viaCollapse.childMask, viaLeafRoot.childMask)
+		})
+	}
+}
