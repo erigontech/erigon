@@ -1163,6 +1163,10 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	if !ok {
 		return nil, false, nil
 	}
+	return ht.historyValueAt(key, histTxNum, txNum)
+}
+
+func (ht *HistoryRoTx) historyValueAt(key []byte, histTxNum, txNum uint64) ([]byte, bool, error) {
 	historyItem, ok := ht.getFile(histTxNum)
 	if !ok {
 		log.Warn("historySeekInFiles: file not found", "key", key, "txNum", txNum, "histTxNum", histTxNum, "ssize", ht.h.stepSize)
