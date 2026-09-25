@@ -46,9 +46,9 @@ func TestFoldLeafRoot(t *testing.T) {
 
 func TestFoldRootForms(t *testing.T) {
 	keyA := foldTestKey(0x00, 0)
-	keyB := foldTestKey(0x80, 1)
-	keyC := foldTestKey(0x10, 2)
-	keyD := foldTestKey(0x14, 3)
+	keyB := foldTestStorageKey(1)
+	keyC := foldTestKey(0x00, 2)
+	keyD := foldTestKey(0x01, 3)
 	cases := []struct {
 		name    string
 		entries []eip8297.Entry
@@ -73,7 +73,7 @@ func TestFoldSplitsInsideWindow(t *testing.T) {
 		t.Run(fmt.Sprintf("bit %d", offset), func(t *testing.T) {
 			left := make([]byte, eip8297.AccountKeyLength)
 			right := make([]byte, eip8297.AccountKeyLength)
-			right[offset/8] = 1 << uint(7-offset%8)
+			right[1] = 1 << uint(7-offset)
 			entries := []eip8297.Entry{{Key: left, Value: foldTestValue(1)}, {Key: right, Value: foldTestValue(2)}}
 			built := buildReferenceRows(entries, nil, eip8297.Bitpath{})
 			got, err := Fold(built.rootKey, &built.root)
@@ -85,8 +85,8 @@ func TestFoldSplitsInsideWindow(t *testing.T) {
 
 func TestFoldTopSplitAwayFromWindowOffsetZero(t *testing.T) {
 	entries := []eip8297.Entry{
-		{Key: foldTestKey(0x10, 1), Value: foldTestValue(1)},
-		{Key: foldTestKey(0x14, 2), Value: foldTestValue(2)},
+		{Key: foldTestKey(0x00, 1), Value: foldTestValue(1)},
+		{Key: foldTestKey(0x00, 2), Value: foldTestValue(2)},
 	}
 	built := buildReferenceRows(entries, nil, eip8297.Bitpath{})
 	require.Equal(t, ExtRoot, built.root.Form)
@@ -186,8 +186,8 @@ func testFoldThreeLeafBranch(t *testing.T) {
 	t.Helper()
 	entries := []eip8297.Entry{
 		{Key: foldTestKey(0x00, 1), Value: foldTestValue(1)},
-		{Key: foldTestKey(0xf0, 2), Value: foldTestValue(2)},
-		{Key: foldTestKey(0xf1, 3), Value: foldTestValue(3)},
+		{Key: foldTestStorageKey(2), Value: foldTestValue(2)},
+		{Key: foldTestStorageKey(3), Value: foldTestValue(3)},
 	}
 	built := buildReferenceRows(entries, nil, eip8297.Bitpath{})
 	got, err := Fold(built.rootKey, &built.root)
@@ -197,8 +197,8 @@ func testFoldThreeLeafBranch(t *testing.T) {
 
 func TestFoldRowsMatchReferenceSubtrees(t *testing.T) {
 	entries := []eip8297.Entry{
-		{Key: foldTestKey(0x10, 1), Value: foldTestValue(1)},
-		{Key: foldTestKey(0x14, 2), Value: foldTestValue(2)},
+		{Key: foldTestKey(0x00, 1), Value: foldTestValue(1)},
+		{Key: foldTestKey(0x00, 2), Value: foldTestValue(2)},
 	}
 	built := buildReferenceRows(entries, nil, eip8297.Bitpath{})
 	for key, record := range built.rows {
@@ -413,6 +413,13 @@ func bitpathFromBits(bits []byte) eip8297.Bitpath {
 func foldTestKey(first, seed byte) []byte {
 	key := make([]byte, eip8297.AccountKeyLength)
 	key[0] = first
+	key[len(key)-1] = seed
+	return key
+}
+
+func foldTestStorageKey(seed byte) []byte {
+	key := make([]byte, eip8297.StorageKeyLength)
+	key[0] = eip8297.StorageZone
 	key[len(key)-1] = seed
 	return key
 }

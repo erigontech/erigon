@@ -154,15 +154,15 @@ func EncodeRecord(key []byte, record *Record) ([]byte, error) {
 }
 
 func DecodeRecord(key, data []byte) (Record, error) {
+	if len(data) != 0 && data[0]&hdrFormatMask != recordFormat {
+		return Record{}, recordError(FormatError, "unsupported record format")
+	}
 	k, err := decodeRecordKey(key)
 	if err != nil {
 		return Record{}, err
 	}
 	if len(data) == 0 {
 		return Record{}, nil
-	}
-	if data[0]&hdrFormatMask != recordFormat {
-		return Record{}, recordError(FormatError, "unsupported record format")
 	}
 	if data[0]&hdrReserved != 0 {
 		return Record{}, recordError(ReservedError, "record reserved header bit is set")
@@ -206,7 +206,11 @@ func encodeRow(k recordKey, record *Record) ([]byte, error) {
 				return nil, err
 			}
 		} else {
-			if int(cell.Prefix.BitLen)+int(k.path.BitLen)+4 > eip8297.MaxPathBits {
+			keyLen, err := rowKeyLength(&k.path, slot)
+			if err != nil {
+				return nil, err
+			}
+			if int(cell.Prefix.BitLen)+int(k.path.BitLen)+4 >= keyLen*8 {
 				return nil, recordError(ExtensionLengthError, "branch prefix exceeds the key length")
 			}
 			if cell.Prefix.BitLen != 0 {
@@ -270,9 +274,15 @@ func encodeRow(k recordKey, record *Record) ([]byte, error) {
 }
 
 func encodeExtRoot(k recordKey, record *Record) ([]byte, error) {
-	maxLen := eip8297.MaxPathBits - rootStart(k)
-	if record.SelfExt.BitLen < 4 || int(record.SelfExt.BitLen) > maxLen {
+	if record.SelfExt.BitLen < 4 {
 		return nil, recordError(SelfExtensionLengthError, "root extension bit length must be at least four")
+	}
+	maxLen, err := rootExtensionKeyLength(k, &record.SelfExt)
+	if err != nil {
+		return nil, err
+	}
+	if int(record.SelfExt.BitLen) >= maxLen {
+		return nil, recordError(SelfExtensionLengthError, "root extension ends at the key length")
 	}
 	out := []byte{recordFormat | hdrIsExtRoot}
 	out = binary.BigEndian.AppendUint16(out, uint16(record.SelfExt.BitLen))
@@ -365,7 +375,11 @@ func decodeRow(k recordKey, data []byte) (Record, error) {
 		if err != nil {
 			return Record{}, err
 		}
-		if int(prefix.BitLen)+int(k.path.BitLen)+4 > eip8297.MaxPathBits {
+		keyLen, keyErr := rowKeyLength(&k.path, slot)
+		if keyErr != nil {
+			return Record{}, keyErr
+		}
+		if int(prefix.BitLen)+int(k.path.BitLen)+4 >= keyLen*8 {
 			return Record{}, recordError(ExtensionLengthError, "branch extension exceeds the key length")
 		}
 		record.Cells[slot].Prefix = prefix
@@ -420,7 +434,7 @@ func decodeExtRoot(k recordKey, data []byte) (Record, error) {
 		return Record{}, recordError(LengthError, "root extension is truncated")
 	}
 	bitLen := int16(binary.BigEndian.Uint16(data[1:3]))
-	if bitLen < 4 || int(bitLen) > eip8297.MaxPathBits-rootStart(k) {
+	if bitLen < 4 {
 		return Record{}, recordError(SelfExtensionLengthError, "root extension bit length must be at least four")
 	}
 	packed := packedLen(bitLen)
@@ -429,6 +443,14 @@ func decodeExtRoot(k recordKey, data []byte) (Record, error) {
 	}
 	if !canonicalPadding(data[3:3+packed], bitLen) {
 		return Record{}, recordError(PaddingError, "root extension has non-zero padding")
+	}
+	selfExt := eip8297.PathFromBits(data[3:3+packed], bitLen)
+	maxLen, keyErr := rootExtensionKeyLength(k, &selfExt)
+	if keyErr != nil {
+		return Record{}, keyErr
+	}
+	if int(bitLen) >= maxLen {
+		return Record{}, recordError(SelfExtensionLengthError, "root extension ends at the key length")
 	}
 	var record Record
 	record.Form = ExtRoot
@@ -504,7 +526,15 @@ func decodeRecordKey(key []byte) (recordKey, error) {
 	if path.BitLen%4 != 0 {
 		return recordKey{}, recordError(KeyError, "row key bit length must be a multiple of four")
 	}
+	if path.BitLen == 0 {
+		return recordKey{}, recordError(KeyError, "ordinary row key cannot be empty")
+	}
 	root := path.BitLen == 264 && pathByte(&path, 0) == eip8297.StorageZone
+	if !root {
+		if err := validateRowPath(&path); err != nil {
+			return recordKey{}, err
+		}
+	}
 	return recordKey{path: path, root: root}, nil
 }
 
@@ -519,6 +549,10 @@ func rowLeafSuffix(path eip8297.Bitpath, slot int, key []byte) (eip8297.Bitpath,
 	full := eip8297.PathFromBits(key, int16(len(key)*8))
 	if eip8297.CommonPrefixBitsAt(&full, 0, &path) != path.BitLen {
 		return eip8297.Bitpath{}, recordError(SuffixLengthError, "leaf key does not match the row path")
+	}
+	keyBytes, ok := eip8297.ZoneKeyLength(key[0])
+	if !ok || len(key) != keyBytes {
+		return eip8297.Bitpath{}, recordError(ZoneError, "leaf key uses a reserved zone")
 	}
 	for i := range 4 {
 		if full.Bit(path.BitLen+int16(i)) != uint64((slot>>(3-i))&1) {
@@ -548,10 +582,9 @@ func rowLeafKey(path eip8297.Bitpath, slot int, suffix eip8297.Bitpath) ([]byte,
 }
 
 func rowSuffixBits(path *eip8297.Bitpath, slot int) (int16, error) {
-	zone := rowZone(path, slot)
-	keyBytes, ok := eip8297.ZoneKeyLength(zone)
-	if !ok {
-		return 0, recordError(ZoneError, "row slot uses a reserved zone")
+	keyBytes, err := rowKeyLength(path, slot)
+	if err != nil {
+		return 0, err
 	}
 	value := keyBytes*8 - int(path.BitLen) - 4
 	if value < 0 || value > eip8297.MaxPathBits {
@@ -568,6 +601,65 @@ func rowZone(path *eip8297.Bitpath, slot int) byte {
 		return pathNibble(path, 0)<<4 | byte(slot)
 	}
 	return pathByte(path, 0)
+}
+
+func rowKeyLength(path *eip8297.Bitpath, slot int) (int, error) {
+	if path.BitLen == 0 {
+		switch slot {
+		case 0:
+			return eip8297.AccountKeyLength, nil
+		case 15:
+			return eip8297.StorageKeyLength, nil
+		default:
+			return 0, recordError(ZoneError, "row slot uses a reserved zone")
+		}
+	}
+	zone := rowZone(path, slot)
+	keyBytes, ok := eip8297.ZoneKeyLength(zone)
+	if !ok {
+		return 0, recordError(ZoneError, "row slot uses a reserved zone")
+	}
+	return keyBytes, nil
+}
+
+func validateRowPath(path *eip8297.Bitpath) error {
+	if path.BitLen < 8 {
+		zone := pathNibble(path, 0)
+		if zone != 0 && zone != 0xf {
+			return recordError(ZoneError, "row path uses a reserved zone")
+		}
+		return nil
+	}
+	if _, ok := eip8297.ZoneKeyLength(pathByte(path, 0)); !ok {
+		return recordError(ZoneError, "row path uses a reserved zone")
+	}
+	return nil
+}
+
+func rootExtensionKeyLength(k recordKey, path *eip8297.Bitpath) (int, error) {
+	if !k.global {
+		return eip8297.StorageKeyLength * 8, nil
+	}
+	if path.BitLen < 4 {
+		return 0, recordError(ZoneError, "root extension does not identify a zone")
+	}
+	zone := pathNibble(path, 0)
+	if zone == 0 {
+		if path.BitLen >= 8 {
+			zone = pathByte(path, 0)
+			if zone != eip8297.AccountZone && zone != eip8297.CodeZone {
+				return 0, recordError(ZoneError, "root extension uses a reserved zone")
+			}
+		}
+		return eip8297.AccountKeyLength * 8, nil
+	}
+	if zone == 0xf {
+		if path.BitLen >= 8 && pathByte(path, 0) != eip8297.StorageZone {
+			return 0, recordError(ZoneError, "root extension uses a reserved zone")
+		}
+		return eip8297.StorageKeyLength * 8, nil
+	}
+	return 0, recordError(ZoneError, "root extension uses a reserved zone")
 }
 
 func rootLeafSuffix(k recordKey, key []byte) (eip8297.Bitpath, error) {

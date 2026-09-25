@@ -17,6 +17,7 @@
 package eip8297
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -198,6 +199,21 @@ func EncodeLeafValue(treeKey []byte, val *[ValueLength]byte) ([]byte, error) {
 }
 
 func DecodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
+	val, err := decodeLeafValue(treeKey, enc)
+	if err != nil {
+		return val, err
+	}
+	canonical, err := EncodeLeafValue(treeKey, &val)
+	if err != nil {
+		return [ValueLength]byte{}, err
+	}
+	if !bytes.Equal(canonical, enc) {
+		return [ValueLength]byte{}, fmt.Errorf("%w: compact value is not canonical", ErrLeafValue)
+	}
+	return val, nil
+}
+
+func decodeLeafValue(treeKey []byte, enc []byte) ([ValueLength]byte, error) {
 	var val [ValueLength]byte
 	if len(treeKey) == 0 {
 		return val, fmt.Errorf("%w: empty tree key", ErrLeafValue)

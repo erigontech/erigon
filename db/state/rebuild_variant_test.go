@@ -374,6 +374,19 @@ func TestRebuildCommitmentFilesV3Target(t *testing.T) {
 	require.NoError(t, err)
 	rebuildVariantReportCounts(t, report, root, commitment.VariantCommitmentV3)
 	require.Equal(t, root, rebuildVariantRestoredRoot(t, db, agg, commitment.VariantCommitmentV3))
+	hphDB, _, _ := rebuildVariantDatadir(t)
+	statecfg.ExperimentalCommitmentV3 = false
+	hphRoot, _, err := state.RebuildCommitmentFiles(t.Context(), hphDB, &rawdbv3.TxNums, log.New(), false,
+		state.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie})
+	require.NoError(t, err)
+	statecfg.ExperimentalCommitmentV3 = true
+	require.Equal(t, hphRoot, root)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	v3State, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.NotEmpty(t, v3State)
 	rebuildVariantSettingsStayHex(t, dirs)
 }
 

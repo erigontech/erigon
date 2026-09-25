@@ -1189,20 +1189,20 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 		firstShard := true
 		for shardFrom < lastShard { // recreate this file range 1+ steps
-			nextKey := func() (ok bool, k []byte) {
+			nextKey := func() (ok bool, k, v []byte) {
 				if !keyIter.HasNext() {
-					return false, nil
+					return false, nil, nil
 				}
-				k, _, err := keyIter.Next()
+				k, v, err := keyIter.Next()
 				if err != nil {
 					err = fmt.Errorf("CommitmentRebuild: keyIter.Next() %w", err)
 					panic(err)
 				}
 				processed++
 				if processed%(keysPerStep*uint64(shardStepsSize)) == 0 && shardTo != lastShard {
-					return false, k
+					return false, k, v
 				}
-				return true, k
+				return true, k, v
 			}
 
 			rwTx, err := rwDb.BeginTemporalRw(ctx)
@@ -1239,6 +1239,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			firstShard = false
 
 			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, removals, &rebuiltCommitment{
+				Variant:  target.Variant,
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  rangeFromTxNum,
@@ -1383,7 +1384,7 @@ func touchRangeRemovals(acRo *AggregatorRoTx, sd *execctx.SharedDomains, fromTxN
 	return touched, nil
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), removals func(*execctx.SharedDomains) (uint64, error), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte, []byte), removals func(*execctx.SharedDomains) (uint64, error), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
@@ -1411,9 +1412,17 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	var processed uint64
 	// next() signals "no more keys" as (false, nil) but a shard boundary as
 	// (false, key), so the key has to be checked separately from ok.
-	for ok, key := next(); ; ok, key = next() {
+	for ok, key, value := next(); ; ok, key, value = next() {
 		if len(key) > 0 {
-			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			if cfg.Variant == commitment.VariantCommitmentV3 {
+				domain := kv.AccountsDomain
+				if len(key) > length.Addr {
+					domain = kv.StorageDomain
+				}
+				sd.GetCommitmentCtx().TouchKey(domain, string(key), value)
+			} else {
+				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			}
 			processed++
 		}
 		if !ok {
@@ -1465,6 +1474,7 @@ type codeStatsTrie interface {
 }
 
 type rebuiltCommitment struct {
+	Variant       commitment.TrieVariant
 	RootHash      []byte // root hash of this commitment. set once commit is finished
 	StepFrom      kv.Step
 	StepTo        kv.Step

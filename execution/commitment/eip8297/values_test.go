@@ -310,6 +310,29 @@ func TestPBinLeafValueCodecZeroLength(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestPBinLeafValueCodecRejectsNonCanonicalReencoding(t *testing.T) {
+	t.Parallel()
+
+	codeHashKey := leafCodecKey(AccountZone, CodeHashLeafKey)
+	storageKey := leafCodecKey(StorageZone, 7)
+	codeKey := leafCodecKey(CodeZone, 7)
+
+	for _, tc := range []struct {
+		name string
+		key  []byte
+		enc  []byte
+	}{
+		{name: "empty code hash alias", key: codeHashKey, enc: empty.CodeHash[:]},
+		{name: "storage leading zero", key: storageKey, enc: []byte{0, 0x42}},
+		{name: "code trailing zero", key: codeKey, enc: []byte{0x42, 0}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := DecodeLeafValue(tc.key, tc.enc)
+			require.ErrorIs(t, err, ErrLeafValue)
+		})
+	}
+}
+
 func TestPBinLeafValueCodecDirection(t *testing.T) {
 	t.Parallel()
 

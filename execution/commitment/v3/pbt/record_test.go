@@ -84,7 +84,7 @@ func TestRecordRoundTrips(t *testing.T) {
 			key:  globalKey,
 			rec: Record{
 				Form:    ExtRoot,
-				SelfExt: eip8297.PathFromBits([]byte{0xa0}, 4),
+				SelfExt: eip8297.PathFromBits([]byte{0x00}, 4),
 				Left:    hash(0x31),
 				Right:   hash(0x32),
 			},
@@ -121,6 +121,102 @@ func TestRecordRoundTrips(t *testing.T) {
 			require.Equal(t, tt.rec, got)
 		})
 	}
+}
+
+func TestRecordGlobalRowRootSupportsAccountAndStorage(t *testing.T) {
+	storage := eip8297.TreeKeyStorage(bytes.Repeat([]byte{0x22}, 20), storageSlotKey())
+	record := Record{Form: RowRoot, Cells: [16]Cell{
+		0:  {Kind: LeafCell, Key: accountKey(0, eip8297.BasicDataLeafKey), Value: basicValue()},
+		15: {Kind: LeafCell, Key: storage, Value: storageValue()},
+	}}
+
+	data, err := EncodeRecord(GlobalRootKey(), &record)
+	require.NoError(t, err)
+	got, err := DecodeRecord(GlobalRootKey(), data)
+	require.NoError(t, err)
+	require.Equal(t, record, got)
+}
+
+func TestRecordGlobalRowRootByteOracleForCodeAndStorage(t *testing.T) {
+	code := make([]byte, 34)
+	code[0] = eip8297.CodeZone
+	code[33] = 7
+	storage := eip8297.TreeKeyStorage(bytes.Repeat([]byte{0x33}, 20), storageSlotKey())
+	codeValue := [32]byte{1}
+	record := Record{Form: RowRoot, Cells: [16]Cell{
+		0:  {Kind: LeafCell, Key: code, Value: codeValue},
+		15: {Kind: LeafCell, Key: storage, Value: storageValue()},
+	}}
+
+	got, err := EncodeRecord(GlobalRootKey(), &record)
+	require.NoError(t, err)
+	require.Equal(t, globalCodeStorageOracle(code, storage), got)
+}
+
+func TestRecordRejectsInvalidRowKeys(t *testing.T) {
+	branchRow := append([]byte{0, 0, 3, 0, 0}, make([]byte, 128)...)
+	ordinaryEmpty := append([]byte{0, 0x80, 1, 0, 0}, make([]byte, 128)...)
+
+	_, err := DecodeRecord([]byte{2, 0}, branchRow)
+	require.ErrorIs(t, err, errorRule(ZoneError))
+
+	_, err = DecodeRecord([]byte{0}, ordinaryEmpty)
+	require.ErrorIs(t, err, errorRule(KeyError))
+	_, err = DecodeRecord(GlobalRootKey(), ordinaryEmpty)
+	require.NoError(t, err)
+}
+
+func TestRecordRejectsOldFormatBeforeKeyValidation(t *testing.T) {
+	data := make([]byte, 0, 68)
+	for range 2 {
+		data = append(data, 0x12, 0)
+		data = append(data, make([]byte, 32)...)
+	}
+	_, err := DecodeRecord([]byte{0, 0, 1}, data)
+	var recordErr *RecordError
+	require.ErrorAs(t, err, &recordErr)
+	require.Equal(t, FormatError, recordErr.Rule)
+	require.Contains(t, err.Error(), "rebuild")
+}
+
+func TestRecordRejectsExtensionsPastZoneKeyLength(t *testing.T) {
+	for _, bitLen := range []int16{260, 261} {
+		t.Run(string(rune('a'+bitLen-260)), func(t *testing.T) {
+			record := Record{Form: RowRoot, Cells: [16]Cell{
+				0: {Kind: BranchCell, Prefix: eip8297.PathFromBits(make([]byte, (int(bitLen)+7)/8), bitLen), Left: hash(1), Right: hash(2)},
+				1: {Kind: BranchCell, Left: hash(3), Right: hash(4)},
+			}}
+			_, err := EncodeRecord(rowKey(8), &record)
+			require.ErrorIs(t, err, errorRule(ExtensionLengthError))
+		})
+	}
+
+	for _, bitLen := range []int16{272, 273} {
+		t.Run(string(rune('a'+bitLen-272)), func(t *testing.T) {
+			record := Record{Form: ExtRoot, SelfExt: eip8297.PathFromBits(make([]byte, (int(bitLen)+7)/8), bitLen), Left: hash(1), Right: hash(2)}
+			_, err := EncodeRecord(GlobalRootKey(), &record)
+			require.ErrorIs(t, err, errorRule(SelfExtensionLengthError))
+		})
+	}
+}
+
+func TestRecordRoundTripsLongestLegalExtensions(t *testing.T) {
+	row := Record{Form: RowRoot, Cells: [16]Cell{
+		0: {Kind: BranchCell, Prefix: eip8297.PathFromBits(make([]byte, 33), 259), Left: hash(1), Right: hash(2)},
+		1: {Kind: BranchCell, Left: hash(3), Right: hash(4)},
+	}}
+	data, err := EncodeRecord(rowKey(8), &row)
+	require.NoError(t, err)
+	got, err := DecodeRecord(rowKey(8), data)
+	require.NoError(t, err)
+	require.Equal(t, row, got)
+
+	ext := Record{Form: ExtRoot, SelfExt: eip8297.PathFromBits(make([]byte, 34), 271), Left: hash(1), Right: hash(2)}
+	data, err = EncodeRecord(GlobalRootKey(), &ext)
+	require.NoError(t, err)
+	got, err = DecodeRecord(GlobalRootKey(), data)
+	require.NoError(t, err)
+	require.Equal(t, ext, got)
 }
 
 func TestRecordTombstone(t *testing.T) {
@@ -171,7 +267,7 @@ func TestRecordRejectsNonCanonical(t *testing.T) {
 	selfExt := append([]byte{0x10, 0, 3, 0xe0}, make([]byte, 64)...)
 	globalKey := GlobalRootKey()
 	rootExtKey := rowKey(8)
-	rootExt := append([]byte{0x10, 0, 4, 0xa0}, make([]byte, 64)...)
+	rootExt := append([]byte{0x10, 0, 4, 0x00}, make([]byte, 64)...)
 	baseLeaf := manualRowOracle()
 	baseLeaf = append([]byte(nil), baseLeaf...)
 
@@ -200,7 +296,7 @@ func TestRecordRejectsNonCanonical(t *testing.T) {
 		{name: "exact length", key: validKey, data: append(baseLeaf, 0), want: LengthError},
 		{name: "compact value", key: validKey, data: compactValueRow(), want: CompactValueError},
 		{name: "suffix length", key: rowKey(528), data: append([]byte{0, 0, 3, 0, 2}, make([]byte, 64)...), want: SuffixLengthError},
-		{name: "reserved zone", key: rowKey(0), data: reservedZoneRow(), want: ZoneError},
+		{name: "reserved zone", key: []byte{0x02, 0}, data: reservedZoneRow(), want: ZoneError},
 	}
 
 	for _, tt := range tests {
@@ -222,7 +318,7 @@ func TestRecordRejectsNonCanonical(t *testing.T) {
 var fuzzRecordBodies atomic.Uint64
 
 func FuzzRecordDecodeCanonical(f *testing.F) {
-	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0xa0}} {
+	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -232,7 +328,7 @@ func FuzzRecordDecodeCanonical(f *testing.F) {
 
 func TestRecordFuzzSeeds(t *testing.T) {
 	fuzzRecordBodies.Store(0)
-	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0xa0}} {
+	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}} {
 		runRecordFuzzBody(seed)
 	}
 	require.Equal(t, uint64(4), fuzzRecordBodies.Load())
@@ -257,6 +353,22 @@ func basicValue() [32]byte {
 
 func storageValue() [32]byte {
 	return eip8297.EncodeStorageValue([]byte{0x42})
+}
+
+func storageSlotKey() []byte {
+	slot := make([]byte, 32)
+	slot[31] = 64
+	return slot
+}
+
+func globalCodeStorageOracle(code, storage []byte) []byte {
+	out := []byte{0, 0x80, 1, 0x80, 1}
+	codePath := eip8297.PathFromBits(code, 272)
+	out = append(out, manualPackedRange(&codePath, 4, 272)...)
+	out = append(out, 1, 1)
+	storagePath := eip8297.PathFromBits(storage, 528)
+	out = append(out, manualPackedRange(&storagePath, 4, 528)...)
+	return append(out, 1, 0x42)
 }
 
 func accountKey(slot, subIndex byte) []byte {
