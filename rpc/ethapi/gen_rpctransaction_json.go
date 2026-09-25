@@ -79,7 +79,7 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if len(x.BlobVersionedHashes) > 0 {
 		ethjson.DataList(s, "blobVersionedHashes", x.BlobVersionedHashes)
 	}
-	if len(x.Authorizations) > 0 {
+	if x.Authorizations != nil {
 		s.Field("authorizationList")
 		if err := x.Authorizations.MarshalFastJSONTo(s); err != nil {
 			return err

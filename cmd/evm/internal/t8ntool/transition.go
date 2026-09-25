@@ -487,7 +487,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			}, nil
 		}
 
-		jsonAuths := txJson.Authorizations
+		jsonAuths := *txJson.Authorizations
 		auths := make([]types.Authorization, 0, len(jsonAuths))
 		for i := range jsonAuths {
 			a, err := jsonAuths[i].ToAuthorization()

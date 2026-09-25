@@ -538,9 +538,14 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	blob := base()
 	blob.Type, blob.MaxFeePerBlobGas = 3, u(0x7)
 	blob.BlobVersionedHashes = []common.Hash{hash}
+	// An empty list still writes [], because SetCodeTransaction's decoder requires the key.
+	emptyAuths := base()
+	emptyAuths.Type = 4
+	emptyAuths.Authorizations = &types.AuthorizationList{}
+
 	setcode := base()
 	setcode.Type = 4
-	setcode.Authorizations = types.AuthorizationList{
+	setcode.Authorizations = &types.AuthorizationList{
 		{
 			ChainID: hexutil.U256(*uint256.NewInt(1)), Address: to, Nonce: 1, YParity: 0,
 			R: hexutil.U256(*uint256.NewInt(0xaa)), S: hexutil.U256(*uint256.NewInt(0xbb)),
@@ -558,7 +563,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 
 	for name, txn := range map[string]*RPCTransaction{
 		"zero": {}, "legacy": base(), "dynamic fee": dynamic, "blob": blob,
-		"set code": setcode, "pending": pending, "contract creation": noTo,
+		"set code": setcode, "set code empty list": emptyAuths, "pending": pending, "contract creation": noTo,
 		"empty access list": emptyAccesses, "empty blob hashes": emptyBlobs,
 	} {
 		t.Run(name, func(t *testing.T) {
