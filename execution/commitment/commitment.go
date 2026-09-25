@@ -244,7 +244,7 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		// ModeDirect regardless of the argument: the parallel prefix trie is a
 		// hex-nibble structure and the binary key space has no nibbles.
 		trie := NewPBinPatriciaHashed(nil)
-		trie.setHashSuite(pbinSelectedSum)
+		trie.setHashSuite(pbinSelectedSum())
 		tree := NewBinUpdates(tmpdir, nil)
 		return trie, tree
 	case VariantHexPatriciaTrie:
@@ -1610,7 +1610,7 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 }
 
 func NewBinUpdates(tmpdir string, plainKeys map[string]struct{}) *Updates {
-	updates := NewUpdates(ModeDirect, tmpdir, pbinKeyHasherWith(pbinSelectedSum))
+	updates := NewUpdates(ModeDirect, tmpdir, pbinKeyHasherWith(pbinSelectedSum()))
 	for key := range plainKeys {
 		updates.TouchPlainKey(key, nil, nil)
 	}

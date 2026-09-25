@@ -126,7 +126,7 @@ func pbinDecodeWitness(preimages [][]byte, root []byte) (*pbinWitnessTree, error
 	w := &pbinWitnessTree{
 		nodes:  make(map[common.Hash]pbinWitnessNode, len(preimages)),
 		root:   common.BytesToHash(root),
-		hasher: pbinHasher{sum: pbinSelectedSum},
+		hasher: pbinHasher{sum: pbinSelectedSum()},
 	}
 	if len(preimages) == 0 {
 		if w.root != pbinEmptyTreeHash {

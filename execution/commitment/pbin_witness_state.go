@@ -63,7 +63,7 @@ func PBinNewWitnessState(nodes [][]byte, root []byte) (*PBinWitnessState, error)
 	return &PBinWitnessState{
 		tree: tree,
 		ctx:  pbinNewWitnessContext(tree),
-		keys: pbinDigestCache{Sum: pbinSelectedSum},
+		keys: pbinDigestCache{Sum: pbinSelectedSum()},
 	}, nil
 }
 
@@ -160,7 +160,7 @@ func (s *PBinWitnessState) Root(ctx context.Context, plainKeys [][]byte, updates
 	defer trie.Release()
 	trie.updateStream.wiped = removed
 
-	upd := NewUpdates(ModeUpdate, "", trie.setHashSuite(pbinSelectedSum))
+	upd := NewUpdates(ModeUpdate, "", trie.setHashSuite(pbinSelectedSum()))
 	for i := range plainKeys {
 		upd.TouchPlainKeyDirect(string(plainKeys[i]), &updates[i])
 	}

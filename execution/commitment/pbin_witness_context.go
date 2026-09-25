@@ -62,7 +62,7 @@ func pbinNewWitnessContext(tree *pbinWitnessTree) *pbinWitnessContext {
 		records: make(map[string][]byte),
 		leaves:  make(map[string]Update),
 		codes:   make(map[string][]byte),
-		keys:    pbinDigestCache{Sum: pbinSelectedSum},
+		keys:    pbinDigestCache{Sum: pbinSelectedSum()},
 	}
 }
 

@@ -171,14 +171,21 @@ func EmbedState(batches [][]State) []Entry {
 	}
 	for _, batch := range batches {
 		for _, state := range batch {
-			address := slices.Clone(state.Address)
 			if state.Deleted {
+				address := slices.Clone(state.Address)
 				for key, owner := range owners {
 					if owner == string(address) {
 						values[key] = nil
 					}
 				}
-			} else if state.Code != nil || state.Nonce != 0 || !state.Balance.IsZero() {
+			}
+		}
+		for _, state := range batch {
+			address := slices.Clone(state.Address)
+			if state.Deleted {
+				continue
+			}
+			if state.Code != nil || state.Nonce != 0 || !state.Balance.IsZero() {
 				basic, err := EncodeBasicData(state.Nonce, &state.Balance, uint64(len(state.Code)))
 				if err != nil {
 					panic(err)
@@ -246,11 +253,10 @@ func merkelize(node Node, sum HashFn) common.Hash {
 	case *Branch:
 		left := merkelize(current.Left, sum)
 		right := merkelize(current.Right, sum)
-		prefix := &Bitpath{BitLen: int16(len(current.Prefix))}
-		for i, bit := range current.Prefix {
-			prefix.SetBitAt(int16(i), uint64(bit))
-		}
-		preimage = BranchPreimage(nil, prefix, &left, &right)
+		preimage = append(preimage, BranchTag)
+		preimage = append(preimage, encodeReferenceBitPrefix(current.Prefix)...)
+		preimage = append(preimage, left[:]...)
+		preimage = append(preimage, right[:]...)
 	}
 	if sum != nil {
 		return common.Hash(sum(preimage))
@@ -258,6 +264,18 @@ func merkelize(node Node, sum HashFn) common.Hash {
 	h := sha3.NewLegacyKeccak256()
 	_, _ = h.Write(preimage)
 	return common.BytesToHash(h.Sum(nil))
+}
+
+func encodeReferenceBitPrefix(prefix []byte) []byte {
+	if len(prefix) >= 1<<16 {
+		panic(fmt.Sprintf("eip8297: prefix of %d bits exceeds the encodable count", len(prefix)))
+	}
+	out := make([]byte, 2+(len(prefix)+7)/8)
+	binary.BigEndian.PutUint16(out, uint16(len(prefix)))
+	for i, bit := range prefix {
+		out[2+i/8] |= bit << (7 - i%8)
+	}
+	return out
 }
 
 func MerkelizeWith(node Node, sum HashFn) common.Hash {

@@ -26,6 +26,7 @@ import (
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -244,7 +245,70 @@ func TestReferenceTwoKeyRootIsBranchHash(t *testing.T) {
 	require.True(t, ok)
 	require.Empty(t, branch.Prefix)
 	left, right := treeHash(branch.Left), treeHash(branch.Right)
-	require.Equal(t, common.Hash(keccak.Sum256(BranchPreimage(nil, &Bitpath{}, &left, &right))), tree.RootHash())
+	preimage := []byte{BranchTag, 0, 0}
+	preimage = append(preimage, left[:]...)
+	preimage = append(preimage, right[:]...)
+	require.Equal(t, handKeccak(preimage), tree.RootHash())
+}
+
+func TestReferenceMerkelizeIndependentBranchOrder(t *testing.T) {
+	entries := []Entry{
+		{Key: []byte{0x00}, Value: referenceValue(1)},
+		{Key: []byte{0x80}, Value: referenceValue(2)},
+	}
+	left := handKeccak(append(append([]byte{LeafTag}, entries[0].Key...), entries[0].Value...))
+	right := handKeccak(append(append([]byte{LeafTag}, entries[1].Key...), entries[1].Value...))
+	preimage := []byte{BranchTag, 0, 0}
+	preimage = append(preimage, left[:]...)
+	preimage = append(preimage, right[:]...)
+
+	require.Equal(t, handKeccak(preimage), StateRoot(entries))
+}
+
+func TestReferenceBranchPreimageUsesHandAssembledBytes(t *testing.T) {
+	left := common.Hash{1}
+	right := common.Hash{2}
+	want := []byte{BranchTag, 0, 3, 0xa0}
+	want = append(want, left[:]...)
+	want = append(want, right[:]...)
+	prefix := Bitpath{BitLen: 3}
+	prefix.SetBitAt(0, 1)
+	prefix.SetBitAt(1, 0)
+	prefix.SetBitAt(2, 1)
+	require.Equal(t, want, BranchPreimage(nil, &prefix, &left, &right))
+}
+
+func TestReferenceMerkelizeSupportsVariableLengthPrefixes(t *testing.T) {
+	keyA := make([]byte, 67)
+	keyB := make([]byte, 67)
+	keyB[len(keyB)-1] = 1
+	var got common.Hash
+	require.NotPanics(t, func() {
+		got = StateRoot([]Entry{{Key: keyA, Value: referenceValue(1)}, {Key: keyB, Value: referenceValue(2)}})
+	})
+	require.NotEqual(t, common.Hash{}, got)
+}
+
+func handKeccak(preimage []byte) common.Hash {
+	h := sha3.NewLegacyKeccak256()
+	_, _ = h.Write(preimage)
+	return common.BytesToHash(h.Sum(nil))
+}
+
+func TestEmbedStateRemovalsRunBeforeBatchUpdates(t *testing.T) {
+	address := referenceAddress(9)
+	slot := referenceSlot(64)
+	value := EncodeStorageValue([]byte{0x42})
+	entries := EmbedState([][]State{
+		{{Address: address, Nonce: 1}},
+		{
+			{Address: address, Slots: map[string][]byte{string(slot): {0x42}}},
+			{Address: address, Deleted: true},
+		},
+	})
+	want := []Entry{{Key: TreeKeyStorage(address, slot), Value: value[:]}}
+	require.Equal(t, want, entries)
+	require.Equal(t, StateRoot(want), StateRoot(entries))
 }
 
 func treeHash(node Node) common.Hash {

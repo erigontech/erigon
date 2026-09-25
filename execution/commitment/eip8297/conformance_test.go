@@ -19,6 +19,7 @@ package eip8297
 import (
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"os"
 	"strconv"
@@ -33,6 +34,9 @@ import (
 )
 
 type conformanceVectors struct {
+	Source       string `json:"source"`
+	SourceCommit string `json:"source_commit"`
+
 	Embedding struct {
 		Address20       string            `json:"address20"`
 		Address32       string            `json:"address32"`
@@ -62,9 +66,45 @@ func loadConformance(t *testing.T) *conformanceVectors {
 	t.Helper()
 	raw, err := os.ReadFile("../testdata/binary_trie_vectors.json")
 	require.NoError(t, err)
-	v := new(conformanceVectors)
-	require.NoError(t, json.Unmarshal(raw, v))
+	v, err := parseConformance(raw)
+	require.NoError(t, err)
 	return v
+}
+
+func parseConformance(raw []byte) (*conformanceVectors, error) {
+	v := new(conformanceVectors)
+	if err := json.Unmarshal(raw, v); err != nil {
+		return nil, err
+	}
+	if err := validateConformance(v); err != nil {
+		return nil, err
+	}
+	return v, nil
+}
+
+func validateConformance(v *conformanceVectors) error {
+	if v == nil || v.SourceCommit == "" {
+		return fmt.Errorf("conformance vectors have no source commit")
+	}
+	if v.Embedding.Address20 == "" || v.Embedding.Address32 == "" || v.Embedding.BasicDataKey == "" ||
+		v.Embedding.CodeHashKey == "" || v.Embedding.DelegationKey == "" || v.Embedding.CodeHash == "" {
+		return fmt.Errorf("conformance embedding is empty")
+	}
+	if len(v.Embedding.StorageSlotKeys) == 0 || len(v.Embedding.CodeChunkKeys) == 0 {
+		return fmt.Errorf("conformance embedding collections are empty")
+	}
+	if len(v.ChunkifyCode) == 0 {
+		return fmt.Errorf("conformance chunkify collection is empty")
+	}
+	if len(v.EncodeBasicData) == 0 {
+		return fmt.Errorf("conformance basic-data collection is empty")
+	}
+	return nil
+}
+
+func TestConformanceRejectsMissingMetadata(t *testing.T) {
+	_, err := parseConformance([]byte(`{}`))
+	require.Error(t, err)
 }
 
 func unhex(t *testing.T, value string) []byte {

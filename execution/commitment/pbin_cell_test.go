@@ -462,7 +462,7 @@ func TestPBinBranchCodecDropsLoadedState(t *testing.T) {
 	t.Parallel()
 
 	cells := [2]pbinCell{pbinTestLeafCell(0x2B, 40), pbinTestBranchCell(0x4D, 8)}
-	keys := pbinDigestCache{Sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum()}
 	storageKey := pbinPathFromBytes(keys.StorageKey(cells[0].storageAddr[:length.Addr], cells[0].storageAddr[length.Addr:]))
 	cells[0].prefix = storageKey
 	cells[0].loaded = cellLoadStorage

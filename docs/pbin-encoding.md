@@ -15,8 +15,8 @@ Everything below was produced by running the engine. Hex is real.
 ## 1. Tree keys
 
 A tree key is `zone(1) || treePosition || subIndex(1)`, assembled by `pbinTreeKey`
-(`pbin_keys.go`). Three zones exist, each admitting exactly one key length
-(`pbinZoneKeyLength`, `pbin_keys.go`):
+(`execution/commitment/eip8297/keys.go`). Three zones exist, each admitting exactly one key length
+(`ZoneKeyLength`, `execution/commitment/eip8297/keys.go`):
 
 | zone | name    | key length | treePosition                    |
 |------|---------|-----------:|---------------------------------|
@@ -28,10 +28,10 @@ The two indexes are unrelated quantities, and neither preimage is a bare concate
 naturally-sized values — both are exactly 64 bytes, with the index widened to fill the tail:
 
 - `codeIndex = chunkID / 256`, the chunk's code group, written as 8 big-endian bytes after 24 zero
-  bytes (§10, `codeChunkKey`, `pbin_keys.go`). No address takes part: the code zone is
+  bytes (§10, `CodeChunkKey`, `execution/commitment/eip8297/keys.go`). No address takes part: the code zone is
   content-addressed, so two accounts running the same bytecode share one set of leaves.
 - `slotIndex = slot >> 8`, written as a 32-byte big-endian value, which is `0x00 || slot[0:31]`
-  (§9, `groupDigest`, `pbin_keys.go`).
+  (§9, `groupDigest`, `execution/commitment/eip8297/keys.go`).
 
 The trailing `subIndex` byte is `chunkID % 256` for code and `slot & 0xFF` for storage.
 
@@ -39,13 +39,13 @@ Zones `0x02..0xFE` have no length and `pbinTreeKey` panics on them. The fixed le
 the prefix-free invariant, and it is re-asserted at hash time from the key's own first byte
 (`leafCellHash`, `pbin_hash.go`) so a malformed key cannot reach the hasher.
 
-`addr32` is the 20-byte address left-zero-padded to 32 (`pbinAddr32`, `pbin_keys.go`).
+`addr32` is the 20-byte address left-zero-padded to 32 (`RightAlign32`, `execution/commitment/eip8297/keys.go`).
 `H` is Keccak-256 by default, blake3 under `--experimental.bin-commitment.hash`
 (`SetPBinHashSuite`, `pbin_hash.go`). Key derivation and node hashing both use `H`, and
 `setHashSuite` (`pbin_patricia_hashed.go`) swaps both seams at once so neither can be configured
 alone.
 
-Two digests are memoized per `pbinDigestCache` (`pbin_keys.go`): the stem, keyed on
+Two digests are memoized per `DigestCache` (`execution/commitment/eip8297/keys.go`): the stem, keyed on
 `addr32`, and the storage group hash, keyed on `(addr32, slot[0:31])`. The group entry is bound to
 the address as well as the index, so an address change cannot yield a stale hit.
 
@@ -599,7 +599,7 @@ byte:  0        1 ............................ 32       33
       +----+------------------------------------+------+
 ```
 
-Constants in `pbin_keys.go`; the dispatch that turns a sub-index into a leaf value is
+Constants in `execution/commitment/eip8297/keys.go`; the dispatch that turns a sub-index into a leaf value is
 `pbinLeafValue` (`pbin_hash.go`).
 
 Sub-indices 128..255 held the first 128 code chunks before every chunk moved into the code zone
@@ -626,7 +626,7 @@ unconditionally, since the stream is told nothing about what the account held a 
 at all: its leaf *is* its code, a read takes the leading `code_size` bytes and `EXTCODEHASH` hashes
 them. Clearing a delegation restores a CODE_HASH leaf of `keccak256("")` with `code_size` zeroed.
 
-Neither sibling has a key derivation of its own: `treeKey` (`pbin_keys.go`) only ever
+Neither sibling has a key derivation of its own: `TreeKey` (`execution/commitment/eip8297/keys.go`) only ever
 derives BASIC_DATA for an address, and the stream produces the sibling by overwriting the last key
 byte inside the same visit (`emitSibling`, `pbin_update_stream.go`).
 
@@ -662,10 +662,10 @@ outright — `codeFromLeaves` re-checks the reassembled code against CODE_HASH
 
 ## 9. The storage sub-trie
 
-`pbinSlotInHeader` (`pbin_keys.go`) decides: slot bytes `[0:31]` all zero **and**
+`SlotInHeader` (`execution/commitment/eip8297/keys.go`) decides: slot bytes `[0:31]` all zero **and**
 `slot[31] < HEADER_STORAGE_SLOTS = 64`. So slots 0..63 only.
 
-Header slots take an account-zone key at sub-index `64 + slot` (`storageKey`, `pbin_keys.go`) — same
+Header slots take an account-zone key at sub-index `64 + slot` (`StorageKey`, `execution/commitment/eip8297/keys.go`) — same
 34-byte shape, same stem, no extra hash. Everything else goes to zone `0xFF`, 66 bytes
 (`storageKey`):
 
@@ -686,7 +686,7 @@ a group = the 256 consecutive slots sharing one treeIdx:
   slot 319  ff | 12b9…3e7a | 1908ec24…d2fe2d42 | 3f   /
 ```
 
-The group preimage is built by `groupDigest` (`pbin_keys.go`) as
+The group preimage is built by `groupDigest` (`execution/commitment/eip8297/keys.go`) as
 `addr32 || 0x00 || slot[0:31]`, 64 bytes. Co-location of a group in one subtree is the point of the
 layout, and the digest is memoized per group.
 
@@ -724,7 +724,7 @@ byte has room, and `chunk[0] = min(pushdataAt[pos], 31)`. A PUSH is any opcode i
 across chunk boundaries — which is exactly what the byte reports.
 
 **Every** chunk lives in the code zone; the account header holds none. One deriver takes a code hash
-and a chunk id (`codeChunkKey`, `pbin_keys.go`):
+and a chunk id (`CodeChunkKey`, `execution/commitment/eip8297/keys.go`):
 
 ```
 treeIndex       = chunkID / 256          the chunk's code group
@@ -738,7 +738,7 @@ dense subtree and the group edge is the only boundary in the layout.
 
 The derivation names no address — only the code hash. Two accounts running the same bytecode derive
 identical keys and share one set of leaves, whatever the code's size
-(`pbinTreeKeyCodeChunk`, `pbin_keys.go`). The dedup is realised at emit time: chunks are
+(`TreeKeyCodeChunk`, `execution/commitment/eip8297/keys.go`). The dedup is realised at emit time: chunks are
 buffered, sorted by key, and duplicate keys collapse to one emission, with an error if two carry
 different values (`flushCodeChunks`, `pbin_update_stream.go`). The chunk digest is
 deliberately not memoized: the digest cache's entries are bound to an address these keys do not
@@ -787,7 +787,7 @@ enumerates every value a leaf may hold — BASIC_DATA, CODE_HASH, a padded stora
 
 An account and its storage are related only by sharing a key **prefix**: bytes 1..32 of the
 account-zone key and bytes 1..32 of the storage-zone key are the same `H(addr32)`
-(`accountHeaderStem` vs `storageKey`, `pbin_keys.go`). Prefix, not containment. The account's code
+(`AccountHeaderStem` vs `StorageKey`, `execution/commitment/eip8297/keys.go`). Prefix, not containment. The account's code
 shares not even that: it is keyed by code hash and sits in a third zone.
 
 ```

@@ -81,7 +81,7 @@ func (f *pbinWitnessPruneFixture) applyOver(t *testing.T, ctx PatriciaContext) [
 
 func pbinWitnessHashSet(t *testing.T, nodes [][]byte) map[common.Hash]struct{} {
 	t.Helper()
-	h := pbinHasher{sum: pbinSelectedSum}
+	h := pbinHasher{sum: pbinSelectedSum()}
 	out := make(map[common.Hash]struct{}, len(nodes))
 	for _, node := range nodes {
 		out[h.hash(node)] = struct{}{}

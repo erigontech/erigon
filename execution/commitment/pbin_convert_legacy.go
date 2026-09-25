@@ -36,7 +36,7 @@ type PBinRecordConverter struct {
 }
 
 func NewPBinRecordConverter() *PBinRecordConverter {
-	return &PBinRecordConverter{keys: pbinDigestCache{Sum: pbinSelectedSum}}
+	return &PBinRecordConverter{keys: pbinDigestCache{Sum: pbinSelectedSum()}}
 }
 
 // PBinEncodeLegacyRecord rewrites a current branch record in the pre-version

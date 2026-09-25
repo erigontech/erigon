@@ -236,13 +236,13 @@ func TestPBinWitnessAccountMissingCodeHashIsMalformed(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(77)
-	keys := pbinDigestCache{Sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum()}
 	var value [pbinValueLength]byte
 	value[pbinBasicDataNonceOffset+7] = 1
 
 	preimage := append([]byte{pbinLeafTag}, keys.AccountKey(addr, pbinBasicDataLeafKey)...)
 	preimage = append(preimage, value[:]...)
-	hasher := pbinHasher{sum: pbinSelectedSum}
+	hasher := pbinHasher{sum: pbinSelectedSum()}
 	root := hasher.hash(preimage)
 
 	state, err := PBinNewWitnessState([][]byte{preimage}, root[:])
@@ -260,8 +260,8 @@ func TestPBinWitnessZeroCodeSizeNeedsTheEmptyCodeHash(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(79)
-	keys := pbinDigestCache{Sum: pbinSelectedSum}
-	hasher := pbinHasher{sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum()}
+	hasher := pbinHasher{sum: pbinSelectedSum()}
 
 	var codeHash common.Hash
 	codeHash[0] = 0xCC
@@ -284,8 +284,8 @@ func TestPBinWitnessOversizedCodeSizeIsRefused(t *testing.T) {
 	t.Parallel()
 
 	addr := pbinOracleAddr(80)
-	keys := pbinDigestCache{Sum: pbinSelectedSum}
-	hasher := pbinHasher{sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum()}
+	hasher := pbinHasher{sum: pbinSelectedSum()}
 
 	leaf := func(key []byte, value [pbinValueLength]byte) ([]byte, common.Hash) {
 		preimage := append(append([]byte{pbinLeafTag}, key...), value[:]...)
@@ -325,8 +325,8 @@ func TestPBinWitnessDelegationLeafPinsCodeSize(t *testing.T) {
 
 	addr := pbinOracleAddr(78)
 	indicator := append([]byte{0xEF, 0x01, 0x00}, bytes.Repeat([]byte{0x44}, 20)...)
-	keys := pbinDigestCache{Sum: pbinSelectedSum}
-	hasher := pbinHasher{sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum()}
+	hasher := pbinHasher{sum: pbinSelectedSum()}
 
 	leaf := func(key []byte, value [pbinValueLength]byte) ([]byte, common.Hash) {
 		preimage := append(append([]byte{pbinLeafTag}, key...), value[:]...)

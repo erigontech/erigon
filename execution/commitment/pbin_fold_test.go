@@ -186,7 +186,7 @@ func TestPBinFoldBranchMatchesOracle(t *testing.T) {
 			require.NotEmpty(t, data, "a branch fold stores its row")
 
 			var stored [2]pbinCell
-			keys := pbinDigestCache{Sum: pbinSelectedSum}
+			keys := pbinDigestCache{Sum: pbinSelectedSum()}
 			err = pbinDecodeBranch(data, &stored, divergence+1, &keys)
 			require.NoError(t, err)
 			for i := range stored {

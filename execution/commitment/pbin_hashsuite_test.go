@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
 // These tests move the process-wide hash selection, so none of them is parallel.
@@ -45,6 +47,19 @@ func TestPBinSetHashSuite(t *testing.T) {
 
 	require.Error(t, SetPBinHashSuite("sha256"))
 	require.Equal(t, PBinHashKeccak, PBinHashSuiteName(), "a rejected name must not change the suite")
+}
+
+func TestPBinEngineReadsLaterEIP8297HashSuiteSelection(t *testing.T) {
+	pbinRestoreHashSuite(t)
+
+	require.NoError(t, SetPBinHashSuite(PBinHashBlake3))
+	require.NoError(t, eip8297.SetHashSuite(PBinHashKeccak))
+	trie, _ := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), TrieConfig{Variant: VariantBinPatriciaTrie})
+	pph := trie.(*PBinPatriciaHashed)
+	defer pph.Release()
+
+	require.Nil(t, pph.hasher.sum)
+	require.Nil(t, pph.updateStream.keyDigest.Sum)
 }
 
 // The selection has to reach both seams: an engine whose node hashing and key

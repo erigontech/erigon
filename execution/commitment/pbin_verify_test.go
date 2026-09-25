@@ -202,7 +202,7 @@ func (v *pbinVerifier) recordAt(nodePath *pbinBitpath) ([2]pbinCell, error) {
 	if len(data) == 0 {
 		return cells, fmt.Errorf("pbin verify: no record for the %d-bit node at %x", nodePath.BitLen, key)
 	}
-	keys := pbinDigestCache{Sum: pbinSelectedSum}
+	keys := pbinDigestCache{Sum: pbinSelectedSum()}
 	if err := pbinDecodeBranch(data, &cells, nodePath.BitLen+1, &keys); err != nil {
 		return cells, fmt.Errorf("pbin verify: record at %x: %w", key, err)
 	}

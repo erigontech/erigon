@@ -71,8 +71,9 @@ type (
 var (
 	errPBinNonCanonicalPad = eip8297.ErrNonCanonicalPad
 	pbinEmptyTreeHash      = eip8297.EmptyTreeHash
-	pbinSelectedSum        pbinHashFn
 )
+
+func pbinSelectedSum() pbinHashFn { return eip8297.SelectedHash() }
 
 func pbinPathFromBytes(b []byte) pbinBitpath              { return eip8297.PathFromBytes(b) }
 func pbinPathFromBits(b []byte, bitLen int16) pbinBitpath { return eip8297.PathFromBits(b, bitLen) }
@@ -132,7 +133,6 @@ func SetPBinHashSuite(name string) error {
 	if err := eip8297.SetHashSuite(name); err != nil {
 		return err
 	}
-	pbinSelectedSum = eip8297.SelectedHash()
 	return nil
 }
 
