@@ -20,7 +20,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/db/snaptype"
 )
 
@@ -51,4 +53,59 @@ func TestIsBlobBacklog(t *testing.T) {
 func TestIsBlobBacklogHandlesNonAdvancingRange(t *testing.T) {
 	require.False(t, isBlobBacklog(1_000_000, 1_000_000))
 	require.False(t, isBlobBacklog(1_000_000, 999_999))
+}
+
+const (
+	tipFrom, tipTo         = uint64(1_000_000), uint64(1_010_000)
+	backlogFrom, backlogTo = uint64(1_000_000), uint64(1_720_000)
+)
+
+func TestBlobCompressWorkersLeavesTheLimiterAloneAtTheTip(t *testing.T) {
+	sema := semaphore.NewWeighted(caplinSnapshotBuildSemaWeight)
+	a := &Antiquary{snBuildSema: sema}
+
+	workers, release := a.blobCompressWorkers(tipFrom, tipTo)
+	defer release()
+
+	require.Equal(t, 1, workers)
+	require.True(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight),
+		"the tip does not build at full budget, so it must not hold the shared limiter")
+}
+
+// Holding the limiter is what stops a blob catch-up overlapping an EL snapshot build, since both
+// draw on the same estimate of the host.
+func TestBlobCompressWorkersHoldsTheLimiterWhileCatchingUp(t *testing.T) {
+	sema := semaphore.NewWeighted(caplinSnapshotBuildSemaWeight)
+	a := &Antiquary{snBuildSema: sema}
+
+	workers, release := a.blobCompressWorkers(backlogFrom, backlogTo)
+
+	require.Equal(t, estimate.CompressSnapshot.Workers(), workers)
+	require.False(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight),
+		"a parallel dump must hold the shared build limiter for its duration")
+
+	release()
+	require.True(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight), "the limiter must be given back")
+}
+
+// Retiring slowly beats not retiring: an unavailable limiter drops the dump to one worker rather
+// than skipping it, because the blob gate stays shut until the whole range lands.
+func TestBlobCompressWorkersFallsBackWhenTheLimiterIsTaken(t *testing.T) {
+	sema := semaphore.NewWeighted(caplinSnapshotBuildSemaWeight)
+	require.True(t, sema.TryAcquire(caplinSnapshotBuildSemaWeight))
+	a := &Antiquary{snBuildSema: sema}
+
+	workers, release := a.blobCompressWorkers(backlogFrom, backlogTo)
+	defer release()
+
+	require.Equal(t, 1, workers)
+}
+
+func TestBlobCompressWorkersWithoutALimiter(t *testing.T) {
+	a := &Antiquary{}
+
+	workers, release := a.blobCompressWorkers(backlogFrom, backlogTo)
+	defer release()
+
+	require.Equal(t, estimate.CompressSnapshot.Workers(), workers)
 }

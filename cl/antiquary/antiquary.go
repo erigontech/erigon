@@ -472,6 +472,32 @@ func (a *Antiquary) NotifyBlobBackfilled(completed bool) {
 	a.blobBackfilled.Store(completed)
 }
 
+const caplinSnapshotBuildSemaWeight int64 = 1
+
+// blobCompressWorkers picks the compression parallelism for a dump, with a func to release the
+// shared build limiter.
+//
+// One worker keeps steady-state retirement from competing with execution. Catching up may use the
+// full estimate, but only while holding the limiter that admits one kind of snapshot build at a
+// time, since EL retirement sizes its own workers from the same estimate of the host. A limiter it
+// cannot take drops the dump to one worker rather than skipping it: the blob gate stays shut until
+// the whole range lands, so retiring slowly beats not retiring.
+func (a *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
+	noop := func() {}
+	if !isBlobBacklog(from, to) {
+		return 1, noop
+	}
+	if a.snBuildSema == nil {
+		return estimate.CompressSnapshot.Workers(), noop
+	}
+	if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+		return 1, noop
+	}
+	return estimate.CompressSnapshot.Workers(), func() {
+		a.snBuildSema.Release(caplinSnapshotBuildSemaWeight)
+	}
+}
+
 // isBlobBacklog reports whether the pending range is a catch-up rather than the single chunk
 // retired at the tip, which is what decides how many workers the compression may use.
 func isBlobBacklog(from, to uint64) bool {
@@ -524,13 +550,8 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 
 	// now, we need to retire the blobs
-	// One worker keeps steady-state retirement from competing with execution, but a backlog
-	// compresses gigabyte segments for days that way, so catching up gets the same parallelism
-	// EL retirement takes during its initial cycle.
-	compressWorkers := 1
-	if isBlobBacklog(currentBlobsProgress, to) {
-		compressWorkers = estimate.CompressSnapshot.Workers()
-	}
+	compressWorkers, releaseBuildSlot := a.blobCompressWorkers(currentBlobsProgress, to)
+	defer releaseBuildSlot()
 	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, compressWorkers, blobCountFn, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
