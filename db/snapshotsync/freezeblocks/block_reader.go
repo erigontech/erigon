@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"sync"
 	"time"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -825,7 +826,7 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 		return nil, nil
 	}
 
-	txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf)
+	txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg)
 	if err != nil {
 		return nil, err
 	}
@@ -1023,7 +1024,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailableInView=%d", blockHeight, maxBlockNumInFiles)
 			return nil, nil, err
 		}
-		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
+		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1200,7 +1201,10 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 	return b, buf, nil
 }
 
-func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
+// txnBufPool holds record buffers for txsFromSnapshot, which each grow to the largest transaction read.
+var txnBufPool = sync.Pool{New: func() any { return new([]byte) }}
+
+func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment) (txs []types.Transaction, senders []common.Address, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.From(), txsSeg.To(), dbg.Stack()))
@@ -1227,11 +1231,14 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	}
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
+	bufp := txnBufPool.Get().(*[]byte)
+	defer txnBufPool.Put(bufp)
 	for i := range txCount {
 		if !gg.HasNext() {
 			return nil, nil, nil
 		}
-		buf, _ = gg.Next(buf[:0])
+		*bufp, _ = gg.Next((*bufp)[:0])
+		buf := *bufp
 		if len(buf) < 1+20 {
 			return nil, nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
 		}
