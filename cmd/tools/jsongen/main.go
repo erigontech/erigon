@@ -141,7 +141,6 @@ func (x *%[2]s) %[5]s(s *jsonstream.StackStream) error {
 // renamed since the last run still has its old name in a generated body, and on a first run the
 // method this writes is missing altogether; neither says anything about the tags. Any other
 // error does, and stops the run rather than generating from types that will not build.
-
 func load() (*packages.Package, error) {
 	cfg := &packages.Config{Mode: packages.NeedName | packages.NeedSyntax | packages.NeedTypes |
 		packages.NeedTypesInfo | packages.NeedImports | packages.NeedDeps}
