@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -40,7 +41,14 @@ type Trie struct {
 	ctx                    commitment.PatriciaContext
 	ctxFactory             commitment.TrieContextFactory
 	phaseBase              commitment.PatriciaContext
+	phaseReadMu            *sync.Mutex
 	phaseHook              func(phaseTask, *Op) error
+	coreApplyHook          func(phaseTask, *Op) error
+	coreEncodeHook         func(phaseTask, []byte) error
+	coreTask               *phaseTask
+	ownedPrefix            *eip8297.Bitpath
+	suppressRoot           bool
+	suppressBucketRecords  bool
 	rootKey                []byte
 	rootPath               eip8297.Bitpath
 	bucketMode             bool
@@ -79,6 +87,11 @@ func newBucketTrie(ctx commitment.PatriciaContext, key []byte) (*Trie, error) {
 func (t *Trie) SetTrieContextFactory(factory commitment.TrieContextFactory) { t.ctxFactory = factory }
 
 func (t *Trie) SetPhaseHook(hook func(phaseTask, *Op) error) { t.phaseHook = hook }
+
+func (t *Trie) SetCoreHooks(apply func(phaseTask, *Op) error, encode func(phaseTask, []byte) error) {
+	t.coreApplyHook = apply
+	t.coreEncodeHook = encode
+}
 
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.ctx = ctx
@@ -123,6 +136,9 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	t.rememberPrev(t.rootRecordKey(), t.root.prev)
 	t.deltas = nil
 	for i := range ops {
+		if err := t.coreApply(&ops[i]); err != nil {
+			return common.Hash{}, err
+		}
 		var err error
 		switch {
 		case len(ops[i].Drop) != 0:
@@ -210,13 +226,22 @@ func (t *Trie) write() error {
 	prev := make(map[string][]byte, len(t.dirtyRows)+len(t.bucketDirty)+1)
 	rows := make(map[string]*rowNode, len(t.dirtyRows))
 	for key, row := range t.dirtyRows {
+		if !t.ownsRecordKey(row.key) {
+			continue
+		}
 		rows[key] = row
 		prev[key] = t.previousRecord([]byte(key), row.prev)
 		if row.tombstone {
+			if err := t.coreEncode(row.key); err != nil {
+				return err
+			}
 			final[key] = nil
 			continue
 		}
 		record := row.record()
+		if err := t.coreEncode(row.key); err != nil {
+			return err
+		}
 		data, err := EncodeRecord(row.key, &record)
 		if err != nil {
 			return err
@@ -225,11 +250,14 @@ func (t *Trie) write() error {
 	}
 	rootKeyBytes := t.rootRecordKey()
 	rootKey := string(rootKeyBytes)
-	if t.rootDirty && (t.root.form != RowRoot || t.root.row == nil) {
+	if !t.suppressRoot && t.rootDirty && t.ownsRecordKey(rootKeyBytes) && (t.root.form != RowRoot || t.root.row == nil) {
 		var data []byte
 		if t.root.form != RowRoot || t.root.row != nil {
 			record := t.rootRecord()
 			var err error
+			if err := t.coreEncode(rootKeyBytes); err != nil {
+				return err
+			}
 			data, err = EncodeRecord(rootKeyBytes, &record)
 			if err != nil {
 				return err
@@ -239,6 +267,9 @@ func (t *Trie) write() error {
 		prev[rootKey] = t.previousRecord(rootKeyBytes, t.root.prev)
 	}
 	for key, bucketKey := range t.bucketDirty {
+		if t.suppressBucketRecords || !t.ownsRecordKey(bucketKey) {
+			continue
+		}
 		descriptor, ok, err := t.bucketDescriptor(bucketKey)
 		if err != nil {
 			return err
@@ -249,10 +280,16 @@ func (t *Trie) write() error {
 		}
 		prev[key] = old
 		if !ok {
+			if err := t.coreEncode(bucketKey); err != nil {
+				return err
+			}
 			final[key] = nil
 			continue
 		}
 		record := descriptor.record()
+		if err := t.coreEncode(bucketKey); err != nil {
+			return err
+		}
 		data, err := EncodeRecord(bucketKey, &record)
 		if err != nil {
 			return err

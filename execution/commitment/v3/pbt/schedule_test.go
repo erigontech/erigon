@@ -179,6 +179,168 @@ func TestTrieParallelPhaseAAttributesEveryOpOnce(t *testing.T) {
 	}
 }
 
+func TestTrieParallelCoreAttribution(t *testing.T) {
+	ctx := newTrieTestContext()
+	address := bytes.Repeat([]byte{0x71}, 20)
+	ops := []Op{
+		{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: testTrieValue(1)},
+		{Key: eip8297.TreeKeyCodeChunk([32]byte{3}, 0), Value: testTrieValue(2)},
+		{Key: eip8297.TreeKeyStorage(address, storageSlot(64)), Value: testTrieValue(3)},
+	}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	applied := make(map[string]int)
+	encoded := make(map[string]phaseTaskKind)
+	var mu sync.Mutex
+	trie := NewTrie(ctx)
+	trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) { return ctx, func() {} })
+	trie.SetCoreHooks(func(task phaseTask, op *Op) error {
+		if op == nil {
+			return nil
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		applied[string(op.Key)]++
+		if op.Key[0] == eip8297.StorageZone {
+			require.Contains(t, []phaseTaskKind{phaseBucket, phaseBucketSubtask}, task.kind)
+		} else {
+			require.Equal(t, phaseChain, task.kind)
+		}
+		return nil
+	}, func(task phaseTask, key []byte) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if _, exists := encoded[string(key)]; exists {
+			return fmt.Errorf("record %x encoded twice", key)
+		}
+		encoded[string(key)] = task.kind
+		return nil
+	})
+	_, err := trie.ProcessParallel(ops, 4)
+	require.NoError(t, err)
+	for _, op := range ops {
+		require.Equal(t, 1, applied[string(op.Key)])
+	}
+	require.Equal(t, phaseJoin, encoded[string(GlobalRootKey())])
+}
+
+func TestTrieParallelChainMutationRunsConcurrently(t *testing.T) {
+	addressA := bytes.Repeat([]byte{0x01}, 20)
+	addressB := bytes.Repeat([]byte{0x02}, 20)
+	for addressB[0] = 0; addressB[0] < 255 && eip8297.TreeKeyAccount(addressA, eip8297.BasicDataLeafKey)[1]>>4 == eip8297.TreeKeyAccount(addressB, eip8297.BasicDataLeafKey)[1]>>4; addressB[0]++ {
+	}
+	ops := []Op{
+		{Key: eip8297.TreeKeyAccount(addressA, eip8297.BasicDataLeafKey), Value: testTrieValue(1)},
+		{Key: eip8297.TreeKeyAccount(addressB, eip8297.BasicDataLeafKey), Value: testTrieValue(2)},
+	}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	ctx := newTrieTestContext()
+	var started atomic.Int32
+	seen := make(map[string]struct{})
+	var seenMu sync.Mutex
+	bothStarted := make(chan struct{})
+	trie := NewTrie(ctx)
+	trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) { return ctx, func() {} })
+	trie.SetCoreHooks(func(task phaseTask, op *Op) error {
+		if task.kind != phaseChain || op == nil {
+			return nil
+		}
+		name := string(eip8297.AppendBitPath(nil, &task.prefix))
+		seenMu.Lock()
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			if started.Add(1) == 2 {
+				close(bothStarted)
+			}
+		}
+		seenMu.Unlock()
+		select {
+		case <-bothStarted:
+			return nil
+		case <-time.After(time.Second):
+			return fmt.Errorf("chain mutation did not run concurrently")
+		}
+	}, nil)
+	_, err := trie.ProcessParallel(ops, 2)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), started.Load())
+}
+
+func TestTrieParallelWhaleMutationRunsConcurrently(t *testing.T) {
+	address := bytes.Repeat([]byte{0x77}, 20)
+	stem := eip8297.TreeKeyStorage(address, storageSlot(64))[:33]
+	ops := make([]Op, 0, 16)
+	for slot := range 8 {
+		ops = append(ops,
+			Op{Key: storageKeyWithSuffix(stem, 0x20, byte(slot)), Value: testTrieValue(byte(slot))},
+			Op{Key: storageKeyWithSuffix(stem, 0x40, byte(slot)), Value: testTrieValue(byte(slot + 8))},
+		)
+	}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	ctx := newTrieTestContext()
+	var started atomic.Int32
+	seen := make(map[string]struct{})
+	var seenMu sync.Mutex
+	bothStarted := make(chan struct{})
+	trie := NewTrie(ctx)
+	trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) { return ctx, func() {} })
+	trie.SetCoreHooks(func(task phaseTask, op *Op) error {
+		if task.kind != phaseBucketSubtask || op == nil {
+			return nil
+		}
+		name := string(eip8297.AppendBitPath(nil, &task.prefix))
+		seenMu.Lock()
+		if _, ok := seen[name]; !ok {
+			seen[name] = struct{}{}
+			if started.Add(1) == 2 {
+				close(bothStarted)
+			}
+		}
+		seenMu.Unlock()
+		select {
+		case <-bothStarted:
+			return nil
+		case <-time.After(time.Second):
+			return fmt.Errorf("whale mutation did not run concurrently")
+		}
+	}, nil)
+	_, err := trie.ProcessParallelWithThreshold(ops, 2, 2)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), started.Load())
+}
+
+func TestSubtreeTaskRejectsForeignOperations(t *testing.T) {
+	address := bytes.Repeat([]byte{0x46}, 20)
+	foreignAddress := bytes.Repeat([]byte{0x47}, 20)
+	key := eip8297.TreeKeyStorage(address, storageSlot(64))
+	bucketKey, err := bucketKeyForStorage(key)
+	require.NoError(t, err)
+	foreignKey := eip8297.TreeKeyStorage(foreignAddress, storageSlot(64))
+	ctx := newTrieTestContext()
+	requireProcess(t, ctx, []Op{{Key: key, Value: testTrieValue(1)}})
+	for name, op := range map[string]Op{
+		"insert": {Key: foreignKey, Value: testTrieValue(2)},
+		"delete": {Key: foreignKey},
+		"drop":   Drop(foreignKey[:33]),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := callSubtreeTask(t, ctx, phaseTask{kind: phaseBucket, key: string(bucketKey), ops: []Op{op}})
+			require.ErrorContains(t, err, "outside subtree prefix")
+		})
+	}
+}
+
+func callSubtreeTask(t *testing.T, ctx commitment.PatriciaContext, task phaseTask) (err error) {
+	t.Helper()
+	trie := NewTrie(ctx)
+	defer func() {
+		if recovered := recover(); recovered != nil {
+			err = fmt.Errorf("subtree task panicked: %v", recovered)
+		}
+	}()
+	_, err = trie.runSubtreeTask(context.Background(), ctx, task)
+	return err
+}
+
 func TestTrieParallelRoundFailureLeavesContextUnchanged(t *testing.T) {
 	address := bytes.Repeat([]byte{0x72}, 20)
 	account := eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)
@@ -496,12 +658,15 @@ func TestTrieParallelPhaseBDoesNotReadBucketRows(t *testing.T) {
 }
 
 func TestTrieParallelUpperReadsDoNotGrowWithTree(t *testing.T) {
+	target := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x01}, 20), eip8297.BasicDataLeafKey)
 	build := func(extra int) *trieTestContext {
 		ctx := newTrieTestContext()
-		target := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x01}, 20), eip8297.BasicDataLeafKey)
 		entries := []Op{{Key: target, Value: testTrieValue(1)}}
 		for i := range extra {
-			entries = append(entries, Op{Key: trieCodeKey(byte(i>>8), byte(i), byte(i+1)), Value: testTrieValue(byte(i + 2))})
+			address := make([]byte, 20)
+			address[18] = byte(i >> 8)
+			address[19] = byte(i)
+			entries = append(entries, Op{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: testTrieValue(byte(i + 2))})
 		}
 		sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
 		requireProcess(t, ctx, entries)
@@ -511,10 +676,70 @@ func TestTrieParallelUpperReadsDoNotGrowWithTree(t *testing.T) {
 		return ctx
 	}
 	small := build(1)
-	large := build(512)
-	require.Equal(t, 2, len(small.reads))
-	require.Equal(t, 2, len(large.reads))
-	require.Equal(t, len(small.reads), len(large.reads))
+	large := build(5000)
+	require.Equal(t, storedPathDepth(small, target)+2, len(small.reads))
+	require.Equal(t, storedPathDepth(large, target)+2, len(large.reads))
+}
+
+func storedPathDepth(ctx *trieTestContext, target []byte) int {
+	targetPath, err := keyPath(target)
+	if err != nil {
+		return 0
+	}
+	data := ctx.records[string(GlobalRootKey())]
+	if len(data) == 0 {
+		return 1
+	}
+	record, err := DecodeRecord(GlobalRootKey(), data)
+	if err != nil {
+		return 0
+	}
+	switch record.Form {
+	case LeafRoot:
+		return 1
+	case ExtRoot:
+		path := record.SelfExt
+		if firstDifference(&path, &targetPath) < path.BitLen {
+			return 1
+		}
+		rowPath := path.Slice(0, (path.BitLen/4)*4)
+		return 1 + storedRowPathDepth(ctx, rowPath, &targetPath)
+	case RowRoot:
+		return 1 + storedRowPathDepth(ctx, eip8297.Bitpath{}, &targetPath)
+	default:
+		return 0
+	}
+}
+
+func storedRowPathDepth(ctx *trieTestContext, rowPath eip8297.Bitpath, target *eip8297.Bitpath) int {
+	key, err := rowKeyForPath(&rowPath)
+	if err != nil {
+		return 0
+	}
+	data := ctx.records[string(key)]
+	if len(data) == 0 {
+		return 0
+	}
+	record, err := DecodeRecord(key, data)
+	if err != nil || record.Form != RowRoot {
+		return 0
+	}
+	row := rowFromRecord(rowPath, key, data, &record)
+	slot := slotAt(target, rowPath.BitLen)
+	cell := row.cell(slot)
+	if cell.Kind != BranchCell {
+		return 1
+	}
+	full := branchPath(row, slot, cell)
+	if firstDifference(&full, target) < full.BitLen {
+		return 1
+	}
+	split := branchSplit(row, slot, cell)
+	childPath, err := rowChildPath(row, slot, cell.Prefix, split)
+	if err != nil {
+		return 1
+	}
+	return 1 + storedRowPathDepth(ctx, childPath, target)
 }
 
 func TestTrieParallelParityWithWhaleBuckets(t *testing.T) {
@@ -546,8 +771,14 @@ func TestTrieParallelParityWithWhaleBuckets(t *testing.T) {
 func TestTrieParallelWhaleSubtasksRunConcurrently(t *testing.T) {
 	address := bytes.Repeat([]byte{0x77}, 20)
 	ops := make([]Op, 0, 16)
-	for slot := byte(64); slot < 80; slot++ {
-		ops = append(ops, Op{Key: eip8297.TreeKeyStorage(address, storageSlot(slot)), Value: testTrieValue(slot)})
+	stem := eip8297.TreeKeyStorage(address, storageSlot(64))[:33]
+	for slot := range 8 {
+		key := storageKeyWithSuffix(stem, 0x20, byte(slot))
+		ops = append(ops, Op{Key: key, Value: testTrieValue(byte(slot))})
+	}
+	for slot := range 8 {
+		key := storageKeyWithSuffix(stem, 0x40, byte(slot))
+		ops = append(ops, Op{Key: key, Value: testTrieValue(byte(slot + 8))})
 	}
 	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
 	ctx := newTrieTestContext()

@@ -34,6 +34,14 @@ func isStoragePath(path *eip8297.Bitpath) bool {
 }
 
 func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (common.Hash, error) {
+	if t.roundPrev == nil {
+		t.roundPrev = make(map[string][]byte)
+		t.bucketDirty = make(map[string][]byte)
+		if _, err := t.loadRoot(); err != nil {
+			return common.Hash{}, err
+		}
+		t.rememberPrev(t.rootRecordKey(), t.root.prev)
+	}
 	t.upperOnly = true
 	defer func() { t.upperOnly = false }()
 	for i := range ops {
@@ -60,20 +68,24 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 	sort.Strings(keys)
 	for _, key := range keys {
 		result := changed[key]
-		bucketPath, err := bucketPathForKey([]byte(key))
-		if err != nil {
-			return common.Hash{}, err
+		prefix := result.prefix
+		if prefix.BitLen == 0 {
+			var err error
+			prefix, err = bucketPathForKey([]byte(key))
+			if err != nil {
+				return common.Hash{}, err
+			}
 		}
-		if _, err := t.removeSubtree(&bucketPath); err != nil {
-			return common.Hash{}, fmt.Errorf("remove upper bucket %x: %w", []byte(key), err)
+		if _, err := t.removeSubtree(&prefix); err != nil {
+			return common.Hash{}, fmt.Errorf("remove upper subtree %x: %w", []byte(key), err)
 		}
 		if result.present {
-			subtree, err := subtreeForDescriptor([]byte(key), result.descriptor)
+			subtree, err := subtreeForDescriptorAt(prefix, result.descriptor)
 			if err != nil {
-				return common.Hash{}, fmt.Errorf("descriptor bucket %x: %w", []byte(key), err)
+				return common.Hash{}, fmt.Errorf("descriptor subtree %x: %w", []byte(key), err)
 			}
 			if err := t.insertSubtree(subtree); err != nil {
-				return common.Hash{}, fmt.Errorf("insert upper bucket %x: %w", []byte(key), err)
+				return common.Hash{}, fmt.Errorf("insert upper subtree %x: %w", []byte(key), err)
 			}
 		}
 		if err := t.refreshRouting(); err != nil {
@@ -90,11 +102,7 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 	return t.rootHash()
 }
 
-func subtreeForDescriptor(key []byte, descriptor bucketDescriptor) (subtreeCell, error) {
-	bucketPath, err := bucketPathForKey(key)
-	if err != nil {
-		return subtreeCell{}, err
-	}
+func subtreeForDescriptorAt(prefix eip8297.Bitpath, descriptor bucketDescriptor) (subtreeCell, error) {
 	switch descriptor.form {
 	case LeafRoot:
 		path, err := keyPath(descriptor.leaf.Key)
@@ -113,11 +121,87 @@ func subtreeForDescriptor(key []byte, descriptor bucketDescriptor) (subtreeCell,
 		}
 		return subtreeCell{path: path, cell: branchCell(eip8297.Bitpath{}, result.Left, result.Right)}, nil
 	case ExtRoot:
-		path := bucketPath
+		path := prefix
 		path.Append(&descriptor.self)
 		return subtreeCell{path: path, cell: branchCell(eip8297.Bitpath{}, descriptor.left, descriptor.right)}, nil
 	default:
 		return subtreeCell{}, fmt.Errorf("unknown bucket form %d", descriptor.form)
+	}
+}
+
+func (t *Trie) descriptorAtPrefix(prefix *eip8297.Bitpath) (bucketDescriptor, bool, error) {
+	root, err := t.loadRoot()
+	if err != nil {
+		return bucketDescriptor{}, false, err
+	}
+	switch root.form {
+	case LeafRoot:
+		path, err := keyPath(root.leaf.Key)
+		if err != nil {
+			return bucketDescriptor{}, false, err
+		}
+		if pathHasPrefix(&path, prefix) {
+			return bucketDescriptor{form: LeafRoot, leaf: root.leaf}, true, nil
+		}
+		return bucketDescriptor{}, false, nil
+	case ExtRoot:
+		if pathHasPrefix(&root.self, prefix) {
+			return bucketDescriptor{form: ExtRoot, self: root.self.Slice(prefix.BitLen, root.self.BitLen), left: root.left, right: root.right}, true, nil
+		}
+		if !pathHasPrefix(prefix, &root.self) {
+			return bucketDescriptor{}, false, nil
+		}
+		row, err := t.extTopRow(root)
+		if err != nil {
+			return bucketDescriptor{}, false, err
+		}
+		return t.descriptorAtRow(row, prefix)
+	case RowRoot:
+		if root.row == nil {
+			return bucketDescriptor{}, false, nil
+		}
+		return t.descriptorAtRow(root.row, prefix)
+	default:
+		return bucketDescriptor{}, false, fmt.Errorf("unknown root form %d", root.form)
+	}
+}
+
+func (t *Trie) descriptorAtRow(row *rowNode, prefix *eip8297.Bitpath) (bucketDescriptor, bool, error) {
+	if row.path.BitLen == prefix.BitLen && row.path == *prefix {
+		return bucketDescriptor{form: RowRoot, row: row}, true, nil
+	}
+	if !pathHasPrefix(prefix, &row.path) {
+		return bucketDescriptor{}, false, nil
+	}
+	slot := slotAt(prefix, row.path.BitLen)
+	cell := row.cell(slot)
+	switch cell.Kind {
+	case EmptyCell:
+		return bucketDescriptor{}, false, nil
+	case LeafCell:
+		path, err := keyPath(cell.Key)
+		if err != nil {
+			return bucketDescriptor{}, false, err
+		}
+		if pathHasPrefix(&path, prefix) {
+			return bucketDescriptor{form: LeafRoot, leaf: cell.Cell}, true, nil
+		}
+		return bucketDescriptor{}, false, nil
+	case BranchCell:
+		full := branchPath(row, slot, cell)
+		if pathHasPrefix(&full, prefix) {
+			return bucketDescriptor{form: ExtRoot, self: full.Slice(prefix.BitLen, full.BitLen), left: cell.Left, right: cell.Right}, true, nil
+		}
+		if !pathHasPrefix(prefix, &full) {
+			return bucketDescriptor{}, false, nil
+		}
+		child, err := t.loadBranchChild(row, slot)
+		if err != nil {
+			return bucketDescriptor{}, false, err
+		}
+		return t.descriptorAtRow(child, prefix)
+	default:
+		return bucketDescriptor{}, false, fmt.Errorf("unknown cell form %d", cell.Kind)
 	}
 }
 

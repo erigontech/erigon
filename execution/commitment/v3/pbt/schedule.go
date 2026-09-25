@@ -51,6 +51,7 @@ type phaseTask struct {
 	kind         phaseTaskKind
 	owner        phaseTaskOwner
 	key          string
+	prefix       eip8297.Bitpath
 	zone         byte
 	nibble       byte
 	ops          []Op
@@ -111,8 +112,8 @@ func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
 		bucketList = append(bucketList, key)
 	}
 	sort.Slice(bucketList, func(i, j int) bool {
-		if len(bucketList[i]) != len(bucketList[j]) {
-			return len(bucketList[i]) > len(bucketList[j])
+		if len(bucketOps[string(bucketList[i])]) != len(bucketOps[string(bucketList[j])]) {
+			return len(bucketOps[string(bucketList[i])]) > len(bucketOps[string(bucketList[j])])
 		}
 		return bytes.Compare(bucketList[i], bucketList[j]) < 0
 	})
@@ -134,36 +135,56 @@ func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
 		}
 		index := len(tasks)
 		chainIndexes = append(chainIndexes, index)
-		tasks = append(tasks, phaseTask{kind: phaseChain, owner: ownerChain, zone: key[0], nibble: key[1], ops: chainOps[key], resultIndex: index})
+		tasks = append(tasks, phaseTask{kind: phaseChain, owner: ownerChain, zone: key[0], nibble: key[1], prefix: chainPrefix(key[0], key[1]), ops: chainOps[key], resultIndex: index})
 	}
 	bucketIndex := make(map[string]int, len(bucketList))
 	for _, key := range bucketList {
 		bucketKey := string(key)
 		bucket := bucketOps[bucketKey]
-		if threshold > 0 && len(bucket) >= threshold {
-			parts := min(4, max(2, len(bucket)/threshold))
-			dependencies := make([]int, 0, parts)
-			for part := range parts {
-				partOps := make([]Op, 0, (len(bucket)+parts-1)/parts)
-				for i := part; i < len(bucket); i += parts {
-					partOps = append(partOps, bucket[i])
+		if threshold > 0 && len(bucket) >= threshold && !hasDrop(bucket) {
+			groups := make(map[string][]Op)
+			prefixes := make(map[string]eip8297.Bitpath)
+			bucketPath, err := bucketPathForKey(key)
+			if err != nil {
+				return phasePlan{}, err
+			}
+			for _, op := range bucket {
+				path, err := keyPath(op.Key)
+				if err != nil {
+					return phasePlan{}, err
 				}
+				prefix := path.Slice(0, bucketPath.BitLen+4)
+				name := string(eip8297.AppendBitPath(nil, &prefix))
+				groups[name] = append(groups[name], op)
+				prefixes[name] = prefix
+			}
+			groupNames := make([]string, 0, len(groups))
+			for name := range groups {
+				groupNames = append(groupNames, name)
+			}
+			sort.Strings(groupNames)
+			dependencies := make([]int, 0, len(groupNames))
+			for _, name := range groupNames {
 				index := len(tasks)
 				dependencies = append(dependencies, index)
-				tasks = append(tasks, phaseTask{kind: phaseBucketSubtask, owner: ownerBucket, key: bucketKey, ops: partOps, resultIndex: index})
+				tasks = append(tasks, phaseTask{kind: phaseBucketSubtask, owner: ownerBucket, key: bucketKey, prefix: prefixes[name], ops: groups[name], resultIndex: index})
 			}
 			bucketIndex[bucketKey] = len(tasks)
-			tasks = append(tasks, phaseTask{kind: phaseBucket, owner: ownerBucket, key: bucketKey, ops: bucket, dependencies: dependencies})
+			tasks = append(tasks, phaseTask{kind: phaseBucket, owner: ownerBucket, key: bucketKey, prefix: bucketPath, dependencies: dependencies, resultIndex: len(tasks)})
 			continue
 		}
 		bucketIndex[bucketKey] = len(tasks)
-		tasks = append(tasks, phaseTask{kind: phaseBucket, owner: ownerBucket, key: bucketKey, ops: bucket})
+		bucketPath, err := bucketPathForKey(key)
+		if err != nil {
+			return phasePlan{}, err
+		}
+		tasks = append(tasks, phaseTask{kind: phaseBucket, owner: ownerBucket, key: bucketKey, prefix: bucketPath, ops: bucket, resultIndex: len(tasks)})
 	}
 	for _, key := range chainKeys {
 		if key[0] != eip8297.StorageZone {
 			continue
 		}
-		task := phaseTask{kind: phaseChain, owner: ownerChain, zone: key[0], nibble: key[1]}
+		task := phaseTask{kind: phaseChain, owner: ownerChain, zone: key[0], nibble: key[1], prefix: chainPrefix(key[0], key[1]), resultIndex: len(tasks)}
 		for _, bucket := range bucketList {
 			if bucket[1]>>4 == key[1] {
 				task.dependencies = append(task.dependencies, bucketIndex[string(bucket)])
@@ -173,8 +194,21 @@ func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
 		chainIndexes = append(chainIndexes, len(tasks))
 		tasks = append(tasks, task)
 	}
-	tasks = append(tasks, phaseTask{kind: phaseJoin, owner: ownerJoin, dependencies: chainIndexes})
+	tasks = append(tasks, phaseTask{kind: phaseJoin, owner: ownerJoin, dependencies: chainIndexes, resultIndex: len(tasks)})
 	return phasePlan{tasks: tasks}, nil
+}
+
+func chainPrefix(zone, nibble byte) eip8297.Bitpath {
+	return eip8297.PathFromBits([]byte{zone, nibble << 4}, 12)
+}
+
+func hasDrop(ops []Op) bool {
+	for _, op := range ops {
+		if len(op.Drop) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func runPhasePlan(ctx context.Context, workers int, plan phasePlan, run func(phaseTask) error) error {
