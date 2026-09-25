@@ -199,8 +199,7 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 		collectorAcc: kvmetrics.NewDomainMetrics(),
 	}
 	w.runnable.Store(true)
-	w.ibs = state.New(w.stateReader)
-	w.ibs.SetStorageOverrides(w.engine)
+	w.ibs = state.New(w.stateReader, state.WithStorageOverrides(w.engine))
 	return w
 }
 
@@ -488,8 +487,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 	if rw.ibs != nil {
 		rw.ibs.Close()
 	}
-	rw.ibs = state.New(rw.stateReader)
-	rw.ibs.SetStorageOverrides(rw.engine)
+	rw.ibs = state.New(rw.stateReader, state.WithStorageOverrides(rw.engine))
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:

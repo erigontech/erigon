@@ -108,8 +108,7 @@ func NewHistoricalTraceWorker(
 		vmCfg:       &vm.Config{},
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
-	ie.ibs = state.New(ie.stateReader)
-	ie.ibs.SetStorageOverrides(execArgs.Engine)
+	ie.ibs = state.New(ie.stateReader, state.WithStorageOverrides(execArgs.Engine))
 	return ie
 }
 

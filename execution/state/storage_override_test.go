@@ -8,7 +8,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -112,8 +111,13 @@ func TestStorageOverrideEndsWithTheTransaction(t *testing.T) {
 	override := *uint256.MustFromHex("0xf6a7831804efd2cd0a")
 
 	for name, end := range map[string]func(*state.IntraBlockState) error{
-		"FinalizeTx": func(ibs *state.IntraBlockState) error {
-			return ibs.FinalizeTx(&chain.Rules{}, state.NewNoopWriter())
+		"next transaction": func(ibs *state.IntraBlockState) error {
+			ibs.SetTxContext(35547779, 197)
+			return nil
+		},
+		"detach": func(ibs *state.IntraBlockState) error {
+			ibs.SetStorageOverrides(nil)
+			return nil
 		},
 		"Reset": func(ibs *state.IntraBlockState) error {
 			ibs.Reset()

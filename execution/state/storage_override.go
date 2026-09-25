@@ -26,20 +26,29 @@ type StorageOverrider interface {
 	StorageOverrides(blockNum uint64, txIndex int) []StorageOverride
 }
 
+// Option configures an IntraBlockState at construction.
+type Option func(*IntraBlockState)
+
+// WithStorageOverrides attaches o at construction; see SetStorageOverrides.
+func WithStorageOverrides(o StorageOverrider) Option {
+	return func(sdb *IntraBlockState) { sdb.storageOverrider = o }
+}
+
 // SetStorageOverrides attaches the overrider SetTxContext consults for every
 // transaction; nil detaches it. It matches on block and tx index only, so attach
 // it only to an IBS that executes canonical transactions: a user call run at the
-// same position would pick the overrides up too. Survives Reset.
+// same position would pick the overrides up too. Changing it drops the overrides
+// already installed for the current transaction. Survives Reset.
 func (sdb *IntraBlockState) SetStorageOverrides(o StorageOverrider) {
 	sdb.storageOverrider = o
+	sdb.storageOverrides = nil
 }
 
 // SetStorageOverride overrides the committed value of one storage slot for the
 // current transaction, so a replay can reproduce storage a canonical chain
 // committed through a cache bug in the client that sealed it. The transaction
 // reads the override, prices SSTORE against it and skips writes equal to it;
-// its own writes shadow it. Cleared at the transaction boundary: SetTxContext,
-// FinalizeTx and Reset.
+// its own writes shadow it. Replaced at the next SetTxContext, cleared by Reset.
 func (sdb *IntraBlockState) SetStorageOverride(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
 	if sdb.storageOverrides == nil {
 		sdb.storageOverrides = map[storageOverrideKey]uint256.Int{}

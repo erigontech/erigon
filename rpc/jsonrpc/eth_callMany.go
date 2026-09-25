@@ -157,8 +157,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 		return nil, err
 	}
 
-	st := state.New(stateReader)
-	st.SetStorageOverrides(api.engine())
+	st := state.New(stateReader, state.WithStorageOverrides(api.engine()))
 	defer st.Close()
 
 	header := block.HeaderNoCopy()

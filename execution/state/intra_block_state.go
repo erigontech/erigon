@@ -240,7 +240,7 @@ type sdProbeEntry struct {
 }
 
 // Create a new state from a given trie
-func New(stateReader StateReader) *IntraBlockState {
+func New(stateReader StateReader, opts ...Option) *IntraBlockState {
 	ibs := &IntraBlockState{
 		stateReader:       stateReader,
 		stateObjects:      map[accounts.Address]*stateObject{},
@@ -256,6 +256,9 @@ func New(stateReader StateReader) *IntraBlockState {
 		dep:               UnknownDep,
 	}
 	ibs.revisions.init()
+	for _, opt := range opts {
+		opt(ibs)
+	}
 	return ibs
 }
 
@@ -2610,7 +2613,6 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
-	sdb.storageOverrides = nil
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			if _, err := sdb.getStateObject(addr, true); err != nil {

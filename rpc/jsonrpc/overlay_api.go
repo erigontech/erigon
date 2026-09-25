@@ -165,8 +165,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 		return nil, err
 	}
 
-	statedb := state.New(stateReader)
-	statedb.SetStorageOverrides(api.engine())
+	statedb := state.New(stateReader, state.WithStorageOverrides(api.engine()))
 	defer statedb.Close()
 
 	header := block.HeaderNoCopy()
