@@ -61,18 +61,17 @@ const (
 	pbinBranchTag = eip8297.BranchTag
 )
 
-type pbinBitpath = eip8297.Bitpath
-type pbinHashFn = eip8297.HashFn
-type pbinDigestCache = eip8297.DigestCache
-type pbinChunkScratch = eip8297.ChunkScratch
+type (
+	pbinBitpath      = eip8297.Bitpath
+	pbinHashFn       = eip8297.HashFn
+	pbinDigestCache  = eip8297.DigestCache
+	pbinChunkScratch = eip8297.ChunkScratch
+)
 
 var (
-	errPBinNonCanonicalPad  = eip8297.ErrNonCanonicalPad
-	errPBinBalanceOverflow  = eip8297.ErrBalanceOverflow
-	errPBinCodeSizeOverflow = eip8297.ErrCodeSizeOverflow
-	errPBinLeafValue        = eip8297.ErrLeafValue
-	pbinEmptyTreeHash       = eip8297.EmptyTreeHash
-	pbinSelectedSum         pbinHashFn
+	errPBinNonCanonicalPad = eip8297.ErrNonCanonicalPad
+	pbinEmptyTreeHash      = eip8297.EmptyTreeHash
+	pbinSelectedSum        pbinHashFn
 )
 
 func pbinPathFromBytes(b []byte) pbinBitpath              { return eip8297.PathFromBytes(b) }
@@ -85,44 +84,38 @@ func pbinEncodeBitPath(p *pbinBitpath) []byte             { return eip8297.Encod
 func pbinDecodeBitPath(buf []byte) (pbinBitpath, error)   { return eip8297.DecodeBitPath(buf) }
 
 func pbinZoneKeyLength(zone byte) (int, bool) { return eip8297.ZoneKeyLength(zone) }
-func pbinLeafSuffixBits(zone byte, depth int) (int, error) {
-	return eip8297.LeafSuffixBits(zone, depth)
-}
-func pbinRightAlign32(b []byte) [32]byte { return eip8297.RightAlign32(b) }
 func pbinTreeKey(zone byte, position []byte, subIndex byte) []byte {
 	return eip8297.TreeKey(zone, position, subIndex)
 }
+
 func pbinTreeKeyAccount(addr []byte, subIndex byte) []byte {
 	return eip8297.TreeKeyAccount(addr, subIndex)
 }
+
 func pbinTreeKeyStorage(addr, slot []byte) []byte {
 	return eip8297.TreeKeyStorage(addr, slot)
 }
+
 func pbinTreeKeyCodeChunk(codeHash common.Hash, chunkID int) []byte {
 	return eip8297.TreeKeyCodeChunk(codeHash, chunkID)
 }
-func pbinSlotInHeader(slot *[32]byte) bool { return eip8297.SlotInHeader(slot) }
-
 func pbinKeyHasher() keyHasher                   { return keyHasher(eip8297.KeyHasher()) }
 func pbinKeyHasherWith(sum pbinHashFn) keyHasher { return keyHasher(eip8297.KeyHasherWith(sum)) }
 
 func pbinEncodeBasicData(nonce uint64, balance *uint256.Int, codeSize uint64) ([pbinValueLength]byte, error) {
 	return eip8297.EncodeBasicData(nonce, balance, codeSize)
 }
+
 func pbinCodeHashValue(codeHash common.Hash) [pbinValueLength]byte {
 	return eip8297.CodeHashValue(codeHash)
 }
+
 func pbinIsEmptyCodeHash(codeHash common.Hash) bool          { return eip8297.IsEmptyCodeHash(codeHash) }
 func pbinIsDelegation(code []byte) bool                      { return eip8297.IsDelegation(code) }
 func pbinEncodeDelegation(code []byte) [pbinValueLength]byte { return eip8297.EncodeDelegation(code) }
+
 func pbinEncodeStorageValue(value []byte) [pbinValueLength]byte {
 	return eip8297.EncodeStorageValue(value)
-}
-func pbinEncodeLeafValue(treeKey []byte, val *[pbinValueLength]byte) ([]byte, error) {
-	return eip8297.EncodeLeafValue(treeKey, val)
-}
-func pbinDecodeLeafValue(treeKey []byte, enc []byte) ([pbinValueLength]byte, error) {
-	return eip8297.DecodeLeafValue(treeKey, enc)
 }
 
 func pbinChunkifyCode(code []byte) [][pbinValueLength]byte { return eip8297.ChunkifyCode(code) }
