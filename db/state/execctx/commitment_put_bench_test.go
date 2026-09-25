@@ -88,7 +88,7 @@ func BenchmarkCommitmentPut(b *testing.B) {
 	b.Run("per-record", func(b *testing.B) {
 		run(b, func(sd *execctx.SharedDomains, tx kv.TemporalTx) error {
 			for _, w := range writes {
-				if err := sd.DomainPutCommitmentDiff(tx, w.Key, w.Data, 1, w.Prev, nil); err != nil {
+				if err := sd.DomainPutCommitmentDiff(kv.CommitmentDomain, tx, w.Key, w.Data, 1, w.Prev, nil); err != nil {
 					return err
 				}
 			}

@@ -245,7 +245,7 @@ func TestCommitmentReadSharesItsOnlyCopyWithTheBranchCache(t *testing.T) {
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer roTx.Rollback()
-	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
 	branchCache.Clear()
 	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
 	require.NoError(t, err)
@@ -286,7 +286,7 @@ func TestV3SharedDomainsLeaveBranchCacheEmpty(t *testing.T) {
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	branchCache := rwTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache := rwTx.AggTx().(commitment.BranchCacheProvider).BranchCache(kv.CommitmentDomain)
 	branchCache.Clear()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV3

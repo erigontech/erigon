@@ -86,7 +86,7 @@ func TestPutCommitmentBranchesMatchesPerRecordPuts(t *testing.T) {
 				continue
 			}
 			for _, d := range cloneDeltas(round.deltas) {
-				require.NoError(t, sd.DomainPutCommitmentDiff(tx, d.Key, d.Data, round.txNum, d.Prev, &diff))
+				require.NoError(t, sd.DomainPutCommitmentDiff(kv.CommitmentDomain, tx, d.Key, d.Data, round.txNum, d.Prev, &diff))
 			}
 		}
 		latest := make(map[string][]byte, len(seed))
@@ -130,7 +130,7 @@ func TestPutCommitmentBranchesResolvesNilPrevAfterEarlierWrites(t *testing.T) {
 			}
 			for _, part := range round.parts {
 				for _, d := range part {
-					require.NoError(t, sd.DomainPutCommitmentDiff(tx, d.Key, d.Data, round.txNum, d.Prev, nil))
+					require.NoError(t, sd.DomainPutCommitmentDiff(kv.CommitmentDomain, tx, d.Key, d.Data, round.txNum, d.Prev, nil))
 				}
 			}
 		}
@@ -167,7 +167,7 @@ func TestFlushPendingDeltasLandInTheBlockChangeset(t *testing.T) {
 			})
 			require.NoError(t, sd.FlushPendingUpdates(t.Context(), tx))
 		} else {
-			restore := sd.SwapCommitmentDiffLocked(block)
+			restore := sd.SwapCommitmentDiffLocked(kv.CommitmentDomain, block)
 			for _, d := range cloneDeltas(next) {
 				require.NoError(t, sd.DomainPut(kv.CommitmentDomain, tx, d.Key, d.Data, 2, d.Prev))
 			}

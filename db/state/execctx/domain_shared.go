@@ -378,7 +378,11 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 			return nil, ErrBinCommitmentUnsupported
 		}
 		commitmentDomains = []kv.Domain{kv.CommitmentDomain}
-		o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
+		if statecfg.ExperimentalCommitmentV3 {
+			o.trieCfg.Variant = commitment.VariantCommitmentV3
+		} else {
+			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
+		}
 	}
 	commitmentDomain := commitmentDomains[0]
 	if o.commitmentDomain != nil {

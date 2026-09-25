@@ -109,6 +109,37 @@ func TestPBinHexOnlyCommitmentDemotesParallel(t *testing.T) {
 	require.Equal(t, commitment.VariantHexPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
 }
 
+func TestSharedDomainsHexOnlyUsesConfiguredV3(t *testing.T) {
+	originalV3 := statecfg.ExperimentalCommitmentV3
+	originalParallel := statecfg.ExperimentalParallelCommitment
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.ExperimentalParallelCommitment = originalParallel
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithHexCommitmentOnly())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	require.Equal(t, commitment.VariantCommitmentV3, sd.GetCommitmentCtx().Trie().Variant())
+}
+
 func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 	originalBin := statecfg.ExperimentalBinCommitment
 	originalHexBin := statecfg.ExperimentalHexBinCommitment
