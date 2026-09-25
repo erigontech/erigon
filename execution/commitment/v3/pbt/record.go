@@ -706,13 +706,6 @@ func rootSuffixBits(k recordKey, data []byte) (int16, error) {
 	return int16(keyBytes * 8), nil
 }
 
-func rootStart(k recordKey) int {
-	if k.global {
-		return 0
-	}
-	return int(k.path.BitLen)
-}
-
 func pathByte(path *eip8297.Bitpath, byteIndex int) byte {
 	var out byte
 	for i := range 8 {
