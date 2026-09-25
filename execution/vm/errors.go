@@ -173,6 +173,26 @@ const (
 	VMErrorCodeUnknown = math.MaxInt - 1
 )
 
+var exceptionalErrs = []error{
+	ErrInvalidSubroutineEntry, ErrOutOfGas, ErrCodeStoreOutOfGas, ErrDepth,
+	ErrInsufficientBalance, ErrContractAddressCollision, ErrMaxCodeSizeExceeded,
+	ErrMaxInitCodeSizeExceeded, ErrInvalidJump, ErrWriteProtection,
+	ErrReturnDataOutOfBounds, ErrGasUintOverflow, ErrInvalidRetsub,
+	ErrReturnStackExceeded, ErrInvalidCode, ErrNonceUintOverflow,
+}
+
+func isRevert(err error) bool {
+	if !errors.Is(err, ErrExecutionReverted) {
+		return false
+	}
+	for _, exceptional := range exceptionalErrs {
+		if errors.Is(err, exceptional) {
+			return false
+		}
+	}
+	return true
+}
+
 func vmErrorCodeFromErr(err error) int {
 	switch {
 	case errors.Is(err, ErrWriteProtection):

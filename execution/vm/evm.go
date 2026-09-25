@@ -38,6 +38,35 @@ import (
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 )
 
+// frameIdentity resolves the address a frame acts as and its caller: CALLCODE
+// and DELEGATECALL run foreign code under the calling frame's own identity.
+func frameIdentity(typ OpCode, caller, callerAddress, addr accounts.Address) (self, frameCaller accounts.Address) {
+	switch typ {
+	case CALLCODE:
+		return caller, caller
+	case DELEGATECALL:
+		return caller, callerAddress
+	default:
+		return addr, caller
+	}
+}
+
+func (evm *EVM) enterFrame(readOnly bool) (restoreReadonly bool) {
+	restoreReadonly = readOnly && !evm.readOnly
+	if restoreReadonly {
+		evm.readOnly = true
+	}
+	evm.depth++
+	return restoreReadonly
+}
+
+func (evm *EVM) exitFrame(restoreReadonly bool) {
+	evm.depth--
+	if restoreReadonly {
+		evm.readOnly = false
+	}
+}
+
 func (evm *EVM) precompile(addr accounts.Address) (PrecompiledContract, bool) {
 	p, ok := evm.precompiles[addr]
 	return p, ok
@@ -347,6 +376,14 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		}()
 	}
 
+	// The interpreter refuses a value-bearing CALL from a static frame while
+	// charging gas, so only a precompile calling back in through ctx.EVM
+	// reaches here. Refuse above the tracer and BAL hooks, or the refusal
+	// records an EIP-7928 address access the opcode path never produces.
+	if evm.readOnly && typ == CALL && !value.IsZero() {
+		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
+	}
+
 	p, isPrecompile := evm.precompile(addr)
 	var code []byte
 	if !isPrecompile {
@@ -446,7 +483,33 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	// It is allowed to call precompiles, even via delegatecall
 	switch {
 	case isPrecompile:
-		ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
+		if sp, ok := p.(StatefulPrecompile); ok {
+			actingAs, frameCaller := frameIdentity(typ, caller, callerAddress, addr)
+			ctx := &PrecompileContext{
+				Self:     addr,
+				ActingAs: actingAs,
+				Caller:   frameCaller,
+				ReadOnly: evm.readOnly || typ == STATICCALL,
+				EVM:      evm,
+				Value:    value,
+			}
+			frameRemaining, frameUsed := gasRemaining, gasUsed
+			pgas := &PrecompileGas{remaining: &frameRemaining, used: &frameUsed, tracer: evm.Config().Tracer, amsterdam: evm.chainRules.IsAmsterdam}
+			func() {
+				// Deferred: a recovered panic must not leave a live handle.
+				defer pgas.release()
+				defer func() { gasRemaining, gasUsed = frameRemaining, frameUsed }()
+				defer evm.exitFrame(evm.enterFrame(ctx.ReadOnly))
+				ret, err = sp.RunStateful(input, pgas, ctx)
+			}()
+			// Frame classification compares the bare sentinel: a wrapped
+			// revert would burn the frame's gas and drop the return data.
+			if err != nil && isRevert(err) {
+				err = ErrExecutionReverted
+			}
+		} else {
+			ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
+		}
 	case len(code) == 0:
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
@@ -459,32 +522,13 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 		if err != nil {
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
-		var contract Contract
-		switch typ {
-		case CALLCODE:
-			contract = Contract{
-				caller:   caller,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
-		case DELEGATECALL:
-			contract = Contract{
-				caller:   callerAddress,
-				addr:     caller,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
-		default:
-			contract = Contract{
-				caller:   caller,
-				addr:     addr,
-				value:    value,
-				Code:     code,
-				CodeHash: codeHash,
-			}
+		self, frameCaller := frameIdentity(typ, caller, callerAddress, addr)
+		contract := Contract{
+			caller:   frameCaller,
+			addr:     self,
+			value:    value,
+			Code:     code,
+			CodeHash: codeHash,
 		}
 		readOnly := false
 		if typ == STATICCALL {
@@ -627,6 +671,11 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
+
+	// Write protection, for the same reason as in evm.call.
+	if evm.readOnly {
+		return nil, accounts.Address{}, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
+	}
 
 	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		defer func() {
@@ -794,6 +843,11 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 // otherwise the usual sender-and-nonce-hash is used (CREATE).
 // DESCRIBED: docs/programmers_guide/guide.md#nonce
 func (evm *EVM) Create(caller accounts.Address, code []byte, gas mdgas.MdGas, endowment uint256.Int, salt *uint256.Int, bailout bool) (ret []byte, contractAddr accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
+	// Before the nonce read below: deriving the address touches state.
+	if evm.readOnly {
+		return nil, accounts.NilAddress, gas, mdgas.MdGasUsage{}, ErrWriteProtection
+	}
+
 	ch := &codeAndHash{code: code}
 	op := CREATE
 	if salt != nil {

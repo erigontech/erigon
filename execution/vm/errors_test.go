@@ -16,3 +16,22 @@ func TestVMErrorCodeWriteProtectionWrappedAsOutOfGas(t *testing.T) {
 		t.Fatalf("vmErrorCodeFromErr(write protection wrapped as out-of-gas) = %d, want VMErrorCodeWriteProtection (%d)", got, VMErrorCodeWriteProtection)
 	}
 }
+
+func TestRevertClassificationIgnoresSwitchOrder(t *testing.T) {
+	t.Parallel()
+	for _, exceptional := range exceptionalErrs {
+		wrapped := fmt.Errorf("%w: %w", exceptional, ErrExecutionReverted)
+		if isRevert(wrapped) {
+			t.Errorf("isRevert(%v wrapped with a revert) = true, want false", exceptional)
+		}
+	}
+	if !isRevert(ErrExecutionReverted) {
+		t.Error("isRevert(bare sentinel) = false, want true")
+	}
+	if !isRevert(fmt.Errorf("precompile failed: %w", ErrExecutionReverted)) {
+		t.Error("isRevert(single-wrapped revert) = false, want true")
+	}
+	if isRevert(ErrOutOfGas) {
+		t.Error("isRevert(non-revert) = true, want false")
+	}
+}
