@@ -78,6 +78,73 @@ func TestTrieDropStoragePrefix(t *testing.T) {
 	assertPersistedTrie(t, ctx, []Op{{Key: account, Value: testTrieValue(1)}})
 }
 
+func TestTrieDropAndRewriteSameBatch(t *testing.T) {
+	address := bytes.Repeat([]byte{0x52}, 20)
+	account := accountKey(0, eip8297.BasicDataLeafKey)
+	keyA := eip8297.TreeKeyStorage(address, storageSlot(64))
+	keyB := eip8297.TreeKeyStorage(address, storageSlot(65))
+	prefix := bytes.Clone(keyA[:33])
+	initial := []Op{{Key: account, Value: testTrieValue(1)}, {Key: keyA, Value: testTrieValue(2)}, {Key: keyB, Value: testTrieValue(3)}}
+	for _, tc := range []struct {
+		name    string
+		rewrite []Op
+		want    []Op
+	}{
+		{name: "single row", rewrite: []Op{{Key: keyA, Value: testTrieValue(4)}, {Key: keyB, Value: testTrieValue(5)}}, want: []Op{{Key: account, Value: testTrieValue(1)}, {Key: keyA, Value: testTrieValue(4)}, {Key: keyB, Value: testTrieValue(5)}}},
+		{name: "partial row", rewrite: []Op{{Key: keyA, Value: testTrieValue(4)}}, want: []Op{{Key: account, Value: testTrieValue(1)}, {Key: keyA, Value: testTrieValue(4)}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := newTrieTestContext()
+			requireProcess(t, ctx, initial)
+			ops := append([]Op{{Drop: prefix}}, tc.rewrite...)
+			root, err := NewTrie(ctx).Process(ops)
+			require.NoError(t, err)
+			require.Equal(t, eip8297.StateRoot(entriesFromOps(tc.want)), root)
+			assertPersistedTrie(t, ctx, tc.want)
+		})
+	}
+
+	address = bytes.Repeat([]byte{0x63}, 20)
+	stem := eip8297.TreeKeyStorage(address, storageSlot(64))[:33]
+	k0 := storageKeyWithSuffix(stem, 0x20, 0x40)
+	k1 := storageKeyWithSuffix(stem, 0xc6, 0x40)
+	k2 := storageKeyWithSuffix(stem, 0xc6, 0x41)
+	initial = []Op{{Key: account, Value: testTrieValue(1)}, {Key: k0, Value: testTrieValue(2)}, {Key: k1, Value: testTrieValue(3)}, {Key: k2, Value: testTrieValue(4)}}
+	ctx := newTrieTestContext()
+	requireProcess(t, ctx, initial)
+	root, err := NewTrie(ctx).Process(append([]Op{{Drop: bytes.Clone(k0[:33])}}, initial[1:]...))
+	require.NoError(t, err)
+	require.Equal(t, eip8297.StateRoot(entriesFromOps(initial)), root)
+	assertPersistedTrie(t, ctx, initial)
+}
+
+func TestTrieDeleteAndInsertKeepsTopRowsAttached(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		keys [][]byte
+	}{
+		{name: "three leaves", keys: [][]byte{trieCodeKey(0, 0, 1), trieCodeKey(0, 2, 2), trieCodeKey(0, 8, 3)}},
+		{name: "two leaves", keys: [][]byte{trieCodeKey(0, 0, 1), trieCodeKey(0, 2, 2)}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := newTrieTestContext()
+			initial := make([]Op, 0, len(tc.keys))
+			for index, key := range tc.keys {
+				initial = append(initial, Op{Key: key, Value: testTrieValue(byte(index + 1))})
+			}
+			requireProcess(t, ctx, initial)
+			newKey := trieCodeKey(0x10, 0, 4)
+			batch := []Op{{Key: tc.keys[0], Value: [32]byte{}}, {Key: newKey, Value: testTrieValue(4)}}
+			root, err := NewTrie(ctx).Process(batch)
+			require.NoError(t, err)
+			want := append([]Op(nil), initial[1:]...)
+			want = append(want, Op{Key: newKey, Value: testTrieValue(4)})
+			require.Equal(t, eip8297.StateRoot(entriesFromOps(want)), root)
+			assertPersistedTrie(t, ctx, want)
+		})
+	}
+}
+
 func TestTrieCollapseMovesStorageSplitToLastBit(t *testing.T) {
 	address := bytes.Repeat([]byte{0x62}, 20)
 	stem := eip8297.TreeKeyStorage(address, storageSlot(64))[:33]
@@ -164,6 +231,14 @@ func storageKeyWithSuffix(prefix []byte, first, last byte) []byte {
 	key = append(key, make([]byte, 31)...)
 	key = append(key, last)
 	return key
+}
+
+func entriesFromOps(ops []Op) []eip8297.Entry {
+	entries := make([]eip8297.Entry, 0, len(ops))
+	for _, op := range ops {
+		entries = append(entries, eip8297.Entry{Key: op.Key, Value: op.Value[:]})
+	}
+	return entries
 }
 
 func rowKeyForTestPath(key []byte, bitLen int16) []byte {

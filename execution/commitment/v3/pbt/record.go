@@ -437,15 +437,15 @@ func decodeExtRoot(k recordKey, data []byte) (Record, error) {
 	if bitLen < 4 {
 		return Record{}, recordError(SelfExtensionLengthError, "root extension bit length must be at least four")
 	}
+	if bitLen > eip8297.MaxPathBits {
+		return Record{}, recordError(SelfExtensionLengthError, "root extension exceeds the key length")
+	}
 	packed := packedLen(int16(bitLen))
 	if len(data) != 3+packed+64 {
 		return Record{}, recordError(LengthError, "root extension length is not exact")
 	}
 	if !canonicalPadding(data[3:3+packed], int16(bitLen)) {
 		return Record{}, recordError(PaddingError, "root extension has non-zero padding")
-	}
-	if bitLen > eip8297.MaxPathBits {
-		return Record{}, recordError(SelfExtensionLengthError, "root extension exceeds the key length")
 	}
 	selfExt := eip8297.PathFromBits(data[3:3+packed], int16(bitLen))
 	maxLen, keyErr := rootExtensionKeyLength(k, &selfExt)
@@ -503,19 +503,19 @@ func decodePathField(data []byte, off int) (eip8297.Bitpath, int, error) {
 	if len(data) < off+2 {
 		return eip8297.Bitpath{}, 0, recordError(LengthError, "extension length is truncated")
 	}
-	bitLen := int16(binary.BigEndian.Uint16(data[off : off+2]))
+	bitLen := int(binary.BigEndian.Uint16(data[off : off+2]))
 	if bitLen < 1 || bitLen > eip8297.MaxPathBits {
 		return eip8297.Bitpath{}, 0, recordError(ExtensionLengthError, "extension bit length is outside the canonical range")
 	}
 	off += 2
-	packed := packedLen(bitLen)
+	packed := packedLen(int16(bitLen))
 	if len(data) < off+packed {
 		return eip8297.Bitpath{}, 0, recordError(LengthError, "extension bits are truncated")
 	}
-	if !canonicalPadding(data[off:off+packed], bitLen) {
+	if !canonicalPadding(data[off:off+packed], int16(bitLen)) {
 		return eip8297.Bitpath{}, 0, recordError(PaddingError, "extension has non-zero padding")
 	}
-	return eip8297.PathFromBits(data[off:off+packed], bitLen), off + packed, nil
+	return eip8297.PathFromBits(data[off:off+packed], int16(bitLen)), off + packed, nil
 }
 
 func decodeRecordKey(key []byte) (recordKey, error) {

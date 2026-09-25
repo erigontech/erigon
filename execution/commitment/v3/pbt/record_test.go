@@ -18,6 +18,7 @@ package pbt
 
 import (
 	"bytes"
+	"fmt"
 	"sync/atomic"
 	"testing"
 
@@ -300,6 +301,7 @@ func TestRecordRejectsNonCanonical(t *testing.T) {
 		{name: "extension length", key: validKey, data: append(append([]byte{0x20, 0, 3, 0, 2, 0, 1}, make([]byte, 64)...), 0, 0), want: ExtensionLengthError},
 		{name: "self extension length", key: globalKey, data: selfExt, want: SelfExtensionLengthError},
 		{name: "self extension beyond global key", key: globalKey, data: rootExtensionBody(529), want: SelfExtensionLengthError},
+		{name: "self extension high u16 length", key: globalKey, data: []byte{0x10, 0xfd, 0xf2}, want: SelfExtensionLengthError},
 		{name: "self extension padding", key: globalKey, data: append([]byte{0x10, 0, 4, 0xaf}, make([]byte, 64)...), want: PaddingError},
 		{name: "extension padding", key: validKey, data: extensionPadRow(), want: PaddingError},
 		{name: "suffix padding", key: validKey, data: suffixPadRow(), want: PaddingError},
@@ -338,10 +340,46 @@ func TestRecordRejectsBucketExtensionsAtAndPastTheKeyLength(t *testing.T) {
 	}
 }
 
+func TestRecordDecodeRejectsEveryU16ExtensionLength(t *testing.T) {
+	bucket, err := BucketRootKey(bytes.Repeat([]byte{0x44}, 20))
+	require.NoError(t, err)
+	keys := [][]byte{GlobalRootKey(), bucket}
+	for _, key := range keys {
+		for length := range 1 << 16 {
+			t.Run(fmt.Sprintf("%x/%d", key, length), func(t *testing.T) {
+				data := rootExtensionLengthBody(length)
+				var decodeErr error
+				require.NotPanics(t, func() {
+					_, decodeErr = DecodeRecord(key, data)
+				})
+				require.Error(t, decodeErr)
+			})
+		}
+	}
+}
+
+func TestRecordDecodeRejectsEveryU16RowExtensionLength(t *testing.T) {
+	bucket, err := BucketRootKey(bytes.Repeat([]byte{0x55}, 20))
+	require.NoError(t, err)
+	keys := [][]byte{GlobalRootKey(), bucket}
+	for _, key := range keys {
+		for length := range 1 << 16 {
+			t.Run(fmt.Sprintf("%x/%d", key, length), func(t *testing.T) {
+				data := rowExtensionLengthBody(length)
+				var decodeErr error
+				require.NotPanics(t, func() {
+					_, decodeErr = DecodeRecord(key, data)
+				})
+				require.Error(t, decodeErr)
+			})
+		}
+	}
+}
+
 var fuzzRecordBodies atomic.Uint64
 
 func FuzzRecordDecodeCanonical(f *testing.F) {
-	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}, rootExtensionBody(529)} {
+	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}, rootExtensionBody(529), rootExtensionLengthBody(0xfdf2), rowExtensionLengthBody(0xfdf2)} {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -351,10 +389,10 @@ func FuzzRecordDecodeCanonical(f *testing.F) {
 
 func TestRecordFuzzSeeds(t *testing.T) {
 	fuzzRecordBodies.Store(0)
-	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}, rootExtensionBody(529)} {
+	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}, rootExtensionBody(529), rootExtensionLengthBody(0xfdf2), rowExtensionLengthBody(0xfdf2)} {
 		runRecordFuzzBody(seed)
 	}
-	require.Equal(t, uint64(5), fuzzRecordBodies.Load())
+	require.Equal(t, uint64(7), fuzzRecordBodies.Load())
 }
 
 func sixteenCellRecord() Record {
@@ -491,6 +529,17 @@ func rootExtensionBody(bitLen int) []byte {
 	packed := make([]byte, (bitLen+7)/8)
 	out := append([]byte{0x10, byte(bitLen >> 8), byte(bitLen)}, packed...)
 	return append(out, make([]byte, 64)...)
+}
+
+func rootExtensionLengthBody(bitLen int) []byte {
+	return []byte{0x10, byte(bitLen >> 8), byte(bitLen), 0, 0, 0, 0, 0, 0, 0, 0}
+}
+
+func rowExtensionLengthBody(bitLen int) []byte {
+	out := []byte{0x20, 0, 3, 0, 0, 0, 1}
+	out = append(out, make([]byte, 64)...)
+	out = append(out, byte(bitLen>>8), byte(bitLen))
+	return out
 }
 
 func reservedZoneRow() []byte {

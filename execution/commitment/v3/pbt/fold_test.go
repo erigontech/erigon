@@ -235,12 +235,61 @@ func TestFoldPropertyMatchesReference(t *testing.T) {
 			for _, count := range []int{1, 7, 64, 1024, 10000} {
 				entries := randomEntries(seed, count)
 				built := buildReferenceRows(entries, eip8297.SelectedHash(), eip8297.Bitpath{})
+				foldReferenceRows(t, &built, eip8297.SelectedHash())
 				got, err := Fold(built.rootKey, &built.root)
 				require.NoErrorf(t, err, "suite=%s seed=%d count=%d", suite, seed, count)
 				want := eip8297.StateRootWithHash(entries, eip8297.SelectedHash())
 				require.Equalf(t, want, got, "suite=%s seed=%d count=%d", suite, seed, count)
 			}
 		}
+	}
+}
+
+func foldReferenceRows(t *testing.T, built *referenceRows, sum eip8297.HashFn) {
+	t.Helper()
+	keys := make([]string, 0, len(built.rows))
+	for key := range built.rows {
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, func(a, b string) int {
+		return int(recordPath([]byte(b)).BitLen - recordPath([]byte(a)).BitLen)
+	})
+	results := make(map[string]FoldResult, len(keys))
+	for _, key := range keys {
+		record := built.rows[key]
+		got, err := FoldRow([]byte(key), &record)
+		require.NoError(t, err)
+		want := referenceFoldResult(built.referenceNodes[key], built.referenceSplits[key], sum)
+		require.Equalf(t, want, got, "row %x", key)
+		results[key] = got
+		for parentKey, parent := range built.rows {
+			parentPath := recordPath([]byte(parentKey))
+			for slot := range parent.Cells {
+				cell := &parent.Cells[slot]
+				if cell.Kind != BranchCell {
+					continue
+				}
+				split := branchSplit(&rowNode{path: parentPath}, slot, &rowCell{Cell: *cell})
+				childPath, err := rowChildPath(&rowNode{path: parentPath}, slot, cell.Prefix, split)
+				require.NoError(t, err)
+				if string(rootKey(childPath)) != key {
+					continue
+				}
+				cell.Left, cell.Right = got.Left, got.Right
+				built.rows[parentKey] = parent
+			}
+		}
+	}
+	if built.root.Form == RowRoot {
+		built.root = built.rows[string(GlobalRootKey())]
+		return
+	}
+	if built.root.Form != ExtRoot {
+		return
+	}
+	path := built.root.SelfExt.Slice(0, (built.root.SelfExt.BitLen/4)*4)
+	if result, ok := results[string(rootKey(path))]; ok {
+		built.root.Left, built.root.Right = result.Left, result.Right
 	}
 }
 
@@ -478,6 +527,9 @@ func randomEntries(seed int64, count int) []eip8297.Entry {
 }
 
 func recordPath(key []byte) eip8297.Bitpath {
+	if bytes.Equal(key, GlobalRootKey()) {
+		return eip8297.Bitpath{}
+	}
 	path, err := eip8297.DecodeBitPath(key)
 	if err != nil {
 		panic(err)

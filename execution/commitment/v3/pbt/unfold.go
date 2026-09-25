@@ -33,6 +33,7 @@ func (t *Trie) loadRoot() (*treeRoot, error) {
 		return nil, err
 	}
 	t.root = &treeRoot{}
+	t.rememberPrev(GlobalRootKey(), data)
 	if len(data) == 0 {
 		return t.root, nil
 	}
@@ -77,6 +78,7 @@ func (t *Trie) loadRow(path eip8297.Bitpath) (*rowNode, error) {
 	if len(data) == 0 {
 		return nil, fmt.Errorf("row %x is missing", key)
 	}
+	t.rememberPrev(key, data)
 	record, err := DecodeRecord(key, data)
 	if err != nil {
 		return nil, err

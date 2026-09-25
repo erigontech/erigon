@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
 func TestTrieCancelsDeleteRewriteDelta(t *testing.T) {
@@ -61,6 +63,28 @@ func TestTrieDeltasRestoreRoundStartRecords(t *testing.T) {
 		require.Equal(t, start[string(delta.Key)], delta.Prev)
 	}
 	assertPersistedTrie(t, ctx, []Op{{Key: keyA, Value: testTrieValue(3)}})
+	for _, delta := range slices.Backward(deltas) {
+		require.NoError(t, ctx.PutBranch(delta.Key, delta.Prev, delta.Data))
+	}
+	require.Equal(t, start, ctx.records)
+}
+
+func TestTrieRootFormChangeKeepsRoundStartPreviousRecord(t *testing.T) {
+	ctx := newTrieTestContext()
+	ctx.rejectNilPrev = true
+	key := accountKey(0, eip8297.BasicDataLeafKey)
+	value := testTrieValue(1)
+	storage := eip8297.TreeKeyStorage([]byte{0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77, 0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f, 0x80, 0x81, 0x82, 0x83, 0x84}, storageSlot(64))
+	requireProcess(t, ctx, []Op{{Key: key, Value: value}})
+	start := cloneRecords(ctx.records)
+	trie := NewTrie(ctx)
+	rewrite := testTrieValue(2)
+	_, err := trie.Process([]Op{{Key: key, Value: [32]byte{}}, {Key: key, Value: rewrite}, {Key: storage, Value: testTrieValue(3)}})
+	require.NoError(t, err)
+	deltas := trie.TakeDeltas()
+	for _, delta := range deltas {
+		require.Equal(t, start[string(delta.Key)], delta.Prev, "delta %x", delta.Key)
+	}
 	for _, delta := range slices.Backward(deltas) {
 		require.NoError(t, ctx.PutBranch(delta.Key, delta.Prev, delta.Data))
 	}

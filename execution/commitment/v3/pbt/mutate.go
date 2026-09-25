@@ -105,7 +105,8 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 		if err := t.insertRow(row, path, key, value); err != nil {
 			return err
 		}
-		return t.refreshRootFromRow(root, row)
+		t.markDirty(row)
+		return nil
 	}
 	window := (d / 4) * 4
 	oldPath := root.self
@@ -115,6 +116,11 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 		newSlot := slotAt(&path, 0)
 		oldPrefix := oldPath.Slice(4, oldPath.BitLen)
 		row.cells[oldSlot] = branchCell(oldPrefix, root.left, root.right)
+		if root.topRow != nil {
+			row.cells[oldSlot].child = root.topRow
+			root.topRow.parent = row
+			root.topRow.parentSlot = oldSlot
+		}
 		row.cells[newSlot] = leafCell(key, value)
 		row.markDirty()
 		root.form = RowRoot
@@ -127,13 +133,15 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 	if err != nil {
 		return err
 	}
-	result, err := rowFoldResult(row)
-	if err != nil {
-		return err
-	}
+	oldChild := root.topRow
+	oldSlot := slotAt(&oldPath, rowPath.BitLen)
 	root.self = path.Slice(0, d)
-	root.left, root.right = result.Left, result.Right
 	root.topRow = row
+	if oldChild != nil {
+		row.cells[oldSlot].child = oldChild
+		oldChild.parent = row
+		oldChild.parentSlot = oldSlot
+	}
 	t.registerRow(row)
 	return nil
 }
@@ -233,7 +241,8 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 		if err := t.insertRow(child, path, key, value); err != nil {
 			return err
 		}
-		return t.refreshBranch(row, slot, child)
+		t.markDirty(row)
+		return nil
 	}
 	window := (d / 4) * 4
 	childPath := path.Slice(0, window)

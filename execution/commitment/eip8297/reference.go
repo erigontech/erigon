@@ -203,7 +203,8 @@ func EmbedState(batches [][]State) []Entry {
 		for index, state := range batch {
 			address := string(state.Address)
 			addressBytes := []byte(address)
-			if lastAccounts[address] == index && !state.Deleted {
+			accountIndex, hasAccount := lastAccounts[address]
+			if hasAccount && accountIndex == index && !state.Deleted {
 				basic, err := EncodeBasicData(state.Nonce, &state.Balance, uint64(len(state.Code)))
 				if err != nil {
 					panic(err)

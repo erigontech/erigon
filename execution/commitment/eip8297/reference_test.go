@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
@@ -342,6 +343,30 @@ func TestEmbedStateAccountRewriteKeepsEarlierSlots(t *testing.T) {
 		}
 	}
 	require.True(t, found)
+}
+
+func TestEmbedStateStorageOnlyBatchKeepsAccount(t *testing.T) {
+	address := referenceAddress(12)
+	slot := referenceSlot(64)
+	basic, err := EncodeBasicData(7, new(uint256.Int), 0)
+	require.NoError(t, err)
+	storage := EncodeStorageValue([]byte{0x42})
+	entries := EmbedState([][]State{
+		{{Address: address, Nonce: 7}},
+		{{Address: address, Slots: map[string][]byte{string(slot): {0x42}}}},
+	})
+	require.Contains(t, entries, Entry{Key: TreeKeyAccount(address, BasicDataLeafKey), Value: basic[:]})
+	require.Contains(t, entries, Entry{Key: TreeKeyStorage(address, slot), Value: storage[:]})
+}
+
+func TestEmbedStateStorageOnlyFirstBatchDoesNotCreateAccount(t *testing.T) {
+	address := referenceAddress(13)
+	slot := referenceSlot(64)
+	zero := common.Hash{}
+	emptyCodeHash := CodeHashValue(zero)
+	entries := EmbedState([][]State{{{Address: address, Slots: map[string][]byte{string(slot): {0x42}}}}})
+	require.NotContains(t, entries, Entry{Key: TreeKeyAccount(address, BasicDataLeafKey)})
+	require.NotContains(t, entries, Entry{Key: TreeKeyAccount(address, CodeHashLeafKey), Value: emptyCodeHash[:]})
 }
 
 func TestReferenceDelegationHelpersUseSpecBytes(t *testing.T) {

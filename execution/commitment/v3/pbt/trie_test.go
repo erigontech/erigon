@@ -29,9 +29,10 @@ import (
 )
 
 type trieTestContext struct {
-	records map[string][]byte
-	reads   [][]byte
-	writes  []trieTestWrite
+	records       map[string][]byte
+	reads         [][]byte
+	writes        []trieTestWrite
+	rejectNilPrev bool
 }
 
 type trieTestWrite struct {
@@ -51,6 +52,9 @@ func (c *trieTestContext) Branch(key []byte) ([]byte, kv.Step, error) {
 
 func (c *trieTestContext) PutBranch(key, data, prev []byte) error {
 	old := c.records[string(key)]
+	if c.rejectNilPrev && len(old) != 0 && len(prev) == 0 {
+		return fmt.Errorf("nil previous record for %x", key)
+	}
 	if !bytes.Equal(old, prev) {
 		return fmt.Errorf("previous record mismatch for %x", key)
 	}
@@ -96,6 +100,12 @@ func assertPersistedTrie(t *testing.T, ctx *trieTestContext, entries []Op) {
 	require.NoError(t, err)
 	require.Equal(t, wantRoot, freshRoot)
 	require.Equal(t, freshContext.records, ctx.records)
+}
+
+func requireProcess(t *testing.T, ctx *trieTestContext, ops []Op) {
+	t.Helper()
+	_, err := NewTrie(ctx).Process(ops)
+	require.NoError(t, err)
 }
 
 func TestTriePersistsEveryChangedRow(t *testing.T) {

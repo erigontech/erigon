@@ -42,6 +42,7 @@ type Trie struct {
 	rows       map[string]*rowNode
 	dirtyRows  map[string]*rowNode
 	deltas     []commitment.BranchDelta
+	roundPrev  map[string][]byte
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {
@@ -56,15 +57,18 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.rows = make(map[string]*rowNode)
 	t.dirtyRows = make(map[string]*rowNode)
 	t.deltas = nil
+	t.roundPrev = nil
 }
 
 func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if t.ctx == nil {
 		return common.Hash{}, fmt.Errorf("nil Patricia context")
 	}
+	t.roundPrev = make(map[string][]byte)
 	if _, err := t.loadRoot(); err != nil {
 		return common.Hash{}, err
 	}
+	t.rememberPrev(GlobalRootKey(), t.root.prev)
 	t.deltas = nil
 	ordered := make([]Op, len(ops))
 	copy(ordered, ops)
@@ -136,7 +140,7 @@ func (t *Trie) write() error {
 	rows := make(map[string]*rowNode, len(t.dirtyRows))
 	for key, row := range t.dirtyRows {
 		rows[key] = row
-		prev[key] = bytes.Clone(row.prev)
+		prev[key] = t.previousRecord([]byte(key), row.prev)
 		if row.tombstone {
 			final[key] = nil
 			continue
@@ -160,7 +164,7 @@ func (t *Trie) write() error {
 			}
 		}
 		final[rootKey] = data
-		prev[rootKey] = bytes.Clone(t.root.prev)
+		prev[rootKey] = t.previousRecord(GlobalRootKey(), t.root.prev)
 	}
 	keys := make([]string, 0, len(final))
 	for key := range final {
@@ -190,6 +194,7 @@ func (t *Trie) write() error {
 	}
 	t.dirtyRows = make(map[string]*rowNode)
 	t.rootDirty = false
+	t.roundPrev = nil
 	return nil
 }
 
@@ -214,10 +219,28 @@ func (t *Trie) registerRow(row *rowNode) {
 		}
 		row.key = key
 	}
+	t.rememberPrev(row.key, row.prev)
 	t.rows[string(row.key)] = row
 	if row.dirty {
 		t.dirtyRows[string(row.key)] = row
 	}
+}
+
+func (t *Trie) rememberPrev(key, data []byte) {
+	if t.roundPrev == nil {
+		return
+	}
+	name := string(key)
+	if _, ok := t.roundPrev[name]; !ok {
+		t.roundPrev[name] = bytes.Clone(data)
+	}
+}
+
+func (t *Trie) previousRecord(key, fallback []byte) []byte {
+	if data, ok := t.roundPrev[string(key)]; ok {
+		return bytes.Clone(data)
+	}
+	return bytes.Clone(fallback)
 }
 
 func (t *Trie) markDirty(row *rowNode) {
