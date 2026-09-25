@@ -38,8 +38,8 @@ func TestIsBlobBacklog(t *testing.T) {
 		want bool
 	}{
 		{"one chunk, the steady tip case", limit, false},
-		{"still short of a second chunk", 2*limit - 1, false},
-		{"two chunks", 2 * limit, true},
+		{"one slot short of two chunks, so only one is compressed", 2*limit - 1, false},
+		{"exactly two chunks", 2 * limit, true},
 		{"the 72-chunk backlog measured on sepolia", 72 * limit, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -500,6 +500,9 @@ func (a *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
 
 // isBlobBacklog reports whether the pending range is a catch-up rather than the single chunk
 // retired at the tip, which is what decides how many workers the compression may use.
+//
+// The span is the one DumpBlobsSidecar counts chunks with: it breaks once `toSlot-i` drops below a
+// merge limit, so two chunks are compressed exactly when the span reaches two of them.
 func isBlobBacklog(from, to uint64) bool {
 	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
 }
