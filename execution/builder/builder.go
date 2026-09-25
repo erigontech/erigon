@@ -103,6 +103,11 @@ func (b *Builder) PendingBlockCh() chan *types.Block {
 	return b.pendingBlockCh
 }
 
+func newBuilderSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*execctx.SharedDomains, error) {
+	return execctx.NewSharedDomains(ctx, tx, logger,
+		execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+}
+
 // Build satisfies BlockBuilderFunc. Pass b.Build directly to ExecModule.
 //
 // Build passes ctx through the read and execution paths and stops waiting for an asynchronous seal
@@ -145,7 +150,7 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 		}
 	}
 
-	sd, err := execctx.NewSharedDomains(ctx, compositeTx, b.logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache())
+	sd, err := newBuilderSharedDomains(ctx, compositeTx, b.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -155,9 +160,7 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 		sd.SetParent(parentSD)
 	}
 
-	// Wire the parallel commitment trie's context factory. Values still resolve
-	// through the sd/parent mem-batch overlay chain; b.db only backs the fresh
-	// per-worker readers. Mirrors exec3; no-op for the sequential trie.
+	// The sequential trie only uses this DB for best-effort page-cache warmup.
 	sd.EnableParaTrieDB(b.db)
 
 	executionAt, err := stages.GetStageProgress(compositeTx, stages.Execution)
