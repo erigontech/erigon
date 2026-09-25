@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -30,7 +32,9 @@ type Reset struct {
 	PreverifiedSnapshots preverified.SortedItems
 	RemoveUnknown        bool
 	RemoveLocal          bool
-	Dirs                 *datadir.Dirs
+	// AllowMixedStateBuilds skips the commitment/state build check.
+	AllowMixedStateBuilds bool
+	Dirs                  *datadir.Dirs
 
 	stats struct {
 		removed  Stats
@@ -38,8 +42,71 @@ type Reset struct {
 	}
 }
 
+// stateKVName matches a domain data file, capturing the domain and its step range.
+var stateKVName = regexp.MustCompile(`^v[0-9]+\.[0-9]+-(accounts|storage|commitment)\.([0-9]+-[0-9]+)\.kv$`)
+
+// checkStateBuilds reports step ranges whose commitment file would end up from a different build
+// than its accounts/storage files.
+//
+// Commitment values address accounts and storage records by byte offset into the .kv of the same
+// step range, so the two only agree when they come from the same build. Reset normalises files the
+// preverified set knows about and leaves the rest untouched, so a range holding one of each ends up
+// with offsets pointing into bytes that moved.
+func (reset *Reset) checkStateBuilds() error {
+	entries, err := os.ReadDir(reset.Dirs.SnapDomain)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	canonical := map[string]map[string]bool{}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		m := stateKVName.FindStringSubmatch(entry.Name())
+		if m == nil {
+			continue
+		}
+		domain, stepRange := m[1], m[2]
+		_, known := reset.PreverifiedSnapshots.Get("domain/" + entry.Name())
+		if canonical[stepRange] == nil {
+			canonical[stepRange] = map[string]bool{}
+		}
+		canonical[stepRange][domain] = known
+	}
+
+	var mixed []string
+	for stepRange, domains := range canonical {
+		commitment, ok := domains["commitment"]
+		if !ok {
+			continue
+		}
+		for _, domain := range []string{"accounts", "storage"} {
+			if state, ok := domains[domain]; ok && state != commitment {
+				mixed = append(mixed, stepRange)
+				break
+			}
+		}
+	}
+	if len(mixed) == 0 {
+		return nil
+	}
+	slices.Sort(mixed)
+	return fmt.Errorf("reset would leave commitment and its accounts/storage files from different "+
+		"builds for step ranges %s, which breaks the byte offsets commitment holds into them. "+
+		"Remove those ranges first with 'erigon snapshots rm-state-snapshots --step=<range>', or "+
+		"re-run with --allow-mixed-state to proceed anyway", strings.Join(mixed, ", "))
+}
+
 func (reset *Reset) Run() (err error) {
 	logger := reset.Logger
+	if !reset.AllowMixedStateBuilds {
+		if mixed := reset.checkStateBuilds(); mixed != nil {
+			return mixed
+		}
+	}
 	logger.Info("Resetting snapshots directory", "path", reset.pathForLog(datadir.SnapDir))
 	err = reset.doSnapshots()
 	if err != nil {

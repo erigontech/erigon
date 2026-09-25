@@ -31,6 +31,12 @@ var (
 		Aliases:  []string{"l"},
 		Category: "Reset",
 	}
+	allowMixedStateFlag = cli.BoolFlag{
+		Name:     "allow-mixed-state",
+		Usage:    "Proceed even when a step range would keep its commitment and accounts/storage files from different builds.",
+		Value:    false,
+		Category: "Reset",
+	}
 	dryRunFlag = cli.BoolFlag{
 		Name:     "dry-run",
 		Usage:    "Print files that would be removed, but do not remove them.",
@@ -56,6 +62,7 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	// This is set up in snapshots cli.Command.Before.
 	logger := log.Root()
 	removeLocal := cliCtx.Bool(removeLocalFlag.Name)
+	allowMixedState := cliCtx.Bool(allowMixedStateFlag.Name)
 	dryRun := cliCtx.Bool(dryRunFlag.Name)
 	dataDirPath := cliCtx.String(utils.DataDirFlag.Name)
 	logger.Info("resetting datadir", "path", dataDirPath)
@@ -121,11 +128,12 @@ func resetCliAction(ctx context.Context, cliCtx *cli.Command) (err error) {
 	//}
 
 	r := reset.Reset{
-		Dirs:                 &dirs,
-		RemoveUnknown:        removeLocal,
-		RemoveLocal:          removeLocal,
-		Logger:               logger,
-		PreverifiedSnapshots: cfg.Preverified.Items,
+		Dirs:                  &dirs,
+		RemoveUnknown:         removeLocal,
+		RemoveLocal:           removeLocal,
+		AllowMixedStateBuilds: allowMixedState,
+		Logger:                logger,
+		PreverifiedSnapshots:  cfg.Preverified.Items,
 		RemoveFunc: func(osName reset.OsFilePath) error {
 			if dryRun {
 				println(osName)
