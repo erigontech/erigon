@@ -106,7 +106,10 @@ reported. How they appear depends on the method:
 `trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
 `trace_call` and `trace_callMany` take no such parameter and always enable it
 internally, so everything below applies to them unconditionally. `trace_rawTransaction`
-never enables it: a signed transaction pays for its gas as it would in a block.
+never enables it: a signed transaction pays for its gas as it would in a block. The gas
+is bought before execution, so `BALANCE(ORIGIN)`, or `SELFBALANCE` in a delegated sender,
+reads the balance after that charge; this shows in `trace` and `vmTrace` as well as in
+`stateDiff`.
 
 :::warning
 `gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It
