@@ -79,7 +79,7 @@ type Parlia struct {
 	logger      log.Logger
 	upgrades    []systemContractUpgrade
 
-	hertzFixPatches []hertzFixPatch
+	storageOverrides state.StorageOverrideTable
 }
 
 func New(chainConfig *chain.Config, logger log.Logger) *Parlia {
@@ -88,7 +88,7 @@ func New(chainConfig *chain.Config, logger log.Logger) *Parlia {
 		p.upgrades = parseSystemContractUpgrades(chainConfig.Parlia.BlockAlloc)
 	}
 	if chainConfig.ChainID != nil {
-		p.hertzFixPatches = hertzFixPatches[chainConfig.ChainID.Uint64()]
+		p.storageOverrides = hertzFixPatches[chainConfig.ChainID.Uint64()]
 	}
 	return p
 }

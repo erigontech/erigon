@@ -162,8 +162,8 @@ type IntraBlockState struct {
 
 	// Engine-supplied committed values for individual storage slots, valid for
 	// the current transaction only. See SetStorageOverride.
-	storageOverrides map[storageOverrideKey]uint256.Int
-	storageOverrider StorageOverrider
+	storageOverrides     map[storageOverrideKey]uint256.Int
+	storageOverrideTable StorageOverrideTable
 
 	// Transient storage
 	transientStorage transientStorage

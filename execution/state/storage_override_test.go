@@ -163,17 +163,10 @@ func TestStorageOverrideShadowsTheVersionMap(t *testing.T) {
 	require.Equal(t, override.String(), committed.String())
 }
 
-type fixedOverrider struct {
-	blockNum  uint64
-	txIndex   int
-	overrides []state.StorageOverride
-}
+type fixedOverrider state.StorageOverrideTable
 
-func (o fixedOverrider) StorageOverrides(blockNum uint64, txIndex int) []state.StorageOverride {
-	if blockNum != o.blockNum || txIndex != o.txIndex {
-		return nil
-	}
-	return o.overrides
+func (o fixedOverrider) StorageOverrides() state.StorageOverrideTable {
+	return state.StorageOverrideTable(o)
 }
 
 func TestSetTxContextInstallsAttachedOverrides(t *testing.T) {
@@ -189,8 +182,9 @@ func TestSetTxContextInstallsAttachedOverrides(t *testing.T) {
 	}
 
 	ibs := newOverrideTestIBS(t, false)
-	ibs.SetStorageOverrides(fixedOverrider{blockNum: 35547779, txIndex: 196,
-		overrides: []state.StorageOverride{{Address: addr, Key: key, Value: value}}})
+	ibs.SetStorageOverrides(fixedOverrider{
+		{BlockNum: 35547779, TxIndex: 196}: {{Address: addr, Key: key, Value: value}},
+	})
 
 	ibs.SetTxContext(35547779, 196)
 	require.Equal(t, value, committed(ibs))

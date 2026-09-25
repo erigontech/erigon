@@ -43,11 +43,8 @@ type overrideEngine struct {
 	overrides []state.StorageOverride
 }
 
-func (e overrideEngine) StorageOverrides(blockNum uint64, txIndex int) []state.StorageOverride {
-	if blockNum != e.blockNum || txIndex != e.txIndex {
-		return nil
-	}
-	return e.overrides
+func (e overrideEngine) StorageOverrides() state.StorageOverrideTable {
+	return state.StorageOverrideTable{{BlockNum: e.blockNum, TxIndex: e.txIndex}: e.overrides}
 }
 
 // A regenerated receipt must reproduce a patched transaction's canonical gas,

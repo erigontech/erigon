@@ -20,28 +20,46 @@ type StorageOverride struct {
 	Value   uint256.Int
 }
 
-// StorageOverrider supplies the overrides for the transaction at
-// (blockNum, txIndex). rules.EngineReader implements it.
+// StorageOverridePosition names one canonical transaction.
+type StorageOverridePosition struct {
+	BlockNum uint64
+	TxIndex  int
+}
+
+// StorageOverrideTable holds the overrides of every patched transaction of a
+// chain. IBSs share it read-only.
+type StorageOverrideTable map[StorageOverridePosition][]StorageOverride
+
+// StorageOverrider supplies a chain's override table. rules.EngineReader
+// implements it.
 type StorageOverrider interface {
-	StorageOverrides(blockNum uint64, txIndex int) []StorageOverride
+	StorageOverrides() StorageOverrideTable
 }
 
 // Option configures an IntraBlockState at construction.
 type Option func(*IntraBlockState)
 
-// WithStorageOverrides attaches o at construction; see SetStorageOverrides.
+// WithStorageOverrides attaches o's table at construction; see
+// SetStorageOverrides.
 func WithStorageOverrides(o StorageOverrider) Option {
-	return func(sdb *IntraBlockState) { sdb.storageOverrider = o }
+	return func(sdb *IntraBlockState) { sdb.storageOverrideTable = storageOverrideTable(o) }
 }
 
-// SetStorageOverrides attaches the overrider SetTxContext consults for every
-// transaction; nil detaches it. It matches on block and tx index only, so attach
-// it only to an IBS that executes canonical transactions: a user call run at the
-// same position would pick the overrides up too. Changing it drops the overrides
-// already installed for the current transaction. Survives Reset.
+// SetStorageOverrides attaches o's table, which SetTxContext consults for every
+// transaction; nil detaches it. The table is keyed on block and tx index only, so
+// attach it only to an IBS that executes canonical transactions: a user call run
+// at the same position would pick the overrides up too. Changing it drops the
+// overrides already installed for the current transaction. Survives Reset.
 func (sdb *IntraBlockState) SetStorageOverrides(o StorageOverrider) {
-	sdb.storageOverrider = o
+	sdb.storageOverrideTable = storageOverrideTable(o)
 	sdb.storageOverrides = nil
+}
+
+func storageOverrideTable(o StorageOverrider) StorageOverrideTable {
+	if o == nil {
+		return nil
+	}
+	return o.StorageOverrides()
 }
 
 // SetStorageOverride overrides the committed value of one storage slot for the
@@ -58,10 +76,7 @@ func (sdb *IntraBlockState) SetStorageOverride(addr accounts.Address, key accoun
 
 func (sdb *IntraBlockState) installStorageOverrides() {
 	sdb.storageOverrides = nil
-	if sdb.storageOverrider == nil {
-		return
-	}
-	for _, override := range sdb.storageOverrider.StorageOverrides(sdb.blockNum, sdb.txIndex) {
+	for _, override := range sdb.storageOverrideTable[StorageOverridePosition{sdb.blockNum, sdb.txIndex}] {
 		sdb.SetStorageOverride(override.Address, override.Key, override.Value)
 	}
 }

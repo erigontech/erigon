@@ -606,7 +606,7 @@ func (ethash *Ethash) GetTransferFunc() evmtypes.TransferFunc {
 	return misc.Transfer
 }
 
-func (ethash *Ethash) StorageOverrides(blockNum uint64, txIndex int) []state.StorageOverride {
+func (ethash *Ethash) StorageOverrides() state.StorageOverrideTable {
 	return nil
 }
 
