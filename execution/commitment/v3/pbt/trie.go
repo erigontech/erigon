@@ -35,18 +35,19 @@ type Op struct {
 func Drop(prefix []byte) Op { return Op{Drop: bytes.Clone(prefix)} }
 
 type Trie struct {
-	ctx        commitment.PatriciaContext
-	root       *treeRoot
-	rootLoaded bool
-	rootDirty  bool
-	rows       map[string]*rowNode
-	dirtyRows  map[string]*rowNode
-	deltas     []commitment.BranchDelta
-	roundPrev  map[string][]byte
+	ctx         commitment.PatriciaContext
+	root        *treeRoot
+	rootLoaded  bool
+	rootDirty   bool
+	rows        map[string]*rowNode
+	dirtyRows   map[string]*rowNode
+	bucketDirty map[string][]byte
+	deltas      []commitment.BranchDelta
+	roundPrev   map[string][]byte
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {
-	return &Trie{ctx: ctx, rows: make(map[string]*rowNode), dirtyRows: make(map[string]*rowNode)}
+	return &Trie{ctx: ctx, rows: make(map[string]*rowNode), dirtyRows: make(map[string]*rowNode), bucketDirty: make(map[string][]byte)}
 }
 
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
@@ -56,6 +57,7 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.rootDirty = false
 	t.rows = make(map[string]*rowNode)
 	t.dirtyRows = make(map[string]*rowNode)
+	t.bucketDirty = make(map[string][]byte)
 	t.deltas = nil
 	t.roundPrev = nil
 }
@@ -65,6 +67,7 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 		return common.Hash{}, fmt.Errorf("nil Patricia context")
 	}
 	t.roundPrev = make(map[string][]byte)
+	t.bucketDirty = make(map[string][]byte)
 	if _, err := t.loadRoot(); err != nil {
 		return common.Hash{}, err
 	}
@@ -87,10 +90,39 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 		var err error
 		switch {
 		case len(ordered[i].Drop) != 0:
+			var bucketKey []byte
+			bucketKey, err = bucketKeyForPrefix(ordered[i].Drop)
+			if err == nil {
+				t.touchBucket(bucketKey)
+			}
+			if err != nil {
+				err = errInsertKey
+				break
+			}
 			err = t.dropPrefix(ordered[i].Drop)
 		case ordered[i].Value == ([eip8297.ValueLength]byte{}):
+			if len(ordered[i].Key) == eip8297.StorageKeyLength && ordered[i].Key[0] == eip8297.StorageZone {
+				var bucketKey []byte
+				bucketKey, err = bucketKeyForStorage(ordered[i].Key)
+				if err == nil {
+					t.touchBucket(bucketKey)
+				}
+			}
+			if err != nil {
+				break
+			}
 			err = t.remove(ordered[i].Key)
 		default:
+			if len(ordered[i].Key) == eip8297.StorageKeyLength && ordered[i].Key[0] == eip8297.StorageZone {
+				var bucketKey []byte
+				bucketKey, err = bucketKeyForStorage(ordered[i].Key)
+				if err == nil {
+					t.touchBucket(bucketKey)
+				}
+			}
+			if err != nil {
+				break
+			}
 			err = t.insert(ordered[i].Key, ordered[i].Value)
 		}
 		if err != nil {
@@ -135,8 +167,8 @@ func (t *Trie) rootHash() (common.Hash, error) {
 }
 
 func (t *Trie) write() error {
-	final := make(map[string][]byte, len(t.dirtyRows)+1)
-	prev := make(map[string][]byte, len(t.dirtyRows)+1)
+	final := make(map[string][]byte, len(t.dirtyRows)+len(t.bucketDirty)+1)
+	prev := make(map[string][]byte, len(t.dirtyRows)+len(t.bucketDirty)+1)
 	rows := make(map[string]*rowNode, len(t.dirtyRows))
 	for key, row := range t.dirtyRows {
 		rows[key] = row
@@ -166,6 +198,27 @@ func (t *Trie) write() error {
 		final[rootKey] = data
 		prev[rootKey] = t.previousRecord(GlobalRootKey(), t.root.prev)
 	}
+	for key, bucketKey := range t.bucketDirty {
+		descriptor, ok, err := t.bucketDescriptor(bucketKey)
+		if err != nil {
+			return err
+		}
+		old, err := t.bucketRecordPrevious(bucketKey)
+		if err != nil {
+			return err
+		}
+		prev[key] = old
+		if !ok {
+			final[key] = nil
+			continue
+		}
+		record := descriptor.record()
+		data, err := EncodeRecord(bucketKey, &record)
+		if err != nil {
+			return err
+		}
+		final[key] = data
+	}
 	keys := make([]string, 0, len(final))
 	for key := range final {
 		keys = append(keys, key)
@@ -193,6 +246,7 @@ func (t *Trie) write() error {
 		t.root.prev = bytes.Clone(data)
 	}
 	t.dirtyRows = make(map[string]*rowNode)
+	t.bucketDirty = make(map[string][]byte)
 	t.rootDirty = false
 	t.roundPrev = nil
 	return nil
@@ -234,6 +288,10 @@ func (t *Trie) rememberPrev(key, data []byte) {
 	if _, ok := t.roundPrev[name]; !ok {
 		t.roundPrev[name] = bytes.Clone(data)
 	}
+}
+
+func (t *Trie) touchBucket(key []byte) {
+	t.bucketDirty[string(key)] = bytes.Clone(key)
 }
 
 func (t *Trie) previousRecord(key, fallback []byte) []byte {

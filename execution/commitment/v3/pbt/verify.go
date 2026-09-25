@@ -31,40 +31,48 @@ func (t *Trie) Verify() error {
 		return err
 	}
 	if root.row == nil && root.form == RowRoot {
-		return nil
+		return t.verifyBuckets()
 	}
+	var verifyErr error
 	switch root.form {
 	case LeafRoot:
-		return t.verifyRootRecord()
+		verifyErr = t.verifyRootRecord()
 	case ExtRoot:
 		if err := t.verifyRootRecord(); err != nil {
-			return err
+			verifyErr = err
+			break
 		}
 		row, err := t.extTopRow(root)
 		if err != nil {
-			return err
+			verifyErr = err
+			break
 		}
 		result, err := t.verifyRow(row)
 		if err != nil {
-			return err
+			verifyErr = err
+			break
 		}
 		if result.Split != root.self.BitLen || result.Left != root.left || result.Right != root.right {
-			return fmt.Errorf("root extension does not match its top row")
+			verifyErr = fmt.Errorf("root extension does not match its top row")
+			break
 		}
 		wantSelf, err := rowTopPrefix(row, result.Split)
 		if err != nil {
-			return err
+			verifyErr = err
+			break
 		}
 		if root.self != wantSelf {
-			return fmt.Errorf("root extension prefix does not match its top row")
+			verifyErr = fmt.Errorf("root extension prefix does not match its top row")
 		}
-		return nil
 	case RowRoot:
-		_, err := t.verifyRow(root.row)
-		return err
+		_, verifyErr = t.verifyRow(root.row)
 	default:
-		return fmt.Errorf("unknown root form %d", root.form)
+		verifyErr = fmt.Errorf("unknown root form %d", root.form)
 	}
+	if verifyErr != nil {
+		return verifyErr
+	}
+	return t.verifyBuckets()
 }
 
 func (t *Trie) verifyRootRecord() error {
@@ -125,4 +133,33 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 		}
 	}
 	return rowFoldResult(row)
+}
+
+func (t *Trie) verifyBuckets() error {
+	want, err := t.expectedBucketRecords()
+	if err != nil {
+		return err
+	}
+	for key := range want {
+		descriptor := want[key]
+		data, _, err := t.ctx.Branch([]byte(key))
+		if err != nil {
+			return err
+		}
+		if len(data) == 0 {
+			return fmt.Errorf("bucket record %x is missing", []byte(key))
+		}
+		record := descriptor.record()
+		wantData, err := EncodeRecord([]byte(key), &record)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(data, wantData) {
+			return fmt.Errorf("bucket record %x does not match its upper cell", []byte(key))
+		}
+		if _, err := DecodeRecord([]byte(key), data); err != nil {
+			return err
+		}
+	}
+	return nil
 }

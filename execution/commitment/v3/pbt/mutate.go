@@ -458,67 +458,20 @@ func (t *Trie) normalizeRow(row *rowNode) error {
 }
 
 func (t *Trie) dropPrefix(prefix []byte) error {
-	if len(prefix) != 33 || prefix[0] != eip8297.StorageZone {
-		return errInsertKey
+	bucketKey, err := bucketKeyForPrefix(prefix)
+	if err != nil {
+		return err
 	}
-	keys, err := t.allKeys()
+	keys, err := t.bucketKeysFromRecord(bucketKey)
 	if err != nil {
 		return err
 	}
 	for _, key := range keys {
-		if bytes.HasPrefix(key, prefix) {
-			if err := t.remove(key); err != nil {
-				return err
-			}
+		if err := t.remove(key); err != nil {
+			return err
 		}
 	}
 	return nil
-}
-
-func (t *Trie) allKeys() ([][]byte, error) {
-	root, err := t.loadRoot()
-	if err != nil {
-		return nil, err
-	}
-	var keys [][]byte
-	var visit func(*rowNode) error
-	visit = func(row *rowNode) error {
-		for slot := range row.cells {
-			cell := row.cell(slot)
-			switch cell.Kind {
-			case LeafCell:
-				keys = append(keys, bytes.Clone(cell.Key))
-			case BranchCell:
-				child, err := t.loadBranchChild(row, slot)
-				if err != nil {
-					return err
-				}
-				if err := visit(child); err != nil {
-					return err
-				}
-			}
-		}
-		return nil
-	}
-	switch root.form {
-	case LeafRoot:
-		keys = append(keys, bytes.Clone(root.leaf.Key))
-	case ExtRoot:
-		row, err := t.extTopRow(root)
-		if err != nil {
-			return nil, err
-		}
-		if err := visit(row); err != nil {
-			return nil, err
-		}
-	case RowRoot:
-		if root.row != nil {
-			if err := visit(root.row); err != nil {
-				return nil, err
-			}
-		}
-	}
-	return keys, nil
 }
 
 func (t *Trie) refreshBranch(parent *rowNode, slot int, child *rowNode) error {
