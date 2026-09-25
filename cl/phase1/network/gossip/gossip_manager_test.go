@@ -1369,11 +1369,55 @@ func TestPublishBackground_DeliversToRemotePeer(t *testing.T) {
 	require.True(t, bytes.HasPrefix(got, []byte(payloadPrefix)))
 }
 
+// publishOutcomeNames is every outcome publishOutcomeCounter records, used
+// to sum a topic's outcome counts without hardcoding the list twice.
+var publishOutcomeNames = []string{"handoff_ok", "publish_error", "panic", "expired", "shutdown"}
+
+// publishCounterSnapshot captures publishAcceptedCounter and
+// publishOutcomeCounter for one topic. These are process-global Prometheus
+// collectors, shared across every test in the binary and never reset
+// between runs (including repeated runs under `go test -count=N`), so
+// comparing raw values is wrong - only the delta between two snapshots
+// taken around a specific piece of work is meaningful.
+type publishCounterSnapshot struct {
+	accepted float64
+	outcomes map[string]float64
+}
+
+func snapshotPublishCounters(topic string) publishCounterSnapshot {
+	outcomes := make(map[string]float64, len(publishOutcomeNames))
+	for _, o := range publishOutcomeNames {
+		outcomes[o] = publishOutcomeCounter.WithLabelValues(topic, o).GetValue()
+	}
+	return publishCounterSnapshot{
+		accepted: publishAcceptedCounter.WithLabelValues(topic).GetValue(),
+		outcomes: outcomes,
+	}
+}
+
+func (before publishCounterSnapshot) acceptedDelta(topic string) float64 {
+	return publishAcceptedCounter.WithLabelValues(topic).GetValue() - before.accepted
+}
+
+func (before publishCounterSnapshot) outcomeDelta(topic, outcome string) float64 {
+	return publishOutcomeCounter.WithLabelValues(topic, outcome).GetValue() - before.outcomes[outcome]
+}
+
+func (before publishCounterSnapshot) outcomeDeltaSum(topic string) float64 {
+	var sum float64
+	for _, o := range publishOutcomeNames {
+		sum += before.outcomeDelta(topic, o)
+	}
+	return sum
+}
+
 // TestPublishAcceptedAndOutcomeCountersAreConsistentAtQuiescence proves the
 // invariant the metrics are meant to guarantee: once the worker has
-// finished with a job, the accepted count for its topic equals the sum of
-// its terminal-outcome counts - a job is never silently missing an
-// outcome, and rejected (never-accepted) work is never counted as one.
+// finished with a job, the accepted count for its topic increases by
+// exactly as much as the sum of its terminal-outcome counts - a job is
+// never silently missing an outcome, and rejected (never-accepted) work is
+// never counted as one. Compares deltas against a baseline taken before
+// this test's own work, not raw counter values (see publishCounterSnapshot).
 func (s *subscribeUpcomingTopicsTestSuite) TestPublishAcceptedAndOutcomeCountersAreConsistentAtQuiescence() {
 	const okTopicName = "invariant_ok_topic"
 	forkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
@@ -1388,6 +1432,12 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishAcceptedAndOutcomeCounters
 	const errTopicName = "invariant_error_topic"       // never joined: publishToDigest fails
 	const expiredTopicName = "invariant_expired_topic" // stale by the time the worker gets to it
 	const panicTopicName = "invariant_panic_topic"     // hook panics for this one
+	topics := []string{okTopicName, errTopicName, expiredTopicName, panicTopicName}
+
+	before := make(map[string]publishCounterSnapshot, len(topics))
+	for _, name := range topics {
+		before[name] = snapshotPublishCounters(name)
+	}
 
 	occupyEntered := make(chan struct{})
 	unblockOccupy := make(chan struct{})
@@ -1429,18 +1479,15 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishAcceptedAndOutcomeCounters
 		{panicTopicName, "panic"},
 	} {
 		s.Eventually(func() bool {
-			return publishOutcomeCounter.WithLabelValues(tc.name, tc.outcome).GetValue() == 1
+			return before[tc.name].outcomeDelta(tc.name, tc.outcome) == 1
 		}, 2*time.Second, time.Millisecond, "expected outcome %s for topic %s", tc.outcome, tc.name)
 	}
 
-	for _, name := range []string{okTopicName, errTopicName, expiredTopicName, panicTopicName} {
-		accepted := publishAcceptedCounter.WithLabelValues(name).GetValue()
-		sum := publishOutcomeCounter.WithLabelValues(name, "handoff_ok").GetValue() +
-			publishOutcomeCounter.WithLabelValues(name, "publish_error").GetValue() +
-			publishOutcomeCounter.WithLabelValues(name, "panic").GetValue() +
-			publishOutcomeCounter.WithLabelValues(name, "expired").GetValue() +
-			publishOutcomeCounter.WithLabelValues(name, "shutdown").GetValue()
-		s.Equal(accepted, sum, "accepted must equal the sum of terminal outcomes for topic %s at quiescence", name)
+	for _, name := range topics {
+		acceptedDelta := before[name].acceptedDelta(name)
+		outcomeDeltaSum := before[name].outcomeDeltaSum(name)
+		s.Equal(acceptedDelta, outcomeDeltaSum, "accepted delta must equal the sum of terminal-outcome deltas for topic %s at quiescence", name)
+		s.Equal(float64(1), acceptedDelta, "expected exactly one accepted job for topic %s in this test", name)
 	}
 }
 
