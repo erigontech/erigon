@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -819,6 +820,90 @@ func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NotContains(t, result.StateDiff, accounts.InternAddress(untouched))
+}
+
+// vmTrace attaches a sub only to call and create ops that run a child frame.
+func TestTraceCallVmTraceSubs(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0004")
+
+	for _, tc := range []struct {
+		name   string
+		code   []byte
+		nonce  hexutil.Uint64
+		extra  ethapi.StateOverrides
+		pc     int
+		frame  string
+		hasSub bool
+	}{
+		{
+			name:   "call without code",
+			code:   []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.GAS), byte(vm.CALL), byte(vm.STOP)},
+			pc:     7,
+			frame:  CALL,
+			hasSub: true,
+		},
+		{
+			name:  "call with insufficient balance",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.GAS), byte(vm.CALL), byte(vm.STOP)},
+			pc:    8,
+			frame: CALL,
+		},
+		{
+			name:  "create with insufficient balance",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE), byte(vm.STOP)},
+			pc:    4,
+			frame: CREATE,
+		},
+		{
+			name:  "create with nonce overflow",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE), byte(vm.STOP)},
+			nonce: math.MaxUint64,
+			pc:    3,
+			frame: CREATE,
+		},
+		{
+			name: "create with address collision",
+			code: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE), byte(vm.STOP)},
+			extra: ethapi.StateOverrides{
+				accounts.InternAddress(types.CreateAddress(target, 0)): {Nonce: new(hexutil.Uint64(1))},
+			},
+			pc:     3,
+			frame:  CREATE,
+			hasSub: true,
+		},
+		{
+			name:  "selfdestruct",
+			code:  []byte{byte(vm.PUSH0), byte(vm.SELFDESTRUCT)},
+			pc:    1,
+			frame: SUICIDE,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := hexutil.Bytes(tc.code)
+			overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code, Nonce: &tc.nonce}}
+			maps.Copy(overrides, tc.extra)
+			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
+				[]string{TraceTypeTrace, TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+			require.NoError(t, err)
+			require.Len(t, result.Trace, 2)
+			require.Equal(t, tc.frame, result.Trace[1].Type)
+
+			var op *VmTraceOp
+			for _, o := range result.VmTrace.Ops {
+				if o.Pc == tc.pc {
+					op = o
+				}
+			}
+			require.NotNil(t, op)
+			if tc.hasSub {
+				require.NotNil(t, op.Sub)
+			} else {
+				require.Nil(t, op.Sub)
+			}
+		})
+	}
 }
 
 // Call data takes the same data/input precedence as eth_call: input wins when both are set.

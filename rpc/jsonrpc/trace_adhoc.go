@@ -471,7 +471,10 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		}
 		if ot.lastVmOp != nil {
 			vmTrace = &VmTrace{Ops: []*VmTraceOp{}}
-			ot.lastVmOp.Sub = vmTrace
+			// SELFDESTRUCT enters a frame that runs no code, so it gets no sub.
+			if typ != vm.SELFDESTRUCT {
+				ot.lastVmOp.Sub = vmTrace
+			}
 			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
 		} else {
 			vmTrace = ot.r.VmTrace
@@ -580,6 +583,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
 			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+			// A call or create that fails its depth, balance or nonce check runs no code, so it gets no sub.
+			if errors.Is(err, vm.ErrDepth) || errors.Is(err, vm.ErrInsufficientBalance) || errors.Is(err, vm.ErrNonceUintOverflow) {
+				ot.lastOffStack.Sub = nil
+			}
 		}
 		if !ot.compat && deep {
 			ot.idx = ot.idx[:len(ot.idx)-1]
