@@ -17,13 +17,13 @@
 package v3
 
 import (
-	"context"
 	"math/rand"
 	"testing"
 
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func v3Account(u *commitment.Update) *accounts.Account {
@@ -40,52 +40,6 @@ func encodeAccountLeafV3(a *accounts.Account, storageRoot []byte) []byte {
 		enc = append(enc, storageRoot...)
 	}
 	return enc
-}
-
-func TestZZAccountLeafFormats(t *testing.T) {
-	rnd := rand.New(rand.NewSource(7))
-	const n = 200000
-	const contractShare = 12
-
-	var packedBytes, v3Bytes, v3NoRootBytes int
-	var eoaN, ctrN int
-	for i := range n {
-		var u *commitment.Update
-		var root []byte
-		if i%100 < contractShare {
-			u, root = sizeContract(i, rnd)
-			ctrN++
-		} else {
-			u, root = sizeEOA(i, rnd)
-			eoaN++
-		}
-		acc := v3Account(u)
-		packedBytes += len(encodeAccountLeaf(u, root, nil))
-		v3Bytes += len(encodeAccountLeafV3(acc, root))
-		v3NoRootBytes += len(accounts.SerialiseV3(acc))
-	}
-	t.Logf("n=%d (EOA %d / contract %d)", n, eoaN, ctrN)
-	t.Logf("  packed             %9d B  avg %6.3f B/leaf", packedBytes, float64(packedBytes)/n)
-	t.Logf("  SerialiseV3+root   %9d B  avg %6.3f B/leaf  (%+.2f B/leaf vs packed)",
-		v3Bytes, float64(v3Bytes)/n, float64(v3Bytes-packedBytes)/n)
-	t.Logf("  SerialiseV3 alone  %9d B  avg %6.3f B/leaf  (no storage root)",
-		v3NoRootBytes, float64(v3NoRootBytes)/n)
-}
-
-func TestZZAccountLeafFormatsEOAOnly(t *testing.T) {
-	rnd := rand.New(rand.NewSource(7))
-	const n = 200000
-	var packedBytes, v3Bytes int
-	for range n {
-		u, _ := sizeEOA(0, rnd)
-		acc := v3Account(u)
-		packedBytes += len(encodeAccountLeaf(u, empty.RootHash[:], nil))
-		v3Bytes += len(encodeAccountLeafV3(acc, empty.RootHash[:]))
-	}
-	t.Logf("EOA-only n=%d", n)
-	t.Logf("  v3 packed        avg %6.3f B/leaf", float64(packedBytes)/n)
-	t.Logf("  SerialiseV3      avg %6.3f B/leaf  (%+.2f B/leaf)",
-		float64(v3Bytes)/n, float64(v3Bytes-packedBytes)/n)
 }
 
 func BenchmarkZZAccountLeafFormats(b *testing.B) {
@@ -156,30 +110,43 @@ func BenchmarkZZContractDecode(b *testing.B) {
 	})
 }
 
-func contextBackground() context.Context { return context.Background() }
+func sizeEOA(i int, rnd *rand.Rand) (*commitment.Update, []byte) {
+	value, root := commitmenttest.SizedAccount(i, false, rnd)
+	return testAccountUpdate(value), root
+}
 
-func TestZZRecordByteBudget(t *testing.T) {
-	ctxb := contextBackground()
-	for _, shape := range []string{"accounts", "storage"} {
-		entries := benchEntries(shape, 100000)
-		c := newParityContext()
-		tr := &Trie{}
-		tr.ResetContext(c)
-		u := benchUpdates2(t, entries)
-		if _, err := tr.Process(ctxb, u, "", nil, commitmentWarmup()); err != nil {
-			t.Fatal(err)
+func sizeContract(i int, rnd *rand.Rand) (*commitment.Update, []byte) {
+	value, root := commitmenttest.SizedAccount(i, true, rnd)
+	return testAccountUpdate(value), root
+}
+
+func BenchmarkZZAccountLeafCodec(b *testing.B) {
+	rnd := rand.New(rand.NewSource(7))
+	u, _ := sizeEOA(1, rnd)
+	packed := encodeAccountLeaf(u, empty.RootHash[:], nil)
+	buf := make([]byte, 0, 128)
+
+	b.Run("encode", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			buf = encodeAccountLeaf(u, empty.RootHash[:], buf[:0])
 		}
-		var keyB, valB, recs int
-		for k, v := range c.branches {
-			keyB += len(k)
-			valB += len(v)
-			recs++
+	})
+	b.Run("decode+consensusRLP", func(b *testing.B) {
+		b.ReportAllocs()
+		for range b.N {
+			nonce, bal, ch, sr, err := decodeAccountLeaf(packed)
+			if err != nil {
+				b.Fatal(err)
+			}
+			buf = accountConsensusRLP(nonce, &bal, sr, ch, buf[:0])
 		}
-		nLeaves := 100000
-		t.Logf("%s/100k: %d records, keys %d B, values %d B, total %d B (%.1f B/record)",
-			shape, recs, keyB, valB, keyB+valB, float64(keyB+valB)/float64(recs))
-		t.Logf("   account-leaf format delta at +1.77 B/leaf = %+d B (%+.2f%% of total)",
-			int(1.77*float64(nLeaves)), 100*1.77*float64(nLeaves)/float64(keyB+valB))
-		tr.Release()
-	}
+	})
+	b.Run("consensusRLP_only", func(b *testing.B) {
+		b.ReportAllocs()
+		bal := u.Balance
+		for range b.N {
+			buf = accountConsensusRLP(u.Nonce, &bal, empty.RootHash[:], empty.CodeHash[:], buf[:0])
+		}
+	})
 }

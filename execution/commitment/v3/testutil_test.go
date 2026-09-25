@@ -49,14 +49,6 @@ func parityEntries(ops []commitmenttest.Op) []parityUpdate {
 	return entries
 }
 
-func incrementalEntries(ops []commitmenttest.Op) []incrementalOp {
-	entries := make([]incrementalOp, len(ops))
-	for i, op := range ops {
-		entries[i] = incrementalOp{key: op.Key, update: runner.Update(op), read: op.Read}
-	}
-	return entries
-}
-
 func openTestTrie(ctx context.Context, spec runner.RunSpec) (commitment.Trie, error) {
 	if spec.Mode != commitment.ModeCollect {
 		return runner.OpenHPH(ctx, spec)
@@ -74,8 +66,8 @@ func TestSharedRunnerCatalogue(t *testing.T) {
 		kind  string
 		count int
 	}{
-		{"E102/process-100k-accounts", "accounts", 100000},
-		{"E102/process-100k-storage", "storage", 100000},
+		{"E58-E101/process-100k-accounts", "accounts", 100000},
+		{"E58-E101/process-100k-storage", "storage", 100000},
 		{"E103/differential-zero-state-reads", "incremental", 0},
 	} {
 		t.Run(tc.id, func(t *testing.T) {
@@ -165,7 +157,7 @@ func entryOf(path []byte, update *commitment.Update) storageEntry {
 }
 
 func slotPath(prefix ...byte) []byte {
-	paths, err := commitmenttest.Paths(commitmenttest.Shape{Plane: "storage", Prefixes: [][]byte{prefix}})
+	paths, err := commitmenttest.Paths(commitmenttest.Shape{Prefixes: [][]byte{prefix}})
 	if err != nil {
 		panic(err)
 	}

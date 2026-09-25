@@ -25,7 +25,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
@@ -37,12 +36,6 @@ import (
 type parityUpdate struct {
 	key    []byte
 	update *commitment.Update
-}
-
-type incrementalOp struct {
-	key    []byte
-	update *commitment.Update
-	read   bool
 }
 
 type parityContext struct {
@@ -100,44 +93,6 @@ func incrSlot(addr []byte, j int) []byte {
 }
 
 func slotKey(addr, slot []byte) []byte { return append(bytes.Clone(addr), slot...) }
-
-func plainAccount(i int) *commitment.Update {
-	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "plain", Number: i}))
-}
-
-func incrAccountUpdate(rng *rand.Rand) *commitment.Update {
-	return testAccountUpdate(commitmenttest.RandomAccount(rng))
-}
-
-func incrStorageUpdate(rng *rand.Rand) *commitment.Update {
-	return storageUpdate(commitmenttest.RandomStorage(rng))
-}
-
-func incrementalAccountUpdate(nonce, balance uint64) *commitment.Update {
-	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: common.HexToHash("0x1234")}))
-}
-
-func incrementalStorageUpdate(value byte) *commitment.Update {
-	return storageUpdate(commitmenttest.Storage(commitmenttest.StorageSpec{Value: []byte{value}}))
-}
-
-func incrementalDeleteUpdate() *commitment.Update {
-	return &commitment.Update{Flags: commitment.DeleteUpdate}
-}
-
-func incrementalBatches() ([][]incrementalOp, []incrementalOp) {
-	c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
-	if err != nil {
-		panic(err)
-	}
-	batches := make([][]incrementalOp, len(c.Rounds))
-	state := make(commitmenttest.State)
-	for i, round := range c.Rounds {
-		batches[i] = incrementalEntries(round)
-		state.Apply(round)
-	}
-	return batches, incrementalEntries(state.Ops())
-}
 
 func accountOp(key []byte, spec commitmenttest.AccountSpec) commitmenttest.Op {
 	value := commitmenttest.Account(spec)
@@ -312,6 +267,17 @@ func TestDifferential(t *testing.T) {
 					}
 				}
 			}
+		}
+	})
+
+	t.Run("E61/two-slot-seeds", func(t *testing.T) {
+		for seed := range int64(200) {
+			t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
+				c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: 2})
+				require.NoError(t, err)
+				c.ID = "E61/two-slot-seeds"
+				differential(t, c, serialEngines[:1])
+			})
 		}
 	})
 

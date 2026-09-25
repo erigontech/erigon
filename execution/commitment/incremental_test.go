@@ -68,12 +68,15 @@ func TestIncrementalRootsAgree(t *testing.T) {
 	for _, warmup := range []struct {
 		name    string
 		enabled bool
+		opts    whaleOpts
 	}{
-		{name: "off"},
-		{name: "on", enabled: true},
+		{name: "off", opts: bigAccountWhale(50_000)},
+		{name: "on", enabled: true, opts: bigAccountWhale(50_000)},
+		{name: "E83/100K", opts: bigAccountWhale(100_000)},
+		{name: "E83/1M", opts: whale1M()},
 	} {
 		t.Run(warmup.name, func(t *testing.T) {
-			pk, upds := buildWhaleCorpus(bigAccountWhale(50_000))
+			pk, upds := buildWhaleCorpus(warmup.opts)
 			dk, du := buildDelta(pk, upds, 500, 4242)
 
 			ms := NewMockState(t)

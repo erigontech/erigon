@@ -17,6 +17,8 @@
 package v3
 
 import (
+	"fmt"
+	"math/rand"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -116,6 +118,37 @@ func TestAccountCodec(t *testing.T) {
 				t.Run(tt.name, func(t *testing.T) {
 					_, _, _, _, err := decodeAccountLeaf(tt.data)
 					require.ErrorIs(t, err, errAccountLeafFlags)
+				})
+			}
+		}},
+		{"E1-E101/seeded-decode", func(t *testing.T) {
+			for _, share := range []int{12, 0} {
+				t.Run(fmt.Sprintf("contracts=%d", share), func(t *testing.T) {
+					rnd := rand.New(rand.NewSource(7))
+					for i := range 200000 {
+						value, root := commitmenttest.SizedAccount(i, i%100 < share, rnd)
+						encoded := encodeAccountLeaf(testAccountUpdate(value), root, nil)
+						nonce, balance, code, storage, err := decodeAccountLeaf(encoded)
+						require.NoError(t, err, "account=%d", i)
+						require.Equal(t, value.Nonce, nonce)
+						require.Equal(t, value.Balance, balance)
+						require.Equal(t, value.CodeHash[:], code)
+						require.Equal(t, root, storage)
+						_ = accountConsensusRLP(nonce, &balance, storage, code, nil)
+					}
+					if share == 0 {
+						return
+					}
+					for range 200000 {
+						n := 1 + rnd.Intn(32)
+						if rnd.Intn(100) < 55 {
+							n = 1 + rnd.Intn(4)
+						}
+						value := make([]byte, n)
+						rnd.Read(value)
+						value[0] |= 0x01
+						require.Equal(t, storageLeafRefBuffered(nil, value, nil), storageLeafRef(nil, value, nil))
+					}
 				})
 			}
 		}},

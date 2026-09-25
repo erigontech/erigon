@@ -58,7 +58,5 @@ type Case struct {
 	ID         string
 	Seed       Seed
 	Rounds     [][]Op
-	Shape      Shape
-	Records    []RecordSpec
 	Assertions Assertions
 }

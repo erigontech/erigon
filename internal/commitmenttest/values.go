@@ -75,7 +75,7 @@ func Account(spec AccountSpec) AccountValue {
 	return value
 }
 
-func RandomAccount(rng *rand.Rand) AccountValue {
+func randomAccount(rng *rand.Rand) AccountValue {
 	value := AccountValue{Fields: allFields, Nonce: uint64(rng.Intn(1 << 20)), Balance: *uint256.NewInt(rng.Uint64()), CodeHash: empty.CodeHash}
 	if rng.Intn(3) == 0 {
 		value.CodeHash = common.BigToHash(uint256.NewInt(rng.Uint64()).ToBig())
@@ -115,7 +115,7 @@ func Storage(spec StorageSpec) []byte {
 	return []byte{byte(spec.Number), byte(spec.Number >> 8)}
 }
 
-func RandomStorage(rng *rand.Rand) []byte {
+func randomStorage(rng *rand.Rand) []byte {
 	value := make([]byte, 1+rng.Intn(32))
 	_, _ = rng.Read(value)
 	value[0] |= 1

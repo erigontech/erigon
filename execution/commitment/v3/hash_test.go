@@ -19,6 +19,7 @@ package v3
 import (
 	"bytes"
 	"encoding/hex"
+	"math/rand"
 	"testing"
 
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
@@ -99,6 +100,29 @@ func TestConsensusHash(t *testing.T) {
 				}
 			}
 		}},
+		{"E23/StorageLeafRefRandom", func(t *testing.T) {
+			rnd := rand.New(rand.NewSource(11))
+			for _, suffixLen := range []int{1, 2, 17, 33} {
+				suffix := make([]byte, suffixLen)
+				for l := 1; l <= 32; l++ {
+					for trial := range 400 {
+						v := make([]byte, l)
+						rnd.Read(v)
+						if trial < 256 && l == 1 {
+							v[0] = byte(trial)
+						}
+						if v[0] == 0 && l > 1 {
+							v[0] = 1
+						}
+						rnd.Read(suffix)
+						want := storageLeafRefBuffered(suffix, v, nil)
+						got := storageLeafRefDirect(suffix, v, nil)
+						require.Equal(t, want, got, "suffixLen=%d l=%d v=%x", suffixLen, l, v)
+						require.Equal(t, want, storageLeafRef(suffix, v, nil), "suffixLen=%d l=%d v=%x", suffixLen, l, v)
+					}
+				}
+			}
+		}},
 	} {
 		t.Run(tc.name, tc.run)
 	}
@@ -109,4 +133,24 @@ func mustDecodeHex(t *testing.T, value string) []byte {
 	decoded, err := hex.DecodeString(value)
 	require.NoError(t, err)
 	return decoded
+}
+
+func storageLeafRefBuffered(suffix []byte, payload []byte, dst []byte) []byte {
+	var encoded bytes.Buffer
+	var prefix [8]byte
+	if err := rlp.RlpSerializableBytes(payload).ToDoubleRLP(&encoded, prefix[:]); err != nil {
+		panic(err)
+	}
+	contentLen := rlp.StringLen(suffix) + encoded.Len()
+	start := len(dst)
+	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
+	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
+	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
+	pos += copy(dst[pos:], encoded.Bytes())
+	encodedBytes := dst[start:pos]
+	if len(encodedBytes) < 32 {
+		return encodedBytes
+	}
+	hash := keccak.Sum256(encodedBytes)
+	return append(dst[:start], hash[:]...)
 }

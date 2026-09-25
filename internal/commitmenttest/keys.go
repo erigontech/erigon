@@ -104,7 +104,6 @@ func Keys(seed Seed, spec KeySpec) ([][]byte, error) {
 }
 
 type Shape struct {
-	Plane    string
 	Paths    [][]byte
 	Prefixes [][]byte
 }

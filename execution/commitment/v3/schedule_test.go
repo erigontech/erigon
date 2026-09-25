@@ -54,6 +54,24 @@ func (c *barrierContext) Branch(key []byte) ([]byte, kv.Step, error) {
 }
 
 func TestScheduling(t *testing.T) {
+	t.Run("E47-E58-E101/worker-smoke", func(t *testing.T) {
+		for _, shape := range []string{"storage", "accounts"} {
+			entries := benchEntries(shape, 100000)
+			for _, workers := range []int{1, 2, 4, 8, 18, 36} {
+				for iter := range 3 {
+					t.Run(fmt.Sprintf("%s/workers=%d/iteration=%d", shape, workers, iter), func(t *testing.T) {
+						tr := &Trie{scheduleWorkers: workers}
+						tr.ResetContext(newParityContext())
+						defer tr.Release()
+						updates := benchUpdatesIn(t.TempDir(), commitment.ModeCollect, entries)
+						defer updates.Close()
+						_, err := tr.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
+						require.NoError(t, err)
+					})
+				}
+			}
+		}
+	})
 	storage := benchEntries("storage", 256)
 	t.Run("deferred_builds_worker_contexts", func(t *testing.T) {
 		_, _, calls := runV3(t, newShardedContext(), v3Config{deferred: true}, storage)
