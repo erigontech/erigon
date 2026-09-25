@@ -26,6 +26,7 @@ import (
 	"github.com/holiman/uint256"
 
 	bscchain "github.com/erigontech/erigon/bsc/chain"
+	"github.com/erigontech/erigon/bsc/parlia/seal"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
@@ -283,7 +284,14 @@ func (p *Parlia) Seal(chain rules.ChainHeaderReader, block *types.BlockWithRecei
 	return errNotSupported
 }
 
-func (p *Parlia) SealHash(header *types.Header) common.Hash { return header.Hash() }
+func (p *Parlia) SealHash(header *types.Header) common.Hash {
+	hash, err := seal.Hash(header, p.chainConfig.ChainID.ToBig())
+	if err != nil {
+		p.logger.Warn("parlia: cannot compute seal hash", "block", header.Number.Uint64(), "err", err)
+		return common.Hash{}
+	}
+	return hash
+}
 
 func (p *Parlia) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64,
 	parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash,
