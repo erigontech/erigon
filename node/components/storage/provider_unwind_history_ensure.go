@@ -97,11 +97,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	if err != nil {
 		return noop, fmt.Errorf("TxNums.Max(%d): %w", toBlock, err)
 	}
-	// walkEndStep = (toBlockLastTxNum + 1) / stepSize mirrors the compute's
-	// stepBoundary derivation in execution/commitment/commitmentdb/
-	// recompute_sdless.go. This is the maxStep the compute passes to
-	// getLatestFromFilesUpToStep for its baseline lookup.
-	walkEndStep := (toBlockLastTxNum + 1) / stepSize
+	walkEndStep := walkEndStepFor(toBlockLastTxNum, stepSize)
 	if walkEndStep == 0 {
 		return noop, nil
 	}
@@ -116,9 +112,10 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	if !ok {
 		return noop, nil
 	}
-	if unwindWalkIsEmpty(baselineStep, stepSize, toBlockLastTxNum) {
-		// The compute's touch range is empty; it will just re-encode the
-		// baseline trie state. No history walk needed.
+	if baselineStep >= walkEndStep {
+		// Baseline is already at/past the walk end — the compute's
+		// touch range is empty and it will just re-encode the baseline
+		// trie state. No history walk needed.
 		return noop, nil
 	}
 
@@ -273,6 +270,16 @@ func (p *Provider) discardDownloadedHistory(ctx context.Context, paths []string,
 // Called by ensureHistoryForUnwindWalk as a fast path: local coverage
 // means no download is needed, even when the preverified registry has
 // nothing for the range (which is normal past preverified's horizon).
+// walkEndStepFor returns the EXCLUSIVE end of the step range the compute's
+// txNum walk touches. v4 files are cut mid-step, so the target commonly sits
+// inside a step rather than on its boundary; that step is touched, and the
+// exclusive end is one past it. Deriving the end as (target+1)/stepSize
+// instead collapses a sub-step walk to an empty range, and every step-range
+// consumer below then reports the walk as needing nothing.
+func walkEndStepFor(targetTxNum, stepSize uint64) uint64 {
+	return targetTxNum/stepSize + 1
+}
+
 func localHistoryCoversWalk(snapDir string, baselineStep, walkEndStep, stepSize uint64) bool {
 	if baselineStep >= walkEndStep {
 		return true
@@ -502,19 +509,8 @@ func stepSizeFromName(name string) uint64 {
 // range overlapping (baselineStep, walkEndStep]. Extracted so unit
 // tests can drive it with a synthetic PreverifiedItems slice without a
 // full Provider.
-// unwindWalkIsEmpty reports whether the compute's walk touches nothing. The
-// walk is (baselineStep*stepSize-1, targetTxNum], so it is empty only when the
-// target sits at or below the baseline file's last txNum — a step-granular
-// comparison wrongly calls a sub-step walk empty.
-func unwindWalkIsEmpty(baselineStep, stepSize, targetTxNum uint64) bool {
-	return targetTxNum < baselineStep*stepSize
-}
-
 func neededPreverifiedHistoryForWalk(items snapcfg.PreverifiedItems, baselineStep, walkEndStep, stepSize uint64) []snapcfg.PreverifiedItem {
-	// Equal steps are NOT an empty range: a v4 file cut mid-step leaves the
-	// compute walking a sub-step txNum range that still needs the step it
-	// sits in. Only a baseline past the walk end covers nothing.
-	if baselineStep > walkEndStep {
+	if baselineStep >= walkEndStep {
 		return nil
 	}
 	out := make([]snapcfg.PreverifiedItem, 0, 16)

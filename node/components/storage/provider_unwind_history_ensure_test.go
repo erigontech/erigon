@@ -124,15 +124,12 @@ func TestNeededPreverifiedHistoryForWalk_ExcludesStepsPastEnd(t *testing.T) {
 	require.Equal(t, []string{"history/v2.0-accounts.256-272.v"}, got)
 }
 
-func TestNeededPreverifiedHistoryForWalk_BaselineBeyondWalkEndReturnsNil(t *testing.T) {
+func TestNeededPreverifiedHistoryForWalk_BaselineAtOrBeyondWalkEndReturnsNil(t *testing.T) {
 	t.Parallel()
 
 	all := items(map[string]string{"history/v2.0-accounts.256-272.v": "x"})
-	require.Nil(t, neededPreverifiedHistoryForWalk(all, 300, 287, testStepSize),
-		"a baseline past the walk end covers everything the walk could touch")
-	// Equal steps are a sub-step walk, not an empty one: nothing is selected
-	// here only because no file spans step 287.
-	require.Empty(t, neededPreverifiedHistoryForWalk(all, 287, 287, testStepSize))
+	require.Nil(t, neededPreverifiedHistoryForWalk(all, 287, 287, testStepSize))
+	require.Nil(t, neededPreverifiedHistoryForWalk(all, 300, 287, testStepSize))
 }
 
 func TestFilterMissingOnDisk_SplitsPresentAndMissing(t *testing.T) {
@@ -388,52 +385,23 @@ func TestLocalCommitmentBaselineStep(t *testing.T) {
 	require.False(t, ok)
 }
 
-// TestNeededPreverifiedHistoryForWalk_SubStepWalkSelectsContainingStep pins
-// that a walk contained within a single step still asks for that step's
-// history.
+// TestWalkEndStepFor pins the exclusive end of the compute's walk.
 //
-// v4 files are cut mid-step, so an unwind target inside a step leaves the
-// compute walking a sub-step range whose baseline and end land on the SAME
-// step number. Comparing steps makes that look like an empty walk; the walk
-// is measured in txNums and is not empty.
-func TestNeededPreverifiedHistoryForWalk_SubStepWalkSelectsContainingStep(t *testing.T) {
-	t.Parallel()
-
-	all := items(map[string]string{
-		"history/v2.1-accounts.330-331.v": "a",
-		"idx/v3.1-accounts.330-331.ef":    "b",
-		"history/v2.0-storage.330-331.v":  "c",
-		"history/v2.0-code.328-330.v":     "d", // ends at the baseline — not needed
-	})
-
-	got := neededPreverifiedHistoryForWalk(all, 330, 330, testStepSize)
-
-	names := make([]string, 0, len(got))
-	for _, it := range got {
-		names = append(names, it.Name)
-	}
-	require.Contains(t, names, "history/v2.1-accounts.330-331.v",
-		"the step containing the walk must be fetched — without it the compute "+
-			"finds zero touches and the unwind refuses")
-	require.Contains(t, names, "idx/v3.1-accounts.330-331.ef")
-	require.Contains(t, names, "history/v2.0-storage.330-331.v")
-	require.NotContains(t, names, "history/v2.0-code.328-330.v",
-		"a file ending at the baseline covers nothing the walk touches")
-}
-
-// TestUnwindWalkIsEmpty pins the emptiness rule the caller gates on: the walk
-// is (baselineStep*stepSize-1, targetTxNum], so it is empty only when the
-// target sits at or below the baseline's last txNum.
-func TestUnwindWalkIsEmpty(t *testing.T) {
+// v4 files are cut mid-step, so an unwind target usually sits inside a step
+// rather than on its boundary. That step is touched and must be included;
+// deriving the end as (target+1)/stepSize collapses such a walk to an empty
+// step range, and ensureHistoryForUnwindWalk then fetches nothing — the
+// compute later refuses the unwind with "zero touches".
+func TestWalkEndStepFor(t *testing.T) {
 	t.Parallel()
 
 	const step = uint64(390625)
-	require.True(t, unwindWalkIsEmpty(330, step, 330*step-1),
-		"target exactly at the baseline's last txNum touches nothing")
-	require.False(t, unwindWalkIsEmpty(330, step, 330*step),
-		"one txNum past the baseline is a non-empty walk")
-	require.False(t, unwindWalkIsEmpty(330, step, 129_256_174),
-		"the live mode-C case: a sub-step walk inside step 330")
-	require.True(t, unwindWalkIsEmpty(331, step, 129_256_174),
-		"baseline beyond the target touches nothing")
+	require.Equal(t, uint64(331), walkEndStepFor(129_256_174, step),
+		"a target inside step 330 must leave step 330 in the range")
+	require.Equal(t, uint64(331), walkEndStepFor(128_934_742, step),
+		"the live mode-C case: 28493 txNums into step 330")
+	require.Equal(t, uint64(331), walkEndStepFor(331*step-1, step),
+		"the last txNum of step 330 is still step 330")
+	require.Equal(t, uint64(332), walkEndStepFor(331*step, step),
+		"the first txNum of step 331 moves the end on")
 }
