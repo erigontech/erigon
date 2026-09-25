@@ -77,14 +77,15 @@ func (t *Trie) Verify() error {
 
 func (t *Trie) verifyRootRecord() error {
 	record := t.rootRecord()
-	data, err := EncodeRecord(GlobalRootKey(), &record)
+	rootKey := t.rootRecordKey()
+	data, err := EncodeRecord(rootKey, &record)
 	if err != nil {
 		return err
 	}
 	if !bytes.Equal(data, t.root.raw) {
 		return fmt.Errorf("root record is not canonical")
 	}
-	decoded, err := DecodeRecord(GlobalRootKey(), data)
+	decoded, err := DecodeRecord(rootKey, data)
 	if err != nil {
 		return err
 	}

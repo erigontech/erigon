@@ -18,18 +18,137 @@ package pbt
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"math/rand"
 	"slices"
 	"sort"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
+
+func TestTrieParallelPhaseAStartsBucketTasksConcurrently(t *testing.T) {
+	ctx := newTrieTestContext()
+	addressA := bytes.Repeat([]byte{0x51}, 20)
+	addressB := bytes.Repeat([]byte{0x61}, 20)
+	ops := []Op{
+		{Key: eip8297.TreeKeyStorage(addressA, storageSlot(64)), Value: testTrieValue(1)},
+		{Key: eip8297.TreeKeyStorage(addressB, storageSlot(64)), Value: testTrieValue(2)},
+	}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	started := make(chan struct{})
+	var count atomic.Int32
+	trie := NewTrie(ctx)
+	trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) { return ctx, func() {} })
+	trie.SetPhaseHook(func(task phaseTask, op *Op) error {
+		if task.kind != phaseBucket || op != nil {
+			return nil
+		}
+		if count.Add(1) == 2 {
+			close(started)
+		}
+		select {
+		case <-started:
+			return nil
+		case <-time.After(time.Second):
+			return fmt.Errorf("bucket tasks did not start concurrently")
+		}
+	})
+	_, err := trie.ProcessParallelContext(t.Context(), ops, 2)
+	require.NoError(t, err)
+	require.Equal(t, int32(2), count.Load())
+}
+
+func TestTrieParallelPhaseAAttributesEveryOpOnce(t *testing.T) {
+	ctx := newTrieTestContext()
+	addressA := bytes.Repeat([]byte{0x71}, 20)
+	addressB := bytes.Repeat([]byte{0x81}, 20)
+	account := eip8297.TreeKeyAccount(addressA, eip8297.BasicDataLeafKey)
+	code := eip8297.TreeKeyCodeChunk([32]byte{3}, 0)
+	storageA := eip8297.TreeKeyStorage(addressA, storageSlot(64))
+	storageB := eip8297.TreeKeyStorage(addressB, storageSlot(64))
+	ops := []Op{
+		{Key: account, Value: testTrieValue(1)},
+		{Key: code, Value: testTrieValue(2)},
+		{Key: storageA, Value: testTrieValue(3)},
+		{Key: storageB, Value: testTrieValue(4)},
+	}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	counts := make(map[string]int)
+	var mu sync.Mutex
+	trie := NewTrie(ctx)
+	trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) { return ctx, func() {} })
+	trie.SetPhaseHook(func(task phaseTask, op *Op) error {
+		if op == nil {
+			return nil
+		}
+		if task.kind == phaseBucket && op.Key[0] != eip8297.StorageZone {
+			return fmt.Errorf("non-storage op owned by bucket")
+		}
+		if task.kind != phaseBucket && op.Key[0] == eip8297.StorageZone {
+			return fmt.Errorf("storage op reached phase B")
+		}
+		mu.Lock()
+		counts[string(op.Key)]++
+		mu.Unlock()
+		return nil
+	})
+	_, err := trie.ProcessParallelContext(t.Context(), ops, 2)
+	require.NoError(t, err)
+	for _, op := range ops {
+		require.Equal(t, 1, counts[string(op.Key)], "%x", op.Key)
+	}
+}
+
+func TestTrieParallelParityWorkerCounts(t *testing.T) {
+	addressA := bytes.Repeat([]byte{0x91}, 20)
+	addressB := bytes.Repeat([]byte{0xa1}, 20)
+	initial := []Op{
+		{Key: eip8297.TreeKeyAccount(addressA, eip8297.BasicDataLeafKey), Value: testTrieValue(1)},
+		{Key: eip8297.TreeKeyStorage(addressA, storageSlot(64)), Value: testTrieValue(2)},
+		{Key: eip8297.TreeKeyStorage(addressB, storageSlot(64)), Value: testTrieValue(3)},
+	}
+	batch := []Op{
+		{Key: eip8297.TreeKeyAccount(addressA, eip8297.BasicDataLeafKey), Value: testTrieValue(4)},
+		{Key: eip8297.TreeKeyStorage(addressA, storageSlot256()), Value: testTrieValue(5)},
+		{Key: eip8297.TreeKeyStorage(addressB, storageSlot(65)), Value: testTrieValue(6)},
+	}
+	want := []Op{
+		{Key: eip8297.TreeKeyAccount(addressA, eip8297.BasicDataLeafKey), Value: testTrieValue(4)},
+		{Key: eip8297.TreeKeyStorage(addressA, storageSlot(64)), Value: testTrieValue(2)},
+		{Key: eip8297.TreeKeyStorage(addressA, storageSlot256()), Value: testTrieValue(5)},
+		{Key: eip8297.TreeKeyStorage(addressB, storageSlot(64)), Value: testTrieValue(3)},
+		{Key: eip8297.TreeKeyStorage(addressB, storageSlot(65)), Value: testTrieValue(6)},
+	}
+	sort.Slice(initial, func(i, j int) bool { return bytes.Compare(initial[i].Key, initial[j].Key) < 0 })
+	sort.Slice(batch, func(i, j int) bool { return bytes.Compare(batch[i].Key, batch[j].Key) < 0 })
+	sort.Slice(want, func(i, j int) bool { return bytes.Compare(want[i].Key, want[j].Key) < 0 })
+	for _, workers := range []int{1, 2, 8} {
+		t.Run(fmt.Sprintf("workers-%d", workers), func(t *testing.T) {
+			serialContext := newTrieTestContext()
+			parallelContext := newTrieTestContext()
+			requireProcess(t, serialContext, initial)
+			requireProcess(t, parallelContext, initial)
+			trie := NewTrie(parallelContext)
+			trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) { return parallelContext, func() {} })
+			serialRoot, err := NewTrie(serialContext).Process(batch)
+			require.NoError(t, err)
+			require.NoError(t, NewTrie(serialContext).Verify())
+			parallelRoot, err := trie.ProcessParallel(batch, workers)
+			require.NoError(t, err)
+			require.Equal(t, serialRoot, parallelRoot)
+			require.Equal(t, serialContext.records, parallelContext.records)
+			assertPersistedTrie(t, parallelContext, want)
+		})
+	}
+}
 
 func TestBuildPhasePlanOwnsChainsAndBucketDependencies(t *testing.T) {
 	addressA := bytes.Repeat([]byte{0x11}, 20)

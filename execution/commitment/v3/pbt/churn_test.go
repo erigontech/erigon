@@ -42,6 +42,68 @@ func TestTrieRandomizedChurn(t *testing.T) {
 	}
 }
 
+func TestTrieChurnWindowCoverage(t *testing.T) {
+	address := bytes.Repeat([]byte{0xb1}, 20)
+	prefix := eip8297.TreeKeyStorage(address, storageSlot(64))[:33]
+	for bit := 264; bit <= 271; bit++ {
+		t.Run("storage-bit-"+formatChurnSeed(int64(bit)), func(t *testing.T) {
+			checkStorageSplit(t, prefix, bit)
+		})
+	}
+	for window := 66; window <= 131; window++ {
+		bit := window*4 + 1
+		t.Run("storage-window-"+formatChurnSeed(int64(window)), func(t *testing.T) {
+			checkStorageSplit(t, prefix, bit)
+		})
+	}
+	for window := 2; window <= 67; window++ {
+		bit := window*4 + 1
+		t.Run("code-window-"+formatChurnSeed(int64(window)), func(t *testing.T) {
+			checkCodeSplit(t, bit)
+		})
+	}
+	ctx := newTrieTestContext()
+	account := accountKey(0, eip8297.BasicDataLeafKey)
+	code := trieCodeKey(0, 0, 1)
+	_, err := NewTrie(ctx).Process([]Op{{Key: account, Value: testTrieValue(1)}, {Key: code, Value: testTrieValue(2)}})
+	require.NoError(t, err)
+}
+
+func checkStorageSplit(t *testing.T, prefix []byte, bit int) {
+	t.Helper()
+	keyA := storageKeyWithSuffix(prefix, 0, 0)
+	keyB := bytes.Clone(keyA)
+	keyB[bit/8] ^= 1 << uint(7-bit%8)
+	ctx := newTrieTestContext()
+	ops := []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	_, err := NewTrie(ctx).Process(ops)
+	require.NoError(t, err)
+	bucketKey, err := bucketKeyForStorage(keyA)
+	require.NoError(t, err)
+	record, err := DecodeRecord(bucketKey, ctx.records[string(bucketKey)])
+	require.NoError(t, err)
+	if bit < 268 {
+		require.Equal(t, RowRoot, record.Form)
+		return
+	}
+	require.Equal(t, ExtRoot, record.Form)
+	require.Equal(t, int16(bit-264), record.SelfExt.BitLen)
+}
+
+func checkCodeSplit(t *testing.T, bit int) {
+	t.Helper()
+	keyA := trieCodeKey(0, 0, 1)
+	keyB := bytes.Clone(keyA)
+	keyB[bit/8] ^= 1 << uint(7-bit%8)
+	ctx := newTrieTestContext()
+	ops := []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	_, err := NewTrie(ctx).Process(ops)
+	require.NoError(t, err)
+	require.NoError(t, NewTrie(ctx).Verify())
+}
+
 func runTrieChurn(t *testing.T, seed int64) {
 	t.Helper()
 	batches := 5000

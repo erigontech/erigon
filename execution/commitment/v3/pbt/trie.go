@@ -38,6 +38,11 @@ func Drop(prefix []byte) Op { return Op{Drop: bytes.Clone(prefix)} }
 
 type Trie struct {
 	ctx                    commitment.PatriciaContext
+	ctxFactory             commitment.TrieContextFactory
+	phaseHook              func(phaseTask, *Op) error
+	rootKey                []byte
+	rootPath               eip8297.Bitpath
+	bucketMode             bool
 	root                   *treeRoot
 	rootLoaded             bool
 	rootDirty              bool
@@ -53,6 +58,26 @@ func NewTrie(ctx commitment.PatriciaContext) *Trie {
 	return &Trie{ctx: ctx, rows: make(map[string]*rowNode), dirtyRows: make(map[string]*rowNode), bucketDirty: make(map[string][]byte)}
 }
 
+func newBucketTrie(ctx commitment.PatriciaContext, key []byte) (*Trie, error) {
+	path, err := bucketPathForKey(key)
+	if err != nil {
+		return nil, err
+	}
+	return &Trie{
+		ctx:         ctx,
+		rootKey:     bytes.Clone(key),
+		rootPath:    path,
+		bucketMode:  true,
+		rows:        make(map[string]*rowNode),
+		dirtyRows:   make(map[string]*rowNode),
+		bucketDirty: make(map[string][]byte),
+	}, nil
+}
+
+func (t *Trie) SetTrieContextFactory(factory commitment.TrieContextFactory) { t.ctxFactory = factory }
+
+func (t *Trie) SetPhaseHook(hook func(phaseTask, *Op) error) { t.phaseHook = hook }
+
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.ctx = ctx
 	t.root = nil
@@ -64,6 +89,20 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.scheduledBucketRecords = nil
 	t.deltas = nil
 	t.roundPrev = nil
+}
+
+func (t *Trie) rootRecordKey() []byte {
+	if t.bucketMode {
+		return t.rootKey
+	}
+	return GlobalRootKey()
+}
+
+func (t *Trie) rootRecordPath() eip8297.Bitpath {
+	if t.bucketMode {
+		return t.rootPath
+	}
+	return eip8297.Bitpath{}
 }
 
 func (t *Trie) Process(ops []Op) (common.Hash, error) {
@@ -78,7 +117,7 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if _, err := t.loadRoot(); err != nil {
 		return common.Hash{}, err
 	}
-	t.rememberPrev(GlobalRootKey(), t.root.prev)
+	t.rememberPrev(t.rootRecordKey(), t.root.prev)
 	t.deltas = nil
 	for i := range ops {
 		var err error
@@ -157,7 +196,7 @@ func (t *Trie) rootHash() (common.Hash, error) {
 		return branchHash(&t.root.self, &t.root.left, &t.root.right), nil
 	case RowRoot:
 		record := t.root.row.record()
-		return Fold(GlobalRootKey(), &record)
+		return Fold(t.rootRecordKey(), &record)
 	default:
 		return common.Hash{}, fmt.Errorf("unknown root form %d", t.root.form)
 	}
@@ -181,19 +220,20 @@ func (t *Trie) write() error {
 		}
 		final[key] = data
 	}
-	rootKey := string(GlobalRootKey())
+	rootKeyBytes := t.rootRecordKey()
+	rootKey := string(rootKeyBytes)
 	if t.rootDirty && (t.root.form != RowRoot || t.root.row == nil) {
 		var data []byte
 		if t.root.form != RowRoot || t.root.row != nil {
 			record := t.rootRecord()
 			var err error
-			data, err = EncodeRecord(GlobalRootKey(), &record)
+			data, err = EncodeRecord(rootKeyBytes, &record)
 			if err != nil {
 				return err
 			}
 		}
 		final[rootKey] = data
-		prev[rootKey] = t.previousRecord(GlobalRootKey(), t.root.prev)
+		prev[rootKey] = t.previousRecord(rootKeyBytes, t.root.prev)
 	}
 	for key, bucketKey := range t.bucketDirty {
 		descriptor, ok, err := t.bucketDescriptor(bucketKey)
@@ -254,7 +294,11 @@ func (t *Trie) rootRecord() Record {
 	case LeafRoot:
 		return Record{Form: LeafRoot, Cells: [maxCells]Cell{0: t.root.leaf}}
 	case ExtRoot:
-		return Record{Form: ExtRoot, SelfExt: t.root.self, Left: t.root.left, Right: t.root.right}
+		self := t.root.self
+		if self.BitLen > t.rootRecordPath().BitLen {
+			self = self.Slice(t.rootRecordPath().BitLen, self.BitLen)
+		}
+		return Record{Form: ExtRoot, SelfExt: self, Left: t.root.left, Right: t.root.right}
 	case RowRoot:
 		return t.root.row.record()
 	default:
@@ -290,6 +334,9 @@ func (t *Trie) rememberPrev(key, data []byte) {
 }
 
 func (t *Trie) touchBucket(key []byte) {
+	if t.bucketMode {
+		return
+	}
 	t.bucketDirty[string(key)] = bytes.Clone(key)
 }
 

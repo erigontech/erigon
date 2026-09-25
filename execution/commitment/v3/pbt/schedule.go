@@ -21,12 +21,12 @@ import (
 	"context"
 	"runtime"
 	"sort"
-	"sync"
 	"sync/atomic"
 
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -52,6 +52,7 @@ type phaseTask struct {
 	key          string
 	zone         byte
 	nibble       byte
+	ops          []Op
 	dependencies []int
 }
 
@@ -63,6 +64,7 @@ func buildPhasePlan(ops []Op) (phasePlan, error) {
 	if err := validateOps(ops); err != nil {
 		return phasePlan{}, err
 	}
+	bucketOps := make(map[string][]Op)
 	bucketKeys := make(map[string][]byte)
 	chains := make(map[[2]byte]struct{})
 	for _, op := range ops {
@@ -72,6 +74,7 @@ func buildPhasePlan(ops []Op) (phasePlan, error) {
 				return phasePlan{}, err
 			}
 			bucketKeys[string(key)] = key
+			bucketOps[string(key)] = append(bucketOps[string(key)], op)
 			chains[[2]byte{eip8297.StorageZone, key[1] >> 4}] = struct{}{}
 			continue
 		}
@@ -88,6 +91,7 @@ func buildPhasePlan(ops []Op) (phasePlan, error) {
 				return phasePlan{}, err
 			}
 			bucketKeys[string(key)] = key
+			bucketOps[string(key)] = append(bucketOps[string(key)], op)
 		}
 		chains[[2]byte{zone, op.Key[1] >> 4}] = struct{}{}
 	}
@@ -105,7 +109,7 @@ func buildPhasePlan(ops []Op) (phasePlan, error) {
 	bucketIndex := make(map[string]int, len(bucketList))
 	for _, key := range bucketList {
 		bucketIndex[string(key)] = len(tasks)
-		tasks = append(tasks, phaseTask{kind: phaseBucket, owner: ownerBucket, key: string(key)})
+		tasks = append(tasks, phaseTask{kind: phaseBucket, owner: ownerBucket, key: string(key), ops: bucketOps[string(key)]})
 	}
 	chainKeys := make([][2]byte, 0, len(chains))
 	for key := range chains {
@@ -138,6 +142,12 @@ func buildPhasePlan(ops []Op) (phasePlan, error) {
 }
 
 func runPhasePlan(ctx context.Context, workers int, plan phasePlan, run func(phaseTask) error) error {
+	return runPhasePlanWithFactory(ctx, workers, plan, nil, func(_ context.Context, _ commitment.PatriciaContext, task phaseTask) error {
+		return run(task)
+	})
+}
+
+func runPhasePlanWithFactory(ctx context.Context, workers int, plan phasePlan, factory commitment.TrieContextFactory, run func(context.Context, commitment.PatriciaContext, phaseTask) error) error {
 	if len(plan.tasks) == 0 {
 		return nil
 	}
@@ -153,6 +163,15 @@ func runPhasePlan(ctx context.Context, workers int, plan phasePlan, run func(pha
 	g, gctx := errgroup.WithContext(ctx)
 	for range workers {
 		g.Go(func() error {
+			workerCtx := gctx
+			var workerContext commitment.PatriciaContext
+			var cleanup func()
+			if factory != nil {
+				workerContext, cleanup = factory(gctx)
+				if cleanup != nil {
+					defer cleanup()
+				}
+			}
 			for {
 				if err := gctx.Err(); err != nil {
 					return err
@@ -168,7 +187,7 @@ func runPhasePlan(ctx context.Context, workers int, plan phasePlan, run func(pha
 						return gctx.Err()
 					}
 				}
-				if err := run(plan.tasks[i]); err != nil {
+				if err := run(workerCtx, workerContext, plan.tasks[i]); err != nil {
 					return err
 				}
 				close(done[i])
@@ -193,22 +212,5 @@ func (t *Trie) ProcessParallelContext(ctx context.Context, ops []Op, workers int
 	if t.ctx == nil {
 		return t.Process(ops)
 	}
-	t.scheduledBucketRecords = make(map[string][]byte)
-	defer func() { t.scheduledBucketRecords = nil }()
-	var readMu sync.Mutex
-	if err := runPhasePlan(ctx, workers, plan, func(task phaseTask) error {
-		if task.kind != phaseBucket {
-			return nil
-		}
-		readMu.Lock()
-		defer readMu.Unlock()
-		data, _, err := t.ctx.Branch([]byte(task.key))
-		if err == nil {
-			t.scheduledBucketRecords[task.key] = bytes.Clone(data)
-		}
-		return err
-	}); err != nil {
-		return common.Hash{}, err
-	}
-	return t.Process(ops)
+	return t.processParallelPhaseA(ctx, workers, plan, ops)
 }

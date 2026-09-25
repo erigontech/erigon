@@ -28,16 +28,17 @@ func (t *Trie) loadRoot() (*treeRoot, error) {
 		return t.root, nil
 	}
 	t.rootLoaded = true
-	data, _, err := t.ctx.Branch(GlobalRootKey())
+	rootKey := t.rootRecordKey()
+	data, _, err := t.ctx.Branch(rootKey)
 	if err != nil {
 		return nil, err
 	}
 	t.root = &treeRoot{}
-	t.rememberPrev(GlobalRootKey(), data)
+	t.rememberPrev(rootKey, data)
 	if len(data) == 0 {
 		return t.root, nil
 	}
-	record, err := DecodeRecord(GlobalRootKey(), data)
+	record, err := DecodeRecord(rootKey, data)
 	if err != nil {
 		return nil, err
 	}
@@ -45,16 +46,21 @@ func (t *Trie) loadRoot() (*treeRoot, error) {
 	t.root.prev = bytes.Clone(data)
 	switch record.Form {
 	case RowRoot:
-		path := eip8297.Bitpath{}
+		path := t.rootRecordPath()
 		t.root.form = RowRoot
-		t.root.row = rowFromRecord(path, GlobalRootKey(), data, &record)
-		t.rows[string(GlobalRootKey())] = t.root.row
+		t.root.row = rowFromRecord(path, rootKey, data, &record)
+		t.rows[string(rootKey)] = t.root.row
 	case LeafRoot:
 		t.root.form = LeafRoot
 		t.root.leaf = record.Cells[0]
 	case ExtRoot:
 		t.root.form = ExtRoot
 		t.root.self = record.SelfExt
+		if t.bucketMode {
+			self := t.rootRecordPath()
+			self.Append(&record.SelfExt)
+			t.root.self = self
+		}
 		t.root.left = record.Left
 		t.root.right = record.Right
 	default:

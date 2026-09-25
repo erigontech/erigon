@@ -76,7 +76,7 @@ func (t *Trie) splitRootLeaf(root *treeRoot, oldPath eip8297.Bitpath, old Cell, 
 	if err != nil {
 		return err
 	}
-	if window == 0 {
+	if window == t.rootRecordPath().BitLen {
 		row.prev = bytes.Clone(root.raw)
 		root.form = RowRoot
 		root.row = row
@@ -111,11 +111,12 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 	}
 	window := (d / 4) * 4
 	oldPath := root.self
-	if window == 0 {
-		row := newRow(eip8297.Bitpath{}, GlobalRootKey(), root.raw)
-		oldSlot := slotAt(&oldPath, 0)
-		newSlot := slotAt(&path, 0)
-		oldPrefix := oldPath.Slice(4, oldPath.BitLen)
+	if window == t.rootRecordPath().BitLen {
+		rootPath := t.rootRecordPath()
+		row := newRow(rootPath, t.rootRecordKey(), root.raw)
+		oldSlot := slotAt(&oldPath, rootPath.BitLen)
+		newSlot := slotAt(&path, rootPath.BitLen)
+		oldPrefix := oldPath.Slice(rootPath.BitLen+4, oldPath.BitLen)
 		row.cells[oldSlot] = branchCell(oldPrefix, root.left, root.right)
 		if root.topRow != nil {
 			row.cells[oldSlot].child = root.topRow
@@ -416,8 +417,8 @@ func (t *Trie) normalizeRootRow(root *treeRoot, row *rowNode) error {
 		return nil
 	}
 	t.rootDirty = true
-	if row.path.BitLen == 0 {
-		delete(t.dirtyRows, string(GlobalRootKey()))
+	if row.path.BitLen == t.rootRecordPath().BitLen {
+		delete(t.dirtyRows, string(t.rootRecordKey()))
 	} else {
 		row.tombstone = true
 		t.markDirty(row)

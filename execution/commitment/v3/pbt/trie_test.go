@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,6 +31,7 @@ import (
 )
 
 type trieTestContext struct {
+	mu            sync.Mutex
 	records       map[string][]byte
 	reads         [][]byte
 	writes        []trieTestWrite
@@ -47,11 +49,15 @@ func newTrieTestContext() *trieTestContext {
 }
 
 func (c *trieTestContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.reads = append(c.reads, bytes.Clone(key))
 	return bytes.Clone(c.records[string(key)]), 0, nil
 }
 
 func (c *trieTestContext) PutBranch(key, data, prev []byte) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	old := c.records[string(key)]
 	if c.rejectNilPrev && len(old) != 0 && len(prev) == 0 {
 		return fmt.Errorf("nil previous record for %x", key)
