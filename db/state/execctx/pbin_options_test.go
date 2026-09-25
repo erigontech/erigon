@@ -162,6 +162,7 @@ func TestSharedDomainsV3SeekRestoresCommittedPosition(t *testing.T) {
 	db := newTestDb(t, 16)
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 
 	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
