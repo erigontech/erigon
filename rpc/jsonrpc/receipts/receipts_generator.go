@@ -365,7 +365,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			for txnIndex := range index {
 				currTxn := postState.Txns[txnIndex]
 
-				protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, txnIndex)
+				protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, txnIndex, currTxn.Hash())
 				_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
 				if err != nil {
 					return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
@@ -379,7 +379,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				}
 			}
 
-			protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, index)
+			protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, index, txn.Hash())
 		} else {
 			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
 			if err != nil {
@@ -590,7 +590,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				}
 			}()
 
-			protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, i)
+			protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, i, txn.Hash())
 			receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
 			close(txDone)
 			if err != nil {

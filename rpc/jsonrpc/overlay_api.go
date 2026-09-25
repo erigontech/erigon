@@ -187,7 +187,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		protocol.SetTxContext(statedb, api.engine(), blockNum, idx)
+		protocol.SetTxContext(statedb, api.engine(), blockNum, idx, txn.Hash())
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
@@ -204,7 +204,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	creationTx := block.Transactions()[transactionIndex]
-	protocol.SetTxContext(statedb, api.engine(), blockNum, transactionIndex)
+	protocol.SetTxContext(statedb, api.engine(), blockNum, transactionIndex, creationTx.Hash())
 
 	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
 	msg, err := creationTx.AsMessage(*signer, block.BaseFee(), rules)
@@ -515,7 +515,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			}
 		}
 
-		protocol.SetTxContext(statedb, api.engine(), blockNum, idx)
+		protocol.SetTxContext(statedb, api.engine(), blockNum, idx, txn.Hash())
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 

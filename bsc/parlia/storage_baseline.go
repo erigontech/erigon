@@ -35,6 +35,7 @@ const (
 type hertzFixPatch struct {
 	blockNum  uint64
 	txIndex   int
+	txHash    common.Hash
 	baselines []rules.StorageBaseline
 }
 
@@ -47,6 +48,7 @@ var hertzFixPatches = map[uint64][]hertzFixPatch{
 		{
 			blockNum: 33851236,
 			txIndex:  89,
+			txHash:   common.HexToHash("0x7eba4edc7c1806d6ee1691d43513838931de5c94f9da56ec865721b402f775b0"),
 			baselines: hertzFixBaselines("0x00000000001f8b68515EfB546542397d3293CCfd", map[string]string{
 				"0x0000000000000000000000000000000000000000000000000000000000000001": "0x00000000000000000000000052db206170b430da8223651d28830e56ba3cdc04",
 				"0x0000000000000000000000000000000000000000000000000000000000000002": "0x000000000000000000000000bb45f138499734bf5c0948d490c65903676ea1de",
@@ -64,6 +66,7 @@ var hertzFixPatches = map[uint64][]hertzFixPatch{
 		{
 			blockNum: 33851236,
 			txIndex:  90,
+			txHash:   common.HexToHash("0x5217324f0711af744fe8e12d73f13fdb11805c8e29c0c095ac747b7e4563e935"),
 			baselines: hertzFixBaselines("0x00000000001f8b68515EfB546542397d3293CCfd", map[string]string{
 				"0xbcfc62ca570bdb58cf9828ac51ae8d7e063a1cc0fa1aee57691220a7cd78b1c8": "0x0000000000000000000000000000000000000000000000000000000000000001",
 				"0x30dce49ce1a4014301bf21aad0ee16893e4dcc4a4e4be8aa10e442dd13259837": "0x0000000000000000000000000000000000000000000000000000000000000001",
@@ -94,6 +97,7 @@ var hertzFixPatches = map[uint64][]hertzFixPatch{
 		{
 			blockNum: 35547779,
 			txIndex:  196,
+			txHash:   common.HexToHash("0x7ce9a3cf77108fcc85c1e84e88e363e3335eca515dfcf2feb2011729878b13a7"),
 			baselines: hertzFixBaselines("0x89791428868131eb109e42340ad01eb8987526b2", map[string]string{
 				"0xf1e9242398de526b8dd9c25d38e65fbb01926b8940377762d7884b8b0dcdc3b0": "0x0000000000000000000000000000000000000000000000f6a7831804efd2cd0a",
 			}),
@@ -101,6 +105,7 @@ var hertzFixPatches = map[uint64][]hertzFixPatch{
 		{
 			blockNum: 35548081,
 			txIndex:  486,
+			txHash:   common.HexToHash("0xe3895eb95605d6b43ceec7876e6ff5d1c903e572bf83a08675cb684c047a695c"),
 			baselines: hertzFixBaselines("0x89791428868131eb109e42340ad01eb8987526b2", map[string]string{
 				"0xf1e9242398de526b8dd9c25d38e65fbb01926b8940377762d7884b8b0dcdc3b0": "0x0000000000000000000000000000000000000000000000114be8ecea72b64003",
 			}),
@@ -122,9 +127,9 @@ func hertzFixBaselines(addr string, slots map[string]string) []rules.StorageBase
 }
 
 // StorageBaselines implements rules.StorageBaselineEngine.
-func (p *Parlia) StorageBaselines(blockNum uint64, txIndex int) []rules.StorageBaseline {
+func (p *Parlia) StorageBaselines(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageBaseline {
 	for _, patch := range p.hertzFixPatches {
-		if patch.blockNum == blockNum && patch.txIndex == txIndex {
+		if patch.blockNum == blockNum && patch.txIndex == txIndex && patch.txHash == txHash {
 			return patch.baselines
 		}
 	}

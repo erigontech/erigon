@@ -104,7 +104,7 @@ type StorageBaseline struct {
 // transaction observed committed storage that correct execution does not
 // produce. The executor installs the returned slots for that transaction only.
 type StorageBaselineEngine interface {
-	StorageBaselines(blockNum uint64, txIndex int) []StorageBaseline
+	StorageBaselines(blockNum uint64, txIndex int, txHash common.Hash) []StorageBaseline
 }
 
 // RewardKind - The kind of block reward.

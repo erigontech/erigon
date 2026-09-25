@@ -202,7 +202,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		result.Err = func() error {
 			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
-			protocol.SetTxContext(ibs, rw.execArgs.Engine, txTask.BlockNumber(), txTask.TxIndex)
+			protocol.SetTxContext(ibs, rw.execArgs.Engine, txTask.BlockNumber(), txTask.TxIndex, txTask.TxHash())
 			txn := txTask.Tx()
 
 			if txTask.Tx().Type() == types.AccountAbstractionTxType {

@@ -95,7 +95,7 @@ func ComputeBlockContext(ctx context.Context, engine rules.EngineReader, header 
 // ComputeTxContext returns the execution environment of a certain transaction.
 func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader, rules *chain.Rules, signer *types.Signer, block *types.Block, cfg *chain.Config, txIndex int) (protocol.Message, evmtypes.TxContext, error) {
 	txn := block.Transactions()[txIndex]
-	protocol.SetTxContext(statedb, engine, block.NumberU64(), txIndex)
+	protocol.SetTxContext(statedb, engine, block.NumberU64(), txIndex, txn.Hash())
 	msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 	if err != nil {
 		return nil, evmtypes.TxContext{}, fmt.Errorf("convert transaction at index %d (%s) to message: %w", txIndex, txn.Hash(), err)

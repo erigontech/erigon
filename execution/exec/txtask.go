@@ -556,7 +556,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
-		protocol.ApplyStorageBaselines(ibs, engine, txTask.BlockNumber(), txTask.TxIndex)
+		protocol.ApplyStorageBaselines(ibs, engine, txTask.BlockNumber(), txTask.TxIndex, txTask.TxHash())
 
 		if txTask.isSystemTx {
 			result = *txTask.executeSystemTx(engine, evm, ibs)

@@ -22,11 +22,12 @@ type baselineEngine struct {
 	rules.EngineReader
 	blockNum  uint64
 	txIndex   int
+	txHash    common.Hash
 	baselines []rules.StorageBaseline
 }
 
-func (e baselineEngine) StorageBaselines(blockNum uint64, txIndex int) []rules.StorageBaseline {
-	if blockNum != e.blockNum || txIndex != e.txIndex {
+func (e baselineEngine) StorageBaselines(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageBaseline {
+	if blockNum != e.blockNum || txIndex != e.txIndex || txHash != e.txHash {
 		return nil
 	}
 	return e.baselines
@@ -41,10 +42,12 @@ func TestSetTxContextInstallsStorageBaselines(t *testing.T) {
 	contract := accounts.InternAddress(common.HexToAddress("0x89791428868131eb109e42340ad01eb8987526b2"))
 	key := accounts.InternKey(common.HexToHash("0xf1e9242398de526b8dd9c25d38e65fbb01926b8940377762d7884b8b0dcdc3b0"))
 	value := uint256.MustFromHex("0xf6a7831804efd2cd0a")
+	txHash := common.HexToHash("0x7ce9a3cf77108fcc85c1e84e88e363e3335eca515dfcf2feb2011729878b13a7")
 
 	engine := baselineEngine{
 		blockNum:  35547779,
 		txIndex:   196,
+		txHash:    txHash,
 		baselines: []rules.StorageBaseline{{Address: contract, Key: key, Value: *value}},
 	}
 
@@ -59,18 +62,18 @@ func TestSetTxContextInstallsStorageBaselines(t *testing.T) {
 	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer ibs.Close()
 
-	protocol.SetTxContext(ibs, engine, 35547779, 196)
+	protocol.SetTxContext(ibs, engine, 35547779, 196, txHash)
 	committed, err := ibs.GetCommittedState(contract, key)
 	require.NoError(t, err)
 	require.Equal(t, value.String(), committed.String())
 
-	protocol.SetTxContext(ibs, engine, 35547779, 197)
+	protocol.SetTxContext(ibs, engine, 35547779, 197, txHash)
 	committed, err = ibs.GetCommittedState(contract, key)
 	require.NoError(t, err)
 	require.True(t, committed.IsZero())
 
 	// An engine without baselines is left alone.
-	protocol.SetTxContext(ibs, struct{ rules.EngineReader }{}, 35547779, 196)
+	protocol.SetTxContext(ibs, struct{ rules.EngineReader }{}, 35547779, 196, txHash)
 	committed, err = ibs.GetCommittedState(contract, key)
 	require.NoError(t, err)
 	require.True(t, committed.IsZero())

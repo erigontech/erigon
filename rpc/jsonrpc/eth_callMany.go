@@ -189,7 +189,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		protocol.SetTxContext(st, api.engine(), blockNum, idx)
+		protocol.SetTxContext(st, api.engine(), blockNum, idx, txn.Hash())
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err

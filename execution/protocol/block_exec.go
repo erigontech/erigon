@@ -117,7 +117,7 @@ func ExecuteBlockEphemerally(
 	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
-		SetTxContext(ibs, engine, blockNum, i)
+		SetTxContext(ibs, engine, blockNum, i, txn.Hash())
 		writeTrace := false
 		if vmConfig.Tracer == nil && getTracer != nil {
 			tracer, err := getTracer(i, txn.Hash())
@@ -206,19 +206,19 @@ func ExecuteBlockEphemerally(
 // IntraBlockState.SetTxContext, otherwise the overrides are silently skipped and
 // the transaction — and every later one in the block — replays differently from
 // the canonical chain.
-func SetTxContext(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int) {
+func SetTxContext(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int, txHash common.Hash) {
 	ibs.SetTxContext(blockNum, txIndex)
-	ApplyStorageBaselines(ibs, engine, blockNum, txIndex)
+	ApplyStorageBaselines(ibs, engine, blockNum, txIndex, txHash)
 }
 
 // ApplyStorageBaselines is SetTxContext for callers that already set the tx
 // context themselves.
-func ApplyStorageBaselines(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int) {
+func ApplyStorageBaselines(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int, txHash common.Hash) {
 	baselineEngine, ok := engine.(rules.StorageBaselineEngine)
 	if !ok {
 		return
 	}
-	for _, baseline := range baselineEngine.StorageBaselines(blockNum, txIndex) {
+	for _, baseline := range baselineEngine.StorageBaselines(blockNum, txIndex, txHash) {
 		ibs.SetStorageBaseline(baseline.Address, baseline.Key, baseline.Value)
 	}
 }

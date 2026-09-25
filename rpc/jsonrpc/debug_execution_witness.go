@@ -671,7 +671,7 @@ func (api *BaseAPI) buildAccessedState(
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
 		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-		protocol.SetTxContext(ibs, engine, blockNum, txIndex)
+		protocol.SetTxContext(ibs, engine, blockNum, txIndex, txn.Hash())
 
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		// A user tx that accesses the system address via an opcode keeps it in the
@@ -2092,7 +2092,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
 		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-		protocol.SetTxContext(ibs, engine, blockNum, txIndex)
+		protocol.SetTxContext(ibs, engine, blockNum, txIndex, txn.Hash())
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
