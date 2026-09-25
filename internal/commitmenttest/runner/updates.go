@@ -57,7 +57,7 @@ func Update(op commitmenttest.Op) *commitment.Update {
 	return u
 }
 
-func Updates(tb testing.TB, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {
+func updatesFor(tb testing.TB, mode commitment.Mode, ops []commitmenttest.Op) *commitment.Updates {
 	tb.Helper()
 	updates := commitment.NewUpdates(mode, tb.TempDir(), commitment.KeyToHexNibbleHash)
 	tb.Cleanup(updates.Close)

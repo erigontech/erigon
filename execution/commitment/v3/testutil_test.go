@@ -108,3 +108,23 @@ func TestSharedRunnerReload(t *testing.T) {
 		require.Equal(t, uint64(i+1), round.TxNum)
 	}
 }
+
+func materializeNode(path []byte, plane byte, spec *commitmenttest.RecordSpec) *node {
+	n := fork(path)
+	n.plane = plane
+	for nib := range 16 {
+		if spec.ChildMask&(1<<nib) == 0 {
+			continue
+		}
+		if spec.LeafMask&(1<<nib) != 0 {
+			n.setLeaf(nib, spec.Leaves[nib].Suffix, spec.Leaves[nib].Value)
+		} else {
+			ext := spec.Extensions[nib]
+			if len(ext) != 0 {
+				ext = unpackPath(ext[1:], int(ext[0]), nil)
+			}
+			n.setStoredChild(nib, spec.Hashes[nib], ext)
+		}
+	}
+	return n
+}

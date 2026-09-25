@@ -17,6 +17,7 @@
 package commitmenttest
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,9 +26,10 @@ import (
 func TestCaseRoundTripAndStateOwnership(t *testing.T) {
 	c, err := Generate(MathRand(0), SequenceSpec{Kind: "incremental"})
 	require.NoError(t, err)
-	data, err := EncodeCase(c)
+	data, err := json.Marshal(c)
 	require.NoError(t, err)
-	decoded, err := DecodeCase(data)
+	var decoded Case
+	err = json.Unmarshal(data, &decoded)
 	require.NoError(t, err)
 	require.Equal(t, c, decoded)
 	state := make(State)
@@ -57,7 +59,8 @@ func TestInvalidInputs(t *testing.T) {
 	require.ErrorContains(t, err, "too many distinct keys")
 	_, err = Paths(Shape{Prefixes: [][]byte{{16}}})
 	require.ErrorContains(t, err, "invalid nibble")
-	_, err = DecodeCase([]byte("{"))
+	var malformed Case
+	err = json.Unmarshal([]byte("{"), &malformed)
 	require.Error(t, err)
 }
 

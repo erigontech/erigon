@@ -83,7 +83,7 @@ func TestMemoryPreviousValuesAndCounters(t *testing.T) {
 	require.ErrorContains(t, err, "unexpected state read")
 	_, err = m.Storage([]byte("s"))
 	require.ErrorContains(t, err, "unexpected state read")
-	require.Equal(t, Counts{Writes: 2, AccountReads: 1, StorageReads: 1}, m.Counts())
+	require.Equal(t, counts{Writes: 2, AccountReads: 1, StorageReads: 1}, m.Counts())
 }
 
 func TestMemoryConcurrentReaders(t *testing.T) {
@@ -112,7 +112,7 @@ func TestMemoryConcurrentReaders(t *testing.T) {
 	for err := range errs {
 		require.NoError(t, err)
 	}
-	require.Equal(t, Counts{Writes: 1, BranchReads: 800, Readers: 8}, m.Counts())
+	require.Equal(t, counts{Writes: 1, BranchReads: 800, Readers: 8}, m.Counts())
 }
 
 func TestMemoryErrorsAndGate(t *testing.T) {

@@ -86,7 +86,7 @@ func Keys(seed Seed, spec KeySpec) ([][]byte, error) {
 	if spec.Size < 8 && uint64(spec.Count) > uint64(1)<<(8*spec.Size) {
 		return nil, fmt.Errorf("too many distinct keys for size %d", spec.Size)
 	}
-	rng, err := seed.Rand()
+	rng, err := seed.rand()
 	if err != nil {
 		return nil, err
 	}

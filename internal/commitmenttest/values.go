@@ -26,17 +26,17 @@ import (
 	"github.com/holiman/uint256"
 )
 
-type AccountFields uint8
+type accountFields uint8
 
 const (
-	BalanceField AccountFields = 1 << iota
+	BalanceField accountFields = 1 << iota
 	NonceField
 	CodeField
-	AllFields = BalanceField | NonceField | CodeField
+	allFields = BalanceField | NonceField | CodeField
 )
 
 type AccountValue struct {
-	Fields   AccountFields
+	Fields   accountFields
 	Nonce    uint64
 	Balance  uint256.Int
 	CodeHash common.Hash
@@ -51,7 +51,7 @@ type AccountSpec struct {
 }
 
 func Account(spec AccountSpec) AccountValue {
-	value := AccountValue{Fields: AllFields, Nonce: spec.Nonce, Balance: *uint256.NewInt(spec.Balance), CodeHash: spec.CodeHash}
+	value := AccountValue{Fields: allFields, Nonce: spec.Nonce, Balance: *uint256.NewInt(spec.Balance), CodeHash: spec.CodeHash}
 	switch spec.Kind {
 	case "parity":
 		value.Nonce = uint64(spec.Number + 1)
@@ -73,7 +73,7 @@ func Account(spec AccountSpec) AccountValue {
 }
 
 func RandomAccount(rng *rand.Rand) AccountValue {
-	value := AccountValue{Fields: AllFields, Nonce: uint64(rng.Intn(1 << 20)), Balance: *uint256.NewInt(rng.Uint64()), CodeHash: empty.CodeHash}
+	value := AccountValue{Fields: allFields, Nonce: uint64(rng.Intn(1 << 20)), Balance: *uint256.NewInt(rng.Uint64()), CodeHash: empty.CodeHash}
 	if rng.Intn(3) == 0 {
 		value.CodeHash = common.BigToHash(uint256.NewInt(rng.Uint64()).ToBig())
 	}
@@ -87,7 +87,7 @@ func SizedAccount(number int, contract bool, rng *rand.Rand) (AccountValue, []by
 		value.Balance.SetUint64(uint64(rng.Int63n(4e18)))
 		return value, bytes.Clone(empty.RootHash[:])
 	}
-	value.Fields = AllFields
+	value.Fields = allFields
 	value.Nonce = 1
 	value.Balance.SetUint64(uint64(rng.Int63n(1e15)))
 	value.CodeHash = common.HexToHash(fmt.Sprintf("0x%064x", number+7))

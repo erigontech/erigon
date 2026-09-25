@@ -27,20 +27,18 @@ import (
 	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
-type ReadGateFunc func(context.Context, []byte) error
-
 type ContextSpec struct {
 	Borrowed         bool
 	Owned            bool
 	ForbidStateReads bool
 	CaptureDeltas    bool
 	CheckPrevious    bool
-	BeforeRead       ReadGateFunc
+	BeforeRead       func(context.Context, []byte) error
 	ReadError        error
 	PutError         error
 }
 
-type Counts struct {
+type counts struct {
 	BranchReads  int
 	AccountReads int
 	StorageReads int
@@ -60,7 +58,7 @@ type memoryStore struct {
 	sync.Mutex
 	records map[string][]byte
 	state   commitmenttest.State
-	counts  Counts
+	counts  counts
 	deltas  []commitment.BranchDelta
 }
 
@@ -161,7 +159,7 @@ func (m *Memory) Apply(ops []commitmenttest.Op) {
 	m.store.state.Apply(ops)
 }
 
-func (m *Memory) Counts() Counts {
+func (m *Memory) Counts() counts {
 	m.store.Lock()
 	defer m.store.Unlock()
 	return m.store.counts

@@ -17,7 +17,6 @@
 package commitmenttest
 
 import (
-	"encoding/json"
 	"fmt"
 	"math/rand"
 )
@@ -32,7 +31,7 @@ func MathRand(seed int64) Seed {
 	return Seed{Algorithm: "math/rand", Version: 1, Words: []uint64{uint64(seed)}}
 }
 
-func (s Seed) Rand() (*rand.Rand, error) {
+func (s Seed) rand() (*rand.Rand, error) {
 	if s.Algorithm != "math/rand" || s.Version != 1 || len(s.Words) != 1 {
 		return nil, fmt.Errorf("unsupported seed: %+v", s)
 	}
@@ -61,13 +60,6 @@ type Case struct {
 	Shape      Shape
 	Records    []RecordSpec
 	Assertions Assertions
-}
-
-func EncodeCase(c Case) ([]byte, error) { return json.Marshal(c) }
-func DecodeCase(data []byte) (Case, error) {
-	var c Case
-	err := json.Unmarshal(data, &c)
-	return c, err
 }
 
 func Corpus() []Case {

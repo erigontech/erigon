@@ -30,7 +30,7 @@ import (
 
 type (
 	Engine   = commitment.Trie
-	OpenFunc func(context.Context, RunSpec) (Engine, error)
+	openFunc func(context.Context, RunSpec) (Engine, error)
 )
 
 type RunSpec struct {
@@ -42,21 +42,21 @@ type RunSpec struct {
 	Memory  *Memory
 }
 
-type Round struct {
+type roundResult struct {
 	State    []byte
 	BlockNum uint64
 	TxNum    uint64
 	Root     []byte
 	Records  map[string][]byte
-	Counts   Counts
+	Counts   counts
 	Deltas   []commitment.BranchDelta
 	Err      error
 	Rebuilt  bool
 }
 
-type Observation struct {
+type observation struct {
 	Name   string
-	Rounds []Round
+	Rounds []roundResult
 }
 
 func OpenHPH(ctx context.Context, spec RunSpec) (Engine, error) {
@@ -70,9 +70,9 @@ func OpenHPH(ctx context.Context, spec RunSpec) (Engine, error) {
 	return commitment.NewHexPatriciaHashed(20, reader, commitment.DefaultTrieConfig()), nil
 }
 
-func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open OpenFunc) Observation {
+func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) observation {
 	tb.Helper()
-	got := Observation{Name: spec.Name, Rounds: make([]Round, 0, len(c.Rounds))}
+	got := observation{Name: spec.Name, Rounds: make([]roundResult, 0, len(c.Rounds))}
 	state := make(commitmenttest.State)
 	var engine Engine
 	defer func() {
@@ -82,7 +82,7 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open OpenFunc) 
 	}()
 	for i, ops := range c.Rounds {
 		state.Apply(ops)
-		round := Round{Rebuilt: engine == nil && i != 0}
+		round := roundResult{Rebuilt: engine == nil && i != 0}
 		if engine == nil {
 			spec.Memory = NewMemory(spec.Context)
 			engine, round.Err = open(context.Background(), spec)
@@ -92,7 +92,7 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open OpenFunc) 
 		}
 		spec.Memory.Apply(ops)
 		if round.Err == nil {
-			updates := Updates(tb, spec.Mode, ops)
+			updates := updatesFor(tb, spec.Mode, ops)
 			round.Root, round.Err = engine.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
 			updates.Close()
 			round.Root = bytes.Clone(round.Root)
@@ -110,7 +110,7 @@ func execute(tb testing.TB, c commitmenttest.Case, spec RunSpec, open OpenFunc) 
 	return got
 }
 
-func reload(tb testing.TB, engine Engine, spec RunSpec, open OpenFunc, round *Round, number uint64) Engine {
+func reload(tb testing.TB, engine Engine, spec RunSpec, open openFunc, round *roundResult, number uint64) Engine {
 	tb.Helper()
 	codec, ok := engine.(commitment.TrieStateCodec)
 	if !ok {
@@ -131,7 +131,7 @@ func reload(tb testing.TB, engine Engine, spec RunSpec, open OpenFunc, round *Ro
 	if round.Err != nil {
 		return engine
 	}
-	updates := Updates(tb, spec.Mode, nil)
+	updates := updatesFor(tb, spec.Mode, nil)
 	root, err := engine.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{})
 	updates.Close()
 	round.Err = err
@@ -141,7 +141,7 @@ func reload(tb testing.TB, engine Engine, spec RunSpec, open OpenFunc, round *Ro
 	return engine
 }
 
-func check(tb testing.TB, c commitmenttest.Case, got Observation) {
+func check(tb testing.TB, c commitmenttest.Case, got observation) {
 	tb.Helper()
 	require.True(tb, c.Assertions.ProcessNoError, "case=%s must declare its Process no-error assertion", c.ID)
 	require.Len(tb, got.Rounds, len(c.Rounds), "case=%s seed=%+v engine=%s", c.ID, c.Seed, got.Name)
@@ -159,16 +159,16 @@ func check(tb testing.TB, c commitmenttest.Case, got Observation) {
 	}
 }
 
-func Run(tb testing.TB, c commitmenttest.Case, spec RunSpec, open OpenFunc) Observation {
+func Run(tb testing.TB, c commitmenttest.Case, spec RunSpec, open openFunc) observation {
 	tb.Helper()
 	got := execute(tb, c, spec, open)
 	check(tb, c, got)
 	return got
 }
 
-func Compare(tb testing.TB, c commitmenttest.Case, runs []RunSpec, open OpenFunc) {
+func Compare(tb testing.TB, c commitmenttest.Case, runs []RunSpec, open openFunc) {
 	tb.Helper()
-	observations := make([]Observation, 0, len(runs))
+	observations := make([]observation, 0, len(runs))
 	for _, spec := range runs {
 		observations = append(observations, execute(tb, c, spec, open))
 	}

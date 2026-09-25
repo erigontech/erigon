@@ -53,7 +53,7 @@ func Generate(seed Seed, spec SequenceSpec) (Case, error) {
 	if spec.Count < 0 {
 		return c, fmt.Errorf("negative count %d", spec.Count)
 	}
-	rng, err := seed.Rand()
+	rng, err := seed.rand()
 	if err != nil {
 		return c, err
 	}
@@ -193,7 +193,7 @@ func (s State) Apply(ops []Op) {
 		op.Key = bytes.Clone(op.Key)
 		op.Storage = bytes.Clone(op.Storage)
 		if op.Account != nil {
-			value := AccountValue{Fields: AllFields, CodeHash: empty.CodeHash}
+			value := AccountValue{Fields: allFields, CodeHash: empty.CodeHash}
 			if prev := s[key].Account; prev != nil {
 				value = *prev
 			}

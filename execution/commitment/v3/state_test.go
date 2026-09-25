@@ -20,60 +20,65 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/stretchr/testify/require"
-
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/stretchr/testify/require"
 )
 
-func TestStateRoundTrip(t *testing.T) {
-	trie := &Trie{root: bytes.Repeat([]byte{0x37}, 32)}
-	encoded, err := trie.EncodeState(91, 73, []byte{0xaa})
-	require.NoError(t, err)
-	require.Equal(t, commitment.CommitmentV3StateMarker, encoded[1])
+func TestStateCodec(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"E44/StateRoundTrip", func(t *testing.T) {
+			trie := &Trie{root: bytes.Repeat([]byte{0x37}, 32)}
+			encoded, err := trie.EncodeState(91, 73, []byte{0xaa})
+			require.NoError(t, err)
+			require.Equal(t, commitment.CommitmentV3StateMarker, encoded[1])
 
-	restored := &Trie{}
-	blockNum, txNum, err := restored.RestoreState(encoded[1:])
-	require.NoError(t, err)
-	require.Equal(t, uint64(91), blockNum)
-	require.Equal(t, uint64(73), txNum)
-	root, err := restored.RootHash()
-	require.NoError(t, err)
-	require.Equal(t, trie.root, root)
-}
+			restored := &Trie{}
+			blockNum, txNum, err := restored.RestoreState(encoded[1:])
+			require.NoError(t, err)
+			require.Equal(t, uint64(91), blockNum)
+			require.Equal(t, uint64(73), txNum)
+			root, err := restored.RootHash()
+			require.NoError(t, err)
+			require.Equal(t, trie.root, root)
+		}},
+		{"E44/StateRoundTripEmptyRoot", func(t *testing.T) {
+			trie := &Trie{}
+			encoded, err := trie.EncodeState(1, 2, nil)
+			require.NoError(t, err)
 
-func TestStateRoundTripEmptyRoot(t *testing.T) {
-	trie := &Trie{}
-	encoded, err := trie.EncodeState(1, 2, nil)
-	require.NoError(t, err)
+			restored := &Trie{root: bytes.Repeat([]byte{0x55}, 32)}
+			_, _, err = restored.RestoreState(encoded)
+			require.NoError(t, err)
+			root, err := restored.RootHash()
+			require.NoError(t, err)
+			require.Equal(t, empty.RootHash[:], root)
+		}},
+		{"E44/StateRejectsLegacyAndMalformedBlobs", func(t *testing.T) {
+			trie := &Trie{}
+			legacy := make([]byte, commitment.CommitmentV3StateSize)
+			legacy[0] = commitment.CommitmentV3StateMarker - 1
+			_, _, err := trie.RestoreState(legacy)
+			require.ErrorIs(t, err, commitment.ErrCommitmentV3StateMarker)
 
-	restored := &Trie{root: bytes.Repeat([]byte{0x55}, 32)}
-	_, _, err = restored.RestoreState(encoded)
-	require.NoError(t, err)
-	root, err := restored.RootHash()
-	require.NoError(t, err)
-	require.Equal(t, empty.RootHash[:], root)
-}
+			for _, value := range [][]byte{{commitment.CommitmentV3StateMarker}, make([]byte, commitment.CommitmentV3StateSize-1), make([]byte, commitment.CommitmentV3StateSize+1)} {
+				_, _, err = trie.RestoreState(value)
+				require.ErrorIs(t, err, commitment.ErrCommitmentV3StateSize)
+			}
 
-func TestStateRejectsLegacyAndMalformedBlobs(t *testing.T) {
-	trie := &Trie{}
-	legacy := make([]byte, commitment.CommitmentV3StateSize)
-	legacy[0] = commitment.CommitmentV3StateMarker - 1
-	_, _, err := trie.RestoreState(legacy)
-	require.ErrorIs(t, err, commitment.ErrCommitmentV3StateMarker)
-
-	for _, value := range [][]byte{{commitment.CommitmentV3StateMarker}, make([]byte, commitment.CommitmentV3StateSize-1), make([]byte, commitment.CommitmentV3StateSize+1)} {
-		_, _, err = trie.RestoreState(value)
-		require.ErrorIs(t, err, commitment.ErrCommitmentV3StateSize)
+			badMarker := make([]byte, commitment.CommitmentV3StateSize)
+			badMarker[0] = commitment.CommitmentV3StateMarker + 1
+			_, _, err = trie.RestoreState(badMarker)
+			require.ErrorIs(t, err, commitment.ErrCommitmentV3StateMarker)
+		}},
+		{"E44/StateEncodeRejectsInvalidRoot", func(t *testing.T) {
+			_, err := (&Trie{root: []byte{1}}).EncodeState(0, 0, nil)
+			require.ErrorIs(t, err, commitment.ErrCommitmentV3StateSize)
+		}},
+	} {
+		t.Run(tc.name, tc.run)
 	}
-
-	badMarker := make([]byte, commitment.CommitmentV3StateSize)
-	badMarker[0] = commitment.CommitmentV3StateMarker + 1
-	_, _, err = trie.RestoreState(badMarker)
-	require.ErrorIs(t, err, commitment.ErrCommitmentV3StateMarker)
-}
-
-func TestStateEncodeRejectsInvalidRoot(t *testing.T) {
-	_, err := (&Trie{root: []byte{1}}).EncodeState(0, 0, nil)
-	require.ErrorIs(t, err, commitment.ErrCommitmentV3StateSize)
 }

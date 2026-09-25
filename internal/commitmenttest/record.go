@@ -36,13 +36,13 @@ type RecordSpec struct {
 	Root          []byte
 }
 
-type RecordValue struct {
+type recordValue struct {
 	Key  []byte
 	Data []byte
 }
 
-func Records(specs []RecordSpec) []RecordValue {
-	out := make([]RecordValue, 0, len(specs))
+func Records(specs []RecordSpec) []recordValue {
+	out := make([]recordValue, 0, len(specs))
 	for i := range specs {
 		spec := &specs[i]
 		data := []byte{spec.Flags}
@@ -52,7 +52,7 @@ func Records(specs []RecordSpec) []RecordValue {
 			} else {
 				data = append(data, spec.Root...)
 			}
-			out = append(out, RecordValue{Key: bytes.Clone(spec.Key), Data: data})
+			out = append(out, recordValue{Key: bytes.Clone(spec.Key), Data: data})
 			continue
 		}
 		if spec.Flags&0x10 != 0 {
@@ -84,7 +84,7 @@ func Records(specs []RecordSpec) []RecordValue {
 				data = append(data, leaf.Value...)
 			}
 		}
-		out = append(out, RecordValue{Key: bytes.Clone(spec.Key), Data: data})
+		out = append(out, recordValue{Key: bytes.Clone(spec.Key), Data: data})
 	}
 	return out
 }
