@@ -36,15 +36,15 @@ func Test_EncodeCommitmentState(t *testing.T) {
 	require.Equal(t, cs.trieState, dec.trieState)
 }
 
-func TestCommitmentV4StateDispatch(t *testing.T) {
+func TestCommitmentV3StateDispatch(t *testing.T) {
 	t.Parallel()
 
 	trie := &stateCodecTrie{}
 	sdc := &SharedDomainsCommitmentContext{patriciaTrie: trie}
 	state, err := sdc.encodeCommitmentState(12, 34)
 	require.NoError(t, err)
-	require.Equal(t, commitment.CommitmentV4StateMarker, state[0])
-	require.Equal(t, commitment.KeyCommitmentV4State, sdc.commitmentStateKey())
+	require.Equal(t, commitment.CommitmentV3StateMarker, state[0])
+	require.Equal(t, commitment.KeyCommitmentV3State, sdc.commitmentStateKey())
 
 	blockNum, txNum, err := sdc.restorePatriciaState(state)
 	require.NoError(t, err)
@@ -70,7 +70,7 @@ func TestLegacyCommitmentStateDispatch(t *testing.T) {
 	}
 }
 
-func TestCommitmentV4StateRejectsLegacyBlob(t *testing.T) {
+func TestCommitmentV3StateRejectsLegacyBlob(t *testing.T) {
 	t.Parallel()
 
 	cs := commitmentState{txNum: 2, blockNum: 1, trieState: []byte{3}}
@@ -88,7 +88,7 @@ func (*stateCodecTrie) RootHash() ([]byte, error) { return nil, nil }
 
 func (*stateCodecTrie) SetTraceWriter(io.Writer) {}
 
-func (*stateCodecTrie) Variant() commitment.TrieVariant { return commitment.VariantCommitmentV4 }
+func (*stateCodecTrie) Variant() commitment.TrieVariant { return commitment.VariantCommitmentV3 }
 
 func (*stateCodecTrie) Reset() {}
 
@@ -101,12 +101,12 @@ func (*stateCodecTrie) Process(context.Context, *commitment.Updates, string, fun
 func (*stateCodecTrie) Release() {}
 
 func (*stateCodecTrie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
-	return append(dst, commitment.CommitmentV4StateMarker, byte(blockNum), byte(txNum)), nil
+	return append(dst, commitment.CommitmentV3StateMarker, byte(blockNum), byte(txNum)), nil
 }
 
 func (*stateCodecTrie) RestoreState(value []byte) (uint64, uint64, error) {
-	if len(value) != 3 || value[0] != commitment.CommitmentV4StateMarker {
-		return 0, 0, errors.New("commitment v4: invalid state variant marker")
+	if len(value) != 3 || value[0] != commitment.CommitmentV3StateMarker {
+		return 0, 0, errors.New("commitment v3: invalid state variant marker")
 	}
 	return uint64(value[1]), uint64(value[2]), nil
 }

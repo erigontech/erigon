@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
-	_ "github.com/erigontech/erigon/execution/commitment/v4"
+	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -149,9 +149,9 @@ func TestConvertCommitmentFiles_V3History(t *testing.T) {
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	latestState, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV4State, kv.GetLatestOptions{})
+	latestState, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
 	require.NoError(t, err)
-	_, lastFrozenCommit, _, err := commitment.DecodeCommitmentV4State(latestState)
+	_, lastFrozenCommit, _, err := commitment.DecodeCommitmentV3State(latestState)
 	require.NoError(t, err)
 	tx.Rollback()
 	checked := 0

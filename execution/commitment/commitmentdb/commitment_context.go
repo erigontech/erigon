@@ -89,7 +89,7 @@ type SharedDomainsCommitmentContext struct {
 	warnedUnwired  sync.Once
 }
 
-type v4Trie interface {
+type v3Trie interface {
 	ProcessFeed(ctx context.Context, feed *commitment.Feed, onProgress func(*commitment.CommitProgress)) ([]byte, error)
 	SetDeferCommitmentUpdates(bool)
 	TakeDeferredDeltas() [][]commitment.BranchDelta
@@ -233,7 +233,7 @@ func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Update
 }
 
 func (sdc *SharedDomainsCommitmentContext) AcceptsFeed() bool {
-	_, ok := sdc.patriciaTrie.(v4Trie)
+	_, ok := sdc.patriciaTrie.(v3Trie)
 	return ok
 }
 
@@ -617,16 +617,16 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		ptrie.SetLeaveDeferredForCaller(true)
 		defer ptrie.SetLeaveDeferredForCaller(false)
 	}
-	if trie, ok := sdc.patriciaTrie.(v4Trie); ok && sdc.deferCommitmentUpdates {
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
 		trie.SetDeferCommitmentUpdates(true)
 		defer trie.SetDeferCommitmentUpdates(false)
 	}
-	if trie, ok := sdc.patriciaTrie.(v4Trie); ok {
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok {
 		trie.SetStorageFanOutMin(sdc.storageFanOutMin)
 	}
 
 	if feed != nil {
-		rootHash, err = sdc.patriciaTrie.(v4Trie).ProcessFeed(ctx, feed, onProgress)
+		rootHash, err = sdc.patriciaTrie.(v3Trie).ProcessFeed(ctx, feed, onProgress)
 	} else {
 		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 	}
@@ -680,7 +680,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			}
 		}
 	}
-	if trie, ok := sdc.patriciaTrie.(v4Trie); ok && sdc.deferCommitmentUpdates {
+	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
 		if deltas := trie.TakeDeferredDeltas(); deltas != nil {
 			sdc.pendingUpdate = &commitment.PendingCommitmentUpdate{
 				BlockNum: blockNum,
@@ -838,7 +838,7 @@ func (e *errorTrieContext) Storage(plainKey []byte) (*commitment.Update, error) 
 // truth so BranchCache can exclude it by construction.
 var KeyCommitmentState = commitment.KeyCommitmentState
 
-var CommitmentStateKeys = [][]byte{commitment.KeyCommitmentV4State, KeyCommitmentState}
+var CommitmentStateKeys = [][]byte{commitment.KeyCommitmentV3State, KeyCommitmentState}
 
 var ErrBehindCommitment = errors.New("behind commitment")
 
@@ -860,7 +860,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 		return 0, 0, nil, err
 	}
 
-	if len(state) != 0 && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV4 {
+	if len(state) != 0 && sdc.patriciaTrie.Variant() == commitment.VariantCommitmentV3 {
 		return 0, 0, bytes.Clone(state), nil
 	}
 	if len(state) < 16 {
@@ -943,7 +943,7 @@ func (sdc *SharedDomainsCommitmentContext) encodeAndStoreCommitmentState(trieCon
 
 func (sdc *SharedDomainsCommitmentContext) commitmentStateKey() []byte {
 	if _, ok := sdc.patriciaTrie.(commitment.TrieStateCodec); ok {
-		return commitment.KeyCommitmentV4State
+		return commitment.KeyCommitmentV3State
 	}
 	return KeyCommitmentState
 }
@@ -984,7 +984,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 	if trie, ok := sdc.patriciaTrie.(commitment.TrieStateCodec); ok {
 		blockNum, txNum, err := trie.RestoreState(value)
 		if err != nil {
-			return 0, 0, fmt.Errorf("failed restore v4 state: %w", err)
+			return 0, 0, fmt.Errorf("failed restore v3 state: %w", err)
 		}
 		sdc.justRestored.Store(true)
 		return blockNum, txNum, nil
@@ -1244,12 +1244,12 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	v, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV4State, kv.GetLatestOptions{})
+	v, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, err
 	}
 	if len(v) > 0 {
-		blockNum, _, _, err := commitment.DecodeCommitmentV4State(v)
+		blockNum, _, _, err := commitment.DecodeCommitmentV3State(v)
 		return blockNum, err
 	}
 	v, _, err = tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})

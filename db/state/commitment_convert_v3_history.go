@@ -46,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
-	v4 "github.com/erigontech/erigon/execution/commitment/v4"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 const commitmentV3HistoryBatch = 256
@@ -96,7 +96,7 @@ type historyVersion struct {
 
 type historyVersionEntry struct {
 	k0, k1, v1 int
-	kind       v4.LegacyKind
+	kind       v3.LegacyKind
 }
 
 const (
@@ -160,7 +160,7 @@ func (h *historyVersion) valueOf(key []byte) []byte {
 	return nil
 }
 
-func (h *historyVersion) add(k, v []byte, kind v4.LegacyKind) error {
+func (h *historyVersion) add(k, v []byte, kind v3.LegacyKind) error {
 	k0 := len(h.buf)
 	h.buf = append(append(h.buf, k...), v...)
 	h.ents = append(h.ents, historyVersionEntry{k0: k0, k1: k0 + len(k), v1: len(h.buf), kind: kind})
@@ -373,15 +373,15 @@ func convertStateOrEmpty(legacy []byte) ([]byte, error) {
 	if len(legacy) == 0 {
 		return nil, nil
 	}
-	return v4.ConvertLegacyState(legacy)
+	return v3.ConvertLegacyState(legacy)
 }
 
 func stateRootsDiffer(a, b []byte) bool {
 	if len(a) == 0 || len(b) == 0 {
 		return len(a) != len(b)
 	}
-	_, _, rootA, errA := commitment.DecodeCommitmentV4State(a)
-	_, _, rootB, errB := commitment.DecodeCommitmentV4State(b)
+	_, _, rootA, errA := commitment.DecodeCommitmentV3State(a)
+	_, _, rootB, errB := commitment.DecodeCommitmentV3State(b)
 	return errA != nil || errB != nil || !bytes.Equal(rootA, rootB)
 }
 
@@ -398,14 +398,14 @@ func legacyCommitmentAsOf(dt *DomainRoTx, key []byte, txNum uint64) ([]byte, err
 	return bytes.Clone(v), nil
 }
 
-func resolveLegacyHistory(key []byte, entries []v4.LegacyEntry) ([]byte, error) {
+func resolveLegacyHistory(key []byte, entries []v3.LegacyEntry) ([]byte, error) {
 	var value []byte
 	for _, e := range entries {
 		if len(e.Value) == 0 {
 			continue
 		}
 		if value != nil && !bytes.Equal(e.Value, value) {
-			return nil, fmt.Errorf("%w: two history values for %x", v4.ErrLegacyConflict, key)
+			return nil, fmt.Errorf("%w: two history values for %x", v3.ErrLegacyConflict, key)
 		}
 		value = e.Value
 	}
@@ -600,12 +600,12 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			defer wat.Close()
 			wdt := wat.d[kv.CommitmentDomain]
 			vals := &legacyHistoryValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], cache: map[string]historyValue{}}
-			conv := v4.NewLegacyConverter(vals, keysV2, false)
+			conv := v3.NewLegacyConverter(vals, keysV2, false)
 			var cur, nextVersion, childCur, childNext, scratch historyVersion
 			var beforeChildren, afterChildren []legacyChild
 			var key, rootKey []byte
 			var res *convertedBatch
-			emit := func(k []byte, txNum uint64, v []byte, kind v4.LegacyKind) error {
+			emit := func(k []byte, txNum uint64, v []byte, kind v3.LegacyKind) error {
 				key = binary.BigEndian.AppendUint64(appendEscapedKey(key[:0], k), txNum)
 				return res.emit(key, v, kind)
 			}
@@ -639,11 +639,11 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 			}
 			emitBoundary := func(txNum uint64, cur, next *historyVersion) error {
 				for _, e := range cur.ents {
-					if e.kind == v4.LegacySynthesized {
+					if e.kind == v3.LegacySynthesized {
 						continue
 					}
 					k, v := cur.key(e), cur.value(e)
-					if e.kind == v4.LegacyDirect && next.hasValue(k, v) {
+					if e.kind == v3.LegacyDirect && next.hasValue(k, v) {
 						continue
 					}
 					if err := emit(k, txNum, v, e.kind); err != nil {
@@ -651,7 +651,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 					}
 				}
 				for _, a := range cur.accounts {
-					rootKey = v4.StorageNodeKey(a.addrHash, nil, rootKey[:0])
+					rootKey = v3.StorageNodeKey(a.addrHash, nil, rootKey[:0])
 					after, inNext := next.account(a.addrHash)
 					var before []byte
 					switch a.class {
@@ -671,7 +671,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 					default:
 						continue
 					}
-					if err := emit(rootKey, txNum, before, v4.LegacySynthesized); err != nil {
+					if err := emit(rootKey, txNum, before, v3.LegacySynthesized); err != nil {
 						return err
 					}
 				}
@@ -682,8 +682,8 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 					if b, inCur := cur.account(a.addrHash); inCur && b.class != storageNone {
 						continue
 					}
-					rootKey = v4.StorageNodeKey(a.addrHash, nil, rootKey[:0])
-					if err := emit(rootKey, txNum, nil, v4.LegacySynthesized); err != nil {
+					rootKey = v3.StorageNodeKey(a.addrHash, nil, rootKey[:0])
+					if err := emit(rootKey, txNum, nil, v3.LegacySynthesized); err != nil {
 						return err
 					}
 				}
@@ -780,7 +780,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 							if err != nil {
 								return fmt.Errorf("state before txNum %d: %w", txNum, err)
 							}
-							if emitErr := emit(commitment.KeyCommitmentV4State, txNum, before, v4.LegacyDirect); emitErr != nil {
+							if emitErr := emit(commitment.KeyCommitmentV3State, txNum, before, v3.LegacyDirect); emitErr != nil {
 								return emitErr
 							}
 							next, err := after(i)
@@ -863,7 +863,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 	var (
 		groupKey, histKey, efBytes []byte
 		curKey, nextKey            []byte
-		group                      []v4.LegacyEntry
+		group                      []v3.LegacyEntry
 		groupVals                  []byte
 		keyTxNums                  []uint64
 		builder                    multiencseq.SequenceBuilder
@@ -918,7 +918,7 @@ func convertCommitmentHistoryFileV3(ctx context.Context, at *AggregatorRoTx, vFi
 		}
 		start := len(groupVals)
 		groupVals = append(groupVals, v[1:]...)
-		group = append(group, v4.LegacyEntry{Kind: v4.LegacyKind(v[0]), Value: groupVals[start:]})
+		group = append(group, v3.LegacyEntry{Kind: v3.LegacyKind(v[0]), Value: groupVals[start:]})
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
 	if loadErr == nil {
@@ -1016,7 +1016,7 @@ func verifyCommitmentV3History(ctx context.Context, a *Aggregator, ranges []comm
 	stepSize := at.StepSize()
 	var samples []uint64
 	for _, r := range ranges {
-		txNums, err := appendFileTxNums(nil, iit, uint64(r.fromStep)*stepSize, uint64(r.toStep)*stepSize, commitment.KeyCommitmentV4State)
+		txNums, err := appendFileTxNums(nil, iit, uint64(r.fromStep)*stepSize, uint64(r.toStep)*stepSize, commitment.KeyCommitmentV3State)
 		if err != nil {
 			at.Close()
 			return err

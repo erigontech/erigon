@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
-	v4 "github.com/erigontech/erigon/execution/commitment/v4"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 func TestConvertCommitmentFiles_V3(t *testing.T) {
@@ -48,10 +48,10 @@ func TestConvertCommitmentFiles_V3(t *testing.T) {
 	legacyState, found, _, _, err := state.AggTx(legacyTx).DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentState, math.MaxUint64)
 	require.NoError(t, err)
 	require.True(t, found)
-	legacyConverted, err := v4.ConvertLegacyState(legacyState)
+	legacyConverted, err := v3.ConvertLegacyState(legacyState)
 	legacyTx.Rollback()
 	require.NoError(t, err)
-	wantBlock, wantTxNum, wantRoot, err := commitment.DecodeCommitmentV4State(legacyConverted)
+	wantBlock, wantTxNum, wantRoot, err := commitment.DecodeCommitmentV3State(legacyConverted)
 	require.NoError(t, err)
 
 	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
@@ -74,9 +74,9 @@ func TestConvertCommitmentFiles_V3(t *testing.T) {
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	stateValue, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV4State, kv.GetLatestOptions{})
+	stateValue, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
 	require.NoError(t, err)
-	blockNum, txNum, root, err := commitment.DecodeCommitmentV4State(stateValue)
+	blockNum, txNum, root, err := commitment.DecodeCommitmentV3State(stateValue)
 	require.NoError(t, err)
 	require.Equal(t, wantRoot, root)
 	require.Equal(t, wantBlock, blockNum)

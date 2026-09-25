@@ -127,52 +127,52 @@ type TrieVariant string
 const (
 	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
-	VariantCommitmentV4        TrieVariant = "commitment-v4"
-	CommitmentV4StateMarker    byte        = 0x04
+	VariantCommitmentV3        TrieVariant = "commitment-v3"
+	CommitmentV3StateMarker    byte        = 0x04
 )
 
-var KeyCommitmentV4State = []byte{0x42}
+var KeyCommitmentV3State = []byte{0x42}
 
-const CommitmentV4StateSize = 1 + 8 + 8 + 32
+const CommitmentV3StateSize = 1 + 8 + 8 + 32
 
 var (
-	ErrCommitmentV4StateMarker = errors.New("commitment v4: invalid state variant marker")
-	ErrCommitmentV4StateSize   = errors.New("commitment v4: invalid state size")
+	ErrCommitmentV3StateMarker = errors.New("commitment v3: invalid state variant marker")
+	ErrCommitmentV3StateSize   = errors.New("commitment v3: invalid state size")
 )
 
-func EncodeCommitmentV4State(root []byte, blockNum, txNum uint64, dst []byte) ([]byte, error) {
+func EncodeCommitmentV3State(root []byte, blockNum, txNum uint64, dst []byte) ([]byte, error) {
 	if len(root) != length.Hash {
-		return nil, ErrCommitmentV4StateSize
+		return nil, ErrCommitmentV3StateSize
 	}
-	dst = append(slices.Grow(dst, CommitmentV4StateSize), CommitmentV4StateMarker)
+	dst = append(slices.Grow(dst, CommitmentV3StateSize), CommitmentV3StateMarker)
 	dst = binary.BigEndian.AppendUint64(dst, txNum)
 	dst = binary.BigEndian.AppendUint64(dst, blockNum)
 	return append(dst, root...), nil
 }
 
-func DecodeCommitmentV4State(value []byte) (blockNum, txNum uint64, root []byte, err error) {
-	if len(value) != CommitmentV4StateSize {
-		return 0, 0, nil, ErrCommitmentV4StateSize
+func DecodeCommitmentV3State(value []byte) (blockNum, txNum uint64, root []byte, err error) {
+	if len(value) != CommitmentV3StateSize {
+		return 0, 0, nil, ErrCommitmentV3StateSize
 	}
-	if value[0] != CommitmentV4StateMarker {
-		return 0, 0, nil, ErrCommitmentV4StateMarker
+	if value[0] != CommitmentV3StateMarker {
+		return 0, 0, nil, ErrCommitmentV3StateMarker
 	}
 	return binary.BigEndian.Uint64(value[9:17]), binary.BigEndian.Uint64(value[1:9]), bytes.Clone(value[17:]), nil
 }
 
 func IsCommitmentStateKey(key []byte) bool {
-	return bytes.Equal(key, KeyCommitmentV4State) || bytes.Equal(key, KeyCommitmentState)
+	return bytes.Equal(key, KeyCommitmentV3State) || bytes.Equal(key, KeyCommitmentState)
 }
 
-var NewCommitmentV4Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
-	case VariantCommitmentV4:
-		if NewCommitmentV4Trie == nil {
-			panic("commitment v4 selected without importing execution/commitment/v4")
+	case VariantCommitmentV3:
+		if NewCommitmentV3Trie == nil {
+			panic("commitment v3 selected without importing execution/commitment/v3")
 		}
-		return NewCommitmentV4Trie(tmpdir, cfg)
+		return NewCommitmentV3Trie(tmpdir, cfg)
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
@@ -1172,8 +1172,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
-	case "v4":
-		trieVariant = VariantCommitmentV4
+	case "v3":
+		trieVariant = VariantCommitmentV3
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":

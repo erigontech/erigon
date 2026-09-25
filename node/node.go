@@ -49,7 +49,7 @@ import (
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/diskutils"
 	"github.com/erigontech/erigon/execution/commitment"
-	_ "github.com/erigontech/erigon/execution/commitment/v4"
+	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/nodecfg"
 )

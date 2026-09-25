@@ -26,27 +26,27 @@ import (
 )
 
 func TestPickTrieVariant(t *testing.T) {
-	parallel, v4 := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV4
+	parallel, v3 := statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3
 	t.Cleanup(func() {
-		statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV4 = parallel, v4
+		statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3 = parallel, v3
 	})
 
 	for _, tc := range []struct {
-		parallel, v4 bool
+		parallel, v3 bool
 		want         commitment.TrieVariant
 	}{
 		{false, false, commitment.VariantHexPatriciaTrie},
 		{true, false, commitment.VariantParallelHexPatricia},
-		{false, true, commitment.VariantCommitmentV4},
-		{true, true, commitment.VariantCommitmentV4},
+		{false, true, commitment.VariantCommitmentV3},
+		{true, true, commitment.VariantCommitmentV3},
 	} {
-		statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV4 = tc.parallel, tc.v4
-		require.Equal(t, tc.want, PickTrieVariant(), "parallel=%v v4=%v", tc.parallel, tc.v4)
+		statecfg.ExperimentalParallelCommitment, statecfg.ExperimentalCommitmentV3 = tc.parallel, tc.v3
+		require.Equal(t, tc.want, PickTrieVariant(), "parallel=%v v3=%v", tc.parallel, tc.v3)
 	}
 }
 
-func TestParseTrieVariantKnowsV4(t *testing.T) {
-	require.Equal(t, commitment.VariantCommitmentV4, commitment.ParseTrieVariant("v4"))
+func TestParseTrieVariantKnowsV3(t *testing.T) {
+	require.Equal(t, commitment.VariantCommitmentV3, commitment.ParseTrieVariant("v3"))
 	require.Equal(t, commitment.VariantParallelHexPatricia, commitment.ParseTrieVariant("parallel"))
 	require.Equal(t, commitment.VariantHexPatriciaTrie, commitment.ParseTrieVariant("hex"))
 }

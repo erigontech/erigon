@@ -43,7 +43,7 @@ type BranchCache struct {
 
 	// accountTrunk: nibble depths 1-4; depth 5+ spills to the LRU tail.
 	accountTrunk   *trunk
-	v4AccountTrunk *trunk
+	v3AccountTrunk *trunk
 
 	pinned   atomic.Pointer[maphash.Map[*trunk]]
 	pinnedMu sync.Mutex
@@ -228,7 +228,7 @@ func NewBranchCache(tailCapacity int) *BranchCache {
 		tailCap:        uint32(tailCapacity),
 		maxDepth:       maxDepth,
 		accountTrunk:   newAccountTrunk(maxDepth),
-		v4AccountTrunk: newAccountTrunk(maxDepth),
+		v3AccountTrunk: newAccountTrunk(maxDepth),
 		trunkDisabled:  os.Getenv("BRANCH_CACHE_TRUNK_DISABLE") != "",
 	}
 	log.Debug("[branch-cache] init", "trunkEnabled", !bc.trunkDisabled, "tailCap", tailCapacity, "trunkDepth", maxDepth)
@@ -275,11 +275,11 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 		switch prefix[0] {
 		case 0x40:
 			var path [4]byte
-			depth, ok := v4KeyPath(prefix, &path)
+			depth, ok := v3KeyPath(prefix, &path)
 			if !ok {
 				return nil
 			}
-			return c.v4AccountTrunk.slot(&path, depth, forWrite)
+			return c.v3AccountTrunk.slot(&path, depth, forWrite)
 		case 0x41, 0x42:
 			return nil
 		}
@@ -312,7 +312,7 @@ func (c *BranchCache) trunkSlot(prefix []byte, forWrite bool) *atomic.Pointer[br
 	return nil
 }
 
-func v4KeyPath(prefix []byte, path *[4]byte) (depth int, ok bool) {
+func v3KeyPath(prefix []byte, path *[4]byte) (depth int, ok bool) {
 	if len(prefix) <= 1 {
 		return 0, false
 	}
@@ -692,7 +692,7 @@ func (c *BranchCache) Clear() {
 
 	c.root.Store(nil)
 	clearTrunk(c.accountTrunk)
-	clearTrunk(c.v4AccountTrunk)
+	clearTrunk(c.v3AccountTrunk)
 	c.pinned.Store(nil)
 	if tail := c.tail.Load(); tail != nil {
 		tail.reset()

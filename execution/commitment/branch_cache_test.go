@@ -373,10 +373,10 @@ func TestBranchCache_StateKeyNeverCached(t *testing.T) {
 	_, _, ok := c.Get(KeyCommitmentState)
 	require.False(t, ok, "state key must never be served from the cache")
 	require.Equal(t, 0, c.tailLen(), "state key must not occupy a tail slot")
-	c.Put(KeyCommitmentV4State, []byte("checkpoint"), 1, 1)
-	_, _, ok = c.Get(KeyCommitmentV4State)
-	require.False(t, ok, "v4 state key must never be served from the cache")
-	require.Equal(t, 0, c.tailLen(), "v4 state key must not occupy a tail slot")
+	c.Put(KeyCommitmentV3State, []byte("checkpoint"), 1, 1)
+	_, _, ok = c.Get(KeyCommitmentV3State)
+	require.False(t, ok, "v3 state key must never be served from the cache")
+	require.Equal(t, 0, c.tailLen(), "v3 state key must not occupy a tail slot")
 
 	deepKey := []byte{0x12, 0x34}
 	c.Put(deepKey, []byte("d"), 0, 0)

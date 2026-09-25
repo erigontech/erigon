@@ -83,7 +83,7 @@ func init() {
 		Schema.CommitmentDomain.Accessors = AccessorBTree | AccessorExistence
 	}
 	InitSchemas()
-	if ExperimentalCommitmentV4 {
+	if ExperimentalCommitmentV3 {
 		EnableCommitmentV3Records(&Schema.CommitmentDomain)
 	}
 }
@@ -206,9 +206,9 @@ const DefaultParallelCommitment = true
 
 var ExperimentalParallelCommitment = dbg.EnvBool("COMMITMENT_PARALLEL", DefaultParallelCommitment)
 
-const DefaultCommitmentV4 = false
+const DefaultCommitmentV3 = false
 
-var ExperimentalCommitmentV4 = dbg.EnvBool("COMMITMENT_V4", DefaultCommitmentV4)
+var ExperimentalCommitmentV3 = dbg.EnvBool("COMMITMENT_V3", DefaultCommitmentV3)
 
 var Schema = SchemaGen{
 	AccountsDomain: DomainCfg{

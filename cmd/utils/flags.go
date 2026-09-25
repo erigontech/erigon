@@ -1150,10 +1150,10 @@ var (
 		Usage: "Compute commitment on the parallel trie (ParallelPatriciaHashed). Pass =false for the sequential trie.",
 		Value: statecfg.DefaultParallelCommitment,
 	}
-	ExperimentalCommitmentV4Flag = cli.BoolFlag{
-		Name:  "experimental.commitment-v4",
-		Usage: "Compute commitment on the v4 trie. Takes precedence over --experimental.parallel-commitment.",
-		Value: statecfg.DefaultCommitmentV4,
+	ExperimentalCommitmentV3Flag = cli.BoolFlag{
+		Name:  "experimental.commitment-v3",
+		Usage: "Compute commitment on the v3 trie. Takes precedence over --experimental.parallel-commitment.",
+		Value: statecfg.DefaultCommitmentV3,
 	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
@@ -1936,9 +1936,9 @@ func setParallelCommitment(ctx *cli.Command) {
 	if ctx.IsSet(ExperimentalParallelCommitmentFlag.Name) {
 		statecfg.ExperimentalParallelCommitment = ctx.Bool(ExperimentalParallelCommitmentFlag.Name)
 	}
-	if ctx.IsSet(ExperimentalCommitmentV4Flag.Name) {
-		statecfg.ExperimentalCommitmentV4 = ctx.Bool(ExperimentalCommitmentV4Flag.Name)
-		if statecfg.ExperimentalCommitmentV4 {
+	if ctx.IsSet(ExperimentalCommitmentV3Flag.Name) {
+		statecfg.ExperimentalCommitmentV3 = ctx.Bool(ExperimentalCommitmentV3Flag.Name)
+		if statecfg.ExperimentalCommitmentV3 {
 			statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 		}
 	}

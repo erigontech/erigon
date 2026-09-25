@@ -113,7 +113,7 @@ type factoryWiringTrie struct {
 func (*factoryWiringTrie) RootHash() ([]byte, error) { return []byte{1}, nil }
 func (*factoryWiringTrie) SetTraceWriter(io.Writer)  {}
 func (*factoryWiringTrie) Variant() commitment.TrieVariant {
-	return commitment.VariantCommitmentV4
+	return commitment.VariantCommitmentV3
 }
 func (*factoryWiringTrie) Reset()                                  {}
 func (*factoryWiringTrie) ResetContext(commitment.PatriciaContext) {}
@@ -126,7 +126,7 @@ func (t *factoryWiringTrie) SetTrieContextFactory(factory commitment.TrieContext
 	t.factory = factory
 }
 
-func TestComputeCommitmentWiresV4Factories(t *testing.T) {
+func TestComputeCommitmentWiresV3Factories(t *testing.T) {
 	trie := &factoryWiringTrie{}
 	domains := factoryWiringDomains{}
 	updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
@@ -145,6 +145,6 @@ func TestComputeCommitmentWiresV4Factories(t *testing.T) {
 
 	_, err := sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
 	require.NoError(t, err)
-	require.NotNil(t, trie.factory, "v4 storage factory must be configured by ComputeCommitment")
-	require.NotNil(t, trie.warmup.CtxFactory, "v4 warmup factory must remain configured")
+	require.NotNil(t, trie.factory, "v3 storage factory must be configured by ComputeCommitment")
+	require.NotNil(t, trie.warmup.CtxFactory, "v3 warmup factory must remain configured")
 }

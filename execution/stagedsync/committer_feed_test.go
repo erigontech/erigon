@@ -29,17 +29,17 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
-	_ "github.com/erigontech/erigon/execution/commitment/v4"
+	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestCalculatorFeedRootMatchesHexPatricia(t *testing.T) {
-	defer func(v bool) { statecfg.ExperimentalCommitmentV4 = v }(statecfg.ExperimentalCommitmentV4)
+	defer func(v bool) { statecfg.ExperimentalCommitmentV3 = v }(statecfg.ExperimentalCommitmentV3)
 	roots := make(map[bool][][]byte)
-	for _, v4 := range []bool{false, true} {
-		statecfg.ExperimentalCommitmentV4 = v4
-		roots[v4] = calculatorRoots(t, v4)
+	for _, v3 := range []bool{false, true} {
+		statecfg.ExperimentalCommitmentV3 = v3
+		roots[v3] = calculatorRoots(t, v3)
 	}
 	require.Len(t, roots[false], 2)
 	require.Equal(t, roots[false], roots[true])

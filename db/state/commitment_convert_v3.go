@@ -40,7 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/commitment"
-	v4 "github.com/erigontech/erigon/execution/commitment/v4"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 const commitmentV3Batch = 1024
@@ -68,7 +68,7 @@ type convertedBatch struct {
 	ents [][3]int
 }
 
-func (b *convertedBatch) emit(k, v []byte, kind v4.LegacyKind) error {
+func (b *convertedBatch) emit(k, v []byte, kind v3.LegacyKind) error {
 	k0 := len(b.buf)
 	b.buf = append(b.buf, k...)
 	v0 := len(b.buf)
@@ -220,7 +220,7 @@ func convertCommitmentFileV3(
 			wat := at.a.BeginFilesRo()
 			defer wat.Close()
 			vals := &legacyFileValues{accounts: wat.d[kv.AccountsDomain], storage: wat.d[kv.StorageDomain], maxStep: lastStep - 1}
-			conv := v4.NewLegacyConverter(vals, st.keysV2, incremental)
+			conv := v3.NewLegacyConverter(vals, st.keysV2, incremental)
 			prevs := wat.d[kv.CommitmentDomain]
 			for batch := range in {
 				res := convertedBatchPool.Get().(*convertedBatch)
@@ -270,13 +270,13 @@ func convertCommitmentFileV3(
 	}
 	writer := seg.NewWriter(valuesComp, compress)
 	var groupKey, groupVals []byte
-	var group []v4.LegacyEntry
+	var group []v3.LegacyEntry
 	var written uint64
 	flush := func() error {
 		if len(group) == 0 {
 			return nil
 		}
-		value, write, resolveErr := v4.ResolveLegacy(groupKey, group)
+		value, write, resolveErr := v3.ResolveLegacy(groupKey, group)
 		if resolveErr != nil || !write {
 			return resolveErr
 		}
@@ -296,7 +296,7 @@ func convertCommitmentFileV3(
 		}
 		start := len(groupVals)
 		groupVals = append(groupVals, v[1:]...)
-		group = append(group, v4.LegacyEntry{Kind: v4.LegacyKind(v[0]), Value: groupVals[start:]})
+		group = append(group, v3.LegacyEntry{Kind: v3.LegacyKind(v[0]), Value: groupVals[start:]})
 		return nil
 	}, etl.TransformArgs{Quit: ctx.Done()})
 	if err == nil {
@@ -388,16 +388,16 @@ func readOwned(reader *seg.Reader, batch *kvBatch, compressed bool) []byte {
 	return batch.buf[start:]
 }
 
-func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v4.LegacyConverter, emit v4.LegacyEmitFunc) error {
+func convertLegacyPairV3(k, v []byte, incremental bool, stepFrom kv.Step, prevs *DomainRoTx, conv *v3.LegacyConverter, emit v3.LegacyEmitFunc) error {
 	if commitment.IsCommitmentStateKey(k) {
 		if !bytes.Equal(k, commitment.KeyCommitmentState) {
 			return fmt.Errorf("unexpected state key %x in a legacy file", k)
 		}
-		state, err := v4.ConvertLegacyState(v)
+		state, err := v3.ConvertLegacyState(v)
 		if err != nil {
 			return err
 		}
-		return emit(commitment.KeyCommitmentV4State, state, v4.LegacyDirect)
+		return emit(commitment.KeyCommitmentV3State, state, v3.LegacyDirect)
 	}
 	var prev []byte
 	if incremental {
@@ -507,7 +507,7 @@ type commitmentV3Fold struct {
 }
 
 func (f commitmentV3Fold) checkState() (blockNum, txNum uint64, err error) {
-	blockNum, txNum, stateRoot, err := commitment.DecodeCommitmentV4State(f.state)
+	blockNum, txNum, stateRoot, err := commitment.DecodeCommitmentV3State(f.state)
 	if err != nil {
 		return 0, 0, fmt.Errorf("state %x: %w", f.state, err)
 	}
@@ -548,7 +548,7 @@ func foldCommitmentV3Records(ctx context.Context, it stream.KV) (commitmentV3Fol
 			if len(v) == 0 {
 				continue
 			}
-			if bytes.Equal(k, commitment.KeyCommitmentV4State) {
+			if bytes.Equal(k, commitment.KeyCommitmentV3State) {
 				state = bytes.Clone(v)
 				continue
 			}
@@ -569,7 +569,7 @@ func foldCommitmentV3Records(ctx context.Context, it stream.KV) (commitmentV3Fol
 		hashing.Add(1)
 		g.Go(func() error {
 			defer hashing.Done()
-			hasher := v4.NewRecordHasher()
+			hasher := v3.NewRecordHasher()
 			for batch := range in {
 				res := hashedBatchPool.Get().(*hashedBatch)
 				res.seq, res.buf, res.records, res.expects = batch.seq, res.buf[:0], res.records[:0], res.expects[:0]
@@ -599,7 +599,7 @@ func foldCommitmentV3Records(ctx context.Context, it stream.KV) (commitmentV3Fol
 		close(out)
 		return nil
 	})
-	matcher := v4.NewRecordMatcher()
+	matcher := v3.NewRecordMatcher()
 	g.Go(func() error {
 		waiting := map[uint64]*hashedBatch{}
 		var next uint64

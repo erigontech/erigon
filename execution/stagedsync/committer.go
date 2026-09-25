@@ -289,7 +289,7 @@ func newCommitmentCalculator(
 	}
 
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
-	// trie reads leaf values from the as-of reader and v4 owns its own collected
+	// trie reads leaf values from the as-of reader and v3 owns its own collected
 	// feed, so only ModeDirect needs the upgrade.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
 	calcUpdates := sdCtxUpdates.NewEmpty()

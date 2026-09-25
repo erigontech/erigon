@@ -26,10 +26,10 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	v4 "github.com/erigontech/erigon/execution/commitment/v4"
+	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
-var branchPrefetchEnabled = dbg.EnvBool("COMMITMENT_V4_PREFETCH", true)
+var branchPrefetchEnabled = dbg.EnvBool("COMMITMENT_V3_PREFETCH", true)
 
 const (
 	branchPrefetchWorkers  = 8
@@ -145,7 +145,7 @@ func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
 		return data
 	}
 	data = bytes.Clone(data)
-	refs := v4.ComputeLeafRefs(key, data)
+	refs := v3.ComputeLeafRefs(key, data)
 	s := p.shard(key)
 	s.mu.Lock()
 	s.records[string(key)] = prefetchedRecord{data: data, step: step, refs: refs}
@@ -196,8 +196,8 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 
 func (it *prefetchItem) touch(read func(key []byte) []byte) {
 	if it.storage {
-		v4.PrefetchPath(read, it.account[:], it.slot[:], 64)
+		v3.PrefetchPath(read, it.account[:], it.slot[:], 64)
 		return
 	}
-	v4.PrefetchPath(read, it.account[:], nil, 0)
+	v3.PrefetchPath(read, it.account[:], nil, 0)
 }
