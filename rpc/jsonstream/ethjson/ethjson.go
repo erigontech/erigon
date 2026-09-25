@@ -36,15 +36,6 @@ func Quantity[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v T) {
 	jsonstream.HexUint64(s, uint64(v))
 }
 
-// QuantityOrNull writes null for a field the header or receipt does not carry.
-func QuantityOrNull[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v *T) {
-	if v == nil {
-		s.Field(name).WriteNil()
-		return
-	}
-	Quantity(s, name, *v)
-}
-
 // Quantity256 writes a 256-bit quantity, null when the field is absent.
 func Quantity256(s *jsonstream.StackStream, name string, v *uint256.Int) {
 	s.Field(name)
