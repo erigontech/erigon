@@ -109,6 +109,12 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 			return err
 		}
 	}
+	if x.ZeroInners != nil {
+		s.Field("zeroInners")
+		if err := x.ZeroInners.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
 	if x.Renamed != 0 {
 		ethjson.Quantity(s, "Renamed", x.Renamed)
 	}

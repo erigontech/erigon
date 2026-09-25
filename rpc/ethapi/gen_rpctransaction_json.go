@@ -43,11 +43,7 @@ func (x *RPCTransaction) writeJSONFields(s *jsonstream.StackStream) error {
 	}
 	ethjson.Data(s, "from", x.From[:])
 	ethjson.Quantity(s, "gas", x.Gas)
-	if x.GasPrice == nil {
-		s.Field("gasPrice").WriteNil()
-	} else {
-		ethjson.Quantity256(s, "gasPrice", (*uint256.Int)(x.GasPrice))
-	}
+	ethjson.Quantity256(s, "gasPrice", (*uint256.Int)(&x.GasPrice))
 	if x.MaxPriorityFeePerGas != nil {
 		ethjson.Quantity256(s, "maxPriorityFeePerGas", (*uint256.Int)(x.MaxPriorityFeePerGas))
 	}
@@ -88,7 +84,7 @@ func (x *RPCTransaction) writeJSONFields(s *jsonstream.StackStream) error {
 	if len(x.BlobVersionedHashes) > 0 {
 		ethjson.DataList(s, "blobVersionedHashes", x.BlobVersionedHashes)
 	}
-	if len(x.Authorizations) > 0 {
+	if x.Authorizations != nil {
 		s.Field("authorizationList")
 		if err := x.Authorizations.MarshalFastJSONTo(s); err != nil {
 			return err

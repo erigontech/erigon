@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -106,6 +107,28 @@ func TestNewRPCTransaction_EIP1559_AllZeroSig(t *testing.T) {
 	require.EqualValues(t, 0, result.V.ToInt().Int64())
 	require.EqualValues(t, 0, result.R.ToInt().Int64())
 	require.EqualValues(t, 0, result.S.ToInt().Int64())
+}
+
+func TestRPCMarshalBlockAllocsPerTransaction(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	blockAllocs := func(n int) float64 {
+		txs := make([]types.Transaction, n)
+		for i := range txs {
+			tx := &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: 21000, To: &to, V: *uint256.NewInt(1), R: *uint256.NewInt(2), S: *uint256.NewInt(3)},
+				ChainID:  *uint256.NewInt(1),
+				TipCap:   *uint256.NewInt(2),
+				FeeCap:   *uint256.NewInt(100),
+			}
+			tx.SetSender(accounts.InternAddress(to))
+			tx.Hash()
+			txs[i] = tx
+		}
+		block := types.NewBlock(&types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(7)}, txs, nil, nil, nil, nil)
+		block.Hash()
+		return testing.AllocsPerRun(100, func() { RPCMarshalBlock(block, true, true) })
+	}
+	require.Equal(t, 1.0, blockAllocs(2)-blockAllocs(1))
 }
 
 func txFields(t *testing.T, r SignTransactionResult) map[string]json.RawMessage {
@@ -497,7 +520,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	base := func() *RPCTransaction {
 		return &RPCTransaction{
 			BlockHash: &hash, BlockNumber: u(0x1234), BlockTimestamp: q(0x64),
-			From: to, Gas: 0x5208, GasPrice: u(0x9), Hash: hash,
+			From: to, Gas: 0x5208, GasPrice: *u(0x9), Hash: hash,
 			Input: hexutil.Bytes{0xde, 0xad}, Nonce: 3, To: &to,
 			TransactionIndex: q(2), Value: u(0x100), Type: 0,
 			V: u(0x1b), R: u(0xaa), S: u(0xbb),
@@ -506,7 +529,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	dynamic := base()
 	dynamic.Type, dynamic.MaxPriorityFeePerGas, dynamic.MaxFeePerGas = 2, u(0x1), u(0x2)
 	dynamic.ChainID, dynamic.YParity = u(1), u(0)
-	dynamic.Accesses = &types.AccessList{
+	dynamic.Accesses = types.AccessList{
 		{Address: to, StorageKeys: []common.Hash{hash, {}}},
 		{Address: common.Address{}, StorageKeys: nil},
 		{Address: to, StorageKeys: []common.Hash{}},
@@ -514,6 +537,11 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	blob := base()
 	blob.Type, blob.MaxFeePerBlobGas = 3, u(0x7)
 	blob.BlobVersionedHashes = []common.Hash{hash}
+	// An empty list still writes [], because SetCodeTransaction's decoder requires the key.
+	emptyAuths := base()
+	emptyAuths.Type = 4
+	emptyAuths.Authorizations = types.AuthorizationList{}
+
 	setcode := base()
 	setcode.Type = 4
 	setcode.Authorizations = types.AuthorizationList{
@@ -528,13 +556,13 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	noTo := base()
 	noTo.To, noTo.Input = nil, nil
 	emptyAccesses := base()
-	emptyAccesses.Accesses = &types.AccessList{}
+	emptyAccesses.Accesses = types.AccessList{}
 	emptyBlobs := base()
 	emptyBlobs.BlobVersionedHashes = []common.Hash{}
 
 	for name, txn := range map[string]*RPCTransaction{
 		"zero": {}, "legacy": base(), "dynamic fee": dynamic, "blob": blob,
-		"set code": setcode, "pending": pending, "contract creation": noTo,
+		"set code": setcode, "set code empty list": emptyAuths, "pending": pending, "contract creation": noTo,
 		"empty access list": emptyAccesses, "empty blob hashes": emptyBlobs,
 	} {
 		t.Run(name, func(t *testing.T) {
@@ -543,6 +571,8 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 			require.Equal(t, string(want), fastJSON(t, txn))
 		})
 	}
+	require.Contains(t, fastJSON(t, emptyAuths), `"authorizationList":[]`)
+	require.Contains(t, fastJSON(t, emptyAccesses), `"accessList":[]`)
 }
 
 // ots_getBlockDetails and ots_getBlockTransactions write transactionCount as a JSON number.
