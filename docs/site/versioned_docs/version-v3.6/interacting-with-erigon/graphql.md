@@ -1,0 +1,56 @@
+---
+title: "GraphQL"
+description: "GraphQL interface for flexible, schema-driven Ethereum data queries."
+sidebar_position: 16
+---
+
+# GraphQL
+
+Erigon implements the Ethereum GraphQL interface originally introduced in [EIP-1767](https://eips.ethereum.org/EIPS/eip-1767). The schema is maintained in the [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis) repository, kept in sync with client implementations such as Geth and Besu. Erigon follows that schema.
+
+## Enabling GraphQL
+
+GraphQL is disabled by default. Enable it with the `--graphql` flag:
+
+```bash
+./erigon --graphql
+```
+
+GraphQL shares the same port as the HTTP JSON-RPC server (default `8545`). It does **not** use `--http.api` — `--graphql` is its own toggle.
+
+## Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `http://localhost:8545/graphql` | GraphQL API endpoint |
+| `http://localhost:8545/graphql/ui` | GraphiQL browser UI for interactive queries |
+
+## Schema Reference
+
+Erigon follows the GraphQL schema maintained in [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis), which is kept in sync with major clients such as Geth and Besu. For human-readable field descriptions and query examples, the [Geth GraphQL reference](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql) is a useful companion.
+
+The schema includes queries for blocks, transactions, accounts, logs, and pending state, as well as the `sendRawTransaction` mutation.
+
+## Example Query
+
+```graphql
+{
+  block(number: 21000000) {
+    hash
+    number
+    timestamp
+    transactions {
+      hash
+      from { address }
+      to { address }
+      value
+    }
+  }
+}
+```
+
+```bash
+curl -X POST http://localhost:8545/graphql \
+  -H "Content-Type: application/json" \
+  -d '{"query": "{ block(number: 21000000) { hash number } }"}'
+```
