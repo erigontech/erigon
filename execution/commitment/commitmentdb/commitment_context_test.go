@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 	"github.com/stretchr/testify/require"
 )
 
@@ -21,9 +22,7 @@ func Test_EncodeCommitmentState(t *testing.T) {
 		txNum:     rand.Uint64(),
 		trieState: make([]byte, 1024),
 	}
-	n, err := rand.Read(cs.trieState)
-	require.NoError(t, err)
-	require.Equal(t, len(cs.trieState), n)
+	commitmenttest.Read(t, cs.trieState, rand.Read)
 
 	buf, err := cs.Encode()
 	require.NoError(t, err)
@@ -82,23 +81,25 @@ func TestCommitmentV3StateRejectsLegacyBlob(t *testing.T) {
 	require.ErrorContains(t, err, "invalid state variant marker")
 }
 
-type stateCodecTrie struct{}
+type stateCodecTrie struct{ testTrie }
 
-func (*stateCodecTrie) RootHash() ([]byte, error) { return nil, nil }
+type testTrie struct{}
 
-func (*stateCodecTrie) SetTraceWriter(io.Writer) {}
+func (*testTrie) RootHash() ([]byte, error) { return nil, nil }
 
-func (*stateCodecTrie) Variant() commitment.TrieVariant { return commitment.VariantCommitmentV3 }
+func (*testTrie) SetTraceWriter(io.Writer) {}
 
-func (*stateCodecTrie) Reset() {}
+func (*testTrie) Variant() commitment.TrieVariant { return commitment.VariantCommitmentV3 }
 
-func (*stateCodecTrie) ResetContext(commitment.PatriciaContext) {}
+func (*testTrie) Reset() {}
 
-func (*stateCodecTrie) Process(context.Context, *commitment.Updates, string, func(*commitment.CommitProgress), commitment.WarmupConfig) ([]byte, error) {
+func (*testTrie) ResetContext(commitment.PatriciaContext) {}
+
+func (*testTrie) Process(context.Context, *commitment.Updates, string, func(*commitment.CommitProgress), commitment.WarmupConfig) ([]byte, error) {
 	return nil, nil
 }
 
-func (*stateCodecTrie) Release() {}
+func (*testTrie) Release() {}
 
 func (*stateCodecTrie) EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error) {
 	return append(dst, commitment.CommitmentV3StateMarker, byte(blockNum), byte(txNum)), nil

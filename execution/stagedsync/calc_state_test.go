@@ -823,25 +823,7 @@ func sdEIP8246Original() *accounts.Account {
 // calcState so callers can inspect the account and flush to updates.
 func buildSDWithPostBalance(t *testing.T, addr accounts.Address, postSDBalance uint256.Int, eip8246 bool) *calcState {
 	t.Helper()
-	original := sdEIP8246Original()
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-
-	// IBS.Selfdestruct emits IncarnationPath=preInc, SelfDestructPath=true and
-	// BalancePath=postSDBalance (pre-8246 that balance is 0; EIP-8246 leaves the
-	// moved-in/retained balance).
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, postSDBalance).
-		build()
-
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, postSDBalance, true)
-
-	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, eip8246)
+	normalized := sdWrites(addr, postSDBalance, eip8246)
 
 	cs := newTestCalcState()
 	cs.ApplyWrites(normalized, eip8246)
@@ -951,18 +933,7 @@ func applySDToDomains(t *testing.T, postSDBalance uint256.Int, useBlockCache boo
 	original := sdEIP8246Original()
 	addrVal := addr.Value()
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(original), 0, nil))
-	ver := state.Version{TxIndex: 0, Incarnation: 0}
-	rawWrites := newWS().
-		inc(addr, ver, original.Incarnation).
-		selfDestruct(addr, ver, true).
-		bal(addr, ver, postSDBalance).
-		build()
-	vm := state.NewVersionMap(nil)
-	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
-	vm.WriteSelfDestruct(addr, ver, true, true)
-	vm.WriteBalance(addr, ver, postSDBalance, true)
-	stateReader := &preBlockReader{addr: addr, acc: original}
-	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, true)
+	normalized := sdWrites(addr, postSDBalance, true)
 	rs := state.NewStateV3(domains, false, log.New())
 	var blockCache *state.BlockStateCache
 	if useBlockCache {
@@ -1155,4 +1126,26 @@ func TestFlushToFeedCarriesWhatFlushToUpdatesEmits(t *testing.T) {
 	require.Len(t, distinct, len(feed.Accounts))
 	require.Equal(t, len(want), feed.Keys)
 	require.Equal(t, want, got)
+}
+
+func sdWrites(addr accounts.Address, postSDBalance uint256.Int, eip8246 bool) *state.WriteSet {
+	original := sdEIP8246Original()
+	ver := state.Version{TxIndex: 0, Incarnation: 0}
+	// IBS.Selfdestruct emits IncarnationPath=preInc, SelfDestructPath=true and
+	// BalancePath=postSDBalance (pre-8246 that balance is 0; EIP-8246 leaves the
+	// moved-in/retained balance).
+	rawWrites := newWS().
+		inc(addr, ver, original.Incarnation).
+		selfDestruct(addr, ver, true).
+		bal(addr, ver, postSDBalance).
+		build()
+
+	vm := state.NewVersionMap(nil)
+	vm.WriteIncarnation(addr, ver, original.Incarnation, true)
+	vm.WriteSelfDestruct(addr, ver, true, true)
+	vm.WriteBalance(addr, ver, postSDBalance, true)
+
+	stateReader := &preBlockReader{addr: addr, acc: original}
+	normalized, _ := rawWrites.Normalize(vm, 0, 0, stateReader, nil, true, false, eip8246)
+	return normalized
 }

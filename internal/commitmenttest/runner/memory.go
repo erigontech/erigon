@@ -178,9 +178,5 @@ func (m *Memory) Records() map[string][]byte {
 func (m *Memory) Deltas() []commitment.BranchDelta {
 	m.store.Lock()
 	defer m.store.Unlock()
-	out := make([]commitment.BranchDelta, len(m.store.deltas))
-	for i, d := range m.store.deltas {
-		out[i] = commitment.BranchDelta{Key: bytes.Clone(d.Key), Data: bytes.Clone(d.Data), Prev: bytes.Clone(d.Prev)}
-	}
-	return out
+	return CloneDeltas(m.store.deltas)
 }

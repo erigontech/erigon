@@ -20,6 +20,9 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -117,4 +120,11 @@ func RandomStorage(rng *rand.Rand) []byte {
 	_, _ = rng.Read(value)
 	value[0] |= 1
 	return value
+}
+
+func Read(tb testing.TB, value []byte, read func([]byte) (int, error)) {
+	tb.Helper()
+	n, err := read(value)
+	require.NoError(tb, err)
+	require.Equal(tb, len(value), n)
 }

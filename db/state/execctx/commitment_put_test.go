@@ -18,6 +18,7 @@ package execctx_test
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -30,25 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
-
-func cloneDeltas(in []commitment.BranchDelta) []commitment.BranchDelta {
-	out := make([]commitment.BranchDelta, len(in))
-	for i, d := range in {
-		out[i] = commitment.BranchDelta{Key: bytes.Clone(d.Key), Data: bytes.Clone(d.Data), Prev: bytes.Clone(d.Prev)}
-	}
-	return out
-}
-
-func splitParts(deltas []commitment.BranchDelta, size int) [][]commitment.BranchDelta {
-	var parts [][]commitment.BranchDelta
-	for len(deltas) > 0 {
-		n := min(size, len(deltas))
-		parts = append(parts, deltas[:n])
-		deltas = deltas[n:]
-	}
-	return parts
-}
 
 func TestPutCommitmentBranchesMatchesPerRecordPuts(t *testing.T) {
 	seed := commitmentPutCorpus(3*8192 + 17)
@@ -82,10 +66,10 @@ func TestPutCommitmentBranchesMatchesPerRecordPuts(t *testing.T) {
 			deltas []commitment.BranchDelta
 		}{{1, seed}, {2, next}} {
 			if batch {
-				require.NoError(t, sd.PutCommitmentBranches(tx, splitParts(cloneDeltas(round.deltas), 5), round.txNum, &diff))
+				require.NoError(t, sd.PutCommitmentBranches(tx, slices.Collect(slices.Chunk(runner.CloneDeltas(round.deltas), 5)), round.txNum, &diff))
 				continue
 			}
-			for _, d := range cloneDeltas(round.deltas) {
+			for _, d := range runner.CloneDeltas(round.deltas) {
 				require.NoError(t, sd.DomainPutCommitmentDiff(tx, d.Key, d.Data, round.txNum, d.Prev, &diff))
 			}
 		}
@@ -157,18 +141,18 @@ func TestFlushPendingDeltasLandInTheBlockChangeset(t *testing.T) {
 		require.NoError(t, err)
 		defer sd.Close()
 
-		require.NoError(t, sd.PutCommitmentBranches(tx, [][]commitment.BranchDelta{cloneDeltas(seed)}, 1, nil))
+		require.NoError(t, sd.PutCommitmentBranches(tx, [][]commitment.BranchDelta{runner.CloneDeltas(seed)}, 1, nil))
 		block, live := &changeset.StateChangeSet{}, &changeset.StateChangeSet{}
 		sd.SavePastChangesetAccumulator(blockHash, 5, block)
 		sd.SetChangesetAccumulator(live)
 		if pending {
 			sd.GetCommitmentContext().SetPendingUpdate(&commitment.PendingCommitmentUpdate{
-				BlockNum: 5, BlockHash: blockHash, TxNum: 2, Deltas: splitParts(cloneDeltas(next), 5),
+				BlockNum: 5, BlockHash: blockHash, TxNum: 2, Deltas: slices.Collect(slices.Chunk(runner.CloneDeltas(next), 5)),
 			})
 			require.NoError(t, sd.FlushPendingUpdates(t.Context(), tx))
 		} else {
 			restore := sd.SwapCommitmentDiffLocked(block)
-			for _, d := range cloneDeltas(next) {
+			for _, d := range runner.CloneDeltas(next) {
 				require.NoError(t, sd.DomainPut(kv.CommitmentDomain, tx, d.Key, d.Data, 2, d.Prev))
 			}
 			restore()

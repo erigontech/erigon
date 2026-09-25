@@ -17,6 +17,7 @@
 package runner
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/erigontech/erigon/execution/commitment"
@@ -82,4 +83,12 @@ func Feed(ops []commitmenttest.Op) (*commitment.Feed, error) {
 		account.Slots = append(account.Slots, slot)
 	}
 	return feed, nil
+}
+
+func CloneDeltas(in []commitment.BranchDelta) []commitment.BranchDelta {
+	out := make([]commitment.BranchDelta, len(in))
+	for i, d := range in {
+		out[i] = commitment.BranchDelta{Key: bytes.Clone(d.Key), Data: bytes.Clone(d.Data), Prev: bytes.Clone(d.Prev)}
+	}
+	return out
 }

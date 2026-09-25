@@ -18,7 +18,6 @@ package commitmentdb
 
 import (
 	"context"
-	"io"
 	"testing"
 	"time"
 
@@ -106,22 +105,18 @@ func (factoryWiringDomains) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetr
 func (factoryWiringDomains) StepSize() uint64                                        { return 1 }
 
 type factoryWiringTrie struct {
+	testTrie
 	factory commitment.TrieContextFactory
 	warmup  commitment.WarmupConfig
 }
 
 func (*factoryWiringTrie) RootHash() ([]byte, error) { return []byte{1}, nil }
-func (*factoryWiringTrie) SetTraceWriter(io.Writer)  {}
-func (*factoryWiringTrie) Variant() commitment.TrieVariant {
-	return commitment.VariantCommitmentV3
-}
-func (*factoryWiringTrie) Reset()                                  {}
-func (*factoryWiringTrie) ResetContext(commitment.PatriciaContext) {}
+
 func (t *factoryWiringTrie) Process(_ context.Context, _ *commitment.Updates, _ string, _ func(*commitment.CommitProgress), warmup commitment.WarmupConfig) ([]byte, error) {
 	t.warmup = warmup
 	return []byte{1}, nil
 }
-func (*factoryWiringTrie) Release() {}
+
 func (t *factoryWiringTrie) SetTrieContextFactory(factory commitment.TrieContextFactory) {
 	t.factory = factory
 }
