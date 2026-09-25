@@ -34,11 +34,7 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	}
 	ethjson.Data(s, "from", x.From[:])
 	ethjson.Quantity(s, "gas", x.Gas)
-	if x.GasPrice == nil {
-		s.Field("gasPrice").WriteNil()
-	} else {
-		ethjson.Quantity256(s, "gasPrice", (*uint256.Int)(x.GasPrice))
-	}
+	ethjson.Quantity256(s, "gasPrice", (*uint256.Int)(&x.GasPrice))
 	if x.MaxPriorityFeePerGas != nil {
 		ethjson.Quantity256(s, "maxPriorityFeePerGas", (*uint256.Int)(x.MaxPriorityFeePerGas))
 	}
