@@ -209,10 +209,7 @@ func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
 		_, _ = api.UninstallFilter(ctx, filterID)
 	})
 
-	queued := &types.RPCLog{
-		Log:            types.Log{Address: common.Address{1}},
-		BlockTimestamp: 123,
-	}
+	queued := &types.Log{Address: common.Address{1}, BlockTimestamp: 123}
 	ff.AddLogs(rpchelper.LogsSubID(strings.TrimPrefix(filterID, "0x")), queued)
 
 	_, err = api.GetFilterLogs(ctx, filterID)

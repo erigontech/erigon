@@ -62,6 +62,9 @@ type Log struct {
 	// The Removed field is true if this log was reverted due to a chain reorganisation.
 	// You must pay attention to this field if you receive logs through a filter query.
 	Removed bool `json:"removed" ethjson:"bool" codec:"-"`
+
+	// zero for the replies that do not stamp it
+	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp,omitempty" ethjson:"quantity" codec:"-"`
 }
 
 // UnmarshalJSON validates required fields: address, topics, data, transactionHash.
@@ -76,6 +79,8 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 		BlockHash   *common.Hash    `json:"blockHash"`
 		Index       *hexutil.Uint   `json:"logIndex"`
 		Removed     *bool           `json:"removed"`
+
+		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
 	}
 	var dec log
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -112,37 +117,13 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	if dec.Removed != nil {
 		l.Removed = *dec.Removed
 	}
-	return nil
-}
-
-type Logs []*Log
-
-// RPCLog Extends `types.Log` and add BlockTimestamp field
-//
-//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type RPCLog
-type RPCLog struct {
-	Log
-	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" ethjson:"quantity" codec:"-"`
-}
-
-// UnmarshalJSON parses both the embedded Log fields and the RPC-specific blockTimestamp field.
-func (l *RPCLog) UnmarshalJSON(input []byte) error {
-	if err := l.Log.UnmarshalJSON(input); err != nil {
-		return err
-	}
-	var dec struct {
-		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
-	}
-	if err := json.Unmarshal(input, &dec); err != nil {
-		return err
-	}
 	if dec.BlockTimestamp != nil {
 		l.BlockTimestamp = *dec.BlockTimestamp
 	}
 	return nil
 }
 
-type RPCLogs []*RPCLog
+type Logs []*Log
 
 // Copy deep-copies the logs into freshly allocated shared backing arrays.
 // Nil entries stay nil.
@@ -177,12 +158,12 @@ func (logs Logs) Copy() Logs {
 	return out
 }
 
-// ToRPCTransactionLog converts types.Log in a RPCLog.
-func ToRPCTransactionLog(log *Log, header *Header) *RPCLog {
-	return &RPCLog{
-		Log:            *log,
-		BlockTimestamp: hexutil.Uint64(header.Time),
-	}
+// StampedLog copies the log with the block's timestamp filled in, so a reply carries it without
+// writing to the log the caller holds.
+func StampedLog(log *Log, timestamp uint64) *Log {
+	stamped := *log
+	stamped.BlockTimestamp = hexutil.Uint64(timestamp)
+	return &stamped
 }
 
 // BuildTopicMap converts a slice-of-alternatives representation of topics into a
@@ -245,16 +226,16 @@ func (logs Logs) FilterWithTopicMap(addrMap map[common.Address]struct{}, topicMa
 	return o
 }
 
-// AppendFilteredRPCLogs appends the logs matching addrMap and topicMap to dst as RPCLogs,
+// AppendFilteredLogs appends the logs matching addrMap and topicMap to dst,
 // adding a timestamp to each entry. It stops once dst holds limit entries, so a caller
 // enforcing a result cap never converts more logs than it can use; limit 0 is unlimited.
-func (logs Logs) AppendFilteredRPCLogs(dst RPCLogs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, timestamp uint64, limit int) RPCLogs {
+func (logs Logs) AppendFilteredLogs(dst Logs, addrMap map[common.Address]struct{}, topicMap []map[common.Hash]struct{}, timestamp uint64, limit int) Logs {
 	for _, l := range logs {
 		if limit != 0 && len(dst) >= limit {
 			break
 		}
 		if _, matched := l.matchFilter(addrMap, topicMap); matched {
-			dst = append(dst, &RPCLog{Log: *l, BlockTimestamp: hexutil.Uint64(timestamp)})
+			dst = append(dst, StampedLog(l, timestamp))
 		}
 	}
 	return dst

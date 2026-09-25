@@ -103,7 +103,7 @@ type GraphQLAPI interface {
 	Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error)
 	EstimateGas(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error)
 	GasPrice(ctx context.Context) (string, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
 	GetPendingTransactions(ctx context.Context) ([]types.Transaction, error)
 }
 
@@ -499,7 +499,7 @@ func (api *GraphQLAPIImpl) GasPrice(ctx context.Context) (string, error) {
 	return price.String(), nil
 }
 
-func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
+func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {
 	return api.eth.GetLogs(ctx, crit)
 }
 
