@@ -44,7 +44,7 @@ type accountResult struct {
 }
 
 const (
-	storageOversubscribe = 1
+	storageOversubscribe = 4
 	accountPlaneFanout   = 16
 )
 
