@@ -166,6 +166,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	statedb := state.New(stateReader)
+	statedb.SetStorageOverrides(api.engine())
 	defer statedb.Close()
 
 	header := block.HeaderNoCopy()
@@ -187,7 +188,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		protocol.SetTxContext(statedb, api.engine(), blockNum, idx, txn.Hash())
+		statedb.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
@@ -204,7 +205,7 @@ func (api *OverlayAPIImpl) CallConstructor(ctx context.Context, address common.A
 	}
 
 	creationTx := block.Transactions()[transactionIndex]
-	protocol.SetTxContext(statedb, api.engine(), blockNum, transactionIndex, creationTx.Hash())
+	statedb.SetTxContext(blockNum, transactionIndex)
 
 	// CREATE2: keep original message so we match the existing contract address, code will be replaced later
 	msg, err := creationTx.AsMessage(*signer, block.BaseFee(), rules)
@@ -427,6 +428,7 @@ func filterLogs(logs types.Logs, addresses []common.Address, topics [][]common.H
 }
 
 func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, statedb *state.IntraBlockState, chainConfig *chain.Config, tx kv.TemporalTx, replayFailedTxns bool) ([]*types.Log, error) {
+	statedb.SetStorageOverrides(api.engine())
 	log.Debug("[replayBlock] begin", "block", blockNum)
 	var (
 		hash               common.Hash
@@ -515,7 +517,7 @@ func (api *OverlayAPIImpl) replayBlock(ctx context.Context, blockNum uint64, sta
 			}
 		}
 
-		protocol.SetTxContext(statedb, api.engine(), blockNum, idx, txn.Hash())
+		statedb.SetTxContext(blockNum, idx)
 		txCtx = protocol.NewEVMTxContext(msg)
 		evm.TxContext = txCtx
 

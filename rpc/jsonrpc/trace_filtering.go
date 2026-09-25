@@ -474,12 +474,13 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 		ibs := state.New(cachedReader)
 		defer ibs.Close()
+		ibs.SetStorageOverrides(api.engine())
 
 		evmTxCtx := protocol.NewEVMTxContext(msg)
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		protocol.SetTxContext(ibs, api.engine(), blockNum, txIndex, txn.Hash())
+		ibs.SetTxContext(blockNum, txIndex)
 		ibs.SetHooks(ot.Tracer().Hooks)
 
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
@@ -826,6 +827,7 @@ func (api *TraceAPIImpl) callBlock(
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
 	ibs := state.New(cachedReader)
 	defer ibs.Close()
+	ibs.SetStorageOverrides(engine)
 
 	logger := log.New("trace_filtering")
 	consensusHeaderReader := consensuschain.NewReader(cfg, dbtx, api._blockReader, logger)
@@ -1019,6 +1021,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				// workerReader reads state up to but not including the current transaction.
 				workerReader := state.NewHistoryReaderV3(workerTx, baseTxNum+uint64(job.txIndex))
 				workerIbs := state.New(workerReader)
+				workerIbs.SetStorageOverrides(api.engine())
 				defer workerIbs.Close()
 
 				traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: job.callParam.txHash}
@@ -1034,7 +1037,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				tracer := ot.Tracer()
 				vmConfig := vm.Config{Tracer: tracer.Hooks}
 
-				protocol.SetTxContext(workerIbs, api.engine(), blockCtx.BlockNumber, job.txIndex, job.txn.Hash())
+				workerIbs.SetTxContext(blockCtx.BlockNumber, job.txIndex)
 				workerIbs.SetHooks(tracer.Hooks)
 
 				txCtx := protocol.NewEVMTxContext(job.msg)

@@ -627,6 +627,7 @@ func (api *BaseAPI) buildAccessedState(
 
 	// Create the in-block state with the recording state as reader
 	ibs := state.New(recordingState)
+	ibs.SetStorageOverrides(engine)
 	defer ibs.Close()
 
 	// Get header for block context
@@ -671,7 +672,7 @@ func (api *BaseAPI) buildAccessedState(
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
 		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-		protocol.SetTxContext(ibs, engine, blockNum, txIndex, txn.Hash())
+		ibs.SetTxContext(blockNum, txIndex)
 
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		// A user tx that accesses the system address via an opcode keeps it in the
@@ -2059,6 +2060,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
+	ibs.SetStorageOverrides(engine)
 	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
@@ -2092,7 +2094,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
 		gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(chainConfig.GetMaxBlobGasPerBlock(header.Time))
-		protocol.SetTxContext(ibs, engine, blockNum, txIndex, txn.Hash())
+		ibs.SetTxContext(blockNum, txIndex)
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)

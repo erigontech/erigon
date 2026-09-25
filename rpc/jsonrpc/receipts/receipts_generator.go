@@ -166,6 +166,7 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 	if err != nil {
 		return nil, fmt.Errorf("ReceiptsGen: PrepareEnv: bn=%d, %w", header.Number.Uint64(), err)
 	}
+	ibs.SetStorageOverrides(g.engine)
 
 	gasUsed := new(protocol.GasUsed)
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
@@ -365,7 +366,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 			for txnIndex := range index {
 				currTxn := postState.Txns[txnIndex]
 
-				protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, txnIndex, currTxn.Hash())
+				genEnv.ibs.SetTxContext(blockNum, txnIndex)
 				_, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, currTxn, genEnv.gasUsed, vm.Config{}, evm)
 				if err != nil {
 					return nil, fmt.Errorf("ReceiptGen.GetReceipts: bn=%d, txnIdx=%d, %w", blockNum, txnIndex, err)
@@ -379,7 +380,7 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 				}
 			}
 
-			protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, index, txn.Hash())
+			genEnv.ibs.SetTxContext(blockNum, index)
 		} else {
 			genEnv, err = g.PrepareEnv(ctx, header, cfg, tx, index)
 			if err != nil {
@@ -590,7 +591,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 				}
 			}()
 
-			protocol.SetTxContext(genEnv.ibs, g.engine, blockNum, i, txn.Hash())
+			genEnv.ibs.SetTxContext(blockNum, i)
 			receipt, err := protocol.ApplyTransactionWithEVM(cfg, g.engine, genEnv.gp, genEnv.ibs, stateWriter, genEnv.header, txn, genEnv.gasUsed, vmCfg, evm)
 			close(txDone)
 			if err != nil {

@@ -40,12 +40,11 @@ type overrideEngine struct {
 	rules.Engine
 	blockNum  uint64
 	txIndex   int
-	txHash    common.Hash
-	overrides []rules.StorageOverride
+	overrides []state.StorageOverride
 }
 
-func (e overrideEngine) StorageOverrides(blockNum uint64, txIndex int, txHash common.Hash) []rules.StorageOverride {
-	if blockNum != e.blockNum || txIndex != e.txIndex || txHash != e.txHash {
+func (e overrideEngine) StorageOverrides(blockNum uint64, txIndex int) []state.StorageOverride {
+	if blockNum != e.blockNum || txIndex != e.txIndex {
 		return nil
 	}
 	return e.overrides
@@ -76,8 +75,7 @@ func TestDeriveBlockReceiptsAppliesStorageOverrides(t *testing.T) {
 		Engine:    ethash.NewFaker(),
 		blockNum:  1,
 		txIndex:   0,
-		txHash:    txns[0].Hash(),
-		overrides: []rules.StorageOverride{{Address: contract, Key: accounts.ZeroKey, Value: *uint256.NewInt(5)}},
+		overrides: []state.StorageOverride{{Address: contract, Key: accounts.ZeroKey, Value: *uint256.NewInt(5)}},
 	}
 
 	ibs := state.New(state.NewNoopReader())

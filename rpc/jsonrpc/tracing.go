@@ -104,6 +104,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		return err
 	}
 	defer ibs.Close()
+	ibs.SetStorageOverrides(engine)
 
 	var precompiles vm.PrecompiledContracts
 	if config.BlockOverrides != nil {
@@ -136,7 +137,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		protocol.SetTxContext(ibs, api.engine(), blockCtx.BlockNumber, txnIndex, txnHash)
+		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 
 		inner.ResetField()
 

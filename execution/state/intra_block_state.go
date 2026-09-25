@@ -163,6 +163,7 @@ type IntraBlockState struct {
 	// Engine-supplied committed values for individual storage slots, valid for
 	// the current transaction only. See SetStorageOverride.
 	storageOverrides map[storageOverrideKey]uint256.Int
+	storageOverrider StorageOverrider
 
 	// Transient storage
 	transientStorage transientStorage
@@ -2863,7 +2864,7 @@ func (sdb *IntraBlockState) SetTxContext(bn uint64, ti int) {
 	sdb.txIndex = ti
 	sdb.blockNum = bn
 	sdb.sdProbeEpoch++
-	sdb.storageOverrides = nil
+	sdb.installStorageOverrides()
 }
 
 // no not lock

@@ -78,13 +78,14 @@ func RederiveBlockAccessList(
 	gp := new(protocol.GasPool).AddGas(header.GasLimit).AddBlobGas(cfg.GetMaxBlobGasPerBlock(header.Time))
 	vmCfg := vm.Config{}
 	receipts := make(types.Receipts, 0, len(txns))
+	ibs.SetStorageOverrides(engine)
 	for i, txn := range txns {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
-		protocol.SetTxContext(ibs, engine, blockNum, i, txn.Hash())
+		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txn, gasUsed, vmCfg, evm)

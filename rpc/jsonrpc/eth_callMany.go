@@ -158,6 +158,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	}
 
 	st := state.New(stateReader)
+	st.SetStorageOverrides(api.engine())
 	defer st.Close()
 
 	header := block.HeaderNoCopy()
@@ -189,7 +190,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 	// and apply the message.
 	gp := new(protocol.GasPool).AddGas(math.MaxUint64).AddBlobGas(math.MaxUint64)
 	for idx, txn := range replayTransactions {
-		protocol.SetTxContext(st, api.engine(), blockNum, idx, txn.Hash())
+		st.SetTxContext(blockNum, idx)
 		msg, err := txn.AsMessage(*signer, block.BaseFee(), rules)
 		if err != nil {
 			return nil, err
@@ -209,6 +210,7 @@ func (api *APIImpl) CallMany(ctx context.Context, bundles []Bundle, simulateCont
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
 	}
+	st.SetStorageOverrides(nil)
 
 	// after replaying the txns, we want to overload the state
 	// overload state

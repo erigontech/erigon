@@ -109,6 +109,7 @@ func NewHistoricalTraceWorker(
 	}
 	ie.evm = vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, execArgs.ChainConfig, *ie.vmCfg)
 	ie.ibs = state.New(ie.stateReader)
+	ie.ibs.SetStorageOverrides(execArgs.Engine)
 	return ie
 }
 
@@ -202,7 +203,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		result.Err = func() error {
 			rw.taskGasPool.Reset(txTask.Tx().GetGasLimit(), txTask.Tx().GetBlobGas())
 			rw.vmCfg.Tracer = tracer.Tracer().Hooks
-			protocol.SetTxContext(ibs, rw.execArgs.Engine, txTask.BlockNumber(), txTask.TxIndex, txTask.TxHash())
+			ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 			txn := txTask.Tx()
 
 			if txTask.Tx().Type() == types.AccountAbstractionTxType {

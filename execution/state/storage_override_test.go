@@ -158,3 +158,47 @@ func TestStorageOverrideShadowsTheVersionMap(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, override.String(), committed.String())
 }
+
+type fixedOverrider struct {
+	blockNum  uint64
+	txIndex   int
+	overrides []state.StorageOverride
+}
+
+func (o fixedOverrider) StorageOverrides(blockNum uint64, txIndex int) []state.StorageOverride {
+	if blockNum != o.blockNum || txIndex != o.txIndex {
+		return nil
+	}
+	return o.overrides
+}
+
+func TestSetTxContextInstallsAttachedOverrides(t *testing.T) {
+	t.Parallel()
+
+	addr := accounts.InternAddress(common.HexToAddress("0x89791428868131eb109e42340ad01eb8987526b2"))
+	key := accounts.InternKey(common.HexToHash("0xf1e9242398de526b8dd9c25d38e65fbb01926b8940377762d7884b8b0dcdc3b0"))
+	value := *uint256.NewInt(0x1234)
+	committed := func(ibs *state.IntraBlockState) uint256.Int {
+		v, err := ibs.GetCommittedState(addr, key)
+		require.NoError(t, err)
+		return v
+	}
+
+	ibs := newOverrideTestIBS(t, false)
+	ibs.SetStorageOverrides(fixedOverrider{blockNum: 35547779, txIndex: 196,
+		overrides: []state.StorageOverride{{Address: addr, Key: key, Value: value}}})
+
+	ibs.SetTxContext(35547779, 196)
+	require.Equal(t, value, committed(ibs))
+
+	ibs.SetTxContext(35547779, 197)
+	require.Equal(t, uint256.Int{}, committed(ibs), "the next transaction must not inherit the override")
+
+	ibs.Reset()
+	ibs.SetTxContext(35547779, 196)
+	require.Equal(t, value, committed(ibs), "the overrider survives Reset")
+
+	ibs.SetStorageOverrides(nil)
+	ibs.SetTxContext(35547779, 196)
+	require.Equal(t, uint256.Int{}, committed(ibs), "detaching stops the overrides")
+}

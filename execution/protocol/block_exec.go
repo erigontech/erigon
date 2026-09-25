@@ -84,6 +84,7 @@ func ExecuteBlockEphemerally(
 ) (res *EphemeralExecResult, executeBlockErr error) {
 	defer blockExecutionTimer.ObserveDuration(time.Now())
 	ibs := state.New(stateReader)
+	ibs.SetStorageOverrides(engine)
 	defer ibs.Close()
 	ibs.SetHooks(vmConfig.Tracer)
 	header := block.Header()
@@ -117,7 +118,7 @@ func ExecuteBlockEphemerally(
 	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
-		SetTxContext(ibs, engine, blockNum, i, txn.Hash())
+		ibs.SetTxContext(blockNum, i)
 		writeTrace := false
 		if vmConfig.Tracer == nil && getTracer != nil {
 			tracer, err := getTracer(i, txn.Hash())
@@ -198,21 +199,6 @@ func ExecuteBlockEphemerally(
 	}
 
 	return execRs, nil
-}
-
-// SetTxContext sets the tx context and installs the engine's storage overrides
-// for that transaction. Every path that executes or re-executes a canonical
-// transaction must use it instead of IntraBlockState.SetTxContext: skipped
-// overrides make that transaction, and every later one in the block, replay
-// differently from the canonical chain.
-func SetTxContext(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int, txHash common.Hash) {
-	ibs.SetTxContext(blockNum, txIndex)
-	if engine == nil {
-		return
-	}
-	for _, override := range engine.StorageOverrides(blockNum, txIndex, txHash) {
-		ibs.SetStorageOverride(override.Address, override.Key, override.Value)
-	}
 }
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {

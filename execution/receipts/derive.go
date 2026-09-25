@@ -77,13 +77,14 @@ func DeriveForRange(
 
 	// If starting mid-block, we need to replay 0..fromIdx-1 first to get
 	// cumulative gas and state to the right point. We discard those receipts.
+	ibs.SetStorageOverrides(engine)
 	for i := 0; i < fromIdx; i++ {
 		select {
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		default:
 		}
-		protocol.SetTxContext(ibs, engine, blockNum, i, txns[i].Hash())
+		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		_, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
 		if err != nil {
@@ -99,7 +100,7 @@ func DeriveForRange(
 			return nil, ctx.Err()
 		default:
 		}
-		protocol.SetTxContext(ibs, engine, blockNum, i, txns[i].Hash())
+		ibs.SetTxContext(blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 
 		// Cancel watcher: abort mid-opcode if the context is cancelled

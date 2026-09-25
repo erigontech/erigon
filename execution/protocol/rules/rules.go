@@ -91,15 +91,6 @@ type SystemTxEngine interface {
 	ApplySystemTx(tx types.Transaction, ibs *state.IntraBlockState, header *types.Header) error
 }
 
-// StorageOverride replaces the committed (tx-start) value of one storage slot
-// for one transaction. It changes what SSTORE prices against, unlike an eth_call
-// state override, which replaces the current value.
-type StorageOverride struct {
-	Address accounts.Address
-	Key     accounts.StorageKey
-	Value   uint256.Int
-}
-
 // RewardKind - The kind of block reward.
 // Depending on the rules engine the allocated block reward might have
 // different semantics which could lead e.g. to different reward values.
@@ -156,7 +147,7 @@ type EngineReader interface {
 	// StorageOverrides returns the committed-storage overrides for one canonical
 	// transaction, for chains whose sealing client canonicalized a storage bug.
 	// Engines without such history return nil.
-	StorageOverrides(blockNum uint64, txIndex int, txHash common.Hash) []StorageOverride
+	StorageOverrides(blockNum uint64, txIndex int) []state.StorageOverride
 
 	ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
 		gasUsed, blobGasUsed uint64, checkReceipts, checkBloom bool,

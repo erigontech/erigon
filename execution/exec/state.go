@@ -200,6 +200,7 @@ func NewWorker(ctx context.Context, background bool, metrics *WorkerMetrics, cha
 	}
 	w.runnable.Store(true)
 	w.ibs = state.New(w.stateReader)
+	w.ibs.SetStorageOverrides(w.engine)
 	return w
 }
 
@@ -488,6 +489,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 		rw.ibs.Close()
 	}
 	rw.ibs = state.New(rw.stateReader)
+	rw.ibs.SetStorageOverrides(rw.engine)
 
 	switch reader.(type) {
 	case *state.HistoryReaderV3:
@@ -551,7 +553,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 
 	rw.resetTxNum(txTask.Version().TxNum)
 
-	if err := txTask.Reset(rw.evm, rw.engine, rw.ibs, callTracer); err != nil {
+	if err := txTask.Reset(rw.evm, rw.ibs, callTracer); err != nil {
 		return &TxResult{
 			Task: txTask,
 			Err:  err,
