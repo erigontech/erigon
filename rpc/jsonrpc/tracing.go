@@ -136,7 +136,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		case <-ctx.Done():
 			return ctx.Err()
 		}
-		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
+		protocol.SetTxContext(ibs, api.engine(), blockCtx.BlockNumber, txnIndex)
 
 		inner.ResetField()
 

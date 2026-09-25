@@ -83,7 +83,7 @@ func DeriveForRange(
 			return nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(blockNum, i)
+		protocol.SetTxContext(ibs, engine, blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		_, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txns[i], gasUsed, vmCfg, evm)
 		if err != nil {
@@ -99,7 +99,7 @@ func DeriveForRange(
 			return nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(blockNum, i)
+		protocol.SetTxContext(ibs, engine, blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 
 		// Cancel watcher: abort mid-opcode if the context is cancelled

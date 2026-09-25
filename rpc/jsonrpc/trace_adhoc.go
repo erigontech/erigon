@@ -1495,7 +1495,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			sd = &StateDiff{sdMap: sdMap}
 		}
 
-		ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
+		protocol.SetTxContext(ibs, api.engine(), blockCtx.BlockNumber, txIndex)
 		if tracer != nil {
 			ibs.SetHooks(tracer.Hooks)
 		}
@@ -1682,7 +1682,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 
 	ibs.Reset()
-	ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
+	protocol.SetTxContext(ibs, api.engine(), blockCtx.BlockNumber, txIndex)
 	txCtx := protocol.NewEVMTxContext(msg)
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())

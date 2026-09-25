@@ -84,7 +84,7 @@ func RederiveBlockAccessList(
 			return nil, ctx.Err()
 		default:
 		}
-		ibs.SetTxContext(blockNum, i)
+		protocol.SetTxContext(ibs, engine, blockNum, i)
 		evm := protocol.CreateEVM(cfg, hashFn, engine, accounts.NilAddress, ibs, header, vmCfg)
 		stopCancelWatch := context.AfterFunc(ctx, evm.Cancel)
 		receipt, err := protocol.ApplyTransactionWithEVM(cfg, engine, gp, ibs, noopWriter, header, txn, gasUsed, vmCfg, evm)

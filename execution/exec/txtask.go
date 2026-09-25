@@ -556,7 +556,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			result.TraceTos[accounts.InternAddress(uncle.Coinbase)] = struct{}{}
 		}
 	default:
-		txTask.applyStorageBaselines(engine, ibs)
+		protocol.ApplyStorageBaselines(ibs, engine, txTask.BlockNumber(), txTask.TxIndex)
 
 		if txTask.isSystemTx {
 			result = *txTask.executeSystemTx(engine, evm, ibs)
@@ -724,16 +724,6 @@ func (txTask *TxTask) executeAA(aaTxn *types.AccountAbstractionTransaction,
 	log.Info("🚀[aa] executed AA bundle transaction", "txIndex", txTask.TxIndex, "status", status)
 
 	return &result
-}
-
-func (txTask *TxTask) applyStorageBaselines(engine rules.Engine, ibs *state.IntraBlockState) {
-	baselineEngine, ok := engine.(rules.StorageBaselineEngine)
-	if !ok {
-		return
-	}
-	for _, baseline := range baselineEngine.StorageBaselines(txTask.BlockNumber(), txTask.TxIndex) {
-		ibs.SetStorageBaseline(baseline.Address, baseline.Key, baseline.Value)
-	}
 }
 
 // executeSystemTx runs a consensus system transaction as a free call (no gas

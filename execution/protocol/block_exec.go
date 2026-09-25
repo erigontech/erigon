@@ -117,7 +117,7 @@ func ExecuteBlockEphemerally(
 	blockNum := block.NumberU64()
 
 	for i, txn := range block.Transactions() {
-		ibs.SetTxContext(blockNum, i)
+		SetTxContext(ibs, engine, blockNum, i)
 		writeTrace := false
 		if vmConfig.Tracer == nil && getTracer != nil {
 			tracer, err := getTracer(i, txn.Hash())
@@ -198,6 +198,29 @@ func ExecuteBlockEphemerally(
 	}
 
 	return execRs, nil
+}
+
+// SetTxContext prepares ibs for one transaction: its tx context plus any
+// committed storage the engine overrides for it. Every path that executes or
+// re-executes a canonical transaction uses this instead of
+// IntraBlockState.SetTxContext, otherwise the overrides are silently skipped and
+// the transaction — and every later one in the block — replays differently from
+// the canonical chain.
+func SetTxContext(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int) {
+	ibs.SetTxContext(blockNum, txIndex)
+	ApplyStorageBaselines(ibs, engine, blockNum, txIndex)
+}
+
+// ApplyStorageBaselines is SetTxContext for callers that already set the tx
+// context themselves.
+func ApplyStorageBaselines(ibs *state.IntraBlockState, engine rules.EngineReader, blockNum uint64, txIndex int) {
+	baselineEngine, ok := engine.(rules.StorageBaselineEngine)
+	if !ok {
+		return
+	}
+	for _, baseline := range baselineEngine.StorageBaselines(blockNum, txIndex) {
+		ibs.SetStorageBaseline(baseline.Address, baseline.Key, baseline.Value)
+	}
 }
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {

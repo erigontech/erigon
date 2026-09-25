@@ -479,7 +479,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		evm := vm.NewEVM(blockCtx, evmTxCtx, ibs, chainConfig, vmConfig)
 
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-		ibs.SetTxContext(blockNum, txIndex)
+		protocol.SetTxContext(ibs, api.engine(), blockNum, txIndex)
 		ibs.SetHooks(ot.Tracer().Hooks)
 
 		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxStart != nil {
@@ -1034,7 +1034,7 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 				tracer := ot.Tracer()
 				vmConfig := vm.Config{Tracer: tracer.Hooks}
 
-				workerIbs.SetTxContext(blockCtx.BlockNumber, job.txIndex)
+				protocol.SetTxContext(workerIbs, api.engine(), blockCtx.BlockNumber, job.txIndex)
 				workerIbs.SetHooks(tracer.Hooks)
 
 				txCtx := protocol.NewEVMTxContext(job.msg)
