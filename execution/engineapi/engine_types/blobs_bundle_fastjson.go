@@ -65,7 +65,7 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.StackStream) {
 	s.Field("transactions")
 	jsonstream.ArrayValue(s, p.Transactions, writeHex)
 	s.Field("withdrawals")
-	jsonstream.ArrayValue(s, p.Withdrawals, writeWithdrawal)
+	_ = types.Withdrawals(p.Withdrawals).MarshalFastJSONTo(s)
 	jsonstream.Text(s, "blobGasUsed", p.BlobGasUsed)
 	jsonstream.Text(s, "excessBlobGas", p.ExcessBlobGas)
 	if p.SlotNumber != nil {
@@ -76,6 +76,3 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.StackStream) {
 	}
 	s.WriteObjectEnd()
 }
-
-// writeWithdrawal never fails: Withdrawal.MarshalFastJSONTo reports no error.
-func writeWithdrawal(s *jsonstream.StackStream, w **types.Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }
