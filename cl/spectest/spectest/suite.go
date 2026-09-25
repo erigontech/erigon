@@ -7,85 +7,59 @@ import (
 
 	"github.com/erigontech/erigon/cl/transition/machine"
 
-	"gfx.cafe/util/go/generic"
 	"github.com/stretchr/testify/require"
 )
 
 func RunCases(t *testing.T, app Appendix, machineImpl machine.Interface, root fs.FS) {
 	cases, err := ReadTestCases(root)
 	require.NoError(t, err, "reading cases")
-	// prepare for gore.....
-	type (
-		K1 = string
-		K2 = string
-		K3 = string
-		K4 = string
-		K5 = string
-		V  = TestCase
-	)
-	// welcome to hell
-	cases.tree.Range0(func(s string, m *generic.Map5[K1, K2, K3, K4, K5, V]) bool {
-		t.Run(s, func(t *testing.T) {
-			t.Parallel()
-			m.Range0(func(s string, m *generic.Map4[K1, K2, K3, K4, V]) bool {
-				t.Run(s, func(t *testing.T) {
-					t.Parallel()
-					m.Range0(func(s string, m *generic.Map3[K1, K2, K3, V]) bool {
-						t.Run(s, func(t *testing.T) {
-							t.Parallel()
-							m.Range0(func(s string, m *generic.Map2[K1, K2, V]) bool {
-								t.Run(s, func(t *testing.T) {
-									t.Parallel()
-									m.Range0(func(s string, m *generic.Map1[K1, V]) bool {
-										t.Run(s, func(t *testing.T) {
-											t.Parallel()
-											m.Range0(func(key string, value TestCase) bool {
-												if value.ForkPhaseName == "whisk" || value.ForkPhaseName == "eip7594" || value.ForkPhaseName == "heze" {
-													t.Skipf("skipping %s", value.ForkPhaseName)
-													return true
-												}
-												t.Run(key, func(t *testing.T) {
-													require.NotPanics(t, func() {
-														t.Parallel()
-														runner, ok := app[value.RunnerName]
-														if !ok {
-															t.Skipf("runner not found: %s", value.RunnerName)
-															return
-														}
-														handler, err := runner.GetHandler(value.HandlerName)
-														if err != nil {
-															t.Skipf("handler not found: %s/%s", value.RunnerName, value.HandlerName)
-															return
-														}
-														subfs, err := fs.Sub(root, filepath.Join(
-															value.ConfigName,
-															value.ForkPhaseName,
-															value.RunnerName,
-															value.HandlerName,
-															value.SuiteName,
-															value.CaseName,
-														))
-														value.Machine = machineImpl
-														require.NoError(t, err)
-														err = handler.Run(t, subfs, value)
-														require.NoError(t, err)
-													})
-												})
-												return true
-											})
-										})
-										return true
-									})
-								})
-								return true
-							})
-						})
-						return true
-					})
-				})
-				return true
+	runLevel(t, cases, 0, func(t *testing.T, value TestCase) {
+		if value.ForkPhaseName == "whisk" || value.ForkPhaseName == "eip7594" || value.ForkPhaseName == "heze" {
+			t.Skipf("skipping %s", value.ForkPhaseName)
+		}
+		t.Run(value.CaseName, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				t.Parallel()
+				runner, ok := app[value.RunnerName]
+				if !ok {
+					t.Skipf("runner not found: %s", value.RunnerName)
+					return
+				}
+				handler, err := runner.GetHandler(value.HandlerName)
+				if err != nil {
+					t.Skipf("handler not found: %s/%s", value.RunnerName, value.HandlerName)
+					return
+				}
+				path := value.path()
+				subfs, err := fs.Sub(root, filepath.Join(path[:]...))
+				value.Machine = machineImpl
+				require.NoError(t, err)
+				err = handler.Run(t, subfs, value)
+				require.NoError(t, err)
 			})
 		})
-		return true
 	})
+}
+
+// cases must be grouped by path, as fs.WalkDir returns them.
+func runLevel(t *testing.T, cases []TestCase, depth int, runCase func(*testing.T, TestCase)) {
+	if depth == 5 {
+		for _, c := range cases {
+			runCase(t, c)
+		}
+		return
+	}
+	for len(cases) > 0 {
+		name := cases[0].path()[depth]
+		n := 1
+		for n < len(cases) && cases[n].path()[depth] == name {
+			n++
+		}
+		group := cases[:n]
+		cases = cases[n:]
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			runLevel(t, group, depth+1, runCase)
+		})
+	}
 }
