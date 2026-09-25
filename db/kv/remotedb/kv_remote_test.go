@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
@@ -34,6 +36,31 @@ func TestMaxPrunableStepsBacklog(t *testing.T) {
 	client.EXPECT().MaxPrunableStepsBacklog(gomock.Any(), gomock.Any(), gomock.Any()).Return(&remoteproto.MaxPrunableStepsBacklogReply{Steps: 123}, nil)
 	db := &DB{remoteKV: client}
 	require.Equal(t, uint64(123), db.MaxPrunableStepsBacklog())
+}
+
+func TestHistoryStartFromWithErrorPreservesFloor(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := remoteproto.NewMockKVClient(ctrl)
+	client.EXPECT().HistoryStartFrom(t.Context(), &remoteproto.HistoryStartFromReq{
+		TxId: 7, Domain: uint32(kv.StorageDomain),
+	}).Return(&remoteproto.HistoryStartFromReply{StartFrom: 123}, nil)
+	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
+
+	start, err := tx.HistoryStartFromWithError(kv.StorageDomain)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), start)
+}
+
+func TestHistoryStartFromWithErrorPropagatesTransportError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := remoteproto.NewMockKVClient(ctrl)
+	wantErr := status.Error(codes.Unavailable, "history unavailable")
+	client.EXPECT().HistoryStartFrom(gomock.Any(), gomock.Any()).Return(nil, wantErr)
+	tx := &tx{ctx: t.Context(), db: &DB{remoteKV: client}, id: 7}
+
+	start, err := tx.HistoryStartFromWithError(kv.StorageDomain)
+	require.ErrorIs(t, err, wantErr)
+	require.Zero(t, start)
 }
 
 func TestGetLatestForwardsMaxStep(t *testing.T) {
