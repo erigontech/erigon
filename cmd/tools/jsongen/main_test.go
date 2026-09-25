@@ -100,7 +100,10 @@ func TestGenerateRefusesBrokenPackage(t *testing.T) {
 	const pkg = "testdata/broken"
 	require.NoError(t, os.CopyFS(pkg, os.DirFS("testdata/sample")))
 	t.Cleanup(func() { _ = dir.RemoveAll(pkg) })
-	require.NoError(t, os.WriteFile(filepath.Join(pkg, "typo.go"), []byte("package sample\n\nvar _ = undefinedHere\n"), 0o644))
+	// Two shapes: a name the old substring filter also rejected, and one it did not — a bare
+	// mention of the method this run writes, which only the full-phrase match refuses.
+	require.NoError(t, os.WriteFile(filepath.Join(pkg, "typo.go"),
+		[]byte("package sample\n\nvar _ = undefinedHere\nvar _ = "+method+"\n"), 0o644))
 
 	t.Chdir(pkg)
 	require.ErrorContains(t, run("Sample", filepath.Join(t.TempDir(), "out.go"), "writeComputedJSON"), "undefinedHere")
