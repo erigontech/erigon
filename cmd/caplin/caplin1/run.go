@@ -85,35 +85,36 @@ import (
 
 // OpenCaplinDatabase returns the index db, the blob storage, and a
 // synchronous close func the caller MUST run before the next
-// OpenCaplinDatabase against the same paths. A prior ctx-Done async
-// close raced Restart's new MustOpen and produced MDBX_BUSY.
+// OpenCaplinDatabase against the same paths. Closing the index db alone
+// leaves the blob env held, and the next open of that path fails with
+// MDBX "resource temporarily unavailable".
 func OpenCaplinDatabase(ctx context.Context,
 	beaconConfig *clparams.BeaconChainConfig,
 	dbPath string,
 	blobDir string,
 	engine execution_client.ExecutionEngine,
 	wipeout bool,
-) (kv.RwDB, blob_storage.BlobStorage, error) {
+) (kv.RwDB, blob_storage.BlobStorage, func(), error) {
 	dataDirIndexer := path.Join(dbPath, "beacon_indicies")
 	blobDbPath := path.Join(blobDir, "chaindata")
 
 	if wipeout {
 		if err := dir.RemoveAll(dataDirIndexer); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 		if err := dir.RemoveAll(blobDbPath); err != nil {
-			return nil, nil, err
+			return nil, nil, nil, err
 		}
 	}
 
 	if err := os.MkdirAll(dbPath, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := os.MkdirAll(dataDirIndexer, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err := os.MkdirAll(blobDbPath, 0700); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	db := mdbx.New(dbcfg.CaplinDB, log.New()).Path(dbPath).
@@ -129,7 +130,7 @@ func OpenCaplinDatabase(ctx context.Context,
 	if err != nil {
 		db.Close()
 		blobDB.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	defer tx.Rollback()
 
@@ -137,9 +138,13 @@ func OpenCaplinDatabase(ctx context.Context,
 		tx.Rollback()
 		db.Close()
 		blobDB.Close()
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir)), nil
+	closeFn := func() {
+		db.Close()
+		blobDB.Close()
+	}
+	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir)), closeFn, nil
 }
 
 func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
@@ -335,11 +340,11 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
-	indexDB, blobStorage, err := OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false)
+	indexDB, blobStorage, closeCaplinDatabases, err := OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false)
 	if err != nil {
 		return err
 	}
-	caplinGroup.OnStop("caplin-databases", func() { indexDB.Close() })
+	caplinGroup.OnStop("caplin-databases", closeCaplinDatabases)
 
 	// Write the genesis beacon block to the index DB before the sentinel and fork
 	// choice are created. This ensures the genesis block is available when peers

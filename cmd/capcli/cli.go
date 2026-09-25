@@ -136,11 +136,11 @@ func (c *Chain) Run(ctx context.Context) error {
 	}
 
 	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, blobStorage, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer closeCaplinDB()
 
 	beacon := rpc.NewBeaconRpcP2P(ctx, s, beaconConfig, ethClock, nil)
 
@@ -277,11 +277,11 @@ func (c *ChainEndpoint) Run(ctx context.Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
 	dirs := datadir.New(c.Datadir)
-	db, blobDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, blobDB, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer closeCaplinDB()
 
 	// open caplin snapshots too
 	freezingCfg := ethconfig.Defaults.Snapshot
@@ -452,10 +452,11 @@ func (c *DumpSnapshots) Run(ctx context.Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, _, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -495,10 +496,11 @@ func (c *CheckSnapshots) Run(ctx context.Context) error {
 
 	dirs := datadir.New(c.Datadir)
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, _, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	var to uint64
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -582,10 +584,11 @@ func (c *LoopSnapshots) Run(ctx context.Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, _, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	var to uint64
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
@@ -635,10 +638,11 @@ func (r *RetrieveHistoricalState) Run(ctx context.Context) error {
 		return err
 	}
 	dirs := datadir.New(r.Datadir)
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, _, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	tx, err := db.BeginRo(ctx)
@@ -1053,11 +1057,11 @@ func (b *BlobArchiveStoreCheck) Run(ctx context.Context) error {
 
 	dirs := datadir.New(b.Datadir)
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, blobStorage, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer closeCaplinDB()
 
 	freezingCfg := ethconfig.Defaults.Snapshot
 	freezingCfg.ChainName = b.Chain
@@ -1171,10 +1175,11 @@ func (c *DumpBlobsSnapshots) Run(ctx context.Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, blobStorage, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
@@ -1214,10 +1219,11 @@ func (c *CheckBlobsSnapshots) Run(ctx context.Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, blobStorage, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1277,10 +1283,11 @@ func (c *CheckBlobsSnapshotsCount) Run(ctx context.Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, _, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1350,10 +1357,11 @@ func (c *DumpBlobsSnapshotsToStore) Run(ctx context.Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, blobStore, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, blobStore, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -1409,10 +1417,11 @@ func (c *DumpStateSnapshots) Run(ctx context.Context) error {
 	dirs := datadir.New(c.Datadir)
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlInfo, log.StderrHandler))
 
-	db, _, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
+	db, _, closeCaplinDB, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
 	if err != nil {
 		return err
 	}
+	defer closeCaplinDB()
 	var to uint64
 	if err := db.View(ctx, func(tx kv.Tx) (err error) {
 		if c.To == 0 {
