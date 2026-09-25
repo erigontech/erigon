@@ -32,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -209,10 +210,8 @@ func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
 		_, _ = api.UninstallFilter(ctx, filterID)
 	})
 
-	queued := &types.RPCLog{
-		Log:            types.Log{Address: common.Address{1}},
-		BlockTimestamp: 123,
-	}
+	stampedAt := hexutil.Uint64(123)
+	queued := &types.Log{Address: common.Address{1}, BlockTimestamp: &stampedAt}
 	ff.AddLogs(rpchelper.LogsSubID(strings.TrimPrefix(filterID, "0x")), queued)
 
 	_, err = api.GetFilterLogs(ctx, filterID)

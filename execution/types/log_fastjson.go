@@ -21,19 +21,10 @@ import (
 )
 
 // MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
-// pointer method RPCLogs itself would not satisfy the fast-JSON interface.
-func (logs RPCLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+// pointer method Logs itself would not satisfy the fast-JSON interface.
+func (logs Logs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	jsonstream.ArrayValue(s, logs, writeLogElem)
 	return nil
 }
 
-func writeLogElem(s *jsonstream.StackStream, l **RPCLog) { _ = (*l).MarshalFastJSONTo(s) }
-
-// MarshalFastJSONTo writes the logs as a bare array, without a log's block timestamp. The
-// receiver must stay a value, as for RPCLogs.
-func (logs Logs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	jsonstream.ArrayValue(s, logs, writeLog)
-	return nil
-}
-
-func writeLog(s *jsonstream.StackStream, l **Log) { _ = (*l).MarshalFastJSONTo(s) }
+func writeLogElem(s *jsonstream.StackStream, l **Log) { _ = (*l).MarshalFastJSONTo(s) }
