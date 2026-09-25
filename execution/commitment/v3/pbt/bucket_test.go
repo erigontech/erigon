@@ -19,6 +19,7 @@ package pbt
 import (
 	"bytes"
 	"fmt"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -206,8 +207,7 @@ func TestTrieBucketRecordPrevAcrossReopenAndFormChanges(t *testing.T) {
 	for _, delta := range deltas {
 		require.Equal(t, start[string(delta.Key)], delta.Prev, "delta %x", delta.Key)
 	}
-	for i := len(deltas) - 1; i >= 0; i-- {
-		delta := deltas[i]
+	for _, delta := range slices.Backward(deltas) {
 		require.NoError(t, ctx.PutBranch(delta.Key, delta.Prev, delta.Data))
 	}
 
