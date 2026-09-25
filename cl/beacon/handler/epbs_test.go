@@ -611,6 +611,34 @@ func TestPostExecutionPayloadEnvelopeRejectsDuplicateAfterBroadcast(t *testing.T
 	require.Contains(t, second.Body.String(), "already seen")
 }
 
+func TestPostExecutionPayloadEnvelopeReportsHashError(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	fcu.OnExecutionPayloadErr = errors.New("integration unavailable")
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any(),
+	).Return(nil)
+
+	post := func(body string) *httptest.ResponseRecorder {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(body))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+		request.Header.Set("Eth-Blob-Data-Included", "false")
+		recorder := httptest.NewRecorder()
+		handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+		return recorder
+	}
+
+	first := post(`{}`)
+	require.Equal(t, http.StatusAccepted, first.Code, first.Body.String())
+	second := post(`{"message":{"payload":null}}`)
+	require.Equal(t, http.StatusBadRequest, second.Code, second.Body.String())
+	require.Contains(t, second.Body.String(), "execution payload envelope is incomplete")
+	require.NotContains(t, second.Body.String(), "already seen")
+}
+
 func TestPostExecutionPayloadEnvelopeRejectsMatchingAnchorEnvelopeAlreadyStoredByP2P(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
