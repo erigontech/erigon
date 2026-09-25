@@ -52,7 +52,7 @@ func NewTxPoolAPI(base *BaseAPI, pool txpoolproto.TxpoolClient) *TxPoolAPIImpl {
 func flattenTxs(txs []types.Transaction) map[string]*ethapi.RPCTransaction {
 	dump := make(map[string]*ethapi.RPCTransaction, len(txs))
 	for _, txn := range txs {
-		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn)
+		dump[strconv.FormatUint(txn.GetNonce(), 10)] = newRPCPendingTransaction(txn, nil)
 	}
 	return dump
 }

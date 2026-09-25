@@ -180,7 +180,7 @@ func TestMapResultsMarshalAsJSONDoes(t *testing.T) {
 		return newRPCPendingTransaction(&types.LegacyTx{
 			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 21000, To: &to},
 			GasPrice: *uint256.NewInt(1e9),
-		})
+		}, nil)
 	}
 	a1 := common.HexToAddress("0xfe00000000000000000000000000000000000001")
 	a2 := common.HexToAddress("0x0100000000000000000000000000000000000002")

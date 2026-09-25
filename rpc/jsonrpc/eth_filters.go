@@ -271,10 +271,11 @@ func (api *APIImpl) subscribePendingTransactions(ctx context.Context, chanSize i
 			return txsCh, func() { api.filters.UnsubscribePendingTxs(id) }, nil
 		},
 		func(emit func(payload any), txs []types.Transaction) {
+			pendingBaseFee := api.pendingBaseFee()
 			for _, t := range txs {
 				if t != nil {
 					if fullTx {
-						emit(newRPCPendingTransaction(t))
+						emit(newRPCPendingTransaction(t, pendingBaseFee))
 					} else {
 						emit(t.Hash())
 					}

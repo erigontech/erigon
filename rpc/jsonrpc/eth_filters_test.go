@@ -479,7 +479,7 @@ func TestNewPendingTransactionIncludesFrom(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	rpcTx := newRPCPendingTransaction(tx)
+	rpcTx := newRPCPendingTransaction(tx, nil)
 	require.Equal(t, m.Address, rpcTx.From)
 }
 

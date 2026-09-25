@@ -75,6 +75,7 @@ type Filters struct {
 	mu sync.RWMutex
 
 	pendingBlock *types.Block
+	lastHeader   *types.Header
 
 	headsSubs        *concurrent.SyncMap[HeadsSubID, Sub[*Shared[*types.Header]]]
 	pendingLogsSubs  *concurrent.SyncMap[PendingLogsSubID, Sub[types.Logs]]
@@ -337,6 +338,14 @@ func (ff *Filters) LastPendingBlock() *types.Block {
 	ff.mu.RLock()
 	defer ff.mu.RUnlock()
 	return ff.pendingBlock
+}
+
+// LastHeader returns the newest header the node has announced, or nil before the first one. A
+// pending transaction is priced against the block that would follow it.
+func (ff *Filters) LastHeader() *types.Header {
+	ff.mu.RLock()
+	defer ff.mu.RUnlock()
+	return ff.lastHeader
 }
 
 // timeoutLoop runs periodically and evicts subscriptions that have not been polled within the timeout duration.
@@ -967,6 +976,9 @@ func (ff *Filters) onNewHeader(event *remoteproto.SubscribeReply) error {
 	}
 
 	ff.invalidateStalePendingBlock(&header)
+	ff.mu.Lock()
+	ff.lastHeader = &header
+	ff.mu.Unlock()
 
 	ev := &Shared[*types.Header]{Value: &header}
 	return ff.headsSubs.Range(func(k HeadsSubID, v Sub[*Shared[*types.Header]]) error {

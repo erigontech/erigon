@@ -106,7 +106,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, nil
 		}
 
-		return newRPCPendingTransaction(txn), nil
+		return newRPCPendingTransaction(txn, api.pendingBaseFee()), nil
 	}
 
 	// Transaction unknown, return as such

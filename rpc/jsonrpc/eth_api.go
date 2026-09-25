@@ -47,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -938,9 +939,25 @@ func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPo
 	}
 }
 
-// newRPCPendingTransaction returns a pending transaction that will serialize to the RPC representation
-func newRPCPendingTransaction(txn types.Transaction) *ethapi.RPCTransaction {
-	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil)
+// newRPCPendingTransaction returns a pending transaction that will serialize to the RPC
+// representation. It is priced against the block that would include it, as geth does, so
+// gasPrice is the effective price rather than the fee cap.
+func newRPCPendingTransaction(txn types.Transaction, pendingBaseFee *uint256.Int) *ethapi.RPCTransaction {
+	return ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, pendingBaseFee)
+}
+
+// pendingBaseFee is the base fee of the block after the head, or nil while either the head or
+// the chain config is still unknown.
+func (api *APIImpl) pendingBaseFee() *uint256.Int {
+	cc, ok := api.tryChainConfig()
+	if !ok || api.filters == nil {
+		return nil
+	}
+	head := api.filters.LastHeader()
+	if head == nil {
+		return nil
+	}
+	return misc.CalcBaseFee(cc, head)
 }
 
 // newRPCRawTransactionFromBlockIndex returns the bytes of a transaction given a block and a transaction index.
