@@ -912,7 +912,8 @@ func CheckCommitmentHistVal(ctx context.Context, sc SamplerCfg, db kv.TemporalRo
 					if elapsed > 0 {
 						rate = float64(vals) / elapsed
 					}
-					logger.Info("[integrity] CommitmentHistVal progress",
+					logger.Info(
+						"[integrity] CommitmentHistVal progress",
 						"buckets", fmt.Sprintf("%d/%d", completedBuckets.Load(), totalBuckets),
 						"vals", vals,
 						"vals/s", rate,
@@ -1196,7 +1197,8 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				done := checked.Load()
 				wDone := windowsDone.Load()
 				blkRate := float64(done) / time.Since(start).Seconds()
-				logger.Info("[integrity] "+string(StateRootVerifyByHistory),
+				logger.Info(
+					"[integrity] "+string(StateRootVerifyByHistory),
 					"blks/s", fmt.Sprintf("%.1f", blkRate),
 					"checked", fmt.Sprintf("%s/%s", common.PrettyCounter(done), common.PrettyCounter(expectedBlks)),
 					"windows", fmt.Sprintf("%d/%d", wDone, totalWindows),

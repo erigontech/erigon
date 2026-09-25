@@ -260,3 +260,22 @@ func TestCommitmentReadSharesItsOnlyCopyWithTheBranchCache(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, &got[0], &cached[0])
 }
+
+func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := commitmentFileFixture(t, stepSize)
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: []byte{0, 0, 0, 0, 2}})
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.Unwind(16, nil)
+	_, _, err = sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok, "a speculative session must not seed the shared branch cache")
+}

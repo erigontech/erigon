@@ -22,10 +22,12 @@ type countingCtx struct {
 }
 
 func newCountingCtx(inner PatriciaContext) *countingCtx {
-	return &countingCtx{inner: inner,
+	return &countingCtx{
+		inner: inner,
 		readN: map[int]int{}, readB: map[int]int{},
 		writeN: map[int]int{}, writeB: map[int]int{},
-		readKeys: map[string]int{}}
+		readKeys: map[string]int{},
+	}
 }
 
 func (c *countingCtx) Branch(prefix []byte) ([]byte, kv.Step, error) {

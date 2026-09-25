@@ -46,8 +46,10 @@ type WarmupConfig struct {
 	Step       WarmupStepFunc
 }
 
-const WarmupMaxDepth = 128
-const warmupKeyScratchLen = maxCompactKeyLen + 1
+const (
+	WarmupMaxDepth      = 128
+	warmupKeyScratchLen = maxCompactKeyLen + 1
+)
 
 type WarmupStats struct {
 	KeysProcessed uint64

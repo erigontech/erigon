@@ -416,12 +416,10 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
 	stream.WriteObjectStart()
-	stream.WriteObjectField("jsonrpc")
+	stream.Field("jsonrpc")
 	stream.WriteString("2.0")
-	stream.WriteMore()
-	stream.WriteObjectField("id")
-	stream.WriteInt(1)
-	stream.WriteMore()
+	stream.Field("id")
+	stream.Int(1)
 	result := jsonstream.NewLazyFieldStream(stream, "result", false)
 
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
@@ -431,7 +429,6 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	require.True(t, result.Written(), "test needs traces exported before the failure")
 
 	result.CloseIfOpen()
-	stream.WriteMore()
 	rpc.HandleError(err, stream)
 	stream.WriteObjectEnd()
 	require.NoError(t, stream.Flush())

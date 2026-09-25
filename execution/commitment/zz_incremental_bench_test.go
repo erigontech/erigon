@@ -15,7 +15,6 @@ func Benchmark_Incremental_LegacyV2_vs_Hex(b *testing.B) {
 		pk, upds := buildWhaleCorpus(c.opts)
 		dk, du := buildDelta(pk, upds, 500, 4242)
 		b.Run(fmt.Sprintf("%s/delta%d", c.name, len(dk)), func(b *testing.B) {
-
 			b.Run("LegacyV2", func(b *testing.B) {
 				tr := buildLegacyTrie(pk, upds)
 				tr.Hash()

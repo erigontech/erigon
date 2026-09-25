@@ -55,7 +55,7 @@ func sizeContract(i int, rnd *rand.Rand) (*commitment.Update, []byte) {
 func doubleRLPLen(v []byte) int {
 	var buf bytes.Buffer
 	var pfx [8]byte
-	if err := (rlp.RlpSerializableBytes(v)).ToDoubleRLP(&buf, pfx[:]); err != nil {
+	if err := rlp.RlpSerializableBytes(v).ToDoubleRLP(&buf, pfx[:]); err != nil {
 		panic(err)
 	}
 	return buf.Len()
@@ -166,7 +166,7 @@ func BenchmarkZZStorageLeafRef(b *testing.B) {
 func storageLeafRefBuffered(suffix []byte, payload []byte, dst []byte) []byte {
 	var encoded bytes.Buffer
 	var prefix [8]byte
-	if err := (rlp.RlpSerializableBytes(payload)).ToDoubleRLP(&encoded, prefix[:]); err != nil {
+	if err := rlp.RlpSerializableBytes(payload).ToDoubleRLP(&encoded, prefix[:]); err != nil {
 		panic(err)
 	}
 	contentLen := rlp.StringLen(suffix) + encoded.Len()

@@ -27,7 +27,8 @@ func incrRoots(t *testing.T, batch1, batch2 int, seed int64) (v4r, hr []byte, er
 		}
 		for i := lo; i < hi; i++ {
 			out = append(out, parityUpdate{
-				key: append(append([]byte{}, addr...), slots[i]...), update: storageParityUpdate(i)})
+				key: append(append([]byte{}, addr...), slots[i]...), update: storageParityUpdate(i),
+			})
 		}
 		return out
 	}

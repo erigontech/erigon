@@ -908,6 +908,11 @@ var ErrAttemptToDeleteNonDeprecatedBucket = errors.New("only buckets from dbutil
 // available for a new concurrent read transaction. The RPC layer remaps this to HTTP 503 / JSON-RPC -32005.
 var ErrReadTxLimitExceeded = errors.New("read-tx limit exceeded: too many concurrent read transactions")
 
+// ErrInMemHistoryDisabled is returned by TemporalMemBatch history reads when the batch keeps only
+// the latest value per key, so no historical answer exists in memory. Overlay read views treat it as
+// a miss and fall through to their backing transaction; every other reader error stays fatal.
+var ErrInMemHistoryDisabled = errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
+
 type nonBlockingAcquireKey struct{}
 
 // WithNonBlockingAcquire tags ctx to request fail-fast semaphore acquisition in BeginRo.

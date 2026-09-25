@@ -166,7 +166,7 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	if current.Eq(value) { // noop (1)
 		return mdgas.MdGas{Execution: params.NetSstoreNoopGas}, nil
 	}
-	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
+	original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return mdgas.MdGas{Execution: params.NetSstoreInitGas}, nil
@@ -226,7 +226,7 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 		return mdgas.MdGas{Execution: params.SloadGasEIP2200}, nil
 	}
 
-	var original, _ = evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
+	original, _ := evm.IntraBlockState().GetCommittedState(callContext.Address(), key)
 	if original == current {
 		if original.IsZero() { // create slot (2.1.1)
 			return mdgas.MdGas{Execution: params.SstoreSetGasEIP2200}, nil
@@ -492,7 +492,7 @@ func statelessGasCall(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 
 func statefulGasCall(evm *EVM, callContext *CallContext, gas mdgas.MdGas, availableGas mdgas.MdGas, transfersValue bool) (mdgas.MdGas, error) {
 	var accountGas, stateGas uint64
-	var address = evm.internAddress(callContext.Stack.back(1))
+	address := evm.internAddress(callContext.Stack.back(1))
 	rules := evm.ChainRules()
 	callContext.newAccountCharged = false
 	if rules.IsEIP161Enabled() {
@@ -711,7 +711,7 @@ func gasSelfdestruct(evm *EVM, callContext *CallContext, availableGas mdgas.MdGa
 	// TangerineWhistle (EIP150) gas reprice fork:
 	if evm.ChainRules().IsTangerineWhistle {
 		gas.Execution = params.SelfdestructGasEIP150
-		var address = callContext.peekAddress(evm)
+		address := callContext.peekAddress(evm)
 
 		if evm.ChainRules().IsEIP161Enabled() {
 			// if empty and transfers value

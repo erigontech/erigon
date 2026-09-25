@@ -49,17 +49,17 @@ type EthBlockNumber struct {
 
 type EthBalance struct {
 	CommonResponse
-	Balance hexutil.Big `json:"result"`
+	Balance hexutil.U256 `json:"result"`
 }
 
 type EthTransaction struct {
 	From     common.Address  `json:"from"`
 	To       *common.Address `json:"to"` // Pointer because it might be missing
 	Hash     string          `json:"hash"`
-	Gas      hexutil.Big     `json:"gas"`
-	GasPrice hexutil.Big     `json:"gasPrice"`
+	Gas      hexutil.U256    `json:"gas"`
+	GasPrice hexutil.U256    `json:"gasPrice"`
 	Input    hexutil.Bytes   `json:"input"`
-	Value    hexutil.Big     `json:"value"`
+	Value    hexutil.U256    `json:"value"`
 }
 
 type EthSendRawTransaction struct {
@@ -73,7 +73,7 @@ type EthTxPool struct {
 }
 
 type EthBlockByNumberResult struct {
-	Difficulty   hexutil.Big      `json:"difficulty"`
+	Difficulty   hexutil.U256     `json:"difficulty"`
 	Miner        common.Address   `json:"miner"`
 	Transactions []EthTransaction `json:"transactions"`
 	TxRoot       common.Hash      `json:"transactionsRoot"`
@@ -135,16 +135,16 @@ type TraceCallAction struct {
 	To            common.Address `json:"to"`
 	Address       common.Address `json:"address"`
 	RefundAddress common.Address `json:"refundAddress"`
-	Gas           hexutil.Big    `json:"gas"`
-	Value         hexutil.Big    `json:"value"`
-	Balance       hexutil.Big    `json:"balance"`
+	Gas           hexutil.U256   `json:"gas"`
+	Value         hexutil.U256   `json:"value"`
+	Balance       hexutil.U256   `json:"balance"`
 	Init          hexutil.Bytes  `json:"init"`
 	Input         hexutil.Bytes  `json:"input"`
 	CallType      string         `json:"callType"`
 }
 
 type TraceCallTraceResult struct {
-	GasUsed hexutil.Big    `json:"gasUsed"`
+	GasUsed hexutil.U256   `json:"gasUsed"`
 	Output  hexutil.Bytes  `json:"output"`
 	Address common.Address `json:"address"`
 	Code    hexutil.Bytes  `json:"code"`
@@ -263,16 +263,16 @@ type EthGetLogs struct {
 type AccountResult struct {
 	Address      common.Address  `json:"address"`
 	AccountProof []string        `json:"accountProof"`
-	Balance      *hexutil.Big    `json:"balance"`
+	Balance      *hexutil.U256   `json:"balance"`
 	CodeHash     common.Hash     `json:"codeHash"`
 	Nonce        hexutil.Uint64  `json:"nonce"`
 	StorageHash  common.Hash     `json:"storageHash"`
 	StorageProof []StorageResult `json:"storageProof"`
 }
 type StorageResult struct {
-	Key   string       `json:"key"`
-	Value *hexutil.Big `json:"value"`
-	Proof []string     `json:"proof"`
+	Key   string        `json:"key"`
+	Value *hexutil.U256 `json:"value"`
+	Proof []string      `json:"proof"`
 }
 
 type ParityListStorageKeysResult struct {
@@ -284,48 +284,48 @@ type OtsTransaction struct {
 	BlockHash        common.Hash     `json:"blockHash"`
 	BlockNumber      hexutil.Uint64  `json:"blockNumber"`
 	From             common.Address  `json:"from"`
-	Gas              hexutil.Big     `json:"gas"`
-	GasPrice         hexutil.Big     `json:"gasPrice"`
+	Gas              hexutil.U256    `json:"gas"`
+	GasPrice         hexutil.U256    `json:"gasPrice"`
 	Hash             string          `json:"hash"`
 	Input            hexutil.Bytes   `json:"input"`
 	To               *common.Address `json:"to"` // Pointer because it might be missing
 	TransactionIndex hexutil.Uint64  `json:"transactionIndex"`
-	Value            hexutil.Big     `json:"value"`
-	Type             hexutil.Big     `json:"type"`    // To check
-	ChainId          hexutil.Big     `json:"chainId"` // To check
+	Value            hexutil.U256    `json:"value"`
+	Type             hexutil.U256    `json:"type"`    // To check
+	ChainId          hexutil.U256    `json:"chainId"` // To check
 }
 
 type OtsReceipt struct {
 	BlockHash         common.Hash     `json:"blockHash"`
 	BlockNumber       hexutil.Uint64  `json:"blockNumber"`
 	ContractAddress   string          `json:"contractAddress"`
-	CumulativeGasUsed hexutil.Big     `json:"cumulativeGasUsed"`
-	EffectiveGasPrice hexutil.Big     `json:"effectiveGasPrice"`
+	CumulativeGasUsed hexutil.U256    `json:"cumulativeGasUsed"`
+	EffectiveGasPrice hexutil.U256    `json:"effectiveGasPrice"`
 	From              common.Address  `json:"from"`
-	GasUsed           hexutil.Big     `json:"gasUsed"`
+	GasUsed           hexutil.U256    `json:"gasUsed"`
 	To                *common.Address `json:"to"` // Pointer because it might be missing
 	TransactionHash   string          `json:"hash"`
 	TransactionIndex  hexutil.Uint64  `json:"transactionIndex"`
 }
 
 type OtsFullBlock struct {
-	Difficulty hexutil.Big    `json:"difficulty"`
+	Difficulty hexutil.U256   `json:"difficulty"`
 	ExtraData  string         `json:"extraData"`
-	GasLimit   hexutil.Big    `json:"gasLimit"`
-	GasUsed    hexutil.Big    `json:"gasUsed"`
+	GasLimit   hexutil.U256   `json:"gasLimit"`
+	GasUsed    hexutil.U256   `json:"gasUsed"`
 	Hash       common.Hash    `json:"hash"`
 	Bloom      string         `json:"logsBloom"`
 	Miner      common.Address `json:"miner"`
 	MixHash    string         `json:"mixHash"`
 	Nonce      string         `json:"nonce"`
-	Number     hexutil.Big    `json:"number"`
+	Number     hexutil.U256   `json:"number"`
 
-	ParentHash   string      `json:"parentHash"`
-	ReceiptsRoot string      `json:"receiptsRoot"`
-	Sha3Uncles   string      `json:"sha3Uncles"`
-	Size         hexutil.Big `json:"size"`
-	StateRoot    string      `json:"stateRoot"`
-	Timestamp    string      `json:"timestamp"`
+	ParentHash   string       `json:"parentHash"`
+	ReceiptsRoot string       `json:"receiptsRoot"`
+	Sha3Uncles   string       `json:"sha3Uncles"`
+	Size         hexutil.U256 `json:"size"`
+	StateRoot    string       `json:"stateRoot"`
+	Timestamp    string       `json:"timestamp"`
 
 	TransactionCount uint64           `json:"transactionCount"`
 	Transactions     []OtsTransaction `json:"transactions"`

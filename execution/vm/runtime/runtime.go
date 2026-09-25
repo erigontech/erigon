@@ -166,9 +166,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		cfg.Value,
 		false, /* bailout */
 	)
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(nil, err)
-	}
+	cfg.EVMConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 
 	return ret, cfg.State, err
 }
@@ -237,18 +235,17 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		return nil, common.Address{}, gas, vm.ErrNonceUintOverflow
 	}
 	address := accounts.InternAddress(types.CreateAddress(sender.Value(), nonce))
-	leftOverGas, topLevelGasUsed, err := protocol.PrepareTopLevelCreate(vmenv, address, gas)
+	leftOverGas, topLevelGasUsed, err := protocol.HandleRuntimeCreate(vmenv, address, gas)
 	var code []byte
 	var createdAddress accounts.Address
 	if err == nil {
 		code, createdAddress, leftOverGas, _, err = vmenv.Create(sender, input, leftOverGas, cfg.Value, nil, false)
-		protocol.RefillTopLevelGas(&leftOverGas, &topLevelGasUsed, cfg.EVMConfig.RestoreState, err)
+		protocol.RefillTopLevelGas(&leftOverGas, &topLevelGasUsed, cfg.EVMConfig.RestoreState, err, cfg.EVMConfig.Tracer)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
 		if nonceErr := cfg.State.SetNonce(sender, nonce+1, tracing.NonceChangeContractCreator); nonceErr != nil {
 			return nil, common.Address{}, mdgas.MdGas{}, nonceErr
 		}
-		leftOverGas = mdgas.MdGas{State: gas.State}
-		protocol.TraceTopLevelFailure(vmenv, vm.CREATE, sender, address, input, gas, leftOverGas, cfg.Value, err)
+		protocol.HandleRuntimeFailure(vmenv, vm.CREATE, sender, address, input, gas, &leftOverGas, cfg.Value, err)
 	}
 	return code, createdAddress.Value(), leftOverGas, err
 }
@@ -276,7 +273,7 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 	}
 
 	gas := mdgas.SplitTxnGasLimit(cfg.GasLimit, 0, rules)
-	leftOverGas, topLevelCallGasUsed, err := protocol.PrepareTopLevelCall(vmenv, address, cfg.Value, gas)
+	leftOverGas, topLevelCallGasUsed, err := protocol.HandleRuntimeCall(vmenv, address, cfg.Value, gas)
 	var ret []byte
 	if err == nil {
 		ret, leftOverGas, _, err = vmenv.Call(
@@ -287,14 +284,13 @@ func Call(address accounts.Address, input []byte, cfg *Config) ([]byte, mdgas.Md
 			cfg.Value,
 			false, /* bailout */
 		)
-		protocol.RefillTopLevelGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err)
+		protocol.RefillTopLevelGas(&leftOverGas, &topLevelCallGasUsed, cfg.EVMConfig.RestoreState, err, cfg.EVMConfig.Tracer)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-		leftOverGas = mdgas.MdGas{State: gas.State}
-		protocol.TraceTopLevelFailure(vmenv, vm.CALL, sender.Address(), address, input, gas, leftOverGas, cfg.Value, err)
+		protocol.HandleRuntimeFailure(vmenv, vm.CALL, sender.Address(), address, input, gas, &leftOverGas, cfg.Value, err)
 	}
 
-	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxEnd != nil {
-		cfg.EVMConfig.Tracer.OnTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, err)
+	if cfg.EVMConfig.Tracer.HasTxEndHook() {
+		cfg.EVMConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: cfg.GasLimit - leftOverGas.Total()}, mdgas.TxnGasUsage{}, err)
 	}
 
 	return ret, leftOverGas, err

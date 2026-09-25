@@ -45,9 +45,8 @@ type BranchCache struct {
 	accountTrunk   *trunk
 	v4AccountTrunk *trunk
 
-	pinned        atomic.Pointer[maphash.Map[*trunk]]
-	pinnedMu      sync.Mutex
-	pinnedEntries atomic.Int64
+	pinned   atomic.Pointer[maphash.Map[*trunk]]
+	pinnedMu sync.Mutex
 
 	tail    atomic.Pointer[tailLRU]
 	tailCap uint32
@@ -71,6 +70,7 @@ type BranchCache struct {
 
 	lastPublishedPinnedHits   atomic.Uint64
 	lastPublishedPinnedMisses atomic.Uint64
+	lastPublishedStaleEvicted atomic.Uint64
 
 	putStripes [256]sync.Mutex
 
@@ -98,6 +98,7 @@ type trunk struct {
 	d4   atomic.Pointer[[65536]atomic.Pointer[branchCacheEntry]]
 	deep *maphash.Map[*branchCacheEntry]
 
+	entries  atomic.Int64
 	maxDepth uint8
 }
 
@@ -546,25 +547,60 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 		c.tailForWrite().Add(maphash.Hash(prefix), entry)
 		return
 	}
+	if tail := c.tail.Load(); tail != nil {
+		tail.Remove(maphash.Hash(prefix))
+	}
 	if slot := st.slot(&nibBuf, n, true); slot != nil {
 		// Swap publishes and reads prior occupancy in one step: eviction
 		// (Invalidate from a stale Get) takes no put stripe, so a separate
 		// load-then-store here would let it interleave.
 		if slot.Swap(entry) == nil {
-			c.pinnedEntries.Add(1)
+			st.entries.Add(1)
 		}
 		return
 	}
 	if _, loaded := st.deep.LoadAndStore(prefix, entry); !loaded {
-		c.pinnedEntries.Add(1)
+		st.entries.Add(1)
 	}
 }
 
 func (c *BranchCache) PinnedCount() int {
-	return int(c.pinnedEntries.Load())
+	p := c.pinned.Load()
+	if p == nil {
+		return 0
+	}
+	var n int64
+	p.Range(func(_ uint64, st *trunk) bool {
+		n += st.entries.Load()
+		return true
+	})
+	return int(n)
+}
+
+func (c *BranchCache) PinnedCountFor(contractHash []byte) int {
+	p := c.pinned.Load()
+	if p == nil {
+		return 0
+	}
+	st, ok := p.Get(contractHash)
+	if !ok {
+		return 0
+	}
+	return int(st.entries.Load())
+}
+
+func (c *BranchCache) UnpinContract(contractHash []byte) {
+	if p := c.pinned.Load(); p != nil {
+		p.Delete(contractHash)
+	}
 }
 
 func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
+	return c.GetBefore(prefix, ^uint64(0))
+}
+
+// GetBefore rejects newer entries without evicting them from other readers.
+func (c *BranchCache) GetBefore(prefix []byte, txNum uint64) ([]byte, uint64, bool) {
 	if IsCommitmentStateKey(prefix) {
 		return nil, 0, false
 	}
@@ -576,6 +612,9 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	if coh.IsStale(entry.txN, entry.epoch) {
 		c.Invalidate(prefix)
 		c.staleEvicted.Add(1)
+		return nil, 0, false
+	}
+	if entry.txN >= txNum {
 		return nil, 0, false
 	}
 	c.bytesServed.Add(uint64(len(entry.data)))
@@ -629,10 +668,10 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 	if st, n, ok := c.storageRoute(prefix, false, &nibBuf); ok {
 		if slot := st.slot(&nibBuf, n, false); slot != nil {
 			if slot.Swap(nil) != nil {
-				c.pinnedEntries.Add(-1)
+				st.entries.Add(-1)
 			}
 		} else if _, loaded := st.deep.LoadAndDelete(prefix); loaded {
-			c.pinnedEntries.Add(-1)
+			st.entries.Add(-1)
 		}
 	}
 	if tail := c.tail.Load(); tail != nil {
@@ -655,7 +694,6 @@ func (c *BranchCache) Clear() {
 	clearTrunk(c.accountTrunk)
 	clearTrunk(c.v4AccountTrunk)
 	c.pinned.Store(nil)
-	c.pinnedEntries.Store(0)
 	if tail := c.tail.Load(); tail != nil {
 		tail.reset()
 	}
@@ -671,6 +709,7 @@ func (c *BranchCache) Clear() {
 	c.tailMisses.Store(0)
 	c.bytesServed.Store(0)
 	c.staleEvicted.Store(0)
+	c.lastPublishedStaleEvicted.Store(0)
 	c.coh.Reset()
 }
 
@@ -691,7 +730,7 @@ func (c *BranchCache) Stats() string {
 		"branch-cache root hit=%d miss=%d (%.1f%%) | trunk hit=%d miss=%d (%.1f%%) | pin hit=%d miss=%d (%.1f%%) entries=%d | tail hit=%d miss=%d (%.1f%%) entries=%d | served %.1f MiB | staleEvicted=%d",
 		rh, rm, pct(rh, rm),
 		kh, km, pct(kh, km),
-		ph, pm, pct(ph, pm), int(c.pinnedEntries.Load()),
+		ph, pm, pct(ph, pm), c.PinnedCount(),
 		th, tm, pct(th, tm), c.tailLen(),
 		float64(bb)/1024/1024, c.staleEvicted.Load(),
 	)

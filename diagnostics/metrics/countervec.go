@@ -23,53 +23,6 @@ type CounterVec struct {
 	*prometheus.CounterVec
 }
 
-func (cv *CounterVec) Collect(ch chan<- prometheus.Metric) {
-	cv.MetricVec.Collect(ch)
-}
-
-func (cv *CounterVec) CurryWith(labels prometheus.Labels) (*CounterVec, error) {
-	cv2, err := cv.CounterVec.CurryWith(labels)
-	return &CounterVec{cv2}, err
-}
-
-func (cv *CounterVec) Delete(labels prometheus.Labels) bool {
-	return cv.CounterVec.MetricVec.Delete(labels)
-}
-
-func (cv *CounterVec) DeleteLabelValues(lvs ...string) bool {
-	return cv.CounterVec.MetricVec.DeleteLabelValues(lvs...)
-}
-
-func (cv *CounterVec) DeletePartialMatch(labels prometheus.Labels) int {
-	return cv.CounterVec.MetricVec.DeletePartialMatch(labels)
-}
-
-func (cv *CounterVec) Describe(ch chan<- *prometheus.Desc) {
-	cv.CounterVec.MetricVec.Describe(ch)
-}
-
-func (cv *CounterVec) GetMetricWith(labels prometheus.Labels) (Counter, error) {
-	c, err := cv.CounterVec.GetMetricWith(labels)
-	return &counter{c}, err
-}
-
-func (cv *CounterVec) GetMetricWithLabelValues(lvs ...string) (Counter, error) {
-	c, err := cv.CounterVec.GetMetricWithLabelValues(lvs...)
-	return &counter{c}, err
-}
-
-func (cv *CounterVec) MustCurryWith(labels prometheus.Labels) *CounterVec {
-	return &CounterVec{cv.CounterVec.MustCurryWith(labels)}
-}
-
-func (cv *CounterVec) Reset() {
-	cv.CounterVec.MetricVec.Reset()
-}
-
-func (cv *CounterVec) With(labels prometheus.Labels) Counter {
-	return &counter{cv.CounterVec.With(labels)}
-}
-
 func (cv *CounterVec) WithLabelValues(lvs ...string) Counter {
 	return &counter{cv.CounterVec.WithLabelValues(lvs...)}
 }

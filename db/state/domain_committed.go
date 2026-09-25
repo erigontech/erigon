@@ -381,7 +381,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 					var found bool
 					auxBuf, found = storage.lookupByShortenedKey(key, sig)
 					if !found {
-						dt.d.logger.Crit("valTransform: lost storage full key",
+						dt.d.logger.Crit(
+							"valTransform: lost storage full key",
 							"shortened", hex.EncodeToString(key),
 							"merging", rng.String("", dt.d.stepSize),
 							"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),
@@ -430,7 +431,8 @@ func (dt *DomainRoTx) commitmentValTransformDomain(rng MergeRange, accounts, sto
 				var found bool
 				auxBuf, found = accounts.lookupByShortenedKey(key, aig)
 				if !found {
-					dt.d.logger.Crit("valTransform: lost account full key",
+					dt.d.logger.Crit(
+						"valTransform: lost account full key",
 						"shortened", hex.EncodeToString(key),
 						"merging", rng.String("", dt.d.stepSize),
 						"valBuf", fmt.Sprintf("l=%d %x", len(valBuf), valBuf),

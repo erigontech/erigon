@@ -85,7 +85,7 @@ func fixtureBaseAccounts() *UpdateBuilder {
 		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
 		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 0o65606).
 		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
 		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
 		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).
@@ -112,7 +112,7 @@ func fixtureBrokenUniqueRepr() *UpdateBuilder {
 		Balance("18f4dcf2d94402019d5b00f71d5f9d02e4f70e40", 900234).
 		Balance("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", 1233).
 		Storage("8e5476fc5990638a4fb0b5fd3f61bb4b5c5f395e", "24f3a02dc65eda502dbf75919e795458413d3c45b38bb35b51235432707900ed", "0401").
-		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 065606).
+		Balance("27456647f49ba65e220e86cba9abfc4fc1587b81", 0o65606).
 		Balance("b13363d527cdc18173c54ac5d4a54af05dbec22e", 4*1e17).
 		Balance("d995768ab23a0a333eb9584df006da740e66f0aa", 5).
 		Balance("eabf041afbb6c6059fbd25eab0d3202db84e842d", 6).

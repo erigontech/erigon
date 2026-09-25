@@ -254,7 +254,6 @@ func TestWarmupV4KeyShapes(t *testing.T) {
 			require.Zero(t, got[len(got)-2]&0x0f)
 		}
 	}
-
 }
 
 func TestWarmupV4ReadsAccountPlaneRecords(t *testing.T) {

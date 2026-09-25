@@ -213,7 +213,9 @@ func (g *grownBufContext) Branch(key []byte) ([]byte, kv.Step, error) {
 func (g *grownBufContext) PutBranch(key, data, prev []byte) error {
 	return g.inner.PutBranch(key, data, prev)
 }
+
 func (g *grownBufContext) Account(k []byte) (*commitment.Update, error) { return g.inner.Account(k) }
+
 func (g *grownBufContext) Storage(k []byte) (*commitment.Update, error) { return g.inner.Storage(k) }
 
 var _ commitment.PatriciaContext = (*grownBufContext)(nil)

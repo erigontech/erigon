@@ -1106,7 +1106,8 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		cfg.forkChoice.RetryPendingExecutionPayloadEnvelopeIndices(retryCtx, maxPendingGloasPayloadsPerCycle)
 	}}
 	if canValidatePayloads {
-		retryPhases = append(retryPhases,
+		retryPhases = append(
+			retryPhases,
 			func(retryCtx context.Context) {
 				cfg.forkChoice.RetryPendingExecutionPayloadEnvelopes(retryCtx, maxPendingGloasPayloadsPerCycle)
 			},

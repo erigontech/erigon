@@ -17,7 +17,9 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"testing"
@@ -33,12 +35,18 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
@@ -150,7 +158,21 @@ func TestGetStorageAt_ByBlockNumber_WithRequireCanonicalDefault(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
+}
+
+// The wire form is a 0x-prefixed 32-byte hex string, whatever Go type carries it.
+func TestGetStorageAtJSONShape(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+
+	result, err := api.GetStorageAt(context.Background(), addr, "0x0", bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
+	require.NoError(t, err)
+
+	enc, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.Regexp(t, `^"0x[0-9a-f]{64}"$`, string(enc))
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
@@ -164,7 +186,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
@@ -178,7 +200,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue(t *testing.T) {
 		t.Errorf("calling GetStorageAt: %v", err)
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError(t *testing.T) {
@@ -243,7 +265,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(
 		t.Error("error expected")
 	}
 
-	assert.Equal(common.HexToHash("0x0").String(), result)
+	assert.Equal(common.Hash{}, result)
 }
 
 func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.T) {
@@ -271,7 +293,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalDefault_NonCanonicalBlock(t *testi
 	orphanedBlock := orphanedChain[0].Blocks[0]
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), false)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -296,7 +318,7 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 
 	orphanedBlock := orphanedChain[0].Blocks[0]
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(orphanedBlock.Hash(), true)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	if _, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -567,4 +589,108 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 	got, err := api.GetChainID(m.Ctx)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+}
+
+// A pooled transaction is priced at its fee cap, and carries no location.
+func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
+	feeCap := uint256.NewInt(1_000_000_000)
+	txn := types.NewEIP1559Transaction(*uint256.NewInt(1), 1, common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, nil, uint256.NewInt(2), feeCap, nil)
+
+	result := newRPCPendingTransaction(txn)
+	require.NotNil(t, result.GasPrice)
+	require.Equal(t, feeCap.ToBig(), result.GasPrice.ToInt())
+	require.Nil(t, result.BlockHash)
+}
+
+func TestGetStorageAtExcludesNextBlockSystemCall(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	historyAddr := params.HistoryStorageAddress.Value()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: []byte{0x00}, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+	api := NewEthAPI(newBaseApiForTest(m), m.DB, nil, nil, nil, &rpccfg.EthApiConfig{GasCap: 5000000}, log.New())
+
+	const bn = 2
+	at := bnhPtr(rpc.BlockNumberOrHashWithNumber(bn))
+	written, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn-1), at)
+	require.NoError(t, err)
+	require.Equal(t, ch.Blocks[bn-2].Hash(), written)
+
+	notYetWritten, err := api.GetStorageAt(context.Background(), historyAddr, hexutil.EncodeUint64(bn), at)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, notYetWritten, "slot %d is written by block %d", bn, bn+1)
+
+	values, err := api.GetStorageValues(context.Background(), map[common.Address][]common.Hash{historyAddr: {common.BigToHash(big.NewInt(bn))}}, at)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, common.BytesToHash(values[historyAddr][0]))
+
+	gql := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+	stored, err := gql.GetAccountStorage(context.Background(), historyAddr, hexutil.EncodeUint64(bn), rpc.BlockNumber(bn))
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{}, common.HexToHash(stored))
+
+	slot := common.BigToHash(big.NewInt(bn))
+	proof, err := api.GetProof(context.Background(), historyAddr, []hexutil.Bytes{slot[:]}, at)
+	require.NoError(t, err)
+	require.True(t, (*uint256.Int)(proof.StorageProof[0].Value).IsZero())
+}
+
+// sloadStub returns the storage slot named by the call data, so a call can read the slot the
+// EIP-2935 system call writes.
+var sloadStub = []byte{0x5f, 0x35, 0x54, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}
+
+func TestTraceCallExcludesNextBlockSystemCall(t *testing.T) {
+	statecfg.EnableHistoricalCommitment()
+	chainConfig := chain.TestChainOsakaConfig.Copy()
+	historyAddr := params.HistoryStorageAddress.Value()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chainConfig,
+		Alloc: types.GenesisAlloc{
+			historyAddr:                 {Balance: big.NewInt(0), Code: sloadStub, Nonce: 1},
+			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
+		},
+	}))
+	ch, err := m.GenerateChain(3, func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(ch))
+
+	const bn = 2
+	at := bnhPtr(rpc.BlockNumberOrHashWithNumber(bn))
+	slotOfNextBlock := common.BigToHash(big.NewInt(bn))
+	slotOfThisBlock := common.BigToHash(big.NewInt(bn - 1))
+
+	traceAPI := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{})
+	traceRead := func(slot common.Hash) common.Hash {
+		t.Helper()
+		res, err := traceAPI.Call(context.Background(), TraceCallParam{To: &historyAddr, Data: slot[:]}, []string{"trace"}, at, nil)
+		require.NoError(t, err)
+		return common.BytesToHash(res.Output)
+	}
+	require.Equal(t, ch.Blocks[bn-2].Hash(), traceRead(slotOfThisBlock))
+	require.Equal(t, common.Hash{}, traceRead(slotOfNextBlock), "slot %d is written by block %d", bn, bn+1)
+
+	debugAPI := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GasCap: 5000000})
+	debugRead := func(slot common.Hash) common.Hash {
+		t.Helper()
+		data := hexutil.Bytes(slot[:])
+		var out bytes.Buffer
+		stream := jsonstream.New(&out)
+		require.NoError(t, debugAPI.TraceCall(context.Background(), ethapi.CallArgs{To: &historyAddr, Data: &data}, at, &tracersConfig.TraceConfig{}, stream))
+		require.NoError(t, stream.Flush())
+		var traced struct {
+			ReturnValue string `json:"returnValue"`
+		}
+		require.NoError(t, json.Unmarshal(out.Bytes(), &traced))
+		return common.HexToHash(traced.ReturnValue)
+	}
+	require.Equal(t, ch.Blocks[bn-2].Hash(), debugRead(slotOfThisBlock))
+	require.Equal(t, common.Hash{}, debugRead(slotOfNextBlock), "slot %d is written by block %d", bn, bn+1)
 }

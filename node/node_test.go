@@ -36,9 +36,7 @@ import (
 	"github.com/erigontech/erigon/p2p"
 )
 
-var (
-	testNodeKey, _ = crypto.GenerateKey()
-)
+var testNodeKey, _ = crypto.GenerateKey()
 
 func testNodeConfig(t *testing.T) *nodecfg.Config {
 	return &nodecfg.Config{

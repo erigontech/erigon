@@ -20,12 +20,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"sync"
-
 	"fmt"
-	"github.com/erigontech/erigon/db/kv"
 	"math/rand"
+	"sync"
 	"testing"
+
+	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"

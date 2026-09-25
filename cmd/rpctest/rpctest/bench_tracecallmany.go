@@ -55,9 +55,9 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 		n := len(b.Result.Transactions)
 		from := make([]common.Address, n)
 		to := make([]*common.Address, n)
-		gas := make([]*hexutil.Big, n)
-		gasPrice := make([]*hexutil.Big, n)
-		value := make([]*hexutil.Big, n)
+		gas := make([]*hexutil.U256, n)
+		gasPrice := make([]*hexutil.U256, n)
+		value := make([]*hexutil.U256, n)
 		data := make([]hexutil.Bytes, n)
 
 		for i := range n {

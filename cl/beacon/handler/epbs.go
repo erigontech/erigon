@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
-	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
@@ -732,16 +731,33 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
+				// Gossip deduplicates by slot and dependent root before checking the signature.
+				// Only the identical signed preference is a successful REST retry.
+				if errors.Is(err, clservices.ErrProposerPreferenceAlreadySeen) && a.epbsPool != nil {
+					stored, ok := a.epbsPool.GetPreference(req.Message.ProposalSlot, req.Message.DependentRoot)
+					if ok && stored != nil && stored.Message != nil &&
+						*stored.Message == *req.Message && stored.Signature == req.Signature {
+						continue
+					}
+				}
 				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
 				continue
 			}
 		}
 
 		if a.proposerPreferencesService == nil && a.epbsPool != nil {
-			a.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-				Slot:          req.Message.ProposalSlot,
-				DependentRoot: req.Message.DependentRoot,
-			}, req)
+			if _, err := clservices.ValidateProposerPreferenceSlot(a.ethClock, a.beaconChainCfg, req.Message.ProposalSlot); err != nil {
+				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+				continue
+			}
+			inserted, err := a.epbsPool.InsertProposerPreference(req)
+			if err != nil {
+				failures = append(failures, poolingFailure{Index: i, Message: err.Error()})
+				continue
+			}
+			if !inserted {
+				continue
+			}
 		}
 
 		if a.sentinel != nil {
@@ -988,7 +1004,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	emitGossipEvent := false
 	emitIntegrationEvents := false
 	var persistenceErr error
-	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, canonical, true); err != nil {
+	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope, canonical); err != nil {
 		switch {
 		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
@@ -1125,28 +1141,26 @@ func signedExecutionPayloadEnvelopesEqual(left, right *cltypes.SignedExecutionPa
 }
 
 func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot common.Hash) {
-	headRoot, headSlot, err := a.forkchoiceStore.GetHead(nil)
-	if err != nil || headRoot != blockRoot || a.beaconChainCfg.SlotsPerEpoch == 0 {
+	head, headSlot, err := a.forkchoiceStore.GetHeadNode()
+	if err != nil || head.Root != blockRoot || a.beaconChainCfg.SlotsPerEpoch == 0 {
 		return
 	}
-	payloadStatus := a.forkchoiceStore.GetHeadPayloadStatus()
-	if payloadStatus != cltypes.PayloadStatusFull {
+	if head.PayloadStatus != cltypes.PayloadStatusFull {
 		return
 	}
 	optimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	var event *beaconevents.HeadV2Data
 	err = a.forkchoiceStore.ViewStateAtBlockRoot(blockRoot, func(headState *state.CachingBeaconState) error {
-		event, err = beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, headRoot, block.Block.StateRoot, "full", optimistic)
+		event, err = beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, head.Root, block.Block.StateRoot, "full", optimistic)
 		return err
 	})
 	if err != nil || event == nil {
 		return
 	}
 	a.emitters.WithHeadEventLock(func() {
-		currentRoot, currentSlot, err := a.forkchoiceStore.GetHead(nil)
-		if err != nil || currentRoot != headRoot || currentSlot != headSlot ||
-			a.forkchoiceStore.GetHeadPayloadStatus() != payloadStatus ||
-			a.forkchoiceStore.IsRootOptimistic(currentRoot) != optimistic {
+		currentHead, currentSlot, err := a.forkchoiceStore.GetHeadNode()
+		if err != nil || currentHead != head || currentSlot != headSlot ||
+			a.forkchoiceStore.IsRootOptimistic(currentHead.Root) != optimistic {
 			return
 		}
 		a.emitters.State().SendHeadV2(event)
@@ -1341,6 +1355,12 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 	return nil
 }
 
+func (a *ApiHandler) processExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData bool) error {
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
+	return a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, checkBlobData, true)
+}
+
 // ---- Execution Payload Bid ----
 
 // PostEthV1BeaconExecutionPayloadBid publishes a SignedExecutionPayloadBid.
@@ -1455,8 +1475,8 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("execution payload bid slot %d is not current or next", slot))
 	}
-	finishProduction := a.payloadPreparationGate.beginProduction()
-	defer finishProduction()
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
 	var (
 		baseBlockRoot common.Hash
 		baseBlockSlot uint64
@@ -1520,6 +1540,9 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		ctx, 4, baseBlockSlot, baseBlockRoot, baseState, slot, common.Bytes96{}, common.Hash{},
 	)
 	if err != nil {
+		if errors.Is(err, errForkChoiceHeadChanged) {
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, err)
+		}
 		return nil, err
 	}
 	if beaconBody == nil || beaconBody.SignedExecutionPayloadBid == nil || beaconBody.SignedExecutionPayloadBid.Message == nil {
@@ -1534,7 +1557,10 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("execution payload bid slot %d is not current or next", slot))
 	}
-	latestHeadNode, err := a.forkchoiceStore.GetHeadNode()
+	bid := beaconBody.SignedExecutionPayloadBid.Message
+	// Bind the beacon-root check and execution-parent decision to one head snapshot.
+	// Separate reads can pair the same root with different FULL/EMPTY decisions.
+	latestHeadNode, _, err := a.forkchoiceStore.GetHeadNode()
 	if err != nil {
 		return nil, err
 	}
@@ -1542,17 +1568,27 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("execution payload bid is unavailable because the head changed"))
 	}
-	bid := beaconBody.SignedExecutionPayloadBid.Message
-	expectedExecutionParent := baseState.LatestExecutionPayloadHeader().BlockHash
-	if parentBid := baseState.GetLatestExecutionPayloadBid(); parentBid != nil {
-		isPreGloasParent := baseBlockSlot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch
-		buildOnFull := !isPreGloasParent &&
-			latestHeadNode.PayloadStatus == cltypes.PayloadStatusFull &&
-			a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
-			a.forkchoiceStore.ShouldBuildOnFull(latestHeadNode, slot)
-		expectedExecutionParent = gloasProposalExecutionHead(baseBlockSlot, a.beaconChainCfg, parentBid, buildOnFull)
+	path := gloasPayloadPathPreFork
+	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
+		path = a.gloasPayloadPathForHead(latestHeadNode, slot)
 	}
-	if bid.ParentBlockHash != expectedExecutionParent {
+	// Keep production's EMPTY fallback when a FULL envelope is still unreadable.
+	payloadSource := a.executionPayloadSourceForGloasPath(baseState, baseBlockRoot, path)
+	if bid.ParentBlockHash != payloadSource.head {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			errors.New("execution payload bid is unavailable because the execution parent changed"))
+	}
+	// Envelope reads can block while the head or PTC decision changes. Current-slot votes
+	// can change the next-slot parent path without changing the cached root or FULL status.
+	headAfterResolution, _, err := a.forkchoiceStore.GetHeadNode()
+	if err != nil {
+		return nil, err
+	}
+	if headAfterResolution != latestHeadNode {
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
+			errors.New("execution payload bid is unavailable because the head changed"))
+	}
+	if path != gloasPayloadPathPreFork && a.gloasPayloadPathForHead(headAfterResolution, slot) != path {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			errors.New("execution payload bid is unavailable because the execution parent changed"))
 	}

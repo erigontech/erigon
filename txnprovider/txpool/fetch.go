@@ -105,7 +105,7 @@ func NewFetch(
 		pool:                 pool,
 		db:                   db,
 		stateChangesClient:   stateChangesClient,
-		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), //TODO: change ctx if rules changed
+		stateChangesParseCtx: NewTxnParseContext(chainID).ChainIDRequired(), // TODO: change ctx if rules changed
 		pooledTxnsParseCtx:   NewTxnParseContext(chainID).ChainIDRequired(),
 		announcements:        announcements,
 		wg:                   options.p2pFetcherWg,
@@ -552,7 +552,7 @@ func (f *Fetch) handleInboundMessageWithTx(ctx context.Context, tx kv.Tx, req *s
 			}
 		}
 	case sentryproto.MessageId_GET_POOLED_TRANSACTIONS_66:
-		//TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
+		// TODO: handleInboundMessage is single-threaded - means it can accept as argument couple buffers (or analog of txParseContext). Protobuf encoding will copy data anyway, but DirectClient doesn't
 		var encodedRequest []byte
 		var messageID sentryproto.MessageId
 		messageID = sentryproto.MessageId_POOLED_TRANSACTIONS_66
@@ -810,7 +810,6 @@ func (f *Fetch) handleStateChangesRequest(ctx context.Context, req *remoteproto.
 					f.logger.Debug("[txpool.fetch] stream.Recv", "dir", change.Direction, "txnType", txnType, "index", i, "err", err)
 					continue // 1 txn handling error must not stop batch processing
 				}
-
 			}
 		} else if change.Direction == remoteproto.Direction_UNWIND {
 			for i := range change.Txs {
