@@ -513,8 +513,13 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 	if txs := block.Transactions(); inclTx && len(txs) > 0 {
 		if fullTx {
 			full := make([]*RPCTransaction, len(txs))
+			hash, number, time := block.Hash(), hexutil.U256(*uint256.NewInt(block.NumberU64())), hexutil.Uint64(block.Time())
+			indexes := make([]hexutil.Uint64, len(txs))
+			baseFee := block.BaseFee()
 			for i, txn := range txs {
-				full[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
+				indexes[i] = hexutil.Uint64(i)
+				full[i] = newRPCTransaction(txn, baseFee)
+				full[i].BlockHash, full[i].BlockNumber, full[i].BlockTimestamp, full[i].TransactionIndex = &hash, &number, &time, &indexes[i]
 			}
 			transactions = full
 		} else {
@@ -619,19 +624,22 @@ type RPCTransaction struct {
 	YParity              *hexutil.U256              `json:"yParity,omitempty"`
 	R                    *hexutil.U256              `json:"r"`
 	S                    *hexutil.U256              `json:"s"`
-
-	// Values the pointer fields above point at when the source transaction has no copy to alias.
-	blockHash   common.Hash
-	blockNumber uint256.Int
-	blockTime   uint64
-	index       uint64
-	gasPrice    uint256.Int
-	accesses    types.AccessList
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
+	result := newRPCTransaction(txn, baseFee)
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
+		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
+func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransaction {
 	var chainId *uint256.Int
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(txn.Type()),
@@ -672,13 +680,13 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		chainId = txn.GetChainID()
 		result.ChainID = (*hexutil.U256)(chainId)
 		result.YParity = (*hexutil.U256)(v)
-		result.accesses = txn.GetAccessList()
-		result.Accesses = &result.accesses
+		acl := txn.GetAccessList()
+		result.Accesses = &acl
 
 		if txn.Type() == types.AccessListTxType {
 			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 		} else {
-			result.GasPrice = computeGasPrice(txn, baseFee, &result.gasPrice)
+			result.GasPrice = computeGasPrice(txn, baseFee)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
 			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
 		}
@@ -714,32 +722,16 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 			result.From = from.Value()
 		}
 	}
-
-	if blockHash != (common.Hash{}) {
-		result.blockHash = blockHash
-		result.blockNumber.SetUint64(blockNumber)
-		result.blockTime = blockTime
-		result.index = index
-		result.BlockHash = &result.blockHash
-		result.BlockNumber = (*hexutil.U256)(&result.blockNumber)
-		result.BlockTimestamp = (*hexutil.Uint64)(&result.blockTime)
-		result.TransactionIndex = (*hexutil.Uint64)(&result.index)
-	}
 	return result
 }
 
 // computeGasPrice reports the effective gas price of a transaction already in a
 // block, and the fee cap of a pending one, as the execution-apis spec requires.
-func computeGasPrice(txn types.Transaction, baseFee *uint256.Int, price *uint256.Int) *hexutil.U256 {
+func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) *hexutil.U256 {
 	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
-		*price = u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
-		return (*hexutil.U256)(price)
+		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
+		return (*hexutil.U256)(&price)
 	}
 	return (*hexutil.U256)(txn.GetFeeCap())
-}
-
-// newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return NewRPCTransaction(txn, b.Hash(), b.Time(), b.NumberU64(), index, b.BaseFee())
 }
