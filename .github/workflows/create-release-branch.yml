@@ -25,7 +25,7 @@ on:
         type: string
         default: main
       dry_run:
-        description: "Resolve the base commit and validate, but do not create the branch"
+        description: "Check QA references and resolve the base commit, but do not create the branch"
         required: false
         type: boolean
         default: false
@@ -43,7 +43,42 @@ defaults:
     shell: bash
 
 jobs:
+  qa-reference-data:
+    name: QA reference data (${{ matrix.pool }})
+    runs-on: ${{ matrix.runs-on }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - pool: mainnet-rpc
+            chain: mainnet
+            runs-on: [self-hosted, qa, Ethereum, rpc-integration-commitment]
+          - pool: gnosis-rpc
+            chain: gnosis
+            runs-on: [self-hosted, qa, Gnosis, rpc-integration]
+          - pool: mainnet-rpc-latest
+            chain: mainnet
+            runs-on: [self-hosted, qa, Ethereum, rpc-latest-erigon]
+          - pool: mainnet-rpc-performance
+            chain: mainnet
+            runs-on: [self-hosted, qa, Ethereum, rpc-performance]
+    steps:
+      - name: Checkout preflight
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check QA reference data
+        env:
+          RELEASE_BRANCH: ${{ inputs.release_branch }}
+          CHAIN: ${{ matrix.chain }}
+        run: |
+          python3 .github/workflows/scripts/check_qa_reference.py \
+            --branch "$RELEASE_BRANCH" --chain "$CHAIN"
+
   create-release-branch:
+    needs: [qa-reference-data]
     runs-on: ubuntu-latest
     # Approval gate: configure required reviewers on this environment in repo
     # settings. Only those reviewers can release the run to continue.
@@ -134,7 +169,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
   notify:
-    needs: [create-release-branch]
+    needs: [qa-reference-data, create-release-branch]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -142,6 +177,7 @@ jobs:
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
           JOB_RESULT: ${{ needs.create-release-branch.result }}
+          QA_RESULT: ${{ needs.qa-reference-data.result }}
           OUTCOME: ${{ needs.create-release-branch.outputs.outcome }}
           DETAIL: ${{ needs.create-release-branch.outputs.detail }}
           BASE_SHA: ${{ needs.create-release-branch.outputs.base_sha }}
@@ -169,6 +205,9 @@ jobs:
             # A dry-run is the operator's own check — don't ping the channel.
             title=":mag: Release branch dry-run"; color=3447003; mention=""
             desc="Dry-run only — no branch was created."
+          elif [ "$QA_RESULT" != "success" ]; then
+            title=":x: QA reference data is not ready"; color=15158332
+            desc="No branch was created. Check the runner preflight jobs and provision the required QA reference data."
           else
             title=":x: Release branch creation failed"; color=15158332
             desc="${DETAIL:-Job result: ${JOB_RESULT}. See the run for details.}"
