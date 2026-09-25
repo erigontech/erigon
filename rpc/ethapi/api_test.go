@@ -516,7 +516,7 @@ func TestRPCTransactionMarshalFastJSONTo(t *testing.T) {
 	blob.BlobVersionedHashes = []common.Hash{hash}
 	setcode := base()
 	setcode.Type = 4
-	setcode.Authorizations = &[]types.JsonAuthorization{
+	setcode.Authorizations = types.AuthorizationList{
 		{
 			ChainID: hexutil.U256(*uint256.NewInt(1)), Address: to, Nonce: 1, YParity: 0,
 			R: hexutil.U256(*uint256.NewInt(0xaa)), S: hexutil.U256(*uint256.NewInt(0xbb)),

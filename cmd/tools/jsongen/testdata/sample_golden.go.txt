@@ -63,11 +63,33 @@ func (x *Sample) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 			return err
 		}
 	}
+	if x.OptLogs != nil {
+		s.Field("optLogs")
+		if err := x.OptLogs.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
 	if x.Nested == nil {
 		s.Field("nested").WriteNil()
 	} else {
 		s.Field("nested")
 		if err := x.Nested.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	if x.OptNested != nil {
+		s.Field("optNested")
+		if err := x.OptNested.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.Field("inners")
+	if err := x.Inners.MarshalFastJSONTo(s); err != nil {
+		return err
+	}
+	if len(x.OptInners) > 0 {
+		s.Field("optInners")
+		if err := x.OptInners.MarshalFastJSONTo(s); err != nil {
 			return err
 		}
 	}

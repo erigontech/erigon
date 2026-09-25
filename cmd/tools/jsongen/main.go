@@ -257,12 +257,17 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 		write = fmt.Sprintf("s.Field(%q).WriteBool(%s)", name, ref)
 		present = ref
 	case "objects":
-		if omitempty {
-			// Emptiness is the marshaller's own business, and a struct-backed one cannot
-			// even be compared with nil.
-			return "", fmt.Errorf(`ethjson:%q cannot be omitempty`, form)
-		}
 		write = fmt.Sprintf("s.Field(%q)\nif err := %s.%s(s); err != nil {\nreturn err\n}", name, ref, method)
+		switch {
+		case pointer || iface:
+			present = ref + " != nil"
+		case isLenable(t):
+			present = fmt.Sprintf("len(%s) > 0", ref)
+		case omitempty:
+			// A struct writes itself and cannot be compared with nil, so nothing here can
+			// say whether encoding/json would have left it out.
+			return "", fmt.Errorf(`ethjson:%q cannot be omitempty on %s`, form, t)
+		}
 	case "datalist":
 		write = fmt.Sprintf("ethjson.DataList(s, %q, %s)", name, ref)
 		present = fmt.Sprintf("len(%s) > 0", ref)
@@ -305,6 +310,16 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty bool) (strin
 	default:
 		return "\t" + write + "\n", nil
 	}
+}
+
+// isLenable reports a type whose emptiness len reports, which is how encoding/json decides
+// omitempty for it.
+func isLenable(t types.Type) bool {
+	switch t.Underlying().(type) {
+	case *types.Slice, *types.Map:
+		return true
+	}
+	return false
 }
 
 func deref(t types.Type) types.Type {
