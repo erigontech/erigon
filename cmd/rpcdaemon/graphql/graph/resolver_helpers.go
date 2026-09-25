@@ -50,7 +50,7 @@ func (r *queryResolver) block(ctx context.Context, number *string, hash *string,
 
 	if hash != nil {
 		blockHash := common.HexToHash(*hash)
-		res, err := r.GraphQLAPI.GetBlockDetailsByHash(ctx, blockHash)
+		res, err := r.GraphQLAPI.GetBlockDetailsByHashWithTxs(ctx, blockHash, withTxs)
 		if err != nil {
 			return nil, err
 		}
@@ -78,7 +78,7 @@ func (r *queryResolver) block(ctx context.Context, number *string, hash *string,
 		blockNumber = rpc.LatestBlockNumber
 	}
 
-	res, err := r.GraphQLAPI.GetBlockDetails(ctx, blockNumber)
+	res, err := r.GraphQLAPI.GetBlockDetailsWithTxs(ctx, blockNumber, withTxs)
 	if err != nil {
 		return nil, err
 	}

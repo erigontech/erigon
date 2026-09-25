@@ -285,6 +285,14 @@ func (m *mockGraphQLAPI) GetBlockDetails(_ context.Context, _ rpc.BlockNumber) (
 	return m.blockDetails, nil
 }
 
+func (m *mockGraphQLAPI) GetBlockDetailsWithTxs(_ context.Context, _ rpc.BlockNumber, _ bool) (map[string]any, error) {
+	return m.blockDetails, nil
+}
+
+func (m *mockGraphQLAPI) GetBlockDetailsByHashWithTxs(_ context.Context, _ common.Hash, _ bool) (map[string]any, error) {
+	return nil, nil
+}
+
 func (m *mockGraphQLAPI) GetBlockDetailsByHash(_ context.Context, _ common.Hash) (map[string]any, error) {
 	return nil, nil
 }
