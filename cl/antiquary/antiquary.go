@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -471,6 +472,12 @@ func (a *Antiquary) NotifyBlobBackfilled(completed bool) {
 	a.blobBackfilled.Store(completed)
 }
 
+// isBlobBacklog reports whether the pending range is a catch-up rather than the single chunk
+// retired at the tip, which is what decides how many workers the compression may use.
+func isBlobBacklog(from, to uint64) bool {
+	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
+}
+
 func (a *Antiquary) antiquateBlobs() error {
 	if !a.snapgen {
 		return nil
@@ -517,7 +524,14 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 
 	// now, we need to retire the blobs
-	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, 1, blobCountFn, log.LvlDebug, a.logger); err != nil {
+	// One worker keeps steady-state retirement from competing with execution, but a backlog
+	// compresses gigabyte segments for days that way, so catching up gets the same parallelism
+	// EL retirement takes during its initial cycle.
+	compressWorkers := 1
+	if isBlobBacklog(currentBlobsProgress, to) {
+		compressWorkers = estimate.CompressSnapshot.Workers()
+	}
+	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, compressWorkers, blobCountFn, log.LvlDebug, a.logger); err != nil {
 		return err
 	}
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
