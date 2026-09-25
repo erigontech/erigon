@@ -400,6 +400,7 @@ func (sdb *IntraBlockState) Reset() {
 	sdb.clearJournalAndRefund()
 	sdb.txIndex = 0
 	sdb.sdProbeEpoch++
+	sdb.storageBaselines = nil
 	sdb.accessList.Reset()
 	clear(sdb.transientStorage)
 	sdb.versionMap = nil
@@ -946,11 +947,6 @@ func (sdb *IntraBlockState) GetDelegatedDesignation(addr accounts.Address) (acco
 // DESCRIBED: docs/programmers_guide/guide.md#address---identifier-of-an-account
 func (sdb *IntraBlockState) GetState(addr accounts.Address, key accounts.StorageKey) (uint256.Int, error) {
 	versionedValue, source, _, err := readState(sdb, addr, key)
-	if err == nil {
-		if baseline, ok := sdb.storageBaseline(addr, key); ok && !sdb.wroteStorage(addr, key) {
-			versionedValue = baseline
-		}
-	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || (dbg.TraceAccount(addr.Handle()) && traceKey(key))) {
 		fmt.Printf("%d (%d.%d) GetState (%s) %x, %x=%s\n", sdb.blockNum, sdb.txIndex, sdb.version, source, addr, key, versionedValue.Hex()[2:])
@@ -2613,6 +2609,7 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 
 // FinalizeTx should be called after every transaction.
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
+	sdb.storageBaselines = nil
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
 			if _, err := sdb.getStateObject(addr, true); err != nil {

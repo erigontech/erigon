@@ -14,8 +14,9 @@ type storageBaselineKey struct {
 // SetStorageBaseline overrides the committed value of one storage slot for the
 // current transaction, so a replay can reproduce storage a canonical chain
 // committed through a cache bug in the client that sealed it. The transaction
-// reads the baseline and prices SSTORE against it; its own writes and the
-// resulting write set are untouched. Cleared by SetTxContext.
+// reads the baseline, prices SSTORE against it and skips writes equal to it;
+// its own writes shadow it. Cleared at the transaction boundary: SetTxContext,
+// FinalizeTx and Reset.
 func (sdb *IntraBlockState) SetStorageBaseline(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
 	if sdb.storageBaselines == nil {
 		sdb.storageBaselines = map[storageBaselineKey]uint256.Int{}

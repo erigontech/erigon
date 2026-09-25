@@ -1537,6 +1537,16 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	v, source, version, clean, err := readStorageForSet(s, addr, key)
+	if err == nil {
+		if baseline, ok := s.storageBaseline(addr, key); ok && !s.wroteStorage(addr, key) {
+			v = baseline
+		}
+	}
+	return v, source, version, clean, err
+}
+
+func readStorageForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
