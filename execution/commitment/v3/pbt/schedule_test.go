@@ -182,10 +182,15 @@ func TestTrieParallelPhaseAAttributesEveryOpOnce(t *testing.T) {
 func TestTrieParallelCoreAttribution(t *testing.T) {
 	ctx := newTrieTestContext()
 	address := bytes.Repeat([]byte{0x71}, 20)
+	accountKey := eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)
+	codeKey := eip8297.TreeKeyCodeChunk([32]byte{3}, 0)
+	storageKey := eip8297.TreeKeyStorage(address, storageSlot(64))
+	initial := []Op{{Key: accountKey, Value: testTrieValue(1)}, {Key: codeKey, Value: testTrieValue(2)}}
+	sort.Slice(initial, func(i, j int) bool { return bytes.Compare(initial[i].Key, initial[j].Key) < 0 })
+	requireProcess(t, ctx, initial)
 	ops := []Op{
-		{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: testTrieValue(1)},
-		{Key: eip8297.TreeKeyCodeChunk([32]byte{3}, 0), Value: testTrieValue(2)},
-		{Key: eip8297.TreeKeyStorage(address, storageSlot(64)), Value: testTrieValue(3)},
+		{Key: accountKey, Value: testTrieValue(3)},
+		{Key: storageKey, Value: testTrieValue(3)},
 	}
 	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
 	applied := make(map[string]int)
