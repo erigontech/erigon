@@ -259,7 +259,8 @@ func foldReferenceRows(t *testing.T, built *referenceRows, sum eip8297.HashFn) {
 		slot int
 	}
 	parents := make(map[string][]parentLink, len(keys))
-	for parentKey, parent := range built.rows {
+	for parentKey := range built.rows {
+		parent := built.rows[parentKey]
 		parentPath := recordPath([]byte(parentKey))
 		for slot := range parent.Cells {
 			cell := &parent.Cells[slot]
