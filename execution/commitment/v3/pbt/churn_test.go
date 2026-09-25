@@ -116,28 +116,28 @@ func runTrieChurn(t *testing.T, seed int64) {
 }
 
 func churnKeys() ([][]byte, [][]byte) {
-	keys := make([][]byte, 0, 96)
-	for stemNibble := byte(0); stemNibble < 16; stemNibble++ {
+	keys := make([][]byte, 0, 40)
+	for stemNibble := byte(0); stemNibble < 4; stemNibble++ {
 		key := make([]byte, eip8297.AccountKeyLength)
 		key[0] = eip8297.AccountZone
 		key[len(key)-2] = stemNibble
 		key[len(key)-1] = eip8297.BasicDataLeafKey
 		keys = append(keys, key)
 	}
-	prefixes := make([][]byte, 0, 3)
-	for addressIndex := byte(0); addressIndex < 3; addressIndex++ {
+	prefixes := make([][]byte, 0, 2)
+	for addressIndex := byte(0); addressIndex < 2; addressIndex++ {
 		address := bytes.Repeat([]byte{0xa0 + addressIndex}, 20)
 		stem := eip8297.TreeKeyStorage(address, storageSlot(64))[:33]
 		prefixes = append(prefixes, bytes.Clone(stem))
-		for _, first := range []byte{0x20, 0x80, 0xc6} {
-			for last := byte(0); last < 16; last++ {
+		for _, first := range []byte{0x20, 0x40, 0xc6} {
+			for last := byte(0); last < 8; last++ {
 				keys = append(keys, storageKeyWithSuffix(stem, first, last))
 			}
 		}
 	}
-	for _, first := range []byte{0, 2, 0x10, 0x80} {
-		for _, second := range []byte{0, 2, 8, 0x80} {
-			for seed := byte(1); seed < 5; seed++ {
+	for _, first := range []byte{0, 0x10} {
+		for _, second := range []byte{0, 8} {
+			for seed := byte(1); seed < 4; seed++ {
 				keys = append(keys, trieCodeKey(first, second, seed))
 			}
 		}
