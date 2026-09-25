@@ -134,6 +134,7 @@ func (opts AggOpts) DisableInterDomainDeps() AggOpts { //nolint:gocritic
 	opts.disableInterDomainDeps = true
 	return opts
 }
+
 func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts

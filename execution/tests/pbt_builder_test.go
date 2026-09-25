@@ -73,8 +73,10 @@ func testPBTBuilderCanonicalCommitment(t *testing.T, dual bool) {
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
 	from := crypto.PubkeyToAddress(key.PublicKey)
-	genesis := &types.Genesis{Config: config, GasLimit: 30_000_000, BaseFee: uint256.NewInt(0),
-		Alloc: types.GenesisAlloc{from: {Balance: new(big.Int).SetUint64(common.Ether)}}}
+	genesis := &types.Genesis{
+		Config: config, GasLimit: 30_000_000, BaseFee: uint256.NewInt(0),
+		Alloc: types.GenesisAlloc{from: {Balance: new(big.Int).SetUint64(common.Ether)}},
+	}
 	options := []execmoduletester.Option{execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key)}
 	if dual {
 		options = append(options, execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))

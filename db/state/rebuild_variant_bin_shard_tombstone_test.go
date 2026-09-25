@@ -104,7 +104,7 @@ func rebuildShardTombstoneDatadir(t *testing.T) (kv.TemporalRwDB, datadir.Dirs) 
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE),
 		fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = %d\nreferences_in_commitment_branches = false\n",
-			shardTombstoneStepSize, shardTombstoneFrozenSteps), 0644))
+			shardTombstoneStepSize, shardTombstoneFrozenSteps), 0o644))
 
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).InMem(dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
@@ -179,7 +179,8 @@ func writeShardTombstoneGuard(t *testing.T, db kv.TemporalRwDB, txNum uint64) {
 // account index, so every step in the range carries real writes rather than
 // only its last one.
 func writeShardTombstoneRange(t *testing.T, db kv.TemporalRwDB, rangeFrom, rangeTxCount uint64, nonce uint64,
-	slotUpdate func(i int) (drop bool, val []byte)) {
+	slotUpdate func(i int) (drop bool, val []byte),
+) {
 	t.Helper()
 	rwTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)

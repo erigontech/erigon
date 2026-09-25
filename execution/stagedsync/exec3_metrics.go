@@ -229,7 +229,8 @@ func resetDomainGauges(ctx context.Context) {
 }
 
 func updateExecDomainMetrics(metrics *kvmetrics.DomainMetrics, prevMetrics *kvmetrics.DomainMetrics, interval time.Duration,
-	executing bool, commitmentDomain kv.Domain) *kvmetrics.DomainMetrics {
+	executing bool, commitmentDomain kv.Domain,
+) *kvmetrics.DomainMetrics {
 	metrics.RLock()
 	defer metrics.RUnlock()
 

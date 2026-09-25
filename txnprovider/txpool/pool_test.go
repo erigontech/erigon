@@ -2698,7 +2698,6 @@ func TestPoolEIP8038RevisedFollowsBinaryTrie(t *testing.T) {
 	explicit := amsterdamConfig(t)
 	explicit.EIP8038Revised = true
 	require.True(t, newPool(t, explicit).isEIP8038Revised())
-
 }
 
 func TestPoolAndExecutorAgreeOnEIP8038RevisedAtBothSidesOfBinaryTrie(t *testing.T) {

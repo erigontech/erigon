@@ -50,6 +50,7 @@ func (s *pbinStubSharedDomains) SetTxNum(uint64) {}
 func (s *pbinStubSharedDomains) AsStateGetter(kv.TemporalTx, execctxapi.StateGetterOptions) execctxapi.StateGetter {
 	return nil
 }
+
 func (s *pbinStubSharedDomains) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.DomainMetrics) execctxapi.StateGetter {
 	return nil
 }
@@ -57,13 +58,16 @@ func (s *pbinStubSharedDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { retu
 func (s *pbinStubSharedDomains) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff, kv.Domain) kv.TemporalPutDel {
 	return nil
 }
+
 func (s *pbinStubSharedDomains) GetLatestFromMemory(kv.Domain, []byte) ([]byte, kv.Step, bool) {
 	return nil, kv.NoStepBound, false
 }
 func (s *pbinStubSharedDomains) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
 func (s *pbinStubSharedDomains) StepSize() uint64                                        { return 1 }
-func (s *pbinStubSharedDomains) Metrics() *kvmetrics.DomainMetrics                       { return nil }
-func (s *pbinStubSharedDomains) HasSharedBranchCache() bool                              { return s.sharedCache }
+
+func (s *pbinStubSharedDomains) Metrics() *kvmetrics.DomainMetrics { return nil }
+
+func (s *pbinStubSharedDomains) HasSharedBranchCache() bool { return s.sharedCache }
 
 func pbinRecoverMessage(t *testing.T, fn func()) (msg string) {
 	t.Helper()

@@ -36,6 +36,7 @@ func (s *pbinStateStubSD) SetTxNum(uint64) {}
 func (s *pbinStateStubSD) AsStateGetter(kv.TemporalTx, execctxapi.StateGetterOptions) execctxapi.StateGetter {
 	return nil
 }
+
 func (s *pbinStateStubSD) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.DomainMetrics) execctxapi.StateGetter {
 	return nil
 }
@@ -43,6 +44,7 @@ func (s *pbinStateStubSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel { return nil
 func (s *pbinStateStubSD) AsPutDelWithDiff(kv.TemporalTx, *kv.DomainDiff, kv.Domain) kv.TemporalPutDel {
 	return nil
 }
+
 func (s *pbinStateStubSD) GetLatestFromMemory(kv.Domain, []byte) ([]byte, kv.Step, bool) {
 	return nil, kv.NoStepBound, false
 }

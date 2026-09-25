@@ -37,9 +37,11 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
-var pbinConvertPairHook func()
-var pbinConvertDropPairHook func(pair uint64) bool
-var pbinConvertAfterBuildHook func(string)
+var (
+	pbinConvertPairHook       func()
+	pbinConvertDropPairHook   func(pair uint64) bool
+	pbinConvertAfterBuildHook func(string)
+)
 
 // A pre-version branch record opens with the high byte of its touchMap, always
 // zero; a current one opens with a cell-fields byte, which always carries a kind

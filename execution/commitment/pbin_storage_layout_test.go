@@ -58,7 +58,8 @@ func TestPBinStorageLayoutCost(t *testing.T) {
 	buildRow := func(p struct {
 		name string
 		slot func(i int) uint64
-	}) row {
+	},
+	) row {
 		c := new(pbinTestCorpus).account(addr, 1, 100, pbinTestCodeHash(0))
 		for i := range slots {
 			c = c.storage(addr, pbinSlotAt(p.slot(i)), byte(i+1))

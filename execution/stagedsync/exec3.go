@@ -523,7 +523,8 @@ func canonicalCommitmentDomain(tx interface{ AggTx() any }) kv.Domain {
 func snapshotStepAlignment(tx interface {
 	AggTx() any
 	StepsInFiles(...kv.Domain) kv.Step
-}) (kv.Step, error) {
+},
+) (kv.Step, error) {
 	cmtStep := tx.StepsInFiles(canonicalCommitmentDomain(tx))
 	acctStep := tx.StepsInFiles(kv.AccountsDomain)
 	storStep := tx.StepsInFiles(kv.StorageDomain)

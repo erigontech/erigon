@@ -979,7 +979,8 @@ func TestUpdate_EncodeDecode(t *testing.T) {
 	updates := []Update{
 		{Flags: BalanceUpdate, Balance: *uint256.NewInt(123), CodeHash: empty.CodeHash},
 		{Flags: BalanceUpdate | NonceUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123, CodeHash: empty.CodeHash},
-		{Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
+		{
+			Flags: BalanceUpdate | NonceUpdate | CodeUpdate, Balance: *uint256.NewInt(45639015), Nonce: 123,
 			CodeSize: 24576,
 			CodeHash: common.Hash{
 				0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,

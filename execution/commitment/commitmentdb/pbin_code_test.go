@@ -37,7 +37,6 @@ func pbinTestCode(n int) []byte {
 // Code chunk leaves hold raw bytecode, which no account read returns and no
 // other trie needs.
 func TestPBinTrieContextCodeReadsCodeDomain(t *testing.T) {
-
 	code := pbinTestCode(100)
 	addr := pbinCodeSizeAddr(6)
 	ttx := pbinCodeSizeTrieContext(t, true, addr, pbinCodeSizeAccount(crypto.Keccak256Hash(code)), code)
@@ -56,7 +55,6 @@ func TestPBinTrieContextCodeReadsCodeDomain(t *testing.T) {
 // code-less tree. Chunk values are pinned against the reference tree in the
 // commitment package.
 func TestPBinSharedDomainsCommitsCodeBearingAccount(t *testing.T) {
-
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
 
@@ -82,7 +80,6 @@ func TestPBinSharedDomainsCommitsCodeBearingAccount(t *testing.T) {
 // The account header holds the first 128 code chunks; this code is one byte
 // past that, so it spills into the code zone.
 func TestPBinSharedDomainsCommitsCodeBeyondHeader(t *testing.T) {
-
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
 

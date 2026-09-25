@@ -973,8 +973,10 @@ var KeyCommitmentState = commitment.KeyCommitmentState
 
 var CommitmentStateKeys = [][]byte{commitment.KeyCommitmentV3State, KeyCommitmentState}
 
-var ErrBehindCommitment = errors.New("behind commitment")
-var ErrTornCommitmentDatadir = errors.New("torn commitment datadir")
+var (
+	ErrBehindCommitment      = errors.New("behind commitment")
+	ErrTornCommitmentDatadir = errors.New("torn commitment datadir")
+)
 
 func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 	return binary.BigEndian.Uint64(v), binary.BigEndian.Uint64(v[8:16])

@@ -55,7 +55,7 @@ func pbinWithVariantFlags(t *testing.T, bin, parallel bool) {
 func pbinWriteToml(t *testing.T, dirs datadir.Dirs, content string) string {
 	t.Helper()
 	path := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
-	require.NoError(t, os.WriteFile(path, []byte(content), 0644))
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 	return path
 }
 
@@ -157,7 +157,7 @@ func TestPBinVariantRejectsReferencesSetting(t *testing.T) {
 func TestPBinVariantLegacyDatadirRefusesBin(t *testing.T) {
 	pbinWithVariantFlags(t, true, false)
 	dirs := datadir.New(t.TempDir())
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0o644))
 
 	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.ErrorContains(t, err, "already has hex commitment state")
@@ -196,7 +196,7 @@ func TestPBinVariantSurvivesEmptyPreverifiedFromSnapshotsStage(t *testing.T) {
 	_, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)
 
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, datadir.PreverifiedFileName), []byte(""), 0o644))
 
 	settings, err := ResolveErigonDBSettings(dirs, log.New(), false)
 	require.NoError(t, err)

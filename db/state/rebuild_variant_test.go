@@ -96,7 +96,7 @@ func rebuildVariantDatadir(t *testing.T) (kv.TemporalRwDB, *state.Aggregator, da
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE),
-		fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = false\n", rebuildVariantStepSize), 0644))
+		fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = false\n", rebuildVariantStepSize), 0o644))
 
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).InMem(dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()

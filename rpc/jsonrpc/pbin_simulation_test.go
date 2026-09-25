@@ -114,7 +114,6 @@ func TestPBinDualSimulation(t *testing.T) {
 		for i := range expected {
 			require.Equal(t, expected[i].StateRoot, actual[i].StateRoot)
 		}
-
 	})
 
 	t.Run("frozen_hex", func(t *testing.T) {

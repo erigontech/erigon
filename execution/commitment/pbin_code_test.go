@@ -336,7 +336,9 @@ func TestPBinZoneKeyLengthIsExplicit(t *testing.T) {
 		{zone: pbinAccountZone, want: pbinAccountKeyLength, known: true},
 		{zone: pbinCodeZone, want: pbinCodeKeyLength, known: true},
 		{zone: pbinStorageZone, want: pbinStorageKeyLength, known: true},
-		{zone: 0x02}, {zone: 0x7F}, {zone: 0xFE},
+		{zone: 0x02},
+		{zone: 0x7F},
+		{zone: 0xFE},
 	} {
 		got, known := pbinZoneKeyLength(tc.zone)
 		require.Equal(t, tc.known, known, "zone %#x", tc.zone)

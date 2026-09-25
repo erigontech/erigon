@@ -79,5 +79,4 @@ func TestPBinWitnessConsecutiveDeploys(t *testing.T) {
 		w := pbinWitnessOf(t, api, block)
 		require.NotEmpty(t, w.State, "block %d", block)
 	}
-
 }

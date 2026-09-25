@@ -999,8 +999,10 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	} else {
 		sdCtx := cc.doms.GetCommitmentContext()
 		if cc.domainFrozenAfter(sdCtx.CommitmentDomain(), t.lastTxNum) {
-			cc.publish(ctx, commitmentResult{blockNum: t.blockNum, txNum: t.lastTxNum,
-				err: fmt.Errorf("commitmentCalculator: %scommitment domain %s is frozen", m.label, sdCtx.CommitmentDomain())})
+			cc.publish(ctx, commitmentResult{
+				blockNum: t.blockNum, txNum: t.lastTxNum,
+				err: fmt.Errorf("commitmentCalculator: %scommitment domain %s is frozen", m.label, sdCtx.CommitmentDomain()),
+			})
 			return
 		}
 		if !feedMode {

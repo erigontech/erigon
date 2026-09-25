@@ -132,8 +132,10 @@ func testPBTDualCommitmentFlipAndReorg(t *testing.T, parallel bool) {
 			total += value
 			alloc := types.GenesisAlloc{
 				from: {Balance: new(big.Int).Sub(initialBalance, new(big.Int).SetUint64(total)), Nonce: nonce},
-				contract: {Balance: new(big.Int).SetUint64(total), Nonce: 1, Code: code,
-					Storage: map[common.Hash]common.Hash{{}: common.BigToHash(new(big.Int).SetUint64(value))}},
+				contract: {
+					Balance: new(big.Int).SetUint64(total), Nonce: 1, Code: code,
+					Storage: map[common.Hash]common.Hash{{}: common.BigToHash(new(big.Int).SetUint64(value))},
+				},
 			}
 			for address, account := range genesis.Alloc {
 				if address != from && address != contract {
