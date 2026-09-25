@@ -991,7 +991,7 @@ func TestQueryResolver_BlockTransactionsBySelection(t *testing.T) {
 	query := func(q string) string {
 		body, err := json.Marshal(map[string]string{"query": q})
 		require.NoError(t, err)
-		req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(body))
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", bytes.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		rec := httptest.NewRecorder()
 		srv.ServeHTTP(rec, req)
