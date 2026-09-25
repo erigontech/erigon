@@ -37,9 +37,11 @@ const (
 	pbinOracleBranchTag       = eip8297.BranchTag
 )
 
-type pbinOracleNode = eip8297.Node
-type pbinOracleLeaf = eip8297.Leaf
-type pbinOracleBranch = eip8297.Branch
+type (
+	pbinOracleNode   = eip8297.Node
+	pbinOracleLeaf   = eip8297.Leaf
+	pbinOracleBranch = eip8297.Branch
+)
 
 type pbinOracleTree struct {
 	root pbinOracleNode
