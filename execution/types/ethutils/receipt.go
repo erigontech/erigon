@@ -157,6 +157,7 @@ func MarshalReceipt(
 // RPCLogFromProto is the log a subscription delivers, the same object eth_getLogs returns. The
 // address and both hashes must be set, as every backend sets them.
 func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.Log {
+	at := hexutil.Uint64(l.BlockTimestamp)
 	lg := &types.Log{
 		Address:        gointerfaces.ConvertH160toAddress(l.Address),
 		Topics:         make([]common.Hash, len(l.Topics)),
@@ -167,7 +168,7 @@ func RPCLogFromProto(l *remoteproto.SubscribeLogsReply) *types.Log {
 		BlockHash:      gointerfaces.ConvertH256ToHash(l.BlockHash),
 		Index:          hexutil.Uint(l.LogIndex),
 		Removed:        l.Removed,
-		BlockTimestamp: hexutil.Uint64(l.BlockTimestamp),
+		BlockTimestamp: &at,
 	}
 	for i, topic := range l.Topics {
 		lg.Topics[i] = gointerfaces.ConvertH256ToHash(topic)

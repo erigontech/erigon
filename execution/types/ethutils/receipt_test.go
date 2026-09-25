@@ -156,7 +156,7 @@ func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
 		"nil":           nil,
 		"empty":         {},
 		"nil element":   {nil, {Address: to}},
-		"stamped log":   {{Address: to, BlockTimestamp: 7}},
+		"stamped log":   {{Address: to, BlockTimestamp: stampedAt(7)}},
 		"unstamped log": {{Address: to}},
 	} {
 		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
@@ -249,7 +249,7 @@ func TestMarshalSubscribeReceiptFullLogs(t *testing.T) {
 	require.Equal(t, types.Logs{{
 		Address: addr, Topics: []common.Hash{topic}, Data: []byte{0x2a}, BlockNumber: 7,
 		TxHash: txHash, TxIndex: 2, BlockHash: blockHash, Index: 3, Removed: true,
-		BlockTimestamp: 99,
+		BlockTimestamp: stampedAt(99),
 	}}, r.Logs)
 }
 
@@ -299,7 +299,7 @@ func TestRPCReceiptMatchesItsTags(t *testing.T) {
 		Address: addr, Topics: []common.Hash{{0x01}}, Data: []byte{1, 2},
 		BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3,
 		BlockHash: common.HexToHash("0xb10c"), Index: 4, Removed: true,
-		BlockTimestamp: 1_750_000_000,
+		BlockTimestamp: stampedAt(1_750_000_000),
 	}}
 
 	for name, r := range map[string]*RPCReceipt{
@@ -327,4 +327,9 @@ func TestRPCReceiptMatchesItsTags(t *testing.T) {
 			require.Equal(t, string(want), string(got))
 		})
 	}
+}
+
+func stampedAt(v uint64) *hexutil.Uint64 {
+	h := hexutil.Uint64(v)
+	return &h
 }

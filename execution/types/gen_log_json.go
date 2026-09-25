@@ -33,8 +33,8 @@ func (x *Log) writeJSONFields(s *jsonstream.StackStream) error {
 	ethjson.Data(s, "blockHash", x.BlockHash[:])
 	ethjson.Quantity(s, "logIndex", x.Index)
 	s.Field("removed").WriteBool(x.Removed)
-	if x.BlockTimestamp != 0 {
-		ethjson.Quantity(s, "blockTimestamp", x.BlockTimestamp)
+	if x.BlockTimestamp != nil {
+		ethjson.Quantity(s, "blockTimestamp", *x.BlockTimestamp)
 	}
 	return nil
 }
