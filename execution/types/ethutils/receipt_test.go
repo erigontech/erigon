@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 )
 
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
@@ -59,11 +60,11 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	config := chain.TestChainBerlinConfig
 
-	fields := MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
+	fields := MarshalReceipt(receipt, txn, config, header, false, false)
 	assert.Equal(t, preset, *fields.LogsBloom)
 
 	receipt.Bloom = types.Bloom{}
-	fields = MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
+	fields = MarshalReceipt(receipt, txn, config, header, false, false)
 	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
 }
 
@@ -140,7 +141,7 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 				TransactionIndex:  3,
 			}
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, tc.withBlockTimestamp)
+			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, tc.withBlockTimestamp)
 
 			requireFastJSONMatches(t, r)
 		})
@@ -148,17 +149,15 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 }
 
 // Every Logs shape against encoding/json. MarshalReceipt never builds a nil slice, so only a
-// direct construction reaches the typed-nil branches.
+// direct construction reaches the nil branches.
 func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	for name, logs := range map[string]any{
+	for name, logs := range map[string]jsonstream.Marshaler{
 		"nil types.Logs":    types.Logs(nil),
-		"nil []*Log":        []*types.Log(nil),
-		"nil []*RPCLog":     []*types.RPCLog(nil),
+		"nil types.RPCLogs": types.RPCLogs(nil),
 		"untyped nil":       nil,
 		"nil in types.Logs": types.Logs{nil, {Address: to}},
-		"nil in []*Log":     []*types.Log{{Address: to}, nil},
-		"unknown shape":     []string{"a"},
+		"nil in RPCLogs":    types.RPCLogs{nil, {Log: types.Log{Address: to}}},
 	} {
 		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
 	}
@@ -247,7 +246,7 @@ func TestMarshalSubscribeReceiptFullLogs(t *testing.T) {
 			BlockTimestamp:   99,
 		}},
 	})
-	require.Equal(t, []*types.RPCLog{{
+	require.Equal(t, types.RPCLogs{{
 		Log: types.Log{
 			Address: addr, Topics: []common.Hash{topic}, Data: []byte{0x2a}, BlockNumber: 7,
 			TxHash: txHash, TxIndex: 2, BlockHash: blockHash, Index: 3, Removed: true,
@@ -285,6 +284,48 @@ func TestMarshalSubscribeReceiptEffectiveGasPrice(t *testing.T) {
 			}
 			require.NotNil(t, got)
 			assert.Equal(t, tc.want, (*uint256.Int)(got))
+		})
+	}
+}
+
+// Every RPCReceipt field says which of the spec's forms it is written as, and the encoder is
+// held to that: a dropped field, a wrong form or a reordered key fails here.
+func TestRPCReceiptMatchesItsTags(t *testing.T) {
+	t.Parallel()
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	bloom := types.Bloom{1, 2, 3}
+	status := hexutil.Uint64(1)
+	price := hexutil.U256(*uint256.NewInt(7))
+	blobGas := hexutil.Uint64(9)
+	logs := types.RPCLogs{{Log: types.Log{
+		Address: addr, Topics: []common.Hash{{0x01}}, Data: []byte{1, 2},
+		BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3,
+		BlockHash: common.HexToHash("0xb10c"), Index: 4, Removed: true,
+	}, BlockTimestamp: 1_750_000_000}}
+
+	for name, r := range map[string]*RPCReceipt{
+		"every field set": {
+			BlockHash: common.HexToHash("0xb10c"), BlockNumber: 7,
+			TransactionHash: common.HexToHash("0xbeef"), TransactionIndex: 3,
+			From: &addr, To: &addr, Type: 2, GasUsed: 21_000, CumulativeGasUsed: 42_000,
+			ContractAddress: &addr, Logs: logs, LogsBloom: &bloom,
+			EffectiveGasPrice: &price, Status: &status, Root: hexutil.Bytes{9},
+			BlobGasPrice: &price, BlobGasUsed: &blobGas,
+		},
+		"optional fields absent": {Logs: types.RPCLogs{}},
+		// The timestamp-less shape goes through its own writer, held to the same tags.
+		"plain logs": {Logs: types.Logs{{
+			Address: addr, Topics: []common.Hash{{0x01}}, Data: []byte{1, 2},
+			BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3,
+			BlockHash: common.HexToHash("0xb10c"), Index: 4, Removed: true,
+		}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := ethjsontest.ExpectedJSON(r)
+			require.NoError(t, err)
+			got, err := jsonstream.Marshal(r)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
 		})
 	}
 }

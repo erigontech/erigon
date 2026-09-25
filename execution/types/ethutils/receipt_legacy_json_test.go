@@ -215,7 +215,7 @@ func TestMarshalReceiptMatchesLegacyJSON(t *testing.T) {
 								name := fmt.Sprintf("%s/%s/logs=%s/bloom=%v/%s/contract=%v/ts=%v", cfg.name, txName, logs.name, !bloom.IsEmpty(), state.name, contract != (common.Address{}), withBlockTimestamp)
 								want, err := json.Marshal(legacyMarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
 								require.NoError(t, err)
-								got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, receipt.TxHash, true, withBlockTimestamp))
+								got, err := json.Marshal(MarshalReceipt(receipt, txn, cfg.config, header, true, withBlockTimestamp))
 								require.NoError(t, err)
 								require.JSONEq(t, string(want), string(got), name)
 							}
@@ -295,6 +295,8 @@ func legacyMarshalSubscribeReceipt(protoReceipt *remoteproto.SubscribeReceiptsRe
 	}
 	receipt["logs"] = logs
 
+	// Always present, null when the backend sends neither, as geth's receipt has it.
+	receipt["effectiveGasPrice"] = nil
 	if protoReceipt.EffectiveGasPrice != nil {
 		receipt["effectiveGasPrice"] = (*hexutil.U256)(gointerfaces.ConvertH256ToUint256Int(protoReceipt.EffectiveGasPrice))
 	} else if protoReceipt.BaseFee != nil {

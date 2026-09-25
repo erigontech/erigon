@@ -451,7 +451,7 @@ func (api *OtterscanAPIImpl) GetBlockTransactions(ctx context.Context, number rp
 	result := make([]*ethutils.RPCReceipt, 0, pageEnd-pageStart)
 	for _, receipt := range receipts[pageStart:pageEnd] {
 		txn := b.Transactions()[receipt.TransactionIndex]
-		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), txn.Hash(), true, false)
+		marshalledRcpt := ethutils.MarshalReceipt(receipt, txn, chainConfig, b.HeaderNoCopy(), true, false)
 		marshalledRcpt.Logs = nil
 		marshalledRcpt.LogsBloom = nil
 		result = append(result, marshalledRcpt)
