@@ -102,7 +102,7 @@ func TestFillTransactionFillsDefaults(t *testing.T) {
 	require.NotEmpty(t, result.Raw)
 	require.NotNil(t, result.Tx)
 	require.Greater(t, uint64(result.Tx.Gas), uint64(0))
-	require.True(t, result.Tx.GasPrice != nil || result.Tx.MaxFeePerGas != nil)
+	require.True(t, !(*uint256.Int)(&result.Tx.GasPrice).IsZero() || result.Tx.MaxFeePerGas != nil)
 }
 
 func TestFillTransactionConflictingFees(t *testing.T) {
