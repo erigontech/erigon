@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -106,6 +107,29 @@ func TestNewRPCTransaction_EIP1559_AllZeroSig(t *testing.T) {
 	require.EqualValues(t, 0, result.V.ToInt().Int64())
 	require.EqualValues(t, 0, result.R.ToInt().Int64())
 	require.EqualValues(t, 0, result.S.ToInt().Int64())
+}
+
+func TestRPCMarshalBlockAllocsPerTransaction(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	blockAllocs := func(n int) float64 {
+		txs := make([]types.Transaction, n)
+		for i := range txs {
+			tx := &types.DynamicFeeTransaction{
+				CommonTx: types.CommonTx{Nonce: uint64(i), GasLimit: 21000, To: &to, V: *uint256.NewInt(1), R: *uint256.NewInt(2), S: *uint256.NewInt(3)},
+				ChainID:  *uint256.NewInt(1),
+				TipCap:   *uint256.NewInt(2),
+				FeeCap:   *uint256.NewInt(100),
+			}
+			tx.SetSender(accounts.InternAddress(to))
+			tx.Hash()
+			txs[i] = tx
+		}
+		block := types.NewBlock(&types.Header{Number: *uint256.NewInt(7), BaseFee: uint256.NewInt(7)}, txs, nil, nil, nil, nil)
+		block.Hash()
+		return testing.AllocsPerRun(100, func() { RPCMarshalBlock(block, true, true) })
+	}
+	// the result, its access list and its gas price
+	require.Equal(t, 3.0, blockAllocs(2)-blockAllocs(1))
 }
 
 func txFields(t *testing.T, r SignTransactionResult) map[string]json.RawMessage {

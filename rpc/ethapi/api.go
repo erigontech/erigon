@@ -513,8 +513,13 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 	if txs := block.Transactions(); inclTx && len(txs) > 0 {
 		if fullTx {
 			full := make([]*RPCTransaction, len(txs))
+			hash, number, time := block.Hash(), hexutil.U256(*uint256.NewInt(block.NumberU64())), hexutil.Uint64(block.Time())
+			indexes := make([]hexutil.Uint64, len(txs))
+			baseFee := block.BaseFee()
 			for i, txn := range txs {
-				full[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
+				indexes[i] = hexutil.Uint64(i)
+				full[i] = newRPCTransaction(txn, baseFee)
+				full[i].BlockHash, full[i].BlockNumber, full[i].BlockTimestamp, full[i].TransactionIndex = &hash, &number, &time, &indexes[i]
 			}
 			transactions = full
 		} else {
@@ -626,11 +631,18 @@ type RPCTransaction struct {
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
-	// Determine the signer. For replay-protected transactions, use the most permissive
-	// signer, because we assume that signers are backwards-compatible with old
-	// transactions. For non-protected transactions, the homestead signer is used
-	// because the return value of ChainId is zero for those transactions.
-	chainId := new(uint256.Int)
+	result := newRPCTransaction(txn, baseFee)
+	if blockHash != (common.Hash{}) {
+		result.BlockHash = &blockHash
+		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
+		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
+		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	}
+	return result
+}
+
+func newRPCTransaction(txn types.Transaction, baseFee *uint256.Int) *RPCTransaction {
+	var chainId *uint256.Int
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(txn.Type()),
 		Gas:   hexutil.Uint64(txn.GetGasLimit()),
@@ -696,19 +708,21 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		}
 	}
 
-	signer := types.LatestSignerForChainID(chainId)
-	from, err := txn.Sender(*signer)
-	if err != nil {
-		log.Warn("sender recovery", "err", err)
-	} else {
+	if from, ok := txn.GetSender(); ok && !from.IsZero() {
 		result.From = from.Value()
-	}
-
-	if blockHash != (common.Hash{}) {
-		result.BlockHash = &blockHash
-		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
-		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
-		result.TransactionIndex = (*hexutil.Uint64)(&index)
+	} else {
+		// For replay-protected transactions, use the most permissive signer, because we assume
+		// that signers are backwards-compatible with old transactions. For non-protected
+		// transactions, the homestead signer is used because their ChainId is zero.
+		if chainId == nil {
+			chainId = new(uint256.Int)
+		}
+		from, err := txn.Sender(*types.LatestSignerForChainID(chainId))
+		if err != nil {
+			log.Warn("sender recovery", "err", err)
+		} else {
+			result.From = from.Value()
+		}
 	}
 	return result
 }
@@ -722,9 +736,4 @@ func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) *hexutil.U256 
 		return (*hexutil.U256)(&price)
 	}
 	return (*hexutil.U256)(txn.GetFeeCap())
-}
-
-// newRPCTransactionFromBlockAndTxGivenIndex returns a transaction that will serialize to the RPC representation.
-func newRPCTransactionFromBlockAndTxGivenIndex(b *types.Block, txn types.Transaction, index uint64) *RPCTransaction {
-	return NewRPCTransaction(txn, b.Hash(), b.Time(), b.NumberU64(), index, b.BaseFee())
 }
