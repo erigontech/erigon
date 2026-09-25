@@ -226,7 +226,10 @@ func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
 
 	witnessAfter, err := newDebugApiForTest(m).ExecutionWitness(t.Context(), selector, nil)
 	require.NoError(t, err)
-	require.Equal(t, witnessBefore, witnessAfter)
+	require.Equal(t, witnessBefore.State, witnessAfter.State)
+	require.Equal(t, witnessBefore.Codes, witnessAfter.Codes)
+	require.Equal(t, witnessBefore.Keys, witnessAfter.Keys)
+	require.Equal(t, witnessBefore.Headers, witnessAfter.Headers)
 	proofAfter, err := ethAPI.GetProof(t.Context(), address, keys, &selector)
 	require.NoError(t, err)
 	require.Equal(t, proofBefore, proofAfter)

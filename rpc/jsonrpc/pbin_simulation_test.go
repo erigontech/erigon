@@ -79,7 +79,7 @@ func TestPBinDualSimulation(t *testing.T) {
 			require.Len(t, result, len(tc.blocks))
 			require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
 				for i, block := range result {
-					calls := block.Calls.([]CallResult)
+					calls := block.Calls
 					require.Equal(t, hexutil.Uint64(1), calls[0].Status)
 					require.Equal(t, rawdb.ReadHeaderByNumber(tx, tc.base+uint64(i)+1).Root, block.StateRoot)
 				}
