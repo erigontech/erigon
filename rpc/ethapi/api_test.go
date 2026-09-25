@@ -12,6 +12,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -106,6 +107,23 @@ func TestNewRPCTransaction_EIP1559_AllZeroSig(t *testing.T) {
 	require.EqualValues(t, 0, result.V.ToInt().Int64())
 	require.EqualValues(t, 0, result.R.ToInt().Int64())
 	require.EqualValues(t, 0, result.S.ToInt().Int64())
+}
+
+func TestNewRPCTransaction_OneAllocation(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	tx := &types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{Nonce: 1, GasLimit: 21000, To: &to, V: *uint256.NewInt(1), R: *uint256.NewInt(2), S: *uint256.NewInt(3)},
+		ChainID:  *uint256.NewInt(1),
+		TipCap:   *uint256.NewInt(2),
+		FeeCap:   *uint256.NewInt(100),
+	}
+	tx.SetSender(accounts.InternAddress(to))
+	tx.Hash()
+	baseFee := uint256.NewInt(7)
+	allocs := testing.AllocsPerRun(100, func() {
+		NewRPCTransaction(tx, common.Hash{1}, 1, 2, 3, baseFee)
+	})
+	require.Equal(t, 1.0, allocs)
 }
 
 func txFields(t *testing.T, r SignTransactionResult) map[string]json.RawMessage {

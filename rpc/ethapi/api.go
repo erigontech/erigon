@@ -619,16 +619,20 @@ type RPCTransaction struct {
 	YParity              *hexutil.U256              `json:"yParity,omitempty"`
 	R                    *hexutil.U256              `json:"r"`
 	S                    *hexutil.U256              `json:"s"`
+
+	// Values the pointer fields above point at when the source transaction has no copy to alias.
+	blockHash   common.Hash
+	blockNumber uint256.Int
+	blockTime   uint64
+	index       uint64
+	gasPrice    uint256.Int
+	accesses    types.AccessList
 }
 
 // NewRPCTransaction returns a transaction that will serialize to the RPC
 // representation, with the given location metadata set (if available).
 func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime uint64, blockNumber uint64, index uint64, baseFee *uint256.Int) *RPCTransaction {
-	// Determine the signer. For replay-protected transactions, use the most permissive
-	// signer, because we assume that signers are backwards-compatible with old
-	// transactions. For non-protected transactions, the homestead signer is used
-	// because the return value of ChainId is zero for those transactions.
-	chainId := new(uint256.Int)
+	var chainId *uint256.Int
 	result := &RPCTransaction{
 		Type:  hexutil.Uint64(txn.Type()),
 		Gas:   hexutil.Uint64(txn.GetGasLimit()),
@@ -668,13 +672,13 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		chainId = txn.GetChainID()
 		result.ChainID = (*hexutil.U256)(chainId)
 		result.YParity = (*hexutil.U256)(v)
-		acl := txn.GetAccessList()
-		result.Accesses = &acl
+		result.accesses = txn.GetAccessList()
+		result.Accesses = &result.accesses
 
 		if txn.Type() == types.AccessListTxType {
 			result.GasPrice = (*hexutil.U256)(txn.GetTipCap())
 		} else {
-			result.GasPrice = computeGasPrice(txn, baseFee)
+			result.GasPrice = computeGasPrice(txn, baseFee, &result.gasPrice)
 			result.MaxPriorityFeePerGas = (*hexutil.U256)(txn.GetTipCap())
 			result.MaxFeePerGas = (*hexutil.U256)(txn.GetFeeCap())
 		}
@@ -694,30 +698,43 @@ func NewRPCTransaction(txn types.Transaction, blockHash common.Hash, blockTime u
 		}
 	}
 
-	signer := types.LatestSignerForChainID(chainId)
-	from, err := txn.Sender(*signer)
-	if err != nil {
-		log.Warn("sender recovery", "err", err)
-	} else {
+	if from, ok := txn.GetSender(); ok && !from.IsZero() {
 		result.From = from.Value()
+	} else {
+		// For replay-protected transactions, use the most permissive signer, because we assume
+		// that signers are backwards-compatible with old transactions. For non-protected
+		// transactions, the homestead signer is used because their ChainId is zero.
+		if chainId == nil {
+			chainId = new(uint256.Int)
+		}
+		from, err := txn.Sender(*types.LatestSignerForChainID(chainId))
+		if err != nil {
+			log.Warn("sender recovery", "err", err)
+		} else {
+			result.From = from.Value()
+		}
 	}
 
 	if blockHash != (common.Hash{}) {
-		result.BlockHash = &blockHash
-		result.BlockNumber = (*hexutil.U256)(uint256.NewInt(blockNumber))
-		result.BlockTimestamp = (*hexutil.Uint64)(&blockTime)
-		result.TransactionIndex = (*hexutil.Uint64)(&index)
+		result.blockHash = blockHash
+		result.blockNumber.SetUint64(blockNumber)
+		result.blockTime = blockTime
+		result.index = index
+		result.BlockHash = &result.blockHash
+		result.BlockNumber = (*hexutil.U256)(&result.blockNumber)
+		result.BlockTimestamp = (*hexutil.Uint64)(&result.blockTime)
+		result.TransactionIndex = (*hexutil.Uint64)(&result.index)
 	}
 	return result
 }
 
 // computeGasPrice reports the effective gas price of a transaction already in a
 // block, and the fee cap of a pending one, as the execution-apis spec requires.
-func computeGasPrice(txn types.Transaction, baseFee *uint256.Int) *hexutil.U256 {
+func computeGasPrice(txn types.Transaction, baseFee *uint256.Int, price *uint256.Int) *hexutil.U256 {
 	if baseFee != nil {
 		// price = min(tip + baseFee, gasFeeCap)
-		price := u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
-		return (*hexutil.U256)(&price)
+		*price = u256.Min(u256.Add(*txn.GetTipCap(), *baseFee), *txn.GetFeeCap())
+		return (*hexutil.U256)(price)
 	}
 	return (*hexutil.U256)(txn.GetFeeCap())
 }
