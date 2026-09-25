@@ -53,3 +53,14 @@ func Data(s *jsonstream.StackStream, name string, b []byte) {
 func DataList[S ~[]E, E ~[length.Hash]byte](s *jsonstream.StackStream, name string, items S) {
 	jsonstream.HexesField(s, name, items)
 }
+
+// Datas writes variable-length byte strings as one array field, growing the buffer once for the
+// whole array. A nil slice is null.
+func Datas[S ~[]E, E ~[]byte](s *jsonstream.StackStream, name string, items S) {
+	s.Field(name)
+	if items == nil {
+		s.WriteNil()
+		return
+	}
+	jsonstream.WriteHexBytes(s, items)
+}

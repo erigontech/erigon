@@ -55,6 +55,9 @@ type Sample struct {
 	OptBytes   hexutil.Bytes        `json:"optBytes,omitempty" ethjson:"data"`
 	PtrHash    *common.Hash         `json:"ptrHash" ethjson:"data"`
 	Topics     []common.Hash        `json:"topics" ethjson:"datalist"`
+	OptTopics  []common.Hash        `json:"optTopics,omitempty" ethjson:"datalist"`
+	Blobs      []hexutil.Bytes      `json:"blobs" ethjson:"datalist"`
+	OptBlobs   []hexutil.Bytes      `json:"optBlobs,omitempty" ethjson:"datalist"`
 	Num        uint64               `json:"num" ethjson:"quantity"`
 	OptNum     hexutil.Uint         `json:"optNum,omitempty" ethjson:"quantity"`
 	PtrNum     *uint64              `json:"ptrNum" ethjson:"quantity"`
