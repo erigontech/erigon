@@ -313,7 +313,8 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 // on every comparison (O(n log n) allocations). Now we allocate exactly once
 // per transaction (O(n)) and sort with slices.SortFunc (pdqsort).
 func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend OracleBackend, blockNum uint64, limit int,
-	ignoreUnder *uint256.Int, out *[]*uint256.Int) error {
+	ignoreUnder *uint256.Int, out *[]*uint256.Int,
+) error {
 	block, err := backend.BlockByNumber(ctx, rpc.BlockNumber(blockNum))
 	if err != nil {
 		oracle.log.Error("getBlockPrices", "err", err)

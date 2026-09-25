@@ -76,7 +76,6 @@ func ReconnectAndPumpStreamLoop[TMessage any](
 		}
 
 		statusData, err := statusDataFactory(ctx)
-
 		if err != nil {
 			logger.Error("SentryReconnectAndPumpStreamLoop: statusDataFactory error", "stream", streamName, "err", err)
 			contextSleep(ctx, time.Second)

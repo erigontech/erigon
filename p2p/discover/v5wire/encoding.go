@@ -388,7 +388,7 @@ func (c *Codec) makeHandshakeAuth(toID enode.ID, addr netip.AddrPort, challenge 
 
 	// Create the ephemeral key. This needs to be first because the
 	// key is part of the ID nonce signature.
-	var remotePubkey = new(ecdsa.PublicKey)
+	remotePubkey := new(ecdsa.PublicKey)
 	if err := challenge.Node.Load((*enode.Secp256k1)(remotePubkey)); err != nil {
 		return nil, nil, errors.New("can't find secp256k1 key for recipient")
 	}

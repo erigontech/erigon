@@ -20,29 +20,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// MarshalFastJSONTo writes the log in the field order encoding/json uses for the struct,
-// straight into the response stream, so a result never needs a buffer of its own.
-func (l *RPCLog) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	if l == nil {
-		s.WriteNil()
-		return nil
-	}
-	s.WriteObjectStart()
-	s.Field("address").WriteHex(l.Address[:])
-	jsonstream.HexesField(s, "topics", l.Topics)
-	// A nil Data is "0x", not null.
-	s.Field("data").WriteHex(l.Data)
-	jsonstream.Text(s, "blockNumber", &l.BlockNumber)
-	s.Field("transactionHash").WriteHex(l.TxHash[:])
-	jsonstream.Text(s, "transactionIndex", &l.TxIndex)
-	s.Field("blockHash").WriteHex(l.BlockHash[:])
-	jsonstream.Text(s, "logIndex", &l.Index)
-	s.Field("removed").WriteBool(l.Removed)
-	jsonstream.Text(s, "blockTimestamp", &l.BlockTimestamp)
-	s.WriteObjectEnd()
-	return nil
-}
-
 // MarshalFastJSONTo writes the logs as a bare array. The receiver must stay a value: with a
 // pointer method RPCLogs itself would not satisfy the fast-JSON interface.
 func (logs RPCLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
@@ -51,3 +28,12 @@ func (logs RPCLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 }
 
 func writeLogElem(s *jsonstream.StackStream, l **RPCLog) { _ = (*l).MarshalFastJSONTo(s) }
+
+// MarshalFastJSONTo writes the logs as a bare array, without a log's block timestamp. The
+// receiver must stay a value, as for RPCLogs.
+func (logs Logs) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	jsonstream.ArrayValue(s, logs, writeLog)
+	return nil
+}
+
+func writeLog(s *jsonstream.StackStream, l **Log) { _ = (*l).MarshalFastJSONTo(s) }
