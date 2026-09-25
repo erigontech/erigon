@@ -26,6 +26,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c2h5oh/datasize"
 	lru "github.com/hashicorp/golang-lru/v2"
 	"google.golang.org/protobuf/types/known/emptypb"
 
@@ -1201,8 +1202,14 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 	return b, buf, nil
 }
 
-// txnBufPool holds record buffers for txsFromSnapshot, which each grow to the largest transaction read.
 var txnBufPool = sync.Pool{New: func() any { return new([]byte) }}
+
+// putTxnBuf drops buffers grown by rare huge transactions, so the pool does not retain them.
+func putTxnBuf(bufp *[]byte) {
+	if cap(*bufp) <= int(64*datasize.KB) {
+		txnBufPool.Put(bufp)
+	}
+}
 
 func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment) (txs []types.Transaction, senders []common.Address, err error) {
 	defer func() {
@@ -1232,7 +1239,7 @@ func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *
 	gg := txsSeg.Src().MakeGetter()
 	gg.Reset(txnOffset)
 	bufp := txnBufPool.Get().(*[]byte)
-	defer txnBufPool.Put(bufp)
+	defer putTxnBuf(bufp)
 	for i := range txCount {
 		if !gg.HasNext() {
 			return nil, nil, nil
