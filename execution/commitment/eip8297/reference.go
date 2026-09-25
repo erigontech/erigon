@@ -249,7 +249,9 @@ func merkelize(node Node, sum HashFn) common.Hash {
 	var preimage []byte
 	switch current := node.(type) {
 	case *Leaf:
-		preimage = LeafPreimage(nil, current.Key, current.Value)
+		preimage = append(preimage, LeafTag)
+		preimage = append(preimage, current.Key...)
+		preimage = append(preimage, current.Value...)
 	case *Branch:
 		left := merkelize(current.Left, sum)
 		right := merkelize(current.Right, sum)

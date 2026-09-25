@@ -24,7 +24,6 @@ import (
 	"sync"
 	"testing"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
 
@@ -232,7 +231,9 @@ func TestReferenceSingleKeyRootIsLeafHash(t *testing.T) {
 	var tree Tree
 	tree.Insert(entry.Key, entry.Value)
 	require.IsType(t, &Leaf{}, tree.Root)
-	require.Equal(t, common.Hash(keccak.Sum256(LeafPreimage(nil, entry.Key, entry.Value))), tree.RootHash())
+	preimage := append([]byte{LeafTag}, entry.Key...)
+	preimage = append(preimage, entry.Value...)
+	require.Equal(t, handKeccak(preimage), tree.RootHash())
 }
 
 func TestReferenceTwoKeyRootIsBranchHash(t *testing.T) {
