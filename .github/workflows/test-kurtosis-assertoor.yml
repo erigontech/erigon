@@ -381,7 +381,7 @@ jobs:
     permissions:
       contents: read
       actions: write
-    timeout-minutes: 60
+    timeout-minutes: ${{ matrix.suite == 'pectra' && 65 || 60 }}
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR can be evicted.
@@ -391,7 +391,8 @@ jobs:
       matrix:
         # test_timeout_minutes is a per-suite wall-clock cap for the Kurtosis+assertoor
         # step. Observed happy-path durations are roughly:
-        #   glamsterdam / caplin-minimal ~12 min, pectra ~30 min, regular ~34 min.
+        #   glamsterdam / caplin-minimal ~12 min, regular ~34 min. Pectra now
+        # waits for completed withdrawals and consolidation, which need several epochs.
         # The caps below give ~1.5–2x of the happy path so real regressions still
         # pass but pathological hangs (e.g. a node that silently stops proposing)
         # fail in reasonable time instead of burning hours.
@@ -416,12 +417,12 @@ jobs:
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
             ethereum_package_branch: "5.0.1"
-            test_timeout_minutes: 45
+            test_timeout_minutes: 55
             commitment_mode: serial
           - suite: pectra
             package_args: .github/workflows/kurtosis/pectra.io
             ethereum_package_branch: "5.0.1"
-            test_timeout_minutes: 45
+            test_timeout_minutes: 55
             commitment_mode: parallel
           - suite: glamsterdam
             package_args: .github/workflows/kurtosis/glamsterdam.io
@@ -657,6 +658,22 @@ jobs:
           FROM test/erigon:current-base
           ENV ERIGON_COMMITMENT_PARALLEL=${ERIGON_COMMITMENT_PARALLEL}
           EOF
+
+      - name: Check Pectra fixtures
+        if: matrix.suite == 'pectra' && !inputs.cache-warming-only
+        run: make test-pectra-fixtures
+
+      - name: Use Pectra playbooks from the tested revision
+        id: pectra-test-revision
+        if: matrix.suite == 'pectra' && !inputs.cache-warming-only
+        env:
+          TEST_REPOSITORY: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
+          TEST_REVISION: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          yq -i '.assertoor_params.tests[].file |= sub(
+            "https://raw.githubusercontent.com/erigontech/erigon/refs/heads/main/";
+            "https://raw.githubusercontent.com/" + strenv(TEST_REPOSITORY) + "/" + strenv(TEST_REVISION) + "/"
+          )' .github/workflows/kurtosis/pectra.io
 
       - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
         # On branch push, tests already passed in the merge queue. This run exists
