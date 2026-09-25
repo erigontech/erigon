@@ -133,7 +133,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,
-		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, nil)
+		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, false /* noBaseFee */, nil)
 	require.NoError(t, err)
 	require.Len(t, sequentialResults, len(txs))
 

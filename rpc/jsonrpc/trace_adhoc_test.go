@@ -101,6 +101,34 @@ func TestCoinbaseBalance(t *testing.T) {
 	if _, ok := results[1].StateDiff[accounts.ZeroAddress]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
 	}
+	sender := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	for _, res := range results {
+		requireSenderPaysGas(t, res.StateDiff, sender, big.NewInt(1))
+	}
+}
+
+func TestTraceCallChargesSenderForGas(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+	gas := hexutil.Uint64(90_000)
+	args := traceCallValueTransfer()
+	args.Gas = &gas
+	args.GasPrice = (*hexutil.U256)(uint256.NewInt(20_000_000_000))
+
+	result, err := api.Call(context.Background(), args, []string{TraceTypeStateDiff}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	requireSenderPaysGas(t, result.StateDiff, *args.From, args.Value.ToInt())
+}
+
+func requireSenderPaysGas(t *testing.T, diff map[accounts.Address]*StateDiffAccount, sender common.Address, value *big.Int) {
+	t.Helper()
+	acc, ok := diff[accounts.InternAddress(sender)]
+	require.True(t, ok, "sender must appear in stateDiff")
+	balance, ok := acc.Balance.(map[string]*StateDiffBalance)
+	require.True(t, ok, "sender balance must change, got %v", acc.Balance)
+	paid := new(big.Int).Sub(balance["*"].From.ToInt(), balance["*"].To.ToInt())
+	require.Positive(t, paid.Cmp(value), "sender must pay for gas on top of value %s, paid %s", value, paid)
 }
 
 func internedAddress(addr string) accounts.Address {
@@ -700,9 +728,11 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 
 	// EVM bytecode: GASPRICE (0x3a), PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
 	gasPriceCode := hexutil.Bytes{0x3a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	gas := hexutil.Uint64(100_000)
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:                 &bankAddr,
 		To:                   &contractAddr,
+		Gas:                  &gas,
 		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
 		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}, []string{TraceTypeTrace}, nil, &config.TraceConfig{
@@ -1127,7 +1157,7 @@ func TestCallManyBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	contractAddr := c.deployOpcodeContract(t, opGasprice)
 	api := c.traceAPI()
 
-	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
+	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"gas":"0x186a0","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
 		c.bankAddress.Hex(), contractAddr.Hex())
 
 	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, traceConfigWithBaseFeeOverride(uint256.NewInt(10)))
@@ -1487,7 +1517,7 @@ func TestCallManyHistoricalParentPinsStateBoundary(t *testing.T) {
 	parent := &rpc.BlockNumberOrHash{BlockNumber: &parentNum}
 
 	const bundle = `[
-	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x0"},["trace"]],
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0100000000000000000000000000000000000000","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["stateDiff"]]
 ]`
 
