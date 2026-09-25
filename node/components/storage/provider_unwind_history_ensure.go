@@ -116,10 +116,9 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	if !ok {
 		return noop, nil
 	}
-	if baselineStep >= walkEndStep {
-		// Baseline is already at/past the walk end — the compute's
-		// touch range is empty and it will just re-encode the baseline
-		// trie state. No history walk needed.
+	if unwindWalkIsEmpty(baselineStep, stepSize, toBlockLastTxNum) {
+		// The compute's touch range is empty; it will just re-encode the
+		// baseline trie state. No history walk needed.
 		return noop, nil
 	}
 
@@ -503,8 +502,19 @@ func stepSizeFromName(name string) uint64 {
 // range overlapping (baselineStep, walkEndStep]. Extracted so unit
 // tests can drive it with a synthetic PreverifiedItems slice without a
 // full Provider.
+// unwindWalkIsEmpty reports whether the compute's walk touches nothing. The
+// walk is (baselineStep*stepSize-1, targetTxNum], so it is empty only when the
+// target sits at or below the baseline file's last txNum — a step-granular
+// comparison wrongly calls a sub-step walk empty.
+func unwindWalkIsEmpty(baselineStep, stepSize, targetTxNum uint64) bool {
+	return targetTxNum < baselineStep*stepSize
+}
+
 func neededPreverifiedHistoryForWalk(items snapcfg.PreverifiedItems, baselineStep, walkEndStep, stepSize uint64) []snapcfg.PreverifiedItem {
-	if baselineStep >= walkEndStep {
+	// Equal steps are NOT an empty range: a v4 file cut mid-step leaves the
+	// compute walking a sub-step txNum range that still needs the step it
+	// sits in. Only a baseline past the walk end covers nothing.
+	if baselineStep > walkEndStep {
 		return nil
 	}
 	out := make([]snapcfg.PreverifiedItem, 0, 16)
