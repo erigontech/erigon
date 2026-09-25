@@ -43,7 +43,13 @@ make rpcdaemon
 ./build/bin/erigon --txpool.disable --private.api.addr=localhost:9090 --datadir=<your datadir> --http=false
 ```
 
-If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0` or TxPool will listen on localhost by default.
+If the components run on different devices, `localhost` is no longer the right address on either side.
+
+On the Erigon host, bind the internal gRPC endpoint to an interface the other components can reach — `--private.api.addr=<erigon_lan_ip>:9090` — since it defaults to `127.0.0.1:9090`. Bind it to a private interface, never `0.0.0.0`: the endpoint serves the remote database interface and is not authenticated by default, so it must not be reachable from a public network.
+
+On each of the other hosts, point the same flag at Erigon rather than at themselves: the `txpool` and `rpcdaemon` commands below use `--private.api.addr` as the address they dial, so `localhost:9090` has to become `<erigon_lan_ip>:9090`. `--sentry.api.addr` and `--txpool.api.addr` point in whichever direction the binary reading them needs: the `sentry` command binds `--sentry.api.addr` and `txpool` dials it, and the `txpool` command binds `--txpool.api.addr` and `rpcdaemon` dials it. Bind each one to a reachable private address on the host that serves it, and give the hosts that connect that same address.
+
+`--datadir` does not follow that pattern, and on `rpcdaemon` it is the one flag to drop. For `sentry` and `txpool` it names their *own* working directory on their own host — `txpool` keeps its database in `<datadir>/txpool` — so it stays. On `rpcdaemon` it means the opposite: it is the same-machine optimisation that makes the daemon read Erigon's `chaindata/` and snapshots directly instead of over gRPC (`RemoteServices` in `cmd/rpcdaemon/cli/config.go`, which logs *"if you run RPCDaemon on same machine with Erigon add --datadir option"*). Pointed at a host that has no Erigon datadir it fails on the missing salt files rather than falling back to the remote connection, so a remote `rpcdaemon` runs with `--private.api.addr` alone.
 
 ```sh
 ./build/bin/sentry --sentry.api.addr=localhost:9091 --datadir=<your datadir>
@@ -61,7 +67,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 
 * `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
 * `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
-* `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
+* `--datadir=<your datadir>`: The working directory of the process reading it, not a single shared path. For Erigon it is the node's own datadir; for `sentry` and `txpool` it is where that component keeps its own files (`txpool` uses `<datadir>/txpool`); for `rpcdaemon` it additionally selects direct local access to Erigon's databases and is therefore only valid when the daemon runs on the Erigon host.
 * `--http=false`: This flag disables the HTTP API server in Erigon (default: `true`). When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
 * `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the Sentry API. The Sentry API is used for communication between the TxPool and the Sentry.
 * `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the TxPool API (default: use value of `--private.api.addr`). The TxPool API is used for communication between the TxPool and other Erigon components.
