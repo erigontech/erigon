@@ -31,6 +31,11 @@ import (
 
 const maxReferenceKeyLength = 8192
 
+const (
+	referenceLeafTag   byte = 0x00
+	referenceBranchTag byte = 0x01
+)
+
 type Node interface{ node() }
 
 type Leaf struct {
@@ -264,13 +269,13 @@ func merkelize(node Node, sum HashFn) common.Hash {
 	var preimage []byte
 	switch current := node.(type) {
 	case *Leaf:
-		preimage = append(preimage, LeafTag)
+		preimage = append(preimage, referenceLeafTag)
 		preimage = append(preimage, current.Key...)
 		preimage = append(preimage, current.Value...)
 	case *Branch:
 		left := merkelize(current.Left, sum)
 		right := merkelize(current.Right, sum)
-		preimage = append(preimage, BranchTag)
+		preimage = append(preimage, referenceBranchTag)
 		preimage = append(preimage, EncodeBitPrefix(current.Prefix)...)
 		preimage = append(preimage, left[:]...)
 		preimage = append(preimage, right[:]...)

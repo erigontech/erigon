@@ -231,7 +231,7 @@ func TestReferenceSingleKeyRootIsLeafHash(t *testing.T) {
 	var tree Tree
 	tree.Insert(entry.Key, entry.Value)
 	require.IsType(t, &Leaf{}, tree.Root)
-	preimage := append([]byte{LeafTag}, entry.Key...)
+	preimage := append([]byte{0x00}, entry.Key...)
 	preimage = append(preimage, entry.Value...)
 	require.Equal(t, handKeccak(preimage), tree.RootHash())
 }
@@ -246,7 +246,7 @@ func TestReferenceTwoKeyRootIsBranchHash(t *testing.T) {
 	require.True(t, ok)
 	require.Empty(t, branch.Prefix)
 	left, right := treeHash(branch.Left), treeHash(branch.Right)
-	preimage := []byte{BranchTag, 0, 0}
+	preimage := []byte{0x01, 0, 0}
 	preimage = append(preimage, left[:]...)
 	preimage = append(preimage, right[:]...)
 	require.Equal(t, handKeccak(preimage), tree.RootHash())
@@ -257,9 +257,9 @@ func TestReferenceMerkelizeIndependentBranchOrder(t *testing.T) {
 		{Key: []byte{0x00}, Value: referenceValue(1)},
 		{Key: []byte{0x80}, Value: referenceValue(2)},
 	}
-	left := handKeccak(append(append([]byte{LeafTag}, entries[0].Key...), entries[0].Value...))
-	right := handKeccak(append(append([]byte{LeafTag}, entries[1].Key...), entries[1].Value...))
-	preimage := []byte{BranchTag, 0, 0}
+	left := handKeccak(append(append([]byte{0x00}, entries[0].Key...), entries[0].Value...))
+	right := handKeccak(append(append([]byte{0x00}, entries[1].Key...), entries[1].Value...))
+	preimage := []byte{0x01, 0, 0}
 	preimage = append(preimage, left[:]...)
 	preimage = append(preimage, right[:]...)
 
@@ -269,7 +269,7 @@ func TestReferenceMerkelizeIndependentBranchOrder(t *testing.T) {
 func TestReferenceBranchPreimageUsesHandAssembledBytes(t *testing.T) {
 	left := common.Hash{1}
 	right := common.Hash{2}
-	want := []byte{BranchTag, 0, 3, 0xa0}
+	want := []byte{0x01, 0, 3, 0xa0}
 	want = append(want, left[:]...)
 	want = append(want, right[:]...)
 	prefix := Bitpath{BitLen: 3}
