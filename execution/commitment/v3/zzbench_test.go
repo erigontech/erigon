@@ -1,5 +1,5 @@
 // Copyright 2026 The Erigon Authors
-// This file is part of the Erigon project.
+// This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
@@ -19,9 +19,7 @@ package v3
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
-	"math/rand"
 	"sync"
 	"testing"
 
@@ -29,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func benchUpdatesIn(dir string, mode commitment.Mode, entries []parityUpdate) *commitment.Updates {
@@ -40,74 +39,29 @@ func benchUpdatesIn(dir string, mode commitment.Mode, entries []parityUpdate) *c
 }
 
 func benchAddr(i int) []byte {
-	a := make([]byte, length.Addr)
-	binary.BigEndian.PutUint64(a[:8], uint64(i)*0x9E3779B97F4A7C15)
-	binary.BigEndian.PutUint64(a[8:16], uint64(i))
-	return a
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-address", Size: 20}, i)
 }
 
 func benchSlot(i int) []byte {
-	s := make([]byte, length.Hash)
-	binary.BigEndian.PutUint64(s[:8], uint64(i)*0xC2B2AE3D27D4EB4F)
-	binary.BigEndian.PutUint64(s[8:16], uint64(i))
-	return s
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "bench-slot", Size: 32}, i)
 }
 
 func benchEntries(shape string, n int) []parityUpdate {
+	seed := int64(0)
 	switch shape {
-	case "accounts":
-		out := make([]parityUpdate, n)
-		for i := range out {
-			out[i] = parityUpdate{key: benchAddr(i), update: accountParityUpdate(i)}
-		}
-		return out
-	case "storage":
-		out := make([]parityUpdate, 0, n*2)
-		for i := range n {
-			out = append(out,
-				parityUpdate{key: benchAddr(i), update: accountParityUpdate(i)},
-				parityUpdate{key: append(benchAddr(i), benchSlot(i)...), update: storageParityUpdate(i)})
-		}
-		return out
+	case "accounts", "storage":
 	case "whale":
-		rnd := rand.New(rand.NewSource(424242))
-		addr := make([]byte, length.Addr)
-		rnd.Read(addr)
-		out := make([]parityUpdate, 0, n+1)
-		out = append(out, parityUpdate{key: addr, update: accountParityUpdate(1)})
-		for i := range n {
-			slot := make([]byte, length.Hash)
-			rnd.Read(slot)
-			out = append(out, parityUpdate{key: append(append([]byte{}, addr...), slot...), update: storageParityUpdate(i)})
-		}
-		return out
+		seed = 424242
 	case "whale_mixed":
-		rnd := rand.New(rand.NewSource(99))
-		out := make([]parityUpdate, 0, n+2000)
-		for i := range 1000 {
-			out = append(out, parityUpdate{key: benchAddr(i), update: accountParityUpdate(i)})
-		}
-		waddr := make([]byte, length.Addr)
-		rnd.Read(waddr)
-		out = append(out, parityUpdate{key: waddr, update: accountParityUpdate(7)})
-		for i := range n {
-			slot := make([]byte, length.Hash)
-			rnd.Read(slot)
-			out = append(out, parityUpdate{key: append(append([]byte{}, waddr...), slot...), update: storageParityUpdate(i)})
-		}
-		for i := range 1000 {
-			out = append(out, parityUpdate{key: benchAddr(500000 + i), update: accountParityUpdate(i)})
-		}
-		return out
+		seed = 99
 	default:
-		out := make([]parityUpdate, 0, n*2)
-		for i := range n {
-			out = append(out,
-				parityUpdate{key: benchAddr(i), update: accountParityUpdate(i)},
-				parityUpdate{key: append(benchAddr(i), benchSlot(i)...), update: storageParityUpdate(i)})
-		}
-		return out
+		shape = "storage"
 	}
+	c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: shape, Count: n})
+	if err != nil {
+		panic(err)
+	}
+	return parityEntries(c.Rounds[0])
 }
 
 func BenchmarkFoldV3VsHPH(b *testing.B) {

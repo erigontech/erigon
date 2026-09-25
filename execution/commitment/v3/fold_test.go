@@ -19,11 +19,9 @@ package v3
 import (
 	"bytes"
 	"context"
-	"math/rand"
 	"strconv"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/empty"
@@ -31,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func TestFoldEmptyTrie(t *testing.T) {
@@ -207,45 +206,25 @@ func foldValue(plane byte, number int) []byte {
 
 func foldUpdate(plane byte, number int) commitment.Update {
 	if plane == planeStorage {
-		var storage [32]byte
-		storage[0] = byte(number)
-		storage[1] = byte(number >> 8)
-		return commitment.Update{Flags: commitment.StorageUpdate, StorageLen: 2, Storage: storage}
+		return *storageUpdate(commitmenttest.Storage(commitmenttest.StorageSpec{Number: number}))
 	}
-	return commitment.Update{CodeHash: empty.CodeHash, Flags: commitment.CodeUpdate | commitment.NonceUpdate | commitment.BalanceUpdate, Nonce: uint64(number), Balance: *uint256.NewInt(uint64(number * 3))}
+	return *testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "fold", Number: number}))
 }
 
 func distinctKeysAndPaths(plane byte, count int, seed int64) ([][]byte, [][]byte) {
-	rng := rand.New(rand.NewSource(seed))
-	keys := make([][]byte, 0, count)
-	paths := make([][]byte, 0, count)
-	seen := make(map[string]struct{}, count)
-	for len(paths) < count {
-		key := make([]byte, length.Addr)
-		if plane == planeStorage {
-			key = make([]byte, length.Addr)
-		}
-		rng.Read(key)
-		if _, ok := seen[string(key)]; ok {
-			continue
-		}
-		seen[string(key)] = struct{}{}
-		keys = append(keys, key)
-		path := commitment.KeyToHexNibbleHash(key)
-		paths = append(paths, path)
+	keys, err := commitmenttest.Keys(commitmenttest.MathRand(seed), commitmenttest.KeySpec{Kind: "random-distinct", Size: 20, Count: count})
+	if err != nil {
+		panic(err)
+	}
+	paths := make([][]byte, 0, len(keys))
+	for _, key := range keys {
+		paths = append(paths, commitment.KeyToHexNibbleHash(key))
 	}
 	return keys, paths
 }
 
 func foldKey(plane byte, number int) []byte {
-	key := make([]byte, length.Addr)
-	if plane == planeStorage {
-		key = make([]byte, length.Addr)
-	}
-	for i := range key {
-		key[i] = byte(number + i*17)
-	}
-	return key
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "fold", Size: 20}, number)
 }
 
 func mustCompact(path []byte) []byte {

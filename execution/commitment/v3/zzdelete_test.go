@@ -22,23 +22,19 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func slotPath(prefix ...byte) []byte {
-	p := make([]byte, 0, 64)
-	p = append(p, prefix...)
-	fill := byte(0xd)
-	if len(prefix) != 0 {
-		fill = (prefix[len(prefix)-1] + 7) & 0x0f
+	paths, err := commitmenttest.Paths(commitmenttest.Shape{Plane: "storage", Prefixes: [][]byte{prefix}})
+	if err != nil {
+		panic(err)
 	}
-	for len(p) < 64 {
-		p = append(p, fill)
-	}
-	return p
+	return paths[0]
 }
 
 func slotValue(path []byte) []byte {
-	return []byte{path[0] + 1, path[1] + 1, path[2] + 1, path[3] + 1}
+	return commitmenttest.Storage(commitmenttest.StorageSpec{Path: path})
 }
 
 func requireRecordsContain(t *testing.T, want, got map[string][]byte) {

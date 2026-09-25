@@ -20,6 +20,8 @@ import (
 	"bytes"
 	"errors"
 	"testing"
+
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 type leafFixture struct {
@@ -28,45 +30,14 @@ type leafFixture struct {
 }
 
 func recordFixture(flags byte, depth int, child, leaf, ext uint16, self []byte, extAt map[int][]byte, leafAt map[int]leafFixture) []byte {
-	if flags&hdrIsLeafRoot != 0 {
-		return append([]byte{flags}, append(make([]byte, 32), 0)...)
+	spec := commitmenttest.RecordSpec{Flags: flags, ChildMask: child, LeafMask: leaf, ExtensionMask: ext, SelfExtension: self}
+	for nib, path := range extAt {
+		spec.Extensions[nib] = path
 	}
-	rec := []byte{flags}
-	if flags&hdrHasSelfExt != 0 {
-		rec = append(rec, self...)
+	for nib, entry := range leafAt {
+		spec.Leaves[nib] = commitmenttest.Leaf{Suffix: entry.suffix, Value: entry.value}
 	}
-	mask := make([]byte, 4)
-	mask[0] = byte(child >> 8)
-	mask[1] = byte(child)
-	mask[2] = byte(leaf >> 8)
-	mask[3] = byte(leaf)
-	rec = append(rec, mask...)
-	if flags&hdrHasChildExt != 0 {
-		rec = append(rec, byte(ext>>8), byte(ext))
-	}
-	tree := child &^ leaf
-	for nib := range 16 {
-		if tree&(uint16(1)<<nib) == 0 {
-			continue
-		}
-		for range 32 {
-			rec = append(rec, byte(nib))
-		}
-	}
-	for nib := range 16 {
-		if ext&(uint16(1)<<nib) != 0 {
-			rec = append(rec, extAt[nib]...)
-		}
-	}
-	for nib := range 16 {
-		if leaf&(uint16(1)<<nib) != 0 {
-			entry := leafAt[nib]
-			rec = append(rec, entry.suffix...)
-			rec = append(rec, byte(len(entry.value)))
-			rec = append(rec, entry.value...)
-		}
-	}
-	return rec
+	return commitmenttest.Records([]commitmenttest.RecordSpec{spec})[0].Data
 }
 
 func extFixture(path []byte) []byte {

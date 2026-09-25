@@ -25,31 +25,22 @@ import (
 	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
-
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func sizeEOA(i int, rnd *rand.Rand) (*commitment.Update, []byte) {
-	u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate}
-	u.Nonce = uint64(rnd.Intn(500))
-	u.Balance = *uint256.NewInt(uint64(rnd.Int63n(4e18)))
-	u.CodeHash = empty.CodeHash
-	return u, empty.RootHash[:]
+	value, root := commitmenttest.SizedAccount(i, false, rnd)
+	return testAccountUpdate(value), root
 }
 
 func sizeContract(i int, rnd *rand.Rand) (*commitment.Update, []byte) {
-	u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
-	u.Nonce = 1
-	u.Balance = *uint256.NewInt(uint64(rnd.Int63n(1e15)))
-	u.CodeHash = common.HexToHash(fmt.Sprintf("0x%064x", i+7))
-	root := make([]byte, 32)
-	rnd.Read(root)
-	return u, root
+	value, root := commitmenttest.SizedAccount(i, true, rnd)
+	return testAccountUpdate(value), root
 }
 
 func doubleRLPLen(v []byte) int {

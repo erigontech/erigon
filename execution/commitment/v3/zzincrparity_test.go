@@ -19,20 +19,18 @@ package v3
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"sort"
 	"strings"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 type incrWorld struct {
@@ -275,87 +273,32 @@ func formatEntries(entries []parityUpdate) string {
 }
 
 func incrAddress(i int) []byte {
-	addr := make([]byte, length.Addr)
-	binary.BigEndian.PutUint64(addr[length.Addr-8:], uint64(i))
-	return addr
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 20}, i)
 }
 
 func incrSlot(addr []byte, j int) []byte {
-	key := make([]byte, 0, length.Addr+length.Hash)
-	key = append(key, addr...)
-	slot := make([]byte, length.Hash)
-	binary.BigEndian.PutUint64(slot[length.Hash-8:], uint64(j))
-	return append(key, slot...)
+	return append(bytes.Clone(addr), commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 32}, j)...)
 }
 
 func plainAccount(i int) *commitment.Update {
-	u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
-	u.Nonce = uint64(i + 1)
-	u.Balance = *uint256.NewInt(uint64(i + 1))
-	u.CodeHash = empty.CodeHash
-	return u
+	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "plain", Number: i}))
 }
 
 func incrAccountUpdate(rng *rand.Rand) *commitment.Update {
-	u := &commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate}
-	u.Nonce = uint64(rng.Intn(1 << 20))
-	u.Balance = *uint256.NewInt(rng.Uint64())
-	u.CodeHash = empty.CodeHash
-	if rng.Intn(3) == 0 {
-		u.CodeHash = common.BigToHash(uint256.NewInt(rng.Uint64()).ToBig())
-	}
-	return u
+	return testAccountUpdate(commitmenttest.RandomAccount(rng))
 }
 
 func incrStorageUpdate(rng *rand.Rand) *commitment.Update {
-	u := &commitment.Update{Flags: commitment.StorageUpdate}
-	n := 1 + rng.Intn(length.Hash)
-	rng.Read(u.Storage[:n])
-	u.Storage[0] |= 1
-	u.StorageLen = int8(n)
-	return u
+	return storageUpdate(commitmenttest.RandomStorage(rng))
 }
 
 func runIncrStress(t *testing.T, seed int64, blocks, addrs, slots, opsPerBlock int) {
 	t.Helper()
-	rng := rand.New(rand.NewSource(seed))
+	c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "stress", Rounds: blocks, Accounts: addrs, Slots: slots, OpsPerRound: opsPerBlock})
+	require.NoError(t, err)
 	w := newIncrWorld(t)
-	live := make(map[string]struct{})
-	for n := range blocks {
-		count := 1 + rng.Intn(opsPerBlock)
-		touched := make(map[string]struct{}, count)
-		entries := make([]parityUpdate, 0, count)
-		for range count {
-			addr := incrAddress(rng.Intn(addrs))
-			if _, busy := touched[string(addr)]; busy {
-				continue
-			}
-			_, alive := live[string(addr)]
-			switch {
-			case !alive:
-				touched[string(addr)] = struct{}{}
-				live[string(addr)] = struct{}{}
-				entries = append(entries, parityUpdate{key: addr, update: incrAccountUpdate(rng)})
-			case rng.Intn(16) == 0:
-				touched[string(addr)] = struct{}{}
-				delete(live, string(addr))
-				entries = append(entries, parityUpdate{key: addr, update: &commitment.Update{Flags: commitment.DeleteUpdate}})
-			default:
-				touched[string(addr)] = struct{}{}
-				if rng.Intn(4) == 0 {
-					entries = append(entries, parityUpdate{key: addr, update: incrAccountUpdate(rng)})
-				}
-				for range 1 + rng.Intn(3) {
-					key := incrSlot(addr, rng.Intn(slots))
-					if rng.Intn(5) == 0 {
-						entries = append(entries, parityUpdate{key: key, update: &commitment.Update{Flags: commitment.DeleteUpdate}})
-						continue
-					}
-					entries = append(entries, parityUpdate{key: key, update: incrStorageUpdate(rng)})
-				}
-			}
-		}
-		if !w.block(n, entries) {
+	for n, ops := range c.Rounds {
+		if !w.block(n, parityEntries(ops)) {
 			t.Logf("HexPatriciaHashed drifted from ground truth at block %d; v3 matched", w.hphDrift)
 			return
 		}
@@ -443,40 +386,14 @@ func TestParityDeleteCollapsesBranchBelowRoot(t *testing.T) {
 }
 
 func runRootCollapseStress(t *testing.T, seed int64, blocks, addrs int) {
-	rng := rand.New(rand.NewSource(seed))
+	c, err := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "root-collapse", Rounds: blocks, Accounts: addrs})
+	require.NoError(t, err)
 	w := newIncrWorld(t)
-	live := make(map[int]struct{})
-	for n := range blocks {
-		entries := make([]parityUpdate, 0, 4)
-		touched := make(map[int]struct{})
-		for i := range addrs {
-			if _, ok := live[i]; ok {
-				continue
-			}
-			if rng.Intn(2) == 0 {
-				live[i] = struct{}{}
-				touched[i] = struct{}{}
-				entries = append(entries, parityUpdate{key: incrAddress(i), update: plainAccount(i*31 + n)})
-			}
-		}
-		for i := range addrs {
-			if _, ok := live[i]; !ok {
-				continue
-			}
-			if _, busy := touched[i]; busy {
-				continue
-			}
-			if rng.Intn(3) != 0 {
-				continue
-			}
-			delete(live, i)
-			touched[i] = struct{}{}
-			entries = append(entries, parityUpdate{key: incrAddress(i), update: &commitment.Update{Flags: commitment.DeleteUpdate}})
-		}
-		if len(entries) == 0 {
+	for n, ops := range c.Rounds {
+		if len(ops) == 0 {
 			continue
 		}
-		if !w.block(n, entries) {
+		if !w.block(n, parityEntries(ops)) {
 			return
 		}
 	}

@@ -3,35 +3,19 @@ package v3
 import (
 	"bytes"
 	"context"
-	"math/rand"
 	"testing"
 
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func incrRoots(t *testing.T, batch1, batch2 int, seed int64) (v3r, hr []byte, err error) {
-	rnd := rand.New(rand.NewSource(seed))
-	addr := make([]byte, length.Addr)
-	rnd.Read(addr)
-	slots := make([][]byte, batch1+batch2)
-	for i := range slots {
-		s := make([]byte, length.Hash)
-		rnd.Read(s)
-		slots[i] = s
+	input, genErr := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", BatchSizes: []int{batch1, batch2}})
+	if genErr != nil {
+		return nil, nil, genErr
 	}
-	build := func(lo, hi int, withAcct bool) []parityUpdate {
-		var out []parityUpdate
-		if withAcct {
-			out = append(out, parityUpdate{key: addr, update: accountParityUpdate(1)})
-		}
-		for i := lo; i < hi; i++ {
-			out = append(out, parityUpdate{
-				key: append(append([]byte{}, addr...), slots[i]...), update: storageParityUpdate(i),
-			})
-		}
-		return out
-	}
+	rounds := [][]parityUpdate{parityEntries(input.Rounds[0]), parityEntries(input.Rounds[1])}
 	mk := func(mode commitment.Mode, es []parityUpdate) *commitment.Updates {
 		u := commitment.NewUpdates(mode, t.TempDir(), commitment.KeyToHexNibbleHash)
 		for _, e := range es {
@@ -46,18 +30,18 @@ func incrRoots(t *testing.T, batch1, batch2 int, seed int64) (v3r, hr []byte, er
 	hph := commitment.NewHexPatriciaHashed(length.Addr, ch, commitment.DefaultTrieConfig())
 	defer hph.Release()
 	ctx := context.Background()
-	if _, err = tr.Process(ctx, mk(commitment.ModeCollect, build(0, batch1, true)), "", nil, commitment.WarmupConfig{}); err != nil {
+	if _, err = tr.Process(ctx, mk(commitment.ModeCollect, rounds[0]), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
-	zzSeed(ch, build(0, batch1, true))
-	if _, err = hph.Process(ctx, mk(commitment.ModeUpdate, build(0, batch1, true)), "", nil, commitment.WarmupConfig{}); err != nil {
+	zzSeed(ch, rounds[0])
+	if _, err = hph.Process(ctx, mk(commitment.ModeUpdate, rounds[0]), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
-	if v3r, err = tr.Process(ctx, mk(commitment.ModeCollect, build(batch1, batch1+batch2, false)), "", nil, commitment.WarmupConfig{}); err != nil {
+	if v3r, err = tr.Process(ctx, mk(commitment.ModeCollect, rounds[1]), "", nil, commitment.WarmupConfig{}); err != nil {
 		return nil, nil, err
 	}
-	zzSeed(ch, build(batch1, batch1+batch2, false))
-	hr, err = hph.Process(ctx, mk(commitment.ModeUpdate, build(batch1, batch1+batch2, false)), "", nil, commitment.WarmupConfig{})
+	zzSeed(ch, rounds[1])
+	hr, err = hph.Process(ctx, mk(commitment.ModeUpdate, rounds[1]), "", nil, commitment.WarmupConfig{})
 	return v3r, hr, err
 }
 

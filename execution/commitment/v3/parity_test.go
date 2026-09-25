@@ -1,5 +1,5 @@
 // Copyright 2026 The Erigon Authors
-// This file is part of the Erigon project.
+// This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
 // it under the terms of the GNU Lesser General Public License as published by
@@ -19,7 +19,6 @@ package v3
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -28,11 +27,11 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 type parityUpdate struct {
@@ -95,37 +94,19 @@ func (p *parityContext) factory(context.Context) (commitment.PatriciaContext, fu
 var _ commitment.PatriciaContext = (*parityContext)(nil)
 
 func accountParityUpdate(i int) *commitment.Update {
-	balance := uint256.NewInt(uint64(i + 1))
-	return &commitment.Update{
-		Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-		Balance:  *balance,
-		Nonce:    uint64(i + 1),
-		CodeHash: common.HexToHash(fmt.Sprintf("0x%064x", i+1)),
-	}
+	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Kind: "parity", Number: i}))
 }
 
 func storageParityUpdate(i int) *commitment.Update {
-	update := &commitment.Update{Flags: commitment.StorageUpdate}
-	update.Storage[0] = byte(i)
-	update.Storage[1] = byte(i >> 8)
-	update.StorageLen = 2
-	return update
+	return storageUpdate(commitmenttest.Storage(commitmenttest.StorageSpec{Number: i}))
 }
 
 func parityAddress(i int) []byte {
-	address := make([]byte, length.Addr)
-	for j := range address {
-		address[j] = byte(i*17 + j)
-	}
-	return address
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "wrapping-address", Size: 20}, i)
 }
 
 func paritySlot(i int) []byte {
-	slot := make([]byte, length.Hash)
-	for j := range slot {
-		slot[j] = byte(i*29 + j*3)
-	}
-	return slot
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "wrapping-slot", Size: 32}, i)
 }
 
 func makeParityUpdates(t *testing.T, mode commitment.Mode, entries []parityUpdate) *commitment.Updates {
@@ -267,9 +248,7 @@ func TestParityCorrectnessCases(t *testing.T) {
 }
 
 func parityFuzzAddress(i int) []byte {
-	key := make([]byte, length.Addr)
-	binary.BigEndian.PutUint64(key[length.Addr-8:], uint64(i))
-	return key
+	return commitmenttest.Key(commitmenttest.KeySpec{Kind: "integer", Size: 20}, i)
 }
 
 func FuzzParityRandomSequences(f *testing.F) {

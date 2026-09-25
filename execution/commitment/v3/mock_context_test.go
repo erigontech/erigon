@@ -20,20 +20,14 @@ import (
 	"bytes"
 	"slices"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func fullAccountUpdate(nonce, balance uint64, codeHash common.Hash) commitment.Update {
-	return commitment.Update{
-		Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-		Nonce:    nonce,
-		Balance:  *uint256.NewInt(balance),
-		CodeHash: codeHash,
-	}
+	return *testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: codeHash}))
 }
 
 type mockContext struct {

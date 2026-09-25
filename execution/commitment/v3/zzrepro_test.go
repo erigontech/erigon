@@ -2,26 +2,18 @@ package v3
 
 import (
 	"context"
-	"math/rand"
 	"testing"
 
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 func oneAccountNSlots(t *testing.T, n int, seed int64) error {
-	rnd := rand.New(rand.NewSource(seed))
-	addr := make([]byte, length.Addr)
-	rnd.Read(addr)
-	entries := []parityUpdate{{key: addr, update: accountParityUpdate(1)}}
-	for i := range n {
-		slot := make([]byte, length.Hash)
-		rnd.Read(slot)
-		entries = append(entries, parityUpdate{
-			key:    append(append([]byte{}, addr...), slot...),
-			update: storageParityUpdate(i),
-		})
+	input, genErr := commitmenttest.Generate(commitmenttest.MathRand(seed), commitmenttest.SequenceSpec{Kind: "whale", Count: n})
+	if genErr != nil {
+		return genErr
 	}
+	entries := parityEntries(input.Rounds[0])
 	c := newParityContext()
 	tr := &Trie{}
 	tr.ResetContext(c)

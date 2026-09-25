@@ -22,12 +22,12 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/internal/commitmenttest"
 )
 
 type incrementalOp struct {
@@ -130,38 +130,17 @@ func TestIncrementalUnwindAndReexecute(t *testing.T) {
 }
 
 func incrementalBatches() ([][]incrementalOp, []incrementalOp) {
-	addressA := bytes.Repeat([]byte{0x11}, 20)
-	addressB := bytes.Repeat([]byte{0x22}, 20)
-	slotA1 := append(append([]byte(nil), addressA...), bytes.Repeat([]byte{0x31}, 32)...)
-	slotA2 := append(append([]byte(nil), addressA...), bytes.Repeat([]byte{0x32}, 32)...)
-	slotA3 := append(append([]byte(nil), addressA...), bytes.Repeat([]byte{0x33}, 32)...)
-	slotB1 := append(append([]byte(nil), addressB...), bytes.Repeat([]byte{0x41}, 32)...)
-
-	batch1 := []incrementalOp{
-		{key: addressA, update: incrementalAccountUpdate(1, 10)},
-		{key: addressB, update: incrementalAccountUpdate(2, 20)},
-		{key: slotA1, update: incrementalStorageUpdate(1)},
-		{key: slotB1, update: incrementalStorageUpdate(2)},
+	c, err := commitmenttest.Generate(commitmenttest.MathRand(0), commitmenttest.SequenceSpec{Kind: "incremental"})
+	if err != nil {
+		panic(err)
 	}
-	batch2 := []incrementalOp{
-		{key: addressA, update: incrementalAccountUpdate(3, 30)},
-		{key: addressA, update: incrementalAccountUpdate(4, 40)},
-		{key: slotA2, update: incrementalStorageUpdate(3)},
-		{key: slotA3, update: incrementalDeleteUpdate()},
-		{key: slotA3, update: incrementalStorageUpdate(4)},
+	batches := make([][]incrementalOp, len(c.Rounds))
+	state := make(commitmenttest.State)
+	for i, round := range c.Rounds {
+		batches[i] = incrementalEntries(round)
+		state.Apply(round)
 	}
-	batch3 := []incrementalOp{
-		{key: addressA, read: true},
-		{key: slotA1, read: true},
-		{key: addressB, update: incrementalDeleteUpdate()},
-	}
-	final := []incrementalOp{
-		{key: addressA, update: incrementalAccountUpdate(4, 40)},
-		{key: slotA1, update: incrementalStorageUpdate(1)},
-		{key: slotA2, update: incrementalStorageUpdate(3)},
-		{key: slotA3, update: incrementalStorageUpdate(4)},
-	}
-	return [][]incrementalOp{batch1, batch2, batch3}, final
+	return batches, incrementalEntries(state.Ops())
 }
 
 func incrementalUpdates(t *testing.T, mode commitment.Mode, ops []incrementalOp) *commitment.Updates {
@@ -221,19 +200,11 @@ func mustRoot(t *testing.T, trie *Trie) []byte {
 }
 
 func incrementalAccountUpdate(nonce, balance uint64) *commitment.Update {
-	value := uint256.NewInt(balance)
-	return &commitment.Update{
-		Flags:    commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate,
-		Balance:  *value,
-		Nonce:    nonce,
-		CodeHash: common.HexToHash("0x1234"),
-	}
+	return testAccountUpdate(commitmenttest.Account(commitmenttest.AccountSpec{Nonce: nonce, Balance: balance, CodeHash: common.HexToHash("0x1234")}))
 }
 
 func incrementalStorageUpdate(value byte) *commitment.Update {
-	update := &commitment.Update{Flags: commitment.StorageUpdate, StorageLen: 1}
-	update.Storage[0] = value
-	return update
+	return storageUpdate(commitmenttest.Storage(commitmenttest.StorageSpec{Value: []byte{value}}))
 }
 
 func incrementalDeleteUpdate() *commitment.Update {
