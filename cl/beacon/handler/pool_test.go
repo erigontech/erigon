@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -516,6 +517,47 @@ func TestPoolSyncCommitteesReturns500OnAdmissionFailure(t *testing.T) {
 		"a known admission failure must not be hidden behind a 200")
 }
 
+// TestPoolSyncCommitteesDoesNotSurface500ForExpiredAdmission proves an
+// already-expired message is not treated as a server-side admission
+// failure the way queue-full/shutdown/fork-digest failures are: a message
+// whose useful window has already closed is expected, ordinary behavior -
+// the same situation ErrIgnore already represents for validation - not a
+// fault worth a 500. Without this, an ordinary stale-slot message (which
+// ProcessMessage exempts from failures via ErrIgnore, but which the handler
+// still hands to PublishBackground) turns into a spurious 500 purely
+// because its computed expiry is naturally already in the past.
+func TestPoolSyncCommitteesDoesNotSurface500ForExpiredAdmission(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(gossip.ErrPublishJobExpired).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode,
+		"an already-expired message must not be surfaced as a 500 - it's ordinary, not a fault")
+}
+
 // TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure proves the
 // response precedence when a batch has both a validation failure (an
 // out-of-range validator index, which pool.go already reports as an
@@ -581,6 +623,24 @@ func TestSyncCommitteeMessageExpiry(t *testing.T) {
 	require.Equal(t, want, got)
 	require.NotEqual(t, ethClock.GetSlotTime(slot).Add(500*time.Millisecond), got,
 		"sanity: must be keyed off slot+1 (slot end), not slot (slot start)")
+}
+
+// TestSyncCommitteeMessageExpiryDoesNotWrapAtMaxSlot proves slot+1 doesn't
+// silently overflow back to genesis for the maximum representable slot: a
+// naive slot+1 wraps uint64's MaxUint64 to 0, producing a deterministic
+// near-genesis (always-in-the-past) expiry for an obviously out-of-range
+// input, rather than the huge, out-of-range value the input itself implies.
+func TestSyncCommitteeMessageExpiryDoesNotWrapAtMaxSlot(t *testing.T) {
+	bcfg := clparams.MainnetBeaconConfig
+	bcfg.InitializeForkSchedule()
+	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
+	netCfg := &clparams.NetworkConfig{MaximumGossipClockDisparity: clparams.ConfigDurationMSec(500 * time.Millisecond)}
+
+	got := syncCommitteeMessageExpiry(ethClock, netCfg, math.MaxUint64)
+	require.NotEqual(t, ethClock.GetSlotTime(0).Add(500*time.Millisecond), got,
+		"slot+1 must not wrap around to genesis for the maximum representable slot")
 }
 
 // TestPoolSyncCommitteesUsesCalculatedExpiry proves the handler actually

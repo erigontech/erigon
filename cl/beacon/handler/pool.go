@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"time"
 
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	networkgossip "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -45,7 +47,11 @@ import (
 // coarser, whole-slot-rounding IsSlotCurrentSlotWithMaximumClockDisparity
 // does not preserve.
 func syncCommitteeMessageExpiry(clock eth_clock.EthereumClock, cfg *clparams.NetworkConfig, slot uint64) time.Time {
-	return clock.GetSlotTime(slot + 1).Add(time.Duration(cfg.MaximumGossipClockDisparity))
+	nextSlot := slot
+	if slot != math.MaxUint64 {
+		nextSlot = slot + 1
+	}
+	return clock.GetSlotTime(nextSlot).Add(time.Duration(cfg.MaximumGossipClockDisparity))
 }
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -507,10 +513,14 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			// A non-nil return means the message was never admitted to the
 			// queue - a known failure, not an unknowable later network one -
 			// so it is surfaced below rather than swallowed behind a 200.
+			// ErrPublishJobExpired is excluded: a message whose window has
+			// already closed (e.g. an ordinary stale slot, which
+			// ProcessMessage above already exempted from failures via
+			// ErrIgnore) is expected, not a server-side fault.
 			if pubErr := a.gossipManager.PublishBackground(
 				gossip.TopicNameSyncCommittee(int(subnetId)), encodedSSZ, expiry,
 				"validatorIndex", v.ValidatorIndex, "subnet", subnetId, "slot", v.Slot,
-			); pubErr != nil && admissionErr == nil {
+			); pubErr != nil && !errors.Is(pubErr, networkgossip.ErrPublishJobExpired) && admissionErr == nil {
 				admissionErr = pubErr
 			}
 		}
