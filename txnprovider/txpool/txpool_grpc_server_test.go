@@ -58,7 +58,6 @@ type addMockTxPool struct {
 	addLocalSlotsLen int
 }
 
-func (m *addMockTxPool) ValidateSerializedTxn(serializedTxn []byte) error { return nil }
 func (m *addMockTxPool) PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error) {
 	return false, nil
 }

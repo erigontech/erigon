@@ -74,8 +74,6 @@ const txMaxBroadcastSize = 4 * 1024
 //
 //go:generate mockgen -typed=true -destination=./pool_mock.go -package=txpool . Pool
 type Pool interface {
-	ValidateSerializedTxn(serializedTxn []byte) error
-
 	// Handle 3 main events - new remote txns from p2p, new local txns from RPC, new blocks from execution layer
 	AddRemoteTxns(ctx context.Context, newTxns TxnSlots, peerID PeerID, sentry sentryproto.SentryClient)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
@@ -1329,10 +1327,7 @@ func (p *TxPool) GetMaxBlobsPerBlock() uint64 {
 	return p.chainConfig.GetMaxBlobsPerBlock(uint64(now))
 }
 
-func (p *TxPool) ValidateSerializedTxn(serializedTxn []byte) error {
-	return ValidateSerializedTxn(serializedTxn)
-}
-
+// ValidateSerializedTxn checks that the serialized transaction does not exceed the size limit for its type.
 func ValidateSerializedTxn(serializedTxn []byte) error {
 	const (
 		// txnSlotSize is used to calculate how many data slots a single transaction

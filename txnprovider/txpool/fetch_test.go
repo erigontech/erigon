@@ -286,13 +286,6 @@ func TestOnNewBlock(t *testing.T) {
 
 	pool := NewMockPool(ctrl)
 
-	pool.EXPECT().
-		ValidateSerializedTxn(gomock.Any()).
-		DoAndReturn(func(_ []byte) error {
-			return nil
-		}).
-		Times(3)
-
 	var minedTxns TxnSlots
 	pool.EXPECT().
 		OnNewBlock(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -678,7 +671,6 @@ func TestNoPenaltyOnInternalDBError(t *testing.T) {
 	sentryServer := sentryproto.NewMockSentryServer(ctrl)
 	pool := NewMockPool(ctrl)
 	pool.EXPECT().Started().Return(true)
-	pool.EXPECT().ValidateSerializedTxn(gomock.Any()).Return(nil).AnyTimes()
 
 	dbErr := fmt.Errorf("mdbx read error")
 	pool.EXPECT().IdHashKnown(gomock.Any(), gomock.Any()).Return(false, dbErr).AnyTimes()
