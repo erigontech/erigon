@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	state_mock "github.com/erigontech/erigon/cl/abstract/mock_services"
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -85,6 +86,26 @@ import (
 )
 
 var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
+
+func TestComputeAttestationRewardUsesGloasParentHeaderSlot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	s := state_mock.NewMockBeaconState(ctrl)
+	cfg := clparams.MainnetBeaconConfig
+	data := &solid.AttestationData{Slot: 10}
+	attestation := &solid.Attestation{Data: data}
+	wantErr := errors.New("stop after parent slot observation")
+
+	s.EXPECT().BaseRewardPerIncrement().Return(uint64(0))
+	s.EXPECT().BeaconConfig().Return(&cfg).AnyTimes()
+	s.EXPECT().Slot().Return(uint64(12)).AnyTimes()
+	s.EXPECT().Version().Return(clparams.GloasVersion)
+	s.EXPECT().GetLatestExecutionPayloadBid().Return(&cltypes.ExecutionPayloadBid{Slot: 9}).AnyTimes()
+	s.EXPECT().LatestBlockHeader().Return(cltypes.BeaconBlockHeader{Slot: 11}).AnyTimes()
+	s.EXPECT().GetAttestationParticipationFlagIndicies(data, uint64(2), uint64(11), false).Return(nil, wantErr)
+
+	_, err := computeAttestationReward(s, attestation)
+	require.ErrorIs(t, err, wantErr)
+}
 
 type publishingBlockKey struct {
 	proposer uint64

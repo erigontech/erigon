@@ -211,6 +211,8 @@ type ForkChoiceStore struct {
 	// Separate from pendingEnvelopes so that OnBlock replay can distinguish local origin
 	// (skip BLS) from gossip origin (full verification) without inspecting envelope contents.
 	pendingLocalSelfBuildEnvelopes *lru.Cache[common.Hash, *cltypes.SignedExecutionPayloadEnvelope]
+	parentBuilderExitsOnce         sync.Once
+	parentBuilderExits             *lru.Cache[common.Hash, []solid.BuilderExitRequest]
 
 	// [New in Gloas:EIP7732] Execution blocks whose CL state transition succeeded but
 	// whose EL newPayload failed (e.g. because EL hasn't caught up after forward sync).
@@ -484,14 +486,8 @@ func NewForkChoiceStore(
 	f.highestSeenRoot.Store(common.Hash(anchorRoot))
 	f.time.Store(anchorState.GenesisTime() + anchorState.BeaconConfig().SecondsPerSlot*anchorState.Slot())
 
-	// [New in Gloas:EIP7732] Initialize payload timeliness and data availability votes
-	// Anchor block votes are initialized to all true (prior payloads/blobs were available)
 	var anchorTimelinessVotes [clparams.PtcSize]int8
 	var anchorDataAvailabilityVotes [clparams.PtcSize]int8
-	for i := range anchorTimelinessVotes {
-		anchorTimelinessVotes[i] = 1
-		anchorDataAvailabilityVotes[i] = 1
-	}
 	f.payloadTimelinessVote.Store(common.Hash(anchorRoot), anchorTimelinessVotes)
 	f.payloadDataAvailabilityVote.Store(common.Hash(anchorRoot), anchorDataAvailabilityVotes)
 
@@ -521,6 +517,43 @@ func (f *ForkChoiceStore) GetRecentExecutionPayloadStatusByRoot(blockRoot common
 		return execution_client.PayloadStatusInvalidated, true
 	}
 	return f.payloadStatusAuthority(blockRoot)
+}
+
+func (f *ForkChoiceStore) GetCachedParentBuilderExitRequests(blockRoot common.Hash) ([]solid.BuilderExitRequest, bool) {
+	f.initParentBuilderExitRequests()
+	requests, ok := f.parentBuilderExits.Get(blockRoot)
+	return slices.Clone(requests), ok
+}
+
+func (f *ForkChoiceStore) cacheParentBuilderExitRequests(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
+		return
+	}
+	exits := envelope.Message.ExecutionRequests.BuilderExits
+	count := 0
+	if exits != nil {
+		count = exits.Len()
+	}
+	requests := make([]solid.BuilderExitRequest, count)
+	for i := range count {
+		request := exits.Get(i)
+		if request == nil {
+			return
+		}
+		requests[i] = *request
+	}
+	f.initParentBuilderExitRequests()
+	f.parentBuilderExits.Add(blockRoot, requests)
+}
+
+func (f *ForkChoiceStore) initParentBuilderExitRequests() {
+	f.parentBuilderExitsOnce.Do(func() {
+		var err error
+		f.parentBuilderExits, err = lru.New[common.Hash, []solid.BuilderExitRequest](checkpointsPerCache)
+		if err != nil {
+			panic(err)
+		}
+	})
 }
 
 // GetExecutionPayloadGasLimit returns the gas_limit of a recently validated execution payload.

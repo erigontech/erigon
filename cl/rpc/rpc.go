@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"time"
 
@@ -212,8 +213,8 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 	if maxRequestPayloads == 0 {
 		return nil, "", errors.New("MAX_REQUEST_PAYLOADS is zero")
 	}
-	if count > maxRequestPayloads {
-		return nil, "", fmt.Errorf("execution payload envelopes by range count %d exceeds MAX_REQUEST_PAYLOADS %d", count, maxRequestPayloads)
+	if count > math.MaxUint64-start {
+		return nil, "", fmt.Errorf("execution payload envelopes by range start %d plus count %d overflows", start, count)
 	}
 	var buf buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buf, &cltypes.ExecutionPayloadEnvelopesByRangeRequest{
@@ -223,7 +224,8 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 		return nil, "", err
 	}
 
-	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), count), count)
+	responseLimit := min(count, maxRequestPayloads)
+	responsePacket, pid, responseErr := b.sendRequest(ctx, communication.ExecutionPayloadEnvelopesByRangeProtocolV1, buf.Bytes(), communication.MaxWireResponseBytes(int(clparams.MaxChunkSize), responseLimit), responseLimit)
 	if responseErr != nil && len(responsePacket) == 0 {
 		return nil, pid, responseErr
 	}

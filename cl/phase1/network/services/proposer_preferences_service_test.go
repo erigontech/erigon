@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"sync"
 	"testing"
@@ -35,6 +36,7 @@ func setupProposerPreferencesService(t *testing.T, ctrl *gomock.Controller) (*pr
 	beaconCfg.SlotsPerEpoch = 32
 	beaconCfg.SlotsPerHistoricalRoot = 8192
 	beaconCfg.MinSeedLookahead = 1
+	beaconCfg.GloasForkEpoch = 0
 	beaconCfg.ValidatorRegistryLimit = 1024
 	forkChoiceMock := &forkchoice_mock.ForkChoiceStorageMock{
 		Headers:             map[common.Hash]*cltypes.BeaconBlockHeader{},
@@ -110,6 +112,74 @@ func TestProposerPreferencesServiceNames(t *testing.T) {
 	names := service.Names()
 	require.Len(t, names, 1)
 	require.Equal(t, "proposer_preferences", names[0])
+}
+
+func TestProposerPreferencesServiceGloasForkBoundary(t *testing.T) {
+	for _, slot := range []uint64{95, 96, 100} {
+		t.Run(fmt.Sprint(slot), func(t *testing.T) {
+			service, _, clock, epbsPool, _ := setupProposerPreferencesService(t, gomock.NewController(t))
+			service.beaconCfg.GloasForkEpoch = 3
+			clock.EXPECT().GetCurrentSlot().Return(uint64(94)).AnyTimes()
+			msg := newTestSignedProposerPreferences(slot, 42)
+			err := service.ProcessMessage(t.Context(), nil, msg)
+			if slot < 96 {
+				require.ErrorIs(t, err, ErrIgnore)
+				require.ErrorContains(t, err, "pre-Gloas")
+				require.Empty(t, epbsPool.ProposerPreferences.Keys())
+				return
+			}
+			require.NoError(t, err)
+			_, ok := epbsPool.GetPreference(slot, testDependentRoot)
+			require.True(t, ok)
+		})
+	}
+}
+
+func TestProposerPreferencesServiceShufflingDependentSlot(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		proposalSlot  uint64
+		stateSlot     uint64
+		dependentSlot uint64
+		valid         bool
+	}{
+		{name: "genesis epoch genesis root", proposalSlot: 1, valid: true},
+		{name: "genesis epoch later root", proposalSlot: 2, dependentSlot: 1},
+		{name: "last genesis lookahead epoch genesis root", proposalSlot: 32, valid: true},
+		{name: "last genesis lookahead epoch later root", proposalSlot: 32, dependentSlot: 1},
+		{name: "later epoch boundary root", proposalSlot: 64, stateSlot: 32, dependentSlot: 31, valid: true},
+		{name: "later epoch root at lookahead start", proposalSlot: 64, stateSlot: 32, dependentSlot: 32},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service, _, clock, epbsPool, fc := setupProposerPreferencesService(t, gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(test.stateSlot)
+			depState := newProposerPreferencesState(service.beaconCfg, nil)
+			require.NoError(t, depState.SetSlot(test.stateSlot))
+			depState.GetProposerLookahead().Set(int(test.proposalSlot-test.stateSlot), 42)
+			fc.StateAtBlockRootVal[testDependentRoot] = depState
+			fc.Headers[testDependentRoot] = &cltypes.BeaconBlockHeader{Slot: test.dependentSlot}
+			msg := newTestSignedProposerPreferences(test.proposalSlot, 42)
+			verified := 0
+			blsVerify = func(_ []byte, _ []byte, _ []byte) (bool, error) {
+				verified++
+				return true, nil
+			}
+
+			err := service.ProcessMessage(t.Context(), nil, msg)
+			stored, ok := epbsPool.GetPreference(test.proposalSlot, testDependentRoot)
+			if !test.valid {
+				require.ErrorContains(t, err, "after shuffling dependent slot")
+				require.NotErrorIs(t, err, ErrIgnore)
+				require.False(t, ok)
+				require.Zero(t, verified)
+				return
+			}
+			require.NoError(t, err)
+			require.True(t, ok)
+			require.Same(t, msg, stored)
+			require.Equal(t, 1, verified)
+		})
+	}
 }
 
 func TestProposerPreferencesServiceNilMessage(t *testing.T) {
@@ -245,12 +315,12 @@ func TestIsPastSlotBoundaries(t *testing.T) {
 	}{
 		{"before_start", start.Add(-time.Nanosecond), false},
 		{"at_start", start, false},
-		{"at_disparity", start.Add(gloasMaximumClockDisparity), false},
-		{"after_disparity", start.Add(gloasMaximumClockDisparity + time.Nanosecond), true},
+		{"at_disparity", start.Add(maximumGossipClockDisparity), false},
+		{"after_disparity", start.Add(maximumGossipClockDisparity + time.Nanosecond), true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			past, valid := isPastSlot(service.ethClock, service.beaconCfg, test.now, 100, gloasMaximumClockDisparity)
+			past, valid := isPastSlot(service.ethClock, service.beaconCfg, test.now, 100, maximumGossipClockDisparity)
 			require.True(t, valid)
 			require.Equal(t, test.past, past)
 		})
@@ -262,7 +332,7 @@ func TestProposerPreferencesServiceAcceptsCurrentSlotAtDisparityEdge(t *testing.
 	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
 	msg := newTestSignedProposerPreferences(96, 42)
 	service.now = func() time.Time {
-		return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity)
+		return service.ethClock.GetSlotTime(96).Add(maximumGossipClockDisparity)
 	}
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
@@ -280,7 +350,7 @@ func TestProposerPreferencesServiceEmitsEvent(t *testing.T) {
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 	msg := newTestSignedProposerPreferences(100, 42)
-	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity) }
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(maximumGossipClockDisparity) }
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
 	event := <-events
@@ -311,7 +381,7 @@ func TestProposerPreferencesServiceProgressesWhileEventFeedIsBlocked(t *testing.
 	<-ready
 
 	msg := newTestSignedProposerPreferences(100, 42)
-	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity) }
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(maximumGossipClockDisparity) }
 	processDone := make(chan error, 1)
 	ctx := t.Context()
 	go func() { processDone <- service.ProcessMessage(ctx, nil, msg) }()
@@ -338,7 +408,7 @@ func TestProposerPreferencesServiceLookaheadClockDisparityBoundary(t *testing.T)
 	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
 	msg := newTestSignedProposerPreferences(100, 42)
 	lookaheadStart := service.ethClock.GetSlotTime(64)
-	now := lookaheadStart.Add(-gloasMaximumClockDisparity - time.Millisecond)
+	now := lookaheadStart.Add(-maximumGossipClockDisparity - time.Millisecond)
 	service.now = func() time.Time { return now }
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
@@ -346,7 +416,7 @@ func TestProposerPreferencesServiceLookaheadClockDisparityBoundary(t *testing.T)
 	require.Contains(t, err.Error(), "not yet known")
 	require.False(t, service.hasSeenPreference(newSeenProposerPreferencesKey(msg.Message)))
 
-	now = lookaheadStart.Add(-gloasMaximumClockDisparity)
+	now = lookaheadStart.Add(-maximumGossipClockDisparity)
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
 	stored, ok := epbsPool.GetPreference(100, testDependentRoot)
 	require.True(t, ok)
@@ -401,7 +471,7 @@ func TestProposerPreferencesServiceDoesNotPruneOnExpiredMessage(t *testing.T) {
 	msg := newTestSignedProposerPreferences(100, 42)
 	key := pool.ProposerPreferencesKey{Slot: 100, DependentRoot: msg.Message.DependentRoot}
 	epbsPool.ProposerPreferences.Add(key, msg)
-	preferenceBoundary := time.Unix(100*12, 0).Add(gloasMaximumClockDisparity)
+	preferenceBoundary := time.Unix(100*12, 0).Add(maximumGossipClockDisparity)
 	service.now = func() time.Time { return preferenceBoundary.Add(time.Nanosecond) }
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
@@ -409,7 +479,7 @@ func TestProposerPreferencesServiceDoesNotPruneOnExpiredMessage(t *testing.T) {
 	_, found := epbsPool.ProposerPreferences.Get(key)
 	require.True(t, found)
 
-	bidBoundary := time.Unix(101*12, 0).Add(gloasMaximumClockDisparity)
+	bidBoundary := time.Unix(101*12, 0).Add(maximumGossipClockDisparity)
 	service.now = func() time.Time { return bidBoundary }
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
