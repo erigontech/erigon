@@ -1103,6 +1103,121 @@ func TestTraceCallRevertedFrames(t *testing.T) {
 	}
 }
 
+// createCode returns code that runs init, at most 32 bytes, through CREATE with the given value.
+func createCode(value byte, init []byte) []byte {
+	code := append([]byte{byte(vm.PUSH1) + byte(len(init)) - 1}, init...)
+	return append(code, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), byte(len(init)), byte(vm.PUSH1), byte(32-len(init)),
+		byte(vm.PUSH1), value, byte(vm.CREATE), byte(vm.STOP))
+}
+
+// callCode returns code that calls addr with the given value and the first size bytes of memory.
+func callCode(op vm.OpCode, addr byte, value byte, size byte) []byte {
+	code := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), size, byte(vm.PUSH0)}
+	if op == vm.CALL {
+		code = append(code, byte(vm.PUSH1), value)
+	}
+	return append(code, byte(vm.PUSH1), addr, byte(vm.GAS), byte(op), byte(vm.STOP))
+}
+
+// A frame that fails other than by reverting reports the draft's failure label and no result.
+func TestTraceCallFailureLabels(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0004")
+	const callee = 0xca
+	// bn256Add of (1, 1), which is not on the curve, and the zero point.
+	badPoint := append([]byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 1, byte(vm.PUSH1), 32, byte(vm.MSTORE)},
+		callCode(vm.CALL, 0x06, 1, 128)...)
+
+	for _, tc := range []struct {
+		name    string
+		code    []byte
+		callee  []byte
+		nonce   hexutil.Uint64
+		balance uint64
+		extra   ethapi.StateOverrides
+		error   string
+	}{
+		{name: "call with insufficient balance", code: callCode(vm.CALL, callee, 1, 0), error: "Insufficient balance for transfer"},
+		{name: "create with insufficient balance", code: createCode(1, []byte{byte(vm.STOP)}), error: "Insufficient balance for transfer"},
+		{name: "create with nonce overflow", code: createCode(0, []byte{byte(vm.STOP)}), nonce: math.MaxUint64, error: "Nonce overflow"},
+		{
+			name: "create with address collision", code: createCode(0, []byte{byte(vm.STOP)}),
+			extra: ethapi.StateOverrides{accounts.InternAddress(types.CreateAddress(target, 0)): {Nonce: new(hexutil.Uint64(1))}},
+			error: "Contract address collision",
+		},
+		{
+			name: "create2 with address collision", code: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE2), byte(vm.STOP)},
+			extra: ethapi.StateOverrides{
+				accounts.InternAddress(types.CreateAddress2(target, [32]byte{}, accounts.EmptyCodeHash)): {Nonce: new(hexutil.Uint64(1))},
+			},
+			error: "Contract address collision",
+		},
+		{
+			name:  "create over the code size limit",
+			code:  createCode(0, []byte{byte(vm.PUSH2), byte((params.MaxCodeSize + 1) >> 8), byte((params.MaxCodeSize + 1) & 0xff), byte(vm.PUSH0), byte(vm.RETURN)}),
+			error: "Out of gas",
+		},
+		{
+			name:  "create of code starting with 0xEF",
+			code:  createCode(0, []byte{byte(vm.PUSH1), 0xef, byte(vm.PUSH0), byte(vm.MSTORE8), byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.RETURN)}),
+			error: "Invalid code",
+		},
+		{name: "out of gas", code: createCode(0, []byte{byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.JUMP)}), error: "Out of gas"},
+		{name: "invalid instruction", code: createCode(0, []byte{byte(vm.INVALID)}), error: "Bad instruction"},
+		{name: "bad jump destination", code: createCode(0, []byte{byte(vm.PUSH0), byte(vm.JUMP)}), error: "Bad jump destination"},
+		{name: "stack underflow", code: createCode(0, []byte{byte(vm.POP)}), error: "Stack underflow"},
+		{
+			name:  "stack overflow",
+			code:  createCode(0, []byte{byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.JUMP)}),
+			error: "Out of stack",
+		},
+		{
+			name:  "return data out of bounds",
+			code:  createCode(0, []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.RETURNDATACOPY)}),
+			error: "Out of bounds",
+		},
+		{
+			name: "write in a static call", code: callCode(vm.STATICCALL, callee, 0, 0),
+			callee: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.SSTORE)}, error: "Mutable Call In Static Context",
+		},
+		{name: "precompile failure", code: badPoint, balance: 1, error: "Built-in failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, calleeCode := hexutil.Bytes(tc.code), hexutil.Bytes(tc.callee)
+			balance := new(hexutil.U256(*uint256.NewInt(tc.balance)))
+			overrides := ethapi.StateOverrides{
+				accounts.InternAddress(target):                                {Code: &code, Nonce: &tc.nonce, Balance: &balance},
+				accounts.InternAddress(common.BytesToAddress([]byte{callee})): {Code: &calleeCode},
+			}
+			maps.Copy(overrides, tc.extra)
+			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target, Gas: new(hexutil.Uint64(1_000_000))},
+				[]string{TraceTypeTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+			require.NoError(t, err)
+			require.Len(t, result.Trace, 2)
+			require.Equal(t, tc.error, result.Trace[1].Error)
+			require.Nil(t, result.Trace[1].Result)
+		})
+	}
+}
+
+// A CALL or CREATE deeper than the call depth limit fails its precheck with "Max call depth exceeded".
+func TestOeTracerDepthLabel(t *testing.T) {
+	for _, op := range []vm.OpCode{vm.CALL, vm.CREATE} {
+		t.Run(op.String(), func(t *testing.T) {
+			result := &TraceCallResult{}
+			hooks := (&OeTracer{r: result}).Tracer().Hooks
+			hooks.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil, mdgas.MdGas{Execution: 1000}, uint256.Int{}, nil)
+			hooks.EmitEnter(1, byte(op), accounts.ZeroAddress, accounts.ZeroAddress, false, nil, mdgas.MdGas{Execution: 900}, uint256.Int{}, nil)
+			hooks.EmitExit(1, nil, mdgas.MdGasUsage{}, vm.ErrDepth, false)
+			hooks.EmitExit(0, nil, mdgas.MdGasUsage{Execution: 100}, nil, false)
+			require.Len(t, result.Trace, 2)
+			require.Equal(t, "Max call depth exceeded", result.Trace[1].Error)
+			require.Nil(t, result.Trace[1].Result)
+		})
+	}
+}
+
 // Call data takes the same data/input precedence as eth_call: input wins when both are set.
 // Call data comes from data or input, as in eth_call. Both may be set only to the same value.
 func TestTraceCallInputField(t *testing.T) {

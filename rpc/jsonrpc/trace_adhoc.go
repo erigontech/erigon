@@ -276,6 +276,7 @@ type OeTracer struct {
 	traceAddr    []int
 	traceStack   []*ParityTrace
 	precompile   bool // Whether the last CaptureStart was called with `precompile = true`
+	builtin      bool // Whether the last frame entered is a precompile; it has no subframes, so its exit comes next
 	compat       bool // Bug for bug compatibility mode
 	isAmsterdam  bool
 	lastVmOp     *VmTraceOp
@@ -466,6 +467,7 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 			vmTrace.Code = code
 		}
 	}
+	ot.builtin = precompile
 	if precompile && deep && (value == nil || value.IsZero()) {
 		ot.precompile = true
 		if !ot.config.IncludePrecompiles {
@@ -576,6 +578,8 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 			ot.memLenStack = ot.memLenStack[:len(ot.memLenStack)-1]
 		}
 	}
+	builtin := ot.builtin
+	ot.builtin = false
 	if ot.precompile {
 		ot.precompile = false
 		if !ot.config.IncludePrecompiles {
@@ -591,14 +595,13 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 		ignoreError = !deep && topTrace.Type == CREATE
 	}
 	if err != nil && !ignoreError {
+		topTrace.Error = parityTraceError(err, builtin)
 		if errors.Is(err, vm.ErrExecutionReverted) {
-			topTrace.Error = "Reverted"
 			// A reverted CREATE deploys nothing, so it reports its revert data as a call does,
 			// without the address it would have occupied.
 			topTrace.Result = &TraceResult{GasUsed: (*hexutil.U256)(uint256.NewInt(gasUsed.Execution)), Output: bytes.Clone(output)}
 		} else {
 			topTrace.Result = nil
-			topTrace.Error = err.Error()
 		}
 	} else {
 		if len(output) > 0 {
@@ -627,6 +630,51 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 	ot.traceStack = ot.traceStack[:len(ot.traceStack)-1]
 	if deep {
 		ot.traceAddr = ot.traceAddr[:len(ot.traceAddr)-1]
+	}
+}
+
+// parityTraceError returns the Parity trace label for a frame's error. An error without a label
+// keeps its own text.
+func parityTraceError(err error, builtin bool) string {
+	var (
+		stackUnderflow *vm.ErrStackUnderflow
+		stackOverflow  *vm.ErrStackOverflow
+		invalidOpCode  *vm.ErrInvalidOpCode
+	)
+	switch {
+	case errors.Is(err, vm.ErrExecutionReverted):
+		return "Reverted"
+	// Before out of gas: the interpreter wraps a dynamic gas error in vm.ErrOutOfGas.
+	case errors.Is(err, vm.ErrWriteProtection):
+		return "Mutable Call In Static Context"
+	// EIP-170 names a code deposit failure, the code size limit included, as out of gas.
+	case errors.Is(err, vm.ErrOutOfGas), errors.Is(err, vm.ErrCodeStoreOutOfGas), errors.Is(err, vm.ErrMaxCodeSizeExceeded),
+		errors.Is(err, vm.ErrMaxInitCodeSizeExceeded), errors.Is(err, vm.ErrGasUintOverflow):
+		return "Out of gas"
+	case errors.Is(err, vm.ErrInvalidJump):
+		return "Bad jump destination"
+	case errors.As(err, &invalidOpCode):
+		return "Bad instruction"
+	case errors.As(err, &stackUnderflow):
+		return "Stack underflow"
+	case errors.As(err, &stackOverflow):
+		return "Out of stack"
+	case errors.Is(err, vm.ErrReturnDataOutOfBounds):
+		return "Out of bounds"
+	case errors.Is(err, vm.ErrInvalidCode):
+		return "Invalid code"
+	case errors.Is(err, vm.ErrContractAddressCollision):
+		return "Contract address collision"
+	case errors.Is(err, vm.ErrNonceUintOverflow):
+		return "Nonce overflow"
+	case errors.Is(err, vm.ErrInsufficientBalance):
+		return "Insufficient balance for transfer"
+	case errors.Is(err, vm.ErrDepth):
+		return "Max call depth exceeded"
+	case builtin:
+		return "Built-in failed"
+	default:
+		return err.Error()
 	}
 }
 

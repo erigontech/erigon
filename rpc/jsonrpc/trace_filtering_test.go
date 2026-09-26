@@ -580,7 +580,7 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 				Action: &CreateTraceAction{From: addr, CreationMethod: "create2", Gas: u(5)},
 				Result: &CreateTraceResult{Address: &addr, Code: hexutil.Bytes{0x60}, GasUsed: &gasUsed}, TraceAddress: []int{0, 1}, Type: "create",
 			},
-			{Action: &CreateTraceAction{}, Error: "out of gas", Type: "create"},
+			{Action: &CreateTraceAction{}, Error: "Out of gas", Type: "create"},
 			{Action: &CreateTraceAction{}, Error: "Reverted", Result: &TraceResult{GasUsed: &gasUsed, Output: hexutil.Bytes{0xde}}, Type: "create"},
 			{Action: &SuicideTraceAction{Address: addr, RefundAddress: addr, Balance: u(9)}, TraceAddress: []int{3}, Type: "suicide"},
 			{Action: &RewardTraceAction{Author: addr, RewardType: "block", Value: u(2e18)}, BlockHash: &hash, BlockNumber: &num, Type: "reward"},
