@@ -442,3 +442,35 @@ func TestWalkNeedsHistoryFiles(t *testing.T) {
 	require.True(t, walkNeedsHistoryFiles(0, historyStart),
 		"a walk from genesis needs files")
 }
+
+// TestWalkStepConsumersAgree pins that the two coverage consumers require the
+// SAME steps for the same walk.
+//
+// They are asked the same question — is the walk's history available — one
+// against files on disk, one against the preverified registry. When their step
+// ranges differ, files that satisfy one starve the other, and which of the two
+// fails depends on where the unwind target happens to land.
+func TestWalkStepConsumersAgree(t *testing.T) {
+	t.Parallel()
+
+	// A walk whose baseline ends at step 330 and whose target sits inside
+	// step 330: the live mode-C shape. Exactly one step is touched — 330.
+	const baselineStep, walkEndStep = uint64(330), uint64(331)
+
+	dir := t.TempDir()
+	historyDir := filepath.Join(dir, "history")
+	require.NoError(t, os.MkdirAll(historyDir, 0o755))
+	names := map[string]string{}
+	for _, dom := range []string{"accounts", "storage", "code", "receipt"} {
+		// Cover exactly the touched step, nothing beyond it.
+		base := "v2.1-" + dom + ".330-331.v"
+		require.NoError(t, os.WriteFile(filepath.Join(historyDir, base), []byte("x"), 0o644))
+		names["history/"+base] = dom
+	}
+
+	require.True(t, localHistoryCoversWalk(dir, baselineStep, walkEndStep, testStepSize),
+		"files covering the touched step must satisfy the on-disk check")
+	require.Empty(t, findStarvedCoverage(items(names), baselineStep, walkEndStep),
+		"the same files must satisfy the preverified check — a consumer asking "+
+			"for a different step reports starvation the other cannot see")
+}

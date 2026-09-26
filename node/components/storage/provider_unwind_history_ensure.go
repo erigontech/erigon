@@ -480,6 +480,12 @@ func localCommitmentBaselineStep(snapDir string, walkEndStep, stepSize uint64) (
 // (accounts/storage/code + receipt) require these histories on disk.
 // Non-walked domains (rcache) are excluded — their coverage is not
 // the mode-B unwind's business.
+// findStarvedCoverage reports (domain, step) tuples in the walk that no
+// preverified item covers. The step range is [baselineStep, walkEndStep) —
+// half-open, the same convention a history file's own [fromStep, toStep)
+// carries, and the same range localHistoryCoversWalk checks against disk.
+// The two are asked the same question about the same walk, so a difference
+// between them shows up as starvation only one of them can see.
 func findStarvedCoverage(needed []snapcfg.PreverifiedItem, baselineStep, walkEndStep uint64) []string {
 	type key struct {
 		domain string
@@ -496,7 +502,7 @@ func findStarvedCoverage(needed []snapcfg.PreverifiedItem, baselineStep, walkEnd
 			continue
 		}
 		for s := fromStep; s < toStep; s++ {
-			if s <= baselineStep || s > walkEndStep {
+			if s < baselineStep || s >= walkEndStep {
 				continue
 			}
 			covered[key{domain: domain, step: s}] = struct{}{}
@@ -504,7 +510,7 @@ func findStarvedCoverage(needed []snapcfg.PreverifiedItem, baselineStep, walkEnd
 	}
 	var missing []string
 	for domain := range walkDomains {
-		for s := baselineStep + 1; s <= walkEndStep; s++ {
+		for s := baselineStep; s < walkEndStep; s++ {
 			if _, ok := covered[key{domain: domain, step: s}]; ok {
 				continue
 			}
