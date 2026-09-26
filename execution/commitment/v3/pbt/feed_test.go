@@ -225,6 +225,26 @@ func TestProcessFeedDelegationAndClear(t *testing.T) {
 	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{set}}, {Accounts: []commitment.PBinFeedAccount{clear}}}, [][]eip8297.State{{feedState(set)}, {feedState(clear)}})
 }
 
+func TestProcessFeedDelegationReplacementAndAccountUpdate(t *testing.T) {
+	address := common.Hex2Bytes("000000000000000000000000000000000000000d")
+	delegationA := append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x01}, 20)...)
+	delegationB := append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x02}, 20)...)
+	set := feedAccount(address)
+	set.Nonce = 1
+	set.CodeWritten = true
+	set.Code = delegationA
+	replace := feedAccount(address)
+	replace.Nonce = 2
+	replace.CodeWritten = true
+	replace.Code = delegationB
+	update := feedAccount(address)
+	update.Nonce = 3
+	assertFeedState(t,
+		[]commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{set}}, {Accounts: []commitment.PBinFeedAccount{replace}}, {Accounts: []commitment.PBinFeedAccount{update}}},
+		[][]eip8297.State{{{Address: address, Nonce: 1, Code: delegationA}}, {{Address: address, Nonce: 2, Code: delegationB}}, {{Address: address, Nonce: 3, Code: delegationB}}},
+	)
+}
+
 func TestTranslateFeedSortsDropsBeforeWrites(t *testing.T) {
 	address := common.Hex2Bytes("0000000000000000000000000000000000000006")
 	account := feedAccount(address)

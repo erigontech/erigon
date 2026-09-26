@@ -133,7 +133,8 @@ func TestCalcStatePBinFeedUsesFinalAccountAndSlots(t *testing.T) {
 	require.Equal(t, code.Bytes, got.Code)
 	require.Equal(t, []commitment.PBinFeedSlot{{Key: key[:], Value: slotValue}}, got.Slots)
 	wantState := eip8297.State{Address: address[:], Nonce: account.Nonce, Balance: account.Balance, Code: code.Bytes, Slots: map[string][]byte{string(key[:]): slotValue}}
-	require.Equal(t,
+	require.Equal(
+		t,
 		eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{wantState}})),
 		eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{calcFeedState(got)}})),
 	)
@@ -181,4 +182,133 @@ func TestCalcStatePBinFeedBALTracksCodeAndEmptyRemoval(t *testing.T) {
 		got[i] = calcFeedState(account)
 	}
 	require.Equal(t, eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{want})), eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{got})))
+}
+
+func TestPBinFeedSourcesMatchReferenceAcrossBlocks(t *testing.T) {
+	address := common.Address{7}
+	codeA := []byte{0x60, 0x01}
+	codeB := []byte{0x60, 0x02}
+	values := []struct {
+		code    []byte
+		nonce   uint64
+		balance uint64
+		deleted bool
+	}{
+		{code: codeA, nonce: 1, balance: 9},
+		{deleted: true},
+		{code: codeB, nonce: 3, balance: 11},
+	}
+
+	makeReader := func(value struct {
+		code    []byte
+		nonce   uint64
+		balance uint64
+		deleted bool
+	},
+	) *calcPBinReader {
+		reader := &calcPBinReader{values: make(map[string][]byte)}
+		if value.deleted {
+			return reader
+		}
+		code := accounts.NewCode(value.code)
+		account := accounts.Account{Nonce: value.nonce, Balance: *uint256.NewInt(value.balance), CodeHash: code.Hash}
+		reader.values[calcPBinReaderKey(kv.AccountsDomain, address[:])] = accounts.SerialiseV3(&account)
+		reader.values[calcPBinReaderKey(kv.CodeDomain, address[:])] = code.Bytes
+		return reader
+	}
+
+	makeCalcFeed := func(value struct {
+		code    []byte
+		nonce   uint64
+		balance uint64
+		deleted bool
+	},
+	) *commitment.PBinFeed {
+		reader := makeReader(value)
+		cs := newTestCalcState()
+		cs.reader = reader
+		if value.deleted {
+			cs.ApplyWrites(newWS().selfDestruct(accounts.InternAddress(address), state.Version{}, true).build(), false)
+		} else {
+			cs.ApplyWrites(newWS().bal(accounts.InternAddress(address), state.Version{}, *uint256.NewInt(value.balance)).nonce(accounts.InternAddress(address), state.Version{}, value.nonce).code(accounts.InternAddress(address), state.Version{}, accounts.NewCode(value.code)).build(), false)
+		}
+		feed, err := cs.BinFeed()
+		require.NoError(t, err)
+		return feed
+	}
+
+	makeBALFeed := func(value struct {
+		code    []byte
+		nonce   uint64
+		balance uint64
+		deleted bool
+	},
+	) *commitment.PBinFeed {
+		reader := makeReader(value)
+		cs := newTestCalcState()
+		cs.reader = reader
+		changes := types.AccountChanges{Address: address}
+		if value.deleted {
+			changes.BalanceChanges = []*types.BalanceChange{{Value: uint256.Int{}}}
+			changes.NonceChanges = []*types.NonceChange{{Value: 0}}
+		} else {
+			changes.BalanceChanges = []*types.BalanceChange{{Value: *uint256.NewInt(value.balance)}}
+			changes.NonceChanges = []*types.NonceChange{{Value: value.nonce}}
+			changes.CodeChanges = []*types.CodeChange{{Bytecode: value.code}}
+		}
+		cs.LoadFromBAL(types.BlockAccessList{changes}, true, false, false)
+		feed, err := cs.BinFeed()
+		require.NoError(t, err)
+		return feed
+	}
+
+	makeSharedFeed := func(value struct {
+		code    []byte
+		nonce   uint64
+		balance uint64
+		deleted bool
+	},
+	) *commitment.PBinFeed {
+		reader := makeReader(value)
+		keys := map[string]struct{}{string(address[:]): {}}
+		codeKeys := make(map[string]struct{})
+		if !value.deleted {
+			codeKeys[string(address[:])] = struct{}{}
+		}
+		feed, err := commitmentdb.BinFeedFromState(keys, codeKeys, nil, reader)
+		require.NoError(t, err)
+		return feed
+	}
+
+	process := func(feeds []*commitment.PBinFeed) (common.Hash, map[string][]byte) {
+		ctx := &calcPBinTrieContext{records: make(map[string][]byte)}
+		trie := pbt.NewTrie(ctx)
+		var root common.Hash
+		for _, feed := range feeds {
+			var err error
+			root, err = trie.ProcessFeed(feed)
+			require.NoError(t, err)
+		}
+		require.NoError(t, pbt.NewTrie(ctx).Verify())
+		return root, ctx.records
+	}
+
+	calcFeeds := make([]*commitment.PBinFeed, 0, len(values))
+	balFeeds := make([]*commitment.PBinFeed, 0, len(values))
+	sharedFeeds := make([]*commitment.PBinFeed, 0, len(values))
+	for _, value := range values {
+		calcFeeds = append(calcFeeds, makeCalcFeed(value))
+		balFeeds = append(balFeeds, makeBALFeed(value))
+		sharedFeeds = append(sharedFeeds, makeSharedFeed(value))
+	}
+	calcRoot, calcRecords := process(calcFeeds)
+	balRoot, balRecords := process(balFeeds)
+	sharedRoot, sharedRecords := process(sharedFeeds)
+	states := [][]eip8297.State{{{Address: address[:], Nonce: 1, Balance: *uint256.NewInt(9), Code: codeA}}, {{Address: address[:], Deleted: true}}, {{Address: address[:], Nonce: 3, Balance: *uint256.NewInt(11), Code: codeB}}}
+	wantRoot := eip8297.StateRoot(eip8297.EmbedState(states))
+	require.Equal(t, wantRoot, calcRoot)
+	require.Equal(t, wantRoot, balRoot)
+	require.Equal(t, wantRoot, sharedRoot)
+	require.Equal(t, calcRecords, balRecords)
+	require.Equal(t, calcRecords, sharedRecords)
 }
