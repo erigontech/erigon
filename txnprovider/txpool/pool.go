@@ -800,6 +800,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	isEIP3860 := p.isShanghai()
 	isEIP7623 := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
+	minTxGas := mdgas.MinTxGas(isAmsterdam)
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -813,7 +814,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 
 	for ; count < n && i < len(best.ms); i++ {
 		// if we wouldn't have enough gas for a standard transaction then quit out early
-		if availableGas.Execution < params.TxGas {
+		if availableGas.Execution < minTxGas {
 			break
 		}
 		if availableRlpSpace <= 0 {

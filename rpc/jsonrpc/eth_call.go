@@ -231,7 +231,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	// Determine the highest gas limit can be used during the estimation.
-	if args.Gas != nil && uint64(*args.Gas) >= params.TxGas {
+	if args.Gas != nil && uint64(*args.Gas) >= mdgas.MinTxGas(chainConfig.IsAmsterdam(effectiveHeader.Time)) {
 		hi = uint64(*args.Gas)
 	} else {
 		// Retrieve the block to act as the gas ceiling
