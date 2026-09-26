@@ -1393,13 +1393,18 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-			if valid == VersionInvalid && matchesLive != nil && matchesLive() {
+			if matchesLive != nil && (valid == VersionInvalid || path == BalancePath) {
 				// Value tiebreaker: the writer version churned (a lower tx
 				// re-executed) but the read's value is unchanged — not a real
 				// conflict, so the read stays valid and does not re-execute.
-				valid = VersionValid
+				if matchesLive() {
+					valid = VersionValid
+				} else if valid == VersionValid && path == BalancePath {
+					valid = VersionInvalid
+					invReason = "done-balance"
+				}
 			}
-			if valid == VersionInvalid {
+			if valid == VersionInvalid && invReason == "" {
 				invReason = "done-vercheck"
 			}
 		}
