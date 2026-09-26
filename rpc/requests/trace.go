@@ -140,9 +140,9 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	return &b.Result, nil
 }
 
-func (req *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs string, traceOpts string) (RPCMethod, string) {
+func (reqGen *requestGenerator) traceCall(blockRef rpc.BlockReference, callArgs string, traceOpts string) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[%s,%s,"%s"],"id":%d}`
-	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef.String(), req.reqID)
+	return Methods.TraceCall, fmt.Sprintf(template, Methods.TraceCall, callArgs, traceOpts, blockRef.String(), reqGen.reqID)
 }
 
 func (reqGen *requestGenerator) TraceTransaction(hash common.Hash) ([]TransactionTrace, error) {

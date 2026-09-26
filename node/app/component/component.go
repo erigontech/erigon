@@ -1273,22 +1273,22 @@ func (c *component) addDependent(dependent *component, parentLocked bool) error 
 	return nil
 }
 
-func (component *component) registerSubscriptions() error {
-	if domain, ok := component.provider.(*componentDomain); ok {
+func (c *component) registerSubscriptions() error {
+	if domain, ok := c.provider.(*componentDomain); ok {
 		if serviceBus := domain.serviceBus(); serviceBus != nil {
-			return serviceBus.Register(component, component.onComponentStateChanged)
+			return serviceBus.Register(c, c.onComponentStateChanged)
 		}
 	}
 
-	if !component.hasDomain() {
+	if !c.hasDomain() {
 		return nil
 	}
 
-	if serviceBus := component.Domain().serviceBus(); serviceBus != nil {
-		return serviceBus.Register(component, component.onComponentStateChanged)
+	if serviceBus := c.Domain().serviceBus(); serviceBus != nil {
+		return serviceBus.Register(c, c.onComponentStateChanged)
 	}
 
-	return fmt.Errorf("expected domain (%T) to have non nil service bus", component.Domain())
+	return fmt.Errorf("expected domain (%T) to have non nil service bus", c.Domain())
 }
 
 // onComponentStateChanged routes the event through the actor inbox so it's

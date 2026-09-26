@@ -48,8 +48,8 @@ func NewGossipManager(
 	return g
 }
 
-func (s *GossipManager) Recv() <-chan *GossipMessage {
-	return s.ch
+func (g *GossipManager) Recv() <-chan *GossipMessage {
+	return g.ch
 }
 
 func (s *Sentinel) SubscribeGossip(topic GossipTopic, expiration time.Time, opts ...pubsub.TopicOpt) (sub *GossipSubscription, err error) {
@@ -82,31 +82,31 @@ type GossipSubscription struct {
 	lock      sync.Mutex
 }
 
-func (sub *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
+func (g *GossipSubscription) OverwriteSubscriptionExpiry(expiry time.Time) {
 	panic("do not call this")
 }
 
 // calls the cancel func for the subscriber and closes the topic and sub
-func (s *GossipSubscription) Close() {
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.closeOnce.Do(func() {
-		if s.stopCh != nil {
-			close(s.stopCh)
+func (g *GossipSubscription) Close() {
+	g.lock.Lock()
+	defer g.lock.Unlock()
+	g.closeOnce.Do(func() {
+		if g.stopCh != nil {
+			close(g.stopCh)
 		}
-		if s.cf != nil {
-			s.cf()
+		if g.cf != nil {
+			g.cf()
 		}
-		if s.rf != nil {
-			s.rf()
+		if g.rf != nil {
+			g.rf()
 		}
-		if s.sub != nil {
-			s.sub.Cancel()
-			s.sub = nil
+		if g.sub != nil {
+			g.sub.Cancel()
+			g.sub = nil
 		}
-		if s.topic != nil {
-			s.topic.Close()
-			s.topic = nil
+		if g.topic != nil {
+			g.topic.Close()
+			g.topic = nil
 		}
 	})
 }

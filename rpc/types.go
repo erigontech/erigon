@@ -156,7 +156,7 @@ func (bn *BlockNumber) UnmarshalJSON(data []byte) error {
 func (bn BlockNumber) MarshalText() ([]byte, error) {
 	switch {
 	case bn < LatestExecutedBlockNumber:
-		return nil, fmt.Errorf("Invalid block number %d", bn)
+		return nil, fmt.Errorf("invalid block number %d", bn)
 	case bn < 0:
 		return []byte(bn.String()), nil
 	default:

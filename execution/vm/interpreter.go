@@ -142,67 +142,67 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 	return ctx
 }
 
-func (c *CallContext) put() {
-	c.Memory.reset()
-	c.Stack.Reset()
-	c.cacheGen = 0
-	c.stateGasSpill = 0
-	c.newAccountCharged = false
+func (ctx *CallContext) put() {
+	ctx.Memory.reset()
+	ctx.Stack.Reset()
+	ctx.cacheGen = 0
+	ctx.stateGasSpill = 0
+	ctx.newAccountCharged = false
 	// Use sentinel values so that a peek call before the first cacheGen++ is
 	// always a miss rather than returning a stale handle from a prior use.
-	c.cachedKeyGen = ^uint64(0)
-	c.cachedAddrGen = ^uint64(0)
+	ctx.cachedKeyGen = ^uint64(0)
+	ctx.cachedAddrGen = ^uint64(0)
 	// Zero the handles to release their canonMap pins while the context is
 	// idle in the pool; unique.Handle values keep interned entries alive.
-	c.cachedKey = accounts.NilKey
-	c.cachedAddr = accounts.NilAddress
-	c.input = nil
-	c.Contract = Contract{}
-	contextPool.Put(c)
+	ctx.cachedKey = accounts.NilKey
+	ctx.cachedAddr = accounts.NilAddress
+	ctx.input = nil
+	ctx.Contract = Contract{}
+	contextPool.Put(ctx)
 }
 
-func (c *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
-	remaining, stateSpill, ok := useMdGas(c.Gas(), gas, t, tracer, reason)
+func (ctx *CallContext) useMdGas(gas uint64, t mdgas.MdGasType, tracer *tracing.Hooks, reason tracing.GasChangeReason) (ok bool) {
+	remaining, stateSpill, ok := useMdGas(ctx.Gas(), gas, t, tracer, reason)
 	if ok {
-		c.gas = remaining.Execution
-		c.stateGas = remaining.State
-		c.stateGasSpill += stateSpill
+		ctx.gas = remaining.Execution
+		ctx.stateGas = remaining.State
+		ctx.stateGasSpill += stateSpill
 	}
 	return ok
 }
 
 // mergeChildStateGas takes over the child's state-gas spill, then absorbs state
 // gas the child left in the reservoir, up to the spill available in this frame.
-func (c *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hooks) {
-	c.stateGasSpill += childSpill
-	misplaced := min(c.stateGas, c.stateGasSpill)
+func (ctx *CallContext) mergeChildStateGas(childSpill uint64, tracer *tracing.Hooks) {
+	ctx.stateGasSpill += childSpill
+	misplaced := min(ctx.stateGas, ctx.stateGasSpill)
 	if misplaced == 0 {
 		return
 	}
 	gasTracing := tracer.HasGasChangeHook()
 	var old mdgas.MdGas
 	if gasTracing {
-		old = c.Gas()
+		old = ctx.Gas()
 	}
-	c.stateGas -= misplaced
-	c.refillStateGas(misplaced, nil, tracing.GasChangeIgnored) // capped by the spill, so LIFO returns all to gas_left
+	ctx.stateGas -= misplaced
+	ctx.refillStateGas(misplaced, nil, tracing.GasChangeIgnored) // capped by the spill, so LIFO returns all to gas_left
 	if gasTracing {
-		tracer.EmitGasChange(old, c.Gas(), tracing.GasChangeCallStateGasReturned)
+		tracer.EmitGasChange(old, ctx.Gas(), tracing.GasChangeCallStateGasReturned)
 	}
 }
 
-func (c *CallContext) refillStateGas(amount uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
-	remaining := c.Gas()
+func (ctx *CallContext) refillStateGas(amount uint64, tracer *tracing.Hooks, reason tracing.GasChangeReason) {
+	remaining := ctx.Gas()
 	gasTracing := reason != tracing.GasChangeIgnored && tracer.HasGasChangeHook()
 	var old mdgas.MdGas
 	if gasTracing {
 		old = remaining
 	}
-	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: c.stateGasSpill}
+	used := mdgas.MdGasUsage{State: int64(amount), StateSpill: ctx.stateGasSpill}
 	mdgas.Refill(&remaining, &used, amount, mdgas.StateGas)
-	c.gas = remaining.Execution
-	c.stateGas = remaining.State
-	c.stateGasSpill = used.StateSpill
+	ctx.gas = remaining.Execution
+	ctx.stateGas = remaining.State
+	ctx.stateGasSpill = used.StateSpill
 	if gasTracing {
 		tracer.EmitGasChange(old, remaining, reason)
 	}

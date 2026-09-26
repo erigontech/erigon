@@ -78,9 +78,9 @@ func (reqGen *requestGenerator) TxpoolContent() (int, int, int, error) {
 	return pendingLen, queuedLen, baseFeeLen, nil
 }
 
-func (req *requestGenerator) txpoolContent() (RPCMethod, string) {
+func (reqGen *requestGenerator) txpoolContent() (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[],"id":%d}`
-	return Methods.TxpoolContent, fmt.Sprintf(template, Methods.TxpoolContent, req.reqID)
+	return Methods.TxpoolContent, fmt.Sprintf(template, Methods.TxpoolContent, reqGen.reqID)
 }
 
 // TxpoolPendingHashesFrom returns the hashes txpool_contentFrom reports as

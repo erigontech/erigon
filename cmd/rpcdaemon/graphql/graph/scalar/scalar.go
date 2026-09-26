@@ -25,7 +25,7 @@ func UnmarshalUint64(v any) (uint64, error) {
 		return strconv.ParseUint(val, 10, 64)
 	case int64:
 		if val < 0 {
-			return 0, fmt.Errorf("Long cannot be negative: %d", val)
+			return 0, fmt.Errorf("long cannot be negative: %d", val)
 		}
 		return uint64(val), nil
 	case float64:

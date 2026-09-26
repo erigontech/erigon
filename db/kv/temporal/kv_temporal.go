@@ -532,6 +532,9 @@ type asyncClone struct {
 // this is needed to create a clone that can be passed
 // to external go rooutines - they are intended as slaves
 // so should never commit or rollback the master transaction
+//
+// The receiver stays "rwtx", not "tx" like RwTx's other methods: renaming it
+// would make the embedded tx{} composite literal below ambiguous with the receiver.
 func (rwtx *RwTx) AsyncClone(asyncTx kv.RwTx) *asyncClone {
 	return &asyncClone{
 		RwTx{

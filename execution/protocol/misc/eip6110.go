@@ -61,11 +61,14 @@ type depositUnpacking struct {
 	Index                 []byte
 }
 
-var InvalidDepositLogErr = errors.New("invalid deposit log: unsupported data layout")
+var ErrInvalidDepositLog = errors.New("invalid deposit log: unsupported data layout")
+
+// Deprecated: use ErrInvalidDepositLog instead.
+var InvalidDepositLogErr = ErrInvalidDepositLog //nolint:staticcheck // ST1012: deprecated alias kept for source compatibility
 
 func validateDepositLog(data []byte) error {
 	if len(data) != DepositLogLen {
-		return InvalidDepositLogErr
+		return ErrInvalidDepositLog
 	}
 	pubkeyOffset := uint256.NewInt(0).SetBytes(data[0:32])
 	withdrawalCredentialsOffset := uint256.NewInt(0).SetBytes(data[32:64])
@@ -78,7 +81,7 @@ func validateDepositLog(data []byte) error {
 		amountOffset.CmpUint64(320) != 0 ||
 		signatureOffset.CmpUint64(384) != 0 ||
 		indexOffset.CmpUint64(512) != 0 {
-		return InvalidDepositLogErr
+		return ErrInvalidDepositLog
 	}
 
 	pubkeySize := uint256.NewInt(0).SetBytes(data[160:192])
@@ -92,7 +95,7 @@ func validateDepositLog(data []byte) error {
 		amountSize.CmpUint64(8) != 0 ||
 		signatureSize.CmpUint64(BLSSigLen) != 0 ||
 		indexSize.CmpUint64(8) != 0 {
-		return InvalidDepositLogErr
+		return ErrInvalidDepositLog
 	}
 	return nil
 }

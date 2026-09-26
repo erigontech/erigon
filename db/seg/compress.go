@@ -34,7 +34,6 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/common/dir"
-	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/etl"
@@ -151,7 +150,7 @@ type Timings struct {
 
 func NewCompressor(ctx context.Context, logPrefix, outputFile, tmpDir string, cfg Cfg, lvl log.Lvl, logger log.Logger) (*Compressor, error) {
 	workers := cfg.Workers
-	dir2.MustExist(tmpDir)
+	dir.MustExist(tmpDir)
 	_, fileName := filepath.Split(outputFile)
 
 	uncompressedPath := filepath.Join(tmpDir, fileName) + ".idt"
@@ -897,7 +896,7 @@ func (f *RawWordsFile) Close() {
 
 func (f *RawWordsFile) CloseAndRemove() {
 	f.Close()
-	dir2.RemoveFile(f.filePath) //nolint:errcheck
+	dir.RemoveFile(f.filePath) //nolint:errcheck
 }
 
 func (f *RawWordsFile) Append(v []byte) error {

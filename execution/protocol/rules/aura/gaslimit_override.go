@@ -86,7 +86,7 @@ func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHea
 
 		if blockGasLimit > 0 {
 			if header.GasLimit != blockGasLimit {
-				return errors.New("Block gas limit doesn't match BlockGasLimitContract with AuRa")
+				return errors.New("block gas limit doesn't match BlockGasLimitContract with AuRa")
 			}
 		}
 	}

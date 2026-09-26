@@ -38,12 +38,12 @@ func NewUint64VectorSSZ(size int) Uint64VectorSSZ {
 	}
 }
 
-func (h uint64VectorSSZ) MarshalJSON() ([]byte, error) {
-	return json.Marshal(h.u)
+func (arr uint64VectorSSZ) MarshalJSON() ([]byte, error) {
+	return json.Marshal(arr.u)
 }
 
-func (h *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
-	return json.Unmarshal(buf, h.u)
+func (arr *uint64VectorSSZ) UnmarshalJSON(buf []byte) error {
+	return json.Unmarshal(buf, arr.u)
 }
 
 func (arr *uint64VectorSSZ) Clear() {

@@ -83,9 +83,9 @@ func (reqGen *requestGenerator) EstimateGas(args bind.CallMsg, blockRef BlockNum
 	return uint64(b.Number), nil
 }
 
-func (req *requestGenerator) estimateGas(callArgs string, blockRef BlockNumber) (RPCMethod, string) {
+func (reqGen *requestGenerator) estimateGas(callArgs string, blockRef BlockNumber) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":[%s,"%s"],"id":%d}`
-	return Methods.ETHEstimateGas, fmt.Sprintf(template, Methods.ETHEstimateGas, callArgs, blockRef, req.reqID)
+	return Methods.ETHEstimateGas, fmt.Sprintf(template, Methods.ETHEstimateGas, callArgs, blockRef, reqGen.reqID)
 }
 
 func (reqGen *requestGenerator) GasPrice() (*uint256.Int, error) {
@@ -151,30 +151,30 @@ func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transactio
 	return result, nil
 }
 
-func (req *requestGenerator) GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error) {
+func (reqGen *requestGenerator) GetTransactionByHash(hash common.Hash) (*ethapi.RPCTransaction, error) {
 	var result ethapi.RPCTransaction
 
-	if err := req.rpcCall(context.Background(), &result, Methods.ETHGetTransactionByHash, hash); err != nil {
+	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHGetTransactionByHash, hash); err != nil {
 		return nil, err
 	}
 
 	return &result, nil
 }
 
-func (req *requestGenerator) GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
+func (reqGen *requestGenerator) GetTransactionReceipt(ctx context.Context, hash common.Hash) (*types.Receipt, error) {
 	var result types.Receipt
 
-	if err := req.rpcCall(ctx, &result, Methods.ETHGetTransactionReceipt, hash); err != nil {
+	if err := reqGen.rpcCall(ctx, &result, Methods.ETHGetTransactionReceipt, hash); err != nil {
 		return nil, err
 	}
 
 	return &result, nil
 }
 
-func (req *requestGenerator) GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error) {
+func (reqGen *requestGenerator) GetBlockReceipts(ctx context.Context, blockRef rpc.BlockNumberOrHash) (types.Receipts, error) {
 	var result types.Receipts
 
-	if err := req.rpcCall(ctx, &result, Methods.ETHGetBlockReceipts, blockRef); err != nil {
+	if err := reqGen.rpcCall(ctx, &result, Methods.ETHGetBlockReceipts, blockRef); err != nil {
 		return nil, err
 	}
 

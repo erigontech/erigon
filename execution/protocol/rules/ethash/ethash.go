@@ -601,6 +601,6 @@ func (ethash *Ethash) GetPostApplyMessageFunc() evmtypes.PostApplyMessageFunc {
 	return nil
 }
 
-func (c *Ethash) TxDependencies(h *types.Header) [][]int {
+func (ethash *Ethash) TxDependencies(h *types.Header) [][]int {
 	return nil
 }

@@ -134,15 +134,15 @@ type itemState struct {
 	Etag               string
 }
 
-func (checker *webseedChecker) submitChain(
+func (me *webseedChecker) submitChain(
 	chain string,
 	baseUrl string,
 	items []preverified.Item,
 	group *errgroup.Group,
 ) error {
-	ctx := checker.ctx
+	ctx := me.ctx
 	chainState := make(map[string]*itemState, len(items))
-	g.MapMustAssignNew(checker.state, chain, chainState)
+	g.MapMustAssignNew(me.state, chain, chainState)
 	for _, item := range items {
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
@@ -160,10 +160,10 @@ func (checker *webseedChecker) submitChain(
 			}()
 			for range 3 {
 				if err != nil {
-					checker.logger.Warn("retrying failed preverified item check", "baseUrl", baseUrl, "item", item, "err", err)
+					me.logger.Warn("retrying failed preverified item check", "baseUrl", baseUrl, "item", item, "err", err)
 				}
 				var done bool
-				done, err = checker.checkPreverifiedItem(baseUrl, item, &state)
+				done, err = me.checkPreverifiedItem(baseUrl, item, &state)
 				if done || ctx.Err() != nil {
 					break
 				}

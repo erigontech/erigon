@@ -26,8 +26,13 @@ import (
 )
 
 var (
-	NO_GENESIS_TIME_ERR    error = errors.New("genesis time is not set")
-	NO_VALIDATOR_ROOT_HASH error = errors.New("genesis validators root is not set")
+	ErrNoGenesisTime       error = errors.New("genesis time is not set")
+	ErrNoValidatorRootHash error = errors.New("genesis validators root is not set")
+
+	// Deprecated: use ErrNoGenesisTime instead.
+	NO_GENESIS_TIME_ERR = ErrNoGenesisTime //nolint:staticcheck // ST1012: deprecated alias kept for source compatibility
+	// Deprecated: use ErrNoValidatorRootHash instead.
+	NO_VALIDATOR_ROOT_HASH = ErrNoValidatorRootHash //nolint:staticcheck // ST1012: deprecated alias kept for source compatibility
 )
 
 func ComputeDomain(

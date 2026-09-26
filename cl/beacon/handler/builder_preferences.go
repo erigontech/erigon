@@ -43,7 +43,7 @@ const (
 func (a *ApiHandler) PostEthV1ValidatorBuilderPreferences(w http.ResponseWriter, r *http.Request) {
 	version, err := clparams.StringToClVersion(r.Header.Get("Eth-Consensus-Version"))
 	if err != nil || version != clparams.GloasVersion {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("gloas Eth-Consensus-Version header is required")).WriteTo(w)
 		return
 	}
 	if a.builderClient == nil {

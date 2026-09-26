@@ -41,33 +41,33 @@ func (b *CachingBeaconState) CopyInto(bs *CachingBeaconState) (err error) {
 	return nil
 }
 
-func (bs *CachingBeaconState) reinitCaches() error {
-	if bs.Version() == clparams.Phase0Version {
-		return bs.InitBeaconState()
+func (b *CachingBeaconState) reinitCaches() error {
+	if b.Version() == clparams.Phase0Version {
+		return b.InitBeaconState()
 	}
 
-	if bs.publicKeyIndicies == nil {
-		bs.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
+	if b.publicKeyIndicies == nil {
+		b.publicKeyIndicies = maphash.NewNonConcurrentMap[uint64]()
 	} else {
-		bs.publicKeyIndicies.Clear()
+		b.publicKeyIndicies.Clear()
 	}
 
-	bs.ForEachValidator(func(v solid.Validator, idx, total int) bool {
-		bs.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
+	b.ForEachValidator(func(v solid.Validator, idx, total int) bool {
+		b.publicKeyIndicies.Set(v.PublicKeyBytes(), uint64(idx))
 		return true
 	})
 
-	bs.totalActiveBalanceCache = nil
-	bs._refreshActiveBalancesIfNeeded()
-	bs.previousStateRoot = common.Hash{}
-	if err := bs.initCaches(); err != nil {
+	b.totalActiveBalanceCache = nil
+	b._refreshActiveBalancesIfNeeded()
+	b.previousStateRoot = common.Hash{}
+	if err := b.initCaches(); err != nil {
 		return err
 	}
-	if err := bs._updateProposerIndex(); err != nil {
+	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}
-	if bs.Version() >= clparams.Phase0Version {
-		return bs._initializeValidatorsPhase0()
+	if b.Version() >= clparams.Phase0Version {
+		return b._initializeValidatorsPhase0()
 	}
 
 	return nil

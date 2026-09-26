@@ -108,7 +108,7 @@ func (reqGen *requestGenerator) DebugAccountAt(blockHash common.Hash, txIndex ui
 	return &b.Result, nil
 }
 
-func (req *requestGenerator) debugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (RPCMethod, string) {
+func (reqGen *requestGenerator) debugAccountAt(blockHash common.Hash, txIndex uint64, account common.Address) (RPCMethod, string) {
 	const template = `{"jsonrpc":"2.0","method":%q,"params":["0x%x",%d, "0x%x"],"id":%d}`
-	return Methods.DebugAccountAt, fmt.Sprintf(template, Methods.DebugAccountAt, blockHash, txIndex, account, req.reqID)
+	return Methods.DebugAccountAt, fmt.Sprintf(template, Methods.DebugAccountAt, blockHash, txIndex, account, reqGen.reqID)
 }

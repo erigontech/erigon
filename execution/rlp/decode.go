@@ -41,7 +41,7 @@ import (
 
 // EOL is returned when the end of the current list
 // has been reached during streaming.
-var EOL = errors.New("rlp: end of list")
+var EOL = errors.New("rlp: end of list") //nolint:staticcheck // ST1012: EOL is not an error, same as io.EOF
 
 var (
 	ErrExpectedString      = errors.New("rlp: expected String or Byte")
