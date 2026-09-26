@@ -39,14 +39,15 @@ import (
 )
 
 // handler handles JSON-RPC messages. There is one handler per connection. Note that
-// handler is not safe for concurrent use. On a connection, message handling never blocks
+// handler is not safe for concurrent use. handleMsg and handleBatch never block
 // indefinitely because RPCs are processed on background goroutines launched by handler;
-// with inlineCalls they run on the caller's goroutine, which a single HTTP request owns.
+// serveMsg runs the RPC on its caller, which a single HTTP request owns.
 //
 // The entry points for incoming messages are:
 //
 //	h.handleMsg(message)
 //	h.handleBatch(message)
+//	h.serveMsg(message)
 //
 // Outgoing calls use the requestOp struct. Register the request before sending it
 // on the connection:
@@ -71,7 +72,6 @@ type handler struct {
 	conn           jsonWriter                     // where responses will be sent
 	logger         log.Logger
 	allowSubscribe bool
-	inlineCalls    bool // the caller waits for every answer, as a single HTTP request does
 	batchLimit     int
 
 	allowList     AllowList // a list of explicitly allowed methods, if empty -- everything is allowed
@@ -333,24 +333,34 @@ func (h *handler) respondWithBatchTooLarge(cp *callProc, batch []*jsonrpcMessage
 	}
 }
 
-// handleMsg handles a single message.
+// handleMsg handles a single message on a new goroutine.
 func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 	if ok := h.handleImmediate(msg); ok {
 		return
 	}
-	h.startCallProc(func(cp *callProc) {
-		if stream == nil {
-			h.answerBuffered(cp, msg)
-		} else {
-			h.answerInto(cp, msg, stream)
-			stream.WriteRaw("\n")
+	h.startCallProc(func(cp *callProc) { h.answerMsg(cp, msg, stream) })
+}
+
+// serveMsg handles a single message on the calling goroutine, for a caller that waits for the answer anyway.
+func (h *handler) serveMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
+	if ok := h.handleImmediate(msg); ok {
+		return
+	}
+	h.runCallProc(func(cp *callProc) { h.answerMsg(cp, msg, stream) })
+}
+
+func (h *handler) answerMsg(cp *callProc, msg *jsonrpcMessage, stream jsonstream.Stream) {
+	if stream == nil {
+		h.answerBuffered(cp, msg)
+	} else {
+		h.answerInto(cp, msg, stream)
+		stream.WriteRaw("\n")
+	}
+	for _, n := range cp.notifiers {
+		if err := n.activate(); err != nil {
+			h.logger.Debug("Failed to activate RPC notifier", "err", err)
 		}
-		for _, n := range cp.notifiers {
-			if err := n.activate(); err != nil {
-				h.logger.Debug("Failed to activate RPC notifier", "err", err)
-			}
-		}
-	})
+	}
 }
 
 // handleResponses processes method call responses.
@@ -479,18 +489,16 @@ func (h *handler) cancelServerSubscriptions(err error) {
 	}
 }
 
-// startCallProc runs fn in a new goroutine tracked by h.callWG, or on the caller's goroutine when inlineCalls is set.
+// startCallProc runs fn in a new goroutine tracked by h.callWG.
 func (h *handler) startCallProc(fn func(*callProc)) {
-	run := func() {
-		ctx, cancel := context.WithCancel(h.rootCtx)
-		defer cancel()
-		fn(&callProc{ctx: ctx})
-	}
-	if h.inlineCalls {
-		run()
-		return
-	}
-	h.callWG.Go(run)
+	h.callWG.Go(func() { h.runCallProc(fn) })
+}
+
+// runCallProc runs fn on the calling goroutine.
+func (h *handler) runCallProc(fn func(*callProc)) {
+	ctx, cancel := context.WithCancel(h.rootCtx)
+	defer cancel()
+	fn(&callProc{ctx: ctx})
 }
 
 // handleImmediate executes non-call messages. It returns false if the message is a
