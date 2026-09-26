@@ -153,11 +153,22 @@ func writeForkChoiceHashes(tx kv.RwTx, blockHash, safeHash, finalizedHash common
 	rawdb.WriteForkchoiceHead(tx, blockHash)
 }
 
+func forkChoiceHashesMatch(tx kv.Getter, blockHash, safeHash, finalizedHash common.Hash) bool {
+	// Zero safe/finalized hashes mean "keep the stored marker", not "clear it".
+	return rawdb.ReadHeadBlockHash(tx) == blockHash && rawdb.ReadForkchoiceHead(tx) == blockHash &&
+		(safeHash == (common.Hash{}) || rawdb.ReadForkchoiceSafe(tx) == safeHash) &&
+		(finalizedHash == (common.Hash{}) || rawdb.ReadForkchoiceFinalized(tx) == finalizedHash)
+}
+
 type canonicalEntry struct {
 	hash   common.Hash
 	number uint64
 }
 
+// unwindIfNeeded returns a non-nil result when the FCU can stop before execution.
+// For a successful short circuit, acceptsMarkerUpdate is true only for a
+// same-head update at or above stored finality. It does not indicate whether
+// the stored markers differ.
 func (e *ExecModule) unwindIfNeeded(
 	ctx context.Context,
 	tx kv.TemporalRwTx,
@@ -169,19 +180,19 @@ func (e *ExecModule) unwindIfNeeded(
 	canonicalHash common.Hash,
 	finishProgressBefore uint64,
 	isSynced bool,
-) (*ForkChoiceResult, error) {
+) (result *ForkChoiceResult, acceptsMarkerUpdate bool, err error) {
 	var finalisedBlockNum uint64
 	lastKnownFinalisedHash := rawdb.ReadForkchoiceFinalized(tx)
 	if lastKnownFinalisedHash != (common.Hash{}) {
 		bn, err := e.blockReader.HeaderNumber(ctx, tx, lastKnownFinalisedHash)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if bn == nil {
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusInvalidForkchoice,
-			}, nil
+			}, false, nil
 		}
 		finalisedBlockNum = *bn
 	}
@@ -189,30 +200,30 @@ func (e *ExecModule) unwindIfNeeded(
 	// we short circuit reorgs if:
 	//   1. the head is an ancestor of the last finalised block
 	//   2. the head is a duplicate FCU (e.g. CLs sending the same FCU repeatedly)
-	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash &&
-		(fcuHeader.Number.Uint64() < finalisedBlockNum || fcuHeader.Number.Uint64() == finishProgressBefore) {
-		writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+	belowFinality := fcuHeader.Number.Uint64() < finalisedBlockNum
+	sameExecutedHead := fcuHeader.Number.Uint64() == finishProgressBefore
+	if fcuHeader.Number.Sign() > 0 && canonicalHash == blockHash && (belowFinality || sameExecutedHead) {
 		valid, err := e.verifyForkchoiceHashes(ctx, tx, blockHash, finalizedHash, safeHash)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if !valid {
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusInvalidForkchoice,
-			}, nil
+			}, false, nil
 		}
 		return &ForkChoiceResult{
 			LatestValidHash: blockHash,
 			Status:          ExecutionStatusSuccess,
-		}, nil
+		}, sameExecutedHead && !belowFinality, nil
 	}
 	if fcuHeader.Number.Sign() == 0 && canonicalHash != blockHash {
 		return &ForkChoiceResult{
 			LatestValidHash: rawdb.ReadHeadBlockHash(tx),
 			Status:          ExecutionStatusBadBlock,
 			ValidationError: "forkchoice head is a non-genesis block at height 0",
-		}, nil
+		}, false, nil
 	}
 	// Find the canonical reconnection point, and collect all hashes on the way
 	newCanonicals := make([]*canonicalEntry, 0, 64)
@@ -226,14 +237,14 @@ func (e *ExecModule) unwindIfNeeded(
 		currentParentNumber = fcuHeader.Number.Uint64() - 1
 		isCanonicalHash, err := e.isCanonicalHash(ctx, tx, currentParentHash)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		for !isCanonicalHash {
 			if currentParentNumber < finalisedBlockNum {
 				return &ForkChoiceResult{
 					LatestValidHash: common.Hash{},
 					Status:          ExecutionStatusInvalidForkchoice,
-				}, nil
+				}, false, nil
 			}
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
@@ -241,13 +252,13 @@ func (e *ExecModule) unwindIfNeeded(
 			})
 			currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if currentHeader == nil {
 				return &ForkChoiceResult{
 					LatestValidHash: common.Hash{},
 					Status:          ExecutionStatusMissingSegment,
-				}, nil
+				}, false, nil
 			}
 			currentParentHash = currentHeader.ParentHash
 			if currentHeader.Number.Sign() == 0 {
@@ -256,7 +267,7 @@ func (e *ExecModule) unwindIfNeeded(
 			currentParentNumber = currentHeader.Number.Uint64() - 1
 			isCanonicalHash, err = e.isCanonicalHash(ctx, tx, currentParentHash)
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 		}
 	}
@@ -265,7 +276,7 @@ func (e *ExecModule) unwindIfNeeded(
 		return &ForkChoiceResult{
 			LatestValidHash: common.Hash{},
 			Status:          ExecutionStatusInvalidForkchoice,
-		}, nil
+		}, false, nil
 	}
 	// Determine current canonical tip from TxNums. If unwindTarget is at or
 	// above the canonical tip, there's nothing above to roll back — skip the
@@ -276,30 +287,30 @@ func (e *ExecModule) unwindIfNeeded(
 	// as ReorgTooDeep even though no state actually needs unwinding.
 	lastCanonicalBlock, _, errLast := rawdbv3.TxNums.Last(tx)
 	if errLast != nil {
-		return nil, errLast
+		return nil, false, errLast
 	}
 	if unwindTarget < lastCanonicalBlock {
 		minUnwindableBlock, err := rawtemporaldb.CanUnwindToBlockNum(tx)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if unwindTarget < minUnwindableBlock {
 			e.logger.Warn("reorg target below minimum unwindable block", "unwindTarget", unwindTarget, "minUnwindableBlock", minUnwindableBlock)
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusReorgTooDeep,
-			}, nil
+			}, false, nil
 		}
 		if err := e.pipelineExecutor.UnwindTo(unwindTarget, stagedsync.ForkChoice, tx); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if err := e.hook.BeforeRun(tx, isSynced); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		// Run the unwind
 		if err := e.pipelineExecutor.RunUnwind(currentContext, tx); err != nil {
 			err = fmt.Errorf("updateForkChoice: %w", err)
-			return nil, err
+			return nil, false, err
 		}
 		e.observeStateTransition(ctx, StateTransitionUnwindComplete)
 	} else {
@@ -316,7 +327,7 @@ func (e *ExecModule) unwindIfNeeded(
 		UpdateForkChoiceDepth(fcuHeader.Number.Uint64() - 1 - unwindTarget)
 	}
 	if err := rawdbv3.TxNums.Truncate(tx, currentParentNumber+1); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	// Mark all new canonicals as canonicals
 	chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
@@ -324,34 +335,34 @@ func (e *ExecModule) unwindIfNeeded(
 		b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
 		h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
 		if b == nil || h == nil {
-			return nil, fmt.Errorf("unexpected chain cap: %d", canonicalSegment.number)
+			return nil, false, fmt.Errorf("unexpected chain cap: %d", canonicalSegment.number)
 		}
 		if canonicalSegment.number > 0 {
 			if err := e.engine.VerifyHeader(chainReader, h, true); err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			if err := e.engine.VerifyUncles(chainReader, h, b.Uncles); err != nil {
-				return nil, err
+				return nil, false, err
 			}
 		}
 		if err := rawdb.WriteCanonicalHash(tx, canonicalSegment.hash, canonicalSegment.number); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
 	if len(newCanonicals) > 0 {
 		if err := rawdbv3.TxNums.Truncate(tx, newCanonicals[0].number); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		// make sure we truncate any previous canonical hashes that go beyond the current head height
 		// so that AppendCanonicalTxNums does not mess up the txNums index
 		if err := rawdb.TruncateCanonicalHash(tx, newCanonicals[0].number+1, false); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if err := rawdb.AppendCanonicalTxNums(tx, newCanonicals[len(newCanonicals)-1].number); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
 func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
@@ -512,11 +523,27 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	result, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, safeHash, finalizedHash, canonicalHash, finishProgressBefore, isSynced)
+	result, acceptsMarkerUpdate, err := e.unwindIfNeeded(ctx, tx, currentContext, fcuHeader, blockHash, safeHash, finalizedHash, canonicalHash, finishProgressBefore, isSynced)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 	if result != nil {
+		// This return skips the normal overlay commit, so accepted marker changes
+		// need a separate durable write. Compare against the DB, not the overlay,
+		// so unchanged FCUs stay read-only.
+		if acceptsMarkerUpdate && !forkChoiceHashesMatch(roTx, blockHash, safeHash, finalizedHash) {
+			// Close the overlay before its backing read view, then release the view
+			// before committing so it cannot pin pages freed by the write.
+			teardownOverlay()
+			roTx.Rollback()
+			roTx = nil
+			if err := e.db.Update(ctx, func(rwTx kv.RwTx) error {
+				writeForkChoiceHashes(rwTx, blockHash, safeHash, finalizedHash)
+				return nil
+			}); err != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+			}
+		}
 		sendForkchoiceResultWithoutWaiting(outcomeCh, *result, false)
 		return nil
 	}
@@ -612,9 +639,13 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			defer commitRwTx.Rollback() // idempotent after a successful Commit
 			// The committed sd is spent; RunLoop closes it and continues on the
 			// fresh SD built below (no reuse).
-			if err := sd.Commit(ctx, commitRwTx); err != nil {
+			if err := sd.Commit(ctx, commitRwTx, func(kv.RwTx) error {
+				e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitReady)
+				return nil
+			}); err != nil {
 				return nil, nil, fmt.Errorf("updateForkChoice: flush+commit sd after hasMore: %w", err)
 			}
+			e.observeStateTransition(ctx, StateTransitionFCUCatchupCommitComplete)
 			// Fresh RO snapshot + SharedDomains + block overlay on the committed state.
 			roTx, err = e.db.BeginTemporalRo(ctx) //nolint:gocritic
 			if err != nil {

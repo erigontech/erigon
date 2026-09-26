@@ -25,10 +25,68 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types"
 )
+
+func TestCrashRecoveryBlocksRequireBAL(t *testing.T) {
+	bal := types.NewBlockAccessListSidecar(types.BlockAccessList{})
+	hash, err := bal.Hash()
+	require.NoError(t, err)
+	header := crashRecoveryBALHeader(hash)
+	block := types.NewBlockWithHeader(header, bal)
+	encoded, err := rlp.EncodeToBytes(block)
+	require.NoError(t, err)
+	var roundTrip types.Block
+	require.NoError(t, rlp.DecodeBytes(encoded, &roundTrip))
+	require.Equal(t, header.BlockAccessListHash, roundTrip.BlockAccessListHash())
+	_, err = decodeCrashRecoveryBlocks([]crashRecoveryBlock{{RLP: encoded}})
+	require.ErrorContains(t, err, "missing block access list")
+	balBytes, err := bal.Bytes()
+	require.NoError(t, err)
+	decoded, err := decodeCrashRecoveryBlocks([]crashRecoveryBlock{{RLP: encoded, BAL: balBytes}})
+	require.NoError(t, err)
+	require.NotNil(t, decoded[0].BlockAccessList())
+}
+
+func crashRecoveryBALHeader(hash common.Hash) *types.Header {
+	// Header extension fields are positional in RLP; include all fields before
+	// the BAL hash so the round trip preserves its meaning.
+	return &types.Header{
+		Number:                uint256.Int{1},
+		BaseFee:               new(uint256.Int),
+		WithdrawalsHash:       new(common.Hash),
+		BlobGasUsed:           new(uint64),
+		ExcessBlobGas:         new(uint64),
+		ParentBeaconBlockRoot: new(common.Hash),
+		RequestsHash:          new(common.Hash),
+		BlockAccessListHash:   &hash,
+		SlotNumber:            new(uint64),
+	}
+}
+
+type crashRecoveryReadFailure struct {
+	kv.TemporalRoDB
+}
+
+func (crashRecoveryReadFailure) View(context.Context, func(kv.Tx) error) error {
+	return errors.New("injected database read failure")
+}
+
+func TestCrashRecoveryExecutionReadFailure(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		started := time.Now()
+		err := waitCrashRecoveryExecution(t.Context(), crashRecoveryReadFailure{}, 62)
+		require.ErrorContains(t, err, "injected database read failure")
+		require.Equal(t, started, time.Now(), "database errors must not wait for the polling deadline")
+	})
+}
 
 func TestCrashRecoveryAttemptDeadline(t *testing.T) {
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -73,13 +131,24 @@ func TestCrashRecoveryRejectsChildFailure(t *testing.T) {
 }
 
 func TestCrashRecoveryWaitsForTransition(t *testing.T) {
+	t.Run("unexpected_early_valid", func(t *testing.T) {
+		synctest.Test(t, func(t *testing.T) {
+			transitions := newStateTransitionController()
+			ready := transitions.hold(t, execmodule.StateTransitionFCUCatchupCommitReady, 1)
+			response := make(chan error, 1)
+			response <- nil
+			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+			defer cancel()
+			require.ErrorContains(t, waitCrashRecoveryTransition(ctx, ready, response, false), "returned before transition")
+		})
+	})
 	t.Run("early_valid", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
 			transitions := newStateTransitionController()
 			cleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
 			response := make(chan error)
 			done := make(chan error, 1)
-			go func() { done <- waitCrashRecoveryTransition(t.Context(), cleared, response) }()
+			go func() { done <- waitCrashRecoveryTransition(t.Context(), cleared, response, true) }()
 			response <- nil
 			synctest.Wait()
 			select {
@@ -97,7 +166,7 @@ func TestCrashRecoveryWaitsForTransition(t *testing.T) {
 			transitions := newStateTransitionController()
 			ready := transitions.hold(t, execmodule.StateTransitionCommitReady, 1)
 			go transitions.observe(t.Context(), execmodule.StateTransitionCommitReady)
-			require.NoError(t, waitCrashRecoveryTransition(t.Context(), ready, make(chan error)))
+			require.NoError(t, waitCrashRecoveryTransition(t.Context(), ready, make(chan error), true))
 			ready.release()
 		})
 	})
@@ -107,7 +176,7 @@ func TestCrashRecoveryWaitsForTransition(t *testing.T) {
 		response := make(chan error, 1)
 		failed := errors.New("forkchoice failed")
 		response <- failed
-		require.ErrorIs(t, waitCrashRecoveryTransition(t.Context(), ready, response), failed)
+		require.ErrorIs(t, waitCrashRecoveryTransition(t.Context(), ready, response, true), failed)
 	})
 	t.Run("deadline", func(t *testing.T) {
 		synctest.Test(t, func(t *testing.T) {
@@ -115,7 +184,7 @@ func TestCrashRecoveryWaitsForTransition(t *testing.T) {
 			ready := transitions.hold(t, execmodule.StateTransitionCommitReady, 1)
 			ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
 			defer cancel()
-			require.ErrorIs(t, waitCrashRecoveryTransition(ctx, ready, nil), context.DeadlineExceeded)
+			require.ErrorIs(t, waitCrashRecoveryTransition(ctx, ready, nil, true), context.DeadlineExceeded)
 		})
 	})
 }
