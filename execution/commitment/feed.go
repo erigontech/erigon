@@ -16,6 +16,12 @@
 
 package commitment
 
+import (
+	"github.com/holiman/uint256"
+
+	"github.com/erigontech/erigon/common"
+)
+
 type FeedSlot struct {
 	Hash  [32]byte
 	Value []byte
@@ -30,4 +36,25 @@ type FeedAccount struct {
 type Feed struct {
 	Accounts []FeedAccount
 	Keys     int
+}
+
+type PBinFeed struct {
+	Accounts []PBinFeedAccount
+}
+
+type PBinFeedAccount struct {
+	Address     []byte
+	Exists      bool
+	Nonce       uint64
+	Balance     uint256.Int
+	CodeHash    common.Hash
+	Wiped       bool
+	CodeWritten bool
+	Code        []byte
+	Slots       []PBinFeedSlot
+}
+
+type PBinFeedSlot struct {
+	Key   []byte
+	Value []byte
 }

@@ -223,6 +223,99 @@ func (t *Trie) bucketKeysFromRecord(key []byte) ([][]byte, error) {
 	return t.rowKeys(row)
 }
 
+func (t *Trie) keysUnderPrefix(prefix []byte) ([][]byte, error) {
+	if len(prefix) != 33 {
+		return nil, errInsertKey
+	}
+	if prefix[0] == eip8297.StorageZone {
+		bucketKey, err := bucketKeyForPrefix(prefix)
+		if err != nil {
+			return nil, err
+		}
+		return t.bucketKeysFromRecord(bucketKey)
+	}
+	if prefix[0] != eip8297.AccountZone {
+		return nil, errInsertKey
+	}
+	path := eip8297.PathFromBits(prefix, 264)
+	root, err := t.loadRoot()
+	if err != nil {
+		return nil, err
+	}
+	switch root.form {
+	case LeafRoot:
+		keyPath, err := keyPath(root.leaf.Key)
+		if err != nil {
+			return nil, err
+		}
+		if pathHasPrefix(&keyPath, &path) {
+			return [][]byte{bytes.Clone(root.leaf.Key)}, nil
+		}
+		return nil, nil
+	case ExtRoot:
+		if !pathHasPrefix(&root.self, &path) && !pathHasPrefix(&path, &root.self) {
+			return nil, nil
+		}
+		row, err := t.extTopRow(root)
+		if err != nil {
+			return nil, err
+		}
+		if pathHasPrefix(&root.self, &path) {
+			return t.rowKeys(row)
+		}
+		return t.keysUnderRow(row, &path)
+	case RowRoot:
+		if root.row == nil {
+			return nil, nil
+		}
+		return t.keysUnderRow(root.row, &path)
+	default:
+		return nil, fmt.Errorf("unknown root form %d", root.form)
+	}
+}
+
+func (t *Trie) keysUnderRow(row *rowNode, prefix *eip8297.Bitpath) ([][]byte, error) {
+	if row.path.BitLen >= prefix.BitLen {
+		if pathHasPrefix(&row.path, prefix) {
+			return t.rowKeys(row)
+		}
+		return nil, nil
+	}
+	if !pathHasPrefix(prefix, &row.path) {
+		return nil, nil
+	}
+	slot := slotAt(prefix, row.path.BitLen)
+	cell := row.cell(slot)
+	switch cell.Kind {
+	case EmptyCell:
+		return nil, nil
+	case LeafCell:
+		keyPath, err := keyPath(cell.Key)
+		if err != nil {
+			return nil, err
+		}
+		if pathHasPrefix(&keyPath, prefix) {
+			return [][]byte{bytes.Clone(cell.Key)}, nil
+		}
+		return nil, nil
+	case BranchCell:
+		full := branchPath(row, slot, cell)
+		if !pathHasPrefix(&full, prefix) && !pathHasPrefix(prefix, &full) {
+			return nil, nil
+		}
+		child, err := t.loadBranchChild(row, slot)
+		if err != nil {
+			return nil, err
+		}
+		if pathHasPrefix(&full, prefix) {
+			return t.rowKeys(child)
+		}
+		return t.keysUnderRow(child, prefix)
+	default:
+		return nil, errInsertKey
+	}
+}
+
 func (t *Trie) rowKeys(row *rowNode) ([][]byte, error) {
 	keys := make([][]byte, 0)
 	for slot := range row.cells {

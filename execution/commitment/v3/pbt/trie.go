@@ -31,6 +31,7 @@ type Op struct {
 	Key   []byte
 	Drop  []byte
 	Value [eip8297.ValueLength]byte
+	merge *feedMerge
 }
 
 var errOperationOrder = fmt.Errorf("operation list must be sorted by key with at most one operation per key; drops must precede writes under their prefix")
@@ -62,6 +63,9 @@ type Trie struct {
 	scheduledBucketRecords map[string][]byte
 	deltas                 []commitment.BranchDelta
 	roundPrev              map[string][]byte
+	originalLeafSeen       map[string]struct{}
+	originalLeaves         map[string]*Cell
+	droppedLeafKeys        map[string]struct{}
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {
@@ -105,6 +109,9 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.scheduledBucketRecords = nil
 	t.deltas = nil
 	t.roundPrev = nil
+	t.originalLeafSeen = nil
+	t.originalLeaves = nil
+	t.droppedLeafKeys = nil
 }
 
 func (t *Trie) rootRecordKey() []byte {
@@ -129,6 +136,9 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 		return common.Hash{}, err
 	}
 	t.roundPrev = make(map[string][]byte)
+	t.originalLeafSeen = make(map[string]struct{})
+	t.originalLeaves = make(map[string]*Cell)
+	t.droppedLeafKeys = make(map[string]struct{})
 	t.bucketDirty = make(map[string][]byte)
 	if _, err := t.loadRoot(); err != nil {
 		return common.Hash{}, err
@@ -142,16 +152,22 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 		var err error
 		switch {
 		case len(ops[i].Drop) != 0:
-			var bucketKey []byte
-			bucketKey, err = bucketKeyForPrefix(ops[i].Drop)
-			if err == nil {
-				t.touchBucket(bucketKey)
+			if len(ops[i].Drop) != 33 || (ops[i].Drop[0] != eip8297.AccountZone && ops[i].Drop[0] != eip8297.StorageZone) {
+				err = errInsertKey
+			} else if ops[i].Drop[0] == eip8297.StorageZone {
+				var bucketKey []byte
+				bucketKey, err = bucketKeyForPrefix(ops[i].Drop)
+				if err == nil {
+					t.touchBucket(bucketKey)
+				}
 			}
 			if err != nil {
 				err = errInsertKey
 				break
 			}
 			err = t.dropPrefix(ops[i].Drop)
+		case ops[i].merge != nil:
+			err = t.applyMerge(ops[i])
 		case ops[i].Value == ([eip8297.ValueLength]byte{}):
 			if len(ops[i].Key) == eip8297.StorageKeyLength && ops[i].Key[0] == eip8297.StorageZone {
 				var bucketKey []byte

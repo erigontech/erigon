@@ -18,17 +18,156 @@ package pbt
 
 import (
 	"bytes"
+	"encoding/binary"
+	"errors"
 	"fmt"
 	"sort"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
 var (
-	errInsertKey   = fmt.Errorf("invalid insert key")
-	errInsertValue = fmt.Errorf("zero insert value")
+	errInsertKey    = fmt.Errorf("invalid insert key")
+	errInsertValue  = fmt.Errorf("zero insert value")
+	errFeedCodeSize = errors.New("pbin: code size unavailable for non-empty code hash")
 )
+
+type mergeKind uint8
+
+const (
+	mergeBasicData mergeKind = iota + 1
+	mergeCodeHash
+)
+
+type feedMerge struct {
+	kind     mergeKind
+	nonce    uint64
+	balance  uint256.Int
+	codeHash common.Hash
+}
+
+func (t *Trie) applyMerge(op Op) error {
+	merge := op.merge
+	switch merge.kind {
+	case mergeBasicData:
+		original, err := t.originalLeaf(op.Key)
+		if err != nil {
+			return err
+		}
+		codeSize := uint64(0)
+		if original != nil && !t.droppedLeaf(op.Key) {
+			codeSize = uint64(binary.BigEndian.Uint32(original.Value[eip8297.BasicDataCodeSizeOffset:]))
+		} else if !eip8297.IsEmptyCodeHash(merge.codeHash) {
+			return fmt.Errorf("%w for %x", errFeedCodeSize, op.Key)
+		}
+		value, err := eip8297.EncodeBasicData(merge.nonce, &merge.balance, codeSize)
+		if err != nil {
+			return err
+		}
+		if value == ([eip8297.ValueLength]byte{}) {
+			return t.remove(op.Key)
+		}
+		return t.insert(op.Key, value)
+	case mergeCodeHash:
+		basicKey := bytes.Clone(op.Key)
+		basicKey[len(basicKey)-1] = eip8297.BasicDataLeafKey
+		original, err := t.originalLeaf(basicKey)
+		if err != nil {
+			return err
+		}
+		if original != nil && !t.droppedLeaf(basicKey) {
+			return nil
+		}
+		return t.insert(op.Key, eip8297.CodeHashValue(merge.codeHash))
+	default:
+		return fmt.Errorf("unknown feed merge %d", merge.kind)
+	}
+}
+
+func (t *Trie) droppedLeaf(key []byte) bool {
+	_, ok := t.droppedLeafKeys[string(key)]
+	return ok
+}
+
+func (t *Trie) originalLeaf(key []byte) (*Cell, error) {
+	name := string(key)
+	if _, ok := t.originalLeafSeen[name]; !ok {
+		cell, found, err := t.lookupLeaf(key)
+		if err != nil {
+			return nil, err
+		}
+		t.originalLeafSeen[name] = struct{}{}
+		if found {
+			copyCell := cell
+			t.originalLeaves[name] = &copyCell
+		}
+	}
+	return t.originalLeaves[name], nil
+}
+
+func (t *Trie) rememberOriginalLeaf(key []byte) error {
+	_, err := t.originalLeaf(key)
+	return err
+}
+
+func (t *Trie) lookupLeaf(key []byte) (Cell, bool, error) {
+	path, err := keyPath(key)
+	if err != nil {
+		return Cell{}, false, err
+	}
+	root, err := t.loadRoot()
+	if err != nil {
+		return Cell{}, false, err
+	}
+	switch root.form {
+	case RowRoot:
+		if root.row == nil {
+			return Cell{}, false, nil
+		}
+		return t.lookupRowLeaf(root.row, &path, key)
+	case LeafRoot:
+		return root.leaf, bytes.Equal(root.leaf.Key, key), nil
+	case ExtRoot:
+		if !pathHasPrefix(&path, &root.self) {
+			return Cell{}, false, nil
+		}
+		row, err := t.extTopRow(root)
+		if err != nil {
+			return Cell{}, false, err
+		}
+		return t.lookupRowLeaf(row, &path, key)
+	default:
+		return Cell{}, false, fmt.Errorf("unknown root form %d", root.form)
+	}
+}
+
+func (t *Trie) lookupRowLeaf(row *rowNode, path *eip8297.Bitpath, key []byte) (Cell, bool, error) {
+	if !pathHasPrefix(path, &row.path) || path.BitLen < row.path.BitLen+4 {
+		return Cell{}, false, nil
+	}
+	cell := row.cell(slotAt(path, row.path.BitLen))
+	switch cell.Kind {
+	case EmptyCell:
+		return Cell{}, false, nil
+	case LeafCell:
+		return cell.Cell, bytes.Equal(cell.Key, key), nil
+	case BranchCell:
+		full := branchPath(row, slotAt(path, row.path.BitLen), cell)
+		if !pathHasPrefix(path, &full) {
+			return Cell{}, false, nil
+		}
+		child, err := t.loadBranchChild(row, slotAt(path, row.path.BitLen))
+		if err != nil {
+			return Cell{}, false, err
+		}
+		return t.lookupRowLeaf(child, path, key)
+	default:
+		return Cell{}, false, errInsertKey
+	}
+}
 
 func (t *Trie) insert(key []byte, value [eip8297.ValueLength]byte) error {
 	path, err := keyPath(key)
@@ -508,15 +647,15 @@ func (t *Trie) normalizeRow(row *rowNode) error {
 }
 
 func (t *Trie) dropPrefix(prefix []byte) error {
-	bucketKey, err := bucketKeyForPrefix(prefix)
-	if err != nil {
-		return err
-	}
-	keys, err := t.bucketKeysFromRecord(bucketKey)
+	keys, err := t.keysUnderPrefix(prefix)
 	if err != nil {
 		return err
 	}
 	for _, key := range keys {
+		if err := t.rememberOriginalLeaf(key); err != nil {
+			return err
+		}
+		t.droppedLeafKeys[string(key)] = struct{}{}
 		if err := t.remove(key); err != nil {
 			return err
 		}
