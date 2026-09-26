@@ -997,7 +997,7 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 	}
 }
 
-// Call data takes the same data/input precedence as eth_call: input wins when both are set.
+// Call data comes from data or input, as in eth_call. Both may be set only to the same value.
 func TestTraceCallInputField(t *testing.T) {
 	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
 	api := newTraceApiForTest(m)
@@ -1019,8 +1019,8 @@ func TestTraceCallInputField(t *testing.T) {
 		{name: "data", fields: `"data":"0xaa"`, output: "0xaa"},
 		{name: "input", fields: `"input":"0xbb"`, output: "0xbb"},
 		{name: "equal", fields: `"data":"0xcc","input":"0xcc"`, output: "0xcc"},
-		{name: "input wins", fields: `"data":"0xaa","input":"0xbb"`, output: "0xbb"},
-		{name: "empty input wins", fields: `"data":"0xaa","input":"0x"`, output: "0x"},
+		{name: "differ", fields: `"data":"0xaa","input":"0xbb"`},
+		{name: "empty input", fields: `"data":"0xaa","input":"0x"`},
 		{name: "null input", fields: `"data":"0xaa","input":null`, output: "0xaa"},
 		{name: "null data", fields: `"data":null,"input":"0xbb"`, output: "0xbb"},
 		{name: "both null", fields: `"data":null,"input":null`, output: "0x"},
@@ -1028,6 +1028,12 @@ func TestTraceCallInputField(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			var args TraceCallParam
 			call := fmt.Sprintf(`{"from":%q,"to":%q,%s}`, bankAddr.Hex(), echo.Hex(), tc.fields)
+			if tc.output == "" {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, json.Unmarshal([]byte(call), &args), &rpcErr)
+				require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+				return
+			}
 			require.NoError(t, json.Unmarshal([]byte(call), &args))
 
 			result, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, traceConfig)
