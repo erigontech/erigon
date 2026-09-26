@@ -122,6 +122,9 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 	if task.hasInitial {
 		local.prefix = &prefix
 		subtreeTrie, err = newSubtreeTrie(local, prefix, task.initial.descriptor, task.initial.present)
+		if err != nil {
+			return phaseBucketResult{}, err
+		}
 	} else if task.kind == phaseBucket && len(task.dependencies) == 0 {
 		subtreeTrie, err = newBucketTrie(local, []byte(task.key))
 		if err != nil {
