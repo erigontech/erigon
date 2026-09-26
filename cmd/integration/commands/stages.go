@@ -879,6 +879,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		if err := collateAndPrune(); err != nil {
 			return err
 		}
+		backup.DefragIfBloated(db, time.Minute, logger)
 		if execProgress >= block {
 			break
 		}

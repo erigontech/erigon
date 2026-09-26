@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 )
 
 type datadirDB struct {
@@ -123,7 +125,7 @@ func autoCompactDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logge
 			logger.Warn("[compact] can't read db page usage", "db", db.path, "err", err)
 			continue
 		}
-		if free <= bloatRatio*data || free < autoCompactMinFree {
+		if !bloated(data, free) {
 			continue
 		}
 		logger.Info("[compact] auto-compact", "db", db.path, "data", data.HR(), "free", free.HR())
@@ -148,6 +150,46 @@ func pageUsage(dbDir string) (data, free datasize.ByteSize, err error) {
 	if err := env.Open(dbDir, mdbx.Readonly, 0o644); err != nil {
 		return 0, 0, err
 	}
+	return envPageUsage(env)
+}
+
+// DefragIfBloated defragments an open chaindata db in place when it is bloated:
+// mdbx moves the pages from the end of the file into free pages, then cuts the
+// file. The db stays open; a reader of an old snapshot stops it early.
+func DefragIfBloated(db kv.RwDB, timeLimit time.Duration, logger log.Logger) {
+	if t, ok := db.(interface{ InternalDB() kv.RwDB }); ok {
+		db = t.InternalDB()
+	}
+	m, ok := db.(*mdbx2.MdbxKV)
+	if !ok {
+		return
+	}
+	data, free, err := envPageUsage(m.Env())
+	if err != nil {
+		logger.Warn("[compact] can't read db page usage", "db", m.Path(), "err", err)
+		return
+	}
+	if !bloated(data, free) {
+		return
+	}
+	logger.Info("[compact] auto-defrag", "db", m.Path(), "data", data.HR(), "free", free.HR())
+	res, err := m.Defrag(mdbx.DefragOptions{TimeLimit: timeLimit, AcceptableBacklash: -1})
+	if res == nil {
+		logger.Warn("[compact] auto-defrag failed", "db", m.Path(), "err", err)
+		return
+	}
+	pageSize := m.PageSize()
+	logger.Info("[compact] auto-defrag done", "db", m.Path(), "err", err,
+		"shrunk", (datasize.ByteSize(max(res.PagesShrunk, 0)) * pageSize).HR(), "moved", (datasize.ByteSize(res.PagesMoved) * pageSize).HR(),
+		"left", (datasize.ByteSize(res.PagesLeft) * pageSize).HR(), "retained", (datasize.ByteSize(res.PagesRetained) * pageSize).HR(),
+		"cycles", res.Cycles, "stoppingReasons", res.StoppingReasons, "took", res.SpentTime)
+}
+
+func bloated(data, free datasize.ByteSize) bool {
+	return free > bloatRatio*data && free >= autoCompactMinFree
+}
+
+func envPageUsage(env *mdbx.Env) (data, free datasize.ByteSize, err error) {
 	st, err := env.Stat()
 	if err != nil {
 		return 0, 0, err
