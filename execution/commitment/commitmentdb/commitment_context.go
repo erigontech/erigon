@@ -617,11 +617,12 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	pbinOps := sdc.pbinOps
 	sdc.pbinOps = nil
 	updateCount := sdc.updates.Size()
-	if feed != nil {
+	switch {
+	case feed != nil:
 		updateCount = uint64(feed.Keys)
-	} else if pbinFeed != nil {
+	case pbinFeed != nil:
 		updateCount = uint64(len(pbinFeed.Accounts))
-	} else if pbinOps != nil {
+	case pbinOps != nil:
 		updateCount = uint64(len(pbinOps))
 	}
 	start := time.Now()
@@ -760,12 +761,17 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 
 	// When deferring commitment updates, tell Process() to leave deferred updates
 	// on the branch encoder instead of applying inline — we'll take them after.
-	if hph, ok := sdc.patriciaTrie.(*commitment.HexPatriciaHashed); ok && sdc.deferCommitmentUpdates {
-		hph.SetLeaveDeferredForCaller(true)
-		defer hph.SetLeaveDeferredForCaller(false)
-	} else if ptrie, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok && sdc.deferCommitmentUpdates {
-		ptrie.SetLeaveDeferredForCaller(true)
-		defer ptrie.SetLeaveDeferredForCaller(false)
+	switch trie := sdc.patriciaTrie.(type) {
+	case *commitment.HexPatriciaHashed:
+		if sdc.deferCommitmentUpdates {
+			trie.SetLeaveDeferredForCaller(true)
+			defer trie.SetLeaveDeferredForCaller(false)
+		}
+	case *commitment.ParallelPatriciaHashed:
+		if sdc.deferCommitmentUpdates {
+			trie.SetLeaveDeferredForCaller(true)
+			defer trie.SetLeaveDeferredForCaller(false)
+		}
 	}
 	if trie, ok := sdc.patriciaTrie.(v3Trie); ok && sdc.deferCommitmentUpdates {
 		trie.SetDeferCommitmentUpdates(true)

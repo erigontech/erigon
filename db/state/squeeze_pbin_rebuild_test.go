@@ -63,7 +63,7 @@ func TestPBinRebuildBatchesSplitWhale(t *testing.T) {
 	address := bytes.Repeat([]byte{0x7a}, 20)
 	ops := make([]pbt.Op, 0, 6)
 	for slot := byte(64); slot < 70; slot++ {
-		key := bytes.Repeat([]byte{0}, 32)
+		key := make([]byte, 32)
 		key[len(key)-1] = slot
 		ops = append(ops, pbt.Op{Key: eip8297.TreeKeyStorage(address, key), Value: [32]byte{slot}})
 	}

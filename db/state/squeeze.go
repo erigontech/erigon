@@ -1506,7 +1506,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		if err != nil {
 			return nil, err
 		}
-		defer os.RemoveAll(tmpDir)
+		defer func() { _ = dir.RemoveAll(tmpDir) }()
 		batchOps := pbinRebuildMaxOps
 		batchBytes := pbinRebuildMaxBytes
 		if cfg.PBinBatchOps != 0 {

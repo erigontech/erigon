@@ -321,8 +321,7 @@ func pbinM1AMeasuredRebuild(t *testing.T, db kv.TemporalRwDB, target state.Rebui
 	}
 	done := make(chan struct{})
 	var sampler sync.WaitGroup
-	sampler.Add(1)
-	go func() {
+	sampler.Go(func() {
 		defer sampler.Done()
 		ticker := time.NewTicker(time.Millisecond)
 		defer ticker.Stop()
@@ -334,7 +333,7 @@ func pbinM1AMeasuredRebuild(t *testing.T, db kv.TemporalRwDB, target state.Rebui
 				updatePeak()
 			}
 		}
-	}()
+	})
 	root, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, target)
 	close(done)
 	sampler.Wait()
