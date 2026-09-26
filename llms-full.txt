@@ -6675,6 +6675,8 @@ Response
 
 Traces a call to `eth_sendRawTransaction` without making the call, returning the traces
 
+The transaction runs against the latest state and must be valid there: its nonce must equal the sender's nonce, the sender must afford value plus gas limit times fee cap (plus blob gas times blob fee cap), and the sender must have no code other than an EIP-7702 delegation. An invalid transaction returns an error instead of a trace. To trace a transaction that is already mined, use `trace_replayTransaction`.
+
 #### Parameters
 
 1. `Data` - Raw transaction data.

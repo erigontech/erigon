@@ -529,41 +529,28 @@ func TestOeTracer(t *testing.T) {
 	}
 }
 
-// rawTxFromBlock reads the first transaction from the given block number and
-// returns its binary encoding together with the sender and recipient addresses.
-func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum uint64) (encoded []byte, from, to accounts.Address) {
+// signedTransferAtLatest signs a 1-wei transfer from the test chain's funded
+// account at its latest nonce, so trace_rawTransaction accepts it.
+func signedTransferAtLatest(t *testing.T, m *execmoduletester.ExecModuleTester) (encoded []byte, from, to accounts.Address) {
 	t.Helper()
-	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
-		if err != nil {
-			return err
-		}
-		txn := b.Transactions()[0]
-		var buf bytes.Buffer
-		if err := txn.MarshalBinary(&buf); err != nil {
-			return err
-		}
-		encoded = buf.Bytes()
-		signer := types.MakeSigner(m.ChainConfig, b.NumberU64(), b.Time())
-		from, err = txn.Sender(*signer)
-		if err != nil {
-			return err
-		}
-		if toAddr := txn.GetTo(); toAddr != nil {
-			to = accounts.InternAddress(*toAddr)
-		}
-		return nil
-	}); err != nil {
-		t.Fatal(err)
-	}
-	return
+	sender := crypto.PubkeyToAddress(m.Key.PublicKey)
+	recipient := common.HexToAddress("0x1234")
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	nonce, err := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil).GetTransactionCount(context.Background(), sender, &latest)
+	require.NoError(t, err)
+	txn, err := types.SignTx(types.NewTransaction(uint64(*nonce), recipient, uint256.NewInt(1), params.TxGas, new(uint256.Int), nil),
+		*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&buf))
+	return buf.Bytes(), accounts.InternAddress(sender), accounts.InternAddress(recipient)
 }
 
 func TestRawTransaction(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 
-	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	encoded, _, _ := signedTransferAtLatest(t, m)
 	result, err := api.RawTransaction(context.Background(), encoded, []string{"trace"})
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -574,7 +561,7 @@ func TestRawTransactionStateDiff(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 
-	encoded, from, to := rawTxFromBlock(t, m, 6)
+	encoded, from, to := signedTransferAtLatest(t, m)
 
 	result, err := api.RawTransaction(context.Background(), encoded, []string{"stateDiff"})
 	require.NoError(t, err)
@@ -627,7 +614,7 @@ func TestRawTransactionVmTrace(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 
-	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	encoded, _, _ := signedTransferAtLatest(t, m)
 
 	result, err := api.RawTransaction(context.Background(), encoded, []string{"vmTrace"})
 	require.NoError(t, err)
@@ -642,7 +629,7 @@ func TestRawTransactionAllTraceTypes(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 
-	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	encoded, _, _ := signedTransferAtLatest(t, m)
 
 	result, err := api.RawTransaction(context.Background(), encoded, []string{"trace", "stateDiff", "vmTrace"})
 	require.NoError(t, err)
@@ -773,7 +760,7 @@ func TestRawTransactionInvalidType(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 
-	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	encoded, _, _ := signedTransferAtLatest(t, m)
 
 	_, err := api.RawTransaction(context.Background(), encoded, []string{"unknown"})
 	require.Error(t, err)
@@ -1526,7 +1513,7 @@ func TestRawTransactionWithoutTraceTypes(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
 
-	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	encoded, _, _ := signedTransferAtLatest(t, m)
 
 	result, err := api.RawTransaction(context.Background(), encoded, []string{})
 	require.NoError(t, err)
@@ -1978,4 +1965,148 @@ func TestTraceCallFields(t *testing.T) {
 			require.Equal(t, word42, traceCallMany(t, callObject(marker, tc.fields))[0].Output.String())
 		})
 	}
+}
+
+// TestRawTransactionValidatesAgainstLatestState checks that trace_rawTransaction
+// runs a signed transaction only if it is valid at the latest state: the nonce
+// must equal the state nonce, the sender must afford value plus gas limit times
+// fee cap, and the sender must not have code other than an EIP-7702 delegation.
+// A valid transaction that reverts or runs out of gas is still traced.
+func TestRawTransactionValidatesAgainstLatestState(t *testing.T) {
+	const stateNonce = 10
+	cfg := chain.TestChainOsakaConfig.Copy()
+	key := func(n int64) *ecdsa.PrivateKey {
+		k, err := crypto.HexToECDSA(fmt.Sprintf("%064x", n))
+		require.NoError(t, err)
+		return k
+	}
+	eoaKey, codeSenderKey, delegatedKey := key(1), key(2), key(3)
+	eoa := crypto.PubkeyToAddress(eoaKey.PublicKey)
+	marker := common.HexToAddress("0x1002")
+	reverter := common.HexToAddress("0x1003")
+	oneEther := big.NewInt(common.Ether)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: cfg,
+		Alloc: types.GenesisAlloc{
+			eoa: {Balance: oneEther, Nonce: stateNonce},
+			crypto.PubkeyToAddress(codeSenderKey.PublicKey): {Balance: oneEther, Nonce: stateNonce, Code: []byte{0x00}},
+			crypto.PubkeyToAddress(delegatedKey.PublicKey):  {Balance: oneEther, Nonce: stateNonce, Code: types.AddressToDelegation(accounts.InternAddress(marker))},
+			// PUSH1 42, PUSH0, SSTORE, PUSH1 42, PUSH0, MSTORE, PUSH1 32, PUSH0, RETURN
+			marker: {Code: []byte{0x60, 0x2a, 0x5f, 0x55, 0x60, 0x2a, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xf3}},
+			// PUSH1 42, PUSH0, MSTORE, PUSH1 32, PUSH0, REVERT
+			reverter: {Code: []byte{0x60, 0x2a, 0x5f, 0x52, 0x60, 0x20, 0x5f, 0xfd}},
+		},
+	}), execmoduletester.WithKey(eoaKey))
+	api := newTraceApiForTest(m)
+	signer := types.LatestSignerForChainID(cfg.ChainID)
+	word42 := common.BigToHash(big.NewInt(42)).Hex()
+	feeCap := uint256.NewInt(10 * common.GWei)
+
+	type tx struct {
+		key      *ecdsa.PrivateKey
+		nonce    uint64
+		to       *common.Address // nil for CREATE
+		value    *big.Int
+		gasLimit uint64
+	}
+	rawTx := func(t *testing.T, tx tx) []byte {
+		t.Helper()
+		var data []byte
+		if tx.to == nil {
+			data = []byte{0x60, 0x00, 0x60, 0x00, 0xf3} // PUSH1 0, PUSH1 0, RETURN
+		}
+		value, overflow := uint256.FromBig(tx.value)
+		require.False(t, overflow)
+		signed, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{Nonce: tx.nonce, To: tx.to, Value: *value, GasLimit: tx.gasLimit, Data: data},
+			ChainID:  *cfg.ChainID,
+			TipCap:   *uint256.NewInt(1),
+			FeeCap:   *feeCap,
+		}, *signer, tx.key)
+		require.NoError(t, err)
+		var buf bytes.Buffer
+		require.NoError(t, signed.MarshalBinary(&buf))
+		return buf.Bytes()
+	}
+	valid := tx{key: eoaKey, nonce: stateNonce, to: &marker, value: big.NewInt(1), gasLimit: 100_000}
+
+	// Leaves enough for gas limit * effective gas price (base fee + 1 wei tip; the
+	// genesis block is latest), but not for gas limit * fee cap.
+	latestBaseFee := m.Genesis.BaseFee()
+	gasAtFeeCap := new(big.Int).Mul(big.NewInt(int64(valid.gasLimit)), feeCap.ToBig())
+	gasAtEffectivePrice := new(big.Int).Mul(big.NewInt(int64(valid.gasLimit)), new(big.Int).Add(latestBaseFee.ToBig(), big.NewInt(1)))
+	valueBelowFeeCapCost := new(big.Int).Sub(oneEther, new(big.Int).Div(new(big.Int).Add(gasAtFeeCap, gasAtEffectivePrice), big.NewInt(2)))
+
+	for _, tc := range []struct {
+		name    string
+		modify  func(*tx)
+		wantErr error
+	}{
+		{name: "nonce below state nonce", modify: func(tx *tx) { tx.nonce-- }, wantErr: protocol.ErrNonceTooLow},
+		{name: "nonce above state nonce", modify: func(tx *tx) { tx.nonce++ }, wantErr: protocol.ErrNonceTooHigh},
+		{name: "create with nonce below state nonce", modify: func(tx *tx) { tx.to = nil; tx.nonce-- }, wantErr: protocol.ErrNonceTooLow},
+		{name: "create with nonce above state nonce", modify: func(tx *tx) { tx.to = nil; tx.nonce++ }, wantErr: protocol.ErrNonceTooHigh},
+		{name: "value above balance", modify: func(tx *tx) { tx.value = new(big.Int).Add(oneEther, big.NewInt(1)) }, wantErr: protocol.ErrInsufficientFunds},
+		{name: "value affordable but not with upfront gas", modify: func(tx *tx) { tx.value = oneEther }, wantErr: protocol.ErrInsufficientFunds},
+		{name: "gas affordable at effective price but not at fee cap", modify: func(tx *tx) { tx.value = valueBelowFeeCapCost }, wantErr: protocol.ErrInsufficientFunds},
+		{name: "sender with ordinary code", modify: func(tx *tx) { tx.key = codeSenderKey }, wantErr: protocol.ErrSenderNoEOA},
+		{name: "gas limit above the EIP-7825 cap", modify: func(tx *tx) { tx.gasLimit = params.MaxTxnGasLimit + 1 }, wantErr: protocol.ErrGasLimitTooHigh},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx := valid
+			tc.modify(&tx)
+			for _, traceTypes := range [][]string{{TraceTypeTrace, TraceTypeStateDiff, TraceTypeVmTrace}, {}} {
+				result, err := api.RawTransaction(context.Background(), rawTx(t, tx), traceTypes)
+				require.ErrorIs(t, err, tc.wantErr, "trace types %v", traceTypes)
+				require.Nil(t, result)
+			}
+		})
+	}
+
+	traceValid := func(t *testing.T, tx tx) *TraceCallResult {
+		t.Helper()
+		result, err := api.RawTransaction(context.Background(), rawTx(t, tx), []string{TraceTypeTrace})
+		require.NoError(t, err)
+		require.Len(t, result.Trace, 1)
+		return result
+	}
+
+	t.Run("valid EOA sender", func(t *testing.T) {
+		result := traceValid(t, valid)
+		require.Equal(t, word42, result.Output.String())
+		require.Empty(t, result.Trace[0].Error)
+	})
+
+	t.Run("valid EIP-7702 delegated sender", func(t *testing.T) {
+		tx := valid
+		tx.key = delegatedKey
+		result := traceValid(t, tx)
+		require.Equal(t, word42, result.Output.String())
+		require.Empty(t, result.Trace[0].Error)
+	})
+
+	t.Run("valid create deploys at the signed nonce's address", func(t *testing.T) {
+		tx := valid
+		tx.to = nil
+		result := traceValid(t, tx)
+		require.Empty(t, result.Trace[0].Error)
+		created, ok := result.Trace[0].Result.(*CreateTraceResult)
+		require.True(t, ok, "unexpected result type %T", result.Trace[0].Result)
+		require.Equal(t, types.CreateAddress(eoa, stateNonce), *created.Address)
+	})
+
+	t.Run("valid transaction that reverts", func(t *testing.T) {
+		tx := valid
+		tx.to = &reverter
+		result := traceValid(t, tx)
+		require.Equal(t, "Reverted", result.Trace[0].Error)
+		require.Equal(t, word42, result.Output.String())
+	})
+
+	t.Run("valid transaction that runs out of gas during execution", func(t *testing.T) {
+		tx := valid
+		tx.gasLimit = params.TxGas + 5_000 // enough to start, not enough for the SSTORE
+		result := traceValid(t, tx)
+		require.Equal(t, vm.ErrOutOfGas.Error(), result.Trace[0].Error)
+	})
 }

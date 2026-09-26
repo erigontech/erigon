@@ -1869,13 +1869,13 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, dbtx, api._blockReader, chainConfig)
 	rules := blockCtx.Rules(chainConfig)
 
+	// Keep the nonce, EIP-3607 sender-code and EIP-7825 gas-limit checks that
+	// AsMessage enables: a signed transaction is traced only if it is valid at
+	// the latest state.
 	msg, err := txn.AsMessage(*signer, header.BaseFee, rules)
 	if err != nil {
 		return nil, err
 	}
-	msg.SetCheckNonce(false)
-	msg.SetCheckTransaction(false)
-	msg.SetCheckGas(false)
 
 	txCtx := protocol.NewEVMTxContext(msg)
 
