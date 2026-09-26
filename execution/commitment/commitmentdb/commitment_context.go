@@ -762,7 +762,8 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		trie.SetStorageFanOutMin(sdc.storageFanOutMin)
 	}
 
-	if sdc.variant == commitment.VariantBinPatriciaTrie {
+	switch {
+	case sdc.variant == commitment.VariantBinPatriciaTrie:
 		processor, ok := sdc.patriciaTrie.(interface {
 			ProcessPBinFeed(context.Context, *commitment.PBinFeed, func(*commitment.CommitProgress)) ([]byte, error)
 		})
@@ -771,9 +772,9 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		} else {
 			rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 		}
-	} else if feed != nil {
+	case feed != nil:
 		rootHash, err = sdc.patriciaTrie.(v3Trie).ProcessFeed(ctx, feed, onProgress)
-	} else {
+	default:
 		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
 	}
 	if err != nil {

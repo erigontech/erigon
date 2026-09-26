@@ -1414,18 +1414,19 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	// (false, key), so the key has to be checked separately from ok.
 	for ok, key, value := next(); ; ok, key, value = next() {
 		if len(key) > 0 {
-			if cfg.Variant == commitment.VariantCommitmentV3 {
+			switch cfg.Variant {
+			case commitment.VariantCommitmentV3:
 				domain := kv.AccountsDomain
 				if len(key) > length.Addr {
 					domain = kv.StorageDomain
 				}
 				sd.GetCommitmentCtx().TouchKey(domain, string(key), value)
-			} else if cfg.Variant == commitment.VariantBinPatriciaTrie {
+			case commitment.VariantBinPatriciaTrie:
 				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), value)
 				if len(key) == length.Addr {
 					sd.GetCommitmentCtx().TouchKey(kv.CodeDomain, string(key), value)
 				}
-			} else {
+			default:
 				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
 			}
 			processed++
