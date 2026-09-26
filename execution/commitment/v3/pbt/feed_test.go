@@ -217,7 +217,7 @@ func TestProcessFeedDelegationAndClear(t *testing.T) {
 	address := common.Hex2Bytes("0000000000000000000000000000000000000005")
 	delegation := append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x09}, 20)...)
 	set := feedAccount(address)
-	set.CodeWritten, set.Code = true, delegation
+	set.CodeWritten, set.Code, set.CodeHash = true, delegation, feedCode(delegation)
 	clear := feedAccount(address)
 	clear.CodeWritten = true
 	clear.Code = []byte{}
@@ -233,10 +233,12 @@ func TestProcessFeedDelegationReplacementAndAccountUpdate(t *testing.T) {
 	set.Nonce = 1
 	set.CodeWritten = true
 	set.Code = delegationA
+	set.CodeHash = feedCode(delegationA)
 	replace := feedAccount(address)
 	replace.Nonce = 2
 	replace.CodeWritten = true
 	replace.Code = delegationB
+	replace.CodeHash = feedCode(delegationB)
 	update := feedAccount(address)
 	update.Nonce = 3
 	assertFeedState(t,
@@ -309,6 +311,41 @@ func TestProcessFeedWipeAndRewriteMatchesReference(t *testing.T) {
 	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{first}}, {Accounts: []commitment.PBinFeedAccount{second}}}, [][]eip8297.State{{firstState}, {secondState}})
 }
 
+func TestProcessParallelFeedWipeAndRewriteMatchesReference(t *testing.T) {
+	address := common.Hex2Bytes("000000000000000000000000000000000000000e")
+	first := feedAccount(address)
+	first.Nonce = 1
+	first.Slots = []commitment.PBinFeedSlot{{Key: []byte{63}, Value: []byte{9}}, {Key: []byte{64}, Value: []byte{10}}}
+	code := []byte{0x60, 0x02}
+	second := feedAccount(address)
+	second.Nonce = 2
+	second.Wiped = true
+	second.CodeWritten = true
+	second.Code = code
+	second.CodeHash = feedCode(code)
+	second.Slots = []commitment.PBinFeedSlot{{Key: []byte{63}, Value: []byte{11}}, {Key: []byte{64}, Value: []byte{12}}}
+	firstOps, err := TranslateFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{first}})
+	require.NoError(t, err)
+	secondOps, err := TranslateFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{second}})
+	require.NoError(t, err)
+	wantRoot := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{{feedState(first)}, {feedState(second)}}))
+	for _, workers := range []int{1, 2, 8} {
+		ctx := newTrieTestContext()
+		_, err = NewTrie(ctx).Process(firstOps)
+		require.NoError(t, err)
+		root, err := NewTrie(ctx).ProcessParallel(secondOps, workers)
+		require.NoError(t, err)
+		require.Equal(t, wantRoot, root)
+		require.NoError(t, NewTrie(ctx).Verify())
+
+		fresh := newTrieTestContext()
+		freshRoot, err := NewTrie(fresh).Process(secondOps)
+		require.NoError(t, err)
+		require.Equal(t, freshRoot, root)
+		require.Equal(t, fresh.records, ctx.records)
+	}
+}
+
 func TestProcessFeedAbsentDropsOnly(t *testing.T) {
 	address := common.Hex2Bytes("0000000000000000000000000000000000000009")
 	first := feedAccount(address)
@@ -361,7 +398,7 @@ func TestTranslateFeedRejectsDelegationCodeHash(t *testing.T) {
 	account.Code = append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x08}, 20)...)
 	account.CodeHash = common.Hash{1}
 	_, err := TranslateFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{account}})
-	require.ErrorContains(t, err, "delegation has a non-empty code hash")
+	require.ErrorContains(t, err, "code hash does not match code")
 }
 
 func TestProcessFeedZeroCodeChunkIsDeleted(t *testing.T) {
@@ -383,9 +420,9 @@ func TestProcessFeedZeroCodeChunkIsDeleted(t *testing.T) {
 func TestTranslateFeedSharesDelegationWithoutChunks(t *testing.T) {
 	delegation := append([]byte{0xef, 0x01, 0x00}, bytes.Repeat([]byte{0x07}, 20)...)
 	first := feedAccount(bytes.Repeat([]byte{3}, 20))
-	first.CodeWritten, first.Code = true, delegation
+	first.CodeWritten, first.Code, first.CodeHash = true, delegation, feedCode(delegation)
 	second := feedAccount(bytes.Repeat([]byte{4}, 20))
-	second.CodeWritten, second.Code = true, delegation
+	second.CodeWritten, second.Code, second.CodeHash = true, delegation, feedCode(delegation)
 	ops, err := TranslateFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{first, second}})
 	require.NoError(t, err)
 	for _, op := range ops {

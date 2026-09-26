@@ -17,11 +17,8 @@
 package jsonrpc
 
 import (
-	"errors"
 	"maps"
 	"math/big"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -29,19 +26,14 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
-	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -50,56 +42,34 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-type pbinWitnessWithoutCommitmentHistory struct {
-	kv.TemporalTx
-}
-
-func (tx pbinWitnessWithoutCommitmentHistory) BlockFilesRoTx() *blocksnapshots.View {
-	if p, ok := tx.TemporalTx.(membatchwithdb.HasBlockFilesRoTx); ok {
-		return p.BlockFilesRoTx()
-	}
-	return nil
-}
-
-func (tx pbinWitnessWithoutCommitmentHistory) GetAsOf(domain kv.Domain, key []byte, txNum uint64) ([]byte, bool, error) {
-	if domain == kv.CommitmentDomain {
-		return nil, false, errors.New("commitment history unavailable")
-	}
-	return tx.TemporalTx.GetAsOf(domain, key, txNum)
-}
-
-func TestPBinHeadCaptureWithoutCommitmentHistory(t *testing.T) {
-	withBinCommitmentDatadir(t)
-	m, key, from := fundedBankGenesis(t, chain.TestChainBerlinConfig)
-	signer := types.LatestSignerForChainID(nil)
-	pack, err := m.GenerateChain(6, func(i int, block *blockgen.BlockGen) {
-		nonce := block.TxNonce(from)
-		var unsigned *types.LegacyTx
-		if i == 0 {
-			unsigned = types.NewContractCreation(nonce, uint256.NewInt(0), 200_000, uint256.NewInt(1_000_000_000), pbinDeployCode(pbinStoreRuntime))
-		} else {
-			unsigned = types.NewTransaction(nonce, types.CreateAddress(from, 0), uint256.NewInt(0), 100_000, uint256.NewInt(1_000_000_000), pbinStoreCalldata(common.Hash{}, uint64(i)))
-		}
-		txn, err := types.SignTx(unsigned, *signer, key)
-		require.NoError(t, err)
-		block.AddTx(txn)
+func withBinCommitmentDatadir(t *testing.T) {
+	t.Helper()
+	origBin, origHash, origSuite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	origParallel := statecfg.ExperimentalParallelCommitment
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = origBin
+		statecfg.BinCommitmentHash = origHash
+		require.NoError(t, commitment.SetPBinHashSuite(origSuite))
+		statecfg.ExperimentalParallelCommitment = origParallel
 	})
-	require.NoError(t, err)
-	require.NoError(t, m.InsertChain(pack.Slice(0, 5)))
-	pin, err := openRollingPin(t.Context(), m.DB)
-	require.NoError(t, err)
-	defer pin.close()
-	require.NoError(t, m.InsertChain(pack.Slice(5, 6)))
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
-	tx, err := m.DB.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	bn := rpc.BlockNumber(6)
-	info, err := api.resolveWitnessBlock(t.Context(), tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
-	require.NoError(t, err)
-	result, err := api.buildWitnessResultHeadCapture(t.Context(), pbinWitnessWithoutCommitmentHistory{tx}, pin.tx, info, witnessModeLegacy)
-	require.NoError(t, err)
-	require.NotEmpty(t, result.State)
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	statecfg.ExperimentalParallelCommitment = false
+}
+
+func withCommitmentHistory(t *testing.T) {
+	t.Helper()
+	previousSchema := statecfg.Schema
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+	statecfg.EnableHistoricalCommitment()
+}
+
+func enableCommitmentHistoryFlag(t *testing.T, db kv.TemporalRwDB) {
+	t.Helper()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
 }
 
 func pbinWitnessFixture(t *testing.T, activation uint64) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
@@ -181,87 +151,51 @@ func pbinWitnessFixture(t *testing.T, activation uint64) (*DebugAPIImpl, *execmo
 	return newDebugApiForTest(m), m
 }
 
-func TestPBinDualExecutionWitness(t *testing.T) {
-	api, m := pbinWitnessFixture(t, 30)
-	for _, n := range []rpc.BlockNumber{2, 3, 4} {
-		t.Run(n.String(), func(t *testing.T) {
-			result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
-			require.NoError(t, err)
-			require.NotEmpty(t, result.State)
-		})
-	}
-	t.Run("missing_parent_shadow", func(t *testing.T) {
-		require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
-			parent := rawdb.ReadHeaderByNumber(tx, 2)
-			require.NotNil(t, parent)
-			return tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(2, parent.Hash()))
-		}))
-		n := rpc.BlockNumber(3)
-		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
-		require.ErrorContains(t, err, "binary parent shadow root missing or invalid for block 2")
-		require.Nil(t, result)
-	})
+func TestPBinExecutionWitnessRefusesBinOnly(t *testing.T) {
+	withCommitmentHistory(t)
+	withBinCommitmentDatadir(t)
+	m, _, _, _ := chainWithDeployedContract(t)
+	enableCommitmentHistoryFlag(t, m.DB)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	bn := rpc.BlockNumber(2)
+	_, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
 }
 
-func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
+func TestPBinOnlyProofAndWitnessRefuse(t *testing.T) {
+	withCommitmentHistory(t)
+	withBinCommitmentDatadir(t)
+	m, bank, _, _ := chainWithDeployedContract(t)
+	enableCommitmentHistoryFlag(t, m.DB)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	selector := rpc.BlockNumberOrHashWithNumber(2)
+	_, err := api.GetProof(t.Context(), bank, nil, &selector)
+	require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
+	_, err = api.GetWitness(t.Context(), selector)
+	require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
+}
+
+func TestPBinDualExecutionWitnessRefusesBin(t *testing.T) {
 	api, m := pbinWitnessFixture(t, 30)
 	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-	selector := rpc.BlockNumberOrHashWithNumber(2)
-	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
-	keys := []hexutil.Bytes{{0}}
-	witnessBefore, err := api.ExecutionWitness(t.Context(), selector, nil)
-	require.NoError(t, err)
-	proofBefore, err := ethAPI.GetProof(t.Context(), address, keys, &selector)
-	require.NoError(t, err)
-	require.NotEmpty(t, proofBefore.AccountProof)
-	require.Len(t, proofBefore.StorageProof, 1)
-
-	_, state := readCommittedCommitmentState(t, t.Context(), m.DB)
-	txNum, _ := commitmentdb.DecodeTxBlockNums(state)
-	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
-	settingsPath := filepath.Join(m.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
-	frozenSettings, err := os.ReadFile(settingsPath)
-	require.NoError(t, err)
-
-	witnessAfter, err := newDebugApiForTest(m).ExecutionWitness(t.Context(), selector, nil)
-	require.NoError(t, err)
-	require.Equal(t, witnessBefore.State, witnessAfter.State)
-	require.Equal(t, witnessBefore.Codes, witnessAfter.Codes)
-	require.Equal(t, witnessBefore.Keys, witnessAfter.Keys)
-	require.Equal(t, witnessBefore.Headers, witnessAfter.Headers)
-	proofAfter, err := ethAPI.GetProof(t.Context(), address, keys, &selector)
-	require.NoError(t, err)
-	require.Equal(t, proofBefore, proofAfter)
-	currentSettings, err := os.ReadFile(settingsPath)
-	require.NoError(t, err)
-	require.Equal(t, frozenSettings, currentSettings)
-	frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
-	require.True(t, frozen)
-	require.Equal(t, txNum, frozenAt)
-
-	tx, err := m.DB.BeginTemporalRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-	require.ErrorContains(t, domains.DomainPut(kv.CommitmentDomain, tx, []byte("branch"), []byte("value"), txNum+1, nil), "is frozen")
-	_, current := readCommittedCommitmentState(t, t.Context(), m.DB)
-	require.Equal(t, state, current)
-}
-
-func TestPBinDualPostFlipProofAndWitnessRefuse(t *testing.T) {
-	_, m := pbinWitnessFixture(t, 30)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	for _, n := range []rpc.BlockNumber{3, 4} {
 		t.Run(n.String(), func(t *testing.T) {
 			selector := rpc.BlockNumberOrHashWithNumber(n)
-			_, err := api.GetProof(t.Context(), address, []hexutil.Bytes{{0}}, &selector)
+			_, err := api.ExecutionWitness(t.Context(), selector, nil)
 			require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
-			_, err = api.GetWitness(t.Context(), selector)
+			_, err = ethAPI.GetProof(t.Context(), address, nil, &selector)
+			require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
+			_, err = ethAPI.GetWitness(t.Context(), selector)
 			require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
 		})
 	}
+}
+
+func TestPBinDualHexExecutionWitnessStillServes(t *testing.T) {
+	api, _ := pbinWitnessFixture(t, 30)
+	n := rpc.BlockNumber(2)
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.State)
 }

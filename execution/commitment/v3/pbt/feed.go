@@ -133,12 +133,6 @@ func TranslateFeed(feed *commitment.PBinFeed) ([]Op, error) {
 }
 
 func feedCodeHash(account commitment.PBinFeedAccount) error {
-	if eip8297.IsDelegation(account.Code) {
-		if !eip8297.IsEmptyCodeHash(account.CodeHash) {
-			return fmt.Errorf("pbin: delegation has a non-empty code hash")
-		}
-		return nil
-	}
 	actual := common.Hash(keccak.Sum256(account.Code))
 	if eip8297.CodeHashValue(actual) != eip8297.CodeHashValue(account.CodeHash) {
 		return fmt.Errorf("pbin: code hash does not match code")

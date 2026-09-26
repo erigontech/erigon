@@ -98,8 +98,8 @@ func TestPBinTrieContextLeavesCodeSizeZeroForHex(t *testing.T) {
 // belongs to the account. code_size follows the account's own code hash, so the
 // residue must not move the root.
 func TestPBinTrieContextIgnoresClearedDelegationResidue(t *testing.T) {
-	residue := []byte{0xef, 0x01, 0x00}
 	addr := pbinCodeSizeAddr(3)
+	residue := append([]byte{0xef, 0x01, 0x00}, addr...)
 	sd, tx := pbinCodeSizeSharedDomains(t, nil, addr, pbinCodeSizeAccount(empty.CodeHash), residue)
 	reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
 	feed, err := commitmentdb.BinFeedFromState(

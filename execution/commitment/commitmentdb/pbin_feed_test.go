@@ -97,8 +97,9 @@ func TestBinFeedFromStateRejectsCodeHashMismatch(t *testing.T) {
 func TestBinFeedFromStateDoesNotUseClearedCodeResidue(t *testing.T) {
 	address := common.HexToAddress("0x1234")
 	account := accounts.Account{CodeHash: accounts.EmptyCodeHash}
+	residue := append(append([]byte(nil), eip8297.DelegationMarker[:]...), address[:]...)
 	values := map[string][]byte{pbinReaderValue(kv.AccountsDomain, address[:]): accounts.SerialiseV3(&account)}
-	values[pbinReaderValue(kv.CodeDomain, address[:])] = eip8297.DelegationMarker[:]
+	values[pbinReaderValue(kv.CodeDomain, address[:])] = residue
 	reader := &pbinFeedReader{values: values}
 	feed, err := BinFeedFromState(map[string]struct{}{string(address[:]): {}}, map[string]struct{}{string(address[:]): {}}, nil, reader)
 	require.NoError(t, err)
@@ -111,13 +112,26 @@ func TestBinFeedFromStateDoesNotUseClearedCodeResidue(t *testing.T) {
 func TestBinFeedFromStateKeepsFinalDelegationCode(t *testing.T) {
 	address := common.HexToAddress("0x1234")
 	delegation := append(append([]byte(nil), eip8297.DelegationMarker[:]...), address[:]...)
-	account := accounts.Account{CodeHash: accounts.EmptyCodeHash}
+	account := accounts.Account{CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(delegation))}
 	values := map[string][]byte{pbinReaderValue(kv.AccountsDomain, address[:]): accounts.SerialiseV3(&account)}
 	values[pbinReaderValue(kv.CodeDomain, address[:])] = delegation
 	reader := &pbinFeedReader{values: values}
 	feed, err := BinFeedFromState(map[string]struct{}{string(address[:]): {}}, map[string]struct{}{string(address[:]): {}}, nil, reader)
 	require.NoError(t, err)
 	require.Equal(t, delegation, feed.Accounts[0].Code)
+}
+
+func TestBinFeedFromStateRejectsDelegationHashMismatch(t *testing.T) {
+	address := common.HexToAddress("0x1234")
+	delegation := append(append([]byte(nil), eip8297.DelegationMarker[:]...), address[:]...)
+	account := accounts.Account{CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash([]byte{9}))}
+	values := map[string][]byte{
+		pbinReaderValue(kv.AccountsDomain, address[:]): accounts.SerialiseV3(&account),
+		pbinReaderValue(kv.CodeDomain, address[:]):     delegation,
+	}
+	reader := &pbinFeedReader{values: values}
+	_, err := BinFeedFromState(map[string]struct{}{string(address[:]): {}}, map[string]struct{}{string(address[:]): {}}, nil, reader)
+	require.ErrorContains(t, err, "code hash mismatch")
 }
 
 func TestBinFeedFromStateRejectsMissingCode(t *testing.T) {

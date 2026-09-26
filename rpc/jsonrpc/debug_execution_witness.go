@@ -17,7 +17,6 @@ import (
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -739,6 +738,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
+	if chainConfig.IsBinaryTrie(blockHeader.Time) {
+		return nil, execctx.ErrBinCommitmentUnsupported
+	}
 	resolvedMode, err := resolveWitnessMode(mode, chainConfig.IsBinaryTrie(blockHeader.Time))
 	if err != nil {
 		return nil, err
@@ -920,9 +922,6 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	// Build merkle proofs for all accessed accounts
 	// Use the proof infrastructure from the commitment context.
-	// Witness capture is served by the sequential HexPatriciaHashed and by
-	// PBinPatriciaHashed, so bin is allowed through; only the parallel trie
-	// cannot serve it and is demoted.
 	tx = commitmentReconstructionView(tx)
 	domains, err := newSnapshotCommitmentDomains(ctx, tx, log.New(), execctx.WithCommitmentDomain(commitmentDomain), execctx.WithoutCommitmentSeek())
 	if err != nil {
@@ -978,7 +977,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.
-	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical, binTrie)
+	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -995,7 +994,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if !ok {
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
-	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine, binTrie, expectedParentRoot); err != nil {
+	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
 		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
@@ -1099,28 +1098,6 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 	for addr := range a.CodeAddrs {
 		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
 	}
-}
-
-func preStateHasStorage(tx kv.TemporalTx, addr common.Address, txNum uint64) (bool, error) {
-	to, ok := kv.NextSubtree(addr[:])
-	if !ok {
-		to = nil
-	}
-	it, err := tx.RangeAsOf(kv.StorageDomain, addr[:], to, txNum, order.Asc, kv.Unlim)
-	if err != nil {
-		return false, err
-	}
-	defer it.Close()
-	for it.HasNext() {
-		var v []byte
-		if _, v, err = it.Next(); err != nil {
-			return false, err
-		}
-		if len(v) > 0 {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 // collectAccessedState rolls the RecordingState maps into an accessedState.
@@ -1404,16 +1381,7 @@ func buildWitnessTrie(
 	siblingPaths [][]byte,
 	accessed *accessedState,
 	produceExclusionProofs bool,
-	binTrie bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
-	// TouchHashedKey records a hashed path with an empty plain key, which the bin update
-	// stream cannot resolve. Bin carries its collapse survivors through the pruner instead,
-	// so detectCollapseSiblings returns none for it and one arriving here is a bug to
-	// surface, not a case to serve.
-	if binTrie && len(siblingPaths) > 0 {
-		return nil, fmt.Errorf("binary trie witness got %d collapse sibling paths; the binary trie names none", len(siblingPaths))
-	}
-
 	encodedNodes = []hexutil.Bytes{}
 
 	sdCtx.SetStateReader(trieReaderFor(hc, tx, sdCtx.CommitmentDomain(), firstTxNumInBlock))
@@ -1424,35 +1392,6 @@ func buildWitnessTrie(
 	domains.SetTxNum(seekTxNum)
 
 	accessed.touchAll(sdCtx)
-
-	// The pass walks the parent state, which holds neither the code the block
-	// deploys nor any sign of which accounts it removed — and under bin both
-	// decide which keys the block touches.
-	if binTrie {
-		block := commitment.PBinWitnessBlock{
-			Code:    make(map[string][]byte, len(accessed.ModifiedCode)),
-			Removed: make(map[string]struct{}, len(accessed.Deleted)),
-		}
-		for addr, code := range accessed.ModifiedCode {
-			block.Code[string(addr[:])] = code
-		}
-		for addr := range accessed.Deleted {
-			block.Removed[string(addr[:])] = struct{}{}
-		}
-		for addr := range accessed.DeletedInBlock {
-			block.Removed[string(addr[:])] = struct{}{}
-		}
-		for addr := range accessed.Created {
-			var wiped bool
-			if wiped, err = preStateHasStorage(tx, addr, firstTxNumInBlock); err != nil {
-				return nil, fmt.Errorf("read pre-state storage of created account %x: %w", addr, err)
-			}
-			if wiped {
-				block.Removed[string(addr[:])] = struct{}{}
-			}
-		}
-		sdCtx.SetWitnessBlock(block)
-	}
 
 	if len(siblingPaths) > 0 {
 		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
@@ -1615,10 +1554,8 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	result *ExecutionWitnessResult,
 	block *types.Block,
 	fullEngine rules.Engine,
-	binTrie bool,
-	parentRoot common.Hash,
 ) error {
-	if witnessVerifySkipped(binTrie) {
+	if witnessVerifySkipped() {
 		return nil
 	}
 
@@ -1627,51 +1564,32 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("failed to get chain config: %w", err)
 	}
 
-	return verifyWitnessAgainstBlock(ctx, result, block, parentRoot, chainCfg, fullEngine, binTrie)
+	return verifyWitnessAgainstBlock(ctx, result, block, chainCfg, fullEngine)
 }
 
-// witnessVerifySkipped reports whether the stateless gate is off: hex runs it
-// only under ERIGON_ASSERT, and ERIGON_WITNESS_NO_VERIFY turns it off there
-// even then. Under bin it is never off: binary witnesses have no external
-// conformance oracle, so re-execution is the only correctness evidence there is,
-// while hex's opt-out exists only to save the roughly doubled execution cost.
-func witnessVerifySkipped(binTrie bool) bool {
-	return !binTrie && (!dbg.AssertEnabled || dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false))
+func witnessVerifySkipped() bool {
+	return !dbg.AssertEnabled || dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false)
 }
 
 // verifyWitnessAgainstBlock re-executes the block from the witness alone and
 // asserts it reaches the header's post-state root, then that keys[] carries a
-// preimage for every leaf the re-execution resolved. The two variants share the
-// replay and differ only in how a leaf resolves and how the root is merkelized;
-// bin needs parentRoot because its decoder is told its root rather than deriving
-// it from the node set.
+// preimage for every leaf the re-execution resolved.
 func verifyWitnessAgainstBlock(
 	ctx context.Context,
 	result *ExecutionWitnessResult,
 	block *types.Block,
-	parentRoot common.Hash,
 	chainCfg *chain.Config,
 	fullEngine rules.Engine,
-	binTrie bool,
 ) error {
 	var (
 		newStateRoot common.Hash
 		usedAddrs    map[common.Address]struct{}
 		usedSlots    map[common.Hash]struct{}
-		err          error
 	)
-	if binTrie {
-		var stateless *pbinWitnessStateless
-		newStateRoot, stateless, err = pbinExecBlockStatelessly(ctx, result, block, parentRoot, chainCfg, fullEngine)
-		if stateless != nil {
-			usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
-		}
-	} else {
-		var stateless *witnessStateless
-		newStateRoot, stateless, err = execBlockStatelessly(result, block, chainCfg, fullEngine)
-		if stateless != nil {
-			usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
-		}
+	var stateless *witnessStateless
+	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	if stateless != nil {
+		usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
 	}
 	if err != nil {
 		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)

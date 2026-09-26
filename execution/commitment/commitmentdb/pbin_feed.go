@@ -93,15 +93,15 @@ func BinFeedFromState(keys, codeKeys, wiped map[string]struct{}, reader StateRea
 			if err != nil {
 				return nil, err
 			}
-			switch {
-			case len(code) == 0 && !eip8297.IsEmptyCodeHash(account.CodeHash):
-				return nil, fmt.Errorf("pbin: code missing for %x", rawAddress)
-			case eip8297.IsDelegation(code) && !eip8297.IsEmptyCodeHash(account.CodeHash):
-				return nil, fmt.Errorf("pbin: code hash mismatch for %x", rawAddress)
-			case len(code) != 0 && !eip8297.IsDelegation(code) && !eip8297.IsEmptyCodeHash(account.CodeHash) && crypto.Keccak256Hash(code) != account.CodeHash:
-				return nil, fmt.Errorf("pbin: code hash mismatch for %x", rawAddress)
-			case len(code) != 0 && !eip8297.IsDelegation(code) && eip8297.IsEmptyCodeHash(account.CodeHash):
+			if eip8297.IsEmptyCodeHash(account.CodeHash) {
 				code = nil
+			} else {
+				if len(code) == 0 {
+					return nil, fmt.Errorf("pbin: code missing for %x", rawAddress)
+				}
+				if crypto.Keccak256Hash(code) != account.CodeHash {
+					return nil, fmt.Errorf("pbin: code hash mismatch for %x", rawAddress)
+				}
 			}
 			account.Code = bytes.Clone(code)
 		}

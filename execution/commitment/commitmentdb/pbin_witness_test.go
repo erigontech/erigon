@@ -156,6 +156,12 @@ func TestPBinWitnessCaptureServesBothVariants(t *testing.T) {
 	for _, variant := range []commitment.TrieVariant{commitment.VariantHexPatriciaTrie, commitment.VariantBinPatriciaTrie} {
 		t.Run(string(variant), func(t *testing.T) {
 			t.Parallel()
+			if variant == commitment.VariantBinPatriciaTrie {
+				sdc := pbinWitnessTrieCtx(t, variant, newPBinWitnessState())
+				_, _, err := sdc.WitnessNodes(t.Context(), false)
+				require.ErrorContains(t, err, "HexPatriciaHashed")
+				return
+			}
 
 			nodes, provedKeys, root, committedRoot, err := pbinWitnessCapture(t, variant)
 			require.NoError(t, err)
@@ -203,6 +209,12 @@ func TestPBinWitnessNodesPrunesPerVariant(t *testing.T) {
 	for _, variant := range []commitment.TrieVariant{commitment.VariantHexPatriciaTrie, commitment.VariantBinPatriciaTrie} {
 		t.Run(string(variant), func(t *testing.T) {
 			t.Parallel()
+			if variant == commitment.VariantBinPatriciaTrie {
+				sdc := pbinWitnessTrieCtx(t, variant, newPBinWitnessState())
+				_, _, err := sdc.WitnessNodes(t.Context(), false)
+				require.ErrorContains(t, err, "HexPatriciaHashed")
+				return
+			}
 
 			state := newPBinWitnessState()
 			touches := pbinWitnessDBCorpus(state)
@@ -210,7 +222,7 @@ func TestPBinWitnessNodesPrunesPerVariant(t *testing.T) {
 
 			capture := pbinWitnessTrieCtx(t, variant, state)
 			pbinWitnessTouchAll(capture, touches)
-			full, provedKeys, root, err := capture.witnessCapture(t.Context(), false)
+			full, provedKeys, _, err := capture.witnessCapture(t.Context(), false)
 			require.NoError(t, err)
 
 			sdc := pbinWitnessTrieCtx(t, variant, state)
@@ -220,13 +232,7 @@ func TestPBinWitnessNodesPrunesPerVariant(t *testing.T) {
 			require.Equal(t, committedRoot, rootHash)
 			require.NotEmpty(t, lean)
 
-			want := trie.WitnessNodesForKeysFromNodes
-			if variant == commitment.VariantBinPatriciaTrie {
-				want = func(nodes, keys [][]byte) ([][]byte, error) {
-					return commitment.PBinWitnessNodesForKeys(nodes, root, keys)
-				}
-			}
-			wantNodes, err := want(full, provedKeys)
+			wantNodes, err := trie.WitnessNodesForKeysFromNodes(full, provedKeys)
 			require.NoError(t, err)
 			require.Equal(t, wantNodes[0], lean[0], "root node must stay first")
 			require.ElementsMatch(t, wantNodes, lean)

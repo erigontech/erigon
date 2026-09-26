@@ -81,6 +81,12 @@ func buildPhasePlanWithThreshold(ops []Op, threshold int) (phasePlan, error) {
 	chainOps := make(map[[2]byte][]Op)
 	for _, op := range ops {
 		if len(op.Drop) != 0 {
+			if len(op.Drop) == 33 && op.Drop[0] == eip8297.AccountZone {
+				key := [2]byte{eip8297.AccountZone, op.Drop[1] >> 4}
+				chainOps[key] = append(chainOps[key], op)
+				chains[key] = struct{}{}
+				continue
+			}
 			key, err := bucketKeyForPrefix(op.Drop)
 			if err != nil {
 				return phasePlan{}, err
