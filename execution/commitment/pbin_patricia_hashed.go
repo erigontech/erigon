@@ -122,6 +122,14 @@ func (pph *PBinPatriciaHashed) setHashSuite(sum pbinHashFn) keyHasher {
 	return pbinKeyHasherWith(sum)
 }
 
+func (pph *PBinPatriciaHashed) SetPBinHashSuite(name string) error {
+	if err := SetPBinHashSuite(name); err != nil {
+		return err
+	}
+	pph.setHashSuite(pbinSelectedSum())
+	return nil
+}
+
 // Release returns the engine to the pool. The caller must not use it afterwards.
 func (pph *PBinPatriciaHashed) Release() {
 	pph.Reset()

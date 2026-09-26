@@ -35,6 +35,49 @@ type PBinRecordConverter struct {
 	keys pbinDigestCache
 }
 
+type PBinLegacyDensity struct {
+	Rows   int
+	Cells  int
+	Bytes  int
+	Splits map[int]int
+}
+
+func PBinLegacyRecordDensity(records map[string][]byte) (PBinLegacyDensity, error) {
+	density := PBinLegacyDensity{Splits: make(map[int]int)}
+	keys := pbinDigestCache{Sum: pbinSelectedSum()}
+	for key, data := range records {
+		if len(data) == 0 {
+			continue
+		}
+		density.Bytes += len(key) + len(data)
+		if PBinIsRootKey([]byte(key)) {
+			var cell pbinCell
+			pos, err := pbinDecodeCell(data, 0, &cell, 0, &keys, false)
+			if err != nil {
+				return PBinLegacyDensity{}, fmt.Errorf("pbin density: key %x: %w", key, err)
+			}
+			if pos != len(data) {
+				return PBinLegacyDensity{}, fmt.Errorf("pbin density: root has %d trailing bytes", len(data)-pos)
+			}
+			density.Cells++
+			continue
+		}
+		path, err := pbinDecodeBitPath([]byte(key))
+		if err != nil {
+			return PBinLegacyDensity{}, fmt.Errorf("pbin density: key %x: %w", key, err)
+		}
+		density.Splits[int(path.BitLen)/4]++
+		var cells [2]pbinCell
+		err = pbinDecodeBranch(data, &cells, path.BitLen+1, &keys)
+		if err != nil {
+			return PBinLegacyDensity{}, fmt.Errorf("pbin density: key %x: %w", key, err)
+		}
+		density.Rows++
+		density.Cells += 2
+	}
+	return density, nil
+}
+
 func NewPBinRecordConverter() *PBinRecordConverter {
 	return &PBinRecordConverter{keys: pbinDigestCache{Sum: pbinSelectedSum()}}
 }
