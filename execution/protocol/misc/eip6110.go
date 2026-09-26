@@ -63,6 +63,9 @@ type depositUnpacking struct {
 
 var ErrInvalidDepositLog = errors.New("invalid deposit log: unsupported data layout")
 
+// Deprecated: use ErrInvalidDepositLog instead.
+var InvalidDepositLogErr = ErrInvalidDepositLog //nolint:staticcheck // ST1012: deprecated alias kept for source compatibility
+
 func validateDepositLog(data []byte) error {
 	if len(data) != DepositLogLen {
 		return ErrInvalidDepositLog

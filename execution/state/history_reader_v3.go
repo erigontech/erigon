@@ -31,6 +31,9 @@ import (
 
 var ErrPruned = errors.New("old data not available due to pruning")
 
+// Deprecated: use ErrPruned instead.
+var PrunedError = ErrPruned //nolint:staticcheck // ST1012: deprecated alias kept for source compatibility
+
 // HistoryReaderV3 Implements StateReader and StateWriter.
 //
 // The read chain, from most-recent to persisted, is:

@@ -72,6 +72,9 @@ const (
 var (
 	SupportedFeatures = []Features{Enums, LessFalsePositives}
 	ErrIncompatible   = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+
+	// Deprecated: use ErrIncompatible instead.
+	IncompatibleErr = ErrIncompatible //nolint:staticcheck // ST1012: deprecated alias kept for source compatibility
 )
 
 // Index implements index lookup from the file created by the RecSplit

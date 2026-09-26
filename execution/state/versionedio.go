@@ -2203,7 +2203,7 @@ func (s *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
 // StripBalanceWrite removes the BalancePath write for addr from the write set
 // and computes the TX's net balance delta by comparing the stale write with
 // the stale read from readSet. This is used in finalize to prevent stale
-// speculative coinbase/burnt-contract balance s from being applied via
+// speculative coinbase/burnt-contract balance writes from being applied via
 // ApplyVersionedWrites. The delta is returned so it can be applied separately
 // on top of the correct base balance from the VersionedStateReader.
 //

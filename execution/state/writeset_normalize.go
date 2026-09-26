@@ -94,16 +94,16 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 		return out, nil
 	}
 
-	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 s for the
+	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
 	// SD'd account (IncarnationPath=preInc, SelfDestructPath=true, BalancePath=0).
 	// If we forward all 3 to applyVersionedWrites, it sees d.balance != nil ||
 	// d.incarnation != nil and routes into the "cleanup-before-recreate"
-	// branch — which s the account back with {Bal=0, Inc=preInc} encoding
+	// branch — which writes the account back with {Bal=0, Inc=preInc} encoding
 	// instead of taking the pure-delete branch (DomainDel(Accounts)). The
 	// account stays in sd.mem with non-zero incarnation, and a subsequent
 	// block's CREATE2 at the same address sees a phantom existing account,
 	// producing wrong execution / wrong trie root in TestRecreateAndRewind.
-	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath s for
+	// Drop the BalancePath/NoncePath/IncarnationPath/CodeHashPath writes for
 	// SD'd addresses so applyVersionedWrites reaches the pure-delete branch.
 	//
 	// Two filters applied here:
@@ -115,7 +115,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 	//      (from Selfdestruct) followed later by SelfDestructPath=false (from
 	//      CreateAccount, since the recreated object's selfdestructed flag is
 	//      cleared). The address ends ALIVE, so its recreate-time account-field
-	//      s must survive — only mark sdSet when the LAST SelfDestructPath
+	//      writes must survive — only mark sdSet when the LAST SelfDestructPath
 	//      entry for the address (in emission order) is true. applyVersionedWrites
 	//      already uses last-write-wins for d.selfDestruct, so this keeps the two
 	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
@@ -131,9 +131,9 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 	}
 
 	for h := range s.AllHeaders() {
-		// Drop account-field s for SD'd addresses so applyVersionedWrites
+		// Drop account-field writes for SD'd addresses so applyVersionedWrites
 		// takes the pure-delete branch instead of cleanup-before-recreate; drop
-		// raw StoragePath s too (the SelfDestructPath case re-emits an
+		// raw StoragePath writes too (the SelfDestructPath case re-emits an
 		// explicit StoragePath=0 delete for every slot via sdStorageSlots).
 		if sdSet[h.Address] {
 			switch h.Path {
@@ -150,7 +150,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 		}
 		switch h.Path {
 		case StoragePath:
-			// Only include s from the current (validated) incarnation.
+			// Only include writes from the current (validated) incarnation.
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
@@ -165,7 +165,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 			// TX) or the domain (pre-block) still holds. The SD's per-slot
 			// zeroing is only re-emitted into the calc's writeset below, never
 			// flushed back to the versionMap, so without this a resurrect TX
-			// that re-s a slot to its pre-SD value is wrongly dropped as a
+			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
 			// Range-scan: a re-creation flushes SelfDestruct=false above the
 			// wiping true cell, and a same-value write-back over the wiped slot
@@ -287,11 +287,11 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 	}
 
 	// For addresses that appear in the raw WriteSet but don't have account-level
-	// s in the output, emit account field entries. Serial's MakeWriteSet
+	// writes in the output, emit account field entries. Serial's MakeWriteSet
 	// always calls UpdateAccountData for every dirty object — the commitment
 	// needs the full account state. This covers:
-	// - Addresses with only storage s (no balance/nonce changes)
-	// - Addresses whose storage s were all filtered as no-ops
+	// - Addresses with only storage writes (no balance/nonce changes)
+	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
 	allAddresses := make(map[accounts.Address]bool)
 	s.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
@@ -387,9 +387,9 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 			continue
 		}
 		// Recover the code whose hash this tx emitted. Prefer the versionMap
-		// (this batch's s); on the SetCode short-circuit path — a
+		// (this batch's writes); on the SetCode short-circuit path — a
 		// re-executing 7702 delegation whose code equals the already-committed
-		// designator, so the validated incarnation s no CodePath and the
+		// designator, so the validated incarnation writes no CodePath and the
 		// prior incarnation's versionMap entry was invalidated on re-exec — the
 		// versionMap holds nothing for this tx, so fall back to the post-state
 		// via stateReader.
@@ -406,7 +406,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 		}
 		// Gate recovery to 7702 designators: that SetCode short-circuit is the only
 		// one that leaves uncommitted code without a CodePath. A regular deploy
-		// s CodePath with CodeHashPath; a CREATE2/unchanged redeploy already
+		// writes CodePath with CodeHashPath; a CREATE2/unchanged redeploy already
 		// has its code in CodeDomain. (Gating also never misattributes callee code.)
 		if _, ok := types.ParseDelegation(code); !ok {
 			continue

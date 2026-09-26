@@ -91,7 +91,7 @@ func (s *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blo
 		if dbg.AssertEnabled {
 			s.assertSelfDestructNormalized()
 		}
-		// One buffer for every storage key this call s: consumers copy what they keep.
+		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
 		var storageKey []byte
 		// Field presence is tracked with has-flags rather than pointers: the
@@ -164,7 +164,7 @@ func (s *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blo
 		}
 
 		// Sort addresses before iterating so that trace output is deterministic.
-		// Domain s are buffered into a sorted BTree by key, so order of
+		// Domain writes are buffered into a sorted BTree by key, so order of
 		// iteration does not affect correctness — only debug reproducibility.
 		addrs := make([]accounts.Address, 0, len(perAddr))
 		for addr := range perAddr {
@@ -410,10 +410,10 @@ func (s *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blo
 }
 
 // ApplyStateWrites applies account/storage/code mutations. When blockCache is
-// non-nil (parallel executor), s go to the block-level cache and only
+// non-nil (parallel executor), writes go to the block-level cache and only
 // TouchKey is called for per-TX commitment tracking. The cache is flushed to
 // SharedDomains at block boundary. When blockCache is nil (serial executor),
-// s go directly to SharedDomains via DomainPut.
+// writes go directly to SharedDomains via DomainPut.
 func (rs *StateV3) ApplyStateWrites(_ context.Context,
 	roTx kv.TemporalTx,
 	blockNum uint64,
