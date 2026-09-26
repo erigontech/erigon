@@ -434,17 +434,18 @@ func TestPBinM1ARebuildTreeKeyBatchesPreserveRecords(t *testing.T) {
 	pbinM1ABinVariant(t)
 	txCount := 4 * pbinM1AStepSize
 
-	incremental, incrementalAgg, incrementalDirs := pbinM1ANewDatadir(t, txCount)
-	pbinForwardRun(t, incremental, txCount, 0, txCount, pbinM1AFixture(), pbinM1ASlots)
-	require.NoError(t, incrementalAgg.BuildFiles(incremental, txCount, unboundedFinalityCtx))
-	incremental, _ = pbinM1AReopen(t, incremental, incrementalAgg, incrementalDirs, txCount)
-	wantRecords := pbinM1ABranchRecords(t, incremental)
-
 	rebuilt, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
 	roots, _ := pbinForwardRun(t, rebuilt, pbinM1AStepSize, 0, txCount, pbinM1AFixture(), pbinM1ASlots)
 	require.NoError(t, agg.BuildFiles(rebuilt, txCount, unboundedFinalityCtx))
 	collatedTxNum := pbinCollatedTxNum(t, rebuilt, kv.StorageDomain)
 	wantRoot := roots[collatedTxNum-1]
+
+	incremental, incrementalAgg, incrementalDirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
+	pbinForwardRun(t, incremental, pbinM1AStepSize, 0, collatedTxNum, pbinM1AFixture(), pbinM1ASlots)
+	require.NoError(t, incrementalAgg.BuildFiles(incremental, collatedTxNum, unboundedFinalityCtx))
+	incremental, _ = pbinM1AReopen(t, incremental, incrementalAgg, incrementalDirs, pbinM1AStepSize)
+	wantRecords := pbinM1ABranchRecords(t, incremental)
+	require.Equal(t, wantRoot, pbinM1ARestoredRoot(t, incremental))
 	rebuilt, agg = pbinM1AWipeCommitment(t, rebuilt, agg, dirs, pbinM1AStepSize)
 	rebuiltRoot, report, err, peak := pbinM1AMeasuredRebuild(t, rebuilt, state.RebuildTarget{PBinBatchOps: 3, PBinBatchBytes: 1024})
 	require.NoError(t, err)
@@ -465,6 +466,7 @@ func TestPBinM1ARebuildTreeKeyBatchesPreserveRecords(t *testing.T) {
 		gotKeys = append(gotKeys, key)
 	}
 	require.ElementsMatch(t, wantKeys, gotKeys)
+	require.Equal(t, wantRecords, gotRecords)
 	pbinM1AAssertNewEngineRecords(t, rebuilt)
 }
 
