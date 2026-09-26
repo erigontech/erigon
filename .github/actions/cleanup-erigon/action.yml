@@ -38,7 +38,7 @@ runs:
 
     - name: Check for existing module cache entry
       id: modcache-probe
-      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE_COMPLETE == 'true' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' }}
       continue-on-error: true
       uses: actions/cache/restore@v5
       with:
@@ -47,7 +47,7 @@ runs:
         lookup-only: true
 
     - uses: ./.github/actions/save-mod-cache
-      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' && steps.modcache-probe.outputs.cache-hit != 'true' }}
+      if: ${{ always() && github.event_name != 'merge_group' && env.ERIGON_CI_MODCACHE_COMPLETE == 'true' && env.ERIGON_CI_MODCACHE != '' && env.ERIGON_CI_MODCACHE_KEY != '' && steps.modcache-probe.outputs.cache-hit != 'true' }}
       with:
         modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
         key: ${{ env.ERIGON_CI_MODCACHE_KEY }}
