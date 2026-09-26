@@ -19,9 +19,11 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -29,12 +31,17 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/raw"
+	"github.com/erigontech/erigon/cl/phase1/network/gossip"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
 func TestPoolAttesterSlashings(t *testing.T) {
@@ -404,6 +411,56 @@ func TestPoolSyncCommittees(t *testing.T) {
 	}, out.Data)
 }
 
+// TestPoolSyncCommitteesPublishesInBackground proves the handler queues the
+// gossip publish rather than awaiting it inline: it must call
+// PublishBackground, never the blocking Publish, and must not depend on the
+// publish completing before writing the HTTP response.
+func TestPoolSyncCommitteesPublishesInBackground(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	published := make(chan struct{}, 1)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(name string, data []byte, expiry time.Time, logCtx ...any) error {
+			select {
+			case published <- struct{}{}:
+			default:
+			}
+			return nil
+		},
+	).MinTimes(1)
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+
+	select {
+	case <-published:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected PostEthV1BeaconPoolSyncCommittees to call PublishBackground")
+	}
+}
+
 func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
 	msgs := []*cltypes.SyncCommitteeMessage{
 		{
@@ -422,6 +479,220 @@ func TestPoolSyncCommitteesIsUnavailableWhileSyncing(t *testing.T) {
 	handler.mux.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+}
+
+// TestPoolSyncCommitteesReturns500OnAdmissionFailure proves a known
+// admission failure (queue full, in this case) is surfaced as a 500 for an
+// otherwise-valid batch, rather than hidden behind a 200 the way a
+// fire-and-forget PublishBackground would.
+func TestPoolSyncCommitteesReturns500OnAdmissionFailure(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(gossip.ErrPublishQueueFull).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode,
+		"a known admission failure must not be hidden behind a 200")
+}
+
+// TestPoolSyncCommitteesDoesNotSurface500ForExpiredAdmission proves an
+// already-expired message is not treated as a server-side admission
+// failure the way queue-full/shutdown/fork-digest failures are: a message
+// whose useful window has already closed is expected, ordinary behavior -
+// the same situation ErrIgnore already represents for validation - not a
+// fault worth a 500. Without this, an ordinary stale-slot message (which
+// ProcessMessage exempts from failures via ErrIgnore, but which the handler
+// still hands to PublishBackground) turns into a spurious 500 purely
+// because its computed expiry is naturally already in the past.
+func TestPoolSyncCommitteesDoesNotSurface500ForExpiredAdmission(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(gossip.ErrPublishJobExpired).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode,
+		"an already-expired message must not be surfaced as a 500 - it's ordinary, not a fault")
+}
+
+// TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure proves the
+// response precedence when a batch has both a validation failure (an
+// out-of-range validator index, which pool.go already reports as an
+// indexed 400 via the existing ComputeSubnetsForSyncCommittee error path)
+// and, independently, an admission failure for the other, valid message:
+// the 400 takes precedence, since it carries more actionable detail, but
+// does not silently discard the admission failure - PublishBackground's own
+// logging/counting for it still happens regardless of which response is
+// written.
+func TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  999_999_999, // out of range: fails ComputeSubnetsForSyncCommittee
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(gossip.ErrPublishQueueFull).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusBadRequest, resp.StatusCode,
+		"a validation failure must take precedence over an admission failure in the response")
+}
+
+// TestSyncCommitteeMessageExpiry pins the formula directly: slot end (the
+// start of the next slot) plus the network config's maximum gossip clock
+// disparity. Every existing handler test that exercises PublishBackground
+// matches the expiry argument with gomock.Any(), so an off-by-one on
+// slot+1 or a wrong disparity conversion would not be caught anywhere else.
+func TestSyncCommitteeMessageExpiry(t *testing.T) {
+	bcfg := clparams.MainnetBeaconConfig
+	bcfg.InitializeForkSchedule()
+	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
+	netCfg := &clparams.NetworkConfig{MaximumGossipClockDisparity: clparams.ConfigDurationMSec(500 * time.Millisecond)}
+
+	const slot = 12345
+	got := syncCommitteeMessageExpiry(ethClock, netCfg, slot)
+	want := ethClock.GetSlotTime(slot + 1).Add(500 * time.Millisecond)
+	require.Equal(t, want, got)
+	require.NotEqual(t, ethClock.GetSlotTime(slot).Add(500*time.Millisecond), got,
+		"sanity: must be keyed off slot+1 (slot end), not slot (slot start)")
+}
+
+// TestSyncCommitteeMessageExpiryDoesNotWrapAtMaxSlot proves slot+1 doesn't
+// silently overflow back to genesis for the maximum representable slot: a
+// naive slot+1 wraps uint64's MaxUint64 to 0, producing a deterministic
+// near-genesis (always-in-the-past) expiry for an obviously out-of-range
+// input, rather than the huge, out-of-range value the input itself implies.
+func TestSyncCommitteeMessageExpiryDoesNotWrapAtMaxSlot(t *testing.T) {
+	bcfg := clparams.MainnetBeaconConfig
+	bcfg.InitializeForkSchedule()
+	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
+	require.NoError(t, err)
+	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
+	netCfg := &clparams.NetworkConfig{MaximumGossipClockDisparity: clparams.ConfigDurationMSec(500 * time.Millisecond)}
+
+	got := syncCommitteeMessageExpiry(ethClock, netCfg, math.MaxUint64)
+	require.NotEqual(t, ethClock.GetSlotTime(0).Add(500*time.Millisecond), got,
+		"slot+1 must not wrap around to genesis for the maximum representable slot")
+}
+
+// TestPoolSyncCommitteesUsesCalculatedExpiry proves the handler actually
+// wires syncCommitteeMessageExpiry's result into PublishBackground for the
+// message's own slot, not just that it calls PublishBackground at all.
+func TestPoolSyncCommitteesUsesCalculatedExpiry(t *testing.T) {
+	const msgSlot = 1
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            msgSlot,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	wantExpiry := syncCommitteeMessageExpiry(handler.ethClock, handler.netConfig, msgSlot)
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	gotExpiry := make(chan time.Time, 1)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(name string, data []byte, expiry time.Time, logCtx ...any) error {
+			select {
+			case gotExpiry <- expiry:
+			default:
+			}
+			return nil
+		},
+	).MinTimes(1)
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+
+	select {
+	case got := <-gotExpiry:
+		require.Equal(t, wantExpiry, got)
+	case <-time.After(2 * time.Second):
+		t.Fatal("PublishBackground was never called")
+	}
 }
 
 func TestPoolSyncContributionAndProofs(t *testing.T) {

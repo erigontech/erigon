@@ -55,6 +55,25 @@ func (mr *MockGossipMockRecorder) Publish(ctx, name, data any) *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Publish", reflect.TypeOf((*MockGossip)(nil).Publish), ctx, name, data)
 }
 
+// PublishBackground mocks base method.
+func (m *MockGossip) PublishBackground(name string, data []byte, expiry time.Time, logCtx ...any) error {
+	m.ctrl.T.Helper()
+	varargs := []any{name, data, expiry}
+	for _, a := range logCtx {
+		varargs = append(varargs, a)
+	}
+	ret := m.ctrl.Call(m, "PublishBackground", varargs...)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// PublishBackground indicates an expected call of PublishBackground.
+func (mr *MockGossipMockRecorder) PublishBackground(name, data, expiry any, logCtx ...any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	varargs := append([]any{name, data, expiry}, logCtx...)
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "PublishBackground", reflect.TypeOf((*MockGossip)(nil).PublishBackground), varargs...)
+}
+
 // SubscribeWithExpiry mocks base method.
 func (m *MockGossip) SubscribeWithExpiry(name string, expiry time.Time) error {
 	m.ctrl.T.Helper()
