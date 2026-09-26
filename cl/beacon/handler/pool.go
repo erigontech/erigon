@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"errors"
-	"math"
 	"net/http"
 	"time"
 
@@ -39,6 +38,13 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+// maxFutureSlotLookahead bounds how far beyond the current slot a
+// sync-committee message's slot is entertained before its expiry is even
+// computed. Far larger than any legitimate lookahead, but still small
+// enough that GetSlotTime's own internal genesisTime+SecondsPerSlot*slot
+// arithmetic (uint64) cannot overflow for slot values within this bound.
+const maxFutureSlotLookahead = 1 << 32
+
 // syncCommitteeMessageExpiry returns the latest wall-clock time a
 // sync-committee message for the given slot is still worth publishing: the
 // slot's end, plus the protocol's maximum gossip clock disparity allowance.
@@ -46,12 +52,16 @@ import (
 // validation uses (reject only once now exceeds this instant), which the
 // coarser, whole-slot-rounding IsSlotCurrentSlotWithMaximumClockDisparity
 // does not preserve.
+//
+// A slot far beyond the current one is always treated as already expired
+// rather than handed to GetSlotTime: slot+1 or GetSlotTime's own
+// multiplication can otherwise overflow uint64 and alias to an arbitrary,
+// not-necessarily-past timestamp instead of erroring.
 func syncCommitteeMessageExpiry(clock eth_clock.EthereumClock, cfg *clparams.NetworkConfig, slot uint64) time.Time {
-	nextSlot := slot
-	if slot != math.MaxUint64 {
-		nextSlot = slot + 1
+	if slot > clock.GetCurrentSlot()+maxFutureSlotLookahead {
+		return time.Unix(0, 0)
 	}
-	return clock.GetSlotTime(nextSlot).Add(time.Duration(cfg.MaximumGossipClockDisparity))
+	return clock.GetSlotTime(slot + 1).Add(time.Duration(cfg.MaximumGossipClockDisparity))
 }
 
 func (a *ApiHandler) GetEthV1BeaconPoolVoluntaryExits(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -503,7 +513,12 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 
 			subnetId := subnet
 
-			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, &syncCommitteeMessageWithGossipData); err != nil && !errors.Is(err, services.ErrIgnore) {
+			if err = a.syncCommitteeMessagesService.ProcessMessage(r.Context(), &subnet, &syncCommitteeMessageWithGossipData); err != nil {
+				if errors.Is(err, services.ErrIgnore) {
+					// Nothing to publish: ErrIgnore means this subnet has no
+					// action to take on this message, not a fault.
+					continue
+				}
 				log.Warn("[Beacon REST] failed to process attestation in syncCommittee service", "err", err)
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
@@ -514,9 +529,8 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			// queue - a known failure, not an unknowable later network one -
 			// so it is surfaced below rather than swallowed behind a 200.
 			// ErrPublishJobExpired is excluded: a message whose window has
-			// already closed (e.g. an ordinary stale slot, which
-			// ProcessMessage above already exempted from failures via
-			// ErrIgnore) is expected, not a server-side fault.
+			// already closed by the time it reached admission is expected,
+			// not a server-side fault.
 			if pubErr := a.gossipManager.PublishBackground(
 				gossip.TopicNameSyncCommittee(int(subnetId)), encodedSSZ, expiry,
 				"validatorIndex", v.ValidatorIndex, "subnet", subnetId, "slot", v.Slot,
