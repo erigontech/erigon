@@ -434,7 +434,10 @@ func highestLocalHistoryStep(snapDir string, stepSize uint64) (uint64, bool) {
 // on disk — the mode-B compute would then fail to find a baseline
 // anyway; the ensure step just no-ops so we don't paper over the
 // upstream problem.
-func localCommitmentBaselineStep(snapDir string, walkEndStep, stepSize uint64) (uint64, bool) {
+// localCommitmentBaselineStep returns the endStep of the widest local
+// commitment .kv with endStep <= baselineMaxStep — the same file the compute
+// picks, whose cap is baselineMaxStepFor, NOT the walk's coverage end.
+func localCommitmentBaselineStep(snapDir string, baselineMaxStep, stepSize uint64) (uint64, bool) {
 	domainDir := filepath.Join(snapDir, "domain")
 	entries, err := os.ReadDir(domainDir)
 	if err != nil {
@@ -457,7 +460,7 @@ func localCommitmentBaselineStep(snapDir string, walkEndStep, stepSize uint64) (
 		if !ok {
 			continue
 		}
-		if toStep > walkEndStep {
+		if toStep > baselineMaxStep {
 			continue
 		}
 		if !found || toStep > best {
@@ -481,7 +484,7 @@ func localCommitmentBaselineStep(snapDir string, walkEndStep, stepSize uint64) (
 // Non-walked domains (rcache) are excluded — their coverage is not
 // the mode-B unwind's business.
 // findStarvedCoverage reports (domain, step) tuples in the walk that no
-// preverified item covers. The step range is [baselineStep, walkEndStep) —
+// preverified item covers. The step range is [baselineStep, baselineMaxStep) —
 // half-open, the same convention a history file's own [fromStep, toStep)
 // carries, and the same range localHistoryCoversWalk checks against disk.
 // The two are asked the same question about the same walk, so a difference
@@ -581,12 +584,12 @@ func neededPreverifiedHistoryForWalk(items snapcfg.PreverifiedItems, baselineSte
 		if fromStep >= toStep {
 			continue
 		}
-		// Overlap with (baselineStep, walkEndStep]: file [fromStep, toStep)
-		// intersects the range iff toStep > baselineStep AND fromStep <= walkEndStep.
+		// Walk steps are [baselineStep, walkEndStep); a file [fromStep, toStep)
+		// intersects that iff toStep > baselineStep AND fromStep < walkEndStep.
 		if toStep <= baselineStep {
 			continue
 		}
-		if fromStep > walkEndStep {
+		if fromStep >= walkEndStep {
 			continue
 		}
 		out = append(out, item)

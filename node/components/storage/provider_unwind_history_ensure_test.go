@@ -473,4 +473,12 @@ func TestWalkStepConsumersAgree(t *testing.T) {
 	require.Empty(t, findStarvedCoverage(items(names), baselineStep, walkEndStep),
 		"the same files must satisfy the preverified check — a consumer asking "+
 			"for a different step reports starvation the other cannot see")
+
+	// The selector feeds findStarvedCoverage, so it must scope to the same
+	// steps: a file starting AT walkEndStep is outside the walk.
+	beyond := items(map[string]string{"history/v2.1-accounts.331-332.v": "accounts"})
+	require.Empty(t, neededPreverifiedHistoryForWalk(beyond, baselineStep, walkEndStep, testStepSize),
+		"a file starting at the exclusive end covers no step the walk touches")
+	require.NotEmpty(t, neededPreverifiedHistoryForWalk(items(names), baselineStep, walkEndStep, testStepSize),
+		"a file covering the touched step must be selected")
 }
