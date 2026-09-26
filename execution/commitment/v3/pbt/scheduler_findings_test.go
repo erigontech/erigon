@@ -75,12 +75,18 @@ func TestParallelWhaleJoinUsesChildDescriptor(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, eip8297.StateRoot([]eip8297.Entry{{Key: keyB, Value: testTrieValueBytes(2)}}), root)
 	require.NoError(t, NewTrie(ctx).Verify())
+	bucketKey, err := bucketKeyForStorage(keyA)
+	require.NoError(t, err)
+	prefix, err := bucketPathForKey(bucketKey)
+	require.NoError(t, err)
+	probe := &Trie{upperOnly: true, upperStops: []eip8297.Bitpath{prefix}}
+	require.True(t, probe.stopsUpperPath(&prefix))
 }
 
 func TestSubtreeTaskDoesNotReadAbovePrefix(t *testing.T) {
 	address := bytes.Repeat([]byte{0x53}, 20)
 	account := eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)
-	other := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0xa3}, 20), eip8297.BasicDataLeafKey)
+	other := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x5a}, 20), eip8297.BasicDataLeafKey)
 	ctx := newTrieTestContext()
 	initial := []Op{{Key: account, Value: testTrieValue(1)}, {Key: other, Value: testTrieValue(2)}}
 	sort.Slice(initial, func(i, j int) bool { return bytes.Compare(initial[i].Key, initial[j].Key) < 0 })
@@ -100,4 +106,7 @@ func TestSubtreeTaskDoesNotReadAbovePrefix(t *testing.T) {
 		require.NoError(t, err, "%x", key)
 		require.True(t, pathHasPrefix(&path, &prefix), "%x is above %x", key, []byte(eip8297.AppendBitPath(nil, &prefix)))
 	}
+	childContext := &phaseContext{base: ctx, records: make(map[string][]byte), prefix: &prefix}
+	_, _, err = childContext.Branch(GlobalRootKey())
+	require.ErrorContains(t, err, "above subtree prefix")
 }
