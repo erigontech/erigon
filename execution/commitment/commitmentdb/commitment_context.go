@@ -473,7 +473,19 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 
 	if updateCount == 0 {
 		rootHash, err = sdc.patriciaTrie.RootHash()
-		return rootHash, err
+		if err != nil {
+			return nil, err
+		}
+		if saveState {
+			commitMetrics := kvmetrics.NewDomainMetrics()
+			defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
+			readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
+			trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx, putter)
+			if err := sdc.encodeAndStoreCommitmentState(trieContext, blockNum, txNum); err != nil {
+				return nil, err
+			}
+		}
+		return rootHash, nil
 	}
 
 	// data accessing functions should be set when domain is opened/shared context updated
