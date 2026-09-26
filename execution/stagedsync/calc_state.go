@@ -366,34 +366,6 @@ func (cs *calcState) LoadFromBAL(blockAccessList types.BlockAccessList, emptyRem
 // remainder — the BAL carries every change's tx index, so no re-execution is
 // needed. maxTxIndex == math.MaxUint32 is the whole block (== LoadFromBAL).
 func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
-	for i := range blockAccessList {
-		accountChanges := &blockAccessList[i]
-		if cs.domainReader == nil {
-			continue
-		}
-		var nonce uint64
-		foundNonce := false
-		for _, change := range accountChanges.NonceChanges {
-			if change != nil && change.Index <= maxTxIndex {
-				nonce = change.Value
-				foundNonce = true
-			}
-		}
-		if !foundNonce || nonce != 1 {
-			continue
-		}
-		addr := accounts.InternAddress(accountChanges.Address)
-		pre, err := cs.domainReader.ReadAccountData(addr)
-		if err != nil {
-			if cs.lazyLoadErr == nil {
-				cs.lazyLoadErr = fmt.Errorf("LoadFromBAL(%x): %w", addr.Value(), err)
-			}
-			continue
-		}
-		if pre != nil && pre.Incarnation > 0 {
-			cs.markWiped(addr)
-		}
-	}
 	cs.ApplyWrites(bal.ToWriteSet(blockAccessList, maxTxIndex), eip8246)
 
 	// EIP-161: a touched account whose merged block-end state is empty is

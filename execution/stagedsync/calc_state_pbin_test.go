@@ -193,17 +193,28 @@ func TestCalcStatePBinFeedCreateOverStorageWipesStorage(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
-func TestLoadFromBALPBinFeedCreateOverStorageWipesStorage(t *testing.T) {
+func TestLoadFromBALPBinFeedGenesisAccountFirstTransactionKeepsStorage(t *testing.T) {
 	addr := accounts.InternAddress(common.Address{0xc0, 0xff, 0xee})
 	io := state.NewVersionedIO(1)
-	io.RecordWrites(state.Version{TxIndex: 0}, newWS().createContract(addr, state.Version{}, true).nonce(addr, state.Version{}, 1).bal(addr, state.Version{}, *uint256.NewInt(7)).build())
+	io.RecordWrites(state.Version{TxIndex: 0}, newWS().nonce(addr, state.Version{}, 1).bal(addr, state.Version{}, *uint256.NewInt(7)).build())
 	bal := io.AsBlockAccessList()
 	require.Len(t, bal, 1)
 	require.Len(t, bal[0].NonceChanges, 1)
 	cs := newTestCalcState()
 	cs.domainReader = &preBlockReader{addr: addr, acc: &accounts.Account{Nonce: 0, Balance: *uint256.NewInt(7), Incarnation: 1}}
 	cs.LoadFromBAL(bal, true, false, false)
-	require.Contains(t, cs.wiped, addr)
+	require.NotContains(t, cs.wiped, addr)
+}
+
+func TestLoadFromBALPBinFeedLegacyContractFirstCreateKeepsStorage(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{0xc0, 0xff, 0xef})
+	io := state.NewVersionedIO(1)
+	io.RecordWrites(state.Version{TxIndex: 0}, newWS().nonce(addr, state.Version{}, 1).build())
+	bal := io.AsBlockAccessList()
+	cs := newTestCalcState()
+	cs.domainReader = &preBlockReader{addr: addr, acc: &accounts.Account{Nonce: 0, Balance: *uint256.NewInt(7), Incarnation: 1}}
+	cs.LoadFromBAL(bal, true, false, false)
+	require.NotContains(t, cs.wiped, addr)
 }
 
 func TestPBinFeedSourcesMatchGeneratedCreateOverStorage(t *testing.T) {
@@ -226,13 +237,6 @@ func TestPBinFeedSourcesMatchGeneratedCreateOverStorage(t *testing.T) {
 
 	io := state.NewVersionedIO(1)
 	io.RecordWrites(state.Version{TxIndex: 0}, writes)
-	bal := io.AsBlockAccessList()
-	balState := newTestCalcState()
-	balState.domainReader = &preBlockReader{addr: address, acc: &accounts.Account{Nonce: 0, Balance: *uint256.NewInt(7), Incarnation: 1}}
-	balState.reader = finalReader
-	balState.LoadFromBAL(bal, true, false, false)
-	balFeed, err := balState.BinFeed()
-	require.NoError(t, err)
 
 	sharedFeed, err := commitmentdb.BinFeedFromState(
 		map[string]struct{}{string(addr[:]): {}},
@@ -254,7 +258,6 @@ func TestPBinFeedSourcesMatchGeneratedCreateOverStorage(t *testing.T) {
 	}
 
 	calcRoot, calcRecords := process(calcFeed)
-	balRoot, balRecords := process(balFeed)
 	sharedRoot, sharedRecords := process(sharedFeed)
 	want := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{
 		{{Address: addr[:], Balance: *uint256.NewInt(7), Slots: func() map[string][]byte {
@@ -269,9 +272,7 @@ func TestPBinFeedSourcesMatchGeneratedCreateOverStorage(t *testing.T) {
 		{{Address: addr[:], Nonce: 1, Balance: *uint256.NewInt(7)}},
 	}))
 	require.Equal(t, want, calcRoot)
-	require.Equal(t, calcRoot, balRoot)
 	require.Equal(t, calcRoot, sharedRoot)
-	require.Equal(t, calcRecords, balRecords)
 	require.Equal(t, calcRecords, sharedRecords)
 }
 

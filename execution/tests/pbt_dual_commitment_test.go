@@ -18,6 +18,7 @@ package executiontests
 
 import (
 	"context"
+	"crypto/ecdsa"
 	"fmt"
 	"math/big"
 	"testing"
@@ -290,4 +291,109 @@ func currentHead(t *testing.T, m *execmoduletester.ExecModuleTester) common.Hash
 	head, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
 	return head.Hash()
+}
+
+func TestPBinBALGenesisAccountFirstTransactionKeepsStorage(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	to := common.Address{0x99}
+	config := chain.AllProtocolChanges.Copy()
+	zero := uint64(0)
+	config.BinaryTrieTime = &zero
+	genesis := &types.Genesis{
+		Config: config,
+		Alloc: types.GenesisAlloc{
+			from: {Balance: new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether)), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
+		},
+		GasLimit: 30_000_000,
+		BaseFee:  uint256.NewInt(0),
+	}
+
+	balRoot := runPBinBALFirstTransaction(t, genesis, key, from, to, true)
+	plainRoot := runPBinBALFirstTransaction(t, genesis, key, from, to, false)
+	require.Equal(t, plainRoot, balRoot)
+}
+
+func TestPBinBALLegacyContractFirstCreateKeepsStorage(t *testing.T) {
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	from := crypto.PubkeyToAddress(key.PublicKey)
+	contract := common.Address{0xc0, 0xff, 0xee}
+	config := chain.AllProtocolChanges.Copy()
+	zero := uint64(0)
+	config.BinaryTrieTime = &zero
+	code := common.FromHex("0x600060006000f05000")
+	genesis := &types.Genesis{
+		Config: config,
+		Alloc: types.GenesisAlloc{
+			from:     {Balance: new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether))},
+			contract: {Code: code, Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(7))}},
+		},
+		GasLimit: 30_000_000,
+		BaseFee:  uint256.NewInt(0),
+	}
+
+	balRoot := runPBinBALContractCreate(t, genesis, key, from, contract, true)
+	plainRoot := runPBinBALContractCreate(t, genesis, key, from, contract, false)
+	require.Equal(t, plainRoot, balRoot)
+}
+
+func runPBinBALFirstTransaction(t *testing.T, genesis *types.Genesis, key *ecdsa.PrivateKey, from, to common.Address, useBAL bool) common.Hash {
+	t.Helper()
+	return runPBinBALBlock(t, genesis, key, from, to, useBAL, func(b *blockgen.BlockGen) {
+		signer := types.LatestSignerForChainID(genesis.Config.ChainID)
+		tx, signErr := types.SignTx(types.NewTransaction(b.TxNonce(from), to, uint256.NewInt(1), 2_000_000, uint256.NewInt(0), nil), *signer, key)
+		require.NoError(t, signErr)
+		b.AddTx(tx)
+	})
+}
+
+func runPBinBALContractCreate(t *testing.T, genesis *types.Genesis, key *ecdsa.PrivateKey, from, contract common.Address, useBAL bool) common.Hash {
+	t.Helper()
+	return runPBinBALBlock(t, genesis, key, from, contract, useBAL, func(b *blockgen.BlockGen) {
+		signer := types.LatestSignerForChainID(genesis.Config.ChainID)
+		tx, signErr := types.SignTx(types.NewTransaction(b.TxNonce(from), contract, uint256.NewInt(0), 2_000_000, uint256.NewInt(0), nil), *signer, key)
+		require.NoError(t, signErr)
+		b.AddTx(tx)
+	})
+}
+
+func runPBinBALBlock(t *testing.T, genesis *types.Genesis, key *ecdsa.PrivateKey, from, to common.Address, useBAL bool, makeTx func(*blockgen.BlockGen)) common.Hash {
+	t.Helper()
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalParallelCommitment = previousParallel
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalParallelCommitment = false
+	options := []execmoduletester.Option{
+		execmoduletester.WithGenesisSpec(genesis),
+		execmoduletester.WithKey(key),
+	}
+	if useBAL {
+		options = append(options, execmoduletester.WithExperimentalBAL())
+	} else {
+		options = append(options, execmoduletester.WithoutExperimentalBAL())
+	}
+	m := execmoduletester.New(t, options...)
+	seedDualGenesis(t, m, genesis)
+	require.NoError(t, m.ExecModule.ResetCurrentContext(t.Context()))
+	pack, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) { makeTx(b) })
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(pack))
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	root, err := domains.GetCommitmentContext().Trie().RootHash()
+	require.NoError(t, err)
+	return common.BytesToHash(root)
 }
