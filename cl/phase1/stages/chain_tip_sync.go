@@ -238,7 +238,7 @@ MainLoop:
 			}
 
 			// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
-			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
+			envelopeRoots, batchBlockByRoot := determineParentEnvelopeRoots(cfg, blocks.Data)
 			envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
 			storedReplayRoots := storedParentReplayRoots(
 				blocks.Data,
@@ -293,12 +293,17 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						_, wasStored := storedEnvelopeRoots[common.Hash(parentRoot)]
+						parentRoot := common.Hash(parentRoot)
+						_, wasStored := storedEnvelopeRoots[parentRoot]
 						envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg) && !wasStored)
 						if envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 						}
-						if wasStored && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, common.Hash(parentRoot), env, envErr) {
+						parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
+						if !ok {
+							parentBlock = batchBlockByRoot[parentRoot]
+						}
+						if storedParentReplayRequired(block, parentBlock, wasStored) && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr) {
 							continue
 						}
 					}
@@ -344,7 +349,7 @@ func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 }
 
 // determineParentEnvelopeRoots identifies FULL parent blocks whose envelopes are required.
-func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) [][32]byte {
+func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) ([][32]byte, map[common.Hash]*cltypes.SignedBeaconBlock) {
 	batchBlockByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock)
 	for _, b := range blocks {
 		if b == nil || b.Block == nil {
@@ -386,7 +391,7 @@ func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock)
 			seen[parentRoot] = struct{}{}
 		}
 	}
-	return roots
+	return roots, batchBlockByRoot
 }
 
 func parentEnvelopeRequired(child, parent *cltypes.SignedBeaconBlock) bool {
@@ -396,6 +401,10 @@ func parentEnvelopeRequired(child, parent *cltypes.SignedBeaconBlock) bool {
 	childBid := child.Block.Body.GetSignedExecutionPayloadBid()
 	parentBid := parent.Block.Body.GetSignedExecutionPayloadBid()
 	return childBid != nil && childBid.Message != nil && parentBid != nil && parentBid.Message != nil && childBid.Message.ParentBlockHash == parentBid.Message.BlockHash
+}
+
+func storedParentReplayRequired(child, parent *cltypes.SignedBeaconBlock, wasStored bool) bool {
+	return wasStored && parentEnvelopeRequired(child, parent)
 }
 
 func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound, gasLimitFound bool) bool {

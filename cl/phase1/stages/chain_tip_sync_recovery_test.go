@@ -138,6 +138,32 @@ func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {
 	require.False(t, parentEnvelopeNeedsRecovery(child, parent, false, execution_client.PayloadStatusInvalidated, true, false))
 }
 
+func TestStoredParentReplayRequiredOnlyForFullSibling(t *testing.T) {
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{1}
+	fullChild := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	fullChild.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{1}
+	emptySibling := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	emptySibling.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{2}
+
+	for _, children := range [][]*cltypes.SignedBeaconBlock{
+		{fullChild, emptySibling},
+		{emptySibling, fullChild},
+	} {
+		replayAccepted := false
+		var processed []*cltypes.SignedBeaconBlock
+		for _, child := range children {
+			if storedParentReplayRequired(child, parent, true) && !replayAccepted {
+				continue
+			}
+			processed = append(processed, child)
+		}
+		require.Equal(t, []*cltypes.SignedBeaconBlock{emptySibling}, processed)
+	}
+
+	require.False(t, storedParentReplayRequired(fullChild, parent, false))
+}
+
 func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {
 	root := common.Hash{1}
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
