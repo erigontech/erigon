@@ -114,6 +114,11 @@ func (reset *Reset) checkStateBuilds() error {
 		if err != nil {
 			return
 		}
+		// A name whose range runs backwards describes no real file, and the span it implies
+		// underflows into one that looks like it carries references.
+		if toStep <= fromStep {
+			return
+		}
 		stepRange, domain := m[3]+"-"+m[4], m[2]
 		supported, ok := supportedKVVersions(domain)
 		if !ok || !supported.Supports(ver) {

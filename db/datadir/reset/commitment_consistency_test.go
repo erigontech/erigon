@@ -265,3 +265,18 @@ func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
 		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
 	})
 }
+
+// A name whose range runs backwards describes no real file, and the span it implies underflows into
+// one large enough to look like it carries references. Refusing over it would block the very
+// command an operator reaches for to clean a datadir up.
+func TestResetIgnoresReversedStepRanges(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.256-0.kv"}}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v1.0-accounts.256-0.kv"}}
+		r.PreverifiedSnapshots.Sort()
+		qt.Assert(t, qt.IsNil(r.Run()))
+	})
+}
