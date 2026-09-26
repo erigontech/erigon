@@ -227,7 +227,7 @@ func IsCommitmentStateKey(key []byte) bool {
 }
 
 var (
-	NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+	NewCommitmentV3Trie  func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 	NewCommitmentBinTrie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 )
 
