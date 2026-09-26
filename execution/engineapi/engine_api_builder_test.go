@@ -788,21 +788,24 @@ func TestEngineApiBALGlamsterdamCreate2OntoFundedAddress(t *testing.T) {
 			recipients[i] = proxies[i]
 			values[i] = creditWei.ToBig()
 		}
-		// One disperse tx credits every still-empty proxy, then independent senders
-		// CREATE2-deploy each proxy in the same block.
+		// The proxies must be funded while still empty, before CREATE2 in the same block.
+		// Nonces do not enforce order across independent senders, so funding has a higher fee.
 		disperseAuth, err := bind.NewKeyedTransactorWithChainID(disperserKey, chainID)
 		require.NoError(t, err)
 		disperseAuth.GasLimit = 3_000_000
+		disperseAuth.GasPrice = big.NewInt(4_000_000_000)
 		disperseAuth.Value = new(big.Int).Mul(creditWei.ToBig(), big.NewInt(numProxies))
-		_, err = disperse.DisperseEther(disperseAuth, recipients, values)
-		require.NoError(t, err)
 		for i := range proxies {
 			deployAuth, err := bind.NewKeyedTransactorWithChainID(deployerKeys[i], chainID)
 			require.NoError(t, err)
 			deployAuth.GasLimit = 500_000
+			deployAuth.GasPrice = big.NewInt(3_000_000_000)
 			_, err = factory.CreateProxy(deployAuth, salts[i])
 			require.NoError(t, err)
 		}
+		// Submit funding last to verify that fees enforce the required block order.
+		_, err = disperse.DisperseEther(disperseAuth, recipients, values)
+		require.NoError(t, err)
 		payload, err := eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err, "proposer vs validator BAL mismatch: disperse credit + same-block CREATE2 of funded proxies")
 		bal := decodeAndValidateBAL(t, payload)
