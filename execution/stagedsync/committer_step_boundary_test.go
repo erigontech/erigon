@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -146,6 +147,7 @@ func TestHandleMessage_StepBoundaryCheckpointBothCommitmentDomains(t *testing.T)
 		require.NoError(t, result.err)
 	}
 	require.NoError(t, doms.Flush(ctx, tx))
+	require.NoError(t, pbt.ValidateEngineIdentityFromTx(tx, kv.CommitmentBinDomain))
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		key := commitmentStateKeyForTest(doms, domain)
 		stateBlob, _, err := doms.GetLatest(domain, tx, key)

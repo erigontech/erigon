@@ -1024,9 +1024,13 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		defer roTx.Rollback() //nolint:gocritic
 		// A KV read slice only lives as long as its transaction, so the state is
 		// validated before the rollback rather than after it.
-		stateValue, _, readErr := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
-		if readErr == nil {
-			readErr = validatePBinRebuildState(stateValue)
+		var readErr error
+		if !a.skipPBinStateDBCheck {
+			stateValue, _, getErr := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, kv.GetLatestOptions{})
+			readErr = getErr
+			if readErr == nil {
+				readErr = validatePBinRebuildState(stateValue)
+			}
 		}
 		roTx.Rollback()
 		if readErr != nil {

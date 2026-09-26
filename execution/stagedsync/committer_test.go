@@ -650,6 +650,8 @@ func TestCommitmentCalculatorFrozenShadowAndWrites(t *testing.T) {
 	require.True(t, ok)
 	err = unwinder.Unwind(t.Context(), tx, 9, &changeset)
 	require.ErrorContains(t, err, "would cross frozen domain commitment at txnum 10")
+	require.NoError(t, doms.Flush(t.Context(), tx))
+	assertPBinEngineIdentity(t, tx)
 }
 
 func TestCommitmentCalculatorCanonicalRootMismatch(t *testing.T) {
@@ -807,4 +809,6 @@ func TestCommitmentCalculatorDualFoldBuffersHexShadowAfterFlip(t *testing.T) {
 	require.True(t, hexWritesBuffered, "the hex shadow's branch writes must stay buffered until both folds join")
 	_, _, ok := doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentV3State)
 	require.True(t, ok, "the hex shadow's commitment state must be replayed after the join")
+	require.NoError(t, doms.Flush(t.Context(), tx))
+	assertPBinEngineIdentity(t, tx)
 }

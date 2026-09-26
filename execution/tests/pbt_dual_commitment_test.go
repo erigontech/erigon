@@ -403,5 +403,6 @@ func runPBinBALBlock(t *testing.T, genesis *types.Genesis, key *ecdsa.PrivateKey
 	defer domains.Close()
 	root, err := domains.GetCommitmentContext().Trie().RootHash()
 	require.NoError(t, err)
+	require.NoError(t, pbt.ValidateEngineIdentityFromTx(tx, kv.CommitmentDomain))
 	return common.BytesToHash(root)
 }

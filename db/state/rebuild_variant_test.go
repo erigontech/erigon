@@ -275,6 +275,28 @@ func TestRebuildCommitmentFilesBinTargetRejectsLegacyPBinState(t *testing.T) {
 	require.ErrorContains(t, err, "format")
 }
 
+func TestRebuildCommitmentFilesBinTargetStagedOutputSkipsSourceCheckpoint(t *testing.T) {
+	db, agg, dirs := rebuildVariantDatadir(t)
+	rebuildVariantPutLegacyPBinState(t, db)
+	agg.Close()
+
+	staged := state.NewTest(dirs).
+		StepSize(rebuildVariantStepSize).
+		SkipPBinStateDBCheck().
+		DisableInterDomainDeps().
+		Logger(log.New()).
+		MustOpen(t.Context())
+	t.Cleanup(staged.Close)
+	require.NoError(t, staged.OpenFolder(db))
+	stagedDB, err := temporal.New(db, staged, nil)
+	require.NoError(t, err)
+	t.Cleanup(stagedDB.Close)
+
+	_, _, err = state.RebuildCommitmentFiles(t.Context(), stagedDB, &rawdbv3.TxNums, log.New(), false,
+		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashBlake3})
+	require.NoError(t, err)
+}
+
 // The commitment files a rebuild left behind, by name and content: a resumed run
 // must neither rewrite nor add to them.
 func rebuildVariantCommitmentFiles(t *testing.T, dirs datadir.Dirs) map[string]string {

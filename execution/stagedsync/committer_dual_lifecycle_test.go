@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/stretchr/testify/require"
 )
 
@@ -48,6 +49,11 @@ func dualCalculatorTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execct
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	return setupStepTest(t)
+}
+
+func assertPBinEngineIdentity(t *testing.T, tx kv.TemporalTx) {
+	t.Helper()
+	require.NoError(t, pbt.ValidateEngineIdentityFromTx(tx, kv.CommitmentBinDomain))
 }
 
 func TestDualCalculatorUsesHexCollectorWithBinarySelected(t *testing.T) {

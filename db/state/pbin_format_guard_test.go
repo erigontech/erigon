@@ -80,9 +80,30 @@ func TestOpenFolderAcceptsCurrentPBinState(t *testing.T) {
 
 	temporalDB, agg := testDbAndAggregatorv3(t, 1)
 	db := temporalDB
-	putPBinOpenState(t, temporalDB, []byte{commitment.PBinStateMarker, commitment.PBinRowStateFormat, 0, 0})
+	putPBinOpenState(t, temporalDB, []byte{commitment.PBinStateMarker, commitment.PBinRowStateFormat, 0, 0, 0})
 	require.NoError(t, agg.OpenFolder(db))
 	require.NoError(t, agg.OpenFolder(db))
+}
+
+func TestOpenFolderRejectsTruncatedCurrentPBinState(t *testing.T) {
+	oldBin := statecfg.ExperimentalBinCommitment
+	oldSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = oldBin
+		statecfg.Schema = oldSchema
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+
+	for length := 2; length < 5; length++ {
+		t.Run(strconv.Itoa(length), func(t *testing.T) {
+			temporalDB, agg := testDbAndAggregatorv3(t, 1)
+			putPBinOpenState(t, temporalDB, []byte{commitment.PBinStateMarker, commitment.PBinRowStateFormat, 0, 0, 0}[:length])
+			err := agg.OpenFolder(temporalDB)
+			require.ErrorContains(t, err, "OpenFolder")
+			require.ErrorContains(t, err, "rebuild the bin commitment domain")
+		})
+	}
 }
 
 func TestOpenFolderAcceptsFreshPBinDatadir(t *testing.T) {

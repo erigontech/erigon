@@ -25,7 +25,7 @@ import (
 )
 
 func TestValidateEngineIdentity(t *testing.T) {
-	state := []byte{commitment.PBinStateMarker, commitment.PBinRowStateFormat, 0, 0}
+	state := []byte{commitment.PBinStateMarker, commitment.PBinRowStateFormat, 0, 0, 0}
 	require.NoError(t, ValidateEngineIdentity(state, nil))
 	require.Error(t, ValidateEngineIdentity([]byte{commitment.PBinStateMarker, 0x10}, nil))
 	err := ValidateEngineIdentity(state, []StoredRecord{{Key: []byte{0, 0}, Value: []byte{0x10}}})

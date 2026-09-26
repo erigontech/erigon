@@ -194,6 +194,10 @@ func TestPBinGenesisComputesBinaryRoot(t *testing.T) {
 
 // Oracle for GenesisToBlock: the same root computed through SharedDomains on bin.
 func pbinGenesisRoot(t *testing.T, g *types.Genesis) []byte {
+	return pbinGenesisRootForDomain(t, g, kv.CommitmentDomain)
+}
+
+func pbinGenesisRootForDomain(t *testing.T, g *types.Genesis, domain kv.Domain) []byte {
 	t.Helper()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -203,14 +207,16 @@ func pbinGenesisRoot(t *testing.T, g *types.Genesis) []byte {
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	require.Equal(t, commitment.VariantBinPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
+	require.Equal(t, commitment.VariantBinPatriciaTrie, sd.GetCommitmentCtxForDomain(domain).Trie().Variant())
 
 	head, _ := genesiswrite.GenesisWithoutStateToBlock(g)
 	root, _, err := genesiswrite.ComputeGenesisCommitment(t.Context(), g, tx, sd, head)
 	require.NoError(t, err)
-	stateBlob, _, ok := sd.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	stateBlob, _, ok := sd.GetLatestFromMemory(domain, commitment.KeyCommitmentState)
 	require.True(t, ok)
 	require.NoError(t, pbt.ValidateEngineStateBlob(stateBlob))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+	require.NoError(t, pbt.ValidateEngineIdentityFromTx(tx, domain))
 	return root
 }
 
@@ -228,6 +234,9 @@ func TestPBinGenesisDelayedScheduleRetryWithHexBin(t *testing.T) {
 			withCommitmentVariant(t, false, true)
 			_, _, err = genesiswrite.GenesisToBlock(delayedPBinGenesis(), dirs, log.New())
 			require.NoError(t, err)
+			if bin {
+				pbinGenesisRootForDomain(t, delayedPBinGenesis(), kv.CommitmentBinDomain)
+			}
 		})
 	}
 }

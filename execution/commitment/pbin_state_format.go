@@ -16,7 +16,10 @@
 
 package commitment
 
-import "fmt"
+import (
+	"encoding/binary"
+	"fmt"
+)
 
 const PBinRowStateFormat byte = 0x20
 
@@ -26,6 +29,13 @@ func PBinValidateRowStateFormat(buf []byte) error {
 	}
 	if buf[1] != PBinRowStateFormat {
 		return fmt.Errorf("pbin: state requires rebuild: format %d, want %d", buf[1], PBinRowStateFormat)
+	}
+	if len(buf) < 5 {
+		return fmt.Errorf("pbin: state requires rebuild: header is %d bytes, want at least 5", len(buf))
+	}
+	rootLen := int(binary.BigEndian.Uint16(buf[3:5]))
+	if len(buf) != 5+rootLen {
+		return fmt.Errorf("pbin: state requires rebuild: root record has %d bytes, %d present", rootLen, len(buf)-5)
 	}
 	return nil
 }
