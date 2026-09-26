@@ -5,7 +5,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"slices"
 	"time"
 
@@ -239,8 +238,26 @@ MainLoop:
 			}
 
 			// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
-			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
-			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
+			envelopeRoots, batchBlockByRoot := determineParentEnvelopeRoots(cfg, blocks.Data)
+			envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
+			storedReplayRoots := storedParentReplayRoots(
+				blocks.Data,
+				envelopes,
+				storedEnvelopeRoots,
+				func(root common.Hash) bool {
+					_, ok := cfg.forkChoice.GetHeader(root)
+					return ok
+				},
+				func(root common.Hash) bool {
+					_, ok := seenBlockRoots[root]
+					return ok
+				},
+			)
+			payloadReplay := storedParentPayloadReplay{
+				budget:    gloasPayloadRetryBudget,
+				remaining: len(storedReplayRoots),
+				results:   make(map[common.Hash]bool),
+			}
 
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
@@ -276,8 +293,18 @@ MainLoop:
 				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
 					parentRoot := block.Block.ParentRoot
 					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						if envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg)); envErr != nil {
+						parentRoot := common.Hash(parentRoot)
+						_, wasStored := storedEnvelopeRoots[parentRoot]
+						envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg) && !wasStored)
+						if envErr != nil {
 							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
+						}
+						parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
+						if !ok {
+							parentBlock = batchBlockByRoot[parentRoot]
+						}
+						if storedParentReplayRequired(block, parentBlock, wasStored) && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr) {
+							continue
 						}
 					}
 				}
@@ -321,12 +348,13 @@ func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 	}
 }
 
-// determineParentEnvelopeRoots identifies parent blocks that were FULL but missing their
-// execution payload envelope. It checks parents in fork choice AND within the current batch
-// using the bid chain: if child.bid.ParentBlockHash == parent.bid.BlockHash, parent was FULL.
-func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) [][32]byte {
+// determineParentEnvelopeRoots identifies FULL parent blocks whose envelopes are required.
+func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) ([][32]byte, map[common.Hash]*cltypes.SignedBeaconBlock) {
 	batchBlockByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock)
 	for _, b := range blocks {
+		if b == nil || b.Block == nil {
+			continue
+		}
 		if r, err := b.Block.HashSSZ(); err == nil {
 			batchBlockByRoot[common.Hash(r)] = b
 		}
@@ -335,17 +363,10 @@ func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock)
 	var roots [][32]byte
 	seen := make(map[[32]byte]struct{})
 	for _, block := range blocks {
-		if block.Version() < clparams.GloasVersion {
-			continue
-		}
-		bid := block.Block.Body.GetSignedExecutionPayloadBid()
-		if bid == nil || bid.Message == nil {
+		if block == nil || block.Block == nil {
 			continue
 		}
 		parentRoot := block.Block.ParentRoot
-		if cfg.forkChoice.HasEnvelope(common.Hash(parentRoot)) {
-			continue
-		}
 		if _, ok := seen[parentRoot]; ok {
 			continue
 		}
@@ -359,43 +380,74 @@ func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock)
 		if parentBlock == nil {
 			continue
 		}
-		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-		if parentBid == nil || parentBid.Message == nil {
-			continue
+		hasEnvelope := cfg.forkChoice.HasEnvelope(common.Hash(parentRoot))
+		status, statusFound := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(common.Hash(parentRoot))
+		gasLimitFound := false
+		if parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid(); parentBid != nil && parentBid.Message != nil {
+			_, gasLimitFound = cfg.forkChoice.GetExecutionPayloadGasLimit(parentBid.Message.BlockHash)
 		}
-		if bid.Message.ParentBlockHash == parentBid.Message.BlockHash {
+		if parentEnvelopeNeedsRecovery(block, parentBlock, hasEnvelope, status, statusFound, gasLimitFound) {
 			roots = append(roots, parentRoot)
 			seen[parentRoot] = struct{}{}
 		}
 	}
-	return roots
+	return roots, batchBlockByRoot
+}
+
+func parentEnvelopeRequired(child, parent *cltypes.SignedBeaconBlock) bool {
+	if child == nil || child.Block == nil || child.Block.Body == nil || child.Version() < clparams.GloasVersion || parent == nil || parent.Block == nil || parent.Block.Body == nil {
+		return false
+	}
+	childBid := child.Block.Body.GetSignedExecutionPayloadBid()
+	parentBid := parent.Block.Body.GetSignedExecutionPayloadBid()
+	return childBid != nil && childBid.Message != nil && parentBid != nil && parentBid.Message != nil && childBid.Message.ParentBlockHash == parentBid.Message.BlockHash
+}
+
+func storedParentReplayRequired(child, parent *cltypes.SignedBeaconBlock, wasStored bool) bool {
+	return wasStored && parentEnvelopeRequired(child, parent)
+}
+
+func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound, gasLimitFound bool) bool {
+	if !parentEnvelopeRequired(child, parent) || (statusFound && status == execution_client.PayloadStatusInvalidated) {
+		return false
+	}
+	gasLimitRequired := status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
+	return !stored || !statusFound || status == execution_client.PayloadStatusNone || (gasLimitRequired && !gasLimitFound)
 }
 
 // fetchParentEnvelopes batch-fetches execution payload envelopes for the given roots.
 // It retries until all envelopes are obtained or the context is cancelled.
-func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope {
+func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, map[common.Hash]struct{}) {
+	envelopes, storedRoots := storedParentEnvelopes(roots, cfg.forkChoice.HasEnvelope, cfg.forkChoice.ReadEnvelopeFromDisk)
 	if len(roots) == 0 {
-		return nil
+		return envelopes, storedRoots
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-	remaining := make([][32]byte, len(roots))
-	copy(remaining, roots)
+	remaining := make([][32]byte, 0, len(roots))
+	for _, root := range roots {
+		if _, ok := envelopes[common.Hash(root)]; !ok {
+			remaining = append(remaining, root)
+		}
+	}
 
 	const maxAttempts = 10
 	for attempt := 0; attempt < maxAttempts && len(remaining) > 0; attempt++ {
 		if ctx.Err() != nil {
-			return envelopes
+			return envelopes, storedRoots
 		}
 		result, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, remaining)
 		if err != nil {
 			log.Debug("[chainTipSync] envelope fetch attempt failed", "err", err, "attempt", attempt+1, "remaining", len(remaining))
 			continue
 		}
-		maps.Copy(envelopes, result)
+		for root, envelope := range result {
+			if _, stored := envelopes[root]; !stored {
+				envelopes[root] = envelope
+			}
+		}
 		// Recalculate remaining
 		var stillMissing [][32]byte
 		for _, root := range remaining {
@@ -408,7 +460,54 @@ func fetchParentEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) map[c
 	if len(remaining) > 0 {
 		log.Debug("[chainTipSync] some parent envelopes still missing after retries", "missing", len(remaining))
 	}
-	return envelopes
+	return envelopes, storedRoots
+}
+
+func storedParentEnvelopes(
+	roots [][32]byte,
+	hasEnvelope func(common.Hash) bool,
+	readEnvelope func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error),
+) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, map[common.Hash]struct{}) {
+	envelopes := make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
+	storedRoots := make(map[common.Hash]struct{})
+	for _, requested := range roots {
+		root := common.Hash(requested)
+		if _, checked := storedRoots[root]; checked || !hasEnvelope(root) {
+			continue
+		}
+		storedRoots[root] = struct{}{}
+		envelope, err := readEnvelope(root)
+		if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.BeaconBlockRoot != root {
+			continue
+		}
+		envelopes[root] = envelope
+	}
+	return envelopes, storedRoots
+}
+
+func storedParentReplayRoots(
+	blocks []*cltypes.SignedBeaconBlock,
+	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
+	storedRoots map[common.Hash]struct{},
+	knownBlock func(common.Hash) bool,
+	seenBlock func(common.Hash) bool,
+) map[common.Hash]struct{} {
+	replayRoots := make(map[common.Hash]struct{})
+	for _, block := range blocks {
+		if block == nil || block.Block == nil || block.Version() < clparams.GloasVersion {
+			continue
+		}
+		parentRoot := common.Hash(block.Block.ParentRoot)
+		if _, stored := storedRoots[parentRoot]; !stored || envelopes[parentRoot] == nil {
+			continue
+		}
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil || knownBlock(common.Hash(blockRoot)) || seenBlock(common.Hash(blockRoot)) {
+			continue
+		}
+		replayRoots[parentRoot] = struct{}{}
+	}
+	return replayRoots
 }
 
 // recoverMissingEnvelopes incrementally scans from the selected head for missing FULL-block envelopes.
@@ -790,6 +889,146 @@ type gloasPayloadValidator interface {
 	NewPayloadWithAdmission(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error)
 }
 
+type gloasPayloadRetryResultStore interface {
+	MarkPayloadStatusAndGasLimitIfRetained(common.Hash, common.Hash, execution_client.PayloadStatus, uint64) (execution_client.PayloadStatus, bool)
+	RequeuePendingELPayload(forkchoice.PendingELPayload)
+}
+
+type storedParentPayloadStore interface {
+	gloasPayloadRetryResultStore
+	HasEnvelope(common.Hash) bool
+	GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool)
+	GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool)
+}
+
+type storedParentPayloadReplay struct {
+	budget           time.Duration
+	deadline         time.Time
+	remaining        int
+	attemptDeadlines map[common.Hash]time.Time
+	results          map[common.Hash]bool
+}
+
+func (r *storedParentPayloadReplay) attemptContext(ctx context.Context, root common.Hash) (context.Context, context.CancelFunc) {
+	if deadline, ok := r.attemptDeadlines[root]; ok {
+		return context.WithDeadline(ctx, deadline)
+	}
+	if r.deadline.IsZero() {
+		r.deadline = time.Now().Add(r.budget)
+	}
+	attemptDeadline := r.deadline
+	if r.remaining > 1 {
+		now := time.Now()
+		if budget := r.deadline.Sub(now); budget > 0 {
+			attemptDeadline = now.Add(budget / time.Duration(r.remaining))
+		}
+	}
+	if r.remaining > 0 {
+		r.remaining--
+	}
+	if r.attemptDeadlines == nil {
+		r.attemptDeadlines = make(map[common.Hash]time.Time)
+	}
+	r.attemptDeadlines[root] = attemptDeadline
+	return context.WithDeadline(ctx, attemptDeadline)
+}
+
+func (r *storedParentPayloadReplay) accepted(
+	ctx context.Context,
+	cfg *Cfg,
+	store storedParentPayloadStore,
+	root common.Hash,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+	applyErr error,
+) bool {
+	if accepted, ok := r.results[root]; ok {
+		return accepted
+	}
+	if r.results == nil {
+		r.results = make(map[common.Hash]bool)
+	}
+	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
+		if r.remaining > 0 {
+			r.remaining--
+		}
+		r.results[root] = false
+		return false
+	}
+	retryCtx, cancel := r.attemptContext(ctx, root)
+	accepted := ensureStoredParentPayloadAccepted(retryCtx, cfg, store, root, envelope)
+	cancel()
+	r.results[root] = accepted
+	return accepted
+}
+
+func ensureStoredParentPayloadAccepted(
+	ctx context.Context,
+	cfg *Cfg,
+	store storedParentPayloadStore,
+	root common.Hash,
+	envelope *cltypes.SignedExecutionPayloadEnvelope,
+) bool {
+	if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil {
+		return false
+	}
+	if status, ok := store.GetRecentExecutionPayloadStatusByRoot(root); ok {
+		switch status {
+		case execution_client.PayloadStatusNotValidated, execution_client.PayloadStatusValidated:
+			status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(
+				root,
+				envelope.Message.Payload.BlockHash,
+				status,
+				envelope.Message.Payload.GasLimit,
+			)
+			return retained && (status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated)
+		case execution_client.PayloadStatusInvalidated:
+			return false
+		}
+	}
+	if !store.HasEnvelope(root) {
+		return false
+	}
+	if !canValidateGloasPayloads(cfg) {
+		status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(
+			root,
+			envelope.Message.Payload.BlockHash,
+			execution_client.PayloadStatusNotValidated,
+			envelope.Message.Payload.GasLimit,
+		)
+		return retained && (status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated)
+	}
+	block, ok := store.GetBlock(root)
+	if !ok || block == nil || block.Block == nil {
+		return false
+	}
+	status, err := retryGloasPayloadWithEL(ctx, cfg, block, envelope)
+	if err != nil {
+		log.Warn("[chainTipSync] persisted parent GLOAS NewPayload failed", "slot", block.Block.Slot, "blockRoot", root, "status", status, "err", err)
+	}
+	status, retained := recordGloasPayloadRetryResult(store, forkchoice.PendingELPayload{Block: block, Envelope: envelope}, status)
+	if !retained {
+		return false
+	}
+	return status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
+}
+
+func recordGloasPayloadRetryResult(
+	store gloasPayloadRetryResultStore,
+	payload forkchoice.PendingELPayload,
+	status execution_client.PayloadStatus,
+) (execution_client.PayloadStatus, bool) {
+	if !validPendingGloasPayload(payload) {
+		return execution_client.PayloadStatusNone, false
+	}
+	beaconRoot := payload.Envelope.Message.BeaconBlockRoot
+	executionPayload := payload.Envelope.Message.Payload
+	status, retained := store.MarkPayloadStatusAndGasLimitIfRetained(beaconRoot, executionPayload.BlockHash, status, executionPayload.GasLimit)
+	if retained && (status == execution_client.PayloadStatusNone || status == execution_client.PayloadStatusNotValidated) {
+		store.RequeuePendingELPayload(payload)
+	}
+	return status, retained
+}
+
 func buildGloasNewPayloadArgs(cfg *Cfg, block *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {
 	if block == nil || block.Block == nil {
 		return nil, nil, errors.New("missing beacon block")
@@ -848,16 +1087,11 @@ func drainPendingGloasPayloads(ctx context.Context, cfg *Cfg) {
 		if err != nil {
 			log.Warn("[chainTipSync] pending GLOAS NewPayload failed", "slot", p.Block.Block.Slot, "status", status, "err", err)
 		}
-		execHash := p.Envelope.Message.Payload.BlockHash
-		var retained bool
-		status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(beaconRoot, execHash, status)
+		status, retained := recordGloasPayloadRetryResult(cfg.forkChoice, p, status)
 		if !retained {
 			continue
 		}
-		switch status {
-		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
-			cfg.forkChoice.RequeuePendingELPayload(p)
-		case execution_client.PayloadStatusInvalidated:
+		if status == execution_client.PayloadStatusInvalidated {
 			log.Warn("[chainTipSync] pending GLOAS payload invalidated by EL", "slot", p.Block.Block.Slot, "blockRoot", beaconRoot)
 		}
 	}
@@ -992,22 +1226,22 @@ func verifyUnverifiedGloasPayloads(ctx context.Context, cfg *Cfg) {
 			return continueGloasVerificationAfterItemFailure(ctx, &completeBatch)
 		}
 		if isGloasPayloadKnownInvalid(cfg, envelope) {
-			cfg.forkChoice.MarkPayloadStatusIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated)
+			cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(item.root, execHash, execution_client.PayloadStatusInvalidated, envelope.Message.Payload.GasLimit)
 			return true
 		}
 		status, err := retryGloasPayloadWithEL(ctx, cfg, item.block, envelope)
 		if err != nil {
 			log.Warn("[chainTipSync] GLOAS verification sweep NewPayload failed", "slot", item.block.Block.Slot, "blockRoot", item.root, "status", status, "err", err)
 		}
-		var retained bool
-		status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(item.root, execHash, status)
+		status, retained := recordGloasPayloadRetryResult(
+			cfg.forkChoice,
+			forkchoice.PendingELPayload{Block: item.block, Envelope: envelope},
+			status,
+		)
 		if !retained {
 			return true
 		}
-		switch status {
-		case execution_client.PayloadStatusNone, execution_client.PayloadStatusNotValidated:
-			cfg.forkChoice.RequeuePendingELPayload(forkchoice.PendingELPayload{Block: item.block, Envelope: envelope})
-		case execution_client.PayloadStatusInvalidated:
+		if status == execution_client.PayloadStatusInvalidated {
 			log.Warn("[chainTipSync] GLOAS verification sweep found invalid payload", "slot", item.block.Block.Slot, "blockRoot", item.root)
 		}
 		swept++
@@ -1072,7 +1306,12 @@ func retryUnverifiedAnchorPayload(ctx context.Context, cfg *Cfg) {
 	}
 	execHash := envelope.Message.Payload.BlockHash
 	var retained bool
-	status, retained = cfg.forkChoice.MarkPayloadStatusIfRetained(anchorRoot, execHash, status)
+	status, retained = cfg.forkChoice.MarkPayloadStatusAndGasLimitIfRetained(
+		anchorRoot,
+		execHash,
+		status,
+		envelope.Message.Payload.GasLimit,
+	)
 	if !retained {
 		return
 	}

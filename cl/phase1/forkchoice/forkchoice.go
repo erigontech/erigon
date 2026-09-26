@@ -957,7 +957,7 @@ func (f *ForkChoiceStore) MarkPayloadStatus(blockRoot common.Hash, executionBloc
 }
 
 type retainedBlockGuard interface {
-	WithRetainedBlock(common.Hash, func()) bool
+	WithRetainedBlock(common.Hash, func(func(common.Hash) bool)) bool
 	IsBlockRetained(common.Hash) bool
 }
 
@@ -967,14 +967,51 @@ func (f *ForkChoiceStore) MarkPayloadStatusIfRetained(blockRoot common.Hash, exe
 	return f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, status)
 }
 
+func (f *ForkChoiceStore) MarkPayloadStatusAndGasLimitIfRetained(
+	blockRoot common.Hash,
+	executionBlockHash common.Hash,
+	status execution_client.PayloadStatus,
+	gasLimit uint64,
+) (execution_client.PayloadStatus, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.markPayloadStatusAndGasLimitIfRetainedLocked(blockRoot, executionBlockHash, status, gasLimit)
+}
+
+func (f *ForkChoiceStore) markPayloadStatusAndGasLimitIfRetainedLocked(
+	blockRoot common.Hash,
+	executionBlockHash common.Hash,
+	status execution_client.PayloadStatus,
+	gasLimit uint64,
+) (execution_client.PayloadStatus, bool) {
+	guard, ok := f.forkGraph.(retainedBlockGuard)
+	if !ok {
+		effective := f.markPayloadStatusLocked(blockRoot, executionBlockHash, status)
+		f.cacheExecutionPayloadGasLimit(executionBlockHash, gasLimit)
+		return effective, true
+	}
+	effective := status
+	retained := guard.WithRetainedBlock(blockRoot, func(isRetained func(common.Hash) bool) {
+		effective = f.markPayloadStatusRetainedLocked(blockRoot, executionBlockHash, status, isRetained)
+		f.cacheExecutionPayloadGasLimit(executionBlockHash, gasLimit)
+	})
+	return effective, retained
+}
+
+func (f *ForkChoiceStore) cacheExecutionPayloadGasLimit(executionBlockHash common.Hash, gasLimit uint64) {
+	if f.executionPayloadGasLimit != nil {
+		f.executionPayloadGasLimit.Add(executionBlockHash, gasLimit)
+	}
+}
+
 func (f *ForkChoiceStore) markPayloadStatusIfRetainedLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) (execution_client.PayloadStatus, bool) {
 	guard, ok := f.forkGraph.(retainedBlockGuard)
 	if !ok {
 		return f.markPayloadStatusLocked(blockRoot, executionBlockHash, status), true
 	}
 	effective := status
-	retained := guard.WithRetainedBlock(blockRoot, func() {
-		effective = f.markPayloadStatusRetainedLocked(blockRoot, executionBlockHash, status)
+	retained := guard.WithRetainedBlock(blockRoot, func(isRetained func(common.Hash) bool) {
+		effective = f.markPayloadStatusRetainedLocked(blockRoot, executionBlockHash, status, isRetained)
 	})
 	return effective, retained
 }
@@ -984,14 +1021,24 @@ func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlo
 }
 
 func (f *ForkChoiceStore) markPayloadStatusLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
-	return f.markPayloadStatus(blockRoot, executionBlockHash, status, false)
+	return f.markPayloadStatus(blockRoot, executionBlockHash, status, nil)
 }
 
-func (f *ForkChoiceStore) markPayloadStatusRetainedLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
-	return f.markPayloadStatus(blockRoot, executionBlockHash, status, true)
+func (f *ForkChoiceStore) markPayloadStatusRetainedLocked(
+	blockRoot common.Hash,
+	executionBlockHash common.Hash,
+	status execution_client.PayloadStatus,
+	isRetained func(common.Hash) bool,
+) execution_client.PayloadStatus {
+	return f.markPayloadStatus(blockRoot, executionBlockHash, status, isRetained)
 }
 
-func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus, retained bool) execution_client.PayloadStatus {
+func (f *ForkChoiceStore) markPayloadStatus(
+	blockRoot common.Hash,
+	executionBlockHash common.Hash,
+	status execution_client.PayloadStatus,
+	isRetained func(common.Hash) bool,
+) execution_client.PayloadStatus {
 	f.trackExecutionPayloadRootLocked(blockRoot, executionBlockHash)
 	effective := status
 	if f.invalidatedExecutionPayloads != nil {
@@ -1004,7 +1051,7 @@ func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBloc
 			effective = execution_client.PayloadStatusInvalidated
 		}
 	}
-	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, retained)
+	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, isRetained != nil)
 	if known {
 		switch current {
 		case execution_client.PayloadStatusInvalidated:
@@ -1041,8 +1088,12 @@ func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBloc
 					f.forkGraph.MarkHeaderAsInvalid(root)
 				}
 			}
-			if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
-				guard.WithRetainedBlock(root, invalidate)
+			if isRetained != nil {
+				if isRetained(root) {
+					invalidate()
+				}
+			} else if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
+				guard.WithRetainedBlock(root, func(func(common.Hash) bool) { invalidate() })
 			} else {
 				invalidate()
 			}
@@ -1378,7 +1429,7 @@ func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
 		return
 	}
 	if guard, guarded := f.forkGraph.(retainedBlockGuard); guarded {
-		guard.WithRetainedBlock(root, func() { f.addPendingELPayload(p.Block, p.Envelope) })
+		guard.WithRetainedBlock(root, func(func(common.Hash) bool) { f.addPendingELPayload(p.Block, p.Envelope) })
 		return
 	}
 	f.addPendingELPayload(p.Block, p.Envelope)

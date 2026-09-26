@@ -2,12 +2,107 @@ package forkchoice
 
 import (
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
+	lru "github.com/hashicorp/golang-lru/v2"
 	"github.com/stretchr/testify/require"
 )
+
+type queuedPruneForkGraph struct {
+	payloadVoteForkGraph
+	primaryRoot   common.Hash
+	outerEntered  chan struct{}
+	pruneQueued   chan struct{}
+	outerReturned chan struct{}
+}
+
+func (g *queuedPruneForkGraph) WithRetainedBlock(root common.Hash, fn func(func(common.Hash) bool)) bool {
+	if root == g.primaryRoot {
+		close(g.outerEntered)
+		<-g.pruneQueued
+		fn(g.IsBlockRetained)
+		close(g.outerReturned)
+		return true
+	}
+	<-g.outerReturned
+	fn(g.IsBlockRetained)
+	return true
+}
+
+func TestMarkPayloadStatusAndGasLimitIfRetained(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	executionHash := common.HexToHash("0xabcd")
+	gasLimit := uint64(36_000_000)
+
+	for _, test := range []struct {
+		name     string
+		retained bool
+	}{
+		{name: "retained", retained: true},
+		{name: "pruned", retained: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cache, err := lru.New[common.Hash, uint64](1)
+			require.NoError(t, err)
+			f := &ForkChoiceStore{
+				forkGraph:                payloadVoteForkGraph{retained: &test.retained},
+				executionPayloadGasLimit: cache,
+			}
+
+			status, retained := f.MarkPayloadStatusAndGasLimitIfRetained(
+				root,
+				executionHash,
+				execution_client.PayloadStatusNotValidated,
+				gasLimit,
+			)
+
+			require.Equal(t, test.retained, retained)
+			if test.retained {
+				require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+				got, ok := f.GetExecutionPayloadGasLimit(executionHash)
+				require.True(t, ok)
+				require.Equal(t, gasLimit, got)
+			} else {
+				_, ok := f.GetExecutionPayloadGasLimit(executionHash)
+				require.False(t, ok)
+			}
+		})
+	}
+}
+
+func TestInvalidPayloadStatusDoesNotNestRetainedBlockGuard(t *testing.T) {
+	primaryRoot := common.HexToHash("0x1234")
+	sharedRoot := common.HexToHash("0x5678")
+	executionHash := common.HexToHash("0xabcd")
+	graph := &queuedPruneForkGraph{
+		primaryRoot:   primaryRoot,
+		outerEntered:  make(chan struct{}),
+		pruneQueued:   make(chan struct{}),
+		outerReturned: make(chan struct{}),
+	}
+	f := &ForkChoiceStore{
+		forkGraph: graph,
+		executionPayloadRoots: map[common.Hash]map[common.Hash]struct{}{
+			executionHash: {primaryRoot: {}, sharedRoot: {}},
+		},
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		f.MarkPayloadStatusAndGasLimitIfRetained(primaryRoot, executionHash, execution_client.PayloadStatusInvalidated, 36_000_000)
+	}()
+
+	<-graph.outerEntered
+	close(graph.pruneQueued)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("invalid payload update nested the retained-block guard behind a queued prune")
+	}
+}
 
 func TestStalePayloadRetryAfterPruneIsDropped(t *testing.T) {
 	root := common.HexToHash("0x1234")
