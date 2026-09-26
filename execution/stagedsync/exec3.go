@@ -106,6 +106,13 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
+func storageFanOutMin(initialCycle bool) int {
+	if initialCycle {
+		return 1024
+	}
+	return 128
+}
+
 func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
 	return dbg.ReadAheadWait && isValidatingBlocks
 }
@@ -201,7 +208,6 @@ func execV3(ctx context.Context,
 	// would panic on the dropped sequential-buffer keys (ERIGON_COMMITMENT_PARALLEL).
 	if !cfg.discardCommitment {
 		doms.EnableParaTrieDB(cfg.db)
-		doms.EnableTrieWarmup(true)
 		doms.SetDeferCommitmentUpdates(false)
 		// Enable deferred commitment updates for fork validation and parallel initial sync.
 		// Deferred updates batch commitment calculations to block boundaries rather than
@@ -212,6 +218,7 @@ func execV3(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+		doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	}
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForWarmup(ctx)
@@ -345,12 +352,12 @@ func execV3Serial(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
 	doms.SetDeferCommitmentUpdates(false)
 	if isForkValidation {
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
+	doms.SetStorageFanOutMin(storageFanOutMin(initialCycle))
 	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
 		cfg.readAheader.WaitForWarmup(ctx)
 	}

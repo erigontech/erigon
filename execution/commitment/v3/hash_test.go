@@ -1,0 +1,156 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package v3
+
+import (
+	"bytes"
+	"encoding/hex"
+	"math/rand"
+	"testing"
+
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
+	"github.com/erigontech/erigon/execution/rlp"
+	keccak "github.com/erigontech/fastkeccak"
+	"github.com/stretchr/testify/require"
+)
+
+func TestConsensusHash(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		run  func(*testing.T)
+	}{
+		{"E20-E21/LeafRefVectors", func(t *testing.T) {
+			key := nibbles.HexToCompact([]byte{1, 2})
+			payload := bytes.Repeat([]byte{0x11}, 32)
+			got := leafRef(key, payload, nil)
+			require.Equal(t, mustDecodeHex(t, "e2d0b037b975d0e18dfaad291e1c147eeab6f0547d7056bdf3ea0b4fbeeca973"), got)
+
+			inline := leafRef(key, []byte{1}, nil)
+			require.Equal(t, []byte{0xc4, 0x82, 0x00, 0x12, 0x01}, inline)
+		}},
+		{"E21/LeafRefHashesAtBoundary", func(t *testing.T) {
+			key := nibbles.HexToCompact([]byte{1, 2})
+			below := leafRef(key, bytes.Repeat([]byte{0x22}, 26), nil)
+			at := leafRef(key, bytes.Repeat([]byte{0x22}, 27), nil)
+			require.Less(t, len(below), 32)
+			require.Len(t, at, 32)
+		}},
+		{"E20/ExtensionRefVector", func(t *testing.T) {
+			child := mustDecodeHex(t, "c7c2cc5c8eba62b7ff0b998ee46c6cc41075ee8d2dbefa0fa4b26bdb2530f272")
+			got := extensionRef([]byte{1, 2}, child)
+			require.Equal(t, mustDecodeHex(t, "c5ab940b6ad7c39b31afef79e182f2d568c79617ad4bca225ceb3e9d1af4cd1d"), got[:])
+		}},
+		{"E20/BranchRefVector", func(t *testing.T) {
+			var refs [16][]byte
+			refs[1] = bytes.Repeat([]byte{0x11}, 32)
+			refs[14] = bytes.Repeat([]byte{0x22}, 32)
+			got := branchRef(&refs)
+			require.Equal(t, mustDecodeHex(t, "c7c2cc5c8eba62b7ff0b998ee46c6cc41075ee8d2dbefa0fa4b26bdb2530f272"), got[:])
+		}},
+		{"E22/BranchRefRejectsInlinableBranch", func(t *testing.T) {
+			var refs [16][]byte
+			refs[0] = []byte{0xc1, 0x01}
+			refs[1] = []byte{0xc1, 0x02}
+			require.PanicsWithValue(t, "commitment v3: inlinable branch child", func() {
+				branchRef(&refs)
+			})
+		}},
+		{"E22/BranchRefAllowsOrdinaryBranches", func(t *testing.T) {
+			for childCount := 2; childCount <= 16; childCount++ {
+				t.Run(string(rune('a'+childCount)), func(t *testing.T) {
+					var refs [16][]byte
+					for i := range childCount {
+						refs[i] = bytes.Repeat([]byte{byte(i + 1)}, 32)
+					}
+					require.NotPanics(t, func() { branchRef(&refs) })
+				})
+			}
+		}},
+		{"E23/StorageLeafRefMatchesRLP", func(t *testing.T) {
+			payloads := [][]byte{{}, {0x00}, {0x7f}, {0x80}, {0xff}}
+			for n := 2; n <= 32; n++ {
+				payloads = append(payloads, bytes.Repeat([]byte{0xaa}, n))
+			}
+			for _, keyLen := range []int{0, 1, 2, 30, 62, 63, 64} {
+				suffix := nibbles.HexToCompact(append(bytes.Repeat([]byte{0x0c}, keyLen), nibbles.Terminator))
+				for _, payload := range payloads {
+					inner, err := rlp.EncodeToBytes(payload)
+					require.NoError(t, err)
+					want, err := rlp.EncodeToBytes([][]byte{suffix, inner})
+					require.NoError(t, err)
+					if len(want) >= 32 {
+						hash := keccak.Sum256(want)
+						want = hash[:]
+					}
+					require.Equal(t, want, storageLeafRef(suffix, payload, nil), "key %d payload %x", keyLen, payload)
+				}
+			}
+		}},
+		{"E23/StorageLeafRefRandom", func(t *testing.T) {
+			rnd := rand.New(rand.NewSource(11))
+			for _, suffixLen := range []int{1, 2, 17, 33} {
+				suffix := make([]byte, suffixLen)
+				for l := 1; l <= 32; l++ {
+					for trial := range 400 {
+						v := make([]byte, l)
+						rnd.Read(v)
+						if trial < 256 && l == 1 {
+							v[0] = byte(trial)
+						}
+						if v[0] == 0 && l > 1 {
+							v[0] = 1
+						}
+						rnd.Read(suffix)
+						want := storageLeafRefBuffered(suffix, v, nil)
+						got := storageLeafRefDirect(suffix, v, nil)
+						require.Equal(t, want, got, "suffixLen=%d l=%d v=%x", suffixLen, l, v)
+						require.Equal(t, want, storageLeafRef(suffix, v, nil), "suffixLen=%d l=%d v=%x", suffixLen, l, v)
+					}
+				}
+			}
+		}},
+	} {
+		t.Run(tc.name, tc.run)
+	}
+}
+
+func mustDecodeHex(t *testing.T, value string) []byte {
+	t.Helper()
+	decoded, err := hex.DecodeString(value)
+	require.NoError(t, err)
+	return decoded
+}
+
+func storageLeafRefBuffered(suffix []byte, payload []byte, dst []byte) []byte {
+	var encoded bytes.Buffer
+	var prefix [8]byte
+	if err := rlp.RlpSerializableBytes(payload).ToDoubleRLP(&encoded, prefix[:]); err != nil {
+		panic(err)
+	}
+	contentLen := rlp.StringLen(suffix) + encoded.Len()
+	start := len(dst)
+	dst = append(dst, make([]byte, rlp.ListLen(contentLen))...)
+	pos := start + rlp.EncodeListPrefixToBuf(contentLen, dst[start:])
+	pos += rlp.EncodeStringToBuf(suffix, dst[pos:])
+	pos += copy(dst[pos:], encoded.Bytes())
+	encodedBytes := dst[start:pos]
+	if len(encodedBytes) < 32 {
+		return encodedBytes
+	}
+	hash := keccak.Sum256(encodedBytes)
+	return append(dst[:start], hash[:]...)
+}

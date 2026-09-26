@@ -1,7 +1,6 @@
 package state
 
 import (
-	"bytes"
 	"context"
 	"encoding/binary"
 	"encoding/hex"
@@ -186,14 +185,14 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	}
 
 	var (
-		temporalFiles  []string
-		processedFiles int
-		sizeDelta      = datasize.B
-		sqExt          = ".squeezed"
-		commitment     = at.d[kv.CommitmentDomain]
-		accounts       = at.d[kv.AccountsDomain]
-		storage        = at.d[kv.StorageDomain]
-		logEvery       = time.NewTicker(30 * time.Second)
+		temporalFiles    []string
+		processedFiles   int
+		sizeDelta        = datasize.B
+		sqExt            = ".squeezed"
+		commitmentDomain = at.d[kv.CommitmentDomain]
+		accounts         = at.d[kv.AccountsDomain]
+		storage          = at.d[kv.StorageDomain]
+		logEvery         = time.NewTicker(30 * time.Second)
 	)
 	defer logEvery.Stop()
 
@@ -206,7 +205,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		if err != nil {
 			return err
 		}
-		cf, err := commitment.lookupVisibleFileByRange(r.from, r.to)
+		cf, err := commitmentDomain.lookupVisibleFileByRange(r.from, r.to)
 		if err != nil {
 			return err
 		}
@@ -217,33 +216,33 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 
 		err = func() error {
 			steps := cf.StepCount(stepSize)
-			compression := commitment.d.Compression
+			compression := commitmentDomain.d.Compression
 			if steps < DomainMinStepsToCompress {
 				compression = seg.CompressNone
 			}
 			logger.Info("[squeeze_migration] file start", "original", cf.decompressor.FileName(),
-				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitment.d.CompressCfg, "compress", compression)
+				"progress", fmt.Sprintf("%d/%d", ri+1, len(ranges)), "compress_cfg", commitmentDomain.d.CompressCfg, "compress", compression)
 
 			originalPath := cf.decompressor.FilePath()
 			// The squeeze re-references the file, so stamp the output with the flag-derived write
 			// version (v2.1) rather than reusing the input name, which may be a plain v2.2 file
 			// written during a flag-off rebuild window.
-			targetPath := commitment.d.kvNewFilePath(kv.Step(r.from/stepSize), kv.Step(r.to/stepSize))
+			targetPath := commitmentDomain.d.kvNewFilePath(kv.Step(r.from/stepSize), kv.Step(r.to/stepSize))
 			squeezedTmpPath := targetPath + sqExt + ".tmp"
 
 			squeezedCompr, err := seg.NewCompressor(ctx, "squeeze", squeezedTmpPath, dirs.Tmp,
-				commitment.d.CompressCfg, log.LvlInfo, commitment.d.logger)
+				commitmentDomain.d.CompressCfg, log.LvlInfo, commitmentDomain.d.logger)
 			if err != nil {
 				return err
 			}
 			defer squeezedCompr.Close()
 
-			writer := commitment.d.dataWriter(squeezedCompr, false)
+			writer := commitmentDomain.d.dataWriter(squeezedCompr, false)
 			reader := seg.NewReader(cf.decompressor.MakeGetter(), compression)
 			reader.Reset(0)
 
 			rng := MergeRange{needMerge: true, from: af.startTxNum, to: af.endTxNum}
-			vt, err := commitment.commitmentValTransformDomain(rng, accounts, storage, af, sf, at.a.referencesInCommitmentBranches())
+			vt, err := commitmentDomain.commitmentValTransformDomain(rng, accounts, storage, af, sf, at.a.referencesInCommitmentBranches())
 			if err != nil {
 				return fmt.Errorf("failed to create commitment value transformer: %w", err)
 			}
@@ -260,7 +259,7 @@ func SqueezeCommitmentFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 					continue
 				}
 
-				if !bytes.Equal(k, commitmentdb.KeyCommitmentState) {
+				if !commitment.IsCommitmentStateKey(k) {
 					v, err = vt(v, af.startTxNum, af.endTxNum)
 					if err != nil {
 						return fmt.Errorf("failed to transform commitment value: %w", err)
@@ -943,10 +942,8 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	start := time.Now()
 
-	// Warmup stays off in this files-only rebuild path to match main; the WithHistory
-	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
-	rebuildTrieCfg.EnableTrieWarmup = false
+	rebuildTrieCfg.Variant = execctx.PickTrieVariant()
 	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
 
 	var totalKeysCommitted uint64
@@ -1020,11 +1017,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		}
 		roTx.Rollback()
 
-		trieVariant := commitment.VariantHexPatriciaTrie
-		if statecfg.ExperimentalParallelCommitment {
-			trieVariant = commitment.VariantParallelHexPatricia
-		}
-
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
 				if !keyIter.HasNext() {
@@ -1048,9 +1040,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 			defer rwTx.Rollback() //nolint:gocritic
 
-			iterTrieCfg := rebuildTrieCfg
-			iterTrieCfg.Variant = trieVariant
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(rebuildTrieCfg))
 			if err != nil {
 				return nil, err
 			}

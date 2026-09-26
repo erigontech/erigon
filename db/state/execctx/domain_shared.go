@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -47,10 +46,6 @@ import (
 )
 
 var mxFlushTook = metrics.GetOrCreateSummary("domain_flush_took")
-
-// CommitmentFlushCallback is invoked once per flushed commitment-domain tuple
-// (key, value, step, txNum) by TemporalMemBatch.FlushWithCommitmentCallback.
-type CommitmentFlushCallback func(k []byte, v []byte, step kv.Step, txNum uint64)
 
 // KvList sort.Interface to sort write list by keys
 type KvList struct {
@@ -336,6 +331,9 @@ type cacheUnwindState struct {
 // entry points instead of leaving Variant unset and relying on an implicit
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
+	if statecfg.ExperimentalCommitmentV3 {
+		return commitment.VariantCommitmentV3
+	}
 	if statecfg.ExperimentalParallelCommitment {
 		return commitment.VariantParallelHexPatricia
 	}
@@ -350,6 +348,9 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	o.trieCfg.Variant = PickTrieVariant()
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.trieCfg.Variant == commitment.VariantCommitmentV3 {
+		o.useSharedBranchCache = false
 	}
 	trieCfg := o.trieCfg
 
@@ -534,11 +535,38 @@ func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) e
 		return nil
 	}
 	defer upd.Clear()
+	if upd.Deltas != nil {
+		return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, nil)
+	}
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
 	}
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-	return err
+	return upd.Apply(putBranch)
+}
+
+func (sd *SharedDomains) PutCommitmentBranches(roTx kv.TemporalTx, parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error {
+	if batch, ok := sd.mem.(commitmentBranchBatchWriter); ok && commitmentDeltasResolved(parts) {
+		return batch.PutOwnedCommitmentBranches(parts, txNum, diff)
+	}
+	for _, part := range parts {
+		for i := range part {
+			if err := sd.DomainPutCommitmentDiff(roTx, part[i].Key, part[i].Data, txNum, part[i].Prev, diff); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+func commitmentDeltasResolved(parts [][]commitment.BranchDelta) bool {
+	for _, part := range parts {
+		for i := range part {
+			if part[i].Data == nil || part[i].Prev == nil {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.TemporalTx, lockHeld bool) error {
@@ -551,6 +579,12 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	putBranch := func(prefix, data, prevData []byte) error {
 		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
+	apply := func() error {
+		if upd.Deltas != nil {
+			return sd.PutCommitmentBranches(tx, upd.Deltas, upd.TxNum, sd.mem.(commitmentDiffSwapper).CommitmentDiff())
+		}
+		return upd.Apply(putBranch)
+	}
 
 	if !lockHeld {
 		sd.changesetMu.Lock()
@@ -559,8 +593,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 
 	switcher, ok := sd.mem.(changesetSwitcher)
 	if !ok {
-		_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-		return err
+		return apply()
 	}
 
 	// Hash-aware lookup when the pending update carries a BlockHash. This
@@ -583,7 +616,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// see concurrency contract on the wrappers above.
 		defer sd.SwapCommitmentDiffLocked(cs)()
 
-		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics); err != nil {
+		if err := apply(); err != nil {
 			return err
 		}
 
@@ -592,8 +625,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	}
 
 	// No past changeset found — write into whatever is current.
-	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch, upd.Metrics)
-	return err
+	return apply()
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
@@ -745,6 +777,14 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 // shared, lockable target SetChangesetAccumulator installs. Non-commitment
 // domains fall back to the normal DomainPut/DomainDel — TrieContext.PutBranch
 // (the only real caller) only ever writes kv.CommitmentDomain.
+type domainCounter interface {
+	DomainLen(domain kv.Domain) int
+}
+
+type commitmentBranchBatchWriter interface {
+	PutOwnedCommitmentBranches(parts [][]commitment.BranchDelta, txNum uint64, diff *kv.DomainDiff) error
+}
+
 type commitmentDiffPutDel struct {
 	temporalPutDel
 	diff *kv.DomainDiff
@@ -1212,6 +1252,9 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	// It borrows the batch's buffers rather than holding a second image of the
 	// whole flush; see FlushConfig.DomainCallbacks.
 	var pendingBranches []branchCacheUpdate
+	if counter, ok := sd.mem.(domainCounter); ok && sd.branchCache != nil {
+		pendingBranches = make([]branchCacheUpdate, 0, counter.DomainLen(kv.CommitmentDomain))
+	}
 	var pendingState []cache.StateUpdate
 	stash := func(domain kv.Domain) kv.FlushOption {
 		return kv.WithFlushCallback(domain, func(k []byte, v []byte, step kv.Step, txNum uint64) {
@@ -1301,7 +1344,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		if len(u.val) == 0 {
 			sd.branchCache.Invalidate(u.key)
 		} else {
-			sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
+			sd.branchCache.PutOwned(u.key, u.val, uint64(u.step), u.txN)
 		}
 	}
 	if sd.stateCache != nil {
@@ -1392,7 +1435,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		return v, step, nil
 	}
 	// stateCache holds committed values shared across domain readers.
-	if sd.stateCache != nil {
+	if sd.stateCache != nil && domain != kv.CommitmentDomain {
 		v, cTxNum, ok := view.GetWithTxNum(domain, k)
 		// The cache stamps txNums — divide to get the step the entry reflects.
 		// A negative uses the last txNum included by its read-view frontier, not
@@ -1465,6 +1508,9 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 	if useBranchCache && !sd.hasLocalCacheUnwind() {
 		getOpts = getOpts.WithBranchCache()
+	}
+	if domain == kv.CommitmentDomain {
+		getOpts = getOpts.WithOwned()
 	}
 	willFill := !sd.hasLocalCacheUnwind() && maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain)
 	fillsCode := willFill && len(opts.codeHash) == len(common.Hash{})
@@ -1967,7 +2013,6 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 }
 
 // ComputeCommitment evaluates commitment for gathered updates.
-// If trieWarmup toggle was enabled via EnableTrieWarmup, pre-warms MDBX page cache by reading Branch data in parallel before processing.
 func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
 	// Flush any pending deferred commitment updates from the previous block
 	// into the CORRECT block's changeset (via the hash-aware lookup in
@@ -1977,12 +2022,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 		return nil, err
 	}
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
-}
-
-// EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
-// It requires a DB to be enabled via EnableParaTrieDB.
-func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
-	sd.sdCtx.EnableTrieWarmup(trieWarmup)
 }
 
 func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
@@ -1997,6 +2036,10 @@ func (sd *SharedDomains) EnableParaTrieDB(db kv.TemporalRoDB) {
 // instead of being applied inline, and must be flushed later via FlushPendingUpdates.
 func (sd *SharedDomains) SetDeferCommitmentUpdates(defer_ bool) {
 	sd.sdCtx.SetDeferCommitmentUpdates(defer_)
+}
+
+func (sd *SharedDomains) SetStorageFanOutMin(n int) {
+	sd.sdCtx.SetStorageFanOutMin(n)
 }
 
 // TouchChangedKeysFromHistory touches the changed keys in the commitment trie by reading the historical updates.

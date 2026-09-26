@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	_ "github.com/erigontech/erigon/execution/commitment/v3"
 )
 
 type commitmentWrite struct {
@@ -239,6 +240,28 @@ func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	require.Equal(t, []byte("v2-branch-bytes"), v, "fresh SD must read the latest committed branch, not the stale read-through entry")
 }
 
+func TestCommitmentReadSharesItsOnlyCopyWithTheBranchCache(t *testing.T) {
+	db, key, value := commitmentFileFixture(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	stored, _, err := roTx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	got, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.NotSame(t, &stored[0], &got[0])
+	cached, _, ok := branchCache.Get(key)
+	require.True(t, ok)
+	require.Same(t, &got[0], &cached[0])
+}
+
 func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
 	const stepSize = uint64(16)
 	db, key, frozenValue := commitmentFileFixture(t, stepSize)
@@ -256,4 +279,30 @@ func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
 	require.NoError(t, err)
 	_, _, ok := branchCache.Get(key)
 	require.False(t, ok, "a speculative session must not seed the shared branch cache")
+}
+
+func TestV3SharedDomainsLeaveBranchCacheEmpty(t *testing.T) {
+	db, key, value := commitmentFileFixture(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	branchCache := rwTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithTrieConfig(cfg))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	got, _, err := sd.GetLatest(kv.CommitmentDomain, rwTx, key)
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	written := []byte{0x0b, 0x0c}
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, rwTx, written, []byte{0, 0, 0, 0, 2}, 30, nil))
+	require.NoError(t, sd.Commit(t.Context(), rwTx))
+
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok, "read-through filled the cache")
+	_, _, ok = branchCache.Get(written)
+	require.False(t, ok, "commit wrote through to the cache")
 }

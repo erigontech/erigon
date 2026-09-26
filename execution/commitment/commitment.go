@@ -25,14 +25,16 @@ import (
 	"io"
 	"math/bits"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
 	"unsafe"
 
-	keccak "github.com/erigontech/fastkeccak"
 	"github.com/google/btree"
 	"github.com/holiman/uint256"
+
+	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
@@ -88,7 +90,6 @@ type Trie interface {
 	RootHash() (hash []byte, err error)
 
 	SetTraceWriter(io.Writer)
-	EnableCsvMetrics(filePathPrefix string)
 
 	Variant() TrieVariant
 
@@ -99,6 +100,11 @@ type Trie interface {
 	Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error)
 
 	Release()
+}
+
+type TrieStateCodec interface {
+	EncodeState(blockNum, txNum uint64, dst []byte) ([]byte, error)
+	RestoreState(value []byte) (blockNum, txNum uint64, err error)
 }
 
 type CommitProgress struct {
@@ -121,10 +127,52 @@ type TrieVariant string
 const (
 	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
+	VariantCommitmentV3        TrieVariant = "commitment-v3"
+	CommitmentV3StateMarker    byte        = 0x04
 )
+
+var KeyCommitmentV3State = []byte{0x42}
+
+const CommitmentV3StateSize = 1 + 8 + 8 + 32
+
+var (
+	ErrCommitmentV3StateMarker = errors.New("commitment v3: invalid state variant marker")
+	ErrCommitmentV3StateSize   = errors.New("commitment v3: invalid state size")
+)
+
+func EncodeCommitmentV3State(root []byte, blockNum, txNum uint64, dst []byte) ([]byte, error) {
+	if len(root) != length.Hash {
+		return nil, ErrCommitmentV3StateSize
+	}
+	dst = append(slices.Grow(dst, CommitmentV3StateSize), CommitmentV3StateMarker)
+	dst = binary.BigEndian.AppendUint64(dst, txNum)
+	dst = binary.BigEndian.AppendUint64(dst, blockNum)
+	return append(dst, root...), nil
+}
+
+func DecodeCommitmentV3State(value []byte) (blockNum, txNum uint64, root []byte, err error) {
+	if len(value) != CommitmentV3StateSize {
+		return 0, 0, nil, ErrCommitmentV3StateSize
+	}
+	if value[0] != CommitmentV3StateMarker {
+		return 0, 0, nil, ErrCommitmentV3StateMarker
+	}
+	return binary.BigEndian.Uint64(value[9:17]), binary.BigEndian.Uint64(value[1:9]), bytes.Clone(value[17:]), nil
+}
+
+func IsCommitmentStateKey(key []byte) bool {
+	return bytes.Equal(key, KeyCommitmentV3State) || bytes.Equal(key, KeyCommitmentState)
+}
+
+var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
+	case VariantCommitmentV3:
+		if NewCommitmentV3Trie == nil {
+			panic("commitment v3 selected without importing execution/commitment/v3")
+		}
+		return NewCommitmentV3Trie(tmpdir, cfg)
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
@@ -259,19 +307,32 @@ func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	}
 }
 
+type BranchDelta struct {
+	Key  []byte
+	Data []byte
+	Prev []byte
+}
+
 type PendingCommitmentUpdate struct {
 	BlockNum uint64
 	// BlockHash disambiguates changeset lookups sharing a block number.
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
+	Deltas    [][]BranchDelta
 	// Metrics is the producing trie's, carried so the later apply still reaches
 	// that trie's log and CSV counters. The Prometheus counters do not depend on
 	// it — publishBranchWrites bills those where the write lands.
 	Metrics *Metrics
 }
 
+func (p *PendingCommitmentUpdate) Apply(putBranch func(prefix, data, prevData []byte) error) error {
+	_, err := ApplyDeferredBranchUpdates(p.Deferred, runtime.NumCPU(), putBranch, p.Metrics)
+	return err
+}
+
 func (p *PendingCommitmentUpdate) Clear() {
+	p.Deltas = nil
 	for _, upd := range p.Deferred {
 		putDeferredUpdate(upd)
 	}
@@ -377,20 +438,20 @@ func ApplyDeferredBranchUpdates(
 		var written, bytesOut int
 		for _, upd := range deferred {
 			if err := mergeDeferredUpdate(upd, merger); err != nil {
-				publishBranchWrites(written, bytesOut, m)
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
 			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
-				publishBranchWrites(written, bytesOut, m)
+				PublishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
 			bytesOut += len(upd.encoded)
 		}
-		publishBranchWrites(written, bytesOut, m)
+		PublishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
@@ -428,13 +489,13 @@ func ApplyDeferredBranchUpdates(
 			continue
 		}
 		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
-			publishBranchWrites(written, bytesOut, m)
+			PublishBranchWrites(written, bytesOut, m)
 			return written, err
 		}
 		written++
 		bytesOut += len(upd.encoded)
 	}
-	publishBranchWrites(written, bytesOut, m)
+	PublishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
 
@@ -477,7 +538,7 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	publishBranchWrites(1, len(updateCopy), be.metrics)
+	PublishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
@@ -1111,6 +1172,8 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 func ParseTrieVariant(s string) TrieVariant {
 	var trieVariant TrieVariant
 	switch s {
+	case "v3":
+		trieVariant = VariantCommitmentV3
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
 	case "hex":
@@ -1272,6 +1335,7 @@ const (
 	ModeDirect   Mode = 1
 	ModeUpdate   Mode = 2
 	ModeParallel Mode = 3
+	ModeCollect  Mode = 4
 )
 
 func (m Mode) String() string {
@@ -1284,6 +1348,8 @@ func (m Mode) String() string {
 		return "update"
 	case ModeParallel:
 		return "parallel"
+	case ModeCollect:
+		return "collect"
 	default:
 		return "unknown"
 	}
@@ -1303,17 +1369,24 @@ type Updates struct {
 	directBytes    int
 	directMemLimit int
 
+	collected []collectedUpdate
+
 	batchSlab []KeyUpdate
 
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
 
-	addrCache      addrHashCache
+	addrCache      AddrHashCache
 	addrCacheReuse bool
 }
 
 const arenaRingSize = 2
+
+type collectedUpdate struct {
+	plainKey string
+	update   Update
+}
 
 func (t *Updates) arenaAlloc(b []byte) []byte {
 	arena := t.arenas[t.curArena]
@@ -1338,10 +1411,6 @@ func (t *Updates) arenaEnsureCap(c int) {
 	}
 }
 
-func (t *Updates) IsConcurrentCommitment() bool {
-	return t.mode == ModeParallel
-}
-
 type keyHasher func(key []byte) []byte
 
 func hasherReusesAddrPrefix(h keyHasher) bool {
@@ -1350,7 +1419,7 @@ func hasherReusesAddrPrefix(h keyHasher) bool {
 
 func (t *Updates) hashKey(key []byte) []byte {
 	if t.addrCacheReuse {
-		return keyToHexNibbleHashCached(key, &t.addrCache)
+		return KeyToHexNibbleHashCached(key, &t.addrCache)
 	}
 	return t.hasher(key)
 }
@@ -1376,6 +1445,8 @@ func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
 	case ModeParallel:
 		t.keys = make(map[string]struct{})
 		t.parallel = newParallelUpdate()
+	case ModeCollect:
+		t.treeIdx = make(map[string]*KeyUpdate)
 	}
 	return t
 }
@@ -1466,6 +1537,8 @@ func (t *Updates) Size() (updates uint64) {
 		return uint64(len(t.keys))
 	case ModeUpdate:
 		return uint64(t.tree.Len())
+	case ModeCollect:
+		return uint64(len(t.treeIdx) + len(t.collected))
 	default:
 		return 0
 	}
@@ -1500,8 +1573,29 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 		ik := t.parallel.internKey(keyBytes)
 		t.keys[key] = struct{}{}
 		t.parallel.Insert(hashedKey, ik, nil)
+	case ModeCollect:
+		existing, ok := t.treeIdx[key]
+		if !ok {
+			existing = &KeyUpdate{plainKey: key, update: new(Update)}
+			t.treeIdx[key] = existing
+		}
+		fn(existing, val)
 	default:
 	}
+}
+
+func (t *Updates) Grow(n int) {
+	if t.mode == ModeCollect {
+		t.collected = slices.Grow(t.collected, n)
+	}
+}
+
+func (t *Updates) TouchPlainKeyUnique(key string, update *Update) {
+	if t.mode != ModeCollect {
+		t.TouchPlainKeyDirect(key, update)
+		return
+	}
+	t.collected = append(t.collected, collectedUpdate{plainKey: key, update: *update})
 }
 
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
@@ -1512,29 +1606,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
-			if update.Flags&DeleteUpdate != 0 {
-				existing.update.Flags = DeleteUpdate
-				existing.update.CodeHash = empty.CodeHash
-			} else {
-				existing.update.Flags &^= DeleteUpdate
-				if update.Flags&BalanceUpdate != 0 {
-					existing.update.Balance.Set(&update.Balance)
-					existing.update.Flags |= BalanceUpdate
-				}
-				if update.Flags&NonceUpdate != 0 {
-					existing.update.Nonce = update.Nonce
-					existing.update.Flags |= NonceUpdate
-				}
-				if update.Flags&CodeUpdate != 0 {
-					existing.update.CodeHash = update.CodeHash
-					existing.update.Flags |= CodeUpdate
-				}
-				if update.Flags&StorageUpdate != 0 {
-					existing.update.Storage = update.Storage
-					existing.update.StorageLen = update.StorageLen
-					existing.update.Flags |= StorageUpdate
-				}
-			}
+			mergeUpdateInto(existing.update, update)
 		} else {
 			pivot := &KeyUpdate{
 				plainKey:  key,
@@ -1561,8 +1633,57 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			t.keys[key] = struct{}{}
 		}
 		t.parallel.Insert(hashedKey, ik, u)
+	case ModeCollect:
+		if existing, ok := t.treeIdx[key]; ok {
+			mergeUpdateInto(existing.update, update)
+			return
+		}
+		u := *update
+		t.treeIdx[key] = &KeyUpdate{plainKey: key, update: &u}
 	default:
 	}
+}
+
+func mergeUpdateInto(existing, update *Update) {
+	if update.Flags&DeleteUpdate != 0 {
+		existing.Flags = DeleteUpdate
+		existing.CodeHash = empty.CodeHash
+		return
+	}
+	existing.Flags &^= DeleteUpdate
+	if update.Flags&BalanceUpdate != 0 {
+		existing.Balance.Set(&update.Balance)
+		existing.Flags |= BalanceUpdate
+	}
+	if update.Flags&NonceUpdate != 0 {
+		existing.Nonce = update.Nonce
+		existing.Flags |= NonceUpdate
+	}
+	if update.Flags&CodeUpdate != 0 {
+		existing.CodeHash = update.CodeHash
+		existing.Flags |= CodeUpdate
+	}
+	if update.Flags&StorageUpdate != 0 {
+		existing.Storage = update.Storage
+		existing.StorageLen = update.StorageLen
+		existing.Flags |= StorageUpdate
+	}
+}
+
+func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
+	for i := range t.collected {
+		if err := fn(t.collected[i].plainKey, &t.collected[i].update); err != nil {
+			return err
+		}
+	}
+	t.collected = t.collected[:0]
+	for key, item := range t.treeIdx {
+		if err := fn(key, item.update); err != nil {
+			return err
+		}
+	}
+	clear(t.treeIdx)
+	return nil
 }
 
 func (t *Updates) TouchHashedKey(hashedKey []byte) {
@@ -1645,6 +1766,7 @@ func (t *Updates) Close() {
 	if t.keys != nil {
 		clear(t.keys)
 	}
+	t.collected = nil
 	if t.tree != nil {
 		t.tree.Clear(true)
 		t.tree = nil
@@ -1863,6 +1985,9 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 		}
 		t.tree.Clear(true)
 
+	case ModeCollect:
+		return errors.New("commitment: ModeCollect has no HashSort; use Drain")
+
 	default:
 		return nil
 	}
@@ -1906,6 +2031,9 @@ func (t *Updates) Reset() {
 		if t.parallel != nil {
 			t.parallel.Reset()
 		}
+	case ModeCollect:
+		clear(t.treeIdx)
+		t.collected = t.collected[:0]
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]

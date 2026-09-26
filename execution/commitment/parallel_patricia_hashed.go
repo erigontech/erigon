@@ -250,7 +250,7 @@ func (p *ParallelPatriciaHashed) Process(
 	p.metrics.Reset()
 	p.metrics.AddRoundKeys(updates.Size())
 	roundStart := time.Now()
-	defer func() { observeRound(p.metrics, roundStart) }()
+	defer func() { ObserveRound(p.metrics, roundStart) }()
 
 	pu := updates.parallel
 	if pu.trie == nil || pu.trie.root == nil || pu.trie.root.subtreeCount == 0 {
@@ -358,7 +358,7 @@ func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *p
 		})
 	}
 	err := g.Wait()
-	publishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
+	PublishBranchWrites(int(written.Load()), int(bytesOut.Load()), p.metrics)
 	if err != nil {
 		return fmt.Errorf("apply deferred branch updates: %w", err)
 	}

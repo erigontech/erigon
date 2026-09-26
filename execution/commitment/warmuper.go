@@ -18,12 +18,10 @@ package commitment
 
 import (
 	"context"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"golang.org/x/sync/errgroup"
 
@@ -34,19 +32,27 @@ import (
 
 type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
 
+type WarmupKeyFunc func(hashedKey []byte, depth int, dst []byte) []byte
+
+type WarmupStepFunc func(record, hashedKey []byte, depth int) (nextDepth int, stop bool)
+
 type WarmupConfig struct {
 	Enabled    bool
 	CtxFactory TrieContextFactory
 	NumWorkers int
 	MaxDepth   int
 	LogPrefix  string
+	Key        WarmupKeyFunc
+	Step       WarmupStepFunc
 }
 
-const WarmupMaxDepth = 128
+const (
+	WarmupMaxDepth      = 128
+	warmupKeyScratchLen = maxCompactKeyLen + 1
+)
 
 type WarmupStats struct {
 	KeysProcessed uint64
-	Duration      time.Duration
 }
 
 type Warmuper struct {
@@ -56,12 +62,13 @@ type Warmuper struct {
 	maxDepth   int
 	numWorkers int
 	logPrefix  string
+	key        WarmupKeyFunc
+	step       WarmupStepFunc
 
 	work chan warmupWorkItem
 	g    *errgroup.Group
 
 	keysProcessed atomic.Uint64
-	startTime     time.Time
 
 	outstanding [arenaRingSize]atomic.Int64
 	mu          sync.Mutex
@@ -86,35 +93,48 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		maxDepth:   cfg.MaxDepth,
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
+		key:        cfg.Key,
+		step:       cfg.Step,
 	}
 	w.cond = sync.NewCond(&w.mu)
 	return w
 }
 
-func (w *Warmuper) Start() {
+func (w *Warmuper) begin() bool {
 	if w.started.Swap(true) {
-		return
+		return false
 	}
 	if w.numWorkers <= 0 {
+		return false
+	}
+	w.work = make(chan warmupWorkItem, w.numWorkers*64)
+	w.g, w.ctx = errgroup.WithContext(w.ctx)
+	return true
+}
+
+func (w *Warmuper) goWorker(run func(trieCtx PatriciaContext, buf []byte) error) {
+	w.g.Go(func() error {
+		trieCtx, cleanup := w.ctxFactory(w.ctx)
+		if cleanup != nil {
+			defer cleanup()
+		}
+		if trieCtx == nil {
+			if err := w.ctx.Err(); err != nil {
+				return err
+			}
+			return errors.New("warmup trie context factory returned nil PatriciaContext")
+		}
+		return run(trieCtx, make([]byte, warmupKeyScratchLen))
+	})
+}
+
+func (w *Warmuper) Start() {
+	if !w.begin() {
 		return
 	}
 
-	w.work = make(chan warmupWorkItem, w.numWorkers*64)
-	w.g, w.ctx = errgroup.WithContext(w.ctx)
-
-	for i := 0; i < w.numWorkers; i++ {
-		w.g.Go(func() error {
-			trieCtx, cleanup := w.ctxFactory(w.ctx)
-			if cleanup != nil {
-				defer cleanup()
-			}
-			if trieCtx == nil {
-				if err := w.ctx.Err(); err != nil {
-					return err
-				}
-				return errors.New("warmup trie context factory returned nil PatriciaContext")
-			}
-
+	for range w.numWorkers {
+		w.goWorker(func(trieCtx PatriciaContext, buf []byte) error {
 			for {
 				select {
 				case <-w.ctx.Done():
@@ -123,7 +143,7 @@ func (w *Warmuper) Start() {
 					if !ok {
 						return nil
 					}
-					w.warmupKey(trieCtx, item.hashedKey, item.startDepth)
+					w.warmupKey(trieCtx, item.hashedKey, item.startDepth, buf)
 					w.keysProcessed.Add(1)
 					w.releaseGen(item.gen)
 				}
@@ -141,69 +161,50 @@ func (w *Warmuper) Start() {
 	})
 }
 
-func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
-	depth := startDepth
-	var compactBuf [maxCompactKeyLen]byte
-	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
+const warmSortedChunk = 256
 
+func (w *Warmuper) WarmSorted(n int, key func(i int) []byte) {
+	w.begin()
+	if w.g == nil || w.closed.Load() {
+		return
+	}
+	var next atomic.Int64
+	for range w.numWorkers {
+		w.goWorker(func(trieCtx PatriciaContext, buf []byte) error {
+			for w.ctx.Err() == nil {
+				lo := int(next.Add(warmSortedChunk)) - warmSortedChunk
+				if lo >= n {
+					return nil
+				}
+				var prev []byte
+				for i := lo; i < min(lo+warmSortedChunk, n); i++ {
+					hk := key(i)
+					depth := nibbles.CommonPrefixLen(prev, hk)
+					w.warmupKey(trieCtx, hk, depth, buf)
+					w.keysProcessed.Add(1)
+					prev = hk
+				}
+			}
+			return nil
+		})
+	}
+}
+
+func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int, buf []byte) {
+	depth := startDepth
+	for depth <= len(hashedKey) && depth <= w.maxDepth {
+		prefix := w.key(hashedKey, depth, buf)
 		branchData, _, err := trieCtx.Branch(prefix)
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
 		}
 
-		if len(branchData) < 4 {
+		nextDepth, stop := w.step(branchData, hashedKey, depth)
+		if stop || nextDepth <= depth {
 			break
 		}
-
-		if depth >= len(hashedKey) {
-			break
-		}
-		nextNibble := int(hashedKey[depth])
-
-		branchData = branchData[2:] // skip touch map
-
-		bitmap := binary.BigEndian.Uint16(branchData[0:2])
-		childBit := uint16(1) << nextNibble
-
-		if bitmap&childBit == 0 {
-			break
-		}
-
-		pos := 2
-		for n := range nextNibble {
-			if bitmap&(uint16(1)<<n) != 0 {
-				if pos >= len(branchData) {
-					break
-				}
-				fieldBits := branchData[pos]
-				pos++
-				pos = skipCellFields(branchData, pos, fieldBits)
-			}
-		}
-
-		if pos >= len(branchData) {
-			break
-		}
-
-		fieldBits := branchData[pos]
-		pos++
-
-		if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
-			break
-		}
-
-		hasExtension := (fieldBits & 1) != 0
-		if hasExtension && pos < len(branchData) {
-			extLen, n := binary.Uvarint(branchData[pos:])
-			if n > 0 && extLen > 0 {
-				depth += int(extLen)
-				continue
-			}
-		}
-
-		depth++
+		depth = nextDepth
 	}
 }
 
@@ -246,14 +247,7 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 }
 
 func (w *Warmuper) Stats() WarmupStats {
-	duration := time.Duration(0)
-	if !w.startTime.IsZero() {
-		duration = time.Since(w.startTime)
-	}
-	return WarmupStats{
-		KeysProcessed: w.keysProcessed.Load(),
-		Duration:      duration,
-	}
+	return WarmupStats{KeysProcessed: w.keysProcessed.Load()}
 }
 
 func (w *Warmuper) DrainPending() {
@@ -281,7 +275,5 @@ func (w *Warmuper) Close() {
 	if w.closed.Swap(true) {
 		return
 	}
-	// w.work is never closed: that would race a concurrent WarmKey send into a
-	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
 }

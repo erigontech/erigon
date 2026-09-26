@@ -18,10 +18,26 @@ package commitment
 
 import (
 	"context"
+	"encoding/hex"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
+
+type warmupRecordContext struct {
+	noopPatriciaContext
+	record []byte
+}
+
+func (c *warmupRecordContext) Branch([]byte) ([]byte, kv.Step, error) {
+	return c.record, 0, nil
+}
 
 func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
 	t.Parallel()
@@ -43,6 +59,8 @@ func TestWarmuperFactoryMustNotOutliveCloseAndWait(t *testing.T) {
 		CtxFactory: factory,
 		NumWorkers: 1,
 		MaxDepth:   WarmupMaxDepth,
+		Key:        HexPatriciaWarmupKey,
+		Step:       HexPatriciaWarmupStep,
 	})
 	w.Start()
 	<-factoryEntered
@@ -75,6 +93,8 @@ func TestWarmuperCloseAndWaitWithBlockedCtxFactory(t *testing.T) {
 		CtxFactory: factory,
 		NumWorkers: 1,
 		MaxDepth:   WarmupMaxDepth,
+		Key:        HexPatriciaWarmupKey,
+		Step:       HexPatriciaWarmupStep,
 	})
 	w.Start()
 
@@ -107,6 +127,8 @@ func TestWarmuperNilFactoryResultUnblocksProducers(t *testing.T) {
 		CtxFactory: factory,
 		NumWorkers: numWorkers,
 		MaxDepth:   WarmupMaxDepth,
+		Key:        HexPatriciaWarmupKey,
+		Step:       HexPatriciaWarmupStep,
 	})
 	w.Start()
 
@@ -139,6 +161,8 @@ func TestDrainPendingAfterCloseReturnsPromptly(t *testing.T) {
 		CtxFactory: factory,
 		NumWorkers: 1,
 		MaxDepth:   WarmupMaxDepth,
+		Key:        HexPatriciaWarmupKey,
+		Step:       HexPatriciaWarmupStep,
 	})
 	w.Start()
 
@@ -192,6 +216,8 @@ func TestWarmKeyCloseRaceDoesNotPanic(t *testing.T) {
 			CtxFactory: factory,
 			NumWorkers: numWorkers,
 			MaxDepth:   WarmupMaxDepth,
+			Key:        HexPatriciaWarmupKey,
+			Step:       HexPatriciaWarmupStep,
 		})
 		w.Start()
 
@@ -243,6 +269,8 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 		CtxFactory: func(ctx context.Context) (PatriciaContext, func()) { <-ctx.Done(); return nil, nil },
 		NumWorkers: 2,
 		MaxDepth:   WarmupMaxDepth,
+		Key:        HexPatriciaWarmupKey,
+		Step:       HexPatriciaWarmupStep,
 	})
 	w.Start()
 	w.Close()
@@ -253,5 +281,100 @@ func TestCloseLeavesWorkChannelOpen(t *testing.T) {
 			t.Fatal("Close must not close w.work")
 		}
 	default:
+	}
+}
+
+func TestWarmupHPHKeyMatchesCompactEncoding(t *testing.T) {
+	hashedKey := make([]byte, 64)
+	for i := range hashedKey {
+		hashedKey[i] = byte((i*7 + 3) & 0x0f)
+	}
+
+	for depth := range 65 {
+		expected := nibbles.HexToCompact(hashedKey[:depth])
+		got := HexPatriciaWarmupKey(hashedKey, depth, make([]byte, 0, maxCompactKeyLen))
+		require.Equalf(t, expected, got, "depth=%d parity=%d", depth, depth&1)
+	}
+}
+
+func TestWarmupHPHStepMatchesDescentDecisions(t *testing.T) {
+	childRecord := func(nibble int, fieldBits byte, suffix ...byte) []byte {
+		bitmap := uint16(1) << nibble
+		record := []byte{0, 0, byte(bitmap >> 8), byte(bitmap), fieldBits}
+		return append(record, suffix...)
+	}
+
+	withSibling := func(nibble int, fieldBits byte, suffix ...byte) []byte {
+		bitmap := uint16(1) | uint16(1)<<nibble
+		record := []byte{0, 0, byte(bitmap >> 8), byte(bitmap), byte(fieldHash), 0, fieldBits}
+		return append(record, suffix...)
+	}
+
+	for _, tc := range []struct {
+		name      string
+		record    []byte
+		hashedKey []byte
+		depth     int
+		next      int
+		stop      bool
+	}{
+		{name: "child-present", record: withSibling(2, byte(fieldHash), 0), hashedKey: []byte{2}, depth: 0, next: 1},
+		{name: "child-absent", record: childRecord(1, byte(fieldHash), 0), hashedKey: []byte{2}, depth: 0, stop: true},
+		{name: "leaf-terminator", record: childRecord(2, byte(fieldAccountAddr)), hashedKey: []byte{2}, depth: 0, stop: true},
+		{name: "extension-advance", record: childRecord(2, byte(fieldExtension), 3), hashedKey: []byte{2}, depth: 0, next: 3},
+		{name: "truncated", record: []byte{0, 0, 0}, hashedKey: []byte{2}, depth: 0, stop: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			next, stop := HexPatriciaWarmupStep(tc.record, tc.hashedKey, tc.depth)
+			require.Equal(t, tc.next, next)
+			require.Equal(t, tc.stop, stop)
+		})
+	}
+}
+
+func TestWarmupHPHStepUsesExtensionLength(t *testing.T) {
+	bitmap := uint16(1) << 2
+	record := []byte{0, 0, byte(bitmap >> 8), byte(bitmap), byte(fieldExtension), 7}
+
+	next, stop := HexPatriciaWarmupStep(record, []byte{0, 0, 0, 0, 2}, 4)
+	require.False(t, stop)
+	require.Equal(t, 11, next)
+}
+
+func TestWarmupKeyStopsOnBackwardsStep(t *testing.T) {
+	record, err := hex.DecodeString("302f033cd3c1afb6afd59e92bbf69401b89a7f")
+	require.NoError(t, err)
+	w := &Warmuper{
+		maxDepth: WarmupMaxDepth,
+		key:      HexPatriciaWarmupKey,
+		step:     HexPatriciaWarmupStep,
+	}
+	ctx := &warmupRecordContext{record: record}
+	require.NotPanics(t, func() {
+		w.warmupKey(ctx, []byte{6, 6, 3}, 2, make([]byte, warmupKeyScratchLen))
+	})
+}
+
+func TestWarmuperStatsConcurrentWithStart(t *testing.T) {
+	for range 100 {
+		w := NewWarmuper(context.Background(), WarmupConfig{
+			MaxDepth: WarmupMaxDepth,
+			Key:      HexPatriciaWarmupKey,
+			Step:     HexPatriciaWarmupStep,
+		})
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			w.Start()
+		}()
+		go func() {
+			defer wg.Done()
+			for range 1000 {
+				w.Stats()
+				runtime.Gosched()
+			}
+		}()
+		wg.Wait()
 	}
 }
