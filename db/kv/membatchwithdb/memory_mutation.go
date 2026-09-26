@@ -389,10 +389,8 @@ func (m *MemoryMutation) StreamDescend(table string, fromPrefix, toPrefix []byte
 	panic("please implement me")
 }
 
-// Range merges the db side and the overlay by key, so on a DupSort table a db
-// value is dropped when the overlay holds another value under the same key.
 func (m *MemoryMutation) Range(table string, fromPrefix, toPrefix []byte, asc order.By, limit int) (stream.KV, error) {
-	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit)}
+	s := &rangeIter{orderAscend: bool(asc), limit: int64(limit), dupSort: isTablePurelyDupsort(table)}
 	var err error
 	m.mu.RLock()
 	cleared := m.isTableCleared(table)
@@ -433,7 +431,19 @@ type rangeIter struct {
 	hasNextDb, hasNextMem                bool
 	nextKdb, nextVdb, nextKmem, nextVmem []byte
 	orderAscend                          bool
+	dupSort                              bool
 	limit                                int64
+}
+
+// Both sides are ordered by key and, on a DupSort table, by value within a
+// key: there the overlay value adds a dup instead of replacing the db one, so
+// only an identical (key, value) pair collapses into a single row.
+func (s *rangeIter) compare() int {
+	c := bytes.Compare(s.nextKdb, s.nextKmem)
+	if c != 0 || !s.dupSort {
+		return c
+	}
+	return bytes.Compare(s.nextVdb, s.nextVmem)
 }
 
 func (s *rangeIter) Close() {
@@ -472,7 +482,7 @@ func (s *rangeIter) HasNext() bool {
 func (s *rangeIter) Next() (k, v []byte, err error) {
 	s.limit--
 	hasNextDb, hasNextMem := s.hasNextDb, s.hasNextMem
-	c := bytes.Compare(s.nextKdb, s.nextKmem)
+	c := s.compare()
 	if hasNextDb && (!hasNextMem || c == -1 && s.orderAscend || c == 1 && !s.orderAscend || c == 0) {
 		k = s.nextKdb
 		v = s.nextVdb
