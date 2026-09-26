@@ -1211,6 +1211,30 @@ func TestReadEnvelopeRejectsUnsupportedFramingVersion(t *testing.T) {
 	require.False(t, f.HasEnvelope(root))
 }
 
+func TestReadEnvelopeAcceptsLegacyFraming(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	envelope := testEnvelopeWithTransaction(root, []byte{1})
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	var compressed bytes.Buffer
+	writer := snappy.NewBufferedWriter(&compressed)
+	length := make([]byte, 8)
+	binary.BigEndian.PutUint64(length, uint64(len(encoded)))
+	_, err = writer.Write(length)
+	require.NoError(t, err)
+	_, err = writer.Write(encoded)
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), compressed.Bytes(), 0o644))
+
+	got, err := f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+	require.Equal(t, root, got.Message.BeaconBlockRoot)
+}
+
 func TestDumpEnvelopeRejectsMismatchedNestedVersions(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
