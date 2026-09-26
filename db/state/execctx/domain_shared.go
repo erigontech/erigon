@@ -439,11 +439,12 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		if domain == kv.CommitmentBinDomain {
 			cfg.Variant = commitment.VariantBinPatriciaTrie
 		} else if len(commitmentDomains) > 1 && cfg.Variant == commitment.VariantBinPatriciaTrie {
-			if statecfg.ExperimentalCommitmentV3 {
+			switch {
+			case statecfg.ExperimentalCommitmentV3:
 				cfg.Variant = commitment.VariantCommitmentV3
-			} else if statecfg.ExperimentalParallelCommitment {
+			case statecfg.ExperimentalParallelCommitment:
 				cfg.Variant = commitment.VariantParallelHexPatricia
-			} else {
+			default:
 				cfg.Variant = commitment.VariantHexPatriciaTrie
 			}
 		}

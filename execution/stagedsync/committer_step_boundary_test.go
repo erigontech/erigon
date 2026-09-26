@@ -752,6 +752,7 @@ func TestReadCommitmentBlockFromDBUsesCanonicalVariantState(t *testing.T) {
 
 	tx2, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer tx2.Rollback()
 	doms2, err := execctx.NewSharedDomains(t.Context(), tx2, log.New(), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	binState, err = commitmentdb.NewCommitmentState(21, 12, nil).Encode()

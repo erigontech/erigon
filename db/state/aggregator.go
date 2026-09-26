@@ -104,9 +104,10 @@ type Aggregator struct {
 	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema           *semaphore.Weighted
 
-	branchCacheDisabled bool
-	skipFilesDBGapCheck bool
-	workers             workersCfg
+	branchCacheDisabled  bool
+	skipFilesDBGapCheck  bool
+	skipPBinStateDBCheck bool
+	workers              workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
@@ -725,7 +726,73 @@ func (a *Aggregator) OpenFolder(db kv.RoDB) error {
 	}(); err != nil {
 		return err
 	}
+	if err := a.checkPBinStateFormat(db); err != nil {
+		return err
+	}
 	return a.checkFilesDBGap(db)
+}
+
+func (a *Aggregator) checkPBinStateFormat(db kv.RoDB) error {
+	if a.trieVariant != TrieVariantBin && a.trieVariant != TrieVariantHexBin {
+		return nil
+	}
+	domain := kv.CommitmentDomain
+	if a.trieVariant == TrieVariantHexBin {
+		domain = kv.CommitmentBinDomain
+	}
+	if a.d[domain] == nil || !a.d[domain].Enabled {
+		return nil
+	}
+	files := a.BeginFilesRo()
+	defer files.Close()
+
+	var state []byte
+	var found bool
+	if db != nil && !a.skipPBinStateDBCheck {
+		err := db.View(a.ctx, func(tx kv.Tx) error {
+			var err error
+			state, _, found, err = files.GetLatest(domain, commitment.KeyCommitmentState, tx, kv.GetLatestOptions{})
+			return err
+		})
+		if err != nil {
+			return fmt.Errorf("OpenFolder: read bin commitment state: %w", err)
+		}
+	}
+	if !found {
+		var err error
+		state, found, _, _, err = files.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, math.MaxUint64)
+		if err != nil {
+			return fmt.Errorf("OpenFolder: read bin commitment state files: %w", err)
+		}
+	}
+	if !found || len(state) == 0 {
+		return nil
+	}
+	if err := validatePBinOpenState(state); err != nil {
+		return fmt.Errorf("OpenFolder: rebuild the bin commitment domain: %w", err)
+	}
+	return nil
+}
+
+func validatePBinOpenState(value []byte) error {
+	state := value
+	if !commitment.IsPBinState(state) {
+		if len(value) < 18 {
+			return fmt.Errorf("state blob is %d bytes, want a pbin blob or commitment-state envelope", len(value))
+		}
+		stateLen := int(binary.BigEndian.Uint16(value[16:18]))
+		if len(value) != 18+stateLen {
+			return fmt.Errorf("state envelope claims %d bytes, %d present", stateLen, len(value)-18)
+		}
+		state = value[18:]
+	}
+	if len(state) == 0 {
+		return nil
+	}
+	if err := commitment.PBinValidateRowStateFormat(state); err != nil {
+		return err
+	}
+	return nil
 }
 
 func (a *Aggregator) restoreCommitmentLifecycle(db kv.RoDB) error {

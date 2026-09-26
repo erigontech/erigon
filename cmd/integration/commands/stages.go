@@ -1186,7 +1186,7 @@ func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.Tempo
 	// and is opened against the source's DB. Neither the commitment alignment nor
 	// a files-vs-DB comparison across two datadirs says anything here.
 	if rebuildOutputDatadir != "" {
-		aggOpts = aggOpts.SkipFilesDBGapCheck().DisableInterDomainDeps()
+		aggOpts = aggOpts.SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
 	}
 	agg := aggOpts.MustOpen(ctx)
 	agg.SetProduceMod(snapCfg.ProduceE3)

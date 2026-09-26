@@ -62,13 +62,6 @@ func TestConvertPBinRecordFilesEndToEnd(t *testing.T) {
 	view.Close()
 	require.Len(t, files, 2)
 
-	settings, err := state.ReadErigonDBSettings(sourceDirs)
-	require.NoError(t, err)
-	variant, hash := state.TrieVariantBin, commitment.PBinHashBlake3
-	settings.TrieVariant = &variant
-	settings.TrieHash = &hash
-	require.NoError(t, state.WriteErigonDBSettings(sourceDirs, settings))
-
 	paths := make([]string, 0, len(files))
 	for _, file := range files {
 		paths = append(paths, file.Fullpath())

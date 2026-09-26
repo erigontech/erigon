@@ -1747,6 +1747,7 @@ func TestSharedDomain_TouchChangedKeysFromHistoryRecordsCodeKeys(t *testing.T) {
 	db1 := newTestDb(t, 1)
 	rwTx, err := db1.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer rwTx.Rollback()
 	addr := common.HexToAddress("0xc0ffee0000000000000000000000000000000000")
 	code := []byte{0x60, 0x00, 0x56}
 	account := accounts.NewAccount()
@@ -1761,15 +1762,15 @@ func TestSharedDomain_TouchChangedKeysFromHistoryRecordsCodeKeys(t *testing.T) {
 
 	db1RoTx, err := db1.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer db1RoTx.Rollback()
 	db2 := newTestDb(t, 1)
 	db2RoTx, err := db2.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer db2RoTx.Rollback()
 	sd2, err := execctx.NewSharedDomains(t.Context(), db2RoTx, log.New())
 	require.NoError(t, err)
 	t.Cleanup(func() {
 		sd2.Close()
-		db1RoTx.Rollback()
-		db2RoTx.Rollback()
 	})
 
 	_, _, err = sd2.TouchChangedKeysFromHistory(db1RoTx, 1, 2)

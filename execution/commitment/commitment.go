@@ -1615,8 +1615,8 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 		for key := range t.treeIdx {
 			keys[key] = struct{}{}
 		}
-		for _, item := range t.collected {
-			keys[item.plainKey] = struct{}{}
+		for i := range t.collected {
+			keys[t.collected[i].plainKey] = struct{}{}
 		}
 		return keys
 	default:

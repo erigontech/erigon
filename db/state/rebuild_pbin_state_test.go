@@ -18,6 +18,7 @@ package state
 
 import (
 	"encoding/binary"
+	"strconv"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -55,7 +56,7 @@ func TestValidatePBinRebuildState(t *testing.T) {
 			return append(make([]byte, 18), 0xB1, 0x03, 0, 0)
 		}(), false},
 		{"hex trie state", pbinRebuildStateValue(t, []byte{0x03, 0, 0}), true},
-		{"pre-version pbin blob", pbinRebuildStateValue(t, []byte{0xB1, 0x03, 0, 0}), false},
+		{"current pbin blob", pbinRebuildStateValue(t, []byte{0xB1, 0x20, 0, 0}), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validatePBinRebuildState(tc.value)
@@ -66,4 +67,13 @@ func TestValidatePBinRebuildState(t *testing.T) {
 			require.Error(t, err)
 		})
 	}
+}
+
+func TestValidatePBinRebuildStateRejectsLegacyFormats(t *testing.T) {
+	for format := byte(0); format <= 7; format++ {
+		t.Run("legacy flags "+strconv.Itoa(int(format)), func(t *testing.T) {
+			require.Error(t, validatePBinRebuildState(pbinRebuildStateValue(t, []byte{0xB1, format, 0, 0})))
+		})
+	}
+	require.Error(t, validatePBinRebuildState(pbinRebuildStateValue(t, []byte{0xB1, 0x10, 0, 0})))
 }

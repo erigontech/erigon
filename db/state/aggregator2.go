@@ -28,11 +28,12 @@ type AggOpts struct { //nolint:gocritic
 	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 	frozenAtTxNum                   map[string]uint64
 
-	genSaltIfNeed       bool
-	sanityOldNaming     bool // prevent start directory with old file names
-	disableFsync        bool // for tests speed
-	disableBranchCache  bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
-	skipFilesDBGapCheck bool
+	genSaltIfNeed        bool
+	sanityOldNaming      bool // prevent start directory with old file names
+	disableFsync         bool // for tests speed
+	disableBranchCache   bool // for one-shot aggregators with no cross-block reuse (e.g. genesis)
+	skipFilesDBGapCheck  bool
+	skipPBinStateDBCheck bool
 	// disableInterDomainDeps drops the accounts/storage -> commitment alignment for a
 	// directory that holds state files and no commitment yet, which is what the
 	// commitment rebuild reads from. Left on, every state file is invisible there.
@@ -78,6 +79,7 @@ func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:go
 	a.branchCacheDisabled = opts.disableBranchCache
 	a.disableFsync = opts.disableFsync
 	a.skipFilesDBGapCheck = opts.skipFilesDBGapCheck
+	a.skipPBinStateDBCheck = opts.skipPBinStateDBCheck
 
 	a.savedSalt = salt
 
@@ -129,7 +131,8 @@ func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; retu
 func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
 
-func (opts AggOpts) SkipFilesDBGapCheck() AggOpts { opts.skipFilesDBGapCheck = true; return opts } //nolint:gocritic
+func (opts AggOpts) SkipFilesDBGapCheck() AggOpts  { opts.skipFilesDBGapCheck = true; return opts }  //nolint:gocritic
+func (opts AggOpts) SkipPBinStateDBCheck() AggOpts { opts.skipPBinStateDBCheck = true; return opts } //nolint:gocritic
 func (opts AggOpts) DisableInterDomainDeps() AggOpts { //nolint:gocritic
 	opts.disableInterDomainDeps = true
 	return opts
