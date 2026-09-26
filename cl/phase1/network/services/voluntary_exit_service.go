@@ -144,12 +144,19 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		// Verify the validator is active
 		// assert is_active_validator(validator, get_current_epoch(state))
 		if !val.Active(curEpoch) {
+			if !msg.ImmediateVerification && val.Active(currentEpoch) {
+				return ErrIgnore
+			}
 			return errors.New("validator is not active")
 		}
 
 		// Verify the validator has been active long enough
 		// assert get_current_epoch(state) >= validator.activation_epoch + SHARD_COMMITTEE_PERIOD
-		if curEpoch < val.ActivationEpoch()+s.beaconCfg.ShardCommitteePeriod {
+		eligibleEpoch := val.ActivationEpoch() + s.beaconCfg.ShardCommitteePeriod
+		if curEpoch < eligibleEpoch {
+			if !msg.ImmediateVerification && currentEpoch >= eligibleEpoch {
+				return ErrIgnore
+			}
 			return errors.New("verify the validator has been active long enough")
 		}
 
