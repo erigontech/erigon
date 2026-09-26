@@ -64,14 +64,6 @@ type pbinUpdateStream struct {
 	codeStats PBinCodeStats
 }
 
-// PBinCodeStats counts the code one pass chunkified: the accounts whose code
-// reached the chunker, and the distinct code hashes among them. The gap between
-// the two is what the per-hash cache saved.
-type PBinCodeStats struct {
-	CodeBearingAccounts uint64
-	UniqueCodeHashes    uint64
-}
-
 type pbinCodeChunk struct {
 	key   [pbinCodeKeyLength]byte
 	value [pbinValueLength]byte

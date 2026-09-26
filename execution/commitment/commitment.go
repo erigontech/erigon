@@ -227,6 +227,7 @@ func IsCommitmentStateKey(key []byte) bool {
 }
 
 var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+var NewCommitmentBinTrie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
@@ -241,6 +242,9 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	case VariantBinPatriciaTrie:
+		if NewCommitmentBinTrie != nil {
+			return NewCommitmentBinTrie(tmpdir, cfg)
+		}
 		// ModeDirect regardless of the argument: the parallel prefix trie is a
 		// hex-nibble structure and the binary key space has no nibbles.
 		trie := NewPBinPatriciaHashed(nil)

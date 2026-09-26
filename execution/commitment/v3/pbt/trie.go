@@ -73,6 +73,8 @@ func NewTrie(ctx commitment.PatriciaContext) *Trie {
 	return &Trie{ctx: ctx, rows: make(map[string]*rowNode), dirtyRows: make(map[string]*rowNode), bucketDirty: make(map[string][]byte)}
 }
 
+func (t *Trie) Reset() { t.ResetContext(t.ctx) }
+
 func newBucketTrie(ctx commitment.PatriciaContext, key []byte) (*Trie, error) {
 	path, err := bucketPathForKey(key)
 	if err != nil {
@@ -269,6 +271,8 @@ func (t *Trie) RootHash() (common.Hash, error) {
 	return t.rootHash()
 }
 
+func (t *Trie) Release() { t.ctx = nil }
+
 func (t *Trie) rootHash() (common.Hash, error) {
 	if t.root == nil || t.root.row == nil && t.root.form == RowRoot {
 		return eip8297.EmptyTreeHash, nil
@@ -300,7 +304,7 @@ func (t *Trie) write() error {
 			if err := t.coreEncode(row.key); err != nil {
 				return err
 			}
-			final[key] = nil
+			final[key] = []byte{}
 			continue
 		}
 		record := row.record()
@@ -316,7 +320,7 @@ func (t *Trie) write() error {
 	rootKeyBytes := t.rootRecordKey()
 	rootKey := string(rootKeyBytes)
 	if !t.suppressRoot && t.rootDirty && t.ownsRecordKey(rootKeyBytes) && (t.root.form != RowRoot || t.root.row == nil) {
-		var data []byte
+		data := []byte{}
 		if t.root.form != RowRoot || t.root.row != nil {
 			record := t.rootRecord()
 			var err error
@@ -348,7 +352,7 @@ func (t *Trie) write() error {
 			if err := t.coreEncode(bucketKey); err != nil {
 				return err
 			}
-			final[key] = nil
+			final[key] = []byte{}
 			continue
 		}
 		record := descriptor.record()

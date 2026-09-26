@@ -17,6 +17,7 @@
 package commitmentdb_test
 
 import (
+	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -132,10 +133,12 @@ func TestPBinSharedDomainsReadsCodeSizeUnderBin(t *testing.T) {
 	addr := pbinCodeSizeAddr(5)
 	acc := pbinCodeSizeAccount(common.Hash{0xAB})
 	sd, tx := pbinCodeSizeSharedDomains(t, []execctx.SharedDomainOption{execctx.WithTrieConfig(cfg)}, addr, acc, nil)
-	require.IsType(t, &commitment.PBinPatriciaHashed{}, sd.GetCommitmentCtx().Trie())
+	require.Implements(t, (*interface {
+		ProcessPBinFeed(context.Context, *commitment.PBinFeed, func(*commitment.CommitProgress)) ([]byte, error)
+	})(nil), sd.GetCommitmentCtx().Trie())
 
 	_, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 0, "pbin-codesize", nil)
-	require.ErrorContains(t, err, "code missing")
+	require.ErrorContains(t, err, "code size unavailable")
 
 	hexSd, hexTx := pbinCodeSizeSharedDomains(t, nil, addr, acc, nil)
 	_, err = hexSd.ComputeCommitment(t.Context(), hexTx, false, 0, 0, "hex-codesize", nil)

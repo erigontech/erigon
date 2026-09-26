@@ -147,3 +147,20 @@ func (t *Trie) ProcessFeed(feed *commitment.PBinFeed) (common.Hash, error) {
 	}
 	return t.Process(ops)
 }
+
+func feedCodeStats(feed *commitment.PBinFeed) commitment.PBinCodeStats {
+	stats := commitment.PBinCodeStats{}
+	seen := make(map[common.Hash]struct{})
+	for i := range feed.Accounts {
+		account := &feed.Accounts[i]
+		if !account.CodeWritten || len(account.Code) == 0 || eip8297.IsDelegation(account.Code) {
+			continue
+		}
+		stats.CodeBearingAccounts++
+		if _, ok := seen[account.CodeHash]; !ok {
+			seen[account.CodeHash] = struct{}{}
+			stats.UniqueCodeHashes++
+		}
+	}
+	return stats
+}

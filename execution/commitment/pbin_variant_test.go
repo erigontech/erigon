@@ -38,7 +38,6 @@ func TestInitializeTrieAndUpdates_BinVariant(t *testing.T) {
 	defer upd.Close()
 	defer trie.Release()
 
-	require.IsType(t, (*PBinPatriciaHashed)(nil), trie)
 	require.Equal(t, VariantBinPatriciaTrie, trie.Variant())
 	require.Equal(t, ModeDirect, upd.Mode())
 	require.Nil(t, upd.parallel)

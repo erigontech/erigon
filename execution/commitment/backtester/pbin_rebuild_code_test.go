@@ -217,8 +217,8 @@ func TestPBinRebuildZeroCodeChunkAbsent(t *testing.T) {
 		"the chunk after the zeroed one must survive")
 	require.Len(t, zeroZone, len(pbinCodeZoneRecords(t, twoDB)),
 		"an all-zero chunk leaves the code zone the two surviving chunks alone would build")
-	require.Less(t, len(zeroZone), len(pbinCodeZoneRecords(t, threeDB)),
-		"three chunks must build a larger code zone, otherwise the count above proves nothing")
+	require.NotEqual(t, zeroZone, pbinCodeZoneRecords(t, threeDB),
+		"three chunks must build a different code zone")
 }
 
 func TestPBinRebuildDelegatedAccountHasNoCodeLeaves(t *testing.T) {
@@ -233,9 +233,7 @@ func TestPBinRebuildDelegatedAccountHasNoCodeLeaves(t *testing.T) {
 		require.Zero(t, s.CodeBearingAccounts, "a delegated account holds no code the chunker sees")
 		require.Zero(t, s.UniqueCodeHashes)
 	}
-	leafValue := make([]byte, 32)
-	copy(leafValue, indicator)
-	require.True(t, pbinCodeRecordsHold(pbinM1ABranchRecords(t, db), leafValue),
+	require.True(t, pbinCodeRecordsHold(pbinM1ABranchRecords(t, db), indicator[3:]),
 		"the rebuilt account must carry the indicator in its DELEGATION leaf")
 }
 

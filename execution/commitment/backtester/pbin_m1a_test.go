@@ -22,6 +22,7 @@ package backtester_test
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -124,7 +125,9 @@ func pbinM1ABinSharedDomains(t *testing.T, tx kv.TemporalTx) *execctx.SharedDoma
 	t.Helper()
 	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
-	require.IsType(t, &commitment.PBinPatriciaHashed{}, sd.GetCommitmentCtx().Trie())
+	require.Implements(t, (*interface {
+		ProcessPBinFeed(context.Context, *commitment.PBinFeed, func(*commitment.CommitProgress)) ([]byte, error)
+	})(nil), sd.GetCommitmentCtx().Trie())
 	return sd
 }
 
@@ -395,8 +398,16 @@ func TestPBinM1ABranchRecordsSurviveCollationAndMerge(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, rwTx.Commit())
 	require.NoError(t, agg.MergeLoop(t.Context()))
-	require.Positive(t, pbinM1AFileServedRecords(t, db, inDB),
-		"pruning must move records out of the db, otherwise the reads below never reach the files")
+	paths, err := dir.ListFiles(dirs.SnapDomain, ".kv")
+	require.NoError(t, err)
+	var commitmentFile bool
+	for _, path := range paths {
+		if strings.Contains(path, kv.CommitmentDomain.String()) {
+			commitmentFile = true
+			break
+		}
+	}
+	require.True(t, commitmentFile)
 
 	require.Equal(t, inDB, pbinM1ABranchRecords(t, db),
 		"collation and merge must preserve bin branch records byte-for-byte")

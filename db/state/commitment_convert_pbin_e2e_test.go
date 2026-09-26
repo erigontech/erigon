@@ -45,6 +45,7 @@ type e2ePBinFile struct {
 
 func TestConvertPBinRecordFilesEndToEnd(t *testing.T) {
 	setPBinTestFlags(t)
+	useLegacyPBinEngine(t)
 	db, source, sourceDirs := rebuildVariantDatadir(t)
 
 	_, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false,

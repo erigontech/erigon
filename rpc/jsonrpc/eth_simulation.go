@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -756,7 +758,7 @@ func (s *simulator) computeSimulatedStateRoot(
 				}
 				commitmentCtx.SetStateReader(newHistoryCommitmentOnlyReader(tx, sharedDomains, firstMinTxNum+1, firstMinTxNum))
 			}
-			if commitmentCtx != sharedDomains.GetCommitmentCtx() {
+			if commitmentCtx != sharedDomains.GetCommitmentCtx() || commitmentCtx.Trie().Variant() == commitment.VariantBinPatriciaTrie {
 				for address, locations := range touchedKeys {
 					addressValue := address.Value()
 					commitmentCtx.TouchKey(kv.AccountsDomain, string(addressValue[:]), nil)
@@ -1172,6 +1174,9 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		updates := tsd.GetCommitmentCtx().GetUpdates()
 		for key := range sd.GetCommitmentCtx().GetUpdates().PlainKeys() {
 			updates.TouchPlainKey(key, nil, nil)
+			if tsd.GetCommitmentCtx().Trie().Variant() == commitment.VariantBinPatriciaTrie && len(key) == length.Addr {
+				tsd.GetCommitmentCtx().TouchKey(kv.CodeDomain, key, nil)
+			}
 		}
 
 		return tsd.ComputeCommitment(ctx, ttx, false, simBlockNum, simMaxTxNum, "commitment-from-history", nil)

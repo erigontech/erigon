@@ -16,50 +16,16 @@
 
 package commitment
 
-import (
-	"github.com/holiman/uint256"
+import "fmt"
 
-	"github.com/erigontech/erigon/common"
-)
+const PBinRowStateFormat byte = 0
 
-type FeedSlot struct {
-	Hash  [32]byte
-	Value []byte
-}
-
-type FeedAccount struct {
-	Hash   [32]byte
-	Update *Update
-	Slots  []FeedSlot
-}
-
-type Feed struct {
-	Accounts []FeedAccount
-	Keys     int
-}
-
-type PBinFeed struct {
-	Accounts []PBinFeedAccount
-}
-
-type PBinCodeStats struct {
-	CodeBearingAccounts uint64
-	UniqueCodeHashes    uint64
-}
-
-type PBinFeedAccount struct {
-	Address     []byte
-	Exists      bool
-	Nonce       uint64
-	Balance     uint256.Int
-	CodeHash    common.Hash
-	Wiped       bool
-	CodeWritten bool
-	Code        []byte
-	Slots       []PBinFeedSlot
-}
-
-type PBinFeedSlot struct {
-	Key   []byte
-	Value []byte
+func PBinValidateRowStateFormat(buf []byte) error {
+	if len(buf) < 2 || !IsPBinState(buf) {
+		return fmt.Errorf("pbin: state requires rebuild: not a pbin blob")
+	}
+	if buf[1] != PBinRowStateFormat {
+		return fmt.Errorf("pbin: state requires rebuild: format %d, want %d", buf[1], PBinRowStateFormat)
+	}
+	return nil
 }

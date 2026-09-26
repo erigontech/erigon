@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	_ "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -71,6 +72,7 @@ type SharedDomainsCommitmentContext struct {
 	updates          *commitment.Updates
 	codeKeys         map[string]struct{}
 	feed             *commitment.Feed
+	pbinFeed         *commitment.PBinFeed
 	patriciaTrie     commitment.Trie
 	variant          commitment.TrieVariant
 	justRestored     atomic.Bool
@@ -274,6 +276,10 @@ func (sdc *SharedDomainsCommitmentContext) AcceptsFeed() bool {
 
 func (sdc *SharedDomainsCommitmentContext) SetFeed(feed *commitment.Feed) {
 	sdc.feed = feed
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetPBinFeed(feed *commitment.PBinFeed) {
+	sdc.pbinFeed = feed
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetMetricsEnabled(enabled bool) {
@@ -572,7 +578,10 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiffAndReader(ct
 }
 
 func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), putter kv.TemporalPutDel, stateReader StateReader, decorate func(commitment.PatriciaContext) commitment.PatriciaContext) (rootHash []byte, err error) {
-	defer sdc.ResetCodeKeys()
+	defer func() {
+		sdc.ResetCodeKeys()
+		sdc.pbinFeed = nil
+	}()
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
 	}
@@ -596,6 +605,8 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 
 	feed := sdc.feed
 	sdc.feed = nil
+	pbinFeed := sdc.pbinFeed
+	sdc.pbinFeed = nil
 	updateCount := sdc.updates.Size()
 	if feed != nil {
 		updateCount = uint64(feed.Keys)
@@ -637,6 +648,12 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	if decorate != nil {
 		activeContext = decorate(activeContext)
 		sdc.patriciaTrie.ResetContext(activeContext)
+	}
+	if sdc.variant == commitment.VariantBinPatriciaTrie && pbinFeed == nil {
+		pbinFeed, err = BinFeedFromState(sdc.updates.PlainKeys(), sdc.CodeKeys(), nil, trieContext.stateReader)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var recorder *commitment.RecordingContext
@@ -745,7 +762,16 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		trie.SetStorageFanOutMin(sdc.storageFanOutMin)
 	}
 
-	if feed != nil {
+	if sdc.variant == commitment.VariantBinPatriciaTrie {
+		processor, ok := sdc.patriciaTrie.(interface {
+			ProcessPBinFeed(context.Context, *commitment.PBinFeed, func(*commitment.CommitProgress)) ([]byte, error)
+		})
+		if ok {
+			rootHash, err = processor.ProcessPBinFeed(ctx, pbinFeed, onProgress)
+		} else {
+			rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+		}
+	} else if feed != nil {
 		rootHash, err = sdc.patriciaTrie.(v3Trie).ProcessFeed(ctx, feed, onProgress)
 	} else {
 		rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)

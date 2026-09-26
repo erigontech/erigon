@@ -53,6 +53,7 @@ type pbinOutputFixture struct {
 func newPBinOutputFixture(t *testing.T, legacy bool, smallOnly bool) pbinOutputFixture {
 	t.Helper()
 	setPBinTestFlags(t)
+	useLegacyPBinEngine(t)
 
 	db, source, _ := rebuildVariantDatadir(t)
 	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false,
@@ -118,6 +119,13 @@ func newPBinOutputFixture(t *testing.T, legacy bool, smallOnly bool) pbinOutputF
 		outputPath:  filepath.Join(outputDirs.SnapDomain, filepath.Base(selectedPath)),
 		sourceBytes: sourceBytes,
 	}
+}
+
+func useLegacyPBinEngine(t *testing.T) {
+	t.Helper()
+	previous := commitment.NewCommitmentBinTrie
+	commitment.NewCommitmentBinTrie = nil
+	t.Cleanup(func() { commitment.NewCommitmentBinTrie = previous })
 }
 
 func keepOnlyCommitmentRange(t *testing.T, dirPath, selectedName string) {

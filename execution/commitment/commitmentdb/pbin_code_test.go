@@ -63,7 +63,9 @@ func TestPBinSharedDomainsCommitsCodeBearingAccount(t *testing.T) {
 	acc := pbinCodeSizeAccount(crypto.Keccak256Hash(code))
 
 	sd, tx := pbinCodeSizeSharedDomains(t, []execctx.SharedDomainOption{execctx.WithTrieConfig(cfg)}, addr, acc, code)
-	require.IsType(t, &commitment.PBinPatriciaHashed{}, sd.GetCommitmentCtx().Trie())
+	require.Implements(t, (*interface {
+		CodeStats() commitment.PBinCodeStats
+	})(nil), sd.GetCommitmentCtx().Trie())
 
 	withCode, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 0, "pbin-code", nil)
 	require.NoError(t, err)

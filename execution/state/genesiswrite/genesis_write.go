@@ -52,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -514,6 +515,9 @@ func (p *genesisCommitmentPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum
 	}
 	for _, ctx := range p.contexts {
 		ctx.TouchKey(domain, string(k), v)
+		if domain == kv.AccountsDomain && len(k) == 20 && ctx.Trie().Variant() == commitment.VariantBinPatriciaTrie {
+			ctx.TouchKey(kv.CodeDomain, string(k), v)
+		}
 	}
 	return nil
 }
@@ -538,7 +542,7 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 
 	putter := sd.AsPutDel(tx)
 	commitmentDomains := sd.CommitmentDomains()
-	if len(commitmentDomains) > 1 {
+	if len(commitmentDomains) > 1 || sd.GetCommitmentCtx().Trie().Variant() == commitment.VariantBinPatriciaTrie {
 		contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(commitmentDomains))
 		for _, domain := range commitmentDomains {
 			contexts = append(contexts, sd.GetCommitmentCtxForDomain(domain))

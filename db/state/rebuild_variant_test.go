@@ -191,7 +191,7 @@ func rebuildVariantPutLegacyPBinState(t *testing.T, db kv.TemporalRwDB) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	legacyTrieState := []byte{0xB1, 0, 0, 0}
+	legacyTrieState := []byte{0xB1, 0x10, 0, 0}
 	stateValue := make([]byte, 18+len(legacyTrieState))
 	binary.BigEndian.PutUint16(stateValue[16:18], uint16(len(legacyTrieState)))
 	copy(stateValue[18:], legacyTrieState)
@@ -272,7 +272,7 @@ func TestRebuildCommitmentFilesBinTargetRejectsLegacyPBinState(t *testing.T) {
 	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false,
 		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
 	require.Error(t, err)
-	require.ErrorContains(t, err, "record format")
+	require.ErrorContains(t, err, "format")
 }
 
 // The commitment files a rebuild left behind, by name and content: a resumed run

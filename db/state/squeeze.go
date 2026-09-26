@@ -986,7 +986,7 @@ func validatePBinRebuildState(stateValue []byte) error {
 	if !commitment.IsPBinState(trieState) {
 		return nil
 	}
-	if err := commitment.ValidatePBinStateFormat(trieState); err != nil {
+	if err := commitment.PBinValidateRowStateFormat(trieState); err != nil {
 		return fmt.Errorf("commitment rebuild: invalid pbin state: %w", err)
 	}
 	return nil
@@ -1420,6 +1420,11 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 					domain = kv.StorageDomain
 				}
 				sd.GetCommitmentCtx().TouchKey(domain, string(key), value)
+			} else if cfg.Variant == commitment.VariantBinPatriciaTrie {
+				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), value)
+				if len(key) == length.Addr {
+					sd.GetCommitmentCtx().TouchKey(kv.CodeDomain, string(key), value)
+				}
 			} else {
 				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
 			}

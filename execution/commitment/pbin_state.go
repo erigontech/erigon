@@ -26,9 +26,8 @@ import (
 // row. State is only encoded with every row folded, and unfold fully initializes
 // a row before anything reads it, so the grid arrays restore as zero.
 const (
-	// pbinStateMarker opens every pbin blob. A hex blob opens with a root-flags
-	// byte ≤ 0x07, so the marker also refuses a cross-variant restore outright.
-	pbinStateMarker = 0xB1
+	PBinStateMarker = 0xB1
+	pbinStateMarker = PBinStateMarker
 	// Above pbinStateFlagsAll on purpose. A pre-version blob is
 	// marker|flags|rootLen, so its flags byte occupies the offset the format byte
 	// now holds; any value at or below 0x07 is a real legacy blob that would

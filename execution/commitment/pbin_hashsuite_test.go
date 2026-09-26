@@ -54,8 +54,8 @@ func TestPBinEngineReadsLaterEIP8297HashSuiteSelection(t *testing.T) {
 
 	require.NoError(t, SetPBinHashSuite(PBinHashBlake3))
 	require.NoError(t, eip8297.SetHashSuite(PBinHashKeccak))
-	trie, _ := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), TrieConfig{Variant: VariantBinPatriciaTrie})
-	pph := trie.(*PBinPatriciaHashed)
+	pph := NewPBinPatriciaHashed(NewMockState(t))
+	pph.setHashSuite(pbinSelectedSum())
 	defer pph.Release()
 
 	require.Nil(t, pph.hasher.sum)
@@ -76,10 +76,11 @@ func TestPBinInitializeTrieAppliesHashSuite(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NoError(t, SetPBinHashSuite(tc.name))
-			trie, tree := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), TrieConfig{Variant: VariantBinPatriciaTrie})
-			pph, ok := trie.(*PBinPatriciaHashed)
-			require.True(t, ok)
+			pph := NewPBinPatriciaHashed(NewMockState(t))
+			pph.setHashSuite(pbinSelectedSum())
+			tree := NewBinUpdates(t.TempDir(), nil)
 			defer pph.Release()
+			defer tree.Close()
 
 			require.Equal(t, tc.wantSame, pph.hasher.sum != nil, "node hashing seam")
 			require.Equal(t, tc.wantSame, pph.updateStream.keyDigest.Sum != nil, "key derivation seam")
@@ -103,8 +104,8 @@ func TestPBinBlake3SuiteMatchesSpecRoots(t *testing.T) {
 
 	rootOf := func(t *testing.T, tc pbinSpecTrieVector) string {
 		t.Helper()
-		trie, _ := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), TrieConfig{Variant: VariantBinPatriciaTrie})
-		pph := trie.(*PBinPatriciaHashed)
+		pph := NewPBinPatriciaHashed(NewMockState(t))
+		pph.setHashSuite(pbinSelectedSum())
 		defer pph.Release()
 		pph.ResetContext(NewMockState(t))
 		return pbinSpecEngineRoot(t, pph, tc)

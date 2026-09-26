@@ -111,12 +111,9 @@ func TestPBinUpdateCodeSizeMergesWithCodeHash(t *testing.T) {
 func TestPBinPushSideNeverDeliversCode(t *testing.T) {
 	t.Parallel()
 
-	cfg := DefaultTrieConfig()
-	cfg.Variant = VariantBinPatriciaTrie
-	trie, upd := InitializeTrieAndUpdates(ModeUpdate, t.TempDir(), cfg)
+	upd := NewBinUpdates(t.TempDir(), nil)
 	defer upd.Close()
 
-	require.IsType(t, &PBinPatriciaHashed{}, trie)
 	require.Equal(t, ModeDirect, upd.Mode(), "the bin variant overrides the requested mode")
 
 	addr := pbinOracleAddr(3)
