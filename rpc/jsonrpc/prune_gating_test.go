@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -558,7 +559,16 @@ func TestPruneModeEndpointGating(t *testing.T) {
 				for _, leg := range legs {
 					t.Run(ep.name+"/"+leg.name, func(t *testing.T) {
 						res, err := ep.call(t.Context(), apis, leg.ref)
-						if pruneGateFires(ep.boundary, cfg, leg.ref.num, chainInfo.head) {
+						pruned := pruneGateFires(ep.boundary, cfg, leg.ref.num, chainInfo.head)
+						if feeHistory, ok := res.(*feeHistoryResult); ok {
+							require.NoError(t, err)
+							require.NotNil(t, feeHistory)
+							blocks := 1
+							if pruned {
+								blocks = 0
+							}
+							require.Len(t, feeHistory.GasUsedRatio, blocks)
+						} else if pruned {
 							require.ErrorIs(t, err, state.PrunedError)
 						} else {
 							require.NoError(t, err)
@@ -811,7 +821,9 @@ func requireRetiredAbove(t *testing.T, m *execmoduletester.ExecModuleTester, dom
 	defer tx.Rollback()
 	maxTxNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, blockNum)
 	require.NoError(t, err)
-	require.Greater(t, tx.Debug().HistoryStartFrom(domain), maxTxNum,
+	historyStart, err := tx.Debug().HistoryStartFrom(domain)
+	require.NoError(t, err)
+	require.Greater(t, historyStart, maxTxNum,
 		"%s must be retired above block %d for the fixture to mean anything", domain, blockNum)
 }
 
@@ -849,6 +861,55 @@ func dropTransactions(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
 		}
 	}
 	require.NoError(t, rwTx.Commit())
+}
+
+func dropBodies(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
+	t.Helper()
+	ctx := context.Background()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for num := from; num < to; num++ {
+		hash, err := rawdb.ReadCanonicalHash(rwTx, num)
+		require.NoError(t, err)
+		rawdb.DeleteBody(rwTx, hash, num)
+	}
+	require.NoError(t, rwTx.Commit())
+}
+
+type historyFloorDB struct {
+	kv.TemporalRoDB
+	startTxNum uint64
+}
+
+func (db historyFloorDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	tx, err := db.TemporalRoDB.BeginTemporalRo(ctx) //nolint:gocritic // Ownership passes to the caller.
+	if err != nil {
+		return nil, err
+	}
+	return historyFloorTx{TemporalTx: tx, startTxNum: db.startTxNum}, nil
+}
+
+type historyFloorTx struct {
+	kv.TemporalTx
+	startTxNum uint64
+}
+
+func (tx historyFloorTx) BlockFilesRoTx() *blocksnapshots.View {
+	return tx.TemporalTx.(interface{ BlockFilesRoTx() *blocksnapshots.View }).BlockFilesRoTx()
+}
+
+func (tx historyFloorTx) Debug() kv.TemporalDebugTx {
+	return historyFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), startTxNum: tx.startTxNum}
+}
+
+type historyFloorDebugTx struct {
+	kv.TemporalDebugTx
+	startTxNum uint64
+}
+
+func (tx historyFloorDebugTx) HistoryStartFrom(kv.Domain) (uint64, error) {
+	return tx.startTxNum, nil
 }
 
 // TestGetBlockByTimestampGatesGenesisBranch pins the gate on the branch that answers

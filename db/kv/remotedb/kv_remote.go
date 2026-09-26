@@ -854,12 +854,14 @@ func (c *remoteCursorDupSort) LastDup() ([]byte, error) {
 
 // Temporal Methods
 
-func (tx *tx) HistoryStartFrom(name kv.Domain) uint64 {
+// HistoryStartFrom preserves remote lookup errors. Returning (0, nil) on failure
+// would remove the on-disk lower bound from history availability checks.
+func (tx *tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	reply, err := tx.db.remoteKV.HistoryStartFrom(tx.ctx, &remoteproto.HistoryStartFromReq{TxId: tx.id, Domain: uint32(name)})
 	if err != nil {
-		return 0
+		return 0, err
 	}
-	return reply.StartFrom
+	return reply.StartFrom, nil
 }
 
 func (tx *tx) StepSize() uint64 {

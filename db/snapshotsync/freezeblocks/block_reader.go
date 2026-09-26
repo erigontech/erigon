@@ -19,7 +19,6 @@ package freezeblocks
 import (
 	"context"
 	"encoding/binary"
-	"errors"
 	"fmt"
 	"slices"
 	"sort"
@@ -467,20 +466,30 @@ func (r *BlockReader) FrozenBlocksObserved() (uint64, bool) { return r.sn.Blocks
 // must ask the same generation it reads from, not the live set that may be ahead of it.
 func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx).BlocksAvailable() }
 
+// MinimumBlockAvailable returns the first block covered by every block-snapshot
+// type in tx's pinned view, falling back to MDBX when the snapshot set is incomplete.
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
+	view := r.view(tx)
 	var snapshotMin uint64
-	if r.FrozenBlocks() > 0 {
-		// Frozen segments that leave no block complete are not an answer on their own: the
-		// database is what still holds one, where it holds anything at all.
-		segmentsMin, complete := r.sn.SegmentsMin()
-		if complete {
-			return segmentsMin, nil
+	if view.BlocksAvailable() > 0 {
+		snapshotTypes := []snaptype.Type{
+			snaptype2.Headers,
+			snaptype2.Bodies,
+			snaptype2.Transactions,
 		}
-		snapshotMin = segmentsMin
-	}
 
-	if tx == nil {
-		return 0, errors.New("MinimumBlockAvailable: no snapshot or DB available")
+		complete := true
+		for _, snapType := range snapshotTypes {
+			segments := view.Segments(snapType)
+			if len(segments) == 0 {
+				complete = false
+				continue
+			}
+			snapshotMin = max(snapshotMin, segments[0].From())
+		}
+		if complete {
+			return snapshotMin, nil
+		}
 	}
 
 	dbMinBlock, found, err := r.findFirstCompleteBlock(tx)

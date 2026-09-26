@@ -173,19 +173,23 @@ func (r *HistoryReaderV3) TracePrefix() string {
 	return r.tracePrefix
 }
 
-// Gets the txNum where Account, Storage and Code history begins.
-// If the node is an archive node all history will be available therefore
-// the result will be 0.
-//
-// For non-archive node old history files get deleted, so this number will vary
-// but the goal is to know where the historical data begins.
-func StateHistoryStartTxNum(ttx kv.TemporalTx) uint64 {
+// StateHistoryStartTxNum returns a conservative lower bound for account, storage
+// and code history. A domain may start later because it had no earlier changes,
+// so the maximum would reject valid reads. The minimum can still admit a request
+// whose history is missing in another domain.
+func StateHistoryStartTxNum(ttx kv.TemporalTx) (uint64, error) {
 	dbg := ttx.Debug()
-	return min(
-		dbg.HistoryStartFrom(kv.AccountsDomain),
-		dbg.HistoryStartFrom(kv.StorageDomain),
-		dbg.HistoryStartFrom(kv.CodeDomain),
-	)
+	var start uint64
+	for i, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+		domainStart, err := dbg.HistoryStartFrom(domain)
+		if err != nil {
+			return 0, err
+		}
+		if i == 0 || domainStart < start {
+			start = domainStart
+		}
+	}
+	return start, nil
 }
 
 func (hr *HistoryReaderV3) DiscardReadList() {}

@@ -1089,9 +1089,9 @@ func (m *MemoryMutation) HistoryRange(name kv.Domain, fromTs, toTs int, asc orde
 	return m.db.HistoryRange(name, fromTs, toTs, asc, limit)
 }
 
-func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) uint64 {
+func (m *MemoryMutation) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	if m.db == nil {
-		return 0
+		return 0, nil
 	}
 	return m.db.Debug().HistoryStartFrom(name)
 }

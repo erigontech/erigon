@@ -152,7 +152,11 @@ func (g *Regenerator) historyStateReader(ctx context.Context, tx kv.TemporalTx, 
 	if err != nil {
 		return nil, err
 	}
-	if minHistoryTxNum := state.StateHistoryStartTxNum(tx); minTxNum < minHistoryTxNum {
+	minHistoryTxNum, err := state.StateHistoryStartTxNum(tx)
+	if err != nil {
+		return nil, err
+	}
+	if minTxNum < minHistoryTxNum {
 		firstAvailBlock, _, _ := g.txNumReader.FindBlockNum(ctx, tx, minHistoryTxNum)
 		return nil, fmt.Errorf("%w: requested block %d, history is available from block %d", state.PrunedError, blockNum, firstAvailBlock)
 	}

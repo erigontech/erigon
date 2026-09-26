@@ -66,6 +66,9 @@ func (v *View) Segments(t snaptype.Type) []*snapshotsync.VisibleSegment { return
 
 func (v *View) BlocksAvailable() uint64 { return v.base.BlocksAvailable() }
 
+// Generation identifies the immutable block-file view pinned by v.
+func (v *View) Generation() uint64 { return v.base.Generation() }
+
 func (v *View) HeadersSegment(blockNum uint64) (*snapshotsync.VisibleSegment, bool) {
 	return v.base.Segment(snaptype2.Headers, blockNum)
 }
