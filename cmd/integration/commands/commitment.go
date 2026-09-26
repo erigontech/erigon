@@ -104,6 +104,7 @@ func init() {
 	withChain(commitmentBranchCmd)
 	withDataDir(commitmentBranchCmd)
 	withConfig(commitmentBranchCmd)
+	withExperimentalCommitment(commitmentBranchCmd)
 	commitmentBranchCmd.Flags().Uint64Var(&txnumFlag, "txnum", 0, "txnum to read as of")
 	commitmentBranchCmd.Flags().StringVar(&branchPrefixFlag, "prefix", "", "hex prefix to read (e.g., 'aa', '0a1b')")
 	commitmentCmd.AddCommand(commitmentBranchCmd)
@@ -131,6 +132,7 @@ func init() {
 	withChain(cmdCommitmentFreeze)
 	withDataDir(cmdCommitmentFreeze)
 	withConfig(cmdCommitmentFreeze)
+	withExperimentalCommitment(cmdCommitmentFreeze)
 	cmdCommitmentFreeze.Flags().StringVar(&freezeTrieFlag, "trie", dbstate.TrieVariantHex, "commitment trie to freeze")
 	commitmentCmd.AddCommand(cmdCommitmentFreeze)
 
@@ -138,12 +140,14 @@ func init() {
 	withChain(cmdCommitmentPrint)
 	withDataDir(cmdCommitmentPrint)
 	withConfig(cmdCommitmentPrint)
+	withExperimentalCommitment(cmdCommitmentPrint)
 	commitmentCmd.AddCommand(cmdCommitmentPrint)
 
 	// commitment convert
 	withChain(cmdCommitmentConvert)
 	withDataDir(cmdCommitmentConvert)
 	withConfig(cmdCommitmentConvert)
+	withExperimentalCommitment(cmdCommitmentConvert)
 	withConvertFlags(cmdCommitmentConvert)
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
 
@@ -151,6 +155,7 @@ func init() {
 	withChain(cmdCommitmentConvertFormat)
 	withDataDir(cmdCommitmentConvertFormat)
 	withConfig(cmdCommitmentConvertFormat)
+	withExperimentalCommitment(cmdCommitmentConvertFormat)
 	withConvertFormatFlags(cmdCommitmentConvertFormat)
 	commitmentCmd.AddCommand(cmdCommitmentConvertFormat)
 
@@ -167,6 +172,7 @@ func init() {
 	withChain(cmdCommitmentBenchLookup)
 	withDataDir(cmdCommitmentBenchLookup)
 	withConfig(cmdCommitmentBenchLookup)
+	withExperimentalCommitment(cmdCommitmentBenchLookup)
 	cmdCommitmentBenchLookup.Flags().IntVar(&benchSampleSize, "sample-size", 10000000, "number of random keys to sample via reservoir sampling")
 	cmdCommitmentBenchLookup.Flags().Int64Var(&benchSeed, "seed", 0, "random seed for sampling (0 = use current time)")
 	cmdCommitmentBenchLookup.Flags().BoolVar(&benchUseGetAsOf, "use-get-as-of", false, "use GetAsOf(math.MaxUint64) instead of GetLatest() for lookups")
@@ -176,6 +182,7 @@ func init() {
 	withChain(cmdCommitmentBenchHistoryLookup)
 	withDataDir(cmdCommitmentBenchHistoryLookup)
 	withConfig(cmdCommitmentBenchHistoryLookup)
+	withExperimentalCommitment(cmdCommitmentBenchHistoryLookup)
 	cmdCommitmentBenchHistoryLookup.Flags().StringVar(&benchHistoryPrefix, "prefix", "", "hex-encoded key prefix to look up in commitment domain (empty = root lookup)")
 	cmdCommitmentBenchHistoryLookup.Flags().Float64Var(&benchHistorySamplePct, "sample-percentage", 10.0, "percentage of txnums to sample from each history file's range or from MDBX (0-100)")
 	cmdCommitmentBenchHistoryLookup.Flags().Int64Var(&benchHistorySeed, "seed", 0, "random seed for sampling (0 = use current time)")

@@ -114,9 +114,14 @@ func TestConfigureHexRegistersSixDomains(t *testing.T) {
 }
 
 func TestConfigureHexBinRegistersCommitmentBinWithoutDependency(t *testing.T) {
-	bin, hexBin := ExperimentalBinCommitment, ExperimentalHexBinCommitment
-	t.Cleanup(func() { ExperimentalBinCommitment, ExperimentalHexBinCommitment = bin, hexBin })
+	bin, hexBin, v3, schema := ExperimentalBinCommitment, ExperimentalHexBinCommitment, ExperimentalCommitmentV3, Schema
+	t.Cleanup(func() {
+		ExperimentalBinCommitment, ExperimentalHexBinCommitment = bin, hexBin
+		ExperimentalCommitmentV3, Schema = v3, schema
+	})
 	ExperimentalBinCommitment, ExperimentalHexBinCommitment = true, true
+	ExperimentalCommitmentV3 = true
+	EnableCommitmentV3Records(&Schema.CommitmentDomain)
 
 	capture := new(schemaCapture)
 	require.NoError(t, Configure(Schema, capture, datadir.New(t.TempDir()), nil, log.New()))

@@ -381,7 +381,6 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 		}
 		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
 			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
-			cs.markWiped(addr)
 			acc.Deleted = true
 			acc.Incarnation = 0
 		}

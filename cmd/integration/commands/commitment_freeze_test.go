@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,6 +39,19 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	etypes "github.com/erigontech/erigon/execution/types"
 )
+
+func TestCommitmentFreezeRegistersV3FlagAndSchema(t *testing.T) {
+	require.NotNil(t, cmdCommitmentFreeze.Flags().Lookup(utils.ExperimentalCommitmentV3Flag.Name))
+
+	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	cmdCommitmentFreeze.PreRun(cmdCommitmentFreeze, nil)
+	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
+}
 
 func TestFreezeHexCommitmentUsesExecutedState(t *testing.T) {
 	tx, agg := newCommitmentFreezeTest(t, 40)

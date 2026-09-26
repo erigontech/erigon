@@ -288,7 +288,8 @@ func TestCalcStatePBinFeedBALTracksCodeAndEmptyRemoval(t *testing.T) {
 	address := accounts.InternAddress(addr)
 	emptyAddress := accounts.InternAddress(emptyAddr)
 	require.Contains(t, cs.codeKeys, address)
-	require.Contains(t, cs.wiped, emptyAddress)
+	require.Empty(t, cs.wiped)
+	require.True(t, cs.accounts[emptyAddress].Deleted)
 	require.NotEqual(t, empty.CodeHash, cs.accounts[address].CodeHash)
 	require.Equal(t, crypto.Keccak256Hash(code), common.Hash(cs.accounts[address].CodeHash))
 	codeAccount := accounts.Account{CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(code))}
