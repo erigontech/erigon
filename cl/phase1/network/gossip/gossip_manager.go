@@ -440,7 +440,11 @@ func (g *GossipManager) rejectShutdown(name string, logCtx []any) error {
 func (g *GossipManager) PublishBackground(name string, data []byte, expiry time.Time, logCtx ...any) error {
 	g.admissionsInFlight.Add(1)
 	defer g.admissionsInFlight.Add(-1)
-	if g.shutdownClosed.Load() {
+	// shutdownClosed alone isn't enough: it's only set once the worker is
+	// scheduled and observes ctx.Done(), which can lag real cancellation.
+	// lifetimeCtx.Err() is a plain, already non-blocking check that reflects
+	// cancellation the instant it happens, closing that window.
+	if g.shutdownClosed.Load() || g.lifetimeCtx.Err() != nil {
 		return g.rejectShutdown(name, logCtx)
 	}
 	if !expiry.IsZero() && g.nowFunc().After(expiry) {

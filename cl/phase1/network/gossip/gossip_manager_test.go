@@ -1253,6 +1253,56 @@ func TestPublishBackground_DoesNotBlockOnInProgressShutdownDrain(t *testing.T) {
 	}
 }
 
+// TestPublishBackground_RejectsAdmissionAfterCancellationBeforeDrainObserved
+// proves a call arriving after the parent context is cancelled is rejected
+// even before the worker has been scheduled to observe that cancellation
+// and flip shutdownClosed: the admission gate must also consult
+// lifetimeCtx.Err() directly, or such a call would resolve the digest,
+// enqueue work only ever destined to be drained as outcome=shutdown, and
+// still report success to a caller who would otherwise surface it as an
+// HTTP 200.
+func TestPublishBackground_RejectsAdmissionAfterCancellationBeforeDrainObserved(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+	mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+	mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+	gm := NewGossipManager(parentCtx, mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+
+	occupyEntered := make(chan struct{})
+	unblockOccupy := make(chan struct{})
+	gm.publishHookForTest = func(name string, data []byte) {
+		close(occupyEntered)
+		<-unblockOccupy
+	}
+	require.NoError(t, gm.PublishBackground("occupy", nil, time.Time{}))
+	select {
+	case <-occupyEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never picked up the occupying job")
+	}
+
+	// The worker is still blocked inside the occupying job, so it cannot
+	// have observed cancellation or set shutdownClosed yet.
+	parentCancel()
+
+	err := gm.PublishBackground("late-arrival", nil, time.Time{})
+	require.ErrorIs(t, err, ErrGossipManagerShutdown,
+		"a call made after the parent context is cancelled must be rejected even before the worker's drain has run")
+
+	close(unblockOccupy)
+	select {
+	case <-gm.workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never completed its shutdown drain")
+	}
+}
+
 // TestRunPublishJob_DropsExpiredJobWithoutPublishingAndContinuesWithFreshWork
 // proves a job that was still fresh at admission but has since expired is
 // dropped when the worker reaches it - counted as outcome=expired rather
