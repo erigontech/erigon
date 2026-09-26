@@ -18,6 +18,7 @@ package forkchoice
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -287,7 +288,19 @@ func (f *ForkChoiceStore) getCheckpointState(checkpoint solid.Checkpoint) (*chec
 	if state, ok := f.checkpointStates.Load(checkpoint); ok {
 		return state.(*checkpointState), nil
 	}
+	cs, err, _ := f.checkpointStateBuilds.Do(fmt.Sprintf("%d:%x", checkpoint.Epoch, checkpoint.Root), func() (any, error) {
+		if state, ok := f.checkpointStates.Load(checkpoint); ok {
+			return state.(*checkpointState), nil
+		}
+		return f.buildCheckpointState(checkpoint)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return cs.(*checkpointState), nil
+}
 
+func (f *ForkChoiceStore) buildCheckpointState(checkpoint solid.Checkpoint) (*checkpointState, error) {
 	// If it is not in cache compute it and then put in cache.
 	if f.forkGraph == nil {
 		return nil, errors.New("getCheckpointState: forkGraph not initialized")
