@@ -311,7 +311,7 @@ func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime u
 	return *ProofOfStakeDifficulty
 }
 
-func (c *Merge) TxDependencies(h *types.Header) [][]int {
+func (s *Merge) TxDependencies(h *types.Header) [][]int {
 	return nil
 }
 

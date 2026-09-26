@@ -359,7 +359,7 @@ func (e *ExecModule) regenerateBlockAccessList(ctx context.Context, tx kv.Tempor
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return nil, err
 	}
-	if errors.Is(err, state.PrunedError) {
+	if errors.Is(err, state.ErrPruned) {
 		e.logger.Debug("regenerateBlockAccessList: history unavailable", "block", blockNum, "hash", blockHash, "err", err)
 		return nil, nil
 	}

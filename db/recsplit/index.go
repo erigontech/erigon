@@ -68,10 +68,10 @@ const (
 	LessFalsePositives Features = 0b10 //
 )
 
-// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return IncompatibleErr and recommend for user manually delete file
+// SupportedFeaturs - if see feature not from this list (likely after downgrade) - return ErrIncompatible and recommend for user manually delete file
 var (
 	SupportedFeatures = []Features{Enums, LessFalsePositives}
-	IncompatibleErr   = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
+	ErrIncompatible   = errors.New("incompatible. can re-build such files by command 'erigon snapshots index'")
 )
 
 // Index implements index lookup from the file created by the RecSplit
@@ -195,7 +195,7 @@ func (idx *Index) init() (err error) {
 	offset := 16 + 1 + int(idx.keyCount)*idx.bytesPerRec
 
 	if offset < 0 {
-		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, IncompatibleErr, offset)
+		return fmt.Errorf("file %s %w. offset is: %d which is below zero", idx.fileName, ErrIncompatible, offset)
 	}
 
 	// Bucket count, bucketSize, leafSize
@@ -239,7 +239,7 @@ func (idx *Index) init() (err error) {
 		arrSz := binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 		if arrSz != idx.keyCount {
-			return fmt.Errorf("%w. size of existence filter %d != keys count %d", IncompatibleErr, arrSz, idx.keyCount)
+			return fmt.Errorf("%w. size of existence filter %d != keys count %d", ErrIncompatible, arrSz, idx.keyCount)
 		}
 		idx.existenceV0 = idx.data[offset : offset+int(arrSz)]
 		offset += int(arrSz)
@@ -275,7 +275,7 @@ func (idx *Index) init() (err error) {
 			}
 			offset += sz
 		default:
-			return fmt.Errorf("%w. unsupported existence filter version %d", IncompatibleErr, idx.dataStructureVersion)
+			return fmt.Errorf("%w. unsupported existence filter version %d", ErrIncompatible, idx.dataStructureVersion)
 		}
 	}
 
@@ -364,7 +364,7 @@ func onlyKnownFeatures(features Features) error {
 		features &^= f
 	}
 	if features != No {
-		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
+		return fmt.Errorf("%w. unknown features bitmap: %b", ErrIncompatible, features)
 	}
 	return nil
 }

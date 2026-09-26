@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/execution/tests/testforks"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	accounts3 "github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
@@ -145,7 +144,7 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 	require.NoError(t, err)
 
 	sender := common.Address{1}
-	account := accounts3.Account{
+	account := accounts.Account{
 		Balance:  *uint256.NewInt(common.Ether),
 		CodeHash: codeHash,
 	}
@@ -157,7 +156,7 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 			Changes: []*remoteproto.AccountChange{{
 				Action:  remoteproto.Action_UPSERT,
 				Address: gointerfaces.ConvertAddressToH160(sender),
-				Data:    accounts3.SerialiseV3(&account),
+				Data:    accounts.SerialiseV3(&account),
 			}},
 		}},
 	}
@@ -289,12 +288,12 @@ func TestOnNewBlockLimitsNewlyDelegatedSender(t *testing.T) {
 		txpoolcfg.Success,
 	}, reasons)
 
-	account := accounts3.Account{
+	account := accounts.Account{
 		Nonce:    1,
 		Balance:  *uint256.NewInt(common.Ether),
 		CodeHash: testDelegationCodeHash(),
 	}
-	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts3.SerialiseV3(&account), 1)
+	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts.SerialiseV3(&account), 1)
 	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      1,
 		PendingBlockBaseFee: 1,
@@ -305,7 +304,7 @@ func TestOnNewBlockLimitsNewlyDelegatedSender(t *testing.T) {
 			Changes: []*remoteproto.AccountChange{{
 				Action:  remoteproto.Action_UPSERT,
 				Address: gointerfaces.ConvertAddressToH160(sender),
-				Data:    accounts3.SerialiseV3(&account),
+				Data:    accounts.SerialiseV3(&account),
 			}},
 		}},
 	}
@@ -417,7 +416,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	require.NoError(t, err)
 
 	sender := common.Address{0x01}
-	account := accounts3.Account{
+	account := accounts.Account{
 		Balance:  *uint256.NewInt(1 * common.Ether),
 		CodeHash: accounts.EmptyCodeHash,
 	}
@@ -430,7 +429,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 			Changes: []*remoteproto.AccountChange{{
 				Action:  remoteproto.Action_UPSERT,
 				Address: gointerfaces.ConvertAddressToH160(sender),
-				Data:    accounts3.SerialiseV3(&account),
+				Data:    accounts.SerialiseV3(&account),
 			}},
 		}},
 	}
@@ -501,13 +500,13 @@ func TestNonceFromAddress(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -730,13 +729,13 @@ func TestMultipleAuthorizations(t *testing.T) {
 	}
 	require.NoError(t, err)
 
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(10 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addrA),
@@ -809,13 +808,13 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -912,13 +911,13 @@ func TestReverseNonces(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -1015,13 +1014,13 @@ func TestTxnPoke(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -1216,8 +1215,8 @@ func TestShanghaiValidateTxn(t *testing.T) {
 			pool, err := New(ctx, ch, nil, coreDB, cfg, cache, chainConfig, nil, nil, func() {}, nil, nil, logger, WithFeeCalculator(nil))
 			asrt.NoError(err)
 
-			sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
-			sndrBytes := accounts3.SerialiseV3(&sndr)
+			sndr := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
+			sndrBytes := accounts.SerialiseV3(&sndr)
 			txNum := uint64(0)
 			err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
 			asrt.NoError(err)
@@ -1286,13 +1285,13 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -1340,8 +1339,8 @@ func TestSetCodeTxnValidationWithLargeAuthorizationValues(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
-	sndr := accounts3.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
-	sndrBytes := accounts3.SerialiseV3(&sndr)
+	sndr := accounts.Account{Nonce: 0, Balance: *uint256.NewInt(math.MaxUint64)}
+	sndrBytes := accounts.SerialiseV3(&sndr)
 	txNum := uint64(0)
 	err = sd.DomainPut(kv.AccountsDomain, tx, []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0}, sndrBytes, txNum, nil)
 	require.NoError(t, err)
@@ -1425,13 +1424,13 @@ func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
 
 	var goodAddr [20]byte
 	goodAddr[0] = 2
-	goodAcc := accounts3.Account{
+	goodAcc := accounts.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	writeTestSenderState(t, ctx, coreDB, logger, goodAddr, accounts3.SerialiseV3(&goodAcc), 1)
+	writeTestSenderState(t, ctx, coreDB, logger, goodAddr, accounts.SerialiseV3(&goodAcc), 1)
 
 	badTxn := newTestTxnSlot(0, 0, 300_000, 300_000, 100_000)
 	badTxn.IDHash[0] = 1
@@ -1481,13 +1480,13 @@ func TestBlobTxnReplacement(t *testing.T) {
 	addr[0] = 1
 
 	// Add 1 eth to the user account, as a part of change
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
@@ -1741,13 +1740,13 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	}
 	var addr [20]byte
 	addr[0] = 1
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       2,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -1842,13 +1841,13 @@ func TestBlobSlots(t *testing.T) {
 	var addr [20]byte
 
 	// Add 1 eth to the user account, as a part of change
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 
 	for i := range 11 {
 		addr[0] = uint8(i + 1)
@@ -1930,13 +1929,13 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 			{BlockHeight: 0, BlockHash: h1},
 		},
 	}
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
@@ -2058,13 +2057,13 @@ func TestGetBlobs(t *testing.T) {
 	var addr [20]byte
 
 	// Add 1 eth to the user account, as a part of change
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 
 	for i := range 11 {
 		addr[0] = uint8(i + 1)
@@ -2132,13 +2131,13 @@ func TestGasLimitChanged(t *testing.T) {
 	h1 := gointerfaces.ConvertHashToH256([32]byte{})
 	var addr [20]byte
 	addr[0] = 1
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       0,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 1,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	tx, err := db.BeginRw(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
@@ -2218,13 +2217,13 @@ func TestZombieQueuedEviction(t *testing.T) {
 	senderAddr[0] = 0x42
 
 	// Set sender's on-chain nonce = 5
-	acc := accounts3.Account{
+	acc := accounts.Account{
 		Nonce:       5,
 		Balance:     *uint256.NewInt(1 * common.Ether),
 		CodeHash:    accounts.EmptyCodeHash,
 		Incarnation: 0,
 	}
-	v := accounts3.SerialiseV3(&acc)
+	v := accounts.SerialiseV3(&acc)
 	change := &remoteproto.StateChangeBatch{
 		StateVersionId:      0,
 		PendingBlockBaseFee: pendingBaseFee,
@@ -2296,12 +2295,12 @@ func TestZombieQueuedEviction(t *testing.T) {
 			chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
 		require.NoError(err)
 
-		acc2 := accounts3.Account{
+		acc2 := accounts.Account{
 			Nonce:    baseNonce,
 			Balance:  *uint256.NewInt(10 * common.Ether),
 			CodeHash: accounts.EmptyCodeHash,
 		}
-		v2 := accounts3.SerialiseV3(&acc2)
+		v2 := accounts.SerialiseV3(&acc2)
 		var addr2 [20]byte
 		addr2[0] = 0x99
 		change2 := &remoteproto.StateChangeBatch{
@@ -2383,22 +2382,22 @@ func TestStalePendingEvictionViaMineNonce(t *testing.T) {
 		defer tx.Rollback()
 		sd, werr := execctx.NewSharedDomains(ctx, tx, logger)
 		req.NoError(werr)
-		a := accounts3.Account{
+		a := accounts.Account{
 			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
 			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
 		}
-		req.NoError(sd.DomainPut(kv.AccountsDomain, tx, addr1[:], accounts3.SerialiseV3(&a), txNum, nil))
+		req.NoError(sd.DomainPut(kv.AccountsDomain, tx, addr1[:], accounts.SerialiseV3(&a), txNum, nil))
 		req.NoError(sd.Flush(ctx, tx))
 		sd.Close()
 		req.NoError(tx.Commit())
 	}
 
 	serialiseAcc := func(nonce uint64) []byte {
-		a := accounts3.Account{
+		a := accounts.Account{
 			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
 			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
 		}
-		return accounts3.SerialiseV3(&a)
+		return accounts.SerialiseV3(&a)
 	}
 
 	// ── Step 1: write addr1 nonce=0 to DB and bootstrap pool ─────────────────
@@ -2516,11 +2515,11 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	h0 := gointerfaces.ConvertHashToH256([32]byte{})
 
 	serialiseAcc := func(nonce uint64) []byte {
-		a := accounts3.Account{
+		a := accounts.Account{
 			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
 			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
 		}
-		return accounts3.SerialiseV3(&a)
+		return accounts.SerialiseV3(&a)
 	}
 
 	// 1) Bootstrap addr1 at nonce=0 in both DB and LatestBatchCache.
@@ -2597,11 +2596,11 @@ func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
 	addr1[0] = 1
 	h0 := gointerfaces.ConvertHashToH256([32]byte{})
 	serialiseAcc := func(nonce uint64) []byte {
-		a := accounts3.Account{
+		a := accounts.Account{
 			Nonce: nonce, Balance: *uint256.NewInt(1 * common.Ether),
 			CodeHash: accounts.EmptyCodeHash, Incarnation: 1,
 		}
-		return accounts3.SerialiseV3(&a)
+		return accounts.SerialiseV3(&a)
 	}
 
 	writeTestSenderState(t, ctx, coreDB, logger, addr1, serialiseAcc(0), 0)
@@ -2674,8 +2673,8 @@ func TestFromDBLoadsUnderPoolLock(t *testing.T) {
 		addr[0], addr[1] = byte(i), byte(i>>8)
 		return addr
 	}
-	acc := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts.EmptyCodeHash}
-	accData := accounts3.SerialiseV3(&acc)
+	acc := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts.EmptyCodeHash}
+	accData := accounts.SerialiseV3(&acc)
 	changes := make([]*remoteproto.AccountChange, senderCount)
 	for i := range changes {
 		changes[i] = &remoteproto.AccountChange{
@@ -2809,7 +2808,7 @@ func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
 
 	var addr [20]byte
 	addr[0] = 1
-	acc := accounts3.Account{Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
+	acc := accounts.Account{Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts.EmptyCodeHash, Incarnation: 1}
 	change := &remoteproto.StateChangeBatch{
 		PendingBlockBaseFee: 1_000_000,
 		BlockGasLimit:       1_000_000,
@@ -2818,7 +2817,7 @@ func TestBaseFeeRoundTripAnnouncesOnce(t *testing.T) {
 	change.ChangeBatch[0].Changes = append(change.ChangeBatch[0].Changes, &remoteproto.AccountChange{
 		Action:  remoteproto.Action_UPSERT,
 		Address: gointerfaces.ConvertAddressToH160(addr),
-		Data:    accounts3.SerialiseV3(&acc),
+		Data:    accounts.SerialiseV3(&acc),
 	})
 	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
 

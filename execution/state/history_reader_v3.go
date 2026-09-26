@@ -29,7 +29,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-var PrunedError = errors.New("old data not available due to pruning")
+var ErrPruned = errors.New("old data not available due to pruning")
 
 // HistoryReaderV3 Implements StateReader and StateWriter.
 //
@@ -165,12 +165,12 @@ func (hr *HistoryReaderV3) SetTrace(trace bool, tracePrefix string) {
 	hr.tracePrefix = tracePrefix
 }
 
-func (r *HistoryReaderV3) Trace() bool {
-	return r.trace
+func (hr *HistoryReaderV3) Trace() bool {
+	return hr.trace
 }
 
-func (r *HistoryReaderV3) TracePrefix() string {
-	return r.tracePrefix
+func (hr *HistoryReaderV3) TracePrefix() string {
+	return hr.tracePrefix
 }
 
 // Gets the txNum where Account, Storage and Code history begins.

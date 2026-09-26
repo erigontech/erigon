@@ -32,15 +32,15 @@ func NewUint64ListSSZ(limit int) Uint64ListSSZ {
 	}
 }
 
-func (h uint64ListSSZ) MarshalJSON() ([]byte, error) {
-	return json.Marshal(h.u)
+func (arr uint64ListSSZ) MarshalJSON() ([]byte, error) {
+	return json.Marshal(arr.u)
 }
 
-func (h uint64ListSSZ) UnmarshalJSON(buf []byte) error {
-	return json.Unmarshal(buf, h.u)
+func (arr uint64ListSSZ) UnmarshalJSON(buf []byte) error {
+	return json.Unmarshal(buf, arr.u)
 }
 
-func (h *uint64ListSSZ) Static() bool {
+func (arr *uint64ListSSZ) Static() bool {
 	return false
 }
 

@@ -76,11 +76,11 @@ type Fixture struct {
 
 // BAL decodes the fixture's block access list sidecar, or nil when the block
 // carried none (pre-Amsterdam).
-func (f *Fixture) BAL() (types.BlockAccessList, error) {
-	if len(f.BALBytes) == 0 {
+func (fx *Fixture) BAL() (types.BlockAccessList, error) {
+	if len(fx.BALBytes) == 0 {
 		return nil, nil
 	}
-	return types.DecodeBlockAccessListBytes(f.BALBytes)
+	return types.DecodeBlockAccessListBytes(fx.BALBytes)
 }
 
 // Outputs is the post-state a block's execution produced: the accounts it

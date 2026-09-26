@@ -120,11 +120,11 @@ func (ws Withdrawals) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 
 func writeWithdrawalElem(s *jsonstream.StackStream, w **Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }
 
-func (s Withdrawals) Len() int { return len(s) }
+func (ws Withdrawals) Len() int { return len(ws) }
 
 // EncodeIndex encodes the i'th withdrawal to w. Note that this does not check for errors
 // because we assume that *Withdrawal will only ever contain valid withdrawals that were either
 // constructed by decoding or via public API in this package.
-func (s Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
-	_ = rlp.Encode(w, s[i])
+func (ws Withdrawals) EncodeIndex(i int, w *bytes.Buffer) {
+	_ = rlp.Encode(w, ws[i])
 }

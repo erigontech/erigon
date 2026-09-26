@@ -304,40 +304,40 @@ func (p *p2pManager) setupENR() error {
 	return nil
 }
 
-func (s *p2pManager) updateENR() {
-	node := s.udpv5.LocalNode()
+func (p *p2pManager) updateENR() {
+	node := p.udpv5.LocalNode()
 	if node == nil {
 		panic("local node is nil")
 	}
 	for {
-		nextForkEpoch := s.ethClock.NextForkEpochIncludeBPO()
-		if nextForkEpoch == s.cfg.BeaconConfig.FarFutureEpoch {
+		nextForkEpoch := p.ethClock.NextForkEpochIncludeBPO()
+		if nextForkEpoch == p.cfg.BeaconConfig.FarFutureEpoch {
 			break
 		}
 		// sleep until next fork epoch
-		wakeupTime := s.ethClock.GetSlotTime(nextForkEpoch * s.cfg.BeaconConfig.SlotsPerEpoch).Add(time.Second)
+		wakeupTime := p.ethClock.GetSlotTime(nextForkEpoch * p.cfg.BeaconConfig.SlotsPerEpoch).Add(time.Second)
 		log.Info("[Sentinel] Sleeping until next fork epoch", "nextForkEpoch", nextForkEpoch, "wakeupTime", wakeupTime)
 		time.Sleep(time.Until(wakeupTime)) // add 1 second for safety
-		nfd, err := s.ethClock.NextForkDigest()
+		nfd, err := p.ethClock.NextForkDigest()
 		if err != nil {
 			log.Warn("[Sentinel] Could not get next fork digest", "err", err)
 			break
 		}
-		node.Set(enr.WithEntry(s.cfg.NetworkConfig.NfdKey, nfd))
-		forkId, err := s.ethClock.ForkId()
+		node.Set(enr.WithEntry(p.cfg.NetworkConfig.NfdKey, nfd))
+		forkId, err := p.ethClock.ForkId()
 		if err != nil {
 			log.Warn("[Sentinel] Could not get fork id", "err", err)
 			break
 		}
-		node.Set(enr.WithEntry(s.cfg.NetworkConfig.Eth2key, forkId))
+		node.Set(enr.WithEntry(p.cfg.NetworkConfig.Eth2key, forkId))
 		log.Info("[Sentinel] Updated fork id and nfd")
 	}
 }
 
-func (s *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
+func (p *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
 	// Attestation subnets use Bitvector64 (8 bytes for 64 subnets).
 	subnetField := bitfield.NewBitvector64()
-	if err := s.udpv5.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField)); err != nil {
+	if err := p.udpv5.LocalNode().Node().Load(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, &subnetField)); err != nil {
 		log.Error("[Sentinel] Could not load AttSubnetKey", "err", err)
 		return
 	}
@@ -355,14 +355,14 @@ func (s *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
 	} else {
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
-	s.udpv5.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.AttSubnetKey, &subnetField))
+	p.udpv5.LocalNode().Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, &subnetField))
 	log.Debug("[Sentinel] Updated att subnet", "subnetIndex", subnetIndex, "on", on)
 }
 
-func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
+func (p *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
 	// Sync committee subnets use Bitvector4 (1 byte for 4 subnets).
 	subnetField := bitfield.NewBitvector4()
-	if err := s.udpv5.LocalNode().Node().Load(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField)); err != nil {
+	if err := p.udpv5.LocalNode().Node().Load(enr.WithEntry(p.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField)); err != nil {
 		log.Error("[Sentinel] Could not load SyncCommsSubnetKey", "err", err)
 		return
 	}
@@ -376,6 +376,6 @@ func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
 	} else {
 		subnetField[subnetIndex/8] &^= 1 << (subnetIndex % 8)
 	}
-	s.udpv5.LocalNode().Set(enr.WithEntry(s.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField))
+	p.udpv5.LocalNode().Set(enr.WithEntry(p.cfg.NetworkConfig.SyncCommsSubnetKey, &subnetField))
 	log.Debug("[Sentinel] Updated sync subnet", "subnetIndex", subnetIndex, "on", on)
 }
