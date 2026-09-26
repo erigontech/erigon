@@ -100,12 +100,18 @@ func TestPBinTrieContextLeavesCodeSizeZeroForHex(t *testing.T) {
 func TestPBinTrieContextIgnoresClearedDelegationResidue(t *testing.T) {
 	residue := []byte{0xef, 0x01, 0x00}
 	addr := pbinCodeSizeAddr(3)
-	ttx := pbinCodeSizeTrieContext(t, true, addr, pbinCodeSizeAccount(empty.CodeHash), residue)
-
-	u, err := ttx.Account(addr)
+	sd, tx := pbinCodeSizeSharedDomains(t, nil, addr, pbinCodeSizeAccount(empty.CodeHash), residue)
+	reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
+	feed, err := commitmentdb.BinFeedFromState(
+		map[string]struct{}{string(addr): {}},
+		map[string]struct{}{string(addr): {}},
+		nil,
+		reader,
+	)
 	require.NoError(t, err)
-	require.Zero(t, u.CodeSize)
-	require.Equal(t, empty.CodeHash, u.CodeHash)
+	require.Len(t, feed.Accounts, 1)
+	require.Equal(t, empty.CodeHash, feed.Accounts[0].CodeHash)
+	require.Empty(t, feed.Accounts[0].Code)
 }
 
 // A code hash with no code behind it (an eth_simulateV1 overlay, a truncated

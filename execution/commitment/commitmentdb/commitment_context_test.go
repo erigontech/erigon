@@ -385,6 +385,18 @@ func TestCommitmentContextUsesBoundBinDomain(t *testing.T) {
 	require.Equal(t, kv.CommitmentBinDomain, putter.puts[0].domain)
 }
 
+func TestSharedDomainsCodeKeysFollowTouchedUpdates(t *testing.T) {
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	sdc := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	t.Cleanup(sdc.Close)
+	address := make([]byte, 20)
+	sdc.TouchKey(kv.CodeDomain, string(address), []byte{1})
+	require.Equal(t, map[string]struct{}{string(address): {}}, sdc.CodeKeys())
+	sdc.SetUpdates(sdc.NewBinUpdates(nil))
+	require.Empty(t, sdc.CodeKeys())
+}
+
 type branchChildCountDomains struct {
 	stubSharedDomains
 	value   []byte

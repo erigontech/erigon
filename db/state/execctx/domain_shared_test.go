@@ -1335,9 +1335,19 @@ func TestSharedDomain_IteratePrefix(t *testing.T) {
 		domains, err = execctx.NewSharedDomains(ctx, rwTx, log.New())
 		require.NoError(err)
 		defer domains.Close()
-		err := domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
+		deleted := make(map[string]struct{})
+		err = domains.IteratePrefix(kv.StorageDomain, nil, rwTx, func(k, _ []byte) (bool, error) {
+			deleted[string(k)] = struct{}{}
+			return true, nil
+		})
+		require.NoError(err)
+		err = domains.DomainDelPrefix(kv.StorageDomain, rwTx, []byte{}, txNum+1)
 		require.NoError(err)
 		require.Equal(0, iterCount(domains))
+		for key := range deleted {
+			_, ok := domains.GetCommitmentContext().GetUpdates().PlainKeys()[key]
+			require.True(ok)
+		}
 	}
 }
 

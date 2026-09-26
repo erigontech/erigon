@@ -69,6 +69,7 @@ type SharedDomainsCommitmentContext struct {
 	sharedDomains    sd
 	commitmentDomain kv.Domain
 	updates          *commitment.Updates
+	codeKeys         map[string]struct{}
 	feed             *commitment.Feed
 	patriciaTrie     commitment.Trie
 	variant          commitment.TrieVariant
@@ -250,6 +251,15 @@ func (sdc *SharedDomainsCommitmentContext) NewBinUpdates(plainKeys map[string]st
 // to install its accumulated touches before calling ComputeCommitment.
 func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Updates) {
 	sdc.updates = updates
+	sdc.codeKeys = make(map[string]struct{})
+}
+
+func (sdc *SharedDomainsCommitmentContext) CodeKeys() map[string]struct{} {
+	keys := make(map[string]struct{}, len(sdc.codeKeys))
+	for key := range sdc.codeKeys {
+		keys[key] = struct{}{}
+	}
+	return keys
 }
 
 func (sdc *SharedDomainsCommitmentContext) AcceptsFeed() bool {
@@ -289,6 +299,7 @@ func NewSharedDomainsCommitmentContext(sd sd, commitmentDomain kv.Domain, mode c
 		commitmentDomain: commitmentDomain,
 		tmpDir:           tmpDir,
 		variant:          variant,
+		codeKeys:         make(map[string]struct{}),
 		warmupBase: commitment.WarmupConfig{
 			Enabled:    cfg.EnableTrieWarmup,
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
@@ -377,6 +388,10 @@ func (sdc *SharedDomainsCommitmentContext) TouchKey(d kv.Domain, key string, val
 	case kv.AccountsDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchAccount)
 	case kv.CodeDomain:
+		if sdc.codeKeys == nil {
+			sdc.codeKeys = make(map[string]struct{})
+		}
+		sdc.codeKeys[key] = struct{}{}
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchCode)
 	case kv.StorageDomain:
 		sdc.updates.TouchPlainKey(key, val, sdc.updates.TouchStorage)

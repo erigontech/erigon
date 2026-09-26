@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -105,6 +106,9 @@ type calcState struct {
 	storageState map[accounts.Address]*calcStorage
 	// storageDirty tracks which slots were modified in the current block
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
+	codeKeys     map[accounts.Address]struct{}
+	wiped        map[accounts.Address]struct{}
+	reader       commitmentdb.StateReader
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
 	domainReader accountBaselineReader
@@ -141,6 +145,9 @@ func newCalcState(reader *asOfStateReader, logger log.Logger, logPrefix string) 
 		accounts:     make(map[accounts.Address]*calcAccountState),
 		storageState: make(map[accounts.Address]*calcStorage),
 		storageDirty: make(map[accounts.Address]map[accounts.StorageKey]bool),
+		codeKeys:     make(map[accounts.Address]struct{}),
+		wiped:        make(map[accounts.Address]struct{}),
+		reader:       reader,
 		domainReader: &calcDomainReader{reader: reader},
 		logger:       logger,
 		logPrefix:    logPrefix,
@@ -210,6 +217,10 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
 		if vw.Val {
+			if cs.wiped == nil {
+				cs.wiped = make(map[accounts.Address]struct{})
+			}
+			cs.wiped[addr] = struct{}{}
 			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
 			cs.markDirty(addr, acc)
@@ -244,6 +255,10 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 	}
 	for addr, vw := range writes.Codes() {
+		if cs.codeKeys == nil {
+			cs.codeKeys = make(map[accounts.Address]struct{})
+		}
+		cs.codeKeys[addr] = struct{}{}
 		acc := cs.ensureAccount(addr, writes)
 		acc.CodeHash = vw.Val.Hash.Value()
 		cs.markDirty(addr, acc)
@@ -353,6 +368,10 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 		}
 		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
 			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
+			if cs.wiped == nil {
+				cs.wiped = make(map[accounts.Address]struct{})
+			}
+			cs.wiped[addr] = struct{}{}
 			acc.Deleted = true
 			acc.Incarnation = 0
 		}
@@ -436,6 +455,38 @@ func (cs *calcState) FlushToFeed(feed *commitment.Feed) {
 	}
 }
 
+func (cs *calcState) BinFeed() (*commitment.PBinFeed, error) {
+	if cs.reader == nil {
+		return nil, fmt.Errorf("pbin: calc state has no state reader")
+	}
+	keys := make(map[string]struct{}, len(cs.dirtyAccounts)+len(cs.storageDirty))
+	for _, addr := range cs.dirtyAccounts {
+		address := addr.Value()
+		keys[string(address[:])] = struct{}{}
+	}
+	for addr, dirty := range cs.storageDirty {
+		address := addr.Value()
+		for slot := range dirty {
+			key := slot.Value()
+			plain := make([]byte, len(address)+len(key))
+			copy(plain, address[:])
+			copy(plain[len(address):], key[:])
+			keys[string(plain)] = struct{}{}
+		}
+	}
+	codeKeys := make(map[string]struct{}, len(cs.codeKeys))
+	for addr := range cs.codeKeys {
+		address := addr.Value()
+		codeKeys[string(address[:])] = struct{}{}
+	}
+	wiped := make(map[string]struct{}, len(cs.wiped))
+	for addr := range cs.wiped {
+		address := addr.Value()
+		wiped[string(address[:])] = struct{}{}
+	}
+	return commitmentdb.BinFeedFromState(keys, codeKeys, wiped, cs.reader)
+}
+
 func (cs *calcState) feedUpdate(acc *calcAccountState) *commitment.Update {
 	cs.feedUpdates = append(cs.feedUpdates, accountUpdateOf(acc))
 	return &cs.feedUpdates[len(cs.feedUpdates)-1]
@@ -478,4 +529,6 @@ func (cs *calcState) ResetBlockFlags() {
 	for addr := range cs.storageDirty {
 		delete(cs.storageDirty, addr)
 	}
+	clear(cs.codeKeys)
+	clear(cs.wiped)
 }
