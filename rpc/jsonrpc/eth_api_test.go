@@ -592,6 +592,27 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+
+	yes, no := true, false
+	withTxs, err := api.GetBlockDetails(m.Ctx, 1, &yes)
+	require.NoError(t, err)
+	require.NotEmpty(t, withTxs["receipts"])
+
+	hash := withTxs["block"].(*ethapi.RPCBlock).Hash
+	for _, details := range []func() (map[string]any, error){
+		func() (map[string]any, error) { return api.GetBlockDetails(m.Ctx, 1, &no) },
+		func() (map[string]any, error) { return api.GetBlockDetailsByHash(m.Ctx, *hash, &no) },
+	} {
+		got, err := details()
+		require.NoError(t, err)
+		require.NotNil(t, got["block"])
+		require.NotContains(t, got, "receipts")
+	}
+}
+
 // A pooled transaction is priced at its fee cap, and carries no location.
 func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
 	feeCap := uint256.NewInt(1_000_000_000)

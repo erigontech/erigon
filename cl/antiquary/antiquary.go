@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -471,6 +472,41 @@ func (a *Antiquary) NotifyBlobBackfilled(completed bool) {
 	a.blobBackfilled.Store(completed)
 }
 
+const caplinSnapshotBuildSemaWeight int64 = 1
+
+// blobCompressWorkers picks the compression parallelism for a dump, with a func to release the
+// shared build limiter.
+//
+// One worker keeps steady-state retirement from competing with execution. Catching up may use the
+// full estimate, but only while holding the limiter that admits one kind of snapshot build at a
+// time, since EL retirement sizes its own workers from the same estimate of the host. A limiter it
+// cannot take drops the dump to one worker rather than skipping it: the blob gate stays shut until
+// the whole range lands, so retiring slowly beats not retiring.
+func (a *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
+	noop := func() {}
+	if !isBlobBacklog(from, to) {
+		return 1, noop
+	}
+	if a.snBuildSema == nil {
+		return estimate.CompressSnapshot.Workers(), noop
+	}
+	if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+		return 1, noop
+	}
+	return estimate.CompressSnapshot.Workers(), func() {
+		a.snBuildSema.Release(caplinSnapshotBuildSemaWeight)
+	}
+}
+
+// isBlobBacklog reports whether the pending range is a catch-up rather than the single chunk
+// retired at the tip, which is what decides how many workers the compression may use.
+//
+// The span is the one DumpBlobsSidecar counts chunks with: it breaks once `toSlot-i` drops below a
+// merge limit, so two chunks are compressed exactly when the span reaches two of them.
+func isBlobBacklog(from, to uint64) bool {
+	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
+}
+
 func (a *Antiquary) antiquateBlobs() error {
 	if !a.snapgen {
 		return nil
@@ -517,7 +553,13 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 
 	// now, we need to retire the blobs
-	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, 1, blobCountFn, log.LvlDebug, a.logger); err != nil {
+	// The build slot is held for the compression only: opening the folder, seeding and pruning
+	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
+	if err := func() error {
+		compressWorkers, releaseBuildSlot := a.blobCompressWorkers(currentBlobsProgress, to)
+		defer releaseBuildSlot()
+		return freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, compressWorkers, blobCountFn, log.LvlDebug, a.logger)
+	}(); err != nil {
 		return err
 	}
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit
