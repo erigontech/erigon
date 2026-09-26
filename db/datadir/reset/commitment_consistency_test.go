@@ -245,3 +245,23 @@ func TestResetIgnoresVersionsTheSchemaCannotSelect(t *testing.T) {
 		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
 	})
 }
+
+// v1- and v1.0- parse to the same version but are two files, and the manifest only ever names one
+// spelling, so the other is kept as a local build. Either may be the one opened — glob order
+// actually favours the legacy spelling — so a twin makes the pair unsafe whichever wins.
+func TestResetTreatsALegacyTwinOfACanonicalFileAsLocal(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{{Name: "snapshots/domain/v1-commitment.0-256.kv"}}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{
+			{Name: "domain/v1.0-commitment.0-256.kv"},
+			{Name: "domain/v1.0-accounts.0-256.kv"},
+		}
+		r.PreverifiedSnapshots.Sort()
+		err := r.Run()
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+	})
+}

@@ -122,8 +122,17 @@ func (reset *Reset) checkStateBuilds() error {
 		if builds[stepRange] == nil {
 			builds[stepRange] = map[string]*domainBuild{}
 		}
-		if b := builds[stepRange][domain]; b != nil && b.ver.Cmp(ver) >= 0 {
-			return
+		if b := builds[stepRange][domain]; b != nil {
+			if b.ver.Cmp(ver) > 0 {
+				return
+			}
+			if b.ver.Cmp(ver) == 0 {
+				// One version can be spelled two ways, and the manifest names only one of them,
+				// so the twin stays on disk as a local build. Either file may be the one opened,
+				// so a local twin makes the pair unsafe whichever wins.
+				b.retainedLocal = b.retainedLocal || retainedLocal
+				return
+			}
 		}
 		builds[stepRange][domain] = &domainBuild{
 			retainedLocal: retainedLocal,
