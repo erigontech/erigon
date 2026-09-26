@@ -23,7 +23,10 @@ package backtester_test
 import (
 	"bytes"
 	"context"
+	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -300,6 +303,45 @@ func pbinM1AAssertNewEngineRecords(t *testing.T, db kv.TemporalRwDB) {
 	require.NoError(t, pbt.ValidateEngineStateBlob(state))
 }
 
+func pbinM1AMeasuredRebuild(t *testing.T, db kv.TemporalRwDB, target state.RebuildTarget) ([]byte, *state.RebuildReport, error, uint64) {
+	t.Helper()
+	var initial runtime.MemStats
+	runtime.ReadMemStats(&initial)
+	var peak atomic.Uint64
+	peak.Store(initial.Alloc)
+	updatePeak := func() {
+		var current runtime.MemStats
+		runtime.ReadMemStats(&current)
+		for {
+			previous := peak.Load()
+			if current.Alloc <= previous || peak.CompareAndSwap(previous, current.Alloc) {
+				return
+			}
+		}
+	}
+	done := make(chan struct{})
+	var sampler sync.WaitGroup
+	sampler.Add(1)
+	go func() {
+		defer sampler.Done()
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				updatePeak()
+			}
+		}
+	}()
+	root, report, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, target)
+	close(done)
+	sampler.Wait()
+	updatePeak()
+	return root, report, err, peak.Load()
+}
+
 // Counts branch records gone from the db table, so a latest read of them can
 // only come from the collated files.
 func pbinM1AFileServedRecords(t *testing.T, db kv.TemporalRwDB, records map[string][]byte) int {
@@ -404,9 +446,10 @@ func TestPBinM1ARebuildTreeKeyBatchesPreserveRecords(t *testing.T) {
 	collatedTxNum := pbinCollatedTxNum(t, rebuilt, kv.StorageDomain)
 	wantRoot := roots[collatedTxNum-1]
 	rebuilt, agg = pbinM1AWipeCommitment(t, rebuilt, agg, dirs, pbinM1AStepSize)
-	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), rebuilt, &rawdbv3.TxNums, log.New(), false,
-		state.RebuildTarget{PBinBatchOps: 3, PBinBatchBytes: 1024})
+	rebuiltRoot, report, err, peak := pbinM1AMeasuredRebuild(t, rebuilt, state.RebuildTarget{PBinBatchOps: 3, PBinBatchBytes: 1024})
 	require.NoError(t, err)
+	require.Positive(t, peak)
+	t.Logf("peak allocation: %d bytes", peak)
 	require.Equal(t, wantRoot, rebuiltRoot)
 	require.NotEmpty(t, report.Ranges)
 	require.NotEmpty(t, report.Ranges[0].Shards)
