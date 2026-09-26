@@ -80,4 +80,19 @@ func (t *registeredTrie) ProcessPBinFeed(ctx context.Context, feed *commitment.P
 	return append([]byte(nil), hash[:]...), nil
 }
 
+func (t *registeredTrie) ProcessPBinOps(ctx context.Context, ops []Op, onProgress func(*commitment.CommitProgress)) ([]byte, error) {
+	hash, err := t.Trie.ProcessParallelContext(ctx, ops, t.workers)
+	if err != nil {
+		return nil, err
+	}
+	if onProgress != nil {
+		onProgress(&commitment.CommitProgress{KeyIndex: uint64(len(ops)), UpdateCount: uint64(len(ops))})
+	}
+	return append([]byte(nil), hash[:]...), nil
+}
+
 func (t *registeredTrie) CodeStats() commitment.PBinCodeStats { return t.stats }
+
+func CodeStatsFromFeed(feed *commitment.PBinFeed) commitment.PBinCodeStats {
+	return feedCodeStats(feed)
+}

@@ -36,8 +36,10 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Sqeeze: ForeignKeys-aware compression of file
@@ -885,7 +887,9 @@ type RebuildTarget struct {
 	Variant  commitment.TrieVariant
 	HashName string // H for a bin target; empty keeps the suite this process selected
 	// MaxShardSteps caps how many steps one shard covers; 0 sizes it from the machine.
-	MaxShardSteps uint64
+	MaxShardSteps  uint64
+	PBinBatchOps   uint64
+	PBinBatchBytes uint64
 }
 
 // DefaultRebuildTarget is what a rebuild produces when the caller names no
@@ -1246,9 +1250,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				TxnTo:    rangeToTxNum,
 				Keys:     totalKeys,
 
-				BlockNumber: blockNum,
-				TxnNumber:   currentTxNum,
-				LogPrefix:   fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
+				BlockNumber:    blockNum,
+				TxnNumber:      currentTxNum,
+				LogPrefix:      fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
+				PBinBatchOps:   target.PBinBatchOps,
+				PBinBatchBytes: target.PBinBatchBytes,
 			})
 			if err != nil {
 				return nil, nil, err
@@ -1410,10 +1416,19 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	sf := time.Now()
 	var processed uint64
+	pbinKeys := make(map[string]struct{})
 	// next() signals "no more keys" as (false, nil) but a shard boundary as
 	// (false, key), so the key has to be checked separately from ok.
 	for ok, key, value := next(); ; ok, key, value = next() {
 		if len(key) > 0 {
+			if cfg.Variant == commitment.VariantBinPatriciaTrie {
+				pbinKeys[string(key)] = struct{}{}
+				processed++
+				if !ok {
+					break
+				}
+				continue
+			}
 			switch cfg.Variant {
 			case commitment.VariantCommitmentV3:
 				domain := kv.AccountsDomain
@@ -1437,14 +1452,84 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	}
 
 	collectionSpent := time.Since(sf)
-	rh, err := sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
-	if err != nil {
-		return nil, err
-	}
-
 	var codeStats commitment.PBinCodeStats
-	if trie, ok := sd.GetCommitmentCtx().Trie().(codeStatsTrie); ok {
-		codeStats = trie.CodeStats()
+	var rh []byte
+	var err error
+	if cfg.Variant == commitment.VariantBinPatriciaTrie {
+		for key := range sd.GetCommitmentCtx().GetUpdates().PlainKeys() {
+			pbinKeys[key] = struct{}{}
+		}
+		reader := commitmentdb.NewFilesOnlyStateReader(tx, cfg.TxnNumber)
+		addresses := make(map[string]struct{}, len(pbinKeys))
+		for key := range pbinKeys {
+			raw := []byte(key)
+			switch len(raw) {
+			case length.Addr:
+				addresses[key] = struct{}{}
+			case length.Addr + length.Hash:
+				addresses[string(raw[:length.Addr])] = struct{}{}
+			default:
+				return nil, fmt.Errorf("commitment rebuild: plain key has length %d", len(raw))
+			}
+		}
+		codeKeys := make(map[string]struct{}, len(addresses))
+		for address := range addresses {
+			encoded, _, err := reader.Read(kv.AccountsDomain, []byte(address), 1)
+			if err != nil {
+				return nil, err
+			}
+			if len(encoded) == 0 {
+				continue
+			}
+			account := new(accounts.Account)
+			if err := accounts.DeserialiseV3(account, encoded); err != nil {
+				return nil, err
+			}
+			if !account.IsEmptyCodeHash() {
+				codeKeys[address] = struct{}{}
+			}
+		}
+		feed, err := commitmentdb.BinFeedFromState(pbinKeys, codeKeys, nil, reader)
+		if err != nil {
+			return nil, err
+		}
+		codeStats = pbt.CodeStatsFromFeed(feed)
+		ops, err := pbt.TranslateFeed(feed)
+		if err != nil {
+			return nil, err
+		}
+		tmpDir, err := os.MkdirTemp("", "erigon-pbin-rebuild-")
+		if err != nil {
+			return nil, err
+		}
+		defer os.RemoveAll(tmpDir)
+		batchOps := pbinRebuildMaxOps
+		batchBytes := pbinRebuildMaxBytes
+		if cfg.PBinBatchOps != 0 {
+			batchOps = int(cfg.PBinBatchOps)
+		}
+		if cfg.PBinBatchBytes != 0 {
+			batchBytes = int(cfg.PBinBatchBytes)
+		}
+		batches, err := pbinRebuildBatches(ops, tmpDir, batchOps, batchBytes)
+		if err != nil {
+			return nil, err
+		}
+		for _, batch := range batches {
+			sd.GetCommitmentCtx().SetPBinOps(batch)
+			rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+			if err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+		if err != nil {
+			return nil, err
+		}
+		if trie, ok := sd.GetCommitmentCtx().Trie().(codeStatsTrie); ok {
+			codeStats = trie.CodeStats()
+		}
 	}
 
 	logger.Info(cfg.LogPrefix+" now sealing (dumping on disk)", "root", hex.EncodeToString(rh),
@@ -1480,18 +1565,82 @@ type codeStatsTrie interface {
 }
 
 type rebuiltCommitment struct {
-	Variant       commitment.TrieVariant
-	RootHash      []byte // root hash of this commitment. set once commit is finished
-	StepFrom      kv.Step
-	StepTo        kv.Step
-	TxnFrom       uint64
-	TxnTo         uint64
-	Keys          uint64 // amount of keys in this range
-	KeysProcessed uint64 // amount of keys this shard walked. set once commit is finished
-	CodeStats     commitment.PBinCodeStats
-	BlockNumber   uint64 // block number for this commitment
-	TxnNumber     uint64 // tx number for this commitment
-	LogPrefix     string
+	Variant        commitment.TrieVariant
+	RootHash       []byte // root hash of this commitment. set once commit is finished
+	StepFrom       kv.Step
+	StepTo         kv.Step
+	TxnFrom        uint64
+	TxnTo          uint64
+	Keys           uint64 // amount of keys in this range
+	KeysProcessed  uint64 // amount of keys this shard walked. set once commit is finished
+	CodeStats      commitment.PBinCodeStats
+	BlockNumber    uint64 // block number for this commitment
+	TxnNumber      uint64 // tx number for this commitment
+	LogPrefix      string
+	PBinBatchOps   uint64
+	PBinBatchBytes uint64
+}
+
+const (
+	pbinRebuildMaxOps   = 100_000
+	pbinRebuildMaxBytes = 64 << 20
+)
+
+func pbinRebuildBatches(ops []pbt.Op, tmpDir string, maxOps, maxBytes int) ([][]pbt.Op, error) {
+	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+	defer collector.Close()
+	for i := range ops {
+		key := ops[i].Key
+		if len(ops[i].Drop) != 0 {
+			key = ops[i].Drop
+		}
+		var index [8]byte
+		binary.BigEndian.PutUint64(index[:], uint64(i))
+		if err := collector.Collect(key, index[:]); err != nil {
+			return nil, err
+		}
+	}
+	ordered := make([]pbt.Op, 0, len(ops))
+	err := collector.Load(nil, "", func(_, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if len(value) != 8 {
+			return fmt.Errorf("commitment rebuild: invalid pbin operation index length %d", len(value))
+		}
+		index := binary.BigEndian.Uint64(value)
+		if index >= uint64(len(ops)) {
+			return fmt.Errorf("commitment rebuild: invalid pbin operation index %d", index)
+		}
+		ordered = append(ordered, ops[index])
+		return nil
+	}, etl.TransformArgs{})
+	if err != nil {
+		return nil, err
+	}
+	if maxOps <= 0 {
+		maxOps = len(ordered)
+	}
+	if maxBytes <= 0 {
+		maxBytes = int(^uint(0) >> 1)
+	}
+	if len(ordered) == 0 {
+		return nil, nil
+	}
+	batches := make([][]pbt.Op, 0, (len(ordered)+maxOps-1)/maxOps)
+	batchBytes := 0
+	for _, op := range ordered {
+		opBytes := len(op.Key) + len(op.Drop) + len(op.Value)
+		if len(batches) == 0 || len(batches[len(batches)-1]) == 0 {
+			batches = append(batches, nil)
+		}
+		current := batches[len(batches)-1]
+		if len(current) > 0 && (len(current) >= maxOps || batchBytes+opBytes > maxBytes) {
+			batches = append(batches, nil)
+			current = nil
+			batchBytes = 0
+		}
+		batches[len(batches)-1] = append(current, op)
+		batchBytes += opBytes
+	}
+	return batches, nil
 }
 
 func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {

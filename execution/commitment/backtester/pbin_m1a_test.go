@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -270,6 +271,35 @@ func pbinM1ABranchRecords(t *testing.T, db kv.TemporalRwDB) map[string][]byte {
 	return out
 }
 
+func pbinM1AAssertNewEngineRecords(t *testing.T, db kv.TemporalRwDB) {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	var state []byte
+	domains := []kv.Domain{kv.CommitmentDomain}
+	if provider, ok := tx.AggTx().(interface{ CommitmentDomains() []kv.Domain }); ok {
+		domains = provider.CommitmentDomains()
+	}
+	for _, domain := range domains {
+		it, err := tx.Debug().RangeLatest(domain, nil, nil, -1)
+		require.NoError(t, err)
+		for it.HasNext() {
+			key, value, err := it.Next()
+			require.NoError(t, err)
+			if commitment.IsCommitmentStateKey(key) {
+				state = bytes.Clone(value)
+				continue
+			}
+			_, err = pbt.DecodeRecord(key, value)
+			require.NoError(t, err)
+		}
+		it.Close()
+	}
+	require.NotEmpty(t, state)
+	require.NoError(t, pbt.ValidateEngineStateBlob(state))
+}
+
 // Counts branch records gone from the db table, so a latest read of them can
 // only come from the collated files.
 func pbinM1AFileServedRecords(t *testing.T, db kv.TemporalRwDB, records map[string][]byte) int {
@@ -356,6 +386,43 @@ func TestPBinM1AForwardRunMatchesRebuildFromDomains(t *testing.T) {
 		"the rebuilt files must carry a trie state that restores to the rebuilt root")
 	require.Equal(t, forwardRoot, pbinM1ARecomputeRoot(t, db),
 		"the rebuilt commitment records must fold back to the forward root")
+}
+
+func TestPBinM1ARebuildTreeKeyBatchesPreserveRecords(t *testing.T) {
+	pbinM1ABinVariant(t)
+	txCount := 4 * pbinM1AStepSize
+
+	incremental, incrementalAgg, incrementalDirs := pbinM1ANewDatadir(t, txCount)
+	pbinForwardRun(t, incremental, txCount, 0, txCount, pbinM1AFixture(), pbinM1ASlots)
+	require.NoError(t, incrementalAgg.BuildFiles(incremental, txCount, unboundedFinalityCtx))
+	incremental, _ = pbinM1AReopen(t, incremental, incrementalAgg, incrementalDirs, txCount)
+	wantRecords := pbinM1ABranchRecords(t, incremental)
+
+	rebuilt, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
+	roots, _ := pbinForwardRun(t, rebuilt, pbinM1AStepSize, 0, txCount, pbinM1AFixture(), pbinM1ASlots)
+	require.NoError(t, agg.BuildFiles(rebuilt, txCount, unboundedFinalityCtx))
+	collatedTxNum := pbinCollatedTxNum(t, rebuilt, kv.StorageDomain)
+	wantRoot := roots[collatedTxNum-1]
+	rebuilt, agg = pbinM1AWipeCommitment(t, rebuilt, agg, dirs, pbinM1AStepSize)
+	rebuiltRoot, report, err := state.RebuildCommitmentFiles(t.Context(), rebuilt, &rawdbv3.TxNums, log.New(), false,
+		state.RebuildTarget{PBinBatchOps: 3, PBinBatchBytes: 1024})
+	require.NoError(t, err)
+	require.Equal(t, wantRoot, rebuiltRoot)
+	require.NotEmpty(t, report.Ranges)
+	require.NotEmpty(t, report.Ranges[0].Shards)
+	require.NoError(t, agg.OpenFolder(rebuilt))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), rebuilt, 1))
+	gotRecords := pbinM1ABranchRecords(t, rebuilt)
+	wantKeys := make([]string, 0, len(wantRecords))
+	gotKeys := make([]string, 0, len(gotRecords))
+	for key := range wantRecords {
+		wantKeys = append(wantKeys, key)
+	}
+	for key := range gotRecords {
+		gotKeys = append(gotKeys, key)
+	}
+	require.ElementsMatch(t, wantKeys, gotKeys)
+	pbinM1AAssertNewEngineRecords(t, rebuilt)
 }
 
 // The second half touches only its own keys, so the root can only come out right

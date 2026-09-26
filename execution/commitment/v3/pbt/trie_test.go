@@ -156,6 +156,44 @@ func TestTriePersistsEveryChangedRow(t *testing.T) {
 	assertPersistedTrie(t, ctx, entries)
 }
 
+func TestTrieBatchReadsOnlyPreviousRightEdge(t *testing.T) {
+	keyA := trieCodeKey(0, 0, 1)
+	keyB := trieCodeKey(0x10, 0, 2)
+	keyC := trieCodeKey(0x20, 0, 3)
+	first := []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}}
+	ctx := newTrieTestContext()
+	requireProcess(t, ctx, first)
+
+	ctx.mu.Lock()
+	previous := make(map[string][]byte, len(ctx.records))
+	for key, value := range ctx.records {
+		previous[key] = bytes.Clone(value)
+	}
+	ctx.reads = nil
+	ctx.mu.Unlock()
+	requireProcess(t, ctx, []Op{{Key: keyC, Value: testTrieValue(3)}})
+
+	keyPath, err := keyPath(keyC)
+	require.NoError(t, err)
+	rightEdge := make(map[string]struct{})
+	for key := range previous {
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		if bytes.Equal([]byte(key), GlobalRootKey()) || err == nil && keyPath.HasPrefix(&path) {
+			rightEdge[key] = struct{}{}
+		}
+	}
+	ctx.mu.Lock()
+	reads := append([][]byte(nil), ctx.reads...)
+	ctx.mu.Unlock()
+	for _, read := range reads {
+		if _, existed := previous[string(read)]; existed {
+			_, allowed := rightEdge[string(read)]
+			require.True(t, allowed, "read completed row %x outside right edge", read)
+		}
+	}
+	require.Len(t, reads, len(rightEdge))
+}
+
 func TestTriePersistsPrefixSplitRows(t *testing.T) {
 	tests := []struct {
 		name    string

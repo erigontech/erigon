@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
-	_ "github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -74,6 +74,7 @@ type SharedDomainsCommitmentContext struct {
 	codeKeys         map[string]struct{}
 	feed             *commitment.Feed
 	pbinFeed         *commitment.PBinFeed
+	pbinOps          []pbt.Op
 	patriciaTrie     commitment.Trie
 	variant          commitment.TrieVariant
 	justRestored     atomic.Bool
@@ -281,6 +282,10 @@ func (sdc *SharedDomainsCommitmentContext) SetFeed(feed *commitment.Feed) {
 
 func (sdc *SharedDomainsCommitmentContext) SetPBinFeed(feed *commitment.PBinFeed) {
 	sdc.pbinFeed = feed
+}
+
+func (sdc *SharedDomainsCommitmentContext) SetPBinOps(ops []pbt.Op) {
+	sdc.pbinOps = ops
 }
 
 func (sdc *SharedDomainsCommitmentContext) SetMetricsEnabled(enabled bool) {
@@ -582,6 +587,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	defer func() {
 		sdc.ResetCodeKeys()
 		sdc.pbinFeed = nil
+		sdc.pbinOps = nil
 	}()
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
@@ -608,11 +614,15 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	sdc.feed = nil
 	pbinFeed := sdc.pbinFeed
 	sdc.pbinFeed = nil
+	pbinOps := sdc.pbinOps
+	sdc.pbinOps = nil
 	updateCount := sdc.updates.Size()
 	if feed != nil {
 		updateCount = uint64(feed.Keys)
 	} else if pbinFeed != nil {
 		updateCount = uint64(len(pbinFeed.Accounts))
+	} else if pbinOps != nil {
+		updateCount = uint64(len(pbinOps))
 	}
 	start := time.Now()
 	defer func() {
@@ -652,7 +662,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		activeContext = decorate(activeContext)
 		sdc.patriciaTrie.ResetContext(activeContext)
 	}
-	if sdc.variant == commitment.VariantBinPatriciaTrie && pbinFeed == nil {
+	if sdc.variant == commitment.VariantBinPatriciaTrie && pbinFeed == nil && pbinOps == nil {
 		pbinFeed, err = BinFeedFromState(sdc.updates.PlainKeys(), sdc.CodeKeys(), nil, trieContext.stateReader)
 		if err != nil {
 			return nil, err
@@ -767,13 +777,23 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 
 	switch {
 	case sdc.variant == commitment.VariantBinPatriciaTrie:
-		processor, ok := sdc.patriciaTrie.(interface {
-			ProcessPBinFeed(context.Context, *commitment.PBinFeed, func(*commitment.CommitProgress)) ([]byte, error)
-		})
-		if ok {
-			rootHash, err = processor.ProcessPBinFeed(ctx, pbinFeed, onProgress)
+		if pbinOps != nil {
+			processor, ok := sdc.patriciaTrie.(interface {
+				ProcessPBinOps(context.Context, []pbt.Op, func(*commitment.CommitProgress)) ([]byte, error)
+			})
+			if !ok {
+				return nil, errors.New("pbin: trie does not process operations")
+			}
+			rootHash, err = processor.ProcessPBinOps(ctx, pbinOps, onProgress)
 		} else {
-			rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+			processor, ok := sdc.patriciaTrie.(interface {
+				ProcessPBinFeed(context.Context, *commitment.PBinFeed, func(*commitment.CommitProgress)) ([]byte, error)
+			})
+			if ok {
+				rootHash, err = processor.ProcessPBinFeed(ctx, pbinFeed, onProgress)
+			} else {
+				rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+			}
 		}
 	case feed != nil:
 		rootHash, err = sdc.patriciaTrie.(v3Trie).ProcessFeed(ctx, feed, onProgress)
