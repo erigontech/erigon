@@ -162,9 +162,7 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
 
-	makeBuffer := func(n int, sorted bool) *sortableBuffer {
-		buf := NewSortableBuffer(256 * 1024 * 1024)
-		buf.Prealloc(n, n*(keyLen+valLen))
+	fill := func(buf *sortableBuffer, n int, sorted bool) {
 		key := make([]byte, keyLen)
 		val := make([]byte, valLen)
 		for i := range n {
@@ -179,7 +177,6 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 			binary.BigEndian.PutUint64(val, uint64(i))
 			buf.Put(key, val)
 		}
-		return buf
 	}
 
 	for _, tc := range []struct {
@@ -194,11 +191,18 @@ func BenchmarkSortableBufferSort(b *testing.B) {
 	} {
 		b.Run(tc.name, func(b *testing.B) {
 			b.ReportAllocs()
+			// One buffer: a fresh one per round would time the previous
+			// rounds' GC.
+			ref := NewSortableBuffer(256 * 1024 * 1024)
+			ref.Prealloc(tc.count, tc.count*(keyLen+valLen))
 			for b.Loop() {
 				b.StopTimer()
-				ref := makeBuffer(tc.count, tc.sorted)
+				ref.Reset()
+				fill(ref, tc.count, tc.sorted)
 				b.StartTimer()
 				ref.Sort()
+				for _, _, ok := ref.Next(); ok; _, _, ok = ref.Next() {
+				}
 			}
 		})
 	}
@@ -357,10 +361,10 @@ func BenchmarkSortableBufferRead(b *testing.B) {
 				binary.BigEndian.PutUint64(val, uint64(i))
 				buf.Put(key, val)
 			}
-			buf.Sort()
+			buf.Sort() // once: an iteration is the rewind plus the read
 			b.ResetTimer()
 			for b.Loop() {
-				buf.at = 0 // rewind; Sort would re-check sortedness first
+				buf.Sort()
 				for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
 				}
 			}
@@ -433,7 +437,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 			b.Run(name+"/Next", func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					buf.at = 0
+					buf.Sort()
 					p := &memoryDataProvider{buffer: buf}
 					for {
 						_, _, err := p.Next()
@@ -450,7 +454,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 			b.Run(name+"/Buffer", func(b *testing.B) {
 				b.ReportAllocs()
 				for i := 0; i < b.N; i++ {
-					buf.at = 0
+					buf.Sort()
 					for _, _, ok := buf.Next(); ok; _, _, ok = buf.Next() {
 					}
 				}
