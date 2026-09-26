@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -55,6 +56,34 @@ func TestOtsGetBlockTransactionsPaging(t *testing.T) {
 			}
 			assert.Equal(t, wantTxs, gotTxs, "block %d, page size %d", block.NumberU64(), pageSize)
 			assert.Equal(t, wantReceipts, gotReceipts, "block %d, page size %d", block.NumberU64(), pageSize)
+		}
+	}
+}
+
+// Each page carries the transactions eth_getBlockByNumber returns for the same
+// positions, with the input cut to the 4-byte selector.
+func TestOtsGetBlockTransactionsPageContent(t *testing.T) {
+	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
+
+	for _, block := range chain.Blocks {
+		want := ethapi.RPCMarshalBlock(block, true, true).Transactions.([]*ethapi.RPCTransaction)
+		for _, rpcTx := range want {
+			if len(rpcTx.Input) >= 4 {
+				rpcTx.Input = rpcTx.Input[:4]
+			}
+		}
+		for page := range want {
+			res, err := api.GetBlockTransactions(m.Ctx, rpc.BlockNumber(block.NumberU64()), uint8(page), 1)
+			require.NoError(t, err)
+			fullblock := res["fullblock"].(*ethapi.RPCBlock)
+			i := len(want) - 1 - page
+			wantJSON, err := json.Marshal(want[i : i+1])
+			require.NoError(t, err)
+			gotJSON, err := json.Marshal(fullblock.Transactions)
+			require.NoError(t, err)
+			assert.JSONEq(t, string(wantJSON), string(gotJSON), "block %d, page %d", block.NumberU64(), page)
+			assert.Equal(t, uint64(len(want)), *fullblock.TransactionCount, "block %d", block.NumberU64())
 		}
 	}
 }
