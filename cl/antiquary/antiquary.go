@@ -482,19 +482,19 @@ const caplinSnapshotBuildSemaWeight int64 = 1
 // time, since EL retirement sizes its own workers from the same estimate of the host. A limiter it
 // cannot take drops the dump to one worker rather than skipping it: the blob gate stays shut until
 // the whole range lands, so retiring slowly beats not retiring.
-func (a *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
+func (s *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
 	noop := func() {}
 	if !isBlobBacklog(from, to) {
 		return 1, noop
 	}
-	if a.snBuildSema == nil {
+	if s.snBuildSema == nil {
 		return estimate.CompressSnapshot.Workers(), noop
 	}
-	if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+	if !s.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
 		return 1, noop
 	}
 	return estimate.CompressSnapshot.Workers(), func() {
-		a.snBuildSema.Release(caplinSnapshotBuildSemaWeight)
+		s.snBuildSema.Release(caplinSnapshotBuildSemaWeight)
 	}
 }
 
