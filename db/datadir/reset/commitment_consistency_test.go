@@ -225,3 +225,23 @@ func TestResetJudgesTheHighestVersionOfEachDomain(t *testing.T) {
 		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
 	})
 }
+
+// A version this build cannot read is skipped when the domain is opened, so it must not stand in
+// for the file that will be. Here an unreadable v3.0 commitment would otherwise mask the v2.1 one
+// that runtime selects, which does carry offsets.
+func TestResetIgnoresVersionsTheSchemaCannotSelect(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{
+			{Name: "snapshots/domain/v3.0-commitment.0-256.kv"}, // newer major: never opened
+			{Name: "snapshots/domain/v2.1-commitment.0-256.kv"}, // the one that is
+		}
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{{Name: "domain/v2.0-accounts.0-256.kv"}}
+		r.PreverifiedSnapshots.Sort()
+		err := r.Run()
+		qt.Assert(t, qt.IsNotNil(err))
+		qt.Assert(t, qt.StringContains(err.Error(), "0-256"))
+	})
+}

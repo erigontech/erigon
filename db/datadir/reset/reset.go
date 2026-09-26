@@ -14,6 +14,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/preverified"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
 
 	g "github.com/anacrolix/generics"
@@ -67,6 +68,20 @@ func (b *domainBuild) referenced() bool {
 	return state.CommitmentBranchReferenced(b.ver, 1, b.fromStep, b.toStep)
 }
 
+// supportedKVVersions gives the .kv versions a domain can be opened with. Anything outside them is
+// skipped when the domain is loaded, so it cannot be the file a range ends up using.
+func supportedKVVersions(domain string) (version.Versions, bool) {
+	switch domain {
+	case "accounts":
+		return statecfg.Schema.AccountsDomain.FileVersion.DataKV, true
+	case "storage":
+		return statecfg.Schema.StorageDomain.FileVersion.DataKV, true
+	case "commitment":
+		return statecfg.Schema.CommitmentDomain.FileVersion.DataKV, true
+	}
+	return version.Versions{}, false
+}
+
 // checkStateBuilds reports step ranges whose commitment file would end up from a different build
 // than its accounts/storage files.
 //
@@ -100,6 +115,10 @@ func (reset *Reset) checkStateBuilds() error {
 			return
 		}
 		stepRange, domain := m[3]+"-"+m[4], m[2]
+		supported, ok := supportedKVVersions(domain)
+		if !ok || !supported.Supports(ver) {
+			return
+		}
 		if builds[stepRange] == nil {
 			builds[stepRange] = map[string]*domainBuild{}
 		}
