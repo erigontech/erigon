@@ -226,8 +226,10 @@ func IsCommitmentStateKey(key []byte) bool {
 	return bytes.Equal(key, KeyCommitmentV3State) || bytes.Equal(key, KeyCommitmentState)
 }
 
-var NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
-var NewCommitmentBinTrie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+var (
+	NewCommitmentV3Trie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+	NewCommitmentBinTrie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+)
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
