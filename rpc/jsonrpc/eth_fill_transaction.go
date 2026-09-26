@@ -90,6 +90,14 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		return nil, errors.New(`both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`)
 	}
 
+	if args.Blobs != nil && args.AuthorizationList != nil {
+		return nil, errors.New("both blobs and authorizationList specified")
+	}
+	sidecar, err := buildBlobSidecar(&args, cc.IsOsaka(head.Time))
+	if err != nil {
+		return nil, err
+	}
+
 	if args.BlobVersionedHashes != nil {
 		if n := len(args.BlobVersionedHashes); n == 0 {
 			return nil, errors.New("need at least 1 blob for a blob transaction")
@@ -156,14 +164,108 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 
 	var buf bytes.Buffer
-	if err := txn.MarshalBinary(&buf); err != nil {
+	if sidecar != nil {
+		sidecar = txn.(*types.BlobTx).WithSidecar(sidecar)
+		err = sidecar.MarshalBinaryWrapped(&buf)
+	} else {
+		err = txn.MarshalBinary(&buf)
+	}
+	if err != nil {
 		return nil, err
 	}
-
 	return &ethapi.SignTransactionResult{
-		Raw: buf.Bytes(),
-		Tx:  ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil),
+		Raw:     buf.Bytes(),
+		Tx:      ethapi.NewRPCTransaction(txn, common.Hash{}, 0, 0, 0, nil),
+		Sidecar: sidecar,
 	}, nil
+}
+
+// buildBlobSidecar computes the missing commitments, proofs and versioned hashes
+// from args.Blobs, or verifies the provided ones. It returns nil when no blobs are given.
+func buildBlobSidecar(args *ethapi.CallArgs, cellProofs bool) (*types.BlobTxWrapper, error) {
+	if args.Blobs == nil {
+		return nil, nil
+	}
+	if args.Commitments == nil && args.Proofs != nil {
+		return nil, errors.New("blob proofs provided while commitments were not")
+	} else if args.Commitments != nil && args.Proofs == nil {
+		return nil, errors.New("blob commitments provided while proofs were not")
+	}
+
+	n := len(args.Blobs)
+	if n > params.MaxBlobsPerTxn {
+		return nil, fmt.Errorf("too many blobs in transaction (have=%d, max=%d)", n, params.MaxBlobsPerTxn)
+	}
+	if args.BlobVersionedHashes != nil && len(args.BlobVersionedHashes) != n {
+		return nil, fmt.Errorf("number of blobs and hashes mismatch (have=%d, want=%d)", len(args.BlobVersionedHashes), n)
+	}
+	if args.Commitments != nil && len(args.Commitments) != n {
+		return nil, fmt.Errorf("number of blobs and commitments mismatch (have=%d, want=%d)", len(args.Commitments), n)
+	}
+	sidecar := &types.BlobTxWrapper{Blobs: make(types.Blobs, n)}
+	proofLen := n
+	if cellProofs {
+		sidecar.WrapperVersion = 1
+		proofLen = n * int(params.CellsPerExtBlob)
+	}
+	commitments, proofs := args.Commitments, args.Proofs
+	if proofs != nil && len(proofs) != proofLen {
+		if len(proofs) != n {
+			return nil, fmt.Errorf("number of blobs and proofs mismatch (have=%d, want=%d)", len(proofs), proofLen)
+		}
+		// Blob proofs from pre-Osaka tooling are replaced by freshly computed cell proofs.
+		commitments, proofs = nil, nil
+	}
+
+	for i, blob := range args.Blobs {
+		if len(blob) != params.BlobSize {
+			return nil, fmt.Errorf("blobs[%d]: invalid length %d, want %d", i, len(blob), params.BlobSize)
+		}
+		copy(sidecar.Blobs[i][:], blob)
+	}
+
+	var err error
+	if commitments == nil {
+		if sidecar.Commitments, _, sidecar.Proofs, err = sidecar.Blobs.ComputeCommitmentsAndProofs(); err != nil {
+			return nil, err
+		}
+		if cellProofs {
+			if sidecar.Proofs, err = sidecar.Blobs.ComputeCellProofs(); err != nil {
+				return nil, err
+			}
+		}
+	} else {
+		if sidecar.Commitments, err = parse48[types.KZGCommitment]("commitments", commitments); err != nil {
+			return nil, err
+		}
+		if sidecar.Proofs, err = parse48[types.KZGProof]("proofs", proofs); err != nil {
+			return nil, err
+		}
+		if err := sidecar.VerifyProofs(); err != nil {
+			return nil, fmt.Errorf("failed to verify blob proof: %w", err)
+		}
+	}
+
+	hashes := make([]common.Hash, n)
+	for i, c := range sidecar.Commitments {
+		hashes[i] = c.ComputeVersionedHash()
+		if len(args.BlobVersionedHashes) == n && args.BlobVersionedHashes[i] != hashes[i] {
+			return nil, fmt.Errorf("blob hash verification failed (have=%s, want=%s)", args.BlobVersionedHashes[i], hashes[i])
+		}
+	}
+	args.BlobVersionedHashes = hashes
+	return sidecar, nil
+}
+
+func parse48[T ~[types.LEN_48]byte](field string, in []hexutil.Bytes) ([]T, error) {
+	out := make([]T, len(in))
+	for i, b := range in {
+		if len(b) != types.LEN_48 {
+			return nil, fmt.Errorf("%s[%d]: invalid length %d, want %d", field, i, len(b), types.LEN_48)
+		}
+		copy(out[i][:], b)
+	}
+	return out, nil
 }
 
 func (api *APIImpl) newGasOracle(dbTx kv.TemporalTx) *gasprice.Oracle {

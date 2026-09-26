@@ -221,6 +221,22 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	return commitments, versionedHashes, proofs, nil
 }
 
+// ComputeCellProofs returns the EIP-7594 cell proofs of the blobs, CellsPerExtBlob per blob.
+func (blobs Blobs) ComputeCellProofs() (KZGProofs, error) {
+	kzgCtx := libkzg.Ctx()
+	cellProofs := make(KZGProofs, 0, len(blobs)*int(params.CellsPerExtBlob))
+	for i := range blobs {
+		_, proofs, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&blobs[i]), 4)
+		if err != nil {
+			return nil, fmt.Errorf("compute cell proofs for blob %d: %w", i, err)
+		}
+		for _, p := range &proofs {
+			cellProofs = append(cellProofs, KZGProof(p))
+		}
+	}
+	return cellProofs, nil
+}
+
 func toBlobs(_blobs Blobs) []*goethkzg.Blob {
 	blobs := make([]*goethkzg.Blob, len(_blobs))
 	for i := range _blobs {
@@ -250,6 +266,24 @@ func (c KZGCommitment) ComputeVersionedHash() common.Hash {
 }
 
 /* BlobTxWrapper methods */
+
+// WithSidecar returns a copy of stx wrapped with the sidecar of sc.
+func (stx *BlobTx) WithSidecar(sc *BlobTxWrapper) *BlobTxWrapper {
+	return &BlobTxWrapper{Tx: stx.copyData(), WrapperVersion: sc.WrapperVersion, Blobs: sc.Blobs, Commitments: sc.Commitments, Proofs: sc.Proofs}
+}
+
+// VerifyProofs checks the KZG proofs against the blobs and commitments: cell proofs
+// for wrapper version 1, one blob proof per blob otherwise.
+func (txw *BlobTxWrapper) VerifyProofs() error {
+	if txw.WrapperVersion == 1 {
+		blobs := make([][]byte, len(txw.Blobs))
+		for i := range txw.Blobs {
+			blobs[i] = txw.Blobs[i][:]
+		}
+		return libkzg.VerifyCellProofBatch(blobs, toComms(txw.Commitments), toProofs(txw.Proofs))
+	}
+	return libkzg.Ctx().VerifyBlobKZGProofBatch(toBlobs(txw.Blobs), toComms(txw.Commitments), toProofs(txw.Proofs))
+}
 
 // validateBlobTransactionWrapper implements validate_blob_transaction_wrapper from EIP-4844
 func (txw *BlobTxWrapper) ValidateBlobTransactionWrapper() error {
@@ -445,17 +479,9 @@ func (txw *BlobTxWrapper) MarshalBinaryWrapped(w io.Writer) error {
 // Returns the re-encoded wrapped transaction bytes.
 // TODO: remove once ecosystem tooling fully supports wrapper_version=1.
 func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
-	kzgCtx := libkzg.Ctx()
-
-	cellProofs := make(KZGProofs, 0, len(txw.Blobs)*int(goethkzg.CellsPerExtBlob))
-	for i := range txw.Blobs {
-		_, proofs, err := kzgCtx.ComputeCellsAndKZGProofs((*goethkzg.Blob)(&txw.Blobs[i]), 4)
-		if err != nil {
-			return nil, fmt.Errorf("compute cell proofs for blob %d: %w", i, err)
-		}
-		for _, p := range &proofs {
-			cellProofs = append(cellProofs, KZGProof(p))
-		}
+	cellProofs, err := txw.Blobs.ComputeCellProofs()
+	if err != nil {
+		return nil, err
 	}
 
 	// Mutate in-place for marshalling, then restore.
@@ -465,7 +491,7 @@ func (txw *BlobTxWrapper) ConvertToV1() ([]byte, error) {
 	txw.Proofs = cellProofs
 
 	var buf bytes.Buffer
-	err := txw.MarshalBinaryWrapped(&buf)
+	err = txw.MarshalBinaryWrapped(&buf)
 
 	txw.WrapperVersion = origVersion
 	txw.Proofs = origProofs
