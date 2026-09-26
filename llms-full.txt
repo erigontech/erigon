@@ -6904,7 +6904,7 @@ Returns traces matching given filter
    - `toAddress`: `Array` - (optional) Sent to these addresses.
    - `after`: `Quantity` - (optional) The offset trace number
    - `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
-   - `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list and preserve the previous behavior when both lists are set. Other mode values, including `""` and `null`, return `-32602`.
+   - `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list and preserve the previous behavior when both lists are set. A `null` mode is the same as an omitted one. Other mode values, including `""`, return `-32602`.
 
    The `'pending'` tag is not supported for either block bound: `trace_filter` scans committed trace history, which has no pending block.
 

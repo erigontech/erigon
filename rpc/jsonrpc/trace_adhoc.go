@@ -73,8 +73,8 @@ type TraceCallParam struct {
 	MaxFeePerGas         *hexutil.U256     `json:"maxFeePerGas"`
 	MaxFeePerBlobGas     *hexutil.U256     `json:"maxFeePerBlobGas"`
 	Value                *hexutil.U256     `json:"value"`
-	Data                 hexutil.Bytes     `json:"data"`
-	Input                hexutil.Bytes     `json:"input"`
+	Data                 *hexutil.Bytes    `json:"data"`
+	Input                *hexutil.Bytes    `json:"input"`
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
 	traceTypes           []string
@@ -84,6 +84,16 @@ type TraceCallParam struct {
 	ChainID             *hexutil.U256             `json:"chainId"`
 	BlobVersionedHashes []common.Hash             `json:"blobVersionedHashes"`
 	AuthorizationList   []types.JsonAuthorization `json:"authorizationList"`
+}
+
+// UnmarshalJSON decodes a call object and rejects one whose data and input disagree, as
+// ethapi.CallArgs does.
+func (args *TraceCallParam) UnmarshalJSON(raw []byte) error {
+	type traceCallParam TraceCallParam
+	if err := json.Unmarshal(raw, (*traceCallParam)(args)); err != nil {
+		return err
+	}
+	return ethapi.CheckCallData(args.Data, args.Input)
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -227,9 +237,9 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	}
 	var data []byte
 	if args.Input != nil {
-		data = args.Input
+		data = *args.Input
 	} else if args.Data != nil {
-		data = args.Data
+		data = *args.Data
 	}
 	var accessList types.AccessList
 	if args.AccessList != nil {

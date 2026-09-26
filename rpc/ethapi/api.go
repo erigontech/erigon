@@ -20,6 +20,7 @@
 package ethapi
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc"
 )
 
 // CallArgs represents the arguments for a call.
@@ -55,6 +57,24 @@ type CallArgs struct {
 	ChainID              *hexutil.U256             `json:"chainId,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
+}
+
+// UnmarshalJSON decodes a call object and rejects one whose data and input disagree.
+func (args *CallArgs) UnmarshalJSON(raw []byte) error {
+	type callArgs CallArgs
+	if err := json.Unmarshal(raw, (*callArgs)(args)); err != nil {
+		return err
+	}
+	return CheckCallData(args.Data, args.Input)
+}
+
+// CheckCallData rejects a call object whose data and input are both set and differ, as
+// invalid params. Either one alone, or both with the same value, gives the call data.
+func CheckCallData(data, input *hexutil.Bytes) error {
+	if data != nil && input != nil && !bytes.Equal(*data, *input) {
+		return &rpc.InvalidParamsError{Message: `both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`}
+	}
+	return nil
 }
 
 func (args *CallArgs) FromOrEmpty() accounts.Address {

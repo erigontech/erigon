@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -996,7 +997,7 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 	}
 }
 
-// Call data takes the same data/input precedence as eth_call: input wins when both are set.
+// Call data comes from data or input, as in eth_call. Both may be set only to the same value.
 func TestTraceCallInputField(t *testing.T) {
 	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
 	api := newTraceApiForTest(m)
@@ -1018,11 +1019,21 @@ func TestTraceCallInputField(t *testing.T) {
 		{name: "data", fields: `"data":"0xaa"`, output: "0xaa"},
 		{name: "input", fields: `"input":"0xbb"`, output: "0xbb"},
 		{name: "equal", fields: `"data":"0xcc","input":"0xcc"`, output: "0xcc"},
-		{name: "input wins", fields: `"data":"0xaa","input":"0xbb"`, output: "0xbb"},
+		{name: "differ", fields: `"data":"0xaa","input":"0xbb"`},
+		{name: "empty input", fields: `"data":"0xaa","input":"0x"`},
+		{name: "null input", fields: `"data":"0xaa","input":null`, output: "0xaa"},
+		{name: "null data", fields: `"data":null,"input":"0xbb"`, output: "0xbb"},
+		{name: "both null", fields: `"data":null,"input":null`, output: "0x"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var args TraceCallParam
 			call := fmt.Sprintf(`{"from":%q,"to":%q,%s}`, bankAddr.Hex(), echo.Hex(), tc.fields)
+			if tc.output == "" {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, json.Unmarshal([]byte(call), &args), &rpcErr)
+				require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+				return
+			}
 			require.NoError(t, json.Unmarshal([]byte(call), &args))
 
 			result, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, traceConfig)
@@ -1045,6 +1056,91 @@ func TestCallManyInputField(t *testing.T) {
 	created, ok := results[0].Trace[0].Result.(*CreateTraceResult)
 	require.True(t, ok)
 	require.Equal(t, "0x602a60005260206000f3", created.Code.String())
+}
+
+// An explicit null for an optional call-object member is the same as omitting it, in both
+// trace_call and trace_callMany. A null to keeps its meaning: the call creates a contract.
+func TestTraceCallNullMembers(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	traceCall := func(t *testing.T, call map[string]any) json.RawMessage {
+		t.Helper()
+		var result json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &result, "trace_call", call, []string{TraceTypeTrace}, "latest"))
+		return result
+	}
+	traceCallMany := func(t *testing.T, call map[string]any) json.RawMessage {
+		t.Helper()
+		var results []json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &results, "trace_callMany", [][]any{{call, []string{TraceTypeTrace}}}, "latest"))
+		require.Len(t, results, 1)
+		return results[0]
+	}
+
+	// A contract creation whose init code returns the word 42.
+	const initCode = "0x602a60005260206000f3"
+	full := map[string]any{
+		"from": bankAddr, "gas": "0x493e0", "maxFeePerGas": "0x77359400", "maxPriorityFeePerGas": "0x0",
+		"value": "0x0", "data": initCode, "accessList": []any{}, "nonce": "0x0",
+		"chainId": hexutil.Uint64(m.ChainConfig.ChainID.Uint64()),
+	}
+	// Members absent from the base call: setting them to null must not change it.
+	nullOnly := []string{"to", "input", "gasPrice", "maxFeePerBlobGas", "blobVersionedHashes", "authorizationList", "type"}
+	for name, trace := range map[string]func(*testing.T, map[string]any) json.RawMessage{"trace_call": traceCall, "trace_callMany": traceCallMany} {
+		t.Run(name, func(t *testing.T) {
+			var want struct {
+				Output hexutil.Bytes `json:"output"`
+				Trace  []struct {
+					Type string `json:"type"`
+				} `json:"trace"`
+			}
+			require.NoError(t, json.Unmarshal(trace(t, full), &want))
+			require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", want.Output.String())
+			require.Equal(t, "create", want.Trace[0].Type)
+
+			for member := range full {
+				t.Run(member, func(t *testing.T) {
+					omitted := maps.Clone(full)
+					delete(omitted, member)
+					null := maps.Clone(omitted)
+					null[member] = nil
+					require.JSONEq(t, string(trace(t, omitted)), string(trace(t, null)))
+				})
+			}
+			for _, member := range nullOnly {
+				t.Run(member, func(t *testing.T) {
+					null := maps.Clone(full)
+					null[member] = nil
+					require.JSONEq(t, string(trace(t, full)), string(trace(t, null)))
+				})
+			}
+			t.Run("calldata in input", func(t *testing.T) {
+				input := maps.Clone(full)
+				delete(input, "data")
+				input["input"] = initCode
+				null := maps.Clone(input)
+				null["data"] = nil
+				require.JSONEq(t, string(trace(t, full)), string(trace(t, input)))
+				require.JSONEq(t, string(trace(t, input)), string(trace(t, null)))
+			})
+			t.Run("all", func(t *testing.T) {
+				null := map[string]any{"data": initCode}
+				for _, member := range nullOnly {
+					null[member] = nil
+				}
+				for member := range full {
+					if member != "data" {
+						null[member] = nil
+					}
+				}
+				require.JSONEq(t, string(trace(t, map[string]any{"data": initCode})), string(trace(t, null)))
+			})
+		})
+	}
 }
 
 // runtimeReturningOpcode returns the given zero-argument opcode's value as a

@@ -108,7 +108,7 @@ var TraceOpts = struct {
 func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args ethapi.CallArgs, traceOpts ...TraceOpt) (*TraceCallResult, error) {
 	var b TraceCall
 
-	if args.Data == nil {
+	if args.Data == nil && args.Input == nil {
 		args.Data = &hexutil.Bytes{}
 	}
 
