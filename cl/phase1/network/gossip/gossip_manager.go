@@ -21,9 +21,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"strconv"
 	"strings"
-	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -145,29 +146,32 @@ type GossipManager struct {
 	// pause a queued job at a known point.
 	publishHookForTest func(name string, data []byte)
 	// enqueueHookForTest, when non-nil, runs inside PublishBackground
-	// immediately before it enqueues, while still holding shutdownMu's
-	// RLock. Tests use it to pause a producer at the exact point a shutdown
-	// race must close.
+	// immediately before it enqueues, while still registered in
+	// admissionsInFlight. Tests use it to pause a producer at the exact
+	// point a shutdown race must close.
 	enqueueHookForTest func()
 	// shutdownObservedHookForTest, when non-nil, runs inside publishWorker
-	// the instant it observes ctx.Done(), before it contends for
-	// shutdownMu in drainPublishQueueOnShutdown. Tests use it as a
-	// deterministic signal that the worker has committed to shutdown,
-	// instead of yielding the scheduler and hoping.
+	// the instant it observes ctx.Done(), before drainPublishQueueOnShutdown
+	// closes admission. Tests use it as a deterministic signal that the
+	// worker has committed to shutdown, instead of yielding the scheduler
+	// and hoping.
 	shutdownObservedHookForTest func()
 	// drainItemHookForTest, when non-nil, runs inside
-	// drainPublishQueueOnShutdown once per buffered job it accounts for,
-	// while still holding shutdownMu's exclusive lock. Tests use it to hold
-	// a drain in progress and observe whether a concurrent PublishBackground
-	// call blocks on it.
+	// drainPublishQueueOnShutdown once per buffered job it accounts for.
+	// Tests use it to hold a drain in progress and observe whether a
+	// concurrent PublishBackground call blocks on it.
 	drainItemHookForTest func()
 
 	// lifetimeCtx is the context the worker watches, cancelled by Close or
-	// by NewGossipManager's parent context ending. shutdownMu pairs
-	// PublishBackground's check against it with the worker's shutdown
-	// drain; see drainPublishQueueOnShutdown for why.
+	// by NewGossipManager's parent context ending.
 	lifetimeCtx context.Context
-	shutdownMu  sync.RWMutex
+	// admissionsInFlight/shutdownClosed form a closeable gate: a producer
+	// registers, checks shutdownClosed, and unregisters - never blocking.
+	// The shutdown drain sets shutdownClosed, then waits for
+	// admissionsInFlight to reach zero before touching the queue, so a
+	// producer that registered just before is still accounted for.
+	admissionsInFlight atomic.Int64
+	shutdownClosed     atomic.Bool
 	// For graceful shutdown
 	cancel context.CancelFunc
 }
@@ -422,31 +426,21 @@ func (g *GossipManager) rejectShutdown(name string, logCtx []any) error {
 
 // PublishBackground queues data for asynchronous publish to the given
 // gossip topic without waiting for the network call: the actual publish
-// runs on this GossipManager's own background worker. It does not block on
-// queue capacity, and a shutdown already observed by this call is a
-// lock-free fast path; it does still take a lock (briefly - no I/O under
-// it), resolve the fork digest, and log synchronously. The fork digest is
-// captured now, at enqueue time, rather than re-resolved when the worker
-// drains the job, so a message accepted just before a fork activates still
-// publishes to the topic it was validated against.
+// runs on this GossipManager's own background worker. It never blocks the
+// caller - not on queue capacity, and not on a shutdown drain in progress -
+// though it does resolve the fork digest and log synchronously. The fork
+// digest is captured now, at enqueue time, rather than re-resolved when the
+// worker drains the job, so a message accepted just before a fork activates
+// still publishes to the topic it was validated against.
 //
 // A non-nil return means the message was never admitted: the caller learns
 // this before it responds, rather than it being invisible behind an HTTP
 // 200. expiry, if non-zero, is the latest time this message is still worth
 // publishing - checked here and again just before the actual publish.
 func (g *GossipManager) PublishBackground(name string, data []byte, expiry time.Time, logCtx ...any) error {
-	// Checked lock-free before contending for shutdownMu: sync.RWMutex's
-	// writer preference means a caller arriving once drainPublishQueueOnShutdown
-	// has already taken the exclusive lock would otherwise wait for that
-	// drain to finish entirely, rather than for the RLock check below.
-	select {
-	case <-g.lifetimeCtx.Done():
-		return g.rejectShutdown(name, logCtx)
-	default:
-	}
-	g.shutdownMu.RLock()
-	defer g.shutdownMu.RUnlock()
-	if g.lifetimeCtx.Err() != nil {
+	g.admissionsInFlight.Add(1)
+	defer g.admissionsInFlight.Add(-1)
+	if g.shutdownClosed.Load() {
 		return g.rejectShutdown(name, logCtx)
 	}
 	if !expiry.IsZero() && g.nowFunc().After(expiry) {
@@ -494,17 +488,17 @@ func (g *GossipManager) publishWorker(ctx context.Context) {
 }
 
 // drainPublishQueueOnShutdown accounts for whatever is left buffered in the
-// queue once the worker stops. Taking shutdownMu's exclusive lock here -
-// rather than in Close, which production code never even calls; see the
-// lifetimeCtx field comment - is what makes this race-free regardless of
-// why ctx was cancelled: the lock cannot be acquired until every in-flight
-// PublishBackground call has finished enqueueing, so anything still found
-// here is truly final. Every job found here was already counted as
-// accepted, so it gets a terminal outcome here (outcome=shutdown), not a
-// second admission-rejection count.
+// queue once the worker stops. Closing the gate here - rather than in
+// Close, which production code never calls; see the lifetimeCtx field
+// comment - makes this race-free regardless of why ctx was cancelled: once
+// the wait below returns, no PublishBackground call can still be trying to
+// enqueue, so anything left in the queue is truly final and gets a
+// terminal outcome (outcome=shutdown), not a second admission-rejection.
 func (g *GossipManager) drainPublishQueueOnShutdown() {
-	g.shutdownMu.Lock()
-	defer g.shutdownMu.Unlock()
+	g.shutdownClosed.Store(true)
+	for g.admissionsInFlight.Load() > 0 {
+		runtime.Gosched()
+	}
 	for {
 		select {
 		case job := <-g.publishQueue:
