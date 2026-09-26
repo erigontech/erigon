@@ -29,7 +29,6 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
@@ -141,10 +140,9 @@ type overlayAheadHarness struct {
 func newOverlayAheadHarness(t *testing.T, withOverlayTxs bool) *overlayAheadHarness {
 	t.Helper()
 
-	var cfg chain.Config
-	require.NoError(t, copier.CopyWithOption(&cfg, chain.TestChainBerlinConfig, copier.Option{DeepCopy: true}))
+	cfg := chain.TestChainBerlinConfig.Copy()
 	cfg.LondonBlock = common.NewUint64(0)
-	m := execmoduletester.New(t, execmoduletester.WithChainConfig(&cfg))
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(cfg))
 
 	c := insertOverlayRaceChain(t, m)
 	base, doms, events, overlayRoTx := newPublishedOverlayTestBase(t, m)
@@ -913,7 +911,10 @@ func TestHeaderHelpersDoNotReselectOverlay(t *testing.T) {
 	}
 }
 
-func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
+// TestGetBlockNumberReadsOnlyThePassedView pins tx to one overlay generation,
+// publishes a different one, and asserts the resolver still answers from the
+// generation the caller handed it.
+func TestGetBlockNumberReadsOnlyThePassedView(t *testing.T) {
 	base, m, firstHeader, events := newOverlayAheadTestAPIWithEvents(t)
 
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -942,7 +943,6 @@ func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
 		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(firstHeader.Number.Uint64())),
 		pinnedTx,
 		m.BlockReader,
-		base.filters,
 	)
 	require.NoError(t, err)
 	require.Equal(t, firstHeader.Hash(), hash)
@@ -2122,7 +2122,7 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 			name: "graphql_getBlockDetails",
 			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
 				api := NewGraphQLAPI(h.base, db, newEthApiForTest(h.base, db, nil, nil), nil, &rpccfg.GraphQLApiConfig{})
-				return api.GetBlockDetails(h.m.Ctx, head(h))
+				return api.GetBlockDetails(h.m.Ctx, head(h), nil)
 			},
 			hashOf: detailsHash,
 		},
@@ -2664,7 +2664,7 @@ func TestGraphQLGetBlockDetails_PinsOverlayView(t *testing.T) {
 	base, m, overlayHeader := newOverlayReceiptsUnpublishTestAPI(t)
 	api := NewGraphQLAPI(base, m.DB, newEthApiForTest(base, m.DB, nil, nil), nil, &rpccfg.GraphQLApiConfig{})
 
-	details, err := api.GetBlockDetails(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	details, err := api.GetBlockDetails(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()), nil)
 	require.NoError(t, err)
 	require.NotNil(t, details)
 }

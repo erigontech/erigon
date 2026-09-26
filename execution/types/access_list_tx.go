@@ -31,18 +31,30 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 var ErrAccessListPreBerlin = errors.New("eip-2930 transactions require Berlin")
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type AccessTuple
+
 // AccessTuple is the element type of an access list.
 type AccessTuple struct {
-	Address     common.Address `json:"address"`
-	StorageKeys []common.Hash  `json:"storageKeys"`
+	Address     common.Address `json:"address" ethjson:"data"`
+	StorageKeys []common.Hash  `json:"storageKeys" ethjson:"datalist"`
 }
 
 // AccessList is an EIP-2930 access list.
 type AccessList []AccessTuple
+
+// MarshalFastJSONTo writes the list as a bare array. The receiver must stay a value, so the
+// type itself satisfies the fast-JSON interface.
+func (al AccessList) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	jsonstream.ArrayValue(s, al, writeAccessTupleElem)
+	return nil
+}
+
+func writeAccessTupleElem(s *jsonstream.StackStream, a *AccessTuple) { _ = a.MarshalFastJSONTo(s) }
 
 // StorageKeys returns the total number of storage keys in the access list.
 func (al AccessList) StorageKeys() int {
@@ -246,7 +258,6 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	return nil
-
 }
 
 // EncodeRLP implements rlp.Encoder
@@ -473,7 +484,8 @@ func (tx *AccessListTx) SigningHash(chainID *uint256.Int) common.Hash {
 			Value:      &tx.Value,
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
-		})
+		},
+	)
 }
 
 func (tx *AccessListTx) Type() byte { return AccessListTxType }

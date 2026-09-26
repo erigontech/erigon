@@ -29,6 +29,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -169,6 +170,49 @@ func TestClientBatchRequest(t *testing.T) {
 	}
 }
 
+// sendService records the order its calls run in. The first call is slow, so a concurrent
+// batch finishes it last.
+type sendService struct {
+	mu    sync.Mutex
+	order []int
+}
+
+func (s *sendService) SendRawTransaction(i int) int {
+	if i == 0 {
+		time.Sleep(50 * time.Millisecond)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.order = append(s.order, i)
+	return i
+}
+
+func TestClientBatchSendsRunInOrder(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+	server.batchConcurrency = 2
+	svc := new(sendService)
+	if err := server.RegisterName("eth", svc); err != nil {
+		t.Fatal(err)
+	}
+	client := DialInProc(server, logger)
+	defer client.Close()
+
+	batch := make([]BatchElem, 4)
+	for i := range batch {
+		batch[i] = BatchElem{Method: "eth_sendRawTransaction", Args: []any{i}, Result: new(int)}
+	}
+	if err := client.BatchCall(batch); err != nil {
+		t.Fatal(err)
+	}
+	svc.mu.Lock()
+	defer svc.mu.Unlock()
+	if !slices.Equal(svc.order, []int{0, 1, 2, 3}) {
+		t.Fatalf("batch ran its sends in order %v, want 0 1 2 3", svc.order)
+	}
+}
+
 func TestClientBatchRequest_len(t *testing.T) {
 	logger := log.New()
 	b, err := json.Marshal([]jsonrpcMessage{
@@ -291,7 +335,7 @@ func TestClientCancelHTTP(t *testing.T)      { testClientCancel("http", t, log.N
 //
 // The HTTP transport uses synctest with in-memory connections for deterministic timing.
 // The WebSocket transport uses real TCP because its long-lived server goroutines
-// (pingLoop, ServeCodec, dispatch) have complex shutdown dependencies incompatible
+// (ServeCodec, dispatch) have complex shutdown dependencies incompatible
 // with synctest's requirement that all bubble goroutines exit.
 func testClientCancel(transport string, t *testing.T, logger log.Logger) {
 	if testing.Short() {

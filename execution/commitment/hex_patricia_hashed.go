@@ -176,7 +176,7 @@ type HexPatriciaHashed struct {
 
 	memoizationOff  bool // if true, do not rely on memoized hashes
 	readOnlyWitness bool // proofs only: off-path cells keep their stored hashes and no branch is written
-	//temp buffers
+	// temp buffers
 	accValBuf rlp.RlpEncodedBytes
 
 	// collapseTracer is called when a node collapse occurs (FullNode reduced to single child).
@@ -187,7 +187,7 @@ type HexPatriciaHashed struct {
 
 	cfg TrieConfig // static config, set at construction
 
-	//processing metrics
+	// processing metrics
 	metrics       *Metrics
 	depthsToTxNum [129]uint64 // endTxNum of file with branch data for that depth
 
@@ -762,7 +762,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 		nonceBytes = common.BitLenToByteLen(bits.Len64(cell.Nonce))
 	}
 
-	var structLength = uint(balanceBytes + nonceBytes + 2)
+	structLength := uint(balanceBytes + nonceBytes + 2)
 	structLength += 66 // Two 32-byte arrays + 2 prefixes
 
 	var pos int
@@ -786,7 +786,7 @@ func (cell *cell) accountForHashing(buffer []byte, storageRootHash common.Hash) 
 		buffer[pos] = byte(cell.Nonce)
 	} else {
 		buffer[pos] = byte(128 + nonceBytes)
-		var nonce = cell.Nonce
+		nonce := cell.Nonce
 		for i := nonceBytes; i > 0; i-- {
 			buffer[pos+i] = byte(nonce)
 			nonce >>= 8
@@ -2516,7 +2516,7 @@ func (hph *HexPatriciaHashed) captureExtensionDivergence(hashedKey []byte, set *
 // Witnesses builds the execution-witness node set on the fly during the fold,
 // capturing consensus node bytes as they are hashed. It returns the captured superset
 // (root first), the fold's hashed keys, and the root hash; callers prune to the lean set.
-func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool, logPrefix string) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
+func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, produceExclusionProofs bool) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	set, provedKeys, rootHash, err := hph.witnessNodeSet(ctx, updates, produceExclusionProofs)
 	if err != nil {
 		return nil, nil, nil, err
@@ -2527,18 +2527,19 @@ func (hph *HexPatriciaHashed) Witnesses(ctx context.Context, updates *Updates, p
 	return nodes, provedKeys, rootHash, nil
 }
 
-// WitnessNodesByHash folds read-only: the set holds only the proven paths, off-path nodes are referenced by hash.
-func (hph *HexPatriciaHashed) WitnessNodesByHash(ctx context.Context, updates *Updates) (map[string][]byte, []byte, error) {
+// WitnessesByHash is Witnesses folded read-only, with the captured nodes left indexed by their hash: it writes no
+// branch and fails while deferred branch updates are pending.
+func (hph *HexPatriciaHashed) WitnessesByHash(ctx context.Context, updates *Updates, produceExclusionProofs bool) (byHash map[string][]byte, provedKeys [][]byte, rootHash []byte, err error) {
 	if len(hph.branchEncoder.deferred) > 0 {
-		return nil, nil, errors.New("read-only witness fold would flush pending deferred branch updates")
+		return nil, nil, nil, errors.New("read-only witness fold would flush pending deferred branch updates")
 	}
 	hph.readOnlyWitness = true
 	defer func() { hph.readOnlyWitness = false }()
-	set, _, rootHash, err := hph.witnessNodeSet(ctx, updates, false)
+	set, provedKeys, rootHash, err := hph.witnessNodeSet(ctx, updates, produceExclusionProofs)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
-	return set.byHash, rootHash, nil
+	return set.byHash, provedKeys, rootHash, nil
 }
 
 func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updates, produceExclusionProofs bool) (set *witnessNodeSet, provedKeys [][]byte, rootHash []byte, err error) {
@@ -2551,9 +2552,6 @@ func (hph *HexPatriciaHashed) witnessNodeSet(ctx context.Context, updates *Updat
 
 	provedKeys = make([][]byte, 0, updates.Size())
 	err = updates.HashSort(ctx, nil, func(hashedKey, plainKey []byte, stateUpdate *Update) error {
-		if hph.readOnlyWitness && len(hashedKey) != 64 && len(hashedKey) != 128 {
-			return fmt.Errorf("read-only witness fold needs a whole hashed key, got %d nibbles", len(hashedKey))
-		}
 		provedKeys = append(provedKeys, bytes.Clone(hashedKey))
 		if len(plainKey) > 0 {
 			if int16(len(plainKey)) == hph.accountKeyLen {
@@ -2768,7 +2766,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	if dbg.KVReadLevelledMetrics {
 		hph.metrics.CollectFileDepthStats(hph.hadToLoadL)
-		log.Debug("commitment finished, counters updated (no reset)",
+		log.Debug(
+			"commitment finished, counters updated (no reset)",
 			//"hadToLoad", common.PrettyCounter(hadToLoad.Load()), "skippedLoad", common.PrettyCounter(skippedLoad.Load()),
 			//"hadToReset", common.PrettyCounter(hadToReset.Load()),
 			"skipRatio", fmt.Sprintf("%.1f%%", 100*(float64(skippedLoad.Load())/float64(hadToLoad.Load()+skippedLoad.Load()))),
@@ -2977,7 +2976,7 @@ func (s *state) Decode(buf []byte) error {
 }
 
 func (cell *cell) Encode() []byte {
-	var pos = int16(1)
+	pos := int16(1)
 	size := pos + 5 + cell.hashLen + cell.accountAddrLen + cell.storageAddrLen + cell.hashedExtLen + cell.extLen // max size
 	buf := make([]byte, size)
 

@@ -85,6 +85,7 @@ type CaplinConfig struct {
 	CaplinDiscoveryAddr         string
 	CaplinDiscoveryPort         uint64
 	CaplinDiscoveryTCPPort      uint64
+	CaplinDiscoveryQUICPort     uint64
 	SentinelAddr                string
 	SentinelPort                uint64
 	SubscribeAllTopics          bool
@@ -1306,6 +1307,8 @@ func sepoliaConfig() BeaconChainConfig {
 	cfg.ElectraForkVersion = 0x90000074
 	cfg.FuluForkEpoch = 272640
 	cfg.FuluForkVersion = 0x90000075
+	cfg.GloasForkEpoch = 353024
+	cfg.GloasForkVersion = 0x90000076
 	cfg.TerminalTotalDifficulty = "17000000000000000"
 	cfg.DepositContractAddress = "0x7f02C3E3c98b133055B8B348B2Ac625669Ed295D"
 

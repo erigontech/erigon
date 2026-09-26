@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"reflect"
 	"strconv"
 	"strings"
 
@@ -42,6 +43,9 @@ type API struct {
 	Version   string // api version for DApp's
 	Service   any    // receiver instance which holds the methods
 	Public    bool   // indication if the methods must be considered safe for public use
+
+	// Iface, when set, keeps exported methods of Service that it does not declare off the wire.
+	Iface reflect.Type
 }
 
 // Error wraps RPC errors, which contain an error code in addition to the message.
@@ -77,8 +81,10 @@ type jsonWriter interface {
 	remoteAddr() string
 }
 
-type BlockNumber int64
-type Timestamp uint64
+type (
+	BlockNumber int64
+	Timestamp   uint64
+)
 
 const (
 	LatestExecutedBlockNumber = BlockNumber(-5)
@@ -329,15 +335,15 @@ func BlockNumberOrHashWithHash(hash common.Hash, canonical bool) BlockNumberOrHa
 type BlockReference BlockNumberOrHash
 
 func (br *BlockReference) UnmarshalJSON(data []byte) error {
-	return ((*BlockNumberOrHash)(br)).UnmarshalJSON(data)
+	return (*BlockNumberOrHash)(br).UnmarshalJSON(data)
 }
 
 func (br BlockReference) Number() (BlockNumber, bool) {
-	return ((*BlockNumberOrHash)(&br)).Number()
+	return (*BlockNumberOrHash)(&br).Number()
 }
 
 func (br BlockReference) Hash() (common.Hash, bool) {
-	return ((*BlockNumberOrHash)(&br)).Hash()
+	return (*BlockNumberOrHash)(&br).Hash()
 }
 
 func (br BlockReference) String() string {
@@ -448,15 +454,12 @@ func (ts *Timestamp) UnmarshalJSON(data []byte) error {
 	// parse string to uint64
 	timestamp, err := strconv.ParseUint(input, 10, 64)
 	if err != nil {
-
 		// try hex number
 		if timestamp, err = hexutil.DecodeUint64(input); err != nil {
 			return err
 		}
-
 	}
 
 	*ts = Timestamp(timestamp)
 	return nil
-
 }

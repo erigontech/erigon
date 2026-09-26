@@ -142,15 +142,21 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 		// Get PTC for each slot in the epoch
 		startSlot := epoch * a.beaconChainCfg.SlotsPerEpoch
 		endSlot := startSlot + a.beaconChainCfg.SlotsPerEpoch
+		emitted := make(map[uint64]struct{})
 		for slot := startSlot; slot < endSlot; slot++ {
 			ptc, err := s.GetPTC(slot)
 			if err != nil {
 				return err
 			}
+			clear(emitted)
 			for _, validatorIndex := range ptc {
 				if _, ok := requestedSet[validatorIndex]; !ok {
 					continue
 				}
+				if _, ok := emitted[validatorIndex]; ok {
+					continue
+				}
+				emitted[validatorIndex] = struct{}{}
 				pk, err := s.ValidatorPublicKey(int(validatorIndex))
 				if err != nil {
 					return err
@@ -929,7 +935,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			}
 			requestRoot, hashErr := signedEnvelope.HashSSZ()
 			if hashErr != nil {
-				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				beaconhttp.NewEndpointError(http.StatusBadRequest, hashErr).WriteTo(w)
 				return
 			}
 			retry, retrying, retryClaimed = a.claimExecutionPayloadEnvelopeRetry(gossipKey, requestRoot)

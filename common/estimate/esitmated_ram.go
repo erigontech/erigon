@@ -38,16 +38,16 @@ func (r EstimatedRamPerWorker) WorkersByRAMOnly() int {
 }
 
 const (
-	//elias-fano index building is single-threaded
+	// elias-fano index building is single-threaded
 	// when set it to 4GB - observed OOM-kill at server with 128Gb ram and 32CPU
 	IndexSnapshot = EstimatedRamPerWorker(1 * datasize.GB)
 
-	//1-file-compression is multi-threaded
+	// 1-file-compression is multi-threaded
 	CompressSnapshot = EstimatedRamPerWorker(1 * datasize.GB)
 
 	StateV3Collate = EstimatedRamPerWorker(5 * datasize.GB)
 
-	//BlocksExecution - in multi-threaded mode
+	// BlocksExecution - in multi-threaded mode
 	BlocksExecution = EstimatedRamPerWorker(512 * datasize.MB)
 )
 
@@ -56,9 +56,11 @@ const (
 func AlmostAllCPUs() int {
 	return max(1, runtime.GOMAXPROCS(-1)-1)
 }
+
 func AllCPUs() int {
 	return max(1, runtime.GOMAXPROCS(-1))
 }
+
 func HalfCPUs() int {
 	return max(1, runtime.GOMAXPROCS(-1)/2)
 }

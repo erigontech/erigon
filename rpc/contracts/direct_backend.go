@@ -54,7 +54,7 @@ func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, block
 
 func (b DirectBackend) CallContract(ctx context.Context, callMsg bind.CallMsg, blockNum *uint256.Int) ([]byte, error) {
 	blockNumberOrHash := BlockNumArg(blockNum)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	return b.api.Call(ctx, CallArgsFromCallMsg(callMsg), blockNumberOrHashRef, nil, nil)
 }
@@ -130,7 +130,7 @@ func (b DirectBackend) FilterLogs(ctx context.Context, query bind.FilterQuery) (
 	res := make([]types.Log, len(rpcLogs))
 
 	for i, log := range rpcLogs {
-		res[i] = log.Log
+		res[i] = *log
 	}
 
 	return res, nil
@@ -151,12 +151,12 @@ func (b DirectBackend) SubscribeFilterLogs(ctx context.Context, query bind.Filte
 				close(closec)
 				return nil
 			case res := <-resc:
-				log, ok := res.(*types.RPCLog)
+				log, ok := res.(*types.Log)
 				if !ok {
 					return fmt.Errorf("unexpected type %T in SubscribeFilterLogs", res)
 				}
 
-				ch <- log.Log
+				ch <- *log
 			}
 		}
 	})

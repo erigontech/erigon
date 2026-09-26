@@ -20,6 +20,7 @@ import (
 	"errors"
 	"math/big"
 	"math/rand"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"testing"
@@ -31,6 +32,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
@@ -44,7 +46,7 @@ import (
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
-func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
+func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache kvcache.Cache, m *execmoduletester.ExecModuleTester) *BaseAPI {
 	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 }
 
@@ -116,7 +118,7 @@ func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
 			"newPendingTransactionsWithBody": func() (*rpc.Subscription, error) { return api.NewPendingTransactionsWithBody(ctx) },
 			"logs":                           func() (*rpc.Subscription, error) { return api.Logs(ctx, filters.FilterCriteria{}) },
 			"transactionReceipts": func() (*rpc.Subscription, error) {
-				return api.TransactionReceipts(ctx, filters.ReceiptsFilterCriteria{})
+				return api.TransactionReceipts(ctx, nil)
 			},
 		}
 		for name, subscribe := range subscriptions {
@@ -208,10 +210,8 @@ func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
 		_, _ = api.UninstallFilter(ctx, filterID)
 	})
 
-	queued := &types.RPCLog{
-		Log:            types.Log{Address: common.Address{1}},
-		BlockTimestamp: 123,
-	}
+	stampedAt := hexutil.Uint64(123)
+	queued := &types.Log{Address: common.Address{1}, BlockTimestamp: &stampedAt}
 	ff.AddLogs(rpchelper.LogsSubID(strings.TrimPrefix(filterID, "0x")), queued)
 
 	_, err = api.GetFilterLogs(ctx, filterID)
@@ -534,4 +534,25 @@ func TestGetFilterChangesReturnsFilterNotFoundForUnknownID(t *testing.T) {
 	// Use a bogus id that does not correspond to any subscription
 	_, err := api.GetFilterChanges(ctx, "0xdeadbeefcafebabe")
 	assert.ErrorIs(err, rpc.ErrFilterNotFound)
+}
+
+// geth and reth take the transactionReceipts filter as optional.
+func TestEthSubscribeTransactionReceiptsWithoutFilter(t *testing.T) {
+	m := execmoduletester.New(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, txpoolproto.NewMiningClient(conn), func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, kvcache.New(kvcache.DefaultCoherentConfig), m), m.DB, nil, nil)
+
+	server := rpc.NewServer(50, false, false, true, m.Log, 100)
+	require.NoError(t, server.RegisterName("eth", api))
+	defer server.Stop()
+	httpsrv := httptest.NewServer(server.WebsocketHandler([]string{"*"}, nil, false, m.Log))
+	defer httpsrv.Close()
+
+	client, err := rpc.DialWebsocket(ctx, "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), "", m.Log)
+	require.NoError(t, err)
+	defer client.Close()
+	sub, err := client.EthSubscribe(ctx, make(chan any), "transactionReceipts")
+	require.NoError(t, err)
+	sub.Unsubscribe()
 }

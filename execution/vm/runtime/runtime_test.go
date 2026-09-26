@@ -310,6 +310,7 @@ type FakeChainHeaderReader struct{}
 func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	return nil
 }
+
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
 }
@@ -330,6 +331,7 @@ func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *typ
 		GasLimit:   100000,
 	}
 }
+
 func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
@@ -443,7 +445,6 @@ func TestBlockhash(t *testing.T) {
 // TestEip2929Cases contains various testcases that are used for
 // EIP-2929 about gas repricings
 func TestEip2929Cases(t *testing.T) {
-
 	tmpdir := t.TempDir()
 	id := 1
 	prettyPrint := func(comment string, code []byte) {
@@ -502,13 +503,13 @@ func TestEip2929Cases(t *testing.T) {
 	{ // EXTCODECOPY
 		code := []byte{
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( 0xff,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.PUSH1), 0xff, byte(vm.EXTCODECOPY),
 			// extcodecopy( this,0,0,0,0)
-			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, //length, codeoffset, memoffset
+			byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, // length, codeoffset, memoffset
 			byte(vm.ADDRESS), byte(vm.EXTCODECOPY),
 
 			byte(vm.STOP),
@@ -519,7 +520,6 @@ func TestEip2929Cases(t *testing.T) {
 
 	{ // SLOAD + SSTORE
 		code := []byte{
-
 			// Add slot `0x1` to access list
 			byte(vm.PUSH1), 0x01, byte(vm.SLOAD), byte(vm.POP), // SLOAD( 0x1) (add to access list)
 			// Write to `0x1` which is already in access list
@@ -877,30 +877,39 @@ func TestOpcodeMaskFiltersDelivery(t *testing.T) {
 		byte(vm.STOP),
 	}
 
-	run := func(mask *tracing.OpcodeMask) []byte {
-		var seen []byte
-		cfg := &Config{EVMConfig: vm.Config{Tracer: &tracing.Hooks{
-			OnOpcode: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
-				seen = append(seen, op)
-			},
-			OnOpcodeMask: mask,
-		}}}
-		if _, _, err := Execute(code, nil, cfg, t.TempDir()); err != nil {
-			t.Fatal(err)
-		}
-		return seen
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			run := func(mask *tracing.OpcodeMask) []byte {
+				var seen []byte
+				hooks := &tracing.Hooks{OnOpcodeMask: mask}
+				if version == "v2" {
+					hooks.OnOpcodeV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ []byte, _ int, _ error) {
+						seen = append(seen, op)
+					}
+				} else {
+					hooks.OnOpcode = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+						seen = append(seen, op)
+					}
+				}
+				cfg := &Config{EVMConfig: vm.Config{Tracer: hooks}}
+				if _, _, err := Execute(code, nil, cfg, t.TempDir()); err != nil {
+					t.Fatal(err)
+				}
+				return seen
+			}
+
+			unmasked := run(nil)
+			require.Equal(t, []byte{
+				byte(vm.PUSH1), byte(vm.SLOAD),
+				byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.MSTORE),
+				byte(vm.PUSH1), byte(vm.SLOAD), byte(vm.POP), byte(vm.STOP),
+			}, unmasked, "a nil mask must deliver every executed opcode, in execution order")
+
+			masked := run(tracing.NewOpcodeMask(byte(vm.SLOAD)))
+			require.Equal(t, []byte{byte(vm.SLOAD), byte(vm.SLOAD)}, masked,
+				"a mask must deliver exactly the opcodes it names, in execution order")
+		})
 	}
-
-	unmasked := run(nil)
-	require.Equal(t, []byte{
-		byte(vm.PUSH1), byte(vm.SLOAD),
-		byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.MSTORE),
-		byte(vm.PUSH1), byte(vm.SLOAD), byte(vm.POP), byte(vm.STOP),
-	}, unmasked, "a nil mask must deliver every executed opcode, in execution order")
-
-	masked := run(tracing.NewOpcodeMask(byte(vm.SLOAD)))
-	require.Equal(t, []byte{byte(vm.SLOAD), byte(vm.SLOAD)}, masked,
-		"a mask must deliver exactly the opcodes it names, in execution order")
 }
 
 // TestOpcodeMaskStillReportsFaults pins that filtering which opcodes a tracer sees
@@ -909,22 +918,35 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 	t.Parallel()
 	code := []byte{byte(vm.PUSH1), 0x01, byte(vm.PUSH1), 0x02, byte(vm.ADD), byte(vm.STOP)}
 
-	var opcodes, faults []byte
-	cfg := &Config{
-		GasLimit: 5, // too little to finish, so an excluded opcode faults
-		EVMConfig: vm.Config{Tracer: &tracing.Hooks{
-			OnOpcode: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
-				opcodes = append(opcodes, op)
-			},
-			OnFault: func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
-				faults = append(faults, op)
-			},
-			OnOpcodeMask: tracing.NewOpcodeMask(byte(vm.SLOAD)), // PUSH1/ADD excluded
-		}},
+	for _, version := range []string{"v1", "v2"} {
+		t.Run(version, func(t *testing.T) {
+			var opcodes []byte
+			var faults []byte
+			hooks := &tracing.Hooks{OnOpcodeMask: tracing.NewOpcodeMask(byte(vm.SLOAD))}
+			if version == "v2" {
+				hooks.OnOpcodeV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					opcodes = append(opcodes, op)
+				}
+				hooks.OnFaultV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ int, _ error) {
+					faults = append(faults, op)
+				}
+			} else {
+				hooks.OnOpcode = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					opcodes = append(opcodes, op)
+				}
+				hooks.OnFault = func(_ uint64, op byte, _, _ uint64, _ tracing.OpContext, _ int, _ error) {
+					faults = append(faults, op)
+				}
+			}
+			cfg := &Config{
+				GasLimit:  5, // too little to finish, so an excluded opcode faults
+				EVMConfig: vm.Config{Tracer: hooks},
+			}
+			if _, _, err := Execute(code, nil, cfg, t.TempDir()); err == nil {
+				t.Fatal("expected the run to fail on gas")
+			}
+			require.Empty(t, opcodes, "the mask excludes every opcode this code runs")
+			require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
+		})
 	}
-	if _, _, err := Execute(code, nil, cfg, t.TempDir()); err == nil {
-		t.Fatal("expected the run to fail on gas")
-	}
-	require.Empty(t, opcodes, "the mask excludes every opcode this code runs")
-	require.NotEmpty(t, faults, "an excluded opcode that faults must still reach OnFault")
 }

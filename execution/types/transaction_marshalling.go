@@ -29,6 +29,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // txJSON is the JSON representation of transactions.
@@ -65,21 +66,38 @@ type txJSON struct {
 	Hash common.Hash `json:"hash"`
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type JsonAuthorization
+
 type JsonAuthorization struct {
-	ChainID hexutil.U256   `json:"chainId"`
-	Address common.Address `json:"address"`
-	Nonce   hexutil.Uint64 `json:"nonce"`
-	YParity hexutil.Uint64 `json:"yParity"`
-	R       hexutil.U256   `json:"r"`
-	S       hexutil.U256   `json:"s"`
+	ChainID hexutil.U256   `json:"chainId" ethjson:"quantity"`
+	Address common.Address `json:"address" ethjson:"data"`
+	Nonce   hexutil.Uint64 `json:"nonce" ethjson:"quantity"`
+	YParity hexutil.Uint64 `json:"yParity" ethjson:"quantity"`
+	R       hexutil.U256   `json:"r" ethjson:"quantity"`
+	S       hexutil.U256   `json:"s" ethjson:"quantity"`
+}
+
+// AuthorizationList is a set-code transaction's authorizations in a reply. An absent list is
+// omitted rather than written as an empty array.
+type AuthorizationList []JsonAuthorization
+
+// MarshalFastJSONTo writes the list as a bare array. The receiver must stay a value, so the
+// type itself satisfies the fast-JSON interface.
+func (l AuthorizationList) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	jsonstream.ArrayValue(s, l, writeAuthorizationElem)
+	return nil
+}
+
+func writeAuthorizationElem(s *jsonstream.StackStream, a *JsonAuthorization) {
+	_ = a.MarshalFastJSONTo(s)
 }
 
 func (a JsonAuthorization) FromAuthorization(authorization Authorization) JsonAuthorization {
 	a.ChainID = hexutil.U256(authorization.ChainID)
 	a.Address = authorization.Address
-	a.Nonce = (hexutil.Uint64)(authorization.Nonce)
+	a.Nonce = hexutil.Uint64(authorization.Nonce)
 
-	a.YParity = (hexutil.Uint64)(authorization.YParity)
+	a.YParity = hexutil.Uint64(authorization.YParity)
 	a.R = hexutil.U256(authorization.R)
 	a.S = hexutil.U256(authorization.S)
 	return a

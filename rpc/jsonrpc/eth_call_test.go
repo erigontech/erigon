@@ -32,7 +32,6 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -77,8 +76,8 @@ func TestEstimateGas(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTestEthAPIWithFilters(t, m)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
@@ -617,6 +616,11 @@ func TestStateCallMethodsRejectPendingTag(t *testing.T) {
 		require.ErrorIs(t, err, errPendingStateNotSupported)
 	})
 
+	t.Run("eth_callMany", func(t *testing.T) {
+		_, err := api.CallMany(ctx, nil, StateContext{BlockNumber: pending}, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
 	t.Run("graphql_call", func(t *testing.T) {
 		_, err := graphqlAPI.Call(ctx, rpc.PendingBlockNumber, ethapi.CallArgs{})
 		require.ErrorIs(t, err, errPendingStateNotSupported)
@@ -777,10 +781,10 @@ func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	_, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -801,7 +805,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	callDataBytes := hexutil.Bytes(callData)
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	_, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -812,7 +816,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 }
 
 func TestGetProof(t *testing.T) {
-	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
+	maxGetProofRewindBlockCount := 1      // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
 	cfg := &rpccfg.EthApiConfig{
@@ -1540,8 +1544,7 @@ func fundedBankGenesis(t testing.TB, cfg *chain.Config) (m *execmoduletester.Exe
 	bankFunds, ok := new(big.Int).SetString("100000000000000000000", 10)
 	require.True(t, ok)
 
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, cfg, copier.Option{DeepCopy: true}))
+	chainConfig := cfg.Copy()
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc:  types.GenesisAlloc{bankAddress: {Balance: bankFunds}},
@@ -2240,8 +2243,7 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
-	chainConfig := new(chain.Config)
-	require.NoError(t, copier.CopyWithOption(chainConfig, chain.TestChainOsakaConfig, copier.Option{DeepCopy: true}))
+	chainConfig := chain.TestChainOsakaConfig.Copy()
 	historyAddr := params.HistoryStorageAddress.Value()
 	gspec := &types.Genesis{
 		Config: chainConfig,

@@ -59,5 +59,4 @@ func BenchmarkFindMergeRange(t *testing.B) {
 			merger.FindMergeRanges(RangesNew, uint64(240*10_000))
 		}
 	})
-
 }

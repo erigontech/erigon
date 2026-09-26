@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"runtime"
@@ -26,7 +27,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	jsoniter "github.com/json-iterator/go"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -191,7 +192,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader)
 	if err != nil {
 		return nil, err
 	}
@@ -285,12 +286,9 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 		}
 	}
 
-	switch req.Mode {
-	case TraceFilterModeIntersection:
+	if req.Mode != TraceFilterModeUnion && len(fromAddresses) > 0 && len(toAddresses) > 0 {
 		allBlocks = stream.Intersect[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
-	case TraceFilterModeUnion:
-		fallthrough
-	default:
+	} else {
 		allBlocks = stream.Union[uint64](allBlocks, blocksTo, order.Asc, kv.Unlim)
 	}
 
@@ -418,7 +416,6 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	}
 	engine := api.engine()
 
-	json := jsoniter.ConfigCompatibleWithStandardLibrary
 	// Execute all transactions in picked blocks
 
 	count := uint64(^uint(0)) // this just makes it easier to use below
@@ -442,22 +439,19 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	// exportTrace returns done=true once count traces were exported: the array
 	// is sealed and the scan must stop, so a later failure in traces the client
 	// never asked for cannot invalidate a complete response.
-	exportTrace := func(tr any) (done bool, err error) {
+	exportTrace := func(tr *ParityTrace) (done bool, err error) {
 		nSeen++
-		b, err := json.Marshal(tr)
-		if err != nil {
-			return false, err
-		}
 		if nSeen <= after {
 			return false, nil
+		}
+		if err := tr.checkKinds(); err != nil {
+			return false, err
 		}
 		if first {
 			stream.WriteArrayStart()
 			first = false
-		} else {
-			stream.WriteMore()
 		}
-		stream.WriteRawBytes(b)
+		tr.writeTo(stream.Open())
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return false, err
 		}
@@ -526,19 +520,19 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 
 		if timer != nil && evm.Cancelled() {
 			timeoutErr := fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
-			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-				ot.Tracer().OnTxEnd(nil, timeoutErr)
+			if ot.Tracer() != nil {
+				ot.Tracer().EmitTxEnd(nil, mdgas.TxnGasUsage{}, timeoutErr)
 			}
 			return nil, timeoutErr
 		}
 		if execErr != nil {
-			if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-				ot.Tracer().OnTxEnd(nil, execErr)
+			if ot.Tracer() != nil {
+				ot.Tracer().EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 			}
 			return nil, execErr
 		}
-		if ot.Tracer() != nil && ot.Tracer().Hooks.OnTxEnd != nil {
-			ot.Tracer().OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+		if ot.Tracer() != nil && ot.Tracer().Hooks.HasTxEndHook() {
+			ot.Tracer().EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 		}
 		traceResult.Output = bytes.Clone(execResult.ReturnData)
 		if err := ibs.FinalizeTx(evm.ChainRules(), noop); err != nil {
@@ -589,6 +583,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if isPos {
 				continue
 			}
+			// the genesis block is not mined, so it pays no rewards
+			if blockNum == 0 {
+				continue
+			}
 
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
@@ -598,7 +596,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
 				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward)
-				done, err := exportTrace(tr)
+				done, err := exportTrace(&tr)
 				if err != nil {
 					return err
 				}
@@ -610,7 +608,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 					if i < len(uncleRewards) {
 						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i])
-						done, err := exportTrace(tr)
+						done, err := exportTrace(&tr)
 						if err != nil {
 							return err
 						}
@@ -635,6 +633,9 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			continue // guess block doesn't have transactions
 		}
 		txHash := txn.Hash()
+		if err := checkOverriddenSigner(traceConfig, lastSigner, txn); err != nil {
+			return err
+		}
 		msg, err := txn.AsMessage(*lastSigner, &lastBaseFee, lastRules)
 		if err != nil {
 			return err
@@ -644,7 +645,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		if err != nil {
 			return err
 		}
-		isIntersectionMode := req.Mode == TraceFilterModeIntersection
+		isIntersectionMode := req.Mode != TraceFilterModeUnion
 		for _, pt := range traceResult.Trace {
 			if includeAll || filterTrace(pt, fromAddresses, toAddresses, isIntersectionMode) {
 				pt.BlockHash = &lastBlockHash
@@ -689,7 +690,7 @@ func filterTrace(pt *ParityTrace, fromAddresses map[common.Address]struct{}, toA
 	}
 
 	if isIntersectionMode {
-		return f && t
+		return (len(fromAddresses) == 0 || f) && (len(toAddresses) == 0 || t)
 	} else {
 		return f || t
 	}
@@ -736,7 +737,8 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, err
 	}
 	stateCache := shards.NewStateCache(
-		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+		32, 0, /* no limit */
+	) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
@@ -963,14 +965,12 @@ func (api *TraceAPIImpl) doCallBlockParallel(
 
 				execResult, execErr := protocol.ApplyMessage(evm, job.msg, gp, true /* refunds */, gasBailout, engine)
 				if execErr != nil {
-					if tracer.Hooks.OnTxEnd != nil {
-						tracer.Hooks.OnTxEnd(nil, execErr)
-					}
+					tracer.Hooks.EmitTxEnd(nil, mdgas.TxnGasUsage{}, execErr)
 					return fmt.Errorf("txIndex %d: %w", job.txIndex, execErr)
 				}
 
-				if tracer.Hooks.OnTxEnd != nil {
-					tracer.Hooks.OnTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, nil)
+				if tracer.Hooks.HasTxEndHook() {
+					tracer.Hooks.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
 				}
 
 				if err := workerIbs.FinalizeTx(chainRules, noop); err != nil {
@@ -1040,7 +1040,8 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 	stateCache := shards.NewStateCache(
-		32, 0 /* no limit */) // this cache living only during current RPC call, but required to store state writes
+		32, 0, /* no limit */
+	) // this cache living only during current RPC call, but required to store state writes
 	cachedReader := state.NewCachedReader(stateReader, stateCache)
 	noop := state.NewNoopWriter()
 	cachedWriter := state.NewCachedWriter(noop, stateCache)
@@ -1058,6 +1059,9 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	txnHash := txn.Hash()
+	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
+	}
 	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
 	if err != nil {
 		return nil, fmt.Errorf("convert txn into msg: %w", err)
@@ -1083,7 +1087,7 @@ type TraceFilterRequest struct {
 	ToBlock     *rpc.BlockNumberOrHash `json:"toBlock"`
 	FromAddress []*common.Address      `json:"fromAddress"`
 	ToAddress   []*common.Address      `json:"toAddress"`
-	Mode        TraceFilterMode        `json:"mode"`
+	Mode        TraceFilterMode        `json:"mode,omitempty"`
 	After       *uint64                `json:"after"`
 	Count       *uint64                `json:"count"`
 }
@@ -1091,9 +1095,22 @@ type TraceFilterRequest struct {
 type TraceFilterMode string
 
 const (
-	// TraceFilterModeUnion is default mode for TraceFilter.
-	// Unions results referred to addresses from FromAddress or ToAddress
+	// TraceFilterModeUnion matches either populated address list.
 	TraceFilterModeUnion = "union"
-	// TraceFilterModeIntersection retrieves results referred to addresses provided both in FromAddress and ToAddress
+	// TraceFilterModeIntersection is the default and matches every populated address list.
 	TraceFilterModeIntersection = "intersection"
 )
+
+func (m *TraceFilterMode) UnmarshalJSON(data []byte) error {
+	var mode string
+	if err := json.Unmarshal(data, &mode); err != nil {
+		return err
+	}
+	switch mode {
+	case TraceFilterModeUnion, TraceFilterModeIntersection:
+		*m = TraceFilterMode(mode)
+		return nil
+	default:
+		return fmt.Errorf("invalid trace filter mode %q: want union or intersection", mode)
+	}
+}

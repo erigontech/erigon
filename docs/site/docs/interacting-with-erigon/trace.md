@@ -104,8 +104,12 @@ reported. How they appear depends on the method:
 `gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
 `trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
 `trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
-`trace_call`, `trace_callMany` and `trace_rawTransaction` take no such parameter and
-always enable it internally, so everything below applies to them unconditionally.
+`trace_call` and `trace_callMany` take no such parameter and always enable it
+internally, so everything below applies to them unconditionally. `trace_rawTransaction`
+never enables it: a signed transaction pays for its gas as it would in a block. The gas
+is bought before execution, so `BALANCE(ORIGIN)`, or `SELFBALANCE` in a delegated sender,
+reads the balance after that charge; this shows in `trace` and `vmTrace` as well as in
+`stateDiff`.
 
 :::warning
 `gasBailOut` is not only a bypass for senders who cannot afford the gas charge. It
@@ -659,10 +663,10 @@ Returns traces matching given filter
    * `fromBlock`: `Quantity` or `Tag` - (optional) From this block.
    * `toBlock`: `Quantity` or `Tag` - (optional) To this block.
    * `fromAddress`: `Array` - (optional) Sent from these addresses.
-   * `toAddress`: `Address` - (optional) Sent to these addresses.
+   * `toAddress`: `Array` - (optional) Sent to these addresses.
    * `after`: `Quantity` - (optional) The offset trace number
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
-   * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
+   * `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list and preserve the previous behavior when both lists are set. Other mode values, including `""` and `null`, return `-32602`.
 
    The `'pending'` tag is not supported for either block bound: `trace_filter` scans committed trace history, which has no pending block.
 

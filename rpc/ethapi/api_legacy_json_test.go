@@ -62,7 +62,7 @@ func legacyRPCMarshalHeader(head *types.Header) map[string]any {
 	}
 	if head.AuRaSeal != nil {
 		result["auraSeal"] = hexutil.Bytes(head.AuRaSeal)
-		result["auraStep"] = (hexutil.Uint64)(head.AuRaStep)
+		result["auraStep"] = hexutil.Uint64(head.AuRaStep)
 	}
 	return result
 }
@@ -76,7 +76,7 @@ func legacyRPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) map[str
 		transactions := make([]any, len(txs))
 		for i, txn := range txs {
 			if fullTx {
-				transactions[i] = newRPCTransactionFromBlockAndTxGivenIndex(block, txn, uint64(i))
+				transactions[i] = NewRPCTransaction(txn, block.Hash(), block.Time(), block.NumberU64(), uint64(i), block.BaseFee())
 			} else {
 				transactions[i] = txn.Hash()
 			}

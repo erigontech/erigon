@@ -31,8 +31,8 @@ import (
 
 // TxPoolAPI the interface for the txpool_ RPC commands
 type TxPoolAPI interface {
-	Content(ctx context.Context) (map[string]map[string]map[string]*ethapi.RPCTransaction, error)
-	ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error)
+	Content(ctx context.Context) (TxPoolContent, error)
+	ContentFrom(ctx context.Context, addr common.Address) (TxPoolContentFrom, error)
 }
 
 // TxPoolAPIImpl data structure to store things needed for net_ commands
@@ -57,13 +57,13 @@ func flattenTxs(txs []types.Transaction) map[string]*ethapi.RPCTransaction {
 	return dump
 }
 
-func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]map[string]*ethapi.RPCTransaction, error) {
+func (api *TxPoolAPIImpl) Content(ctx context.Context) (TxPoolContent, error) {
 	reply, err := api.pool.All(ctx, &txpoolproto.AllRequest{})
 	if err != nil {
 		return nil, err
 	}
 
-	content := map[string]map[string]map[string]*ethapi.RPCTransaction{
+	content := TxPoolContent{
 		"pending": make(map[string]map[string]*ethapi.RPCTransaction),
 		"queued":  make(map[string]map[string]*ethapi.RPCTransaction),
 	}
@@ -106,13 +106,13 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 	return content, nil
 }
 
-func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) (map[string]map[string]*ethapi.RPCTransaction, error) {
+func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) (TxPoolContentFrom, error) {
 	reply, err := api.pool.All(ctx, &txpoolproto.AllRequest{})
 	if err != nil {
 		return nil, err
 	}
 
-	content := map[string]map[string]*ethapi.RPCTransaction{
+	content := TxPoolContentFrom{
 		"pending": make(map[string]*ethapi.RPCTransaction),
 		"queued":  make(map[string]*ethapi.RPCTransaction),
 	}

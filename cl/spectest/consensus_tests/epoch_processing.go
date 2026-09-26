@@ -90,8 +90,10 @@ var justificationFinalizationTest = NewEpochProcessing(func(s abstract.BeaconSta
 	return statechange.ProcessJustificationBitsAndFinality(s, nil)
 })
 
-var participationFlagUpdatesTest = NewEpochProcessing(statechange.ProcessParticipationFlagUpdates)
-var participationRecordUpdatesTest = NewEpochProcessing(statechange.ProcessParticipationRecordUpdates)
+var (
+	participationFlagUpdatesTest   = NewEpochProcessing(statechange.ProcessParticipationFlagUpdates)
+	participationRecordUpdatesTest = NewEpochProcessing(statechange.ProcessParticipationRecordUpdates)
+)
 
 var randaoMixesTest = NewEpochProcessing(statechange.ProcessRandaoMixesReset)
 
