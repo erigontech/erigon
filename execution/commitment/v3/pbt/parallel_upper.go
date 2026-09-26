@@ -119,18 +119,19 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 	}
 	local := &phaseContext{base: base, records: make(map[string][]byte), baseMu: t.phaseReadMu}
 	var subtreeTrie *Trie
-	if task.hasInitial {
+	switch {
+	case task.hasInitial:
 		local.prefix = &prefix
 		subtreeTrie, err = newSubtreeTrie(local, prefix, task.initial.descriptor, task.initial.present)
 		if err != nil {
 			return phaseBucketResult{}, err
 		}
-	} else if task.kind == phaseBucket && len(task.dependencies) == 0 {
+	case task.kind == phaseBucket && len(task.dependencies) == 0:
 		subtreeTrie, err = newBucketTrie(local, []byte(task.key))
 		if err != nil {
 			return phaseBucketResult{}, err
 		}
-	} else {
+	default:
 		subtreeTrie = NewTrie(local)
 		subtreeTrie.ownedPrefix = &prefix
 		subtreeTrie.suppressRoot = true

@@ -45,8 +45,8 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 	t.upperOnly = true
 	previousStops := t.upperStops
 	t.upperStops = make([]eip8297.Bitpath, 0, len(changed))
-	for _, result := range changed {
-		t.upperStops = append(t.upperStops, result.prefix)
+	for key := range changed {
+		t.upperStops = append(t.upperStops, changed[key].prefix)
 	}
 	defer func() {
 		t.upperOnly = false
@@ -632,85 +632,6 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 
 func setBranchOrLeaf(row *rowNode, slot int, cell rowCell) {
 	row.cells[slot] = cell
-}
-
-func (t *Trie) removeSubtree(prefix *eip8297.Bitpath) (bool, error) {
-	root, err := t.loadRoot()
-	if err != nil {
-		return false, err
-	}
-	switch root.form {
-	case RowRoot:
-		if root.row == nil {
-			return false, nil
-		}
-		return t.removeSubtreeRow(root.row, prefix)
-	case LeafRoot:
-		path, err := keyPath(root.leaf.Key)
-		if err != nil {
-			return false, err
-		}
-		if !pathHasPrefix(&path, prefix) {
-			return false, nil
-		}
-		t.emptyRoot()
-		return true, nil
-	case ExtRoot:
-		if root.self.BitLen >= prefix.BitLen && pathHasPrefix(&root.self, prefix) {
-			t.emptyRoot()
-			return true, nil
-		}
-		if !pathHasPrefix(prefix, &root.self) {
-			return false, nil
-		}
-		row, err := t.extTopRow(root)
-		if err != nil {
-			return false, err
-		}
-		return t.removeSubtreeRow(row, prefix)
-	default:
-		return false, errInsertKey
-	}
-}
-
-func (t *Trie) removeSubtreeRow(row *rowNode, prefix *eip8297.Bitpath) (bool, error) {
-	if row == nil || row.path.BitLen >= prefix.BitLen || eip8297.CommonPrefixBitsAt(&row.path, 0, prefix) != row.path.BitLen {
-		return false, nil
-	}
-	slot := slotAt(prefix, row.path.BitLen)
-	cell := row.cell(slot)
-	switch cell.Kind {
-	case EmptyCell:
-		return false, nil
-	case LeafCell:
-		path, err := keyPath(cell.Key)
-		if err != nil {
-			return false, err
-		}
-		if !pathHasPrefix(&path, prefix) {
-			return false, nil
-		}
-		row.cells[slot] = rowCell{}
-		t.markDirty(row)
-		return true, nil
-	case BranchCell:
-		full := branchPath(row, slot, cell)
-		if full.BitLen >= prefix.BitLen && pathHasPrefix(&full, prefix) {
-			row.cells[slot] = rowCell{}
-			t.markDirty(row)
-			return true, nil
-		}
-		if full.BitLen >= prefix.BitLen || !pathHasPrefix(prefix, &full) {
-			return false, nil
-		}
-		child, err := t.loadBranchChild(row, slot)
-		if err != nil {
-			return false, err
-		}
-		return t.removeSubtreeRow(child, prefix)
-	default:
-		return false, errInsertKey
-	}
 }
 
 func (t *Trie) emptyRoot() {
