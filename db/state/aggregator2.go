@@ -213,7 +213,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 			name := entry.Name()
 			if strings.HasPrefix(name, "v1-") {
-				return errors.New("The datadir has bad snapshot files or they are " +
+				return errors.New("the datadir has bad snapshot files or they are " +
 					"incompatible with the current erigon version. If you want to upgrade from an" +
 					"older version, you may run the following to rename files to the " +
 					"new version: `erigon snapshots update-to-new-ver-format`")

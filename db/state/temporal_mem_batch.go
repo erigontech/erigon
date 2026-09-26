@@ -628,7 +628,7 @@ func (sd *TemporalMemBatch) Close() {
 func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 	other, ok := o.(*TemporalMemBatch)
 	if !ok {
-		return fmt.Errorf("Can't merge %T into *TemporalMemBatch", o)
+		return fmt.Errorf("can't merge %T into *TemporalMemBatch", o)
 	}
 
 	for domain, otherEntries := range other.domains {

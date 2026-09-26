@@ -91,7 +91,7 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 			continue
 		}
 		if b.Result == nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d\n", bn)
+			return fmt.Errorf("could not retrieve block (Erigon) %d", bn)
 		}
 
 		nTransactions += len(b.Result.Transactions)

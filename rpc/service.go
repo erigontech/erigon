@@ -77,7 +77,7 @@ func (r *serviceRegistry) registerName(name string, rcvr any, iface reflect.Type
 	}
 	if iface != nil {
 		if iface.Kind() != reflect.Interface {
-			return fmt.Errorf("Iface for service %s is %s, not an interface", rcvrVal.Type(), iface)
+			return fmt.Errorf("iface for service %s is %s, not an interface", rcvrVal.Type(), iface)
 		}
 		if !rcvrVal.Type().Implements(iface) {
 			return fmt.Errorf("service %s does not implement %s", rcvrVal.Type(), iface)

@@ -119,7 +119,7 @@ func SetupCaplinCli(ctx *cli.Command) (cfg *CaplinCliCfg, err error) {
 func ObtainJwtSecret(ctx *cli.Command) ([]byte, error) {
 	path := ctx.String(caplinflags.JwtSecret.Name)
 	if len(strings.TrimSpace(path)) == 0 {
-		return nil, errors.New("Missing jwt secret path")
+		return nil, errors.New("missing jwt secret path")
 	}
 
 	data, err := os.ReadFile(path)
@@ -131,5 +131,5 @@ func ObtainJwtSecret(ctx *cli.Command) ([]byte, error) {
 		return jwtSecret, nil
 	}
 
-	return nil, fmt.Errorf("Invalid JWT secret at %s, invalid size", path)
+	return nil, fmt.Errorf("invalid JWT secret at %s, invalid size", path)
 }
