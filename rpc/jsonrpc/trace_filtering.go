@@ -1102,6 +1102,10 @@ const (
 )
 
 func (m *TraceFilterMode) UnmarshalJSON(data []byte) error {
+	// An explicit null is the same as an omitted mode: the default, intersection.
+	if string(data) == "null" {
+		return nil
+	}
 	var mode string
 	if err := json.Unmarshal(data, &mode); err != nil {
 		return err

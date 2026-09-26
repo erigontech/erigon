@@ -73,8 +73,8 @@ type TraceCallParam struct {
 	MaxFeePerGas         *hexutil.U256     `json:"maxFeePerGas"`
 	MaxFeePerBlobGas     *hexutil.U256     `json:"maxFeePerBlobGas"`
 	Value                *hexutil.U256     `json:"value"`
-	Data                 hexutil.Bytes     `json:"data"`
-	Input                hexutil.Bytes     `json:"input"`
+	Data                 *hexutil.Bytes    `json:"data"`
+	Input                *hexutil.Bytes    `json:"input"`
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
 	traceTypes           []string
@@ -227,9 +227,9 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	}
 	var data []byte
 	if args.Input != nil {
-		data = args.Input
+		data = *args.Input
 	} else if args.Data != nil {
-		data = args.Data
+		data = *args.Data
 	}
 	var accessList types.AccessList
 	if args.AccessList != nil {
