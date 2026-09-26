@@ -18,6 +18,8 @@ package jsonstream
 
 import (
 	"bytes"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -171,4 +173,22 @@ func benchmarkIncompleteStructure(b *testing.B, s Stream) {
 
 func BenchmarkIncompleteStructure_StackStream(b *testing.B) {
 	benchmarkIncompleteStructure(b, newStackStream(nil, InitialBufferSize))
+}
+
+// BenchmarkWriteHex writes one hex value per op through a stream with a writer, as a response
+// does; bufcap is the stream buffer's capacity afterwards.
+func BenchmarkWriteHex(b *testing.B) {
+	for _, n := range []int{32, 1 << 10, 64 << 10, 128 << 10} {
+		b.Run(fmt.Sprintf("%dB", n), func(b *testing.B) {
+			v := make([]byte, n)
+			s := newStackStream(io.Discard, InitialBufferSize)
+			b.SetBytes(int64(n))
+			b.ReportAllocs()
+			for b.Loop() {
+				s.WriteHex(v)
+				_ = s.Flush()
+			}
+			b.ReportMetric(float64(cap(s.Buffer())), "bufcap")
+		})
+	}
 }
