@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
@@ -264,6 +265,7 @@ func assertBlockCommitments(t *testing.T, m *execmoduletester.ExecModuleTester, 
 	require.NoError(t, err)
 	binRoot, err := domains.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
 	require.NoError(t, err)
+	require.NoError(t, pbt.ValidateEngineIdentityFromTx(tx, kv.CommitmentBinDomain))
 	require.Equal(t, want.hex, common.BytesToHash(hexRoot))
 	require.Equal(t, want.bin, common.BytesToHash(binRoot))
 	blockRoot := block.Root()

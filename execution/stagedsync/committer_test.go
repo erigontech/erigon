@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -457,6 +458,9 @@ func TestCommitmentCalculatorDualFold(t *testing.T) {
 	singleRoot, err := single.GetCommitmentContext().ComputeCommitmentWithDiffAndReader(t.Context(), singleRoTx, false, 1, 1, "test", nil, nil, &asOfStateReader{sd: single, roTx: singleRoTx, commitmentDomain: kv.CommitmentDomain}, nil)
 	require.NoError(t, err)
 	require.Equal(t, singleRoot, dual.canonicalRoot, "the hex arm must match the single-arm root")
+	stateBlob, _, ok := doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
+	require.True(t, ok)
+	require.NoError(t, pbt.ValidateEngineStateBlob(stateBlob))
 }
 
 func TestCommitmentCalculatorBALComputeAheadDualFold(t *testing.T) {
@@ -532,6 +536,9 @@ func testCommitmentCalculatorBALDualFold(t *testing.T, code []byte, withStorage 
 	require.NoError(t, err)
 	require.Equal(t, hexRoot, result.canonicalRoot)
 	require.NotEqual(t, hexRoot, binRoot)
+	stateBlob, _, ok := doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
+	require.True(t, ok)
+	require.NoError(t, pbt.ValidateEngineStateBlob(stateBlob))
 }
 
 func TestCommitmentCalculatorComputeDualMainline(t *testing.T) {
@@ -572,6 +579,9 @@ func TestCommitmentCalculatorComputeDualMainline(t *testing.T) {
 	require.NotEqual(t, empty.RootHash[:], hexRoot, "the hex arm folded no update")
 	require.NotEqual(t, make([]byte, 32), binRoot, "the bin arm folded no update")
 	require.NotEqual(t, hexRoot, binRoot)
+	stateBlob, _, ok := doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
+	require.True(t, ok)
+	require.NoError(t, pbt.ValidateEngineStateBlob(stateBlob))
 }
 
 func TestCommitmentCalculatorCanonicalArmFollowsBlockTime(t *testing.T) {

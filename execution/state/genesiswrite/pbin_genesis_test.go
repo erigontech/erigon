@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -151,6 +152,9 @@ func TestPBinGenesisComputesBothRootsAtBlockZero(t *testing.T) {
 	require.NoError(t, err)
 	binRoot, err := sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
 	require.NoError(t, err)
+	stateBlob, _, ok := sd.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
+	require.True(t, ok)
+	require.NoError(t, pbt.ValidateEngineStateBlob(stateBlob))
 	require.Equal(t, hexRoot, headerRoot)
 	require.NotEqual(t, hexRoot, binRoot)
 	got, err := rawdb.ReadShadowStateRoot(tx, head.Hash(), 0)
@@ -204,6 +208,9 @@ func pbinGenesisRoot(t *testing.T, g *types.Genesis) []byte {
 	head, _ := genesiswrite.GenesisWithoutStateToBlock(g)
 	root, _, err := genesiswrite.ComputeGenesisCommitment(t.Context(), g, tx, sd, head)
 	require.NoError(t, err)
+	stateBlob, _, ok := sd.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	require.True(t, ok)
+	require.NoError(t, pbt.ValidateEngineStateBlob(stateBlob))
 	return root
 }
 

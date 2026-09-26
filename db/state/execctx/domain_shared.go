@@ -2170,6 +2170,9 @@ func (sd *SharedDomains) TouchChangedKeysFromHistory(tx kv.TemporalTx, fromTxNum
 	if err != nil {
 		return accountChanges, storageChanges, err
 	}
+	if _, err = sd.touchChangedKeys(tx, kv.CodeDomain, fromTxNum, toTxNum); err != nil {
+		return accountChanges, storageChanges, err
+	}
 	return accountChanges, storageChanges, err
 }
 

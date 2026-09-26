@@ -51,3 +51,11 @@ func TestRegisteredTrieStateUsesRowFormat(t *testing.T) {
 	require.Equal(t, byte(commitment.PBinRowStateFormat), state[1])
 	require.NoError(t, commitment.PBinValidateRowStateFormat(state))
 }
+
+func TestRowStateFormatRejectsLegacyFormats(t *testing.T) {
+	for format := byte(0); format <= 7; format++ {
+		err := commitment.PBinValidateRowStateFormat([]byte{commitment.PBinStateMarker, format})
+		require.Error(t, err, "legacy flags %d must be rejected", format)
+	}
+	require.Error(t, commitment.PBinValidateRowStateFormat([]byte{commitment.PBinStateMarker, 0x10}))
+}

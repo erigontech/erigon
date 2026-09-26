@@ -30,6 +30,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -46,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1730,6 +1732,52 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, expectedRootHash, rootHash)
 	}
+}
+
+func TestSharedDomain_TouchChangedKeysFromHistoryRecordsCodeKeys(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+
+	db1 := newTestDb(t, 1)
+	rwTx, err := db1.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	addr := common.HexToAddress("0xc0ffee0000000000000000000000000000000000")
+	code := []byte{0x60, 0x00, 0x56}
+	account := accounts.NewAccount()
+	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+	sd1, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	require.NoError(t, sd1.DomainPut(kv.AccountsDomain, rwTx, addr[:], accounts3.SerialiseV3(&account), 1, nil))
+	require.NoError(t, sd1.DomainPut(kv.CodeDomain, rwTx, addr[:], code, 1, nil))
+	require.NoError(t, sd1.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	sd1.Close()
+
+	db1RoTx, err := db1.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	db2 := newTestDb(t, 1)
+	db2RoTx, err := db2.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	sd2, err := execctx.NewSharedDomains(t.Context(), db2RoTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		sd2.Close()
+		db1RoTx.Rollback()
+		db2RoTx.Rollback()
+	})
+
+	_, _, err = sd2.TouchChangedKeysFromHistory(db1RoTx, 1, 2)
+	require.NoError(t, err)
+	require.Equal(t, map[string]struct{}{string(addr[:]): {}}, sd2.GetCommitmentContext().CodeKeys())
+	sd2.GetCommitmentContext().SetStateReader(commitmentdb.NewCommitmentReplayStateReader(db2RoTx, db1RoTx, sd2, 2))
+	_, err = sd2.ComputeCommitment(t.Context(), db2RoTx, false, 1, 1, "", nil)
+	require.NoError(t, err)
 }
 
 // Deleting an already-absent key must not record a redundant empty->empty

@@ -14,18 +14,19 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package commitment
+package pbt
 
-import "fmt"
+import (
+	"testing"
 
-const PBinRowStateFormat byte = 0x20
+	"github.com/stretchr/testify/require"
 
-func PBinValidateRowStateFormat(buf []byte) error {
-	if len(buf) < 2 || !IsPBinState(buf) {
-		return fmt.Errorf("pbin: state requires rebuild: not a pbin blob")
-	}
-	if buf[1] != PBinRowStateFormat {
-		return fmt.Errorf("pbin: state requires rebuild: format %d, want %d", buf[1], PBinRowStateFormat)
-	}
-	return nil
+	"github.com/erigontech/erigon/execution/commitment"
+)
+
+func TestValidateEngineIdentity(t *testing.T) {
+	state := []byte{commitment.PBinStateMarker, commitment.PBinRowStateFormat, 0, 0}
+	require.NoError(t, ValidateEngineIdentity(state, nil))
+	require.Error(t, ValidateEngineIdentity([]byte{commitment.PBinStateMarker, 0x10}, nil))
+	require.Error(t, ValidateEngineIdentity(state, []StoredRecord{{Key: []byte{0}, Value: []byte{0x10}}}))
 }

@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -111,6 +112,11 @@ func TestPBinDualCommitmentReplayGenesis(t *testing.T) {
 				called = true
 				require.Len(t, sd.CommitmentDomains(), 2)
 				require.Equal(t, domain, sd.GetCommitmentCtx().CommitmentDomain())
+				if domain == kv.CommitmentBinDomain {
+					state, _, ok := sd.GetLatestFromMemory(domain, commitment.KeyCommitmentState)
+					require.True(t, ok)
+					require.NoError(t, pbt.ValidateEngineStateBlob(state))
+				}
 				return sd.GetCommitmentCtx().Trie().RootHash()
 			}, target...)
 			require.NoError(t, err)

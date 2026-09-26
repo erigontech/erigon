@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -60,6 +61,7 @@ func TestPBinBinOnlySimulation(t *testing.T) {
 			return nil
 		}))
 	}
+	assertPBinEngineIdentity(t, m.DB, kv.CommitmentDomain)
 }
 
 func TestPBinDualSimulation(t *testing.T) {
@@ -151,6 +153,15 @@ func TestPBinDualSimulation(t *testing.T) {
 		require.True(t, frozen)
 		require.Equal(t, txNum, frozenAt)
 	})
+	assertPBinEngineIdentity(t, m.DB, kv.CommitmentBinDomain)
+}
+
+func assertPBinEngineIdentity(t *testing.T, db kv.TemporalRoDB, domain kv.Domain) {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, pbt.ValidateEngineIdentityFromTx(tx, domain))
 }
 
 func readDualCommittedCommitmentState(t *testing.T, ctx context.Context, db kv.TemporalRoDB) (uint64, []byte) {
