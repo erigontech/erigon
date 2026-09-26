@@ -54,6 +54,9 @@ type CallArgs struct {
 	AccessList           *types.AccessList         `json:"accessList"`
 	ChainID              *hexutil.U256             `json:"chainId,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
+	Blobs                []hexutil.Bytes           `json:"blobs"`
+	Commitments          []hexutil.Bytes           `json:"commitments"`
+	Proofs               []hexutil.Bytes           `json:"proofs"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
 
@@ -555,6 +558,8 @@ func RPCMarshalBlock(block *types.Block, inclTx bool, fullTx bool) *RPCBlock {
 type SignTransactionResult struct {
 	Raw hexutil.Bytes   `json:"raw"`
 	Tx  *RPCTransaction `json:"tx"`
+	// Sidecar, when set, adds blobs, commitments and proofs to the tx object.
+	Sidecar *types.BlobTxWrapper `json:"-"`
 }
 
 func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
@@ -590,6 +595,29 @@ func (r SignTransactionResult) MarshalJSON() ([]byte, error) {
 	for _, k := range []string{"v", "r", "s"} {
 		if v, ok := m[k]; !ok || string(v) == "null" {
 			m[k] = zeroHex
+		}
+	}
+	if sc := r.Sidecar; sc != nil {
+		blobs := make([]hexutil.Bytes, len(sc.Blobs))
+		for i := range sc.Blobs {
+			blobs[i] = sc.Blobs[i][:]
+		}
+		commitments := make([]hexutil.Bytes, len(sc.Commitments))
+		for i := range sc.Commitments {
+			commitments[i] = sc.Commitments[i][:]
+		}
+		proofs := make([]hexutil.Bytes, len(sc.Proofs))
+		for i := range sc.Proofs {
+			proofs[i] = sc.Proofs[i][:]
+		}
+		if m["blobs"], err = json.Marshal(blobs); err != nil {
+			return nil, err
+		}
+		if m["commitments"], err = json.Marshal(commitments); err != nil {
+			return nil, err
+		}
+		if m["proofs"], err = json.Marshal(proofs); err != nil {
+			return nil, err
 		}
 	}
 	stripped, err := json.Marshal(m)
