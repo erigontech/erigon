@@ -368,16 +368,38 @@ func (t *voluntaryExitTestSuite) exitAtEpochs(headEpoch, wallEpoch, activationEp
 
 func (t *voluntaryExitTestSuite) TestExitActivityUsesHeadEpoch() {
 	service, msg := t.exitAtEpochs(99, 100, 100, 0, math.MaxUint64)
-	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "validator is not active")
+	msg.ImmediateVerification = false
+	t.Require().ErrorIs(service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 	t.Require().False(service.seen.Contains(10))
 	t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(10))
 }
 
 func (t *voluntaryExitTestSuite) TestExitTenureUsesHeadEpoch() {
 	service, msg := t.exitAtEpochs(99, 100, 0, 100, math.MaxUint64)
-	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "verify the validator has been active long enough")
+	msg.ImmediateVerification = false
+	t.Require().ErrorIs(service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 	t.Require().False(service.seen.Contains(10))
 	t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(10))
+}
+
+func (t *voluntaryExitTestSuite) TestImmediateExitActivityRejectsWhenHeadLags() {
+	service, msg := t.exitAtEpochs(99, 100, 100, 0, math.MaxUint64)
+	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "validator is not active")
+}
+
+func (t *voluntaryExitTestSuite) TestImmediateExitTenureRejectsWhenHeadLags() {
+	service, msg := t.exitAtEpochs(99, 100, 0, 100, math.MaxUint64)
+	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "verify the validator has been active long enough")
+}
+
+func (t *voluntaryExitTestSuite) TestExitActivityRejectsWhenClockAlsoPrecedesActivation() {
+	service, msg := t.exitAtEpochs(99, 99, 100, 0, math.MaxUint64)
+	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "validator is not active")
+}
+
+func (t *voluntaryExitTestSuite) TestExitTenureRejectsWhenClockAlsoPrecedesEligibility() {
+	service, msg := t.exitAtEpochs(99, 99, 0, 100, math.MaxUint64)
+	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "verify the validator has been active long enough")
 }
 
 func (t *voluntaryExitTestSuite) TestInitiatedExitIgnoredBeforeActivity() {
