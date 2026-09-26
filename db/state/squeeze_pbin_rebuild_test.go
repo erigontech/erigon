@@ -37,7 +37,7 @@ func TestPBinRebuildBatchesFollowTreeKeyOrder(t *testing.T) {
 		{Key: eip8297.TreeKeyAccount(addressB, eip8297.BasicDataLeafKey), Value: [32]byte{4}},
 	}
 
-	batches, err := pbinRebuildBatches(ops, t.TempDir(), 2, 256)
+	batches, err := pbinRebuildBatches(ops, t.TempDir(), 2, 1<<20)
 	require.NoError(t, err)
 	require.Len(t, batches, 2)
 	require.Len(t, batches[0], 2)

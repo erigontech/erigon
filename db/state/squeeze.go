@@ -1423,6 +1423,10 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		if len(key) > 0 {
 			if cfg.Variant == commitment.VariantBinPatriciaTrie {
 				pbinKeys[string(key)] = struct{}{}
+				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+				if len(key) == length.Addr {
+					sd.GetCommitmentCtx().TouchKey(kv.CodeDomain, string(key), nil)
+				}
 				processed++
 				if !ok {
 					break
@@ -1515,11 +1519,21 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		if err != nil {
 			return nil, err
 		}
-		for _, batch := range batches {
-			sd.GetCommitmentCtx().SetPBinOps(batch)
+		_, processPBinOps := sd.GetCommitmentCtx().Trie().(interface {
+			ProcessPBinOps(context.Context, []pbt.Op, func(*commitment.CommitProgress)) ([]byte, error)
+		})
+		if !processPBinOps {
 			rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 			if err != nil {
 				return nil, err
+			}
+		} else {
+			for _, batch := range batches {
+				sd.GetCommitmentCtx().SetPBinOps(batch)
+				rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+				if err != nil {
+					return nil, err
+				}
 			}
 		}
 	} else {
