@@ -279,8 +279,8 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 
 // EngineNewPayload validates and possibly executes payload
 func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
-	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
-) (*engine_types.PayloadStatus, error) {
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes, version clparams.StateVersion,
+) (any, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !s.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -440,13 +440,30 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "slotNumber missing"}
 		}
 	}
+	var il types.Transactions
+	if version >= clparams.HezeVersion {
+		if len(inclusionList) == 0 || inclusionList == nil {
+			return nil, &rpc.InvalidParamsError{Message: "inclusion list cannot be empty"}
+		}
+
+		txns := make([][]byte, len(inclusionList))
+		for i, tx := range inclusionList {
+			txns[i] = tx
+		}
+		il, err = types.DecodeTransactions(txns)
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot decode inclusion list: %v", err)}
+		}
+	}
 
 	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
 		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
 		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
 		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
 		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
-		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
+		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) ||
+		(!s.config.IsBogota(header.Time) && version >= clparams.HezeVersion) ||
+		(s.config.IsBogota(header.Time) && version < clparams.HezeVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -519,23 +536,47 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
+	block = block.WithInclusionList(il)
 	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
-	if err != nil {
-		if errors.Is(err, rules.ErrInvalidBlock) {
-			return &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedError(err),
-			}, nil
+	if version < clparams.HezeVersion {
+		if err != nil {
+			if errors.Is(err, rules.ErrInvalidBlock) {
+				return &engine_types.PayloadStatus{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedError(err),
+				}, nil
+			}
+			return nil, err
 		}
-		return nil, err
-	}
-	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
+		s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
-	if payloadStatus.CriticalError != nil {
-		return nil, payloadStatus.CriticalError
-	}
+		ret := payloadStatus.(*engine_types.PayloadStatus)
 
-	return payloadStatus, nil
+		if ret.CriticalError != nil {
+			return nil, ret.CriticalError
+		}
+
+		return ret, nil
+	} else {
+		if err != nil {
+			if errors.Is(err, rules.ErrInvalidBlock) {
+				return &engine_types.PayloadStatusV2{
+					Status:          engine_types.InvalidStatus,
+					ValidationError: engine_types.NewStringifiedError(err),
+				}, nil
+			}
+			return nil, err
+		}
+		s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
+
+		ret := payloadStatus.(*engine_types.PayloadStatusV2)
+
+		if ret.CriticalError != nil {
+			return nil, ret.CriticalError
+		}
+
+		return ret, nil
+	}
 }
 
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
@@ -970,7 +1011,7 @@ func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 	versionedHashes []common.Hash,
-) (*engine_types.PayloadStatus, error) {
+) (any, error) {
 	e.engineLogSpamer.RecordRequest()
 
 	header := block.Header()

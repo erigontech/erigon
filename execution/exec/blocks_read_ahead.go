@@ -34,6 +34,9 @@ type BlockReadAheader struct {
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
+	// inclusionLists is the only copy of each IL (never persisted), so unlike
+	// the other caches a miss cannot fall back to the DB.
+	inclusionLists *lru.Cache[common.Hash, types.Transactions]
 
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
@@ -66,12 +69,17 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
+	ils, err := lru.New[common.Hash, types.Transactions](1)
+	if err != nil {
+		panic(err)
+	}
 	return &BlockReadAheader{
-		headers:    headers,
-		bodies:     bodies,
-		senders:    senders,
-		bals:       bals,
-		warmupGate: semaphore.NewWeighted(1),
+		headers:        headers,
+		bodies:         bodies,
+		senders:        senders,
+		bals:           bals,
+		inclusionLists: ils,
+		warmupGate:     semaphore.NewWeighted(1),
 	}
 }
 
@@ -220,6 +228,13 @@ func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *type
 		return
 	}
 	bra.bals.Add(blockHash, bal)
+}
+
+func (bra *BlockReadAheader) AddInclusionList(blockHash common.Hash, il types.Transactions) {
+	if il == nil {
+		return
+	}
+	bra.inclusionLists.Add(blockHash, il)
 }
 
 const balWarmupStorageChunkSize = 64
@@ -478,6 +493,10 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 
 func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*types.Body, bool) {
 	return bra.bodies.Get(blockHash)
+}
+
+func (bra *BlockReadAheader) ReadInclusionList(blockHash common.Hash) (types.Transactions, bool) {
+	return bra.inclusionLists.Get(blockHash)
 }
 
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {

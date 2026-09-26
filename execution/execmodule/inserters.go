@@ -171,6 +171,10 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 			e.readAheader.AddBlockAccessList(blockHash, blockAccessList)
 		}
+		inclusionList := block.InclusionList()
+		if inclusionList != nil {
+			e.readAheader.AddInclusionList(blockHash, inclusionList)
+		}
 		e.logger.Trace("Inserted block", "hash", blockHash, "number", header.Number)
 	}
 
