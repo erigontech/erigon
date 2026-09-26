@@ -848,6 +848,60 @@ func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_PublishesToReal
 	s.Equal(payload, got)
 }
 
+// TestPublishBackground_ClonesPayloadAtEnqueueTime proves a queued job
+// publishes the bytes as they were at enqueue time, not whatever the
+// caller's buffer becomes before the worker gets around to draining it -
+// unlike the synchronous Publish, which reads data before returning, this
+// call hands the buffer to a worker that reads it later, so a caller
+// reusing or mutating its buffer afterward must not affect what publishes.
+func (s *subscribeUpcomingTopicsTestSuite) TestPublishBackground_ClonesPayloadAtEnqueueTime() {
+	forkDigest := common.Bytes4{0xab, 0xcd, 0x12, 0x34}
+	topicName := "test_clone_topic"
+	topic := composeTopic(forkDigest, topicName)
+	topicHandle, err := s.gm.p2p.Pubsub().Join(topic)
+	s.Require().NoError(err)
+	validator := func(ctx context.Context, pid peer.ID, msg *pubsub.Message) pubsub.ValidationResult {
+		return pubsub.ValidationAccept
+	}
+	s.Require().NoError(s.gm.subscriptions.Add(topic, topicHandle, validator))
+
+	sub, err := topicHandle.Subscribe()
+	s.Require().NoError(err)
+	defer sub.Cancel()
+
+	original := []byte("original-payload")
+	payload := make([]byte, len(original))
+	copy(payload, original)
+
+	hookEntered := make(chan struct{})
+	unblock := make(chan struct{})
+	s.gm.publishHookForTest = func(name string, data []byte) {
+		close(hookEntered)
+		<-unblock
+	}
+
+	s.NoError(s.gm.PublishBackground(topicName, payload, time.Time{}))
+	select {
+	case <-hookEntered:
+	case <-time.After(2 * time.Second):
+		s.FailNow("worker never picked up the job")
+	}
+
+	for i := range payload {
+		payload[i] = 'X'
+	}
+	close(unblock)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	msg, err := sub.Next(ctx)
+	s.Require().NoError(err)
+
+	got, err := utils.DecompressSnappy(msg.GetData(), true)
+	s.Require().NoError(err)
+	s.Equal(original, got, "mutating the caller's buffer after PublishBackground returns must not affect the published bytes")
+}
+
 // TestPublishBackground_CapturesForkDigestAtEnqueueTime proves a message
 // publishes under the fork digest that was active when it was queued, not
 // whatever digest happens to be active once the worker gets around to

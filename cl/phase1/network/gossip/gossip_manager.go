@@ -17,6 +17,7 @@
 package gossip
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -428,10 +429,12 @@ func (g *GossipManager) rejectShutdown(name string, logCtx []any) error {
 // gossip topic without waiting for the network call: the actual publish
 // runs on this GossipManager's own background worker. It never blocks the
 // caller - not on queue capacity, and not on a shutdown drain in progress -
-// though it does resolve the fork digest and log synchronously. The fork
-// digest is captured now, at enqueue time, rather than re-resolved when the
-// worker drains the job, so a message accepted just before a fork activates
-// still publishes to the topic it was validated against.
+// though it does resolve the fork digest, log synchronously, and clone
+// data (the caller keeps ownership of its own slice; the worker reads its
+// own copy later). The fork digest is captured now, at enqueue time,
+// rather than re-resolved when the worker drains the job, so a message
+// accepted just before a fork activates still publishes to the topic it
+// was validated against.
 //
 // A non-nil return means the message was never admitted: the caller learns
 // this before it responds, rather than it being invisible behind an HTTP
@@ -463,8 +466,11 @@ func (g *GossipManager) PublishBackground(name string, data []byte, expiry time.
 	if g.enqueueHookForTest != nil {
 		g.enqueueHookForTest()
 	}
+	// Cloned so a caller reusing or mutating data after this call returns
+	// can't change what the worker publishes later - the synchronous
+	// Publish read data before returning, so it never had this gap.
 	select {
-	case g.publishQueue <- publishJob{name: name, data: data, forkDigest: forkDigest, expiry: expiry, logCtx: logCtx}:
+	case g.publishQueue <- publishJob{name: name, data: bytes.Clone(data), forkDigest: forkDigest, expiry: expiry, logCtx: logCtx}:
 		publishAcceptedCounter.WithLabelValues(name).Inc()
 		return nil
 	default:
