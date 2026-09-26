@@ -153,6 +153,128 @@ func TestCalcStatePBinFeedWipedSurvivesRecreate(t *testing.T) {
 	require.False(t, cs.accounts[addr].Deleted)
 }
 
+func TestCalcStatePBinFeedCreateOverStorageWipesStorage(t *testing.T) {
+	addr := common.Address{0xc0, 0xff, 0xee}
+	address := accounts.InternAddress(addr)
+	initial := commitment.PBinFeedAccount{Address: addr[:], Exists: true, Balance: *uint256.NewInt(7)}
+	for i := range 192 {
+		key := common.Hash{31: byte(i)}
+		initial.Slots = append(initial.Slots, commitment.PBinFeedSlot{Key: key[:], Value: []byte{1}})
+	}
+	ctx := &calcPBinTrieContext{records: make(map[string][]byte)}
+	trie := pbt.NewTrie(ctx)
+	_, err := trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{initial}})
+	require.NoError(t, err)
+
+	reader := &calcPBinReader{values: map[string][]byte{
+		calcPBinReaderKey(kv.AccountsDomain, addr[:]): accounts.SerialiseV3(&accounts.Account{Nonce: 1, Balance: *uint256.NewInt(7)}),
+	}}
+	cs := newTestCalcState()
+	cs.reader = reader
+	writes := newWS().createContract(address, state.Version{}, true).nonce(address, state.Version{}, 1).bal(address, state.Version{}, *uint256.NewInt(7)).build()
+	cs.ApplyWrites(writes, false)
+	require.Contains(t, cs.wiped, address)
+	feed, err := cs.BinFeed()
+	require.NoError(t, err)
+	got, err := pbt.NewTrie(ctx).ProcessFeed(feed)
+	require.NoError(t, err)
+	want := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{
+		{{Address: addr[:], Balance: *uint256.NewInt(7), Slots: func() map[string][]byte {
+			slots := make(map[string][]byte, 192)
+			for i := range 192 {
+				key := common.Hash{31: byte(i)}
+				slots[string(key[:])] = []byte{1}
+			}
+			return slots
+		}()}},
+		{{Address: addr[:], Deleted: true}},
+		{{Address: addr[:], Nonce: 1, Balance: *uint256.NewInt(7)}},
+	}))
+	require.Equal(t, want, got)
+}
+
+func TestLoadFromBALPBinFeedCreateOverStorageWipesStorage(t *testing.T) {
+	addr := accounts.InternAddress(common.Address{0xc0, 0xff, 0xee})
+	io := state.NewVersionedIO(1)
+	io.RecordWrites(state.Version{TxIndex: 0}, newWS().createContract(addr, state.Version{}, true).nonce(addr, state.Version{}, 1).bal(addr, state.Version{}, *uint256.NewInt(7)).build())
+	bal := io.AsBlockAccessList()
+	require.Len(t, bal, 1)
+	require.Len(t, bal[0].NonceChanges, 1)
+	cs := newTestCalcState()
+	cs.domainReader = &preBlockReader{addr: addr, acc: &accounts.Account{Nonce: 0, Balance: *uint256.NewInt(7), Incarnation: 1}}
+	cs.LoadFromBAL(bal, true, false, false)
+	require.Contains(t, cs.wiped, addr)
+}
+
+func TestPBinFeedSourcesMatchGeneratedCreateOverStorage(t *testing.T) {
+	addr := common.Address{0xc0, 0xff, 0xee}
+	address := accounts.InternAddress(addr)
+	initial := &commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{{Address: addr[:], Exists: true, Balance: *uint256.NewInt(7)}}}
+	for i := range 192 {
+		key := common.Hash{31: byte(i)}
+		initial.Accounts[0].Slots = append(initial.Accounts[0].Slots, commitment.PBinFeedSlot{Key: key[:], Value: []byte{1}})
+	}
+	finalReader := &calcPBinReader{values: map[string][]byte{
+		calcPBinReaderKey(kv.AccountsDomain, addr[:]): accounts.SerialiseV3(&accounts.Account{Nonce: 1, Balance: *uint256.NewInt(7)}),
+	}}
+	writes := newWS().createContract(address, state.Version{}, true).nonce(address, state.Version{}, 1).bal(address, state.Version{}, *uint256.NewInt(7)).build()
+	calcState := newTestCalcState()
+	calcState.reader = finalReader
+	calcState.ApplyWrites(writes, false)
+	calcFeed, err := calcState.BinFeed()
+	require.NoError(t, err)
+
+	io := state.NewVersionedIO(1)
+	io.RecordWrites(state.Version{TxIndex: 0}, writes)
+	bal := io.AsBlockAccessList()
+	balState := newTestCalcState()
+	balState.domainReader = &preBlockReader{addr: address, acc: &accounts.Account{Nonce: 0, Balance: *uint256.NewInt(7), Incarnation: 1}}
+	balState.reader = finalReader
+	balState.LoadFromBAL(bal, true, false, false)
+	balFeed, err := balState.BinFeed()
+	require.NoError(t, err)
+
+	sharedFeed, err := commitmentdb.BinFeedFromState(
+		map[string]struct{}{string(addr[:]): {}},
+		map[string]struct{}{},
+		map[string]struct{}{string(addr[:]): {}},
+		finalReader,
+	)
+	require.NoError(t, err)
+
+	process := func(feed *commitment.PBinFeed) (common.Hash, map[string][]byte) {
+		ctx := &calcPBinTrieContext{records: make(map[string][]byte)}
+		trie := pbt.NewTrie(ctx)
+		_, err := trie.ProcessFeed(initial)
+		require.NoError(t, err)
+		root, err := trie.ProcessFeed(feed)
+		require.NoError(t, err)
+		require.NoError(t, pbt.NewTrie(ctx).Verify())
+		return root, ctx.records
+	}
+
+	calcRoot, calcRecords := process(calcFeed)
+	balRoot, balRecords := process(balFeed)
+	sharedRoot, sharedRecords := process(sharedFeed)
+	want := eip8297.StateRoot(eip8297.EmbedState([][]eip8297.State{
+		{{Address: addr[:], Balance: *uint256.NewInt(7), Slots: func() map[string][]byte {
+			slots := make(map[string][]byte, 192)
+			for i := range 192 {
+				key := common.Hash{31: byte(i)}
+				slots[string(key[:])] = []byte{1}
+			}
+			return slots
+		}()}},
+		{{Address: addr[:], Deleted: true}},
+		{{Address: addr[:], Nonce: 1, Balance: *uint256.NewInt(7)}},
+	}))
+	require.Equal(t, want, calcRoot)
+	require.Equal(t, calcRoot, balRoot)
+	require.Equal(t, calcRoot, sharedRoot)
+	require.Equal(t, calcRecords, balRecords)
+	require.Equal(t, calcRecords, sharedRecords)
+}
+
 func TestCalcStatePBinFeedBALTracksCodeAndEmptyRemoval(t *testing.T) {
 	addr := common.Address{5}
 	emptyAddr := common.Address{6}

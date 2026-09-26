@@ -204,6 +204,14 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	cs.prefetch.add(prefetchItem{account: acc.hash})
 }
 
+func (cs *calcState) markWiped(addr accounts.Address) {
+	if cs.wiped == nil {
+		cs.wiped = make(map[accounts.Address]struct{})
+	}
+	cs.wiped[addr] = struct{}{}
+	cs.deleteStorageSubtree(addr)
+}
+
 // ApplyWrites folds a tx's typed write collections into the local state.
 //
 // Self-destruct is applied before the field writes so the priority is explicit
@@ -214,17 +222,21 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 // — even zero — means it is alive (clears Deleted).
 func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 	sdThisCall := make(map[accounts.Address]bool)
+	for header := range writes.AllHeaders() {
+		if header.Path != state.CreateContractPath {
+			continue
+		}
+		if vw, ok := writes.GetCreateContract(header.Address); ok && vw.Val {
+			cs.markWiped(header.Address)
+		}
+	}
 	for addr, vw := range writes.SelfDestructs() {
 		sdThisCall[addr] = vw.Val
 		if vw.Val {
-			if cs.wiped == nil {
-				cs.wiped = make(map[accounts.Address]struct{})
-			}
-			cs.wiped[addr] = struct{}{}
+			cs.markWiped(addr)
 			acc := cs.ensureAccount(addr, writes)
 			acc.Deleted = true
 			cs.markDirty(addr, acc)
-			cs.deleteStorageSubtree(addr)
 		}
 	}
 	clearsDeleted := func(addr accounts.Address, nonZero bool) bool {
@@ -354,6 +366,34 @@ func (cs *calcState) LoadFromBAL(blockAccessList types.BlockAccessList, emptyRem
 // remainder — the BAL carries every change's tx index, so no re-execution is
 // needed. maxTxIndex == math.MaxUint32 is the whole block (== LoadFromBAL).
 func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxTxIndex uint32, emptyRemoval bool, isAura bool, eip8246 bool) {
+	for i := range blockAccessList {
+		accountChanges := &blockAccessList[i]
+		if cs.domainReader == nil {
+			continue
+		}
+		var nonce uint64
+		foundNonce := false
+		for _, change := range accountChanges.NonceChanges {
+			if change != nil && change.Index <= maxTxIndex {
+				nonce = change.Value
+				foundNonce = true
+			}
+		}
+		if !foundNonce || nonce != 1 {
+			continue
+		}
+		addr := accounts.InternAddress(accountChanges.Address)
+		pre, err := cs.domainReader.ReadAccountData(addr)
+		if err != nil {
+			if cs.lazyLoadErr == nil {
+				cs.lazyLoadErr = fmt.Errorf("LoadFromBAL(%x): %w", addr.Value(), err)
+			}
+			continue
+		}
+		if pre != nil && pre.Incarnation > 0 {
+			cs.markWiped(addr)
+		}
+	}
 	cs.ApplyWrites(bal.ToWriteSet(blockAccessList, maxTxIndex), eip8246)
 
 	// EIP-161: a touched account whose merged block-end state is empty is
@@ -368,10 +408,7 @@ func (cs *calcState) LoadFromBALUpTo(blockAccessList types.BlockAccessList, maxT
 		}
 		if acc.Balance.IsZero() && acc.Nonce == 0 && acc.CodeHash == empty.CodeHash &&
 			state.EIP161EmptyRemoval(emptyRemoval, isAura, addr) {
-			if cs.wiped == nil {
-				cs.wiped = make(map[accounts.Address]struct{})
-			}
-			cs.wiped[addr] = struct{}{}
+			cs.markWiped(addr)
 			acc.Deleted = true
 			acc.Incarnation = 0
 		}

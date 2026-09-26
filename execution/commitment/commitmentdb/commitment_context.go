@@ -214,10 +214,15 @@ func (sdc *SharedDomainsCommitmentContext) PeekPendingUpdate() *commitment.Pendi
 
 // ResetPendingUpdates clears the pending update, returning deferred updates to the pool.
 func (sdc *SharedDomainsCommitmentContext) ResetPendingUpdates() {
+	sdc.ResetCodeKeys()
 	if sdc.pendingUpdate != nil {
 		sdc.pendingUpdate.Clear()
 		sdc.pendingUpdate = nil
 	}
+}
+
+func (sdc *SharedDomainsCommitmentContext) ResetCodeKeys() {
+	clear(sdc.codeKeys)
 }
 
 // HasPendingUpdate returns true if there is a pending update to flush.
@@ -356,11 +361,13 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 }
 
 func (sdc *SharedDomainsCommitmentContext) Close() {
+	sdc.ResetCodeKeys()
 	sdc.updates.Close()
 	sdc.patriciaTrie.Release()
 }
 
 func (sdc *SharedDomainsCommitmentContext) Reset() {
+	sdc.ResetCodeKeys()
 	if !sdc.justRestored.Load() {
 		sdc.patriciaTrie.Reset()
 	}
@@ -565,6 +572,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiffAndReader(ct
 }
 
 func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), putter kv.TemporalPutDel, stateReader StateReader, decorate func(commitment.PatriciaContext) commitment.PatriciaContext) (rootHash []byte, err error) {
+	defer sdc.ResetCodeKeys()
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
 	}

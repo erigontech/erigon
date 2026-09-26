@@ -244,6 +244,22 @@ Loop:
 	goto Loop
 }
 
+func TestSharedDomainUnwindClearsCodeKeys(t *testing.T) {
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(domains.Close)
+
+	address := make([]byte, 20)
+	domains.GetCommitmentContext().TouchKey(kv.CodeDomain, string(address), []byte{1})
+	require.NotEmpty(t, domains.GetCommitmentContext().CodeKeys())
+	domains.Unwind(0, nil)
+	require.Empty(t, domains.GetCommitmentContext().CodeKeys())
+}
+
 // TestSharedDomain_UnwindDoesNotRestoreOverlayForNewKey reproduces the
 // mainnet block-24898955 gas-used mismatch (diff = -17100 = SSTORE_RESET -
 // SSTORE_SET). After a forkchoice-driven unwind, the TemporalMemBatch overlay

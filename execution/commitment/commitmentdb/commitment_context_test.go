@@ -397,6 +397,32 @@ func TestSharedDomainsCodeKeysFollowTouchedUpdates(t *testing.T) {
 	require.Empty(t, sdc.CodeKeys())
 }
 
+func TestSharedDomainsCodeKeysClearOnResetPaths(t *testing.T) {
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	sdc := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	t.Cleanup(sdc.Close)
+	address := make([]byte, 20)
+	sdc.TouchKey(kv.CodeDomain, string(address), []byte{1})
+	sdc.Reset()
+	require.Empty(t, sdc.CodeKeys())
+	sdc.TouchKey(kv.CodeDomain, string(address), []byte{1})
+	sdc.ResetPendingUpdates()
+	require.Empty(t, sdc.CodeKeys())
+}
+
+func TestSharedDomainsCodeKeysClearAfterCompute(t *testing.T) {
+	rec := &commitmentTimeRecorder{}
+	sdc := NewSharedDomainsCommitmentContext(rec, kv.CommitmentDomain, commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{})
+	t.Cleanup(sdc.Close)
+	sdc.SetStateReader(&testStateReader{})
+	sdc.TouchKey(kv.CodeDomain, string(make([]byte, 20)), []byte{1})
+	require.NotEmpty(t, sdc.CodeKeys())
+	_, err := sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
+	require.NoError(t, err)
+	require.Empty(t, sdc.CodeKeys())
+}
+
 type branchChildCountDomains struct {
 	stubSharedDomains
 	value   []byte

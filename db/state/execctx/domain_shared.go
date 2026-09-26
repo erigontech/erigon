@@ -958,6 +958,9 @@ func (sd *SharedDomains) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockNumb
 
 // Unwind drops [txNumUnwindTo, ∞)
 func (sd *SharedDomains) Unwind(txNumUnwindTo uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
+	if sd.sdCtx != nil {
+		sd.sdCtx.ResetCodeKeys()
+	}
 	sd.mem.Unwind(txNumUnwindTo, changeset)
 	if !sd.localCacheUnwind {
 		sd.invalidateCaches(txNumUnwindTo)
