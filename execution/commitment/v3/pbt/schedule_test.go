@@ -682,8 +682,8 @@ func TestTrieParallelUpperReadsDoNotGrowWithTree(t *testing.T) {
 	}
 	small := build(1)
 	large := build(5000)
-	require.Equal(t, storedPathDepth(small, target)+2, len(small.reads))
-	require.Equal(t, storedPathDepth(large, target)+2, len(large.reads))
+	require.Equal(t, storedPathDepth(small, target), len(small.reads))
+	require.Equal(t, storedPathDepth(large, target), len(large.reads))
 }
 
 func storedPathDepth(ctx *trieTestContext, target []byte) int {

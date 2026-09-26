@@ -426,6 +426,9 @@ func (t *Trie) refreshRouting() error {
 	}
 	sort.SliceStable(dirty, func(i, j int) bool { return dirty[i].path.BitLen > dirty[j].path.BitLen })
 	for _, row := range dirty {
+		if t.stopsUpperPath(&row.path) {
+			continue
+		}
 		if row.parent == nil || row.parent.cell(row.parentSlot).child != row || len(row.occupied()) < 2 {
 			continue
 		}
@@ -437,7 +440,7 @@ func (t *Trie) refreshRouting() error {
 	case RowRoot:
 		return nil
 	case ExtRoot:
-		if t.upperOnly && t.root.self.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&t.root.self) {
+		if t.stopsUpperPath(&t.root.self) || t.upperOnly && t.root.self.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&t.root.self) {
 			return nil
 		}
 		row, err := t.extTopRow(t.root)
@@ -537,7 +540,7 @@ func (t *Trie) normalize() error {
 		}
 		return t.normalizeRootRow(root, root.row)
 	case ExtRoot:
-		if t.upperOnly && root.self.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&root.self) {
+		if t.stopsUpperPath(&root.self) || t.upperOnly && root.self.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&root.self) {
 			return nil
 		}
 		row, err := t.extTopRow(root)
@@ -597,7 +600,7 @@ func (t *Trie) normalizeChildren(row *rowNode) error {
 		if cell.Kind != BranchCell || cell.child == nil {
 			continue
 		}
-		if t.upperOnly && cell.child.path.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&cell.child.path) {
+		if t.stopsUpperPath(&cell.child.path) || t.upperOnly && cell.child.path.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&cell.child.path) {
 			continue
 		}
 		if err := t.normalizeRow(cell.child); err != nil {

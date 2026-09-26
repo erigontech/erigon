@@ -54,6 +54,7 @@ type Trie struct {
 	rootPath               eip8297.Bitpath
 	bucketMode             bool
 	upperOnly              bool
+	upperStops             []eip8297.Bitpath
 	root                   *treeRoot
 	rootLoaded             bool
 	rootDirty              bool
@@ -86,6 +87,54 @@ func newBucketTrie(ctx commitment.PatriciaContext, key []byte) (*Trie, error) {
 		dirtyRows:   make(map[string]*rowNode),
 		bucketDirty: make(map[string][]byte),
 	}, nil
+}
+
+func newSubtreeTrie(ctx commitment.PatriciaContext, prefix eip8297.Bitpath, descriptor bucketDescriptor, present bool) (*Trie, error) {
+	key, err := rowKeyForPath(&prefix)
+	if err != nil {
+		return nil, err
+	}
+	t := &Trie{
+		ctx:                   ctx,
+		rootKey:               key,
+		rootPath:              prefix,
+		ownedPrefix:           &prefix,
+		suppressRoot:          true,
+		suppressBucketRecords: true,
+		rootLoaded:            true,
+		root:                  &treeRoot{form: RowRoot},
+		rows:                  make(map[string]*rowNode),
+		dirtyRows:             make(map[string]*rowNode),
+		bucketDirty:           make(map[string][]byte),
+	}
+	if !present {
+		return t, nil
+	}
+	switch descriptor.form {
+	case LeafRoot:
+		t.root.form = LeafRoot
+		t.root.leaf = descriptor.leaf
+	case ExtRoot:
+		t.root.form = ExtRoot
+		t.root.self = prefix
+		t.root.self.Append(&descriptor.self)
+		t.root.left = descriptor.left
+		t.root.right = descriptor.right
+	case RowRoot:
+		if descriptor.row == nil {
+			return nil, fmt.Errorf("subtree descriptor has no row")
+		}
+		record := descriptor.row.record()
+		row := rowFromRecord(prefix, key, descriptor.row.raw, &record)
+		t.root.form = RowRoot
+		t.root.row = row
+		t.root.raw = bytes.Clone(descriptor.row.raw)
+		t.root.prev = bytes.Clone(descriptor.row.raw)
+		t.rows[string(key)] = row
+	default:
+		return nil, fmt.Errorf("unknown subtree descriptor form %d", descriptor.form)
+	}
+	return t, nil
 }
 
 func (t *Trie) SetTrieContextFactory(factory commitment.TrieContextFactory) { t.ctxFactory = factory }

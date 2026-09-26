@@ -43,7 +43,15 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 		t.rememberPrev(t.rootRecordKey(), t.root.prev)
 	}
 	t.upperOnly = true
-	defer func() { t.upperOnly = false }()
+	previousStops := t.upperStops
+	t.upperStops = make([]eip8297.Bitpath, 0, len(changed))
+	for _, result := range changed {
+		t.upperStops = append(t.upperStops, result.prefix)
+	}
+	defer func() {
+		t.upperOnly = false
+		t.upperStops = previousStops
+	}()
 	for i := range ops {
 		op := ops[i]
 		var err error
@@ -76,17 +84,8 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 				return common.Hash{}, err
 			}
 		}
-		if _, err := t.removeSubtree(&prefix); err != nil {
-			return common.Hash{}, fmt.Errorf("remove upper subtree %x: %w", []byte(key), err)
-		}
-		if result.present {
-			subtree, err := subtreeForDescriptorAt(prefix, result.descriptor)
-			if err != nil {
-				return common.Hash{}, fmt.Errorf("descriptor subtree %x: %w", []byte(key), err)
-			}
-			if err := t.insertSubtree(subtree); err != nil {
-				return common.Hash{}, fmt.Errorf("insert upper subtree %x: %w", []byte(key), err)
-			}
+		if err := t.replaceSubtreeAt(prefix, result); err != nil {
+			return common.Hash{}, fmt.Errorf("replace upper subtree %x: %w", []byte(key), err)
 		}
 		if err := t.refreshRouting(); err != nil {
 			return common.Hash{}, err
@@ -100,6 +99,179 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 		return common.Hash{}, err
 	}
 	return t.rootHash()
+}
+
+func (t *Trie) stopsUpperPath(path *eip8297.Bitpath) bool {
+	if !t.upperOnly {
+		return false
+	}
+	for i := range t.upperStops {
+		if pathHasPrefix(path, &t.upperStops[i]) {
+			return true
+		}
+	}
+	return false
+}
+
+func (t *Trie) replaceSubtreeAt(prefix eip8297.Bitpath, result phaseBucketResult) error {
+	root, err := t.loadRoot()
+	if err != nil {
+		return err
+	}
+	if prefix.BitLen == t.rootRecordPath().BitLen && prefix == t.rootRecordPath() {
+		return t.replaceRootDescriptor(prefix, result)
+	}
+	var replaced bool
+	switch root.form {
+	case RowRoot:
+		if root.row != nil {
+			replaced, err = t.replaceSubtreeRow(root.row, &prefix, result)
+		}
+	case LeafRoot:
+		path, pathErr := keyPath(root.leaf.Key)
+		if pathErr != nil {
+			return pathErr
+		}
+		replaced = pathHasPrefix(&path, &prefix)
+		if replaced {
+			err = t.replaceRootDescriptor(prefix, result)
+		}
+	case ExtRoot:
+		if root.self.BitLen >= prefix.BitLen && pathHasPrefix(&root.self, &prefix) {
+			replaced = true
+			err = t.replaceRootDescriptor(prefix, result)
+		} else if pathHasPrefix(&prefix, &root.self) {
+			var row *rowNode
+			row, err = t.extTopRow(root)
+			if err == nil {
+				replaced, err = t.replaceSubtreeRow(row, &prefix, result)
+			}
+		}
+	default:
+		return fmt.Errorf("unknown root form %d", root.form)
+	}
+	if err != nil {
+		return err
+	}
+	if !replaced && result.present {
+		subtree, err := subtreeForDescriptorAt(prefix, result.descriptor)
+		if err != nil {
+			return err
+		}
+		if err := t.insertSubtree(subtree); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (t *Trie) replaceRootDescriptor(prefix eip8297.Bitpath, result phaseBucketResult) error {
+	if !result.present {
+		t.emptyRoot()
+		t.rootDirty = true
+		return nil
+	}
+	switch result.descriptor.form {
+	case LeafRoot:
+		t.root.form = LeafRoot
+		t.root.leaf = result.descriptor.leaf
+	case ExtRoot:
+		t.root.form = ExtRoot
+		t.root.self = prefix
+		t.root.self.Append(&result.descriptor.self)
+		t.root.left = result.descriptor.left
+		t.root.right = result.descriptor.right
+		t.root.topRow = nil
+	case RowRoot:
+		if result.descriptor.row == nil {
+			return fmt.Errorf("subtree descriptor has no row")
+		}
+		subtree, err := subtreeForDescriptorAt(prefix, result.descriptor)
+		if err != nil {
+			return err
+		}
+		t.root.form = ExtRoot
+		t.root.self = subtree.path
+		t.root.left = subtree.cell.Left
+		t.root.right = subtree.cell.Right
+		t.root.topRow = nil
+	default:
+		return fmt.Errorf("unknown subtree descriptor form %d", result.descriptor.form)
+	}
+	t.rootDirty = true
+	return nil
+}
+
+func (t *Trie) replaceSubtreeRow(row *rowNode, prefix *eip8297.Bitpath, result phaseBucketResult) (bool, error) {
+	if row == nil || !pathHasPrefix(prefix, &row.path) {
+		return false, nil
+	}
+	if row.path.BitLen == prefix.BitLen {
+		if row.parent == nil {
+			return t.replaceRootDescriptor(*prefix, result) == nil, nil
+		}
+		return t.replaceRowCell(row.parent, row.parentSlot, prefix, result)
+	}
+	slot := slotAt(prefix, row.path.BitLen)
+	cell := row.cell(slot)
+	switch cell.Kind {
+	case EmptyCell:
+		return false, nil
+	case LeafCell:
+		path, err := keyPath(cell.Key)
+		if err != nil {
+			return false, err
+		}
+		if !pathHasPrefix(&path, prefix) {
+			return false, nil
+		}
+		return t.replaceRowCell(row, slot, prefix, result)
+	case BranchCell:
+		full := branchPath(row, slot, cell)
+		if pathHasPrefix(&full, prefix) {
+			return t.replaceRowCell(row, slot, prefix, result)
+		}
+		if !pathHasPrefix(prefix, &full) {
+			return false, nil
+		}
+		childPath, err := rowChildPath(row, slot, cell.Prefix, branchSplit(row, slot, cell))
+		if err != nil {
+			return false, err
+		}
+		if childPath.BitLen >= prefix.BitLen {
+			return t.replaceRowCell(row, slot, prefix, result)
+		}
+		child, err := t.loadBranchChild(row, slot)
+		if err != nil {
+			return false, err
+		}
+		replaced, err := t.replaceSubtreeRow(child, prefix, result)
+		if replaced {
+			t.markDirty(row)
+		}
+		return replaced, err
+	default:
+		return false, errInsertKey
+	}
+}
+
+func (t *Trie) replaceRowCell(row *rowNode, slot int, prefix *eip8297.Bitpath, result phaseBucketResult) (bool, error) {
+	if !result.present {
+		row.cells[slot] = rowCell{}
+		t.markDirty(row)
+		return true, nil
+	}
+	subtree, err := subtreeForDescriptorAt(*prefix, result.descriptor)
+	if err != nil {
+		return false, err
+	}
+	cell, err := subtreeCellForRow(subtree, row.path)
+	if err != nil {
+		return false, err
+	}
+	row.cells[slot] = cell
+	t.markDirty(row)
+	return true, nil
 }
 
 func subtreeForDescriptorAt(prefix eip8297.Bitpath, descriptor bucketDescriptor) (subtreeCell, error) {

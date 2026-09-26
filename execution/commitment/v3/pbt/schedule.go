@@ -57,6 +57,8 @@ type phaseTask struct {
 	ops          []Op
 	dependencies []int
 	resultIndex  int
+	initial      phaseBucketResult
+	hasInitial   bool
 }
 
 type phasePlan struct {
