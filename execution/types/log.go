@@ -377,6 +377,10 @@ func (l *Log) copyTo(dst *Log) {
 	*dst = *l
 	dst.Topics = t[:copy(t, l.Topics)]
 	dst.Data = d[:copy(d, l.Data)]
+	if l.BlockTimestamp != nil {
+		at := *l.BlockTimestamp
+		dst.BlockTimestamp = &at
+	}
 }
 
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of

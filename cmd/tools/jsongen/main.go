@@ -39,6 +39,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon/common/length"
+
 	"golang.org/x/tools/go/packages"
 	"golang.org/x/tools/imports"
 )
@@ -292,7 +294,15 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty, omitzero bo
 			return "", fmt.Errorf(`ethjson:%q cannot be omitempty on %s`, form, t)
 		}
 	case "datalist":
-		write = fmt.Sprintf("ethjson.DataList(s, %q, %s)", name, ref)
+		// Both writers grow the buffer once; DataList takes only a hash-sized element, which
+		// is the whole of what decides between them.
+		writer := "Datas"
+		if slice, ok := t.Underlying().(*types.Slice); ok {
+			if a, fixed := slice.Elem().Underlying().(*types.Array); fixed && a.Len() == length.Hash {
+				writer = "DataList"
+			}
+		}
+		write = fmt.Sprintf("ethjson.%s(s, %q, %s)", writer, name, ref)
 		present = fmt.Sprintf("len(%s) > 0", ref)
 	case "data":
 		// Slicing reads the same on an array and on a pointer to one, but a pointer to a slice

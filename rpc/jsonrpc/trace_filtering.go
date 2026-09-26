@@ -583,6 +583,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if isPos {
 				continue
 			}
+			// the genesis block is not mined, so it pays no rewards
+			if blockNum == 0 {
+				continue
+			}
 
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
