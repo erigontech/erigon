@@ -86,6 +86,16 @@ type TraceCallParam struct {
 	AuthorizationList   []types.JsonAuthorization `json:"authorizationList"`
 }
 
+// UnmarshalJSON decodes a call object and rejects one whose data and input disagree, as
+// ethapi.CallArgs does.
+func (args *TraceCallParam) UnmarshalJSON(raw []byte) error {
+	type traceCallParam TraceCallParam
+	if err := json.Unmarshal(raw, (*traceCallParam)(args)); err != nil {
+		return err
+	}
+	return ethapi.CheckCallData(args.Data, args.Input)
+}
+
 // TraceCallResult is the response to `trace_call` method
 type TraceCallResult struct {
 	Output          hexutil.Bytes                          `json:"output"`
