@@ -108,7 +108,8 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	if err != nil {
 		return noop, fmt.Errorf("TxNums.Max(%d): %w", toBlock, err)
 	}
-	walkEndStep := walkEndStepFor(toBlockLastTxNum, stepSize)
+	baselineMaxStep := baselineMaxStepFor(toBlockLastTxNum, stepSize)
+	walkEndStep := coverageEndStepFor(toBlockLastTxNum, stepSize)
 	if walkEndStep == 0 {
 		return skip("walk end step is zero", "lastTxNum", toBlockLastTxNum)
 	}
@@ -119,9 +120,9 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	// captured in the trie state encoded in that baseline, so downloading
 	// pre-baseline history files (e.g. .0-256.v/.ef/.efi/.vi ≈ hundreds of
 	// GB across all domains) would be pure waste.
-	baselineStep, ok := localCommitmentBaselineStep(p.snapDir, walkEndStep, stepSize)
+	baselineStep, ok := localCommitmentBaselineStep(p.snapDir, baselineMaxStep, stepSize)
 	if !ok {
-		return skip("no local commitment baseline", "walkEndStep", walkEndStep)
+		return skip("no local commitment baseline", "baselineMaxStep", baselineMaxStep)
 	}
 	if baselineStep >= walkEndStep {
 		// Baseline is already at/past the walk end — the compute's
@@ -287,13 +288,22 @@ func (p *Provider) discardDownloadedHistory(ctx context.Context, paths []string,
 // Called by ensureHistoryForUnwindWalk as a fast path: local coverage
 // means no download is needed, even when the preverified registry has
 // nothing for the range (which is normal past preverified's horizon).
-// walkEndStepFor returns the EXCLUSIVE end of the step range the compute's
-// txNum walk touches. v4 files are cut mid-step, so the target commonly sits
-// inside a step rather than on its boundary; that step is touched, and the
-// exclusive end is one past it. Deriving the end as (target+1)/stepSize
-// instead collapses a sub-step walk to an empty range, and every step-range
-// consumer below then reports the walk as needing nothing.
-func walkEndStepFor(targetTxNum, stepSize uint64) uint64 {
+// baselineMaxStepFor mirrors the compute's stepBoundary derivation in
+// execution/commitment/commitmentdb/recompute_sdless.go — the maxStep it
+// passes to getLatestFromFilesUpToStep when picking its baseline commitment
+// file. Ensure must cap its own baseline lookup identically, or it reasons
+// about a different walk than the one that will run.
+func baselineMaxStepFor(targetTxNum, stepSize uint64) uint64 {
+	return (targetTxNum + 1) / stepSize
+}
+
+// coverageEndStepFor returns the EXCLUSIVE end of the step range the walk
+// needs history for. v4 files are cut mid-step, so the target commonly sits
+// inside a step; that step is touched and must be covered. This differs from
+// the baseline cap exactly when the target is mid-step — sharing one value
+// between the two either drops the target's step from coverage or lets the
+// baseline lookup run past where the compute stopped.
+func coverageEndStepFor(targetTxNum, stepSize uint64) uint64 {
 	return targetTxNum/stepSize + 1
 }
 

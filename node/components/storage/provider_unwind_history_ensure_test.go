@@ -385,24 +385,39 @@ func TestLocalCommitmentBaselineStep(t *testing.T) {
 	require.False(t, ok)
 }
 
-// TestWalkEndStepFor pins the exclusive end of the compute's walk.
+// TestBaselineMaxStepFor pins the maxStep the compute uses to pick its
+// baseline commitment file. Ensure must choose the SAME baseline, or it
+// reasons about a walk the compute is not doing.
+func TestBaselineMaxStepFor(t *testing.T) {
+	t.Parallel()
+
+	const step = uint64(390625)
+	require.Equal(t, uint64(330), baselineMaxStepFor(129_287_388, step),
+		"a target inside step 330 leaves the baseline lookup capped at 330")
+	require.Equal(t, uint64(331), baselineMaxStepFor(331*step-1, step),
+		"a target on the step boundary admits a file ending at 331")
+}
+
+// TestCoverageEndStepFor pins the exclusive end of the step range needing
+// history. It differs from the baseline cap whenever the target is mid-step,
+// which is the normal shape once v4 files are cut mid-step.
 //
 // v4 files are cut mid-step, so an unwind target usually sits inside a step
 // rather than on its boundary. That step is touched and must be included;
 // deriving the end as (target+1)/stepSize collapses such a walk to an empty
 // step range, and ensureHistoryForUnwindWalk then fetches nothing — the
 // compute later refuses the unwind with "zero touches".
-func TestWalkEndStepFor(t *testing.T) {
+func TestCoverageEndStepFor(t *testing.T) {
 	t.Parallel()
 
 	const step = uint64(390625)
-	require.Equal(t, uint64(331), walkEndStepFor(129_256_174, step),
+	require.Equal(t, uint64(331), coverageEndStepFor(129_256_174, step),
 		"a target inside step 330 must leave step 330 in the range")
-	require.Equal(t, uint64(331), walkEndStepFor(128_934_742, step),
+	require.Equal(t, uint64(331), coverageEndStepFor(128_934_742, step),
 		"the live mode-C case: 28493 txNums into step 330")
-	require.Equal(t, uint64(331), walkEndStepFor(331*step-1, step),
+	require.Equal(t, uint64(331), coverageEndStepFor(331*step-1, step),
 		"the last txNum of step 330 is still step 330")
-	require.Equal(t, uint64(332), walkEndStepFor(331*step, step),
+	require.Equal(t, uint64(332), coverageEndStepFor(331*step, step),
 		"the first txNum of step 331 moves the end on")
 }
 
