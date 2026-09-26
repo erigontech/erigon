@@ -40,6 +40,9 @@ import (
 type noopPatriciaContext struct{}
 
 func (n *noopPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
+func (n *noopPatriciaContext) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	return nil, 0, nil
+}
 func (n *noopPatriciaContext) PutBranch(prefix, data, prevData []byte) error {
 	return nil
 }
@@ -58,6 +61,10 @@ type gatedPatriciaContext struct {
 	release     chan struct{}
 	startOthers chan struct{}
 	gateDone    atomic.Bool
+}
+
+func (g *gatedPatriciaContext) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	return g.Branch(prefix)
 }
 
 func (g *gatedPatriciaContext) Branch(prefix []byte) ([]byte, kv.Step, error) {
@@ -712,10 +719,17 @@ func TestUpdates_TouchPlainKey(t *testing.T) {
 }
 
 type recordingCtx struct {
-	puts []struct{ prefix, data, prev []byte }
+	branchCalls int
+	puts        []struct{ prefix, data, prev []byte }
 }
 
-func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) { return nil, 0, nil }
+func (r *recordingCtx) Branch(_ []byte) ([]byte, kv.Step, error) {
+	r.branchCalls++
+	return nil, 0, nil
+}
+func (r *recordingCtx) BranchNoCopy(prefix []byte) ([]byte, kv.Step, error) {
+	return r.Branch(prefix)
+}
 func (r *recordingCtx) PutBranch(prefix, data, prev []byte) error {
 	r.puts = append(r.puts, struct{ prefix, data, prev []byte }{
 		bytes.Clone(prefix), bytes.Clone(data), bytes.Clone(prev),
