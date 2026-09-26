@@ -84,13 +84,24 @@ var walkDomains = map[string]struct{}{
 //   - Every intersecting item is already on disk.
 func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOpts, toBlock uint64) (func(), error) {
 	noop := func() {}
+	// Declining to fetch is the failure mode that costs a soak cycle: the
+	// compute then walks a range with no history and refuses the unwind with
+	// "zero touches", far from the decision that caused it. Every decline
+	// says which one it was.
+	skip := func(reason string, kv ...any) (func(), error) {
+		if p.logger != nil {
+			p.logger.Info("[storage] Provider.Unwind: history ensure skipped",
+				append([]any{"toBlock", toBlock, "reason", reason}, kv...)...)
+		}
+		return noop, nil
+	}
 
 	if p.Aggregator == nil || p.downloaderClient == nil || p.ChainConfig == nil {
-		return noop, nil
+		return skip("provider not wired for download")
 	}
 	stepSize := p.Aggregator.StepSize()
 	if stepSize == 0 {
-		return noop, nil
+		return skip("step size unknown")
 	}
 
 	toBlockLastTxNum, err := rawdbv3.TxNums.Max(ctx, opts.Tx, toBlock)
@@ -99,7 +110,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	}
 	walkEndStep := walkEndStepFor(toBlockLastTxNum, stepSize)
 	if walkEndStep == 0 {
-		return noop, nil
+		return skip("walk end step is zero", "lastTxNum", toBlockLastTxNum)
 	}
 
 	// baselineStep is the endStep of the widest local commitment .kv file
@@ -110,23 +121,25 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	// GB across all domains) would be pure waste.
 	baselineStep, ok := localCommitmentBaselineStep(p.snapDir, walkEndStep, stepSize)
 	if !ok {
-		return noop, nil
+		return skip("no local commitment baseline", "walkEndStep", walkEndStep)
 	}
 	if baselineStep >= walkEndStep {
 		// Baseline is already at/past the walk end — the compute's
 		// touch range is empty and it will just re-encode the baseline
 		// trie state. No history walk needed.
-		return noop, nil
+		return skip("walk range empty", "baselineStep", baselineStep, "walkEndStep", walkEndStep)
 	}
 
 	chainName := p.ChainConfig.ChainName
 	cfg := snapcfg.KnownCfgOrDevnet(chainName)
 	if cfg == nil {
-		return noop, nil
+		return skip("no preverified config for chain", "chain", chainName)
 	}
 
-	if !walkNeedsHistoryFiles(baselineStep*stepSize, walkDomainHistoryStart(opts.Tx.Debug())) {
-		return noop, nil
+	historyStart := walkDomainHistoryStart(opts.Tx.Debug())
+	if !walkNeedsHistoryFiles(baselineStep*stepSize, historyStart) {
+		return skip("walk already readable",
+			"walkStartTxNum", baselineStep*stepSize, "historyStartTxNum", historyStart)
 	}
 
 	// Contiguity extension. The compute walks (baselineStep, walkEndStep]
@@ -150,7 +163,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	// failure the guard was meant to catch: source publisher has no
 	// history retention AND we have no local production).
 	if localHistoryCoversWalk(p.snapDir, baselineStep, walkEndStep, stepSize) {
-		return noop, nil
+		return skip("local history covers walk", "baselineStep", baselineStep, "walkEndStep", walkEndStep)
 	}
 
 	if len(needed) == 0 {
@@ -181,7 +194,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 
 	missing, downloadedPaths, downloadedNames := filterMissingOnDisk(needed, p.snapDir)
 	if len(missing) == 0 {
-		return noop, nil
+		return skip("every needed file already on disk", "needed", len(needed))
 	}
 
 	if p.logger != nil {
