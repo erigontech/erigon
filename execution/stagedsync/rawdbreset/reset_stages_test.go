@@ -115,11 +115,17 @@ func TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers(t *te
 func TestResetExecClearsBothCommitmentDomains(t *testing.T) {
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
 	})
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))

@@ -72,6 +72,12 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 	switch s.TrieVariantName() {
 	case TrieVariantBin, TrieVariantHexBin:
 		hexBin := s.TrieVariantName() == TrieVariantHexBin
+		if hexBin && !statecfg.ExperimentalCommitmentV3 {
+			return errors.New("the hex+bin commitment trie requires v3-hex; enable --experimental.commitment-v3 for its hex domain")
+		}
+		if !hexBin && statecfg.ExperimentalCommitmentV3 {
+			return errors.New("the bin commitment trie does not support v3-hex; disable --experimental.commitment-v3 or use a hex+bin datadir")
+		}
 		if !hexBin && s.RefsInCommitmentBranches() {
 			return errors.New("the bin commitment trie does not support references_in_commitment_branches; set it to false")
 		}

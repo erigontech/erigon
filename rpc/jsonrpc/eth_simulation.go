@@ -1025,7 +1025,11 @@ func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint
 	if d == kv.CommitmentDomain || d == kv.CommitmentBinDomain {
 		asOf = r.commitmentAsOfTxNum
 	}
-	enc, _, err = r.roTx.GetAsOf(d, plainKey, asOf)
+	if simulationTx, ok := r.roTx.(*simulationTemporalTx); ok {
+		enc, _, err = simulationTx.TemporalTx.GetAsOf(d, plainKey, asOf)
+	} else {
+		enc, _, err = r.roTx.GetAsOf(d, plainKey, asOf)
+	}
 	if err != nil {
 		return nil, 0, fmt.Errorf("simulationStateReader(GetAsOf) %q: %w", d, err)
 	}
@@ -1033,12 +1037,18 @@ func (r *simulationStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint
 }
 
 func (r *simulationStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
+	if _, ok := r.roTx.(*simulationTemporalTx); ok {
+		return &simulationStateReader{sd: r.sd, roTx: r.roTx, commitmentAsOfTxNum: r.commitmentAsOfTxNum, plainStateAsOfTxNum: r.plainStateAsOfTxNum}
+	}
 	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }
 
 // CloneForWorker mirrors Clone. eth_simulation runs commitment single-threaded
 // (no concurrent warmup), so worker metering isn't needed here.
 func (r *simulationStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
+	if _, ok := r.roTx.(*simulationTemporalTx); ok {
+		return &simulationStateReader{sd: r.sd, roTx: r.roTx, commitmentAsOfTxNum: r.commitmentAsOfTxNum, plainStateAsOfTxNum: r.plainStateAsOfTxNum}
+	}
 	return newHistoryCommitmentOnlyReader(tx, r.sd, r.commitmentAsOfTxNum, r.plainStateAsOfTxNum)
 }
 
@@ -1143,19 +1153,19 @@ func (r *simulationIntraBlockStateReader) Trace() bool               { return fa
 func (r *simulationIntraBlockStateReader) TracePrefix() string       { return "" }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
-	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances.
-	// We use CommitmentReplayStateReader (not a plain SplitStateReader) so that Clone() only propagates the new tx to
-	// the commitment (temp DB) reader, keeping the plain state (main DB) reader pointing at the original outer-DB tx.
-	// This is critical: accounts whose data didn't change during simulation are not written to sd.mem, so when the trie
-	// reads them it must fall back to the real DB (via the original tx), not to the empty temp DB (via ttx).
-	return &commitmentdb.CommitmentReplayStateReader{
-		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
-			commitmentdb.NewLatestStateReader(ttx, tsd, commitmentdb.LatestStateReaderOptions{}),
-			commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{}),
-			tsd.GetCommitmentCtx().CommitmentDomain(),
-			false,
-		),
+	plainStateAsOf := uint64(0)
+	if simulationTx, ok := tx.(*simulationTemporalTx); ok {
+		plainStateAsOf = simulationTx.baseTxNum
 	}
+	if tsd.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3 {
+		return &simulationStateReader{sd: sd, roTx: tx, commitmentAsOfTxNum: plainStateAsOf, plainStateAsOfTxNum: plainStateAsOf}
+	}
+	return commitmentdb.NewCommitmentSplitStateReader(
+		commitmentdb.NewLatestStateReader(ttx, tsd, commitmentdb.LatestStateReaderOptions{}),
+		&simulationStateReader{sd: sd, roTx: tx, commitmentAsOfTxNum: plainStateAsOf, plainStateAsOfTxNum: plainStateAsOf},
+		tsd.GetCommitmentCtx().CommitmentDomain(),
+		false,
+	)
 }
 
 // computeCommitmentFromStateHistory calculates the commitment root for simulated block from state history
@@ -1172,14 +1182,20 @@ func (s *simulator) computeCommitmentFromStateHistory(
 		simBlockNum := baseBlockNum + 1
 		tsd.GetCommitmentCtx().SetStateReader(newSimulateStateReader(ttx, tx, tsd, sd))
 		updates := tsd.GetCommitmentCtx().GetUpdates()
-		for key := range sd.GetCommitmentCtx().GetUpdates().PlainKeys() {
-			updates.TouchPlainKey(key, nil, nil)
-			if tsd.GetCommitmentCtx().Trie().Variant() == commitment.VariantBinPatriciaTrie && len(key) == length.Addr {
-				tsd.GetCommitmentCtx().TouchKey(kv.CodeDomain, key, nil)
+		if tsd.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3 {
+			sd.GetCommitmentCtx().GetUpdates().ForEach(func(key string, update *commitment.Update) {
+				updates.TouchPlainKeyDirect(key, update)
+			})
+		} else {
+			for key := range sd.GetCommitmentCtx().GetUpdates().PlainKeys() {
+				updates.TouchPlainKey(key, nil, nil)
+				if tsd.GetCommitmentCtx().Trie().Variant() == commitment.VariantBinPatriciaTrie && len(key) == length.Addr {
+					tsd.GetCommitmentCtx().TouchKey(kv.CodeDomain, key, nil)
+				}
 			}
 		}
-
-		return tsd.ComputeCommitment(ctx, ttx, false, simBlockNum, simMaxTxNum, "commitment-from-history", nil)
+		root, err := tsd.ComputeCommitment(ctx, ttx, false, simBlockNum, simMaxTxNum, "commitment-from-history", nil)
+		return root, err
 	}
 	return replay.ComputeCustomCommitmentFromStateHistory(ctx, tx, baseBlockNum, simBlockComputeCommitment, commitmentDomain)
 }

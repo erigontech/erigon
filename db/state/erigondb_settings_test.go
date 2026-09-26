@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/statecfg"
 )
 
 func TestRefsInCommitmentBranchesAccessor(t *testing.T) {
@@ -79,6 +80,42 @@ func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
 			require.Equal(t, variant, got.TrieVariantName())
 		})
 	}
+}
+
+func TestReconcileTrieVariantHexBinRequiresV3Hex(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalV3 := statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.ExperimentalCommitmentV3 = originalV3
+	})
+	variant := TrieVariantHexBin
+	refs := false
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = false
+	err := reconcileTrieVariant(&ErigonDBSettings{TrieVariant: &variant, ReferencesInCommitmentBranches: &refs}, log.New())
+	require.ErrorContains(t, err, "v3-hex")
+}
+
+func TestReconcileTrieVariantBinRefusesV3Hex(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalV3 := statecfg.ExperimentalCommitmentV3
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.ExperimentalCommitmentV3 = originalV3
+	})
+	variant := TrieVariantBin
+	refs := false
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = true
+	err := reconcileTrieVariant(&ErigonDBSettings{TrieVariant: &variant, ReferencesInCommitmentBranches: &refs}, log.New())
+	require.ErrorContains(t, err, "v3-hex")
 }
 
 func TestErigonDBSettingsFrozenCommitmentRoundTrip(t *testing.T) {

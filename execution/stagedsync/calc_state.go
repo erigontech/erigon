@@ -108,6 +108,7 @@ type calcState struct {
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
 	codeKeys     map[accounts.Address]struct{}
 	wiped        map[accounts.Address]struct{}
+	resetCount   int
 	reader       commitmentdb.StateReader
 
 	// domainReader provides lazy-load from the domain via asOfStateReader.
@@ -531,6 +532,7 @@ func accountUpdateOf(acc *calcAccountState) commitment.Update {
 // accumulated state values. Called after commitment computation to
 // prepare for the next block.
 func (cs *calcState) ResetBlockFlags() {
+	cs.resetCount++
 	for _, addr := range cs.dirtyAccounts {
 		cs.accounts[addr].dirty = false
 	}

@@ -1610,8 +1610,31 @@ func (t *Updates) PlainKeys() map[string]struct{} {
 			keys[key] = struct{}{}
 		}
 		return keys
+	case ModeCollect:
+		keys := make(map[string]struct{}, len(t.treeIdx)+len(t.collected))
+		for key := range t.treeIdx {
+			keys[key] = struct{}{}
+		}
+		for _, item := range t.collected {
+			keys[item.plainKey] = struct{}{}
+		}
+		return keys
 	default:
 		return nil
+	}
+}
+
+func (t *Updates) ForEach(fn func(string, *Update)) {
+	if t.mode != ModeCollect {
+		return
+	}
+	for i := range t.collected {
+		update := t.collected[i].update
+		fn(t.collected[i].plainKey, &update)
+	}
+	for key, item := range t.treeIdx {
+		update := *item.update
+		fn(key, &update)
 	}
 }
 

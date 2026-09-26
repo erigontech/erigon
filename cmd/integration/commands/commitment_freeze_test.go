@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -90,6 +91,14 @@ func newCommitmentFreezeTest(t *testing.T, blockTime uint64) (kv.TemporalRwTx, *
 	previousDual := statecfg.ExperimentalHexBinCommitment
 	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previousDual })
 	statecfg.ExperimentalHexBinCommitment = true
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	dirs := datadir.New(t.TempDir())
 	_, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), true)
 	require.NoError(t, err)
@@ -98,14 +107,15 @@ func newCommitmentFreezeTest(t *testing.T, blockTime uint64) (kv.TemporalRwTx, *
 	require.NoError(t, err)
 	t.Cleanup(tx.Rollback)
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	state, err := commitmentdb.NewCommitmentState(3, 1, nil).Encode()
+	state, err := commitment.EncodeCommitmentV3State(empty.RootHash[:], 1, 3, nil)
+	require.NoError(t, err)
+	binaryState, err := commitmentdb.NewCommitmentState(3, 1, nil).Encode()
 	require.NoError(t, err)
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	t.Cleanup(domains.Close)
-	for _, domain := range agg.CommitmentDomains() {
-		require.NoError(t, domains.DomainPut(domain, tx, commitment.KeyCommitmentState, state, 3, nil))
-	}
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, state, 3, nil))
+	require.NoError(t, domains.DomainPut(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState, binaryState, 3, nil))
 	require.NoError(t, domains.Flush(t.Context(), tx))
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 3))
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 2, 6))

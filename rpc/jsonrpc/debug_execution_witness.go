@@ -930,6 +930,10 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 	commitmentDomain = sdCtx.CommitmentDomain()
+	if sdCtx.Trie().Variant() == commitment.VariantCommitmentV3 {
+		_, _, err := sdCtx.WitnessNodes(ctx, false)
+		return nil, err
+	}
 
 	// Get the expected parent state root for verification
 	var expectedParentRoot common.Hash

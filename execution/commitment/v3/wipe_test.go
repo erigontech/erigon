@@ -26,8 +26,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestPartitionAccountDeleteCreatesWipeJob(t *testing.T) {
@@ -79,12 +77,10 @@ func TestDeleteThenWriteClearsWipe(t *testing.T) {
 	require.Empty(t, storage)
 }
 
-func TestSelfDestructOnlyWriteSetCreatesStorageWipe(t *testing.T) {
-	addr := accounts.InternAddress(common.Address{0xd4})
-	ws := &state.WriteSet{}
-	ws.SetSelfDestruct(addr, &state.VersionedWrite[bool]{Val: true})
+func TestDeletedAccountCreatesStorageWipe(t *testing.T) {
+	addr := common.Address{0xd4}
 	updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), commitment.KeyToHexNibbleHash)
-	ws.TouchUpdates(updates)
+	updates.TouchPlainKeyDirect(string(addr[:]), &commitment.Update{Flags: commitment.DeleteUpdate})
 
 	var stream []phaseAInput
 	err := updates.HashSort(context.Background(), nil, func(hashedKey, plainKey []byte, update *commitment.Update) error {

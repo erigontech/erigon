@@ -44,8 +44,15 @@ func withDualCommitmentFlags(t *testing.T) {
 	t.Helper()
 	withBinCommitmentFlag(t, true)
 	orig := statecfg.ExperimentalHexBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = orig })
+	origV3, origSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalHexBinCommitment = orig
+		statecfg.ExperimentalCommitmentV3 = origV3
+		statecfg.Schema = origSchema
+	})
 	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 }
 
 // Bin is a persisted datadir property, so WithSequentialCommitment demotes only the
@@ -190,9 +197,13 @@ func TestSharedDomainsV3SeekRestoresCommittedPosition(t *testing.T) {
 func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 	originalBin := statecfg.ExperimentalBinCommitment
 	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalV3 := statecfg.ExperimentalCommitmentV3
+	originalSchema := statecfg.Schema
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = originalBin
 		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.Schema = originalSchema
 	})
 
 	for _, tc := range []struct {
@@ -215,14 +226,19 @@ func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 			bin:    true,
 			hexBin: true,
 			variants: map[kv.Domain]commitment.TrieVariant{
-				kv.CommitmentDomain:    commitment.VariantHexPatriciaTrie,
+				kv.CommitmentDomain:    commitment.VariantCommitmentV3,
 				kv.CommitmentBinDomain: commitment.VariantBinPatriciaTrie,
 			},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			statecfg.Schema = originalSchema
 			statecfg.ExperimentalBinCommitment = tc.bin
 			statecfg.ExperimentalHexBinCommitment = tc.hexBin
+			statecfg.ExperimentalCommitmentV3 = tc.hexBin
+			if tc.hexBin {
+				statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+			}
 
 			db := newTestDb(t, 16)
 			tx, err := db.BeginTemporalRw(t.Context())
@@ -244,6 +260,35 @@ func TestSharedDomainsBuildsContextsForEachCommitmentMode(t *testing.T) {
 	}
 }
 
+func TestSharedDomainsDualDefaultUsesV3HexArm(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalV3 := statecfg.ExperimentalCommitmentV3
+	originalSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	require.Equal(t, commitment.VariantCommitmentV3, sd.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().Variant())
+	require.Equal(t, commitment.VariantBinPatriciaTrie, sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().Variant())
+}
+
 func TestSharedDomainsHexOnlyOptionSelectsHexArmInDualMode(t *testing.T) {
 	withDualCommitmentFlags(t)
 
@@ -258,7 +303,7 @@ func TestSharedDomainsHexOnlyOptionSelectsHexArmInDualMode(t *testing.T) {
 
 	require.NotNil(t, sd.GetCommitmentCtxForDomain(kv.CommitmentDomain))
 	require.Nil(t, sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
-	require.Equal(t, commitment.VariantHexPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
+	require.Equal(t, commitment.VariantCommitmentV3, sd.GetCommitmentCtx().Trie().Variant())
 }
 
 func TestSharedDomainsExplicitCommitmentDomainSelectsBinArm(t *testing.T) {
@@ -290,7 +335,7 @@ func TestSharedDomainsDualDefaultKeepsHexAfterActivation(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 	require.Equal(t, kv.CommitmentDomain, sd.GetCommitmentCtx().CommitmentDomain())
-	require.Equal(t, commitment.VariantHexPatriciaTrie, sd.GetCommitmentCtx().Trie().Variant())
+	require.Equal(t, commitment.VariantCommitmentV3, sd.GetCommitmentCtx().Trie().Variant())
 	require.NotNil(t, sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
 }
 
@@ -334,12 +379,16 @@ func TestSharedDomainsDropsStoppedCommitmentPendingWrites(t *testing.T) {
 func TestSharedDomainsRestoresAfterShadowStopsAdvancing(t *testing.T) {
 	originalBin, originalHexBin := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment
 	originalParallel := statecfg.ExperimentalParallelCommitment
+	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
 	originalHash, originalSuite := statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
 	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = true, true
 	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = originalBin, originalHexBin
 		statecfg.ExperimentalParallelCommitment = originalParallel
+		statecfg.ExperimentalCommitmentV3, statecfg.Schema = originalV3, originalSchema
 		statecfg.BinCommitmentHash = originalHash
 		require.NoError(t, commitment.SetPBinHashSuite(originalSuite))
 	})

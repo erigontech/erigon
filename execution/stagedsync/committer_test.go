@@ -433,7 +433,8 @@ func TestCommitmentCalculatorDualFold(t *testing.T) {
 	}
 
 	target := commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 1}
-	dual, err := cc.computeDualFromUpdatesWithRole(t.Context(), target, updates, &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+	feed := dualHexFeed([]byte(key), commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, CodeHash: empty.CodeHash})
+	dual, err := cc.computeDualFromUpdatesWithRole(t.Context(), target, updates, &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain), feed, nil)
 	require.NoError(t, err)
 	require.NotNil(t, dual.canonicalRoot)
 	require.True(t, binWritesBeforeReplay, "binary branch writes must remain buffered until both folds join")
@@ -449,6 +450,7 @@ func TestCommitmentCalculatorDualFold(t *testing.T) {
 	t.Cleanup(singleUpdates.Close)
 	singleUpdates.TouchPlainKey(key, accountBytes, singleUpdates.TouchAccount)
 	single.GetCommitmentContext().SetUpdates(singleUpdates)
+	single.GetCommitmentContext().SetFeed(feed)
 	singleRoTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	t.Cleanup(singleRoTx.Rollback)
@@ -623,10 +625,10 @@ func TestCommitmentCalculatorFrozenShadowAndWrites(t *testing.T) {
 	}
 	result, err := cc.computeDualFromUpdatesWithRole(t.Context(), commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 11, blockTime: 1}, updates,
 		&asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain},
-		doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+		doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain), dualHexFeed([]byte(key), commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Nonce: 1, CodeHash: empty.CodeHash}), nil)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.canonicalRoot)
-	_, _, ok = doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	_, _, ok = doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentV3State)
 	require.False(t, ok)
 	_, _, ok = doms.GetLatestFromMemory(kv.CommitmentBinDomain, commitment.KeyCommitmentState)
 	require.True(t, ok)
@@ -781,18 +783,18 @@ func TestCommitmentCalculatorDualFoldBuffersHexShadowAfterFlip(t *testing.T) {
 			if domain != kv.CommitmentDomain {
 				return
 			}
-			_, _, ok := doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
+			_, _, ok := doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentV3State)
 			hexWritesBuffered = !ok
 		},
 	}
 	target := commitTarget{blockNum: 1, blockHash: common.Hash{1}, lastTxNum: 1, blockTime: 1}
 	result, err := cc.computeDualFromUpdatesWithRole(t.Context(), target, updates,
 		&asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain},
-		doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain))
+		doms.GetCommitmentCtxForDomain(kv.CommitmentDomain), doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain), dualHexFeed([]byte(key), commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Nonce: 1, CodeHash: empty.CodeHash}), nil)
 	require.NoError(t, err)
 	require.NotNil(t, result.canonicalRoot)
 	require.NotNil(t, result.shadowRoot)
 	require.True(t, hexWritesBuffered, "the hex shadow's branch writes must stay buffered until both folds join")
-	_, _, ok := doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentState)
+	_, _, ok := doms.GetLatestFromMemory(kv.CommitmentDomain, commitment.KeyCommitmentV3State)
 	require.True(t, ok, "the hex shadow's commitment state must be replayed after the join")
 }

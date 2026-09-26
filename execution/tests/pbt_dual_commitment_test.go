@@ -56,6 +56,8 @@ func testPBTDualCommitmentFlipAndReorg(t *testing.T, parallel bool) {
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
 	previousExec3Parallel := dbg.Exec3Parallel
@@ -64,6 +66,8 @@ func testPBTDualCommitmentFlipAndReorg(t *testing.T, parallel bool) {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
 		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
 		statecfg.BinCommitmentHash = previousHash
 		dbg.Exec3Parallel = previousExec3Parallel
 		dbg.BatchCommitments = previousBatchCommitments
@@ -72,6 +76,8 @@ func testPBTDualCommitmentFlipAndReorg(t *testing.T, parallel bool) {
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalParallelCommitment = false
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = ""
 	dbg.Exec3Parallel = parallel
 	dbg.BatchCommitments = false

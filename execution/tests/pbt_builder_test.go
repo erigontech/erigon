@@ -55,14 +55,20 @@ func TestPBTBuilderCanonicalCommitment(t *testing.T) {
 
 func testPBTBuilderCanonicalCommitment(t *testing.T, dual bool) {
 	previousBin, previousDual := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment
+	previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
 	previousParallel, previousHash := statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = previousBin, previousDual
+		statecfg.ExperimentalCommitmentV3, statecfg.Schema = previousV3, previousSchema
 		statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash = previousParallel, previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 	})
 	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = true, dual
+	statecfg.ExperimentalCommitmentV3 = dual
+	if dual {
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	}
 	statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash = false, ""
 	config := chain.AllProtocolChanges.Copy()
 	amsterdam, activation := uint64(0), uint64(30)
@@ -95,9 +101,19 @@ func testPBTBuilderCanonicalCommitment(t *testing.T, dual bool) {
 				tx, err := m.DB.BeginTemporalRo(t.Context())
 				require.NoError(t, err)
 				defer tx.Rollback()
-				value, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+				stateKey := commitment.KeyCommitmentState
+				value, _, err := tx.GetLatest(kv.CommitmentDomain, stateKey, kv.GetLatestOptions{})
 				require.NoError(t, err)
-				txNum, _ := commitmentdb.DecodeTxBlockNums(value)
+				var txNum uint64
+				if dual {
+					stateKey = commitment.KeyCommitmentV3State
+					value, _, err = tx.GetLatest(kv.CommitmentDomain, stateKey, kv.GetLatestOptions{})
+					require.NoError(t, err)
+					_, txNum, _, err = commitment.DecodeCommitmentV3State(value)
+					require.NoError(t, err)
+				} else {
+					txNum, _ = commitmentdb.DecodeTxBlockNums(value)
+				}
 				require.NoError(t, m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).FreezeDomain(kv.CommitmentDomain, txNum))
 				tx.Rollback()
 			}

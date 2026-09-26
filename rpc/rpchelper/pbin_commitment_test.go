@@ -69,14 +69,18 @@ func TestPBinCommitmentReplayRefusesBin(t *testing.T) {
 
 func TestPBinDualCommitmentReplayGenesis(t *testing.T) {
 	originalBin, originalDual := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment
+	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
 	originalParallel, originalHash := statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash
 	originalSuite := commitment.PBinHashSuiteName()
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = originalBin, originalDual
+		statecfg.ExperimentalCommitmentV3, statecfg.Schema = originalV3, originalSchema
 		statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash = originalParallel, originalHash
 		require.NoError(t, commitment.SetPBinHashSuite(originalSuite))
 	})
 	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment = true, true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.ExperimentalParallelCommitment, statecfg.BinCommitmentHash = false, "blake3"
 	require.NoError(t, commitment.SetPBinHashSuite("blake3"))
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))

@@ -127,6 +127,13 @@ func TestPBinVariantBinDatadirRefusesParallel(t *testing.T) {
 
 func TestPBinVariantHexBinAllowsParallelForHexArm(t *testing.T) {
 	pbinWithVariantFlags(t, false, true)
+	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	dirs := datadir.New(t.TempDir())
 	pbinWriteToml(t, dirs, "step_size = 100\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = true\ntrie_variant = \"hex+bin\"\ntrie_hash = \"blake3\"\n")
 

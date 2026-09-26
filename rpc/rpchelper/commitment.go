@@ -37,6 +37,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 )
@@ -153,17 +154,31 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 		if err != nil {
 			return nil, err
 		}
-		tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReaderForDomain(ttx, tx, tsd, tsd.GetCommitmentCtx().CommitmentDomain(), maxTxNum+1))
-		r.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
-		_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
-		if err != nil {
-			return nil, err
+		if tsd.GetCommitmentCtx().Trie().Variant() == commitment.VariantCommitmentV3 {
+			state, _, err := tx.GetAsOf(commitmentDomain, commitment.KeyCommitmentV3State, maxTxNum+1)
+			if err != nil {
+				return nil, err
+			}
+			stateful, ok := tsd.GetCommitmentCtx().Trie().(commitment.TrieStateCodec)
+			if !ok {
+				return nil, errors.New("commitment v3 replay trie is not stateful")
+			}
+			if _, _, err = stateful.RestoreState(state); err != nil {
+				return nil, err
+			}
+		} else {
+			tsd.GetCommitmentCtx().SetStateReader(commitmentdb.NewCommitmentReplayStateReaderForDomain(ttx, tx, tsd, tsd.GetCommitmentCtx().CommitmentDomain(), maxTxNum+1))
+			r.logger.Debug("Touch historical keys", "fromTxNum", minTxNum, "toTxNum", maxTxNum+1)
+			_, _, err = tsd.TouchChangedKeysFromHistory(tx, minTxNum, maxTxNum+1)
+			if err != nil {
+				return nil, err
+			}
+			historicalStateRoot, err := tsd.ComputeCommitment(ctx, ttx, true, baseBlockNum, maxTxNum, "commitment-from-history", nil)
+			if err != nil {
+				return nil, err
+			}
+			r.logger.Debug("Historical state", "historicalStateRoot", common.Bytes2Hex(historicalStateRoot))
 		}
-		historicalStateRoot, err := tsd.ComputeCommitment(ctx, ttx, true, baseBlockNum, maxTxNum, "commitment-from-history", nil)
-		if err != nil {
-			return nil, err
-		}
-		r.logger.Debug("Historical state", "historicalStateRoot", common.Bytes2Hex(historicalStateRoot))
 	}
 
 	// Apply custom delta computation to produce the final state root

@@ -28,7 +28,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -132,8 +133,9 @@ func TestPBinDualSimulation(t *testing.T) {
 			before[i], err = api.SimulateV1(t.Context(), SimulationRequest{BlockStateCalls: tc.blocks}, rpc.BlockNumberOrHashWithNumber(tc.base))
 			require.NoError(t, err)
 		}
-		_, state := readCommittedCommitmentState(t, t.Context(), m.DB)
-		txNum, _ := commitmentdb.DecodeTxBlockNums(state)
+		_, state := readDualCommittedCommitmentState(t, t.Context(), m.DB)
+		_, txNum, _, err := commitment.DecodeCommitmentV3State(state)
+		require.NoError(t, err)
 		agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 		require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
 		for i, tc := range cases {
@@ -143,10 +145,22 @@ func TestPBinDualSimulation(t *testing.T) {
 				require.Equal(t, before[i], after)
 			})
 		}
-		_, current := readCommittedCommitmentState(t, t.Context(), m.DB)
+		_, current := readDualCommittedCommitmentState(t, t.Context(), m.DB)
 		require.Equal(t, state, current)
 		frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
 		require.True(t, frozen)
 		require.Equal(t, txNum, frozenAt)
 	})
+}
+
+func readDualCommittedCommitmentState(t *testing.T, ctx context.Context, db kv.TemporalRoDB) (uint64, []byte) {
+	t.Helper()
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	finish, err := stages.GetStageProgress(tx, stages.Finish)
+	require.NoError(t, err)
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	return finish, state
 }

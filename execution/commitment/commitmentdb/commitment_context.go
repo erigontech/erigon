@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
+	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	_ "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -610,6 +611,8 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	updateCount := sdc.updates.Size()
 	if feed != nil {
 		updateCount = uint64(feed.Keys)
+	} else if pbinFeed != nil {
+		updateCount = uint64(len(pbinFeed.Accounts))
 	}
 	start := time.Now()
 	defer func() {

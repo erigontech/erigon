@@ -21,6 +21,7 @@ import (
 	"math"
 	"testing"
 
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -35,13 +36,17 @@ import (
 func dualCalculatorTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Helper()
 	bin, dual, parallel := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalParallelCommitment
+	v3, schema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
 	hash, suite := statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalParallelCommitment = bin, dual, parallel
+		statecfg.ExperimentalCommitmentV3, statecfg.Schema = v3, schema
 		statecfg.BinCommitmentHash = hash
 		require.NoError(t, commitment.SetPBinHashSuite(suite))
 	})
 	statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalParallelCommitment = true, true, false
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	return setupStepTest(t)
 }
 
@@ -55,16 +60,16 @@ func TestDualCalculatorUsesHexCollectorWithBinarySelected(t *testing.T) {
 	cc, err := newCommitmentCalculator(t.Context(), t.Context(), doms, db, &chain.Config{}, "test", log.New(), false, math.MaxUint64, nil, nil, nil)
 	require.NoError(t, err)
 	t.Cleanup(cc.Stop)
-	key := make([]byte, 20)
-	key[0] = 1
-	cc.updates.TouchPlainKeyDirect(string(key), &commitment.Update{Flags: commitment.NonceUpdate, Nonce: 1})
-	var hashed []byte
-	require.NoError(t, cc.updates.HashSort(t.Context(), nil, func(hk, pk []byte, update *commitment.Update) error {
-		hashed = append([]byte(nil), hk...)
-		return nil
-	}))
-	require.Equal(t, commitment.KeyToHexNibbleHash(key), hashed)
+	require.Equal(t, commitment.VariantCommitmentV3, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().Variant())
+	require.Equal(t, commitment.ModeCollect, cc.updates.Mode())
 	require.True(t, cc.forcePerBlockCompute)
+}
+
+func dualHexFeed(key []byte, update commitment.Update) *commitment.Feed {
+	hash := crypto.Keccak256(key)
+	var feedHash [32]byte
+	copy(feedHash[:], hash)
+	return &commitment.Feed{Keys: 1, Accounts: []commitment.FeedAccount{{Hash: feedHash, Update: &update}}}
 }
 
 func TestStoppedShadowSurvivesCalculatorReplacement(t *testing.T) {
@@ -100,6 +105,20 @@ func TestDualCompletionDiscardsFailedBinaryFold(t *testing.T) {
 	require.Nil(t, result.shadowRoot)
 	require.Zero(t, backend.writes)
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentBinDomain))
+}
+
+func TestDualCompletionDoesNotReplayShadowAfterCanonicalFailure(t *testing.T) {
+	backend := &dualReplayContext{}
+	buffered := commitmentdb.NewBufferedPatriciaContext(backend)
+	require.NoError(t, buffered.PutBranch([]byte{1}, []byte{2}, nil))
+	cc := &commitmentCalculator{}
+	result, err := cc.finishDualFolds(kv.CommitmentDomain, kv.CommitmentBinDomain, []dualFoldResult{
+		{domain: kv.CommitmentDomain, err: errors.New("fold failed")},
+		{domain: kv.CommitmentBinDomain, root: []byte{4}},
+	}, &commitmentFoldArm{buffered: buffered})
+	require.Error(t, err)
+	require.Nil(t, result.canonicalRoot)
+	require.Zero(t, backend.writes)
 }
 
 func TestDualCompletionStopsShadowOnReplayError(t *testing.T) {

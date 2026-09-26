@@ -144,3 +144,17 @@ func TestPBinSharedDomainsReadsCodeSizeUnderBin(t *testing.T) {
 	_, err = hexSd.ComputeCommitment(t.Context(), hexTx, false, 0, 0, "hex-codesize", nil)
 	require.NoError(t, err, "hex does not hash code_size and must not start requiring the code")
 }
+
+func TestPBinFeedWithNoPlainUpdatesIsProcessed(t *testing.T) {
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	addr := pbinCodeSizeAddr(6)
+	acc := pbinCodeSizeAccount(empty.CodeHash)
+	sd, tx := pbinCodeSizeSharedDomains(t, []execctx.SharedDomainOption{execctx.WithTrieConfig(cfg)}, addr, acc, nil)
+	sd.GetCommitmentCtx().GetUpdates().Reset()
+	require.Zero(t, sd.GetCommitmentCtx().GetUpdates().Size())
+	sd.GetCommitmentCtx().SetPBinFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{{Address: addr, Exists: true, Balance: acc.Balance}}})
+	root, err := sd.ComputeCommitment(t.Context(), tx, false, 0, 0, "pbin-feed", nil)
+	require.NoError(t, err)
+	require.NotEqual(t, make([]byte, 32), root)
+}

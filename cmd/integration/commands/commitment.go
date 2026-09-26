@@ -226,14 +226,17 @@ func freezeHexCommitment(tx kv.TemporalTx, agg *dbstate.Aggregator) (uint64, err
 	if !slices.Contains(agg.CommitmentDomains(), kv.CommitmentBinDomain) {
 		return 0, errors.New("freezing hex commitment requires a hex+bin datadir")
 	}
-	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, err
 	}
 	if len(state) < 18 {
 		return 0, errors.New("hex commitment state is missing or truncated")
 	}
-	txNum, blockNum := commitmentdb.DecodeTxBlockNums(state)
+	blockNum, txNum, _, err := commitment.DecodeCommitmentV3State(state)
+	if err != nil {
+		return 0, fmt.Errorf("decode hex commitment state: %w", err)
+	}
 	binaryState, _, err := tx.GetLatest(kv.CommitmentBinDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, err

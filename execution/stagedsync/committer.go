@@ -816,11 +816,16 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 	}
 	balUpdates := cc.balUpdates
 	balState.FlushToUpdates(balUpdates)
+	var hexFeed *commitment.Feed
+	if hexCtx, _, ok := cc.dualCommitmentContexts(); ok && hexCtx.AcceptsFeed() {
+		balState.FlushToFeed(&cc.feed)
+		hexFeed = &cc.feed
+	}
 	binFeed, err := balState.BinFeed()
 	if err != nil {
 		return dualCommitmentResult{}, nil, err
 	}
-	return cc.computeRootFromUpdatesResult(ctx, t, balUpdates, reader, binFeed)
+	return cc.computeRootFromUpdatesResult(ctx, t, balUpdates, reader, hexFeed, binFeed)
 }
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
@@ -829,14 +834,10 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 // flushing its own deferred update) so its branch deltas never pend into a
 // later window block's changeset. Used by BAL compute-ahead, which supplies
 // its own balState-derived updates rather than cc.state.
-func (cc *commitmentCalculator) computeRootFromUpdatesResult(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader, binFeeds ...*commitment.PBinFeed) (dualCommitmentResult, func() error, error) {
+func (cc *commitmentCalculator) computeRootFromUpdatesResult(ctx context.Context, t commitTarget, updates *commitment.Updates, reader *asOfStateReader, hexFeed *commitment.Feed, binFeed *commitment.PBinFeed) (dualCommitmentResult, func() error, error) {
 	cc.setCanonicalCommitmentDomain(t.blockTime)
-	var binFeed *commitment.PBinFeed
-	if len(binFeeds) != 0 {
-		binFeed = binFeeds[0]
-	}
 	if hexCtx, binCtx, ok := cc.dualCommitmentContexts(); ok {
-		result, err := cc.computeDualFromUpdatesWithRole(ctx, t, updates, reader, hexCtx, binCtx, binFeed)
+		result, err := cc.computeDualFromUpdatesWithRole(ctx, t, updates, reader, hexCtx, binCtx, hexFeed, binFeed)
 		return result, nil, err
 	}
 	sdCtx := cc.doms.GetCommitmentContext()
@@ -879,12 +880,17 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 			return
 		}
 	}
-	cc.state.ResetBlockFlags()
-	result, flushOwn, err := cc.computeRootFromUpdatesResult(ctx, target, cc.handOffUpdates(), cc.asOfReader, binFeed)
+	var hexFeed *commitment.Feed
+	if hexCtx, _, ok := cc.dualCommitmentContexts(); ok && hexCtx.AcceptsFeed() {
+		cc.state.FlushToFeed(&cc.feed)
+		hexFeed = &cc.feed
+	}
+	result, flushOwn, err := cc.computeRootFromUpdatesResult(ctx, target, cc.handOffUpdates(), cc.asOfReader, hexFeed, binFeed)
 	if err != nil {
 		cc.fail(ctx, target, fmt.Errorf("shadow incremental compute: %w", err))
 		return
 	}
+	cc.state.ResetBlockFlags()
 	rh := result.canonicalRoot
 	// Both operands are roots this node computed, so the header-root toggle does
 	// not apply: this is the only thing validating the BAL-driven path.
@@ -1009,18 +1015,20 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 			return
 		}
 	}
+	var hexFeed *commitment.Feed
+	if hexCtx, _, ok := cc.dualCommitmentContexts(); ok && hexCtx.AcceptsFeed() {
+		cc.state.FlushToFeed(&cc.feed)
+		hexFeed = &cc.feed
+	}
 	feedMode := false
-	if sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
+	if hexFeed == nil && sdCtx.AcceptsFeed() && dbg.TrieTraceFile == "" && dbg.TrieTraceBlock == 0 {
 		cc.state.FlushToFeed(&cc.feed)
 		sdCtx.SetFeed(&cc.feed)
+		hexFeed = &cc.feed
 		feedMode = true
 	} else {
 		cc.state.FlushToUpdates(cc.updates)
 	}
-	if !m.midBlock {
-		cc.state.ResetBlockFlags()
-	}
-
 	sdCtx.SetStateReader(cc.asOfReader)
 
 	var rh, shadowRoot []byte
@@ -1028,7 +1036,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	var err error
 	if hexCtx, binCtx, ok := cc.dualCommitmentContexts(); ok {
 		var result dualCommitmentResult
-		result, err = cc.computeDualFromUpdatesWithRole(ctx, t, cc.handOffUpdates(), cc.asOfReader, hexCtx, binCtx, binFeed)
+		result, err = cc.computeDualFromUpdatesWithRole(ctx, t, cc.handOffUpdates(), cc.asOfReader, hexCtx, binCtx, hexFeed, binFeed)
 		rh, shadowRoot = result.canonicalRoot, result.shadowRoot
 	} else {
 		sdCtx := cc.doms.GetCommitmentContext()
@@ -1060,6 +1068,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 		})
 		return
 	}
+	cc.state.ResetBlockFlags()
 
 	mismatch := m.checkRoot && headerRootMismatch(rh, t.stateRoot[:])
 	if flushOwn != nil {
@@ -1103,7 +1112,8 @@ type commitmentFoldArm struct {
 	ctx      *commitmentdb.SharedDomainsCommitmentContext
 	reader   *asOfStateReader
 	updates  *commitment.Updates
-	feed     *commitment.PBinFeed
+	feed     *commitment.Feed
+	pbinFeed *commitment.PBinFeed
 	buffered *commitmentdb.BufferedPatriciaContext
 }
 
@@ -1147,7 +1157,7 @@ type dualFoldResult struct {
 	err    error
 }
 
-func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Context, t commitTarget, hexUpdates *commitment.Updates, reader *asOfStateReader, hexCtx, binCtx *commitmentdb.SharedDomainsCommitmentContext, binFeeds ...*commitment.PBinFeed) (dualCommitmentResult, error) {
+func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Context, t commitTarget, hexUpdates *commitment.Updates, reader *asOfStateReader, hexCtx, binCtx *commitmentdb.SharedDomainsCommitmentContext, hexFeed *commitment.Feed, binFeed *commitment.PBinFeed) (dualCommitmentResult, error) {
 	cc.setCanonicalCommitmentDomain(t.blockTime)
 	hexTx, binTx, pin, err := cc.beginCommitmentWorkerTxs(ctx)
 	if err != nil {
@@ -1161,20 +1171,17 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 
 	binUpdates := binCtx.NewBinUpdates(hexUpdates.PlainKeys())
 	defer binUpdates.Close()
-	var binFeed *commitment.PBinFeed
-	if len(binFeeds) != 0 {
-		binFeed = binFeeds[0]
-	}
 	hexArm := commitmentFoldArm{
 		ctx:     hexCtx,
 		reader:  cloneCommitmentReader(reader, hexTx, kv.CommitmentDomain, t.lastTxNum+1),
 		updates: hexUpdates,
+		feed:    hexFeed,
 	}
 	binArm := commitmentFoldArm{
-		ctx:     binCtx,
-		reader:  cloneCommitmentReader(reader, binTx, kv.CommitmentBinDomain, t.lastTxNum+1),
-		updates: binUpdates,
-		feed:    binFeed,
+		ctx:      binCtx,
+		reader:   cloneCommitmentReader(reader, binTx, kv.CommitmentBinDomain, t.lastTxNum+1),
+		updates:  binUpdates,
+		pbinFeed: binFeed,
 	}
 
 	canonicalDomain := cc.canonicalCommitmentDomain(t.blockTime)
@@ -1347,7 +1354,10 @@ func (cc *commitmentCalculator) computeCommitmentArm(ctx context.Context, t comm
 	arm.ctx.SetUpdates(arm.updates)
 	arm.ctx.SetStateReader(arm.reader)
 	if arm.feed != nil {
-		arm.ctx.SetPBinFeed(arm.feed)
+		arm.ctx.SetFeed(arm.feed)
+	}
+	if arm.pbinFeed != nil {
+		arm.ctx.SetPBinFeed(arm.pbinFeed)
 	}
 	if !cc.ownsChangeset(t.blockNum) {
 		rh, flushOwn, err := cc.computeIsolated(ctx, t, arm.ctx, arm.reader.roTx, arm.reader, decorate)

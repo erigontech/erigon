@@ -65,11 +65,17 @@ func withCommitmentVariant(t *testing.T, bin, hexBin bool) {
 	t.Helper()
 	withBinCommitment(t, bin)
 	origHexBin, origHash, origSuite := statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	origV3, origSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
 	t.Cleanup(func() {
 		statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash = origHexBin, origHash
+		statecfg.ExperimentalCommitmentV3, statecfg.Schema = origV3, origSchema
 		require.NoError(t, commitment.SetPBinHashSuite(origSuite))
 	})
 	statecfg.ExperimentalHexBinCommitment, statecfg.BinCommitmentHash = hexBin, ""
+	statecfg.ExperimentalCommitmentV3 = hexBin
+	if hexBin {
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	}
 }
 
 func pbinTestGenesis() *types.Genesis {

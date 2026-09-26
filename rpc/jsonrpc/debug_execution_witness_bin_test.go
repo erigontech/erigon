@@ -79,8 +79,15 @@ func pbinWitnessFixture(t *testing.T, activation uint64) (*DebugAPIImpl, *execmo
 	var options []execmoduletester.Option
 	if activation > 0 {
 		previousDual := statecfg.ExperimentalHexBinCommitment
-		t.Cleanup(func() { statecfg.ExperimentalHexBinCommitment = previousDual })
+		previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+		t.Cleanup(func() {
+			statecfg.ExperimentalHexBinCommitment = previousDual
+			statecfg.ExperimentalCommitmentV3 = previousV3
+			statecfg.Schema = previousSchema
+		})
 		statecfg.ExperimentalHexBinCommitment = true
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 		options = append(options, execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))
 	}
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
@@ -192,10 +199,10 @@ func TestPBinDualExecutionWitnessRefusesBin(t *testing.T) {
 	}
 }
 
-func TestPBinDualHexExecutionWitnessStillServes(t *testing.T) {
+func TestPBinDualV3HexExecutionWitnessRefuses(t *testing.T) {
 	api, _ := pbinWitnessFixture(t, 30)
 	n := rpc.BlockNumber(2)
-	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
-	require.NoError(t, err)
-	require.NotEmpty(t, result.State)
+	_, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "shared domains commitment context doesn't have HexPatriciaHashed")
 }
