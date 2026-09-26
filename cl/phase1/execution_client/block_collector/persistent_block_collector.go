@@ -301,7 +301,9 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 					// of tx data) accumulates in chaindata before any drain
 					// can occur.
 					if lastInsertedBlock != nil {
-						p.doForkChoiceUpdate(ctx, lastInsertedBlock)
+						if err := p.doForkChoiceUpdate(ctx, lastInsertedBlock); err != nil {
+							return err
+						}
 					}
 					blocksBatch = []*types.Block{}
 				}
@@ -340,7 +342,9 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	}
 
 	if lastInsertedBlock != nil {
-		p.doForkChoiceUpdate(ctx, lastInsertedBlock)
+		if err := p.doForkChoiceUpdate(ctx, lastInsertedBlock); err != nil {
+			return err
+		}
 	}
 
 	if gapDetected {
@@ -494,25 +498,17 @@ func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch 
 }
 
 // doForkChoiceUpdate sends a ForkChoiceUpdate to the EL for the given block.
-func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastBlock *types.Block) {
+func (p *PersistentBlockCollector) doForkChoiceUpdate(ctx context.Context, lastBlock *types.Block) error {
 	lastBlockHash := lastBlock.Hash()
-	currentHeader, err := p.engine.CurrentHeader(ctx)
-	if err != nil {
-		p.logger.Warn("[BlockCollector] Failed to get current header", "err", err)
-	}
-
-	isForkchoiceNeeded := currentHeader == nil || lastBlock.NumberU64() > currentHeader.Number.Uint64()
-	if !isForkchoiceNeeded {
-		return
-	}
-
 	fcuVersion := clparams.DenebVersion
 	if lastBlock.HeaderNoCopy().SlotNumber != nil {
 		fcuVersion = clparams.GloasVersion
 	}
-	if _, err := p.engine.ForkChoiceUpdate(ctx, lastBlockHash, lastBlockHash, lastBlockHash, nil, fcuVersion); err != nil {
+	if err := p.engine.ForkChoiceUpdateIfNewer(ctx, lastBlockHash, lastBlockHash, lastBlockHash, fcuVersion); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to update fork choice", "err", err)
+		return err
 	}
+	return nil
 }
 
 // HasBlock checks if a block with the given number is already in the collector

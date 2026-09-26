@@ -111,6 +111,10 @@ func (s *stubExecutionModule) UpdateForkChoice(ctx context.Context, headHash, sa
 	return execmodule.ForkChoiceResult{}, nil
 }
 
+func (s *stubExecutionModule) UpdateForkChoiceIfNewer(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (execmodule.ForkChoiceResult, error) {
+	return s.UpdateForkChoice(ctx, headHash, safeHash, finalizedHash)
+}
+
 func (s *stubExecutionModule) GetForkChoice(ctx context.Context) (execmodule.ForkChoiceState, error) {
 	if s.getForkChoiceFunc != nil {
 		return s.getForkChoiceFunc(ctx)

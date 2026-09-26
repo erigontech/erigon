@@ -19,6 +19,7 @@ package block_collector
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -78,9 +79,42 @@ func blockHash(bb *cltypes.BeaconBlock) common.Hash {
 // flushTestHarness wires a PersistentBlockCollector to a gomock ExecutionEngine
 // that records every batch passed to InsertBlocks (and every FCU call).
 type flushTestHarness struct {
-	collector *PersistentBlockCollector
-	inserted  []*types.Block
-	fcuHeads  []common.Hash
+	collector     *PersistentBlockCollector
+	inserted      []*types.Block
+	fcuHeads      []common.Hash
+	currentHeader *types.Header
+	beforeForward func()
+	forwardErr    error
+}
+
+type forwardOnlyTestEngine struct {
+	execution_client.ExecutionEngine
+	h *flushTestHarness
+}
+
+func (e forwardOnlyTestEngine) ForkChoiceUpdateIfNewer(ctx context.Context, finalized, safe, head common.Hash, version clparams.StateVersion) error {
+	if e.h.forwardErr != nil {
+		return e.h.forwardErr
+	}
+	if e.h.beforeForward != nil {
+		e.h.beforeForward()
+	}
+	var targetNumber *uint64
+	for _, block := range e.h.inserted {
+		if block.Hash() == head {
+			number := block.NumberU64()
+			targetNumber = &number
+			break
+		}
+	}
+	if targetNumber == nil {
+		return errors.New("forward fork choice target not inserted")
+	}
+	if e.h.currentHeader != nil && *targetNumber <= e.h.currentHeader.Number.Uint64() {
+		return nil
+	}
+	_, err := e.ExecutionEngine.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
+	return err
 }
 
 // insertedNumbers returns the block numbers of every inserted block in call order.
@@ -105,7 +139,9 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 			return nil
 		},
 	).AnyTimes()
-	engine.EXPECT().CurrentHeader(gomock.Any()).Return(nil, nil).AnyTimes()
+	engine.EXPECT().CurrentHeader(gomock.Any()).DoAndReturn(func(context.Context) (*types.Header, error) {
+		return h.currentHeader, nil
+	}).AnyTimes()
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
 		func(_ context.Context, _, _, head common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 			h.fcuHeads = append(h.fcuHeads, head)
@@ -114,12 +150,35 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 	).AnyTimes()
 
 	persistDir := filepath.Join(t.TempDir(), "collector")
-	c := NewPersistentBlockCollector(log.New(), engine, &clparams.MainnetBeaconConfig, persistDir)
+	c := NewPersistentBlockCollector(log.New(), forwardOnlyTestEngine{ExecutionEngine: engine, h: h}, &clparams.MainnetBeaconConfig, persistDir)
 	require.NotNil(t, c)
 	t.Cleanup(func() { _ = c.Close() })
 
 	h.collector = c
 	return h
+}
+
+func TestFlushDelegatesForwardCheckToExecutionEngine(t *testing.T) {
+	h := newFlushTestHarness(t, 0)
+	h.currentHeader = makeTestHeader(0, common.Hash{}, []byte("old"))
+	h.beforeForward = func() {
+		h.currentHeader = makeTestHeader(2, common.Hash{}, []byte("newer"))
+	}
+	block := makeBeaconBlock(t, 1, 'a', common.Hash{})
+	require.NoError(t, h.collector.AddBlock(block))
+
+	require.NoError(t, h.collector.Flush(t.Context()))
+	require.Empty(t, h.fcuHeads)
+}
+
+func TestFlushRetainsRowsWhenForwardForkChoiceFails(t *testing.T) {
+	h := newFlushTestHarness(t, 0)
+	h.forwardErr = errors.New("forward fork choice failed")
+	block := makeBeaconBlock(t, 1, 'a', common.Hash{})
+	require.NoError(t, h.collector.AddBlock(block))
+
+	require.ErrorContains(t, h.collector.Flush(t.Context()), "forward fork choice failed")
+	require.True(t, h.collector.HasBlock(1))
 }
 
 // countRowsAtOrAbove returns the number of rows whose 8-byte block-number prefix is >= minNumber.

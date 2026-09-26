@@ -382,6 +382,10 @@ func (s *getPayloadStubModule) UpdateForkChoice(_ context.Context, _, _, _ commo
 	panic("not implemented")
 }
 
+func (s *getPayloadStubModule) UpdateForkChoiceIfNewer(_ context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
+	panic("not implemented")
+}
+
 func (s *getPayloadStubModule) GetForkChoice(_ context.Context) (execmodule.ForkChoiceState, error) {
 	panic("not implemented")
 }

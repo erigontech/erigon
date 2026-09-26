@@ -68,6 +68,10 @@ func (forkChoiceSpectestEngine) ForkChoiceUpdate(context.Context, common.Hash, c
 	return nil, nil
 }
 
+func (forkChoiceSpectestEngine) ForkChoiceUpdateIfNewer(context.Context, common.Hash, common.Hash, common.Hash, clparams.StateVersion) error {
+	return nil
+}
+
 func (forkChoiceSpectestEngine) SupportInsertion() bool { return false }
 
 func (forkChoiceSpectestEngine) InsertBlocks(context.Context, []*types.Block) error {

@@ -24,8 +24,39 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
+
+type forwardOnlyModuleStub struct {
+	execmodule.ExecutionModule
+	head      common.Hash
+	safe      common.Hash
+	finalized common.Hash
+	status    execmodule.ExecutionStatus
+}
+
+func (s *forwardOnlyModuleStub) UpdateForkChoiceIfNewer(_ context.Context, head, safe, finalized common.Hash) (execmodule.ForkChoiceResult, error) {
+	s.head, s.safe, s.finalized = head, safe, finalized
+	return execmodule.ForkChoiceResult{Status: s.status}, nil
+}
+
+func TestForwardForkChoicePreservesHashRolesAndRejectsBusy(t *testing.T) {
+	module := &forwardOnlyModuleStub{status: execmodule.ExecutionStatusSuccess}
+	client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(nil, module, 0), nil)
+	require.NoError(t, err)
+	finalized, safe, head := common.Hash{1}, common.Hash{2}, common.Hash{3}
+
+	require.NoError(t, client.ForkChoiceUpdateIfNewer(t.Context(), finalized, safe, head, clparams.DenebVersion))
+	require.Equal(t, head, module.head)
+	require.Equal(t, safe, module.safe)
+	require.Equal(t, finalized, module.finalized)
+
+	module.status = execmodule.ExecutionStatusBusy
+	require.ErrorContains(t, client.ForkChoiceUpdateIfNewer(t.Context(), finalized, safe, head, clparams.DenebVersion), "status")
+}
 
 func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {
 	calls := 0

@@ -143,6 +143,7 @@ type ExecutionModule interface {
 	// synchronously: a DeadlineExceeded returns ForkChoiceResult{Status:Busy}
 	// so the caller can poll with GetForkChoice.
 	UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error)
+	UpdateForkChoiceIfNewer(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error)
 
 	// GetForkChoice returns the current fork choice state (head, safe,
 	// finalized).
