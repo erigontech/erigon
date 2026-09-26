@@ -26,9 +26,12 @@ import (
 const lifeSpan = 30 * time.Minute
 
 type OperationPool[K comparable, T any] struct {
-	pool         *lru.Cache[K, T] // Map the Signature to the underlying object
-	recentlySeen sync.Map         // map from K to time.Time
-	lastPruned   time.Time
+	pool                 *lru.Cache[K, T] // Map the Signature to the underlying object
+	recentlySeen         sync.Map         // map from K to time.Time
+	persistentIdentities map[K]any
+	persistentMu         sync.Mutex
+	pruneMu              sync.Mutex
+	lastPruned           time.Time
 }
 
 func NewOperationPool[K comparable, T any](capacity int, matricName string) *OperationPool[K, T] {
@@ -37,8 +40,9 @@ func NewOperationPool[K comparable, T any](capacity int, matricName string) *Ope
 		panic(err)
 	}
 	return &OperationPool[K, T]{
-		pool:         pool,
-		recentlySeen: sync.Map{},
+		pool:                 pool,
+		recentlySeen:         sync.Map{},
+		persistentIdentities: make(map[K]any),
 	}
 }
 
@@ -46,16 +50,73 @@ func (o *OperationPool[K, T]) Insert(k K, operation T) {
 	if _, ok := o.recentlySeen.Load(k); ok {
 		return
 	}
+	o.put(k, operation)
+}
+
+func (o *OperationPool[K, T]) put(k K, operation T) {
 	o.pool.Add(k, operation)
-	o.recentlySeen.Store(k, time.Now())
-	if time.Since(o.lastPruned) > lifeSpan {
+	o.recordRecentlySeen(k)
+}
+
+func (o *OperationPool[K, T]) recordRecentlySeen(k K) {
+	now := time.Now()
+	o.pruneRecentlySeen(now)
+	o.recentlySeen.LoadOrStore(k, now)
+}
+
+func (o *OperationPool[K, T]) pruneRecentlySeen(now time.Time) {
+	o.pruneMu.Lock()
+	defer o.pruneMu.Unlock()
+	if now.Sub(o.lastPruned) > lifeSpan {
 		o.recentlySeen.Range(func(k, v any) bool {
-			if time.Since(v.(time.Time)) > lifeSpan {
+			if now.Sub(v.(time.Time)) > lifeSpan {
 				o.recentlySeen.Delete(k)
 			}
 			return true
 		})
-		o.lastPruned = time.Now()
+		o.lastPruned = now
+	}
+}
+
+func (o *OperationPool[K, T]) restoreIfMissingWithPersistentIdentity(k K, operation T, identity any, matches func(any) bool) bool {
+	o.persistentMu.Lock()
+	defer o.persistentMu.Unlock()
+	if first, ok := o.persistentIdentities[k]; ok {
+		if !matches(first) {
+			return false
+		}
+	} else {
+		o.persistentIdentities[k] = identity
+	}
+	contained, _ := o.pool.ContainsOrAdd(k, operation)
+	if contained {
+		return false
+	}
+	o.recordRecentlySeen(k)
+	return true
+}
+
+func (o *OperationPool[K, T]) persistentIdentity(k K) (any, bool) {
+	o.persistentMu.Lock()
+	defer o.persistentMu.Unlock()
+	identity, ok := o.persistentIdentities[k]
+	return identity, ok
+}
+
+func (o *OperationPool[K, T]) hasPersistentIdentities() bool {
+	o.persistentMu.Lock()
+	defer o.persistentMu.Unlock()
+	return len(o.persistentIdentities) != 0
+}
+
+func (o *OperationPool[K, T]) prunePersistentIdentities(shouldDelete func(K, any) bool) {
+	o.persistentMu.Lock()
+	defer o.persistentMu.Unlock()
+	for k, identity := range o.persistentIdentities {
+		if shouldDelete(k, identity) {
+			o.pool.Remove(k)
+			delete(o.persistentIdentities, k)
+		}
 	}
 }
 

@@ -68,6 +68,11 @@ type OperationsPool struct {
 	VoluntaryExitsPool        *OperationPool[uint64, *cltypes.SignedVoluntaryExit]
 }
 
+type voluntaryExitIdentity struct {
+	epoch     uint64
+	signature common.Bytes96
+}
+
 func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	return OperationsPool{
 		AttestationsPool:          NewOperationPool[common.Bytes96, *solid.Attestation](attestationsCapacity(beaconCfg), "attestationsPool"),
@@ -78,11 +83,47 @@ func NewOperationsPool(beaconCfg *clparams.BeaconChainConfig) OperationsPool {
 	}
 }
 
+func (o *OperationsPool) RestoreVoluntaryExitIfMissing(index uint64, exit *cltypes.SignedVoluntaryExit) bool {
+	identity, ok := voluntaryExitIdentityFor(index, exit)
+	if !ok {
+		return false
+	}
+	return o.VoluntaryExitsPool.restoreIfMissingWithPersistentIdentity(index, exit, identity, func(first any) bool {
+		stored, ok := first.(voluntaryExitIdentity)
+		return ok && stored == identity
+	})
+}
+
+func (o *OperationsPool) PreviouslySeenVoluntaryExitMatches(exit *cltypes.SignedVoluntaryExit) (seen, matches bool) {
+	if exit == nil || exit.VoluntaryExit == nil {
+		return false, false
+	}
+	identity, ok := o.VoluntaryExitsPool.persistentIdentity(exit.VoluntaryExit.ValidatorIndex)
+	if !ok {
+		return false, false
+	}
+	want, ok := identity.(voluntaryExitIdentity)
+	return true, ok && want == voluntaryExitIdentity{epoch: exit.VoluntaryExit.Epoch, signature: exit.Signature}
+}
+
+func (o *OperationsPool) HasSeenVoluntaryExit(index uint64) bool {
+	_, ok := o.VoluntaryExitsPool.persistentIdentity(index)
+	return ok
+}
+
+func voluntaryExitIdentityFor(index uint64, exit *cltypes.SignedVoluntaryExit) (voluntaryExitIdentity, bool) {
+	if index&clparams.BuilderIndexFlag != 0 || exit == nil || exit.VoluntaryExit == nil || exit.VoluntaryExit.ValidatorIndex != index {
+		return voluntaryExitIdentity{}, false
+	}
+	return voluntaryExitIdentity{epoch: exit.VoluntaryExit.Epoch, signature: exit.Signature}, true
+}
+
 func (o *OperationsPool) HasPrunableOperations() bool {
 	return o.AttesterSlashingsPool.Len() > 0 ||
 		o.ProposerSlashingsPool.Len() > 0 ||
 		o.BLSToExecutionChangesPool.Len() > 0 ||
-		o.VoluntaryExitsPool.Len() > 0
+		o.VoluntaryExitsPool.Len() > 0 ||
+		o.VoluntaryExitsPool.hasPersistentIdentities()
 }
 
 func (o *OperationsPool) PruneFinalized(finalizedState abstract.BeaconState, finalizedEpoch uint64) {
@@ -107,6 +148,13 @@ func (o *OperationsPool) PruneFinalized(finalizedState abstract.BeaconState, fin
 		o.AttesterSlashingsPool.DeleteIfExist(ComputeKeyForAttesterSlashing(slashing))
 	}
 
+	o.VoluntaryExitsPool.prunePersistentIdentities(func(validatorIndex uint64, _ any) bool {
+		if validatorIndex&clparams.BuilderIndexFlag != 0 {
+			return false
+		}
+		validator, ok := validatorFromState(finalizedState, validatorIndex)
+		return ok && validator.ExitEpoch() != finalizedState.BeaconConfig().FarFutureEpoch
+	})
 	for _, exit := range o.VoluntaryExitsPool.Raw() {
 		if exit == nil || exit.VoluntaryExit == nil {
 			continue

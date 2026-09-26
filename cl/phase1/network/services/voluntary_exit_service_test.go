@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -119,8 +120,9 @@ func (t *voluntaryExitTestSuite) TestProcessMessage() {
 			name: "validator already in pool",
 			mock: func() {
 				t.operationsPool.VoluntaryExitsPool.Insert(mockValidatorIndex, mockMsg.SignedVoluntaryExit)
+				t.voluntaryExitService.(*voluntaryExitService).ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 			},
-			msg:     mockMsg,
+			msg:     &SignedVoluntaryExitForGossip{SignedVoluntaryExit: mockMsg.SignedVoluntaryExit},
 			wantErr: true,
 			err:     ErrIgnore,
 		},
@@ -293,6 +295,8 @@ func (t *voluntaryExitTestSuite) TestSeenValidatorIsIgnoredAfterPoolPrune() {
 
 	t.Require().NoError(t.voluntaryExitService.ProcessMessage(context.Background(), nil, msg))
 	t.Require().True(t.operationsPool.VoluntaryExitsPool.DeleteIfExist(validatorIndex))
+	msg.ImmediateVerification = false
+	t.voluntaryExitService.(*voluntaryExitService).ethClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
 	validator.SetExitEpoch(0)
 	st.ValidatorSet().Set(int(validatorIndex), validator)
 	t.Require().NoError(t.syncedData.OnHeadState(st))
@@ -319,7 +323,7 @@ func (t *voluntaryExitTestSuite) TestFutureExitIgnoredBeforeHeadLookup() {
 	service.beaconCfg = &cfg
 	service.ethClock = eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
 	service.now = func() time.Time {
-		return service.ethClock.GetSlotTime(101 * cfg.SlotsPerEpoch).Add(-500*time.Millisecond - time.Millisecond)
+		return service.ethClock.GetSlotTime(101 * cfg.SlotsPerEpoch).Add(-maximumGossipClockDisparity - time.Millisecond)
 	}
 	t.syncedData.UnsetHeadState()
 	for _, epoch := range []uint64{101, math.MaxUint64} {
@@ -342,12 +346,211 @@ func (t *voluntaryExitTestSuite) TestExitAcceptedAtClockDisparityWithLaggingHead
 	clock := eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
 	service.ethClock = clock
 	boundary := clock.GetSlotTime(101 * cfg.SlotsPerEpoch)
-	service.now = func() time.Time { return boundary.Add(-500 * time.Millisecond) }
+	service.now = func() time.Time { return boundary.Add(-maximumGossipClockDisparity) }
 	t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
 	msg := &SignedVoluntaryExitForGossip{SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 101, ValidatorIndex: 10}}, ImmediateVerification: true}
 	t.Require().NoError(service.ProcessMessage(context.Background(), nil, msg))
 	t.Require().True(service.seen.Contains(10))
 	t.Require().True(t.operationsPool.VoluntaryExitsPool.Has(10))
+}
+
+func (t *voluntaryExitTestSuite) TestImmediateDuplicateReusesVerifiedExitAndRejectsAlternate() {
+	service := t.voluntaryExitService.(*voluntaryExitService)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.ShardCommitteePeriod = 100
+	service.beaconCfg = &cfg
+	_, st, _ := tests.GetBellatrixRandom()
+	t.Require().NoError(st.SetSlot(100 * cfg.SlotsPerEpoch))
+	st.ValidatorSet().Set(10, solid.NewValidatorFromParameters(common.Bytes48{}, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch))
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	service.ethClock = eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(100 * cfg.SlotsPerEpoch) }
+	t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(1)
+
+	exit := &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 100, ValidatorIndex: 10}, Signature: common.Bytes96{1}}
+	msg := &SignedVoluntaryExitForGossip{SignedVoluntaryExit: exit, ImmediateVerification: true}
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, msg))
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, msg))
+
+	alternate := &SignedVoluntaryExitForGossip{SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 99, ValidatorIndex: 10},
+		Signature:     common.Bytes96{2},
+	}, ImmediateVerification: true}
+	t.Require().ErrorIs(service.ProcessMessage(context.Background(), nil, alternate), ErrIgnore)
+	stored, ok := t.operationsPool.VoluntaryExitsPool.Get(10)
+	t.Require().True(ok)
+	t.Require().Equal(exit, stored)
+	t.Require().True(t.gomockCtrl.Satisfied())
+}
+
+func (t *voluntaryExitTestSuite) TestReverifiedExitRestoresPoolAfterBothCachesEvictIt() {
+	service := t.voluntaryExitService.(*voluntaryExitService)
+	seen, err := lru.New[uint64, *cltypes.SignedVoluntaryExit]("voluntary_exit_seen_test", 1)
+	t.Require().NoError(err)
+	service.seen = seen
+	voluntaryExitsPool := pool.NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](1, "voluntaryExitsPoolTest")
+	service.operationsPool.VoluntaryExitsPool = voluntaryExitsPool
+	t.operationsPool.VoluntaryExitsPool = voluntaryExitsPool
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.ShardCommitteePeriod = 100
+	service.beaconCfg = &cfg
+	_, st, _ := tests.GetBellatrixRandom()
+	t.Require().NoError(st.SetSlot(100 * cfg.SlotsPerEpoch))
+	for _, index := range []int{10, 11} {
+		st.ValidatorSet().Set(index, solid.NewValidatorFromParameters(common.Bytes48{}, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch))
+	}
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	service.ethClock = eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(100 * cfg.SlotsPerEpoch) }
+	t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(3)
+
+	exit := func(index uint64) *SignedVoluntaryExitForGossip {
+		return &SignedVoluntaryExitForGossip{
+			SignedVoluntaryExit:   &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 100, ValidatorIndex: index}},
+			ImmediateVerification: true,
+		}
+	}
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, exit(10)))
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, exit(11)))
+	t.Require().False(voluntaryExitsPool.Has(10))
+	t.Require().False(service.seen.Contains(10))
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, exit(10)))
+	t.Require().True(voluntaryExitsPool.Has(10))
+}
+
+func (t *voluntaryExitTestSuite) TestReverifiedAlternateExitDoesNotReplaceEvictedFirstExit() {
+	service := t.voluntaryExitService.(*voluntaryExitService)
+	seen, err := lru.New[uint64, *cltypes.SignedVoluntaryExit]("voluntary_exit_seen_alternate_test", 1)
+	t.Require().NoError(err)
+	service.seen = seen
+	voluntaryExitsPool := pool.NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](1, "voluntaryExitsPoolAlternateTest")
+	service.operationsPool.VoluntaryExitsPool = voluntaryExitsPool
+	t.operationsPool.VoluntaryExitsPool = voluntaryExitsPool
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.ShardCommitteePeriod = 100
+	service.beaconCfg = &cfg
+	_, st, _ := tests.GetBellatrixRandom()
+	t.Require().NoError(st.SetSlot(100 * cfg.SlotsPerEpoch))
+	for _, index := range []int{10, 11} {
+		st.ValidatorSet().Set(index, solid.NewValidatorFromParameters(common.Bytes48{}, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch))
+	}
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	service.ethClock = eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(100 * cfg.SlotsPerEpoch) }
+	t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(2)
+
+	exit := func(index uint64) *SignedVoluntaryExitForGossip {
+		return &SignedVoluntaryExitForGossip{
+			SignedVoluntaryExit:   &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 100, ValidatorIndex: index}},
+			ImmediateVerification: true,
+		}
+	}
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, exit(10)))
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, exit(11)))
+	t.Require().False(voluntaryExitsPool.Has(10))
+	t.Require().False(service.seen.Contains(10))
+	alternate := exit(10)
+	alternate.SignedVoluntaryExit.Signature[0] = 1
+	computeSigningRoot = func(_ ssz.HashableSSZ, _ []byte) ([32]byte, error) {
+		t.FailNow("alternate exit reached state-dependent signing work")
+		return [32]byte{}, nil
+	}
+	t.Require().ErrorIs(service.ProcessMessage(context.Background(), nil, alternate), ErrIgnore)
+	t.Require().False(voluntaryExitsPool.Has(10))
+}
+
+func (t *voluntaryExitTestSuite) TestGossipExitIsIgnoredAfterBothCachesEvictFirstExit() {
+	service := t.voluntaryExitService.(*voluntaryExitService)
+	seen, err := lru.New[uint64, *cltypes.SignedVoluntaryExit]("voluntary_exit_seen_gossip_test", 1)
+	t.Require().NoError(err)
+	service.seen = seen
+	voluntaryExitsPool := pool.NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](1, "voluntaryExitsPoolGossipTest")
+	service.operationsPool.VoluntaryExitsPool = voluntaryExitsPool
+	t.operationsPool.VoluntaryExitsPool = voluntaryExitsPool
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.ShardCommitteePeriod = 100
+	service.beaconCfg = &cfg
+	_, st, _ := tests.GetBellatrixRandom()
+	t.Require().NoError(st.SetSlot(100 * cfg.SlotsPerEpoch))
+	for _, index := range []int{10, 11} {
+		st.ValidatorSet().Set(index, solid.NewValidatorFromParameters(common.Bytes48{}, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch))
+	}
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	service.ethClock = eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(100 * cfg.SlotsPerEpoch) }
+	t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).Times(2)
+
+	exit := func(index uint64) *SignedVoluntaryExitForGossip {
+		return &SignedVoluntaryExitForGossip{
+			SignedVoluntaryExit:   &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 100, ValidatorIndex: index}},
+			ImmediateVerification: true,
+		}
+	}
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, exit(10)))
+	t.Require().NoError(service.ProcessMessage(context.Background(), nil, exit(11)))
+	t.Require().False(voluntaryExitsPool.Has(10))
+	t.Require().False(service.seen.Contains(10))
+	gossipReplay := exit(10)
+	gossipReplay.ImmediateVerification = false
+	t.Require().ErrorIs(service.ProcessMessage(context.Background(), nil, gossipReplay), ErrIgnore)
+	gossipAlternate := exit(10)
+	gossipAlternate.ImmediateVerification = false
+	gossipAlternate.SignedVoluntaryExit.Signature[0] = 1
+	t.Require().ErrorIs(service.ProcessMessage(context.Background(), nil, gossipAlternate), ErrIgnore)
+	t.Require().True(t.gomockCtrl.Satisfied())
+}
+
+func (t *voluntaryExitTestSuite) TestImmediateValidationGateHonorsCanceledAlternate() {
+	service := t.voluntaryExitService.(*voluntaryExitService)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.ShardCommitteePeriod = 100
+	service.beaconCfg = &cfg
+	_, st, _ := tests.GetBellatrixRandom()
+	t.Require().NoError(st.SetSlot(100 * cfg.SlotsPerEpoch))
+	st.ValidatorSet().Set(10, solid.NewValidatorFromParameters(common.Bytes48{}, common.Hash{}, 0, false, 0, 0, cfg.FarFutureEpoch, cfg.FarFutureEpoch))
+	t.Require().NoError(t.syncedData.OnHeadState(st))
+	service.ethClock = eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(100 * cfg.SlotsPerEpoch) }
+	started, release := make(chan struct{}), make(chan struct{})
+	t.gomockCtrl.RecordCall(t.mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func([][]byte, [][]byte, [][]byte) (bool, error) {
+		close(started)
+		<-release
+		return true, nil
+	}).Times(1)
+
+	first := &SignedVoluntaryExitForGossip{SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 100, ValidatorIndex: 10},
+		Signature:     common.Bytes96{1},
+	}, ImmediateVerification: true}
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- service.ProcessMessage(context.Background(), nil, first) }()
+	<-started
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+	alternate := &SignedVoluntaryExitForGossip{SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{
+		VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 99, ValidatorIndex: 10},
+		Signature:     common.Bytes96{2},
+	}, ImmediateVerification: true}
+	err := service.ProcessMessage(canceledCtx, nil, alternate)
+	t.Require().ErrorIs(err, ErrIgnore)
+	t.Require().ErrorIs(err, context.Canceled)
+
+	asyncResult := make(chan error, 1)
+	go func() {
+		_, err := service.storeVerifiedExit(alternate.SignedVoluntaryExit, false)
+		asyncResult <- err
+	}()
+	close(release)
+	t.Require().NoError(<-firstResult)
+	t.Require().ErrorIs(<-asyncResult, ErrIgnore)
+	stored, ok := t.operationsPool.VoluntaryExitsPool.Get(10)
+	t.Require().True(ok)
+	t.Require().Equal(first.SignedVoluntaryExit, stored)
+	t.Require().True(t.gomockCtrl.Satisfied())
 }
 
 func (t *voluntaryExitTestSuite) exitAtEpochs(headEpoch, wallEpoch, activationEpoch, committeePeriod, exitEpoch uint64) (*voluntaryExitService, *SignedVoluntaryExitForGossip) {
@@ -400,6 +603,34 @@ func (t *voluntaryExitTestSuite) TestExitActivityRejectsWhenClockAlsoPrecedesAct
 func (t *voluntaryExitTestSuite) TestExitTenureRejectsWhenClockAlsoPrecedesEligibility() {
 	service, msg := t.exitAtEpochs(99, 99, 0, 100, math.MaxUint64)
 	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "verify the validator has been active long enough")
+}
+
+func (t *voluntaryExitTestSuite) TestBlockedEventSubscriberDoesNotHoldValidationGate() {
+	service, msg := t.exitAtEpochs(100, 100, 0, 0, math.MaxUint64)
+	events := make(chan *beaconevents.EventStream)
+	subscription := t.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	firstResult := make(chan error, 1)
+	go func() { firstResult <- service.ProcessMessage(context.Background(), nil, msg) }()
+	t.Require().Eventually(func() bool {
+		return t.operationsPool.VoluntaryExitsPool.Has(msg.SignedVoluntaryExit.VoluntaryExit.ValidatorIndex)
+	}, time.Second, time.Millisecond)
+
+	secondResult := make(chan error, 1)
+	go func() { secondResult <- service.ProcessMessage(context.Background(), nil, msg) }()
+	select {
+	case err := <-secondResult:
+		t.Require().NoError(err)
+	case <-time.After(250 * time.Millisecond):
+		<-events
+		t.Require().NoError(<-firstResult)
+		t.Require().Fail("duplicate validation remained blocked behind event delivery")
+	}
+
+	event := <-events
+	t.Require().Equal(beaconevents.OpVoluntaryExit, event.Event)
+	t.Require().NoError(<-firstResult)
 }
 
 func (t *voluntaryExitTestSuite) TestInitiatedExitIgnoredBeforeActivity() {

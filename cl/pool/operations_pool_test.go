@@ -155,6 +155,32 @@ func TestOperationsPool(t *testing.T) {
 	require.Len(t, pools.ProposerSlashingsPool.Raw(), 1)
 }
 
+func TestOperationsPoolVoluntaryExitHistory(t *testing.T) {
+	pools := NewOperationsPool(&clparams.MainnetBeaconConfig)
+	builderIndex := clparams.BuilderIndexFlag | 1
+	require.False(t, pools.RestoreVoluntaryExitIfMissing(builderIndex, voluntaryExit(builderIndex)))
+	first := voluntaryExit(1)
+	alternate := voluntaryExit(1)
+	alternate.Signature[0] = 1
+	require.True(t, pools.RestoreVoluntaryExitIfMissing(1, first))
+	require.False(t, pools.RestoreVoluntaryExitIfMissing(1, alternate))
+	seen, matches := pools.PreviouslySeenVoluntaryExitMatches(first)
+	require.True(t, seen)
+	require.True(t, matches)
+	seen, matches = pools.PreviouslySeenVoluntaryExitMatches(alternate)
+	require.True(t, seen)
+	require.False(t, matches)
+
+	pools.VoluntaryExitsPool.DeleteIfExist(1)
+	require.False(t, pools.RestoreVoluntaryExitIfMissing(1, alternate))
+	seen, matches = pools.PreviouslySeenVoluntaryExitMatches(first)
+	require.True(t, seen)
+	require.True(t, matches)
+	seen, matches = pools.PreviouslySeenVoluntaryExitMatches(alternate)
+	require.True(t, seen)
+	require.False(t, matches)
+}
+
 func TestOperationsPoolPruneFinalized(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	finalizedState := state.New(&cfg)
@@ -208,9 +234,9 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 
 	t.Run("voluntary exits", func(t *testing.T) {
 		pools := NewOperationsPool(&cfg)
-		pools.VoluntaryExitsPool.Insert(0, voluntaryExit(0))
-		pools.VoluntaryExitsPool.Insert(2, voluntaryExit(2))
-		pools.VoluntaryExitsPool.Insert(10, voluntaryExit(10))
+		require.True(t, pools.RestoreVoluntaryExitIfMissing(0, voluntaryExit(0)))
+		require.True(t, pools.RestoreVoluntaryExitIfMissing(2, voluntaryExit(2)))
+		require.True(t, pools.RestoreVoluntaryExitIfMissing(10, voluntaryExit(10)))
 		require.NoError(t, finalizedState.SetExitEpochForValidatorAtIndex(2, 4))
 
 		pools.PruneFinalized(finalizedState, 3)
@@ -218,6 +244,43 @@ func TestOperationsPoolPruneFinalized(t *testing.T) {
 		require.True(t, pools.VoluntaryExitsPool.Has(0))
 		require.False(t, pools.VoluntaryExitsPool.Has(2))
 		require.True(t, pools.VoluntaryExitsPool.Has(10))
+		seen, _ := pools.PreviouslySeenVoluntaryExitMatches(voluntaryExit(2))
+		require.False(t, seen)
+		seen, matches := pools.PreviouslySeenVoluntaryExitMatches(voluntaryExit(0))
+		require.True(t, seen)
+		require.True(t, matches)
+	})
+
+	t.Run("evicted voluntary exit identities", func(t *testing.T) {
+		st := state.New(&cfg)
+		for i := range 2 {
+			require.NoError(t, st.AddValidator(solid.NewValidatorFromParameters(
+				common.Bytes48{byte(i)}, common.Hash{}, cfg.MaxEffectiveBalance, false, 0, 0,
+				cfg.FarFutureEpoch, cfg.FarFutureEpoch,
+			), cfg.MaxEffectiveBalance))
+		}
+		require.NoError(t, st.SetExitEpochForValidatorAtIndex(1, 4))
+		pools := NewOperationsPool(&cfg)
+		pools.VoluntaryExitsPool = NewOperationPool[uint64, *cltypes.SignedVoluntaryExit](1, "evictedVoluntaryExitIdentityTest")
+		require.True(t, pools.RestoreVoluntaryExitIfMissing(0, voluntaryExit(0)))
+		require.True(t, pools.RestoreVoluntaryExitIfMissing(1, voluntaryExit(1)))
+		require.False(t, pools.VoluntaryExitsPool.Has(0))
+
+		pools.PruneFinalized(st, 3)
+
+		seen, _ := pools.PreviouslySeenVoluntaryExitMatches(voluntaryExit(1))
+		require.False(t, seen)
+		seen, matches := pools.PreviouslySeenVoluntaryExitMatches(voluntaryExit(0))
+		require.True(t, seen)
+		require.True(t, matches)
+		require.True(t, pools.HasPrunableOperations())
+
+		require.NoError(t, st.SetExitEpochForValidatorAtIndex(0, 4))
+		pools.PruneFinalized(st, 3)
+
+		seen, _ = pools.PreviouslySeenVoluntaryExitMatches(voluntaryExit(0))
+		require.False(t, seen)
+		require.False(t, pools.HasPrunableOperations())
 	})
 
 	t.Run("bls to execution changes", func(t *testing.T) {

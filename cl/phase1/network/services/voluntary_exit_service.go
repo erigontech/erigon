@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -44,7 +45,8 @@ type voluntaryExitService struct {
 	beaconCfg              *clparams.BeaconChainConfig
 	ethClock               eth_clock.EthereumClock
 	batchSignatureVerifier *BatchSignatureVerifier
-	seen                   *lru.Cache[uint64, struct{}]
+	seen                   *lru.Cache[uint64, *cltypes.SignedVoluntaryExit]
+	immediateGates         [256]chan struct{}
 	now                    func() time.Time
 }
 
@@ -63,11 +65,11 @@ func NewVoluntaryExitService(
 	ethClock eth_clock.EthereumClock,
 	batchSignatureVerifier *BatchSignatureVerifier,
 ) VoluntaryExitService {
-	seen, err := lru.New[uint64, struct{}]("voluntary_exit_seen", operationSeenCacheSize)
+	seen, err := lru.New[uint64, *cltypes.SignedVoluntaryExit]("voluntary_exit_seen", operationSeenCacheSize)
 	if err != nil {
 		panic(err)
 	}
-	return &voluntaryExitService{
+	service := &voluntaryExitService{
 		operationsPool:         operationsPool,
 		emitters:               emitters,
 		syncedDataManager:      syncedDataManager,
@@ -77,6 +79,10 @@ func NewVoluntaryExitService(
 		seen:                   seen,
 		now:                    time.Now,
 	}
+	for i := range service.immediateGates {
+		service.immediateGates[i] = make(chan struct{}, 1)
+	}
+	return service
 }
 
 func (s *voluntaryExitService) Names() []string {
@@ -104,13 +110,39 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	}
 	// ref: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#voluntary_exit
 	voluntaryExit := msg.SignedVoluntaryExit.VoluntaryExit
+	var immediateGate chan struct{}
+	immediateGateHeld := false
+	releaseImmediateGate := func() {
+		if immediateGateHeld {
+			<-immediateGate
+			immediateGateHeld = false
+		}
+	}
+	defer releaseImmediateGate()
+	if msg.ImmediateVerification {
+		immediateGate = s.immediateGates[voluntaryExit.ValidatorIndex%uint64(len(s.immediateGates))]
+		select {
+		case immediateGate <- struct{}{}:
+			immediateGateHeld = true
+		case <-ctx.Done():
+			return fmt.Errorf("%w: voluntary exit validation canceled: %w", ErrIgnore, ctx.Err())
+		}
+		if seen, matches := s.operationsPool.PreviouslySeenVoluntaryExitMatches(msg.SignedVoluntaryExit); seen && !matches {
+			return fmt.Errorf("%w: validator already has a different voluntary exit", ErrIgnore)
+		}
+	}
 
 	// [IGNORE] The voluntary exit is the first valid voluntary exit received for the validator with index signed_voluntary_exit.message.validator_index.
-	if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
-		return ErrIgnore
-	}
-	if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
-		return ErrIgnore
+	if !msg.ImmediateVerification {
+		if _, ok := s.seen.Get(voluntaryExit.ValidatorIndex); ok {
+			return ErrIgnore
+		}
+		if s.operationsPool.VoluntaryExitsPool.Has(voluntaryExit.ValidatorIndex) {
+			return ErrIgnore
+		}
+		if s.operationsPool.HasSeenVoluntaryExit(voluntaryExit.ValidatorIndex) {
+			return ErrIgnore
+		}
 	}
 
 	currentEpoch := uint64(0)
@@ -145,7 +177,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		// assert is_active_validator(validator, get_current_epoch(state))
 		if !val.Active(curEpoch) {
 			if !msg.ImmediateVerification && val.Active(currentEpoch) {
-				return ErrIgnore
+				return fmt.Errorf("%w: validator activity is waiting for head epoch", ErrIgnore)
 			}
 			return errors.New("validator is not active")
 		}
@@ -155,7 +187,7 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		eligibleEpoch := val.ActivationEpoch() + s.beaconCfg.ShardCommitteePeriod
 		if curEpoch < eligibleEpoch {
 			if !msg.ImmediateVerification && currentEpoch >= eligibleEpoch {
-				return ErrIgnore
+				return fmt.Errorf("%w: validator tenure is waiting for head epoch", ErrIgnore)
 			}
 			return errors.New("verify the validator has been active long enough")
 		}
@@ -183,19 +215,42 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	if err != nil {
 		return err
 	}
+	if msg.ImmediateVerification {
+		verified, ok := s.seen.Get(voluntaryExit.ValidatorIndex)
+		if !ok {
+			verified, ok = s.operationsPool.VoluntaryExitsPool.Get(voluntaryExit.ValidatorIndex)
+		}
+		if ok {
+			return s.ensureVerifiedExitStored(verified, msg.SignedVoluntaryExit)
+		}
+	}
 
+	var (
+		storeErr error
+		emitExit bool
+	)
 	aggregateVerificationData := &AggregateVerificationData{
 		Signatures:  [][]byte{msg.SignedVoluntaryExit.Signature[:]},
 		SignRoots:   [][]byte{signingRoot[:]},
 		Pks:         [][]byte{pk[:]},
 		SendingPeer: msg.Receiver,
 		F: func() {
-			s.storeVerifiedExit(msg.SignedVoluntaryExit)
+			emitExit, storeErr = s.storeVerifiedExit(msg.SignedVoluntaryExit, immediateGate != nil)
+			if !msg.ImmediateVerification && emitExit {
+				s.emitters.Operation().SendVoluntaryExit(copySignedVoluntaryExit(msg.SignedVoluntaryExit))
+			}
 		},
 	}
 
 	if msg.ImmediateVerification {
-		return s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData)
+		if err := s.batchSignatureVerifier.ImmediateVerification(aggregateVerificationData); err != nil {
+			return err
+		}
+		releaseImmediateGate()
+		if emitExit {
+			s.emitters.Operation().SendVoluntaryExit(copySignedVoluntaryExit(msg.SignedVoluntaryExit))
+		}
+		return storeErr
 	}
 
 	// push the signatures to verify asynchronously and run final functions after that.
@@ -208,10 +263,62 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 	return nil
 }
 
-func (s *voluntaryExitService) storeVerifiedExit(exit *cltypes.SignedVoluntaryExit) {
-	if seen, _ := s.seen.ContainsOrAdd(exit.VoluntaryExit.ValidatorIndex, struct{}{}); seen {
-		return
+func (s *voluntaryExitService) storeVerifiedExit(exit *cltypes.SignedVoluntaryExit, gateHeld bool) (bool, error) {
+	stored := copySignedVoluntaryExit(exit)
+	if !gateHeld {
+		gate := s.immediateGates[stored.VoluntaryExit.ValidatorIndex%uint64(len(s.immediateGates))]
+		gate <- struct{}{}
+		defer func() { <-gate }()
 	}
-	s.operationsPool.VoluntaryExitsPool.Insert(exit.VoluntaryExit.ValidatorIndex, exit)
-	s.emitters.Operation().SendVoluntaryExit(exit)
+	verified, ok := s.seen.Get(stored.VoluntaryExit.ValidatorIndex)
+	if !ok {
+		verified, ok = s.operationsPool.VoluntaryExitsPool.Get(stored.VoluntaryExit.ValidatorIndex)
+	}
+	if !ok {
+		seen, matches := s.operationsPool.PreviouslySeenVoluntaryExitMatches(stored)
+		if seen && !matches {
+			return false, fmt.Errorf("%w: validator already has a different voluntary exit", ErrIgnore)
+		}
+		if matches {
+			verified, ok = stored, true
+		}
+	}
+	if ok {
+		return false, s.ensureVerifiedExitStored(verified, stored)
+	}
+	s.seen.Add(stored.VoluntaryExit.ValidatorIndex, stored)
+	s.operationsPool.RestoreVoluntaryExitIfMissing(stored.VoluntaryExit.ValidatorIndex, stored)
+	return true, nil
+}
+
+func (s *voluntaryExitService) ensureVerifiedExitStored(verified, submitted *cltypes.SignedVoluntaryExit) error {
+	if !equalSignedVoluntaryExits(verified, submitted) {
+		return fmt.Errorf("%w: validator already has a different voluntary exit", ErrIgnore)
+	}
+	index := verified.VoluntaryExit.ValidatorIndex
+	if pooled, ok := s.operationsPool.VoluntaryExitsPool.Get(index); ok {
+		if !equalSignedVoluntaryExits(pooled, verified) {
+			return fmt.Errorf("%w: validator already has a different voluntary exit", ErrIgnore)
+		}
+		return nil
+	}
+	s.operationsPool.RestoreVoluntaryExitIfMissing(index, verified)
+	return nil
+}
+
+func equalSignedVoluntaryExits(a, b *cltypes.SignedVoluntaryExit) bool {
+	return a != nil && b != nil && a.VoluntaryExit != nil && b.VoluntaryExit != nil &&
+		a.VoluntaryExit.Epoch == b.VoluntaryExit.Epoch &&
+		a.VoluntaryExit.ValidatorIndex == b.VoluntaryExit.ValidatorIndex &&
+		a.Signature == b.Signature
+}
+
+func copySignedVoluntaryExit(exit *cltypes.SignedVoluntaryExit) *cltypes.SignedVoluntaryExit {
+	if exit == nil || exit.VoluntaryExit == nil {
+		return nil
+	}
+	message := *exit.VoluntaryExit
+	copy := *exit
+	copy.VoluntaryExit = &message
+	return &copy
 }

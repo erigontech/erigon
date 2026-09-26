@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/erigontech/erigon/cl/aggregation"
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -61,6 +62,8 @@ const (
 	maxBlobBundleCacheSize             = 48 // 8 blocks worth of blobs
 	maxPendingBuilderPayloads          = 4
 	maxExecutionPayloadEnvelopeRetries = 1024
+	maxPublishedVoluntaryExits         = 16384
+	defaultVoluntaryExitPublishTimeout = time.Second
 )
 
 // Pre-fulu blob bundle structure to hold the commitment, blob, and KZG proof. (TODO: remove after electra fork)
@@ -215,8 +218,11 @@ type ApiHandler struct {
 	randaoMixesPool sync.Pool
 
 	// caches
-	lighthouseInclusionCache sync.Map
-	emitters                 *beaconevents.EventEmitter
+	lighthouseInclusionCache    sync.Map
+	emitters                    *beaconevents.EventEmitter
+	publishedVoluntaryExits     *lru.Cache[common.Hash, struct{}]
+	voluntaryExitPublishGroup   singleflight.Group
+	voluntaryExitPublishTimeout time.Duration
 
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
@@ -342,6 +348,10 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+	publishedVoluntaryExits, err := lru.New[common.Hash, struct{}]("publishedVoluntaryExits", maxPublishedVoluntaryExits)
+	if err != nil {
+		panic(err)
+	}
 	builderRoutes := newBuilderRouteStore(builderRouteCapacity, builderRouteTTL, time.Now)
 	return &ApiHandler{
 		logger:                             logger,
@@ -395,6 +405,8 @@ func NewApiHandler(
 		pendingBuilderPayloads:           newPendingBuilderPayloadStore(maxPendingBuilderPayloads),
 		selfBuildEnvelopes:               selfBuildEnvelopes,
 		executionPayloadEnvelopeRetries:  executionPayloadEnvelopeRetries,
+		publishedVoluntaryExits:          publishedVoluntaryExits,
+		voluntaryExitPublishTimeout:      defaultVoluntaryExitPublishTimeout,
 		builderRoutes:                    builderRoutes,
 	}
 }
