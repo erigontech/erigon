@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -145,6 +146,46 @@ func TestWaitForReceiptOfAlreadyMinedTxn(t *testing.T) {
 	require.NoError(err)
 	require.NotNil(receipt)
 	require.Equal(txnHash, receipt.TransactionHash)
+}
+
+// Pins that a txn mined after the initial lookup is found even when the receipts filter never reaches the
+// server, as happens while the un-acked filter update is in flight: Filters without a backend drop it.
+func TestWaitForReceiptOfTxnMinedBeforeFilterIsApplied(t *testing.T) {
+	ctx := t.Context()
+	m := execmoduletester.New(t)
+	require := require.New(t)
+
+	var txnHash common.Hash
+	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
+		txn, err := types.SignTx(
+			types.NewTransaction(0, m.Address, uint256.NewInt(1), params.TxGas, uint256.NewInt(1), nil),
+			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key)
+		require.NoError(err)
+		b.AddTx(txn)
+		txnHash = txn.Hash()
+	})
+	require.NoError(err)
+
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, m.StateCache, m), m.DB, nil, nil)
+
+	type result struct {
+		receipt *ethutils.RPCReceipt
+		err     error
+	}
+	done := make(chan result, 1)
+	go func() {
+		receipt, err := api.waitForReceipt(ctx, txnHash, 5*time.Second)
+		done <- result{receipt, err}
+	}()
+
+	time.Sleep(200 * time.Millisecond) // let the initial lookup miss
+	require.NoError(m.InsertChain(chain))
+
+	res := <-done
+	require.NoError(res.err)
+	require.NotNil(res.receipt)
+	require.Equal(txnHash, res.receipt.TransactionHash)
 }
 
 // Pins that a failed receipt lookup surfaces as itself instead of being renamed into a sync timeout.
