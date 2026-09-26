@@ -1053,6 +1053,56 @@ func TestTraceCallVmTraceSubs(t *testing.T) {
 	}
 }
 
+// revertInit is init code that reverts with 0xdeadbeef after 17 gas.
+var revertInit = []byte{byte(vm.PUSH4), 0xde, 0xad, 0xbe, 0xef, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.REVERT)}
+
+// A reverted frame keeps a result, {gasUsed, output}, for CREATE too: a reverted CREATE deploys
+// nothing, so it has no address or code.
+func TestTraceCallRevertedFrames(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0004")
+	callee := common.HexToAddress("0x00000000000000000000000000000000000000ca")
+	// Runs revertInit through CREATE: PUSH12 revertInit, PUSH0, MSTORE, PUSH1 12, PUSH1 20, PUSH0, CREATE, STOP
+	create := append(append([]byte{byte(vm.PUSH1) + byte(len(revertInit)) - 1}, revertInit...),
+		byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), byte(len(revertInit)), byte(vm.PUSH1), byte(32-len(revertInit)),
+		byte(vm.PUSH0), byte(vm.CREATE), byte(vm.STOP))
+	// Calls callee, whose code is revertInit, with no value or data.
+	call := []byte{
+		byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 0xca,
+		byte(vm.GAS), byte(vm.CALL), byte(vm.STOP),
+	}
+	gas := new(hexutil.Uint64(1_000_000))
+
+	for _, tc := range []struct {
+		name  string
+		args  TraceCallParam
+		code  []byte
+		frame int
+	}{
+		{name: "nested create", args: TraceCallParam{From: &bankAddr, To: &target, Gas: gas}, code: create, frame: 1},
+		{name: "create at the root", args: TraceCallParam{From: &bankAddr, Data: new(hexutil.Bytes(revertInit)), Gas: gas}},
+		{name: "call", args: TraceCallParam{From: &bankAddr, To: &target, Gas: gas}, code: call, frame: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, calleeCode := hexutil.Bytes(tc.code), hexutil.Bytes(revertInit)
+			overrides := ethapi.StateOverrides{
+				accounts.InternAddress(target): {Code: &code},
+				accounts.InternAddress(callee): {Code: &calleeCode},
+			}
+			result, err := api.Call(context.Background(), tc.args, []string{TraceTypeTrace}, nil,
+				&config.TraceConfig{StateOverrides: &overrides})
+			require.NoError(t, err)
+			require.Len(t, result.Trace, tc.frame+1)
+			frame := result.Trace[tc.frame]
+			require.Equal(t, "Reverted", frame.Error)
+			encoded, err := json.Marshal(frame.Result)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"gasUsed":"0x11","output":"0xdeadbeef"}`, string(encoded))
+		})
+	}
+}
+
 // Call data takes the same data/input precedence as eth_call: input wins when both are set.
 func TestTraceCallInputField(t *testing.T) {
 	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)

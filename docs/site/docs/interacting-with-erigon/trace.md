@@ -191,8 +191,8 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | Field | Type | Description |
 | --- | --- | --- |
 | `action` | Object | The action that initiated this call frame. Shape depends on `type` (see **Action variants**). |
-| `result` | Object \| null | The outcome of the action. `null` if the call frame errored. See **Result variants**. |
-| `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
+| `result` | Object \| null | The outcome of the action. `null` if the call frame failed other than by reverting. See **Result variants**. |
+| `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` holds `gasUsed` and `output`, the revert data, for a `create` frame too; for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
 | `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
@@ -260,6 +260,8 @@ The `result` object's shape depends on `type`:
 | `gasUsed` | QUANTITY | Gas consumed by the creation. |
 | `code` | DATA | Deployed runtime bytecode of the new contract. |
 | `address` | DATA, 20 BYTES | Address of the newly deployed contract. |
+
+A reverted `create` frame deploys no contract, so its `result` has the `call` shape, `gasUsed` and `output`, with the revert data as `output`. `trace_filter` does not match a failed `create` by the address it would have occupied.
 
 **`type: "suicide"` and `type: "reward"`**
 
