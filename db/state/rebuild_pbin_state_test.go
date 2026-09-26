@@ -56,7 +56,7 @@ func TestValidatePBinRebuildState(t *testing.T) {
 			return append(make([]byte, 18), 0xB1, 0x03, 0, 0)
 		}(), false},
 		{"hex trie state", pbinRebuildStateValue(t, []byte{0x03, 0, 0}), true},
-		{"current pbin blob", pbinRebuildStateValue(t, []byte{0xB1, 0x20, 0, 0}), true},
+		{"current pbin blob", pbinRebuildStateValue(t, []byte{0xB1, 0x20, 0, 0, 0}), true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := validatePBinRebuildState(tc.value)
