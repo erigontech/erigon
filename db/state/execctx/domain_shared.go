@@ -2036,3 +2036,14 @@ func (sd *SharedDomains) touchChangedKeys(tx kv.TemporalTx, d kv.Domain, fromTxN
 	}
 	return changes, nil
 }
+
+type DomainReader interface {
+	membatchwithdb.DomainReader
+	AsGetter(tx kv.TemporalTx) execctxapi.StateGetter
+	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
+}
+
+// AsGetter returns a metrics-free execution getter.
+func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) execctxapi.StateGetter {
+	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+}
