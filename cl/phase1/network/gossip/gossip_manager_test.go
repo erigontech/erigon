@@ -1098,12 +1098,12 @@ func TestPublishBackground_DrainsBufferedJobsOnParentContextCancellation(t *test
 // before its enqueue send; the parent context (the one production code
 // actually cancels on shutdown - cmd/caplin/caplin1/run.go never calls
 // Close) is cancelled, and shutdownObservedHookForTest gives a deterministic
-// signal that the worker has committed to its shutdown path and is
-// contending for shutdownMu - only then does the producer resume and send.
-// The producer wins this race (it entered the enqueue hook before
-// cancellation, so admission must succeed, not report shutdown), and the
-// drain cannot complete until that send has happened (shutdownMu serializes
-// them), so the message is never left stranded once everything settles.
+// signal that the worker has committed to its shutdown path and is waiting
+// on admissionsInFlight - only then does the producer resume and send. The
+// producer wins this race (it entered the enqueue hook before cancellation,
+// so admission must succeed, not report shutdown), and the drain cannot
+// complete until that send has happened (the wait serializes them), so the
+// message is never left stranded once everything settles.
 func TestPublishBackground_AdmissionRacingCancellationIsDrainedNotStranded(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockClock := eth_clock.NewMockEthereumClock(ctrl)
@@ -1166,10 +1166,9 @@ func TestPublishBackground_AdmissionRacingCancellationIsDrainedNotStranded(t *te
 }
 
 // TestPublishBackground_DoesNotBlockOnInProgressShutdownDrain proves a call
-// arriving after ctx has already been observed cancelled returns
-// immediately via a lock-free ctx.Done() check, rather than contending for
-// shutdownMu and being held by sync.RWMutex's writer preference until an
-// already-in-progress drain of several buffered jobs finishes entirely.
+// arriving once a drain of several buffered jobs is already in progress
+// still returns immediately - the admission gate's shutdownClosed check is
+// a plain atomic load, never a lock a slow drain could be holding.
 func TestPublishBackground_DoesNotBlockOnInProgressShutdownDrain(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	mockClock := eth_clock.NewMockEthereumClock(ctrl)
