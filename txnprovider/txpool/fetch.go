@@ -111,8 +111,8 @@ func NewFetch(
 		wg:                   options.p2pFetcherWg,
 		logger:               logger,
 	}
-	f.pooledTxnsParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
-	f.stateChangesParseCtx.ValidateRLP(f.pool.ValidateSerializedTxn)
+	f.pooledTxnsParseCtx.ValidateRLP(ValidateSerializedTxn)
+	f.stateChangesParseCtx.ValidateRLP(ValidateSerializedTxn)
 
 	return f
 }

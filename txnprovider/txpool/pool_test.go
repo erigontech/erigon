@@ -2004,26 +2004,16 @@ func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 		t.Skip("slow test")
 	}
 	require := require.New(t)
-	ctx, cancel := context.WithCancel(context.Background())
-	t.Cleanup(cancel)
-
-	ch := make(chan Announcements, 1)
-	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := mdbxtest.NewTestPoolDB(t)
-	cfg := txpoolcfg.DefaultConfig
-	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Osaka"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
-	require.NoError(err)
 
 	chainID := testforks.Forks["Osaka"].ChainID
 	rawTxn := makeWrappedBlobTxnRlpWithCellProofs(t, chainID, params.MaxBlobsPerTxn)
 
 	parseCtx := NewTxnParseContext(*chainID)
 	parseCtx.WithSender(false)
-	parseCtx.ValidateRLP(pool.ValidateSerializedTxn)
+	parseCtx.ValidateRLP(ValidateSerializedTxn)
 
 	var slot TxnSlot
-	_, err = parseCtx.ParseTransaction(rawTxn, 0, &slot, nil, false, true, nil)
+	_, err := parseCtx.ParseTransaction(rawTxn, 0, &slot, nil, false, true, nil)
 	require.NoError(err)
 }
 
