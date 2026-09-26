@@ -600,6 +600,49 @@ func TestPoolSyncCommitteesSkipsPublishForIgnoredMessage(t *testing.T) {
 	require.Equal(t, 200, resp.StatusCode)
 }
 
+// TestPoolSyncCommitteesSkipsPublishForRealServiceIgnoredSlot proves the
+// ErrIgnore-skip against the real syncCommitteeMessagesService, not just a
+// mock told to return the sentinel: a message for slot 1 is catastrophically
+// stale relative to the real ethClock's wall-clock-derived current slot, so
+// IsSlotCurrentSlotWithMaximumClockDisparity genuinely rejects it and
+// ProcessMessage genuinely returns ErrIgnore, independent of the handler's
+// own control flow.
+func TestPoolSyncCommitteesSkipsPublishForRealServiceIgnoredSlot(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	realSyncedData, ok := sd.(*synced_data.SyncedDataManager)
+	require.True(t, ok, "test requires the real SyncedDataManager, not a mock, to exercise the real service")
+	handler.syncCommitteeMessagesService = services.NewSyncCommitteeMessagesService(
+		handler.beaconChainCfg, handler.ethClock, realSyncedData, nil, nil, false)
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+}
+
 // TestPoolSyncCommitteesValidationFailurePrecedesAdmissionFailure proves the
 // response precedence when a batch has both a validation failure (an
 // out-of-range validator index, which pool.go already reports as an

@@ -1165,6 +1165,95 @@ func TestPublishBackground_AdmissionRacingCancellationIsDrainedNotStranded(t *te
 		"a message admitted while racing parent-context cancellation must not be left stranded")
 }
 
+// TestPublishBackground_DoesNotBlockOnInProgressShutdownDrain proves a call
+// arriving after ctx has already been observed cancelled returns
+// immediately via a lock-free ctx.Done() check, rather than contending for
+// shutdownMu and being held by sync.RWMutex's writer preference until an
+// already-in-progress drain of several buffered jobs finishes entirely.
+func TestPublishBackground_DoesNotBlockOnInProgressShutdownDrain(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	mockClock := eth_clock.NewMockEthereumClock(ctrl)
+	mockClock.EXPECT().CurrentForkDigest().Return(common.Bytes4{0xab, 0xcd, 0x12, 0x34}, nil).AnyTimes()
+	mockP2P := mock_services.NewMockP2PManager(ctrl)
+	mockP2P.EXPECT().Host().Return(nil).AnyTimes()
+	mockP2P.EXPECT().BandwidthCounter().Return(nil).AnyTimes()
+
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	beaconConfig := &clparams.BeaconChainConfig{SlotsPerEpoch: 32, SecondsPerSlot: 12}
+	gm := NewGossipManager(parentCtx, mockP2P, beaconConfig, &clparams.NetworkConfig{}, mockClock,
+		false, 0, datasize.ByteSize(1024*1024), datasize.ByteSize(1024*1024), false)
+
+	occupyEntered := make(chan struct{})
+	unblockOccupy := make(chan struct{})
+	var once sync.Once
+	gm.publishHookForTest = func(name string, data []byte) {
+		if name == "occupy" {
+			once.Do(func() { close(occupyEntered) })
+			<-unblockOccupy
+		}
+	}
+	require.NoError(t, gm.PublishBackground("occupy", nil, time.Time{}))
+	select {
+	case <-occupyEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never picked up the occupying job")
+	}
+
+	// Many buffered jobs: the worker's select between ctx.Done() and a
+	// ready buffered job is a coin flip per iteration once occupy releases,
+	// so enough jobs must remain for the drain to plausibly still be
+	// mid-way through several of them, not have raced through all of them
+	// via the ordinary per-job path first.
+	const bufferedJobs = 30
+	for range bufferedJobs {
+		require.NoError(t, gm.PublishBackground("buffered", nil, time.Time{}))
+	}
+
+	shutdownObserved := make(chan struct{})
+	gm.shutdownObservedHookForTest = func() { close(shutdownObserved) }
+	drainItemEntered := make(chan struct{}, 1)
+	unblockDrainItem := make(chan struct{})
+	gm.drainItemHookForTest = func() {
+		select {
+		case drainItemEntered <- struct{}{}:
+		default:
+		}
+		<-unblockDrainItem
+	}
+
+	parentCancel()
+	close(unblockOccupy)
+	select {
+	case <-shutdownObserved:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never observed the parent context cancellation")
+	}
+
+	select {
+	case <-drainItemEntered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("drain never reached the first buffered item")
+	}
+
+	done := make(chan struct{})
+	go func() {
+		_ = gm.PublishBackground("late-arrival", nil, time.Time{})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("PublishBackground blocked on the in-progress shutdown drain instead of returning immediately")
+	}
+
+	close(unblockDrainItem)
+	select {
+	case <-gm.workerDone:
+	case <-time.After(2 * time.Second):
+		t.Fatal("worker never completed its shutdown drain")
+	}
+}
+
 // TestRunPublishJob_DropsExpiredJobWithoutPublishingAndContinuesWithFreshWork
 // proves a job that was still fresh at admission but has since expired is
 // dropped when the worker reaches it - counted as outcome=expired rather

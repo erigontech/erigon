@@ -155,6 +155,12 @@ type GossipManager struct {
 	// deterministic signal that the worker has committed to shutdown,
 	// instead of yielding the scheduler and hoping.
 	shutdownObservedHookForTest func()
+	// drainItemHookForTest, when non-nil, runs inside
+	// drainPublishQueueOnShutdown once per buffered job it accounts for,
+	// while still holding shutdownMu's exclusive lock. Tests use it to hold
+	// a drain in progress and observe whether a concurrent PublishBackground
+	// call blocks on it.
+	drainItemHookForTest func()
 
 	// lifetimeCtx is the context the worker watches, cancelled by Close or
 	// by NewGossipManager's parent context ending. shutdownMu pairs
@@ -407,27 +413,41 @@ func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.B
 	return topicHandle.topic.Publish(ctx, compressedData)
 }
 
+func (g *GossipManager) rejectShutdown(name string, logCtx []any) error {
+	publishQueueDroppedCounter.WithLabelValues(name, "shutdown").Inc()
+	fields := append([]any{"topic", name}, logCtx...)
+	log.Debug("[GossipManager] gossip manager shut down, dropping message", fields...)
+	return ErrGossipManagerShutdown
+}
+
 // PublishBackground queues data for asynchronous publish to the given
 // gossip topic without waiting for the network call: the actual publish
 // runs on this GossipManager's own background worker. It does not block on
-// queue capacity or shutdown, but does take a lock, resolve the fork
-// digest, and log synchronously. The fork digest is captured now, at
-// enqueue time, rather than re-resolved when the worker drains the job, so
-// a message accepted just before a fork activates still publishes to the
-// topic it was validated against.
+// queue capacity, and a shutdown already observed by this call is a
+// lock-free fast path; it does still take a lock (briefly - no I/O under
+// it), resolve the fork digest, and log synchronously. The fork digest is
+// captured now, at enqueue time, rather than re-resolved when the worker
+// drains the job, so a message accepted just before a fork activates still
+// publishes to the topic it was validated against.
 //
 // A non-nil return means the message was never admitted: the caller learns
 // this before it responds, rather than it being invisible behind an HTTP
 // 200. expiry, if non-zero, is the latest time this message is still worth
 // publishing - checked here and again just before the actual publish.
 func (g *GossipManager) PublishBackground(name string, data []byte, expiry time.Time, logCtx ...any) error {
+	// Checked lock-free before contending for shutdownMu: sync.RWMutex's
+	// writer preference means a caller arriving once drainPublishQueueOnShutdown
+	// has already taken the exclusive lock would otherwise wait for that
+	// drain to finish entirely, rather than for the RLock check below.
+	select {
+	case <-g.lifetimeCtx.Done():
+		return g.rejectShutdown(name, logCtx)
+	default:
+	}
 	g.shutdownMu.RLock()
 	defer g.shutdownMu.RUnlock()
 	if g.lifetimeCtx.Err() != nil {
-		publishQueueDroppedCounter.WithLabelValues(name, "shutdown").Inc()
-		fields := append([]any{"topic", name}, logCtx...)
-		log.Debug("[GossipManager] gossip manager shut down, dropping message", fields...)
-		return ErrGossipManagerShutdown
+		return g.rejectShutdown(name, logCtx)
 	}
 	if !expiry.IsZero() && g.nowFunc().After(expiry) {
 		publishQueueDroppedCounter.WithLabelValues(name, "expired").Inc()
@@ -488,6 +508,9 @@ func (g *GossipManager) drainPublishQueueOnShutdown() {
 	for {
 		select {
 		case job := <-g.publishQueue:
+			if g.drainItemHookForTest != nil {
+				g.drainItemHookForTest()
+			}
 			publishOutcomeCounter.WithLabelValues(job.name, "shutdown").Inc()
 			fields := append([]any{"topic", job.name}, job.logCtx...)
 			log.Debug("[GossipManager] gossip manager shut down, dropping queued message", fields...)
