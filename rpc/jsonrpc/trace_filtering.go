@@ -451,7 +451,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteArrayStart()
 			first = false
 		}
-		tr.writeTo(stream.Open())
+		tr.marshalFastJSONTo(stream.Open())
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return false, err
 		}
