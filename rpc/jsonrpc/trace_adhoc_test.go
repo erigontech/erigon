@@ -744,6 +744,32 @@ func TestRawTransactionStateDiffChargesFees(t *testing.T) {
 	})
 }
 
+// A signed transaction runs in the latest block's environment, so GASLIMIT reads that
+// block's gas limit, as NUMBER and BASEFEE read its number and base fee.
+func TestRawTransactionGasLimit(t *testing.T) {
+	c := newBaseFeeTestChain(t, chain.TestChainOsakaConfig)
+	contract := c.deployOpcodeContract(t, opGaslimit)
+
+	txn, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{
+			Nonce:    1, // the deployment used nonce 0
+			To:       &contract,
+			GasLimit: 100_000,
+		},
+		ChainID: *c.signer.ChainID(),
+		TipCap:  *uint256.NewInt(1),
+		FeeCap:  *uint256.NewInt(1_000_000_000_000),
+	}, *c.signer, c.bankKey)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&buf))
+
+	result, err := c.traceAPI().RawTransaction(context.Background(), buf.Bytes(), []string{TraceTypeTrace})
+	require.NoError(t, err)
+	gasLimit := common.BigToHash(new(big.Int).SetUint64(c.head.GasLimit()))
+	require.Equal(t, gasLimit.Hex(), result.Output.String())
+}
+
 func TestParseOeTracerConfigRejectsCustomTracer(t *testing.T) {
 	tracer := "callTracer"
 	_, err := parseOeTracerConfig(&config.TraceConfig{Tracer: &tracer})
