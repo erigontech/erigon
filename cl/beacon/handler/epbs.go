@@ -215,7 +215,7 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
-			fmt.Errorf("payload attestation data not available before GLOAS fork"))
+			errors.New("payload attestation data not available before GLOAS fork"))
 	}
 
 	// Get the beacon block root for this slot from fork choice
@@ -883,7 +883,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 
 	if signedEnvelope == nil || signedEnvelope.Message == nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed envelope")).WriteTo(w)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("missing message in signed envelope")).WriteTo(w)
 		return
 	}
 	if canonical && !blobDataIncluded && contents == nil {
@@ -1572,7 +1572,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	}
 	if latestHeadNode.Root != baseBlockRoot {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("execution payload bid is unavailable because the head changed"))
+			errors.New("execution payload bid is unavailable because the head changed"))
 	}
 	path := gloasPayloadPathPreFork
 	if baseState.GetLatestExecutionPayloadBid() != nil && !a.isPreGloasParent(baseState) {
@@ -1709,7 +1709,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeBySlot(w http.Resp
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
-			fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
+			errors.New("execution payload envelopes not available before GLOAS fork"))
 	}
 
 	envelope, ok := a.selfBuildEnvelopeForSlot(slot, nil)
@@ -1739,10 +1739,10 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeByBlockRoot(w http
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid beacon_block_root: %w", err))
 	}
 	if slot != a.ethClock.GetCurrentSlot() {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("execution payload envelope is only retained for the current slot"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("execution payload envelope is only retained for the current slot"))
 	}
 	if slot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelopes not available before GLOAS fork"))
 	}
 	headRoot, _, err := a.forkchoiceStore.GetHead(nil)
 	if err != nil {
@@ -1852,14 +1852,14 @@ func (a *ApiHandler) blockRootFromBlockId(blockId *beaconhttp.SegmentID) (common
 		return root, err
 	case blockId.Genesis():
 		return common.Hash{}, beaconhttp.NewEndpointError(http.StatusBadRequest,
-			fmt.Errorf("genesis block has no execution payload envelope"))
+			errors.New("genesis block has no execution payload envelope"))
 	default:
 		root := blockId.GetRoot()
 		if root == nil {
 			slot := blockId.GetSlot()
 			if slot == nil {
 				return common.Hash{}, beaconhttp.NewEndpointError(http.StatusBadRequest,
-					fmt.Errorf("invalid block_id"))
+					errors.New("invalid block_id"))
 			}
 			// Slot-based lookup: get block root at slot from state
 			var blockRoot common.Hash
