@@ -51,7 +51,7 @@ func Bench6(erigon_url string) error {
 			var receipt EthReceipt
 			if res := reqGen.Erigon("eth_getTransactionReceipt", reqGen.getTransactionReceipt(txn.Hash), &receipt); res.Err != nil {
 				printRPCRequest(client, erigon_url, res.RequestBody)
-				return fmt.Errorf("count not get receipt: %s: %w", txn.Hash, res.Err)
+				return fmt.Errorf("could not get receipt: %s: %w", txn.Hash, res.Err)
 			}
 			if receipt.Error != nil {
 				return fmt.Errorf("error getting receipt: %d %s", receipt.Error.Code, receipt.Error.Message)

@@ -66,7 +66,7 @@ func (a *ApiHandler) GetEthV1BeaconLightClientOptimisticUpdate(w http.ResponseWr
 func (a *ApiHandler) GetEthV1BeaconLightClientFinalityUpdate(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
 	update := a.forkchoiceStore.NewestLightClientUpdate()
 	if update == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finility update loaded yet, try again later. it may take a few minutes for it to load"))
+		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, errors.New("no finality update loaded yet, try again later. it may take a few minutes for it to load"))
 	}
 	version := update.AttestedHeader.Version()
 	return newBeaconResponse(&cltypes.LightClientFinalityUpdate{

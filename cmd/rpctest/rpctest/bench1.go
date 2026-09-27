@@ -185,7 +185,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 			resultsCh <- res
 			if res.Err != nil {
 				printRPCRequest(client, routes[Erigon], reqGen.getTransactionReceipt(txn.Hash))
-				return fmt.Errorf("count not get receipt (Erigon): %s: %w", txn.Hash, res.Err)
+				return fmt.Errorf("could not get receipt (Erigon): %s: %w", txn.Hash, res.Err)
 			}
 			if receipt.Error != nil {
 				return fmt.Errorf("error getting receipt (Erigon): %d %s", receipt.Error.Code, receipt.Error.Message)
@@ -196,7 +196,7 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 				resultsCh <- res
 				if res.Err != nil {
 					printRPCRequest(client, routes[Geth], reqGen.getTransactionReceipt(txn.Hash))
-					return fmt.Errorf("count not get receipt (geth): %s: %w", txn.Hash, res.Err)
+					return fmt.Errorf("could not get receipt (geth): %s: %w", txn.Hash, res.Err)
 				}
 				if receiptg.Error != nil {
 					return fmt.Errorf("error getting receipt (geth): %d %s", receiptg.Error.Code, receiptg.Error.Message)

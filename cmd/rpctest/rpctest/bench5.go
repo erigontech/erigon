@@ -34,7 +34,7 @@ func Bench5(erigonURL string) error {
 	for scanner.Scan() {
 		req_id++
 		if err = post(client, erigonURL, fmt.Sprintf(template, scanner.Text(), req_id), &receipt); err != nil {
-			return fmt.Errorf("count not get receipt: %s: %w", scanner.Text(), err)
+			return fmt.Errorf("could not get receipt: %s: %w", scanner.Text(), err)
 		}
 		if receipt.Error != nil {
 			return fmt.Errorf("error getting receipt: %d %s", receipt.Error.Code, receipt.Error.Message)
