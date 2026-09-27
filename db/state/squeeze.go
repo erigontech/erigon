@@ -1752,7 +1752,6 @@ func newPBinRebuildOverlay() *pbinRebuildOverlay {
 
 func (o *pbinRebuildOverlay) withInner(inner commitment.PatriciaContext) *pbinRebuildOverlay {
 	o.inner = inner
-	o.restored = false
 	return o
 }
 

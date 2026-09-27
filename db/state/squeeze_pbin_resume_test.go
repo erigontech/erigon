@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"os"
 	"runtime"
 	"testing"
 
@@ -193,4 +194,19 @@ func TestPBinRebuildOverlayHeapStaysBoundedByRightEdge(t *testing.T) {
 	} else {
 		require.Less(t, small-large, uint64(32<<20))
 	}
+}
+
+func TestPBinRebuildOverlayRestoresSpillOnce(t *testing.T) {
+	spillPath := t.TempDir() + "/rows"
+	spill, err := os.Create(spillPath)
+	require.NoError(t, err)
+	require.NoError(t, writePBinRebuildSpill(spill, []byte("row"), []byte{1}, nil))
+	require.NoError(t, spill.Close())
+	overlay := newPBinRebuildOverlay().withSpill(spillPath)
+	first := &pbinRebuildContextStub{records: make(map[string][]byte)}
+	second := &pbinRebuildContextStub{records: make(map[string][]byte)}
+	require.NoError(t, overlay.withInner(first).restoreSpill())
+	require.NotEmpty(t, first.records)
+	require.NoError(t, overlay.withInner(second).restoreSpill())
+	require.Empty(t, second.records)
 }
