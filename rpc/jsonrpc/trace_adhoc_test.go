@@ -1522,6 +1522,45 @@ func TestTraceCallWithoutTraceTypes(t *testing.T) {
 	require.Nil(t, result.StateDiff)
 }
 
+// A chainId for another chain makes a call object invalid whatever the state, so trace_call
+// and trace_callMany reject it as invalid params instead of running the call.
+func TestTraceCallRejectsOtherChainID(t *testing.T) {
+	m, _, bank := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	own := fmt.Sprintf(`{"from":%q,"to":%q,"chainId":"0x539"}`, bank.Hex(), bank.Hex())
+	other := fmt.Sprintf(`{"from":%q,"to":%q,"chainId":"0x1"}`, bank.Hex(), bank.Hex())
+	requireRejected := func(t *testing.T, err error) {
+		t.Helper()
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+		require.ErrorContains(t, err, "chainId does not match node's (have=1, want=1337)")
+	}
+
+	// The chainId is checked before the block is resolved, so an unknown block does not hide it.
+	unknownNum := rpc.BlockNumber(1_000_000)
+	for name, block := range map[string]*rpc.BlockNumberOrHash{
+		"latest":  nil,
+		"unknown": {BlockNumber: &unknownNum},
+	} {
+		t.Run("trace_call/"+name, func(t *testing.T) {
+			var args TraceCallParam
+			require.NoError(t, json.Unmarshal([]byte(other), &args))
+			result, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, block, nil)
+			requireRejected(t, err)
+			require.Nil(t, result)
+		})
+
+		t.Run("trace_callMany/"+name, func(t *testing.T) {
+			bundle := json.RawMessage("[[" + own + `,["trace"]],[` + other + `,["trace"]]]`)
+			result, err := api.CallMany(context.Background(), bundle, block, nil)
+			requireRejected(t, err)
+			require.ErrorContains(t, err, "call 1:")
+			require.Nil(t, result)
+		})
+	}
+}
+
 func TestRawTransactionWithoutTraceTypes(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -1967,11 +2006,12 @@ func TestTraceCallFields(t *testing.T) {
 		require.Equal(t, common.Hash{}.Hex(), withoutHash.Output.String())
 	})
 
-	// As in eth_call, the nonce and chainId are not checked against the state or the chain,
-	// so neither changes how the call runs.
+	// As in eth_call, the nonce is not checked against the state, and the chain's own chainId
+	// is accepted, so neither changes how the call runs. TestTraceCallRejectsOtherChainID covers
+	// a chainId for another chain.
 	for _, tc := range []struct{ name, fields string }{
 		{name: "nonce", fields: `,"nonce":"0x7"`},
-		{name: "chainId", fields: `,"chainId":"0x1"`},
+		{name: "chainId", fields: `,"chainId":"0x539"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, word42, traceCall(t, callObject(marker, tc.fields)).Output.String())
