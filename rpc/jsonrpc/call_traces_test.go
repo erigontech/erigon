@@ -337,6 +337,53 @@ func TestFilterAddressIntersection(t *testing.T) {
 	}
 }
 
+// TestFilterRangeDefaults checks that omitted bounds default to the latest
+// executed block, as in eth_getLogs, and that a reversed range, including one
+// whose start is that implicit latest block, is invalid params.
+func TestFilterRangeDefaults(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(5, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chain))
+
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for _, tc := range []struct {
+		name string
+		req  map[string]any
+		want []int // nil means -32602
+	}{
+		{"no bounds", map[string]any{}, []int{5}},
+		{"null bounds", map[string]any{"fromBlock": nil, "toBlock": nil}, []int{5}},
+		{"from only", map[string]any{"fromBlock": "0x3"}, []int{3, 4, 5}},
+		{"from earliest", map[string]any{"fromBlock": "earliest"}, []int{1, 2, 3, 4, 5}},
+		{"to latest", map[string]any{"toBlock": "latest"}, []int{5}},
+		{"to head", map[string]any{"toBlock": "0x5"}, []int{5}},
+		{"to before head", map[string]any{"toBlock": "0x2"}, nil},
+		{"explicit", map[string]any{"fromBlock": "0x1", "toBlock": "0x2"}, []int{1, 2}},
+		{"explicit reversed", map[string]any{"fromBlock": "0x3", "toBlock": "0x2"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "trace_filter", tc.req)
+			if tc.want == nil {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+				require.ErrorContains(t, err, errInvalidBlockRange)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, blockNumbersFromTraces(t, result))
+		})
+	}
+}
+
 func TestFilterModeValidation(t *testing.T) {
 	m := execmoduletester.New(t)
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
@@ -430,8 +477,10 @@ func TestFilterNullMembers(t *testing.T) {
 		}
 	})
 
+	// toBlock is the head, so the range stays valid when an omitted fromBlock
+	// defaults to the latest block.
 	full := map[string]any{
-		"fromBlock": "0x1", "toBlock": "0x2",
+		"fromBlock": "0x1", "toBlock": "0x3",
 		"fromAddress": []common.Address{sender, relay}, "toAddress": []common.Address{sink},
 		"mode": TraceFilterModeUnion, "after": 1, "count": 2,
 	}

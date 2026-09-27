@@ -660,8 +660,8 @@ Returns traces matching given filter
 #### Parameters
 
 1. `Object` - The filter object
-   * `fromBlock`: `Quantity` or `Tag` - (optional) From this block.
-   * `toBlock`: `Quantity` or `Tag` - (optional) To this block.
+   * `fromBlock`: `Quantity` or `Tag` - (optional) From this block. Defaults to the latest executed block; send `"earliest"` to scan from genesis.
+   * `toBlock`: `Quantity` or `Tag` - (optional) To this block. Defaults to the latest executed block. A `toBlock` below `fromBlock`, including the default start, returns `-32602`.
    * `fromAddress`: `Array` - (optional) Sent from these addresses.
    * `toAddress`: `Array` - (optional) Sent to these addresses.
    * `after`: `Quantity` - (optional) The offset trace number
