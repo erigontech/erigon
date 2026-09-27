@@ -92,8 +92,8 @@ func NewGraphQLReceipt(receipt *types.Receipt, txn types.Transaction, chainConfi
 }
 
 type GraphQLAPI interface {
-	GetBlockDetails(ctx context.Context, number rpc.BlockNumber) (map[string]any, error)
-	GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error)
+	GetBlockDetails(ctx context.Context, number rpc.BlockNumber, withTxs *bool) (map[string]any, error)
+	GetBlockDetailsByHash(ctx context.Context, hash common.Hash, withTxs *bool) (map[string]any, error)
 	GetLatestBlockNumber(ctx context.Context) (uint64, error)
 	GetChainID(ctx context.Context) (*uint256.Int, error)
 	GetAccountInfo(ctx context.Context, address common.Address, blockNumber rpc.BlockNumber) (balance string, nonce uint64, code string, err error)
@@ -103,6 +103,7 @@ type GraphQLAPI interface {
 	Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error)
 	EstimateGas(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (uint64, error)
 	GasPrice(ctx context.Context) (string, error)
+	MaxPriorityFeePerGas(ctx context.Context) (string, error)
 	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
 	GetPendingTransactions(ctx context.Context) ([]types.Transaction, error)
 }
@@ -165,7 +166,9 @@ func (api *GraphQLAPIImpl) GetChainID(ctx context.Context) (*uint256.Int, error)
 	return response.ChainID, nil
 }
 
-func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber) (map[string]any, error) {
+// GetBlockDetails answers with the transactions unless withTxs says otherwise, which the
+// GraphQL resolver sets from the query's selection.
+func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.BlockNumber, withTxs *bool) (map[string]any, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -185,10 +188,10 @@ func (api *GraphQLAPIImpl) GetBlockDetails(ctx context.Context, blockNumber rpc.
 		return nil, err
 	}
 
-	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes)
+	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes, withTxs == nil || *withTxs)
 }
 
-func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash) (map[string]any, error) {
+func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash common.Hash, withTxs *bool) (map[string]any, error) {
 	tx, err := api.filters.BeginTemporalRoWithOverlay(ctx, api.db)
 	if err != nil {
 		return nil, err
@@ -218,24 +221,26 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 		return nil, err
 	}
 
-	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes)
+	return api.buildBlockDetailsResponse(ctx, tx, block, getBlockRes, withTxs == nil || *withTxs)
 }
 
-func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes *ethapi.RPCBlock) (map[string]any, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	receipts, err := api.getReceipts(ctx, tx, block)
-	if err != nil {
-		return nil, err
-	}
-
-	result := make([]*GraphQLReceipt, 0, len(receipts))
-	for _, receipt := range receipts {
-		txn := block.Transactions()[receipt.TransactionIndex]
-		result = append(result, NewGraphQLReceipt(receipt, txn, chainConfig, block.HeaderNoCopy()))
+func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.TemporalTx, block *types.Block, getBlockRes *ethapi.RPCBlock, withTxs bool) (map[string]any, error) {
+	response := map[string]any{}
+	if withTxs {
+		chainConfig, err := api.chainConfig(ctx, tx)
+		if err != nil {
+			return nil, err
+		}
+		receipts, err := api.getReceipts(ctx, tx, block)
+		if err != nil {
+			return nil, err
+		}
+		result := make([]*GraphQLReceipt, 0, len(receipts))
+		for _, receipt := range receipts {
+			txn := block.Transactions()[receipt.TransactionIndex]
+			result = append(result, NewGraphQLReceipt(receipt, txn, chainConfig, block.HeaderNoCopy()))
+		}
+		response["receipts"] = result
 	}
 
 	td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
@@ -248,9 +253,7 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		getBlockRes.TotalDifficulty = new(hexutil.U256)
 	}
 
-	response := map[string]any{}
 	response["block"] = getBlockRes
-	response["receipts"] = result
 
 	response["withdrawals"] = marshalWithdrawals(block.Withdrawals())
 
@@ -497,6 +500,14 @@ func (api *GraphQLAPIImpl) GasPrice(ctx context.Context) (string, error) {
 		return "0x0", nil
 	}
 	return price.String(), nil
+}
+
+func (api *GraphQLAPIImpl) MaxPriorityFeePerGas(ctx context.Context) (string, error) {
+	tip, err := api.eth.MaxPriorityFeePerGas(ctx)
+	if err != nil {
+		return "", err
+	}
+	return tip.String(), nil
 }
 
 func (api *GraphQLAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error) {

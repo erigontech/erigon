@@ -812,7 +812,7 @@ func TestGatesTakeNoEmptyBlockExemption(t *testing.T) {
 		{"erigon_getLogs_single", func() (any, error) { return apis.erigon.GetLogs(ctx, blockFilter(empty)) }},
 		{"erigon_getLogsByHash", func() (any, error) { return apis.erigon.GetLogsByHash(ctx, chainInfo.empty.hash) }},
 		{"ots_getBlockDetails", func() (any, error) { return apis.ots.GetBlockDetails(ctx, rpc.BlockNumber(empty)) }},
-		{"graphql_getBlockDetails", func() (any, error) { return apis.graphql.GetBlockDetails(ctx, rpc.BlockNumber(empty)) }},
+		{"graphql_getBlockDetails", func() (any, error) { return apis.graphql.GetBlockDetails(ctx, rpc.BlockNumber(empty), nil) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := tc.call()
