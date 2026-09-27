@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
 var branchPrefetchEnabled = dbg.EnvBool("COMMITMENT_V3_PREFETCH", true)
@@ -57,16 +58,21 @@ type prefetchedShard struct {
 }
 
 type branchPrefetcher struct {
-	work   chan prefetchItem
-	wg     sync.WaitGroup
-	gate   sync.RWMutex
-	seed   maphash.Seed
-	shards [branchPrefetchShards]prefetchedShard
-	bytes  atomic.Int64
+	work    chan prefetchItem
+	wg      sync.WaitGroup
+	gate    sync.RWMutex
+	seed    maphash.Seed
+	shards  [branchPrefetchShards]prefetchedShard
+	bytes   atomic.Int64
+	domains []kv.Domain
 }
 
-func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB) *branchPrefetcher {
-	p := &branchPrefetcher{work: make(chan prefetchItem, branchPrefetchQueue), seed: maphash.MakeSeed()}
+func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB, domainSets ...[]kv.Domain) *branchPrefetcher {
+	domains := []kv.Domain{kv.CommitmentDomain}
+	if len(domainSets) != 0 && len(domainSets[0]) != 0 {
+		domains = append([]kv.Domain(nil), domainSets[0]...)
+	}
+	p := &branchPrefetcher{work: make(chan prefetchItem, branchPrefetchQueue), seed: maphash.MakeSeed(), domains: domains}
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
 	}
@@ -121,34 +127,47 @@ func (p *branchPrefetcher) shard(key []byte) *prefetchedShard {
 	return &p.shards[maphash.Bytes(p.seed, key)%branchPrefetchShards]
 }
 
-func (p *branchPrefetcher) get(key []byte) ([]byte, kv.Step, bool) {
+func (p *branchPrefetcher) getDomain(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
 	s := p.shard(key)
 	s.mu.RLock()
-	r, ok := s.records[string(key)]
+	r, ok := s.records[prefetchRecordKey(domain, key)]
 	s.mu.RUnlock()
 	return r.data, r.step, ok
 }
 
 func (p *branchPrefetcher) leafRefs(key, data []byte) *commitment.LeafRefs {
+	return p.leafRefsDomain(kv.CommitmentDomain, key, data)
+}
+
+func (p *branchPrefetcher) leafRefsDomain(domain kv.Domain, key, data []byte) *commitment.LeafRefs {
 	s := p.shard(key)
 	s.mu.RLock()
-	r, ok := s.records[string(key)]
+	r, ok := s.records[prefetchRecordKey(domain, key)]
 	s.mu.RUnlock()
-	if !ok || len(r.data) != len(data) || &r.data[0] != &data[0] {
+	if !ok || !bytes.Equal(r.data, data) {
 		return nil
 	}
 	return r.refs
 }
 
 func (p *branchPrefetcher) put(key, data []byte, step kv.Step) []byte {
+	return p.putDomain(kv.CommitmentDomain, key, data, step)
+}
+
+func (p *branchPrefetcher) putDomain(domain kv.Domain, key, data []byte, step kv.Step) []byte {
 	if p.bytes.Load() >= branchPrefetchMaxBytes {
 		return data
 	}
 	data = bytes.Clone(data)
-	refs := v3.ComputeLeafRefs(key, data)
+	var refs *commitment.LeafRefs
+	if domain == kv.CommitmentBinDomain {
+		refs = pbt.ComputeLeafRefs(key, data)
+	} else {
+		refs = v3.ComputeLeafRefs(key, data)
+	}
 	s := p.shard(key)
 	s.mu.Lock()
-	s.records[string(key)] = prefetchedRecord{data: data, step: step, refs: refs}
+	s.records[prefetchRecordKey(domain, key)] = prefetchedRecord{data: data, step: step, refs: refs}
 	s.mu.Unlock()
 	size := len(key) + len(data)
 	if refs != nil {
@@ -166,17 +185,7 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 			p.gate.RUnlock()
 			continue
 		}
-		read := func(key []byte) []byte {
-			if data, _, ok := p.get(key); ok {
-				return data
-			}
-			data, step, err := tx.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
-			if err != nil {
-				return nil
-			}
-			return p.put(key, data, step)
-		}
-		it.touch(read)
+		p.touch(tx, it)
 	chunk:
 		for range branchPrefetchPerTx - 1 {
 			select {
@@ -184,7 +193,7 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 				if !ok {
 					break chunk
 				}
-				next.touch(read)
+				p.touch(tx, next)
 			default:
 				break chunk
 			}
@@ -192,6 +201,34 @@ func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {
 		tx.Rollback()
 		p.gate.RUnlock()
 	}
+}
+
+func (p *branchPrefetcher) touch(tx kv.TemporalTx, it prefetchItem) {
+	for _, domain := range p.domains {
+		read := func(key []byte) []byte {
+			if data, _, ok := p.getDomain(domain, key); ok {
+				return data
+			}
+			data, step, err := tx.GetLatest(domain, key, kv.GetLatestOptions{})
+			if err != nil {
+				return nil
+			}
+			return p.putDomain(domain, key, data, step)
+		}
+		if domain == kv.CommitmentBinDomain {
+			pbt.PrefetchPath(read, it.account[:])
+			if it.storage {
+				key := append(it.account[:], it.slot[:]...)
+				pbt.PrefetchPath(read, key)
+			}
+		} else {
+			it.touch(read)
+		}
+	}
+}
+
+func prefetchRecordKey(domain kv.Domain, key []byte) string {
+	return string(append([]byte{byte(domain)}, key...))
 }
 
 func (it *prefetchItem) touch(read func(key []byte) []byte) {

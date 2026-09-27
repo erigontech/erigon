@@ -221,18 +221,22 @@ func FoldRow(key []byte, record *Record) (FoldResult, error) {
 }
 
 func foldRow(path eip8297.Bitpath, record *Record) (foldNode, error) {
+	return foldRowWithRefs(path, record, nil)
+}
+
+func foldRowWithRefs(path eip8297.Bitpath, record *Record, refs *rowNode) (foldNode, error) {
 	slots := occupiedSlots(record)
 	if len(slots) < 2 {
 		return foldNode{}, fmt.Errorf("row must contain at least two cells")
 	}
-	node, err := foldRange(path, record, slots, 0, len(slots), path.BitLen)
+	node, err := foldRange(path, record, slots, 0, len(slots), path.BitLen, refs)
 	if err != nil {
 		return foldNode{}, err
 	}
 	return node, nil
 }
 
-func foldRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16) (foldNode, error) {
+func foldRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16, refs *rowNode) (foldNode, error) {
 	split := firstSlotSplit(slots[from], slots[to-1], path.BitLen)
 	middle := from
 	for middle < to && slotBit(slots[middle], int(split-path.BitLen)) == 0 {
@@ -241,25 +245,30 @@ func foldRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, 
 	if middle == from || middle == to {
 		return foldNode{}, fmt.Errorf("row cells do not split at bit %d", split)
 	}
-	left, err := foldChild(path, record, slots, from, middle, split)
+	left, err := foldChild(path, record, slots, from, middle, split, refs)
 	if err != nil {
 		return foldNode{}, err
 	}
-	right, err := foldChild(path, record, slots, middle, to, split)
+	right, err := foldChild(path, record, slots, middle, to, split, refs)
 	if err != nil {
 		return foldNode{}, err
 	}
 	return foldNode{split: split, left: left, right: right}, nil
 }
 
-func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16) (common.Hash, error) {
+func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16, refs *rowNode) (common.Hash, error) {
 	if to-from > 1 {
-		node, err := foldRange(path, record, slots, from, to, parentSplit)
+		node, err := foldRange(path, record, slots, from, to, parentSplit, refs)
 		if err != nil {
 			return common.Hash{}, err
 		}
 		prefix := rowPrefix(&path, slots[from], parentSplit+1, node.split)
 		return branchHash(&prefix, &node.left, &node.right), nil
+	}
+	if refs != nil {
+		if hash, ok := refs.cachedCellHash(slots[from]); ok {
+			return hash, nil
+		}
 	}
 	cell := &record.Cells[slots[from]]
 	switch cell.Kind {

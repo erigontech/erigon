@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -40,15 +41,21 @@ type rowNode struct {
 	tombstone  bool
 	folded     bool
 	foldResult FoldResult
+	refs       *commitment.LeafRefs
+	refCells   [maxCells]Cell
+	refMask    uint16
 	parent     *rowNode
 	parentSlot int
 	cells      [maxCells]rowCell
 }
 
-const rowChunkSize = 64
+const (
+	rowChunkInitial = 4
+	rowChunkMax     = 64
+)
 
 type rowChunk struct {
-	rows [rowChunkSize]rowNode
+	rows []rowNode
 	used int
 }
 
@@ -142,12 +149,20 @@ func rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNo
 }
 
 func (t *Trie) newRow(path eip8297.Bitpath, key, raw []byte) *rowNode {
-	var chunk *rowChunk
-	if len(t.rowChunks) == 0 || t.rowChunks[len(t.rowChunks)-1].used == rowChunkSize {
-		chunk = &rowChunk{}
-		t.rowChunks = append(t.rowChunks, chunk)
-	} else {
-		chunk = t.rowChunks[len(t.rowChunks)-1]
+	if t.rowChunkIndex == len(t.rowChunks) {
+		size := rowChunkInitial
+		if len(t.rowChunks) != 0 {
+			size = min(len(t.rowChunks[len(t.rowChunks)-1].rows)*2, rowChunkMax)
+		}
+		t.rowChunks = append(t.rowChunks, &rowChunk{rows: make([]rowNode, size)})
+	}
+	chunk := t.rowChunks[t.rowChunkIndex]
+	if chunk.used == len(chunk.rows) {
+		t.rowChunkIndex++
+		if t.rowChunkIndex == len(t.rowChunks) {
+			t.rowChunks = append(t.rowChunks, &rowChunk{rows: make([]rowNode, min(len(chunk.rows)*2, rowChunkMax))})
+		}
+		chunk = t.rowChunks[t.rowChunkIndex]
 	}
 	row := &chunk.rows[chunk.used]
 	chunk.used++
@@ -159,6 +174,11 @@ func (t *Trie) rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Reco
 	n := t.newRow(path, key, raw)
 	for slot := range n.cells {
 		n.cells[slot].Cell = record.Cells[slot]
+	}
+	if refs := leafRefsOf(t.ctx, key, raw); refs != nil {
+		n.refs = refs
+		n.refMask = refs.Mask
+		n.refCells = record.Cells
 	}
 	return n
 }

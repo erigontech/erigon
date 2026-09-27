@@ -1615,11 +1615,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		if !processedBatch {
 			return nil, errors.New("commitment rebuild: binary operation set is empty")
 		}
-	} else if cfg.Variant == commitment.VariantBinPatriciaTrie {
-		rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
-		if err != nil {
-			return nil, err
-		}
 	} else {
 		rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
 		if err != nil {

@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"hash/maphash"
 	"runtime/debug"
 	"testing"
@@ -24,7 +25,24 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 )
+
+func TestBranchPrefetchRejectsChangedRecordBytes(t *testing.T) {
+	p := &branchPrefetcher{seed: maphash.MakeSeed()}
+	for i := range p.shards {
+		p.shards[i].records = make(map[string]prefetchedRecord)
+	}
+	key := []byte{0x08}
+	data := []byte{0x01, 0x02}
+	p.shard(key).records[prefetchRecordKey(kv.CommitmentDomain, key)] = prefetchedRecord{
+		data: bytes.Clone(data),
+		refs: &commitment.LeafRefs{Mask: 1, Refs: make([][32]byte, 1)},
+	}
+	changed := bytes.Clone(data)
+	changed[0]++
+	require.Nil(t, p.leafRefs(key, changed))
+}
 
 func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	_, tx, doms := setupStepTest(t)

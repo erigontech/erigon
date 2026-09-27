@@ -17,11 +17,16 @@
 package stagedsync
 
 import (
+	"bytes"
 	"errors"
 	"math"
+	"sort"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -30,7 +35,9 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
@@ -69,6 +76,53 @@ func TestDualCalculatorUsesHexCollectorWithBinarySelected(t *testing.T) {
 	require.Equal(t, commitment.VariantCommitmentV3, doms.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().Variant())
 	require.Equal(t, commitment.ModeCollect, cc.updates.Mode())
 	require.True(t, cc.forcePerBlockCompute)
+}
+
+func TestBinComputeCommitmentUsesProductionWorkerFactory(t *testing.T) {
+	workers := dbg.TipTrieWarmupers
+	dbg.TipTrieWarmupers = 8
+	t.Cleanup(func() { dbg.TipTrieWarmupers = workers })
+	db, tx, doms := dualCalculatorTest(t)
+	binCtx := doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain)
+	trie, ok := binCtx.Trie().(interface{ SetCoreActivityHook(func(bool)) })
+	require.True(t, ok)
+	var active, peak atomic.Int32
+	started := make(chan struct{})
+	var startedOnce atomic.Bool
+	trie.SetCoreActivityHook(func(start bool) {
+		if start {
+			current := active.Add(1)
+			for {
+				old := peak.Load()
+				if old >= current || peak.CompareAndSwap(old, current) {
+					break
+				}
+			}
+			if current > 1 && startedOnce.CompareAndSwap(false, true) {
+				close(started)
+			}
+			select {
+			case <-started:
+			case <-time.After(time.Second):
+			}
+			return
+		}
+		active.Add(-1)
+	})
+	ops := make([]pbt.Op, 0, 16)
+	for i := range 16 {
+		value, err := eip8297.EncodeBasicData(uint64(i+1), uint256.NewInt(uint64(i+1)), 0)
+		require.NoError(t, err)
+		key := make([]byte, eip8297.AccountKeyLength)
+		key[1] = byte(i << 4)
+		ops = append(ops, pbt.Op{Key: key, Value: value})
+	}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	binCtx.SetPBinOps(ops)
+	_, err := binCtx.ComputeCommitment(t.Context(), tx, false, 1, 1, "factory", nil)
+	require.NoError(t, err)
+	require.Greater(t, peak.Load(), int32(1))
+	_ = db
 }
 
 func dualHexFeed(key []byte, update commitment.Update) *commitment.Feed {

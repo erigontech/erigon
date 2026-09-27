@@ -418,7 +418,6 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 		oldContext.reader = reader
 		oldTrie := commitment.NewPBinPatriciaHashed(oldContext)
 		require.NoError(b, oldTrie.SetPBinHashSuite(commitment.PBinHashBlake3))
-		oldUpdates := feedBenchKeyOnlyUpdates(b, fixture.batch)
 		if round%2 == 0 {
 			before := benchmarkUptime()
 			var allocBefore runtime.MemStats
@@ -439,11 +438,13 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 			before = benchmarkUptime()
 			runtime.ReadMemStats(&allocBefore)
 			start = time.Now()
+			oldUpdates := feedBenchKeyOnlyUpdates(b, fixture.batch)
 			oldRoot, processErr := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
 			oldDurations = append(oldDurations, time.Since(start))
 			runtime.ReadMemStats(&allocAfter)
 			oldAllocations += allocAfter.TotalAlloc - allocBefore.TotalAlloc
 			after = benchmarkUptime()
+			oldUpdates.Close()
 			require.NoError(b, processErr)
 			b.Logf("old round=%d uptime-before=%s uptime-after=%s", round, before, after)
 			require.Equal(b, wantRoot[:], oldRoot)
@@ -453,12 +454,14 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 			var allocBefore runtime.MemStats
 			runtime.ReadMemStats(&allocBefore)
 			start := time.Now()
+			oldUpdates := feedBenchKeyOnlyUpdates(b, fixture.batch)
 			oldRoot, processErr := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
 			oldDurations = append(oldDurations, time.Since(start))
 			var allocAfter runtime.MemStats
 			runtime.ReadMemStats(&allocAfter)
 			oldAllocations += allocAfter.TotalAlloc - allocBefore.TotalAlloc
 			after := benchmarkUptime()
+			oldUpdates.Close()
 			require.NoError(b, processErr)
 			b.Logf("old round=%d uptime-before=%s uptime-after=%s", round, before, after)
 			before = benchmarkUptime()
@@ -478,7 +481,6 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 			require.Equal(b, wantRoot[:], oldRoot)
 			require.Equal(b, wantRoot[:], newRoot[:])
 		}
-		oldUpdates.Close()
 		oldTrie.Release()
 	}
 	newMin, oldMin := newDurations[0], oldDurations[0]

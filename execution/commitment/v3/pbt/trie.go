@@ -75,6 +75,7 @@ type Trie struct {
 	dirtyRows              map[string]*rowNode
 	routingRows            []*rowNode
 	rowChunks              []*rowChunk
+	rowChunkIndex          int
 	bucketDirty            map[string][]byte
 	scheduledBucketRecords map[string][]byte
 	deltas                 []commitment.BranchDelta
@@ -177,7 +178,12 @@ func (t *Trie) foldRowResult(row *rowNode) (FoldResult, error) {
 	if t.foldHook != nil {
 		t.foldHook(row.key)
 	}
-	return rowFoldResult(row)
+	record := row.record()
+	node, err := foldRowWithRefs(row.path, &record, row)
+	if err != nil {
+		return FoldResult{}, err
+	}
+	return FoldResult{Split: node.split, Left: node.left, Right: node.right}, nil
 }
 
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
@@ -200,6 +206,7 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	for _, chunk := range t.rowChunks {
 		chunk.used = 0
 	}
+	t.rowChunkIndex = 0
 	clear(t.bucketDirty)
 	if t.bucketDirty == nil {
 		t.bucketDirty = make(map[string][]byte)

@@ -77,6 +77,15 @@ func (c *phaseContext) PutBranch(key, data, prev []byte) error {
 	return nil
 }
 
+func (c *phaseContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	if source, ok := c.base.(interface {
+		LeafRefs([]byte, []byte) *commitment.LeafRefs
+	}); ok {
+		return source.LeafRefs(key, data)
+	}
+	return nil
+}
+
 func (c *phaseContext) Account(key []byte) (*commitment.Update, error) {
 	if c.baseMu != nil {
 		c.baseMu.Lock()

@@ -332,7 +332,7 @@ func newCommitmentCalculator(
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: collectorContext.CommitmentDomain(), txNum: 0}
 	calc := newCalcState(asOfReader, logger, logPrefix)
 	if branchPrefetchEnabled && collectorContext.AcceptsFeed() {
-		calc.prefetch = newBranchPrefetcher(workCtx, db)
+		calc.prefetch = newBranchPrefetcher(workCtx, db, doms.CommitmentDomains())
 		asOfReader.prefetched = calc.prefetch
 	}
 
@@ -1635,14 +1635,14 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
 		return nil, 0, false
 	}
-	return r.prefetched.get(key)
+	return r.prefetched.getDomain(r.commitmentDomain, key)
 }
 
 func (r *asOfStateReader) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	if r.prefetched == nil || len(data) == 0 {
 		return nil
 	}
-	return r.prefetched.leafRefs(key, data)
+	return r.prefetched.leafRefsDomain(r.commitmentDomain, key, data)
 }
 
 func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {

@@ -19,12 +19,14 @@ package pbt
 import (
 	"bytes"
 	"context"
+	"sort"
 	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
 func TestTrieFoldsDirtyRowsOncePerBatch(t *testing.T) {
@@ -64,5 +66,45 @@ func TestTrieHashHookSeesParallelRows(t *testing.T) {
 		{Key: trieCodeKey(0x80, 0, 2), Value: testTrieValue(2)},
 	}, 2)
 	require.NoError(t, err)
-	require.Positive(t, hashCalls.Load())
+	require.Equal(t, int64(5), hashCalls.Load())
+}
+
+func TestTrieRowArenaReusesAllChunksAfterReset(t *testing.T) {
+	ops := make([]Op, 1000)
+	for i := range ops {
+		ops[i] = Op{Key: trieCodeKey(byte(i>>8), byte(i), byte(i)), Value: testTrieValue(byte(i))}
+	}
+	trie := NewTrie(newTrieTestContext())
+	chunks := 0
+	for range 10 {
+		trie.ResetContext(newTrieTestContext())
+		_, err := trie.Process(ops)
+		require.NoError(t, err)
+		if chunks == 0 {
+			chunks = len(trie.rowChunks)
+		}
+		if len(trie.rowChunks) != chunks {
+			t.Fatalf("row arena retained %d chunks", len(trie.rowChunks))
+		}
+	}
+}
+
+func TestTrieHashHookCountsBucketAndJoinRows(t *testing.T) {
+	address := bytes.Repeat([]byte{0x77}, 20)
+	ops := make([]Op, 0, 16)
+	stem := eip8297.TreeKeyStorage(address, storageSlot(64))[:33]
+	for slot := range 8 {
+		ops = append(ops,
+			Op{Key: storageKeyWithSuffix(stem, 0x20, byte(slot)), Value: testTrieValue(byte(slot))},
+			Op{Key: storageKeyWithSuffix(stem, 0x40, byte(slot)), Value: testTrieValue(byte(slot + 8))})
+	}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	var hashCalls atomic.Int64
+	previousHashHook := hashHook
+	hashHook = func([]byte) { hashCalls.Add(1) }
+	t.Cleanup(func() { hashHook = previousHashHook })
+	trie := NewTrie(newTrieTestContext())
+	_, err := trie.ProcessParallelWithThreshold(ops, 2, 8)
+	require.NoError(t, err)
+	require.Equal(t, int64(33), hashCalls.Load())
 }
