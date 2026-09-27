@@ -122,6 +122,11 @@ func (t *Trie) Process(
 	}
 	var sorted func([]feedEntry) error
 	if t.collapseTracer != nil {
+		if t.ctx != nil && t.ctxFactory == nil {
+			inner := t.ctx
+			t.ctx = &recordCache{PatriciaContext: inner, recs: make(map[string][]byte)}
+			defer func() { t.ctx = inner }()
+		}
 		sorted = func(items []feedEntry) error { return traceCollapses(t.ctx, items, t.collapseTracer) }
 	}
 	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {

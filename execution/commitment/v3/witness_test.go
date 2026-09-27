@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
@@ -517,6 +518,50 @@ func TestCollapseTracerMatchesHPH(t *testing.T) {
 				requireSameChildCounts(t, b, pre, batch, wantEvents, label)
 			}
 		})
+	}
+}
+
+type countingReads struct {
+	commitment.PatriciaContext
+	reads map[string]int
+}
+
+func (c *countingReads) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	c.reads[string(prefix)]++
+	return c.PatriciaContext.Branch(prefix)
+}
+
+func TestTracedProcessReadsEachRecordOnce(t *testing.T) {
+	ctx := context.Background()
+	for seed := range int64(8) {
+		rng := rand.New(rand.NewSource(seed))
+		pre := witnessState(rng, witnessShape{accounts: 24, slots: 4})
+		batch := collapseBatch(rng, newWitnessBed(t, pre))
+		wantEvents, wantRoot := newWitnessBed(t, pre).v3Collapses(t, batch)
+
+		b := newWitnessBed(t, pre)
+		b.v3Mem.Apply(batch)
+		reader, _ := b.v3Mem.Open(ctx)
+		counting := &countingReads{PatriciaContext: reader}
+		tr := &Trie{scheduleWorkers: 1}
+		tr.ResetContext(counting)
+		_, _, err := tr.RestoreState(b.v3State)
+		require.NoError(t, err)
+		counting.reads = map[string]int{}
+		var events []string
+		tr.SetCollapseTracer(func(sibling, prefix []byte) { events = append(events, fmt.Sprintf("%x/%x", sibling, prefix)) })
+		u := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
+		for _, op := range batch {
+			u.TouchPlainKeyDirect(string(op.Key), runner.Update(op))
+		}
+		root, err := tr.Process(ctx, u, "", nil, commitment.WarmupConfig{})
+		u.Close()
+		require.NoError(t, err)
+		require.Equalf(t, wantRoot, root, "seed %d", seed)
+		require.Equalf(t, wantEvents, events, "seed %d", seed)
+		for k, n := range counting.reads {
+			require.Equalf(t, 1, n, "seed %d: record %x read %d times", seed, k, n)
+		}
 	}
 }
 

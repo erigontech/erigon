@@ -54,6 +54,7 @@ type witnessWalk struct {
 	nodes     map[string]*witnessNode
 	roots     map[string]*witnessRoot
 	exts      map[string]struct{}
+	kbuf      []byte
 }
 
 func (t *Trie) WitnessesByHash(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) (map[string][]byte, [][]byte, []byte, error) {
@@ -92,10 +93,11 @@ func (w *witnessWalk) seen(key string) bool {
 }
 
 func (w *witnessWalk) load(plane byte, addrHash, path []byte) (*witnessNode, error) {
-	key := string(nodeKey(plane, addrHash, path, nil))
-	if wn, ok := w.nodes[key]; ok {
+	w.kbuf = nodeKey(plane, addrHash, path, w.kbuf[:0])
+	if wn, ok := w.nodes[string(w.kbuf)]; ok {
 		return wn, nil
 	}
+	key := string(w.kbuf)
 	n, err := unfold(w.ctx, path, plane, addrHash)
 	if err != nil {
 		return nil, err

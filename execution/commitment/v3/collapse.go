@@ -41,7 +41,9 @@ type collapseCell struct {
 type collapseRow struct {
 	cells [16]collapseCell
 	after uint16
+	lazy  uint16
 	depth int
+	src   *node
 }
 
 type collapseSim struct {
@@ -50,6 +52,7 @@ type collapseSim struct {
 	root   collapseCell
 	rows   []collapseRow
 	key    []byte
+	kbuf   []byte
 	nodes  map[string]*node
 }
 
@@ -136,20 +139,21 @@ func liveBranch(load func(plane byte, addrHash, path []byte) (*node, error), pre
 }
 
 func (s *collapseSim) load(plane byte, addrHash, path []byte) (*node, error) {
-	key := string(nodeKey(plane, addrHash, path, nil))
-	if n, ok := s.nodes[key]; ok {
+	s.kbuf = nodeKey(plane, addrHash, path, s.kbuf[:0])
+	if n, ok := s.nodes[string(s.kbuf)]; ok {
 		return n, nil
 	}
 	n, err := unfold(s.ctx, path, plane, addrHash)
 	if err != nil {
 		return nil, err
 	}
-	s.nodes[key] = n
+	s.kbuf = nodeKey(plane, addrHash, path, s.kbuf[:0])
+	s.nodes[string(s.kbuf)] = n
 	return n, nil
 }
 
 func (s *collapseSim) loadRoot() error {
-	root, err := unfold(s.ctx, nil, planeAccount, nil)
+	root, err := s.load(planeAccount, nil, nil)
 	if err != nil || root == nil || root.childMask == 0 {
 		return err
 	}
@@ -189,7 +193,7 @@ func (s *collapseSim) resolve(c *collapseCell) error {
 	}
 	addrHash := hashAddressPath(c.acctKey)
 	c.acctKey = nil
-	root, err := unfold(s.ctx, nil, planeStorage, addrHash[:])
+	root, err := s.load(planeStorage, addrHash[:], nil)
 	if err != nil || root == nil || root.childMask == 0 {
 		return err
 	}
@@ -229,7 +233,7 @@ func (s *collapseSim) needUnfolding(k []byte) (int, error) {
 		if len(k) <= depth {
 			return 0, nil
 		}
-		c = &top.cells[k[len(s.key)]]
+		c = s.cell(top, int(k[len(s.key)]))
 	}
 	if err := s.resolve(c); err != nil {
 		return 0, err
@@ -249,7 +253,7 @@ func (s *collapseSim) unfold(k []byte, unfolding int) error {
 	if len(s.rows) != 0 {
 		top := &s.rows[len(s.rows)-1]
 		upDepth = top.depth
-		up = top.cells[k[upDepth-1]]
+		up = *s.cell(top, int(k[upDepth-1]))
 		s.key = append(s.key, k[upDepth-1])
 	}
 	if len(up.hext) == 0 {
@@ -274,13 +278,16 @@ func (s *collapseSim) unfoldBranch(depth int) error {
 	if n == nil {
 		return fmt.Errorf("commitment v3: collapse trace found no branch at %x", s.key)
 	}
-	row := collapseRow{depth: depth, after: n.childMask}
-	for bitset := n.childMask; bitset != 0; bitset &= bitset - 1 {
-		nib := bits.TrailingZeros16(bitset)
-		row.cells[nib] = recordCell(n, nib, s.key)
-	}
-	s.rows = append(s.rows, row)
+	s.rows = append(s.rows, collapseRow{depth: depth, after: n.childMask, lazy: n.childMask, src: n})
 	return nil
+}
+
+func (s *collapseSim) cell(r *collapseRow, nib int) *collapseCell {
+	if bit := uint16(1) << nib; r.lazy&bit != 0 {
+		r.lazy &^= bit
+		r.cells[nib] = recordCell(r.src, nib, s.key[:r.depth-1])
+	}
+	return &r.cells[nib]
 }
 
 func fillFromUpper(up collapseCell, inc int) collapseCell {
@@ -297,7 +304,7 @@ func (s *collapseSim) updateCell(k []byte, account bool) {
 		top := &s.rows[len(s.rows)-1]
 		depth = top.depth
 		nib := k[len(s.key)]
-		c = &top.cells[nib]
+		c = s.cell(top, int(nib))
 		top.after |= uint16(1) << nib
 	}
 	if len(c.hext) == 0 {
@@ -333,14 +340,15 @@ func (s *collapseSim) deleteCell(k []byte) error {
 	if top.depth < len(k) {
 		return nil
 	}
-	nib := k[len(s.key)]
-	top.after &^= uint16(1) << nib
-	top.cells[nib] = collapseCell{}
+	bit := uint16(1) << k[len(s.key)]
+	top.after &^= bit
+	top.lazy &^= bit
+	top.cells[k[len(s.key)]] = collapseCell{}
 	return nil
 }
 
 func (s *collapseSim) report(row *collapseRow, depth, nib int) error {
-	c := &row.cells[nib]
+	c := s.cell(row, nib)
 	if err := s.resolve(c); err != nil {
 		return err
 	}
@@ -355,7 +363,7 @@ func (s *collapseSim) fold() error {
 	if top > 0 {
 		upDepth = s.rows[top-1].depth
 		nib = int(s.key[upDepth-1])
-		up = &s.rows[top-1].cells[nib]
+		up = s.cell(&s.rows[top-1], nib)
 	}
 	switch bits.OnesCount16(r.after) {
 	case 0:
@@ -371,7 +379,7 @@ func (s *collapseSim) fold() error {
 		*up = collapseCell{}
 	case 1:
 		child := bits.TrailingZeros16(r.after)
-		fillFromLower(up, &r.cells[child], r.depth, s.key[upDepth:], child)
+		fillFromLower(up, s.cell(r, child), r.depth, s.key[upDepth:], child)
 	default:
 		up.hext = slices.Clone(s.key[upDepth:])
 		if r.depth < 64 {
@@ -393,6 +401,26 @@ func fillFromLower(up, low *collapseCell, lowDepth int, pre []byte, nib int) {
 		up.hext = slices.Concat(pre, []byte{byte(nib)}, low.hext)
 	}
 	up.hash, up.acctKey = low.hash, nil
+}
+
+type recordCache struct {
+	commitment.PatriciaContext
+	recs map[string][]byte
+}
+
+func (c *recordCache) BranchOwned(prefix []byte) ([]byte, kv.Step, error) {
+	if data, ok := c.recs[string(prefix)]; ok {
+		return data, 0, nil
+	}
+	data, step, err := branchOwned(c.PatriciaContext, prefix)
+	if err == nil {
+		c.recs[string(prefix)] = data
+	}
+	return data, step, err
+}
+
+func (c *recordCache) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	return leafRefsOf(c.PatriciaContext, key, data)
 }
 
 type branchReader func(key []byte) ([]byte, error)
