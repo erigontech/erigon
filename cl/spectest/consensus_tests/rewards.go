@@ -18,6 +18,7 @@ package consensus_tests
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/fs"
 	"slices"
@@ -84,7 +85,7 @@ func (b *RewardsCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) error {
 	weights := preState.BeaconConfig().ParticipationWeights()
 	activeIncrements := preState.GetTotalActiveBalance() / preState.BeaconConfig().EffectiveBalanceIncrement
 	if activeIncrements == 0 {
-		return fmt.Errorf("active balance has no effective balance increments")
+		return errors.New("active balance has no effective balance increments")
 	}
 
 	participatingIncrements := make([]uint64, len(weights))
@@ -195,7 +196,7 @@ func phase0ComponentRewardDeltas(beaconState *state.CachingBeaconState, eligible
 	attestingBalance = max(attestingBalance, sum)
 	activeIncrements := beaconState.GetTotalActiveBalance() / increment
 	if activeIncrements == 0 {
-		return nil, fmt.Errorf("active balance has no effective balance increments")
+		return nil, errors.New("active balance has no effective balance increments")
 	}
 	for _, validatorIndex := range eligible {
 		baseReward, err := beaconState.BaseReward(validatorIndex)
@@ -294,7 +295,7 @@ func inactivityRewardDeltas(beaconState *state.CachingBeaconState, validatorCoun
 	deltas := &rewardDeltas{rewards: make([]uint64, validatorCount), penalties: make([]uint64, validatorCount)}
 	denominator := beaconState.BeaconConfig().InactivityScoreBias * beaconState.BeaconConfig().GetPenaltyQuotient(beaconState.Version())
 	if denominator == 0 {
-		return nil, fmt.Errorf("inactivity penalty denominator is zero")
+		return nil, errors.New("inactivity penalty denominator is zero")
 	}
 	for _, validatorIndex := range eligible {
 		if timelyTarget[validatorIndex] {
