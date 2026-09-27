@@ -45,8 +45,9 @@ type Context struct {
 type Tracer struct {
 	*tracing.Hooks
 	GetResult func() (json.RawMessage, error)
-	// MarshalFastJSONTo, when set, streams what GetResult would return; on error it writes nothing.
-	MarshalFastJSONTo func(*jsonstream.StackStream) error
+	// MarshalFastJSONTo, when set, streams what GetResult would return. On error it leaves the
+	// stream untouched, so a lazy result field stays unwritten.
+	MarshalFastJSONTo func(jsonstream.Stream) error
 	// Stop terminates execution of the tracer at the first opportune moment.
 	Stop func(err error)
 }

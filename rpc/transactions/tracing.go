@@ -260,21 +260,25 @@ func ExecuteTraceTx(
 		stream.WriteHex(ret)
 		stream.WriteObjectEnd()
 	} else {
-		if tracer.MarshalFastJSONTo != nil {
-			if err := tracer.MarshalFastJSONTo(stream.Open()); err != nil {
-				return err
-			}
-		} else {
-			r, err := tracer.GetResult()
-			if err != nil {
-				return err
-			}
-			stream.WriteRawBytes(r)
+		if err := writeTracerResult(tracer, stream); err != nil {
+			return err
 		}
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
 		}
 	}
 
+	return nil
+}
+
+func writeTracerResult(tracer *tracers.Tracer, stream jsonstream.Stream) error {
+	if tracer.MarshalFastJSONTo != nil {
+		return tracer.MarshalFastJSONTo(stream)
+	}
+	r, err := tracer.GetResult()
+	if err != nil {
+		return err
+	}
+	stream.WriteRawBytes(r)
 	return nil
 }

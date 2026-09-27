@@ -17,6 +17,7 @@
 package native_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"sync"
@@ -216,7 +217,7 @@ func TestTracerStopRace(t *testing.T) {
 	}
 }
 
-type fastJSON func(*jsonstream.StackStream) error
+type fastJSON func(jsonstream.Stream) error
 
 func (f fastJSON) MarshalFastJSONTo(s *jsonstream.StackStream) error { return f(s) }
 
@@ -245,8 +246,8 @@ func TestCallTracerFastJSONMatchesGetResult(t *testing.T) {
 	require.Equal(t, string(want), string(got))
 
 	tracer.Stop(errors.New("stopped"))
-	s := jsonstream.Get(nil)
-	defer jsonstream.Put(s)
-	require.EqualError(t, tracer.MarshalFastJSONTo(s), "stopped")
-	require.Empty(t, s.Buffer(), "a stopped tracer writes nothing")
+	var buf bytes.Buffer
+	result := jsonstream.NewLazyFieldStream(jsonstream.New(&buf), "result", false)
+	require.EqualError(t, tracer.MarshalFastJSONTo(result), "stopped")
+	require.False(t, result.Written(), "a stopped tracer leaves the result field unwritten")
 }
