@@ -57,10 +57,11 @@ type PeerBanner interface {
 const minPublishQueueSize = 64
 
 // publishQueueSizeFor sizes the background-publish queue to hold at least
-// one full sync-committee-sized burst without dropping: a validator client
-// batches all of a slot's sync-committee duties into a single request, so
-// the queue must comfortably absorb up to SyncCommitteeSize jobs arriving
-// at once while the worker is still draining the previous slot's burst.
+// one full sync-committee-sized burst without dropping, when the queue
+// starts empty: a validator client batches all of a slot's sync-committee
+// duties into a single request. If jobs from a previous burst are still
+// queued when the next one arrives, the combined total can exceed this
+// capacity and part of the new burst can be rejected.
 func publishQueueSizeFor(cfg *clparams.BeaconChainConfig) int {
 	return max(int(cfg.SyncCommitteeSize), minPublishQueueSize)
 }
