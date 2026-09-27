@@ -26,6 +26,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/race"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
@@ -115,7 +116,11 @@ func TestTrieSteadyStateAllocations(t *testing.T) {
 	}
 	runtime.ReadMemStats(&after)
 	t.Logf("steady-state allocations=%.2f per op=%.2f bytes per op=%.2f", allocs, allocs/float64(len(ops)), float64(after.TotalAlloc-before.TotalAlloc)/float64(3*len(ops)))
-	require.Less(t, allocs/float64(len(ops)), 14.0)
+	limit := 14.0
+	if race.Enabled {
+		limit = 18.0
+	}
+	require.Less(t, allocs/float64(len(ops)), limit)
 }
 
 func TestTrieHashHookCountsBucketAndJoinRows(t *testing.T) {
