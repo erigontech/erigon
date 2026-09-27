@@ -235,7 +235,8 @@ func feedBenchFixtureFor(kind string) feedBenchFixture {
 func feedBenchReaderFor(fixture feedBenchFixture) *feedBenchReader {
 	values := make(map[string][]byte)
 	batchAccounts := make(map[string]struct{})
-	for _, leaf := range fixture.batch {
+	for i := range fixture.batch {
+		leaf := &fixture.batch[i]
 		if len(leaf.plain) == 20 {
 			batchAccounts[string(leaf.plain)] = struct{}{}
 		}
@@ -302,7 +303,8 @@ func feedBenchExpectedRoot(fixture feedBenchFixture, reader *feedBenchReader) co
 			values[string(op.Key)] = op
 		}
 	}
-	for _, leaf := range fixture.batch {
+	for i := range fixture.batch {
+		leaf := &fixture.batch[i]
 		if len(leaf.plain) != 20 {
 			continue
 		}
