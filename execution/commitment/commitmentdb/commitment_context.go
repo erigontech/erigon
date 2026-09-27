@@ -272,7 +272,12 @@ func (sdc *SharedDomainsCommitmentContext) CodeKeys() map[string]struct{} {
 }
 
 func (sdc *SharedDomainsCommitmentContext) AcceptsFeed() bool {
-	_, ok := sdc.patriciaTrie.(v3Trie)
+	if _, ok := sdc.patriciaTrie.(v3Trie); ok {
+		return true
+	}
+	_, ok := sdc.patriciaTrie.(interface {
+		ProcessPBinFeed(context.Context, *commitment.PBinFeed, func(*commitment.CommitProgress)) ([]byte, error)
+	})
 	return ok
 }
 

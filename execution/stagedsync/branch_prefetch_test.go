@@ -26,6 +26,8 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	pbt "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
 func TestBranchPrefetchRejectsChangedRecordBytes(t *testing.T) {
@@ -69,6 +71,28 @@ func TestPrefetchedBranchesYieldToMemBatch(t *testing.T) {
 	got, _, err = r.Read(kv.CommitmentDomain, absent, 16)
 	require.NoError(t, err)
 	require.Empty(t, got)
+}
+
+func TestBranchPrefetchUsesBinaryTreeKeys(t *testing.T) {
+	_, tx, _ := setupStepTest(t)
+	p := &branchPrefetcher{
+		seed:    maphash.MakeSeed(),
+		domains: []kv.Domain{kv.CommitmentDomain},
+		bin:     map[kv.Domain]bool{kv.CommitmentDomain: true},
+	}
+	for i := range p.shards {
+		p.shards[i].records = make(map[string]prefetchedRecord)
+	}
+	address := [20]byte{0x46}
+	slot := [32]byte{0x80}
+	p.touch(tx, prefetchItem{address: address, plainSlot: slot, storage: true})
+
+	treeKey := eip8297.TreeKeyStorage(address[:], slot[:])
+	path := eip8297.PathFromBits(treeKey, 268)
+	rowKey, err := pbt.EncodeRowKey(&path)
+	require.NoError(t, err)
+	_, _, ok := p.getDomain(kv.CommitmentDomain, rowKey)
+	require.True(t, ok)
 }
 
 func TestRaiseGCPercentRestores(t *testing.T) {

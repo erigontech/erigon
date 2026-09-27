@@ -59,7 +59,7 @@ const (
 	rebuildVariantSteps              = 4
 	rebuildVariantAccounts           = 6
 	rebuildVariantSlots              = 4
-	rebuildVariantKeyCollectorBudget = uint64(1 << 20)
+	rebuildVariantKeyCollectorBudget = uint64(64 << 20)
 	rebuildVariantOpCollectorBudget  = uint64(64 << 20)
 	rebuildVariantRightEdgeBudget    = uint64(1000 * 4096)
 	rebuildVariantFixedBudget        = uint64(1 << 20)
@@ -71,6 +71,15 @@ func rebuildVariantAddr(i int) []byte {
 	a[1] = byte(i)
 	a[length.Addr-1] = byte(i*11 + 5)
 	return a
+}
+
+func TestPBinRebuildKeyCollectorBudgetFitsMainnetPass(t *testing.T) {
+	const keyCount = uint64(2_000_000_000)
+	const maxEntryBytes = uint64(60)
+	const maxBuffers = uint64(2000)
+
+	buffers := (keyCount*maxEntryBytes + rebuildVariantKeyCollectorBudget - 1) / rebuildVariantKeyCollectorBudget
+	require.LessOrEqual(t, buffers, maxBuffers)
 }
 
 func rebuildVariantSlotKey(addr []byte, j int) []byte {

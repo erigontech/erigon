@@ -160,7 +160,8 @@ func TestTrieBatchReadsOnlyPreviousRightEdge(t *testing.T) {
 	keyA := trieCodeKey(0, 0, 1)
 	keyB := trieCodeKey(0x10, 0, 2)
 	keyC := trieCodeKey(0x20, 0, 3)
-	first := []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}}
+	keyD := trieCodeKey(0x80, 0, 4)
+	first := []Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}, {Key: keyD, Value: testTrieValue(4)}}
 	ctx := newTrieTestContext()
 	requireProcess(t, ctx, first)
 

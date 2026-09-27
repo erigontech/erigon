@@ -23,9 +23,11 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
@@ -41,9 +43,14 @@ const (
 )
 
 type prefetchItem struct {
-	account [32]byte
-	slot    [32]byte
-	storage bool
+	account     [32]byte
+	slot        [32]byte
+	address     [20]byte
+	plainSlot   [32]byte
+	codeHash    [32]byte
+	codeChunks  int
+	codeWritten bool
+	storage     bool
 }
 
 type prefetchedRecord struct {
@@ -65,14 +72,14 @@ type branchPrefetcher struct {
 	shards  [branchPrefetchShards]prefetchedShard
 	bytes   atomic.Int64
 	domains []kv.Domain
+	bin     map[kv.Domain]bool
 }
 
-func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB, domainSets ...[]kv.Domain) *branchPrefetcher {
-	domains := []kv.Domain{kv.CommitmentDomain}
-	if len(domainSets) != 0 && len(domainSets[0]) != 0 {
-		domains = append([]kv.Domain(nil), domainSets[0]...)
+func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB, domains []kv.Domain, binDomains map[kv.Domain]bool) *branchPrefetcher {
+	if len(domains) == 0 {
+		domains = []kv.Domain{kv.CommitmentDomain}
 	}
-	p := &branchPrefetcher{work: make(chan prefetchItem, branchPrefetchQueue), seed: maphash.MakeSeed(), domains: domains}
+	p := &branchPrefetcher{work: make(chan prefetchItem, branchPrefetchQueue), seed: maphash.MakeSeed(), domains: domains, bin: binDomains}
 	for i := range p.shards {
 		p.shards[i].records = make(map[string]prefetchedRecord)
 	}
@@ -160,7 +167,7 @@ func (p *branchPrefetcher) putDomain(domain kv.Domain, key, data []byte, step kv
 	}
 	data = bytes.Clone(data)
 	var refs *commitment.LeafRefs
-	if domain == kv.CommitmentBinDomain {
+	if p.bin[domain] {
 		refs = pbt.ComputeLeafRefs(key, data)
 	} else {
 		refs = v3.ComputeLeafRefs(key, data)
@@ -215,11 +222,18 @@ func (p *branchPrefetcher) touch(tx kv.TemporalTx, it prefetchItem) {
 			}
 			return p.putDomain(domain, key, data, step)
 		}
-		if domain == kv.CommitmentBinDomain {
-			pbt.PrefetchPath(read, it.account[:])
+		if p.bin[domain] {
+			address := it.address[:]
+			pbt.PrefetchPath(read, eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey))
+			pbt.PrefetchPath(read, eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey))
+			pbt.PrefetchPath(read, eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey))
 			if it.storage {
-				key := append(it.account[:], it.slot[:]...)
-				pbt.PrefetchPath(read, key)
+				pbt.PrefetchPath(read, eip8297.TreeKeyStorage(address, it.plainSlot[:]))
+			}
+			if it.codeWritten {
+				for chunk := range it.codeChunks {
+					pbt.PrefetchPath(read, eip8297.TreeKeyCodeChunk(common.BytesToHash(it.codeHash[:]), chunk))
+				}
 			}
 		} else {
 			it.touch(read)

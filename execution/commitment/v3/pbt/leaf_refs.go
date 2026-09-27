@@ -17,6 +17,7 @@
 package pbt
 
 import (
+	"bytes"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -49,14 +50,16 @@ func ComputeLeafRefs(key, data []byte) *commitment.LeafRefs {
 		return nil
 	}
 	hashes := [maxCells]common.Hash{}
+	prefixes := [maxCells][]byte{}
 	mask := uint16(0)
-	if err := computeCellRefs(parsed.path, &record, slots, 0, len(slots), parsed.path.BitLen, &hashes, &mask); err != nil {
+	if err := computeCellRefs(parsed.path, &record, slots, 0, len(slots), parsed.path.BitLen, &hashes, &prefixes, &mask); err != nil {
 		return nil
 	}
-	refs := &commitment.LeafRefs{Mask: mask, Refs: make([][32]byte, 0, len(slots))}
+	refs := &commitment.LeafRefs{Mask: mask, Refs: make([][32]byte, 0, len(slots)), Prefixes: make([][]byte, 0, len(slots))}
 	for slot := range maxCells {
 		if mask&(uint16(1)<<slot) != 0 {
 			refs.Refs = append(refs.Refs, hashes[slot])
+			refs.Prefixes = append(refs.Prefixes, prefixes[slot])
 		}
 	}
 	return refs
@@ -74,7 +77,7 @@ func PrefetchPath(read func([]byte) []byte, key []byte) {
 	}
 }
 
-func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16, hashes *[maxCells]common.Hash, mask *uint16) error {
+func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16, hashes *[maxCells]common.Hash, prefixes *[maxCells][]byte, mask *uint16) error {
 	if to-from > 1 {
 		split := firstSlotSplit(slots[from], slots[to-1], path.BitLen)
 		middle := from
@@ -84,10 +87,10 @@ func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to
 		if middle == from || middle == to {
 			return fmt.Errorf("row cells do not split at bit %d", split)
 		}
-		if err := computeCellRefs(path, record, slots, from, middle, split, hashes, mask); err != nil {
+		if err := computeCellRefs(path, record, slots, from, middle, split, hashes, prefixes, mask); err != nil {
 			return err
 		}
-		return computeCellRefs(path, record, slots, middle, to, split, hashes, mask)
+		return computeCellRefs(path, record, slots, middle, to, split, hashes, prefixes, mask)
 	}
 	slot := slots[from]
 	cell := &record.Cells[slot]
@@ -99,6 +102,7 @@ func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to
 		prefix := rowPrefix(&path, slot, parentSplit+1, path.BitLen+4)
 		prefix.Append(&cell.Prefix)
 		hash = branchHash(&prefix, &cell.Left, &cell.Right)
+		prefixes[slot] = eip8297.EncodeBitPath(&prefix)
 	default:
 		return fmt.Errorf("row cell %d is empty", slot)
 	}
@@ -107,7 +111,7 @@ func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to
 	return nil
 }
 
-func (n *rowNode) cachedCellHash(slot int) (common.Hash, bool) {
+func (n *rowNode) cachedCellHash(slot int, prefix *eip8297.Bitpath) (common.Hash, bool) {
 	bit := uint16(1) << slot
 	if n.refs == nil || n.refMask&bit == 0 || n.dirtyCells&bit != 0 {
 		return common.Hash{}, false
@@ -117,6 +121,9 @@ func (n *rowNode) cachedCellHash(slot int) (common.Hash, bool) {
 		if n.refMask&(uint16(1)<<bit) != 0 {
 			index++
 		}
+	}
+	if prefix != nil && (len(n.refs.Prefixes) <= index || !bytes.Equal(n.refs.Prefixes[index], eip8297.EncodeBitPath(prefix))) {
+		return common.Hash{}, false
 	}
 	return common.Hash(n.refs.Refs[index]), true
 }

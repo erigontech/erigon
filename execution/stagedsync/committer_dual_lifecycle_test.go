@@ -83,6 +83,11 @@ func TestBinComputeCommitmentUsesProductionWorkerFactory(t *testing.T) {
 	dbg.TipTrieWarmupers = 8
 	t.Cleanup(func() { dbg.TipTrieWarmupers = workers })
 	db, tx, doms := dualCalculatorTest(t)
+	cc, err := newCommitmentCalculator(t.Context(), t.Context(), doms, db, &chain.Config{}, "prefetch", log.New(), false, math.MaxUint64, nil, nil, nil)
+	require.NoError(t, err)
+	t.Cleanup(cc.Stop)
+	require.NotNil(t, cc.state.prefetch)
+	require.True(t, cc.state.prefetch.bin[kv.CommitmentBinDomain])
 	binCtx := doms.GetCommitmentCtxForDomain(kv.CommitmentBinDomain)
 	trie, ok := binCtx.Trie().(interface{ SetCoreActivityHook(func(bool)) })
 	require.True(t, ok)
@@ -119,7 +124,7 @@ func TestBinComputeCommitmentUsesProductionWorkerFactory(t *testing.T) {
 	}
 	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
 	binCtx.SetPBinOps(ops)
-	_, err := binCtx.ComputeCommitment(t.Context(), tx, false, 1, 1, "factory", nil)
+	_, err = binCtx.ComputeCommitment(t.Context(), tx, false, 1, 1, "factory", nil)
 	require.NoError(t, err)
 	require.Greater(t, peak.Load(), int32(1))
 	_ = db

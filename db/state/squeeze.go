@@ -2103,7 +2103,7 @@ type rebuiltCommitment struct {
 const (
 	pbinRebuildMaxOps                   = 100_000
 	pbinRebuildMaxBytes                 = 64 << 20
-	pbinRebuildKeyCollectorBufferBudget = 1 * datasize.MB
+	pbinRebuildKeyCollectorBufferBudget = 64 * datasize.MB
 	pbinRebuildOpCollectorBufferBudget  = 64 * datasize.MB
 	pbinRebuildMemorySampleInterval     = 64 * 1024
 )

@@ -291,15 +291,15 @@ func (t *Trie) ProcessParallelContext(ctx context.Context, ops []Op, workers int
 }
 
 func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers, threshold int) (common.Hash, error) {
-	plan, err := buildPhasePlanWithThreshold(ops, threshold)
-	if err != nil {
-		return common.Hash{}, err
-	}
 	if err := ctx.Err(); err != nil {
 		return common.Hash{}, err
 	}
-	if t.ctx == nil {
+	if t.ctx == nil || workers == 1 || len(ops) < 2 {
 		return t.Process(ops)
+	}
+	plan, err := buildPhasePlanWithThreshold(ops, threshold)
+	if err != nil {
+		return common.Hash{}, err
 	}
 	return t.processParallelPhaseA(ctx, workers, plan, ops)
 }

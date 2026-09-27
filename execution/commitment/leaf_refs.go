@@ -17,6 +17,7 @@
 package commitment
 
 type LeafRefs struct {
-	Mask uint16
-	Refs [][32]byte
+	Mask     uint16
+	Refs     [][32]byte
+	Prefixes [][]byte
 }

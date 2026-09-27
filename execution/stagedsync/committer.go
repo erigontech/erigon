@@ -332,7 +332,12 @@ func newCommitmentCalculator(
 	asOfReader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: collectorContext.CommitmentDomain(), txNum: 0}
 	calc := newCalcState(asOfReader, logger, logPrefix)
 	if branchPrefetchEnabled && collectorContext.AcceptsFeed() {
-		calc.prefetch = newBranchPrefetcher(workCtx, db, doms.CommitmentDomains())
+		binDomains := make(map[kv.Domain]bool)
+		for _, domain := range doms.CommitmentDomains() {
+			ctx := doms.GetCommitmentCtxForDomain(domain)
+			binDomains[domain] = ctx != nil && ctx.Trie().Variant() == commitment.VariantBinPatriciaTrie
+		}
+		calc.prefetch = newBranchPrefetcher(workCtx, db, doms.CommitmentDomains(), binDomains)
 		asOfReader.prefetched = calc.prefetch
 	}
 
@@ -1564,10 +1569,8 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == r.commitmentDomain {
-		if d == kv.CommitmentDomain {
-			if enc, step, ok := r.prefetchedBranch(plainKey); ok {
-				return enc, step, nil
-			}
+		if enc, step, ok := r.prefetchedBranch(plainKey); ok {
+			return enc, step, nil
 		}
 		// Branches: use GetLatest — written only by this calculator, sequential.
 		if r.getter != nil {
@@ -1632,7 +1635,7 @@ func (r *asOfStateReader) prefetchedBranch(key []byte) ([]byte, kv.Step, bool) {
 	if r.prefetched == nil {
 		return nil, 0, false
 	}
-	if _, maxStep, inMem := r.sd.GetLatestFromMemory(kv.CommitmentDomain, key); inMem || maxStep != kv.NoStepBound {
+	if _, maxStep, inMem := r.sd.GetLatestFromMemory(r.commitmentDomain, key); inMem || maxStep != kv.NoStepBound {
 		return nil, 0, false
 	}
 	return r.prefetched.getDomain(r.commitmentDomain, key)

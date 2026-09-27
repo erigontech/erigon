@@ -19,6 +19,7 @@ package pbt
 import (
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -34,7 +35,10 @@ type FoldResult struct {
 	Left, Right common.Hash
 }
 
-var hashHook func([]byte)
+var (
+	hashHook        func([]byte)
+	hashScratchPool sync.Pool
+)
 
 func rowRoutingResult(row *rowNode) (FoldResult, error) {
 	var occupied [maxCells]int
@@ -267,14 +271,14 @@ func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, 
 		prefix := rowPrefix(&path, slots[from], parentSplit+1, node.split)
 		return branchHash(&prefix, &node.left, &node.right), nil
 	}
-	if refs != nil {
-		if hash, ok := refs.cachedCellHash(slots[from]); ok {
-			return hash, nil
-		}
-	}
 	cell := &record.Cells[slots[from]]
 	switch cell.Kind {
 	case LeafCell:
+		if refs != nil {
+			if hash, ok := refs.cachedCellHash(slots[from], nil); ok {
+				return hash, nil
+			}
+		}
 		return leafHash(cell), nil
 	case BranchCell:
 		if int(path.BitLen)+4+int(cell.Prefix.BitLen) > eip8297.MaxPathBits {
@@ -282,6 +286,11 @@ func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, 
 		}
 		prefix := rowPrefix(&path, slots[from], parentSplit+1, path.BitLen+4)
 		prefix.Append(&cell.Prefix)
+		if refs != nil {
+			if hash, ok := refs.cachedCellHash(slots[from], &prefix); ok {
+				return hash, nil
+			}
+		}
 		return branchHash(&prefix, &cell.Left, &cell.Right), nil
 	default:
 		return common.Hash{}, fmt.Errorf("row cell %d is empty", slots[from])
@@ -289,11 +298,27 @@ func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, 
 }
 
 func branchHash(prefix *eip8297.Bitpath, left, right *common.Hash) common.Hash {
-	return hashBytes(eip8297.BranchPreimage(nil, prefix, left, right))
+	preimage := hashScratch(1 + 2 + (int(prefix.BitLen)+7)/8 + 64)
+	preimage = eip8297.BranchPreimage(preimage[:0], prefix, left, right)
+	hash := hashBytes(preimage)
+	hashScratchPool.Put(preimage[:0])
+	return hash
 }
 
 func leafHash(cell *Cell) common.Hash {
-	return hashBytes(eip8297.LeafPreimage(nil, cell.Key, cell.Value[:]))
+	preimage := hashScratch(1 + len(cell.Key) + eip8297.ValueLength)
+	preimage = eip8297.LeafPreimage(preimage[:0], cell.Key, cell.Value[:])
+	hash := hashBytes(preimage)
+	hashScratchPool.Put(preimage[:0])
+	return hash
+}
+
+func hashScratch(size int) []byte {
+	preimage, _ := hashScratchPool.Get().([]byte)
+	if cap(preimage) < size {
+		return make([]byte, 0, size)
+	}
+	return preimage[:0]
 }
 
 func hashBytes(preimage []byte) common.Hash {

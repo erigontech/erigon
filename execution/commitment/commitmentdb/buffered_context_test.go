@@ -30,6 +30,7 @@ type bufferedContextBackend struct {
 	branchStep kv.Step
 	account    *commitment.Update
 	storage    *commitment.Update
+	refs       *commitment.LeafRefs
 	received   []bufferedBranchWrite
 }
 
@@ -44,6 +45,8 @@ func (b *bufferedContextBackend) Account([]byte) (*commitment.Update, error) {
 func (b *bufferedContextBackend) Storage([]byte) (*commitment.Update, error) {
 	return b.storage, nil
 }
+
+func (b *bufferedContextBackend) LeafRefs([]byte, []byte) *commitment.LeafRefs { return b.refs }
 
 func (b *bufferedContextBackend) PutBranch(prefix, data, prevData []byte) error {
 	b.received = append(b.received, bufferedBranchWrite{
@@ -102,4 +105,10 @@ func TestBufferedPatriciaContextReplayPreservesOrderAndPrevData(t *testing.T) {
 	}
 	require.NoError(t, ctx.Replay())
 	require.Equal(t, writes, backend.received)
+}
+
+func TestBufferedPatriciaContextForwardsLeafRefs(t *testing.T) {
+	refs := &commitment.LeafRefs{Mask: 1, Refs: make([][32]byte, 1)}
+	ctx := NewBufferedPatriciaContext(&bufferedContextBackend{refs: refs})
+	require.Same(t, refs, ctx.LeafRefs([]byte{1}, []byte{2}))
 }

@@ -46,6 +46,16 @@ func (c *BufferedPatriciaContext) Code(plainKey []byte) ([]byte, error) {
 	return provider.Code(plainKey)
 }
 
+func (c *BufferedPatriciaContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	provider, ok := c.PatriciaContext.(interface {
+		LeafRefs([]byte, []byte) *commitment.LeafRefs
+	})
+	if !ok {
+		return nil
+	}
+	return provider.LeafRefs(key, data)
+}
+
 func (c *BufferedPatriciaContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
 	c.writes = append(c.writes, bufferedBranchWrite{
 		prefix:   bytes.Clone(prefix),

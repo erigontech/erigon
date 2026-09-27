@@ -76,6 +76,8 @@ type Trie struct {
 	routingRows            []*rowNode
 	rowChunks              []*rowChunk
 	rowChunkIndex          int
+	cellChunks             []*cellChunk
+	cellChunkIndex         int
 	bucketDirty            map[string][]byte
 	scheduledBucketRecords map[string][]byte
 	deltas                 []commitment.BranchDelta
@@ -207,6 +209,10 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 		chunk.used = 0
 	}
 	t.rowChunkIndex = 0
+	for _, chunk := range t.cellChunks {
+		chunk.used = 0
+	}
+	t.cellChunkIndex = 0
 	clear(t.bucketDirty)
 	if t.bucketDirty == nil {
 		t.bucketDirty = make(map[string][]byte)

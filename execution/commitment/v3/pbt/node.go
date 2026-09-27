@@ -60,6 +60,11 @@ type rowChunk struct {
 	used int
 }
 
+type cellChunk struct {
+	cells []Cell
+	used  int
+}
+
 type treeRoot struct {
 	form   RootForm
 	raw    []byte
@@ -133,11 +138,41 @@ func (n *rowNode) cell(slot int) *rowCell {
 }
 
 func leafCell(key []byte, value [eip8297.ValueLength]byte) rowCell {
-	return rowCell{Cell: &Cell{Kind: LeafCell, Key: bytes.Clone(key), Value: value}, Kind: LeafCell}
+	return rowCell{Cell: &Cell{Kind: LeafCell, Key: key, Value: value}, Kind: LeafCell}
 }
 
 func branchCell(prefix eip8297.Bitpath, left, right common.Hash) rowCell {
 	return rowCell{Cell: &Cell{Kind: BranchCell, Prefix: prefix, Left: left, Right: right}, Kind: BranchCell}
+}
+
+func (t *Trie) newCell(cell Cell) *Cell {
+	if t.cellChunkIndex == len(t.cellChunks) {
+		size := rowChunkInitial
+		if len(t.cellChunks) != 0 {
+			size = min(len(t.cellChunks[len(t.cellChunks)-1].cells)*2, rowChunkMax)
+		}
+		t.cellChunks = append(t.cellChunks, &cellChunk{cells: make([]Cell, size)})
+	}
+	chunk := t.cellChunks[t.cellChunkIndex]
+	if chunk.used == len(chunk.cells) {
+		t.cellChunkIndex++
+		if t.cellChunkIndex == len(t.cellChunks) {
+			t.cellChunks = append(t.cellChunks, &cellChunk{cells: make([]Cell, min(len(chunk.cells)*2, rowChunkMax))})
+		}
+		chunk = t.cellChunks[t.cellChunkIndex]
+	}
+	cellCopy := &chunk.cells[chunk.used]
+	chunk.used++
+	*cellCopy = cell
+	return cellCopy
+}
+
+func (t *Trie) leafCell(key []byte, value [eip8297.ValueLength]byte) rowCell {
+	return rowCell{Cell: t.newCell(Cell{Kind: LeafCell, Key: key, Value: value}), Kind: LeafCell}
+}
+
+func (t *Trie) branchCell(prefix eip8297.Bitpath, left, right common.Hash) rowCell {
+	return rowCell{Cell: t.newCell(Cell{Kind: BranchCell, Prefix: prefix, Left: left, Right: right}), Kind: BranchCell}
 }
 
 func rowKeyForPath(path *eip8297.Bitpath) ([]byte, error) {
@@ -195,8 +230,8 @@ func (t *Trie) rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Reco
 	return n
 }
 
-func setLeaf(n *rowNode, slot int, key []byte, value [eip8297.ValueLength]byte) {
-	n.cells[slot] = leafCell(key, value)
+func (t *Trie) setLeaf(n *rowNode, slot int, key []byte, value [eip8297.ValueLength]byte) {
+	n.cells[slot] = t.leafCell(key, value)
 	n.markCellDirty(slot)
 }
 

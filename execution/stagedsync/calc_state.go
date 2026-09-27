@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -202,7 +203,8 @@ func (cs *calcState) markDirty(addr accounts.Address, acc *calcAccountState) {
 	}
 	acc.dirty = true
 	cs.dirtyAccounts = append(cs.dirtyAccounts, addr)
-	cs.prefetch.add(prefetchItem{account: acc.hash})
+	address := addr.Value()
+	cs.prefetch.add(prefetchItem{account: acc.hash, address: address})
 }
 
 func (cs *calcState) markWiped(addr accounts.Address) {
@@ -273,6 +275,8 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		}
 		cs.codeKeys[addr] = struct{}{}
 		acc := cs.ensureAccount(addr, writes)
+		address := addr.Value()
+		cs.prefetch.add(prefetchItem{account: acc.hash, address: address, codeHash: vw.Val.Hash.Value(), codeChunks: (len(vw.Val.Bytes) + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen, codeWritten: true})
 		acc.CodeHash = vw.Val.Hash.Value()
 		cs.markDirty(addr, acc)
 		if clearsDeleted(addr, vw.Val.Len() > 0) {
@@ -288,9 +292,9 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		// Skip lazy-loading the prior slot value: the only downstream consumer
 		// (FlushToUpdates) reads exactly the value set below, so the cold
 		// GetAsOf seek it would cost is wasted.
+		address := addr.Value()
 		st := cs.storageState[addr]
 		if st == nil {
-			address := addr.Value()
 			st = &calcStorage{hash: keccak.Sum256(address[:]), slots: make(map[accounts.StorageKey]calcSlot)}
 			cs.storageState[addr] = st
 		}
@@ -298,7 +302,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
-			cs.prefetch.add(prefetchItem{account: st.hash})
+			cs.prefetch.add(prefetchItem{account: st.hash, address: address})
 		}
 		for key, vw := range inner {
 			slot, ok := st.slots[key]
@@ -310,7 +314,7 @@ func (cs *calcState) ApplyWrites(writes *state.WriteSet, eip8246 bool) {
 			st.slots[key] = slot
 			if !dirty[key] {
 				dirty[key] = true
-				cs.prefetch.add(prefetchItem{account: st.hash, slot: slot.hash, storage: true})
+				cs.prefetch.add(prefetchItem{account: st.hash, slot: slot.hash, address: address, plainSlot: key.Value(), storage: true})
 			}
 		}
 	}

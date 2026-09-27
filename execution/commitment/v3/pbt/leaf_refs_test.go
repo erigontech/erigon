@@ -36,6 +36,14 @@ type leafRefTestContext struct {
 	refs    *commitment.LeafRefs
 }
 
+type allLeafRefsTestContext struct {
+	*trieTestContext
+}
+
+func (c *allLeafRefsTestContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	return ComputeLeafRefs(key, data)
+}
+
 func (c *leafRefTestContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	if !bytes.Equal(c.refKey, key) || !bytes.Equal(c.refData, data) {
 		return nil
@@ -99,6 +107,30 @@ func TestPBinLeafRefsRejectChangedRecordBytes(t *testing.T) {
 	_, err = NewTrie(refs).Process([]Op{{Key: first, Value: testTrieValue(3)}})
 	require.NoError(t, err)
 	require.Equal(t, plain.records, refs.records)
+}
+
+func TestPBinLeafRefsRejectChangedBranchPrefix(t *testing.T) {
+	first := trieCodeKey(0, 0, 1)
+	second := trieCodeKey(1, 0, 2)
+	third := trieCodeKey(0x80, 0, 3)
+	fourth := trieCodeKey(0x40, 0, 4)
+	base := newTrieTestContext()
+	_, err := NewTrie(base).Process([]Op{
+		{Key: first, Value: testTrieValue(1)},
+		{Key: second, Value: testTrieValue(2)},
+		{Key: third, Value: testTrieValue(3)},
+	})
+	require.NoError(t, err)
+	cacheOff := newTrieTestContext()
+	cacheOff.records = cloneTrieRecords(base.records)
+	cacheOn := &allLeafRefsTestContext{trieTestContext: newTrieTestContext()}
+	cacheOn.records = cloneTrieRecords(base.records)
+	want, err := NewTrie(cacheOff).Process([]Op{{Key: fourth, Value: testTrieValue(4)}})
+	require.NoError(t, err)
+	got, err := NewTrie(cacheOn).Process([]Op{{Key: fourth, Value: testTrieValue(4)}})
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	require.Equal(t, cacheOff.records, cacheOn.records)
 }
 
 func TestPBinComputeLeafRefsHashesEveryRowCell(t *testing.T) {

@@ -502,25 +502,65 @@ func TestTrieParallelChurnParity(t *testing.T) {
 	keys, prefixes := churnKeys()
 	for _, workers := range []int{1, 2, 8} {
 		t.Run(fmt.Sprintf("workers-%d", workers), func(t *testing.T) {
-			serialContext := newTrieTestContext()
-			parallelContext := newTrieTestContext()
+			serialContext := &allLeafRefsTestContext{trieTestContext: newTrieTestContext()}
+			parallelContext := &allLeafRefsTestContext{trieTestContext: newTrieTestContext()}
+			referenceContext := newTrieTestContext()
 			state := make(map[string]Op)
 			rng := rand.New(rand.NewSource(0x51d734 + int64(workers)))
+			initial := []Op{
+				{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(1)},
+				{Key: trieCodeKey(1, 0, 2), Value: testTrieValue(2)},
+				{Key: trieCodeKey(0x80, 0, 3), Value: testTrieValue(3)},
+			}
+			_, err := NewTrie(serialContext).Process(initial)
+			require.NoError(t, err)
+			_, err = NewTrie(parallelContext).Process(initial)
+			require.NoError(t, err)
+			_, err = NewTrie(referenceContext).Process(initial)
+			require.NoError(t, err)
+			updateChurnState(state, initial)
+			branchMove := []Op{{Key: trieCodeKey(0x40, 0, 4), Value: testTrieValue(4)}}
+			serialRoot, err := NewTrie(serialContext).Process(branchMove)
+			require.NoError(t, err)
+			parallelRoot, err := NewTrie(parallelContext).ProcessParallel(branchMove, workers)
+			require.NoError(t, err)
+			referenceRoot, err := NewTrie(referenceContext).Process(branchMove)
+			require.NoError(t, err)
+			require.Equal(t, referenceRoot, serialRoot)
+			require.Equal(t, referenceRoot, parallelRoot)
+			updateChurnState(state, branchMove)
 			for batch := range 64 {
 				ops := churnBatch(rng, keys, prefixes, state)
 				serialRoot, err := NewTrie(serialContext).Process(ops)
 				require.NoError(t, err, "batch=%d", batch)
 				parallelRoot, err := NewTrie(parallelContext).ProcessParallel(ops, workers)
 				require.NoError(t, err, "batch=%d", batch)
+				referenceRoot, err := NewTrie(referenceContext).Process(ops)
+				require.NoError(t, err, "batch=%d", batch)
 				require.Equal(t, serialRoot, parallelRoot, "batch=%d", batch)
+				require.Equal(t, referenceRoot, serialRoot, "batch=%d", batch)
 				require.Equal(t, serialContext.records, parallelContext.records, "batch=%d", batch)
+				require.Equal(t, referenceContext.records, serialContext.records, "batch=%d", batch)
 				updateChurnState(state, ops)
 				entries := churnEntries(state)
 				require.Equal(t, eip8297.StateRootWithHash(entriesFromOps(entries), eip8297.SelectedHash()), parallelRoot, "batch=%d", batch)
-				assertPersistedTrie(t, parallelContext, entries)
+				assertPersistedTrie(t, parallelContext.trieTestContext, entries)
 			}
 		})
 	}
+}
+
+func TestTrieParallelSkipsPlanForSmallBatch(t *testing.T) {
+	ctx := newTrieTestContext()
+	trie := NewTrie(ctx)
+	var planned atomic.Int32
+	trie.SetPhaseHook(func(phaseTask, *Op) error {
+		planned.Add(1)
+		return nil
+	})
+	_, err := trie.ProcessParallel([]Op{{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(1)}}, 8)
+	require.NoError(t, err)
+	require.Zero(t, planned.Load())
 }
 
 func TestBuildPhasePlanOwnsChainsAndBucketDependencies(t *testing.T) {
