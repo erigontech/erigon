@@ -334,6 +334,7 @@ func TestSubtreeTaskRejectsForeignOperations(t *testing.T) {
 	}
 }
 
+//nolint:gocritic
 func callSubtreeTask(t *testing.T, ctx commitment.PatriciaContext, task phaseTask) (err error) {
 	t.Helper()
 	trie := NewTrie(ctx)

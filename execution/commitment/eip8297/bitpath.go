@@ -99,15 +99,28 @@ func (p *Bitpath) Slice(from, to int16) Bitpath {
 		panic(fmt.Sprintf("pbin: slice [%d,%d) out of range for %d-bit path", from, to, p.BitLen))
 	}
 	var r Bitpath
-	for i := from; i < to; i++ {
-		r.SetBitAt(i-from, p.Bit(i))
+	for src, dst := from, int16(0); dst < to-from; {
+		take := min(int16(64-dst%64), to-from-dst)
+		word := p.wordAt(src)
+		if take < 64 {
+			word &= ^uint64(0) << (64 - uint(take))
+		}
+		r.Words[dst/64] |= word >> uint(dst%64)
+		src += take
+		dst += take
 	}
 	r.BitLen = to - from
+	r.MaskTail()
 	return r
 }
 
 func (p *Bitpath) AppendBit(v uint64) {
-	p.SetBitAt(p.BitLen, v)
+	if p.BitLen < 0 || p.BitLen >= MaxPathBits {
+		panic(fmt.Sprintf("pbin: bit %d out of range", p.BitLen))
+	}
+	if v != 0 {
+		p.Words[p.BitLen/64] |= uint64(1) << (63 - uint(p.BitLen%64))
+	}
 	p.BitLen++
 }
 
@@ -115,10 +128,26 @@ func (p *Bitpath) Append(o *Bitpath) {
 	if int(p.BitLen)+int(o.BitLen) > MaxPathBits {
 		panic(fmt.Sprintf("pbin: appending %d bits to %d-bit path overflows", o.BitLen, p.BitLen))
 	}
-	for i := int16(0); i < o.BitLen; i++ {
-		p.SetBitAt(p.BitLen+i, o.Bit(i))
+	for src, dst := int16(0), p.BitLen; src < o.BitLen; {
+		take := min(int16(64-dst%64), o.BitLen-src)
+		word := o.wordAt(src)
+		if take < 64 {
+			word &= ^uint64(0) << (64 - uint(take))
+		}
+		p.Words[dst/64] |= word >> uint(dst%64)
+		src += take
+		dst += take
 	}
 	p.BitLen += o.BitLen
+	p.MaskTail()
+}
+
+func (p *Bitpath) wordAt(offset int16) uint64 {
+	word := p.Words[offset/64] << uint(offset%64)
+	if shift := uint(offset % 64); shift != 0 && int(offset/64)+1 < PathWords {
+		word |= p.Words[offset/64+1] >> (64 - shift)
+	}
+	return word
 }
 
 func (p *Bitpath) HasPrefix(o *Bitpath) bool {

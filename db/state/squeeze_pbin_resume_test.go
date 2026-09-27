@@ -97,6 +97,23 @@ func TestPBinRebuildOverlayReadsPendingRowsBeforeFiles(t *testing.T) {
 	require.Equal(t, 1, inner.reads)
 }
 
+func TestPBinRebuildBatchesReadOnlyRightEdgeRows(t *testing.T) {
+	inner := &pbinRebuildContextStub{records: map[string][]byte{
+		"right-edge": {2},
+	}}
+	overlay := newPBinRebuildOverlay().withInner(inner)
+	require.NoError(t, overlay.PutBranch([]byte("finished"), []byte{1}, nil))
+
+	readsBefore := inner.reads
+	finished, _, err := overlay.Branch([]byte("finished"))
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, finished)
+	rightEdge, _, err := overlay.Branch([]byte("right-edge"))
+	require.NoError(t, err)
+	require.Equal(t, []byte{2}, rightEdge)
+	require.Equal(t, 1, inner.reads-readsBefore)
+}
+
 func TestPBinRebuildCheckpointResumesAfterLargestTreeKey(t *testing.T) {
 	overlay := newPBinRebuildOverlay()
 	overlay.writes["row"] = pbinRebuildWrite{data: []byte{1}, prev: []byte{2}}

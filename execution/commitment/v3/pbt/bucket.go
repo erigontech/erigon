@@ -29,6 +29,7 @@ type bucketDescriptor struct {
 	leaf        Cell
 	self        eip8297.Bitpath
 	left, right common.Hash
+	split       int16
 	row         *rowNode
 }
 

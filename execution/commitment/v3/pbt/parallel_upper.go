@@ -100,6 +100,7 @@ type phaseBucketResult struct {
 	present    bool
 }
 
+//nolint:gocritic
 func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask) (phaseBucketResult, error) {
 	prefix, err := taskSubtreePrefix(task)
 	if err != nil {
@@ -140,6 +141,7 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 	subtreeTrie.coreTask = &task
 	subtreeTrie.coreApplyHook = t.coreApplyHook
 	subtreeTrie.coreEncodeHook = t.coreEncodeHook
+	subtreeTrie.coreActivityHook = t.coreActivityHook
 	for i := range task.ops {
 		if err := t.phaseHookCall(task, &task.ops[i]); err != nil {
 			return phaseBucketResult{}, err
@@ -148,11 +150,15 @@ func (t *Trie) runSubtreeTask(workerCtx context.Context, workerContext commitmen
 	if _, err := subtreeTrie.Process(task.ops); err != nil {
 		return phaseBucketResult{}, fmt.Errorf("process subtree %x: %w", []byte(task.key), err)
 	}
+	deltas := subtreeTrie.TakeDeltas()
 	descriptor, present, err := subtreeTrie.descriptorFromRoot()
 	if err != nil {
-		return phaseBucketResult{}, err
+		if len(deltas) == 0 && task.fallbackSeen {
+			descriptor, present = task.fallback, task.fallbackOK
+		} else {
+			return phaseBucketResult{}, err
+		}
 	}
-	deltas := subtreeTrie.TakeDeltas()
 	if task.kind != phaseBucket || len(task.dependencies) != 0 {
 		deltas = ownedDeltas(deltas, &prefix)
 	}
@@ -171,6 +177,7 @@ func ownedDeltas(deltas []commitment.BranchDelta, prefix *eip8297.Bitpath) []com
 	return result
 }
 
+//nolint:gocritic
 func taskSubtreePrefix(task phaseTask) (eip8297.Bitpath, error) {
 	if task.prefix.BitLen != 0 {
 		return task.prefix, nil
@@ -309,6 +316,7 @@ func (t *Trie) processParallelPhaseA(ctx context.Context, workers int, plan phas
 	return finalRoot, nil
 }
 
+//nolint:gocritic
 func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
 	base := workerContext
 	if base == nil {
@@ -322,6 +330,7 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 	bucketTrie.coreTask = &task
 	bucketTrie.coreApplyHook = t.coreApplyHook
 	bucketTrie.coreEncodeHook = t.coreEncodeHook
+	bucketTrie.coreActivityHook = t.coreActivityHook
 	bucketTrie.roundPrev = make(map[string][]byte)
 	bucketTrie.bucketDirty = make(map[string][]byte)
 	childDeltas := make([]commitment.BranchDelta, 0)
@@ -341,13 +350,21 @@ func (t *Trie) runBucketJoin(workerCtx context.Context, workerContext commitment
 	if _, err := bucketTrie.processUpperOps(nil, changed); err != nil {
 		return phaseBucketResult{}, err
 	}
+	bucketDeltas := bucketTrie.TakeDeltas()
+	childDeltas = append(childDeltas, bucketDeltas...)
+	deltas := childDeltas
 	descriptor, present, err := bucketTrie.descriptorFromRoot()
 	if err != nil {
-		return phaseBucketResult{}, err
+		if len(deltas) == 0 && task.fallbackSeen {
+			descriptor, present = task.fallback, task.fallbackOK
+		} else {
+			return phaseBucketResult{}, err
+		}
 	}
-	return phaseBucketResult{prefix: task.prefix, deltas: append(childDeltas, bucketTrie.TakeDeltas()...), descriptor: descriptor, present: present}, workerCtx.Err()
+	return phaseBucketResult{prefix: task.prefix, deltas: deltas, descriptor: descriptor, present: present}, workerCtx.Err()
 }
 
+//nolint:gocritic
 func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.PatriciaContext, task phaseTask, results []phaseBucketResult, ready []bool) (phaseBucketResult, error) {
 	base := workerContext
 	if base == nil {
@@ -362,6 +379,7 @@ func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.
 	chainTrie.coreTask = &task
 	chainTrie.coreApplyHook = t.coreApplyHook
 	chainTrie.coreEncodeHook = t.coreEncodeHook
+	chainTrie.coreActivityHook = t.coreActivityHook
 	if task.zone == eip8297.StorageZone {
 		changed := make(map[string]phaseBucketResult)
 		for _, dependency := range task.dependencies {
@@ -384,11 +402,16 @@ func (t *Trie) runChainTask(workerCtx context.Context, workerContext commitment.
 			return phaseBucketResult{}, err
 		}
 	}
+	deltas := ownedDeltas(chainTrie.TakeDeltas(), &task.prefix)
 	descriptor, present, err := chainTrie.descriptorFromRoot()
 	if err != nil {
-		return phaseBucketResult{}, err
+		if len(deltas) == 0 && task.hasInitial {
+			descriptor, present = task.initial.descriptor, task.initial.present
+		} else {
+			return phaseBucketResult{}, err
+		}
 	}
-	return phaseBucketResult{prefix: task.prefix, deltas: ownedDeltas(chainTrie.TakeDeltas(), &task.prefix), descriptor: descriptor, present: present}, workerCtx.Err()
+	return phaseBucketResult{prefix: task.prefix, deltas: deltas, descriptor: descriptor, present: present}, workerCtx.Err()
 }
 
 func phaseRecordOwned(key []byte, prefix *eip8297.Bitpath) bool {
@@ -403,7 +426,7 @@ func (t *Trie) preparePhaseTasks(plan *phasePlan, base commitment.PatriciaContex
 	buckets := make(map[string]*Trie)
 	for i := range plan.tasks {
 		task := &plan.tasks[i]
-		if task.kind != phaseChain && task.kind != phaseBucketSubtask {
+		if task.kind != phaseChain && task.kind != phaseBucketSubtask && task.kind != phaseBucket {
 			continue
 		}
 		prefix, err := taskSubtreePrefix(*task)
@@ -428,8 +451,14 @@ func (t *Trie) preparePhaseTasks(plan *phasePlan, base commitment.PatriciaContex
 		if err != nil {
 			return err
 		}
-		task.initial = phaseBucketResult{prefix: prefix, descriptor: descriptor, present: present}
-		task.hasInitial = true
+		if task.kind == phaseBucket {
+			task.fallback = descriptor
+			task.fallbackSeen = true
+			task.fallbackOK = present
+		} else {
+			task.initial = phaseBucketResult{prefix: prefix, descriptor: descriptor, present: present}
+			task.hasInitial = true
+		}
 	}
 	return nil
 }
@@ -461,6 +490,7 @@ func mergeRoundDeltas(deltas []commitment.BranchDelta) []commitment.BranchDelta 
 	return result
 }
 
+//nolint:gocritic
 func (t *Trie) phaseHookCall(task phaseTask, op *Op) error {
 	if t.phaseHook == nil {
 		return nil
@@ -470,7 +500,15 @@ func (t *Trie) phaseHookCall(task phaseTask, op *Op) error {
 
 func (t *Trie) coreApply(op *Op) error {
 	if t.coreApplyHook == nil || t.coreTask == nil {
+		if t.coreActivityHook != nil && t.coreTask != nil {
+			t.coreActivityHook(true)
+			defer t.coreActivityHook(false)
+		}
 		return nil
+	}
+	if t.coreActivityHook != nil {
+		t.coreActivityHook(true)
+		defer t.coreActivityHook(false)
 	}
 	return t.coreApplyHook(*t.coreTask, op)
 }
@@ -505,7 +543,10 @@ func (t *Trie) descriptorFromRoot() (bucketDescriptor, bool, error) {
 		if t.root.row == nil {
 			return bucketDescriptor{}, false, nil
 		}
-		return bucketDescriptor{form: RowRoot, row: t.root.row}, true, nil
+		if !t.root.row.folded {
+			return bucketDescriptor{}, false, fmt.Errorf("row descriptor was not folded")
+		}
+		return bucketDescriptor{form: RowRoot, row: t.root.row, split: t.root.row.foldResult.Split, left: t.root.row.foldResult.Left, right: t.root.row.foldResult.Right}, true, nil
 	case LeafRoot:
 		return bucketDescriptor{form: LeafRoot, leaf: t.root.leaf}, true, nil
 	case ExtRoot:

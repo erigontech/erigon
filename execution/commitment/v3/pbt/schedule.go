@@ -59,6 +59,9 @@ type phaseTask struct {
 	resultIndex  int
 	initial      phaseBucketResult
 	hasInitial   bool
+	fallback     bucketDescriptor
+	fallbackSeen bool
+	fallbackOK   bool
 }
 
 type phasePlan struct {

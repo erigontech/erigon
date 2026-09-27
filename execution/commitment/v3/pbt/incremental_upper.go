@@ -34,6 +34,8 @@ func isStoragePath(path *eip8297.Bitpath) bool {
 }
 
 func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (common.Hash, error) {
+	t.foldedRoot = common.Hash{}
+	t.foldedRootReady = false
 	if t.roundPrev == nil {
 		t.roundPrev = make(map[string][]byte)
 		t.bucketDirty = make(map[string][]byte)
@@ -94,6 +96,9 @@ func (t *Trie) processUpperOps(ops []Op, changed map[string]phaseBucketResult) (
 	}
 	if err := t.normalize(); err != nil {
 		return common.Hash{}, fmt.Errorf("normalize upper tree: %w", err)
+	}
+	if err := t.foldDirtyRows(); err != nil {
+		return common.Hash{}, err
 	}
 	if err := t.write(); err != nil {
 		return common.Hash{}, err
@@ -283,15 +288,19 @@ func subtreeForDescriptorAt(prefix eip8297.Bitpath, descriptor bucketDescriptor)
 		}
 		return subtreeCell{path: path, cell: leafCell(descriptor.leaf.Key, descriptor.leaf.Value)}, nil
 	case RowRoot:
-		result, err := rowFoldResult(descriptor.row)
-		if err != nil {
-			return subtreeCell{}, err
+		result := descriptor.row.foldResult
+		if !descriptor.row.folded {
+			var err error
+			result, err = rowRoutingResult(descriptor.row)
+			if err != nil {
+				return subtreeCell{}, err
+			}
 		}
 		path, err := rowTopPrefix(descriptor.row, result.Split)
 		if err != nil {
 			return subtreeCell{}, err
 		}
-		return subtreeCell{path: path, cell: branchCell(eip8297.Bitpath{}, result.Left, result.Right)}, nil
+		return subtreeCell{path: path, cell: branchCell(eip8297.Bitpath{}, descriptor.left, descriptor.right)}, nil
 	case ExtRoot:
 		path := prefix
 		path.Append(&descriptor.self)
@@ -474,7 +483,7 @@ func (t *Trie) splitRootSubtree(root *treeRoot, old, added subtreeCell, split in
 		t.registerRow(row)
 		return nil
 	}
-	result, err := rowFoldResult(row)
+	result, err := rowRoutingResult(row)
 	if err != nil {
 		return err
 	}
@@ -483,7 +492,7 @@ func (t *Trie) splitRootSubtree(root *treeRoot, old, added subtreeCell, split in
 	if err != nil {
 		return err
 	}
-	root.left, root.right = result.Left, result.Right
+	root.left, root.right = common.Hash{}, common.Hash{}
 	root.topRow = row
 	t.registerRow(row)
 	return nil
@@ -571,7 +580,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 		if err != nil {
 			return err
 		}
-		result, err := rowFoldResult(child)
+		result, err := rowRoutingResult(child)
 		if err != nil {
 			return err
 		}
@@ -579,7 +588,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 		if err != nil {
 			return err
 		}
-		setBranch(row, slot, branchCell(full.Slice(row.path.BitLen+4, result.Split), result.Left, result.Right))
+		setBranch(row, slot, branchCell(full.Slice(row.path.BitLen+4, result.Split), common.Hash{}, common.Hash{}))
 		row.cell(slot).child = child
 		child.parent = row
 		child.parentSlot = slot
@@ -610,7 +619,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 		if err != nil {
 			return err
 		}
-		result, err := rowFoldResult(child)
+		result, err := rowRoutingResult(child)
 		if err != nil {
 			return err
 		}
@@ -618,7 +627,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 		if err != nil {
 			return err
 		}
-		setBranch(row, slot, branchCell(newFull.Slice(row.path.BitLen+4, result.Split), result.Left, result.Right))
+		setBranch(row, slot, branchCell(newFull.Slice(row.path.BitLen+4, result.Split), common.Hash{}, common.Hash{}))
 		row.cell(slot).child = child
 		child.parent = row
 		child.parentSlot = slot

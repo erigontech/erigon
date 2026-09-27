@@ -14,71 +14,82 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package pbt
+package pbt_test
 
 import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"fmt"
 	"os/exec"
 	"runtime"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/empty"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/holiman/uint256"
 )
 
-type compareLeaf struct {
-	plain  []byte
-	key    []byte
-	value  [eip8297.ValueLength]byte
-	raw    [eip8297.ValueLength]byte
-	update commitment.Update
+type feedBenchLeaf struct {
+	plain []byte
+	key   []byte
+	value [eip8297.ValueLength]byte
+	state commitment.Update
 }
 
-type compareFixture struct {
-	seed  []compareLeaf
-	batch []compareLeaf
+type feedBenchFixture struct {
+	seed  []feedBenchLeaf
+	batch []feedBenchLeaf
 }
 
-type compareContext struct {
-	*trieTestContext
-	discard bool
-	state   map[string]commitment.Update
+type feedBenchContext struct {
+	mu       sync.Mutex
+	records  map[string][]byte
+	accounts map[string]commitment.Update
+	storage  map[string]commitment.Update
+	discard  bool
 }
 
-func newCompareContext(records map[string][]byte, discard bool, stateLeaves []compareLeaf) *compareContext {
-	ctx := newTrieTestContext()
+func newFeedBenchContext(records map[string][]byte, discard bool, leaves []feedBenchLeaf) *feedBenchContext {
+	ctx := &feedBenchContext{records: make(map[string][]byte, len(records)), accounts: make(map[string]commitment.Update), storage: make(map[string]commitment.Update), discard: discard}
 	for key, value := range records {
 		ctx.records[key] = bytes.Clone(value)
 	}
-	state := make(map[string]commitment.Update, len(stateLeaves))
-	for i := range stateLeaves {
-		state[string(stateLeaves[i].plain)] = stateLeaves[i].update
+	for i := range leaves {
+		leaf := &leaves[i]
+		if len(leaf.plain) == 20 {
+			ctx.accounts[string(leaf.plain)] = leaf.state
+		} else {
+			ctx.storage[string(leaf.plain)] = leaf.state
+		}
 	}
-	return &compareContext{trieTestContext: ctx, discard: discard, state: state}
+	return ctx
 }
 
-func (c *compareContext) Storage(key []byte) (*commitment.Update, error) {
-	update, ok := c.state[string(key)]
-	if !ok {
-		return nil, fmt.Errorf("unexpected storage read for %x", key)
-	}
-	return &update, nil
+func (c *feedBenchContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return bytes.Clone(c.records[string(key)]), 0, nil
 }
 
-func (c *compareContext) PutBranch(key, data, prev []byte) error {
+func (c *feedBenchContext) PutBranch(key, data, prev []byte) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if !bytes.Equal(c.records[string(key)], prev) {
-		return fmt.Errorf("previous record mismatch for %x", key)
+		return &feedBenchError{key: bytes.Clone(key)}
 	}
 	if c.discard {
 		return nil
@@ -91,172 +102,294 @@ func (c *compareContext) PutBranch(key, data, prev []byte) error {
 	return nil
 }
 
-func compareStorageLeaf(index, addressCount int, value byte, hasher eip8297.KeyHasherFunc) compareLeaf {
-	address := make([]byte, 20)
-	binary.BigEndian.PutUint64(address[12:], uint64(index%addressCount+1))
-	slot := make([]byte, 32)
-	binary.BigEndian.PutUint64(slot[24:], uint64(index))
-	plain := append(bytes.Clone(address), slot...)
-	var rawValue [eip8297.ValueLength]byte
-	rawValue[len(rawValue)-1] = value
-	update := commitment.Update{Flags: commitment.StorageUpdate, StorageLen: eip8297.ValueLength}
-	update.Storage = rawValue
-	key := hasher(plain)
-	return compareLeaf{plain: plain, key: key, value: eip8297.EncodeStorageValue(rawValue[:]), raw: rawValue, update: update}
+func (c *feedBenchContext) Account(key []byte) (*commitment.Update, error) {
+	update := c.accounts[string(key)]
+	return &update, nil
 }
 
-func compareFixtureFor(kind string, hasher eip8297.KeyHasherFunc) compareFixture {
+func (c *feedBenchContext) Storage(key []byte) (*commitment.Update, error) {
+	update := c.storage[string(key)]
+	return &update, nil
+}
+
+type feedBenchError struct{ key []byte }
+
+func (e *feedBenchError) Error() string { return "benchmark previous record mismatch" }
+
+type feedBenchReader struct{ values map[string][]byte }
+
+func (r *feedBenchReader) WithHistory() bool { return false }
+
+func (r *feedBenchReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *feedBenchReader) Read(domain kv.Domain, key []byte, _ uint64) ([]byte, kv.Step, error) {
+	return bytes.Clone(r.values[feedBenchValueKey(domain, key)]), 0, nil
+}
+
+func (r *feedBenchReader) Clone(kv.TemporalTx) commitmentdb.StateReader { return r }
+
+func (r *feedBenchReader) CloneForWorker(context.Context, kv.TemporalTx) commitmentdb.StateReader {
+	return r
+}
+
+func feedBenchValueKey(domain kv.Domain, key []byte) string {
+	return string(append([]byte{byte(domain)}, key...))
+}
+
+func feedBenchFixtureFor(kind string) feedBenchFixture {
+	addressCount, slotsPerAddress := 5000, 1
+	seedCount := addressCount
 	switch kind {
 	case "tip":
-		seed := make([]compareLeaf, 10_000)
-		for i := range seed {
-			seed[i] = compareStorageLeaf(i, 10_000, 1, hasher)
-		}
-		batch := make([]compareLeaf, 5_000)
-		copy(batch, seed[5_000:])
-		for i := range batch {
-			batch[i].raw[len(batch[i].raw)-1] = 2
-			batch[i].value = eip8297.EncodeStorageValue(batch[i].raw[:])
-			batch[i].update.Storage = batch[i].raw
-		}
-		return compareFixture{seed: seed, batch: batch}
+		addressCount, seedCount, slotsPerAddress = 5000, 1000, 0
 	case "whale":
-		seed := make([]compareLeaf, 5_000)
-		batch := make([]compareLeaf, 5_000)
-		for i := range seed {
-			seed[i] = compareStorageLeaf(i+64, 1, 1, hasher)
-			batch[i] = compareStorageLeaf(i+64, 1, 2, hasher)
-		}
-		return compareFixture{seed: seed, batch: batch}
+		addressCount, slotsPerAddress = 1, 512
+		seedCount = addressCount
 	case "rebuild":
-		batch := make([]compareLeaf, 5_000)
-		for i := range batch {
-			batch[i] = compareStorageLeaf(i, 5_000, 3, hasher)
-		}
-		return compareFixture{batch: batch}
+		addressCount, slotsPerAddress = 5000, 0
+		seedCount = 0
 	default:
-		panic("unknown benchmark fixture")
+		panic(kind)
 	}
+	makeLeaves := func(from, to int, value byte) []feedBenchLeaf {
+		leaves := make([]feedBenchLeaf, 0, (to-from)*(slotsPerAddress+1))
+		for addressIndex := from; addressIndex < to; addressIndex++ {
+			address := make([]byte, 20)
+			address[18] = byte(addressIndex >> 8)
+			address[19] = byte(addressIndex)
+			balance := uint256.NewInt(1)
+			basic, err := eip8297.EncodeBasicData(1, balance, 0)
+			if err != nil {
+				panic(err)
+			}
+			leaves = append(leaves, feedBenchLeaf{plain: bytes.Clone(address), key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), value: basic, state: commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Balance: *balance, Nonce: 1, CodeHash: empty.CodeHash}})
+			for slotIndex := range slotsPerAddress {
+				slot := make([]byte, 32)
+				binary.BigEndian.PutUint64(slot[24:], uint64(addressIndex*slotsPerAddress+slotIndex))
+				plain := append(bytes.Clone(address), slot...)
+				var raw [eip8297.ValueLength]byte
+				raw[len(raw)-1] = value
+				leaves = append(leaves, feedBenchLeaf{plain: plain, key: eip8297.TreeKeyStorage(address, slot), value: eip8297.EncodeStorageValue(raw[:]), state: commitment.Update{Flags: commitment.StorageUpdate, StorageLen: eip8297.ValueLength, Storage: raw}})
+			}
+		}
+		return leaves
+	}
+	batchFrom := 0
+	seed := makeLeaves(0, seedCount, 1)
+	batch := makeLeaves(batchFrom, batchFrom+addressCount, 2)
+	if slotsPerAddress != 0 && kind != "rebuild" {
+		batch = slices.DeleteFunc(batch, func(leaf feedBenchLeaf) bool { return len(leaf.plain) == 20 })
+	}
+	return feedBenchFixture{seed: seed, batch: batch}
 }
 
-func compareOps(leaves []compareLeaf) []Op {
-	ops := make([]Op, len(leaves))
+func feedBenchReaderFor(fixture feedBenchFixture) *feedBenchReader {
+	values := make(map[string][]byte)
+	leaves := append(append([]feedBenchLeaf(nil), fixture.seed...), fixture.batch...)
 	for i := range leaves {
-		ops[i] = Op{Key: bytes.Clone(leaves[i].key), Value: leaves[i].value}
+		leaf := &leaves[i]
+		if len(leaf.plain) == 20 {
+			account := accounts.Account{Nonce: leaf.state.Nonce, Balance: leaf.state.Balance, CodeHash: accounts.EmptyCodeHash}
+			values[feedBenchValueKey(kv.AccountsDomain, leaf.plain)] = accounts.SerialiseV3(&account)
+		} else {
+			values[feedBenchValueKey(kv.StorageDomain, leaf.plain)] = bytes.Clone(leaf.state.Storage[:])
+		}
+	}
+	return &feedBenchReader{values: values}
+}
+
+func feedBenchOps(leaves []feedBenchLeaf) []pbt.Op {
+	ops := make([]pbt.Op, 0, len(leaves)*2)
+	for i := range leaves {
+		leaf := &leaves[i]
+		ops = append(ops, pbt.Op{Key: leaf.key, Value: leaf.value})
+		if len(leaf.plain) == 20 {
+			ops = append(ops, pbt.Op{Key: eip8297.TreeKeyAccount(leaf.plain, eip8297.CodeHashLeafKey), Value: eip8297.CodeHashValue(empty.CodeHash)})
+		}
 	}
 	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
 	return ops
 }
 
-func compareUpdates(leaves []compareLeaf, tmpdir string) *commitment.Updates {
-	hasher := eip8297.KeyHasherWith(eip8297.SelectedHash())
-	updates := commitment.NewUpdates(commitment.ModeUpdate, tmpdir, func(key []byte) []byte { return hasher(key) })
+func feedBenchPlainKeys(leaves []feedBenchLeaf) map[string]struct{} {
+	keys := make(map[string]struct{}, len(leaves))
 	for i := range leaves {
-		update := leaves[i].update
-		updates.TouchPlainKeyDirect(string(leaves[i].plain), &update)
+		leaf := &leaves[i]
+		keys[string(leaf.plain)] = struct{}{}
 	}
+	return keys
+}
+
+func feedBenchState(leaves ...[]feedBenchLeaf) []feedBenchLeaf {
+	result := make([]feedBenchLeaf, 0)
+	for _, group := range leaves {
+		result = append(result, group...)
+	}
+	return result
+}
+
+func feedBenchRecords(records map[string][]byte) map[string][]byte {
+	result := make(map[string][]byte, len(records))
+	for key, value := range records {
+		result[key] = bytes.Clone(value)
+	}
+	return result
+}
+
+func feedBenchKeyOnlyUpdates(tb testing.TB, leaves []feedBenchLeaf) *commitment.Updates {
+	tb.Helper()
+	previous := commitment.PBinHashSuiteName()
+	require.NoError(tb, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
+	updates := commitment.NewBinUpdates(tb.TempDir(), feedBenchPlainKeys(leaves))
+	require.NoError(tb, commitment.SetPBinHashSuite(previous))
 	return updates
 }
 
-func compareRecords(records map[string][]byte) map[string][]byte {
-	copyRecords := make(map[string][]byte, len(records))
-	for key, value := range records {
-		copyRecords[key] = bytes.Clone(value)
-	}
-	return copyRecords
-}
-
-func prepareCompareFixture(b *testing.B, fixture compareFixture) (map[string][]byte, map[string][]byte) {
-	b.Helper()
-	seedOps := compareOps(fixture.seed)
-	previous := eip8297.HashSuiteName()
-	b.Cleanup(func() { require.NoError(b, eip8297.SetHashSuite(previous)) })
-	require.NoError(b, eip8297.SetHashSuite(eip8297.HashBlake3))
-	require.NoError(b, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
-
-	newContext := newCompareContext(nil, false, nil)
-	newRoot, err := NewTrie(newContext).Process(seedOps)
+func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectParallel bool) {
+	seedOps := feedBenchOps(fixture.seed)
+	newSeed := newFeedBenchContext(nil, false, fixture.seed)
+	newSeedRoot, err := pbt.NewTrie(newSeed).Process(seedOps)
 	require.NoError(b, err)
-
-	oldContext := newCompareContext(nil, false, fixture.seed)
-	oldTrie := commitment.NewPBinPatriciaHashed(oldContext)
+	newBase := feedBenchRecords(newSeed.records)
+	oldSeed := newFeedBenchContext(nil, false, fixture.seed)
+	oldTrie := commitment.NewPBinPatriciaHashed(oldSeed)
 	require.NoError(b, oldTrie.SetPBinHashSuite(commitment.PBinHashBlake3))
-	oldUpdates := compareUpdates(fixture.seed, b.TempDir())
-	oldRoot, err := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
+	seedUpdates := feedBenchKeyOnlyUpdates(b, fixture.seed)
+	oldSeedRoot, err := oldTrie.Process(context.Background(), seedUpdates, "benchmark", nil, commitment.WarmupConfig{})
 	require.NoError(b, err)
-	oldUpdates.Close()
-	oldTrie.Release()
-	require.Equal(b, oldRoot, newRoot[:])
-	return compareRecords(newContext.records), compareRecords(oldContext.records)
-}
-
-func compareRun(b *testing.B, fixture compareFixture, newBase, oldBase map[string][]byte, workers int) {
-	b.Helper()
-	newOps := compareOps(fixture.batch)
-	rounds := 5
-	newDurations := make([]time.Duration, 0, rounds)
-	oldDurations := make([]time.Duration, 0, rounds)
-	for round := range rounds {
-		newContext := newCompareContext(newBase, true, nil)
-		newTrie := NewTrie(newContext)
-		oldContext := newCompareContext(oldBase, true, fixture.seed)
+	require.Equal(b, oldSeedRoot, newSeedRoot[:])
+	seedUpdates.Close()
+	oldBase := feedBenchRecords(oldSeed.records)
+	reader := feedBenchReaderFor(fixture)
+	keys := feedBenchPlainKeys(fixture.batch)
+	state := feedBenchState(fixture.seed, fixture.batch)
+	var newDurations, oldDurations []time.Duration
+	for round := range 5 {
+		newContext := newFeedBenchContext(newBase, true, state)
+		newTrie := pbt.NewTrie(newContext)
+		newTrie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) {
+			return newFeedBenchContext(newBase, true, state), func() {}
+		})
+		var active, peak atomic.Int32
+		newTrie.SetCoreActivityHook(func(start bool) {
+			if !start {
+				active.Add(-1)
+				return
+			}
+			current := active.Add(1)
+			for {
+				old := peak.Load()
+				if old >= current || peak.CompareAndSwap(old, current) {
+					break
+				}
+			}
+			runtime.Gosched()
+		})
+		oldContext := newFeedBenchContext(oldBase, true, state)
 		oldTrie := commitment.NewPBinPatriciaHashed(oldContext)
 		require.NoError(b, oldTrie.SetPBinHashSuite(commitment.PBinHashBlake3))
-		oldUpdates := compareUpdates(fixture.batch, b.TempDir())
+		oldUpdates := feedBenchKeyOnlyUpdates(b, fixture.batch)
 		if round%2 == 0 {
 			before := benchmarkUptime()
 			start := time.Now()
-			newRoot, err := newTrie.ProcessParallelContext(context.Background(), newOps, workers)
+			feed, feedErr := commitmentdb.BinFeedFromState(keys, nil, nil, reader)
+			require.NoError(b, feedErr)
+			ops, translateErr := pbt.TranslateFeed(feed)
+			require.NoError(b, translateErr)
+			newRoot, processErr := newTrie.ProcessParallelContext(context.Background(), ops, workers)
+			require.NoError(b, processErr)
 			newDurations = append(newDurations, time.Since(start))
 			after := benchmarkUptime()
-			require.NoError(b, err)
-			b.Logf("new round=%d uptime-before=%s uptime-after=%s", round, before, after)
-
+			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d", round, before, after, peak.Load())
+			if workers > 1 && expectParallel {
+				require.Greater(b, peak.Load(), int32(1))
+			}
 			before = benchmarkUptime()
 			start = time.Now()
-			oldRoot, err := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
+			oldRoot, processErr := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
 			oldDurations = append(oldDurations, time.Since(start))
 			after = benchmarkUptime()
-			require.NoError(b, err)
+			require.NoError(b, processErr)
 			b.Logf("old round=%d uptime-before=%s uptime-after=%s", round, before, after)
 			require.Equal(b, oldRoot, newRoot[:])
 		} else {
 			before := benchmarkUptime()
 			start := time.Now()
-			oldRoot, err := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
+			oldRoot, processErr := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
 			oldDurations = append(oldDurations, time.Since(start))
 			after := benchmarkUptime()
-			require.NoError(b, err)
+			require.NoError(b, processErr)
 			b.Logf("old round=%d uptime-before=%s uptime-after=%s", round, before, after)
-
 			before = benchmarkUptime()
 			start = time.Now()
-			newRoot, err := newTrie.ProcessParallelContext(context.Background(), newOps, workers)
+			feed, feedErr := commitmentdb.BinFeedFromState(keys, nil, nil, reader)
+			require.NoError(b, feedErr)
+			ops, translateErr := pbt.TranslateFeed(feed)
+			require.NoError(b, translateErr)
+			newRoot, processErr := newTrie.ProcessParallelContext(context.Background(), ops, workers)
 			newDurations = append(newDurations, time.Since(start))
 			after = benchmarkUptime()
-			require.NoError(b, err)
-			b.Logf("new round=%d uptime-before=%s uptime-after=%s", round, before, after)
+			require.NoError(b, processErr)
+			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d", round, before, after, peak.Load())
+			if workers > 1 && expectParallel {
+				require.Greater(b, peak.Load(), int32(1))
+			}
 			require.Equal(b, oldRoot, newRoot[:])
 		}
 		oldUpdates.Close()
 		oldTrie.Release()
 	}
 	newMin, oldMin := newDurations[0], oldDurations[0]
-	for i := 1; i < rounds; i++ {
-		newMin = min(newMin, newDurations[i])
-		oldMin = min(oldMin, oldDurations[i])
+	for i := 1; i < len(newDurations); i++ {
+		if newDurations[i] < newMin {
+			newMin = newDurations[i]
+		}
+		if oldDurations[i] < oldMin {
+			oldMin = oldDurations[i]
+		}
 	}
-	keys := float64(len(fixture.batch))
-	b.ReportMetric(float64(newMin.Microseconds())/1000*1000/keys, "new-ms/1k")
-	b.ReportMetric(float64(oldMin.Microseconds())/1000*1000/keys, "old-ms/1k")
+	keysCount := float64(len(fixture.batch))
+	b.ReportMetric(float64(newMin.Microseconds())/keysCount, "new-ms/1k")
+	b.ReportMetric(float64(oldMin.Microseconds())/keysCount, "old-ms/1k")
 }
 
-func benchmarkUptime() string {
-	output, err := exec.CommandContext(context.Background(), "uptime").Output()
-	if err != nil {
-		return "unavailable"
+func BenchmarkPBinCompareFeedTip(b *testing.B) {
+	previous := eip8297.HashSuiteName()
+	previousPBin := commitment.PBinHashSuiteName()
+	b.Cleanup(func() { require.NoError(b, eip8297.SetHashSuite(previous)) })
+	b.Cleanup(func() { require.NoError(b, commitment.SetPBinHashSuite(previousPBin)) })
+	require.NoError(b, eip8297.SetHashSuite(eip8297.HashBlake3))
+	require.NoError(b, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	fixture := feedBenchFixtureFor("tip")
+	for _, workers := range []int{1, physicalCoreCount()} {
+		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) { feedBenchRun(b, fixture, workers, true) })
 	}
-	return strings.TrimSpace(string(output))
+}
+
+func BenchmarkPBinCompareFeedWhale(b *testing.B) {
+	previous := eip8297.HashSuiteName()
+	previousPBin := commitment.PBinHashSuiteName()
+	b.Cleanup(func() { require.NoError(b, eip8297.SetHashSuite(previous)) })
+	b.Cleanup(func() { require.NoError(b, commitment.SetPBinHashSuite(previousPBin)) })
+	require.NoError(b, eip8297.SetHashSuite(eip8297.HashBlake3))
+	require.NoError(b, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	fixture := feedBenchFixtureFor("whale")
+	for _, workers := range []int{1, physicalCoreCount()} {
+		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) { feedBenchRun(b, fixture, workers, true) })
+	}
+}
+
+func BenchmarkPBinCompareFeedRebuild(b *testing.B) {
+	previous := eip8297.HashSuiteName()
+	previousPBin := commitment.PBinHashSuiteName()
+	b.Cleanup(func() { require.NoError(b, eip8297.SetHashSuite(previous)) })
+	b.Cleanup(func() { require.NoError(b, commitment.SetPBinHashSuite(previousPBin)) })
+	require.NoError(b, eip8297.SetHashSuite(eip8297.HashBlake3))
+	require.NoError(b, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	fixture := feedBenchFixtureFor("rebuild")
+	for _, workers := range []int{1, physicalCoreCount()} {
+		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) { feedBenchRun(b, fixture, workers, true) })
+	}
 }
 
 func physicalCoreCount() int {
@@ -265,110 +398,13 @@ func physicalCoreCount() int {
 			return count
 		}
 	}
-	if output, err := exec.CommandContext(context.Background(), "system_profiler", "SPHardwareDataType").Output(); err == nil {
-		for line := range strings.SplitSeq(string(output), "\n") {
-			if strings.Contains(line, "Total Number of Cores") {
-				parts := strings.Split(line, ":")
-				if len(parts) == 2 {
-					if count, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil && count > 0 {
-						return count
-					}
-				}
-			}
-		}
-	}
 	return runtime.NumCPU()
 }
 
-func BenchmarkPBinCompareTip(b *testing.B) {
-	benchmarkPBinFixture(b, "tip")
-}
-
-func BenchmarkPBinCompareWhale(b *testing.B) {
-	benchmarkPBinFixture(b, "whale")
-}
-
-func BenchmarkPBinCompareRebuild(b *testing.B) {
-	benchmarkPBinFixture(b, "rebuild")
-}
-
-func benchmarkPBinFixture(b *testing.B, kind string) {
-	fixture := benchmarkFixture(b, kind)
-	newBase, oldBase := prepareCompareFixture(b, fixture)
-	for _, workers := range []int{1, physicalCoreCount()} {
-		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) {
-			compareRun(b, fixture, newBase, oldBase, workers)
-		})
+func benchmarkUptime() string {
+	output, err := exec.CommandContext(context.Background(), "uptime").Output()
+	if err != nil {
+		return "unavailable"
 	}
-}
-
-func benchmarkFixture(b *testing.B, kind string) compareFixture {
-	previous := eip8297.HashSuiteName()
-	require.NoError(b, eip8297.SetHashSuite(eip8297.HashBlake3))
-	b.Cleanup(func() { require.NoError(b, eip8297.SetHashSuite(previous)) })
-	return compareFixtureFor(kind, eip8297.KeyHasherWith(eip8297.SelectedHash()))
-}
-
-func BenchmarkPBinDensity(b *testing.B) {
-	fixture := benchmarkFixture(b, "whale")
-	newBase, oldBase := prepareCompareFixture(b, fixture)
-	newDensity := pbtDensity(newBase, fixture.seed)
-	oldDensity, err := commitment.PBinLegacyRecordDensity(oldBase)
-	require.NoError(b, err)
-	b.ReportMetric(float64(newDensity.rows)/float64(len(fixture.batch)), "new-rows/leaf")
-	b.ReportMetric(float64(oldDensity.Rows)/float64(len(fixture.batch)), "old-rows/leaf")
-	b.ReportMetric(float64(newDensity.cells)/float64(len(fixture.batch)), "new-cells/leaf")
-	b.ReportMetric(float64(oldDensity.Cells)/float64(len(fixture.batch)), "old-cells/leaf")
-	b.ReportMetric(float64(newDensity.bucketRecords), "new-bucket-records")
-	b.ReportMetric(0, "old-bucket-records")
-	b.ReportMetric(float64(newDensity.bytes)/float64(len(fixture.batch)), "new-bytes/leaf")
-	b.ReportMetric(float64(oldDensity.Bytes)/float64(len(fixture.batch)), "old-bytes/leaf")
-	b.ReportMetric(float64(newDensity.bytes), "new-kv-size")
-	b.ReportMetric(float64(oldDensity.Bytes), "old-kv-size")
-	windows := make([]int, 0, len(oldDensity.Splits))
-	for window := range oldDensity.Splits {
-		windows = append(windows, window)
-	}
-	sort.Ints(windows)
-	for _, window := range windows {
-		b.ReportMetric(float64(oldDensity.Splits[window]), fmt.Sprintf("old-splits/w%d", window))
-	}
-}
-
-type compareDensity struct {
-	rows, cells, bytes, bucketRecords int
-}
-
-func pbtDensity(records map[string][]byte, leaves []compareLeaf) compareDensity {
-	density := compareDensity{}
-	bucketKeys := make(map[string]struct{}, len(leaves))
-	for i := range leaves {
-		key, err := bucketKeyForStorage(leaves[i].key)
-		if err == nil {
-			bucketKeys[string(key)] = struct{}{}
-		}
-	}
-	for key, value := range records {
-		if len(value) == 0 {
-			continue
-		}
-		density.bytes += len(key) + len(value)
-		if _, ok := bucketKeys[key]; ok {
-			density.bucketRecords++
-			continue
-		}
-		record, err := DecodeRecord([]byte(key), value)
-		if err != nil {
-			panic(err)
-		}
-		if record.Form == RowRoot {
-			density.rows++
-		}
-		for i := range record.Cells {
-			if record.Cells[i].Kind != EmptyCell {
-				density.cells++
-			}
-		}
-	}
-	return density
+	return strings.TrimSpace(string(output))
 }

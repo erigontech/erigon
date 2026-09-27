@@ -30,6 +30,15 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
+func pbinRebuildBatches(ops []pbt.Op, tmpDir string, maxOps, maxBytes int) ([][]pbt.Op, error) {
+	var batches [][]pbt.Op
+	err := pbinForEachRebuildBatch(ops, tmpDir, maxOps, maxBytes, func(batch []pbt.Op, _ bool) error {
+		batches = append(batches, append([]pbt.Op(nil), batch...))
+		return nil
+	})
+	return batches, err
+}
+
 func TestPBinRebuildBatchesFollowTreeKeyOrder(t *testing.T) {
 	addressA := bytes.Repeat([]byte{0x01}, 20)
 	addressB := bytes.Repeat([]byte{0x02}, 20)

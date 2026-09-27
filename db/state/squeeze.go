@@ -1524,10 +1524,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			return nil, err
 		}
 		codeStats = pbt.CodeStatsFromFeed(feed)
-		ops, err := pbt.TranslateFeed(feed)
-		if err != nil {
-			return nil, err
-		}
 		tmpDir, err := os.MkdirTemp("", "erigon-pbin-rebuild-")
 		if err != nil {
 			return nil, err
@@ -1564,7 +1560,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 				resumeKey = checkpoint.LastKey
 			}
 			processedBatch := false
-			err = pbinForEachRebuildBatchAfter(ops, tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, final bool) error {
+			err = pbinForEachRebuildFeedBatchAfter(feed, tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, final bool) error {
 				processedBatch = true
 				sd.GetCommitmentCtx().SetPBinOps(batch)
 				var current *pbinRebuildOverlay
@@ -1783,86 +1779,43 @@ const (
 	pbinRebuildMaxBytes = 64 << 20
 )
 
-func pbinRebuildBatches(ops []pbt.Op, tmpDir string, maxOps, maxBytes int) ([][]pbt.Op, error) {
-	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
-	defer collector.Close()
-	for i := range ops {
-		key := ops[i].Key
-		if len(ops[i].Drop) != 0 {
-			key = ops[i].Drop
-		}
-		var index [8]byte
-		binary.BigEndian.PutUint64(index[:], uint64(i))
-		if err := collector.Collect(key, index[:]); err != nil {
-			return nil, err
-		}
-	}
-	ordered := make([]pbt.Op, 0, len(ops))
-	err := collector.Load(nil, "", func(_, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-		if len(value) != 8 {
-			return fmt.Errorf("commitment rebuild: invalid pbin operation index length %d", len(value))
-		}
-		index := binary.BigEndian.Uint64(value)
-		if index >= uint64(len(ops)) {
-			return fmt.Errorf("commitment rebuild: invalid pbin operation index %d", index)
-		}
-		ordered = append(ordered, ops[index])
-		return nil
-	}, etl.TransformArgs{})
-	if err != nil {
-		return nil, err
-	}
-	if maxOps <= 0 {
-		maxOps = len(ordered)
-	}
-	if maxBytes <= 0 {
-		maxBytes = int(^uint(0) >> 1)
-	}
-	if len(ordered) == 0 {
-		return nil, nil
-	}
-	batches := make([][]pbt.Op, 0, (len(ordered)+maxOps-1)/maxOps)
-	batchBytes := 0
-	for _, op := range ordered {
-		opBytes := len(op.Key) + len(op.Drop) + len(op.Value)
-		if len(batches) == 0 || len(batches[len(batches)-1]) == 0 {
-			batches = append(batches, nil)
-		}
-		current := batches[len(batches)-1]
-		if len(current) > 0 && (len(current) >= maxOps || batchBytes+opBytes > maxBytes) {
-			batches = append(batches, nil)
-			current = nil
-			batchBytes = 0
-		}
-		batches[len(batches)-1] = append(current, op)
-		batchBytes += opBytes
-	}
-	return batches, nil
-}
-
 func pbinForEachRebuildBatch(ops []pbt.Op, tmpDir string, maxOps, maxBytes int, visit func([]pbt.Op, bool) error) error {
 	return pbinForEachRebuildBatchAfter(ops, tmpDir, maxOps, maxBytes, nil, visit)
 }
 
 func pbinForEachRebuildBatchAfter(ops []pbt.Op, tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, bool) error) error {
-	opCount := len(ops)
-	if opCount == 0 {
+	return pbinForEachRebuildOpStreamAfter(tmpDir, maxOps, maxBytes, afterKey, visit, func(emit func(pbt.Op) error) error {
+		for i := range ops {
+			if err := emit(ops[i]); err != nil {
+				return err
+			}
+		}
 		return nil
-	}
+	})
+}
+
+func pbinForEachRebuildFeedBatchAfter(feed *commitment.PBinFeed, tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, bool) error) error {
+	return pbinForEachRebuildOpStreamAfter(tmpDir, maxOps, maxBytes, afterKey, visit, func(emit func(pbt.Op) error) error {
+		return pbt.ForEachFeedOp(feed, emit)
+	})
+}
+
+func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, bool) error, stream func(func(pbt.Op) error) error) error {
 	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
 	defer collector.Close()
-	for i := range ops {
-		key := ops[i].Key
-		if len(ops[i].Drop) != 0 {
-			key = ops[i].Drop
-		}
-		encoded, err := pbt.EncodeOp(ops[i])
+	emit := func(op pbt.Op) error {
+		key := batchOperationKey(op)
+		encoded, err := pbt.EncodeOp(op)
 		if err != nil {
 			return err
 		}
 		if err := collector.Collect(key, encoded); err != nil {
 			return err
 		}
+		return nil
+	}
+	if err := stream(emit); err != nil {
+		return err
 	}
 	if err := collector.Flush(); err != nil {
 		collector.Close()
@@ -1895,12 +1848,12 @@ func pbinForEachRebuildBatchAfter(ops []pbt.Op, tmpDir string, maxOps, maxBytes 
 	}
 	defer func() { _ = dir.RemoveFile(sortedPath) }()
 	if maxOps <= 0 {
-		maxOps = opCount
+		maxOps = int(^uint(0) >> 1)
 	}
 	if maxBytes <= 0 {
 		maxBytes = int(^uint(0) >> 1)
 	}
-	batch := make([]pbt.Op, 0, min(maxOps, opCount))
+	batch := make([]pbt.Op, 0, min(maxOps, 1024))
 	batchBytes := 0
 	reader, err := os.Open(sortedPath)
 	if err != nil {

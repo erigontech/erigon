@@ -55,6 +55,8 @@ type Trie struct {
 	phaseHook              func(phaseTask, *Op) error
 	coreApplyHook          func(phaseTask, *Op) error
 	coreEncodeHook         func(phaseTask, []byte) error
+	coreActivityHook       func(bool)
+	foldHook               func([]byte)
 	coreTask               *phaseTask
 	ownedPrefix            *eip8297.Bitpath
 	suppressRoot           bool
@@ -67,6 +69,8 @@ type Trie struct {
 	root                   *treeRoot
 	rootLoaded             bool
 	rootDirty              bool
+	foldedRoot             common.Hash
+	foldedRootReady        bool
 	rows                   map[string]*rowNode
 	dirtyRows              map[string]*rowNode
 	bucketDirty            map[string][]byte
@@ -163,12 +167,25 @@ func (t *Trie) SetCoreHooks(apply func(phaseTask, *Op) error, encode func(phaseT
 	t.coreEncodeHook = encode
 }
 
+func (t *Trie) SetCoreActivityHook(hook func(bool)) { t.coreActivityHook = hook }
+
+func (t *Trie) SetFoldHook(hook func([]byte)) { t.foldHook = hook }
+
+func (t *Trie) foldRowResult(row *rowNode) (FoldResult, error) {
+	if t.foldHook != nil {
+		t.foldHook(row.key)
+	}
+	return rowFoldResult(row)
+}
+
 func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.ctx = ctx
 	t.phaseBase = nil
 	t.root = nil
 	t.rootLoaded = false
 	t.rootDirty = false
+	t.foldedRoot = common.Hash{}
+	t.foldedRootReady = false
 	t.rows = make(map[string]*rowNode)
 	t.dirtyRows = make(map[string]*rowNode)
 	t.bucketDirty = make(map[string][]byte)
@@ -209,6 +226,8 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	t.originalLeaves = make(map[string]*Cell)
 	t.droppedLeafKeys = make(map[string]struct{})
 	t.bucketDirty = make(map[string][]byte)
+	t.foldedRoot = common.Hash{}
+	t.foldedRootReady = false
 	if _, err := t.loadRoot(); err != nil {
 		return common.Hash{}, err
 	}
@@ -273,6 +292,9 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if err := t.normalize(); err != nil {
 		return common.Hash{}, err
 	}
+	if err := t.foldDirtyRows(); err != nil {
+		return common.Hash{}, err
+	}
 	if err := t.write(); err != nil {
 		return common.Hash{}, err
 	}
@@ -292,6 +314,9 @@ func (t *Trie) RootHash() (common.Hash, error) {
 func (t *Trie) Release() { t.ctx = nil }
 
 func (t *Trie) rootHash() (common.Hash, error) {
+	if t.foldedRootReady {
+		return t.foldedRoot, nil
+	}
 	if t.root == nil || t.root.row == nil && t.root.form == RowRoot {
 		return eip8297.EmptyTreeHash, nil
 	}

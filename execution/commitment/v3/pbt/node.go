@@ -36,6 +36,8 @@ type rowNode struct {
 	prev       []byte
 	dirty      bool
 	tombstone  bool
+	folded     bool
+	foldResult FoldResult
 	parent     *rowNode
 	parentSlot int
 	cells      [maxCells]rowCell
@@ -66,8 +68,8 @@ func (n *rowNode) record() Record {
 	return record
 }
 
-func (n *rowNode) occupied() []int {
-	slots := make([]int, 0, maxCells)
+func (n *rowNode) occupiedInto(slots []int) []int {
+	slots = slots[:0]
 	for slot := range n.cells {
 		if n.cells[slot].Kind != EmptyCell {
 			slots = append(slots, slot)
@@ -76,8 +78,19 @@ func (n *rowNode) occupied() []int {
 	return slots
 }
 
+func (n *rowNode) occupiedCount() int {
+	count := 0
+	for slot := range n.cells {
+		if n.cells[slot].Kind != EmptyCell {
+			count++
+		}
+	}
+	return count
+}
+
 func (n *rowNode) markDirty() {
 	n.dirty = true
+	n.folded = false
 }
 
 func (n *rowNode) cell(slot int) *rowCell {
@@ -130,7 +143,8 @@ func recordPointer(n *rowNode) *Record {
 }
 
 func rowTopPrefix(n *rowNode, split int16) (eip8297.Bitpath, error) {
-	slots := n.occupied()
+	var occupied [maxCells]int
+	slots := n.occupiedInto(occupied[:0])
 	if len(slots) < 2 {
 		return eip8297.Bitpath{}, fmt.Errorf("row has fewer than two cells")
 	}

@@ -18,6 +18,7 @@ package pbt
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -31,6 +32,15 @@ type foldNode struct {
 type FoldResult struct {
 	Split       int16
 	Left, Right common.Hash
+}
+
+func rowRoutingResult(row *rowNode) (FoldResult, error) {
+	var occupied [maxCells]int
+	slots := row.occupiedInto(occupied[:0])
+	if len(slots) < 2 {
+		return FoldResult{}, fmt.Errorf("row must contain at least two cells")
+	}
+	return FoldResult{Split: firstSlotSplit(slots[0], slots[len(slots)-1], row.path.BitLen)}, nil
 }
 
 func Fold(key []byte, record *Record) (common.Hash, error) {
@@ -69,6 +79,127 @@ func Fold(key []byte, record *Record) (common.Hash, error) {
 		return branchHash(&prefix, &node.left, &node.right), nil
 	default:
 		return common.Hash{}, fmt.Errorf("unknown record form %d", record.Form)
+	}
+}
+
+func (t *Trie) foldDirtyRows() error {
+	if t.root != nil && t.root.form == ExtRoot && t.root.topRow == nil && !t.stopsUpperPath(&t.root.self) && !(t.upperOnly && t.root.self.BitLen >= t.rootRecordPath().BitLen+264 && isStoragePath(&t.root.self)) {
+		row, err := t.extTopRow(t.root)
+		if err != nil {
+			return err
+		}
+		t.root.topRow = row
+	}
+	dirty := make([]*rowNode, 0, len(t.dirtyRows))
+	for _, row := range t.dirtyRows {
+		dirty = append(dirty, row)
+	}
+	sort.SliceStable(dirty, func(i, j int) bool { return dirty[i].path.BitLen > dirty[j].path.BitLen })
+	for _, row := range dirty {
+		if row.tombstone {
+			continue
+		}
+		var occupied [maxCells]int
+		slots := row.occupiedInto(occupied[:0])
+		if len(slots) >= 2 {
+			result, err := t.foldRowResult(row)
+			if err != nil {
+				return err
+			}
+			row.folded = true
+			row.foldResult = result
+		} else if len(slots) == 1 && row.cell(slots[0]).Kind == BranchCell && row.cell(slots[0]).child != nil {
+			path, left, right, err := t.rowDescriptor(row.cell(slots[0]).child)
+			if err != nil {
+				return err
+			}
+			start := row.path.BitLen + 4
+			if path.BitLen < start {
+				return errInsertKey
+			}
+			cell := row.cell(slots[0])
+			cell.Prefix = path.Slice(start, path.BitLen)
+			cell.Left, cell.Right = left, right
+		}
+		if len(slots) == 0 {
+			continue
+		}
+		path, left, right, err := t.rowDescriptor(row)
+		if err != nil {
+			return err
+		}
+		if row.parent != nil && row.parent.cell(row.parentSlot).child == row {
+			cell := row.parent.cell(row.parentSlot)
+			start := row.parent.path.BitLen + 4
+			if path.BitLen < start {
+				return errInsertKey
+			}
+			cell.Prefix = path.Slice(start, path.BitLen)
+			cell.Left, cell.Right = left, right
+		}
+		if t.root != nil && t.root.row == row {
+			t.foldedRoot = branchHash(&path, &left, &right)
+			t.foldedRootReady = true
+		}
+		if t.root != nil && t.root.topRow == row && t.root.form == ExtRoot {
+			t.root.self = path
+			t.root.left, t.root.right = left, right
+			t.foldedRoot = branchHash(&t.root.self, &t.root.left, &t.root.right)
+			t.foldedRootReady = true
+		}
+	}
+	if t.root == nil {
+		return nil
+	}
+	switch t.root.form {
+	case LeafRoot:
+		t.foldedRoot = leafHash(&t.root.leaf)
+		t.foldedRootReady = true
+	case RowRoot:
+		if t.root.row == nil {
+			t.foldedRoot = eip8297.EmptyTreeHash
+			t.foldedRootReady = true
+		}
+	case ExtRoot:
+		if !t.foldedRootReady {
+			t.foldedRoot = branchHash(&t.root.self, &t.root.left, &t.root.right)
+			t.foldedRootReady = true
+		}
+	}
+	return nil
+}
+
+func (t *Trie) rowDescriptor(row *rowNode) (eip8297.Bitpath, common.Hash, common.Hash, error) {
+	var occupied [maxCells]int
+	slots := row.occupiedInto(occupied[:0])
+	switch len(slots) {
+	case 0:
+		return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, errInsertKey
+	case 1:
+		cell := row.cell(slots[0])
+		switch cell.Kind {
+		case LeafCell:
+			path, err := keyPath(cell.Key)
+			if err != nil {
+				return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, err
+			}
+			return path, leafHash(&cell.Cell), common.Hash{}, nil
+		case BranchCell:
+			return branchPath(row, slots[0], cell), cell.Left, cell.Right, nil
+		default:
+			return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, errInsertKey
+		}
+	case 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16:
+		if !row.folded {
+			return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, fmt.Errorf("row %x was not folded", row.key)
+		}
+		prefix, err := rowTopPrefix(row, row.foldResult.Split)
+		if err != nil {
+			return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, err
+		}
+		return prefix, row.foldResult.Left, row.foldResult.Right, nil
+	default:
+		return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, errInsertKey
 	}
 }
 
@@ -201,13 +332,20 @@ func slotBit(slot, offset int) uint64 {
 }
 
 func rowPrefix(path *eip8297.Bitpath, slot int, from, to int16) eip8297.Bitpath {
-	var prefix eip8297.Bitpath
-	for bit := from; bit < to; bit++ {
-		if bit < path.BitLen {
-			prefix.AppendBit(path.Bit(bit))
-			continue
-		}
-		prefix.AppendBit(slotBit(slot, int(bit-path.BitLen)))
+	if from >= to {
+		return eip8297.Bitpath{}
 	}
-	return prefix
+	if from < path.BitLen {
+		pathEnd := min(to, path.BitLen)
+		prefix := path.Slice(from, pathEnd)
+		if pathEnd == to {
+			return prefix
+		}
+		slotPath := eip8297.PathFromBits([]byte{byte(slot) << 4}, 4)
+		suffix := slotPath.Slice(0, to-pathEnd)
+		prefix.Append(&suffix)
+		return prefix
+	}
+	slotPath := eip8297.PathFromBits([]byte{byte(slot) << 4}, 4)
+	return slotPath.Slice(from-path.BitLen, to-path.BitLen)
 }

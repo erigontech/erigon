@@ -233,13 +233,9 @@ func (t *Trie) splitRootLeaf(root *treeRoot, oldPath eip8297.Bitpath, old Cell, 
 		t.registerRow(row)
 		return nil
 	}
-	result, err := rowFoldResult(row)
-	if err != nil {
-		return err
-	}
 	root.form = ExtRoot
 	root.self = oldPath.Slice(0, split)
-	root.left, root.right = result.Left, result.Right
+	root.left, root.right = common.Hash{}, common.Hash{}
 	root.topRow = row
 	t.registerRow(row)
 	return nil
@@ -313,7 +309,7 @@ func (t *Trie) extTopRow(root *treeRoot) (*rowNode, error) {
 }
 
 func (t *Trie) refreshRootFromRow(root *treeRoot, row *rowNode) error {
-	result, err := rowFoldResult(row)
+	result, err := rowRoutingResult(row)
 	if err != nil {
 		return err
 	}
@@ -321,7 +317,6 @@ func (t *Trie) refreshRootFromRow(root *treeRoot, row *rowNode) error {
 	if err != nil {
 		return err
 	}
-	root.left, root.right = result.Left, result.Right
 	root.self = self
 	root.topRow = row
 	return nil
@@ -361,12 +356,12 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 		if err != nil {
 			return err
 		}
-		result, err := rowFoldResult(child)
+		result, err := rowRoutingResult(child)
 		if err != nil {
 			return err
 		}
 		prefix := path.Slice(row.path.BitLen+4, result.Split)
-		setBranch(row, slot, branchCell(prefix, result.Left, result.Right))
+		setBranch(row, slot, branchCell(prefix, common.Hash{}, common.Hash{}))
 		row.cell(slot).child = child
 		child.parent = row
 		child.parentSlot = slot
@@ -403,7 +398,7 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 	if err != nil {
 		return err
 	}
-	result, err := rowFoldResult(child)
+	result, err := rowRoutingResult(child)
 	if err != nil {
 		return err
 	}
@@ -412,7 +407,7 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 		return err
 	}
 	prefix := full.Slice(row.path.BitLen+4, result.Split)
-	setBranch(row, slot, branchCell(prefix, result.Left, result.Right))
+	setBranch(row, slot, branchCell(prefix, common.Hash{}, common.Hash{}))
 	row.cell(slot).child = child
 	child.parent = row
 	child.parentSlot = slot
@@ -440,7 +435,7 @@ func (t *Trie) refreshRouting() error {
 		if t.stopsUpperPath(&row.path) {
 			continue
 		}
-		if row.parent == nil || row.parent.cell(row.parentSlot).child != row || len(row.occupied()) < 2 {
+		if row.parent == nil || row.parent.cell(row.parentSlot).child != row {
 			continue
 		}
 		if err := t.refreshBranch(row.parent, row.parentSlot, row); err != nil {
@@ -458,7 +453,7 @@ func (t *Trie) refreshRouting() error {
 		if err != nil {
 			return err
 		}
-		if len(row.occupied()) >= 2 {
+		if row.occupiedCount() >= 2 {
 			return t.refreshRootFromRow(t.root, row)
 		}
 	}
@@ -571,7 +566,8 @@ func (t *Trie) normalizeRootRow(root *treeRoot, row *rowNode) error {
 	if err := t.normalizeChildren(row); err != nil {
 		return err
 	}
-	slots := row.occupied()
+	var occupied [maxCells]int
+	slots := row.occupiedInto(occupied[:0])
 	if len(slots) >= 2 {
 		if root.form == ExtRoot {
 			return t.refreshRootFromRow(root, row)
@@ -631,7 +627,8 @@ func (t *Trie) normalizeRow(row *rowNode) error {
 	if !row.dirty {
 		return nil
 	}
-	slots := row.occupied()
+	var occupied [maxCells]int
+	slots := row.occupiedInto(occupied[:0])
 	if len(slots) >= 2 {
 		if row.parent == nil {
 			return nil
@@ -648,7 +645,6 @@ func (t *Trie) normalizeRow(row *rowNode) error {
 		parent.cells[row.parentSlot] = rowCell{}
 	} else {
 		cell := *row.cell(slots[0])
-		cell.child = nil
 		if cell.Kind == BranchCell {
 			full := branchPath(row, slots[0], row.cell(slots[0]))
 			start := parent.path.BitLen + 4
@@ -656,6 +652,10 @@ func (t *Trie) normalizeRow(row *rowNode) error {
 				return errInsertKey
 			}
 			cell.Prefix = full.Slice(start, full.BitLen)
+			if cell.child != nil {
+				cell.child.parent = parent
+				cell.child.parentSlot = row.parentSlot
+			}
 		}
 		parent.cells[row.parentSlot] = cell
 	}
@@ -681,21 +681,35 @@ func (t *Trie) dropPrefix(prefix []byte) error {
 }
 
 func (t *Trie) refreshBranch(parent *rowNode, slot int, child *rowNode) error {
-	result, err := rowFoldResult(child)
-	if err != nil {
-		return err
-	}
-	full, err := rowTopPrefix(child, result.Split)
-	if err != nil {
-		return err
-	}
 	start := parent.path.BitLen + 4
-	if full.BitLen < start {
-		return errInsertKey
+	if child.occupiedCount() == 0 {
+		parent.cells[slot] = rowCell{}
+		child.tombstone = true
+		t.markDirty(parent)
+		return nil
 	}
 	cell := parent.cell(slot)
-	cell.Prefix = full.Slice(start, result.Split)
-	cell.Left, cell.Right = result.Left, result.Right
+	split := child.path.BitLen
+	if child.occupiedCount() >= 2 {
+		result, err := rowRoutingResult(child)
+		if err != nil {
+			return err
+		}
+		full, err := rowTopPrefix(child, result.Split)
+		if err != nil {
+			return err
+		}
+		if full.BitLen < start {
+			return errInsertKey
+		}
+		split = result.Split
+		cell.Prefix = full.Slice(start, split)
+	} else {
+		if split < start {
+			return errInsertKey
+		}
+		cell.Prefix = child.path.Slice(start, split)
+	}
 	cell.child = child
 	t.markDirty(parent)
 	return nil
