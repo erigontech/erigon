@@ -60,7 +60,7 @@ func TestPBinRebuildSkipsStorageForAbsentAccount(t *testing.T) {
 	address := bytes.Repeat([]byte{0x41}, length.Addr)
 	slot := bytes.Repeat([]byte{0x17}, length.Hash)
 	plainKeys := etl.NewCollector("pbin-rebuild-feed-test", t.TempDir(), etl.NewSortableBuffer(1024), log.Root())
-	t.Cleanup(plainKeys.Close)
+	defer plainKeys.Close()
 	require.NoError(t, plainKeys.Collect(address, nil))
 	require.NoError(t, plainKeys.Collect(append(bytes.Clone(address), slot...), nil))
 	require.NoError(t, plainKeys.Flush())
