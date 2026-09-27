@@ -432,10 +432,15 @@ func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) uint64 {
 }
 
 func TestRebuildCommitmentFilesBinTargetMemoryDoesNotGrowWithSlots(t *testing.T) {
-	smallDB, _ := rebuildVariantMemoryDatadir(t, 200_000)
-	smallPeak := rebuildVariantMeasuredMemory(t, smallDB)
-	largeDB, _ := rebuildVariantMemoryDatadir(t, 650_000)
-	largePeak := rebuildVariantMeasuredMemory(t, largeDB)
+	var smallPeak, largePeak uint64
+	t.Run("200000", func(t *testing.T) {
+		db, _ := rebuildVariantMemoryDatadir(t, 200_000)
+		smallPeak = rebuildVariantMeasuredMemory(t, db)
+	})
+	t.Run("650000", func(t *testing.T) {
+		db, _ := rebuildVariantMemoryDatadir(t, 650_000)
+		largePeak = rebuildVariantMeasuredMemory(t, db)
+	})
 	ceiling := uint64(128<<20) + 1<<20 + 1000*4096
 	t.Logf("production rebuild live heap after GC: slots=200000 peak=%d slots=650000 peak=%d ceiling=%d", smallPeak, largePeak, ceiling)
 	require.LessOrEqual(t, smallPeak, ceiling)
@@ -446,7 +451,7 @@ func TestRebuildCommitmentFilesBinTargetMemoryDoesNotGrowWithSlots(t *testing.T)
 	} else {
 		difference = smallPeak - largePeak
 	}
-	require.LessOrEqual(t, difference, uint64(32<<20))
+	require.LessOrEqual(t, difference, uint64(16<<20))
 }
 
 func TestRebuildCommitmentFilesBinTargetStagedOutputSkipsSourceCheckpoint(t *testing.T) {

@@ -1455,7 +1455,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			return nil, err
 		}
 		defer func() { _ = dir.RemoveAll(plainKeyTmpDir) }()
-		plainKeyCollector = etl.NewCollector("[rebuild_commitment_pbin_keys]", plainKeyTmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+		plainKeyCollector = etl.NewCollector("[rebuild_commitment_pbin_keys]", plainKeyTmpDir, etl.NewSortableBuffer(1*datasize.MB), log.Root())
 		defer plainKeyCollector.Close()
 	}
 	if removals != nil && len(visComFiles) > 0 {
