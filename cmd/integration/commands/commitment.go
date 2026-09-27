@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"encoding/gob"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -539,6 +540,9 @@ func validateStagedOutput(src, out datadir.Dirs) error {
 		}
 		return err
 	}
+	if err := validatePBinRebuildCheckpoints(src, out); err != nil {
+		return err
+	}
 	return filepath.WalkDir(out.DataDir, func(path string, entry os.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -555,6 +559,10 @@ func validateStagedOutput(src, out datadir.Dirs) error {
 			return err
 		}
 		if snapRel == "." || strings.HasPrefix(snapRel, ".."+string(filepath.Separator)) {
+			tmpRel, tmpErr := filepath.Rel(out.Tmp, path)
+			if tmpErr == nil && tmpRel != "." && !strings.HasPrefix(tmpRel, ".."+string(filepath.Separator)) && isPBinRebuildCheckpointName(entry.Name()) {
+				return nil
+			}
 			return fmt.Errorf("commitment rebuild: unexpected file outside snapshots: %s", rel)
 		}
 		if snapRel == dbstate.ERIGONDB_SETTINGS_FILE {
@@ -584,6 +592,109 @@ func validateStagedOutput(src, out datadir.Dirs) error {
 		}
 		return nil
 	})
+}
+
+type stagedPBinRebuildCheckpointWrite struct {
+	Data []byte
+	Prev []byte
+}
+
+type stagedPBinRebuildCheckpoint struct {
+	LastKey   []byte
+	Writes    map[string]stagedPBinRebuildCheckpointWrite
+	SpillPath string
+	SpillSize int64
+}
+
+func isPBinRebuildCheckpointName(name string) bool {
+	return strings.HasPrefix(name, "pbin-rebuild-") && (strings.HasSuffix(name, ".checkpoint") || strings.HasSuffix(name, ".checkpoint.rows"))
+}
+
+func pbinRebuildCheckpointRange(name string) (uint64, uint64, error) {
+	base := strings.TrimSuffix(strings.TrimSuffix(name, ".rows"), ".checkpoint")
+	parts := strings.Split(strings.TrimPrefix(base, "pbin-rebuild-"), "-")
+	if len(parts) != 2 {
+		return 0, 0, fmt.Errorf("commitment rebuild: invalid pbin checkpoint name %s", name)
+	}
+	from, err := strconv.ParseUint(parts[0], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("commitment rebuild: invalid pbin checkpoint name %s", name)
+	}
+	to, err := strconv.ParseUint(parts[1], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("commitment rebuild: invalid pbin checkpoint name %s", name)
+	}
+	return from, to, nil
+}
+
+func validatePBinRebuildCheckpoints(src, out datadir.Dirs) error {
+	entries, err := os.ReadDir(out.Tmp)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	settings, err := dbstate.ReadErigonDBSettings(src)
+	if err != nil {
+		return err
+	}
+	files, err := commitmentFilesIn(out.SnapDomain)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !isPBinRebuildCheckpointName(entry.Name()) {
+			continue
+		}
+		checkpointPath := filepath.Join(out.Tmp, entry.Name())
+		if strings.HasSuffix(entry.Name(), ".rows") {
+			checkpointName := strings.TrimSuffix(entry.Name(), ".rows")
+			if _, err := os.Stat(filepath.Join(out.Tmp, checkpointName)); err != nil {
+				return fmt.Errorf("commitment rebuild: spill has no checkpoint: %s", entry.Name())
+			}
+			continue
+		}
+		data, err := os.ReadFile(checkpointPath)
+		if err != nil {
+			return err
+		}
+		checkpoint := new(stagedPBinRebuildCheckpoint)
+		if err := gob.NewDecoder(bytes.NewReader(data)).Decode(checkpoint); err != nil {
+			return fmt.Errorf("commitment rebuild: invalid checkpoint %s: %w", entry.Name(), err)
+		}
+		if len(checkpoint.LastKey) == 0 {
+			return fmt.Errorf("commitment rebuild: invalid checkpoint %s: missing last key", entry.Name())
+		}
+		from, to, err := pbinRebuildCheckpointRange(entry.Name())
+		if err != nil {
+			return err
+		}
+		for _, file := range files {
+			parsed, _, ok := snaptype.ParseFileName(out.SnapDomain, file)
+			if ok && uint64(parsed.From)*settings.StepSize == from && uint64(parsed.To)*settings.StepSize == to {
+				return fmt.Errorf("commitment rebuild: checkpoint %s is already covered by %s", entry.Name(), file)
+			}
+		}
+		if checkpoint.SpillPath != "" {
+			expected := filepath.Join(out.Tmp, entry.Name()+".rows")
+			if filepath.Clean(checkpoint.SpillPath) != filepath.Clean(expected) {
+				return fmt.Errorf("commitment rebuild: checkpoint %s names an unexpected spill", entry.Name())
+			}
+			info, err := os.Stat(expected)
+			if err != nil {
+				return fmt.Errorf("commitment rebuild: checkpoint %s has no spill", entry.Name())
+			}
+			if info.Size() != checkpoint.SpillSize {
+				return fmt.Errorf("commitment rebuild: checkpoint and spill disagree")
+			}
+		} else if _, err := os.Stat(filepath.Join(out.Tmp, entry.Name()+".rows")); err == nil {
+			return fmt.Errorf("commitment rebuild: checkpoint and spill disagree")
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+	}
+	return nil
 }
 
 // requireKeptFilesMatchTarget refuses a --resume run under a scheme other than the

@@ -364,6 +364,16 @@ func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, s
 	return sd.getLatest(domain, key)
 }
 
+func (sd *TemporalMemBatch) ForgetLatest(domain kv.Domain, key []byte) {
+	sd.latestStateLocks[domain].Lock()
+	defer sd.latestStateLocks[domain].Unlock()
+	if domain == kv.StorageDomain {
+		sd.storage.Delete(string(key))
+		return
+	}
+	delete(sd.domains[domain], string(key))
+}
+
 // getLatest is the lock-free implementation of GetLatest.
 // The caller must already hold the domain's lock (either RLock or Lock),
 // e.g. from within an IteratePrefix callback.

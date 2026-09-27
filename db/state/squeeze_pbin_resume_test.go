@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"runtime"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -26,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 )
 
@@ -68,6 +70,7 @@ func TestPBinRebuildStateReaderKeepsCommitmentOverlaySeparate(t *testing.T) {
 type pbinRebuildContextStub struct {
 	records map[string][]byte
 	reads   int
+	discard bool
 }
 
 func (c *pbinRebuildContextStub) Branch(key []byte) ([]byte, kv.Step, error) {
@@ -76,6 +79,9 @@ func (c *pbinRebuildContextStub) Branch(key []byte) ([]byte, kv.Step, error) {
 }
 
 func (c *pbinRebuildContextStub) PutBranch(key, data, _ []byte) error {
+	if c.discard {
+		return nil
+	}
 	c.records[string(key)] = bytes.Clone(data)
 	return nil
 }
@@ -134,4 +140,57 @@ func TestPBinRebuildCheckpointResumesAfterLargestTreeKey(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, resumed, 1)
 	require.True(t, bytes.Equal(ops[1].Key, resumed[0].Key))
+}
+
+func TestPBinRebuildOverlayHeapStaysBoundedByRightEdge(t *testing.T) {
+	const (
+		maxOperations = 1000
+		maxBytes      = 1 << 20
+	)
+	run := func(count int) uint64 {
+		inner := &pbinRebuildContextStub{records: make(map[string][]byte), discard: true}
+		overlay := newPBinRebuildOverlay().withInner(inner)
+		runtime.GC()
+		var baseline runtime.MemStats
+		runtime.ReadMemStats(&baseline)
+		var peak uint64
+		maxKey := bytes.Repeat([]byte{0xff}, eip8297.StorageKeyLength)
+		lastPath := eip8297.PathFromBits(maxKey[:33], 264)
+		lastRow, err := pbt.EncodeRowKey(&lastPath)
+		require.NoError(t, err)
+		for i := 0; i < count; i++ {
+			path := eip8297.PathFromBits([]byte{byte(i >> 16), byte(i >> 8), byte(i)}, 24)
+			key, err := pbt.EncodeRowKey(&path)
+			require.NoError(t, err)
+			if i == count-1 {
+				key = lastRow
+			}
+			overlay.writes[string(key)] = pbinRebuildWrite{data: []byte{1}}
+			if i%maxOperations == maxOperations-1 || i == count-1 {
+				require.NoError(t, overlay.FlushFinished(maxKey))
+				runtime.GC()
+				var current runtime.MemStats
+				runtime.ReadMemStats(&current)
+				if current.Alloc > peak {
+					peak = current.Alloc
+				}
+			}
+		}
+		runtime.GC()
+		var stats runtime.MemStats
+		runtime.ReadMemStats(&stats)
+		require.LessOrEqual(t, len(overlay.writes), 1)
+		ceiling := baseline.Alloc + maxBytes + maxOperations*256 + 32<<20
+		require.Less(t, peak, ceiling)
+		t.Logf("overlay rows: %d; peak live heap after GC: %d bytes; live heap after GC: %d bytes; ceiling: %d bytes", len(overlay.writes), peak, stats.Alloc, ceiling)
+		return stats.Alloc
+	}
+
+	small := run(200_000)
+	large := run(600_000)
+	if large > small {
+		require.Less(t, large-small, uint64(32<<20))
+	} else {
+		require.Less(t, small-large, uint64(32<<20))
+	}
 }

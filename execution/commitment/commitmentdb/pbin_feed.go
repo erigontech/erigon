@@ -69,55 +69,73 @@ func BinFeedFromState(keys, codeKeys, wiped map[string]struct{}, reader StateRea
 	feed := &commitment.PBinFeed{Accounts: make([]commitment.PBinFeedAccount, 0, len(ordered))}
 	for _, address := range ordered {
 		rawAddress := []byte(address)
-		encoded, _, err := reader.Read(kv.AccountsDomain, rawAddress, 1)
+		account, err := BinFeedAccountFromState(rawAddress, slots[address], hasKey(codeKeys, address), hasKey(wiped, address), reader)
 		if err != nil {
 			return nil, err
-		}
-		account := commitment.PBinFeedAccount{Address: bytes.Clone(rawAddress), CodeHash: empty.CodeHash}
-		if len(encoded) != 0 {
-			decoded := new(accounts.Account)
-			if err := accounts.DeserialiseV3(decoded, encoded); err != nil {
-				return nil, fmt.Errorf("pbin: decode account %x: %w", rawAddress, err)
-			}
-			account.Exists = true
-			account.Nonce = decoded.Nonce
-			account.Balance = decoded.Balance
-			account.CodeHash = decoded.CodeHash.Value()
-		}
-		if _, ok := wiped[address]; ok {
-			account.Wiped = true
-		}
-		if _, ok := codeKeys[address]; ok {
-			account.CodeWritten = true
-			code, _, err := reader.Read(kv.CodeDomain, rawAddress, 1)
-			if err != nil {
-				return nil, err
-			}
-			if eip8297.IsEmptyCodeHash(account.CodeHash) {
-				code = nil
-			} else {
-				if len(code) == 0 {
-					return nil, fmt.Errorf("pbin: code missing for %x", rawAddress)
-				}
-				if crypto.Keccak256Hash(code) != account.CodeHash {
-					return nil, fmt.Errorf("pbin: code hash mismatch for %x", rawAddress)
-				}
-			}
-			account.Code = bytes.Clone(code)
-		}
-		account.Slots = make([]commitment.PBinFeedSlot, 0, len(slots[address]))
-		sort.Slice(slots[address], func(i, j int) bool { return bytes.Compare(slots[address][i], slots[address][j]) < 0 })
-		for _, slot := range slots[address] {
-			composite := make([]byte, length.Addr+length.Hash)
-			copy(composite, rawAddress)
-			copy(composite[length.Addr:], slot)
-			value, _, err := reader.Read(kv.StorageDomain, composite, 1)
-			if err != nil {
-				return nil, err
-			}
-			account.Slots = append(account.Slots, commitment.PBinFeedSlot{Key: bytes.Clone(slot), Value: bytes.Clone(value)})
 		}
 		feed.Accounts = append(feed.Accounts, account)
 	}
 	return feed, nil
+}
+
+func hasKey(keys map[string]struct{}, key string) bool {
+	_, ok := keys[key]
+	return ok
+}
+
+func BinFeedAccountFromState(address []byte, slotKeys [][]byte, codeWritten, wiped bool, reader StateReader) (commitment.PBinFeedAccount, error) {
+	if reader == nil {
+		return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: nil state reader")
+	}
+	if len(address) != length.Addr {
+		return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: address has length %d, want %d", len(address), length.Addr)
+	}
+	encoded, _, err := reader.Read(kv.AccountsDomain, address, 1)
+	if err != nil {
+		return commitment.PBinFeedAccount{}, err
+	}
+	account := commitment.PBinFeedAccount{Address: bytes.Clone(address), CodeHash: empty.CodeHash, Wiped: wiped, CodeWritten: codeWritten}
+	if len(encoded) != 0 {
+		decoded := new(accounts.Account)
+		if err := accounts.DeserialiseV3(decoded, encoded); err != nil {
+			return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: decode account %x: %w", address, err)
+		}
+		account.Exists = true
+		account.Nonce = decoded.Nonce
+		account.Balance = decoded.Balance
+		account.CodeHash = decoded.CodeHash.Value()
+	}
+	if codeWritten {
+		code, _, err := reader.Read(kv.CodeDomain, address, 1)
+		if err != nil {
+			return commitment.PBinFeedAccount{}, err
+		}
+		if eip8297.IsEmptyCodeHash(account.CodeHash) {
+			code = nil
+		} else {
+			if len(code) == 0 {
+				return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: code missing for %x", address)
+			}
+			if crypto.Keccak256Hash(code) != account.CodeHash {
+				return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: code hash mismatch for %x", address)
+			}
+		}
+		account.Code = bytes.Clone(code)
+	}
+	account.Slots = make([]commitment.PBinFeedSlot, 0, len(slotKeys))
+	sort.Slice(slotKeys, func(i, j int) bool { return bytes.Compare(slotKeys[i], slotKeys[j]) < 0 })
+	for _, slot := range slotKeys {
+		if len(slot) != length.Hash {
+			return commitment.PBinFeedAccount{}, fmt.Errorf("pbin: slot key has length %d, want %d", len(slot), length.Hash)
+		}
+		composite := make([]byte, length.Addr+length.Hash)
+		copy(composite, address)
+		copy(composite[length.Addr:], slot)
+		value, _, err := reader.Read(kv.StorageDomain, composite, 1)
+		if err != nil {
+			return commitment.PBinFeedAccount{}, err
+		}
+		account.Slots = append(account.Slots, commitment.PBinFeedSlot{Key: bytes.Clone(slot), Value: bytes.Clone(value)})
+	}
+	return account, nil
 }

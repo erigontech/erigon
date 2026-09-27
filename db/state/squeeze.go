@@ -39,10 +39,10 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // Sqeeze: ForeignKeys-aware compression of file
@@ -1442,13 +1442,27 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	sf := time.Now()
 	var processed uint64
-	pbinKeys := make(map[string]struct{})
+	var err error
+	var plainKeyCollector *etl.Collector
+	var plainKeyTmpDir string
+	if cfg.Variant == commitment.VariantBinPatriciaTrie {
+		plainKeyTmpDir, err = os.MkdirTemp("", "erigon-pbin-rebuild-keys-")
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = dir.RemoveAll(plainKeyTmpDir) }()
+		plainKeyCollector = etl.NewCollector("[rebuild_commitment_pbin_keys]", plainKeyTmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+		defer plainKeyCollector.Close()
+	}
+	var collectErr error
 	// next() signals "no more keys" as (false, nil) but a shard boundary as
 	// (false, key), so the key has to be checked separately from ok.
 	for ok, key, value := next(); ; ok, key, value = next() {
 		if len(key) > 0 {
 			if cfg.Variant == commitment.VariantBinPatriciaTrie {
-				pbinKeys[string(key)] = struct{}{}
+				if collectErr == nil {
+					collectErr = plainKeyCollector.Collect(key, []byte{})
+				}
 				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
 				if len(key) == length.Addr {
 					sd.GetCommitmentCtx().TouchKey(kv.CodeDomain, string(key), nil)
@@ -1480,50 +1494,23 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			break
 		}
 	}
+	if collectErr != nil {
+		return nil, collectErr
+	}
 
 	collectionSpent := time.Since(sf)
 	var codeStats commitment.PBinCodeStats
 	var rh []byte
-	var err error
 	if cfg.Variant == commitment.VariantBinPatriciaTrie {
 		for key := range sd.GetCommitmentCtx().GetUpdates().PlainKeys() {
-			pbinKeys[key] = struct{}{}
-		}
-		reader := commitmentdb.NewFilesOnlyStateReader(tx, cfg.TxnNumber)
-		addresses := make(map[string]struct{}, len(pbinKeys))
-		for key := range pbinKeys {
-			raw := []byte(key)
-			switch len(raw) {
-			case length.Addr:
-				addresses[key] = struct{}{}
-			case length.Addr + length.Hash:
-				addresses[string(raw[:length.Addr])] = struct{}{}
-			default:
-				return nil, fmt.Errorf("commitment rebuild: plain key has length %d", len(raw))
-			}
-		}
-		codeKeys := make(map[string]struct{}, len(addresses))
-		for address := range addresses {
-			encoded, _, err := reader.Read(kv.AccountsDomain, []byte(address), 1)
-			if err != nil {
+			if err := plainKeyCollector.Collect([]byte(key), []byte{}); err != nil {
 				return nil, err
 			}
-			if len(encoded) == 0 {
-				continue
-			}
-			account := new(accounts.Account)
-			if err := accounts.DeserialiseV3(account, encoded); err != nil {
-				return nil, err
-			}
-			if !account.IsEmptyCodeHash() {
-				codeKeys[address] = struct{}{}
-			}
 		}
-		feed, err := commitmentdb.BinFeedFromState(pbinKeys, codeKeys, nil, reader)
-		if err != nil {
+		if err := plainKeyCollector.Flush(); err != nil {
 			return nil, err
 		}
-		codeStats = pbt.CodeStatsFromFeed(feed)
+		reader := commitmentdb.NewFilesOnlyStateReader(tx, cfg.TxnNumber)
 		tmpDir, err := os.MkdirTemp("", "erigon-pbin-rebuild-")
 		if err != nil {
 			return nil, err
@@ -1553,22 +1540,32 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			var overlay *pbinRebuildOverlay
 			var resumeKey []byte
 			if checkpoint != nil {
-				overlay = newPBinRebuildOverlay()
+				overlay = newPBinRebuildOverlay().withSpill(checkpoint.SpillPath)
 				for key, write := range checkpoint.Writes {
 					overlay.writes[key] = pbinRebuildWrite{data: write.Data, prev: write.Prev}
 				}
 				resumeKey = checkpoint.LastKey
 			}
 			processedBatch := false
-			err = pbinForEachRebuildFeedBatchAfter(feed, tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, final bool) error {
+			emitter := pbt.NewRebuildFeedOpEmitter()
+			err = pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, nextKey []byte, final bool) error {
 				processedBatch = true
 				sd.GetCommitmentCtx().SetPBinOps(batch)
 				var current *pbinRebuildOverlay
 				rh, err = sd.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 					if overlay == nil {
-						overlay = newPBinRebuildOverlay()
+						spillPath := ""
+						if cfg.PBinResumePath != "" {
+							spillPath = cfg.PBinResumePath + ".rows"
+						}
+						overlay = newPBinRebuildOverlay().withSpill(spillPath)
 					}
-					current = overlay.withInner(inner)
+					current = overlay.withInner(inner).withRelease(func(key []byte) {
+						sd.GetMemBatch().(*TemporalMemBatch).ForgetLatest(kv.CommitmentDomain, key)
+					})
+					if err := current.restoreSpill(); err != nil {
+						current.err = err
+					}
 					return current
 				})
 				if err != nil {
@@ -1580,11 +1577,17 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 					}
 					return removePBinRebuildCheckpoint(cfg.PBinResumePath)
 				}
+				if err := current.FlushFinished(nextKey); err != nil {
+					return err
+				}
 				return writePBinRebuildCheckpoint(cfg.PBinResumePath, batchOperationKey(batch[len(batch)-1]), overlay)
+			}, func(emit func(pbt.Op) error) error {
+				return pbinRebuildFeedStream(plainKeyCollector, reader, emitter, emit)
 			})
 			if err != nil {
 				return nil, err
 			}
+			codeStats = emitter.Stats()
 			if !processedBatch {
 				return nil, errors.New("commitment rebuild: binary operation set is empty")
 			}
@@ -1625,6 +1628,51 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	}, nil
 }
 
+func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader, emitter *pbt.FeedOpEmitter, emit func(pbt.Op) error) error {
+	var address []byte
+	var slots [][]byte
+	var previousKey []byte
+	flush := func() error {
+		if len(address) == 0 {
+			return nil
+		}
+		account, err := commitmentdb.BinFeedAccountFromState(address, slots, true, false, reader)
+		if err != nil {
+			return err
+		}
+		if !account.Exists || eip8297.IsEmptyCodeHash(account.CodeHash) {
+			account.CodeWritten = false
+			account.Code = nil
+		}
+		return emitter.EmitAccount(account, emit)
+	}
+	err := keys.Load(nil, "", func(key, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if len(key) != length.Addr && len(key) != length.Addr+length.Hash {
+			return fmt.Errorf("commitment rebuild: plain key has length %d", len(key))
+		}
+		if bytes.Equal(previousKey, key) {
+			return nil
+		}
+		previousKey = bytes.Clone(key)
+		keyAddress := key[:length.Addr]
+		if !bytes.Equal(address, keyAddress) {
+			if err := flush(); err != nil {
+				return err
+			}
+			address = bytes.Clone(keyAddress)
+			slots = slots[:0]
+		}
+		if len(key) == length.Addr+length.Hash {
+			slots = append(slots, bytes.Clone(key[length.Addr:]))
+		}
+		return nil
+	}, etl.TransformArgs{})
+	if err != nil {
+		return err
+	}
+	return flush()
+}
+
 type pbinRebuildWrite struct {
 	data []byte
 	prev []byte
@@ -1635,8 +1683,67 @@ func newPBinRebuildStateReader(commitmentReader, plainStateReader commitmentdb.S
 }
 
 type pbinRebuildOverlay struct {
-	inner  commitment.PatriciaContext
-	writes map[string]pbinRebuildWrite
+	inner     commitment.PatriciaContext
+	writes    map[string]pbinRebuildWrite
+	release   func([]byte)
+	spillPath string
+	restored  bool
+	err       error
+}
+
+func (o *pbinRebuildOverlay) FlushFinished(nextKey []byte) error {
+	if o.err != nil {
+		return o.err
+	}
+	nextPath := eip8297.PathFromBits(nextKey, int16(len(nextKey)*8))
+	keys := make([]string, 0, len(o.writes))
+	for key := range o.writes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var spill *os.File
+	if o.spillPath != "" {
+		var err error
+		spill, err = os.OpenFile(o.spillPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+		if err != nil {
+			return err
+		}
+		defer spill.Close()
+	}
+	for _, key := range keys {
+		if bytes.Equal([]byte(key), pbt.GlobalRootKey()) {
+			continue
+		}
+		path, err := eip8297.DecodeBitPath([]byte(key))
+		if err != nil {
+			return err
+		}
+		if path.BitLen <= nextPath.BitLen && eip8297.CommonPrefixBitsAt(&path, 0, &nextPath) == path.BitLen {
+			continue
+		}
+		write := o.writes[key]
+		if spill != nil {
+			if err := writePBinRebuildSpill(spill, []byte(key), write.data, write.prev); err != nil {
+				return err
+			}
+		}
+		if o.inner == nil {
+			return errors.New("commitment rebuild: overlay has no inner context")
+		}
+		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
+			return err
+		}
+		if o.release != nil {
+			o.release([]byte(key))
+		}
+		delete(o.writes, key)
+	}
+	if spill != nil {
+		if err := spill.Sync(); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func newPBinRebuildOverlay() *pbinRebuildOverlay {
@@ -1645,10 +1752,24 @@ func newPBinRebuildOverlay() *pbinRebuildOverlay {
 
 func (o *pbinRebuildOverlay) withInner(inner commitment.PatriciaContext) *pbinRebuildOverlay {
 	o.inner = inner
+	o.restored = false
+	return o
+}
+
+func (o *pbinRebuildOverlay) withRelease(release func([]byte)) *pbinRebuildOverlay {
+	o.release = release
+	return o
+}
+
+func (o *pbinRebuildOverlay) withSpill(path string) *pbinRebuildOverlay {
+	o.spillPath = path
 	return o
 }
 
 func (o *pbinRebuildOverlay) Branch(prefix []byte) ([]byte, kv.Step, error) {
+	if o.err != nil {
+		return nil, 0, o.err
+	}
 	if write, ok := o.writes[string(prefix)]; ok {
 		return bytes.Clone(write.data), 0, nil
 	}
@@ -1656,6 +1777,9 @@ func (o *pbinRebuildOverlay) Branch(prefix []byte) ([]byte, kv.Step, error) {
 }
 
 func (o *pbinRebuildOverlay) PutBranch(prefix, data, prevData []byte) error {
+	if o.err != nil {
+		return o.err
+	}
 	key := string(prefix)
 	write, ok := o.writes[key]
 	if !ok {
@@ -1675,6 +1799,9 @@ func (o *pbinRebuildOverlay) Storage(key []byte) (*commitment.Update, error) {
 }
 
 func (o *pbinRebuildOverlay) Flush() error {
+	if o.err != nil {
+		return o.err
+	}
 	for key, write := range o.writes {
 		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
 			return err
@@ -1683,14 +1810,46 @@ func (o *pbinRebuildOverlay) Flush() error {
 	return nil
 }
 
+func (o *pbinRebuildOverlay) restoreSpill() error {
+	if o.restored || o.spillPath == "" {
+		return nil
+	}
+	o.restored = true
+	f, err := os.Open(o.spillPath)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	for {
+		key, data, prev, eof, err := readPBinRebuildSpill(f)
+		if err != nil {
+			return err
+		}
+		if eof {
+			return nil
+		}
+		if err := o.inner.PutBranch(key, data, prev); err != nil {
+			return err
+		}
+		if o.release != nil {
+			o.release(key)
+		}
+	}
+}
+
 type pbinRebuildCheckpointWrite struct {
 	Data []byte
 	Prev []byte
 }
 
 type pbinRebuildCheckpoint struct {
-	LastKey []byte
-	Writes  map[string]pbinRebuildCheckpointWrite
+	LastKey   []byte
+	Writes    map[string]pbinRebuildCheckpointWrite
+	SpillPath string
+	SpillSize int64
 }
 
 func readPBinRebuildCheckpoint(path string) (*pbinRebuildCheckpoint, error) {
@@ -1708,6 +1867,15 @@ func readPBinRebuildCheckpoint(path string) (*pbinRebuildCheckpoint, error) {
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(checkpoint); err != nil {
 		return nil, err
 	}
+	if checkpoint.SpillPath != "" {
+		info, err := os.Stat(checkpoint.SpillPath)
+		if err != nil {
+			return nil, err
+		}
+		if info.Size() != checkpoint.SpillSize {
+			return nil, fmt.Errorf("commitment rebuild: checkpoint and spill disagree")
+		}
+	}
 	return checkpoint, nil
 }
 
@@ -1715,7 +1883,14 @@ func writePBinRebuildCheckpoint(path string, lastKey []byte, overlay *pbinRebuil
 	if path == "" {
 		return nil
 	}
-	checkpoint := pbinRebuildCheckpoint{LastKey: bytes.Clone(lastKey), Writes: make(map[string]pbinRebuildCheckpointWrite, len(overlay.writes))}
+	checkpoint := pbinRebuildCheckpoint{LastKey: bytes.Clone(lastKey), Writes: make(map[string]pbinRebuildCheckpointWrite, len(overlay.writes)), SpillPath: overlay.spillPath}
+	if overlay.spillPath != "" {
+		info, err := os.Stat(overlay.spillPath)
+		if err != nil {
+			return err
+		}
+		checkpoint.SpillSize = info.Size()
+	}
 	for key, write := range overlay.writes {
 		checkpoint.Writes[key] = pbinRebuildCheckpointWrite{Data: bytes.Clone(write.data), Prev: bytes.Clone(write.prev)}
 	}
@@ -1744,10 +1919,50 @@ func removePBinRebuildCheckpoint(path string) error {
 		return nil
 	}
 	err := dir.RemoveFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
 	}
-	return err
+	err = dir.RemoveFile(path + ".rows")
+	if err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func writePBinRebuildSpill(w io.Writer, key, data, prev []byte) error {
+	var lengths [12]byte
+	binary.BigEndian.PutUint32(lengths[0:4], uint32(len(key)))
+	binary.BigEndian.PutUint32(lengths[4:8], uint32(len(data)))
+	binary.BigEndian.PutUint32(lengths[8:12], uint32(len(prev)))
+	if _, err := w.Write(lengths[:]); err != nil {
+		return err
+	}
+	for _, part := range [][]byte{key, data, prev} {
+		if _, err := w.Write(part); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func readPBinRebuildSpill(r io.Reader) (key, data, prev []byte, eof bool, err error) {
+	var lengths [12]byte
+	n, readErr := io.ReadFull(r, lengths[:])
+	if errors.Is(readErr, io.EOF) && n == 0 {
+		return nil, nil, nil, true, nil
+	}
+	if readErr != nil {
+		return nil, nil, nil, false, readErr
+	}
+	parts := []*[]byte{&key, &data, &prev}
+	for i, part := range parts {
+		length := binary.BigEndian.Uint32(lengths[i*4 : i*4+4])
+		*part = make([]byte, length)
+		if _, err := io.ReadFull(r, *part); err != nil {
+			return nil, nil, nil, false, err
+		}
+	}
+	return key, data, prev, false, nil
 }
 
 // codeStatsTrie is the optional capability of an engine to report the code its
@@ -1800,7 +2015,30 @@ func pbinForEachRebuildFeedBatchAfter(feed *commitment.PBinFeed, tmpDir string, 
 	})
 }
 
+func pbinForEachRebuildOpStreamsAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, streams []func(func(pbt.Op) error) error, visit func([]pbt.Op, bool) error) error {
+	return pbinForEachRebuildOpStreamsLookaheadAfter(tmpDir, maxOps, maxBytes, afterKey, func(batch []pbt.Op, _ []byte, final bool) error {
+		return visit(batch, final)
+	}, streams)
+}
+
+func pbinForEachRebuildOpStreamsLookaheadAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, streams []func(func(pbt.Op) error) error) error {
+	return pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, afterKey, visit, func(emit func(pbt.Op) error) error {
+		for _, stream := range streams {
+			if err := stream(emit); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
 func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, bool) error, stream func(func(pbt.Op) error) error) error {
+	return pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, afterKey, func(batch []pbt.Op, _ []byte, final bool) error {
+		return visit(batch, final)
+	}, stream)
+}
+
+func pbinForEachRebuildOpStreamLookaheadAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error) error {
 	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
 	defer collector.Close()
 	emit := func(op pbt.Op) error {
@@ -1821,6 +2059,7 @@ func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterK
 		collector.Close()
 		return err
 	}
+	var previousOpKey, previousOpValue []byte
 	sortedFile, err := os.CreateTemp(tmpDir, "pbin-ops-*.bin")
 	if err != nil {
 		collector.Close()
@@ -1833,7 +2072,15 @@ func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterK
 		}
 		return nil
 	}
-	if err := collector.Load(nil, "", func(_, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
+		if bytes.Equal(previousOpKey, key) {
+			if !bytes.Equal(previousOpValue, value) {
+				return fmt.Errorf("commitment rebuild: duplicate operation key %x", key)
+			}
+			return nil
+		}
+		previousOpKey = bytes.Clone(key)
+		previousOpValue = bytes.Clone(value)
 		return writePBinRebuildOp(sortedFile, value)
 	}, etl.TransformArgs{}); err != nil {
 		_ = closeFile()
@@ -1875,7 +2122,7 @@ func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterK
 		opBytes := len(op.Key) + len(op.Drop) + len(op.Value)
 		keepMergeGroup := len(batch) > 0 && len(pbt.MergeGroupKey(batch[len(batch)-1])) != 0 && bytes.Equal(pbt.MergeGroupKey(batch[len(batch)-1]), pbt.MergeGroupKey(op))
 		if len(batch) > 0 && (len(batch) >= maxOps || batchBytes+opBytes > maxBytes) && !keepMergeGroup {
-			if err := visit(batch, false); err != nil {
+			if err := visit(batch, batchOperationKey(op), false); err != nil {
 				return err
 			}
 			batch = batch[:0]
@@ -1885,7 +2132,7 @@ func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterK
 		batchBytes += opBytes
 	}
 	if len(batch) > 0 {
-		if err := visit(batch, true); err != nil {
+		if err := visit(batch, nil, true); err != nil {
 			return err
 		}
 	}

@@ -17,6 +17,8 @@
 package commands
 
 import (
+	"bytes"
+	"encoding/gob"
 	"os"
 	"path/filepath"
 	"sort"
@@ -289,6 +291,65 @@ func TestStageRebuildOutputRefusesExistingNonCommitmentFiles(t *testing.T) {
 	_, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
 	require.ErrorContains(t, err, "is not empty")
 	require.ErrorContains(t, err, "--resume")
+}
+
+func TestStageRebuildOutputAcceptsPBinCheckpoint(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	require.NoError(t, err)
+	checkpoint := filepath.Join(out.dirs.Tmp, "pbin-rebuild-0-100000000.checkpoint")
+	writeTestPBinCheckpoint(t, checkpoint)
+	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
+	require.NoError(t, err)
+}
+
+func TestStageRebuildOutputRejectsCheckpointWithCompletedRange(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	require.NoError(t, err)
+	checkpoint := filepath.Join(out.dirs.Tmp, "pbin-rebuild-0-100000000.checkpoint")
+	writeTestPBinCheckpoint(t, checkpoint)
+	require.NoError(t, os.WriteFile(filepath.Join(out.dirs.SnapDomain, "v1.0-commitment.0-64.kv"), []byte("finished"), 0o644))
+	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
+	require.ErrorContains(t, err, "checkpoint")
+}
+
+func TestStageRebuildOutputRejectsPBinCheckpointSpillMismatch(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	require.NoError(t, err)
+	checkpoint := filepath.Join(out.dirs.Tmp, "pbin-rebuild-0-100000000.checkpoint")
+	spill := checkpoint + ".rows"
+	require.NoError(t, os.WriteFile(spill, []byte{1, 2}, 0o644))
+	var data bytes.Buffer
+	require.NoError(t, gob.NewEncoder(&data).Encode(stagedPBinRebuildCheckpoint{
+		LastKey:   []byte{1},
+		SpillPath: spill,
+		SpillSize: 3,
+	}))
+	require.NoError(t, os.WriteFile(checkpoint, data.Bytes(), 0o644))
+	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
+	require.ErrorContains(t, err, "disagree")
+}
+
+func TestStageRebuildOutputRejectsOrphanPBinSpill(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	out, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	require.NoError(t, err)
+	require.NoError(t, os.WriteFile(filepath.Join(out.dirs.Tmp, "pbin-rebuild-0-100000000.checkpoint.rows"), []byte{1}, 0o644))
+	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
+	require.ErrorContains(t, err, "no checkpoint")
+}
+
+func writeTestPBinCheckpoint(t *testing.T, path string) {
+	t.Helper()
+	var data bytes.Buffer
+	require.NoError(t, gob.NewEncoder(&data).Encode(stagedPBinRebuildCheckpoint{LastKey: []byte{1}}))
+	require.NoError(t, os.WriteFile(path, data.Bytes(), 0o644))
 }
 
 func TestStageRebuildOutputResumeRefusesUnrelatedExistingFile(t *testing.T) {

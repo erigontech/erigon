@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"runtime"
-	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -108,6 +107,23 @@ func TestPBinRebuildBatchStreamPreservesOperations(t *testing.T) {
 	require.Equal(t, want[0], got)
 }
 
+func TestPBinRebuildOpStreamsKeepOneGlobalTreeKeyOrder(t *testing.T) {
+	low := pbt.Op{Key: []byte{0x00, 0x01}}
+	high := pbt.Op{Key: []byte{0xff, 0x01}}
+	var got []pbt.Op
+	err := pbinForEachRebuildOpStreamsAfter(t.TempDir(), 1, 1<<20, nil, []func(func(pbt.Op) error) error{
+		func(emit func(pbt.Op) error) error { return emit(high) },
+		func(emit func(pbt.Op) error) error { return emit(low) },
+	}, func(batch []pbt.Op, _ bool) error {
+		got = append(got, batch...)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Equal(t, low.Key, got[0].Key)
+	require.Equal(t, high.Key, got[1].Key)
+}
+
 func TestPBinRebuildBatchStreamBoundsLiveHeap(t *testing.T) {
 	const (
 		operationCount = 600_000
@@ -118,17 +134,9 @@ func TestPBinRebuildBatchStreamBoundsLiveHeap(t *testing.T) {
 	runtime.GC()
 	var baseline runtime.MemStats
 	runtime.ReadMemStats(&baseline)
-	var beforeUsage syscall.Rusage
-	require.NoError(t, syscall.Getrusage(syscall.RUSAGE_SELF, &beforeUsage))
-	ops := make([]pbt.Op, operationCount)
-	for i := range ops {
-		slot := make([]byte, 32)
-		binary.BigEndian.PutUint32(slot[28:], uint32(i))
-		ops[i] = pbt.Op{Key: eip8297.TreeKeyStorage(address, slot), Value: [32]byte{1}}
-	}
 	var largest int
 	var peak uint64
-	err := pbinForEachRebuildBatch(ops, t.TempDir(), maxOperations, maxBytes, func(batch []pbt.Op, _ bool) error {
+	err := pbinForEachRebuildOpStreamLookaheadAfter(t.TempDir(), maxOperations, maxBytes, nil, func(batch []pbt.Op, _ []byte, _ bool) error {
 		if len(batch) > largest {
 			largest = len(batch)
 		}
@@ -138,20 +146,67 @@ func TestPBinRebuildBatchStreamBoundsLiveHeap(t *testing.T) {
 			peak = current.Alloc
 		}
 		return nil
+	}, func(emit func(pbt.Op) error) error {
+		for i := 0; i < operationCount; i++ {
+			slot := make([]byte, 32)
+			binary.BigEndian.PutUint32(slot[28:], uint32(i))
+			if err := emit(pbt.Op{Key: eip8297.TreeKeyStorage(address, slot), Value: [32]byte{1}}); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	require.NoError(t, err)
 	require.Equal(t, maxOperations, largest)
 	runtime.GC()
-	require.Len(t, ops, operationCount)
 	var stats runtime.MemStats
 	runtime.ReadMemStats(&stats)
-	var afterUsage syscall.Rusage
-	require.NoError(t, syscall.Getrusage(syscall.RUSAGE_SELF, &afterUsage))
 	ceiling := uint64(maxBytes) + uint64(maxOperations)*128 + 32<<20
 	retained := uint64(0)
 	if stats.Alloc > baseline.Alloc {
 		retained = stats.Alloc - baseline.Alloc
 	}
-	t.Logf("peak live heap: %d bytes; live heap after GC: %d bytes; retained: %d bytes; peak rss delta: %d; ceiling: %d bytes", peak, stats.Alloc, retained, afterUsage.Maxrss-beforeUsage.Maxrss, ceiling)
+	t.Logf("peak live heap: %d bytes; live heap after GC: %d bytes; retained: %d bytes; ceiling: %d bytes", peak, stats.Alloc, retained, ceiling)
 	require.Less(t, retained, ceiling)
+}
+
+func TestPBinRebuildOpStreamHeapDoesNotGrowWithInput(t *testing.T) {
+	measure := func(operationCount int) uint64 {
+		runtime.GC()
+		var before runtime.MemStats
+		runtime.ReadMemStats(&before)
+		var peak uint64
+		err := pbinForEachRebuildOpStreamLookaheadAfter(t.TempDir(), 1000, 1<<20, nil, func([]pbt.Op, []byte, bool) error {
+			runtime.GC()
+			var current runtime.MemStats
+			runtime.ReadMemStats(&current)
+			if current.Alloc > peak {
+				peak = current.Alloc
+			}
+			return nil
+		}, func(emit func(pbt.Op) error) error {
+			address := bytes.Repeat([]byte{0x31}, 20)
+			for i := 0; i < operationCount; i++ {
+				slot := make([]byte, 32)
+				binary.BigEndian.PutUint32(slot[28:], uint32(i))
+				if err := emit(pbt.Op{Key: eip8297.TreeKeyStorage(address, slot), Value: [32]byte{1}}); err != nil {
+					return err
+				}
+			}
+			return nil
+		})
+		require.NoError(t, err)
+		if peak <= before.Alloc {
+			return 0
+		}
+		return peak - before.Alloc
+	}
+
+	small := measure(200_000)
+	large := measure(600_000)
+	if large > small {
+		require.Less(t, large-small, uint64(32<<20))
+	} else {
+		require.Less(t, small-large, uint64(32<<20))
+	}
 }

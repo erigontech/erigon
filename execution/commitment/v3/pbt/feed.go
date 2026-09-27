@@ -73,94 +73,128 @@ func ForEachFeedOp(feed *commitment.PBinFeed, emit func(Op) error) error {
 	sort.SliceStable(accounts, func(i, j int) bool {
 		return bytes.Compare(accounts[i].Address, accounts[j].Address) < 0
 	})
-	chunks := make(map[string][eip8297.ValueLength]byte)
+	emitter := NewFeedOpEmitter()
 	for i := range accounts {
-		account := &accounts[i]
-		if len(account.Address) != length.Addr {
-			return fmt.Errorf("pbin: address has length %d, want %d", len(account.Address), length.Addr)
+		if err := emitter.EmitAccount(accounts[i], emit); err != nil {
+			return err
 		}
-		address := bytes.Clone(account.Address)
-		cache := new(eip8297.DigestCache)
-		headerPrefix := cache.AccountHeaderStem(address)
-		storagePrefix := cache.AccountStoragePrefix(address)
-		if !account.Exists || account.Wiped {
-			if err := emit(Drop(headerPrefix)); err != nil {
-				return err
-			}
-			if err := emit(Drop(storagePrefix)); err != nil {
-				return err
-			}
-		}
-		if !account.Exists {
-			continue
-		}
+	}
+	return nil
+}
 
-		basicKey := eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)
-		if account.CodeWritten {
-			if err := feedCodeHash(*account); err != nil {
+type FeedOpEmitter struct {
+	chunks map[string][eip8297.ValueLength]byte
+	hashes map[common.Hash]struct{}
+	stats  commitment.PBinCodeStats
+}
+
+func NewFeedOpEmitter() *FeedOpEmitter {
+	return &FeedOpEmitter{chunks: make(map[string][eip8297.ValueLength]byte), hashes: make(map[common.Hash]struct{})}
+}
+
+func NewRebuildFeedOpEmitter() *FeedOpEmitter {
+	return &FeedOpEmitter{hashes: make(map[common.Hash]struct{})}
+}
+
+func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit func(Op) error) error {
+	if emit == nil {
+		return fmt.Errorf("pbin: nil operation emitter")
+	}
+	if len(account.Address) != length.Addr {
+		return fmt.Errorf("pbin: address has length %d, want %d", len(account.Address), length.Addr)
+	}
+	address := bytes.Clone(account.Address)
+	cache := new(eip8297.DigestCache)
+	headerPrefix := cache.AccountHeaderStem(address)
+	storagePrefix := cache.AccountStoragePrefix(address)
+	if !account.Exists || account.Wiped {
+		if err := emit(Drop(headerPrefix)); err != nil {
+			return err
+		}
+		if err := emit(Drop(storagePrefix)); err != nil {
+			return err
+		}
+	}
+	if !account.Exists {
+		return nil
+	}
+
+	basicKey := eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)
+	if account.CodeWritten {
+		if err := feedCodeHash(account); err != nil {
+			return err
+		}
+		basic, err := eip8297.EncodeBasicData(account.Nonce, &account.Balance, uint64(len(account.Code)))
+		if err != nil {
+			return err
+		}
+		if err := emit(Op{Key: basicKey, Value: basic}); err != nil {
+			return err
+		}
+		if eip8297.IsDelegation(account.Code) {
+			if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey)}); err != nil {
 				return err
 			}
-			basic, err := eip8297.EncodeBasicData(account.Nonce, &account.Balance, uint64(len(account.Code)))
-			if err != nil {
+			if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey), Value: eip8297.EncodeDelegation(account.Code)}); err != nil {
 				return err
 			}
-			if err := emit(Op{Key: basicKey, Value: basic}); err != nil {
+		} else {
+			if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), Value: eip8297.CodeHashValue(account.CodeHash)}); err != nil {
 				return err
 			}
-			if eip8297.IsDelegation(account.Code) {
-				if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey)}); err != nil {
-					return err
+			if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey)}); err != nil {
+				return err
+			}
+			if len(account.Code) != 0 {
+				e.stats.CodeBearingAccounts++
+				if _, ok := e.hashes[account.CodeHash]; !ok {
+					e.hashes[account.CodeHash] = struct{}{}
+					e.stats.UniqueCodeHashes++
 				}
-				if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey), Value: eip8297.EncodeDelegation(account.Code)}); err != nil {
-					return err
-				}
-			} else {
-				if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), Value: eip8297.CodeHashValue(account.CodeHash)}); err != nil {
-					return err
-				}
-				if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey)}); err != nil {
-					return err
-				}
-				for index, chunk := range eip8297.ChunkifyCode(account.Code) {
-					key := eip8297.TreeKeyCodeChunk(account.CodeHash, index)
+			}
+			for index, chunk := range eip8297.ChunkifyCode(account.Code) {
+				key := eip8297.TreeKeyCodeChunk(account.CodeHash, index)
+				if e.chunks != nil {
 					name := string(key)
-					if old, ok := chunks[name]; ok {
+					if old, ok := e.chunks[name]; ok {
 						if old != chunk {
 							return fmt.Errorf("pbin: code chunk %x carries two values", key)
 						}
 						continue
 					}
-					chunks[name] = chunk
-					if err := emit(Op{Key: key, Value: chunk}); err != nil {
-						return err
-					}
+					e.chunks[name] = chunk
+				}
+				if err := emit(Op{Key: key, Value: chunk}); err != nil {
+					return err
 				}
 			}
-		} else {
-			if err := emit(Op{Key: basicKey, merge: &feedMerge{
-				kind: mergeBasicData, nonce: account.Nonce, balance: account.Balance, codeHash: account.CodeHash,
-			}}); err != nil {
-				return err
-			}
-			if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), merge: &feedMerge{
-				kind: mergeCodeHash, codeHash: account.CodeHash,
-			}}); err != nil {
-				return err
-			}
 		}
-		for _, slot := range account.Slots {
-			if len(slot.Key) > length.Hash || len(slot.Value) > eip8297.ValueLength {
-				return fmt.Errorf("pbin: slot key or value is too long")
-			}
-			key := eip8297.TreeKeyStorage(address, slot.Key)
-			value := eip8297.EncodeStorageValue(slot.Value)
-			if err := emit(Op{Key: key, Value: value}); err != nil {
-				return err
-			}
+	} else {
+		if err := emit(Op{Key: basicKey, merge: &feedMerge{
+			kind: mergeBasicData, nonce: account.Nonce, balance: account.Balance, codeHash: account.CodeHash,
+		}}); err != nil {
+			return err
+		}
+		if err := emit(Op{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), merge: &feedMerge{
+			kind: mergeCodeHash, codeHash: account.CodeHash,
+		}}); err != nil {
+			return err
+		}
+	}
+	for _, slot := range account.Slots {
+		if len(slot.Key) > length.Hash || len(slot.Value) > eip8297.ValueLength {
+			return fmt.Errorf("pbin: slot key or value is too long")
+		}
+		key := eip8297.TreeKeyStorage(address, slot.Key)
+		value := eip8297.EncodeStorageValue(slot.Value)
+		if err := emit(Op{Key: key, Value: value}); err != nil {
+			return err
 		}
 	}
 	return nil
 }
+
+func (e *FeedOpEmitter) Stats() commitment.PBinCodeStats { return e.stats }
 
 func feedCodeHash(account commitment.PBinFeedAccount) error {
 	actual := common.Hash(keccak.Sum256(account.Code))
