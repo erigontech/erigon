@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -792,22 +791,7 @@ func opJump(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 		return pc, nil, errStopToken
 	}
 	pos := scope.Stack.pop()
-	if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
-		if usedBitmap {
-			if evm.config.TraceJumpDest {
-				log.Debug(
-					"Code Bitmap used for detecting invalid jump",
-					"tx", fmt.Sprintf("0x%x", evm.TxHash),
-					"block_num", evm.Context.BlockNumber,
-				)
-			} else {
-				// This is "cheaper" version because it does not require calculation of txHash for each transaction
-				log.Debug(
-					"Code Bitmap used for detecting invalid jump",
-					"block_num", evm.Context.BlockNumber,
-				)
-			}
-		}
+	if !scope.Contract.validJumpdest(pos) {
 		return pc, nil, ErrInvalidJump
 	}
 	// pc will be increased by the interpreter loop
@@ -825,22 +809,7 @@ func opJumpi(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	}
 	pos, cond := scope.Stack.pop2()
 	if !cond.IsZero() {
-		if valid, usedBitmap := scope.Contract.validJumpdest(pos); !valid {
-			if usedBitmap {
-				if evm.config.TraceJumpDest {
-					log.Warn(
-						"Code Bitmap used for detecting invalid jump",
-						"tx", fmt.Sprintf("0x%x", evm.TxHash),
-						"block_num", evm.Context.BlockNumber,
-					)
-				} else {
-					// This is "cheaper" version because it does not require calculation of txHash for each transaction
-					log.Warn(
-						"Code Bitmap used for detecting invalid jump",
-						"block_num", evm.Context.BlockNumber,
-					)
-				}
-			}
+		if !scope.Contract.validJumpdest(pos) {
 			return pc, nil, ErrInvalidJump
 		}
 		pc = pos.Uint64() - 1 // pc will be increased by the interpreter loop
