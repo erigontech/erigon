@@ -451,7 +451,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteArrayStart()
 			first = false
 		}
-		tr.writeTo(stream.Open())
+		tr.marshalFastJSONTo(stream.Open())
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return false, err
 		}
@@ -1102,6 +1102,10 @@ const (
 )
 
 func (m *TraceFilterMode) UnmarshalJSON(data []byte) error {
+	// An explicit null is the same as an omitted mode: the default, intersection.
+	if string(data) == "null" {
+		return nil
+	}
 	var mode string
 	if err := json.Unmarshal(data, &mode); err != nil {
 		return err
