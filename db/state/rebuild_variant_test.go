@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -362,19 +363,25 @@ func TestRebuildCommitmentFilesRefusesSwappedPBinCheckpointSpill(t *testing.T) {
 	db, _, dirs := rebuildVariantDatadir(t)
 	checkpointPath := rebuildVariantCheckpointPath(t, dirs)
 	spillPath := checkpointPath + ".rows"
-	rootKey := pbt.GlobalRootKey()
-	firstKey := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x11}, length.Addr), eip8297.BasicDataLeafKey)
-	secondKey := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x22}, length.Addr), eip8297.BasicDataLeafKey)
+	address := bytes.Repeat([]byte{0x99}, length.Addr)
+	rowKey, err := pbt.BucketRootKey(address)
+	require.NoError(t, err)
+	slot := make([]byte, length.Hash)
+	slot[length.Hash-1] = eip8297.HeaderStorageSlots
+	leafKey := eip8297.TreeKeyStorage(address, slot)
+	firstValue := eip8297.EncodeStorageValue([]byte{1})
+	secondValue := eip8297.EncodeStorageValue([]byte{2})
 	firstRecord := pbt.Record{Form: pbt.LeafRoot}
-	firstRecord.Cells[0] = pbt.Cell{Kind: pbt.LeafCell, Key: firstKey}
-	secondRecord := pbt.Record{Form: pbt.LeafRoot}
-	secondRecord.Cells[0] = pbt.Cell{Kind: pbt.LeafCell, Key: secondKey}
-	firstData, err := pbt.EncodeRecord(rootKey, &firstRecord)
+	firstRecord.Cells[0] = pbt.Cell{Kind: pbt.LeafCell, Key: leafKey, Value: firstValue}
+	secondRecord := firstRecord
+	secondRecord.Cells[0].Value = secondValue
+	secondRecord.Cells[1].Value = secondValue
+	firstData, err := pbt.EncodeRecord(rowKey, &firstRecord)
 	require.NoError(t, err)
-	secondData, err := pbt.EncodeRecord(rootKey, &secondRecord)
+	secondData, err := pbt.EncodeRecord(rowKey, &secondRecord)
 	require.NoError(t, err)
-	firstSpill := rebuildVariantSpillBytes(rootKey, firstData, nil)
-	spill := rebuildVariantSpillBytes(rootKey, secondData, nil)
+	firstSpill := rebuildVariantSpillBytes(rowKey, firstData, nil)
+	spill := rebuildVariantSpillBytes(rowKey, secondData, nil)
 	want := sha256.Sum256(firstSpill)
 	require.NoError(t, os.WriteFile(spillPath, spill, 0o644))
 	writeRebuildPBinCheckpointFixture(t, checkpointPath, rebuildPBinCheckpointFixture{
@@ -466,6 +473,9 @@ func rebuildVariantMemoryDatadir(t *testing.T, slots int) (kv.TemporalRwDB, *sta
 
 func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) (uint64, uint64) {
 	t.Helper()
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
 	var samples []uint64
 	root, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
 		Variant:        commitment.VariantBinPatriciaTrie,
@@ -478,7 +488,7 @@ func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) (uint64, uin
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.NotEmpty(t, samples)
-	baseline := samples[0]
+	baseline := before.Alloc
 	peak := baseline
 	for _, sample := range samples {
 		peak = max(peak, sample)
@@ -509,11 +519,16 @@ func TestRebuildCommitmentFilesBinTargetMemoryDoesNotGrowWithSlots(t *testing.T)
 		}
 		return peak - baseline
 	}
-	_, _, largeGrowth := growth(smallBaseline, smallPeak), growth(mediumBaseline, mediumPeak), growth(largeBaseline, largePeak)
+	smallGrowth, mediumGrowth, largeGrowth := growth(smallBaseline, smallPeak), growth(mediumBaseline, mediumPeak), growth(largeBaseline, largePeak)
 	require.LessOrEqual(t, smallPeak, smallBaseline+ceiling)
 	require.LessOrEqual(t, mediumPeak, mediumBaseline+ceiling)
 	require.LessOrEqual(t, largePeak, largeBaseline+ceiling)
-	require.LessOrEqual(t, largeGrowth, uint64(64<<20))
+	require.LessOrEqual(t, smallGrowth, ceiling)
+	require.LessOrEqual(t, mediumGrowth, ceiling)
+	require.LessOrEqual(t, largeGrowth, ceiling)
+	require.LessOrEqual(t, smallGrowth, rebuildVariantOpCollectorBudget)
+	require.LessOrEqual(t, mediumGrowth, rebuildVariantOpCollectorBudget)
+	require.LessOrEqual(t, largeGrowth, rebuildVariantOpCollectorBudget)
 }
 
 func TestRebuildCommitmentFilesBinTargetStagedOutputSkipsSourceCheckpoint(t *testing.T) {

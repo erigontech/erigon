@@ -76,6 +76,8 @@ type Trie struct {
 	routingRows            []*rowNode
 	rowChunks              []*rowChunk
 	rowChunkIndex          int
+	rowCellChunks          []*rowCellChunk
+	recordChunks           []*recordChunk
 	cellChunks             []*cellChunk
 	cellChunkIndex         int
 	bucketDirty            map[string][]byte
@@ -209,6 +211,12 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 		chunk.used = 0
 	}
 	t.rowChunkIndex = 0
+	for _, chunk := range t.rowCellChunks {
+		chunk.used = 0
+	}
+	for _, chunk := range t.recordChunks {
+		chunk.used = 0
+	}
 	for _, chunk := range t.cellChunks {
 		chunk.used = 0
 	}
@@ -515,14 +523,14 @@ func (t *Trie) registerRow(row *rowNode) {
 			return
 		}
 		row.key = key
-		row.name = string(key)
 	}
+	name := string(row.key)
 	if len(row.prev) != 0 {
-		t.rememberPrevName(row.name, row.prev)
+		t.rememberPrevName(name, row.prev)
 	}
-	t.rows[row.name] = row
+	t.rows[name] = row
 	if row.dirty {
-		t.dirtyRows[row.name] = row
+		t.dirtyRows[name] = row
 		if !row.routing {
 			row.routing = true
 			t.routingRows = append(t.routingRows, row)

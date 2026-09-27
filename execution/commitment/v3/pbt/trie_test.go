@@ -156,6 +156,29 @@ func TestTriePersistsEveryChangedRow(t *testing.T) {
 	assertPersistedTrie(t, ctx, entries)
 }
 
+func TestLoadedRowMaterializesOnlyChangedCells(t *testing.T) {
+	keyA := trieCodeKey(0, 0, 1)
+	keyB := trieCodeKey(0, 2, 2)
+	ctx := newTrieTestContext()
+	_, err := NewTrie(ctx).Process([]Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}})
+	require.NoError(t, err)
+
+	trie := NewTrie(ctx)
+	_, err = trie.Process([]Op{{Key: keyA, Value: testTrieValue(3)}})
+	require.NoError(t, err)
+	loaded := 0
+	for _, chunk := range trie.rowChunks {
+		for _, row := range chunk.rows[:chunk.used] {
+			if len(row.raw) == 0 {
+				continue
+			}
+			loaded++
+			require.LessOrEqual(t, len(row.cells), 1)
+		}
+	}
+	require.NotZero(t, loaded)
+}
+
 func TestTrieBatchReadsOnlyPreviousRightEdge(t *testing.T) {
 	keyA := trieCodeKey(0, 0, 1)
 	keyB := trieCodeKey(0x10, 0, 2)

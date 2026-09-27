@@ -111,8 +111,14 @@ func (t *Trie) verifyRow(row *rowNode) (FoldResult, error) {
 	if !reflect.DeepEqual(record, decoded) {
 		return FoldResult{}, fmt.Errorf("row %x is not canonical", row.key)
 	}
-	for slot := range row.cells {
-		cell := row.cell(slot)
+	for slot := range maxCells {
+		cell, ok := row.cellValue(slot)
+		if !ok {
+			continue
+		}
+		if cell.Kind == BranchCell {
+			cell = *row.cell(slot)
+		}
 		if cell.Kind != BranchCell {
 			continue
 		}

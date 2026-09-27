@@ -319,8 +319,14 @@ func (t *Trie) keysUnderRow(row *rowNode, prefix *eip8297.Bitpath) ([][]byte, er
 
 func (t *Trie) rowKeys(row *rowNode) ([][]byte, error) {
 	keys := make([][]byte, 0)
-	for slot := range row.cells {
-		cell := row.cell(slot)
+	for slot := range maxCells {
+		cell, ok := row.cellValue(slot)
+		if !ok {
+			continue
+		}
+		if cell.Kind == BranchCell {
+			cell = *row.cell(slot)
+		}
 		switch cell.Kind {
 		case LeafCell:
 			keys = append(keys, bytes.Clone(cell.Key))
@@ -351,8 +357,14 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 	}
 	var visit func(*rowNode) error
 	visit = func(row *rowNode) error {
-		for slot := range row.cells {
-			cell := row.cell(slot)
+		for slot := range maxCells {
+			cell, ok := row.cellValue(slot)
+			if !ok {
+				continue
+			}
+			if cell.Kind == BranchCell {
+				cell = *row.cell(slot)
+			}
 			switch cell.Kind {
 			case LeafCell:
 				if cell.Key[0] != eip8297.StorageZone {
@@ -367,7 +379,7 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 					return err
 				}
 			case BranchCell:
-				full := branchPath(row, slot, cell)
+				full := branchPath(row, slot, &cell)
 				if full.BitLen >= 264 && pathByte(&full, 0) == eip8297.StorageZone {
 					bucketPath := full.Slice(0, 264)
 					if full.BitLen < 268 {

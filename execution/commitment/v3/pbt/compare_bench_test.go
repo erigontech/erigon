@@ -64,6 +64,7 @@ type feedBenchContext struct {
 	storage  map[string]commitment.Update
 	reader   *feedBenchReader
 	refs     map[string]*commitment.LeafRefs
+	refHits  *atomic.Int64
 	discard  bool
 }
 
@@ -87,6 +88,9 @@ func (c *feedBenchContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
 	ref := c.refs[string(key)]
 	if ref == nil || !bytes.Equal(c.records[string(key)], data) {
 		return nil
+	}
+	if c.refHits != nil {
+		c.refHits.Add(1)
 	}
 	return ref
 }
@@ -341,18 +345,22 @@ func feedBenchExpectedRoot(fixture feedBenchFixture, reader *feedBenchReader) co
 	return eip8297.StateRootWithHash(entries, eip8297.SelectedHash())
 }
 
-func feedBenchFactory(base map[string][]byte, workers int, refs map[string]*commitment.LeafRefs) commitment.TrieContextFactory {
-	contexts := make([]commitment.PatriciaContext, workers)
+func feedBenchFactory(base map[string][]byte, workers int, refs map[string]*commitment.LeafRefs, refHits *atomic.Int64) commitment.TrieContextFactory {
+	contexts := make([]commitment.PatriciaContext, workers*6)
 	for i := range contexts {
 		ctx := newFeedBenchContext(base, true, nil)
 		ctx.refs = refs
+		ctx.refHits = refHits
 		contexts[i] = ctx
 	}
 	var next atomic.Int32
 	return func(context.Context) (commitment.PatriciaContext, func()) {
 		index := int(next.Add(1)) - 1
 		if index >= len(contexts) {
-			return newFeedBenchContext(base, true, nil), func() {}
+			ctx := newFeedBenchContext(base, true, nil)
+			ctx.refs = refs
+			ctx.refHits = refHits
+			return ctx, func() {}
 		}
 		return contexts[index], func() {}
 	}
@@ -361,7 +369,7 @@ func feedBenchFactory(base map[string][]byte, workers int, refs map[string]*comm
 func feedBenchParallelProbe(b *testing.B, base map[string][]byte, ops []pbt.Op, workers int) int32 {
 	b.Helper()
 	trie := pbt.NewTrie(newFeedBenchContext(base, true, nil))
-	trie.SetTrieContextFactory(feedBenchFactory(base, workers, nil))
+	trie.SetTrieContextFactory(feedBenchFactory(base, workers, nil, nil))
 	var active, peak atomic.Int32
 	trie.SetCoreActivityHook(func(start bool) {
 		if !start {
@@ -432,7 +440,8 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 	state := feedBenchState(fixture.seed, fixture.batch)
 	wantRoot := feedBenchExpectedRoot(fixture, reader)
 	newTrie := pbt.NewTrie(newFeedBenchContext(newBase, true, state))
-	newTrie.SetTrieContextFactory(feedBenchFactory(newBase, workers, prefetched))
+	var refHits atomic.Int64
+	newTrie.SetTrieContextFactory(feedBenchFactory(newBase, workers, prefetched, &refHits))
 	oldTrie.Reset()
 	oldContext := newFeedBenchContext(oldBase, true, state)
 	oldContext.reader = reader
@@ -448,9 +457,19 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 	}
 	var newDurations, oldDurations []time.Duration
 	var newAllocations, oldAllocations uint64
+	minimumRefs := int64(0)
+	if len(fixture.seed) > 0 {
+		if len(fixture.batch) > len(fixture.seed) {
+			minimumRefs = int64(len(fixture.seed) / 2)
+		} else {
+			minimumRefs = 8
+		}
+	}
 	for round := range 5 {
+		refHits.Store(0)
 		newContext := newFeedBenchContext(newBase, true, state)
 		newContext.refs = prefetched
+		newContext.refHits = &refHits
 		newTrie.ResetContext(newContext)
 		oldTrie.Reset()
 		oldContext = newFeedBenchContext(oldBase, true, state)
@@ -472,7 +491,10 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 			runtime.ReadMemStats(&allocAfter)
 			newAllocations += allocAfter.TotalAlloc - allocBefore.TotalAlloc
 			after := benchmarkUptime()
-			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d", round, before, after, peak)
+			if prefetch {
+				require.GreaterOrEqual(b, refHits.Load(), minimumRefs)
+			}
+			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d refs=%d", round, before, after, peak, refHits.Load())
 			before = benchmarkUptime()
 			runtime.ReadMemStats(&allocBefore)
 			start = time.Now()
@@ -515,7 +537,10 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 			newAllocations += allocAfter.TotalAlloc - allocBefore.TotalAlloc
 			after = benchmarkUptime()
 			require.NoError(b, processErr)
-			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d", round, before, after, peak)
+			if prefetch {
+				require.GreaterOrEqual(b, refHits.Load(), minimumRefs)
+			}
+			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d refs=%d", round, before, after, peak, refHits.Load())
 			require.Equal(b, wantRoot[:], oldRoot)
 			require.Equal(b, wantRoot[:], newRoot[:])
 		}
