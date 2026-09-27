@@ -648,6 +648,18 @@ func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	}
 }
 
+func TestDumpStateExposesCommitmentV3(t *testing.T) {
+	require.NotNil(t, dumpState.Flags().Lookup(utils.ExperimentalCommitmentV3Flag.Name))
+	originalV3, originalSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	dumpState.PreRun(dumpState, nil)
+	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
+}
+
 func TestWithExperimentalCommitmentResolution(t *testing.T) {
 	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
 

@@ -70,10 +70,21 @@ func (t *Trie) applyMerge(op Op) error {
 		if value == ([eip8297.ValueLength]byte{}) {
 			return t.remove(op.Key)
 		}
-		return t.insert(op.Key, value)
+		err = t.insert(op.Key, value)
+		if err == nil {
+			if original == nil || t.droppedLeaf(op.Key) {
+				t.mergeCreatedStems[string(op.Key)] = struct{}{}
+			} else {
+				delete(t.mergeCreatedStems, string(op.Key))
+			}
+		}
+		return err
 	case mergeCodeHash:
 		basicKey := bytes.Clone(op.Key)
 		basicKey[len(basicKey)-1] = eip8297.BasicDataLeafKey
+		if _, created := t.mergeCreatedStems[string(basicKey)]; created {
+			return t.insert(op.Key, eip8297.CodeHashValue(merge.codeHash))
+		}
 		original, err := t.originalLeaf(basicKey)
 		if err != nil {
 			return err
@@ -455,6 +466,9 @@ func (t *Trie) refreshRouting() error {
 }
 
 func (t *Trie) remove(key []byte) error {
+	if len(key) == eip8297.AccountKeyLength && key[len(key)-1] == eip8297.BasicDataLeafKey {
+		delete(t.mergeCreatedStems, string(key))
+	}
 	path, err := keyPath(key)
 	if err != nil {
 		return err

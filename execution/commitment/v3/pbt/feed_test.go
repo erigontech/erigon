@@ -48,6 +48,29 @@ func TestTranslateFeedBuildsBasicData(t *testing.T) {
 	require.Equal(t, eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), ops[1].Key)
 }
 
+func TestTranslateFeedMergeOperationsCanBeProcessedInSingleOperationBatches(t *testing.T) {
+	address := common.Hex2Bytes("0000000000000000000000000000000000000001")
+	feed := &commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{{
+		Address: address,
+		Exists:  true,
+		Nonce:   7,
+		Balance: *uint256FromUint64(9),
+	}}}
+	ops, err := TranslateFeed(feed)
+	require.NoError(t, err)
+	incremental := NewTrie(newTrieTestContext())
+	for i := range ops {
+		_, err := incremental.Process([]Op{ops[i]})
+		require.NoError(t, err)
+	}
+	fresh := NewTrie(newTrieTestContext())
+	want, err := fresh.Process(ops)
+	require.NoError(t, err)
+	got, err := incremental.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestTranslateFeedRejectsNil(t *testing.T) {
 	_, err := TranslateFeed(nil)
 	require.ErrorContains(t, err, "nil feed")

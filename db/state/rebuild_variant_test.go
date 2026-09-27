@@ -478,4 +478,9 @@ func TestRebuildTargetResolve(t *testing.T) {
 	pinned, err := state.RebuildTarget{MaxShardSteps: 16}.Resolve()
 	require.NoError(t, err)
 	require.Equal(t, uint64(16), pinned.MaxShardSteps, "an explicit shard size survives resolution")
+
+	batched, err := state.RebuildTarget{PBinBatchOps: 2, PBinBatchBytes: 256}.Resolve()
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), batched.PBinBatchOps)
+	require.Equal(t, uint64(256), batched.PBinBatchBytes)
 }

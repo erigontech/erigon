@@ -38,6 +38,15 @@ var errOperationOrder = fmt.Errorf("operation list must be sorted by key with at
 
 func Drop(prefix []byte) Op { return Op{Drop: bytes.Clone(prefix)} }
 
+func MergeGroupKey(op Op) []byte {
+	if op.merge == nil {
+		return nil
+	}
+	key := bytes.Clone(op.Key)
+	key[len(key)-1] = eip8297.BasicDataLeafKey
+	return key
+}
+
 type Trie struct {
 	ctx                    commitment.PatriciaContext
 	ctxFactory             commitment.TrieContextFactory
@@ -67,13 +76,17 @@ type Trie struct {
 	originalLeafSeen       map[string]struct{}
 	originalLeaves         map[string]*Cell
 	droppedLeafKeys        map[string]struct{}
+	mergeCreatedStems      map[string]struct{}
 }
 
 func NewTrie(ctx commitment.PatriciaContext) *Trie {
-	return &Trie{ctx: ctx, rows: make(map[string]*rowNode), dirtyRows: make(map[string]*rowNode), bucketDirty: make(map[string][]byte)}
+	return &Trie{ctx: ctx, rows: make(map[string]*rowNode), dirtyRows: make(map[string]*rowNode), bucketDirty: make(map[string][]byte), mergeCreatedStems: make(map[string]struct{})}
 }
 
-func (t *Trie) Reset() { t.ResetContext(t.ctx) }
+func (t *Trie) Reset() {
+	t.mergeCreatedStems = make(map[string]struct{})
+	t.ResetContext(t.ctx)
+}
 
 func newBucketTrie(ctx commitment.PatriciaContext, key []byte) (*Trie, error) {
 	path, err := bucketPathForKey(key)
@@ -81,13 +94,14 @@ func newBucketTrie(ctx commitment.PatriciaContext, key []byte) (*Trie, error) {
 		return nil, err
 	}
 	return &Trie{
-		ctx:         ctx,
-		rootKey:     bytes.Clone(key),
-		rootPath:    path,
-		bucketMode:  true,
-		rows:        make(map[string]*rowNode),
-		dirtyRows:   make(map[string]*rowNode),
-		bucketDirty: make(map[string][]byte),
+		ctx:               ctx,
+		rootKey:           bytes.Clone(key),
+		rootPath:          path,
+		bucketMode:        true,
+		rows:              make(map[string]*rowNode),
+		dirtyRows:         make(map[string]*rowNode),
+		bucketDirty:       make(map[string][]byte),
+		mergeCreatedStems: make(map[string]struct{}),
 	}, nil
 }
 
@@ -108,6 +122,7 @@ func newSubtreeTrie(ctx commitment.PatriciaContext, prefix eip8297.Bitpath, desc
 		rows:                  make(map[string]*rowNode),
 		dirtyRows:             make(map[string]*rowNode),
 		bucketDirty:           make(map[string][]byte),
+		mergeCreatedStems:     make(map[string]struct{}),
 	}
 	if !present {
 		return t, nil
@@ -163,6 +178,9 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.originalLeafSeen = nil
 	t.originalLeaves = nil
 	t.droppedLeafKeys = nil
+	if t.mergeCreatedStems == nil {
+		t.mergeCreatedStems = make(map[string]struct{})
+	}
 }
 
 func (t *Trie) rootRecordKey() []byte {

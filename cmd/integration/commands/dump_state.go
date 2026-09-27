@@ -72,6 +72,7 @@ func init() {
 	withDataDir(dumpState)
 	withChain(dumpState)
 	withBlock(dumpState)
+	withExperimentalCommitment(dumpState)
 	dumpState.Flags().StringVar(&dumpStateOutput, "output", "", "output TSV file path (required unless --dry-run)")
 	dumpState.Flags().BoolVar(&dumpStateDryRun, "dry-run", false, "count accounts without writing a TSV file")
 	dumpState.Flags().Uint64Var(&dumpStateExpectedTotal, "expected-total", 0, "expected account count, used to log an ETA (e.g. from a prior --dry-run)")

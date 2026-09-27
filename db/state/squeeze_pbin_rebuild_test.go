@@ -18,6 +18,9 @@ package state
 
 import (
 	"bytes"
+	"encoding/binary"
+	"runtime"
+	"syscall"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -76,4 +79,70 @@ func TestPBinRebuildBatchesSplitWhale(t *testing.T) {
 	}
 	require.Equal(t, ops[0].Key, batches[0][0].Key)
 	require.Equal(t, ops[len(ops)-1].Key, batches[2][1].Key)
+}
+
+func TestPBinRebuildBatchStreamPreservesOperations(t *testing.T) {
+	address := bytes.Repeat([]byte{0x3a}, 20)
+	ops := []pbt.Op{
+		{Key: eip8297.TreeKeyStorage(address, bytes.Repeat([]byte{0x02}, 32)), Value: [32]byte{1}},
+		{Key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), Value: [32]byte{2}},
+		{Key: eip8297.TreeKeyStorage(address, bytes.Repeat([]byte{0x01}, 32)), Value: [32]byte{3}},
+	}
+	want, err := pbinRebuildBatches(ops, t.TempDir(), 10, 1<<20)
+	require.NoError(t, err)
+	var got []pbt.Op
+	err = pbinForEachRebuildBatch(ops, t.TempDir(), 10, 1<<20, func(batch []pbt.Op, _ bool) error {
+		got = append(got, batch...)
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, want[0], got)
+}
+
+func TestPBinRebuildBatchStreamBoundsLiveHeap(t *testing.T) {
+	const (
+		operationCount = 600_000
+		maxOperations  = 100_000
+		maxBytes       = 64 << 20
+	)
+	address := bytes.Repeat([]byte{0x5a}, 20)
+	runtime.GC()
+	var baseline runtime.MemStats
+	runtime.ReadMemStats(&baseline)
+	var beforeUsage syscall.Rusage
+	require.NoError(t, syscall.Getrusage(syscall.RUSAGE_SELF, &beforeUsage))
+	ops := make([]pbt.Op, operationCount)
+	for i := range ops {
+		slot := make([]byte, 32)
+		binary.BigEndian.PutUint32(slot[28:], uint32(i))
+		ops[i] = pbt.Op{Key: eip8297.TreeKeyStorage(address, slot), Value: [32]byte{1}}
+	}
+	var largest int
+	var peak uint64
+	err := pbinForEachRebuildBatch(ops, t.TempDir(), maxOperations, maxBytes, func(batch []pbt.Op, _ bool) error {
+		if len(batch) > largest {
+			largest = len(batch)
+		}
+		var current runtime.MemStats
+		runtime.ReadMemStats(&current)
+		if current.Alloc > peak {
+			peak = current.Alloc
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, maxOperations, largest)
+	runtime.GC()
+	require.Len(t, ops, operationCount)
+	var stats runtime.MemStats
+	runtime.ReadMemStats(&stats)
+	var afterUsage syscall.Rusage
+	require.NoError(t, syscall.Getrusage(syscall.RUSAGE_SELF, &afterUsage))
+	ceiling := uint64(maxBytes) + uint64(maxOperations)*128 + 32<<20
+	retained := uint64(0)
+	if stats.Alloc > baseline.Alloc {
+		retained = stats.Alloc - baseline.Alloc
+	}
+	t.Logf("peak live heap: %d bytes; live heap after GC: %d bytes; retained: %d bytes; peak rss delta: %d; ceiling: %d bytes", peak, stats.Alloc, retained, afterUsage.Maxrss-beforeUsage.Maxrss, ceiling)
+	require.Less(t, retained, ceiling)
 }

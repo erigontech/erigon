@@ -472,6 +472,31 @@ func TestTrieParallelParityWorkerCounts(t *testing.T) {
 	}
 }
 
+func TestTrieParallelIncrementalBatchesMatchFreshBuild(t *testing.T) {
+	keys := []Op{
+		{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(1)},
+		{Key: trieCodeKey(0, 2, 2), Value: testTrieValue(2)},
+		{Key: trieCodeKey(0, 8, 3), Value: testTrieValue(3)},
+		{Key: trieCodeKey(0x10, 0, 4), Value: testTrieValue(4)},
+		{Key: eip8297.TreeKeyStorage(bytes.Repeat([]byte{2}, 20), storageSlotKey()), Value: eip8297.EncodeStorageValue([]byte{5})},
+	}
+	sort.Slice(keys, func(i, j int) bool { return bytes.Compare(keys[i].Key, keys[j].Key) < 0 })
+	incrementalContext := newTrieTestContext()
+	incremental := NewTrie(incrementalContext)
+	for i := 0; i < len(keys); i += 2 {
+		end := min(i+2, len(keys))
+		_, err := incremental.ProcessParallel(keys[i:end], 1)
+		require.NoError(t, err)
+	}
+	freshContext := newTrieTestContext()
+	freshRoot, err := NewTrie(freshContext).Process(keys)
+	require.NoError(t, err)
+	incrementalRoot, err := incremental.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, freshRoot, incrementalRoot)
+	require.Equal(t, freshContext.records, incrementalContext.records)
+}
+
 func TestTrieParallelChurnParity(t *testing.T) {
 	keys, prefixes := churnKeys()
 	for _, workers := range []int{1, 2, 8} {

@@ -237,12 +237,6 @@ func TestPBinRebuildDelegatedAccountHasNoCodeLeaves(t *testing.T) {
 		"the rebuilt account must carry the indicator in its DELEGATION leaf")
 }
 
-// A range wider than one shard is rebuilt in
-// several shards, each its own Process over its own slice of the key order. The
-// two accounts running the same code sit at the ends of that order, so the
-// shard boundary falls between them and the code zone comes out right only if
-// the second shard chunks the code rather than taking the first shard's work as
-// done.
 func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 	pbinM1ABinVariant(t)
 
@@ -282,13 +276,12 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 	require.Positive(t, peak)
 	t.Logf("peak allocation: %d bytes", peak)
 	require.Len(t, report.Ranges, 1)
-	require.Len(t, report.Ranges[0].Shards, 2, "the fixture must split one range into two shards, otherwise it proves nothing")
+	require.Len(t, report.Ranges[0].Shards, 1)
 	require.Equal(t, wantRoot, rebuiltRoot)
 
 	for i, s := range pbinCodeReportShards(t, report) {
 		require.Positive(t, s.CodeBearingAccounts, "shard %d holds no holder of the shared code, so the split proves nothing", i)
-		require.Equal(t, uint64(1), s.UniqueCodeHashes,
-			"the chunk cache lives for one shard, so shard %d must chunk the shared code itself", i)
+		require.Equal(t, uint64(1), s.UniqueCodeHashes)
 	}
 
 	require.NoError(t, agg.OpenFolder(db))

@@ -23,6 +23,7 @@ package backtester_test
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -466,6 +467,25 @@ func TestPBinM1ARebuildTreeKeyBatchesPreserveRecords(t *testing.T) {
 	require.ElementsMatch(t, wantKeys, gotKeys)
 	require.Equal(t, wantRecords, gotRecords)
 	pbinM1AAssertNewEngineRecords(t, rebuilt)
+}
+
+func TestPBinM1ARebuildTreeKeyBatchSizes(t *testing.T) {
+	for _, batchOps := range []uint64{1, 2, 7} {
+		t.Run(fmt.Sprintf("ops-%d", batchOps), func(t *testing.T) {
+			pbinM1ABinVariant(t)
+			db, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
+			roots, _ := pbinForwardRun(t, db, pbinM1AStepSize, 0, 4*pbinM1AStepSize, pbinM1AFixture(), pbinM1ASlots)
+			require.NoError(t, agg.BuildFiles(db, 4*pbinM1AStepSize, unboundedFinalityCtx))
+			collatedTxNum := pbinCollatedTxNum(t, db, kv.StorageDomain)
+			wantRoot := roots[collatedTxNum-1]
+			db, _ = pbinM1AWipeCommitment(t, db, agg, dirs, pbinM1AStepSize)
+			gotRoot, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
+				PBinBatchOps: batchOps, PBinBatchBytes: 64 << 20,
+			})
+			require.NoError(t, err)
+			require.Equal(t, wantRoot, gotRoot)
+		})
+	}
 }
 
 // The second half touches only its own keys, so the root can only come out right
