@@ -2737,7 +2737,10 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 		return nil, false, err
 	}
 	if ok {
-		return v, len(v) != 0, nil
+		if len(v) == 0 {
+			return nil, false, nil
+		}
+		return v, true, nil
 	}
 	v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	return v, ok, err

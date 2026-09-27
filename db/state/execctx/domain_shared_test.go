@@ -1837,6 +1837,7 @@ func TestCommitmentGetAsOfBeforeKeyCreation(t *testing.T) {
 		require.NoError(t, err)
 		if tc.want == nil {
 			require.False(t, ok, "ts=%d: key not created yet, got %x", tc.ts, got)
+			require.Nil(t, got, "ts=%d", tc.ts)
 			continue
 		}
 		require.True(t, ok, "ts=%d", tc.ts)
