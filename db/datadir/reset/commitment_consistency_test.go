@@ -279,3 +279,21 @@ func TestResetIgnoresReversedStepRanges(t *testing.T) {
 		qt.Assert(t, qt.IsNil(r.Run()))
 	})
 }
+
+// The alias tie is decided by name, not by chance: the loader walks a sorted listing and keeps a
+// candidate only on a strictly greater version, and '-' sorts before '.'. So when the manifest
+// names the legacy spelling, the canonical file wins and the local twin never loads.
+func TestResetKeepsTheWinningAliasWhenTheCanonicalOneSortsFirst(t *testing.T) {
+	withOsRoot(t, func(root *os.Root) {
+		startEntries := []fsEntry{{Name: "snapshots/domain/v1.0-commitment.0-256.kv"}} // local twin, sorts second
+		makeEntries(t, startEntries, root)
+		r := makeTestingReset(t, startEntries, root, "", ".")
+		r.RemoveUnknown, r.RemoveLocal = false, false
+		r.PreverifiedSnapshots = preverified.SortedItems{
+			{Name: "domain/v1-commitment.0-256.kv"}, // canonical, sorts first, so it is the one opened
+			{Name: "domain/v1-accounts.0-256.kv"},
+		}
+		r.PreverifiedSnapshots.Sort()
+		qt.Assert(t, qt.IsNil(r.Run()))
+	})
+}

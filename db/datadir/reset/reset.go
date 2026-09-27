@@ -54,6 +54,7 @@ var stateKVName = regexp.MustCompile(`^(v[0-9]+(?:\.[0-9]+)?)-(accounts|storage|
 // downloader has fetched what the manifest describes. Only the highest version of a logical file is
 // opened, so that is the one recorded.
 type domainBuild struct {
+	name          string
 	retainedLocal bool
 	ver           version.Version
 	fromStep      uint64
@@ -108,19 +109,17 @@ func (reset *Reset) checkStateBuilds() error {
 		if builds[stepRange] == nil {
 			builds[stepRange] = map[string]*domainBuild{}
 		}
+		// The loader walks a sorted directory listing and keeps a candidate only on a strictly
+		// greater version, so among equal versions the first name wins. One version can be spelled
+		// two ways, and the manifest names only one of them, which decides the tie rather than
+		// leaving it open.
 		if b := builds[stepRange][domain]; b != nil {
-			if b.ver.Cmp(ver) > 0 {
-				return
-			}
-			if b.ver.Cmp(ver) == 0 {
-				// One version can be spelled two ways, and the manifest names only one of them,
-				// so the twin stays on disk as a local build. Either file may be the one opened,
-				// so a local twin makes the pair unsafe whichever wins.
-				b.retainedLocal = b.retainedLocal || retainedLocal
+			if b.ver.Cmp(ver) > 0 || (b.ver.Cmp(ver) == 0 && b.name <= fileName) {
 				return
 			}
 		}
 		builds[stepRange][domain] = &domainBuild{
+			name:          fileName,
 			retainedLocal: retainedLocal,
 			ver:           ver,
 			fromStep:      fromStep,
