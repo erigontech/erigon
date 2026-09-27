@@ -330,6 +330,9 @@ func (s *collapseSim) deleteCell(k []byte) error {
 		return nil
 	}
 	top := &s.rows[len(s.rows)-1]
+	if top.depth < len(k) {
+		return nil
+	}
 	nib := k[len(s.key)]
 	top.after &^= uint16(1) << nib
 	top.cells[nib] = collapseCell{}

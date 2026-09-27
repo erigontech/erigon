@@ -394,6 +394,14 @@ func collapseBatch(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
 		}
 		ops = append(ops, commitmenttest.Op{Key: craftKey(rng, length.Addr, prefix, accountNibbles), Account: randomWitnessAccount(rng)})
 	}
+	for range rng.Intn(3) {
+		var prefix []byte
+		if len(b.accounts) != 0 && rng.Intn(2) == 0 {
+			near := accountNibbles(b.accounts[rng.Intn(len(b.accounts))])
+			prefix = near[:1+rng.Intn(3)]
+		}
+		ops = append(ops, commitmenttest.Op{Key: craftKey(rng, length.Addr, prefix, accountNibbles), Delete: true})
+	}
 	for range rng.Intn(4) {
 		if len(b.accounts) == 0 {
 			break
@@ -464,6 +472,13 @@ func TestCollapseTracerMatchesHPH(t *testing.T) {
 		{name: "propagate", accounts: 3, accountPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8}}},
 		{name: "propagate-deep", accounts: 5, accountPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8, 0x1}, {0x8, 0x5}, {0xc}}},
 		{name: "storage-propagate", accounts: 1, slots: 3, slotPrefixes: [][]byte{{0x2, 0x1}, {0x2, 0x9}, {0x8}}},
+		{
+			name: "storage-delete-without-storage", accounts: 3, accountPrefixes: [][]byte{{0x6, 0x1}, {0x6, 0x9}, {0xb}},
+			batch: func(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
+				addr := b.accounts[0]
+				return []commitmenttest.Op{{Key: append(bytes.Clone(addr), craftKey(rng, length.Hash, nil, slotNibbles(addr))...), Delete: true}}
+			},
+		},
 		{
 			name: "split-then-propagate", accounts: 4, accountPrefixes: [][]byte{{0x1, 0x2, 0x1}, {0x1, 0x8}, {0x1, 0x9}, {0x5}},
 			batch: func(rng *rand.Rand, b *witnessBed) []commitmenttest.Op {
