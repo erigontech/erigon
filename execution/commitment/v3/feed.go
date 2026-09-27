@@ -123,7 +123,7 @@ func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper
 	return slices.Concat(storage[:]...), slices.Concat(accounts[:]...), len(items), nil
 }
 
-func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, warmuper *commitment.Warmuper) ([]storageTask, []accountEntry, int, error) {
+func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, warmuper *commitment.Warmuper, sorted func([]feedEntry) error) ([]storageTask, []accountEntry, int, error) {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
@@ -139,10 +139,15 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 	}
 
 	hashFeed(items, workers)
-	if workers > 1 && len(items) >= hashParallelMin {
+	if workers > 1 && len(items) >= hashParallelMin && sorted == nil {
 		return partitionFeed(items, workers, warmuper)
 	}
 	slices.SortFunc(items, compareFeed)
+	if sorted != nil {
+		if err := sorted(items); err != nil {
+			return nil, nil, 0, err
+		}
+	}
 	warmSorted(warmuper, items)
 
 	p := &partitioner{}

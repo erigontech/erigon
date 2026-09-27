@@ -37,6 +37,7 @@ type Trie struct {
 	fanOutMin       int
 	deferUpdates    bool
 	deferred        deltaParts
+	collapseTracer  commitment.CollapseTracer
 }
 
 func NewTrie(tmpdir string, _ commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
@@ -91,6 +92,8 @@ func (t *Trie) SetDeferCommitmentUpdates(deferUpdates bool) { t.deferUpdates = d
 
 func (t *Trie) SetStorageFanOutMin(n int) { t.fanOutMin = n }
 
+func (t *Trie) SetCollapseTracer(tracer commitment.CollapseTracer) { t.collapseTracer = tracer }
+
 func (t *Trie) TakeDeferredDeltas() [][]commitment.BranchDelta {
 	parts := t.deferred
 	t.deferred = nil
@@ -117,8 +120,12 @@ func (t *Trie) Process(
 		warmuper = commitment.NewWarmuper(ctx, warmup)
 		defer warmuper.CloseAndWait()
 	}
+	var sorted func([]feedEntry) error
+	if t.collapseTracer != nil {
+		sorted = func(items []feedEntry) error { return traceCollapses(t.ctx, items, t.collapseTracer) }
+	}
 	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
-		return partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper)
+		return partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper, sorted)
 	})
 }
 

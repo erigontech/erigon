@@ -61,7 +61,7 @@ func warmPartition(t *testing.T, w *commitment.Warmuper, updates *commitment.Upd
 	t.Helper()
 	defer w.CloseAndWait()
 	defer updates.Close()
-	_, _, _, err := partitionUpdates(context.Background(), updates, 4, w)
+	_, _, _, err := partitionUpdates(context.Background(), updates, 4, w, nil)
 	require.NoError(t, err)
 	require.Eventually(t, func() bool { return w.Stats().KeysProcessed == uint64(keys) }, 10*time.Second, time.Millisecond)
 	w.CloseAndWait()
