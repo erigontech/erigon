@@ -1516,6 +1516,12 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		if err := plainKeyCollector.Flush(); err != nil {
 			return nil, err
 		}
+		if cfg.PBinMemorySample != nil {
+			runtime.GC()
+			var memory runtime.MemStats
+			runtime.ReadMemStats(&memory)
+			cfg.PBinMemorySample(memory.Alloc)
+		}
 		reader := commitmentdb.NewFilesOnlyStateReader(tx, cfg.TxnNumber)
 		tmpDir, err := os.MkdirTemp("", "erigon-pbin-rebuild-")
 		if err != nil {
