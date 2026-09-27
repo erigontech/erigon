@@ -328,7 +328,7 @@ func mergeChurnBatches() ([][]Op, []Op) {
 		{Key: eip8297.TreeKeyAccount(addresses[0], eip8297.CodeHashLeafKey), Value: codeValue},
 		{Key: eip8297.TreeKeyAccount(addresses[1], eip8297.CodeHashLeafKey), Value: codeValue},
 	}
-	balance := *new(uint256.Int)
+	balance := uint256.Int{}
 	update := []Op{
 		{Key: eip8297.TreeKeyAccount(addresses[0], eip8297.BasicDataLeafKey), merge: &feedMerge{kind: mergeBasicData, nonce: 7, balance: balance, codeHash: common.Hash{}}},
 		{Key: eip8297.TreeKeyAccount(addresses[0], eip8297.CodeHashLeafKey), merge: &feedMerge{kind: mergeCodeHash, codeHash: common.Hash{}}},
