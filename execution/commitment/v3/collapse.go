@@ -147,7 +147,6 @@ func (s *collapseSim) load(plane byte, addrHash, path []byte) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.kbuf = nodeKey(plane, addrHash, path, s.kbuf[:0])
 	s.nodes[string(s.kbuf)] = n
 	return n, nil
 }
