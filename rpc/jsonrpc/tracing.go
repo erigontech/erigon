@@ -147,7 +147,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	txns := block.Transactions()
 
 	var gasUsed uint64
-	inner := jsonstream.NewLazyFieldStream(stream, "result", true)
 	for txnIndex, txn := range txns {
 		txnHash := txn.Hash()
 
@@ -161,33 +160,25 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		}
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 
-		inner.ResetField()
-
-		{
+		// A transaction's error is answered inside its own object; the block trace goes on.
+		_ = rpc.WriteFieldOrError(stream, "result", func() error {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
-				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
-			} else {
-				txCtx := evmtypes.TxContext{
-					TxHash:     txnHash,
-					Origin:     msg.From(),
-					GasPrice:   *msg.GasPrice(),
-					BlobHashes: msg.BlobHashes(),
-				}
-
-				var _gasUsed uint64
-				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
-				gasUsed += _gasUsed
+				return fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
 			}
-		}
-		if err == nil {
-			err = ibs.FinalizeTx(rules, state.NewNoopWriter())
-		}
-
-		if err != nil {
-			inner.CloseIfOpen()
-			rpc.HandleError(err, stream)
-		}
+			txCtx := evmtypes.TxContext{
+				TxHash:     txnHash,
+				Origin:     msg.From(),
+				GasPrice:   *msg.GasPrice(),
+				BlobHashes: msg.BlobHashes(),
+			}
+			txGasUsed, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+			gasUsed += txGasUsed
+			if traceErr != nil {
+				return traceErr
+			}
+			return ibs.FinalizeTx(rules, state.NewNoopWriter())
+		})
 
 		stream.WriteObjectEnd()
 

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math/big"
 	"reflect"
@@ -547,43 +548,8 @@ func TestPricedBlobsCompareFeeCapToBlobBaseFeeOverride(t *testing.T) {
 	})
 }
 
-// TestTxResultFieldStreamLazy verifies the lazy-write semantics of LazyFieldStream
-// with prependSeparator=true (the per-tx result field case).
-func TestTxResultFieldStreamLazy(t *testing.T) {
-	newInner := func() (*bytes.Buffer, jsonstream.Stream) {
-		var buf bytes.Buffer
-		return &buf, jsonstream.New(&buf)
-	}
-
-	t.Run("no_writes_when_unused", func(t *testing.T) {
-		buf, inner := newInner()
-		_ = jsonstream.NewLazyFieldStream(inner, "result", true)
-		require.NoError(t, inner.Flush())
-		require.Empty(t, buf.Bytes())
-	})
-
-	t.Run("writes_separator_and_field_on_first_value", func(t *testing.T) {
-		buf, inner := newInner()
-		lazy := jsonstream.NewLazyFieldStream(inner, "result", true)
-		lazy.WriteNil()
-		require.NoError(t, inner.Flush())
-		require.Equal(t, `,"result":null`, buf.String())
-	})
-
-	t.Run("field_written_only_once", func(t *testing.T) {
-		buf, inner := newInner()
-		lazy := jsonstream.NewLazyFieldStream(inner, "result", true)
-		lazy.WriteArrayStart()
-		lazy.WriteString("a")
-		lazy.WriteString("b")
-		lazy.WriteArrayEnd()
-		require.NoError(t, inner.Flush())
-		require.Equal(t, `,"result":["a","b"]`, buf.String())
-	})
-}
-
 // TestTraceBlockErrorBeforeWrite verifies traceBlock produces valid JSON when AssembleTracer fails
-// before any write (inner.Written stays false): each tx object has "error" but no "result" field.
+// before any write: each tx object has "error" but no "result" field.
 func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
@@ -594,8 +560,7 @@ func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	require.NotNil(t, tx)
 	blockNum := rpc.BlockNumber(tx.BlockNumber.ToInt().Uint64())
 
-	// Invalid timeout makes AssembleTracer fail before any write to inner, so inner.Written stays
-	// false and the error handler writes only the "error" field inside the tx object.
+	// Invalid timeout makes AssembleTracer fail before any write, so the tx object gets only "error".
 	tracer := "callTracer"
 	timeout := "garbage"
 	cfg := &tracersConfig.TraceConfig{Tracer: &tracer, Timeout: &timeout}
@@ -617,30 +582,24 @@ func TestTraceBlockErrorBeforeWrite(t *testing.T) {
 	}
 }
 
-// TestTraceBlockErrorAfterWrite exercises the Written==true close path: when a tracer starts
-// writing to the result field before an error occurs, CloseIfOpen must seal the partial JSON
-// back to the tx-object level so the overall output remains valid.
+// TestTraceBlockErrorAfterWrite: when a tracer starts writing the result before an error occurs,
+// the partial result is sealed back to the tx-object level and "error" follows it.
 func TestTraceBlockErrorAfterWrite(t *testing.T) {
 	var buf bytes.Buffer
 	s := jsonstream.New(&buf)
-	inner := jsonstream.NewLazyFieldStream(s, "result", true)
 
 	// Replicate the per-tx structure of the traceBlock loop.
 	s.WriteArrayStart()
 	s.WriteObjectStart()
 	s.Field("txHash")
 	s.WriteString("0xdeadbeef")
-	inner.ResetField()
-
-	// Simulate TraceTx writing a partial result before returning an error:
-	// the first write to inner triggers ensure() and sets Written=true.
-	inner.WriteObjectStart()
-	inner.Field("from")
-	inner.WriteString("0xabcd")
-	// Replicate the traceBlock error handler.
-	inner.CloseIfOpen()
-	s.Field("error")
-	s.WriteString("partial write error")
+	err := rpc.WriteFieldOrError(s, "result", func() error {
+		s.WriteObjectStart()
+		s.Field("from")
+		s.WriteString("0xabcd")
+		return errors.New("partial write error")
+	})
+	require.Error(t, err)
 	s.WriteObjectEnd()
 
 	s.WriteArrayEnd()
@@ -652,10 +611,10 @@ func TestTraceBlockErrorAfterWrite(t *testing.T) {
 	var obj map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(entries[0], &obj), "tx entry is not a JSON object")
 	require.Contains(t, obj, "txHash")
-	require.Contains(t, obj, "result", "result must be present when Written=true before error")
+	require.Contains(t, obj, "result", "a result the tracer started must be kept")
 	require.Contains(t, obj, "error", "error must be inside the tx object, not at array level")
 	var resultObj map[string]json.RawMessage
-	require.NoError(t, json.Unmarshal(obj["result"], &resultObj), "result must be valid JSON after CloseIfOpen: %s", obj["result"])
+	require.NoError(t, json.Unmarshal(obj["result"], &resultObj), "result must be valid JSON: %s", obj["result"])
 }
 
 func TestTraceTransactionNoRefund(t *testing.T) {

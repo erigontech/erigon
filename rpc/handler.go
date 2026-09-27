@@ -713,8 +713,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		return nil, msg.writeResponse(stream, result)
 	}
 
-	return nil, writeLazyResponse(stream, msg.ID, func(rs *jsonstream.LazyFieldStream) error {
-		if _, err := callb.call(ctx, msg.Method, args, rs); err != nil {
+	return nil, writeResultResponse(stream, msg.ID, func(s *jsonstream.StackStream) error {
+		if _, err := callb.call(ctx, msg.Method, args, s); err != nil {
 			return remapDBOverload(ctx, err)
 		}
 		return nil

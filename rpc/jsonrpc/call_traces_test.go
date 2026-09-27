@@ -594,16 +594,12 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	stream.WriteString("2.0")
 	stream.Field("id")
 	stream.Int(1)
-	result := jsonstream.NewLazyFieldStream(stream, "result", false)
-
-	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
-		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
-	}, result)
+	err := rpc.WriteFieldOrError(stream, "result", func() error {
+		return api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+			BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
+		}, stream)
+	})
 	require.ErrorContains(t, err, "protected txn is not supported by signer")
-	require.True(t, result.Written(), "test needs traces exported before the failure")
-
-	result.CloseIfOpen()
-	rpc.HandleError(err, stream)
 	stream.WriteObjectEnd()
 	require.NoError(t, stream.Flush())
 
