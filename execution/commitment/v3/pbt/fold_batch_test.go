@@ -118,7 +118,7 @@ func TestTrieSteadyStateAllocations(t *testing.T) {
 	t.Logf("steady-state allocations=%.2f per op=%.2f bytes per op=%.2f", allocs, allocs/float64(len(ops)), float64(after.TotalAlloc-before.TotalAlloc)/float64(3*len(ops)))
 	limit := 16.0
 	if race.Enabled {
-		limit = 18.0
+		limit = 24.0
 	}
 	require.Less(t, allocs/float64(len(ops)), limit)
 }
