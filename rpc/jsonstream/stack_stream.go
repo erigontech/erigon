@@ -42,10 +42,10 @@ const (
 	ItemField
 )
 
-// StackStream wraps jsoniter.Stream with a stack to track unclosed JSON elements
-// It implements the Stream interface
 var _ Stream = (*StackStream)(nil)
 
+// StackStream wraps jsoniter.Stream with a stack to track unclosed JSON elements
+// It implements the Stream interface
 type StackStream struct {
 	separatorPending bool
 	stream           *jsoniter.Stream

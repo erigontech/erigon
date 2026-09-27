@@ -145,9 +145,8 @@ func writeResultResponse(stream jsonstream.Stream, id json.RawMessage, write fun
 	return err
 }
 
-// WriteFieldOrError writes field with the value write streams, or "error" when write fails. A field
-// that got no value before the error is taken back, so the object carries only "error"; a partial
-// value that was already flushed can only be closed, and "error" follows it.
+// WriteFieldOrError writes field with the value write streams. When write fails, a field that got no
+// value is taken back so the object carries only "error"; a partial value is closed and "error" follows.
 func WriteFieldOrError(stream jsonstream.Stream, field string, write func() error) error {
 	s := stream.Open()
 	mark, depth := len(s.Buffer()), s.Depth()
