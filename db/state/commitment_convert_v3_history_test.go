@@ -219,6 +219,7 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 	ownerPath := commitment.KeyToHexNibbleHash(owner)
 	roTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
+	defer roTx.Rollback()
 	orphan, _, err := roTx.GetAsOf(kv.CommitmentDomain, nibbles.HexToCompact(ownerPath), 3)
 	require.NoError(t, err)
 	roTx.Rollback()
@@ -228,6 +229,7 @@ func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
 
 	roTx, err = db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
+	defer roTx.Rollback()
 	latestState, _, err := roTx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	roTx.Rollback()
