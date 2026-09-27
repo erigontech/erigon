@@ -399,13 +399,13 @@ func subtreeCellForRow(subtree subtreeCell, rowPath eip8297.Bitpath) (rowCell, e
 	return cell, nil
 }
 
-func subtreeRow(path eip8297.Bitpath, old, added subtreeCell) (*rowNode, error) {
+func (t *Trie) subtreeRow(path eip8297.Bitpath, old, added subtreeCell) (*rowNode, error) {
 	oldSlot := slotAt(&old.path, path.BitLen)
 	newSlot := slotAt(&added.path, path.BitLen)
 	if oldSlot == newSlot {
 		return nil, errInsertKey
 	}
-	row := newRow(path, nil, nil)
+	row := t.newRow(path, nil, nil)
 	oldCell, err := subtreeCellForRow(old, path)
 	if err != nil {
 		return nil, err
@@ -473,7 +473,7 @@ func (t *Trie) insertSubtree(subtree subtreeCell) error {
 func (t *Trie) splitRootSubtree(root *treeRoot, old, added subtreeCell, split int16) error {
 	window := (split / 4) * 4
 	rowPath := old.path.Slice(0, window)
-	row, err := subtreeRow(rowPath, old, added)
+	row, err := t.subtreeRow(rowPath, old, added)
 	if err != nil {
 		return err
 	}
@@ -513,7 +513,7 @@ func (t *Trie) insertSubtreeExtRoot(root *treeRoot, subtree subtreeCell) error {
 	window := (d / 4) * 4
 	if window == t.rootRecordPath().BitLen {
 		rowPath := t.rootRecordPath()
-		row, err := subtreeRow(rowPath, old, subtree)
+		row, err := t.subtreeRow(rowPath, old, subtree)
 		if err != nil {
 			return err
 		}
@@ -524,7 +524,7 @@ func (t *Trie) insertSubtreeExtRoot(root *treeRoot, subtree subtreeCell) error {
 		return nil
 	}
 	rowPath := subtree.path.Slice(0, window)
-	row, err := subtreeRow(rowPath, old, subtree)
+	row, err := t.subtreeRow(rowPath, old, subtree)
 	if err != nil {
 		return err
 	}
@@ -576,7 +576,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 			return nil
 		}
 		childPath := subtree.path.Slice(0, (d/4)*4)
-		child, err := subtreeRow(childPath, old, subtree)
+		child, err := t.subtreeRow(childPath, old, subtree)
 		if err != nil {
 			return err
 		}
@@ -615,7 +615,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 		}
 		old := subtreeCell{path: full, cell: *cell}
 		childPath := subtree.path.Slice(0, (d/4)*4)
-		child, err := subtreeRow(childPath, old, subtree)
+		child, err := t.subtreeRow(childPath, old, subtree)
 		if err != nil {
 			return err
 		}

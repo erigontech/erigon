@@ -32,15 +32,24 @@ type rowCell struct {
 type rowNode struct {
 	path       eip8297.Bitpath
 	key        []byte
+	name       string
 	raw        []byte
 	prev       []byte
 	dirty      bool
+	routing    bool
 	tombstone  bool
 	folded     bool
 	foldResult FoldResult
 	parent     *rowNode
 	parentSlot int
 	cells      [maxCells]rowCell
+}
+
+const rowChunkSize = 64
+
+type rowChunk struct {
+	rows [rowChunkSize]rowNode
+	used int
 }
 
 type treeRoot struct {
@@ -56,7 +65,19 @@ type treeRoot struct {
 }
 
 func newRow(path eip8297.Bitpath, key, raw []byte) *rowNode {
-	return &rowNode{path: path, key: bytes.Clone(key), raw: bytes.Clone(raw), prev: bytes.Clone(raw)}
+	row := new(rowNode)
+	initRow(row, path, key, raw)
+	return row
+}
+
+func initRow(row *rowNode, path eip8297.Bitpath, key, raw []byte) {
+	keyCopy := bytes.Clone(key)
+	initRowOwned(row, path, keyCopy, raw)
+}
+
+func initRowOwned(row *rowNode, path eip8297.Bitpath, key, raw []byte) {
+	rawCopy := bytes.Clone(raw)
+	*row = rowNode{path: path, key: key, name: string(key), raw: rawCopy, prev: rawCopy}
 }
 
 func (n *rowNode) record() Record {
@@ -116,7 +137,28 @@ func rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNo
 	n := newRow(path, key, raw)
 	for slot := range n.cells {
 		n.cells[slot].Cell = record.Cells[slot]
-		n.cells[slot].Key = bytes.Clone(record.Cells[slot].Key)
+	}
+	return n
+}
+
+func (t *Trie) newRow(path eip8297.Bitpath, key, raw []byte) *rowNode {
+	var chunk *rowChunk
+	if len(t.rowChunks) == 0 || t.rowChunks[len(t.rowChunks)-1].used == rowChunkSize {
+		chunk = &rowChunk{}
+		t.rowChunks = append(t.rowChunks, chunk)
+	} else {
+		chunk = t.rowChunks[len(t.rowChunks)-1]
+	}
+	row := &chunk.rows[chunk.used]
+	chunk.used++
+	initRowOwned(row, path, key, raw)
+	return row
+}
+
+func (t *Trie) rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNode {
+	n := t.newRow(path, key, raw)
+	for slot := range n.cells {
+		n.cells[slot].Cell = record.Cells[slot]
 	}
 	return n
 }

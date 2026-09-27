@@ -19,6 +19,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
 	"runtime"
 	"testing"
@@ -69,13 +70,15 @@ func TestPBinRebuildStateReaderKeepsCommitmentOverlaySeparate(t *testing.T) {
 }
 
 type pbinRebuildContextStub struct {
-	records map[string][]byte
-	reads   int
-	discard bool
+	records  map[string][]byte
+	reads    int
+	readKeys [][]byte
+	discard  bool
 }
 
 func (c *pbinRebuildContextStub) Branch(key []byte) ([]byte, kv.Step, error) {
 	c.reads++
+	c.readKeys = append(c.readKeys, bytes.Clone(key))
 	return bytes.Clone(c.records[string(key)]), 0, nil
 }
 
@@ -105,20 +108,51 @@ func TestPBinRebuildOverlayReadsPendingRowsBeforeFiles(t *testing.T) {
 }
 
 func TestPBinRebuildBatchesReadOnlyRightEdgeRows(t *testing.T) {
-	inner := &pbinRebuildContextStub{records: map[string][]byte{
-		"right-edge": {2},
-	}}
-	overlay := newPBinRebuildOverlay().withInner(inner)
-	require.NoError(t, overlay.PutBranch([]byte("finished"), []byte{1}, nil))
-
-	readsBefore := inner.reads
-	finished, _, err := overlay.Branch([]byte("finished"))
+	codeOp := func(prefix, value byte) pbt.Op {
+		key := make([]byte, eip8297.CodeKeyLength)
+		key[0] = eip8297.CodeZone
+		key[1] = prefix
+		key[len(key)-1] = prefix + 1
+		return pbt.Op{Key: key, Value: [32]byte{value}}
+	}
+	ops := []pbt.Op{
+		codeOp(0, 1),
+		codeOp(0x10, 2),
+		codeOp(0x20, 3),
+	}
+	inner := &pbinRebuildContextStub{records: make(map[string][]byte)}
+	var batches int
+	err := pbinForEachRebuildOpStreamLookaheadAfter(t.TempDir(), 1, 1<<20, nil, func(batch []pbt.Op, _ []byte, _ bool) error {
+		inner.readKeys = nil
+		_, err := pbt.NewTrie(inner).Process(batch)
+		if err != nil {
+			return err
+		}
+		path := eip8297.PathFromBits(batch[0].Key, int16(len(batch[0].Key)*8))
+		for _, key := range inner.readKeys {
+			if bytes.Equal(key, pbt.GlobalRootKey()) {
+				continue
+			}
+			rowPath, err := eip8297.DecodeBitPath(key)
+			if err != nil {
+				return err
+			}
+			if !path.HasPrefix(&rowPath) {
+				return fmt.Errorf("read completed row %x outside right edge", key)
+			}
+		}
+		batches++
+		return nil
+	}, func(emit func(pbt.Op) error) error {
+		for _, op := range ops {
+			if err := emit(op); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 	require.NoError(t, err)
-	require.Equal(t, []byte{1}, finished)
-	rightEdge, _, err := overlay.Branch([]byte("right-edge"))
-	require.NoError(t, err)
-	require.Equal(t, []byte{2}, rightEdge)
-	require.Equal(t, 1, inner.reads-readsBefore)
+	require.Equal(t, len(ops), batches)
 }
 
 func TestPBinRebuildCheckpointResumesAfterLargestTreeKey(t *testing.T) {

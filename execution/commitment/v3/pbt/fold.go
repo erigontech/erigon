@@ -34,6 +34,8 @@ type FoldResult struct {
 	Left, Right common.Hash
 }
 
+var hashHook func([]byte)
+
 func rowRoutingResult(row *rowNode) (FoldResult, error) {
 	var occupied [maxCells]int
 	slots := row.occupiedInto(occupied[:0])
@@ -276,11 +278,18 @@ func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, 
 }
 
 func branchHash(prefix *eip8297.Bitpath, left, right *common.Hash) common.Hash {
-	return eip8297.HashBytes(eip8297.BranchPreimage(nil, prefix, left, right))
+	return hashBytes(eip8297.BranchPreimage(nil, prefix, left, right))
 }
 
 func leafHash(cell *Cell) common.Hash {
-	return eip8297.HashBytes(eip8297.LeafPreimage(nil, cell.Key, cell.Value[:]))
+	return hashBytes(eip8297.LeafPreimage(nil, cell.Key, cell.Value[:]))
+}
+
+func hashBytes(preimage []byte) common.Hash {
+	if hashHook != nil {
+		hashHook(preimage)
+	}
+	return eip8297.HashBytes(preimage)
 }
 
 func occupiedSlots(record *Record) []int {

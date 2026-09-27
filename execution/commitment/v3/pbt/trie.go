@@ -73,6 +73,8 @@ type Trie struct {
 	foldedRootReady        bool
 	rows                   map[string]*rowNode
 	dirtyRows              map[string]*rowNode
+	routingRows            []*rowNode
+	rowChunks              []*rowChunk
 	bucketDirty            map[string][]byte
 	scheduledBucketRecords map[string][]byte
 	deltas                 []commitment.BranchDelta
@@ -146,7 +148,7 @@ func newSubtreeTrie(ctx commitment.PatriciaContext, prefix eip8297.Bitpath, desc
 			return nil, fmt.Errorf("subtree descriptor has no row")
 		}
 		record := descriptor.row.record()
-		row := rowFromRecord(prefix, key, descriptor.row.raw, &record)
+		row := t.rowFromRecord(prefix, key, descriptor.row.raw, &record)
 		t.root.form = RowRoot
 		t.root.row = row
 		t.root.raw = bytes.Clone(descriptor.row.raw)
@@ -186,9 +188,22 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.rootDirty = false
 	t.foldedRoot = common.Hash{}
 	t.foldedRootReady = false
-	t.rows = make(map[string]*rowNode)
-	t.dirtyRows = make(map[string]*rowNode)
-	t.bucketDirty = make(map[string][]byte)
+	clear(t.rows)
+	clear(t.dirtyRows)
+	if t.rows == nil {
+		t.rows = make(map[string]*rowNode)
+	}
+	if t.dirtyRows == nil {
+		t.dirtyRows = make(map[string]*rowNode)
+	}
+	t.routingRows = t.routingRows[:0]
+	for _, chunk := range t.rowChunks {
+		chunk.used = 0
+	}
+	clear(t.bucketDirty)
+	if t.bucketDirty == nil {
+		t.bucketDirty = make(map[string][]byte)
+	}
 	t.scheduledBucketRecords = nil
 	t.deltas = nil
 	t.roundPrev = nil
@@ -221,18 +236,38 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if err := validateOps(ops); err != nil {
 		return common.Hash{}, err
 	}
-	t.roundPrev = make(map[string][]byte)
-	t.originalLeafSeen = make(map[string]struct{})
-	t.originalLeaves = make(map[string]*Cell)
-	t.droppedLeafKeys = make(map[string]struct{})
-	t.bucketDirty = make(map[string][]byte)
+	if t.roundPrev == nil {
+		t.roundPrev = make(map[string][]byte)
+	} else {
+		clear(t.roundPrev)
+	}
+	if t.originalLeafSeen == nil {
+		t.originalLeafSeen = make(map[string]struct{})
+	} else {
+		clear(t.originalLeafSeen)
+	}
+	if t.originalLeaves == nil {
+		t.originalLeaves = make(map[string]*Cell)
+	} else {
+		clear(t.originalLeaves)
+	}
+	if t.droppedLeafKeys == nil {
+		t.droppedLeafKeys = make(map[string]struct{})
+	} else {
+		clear(t.droppedLeafKeys)
+	}
+	if t.bucketDirty == nil {
+		t.bucketDirty = make(map[string][]byte)
+	} else {
+		clear(t.bucketDirty)
+	}
 	t.foldedRoot = common.Hash{}
 	t.foldedRootReady = false
 	if _, err := t.loadRoot(); err != nil {
 		return common.Hash{}, err
 	}
 	t.rememberPrev(t.rootRecordKey(), t.root.prev)
-	t.deltas = nil
+	t.deltas = t.deltas[:0]
 	for i := range ops {
 		if err := t.coreApply(&ops[i]); err != nil {
 			return common.Hash{}, err
@@ -425,19 +460,21 @@ func (t *Trie) write() error {
 	}
 	for key, row := range rows {
 		data := final[key]
-		row.raw = bytes.Clone(data)
-		row.prev = bytes.Clone(data)
+		stored := bytes.Clone(data)
+		row.raw = stored
+		row.prev = stored
 		row.dirty = false
 		row.tombstone = len(data) == 0
 	}
 	if data, ok := final[rootKey]; ok {
-		t.root.raw = bytes.Clone(data)
-		t.root.prev = bytes.Clone(data)
+		stored := bytes.Clone(data)
+		t.root.raw = stored
+		t.root.prev = stored
 	}
-	t.dirtyRows = make(map[string]*rowNode)
-	t.bucketDirty = make(map[string][]byte)
+	clear(t.dirtyRows)
+	clear(t.bucketDirty)
+	t.clearRoutingRows()
 	t.rootDirty = false
-	t.roundPrev = nil
 	return nil
 }
 
@@ -465,21 +502,29 @@ func (t *Trie) registerRow(row *rowNode) {
 			return
 		}
 		row.key = key
+		row.name = string(key)
 	}
 	if len(row.prev) != 0 {
-		t.rememberPrev(row.key, row.prev)
+		t.rememberPrevName(row.name, row.prev)
 	}
-	t.rows[string(row.key)] = row
+	t.rows[row.name] = row
 	if row.dirty {
-		t.dirtyRows[string(row.key)] = row
+		t.dirtyRows[row.name] = row
+		if !row.routing {
+			row.routing = true
+			t.routingRows = append(t.routingRows, row)
+		}
 	}
 }
 
 func (t *Trie) rememberPrev(key, data []byte) {
+	t.rememberPrevName(string(key), data)
+}
+
+func (t *Trie) rememberPrevName(name string, data []byte) {
 	if t.roundPrev == nil {
 		return
 	}
-	name := string(key)
 	if _, ok := t.roundPrev[name]; !ok {
 		t.roundPrev[name] = bytes.Clone(data)
 	}
@@ -517,7 +562,18 @@ func (t *Trie) previousRecord(key, fallback []byte) []byte {
 func (t *Trie) markDirty(row *rowNode) {
 	for row != nil {
 		row.markDirty()
+		if !row.routing {
+			row.routing = true
+			t.routingRows = append(t.routingRows, row)
+		}
 		t.registerRow(row)
 		row = row.parent
 	}
+}
+
+func (t *Trie) clearRoutingRows() {
+	for _, row := range t.routingRows {
+		row.routing = false
+	}
+	t.routingRows = t.routingRows[:0]
 }

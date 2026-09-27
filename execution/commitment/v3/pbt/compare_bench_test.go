@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"os/exec"
 	"runtime"
 	"slices"
@@ -33,6 +34,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -60,6 +62,7 @@ type feedBenchContext struct {
 	records  map[string][]byte
 	accounts map[string]commitment.Update
 	storage  map[string]commitment.Update
+	reader   *feedBenchReader
 	discard  bool
 }
 
@@ -103,11 +106,17 @@ func (c *feedBenchContext) PutBranch(key, data, prev []byte) error {
 }
 
 func (c *feedBenchContext) Account(key []byte) (*commitment.Update, error) {
+	if c.reader != nil {
+		return c.reader.Account(key)
+	}
 	update := c.accounts[string(key)]
 	return &update, nil
 }
 
 func (c *feedBenchContext) Storage(key []byte) (*commitment.Update, error) {
+	if c.reader != nil {
+		return c.reader.Storage(key)
+	}
 	update := c.storage[string(key)]
 	return &update, nil
 }
@@ -130,6 +139,42 @@ func (r *feedBenchReader) Clone(kv.TemporalTx) commitmentdb.StateReader { return
 
 func (r *feedBenchReader) CloneForWorker(context.Context, kv.TemporalTx) commitmentdb.StateReader {
 	return r
+}
+
+func (r *feedBenchReader) Account(key []byte) (*commitment.Update, error) {
+	encoded, _, err := r.Read(kv.AccountsDomain, key, 0)
+	if err != nil {
+		return nil, err
+	}
+	update := &commitment.Update{CodeHash: empty.CodeHash}
+	if len(encoded) == 0 {
+		update.Flags = commitment.DeleteUpdate
+		return update, nil
+	}
+	account := new(accounts.Account)
+	if err := accounts.DeserialiseV3(account, encoded); err != nil {
+		return nil, fmt.Errorf("decode benchmark account: %w", err)
+	}
+	update.Flags = commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate
+	update.Balance.Set(&account.Balance)
+	update.Nonce = account.Nonce
+	if !account.CodeHash.IsZero() {
+		update.CodeHash = account.CodeHash.Value()
+	}
+	return update, nil
+}
+
+func (r *feedBenchReader) Storage(key []byte) (*commitment.Update, error) {
+	encoded, _, err := r.Read(kv.StorageDomain, key, 0)
+	if err != nil {
+		return nil, err
+	}
+	update := &commitment.Update{Flags: commitment.DeleteUpdate, StorageLen: int8(len(encoded))}
+	if len(encoded) != 0 {
+		update.Flags = commitment.StorageUpdate
+		copy(update.Storage[:], encoded)
+	}
+	return update, nil
 }
 
 func feedBenchValueKey(domain kv.Domain, key []byte) string {
@@ -165,7 +210,11 @@ func feedBenchFixtureFor(kind string) feedBenchFixture {
 			leaves = append(leaves, feedBenchLeaf{plain: bytes.Clone(address), key: eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey), value: basic, state: commitment.Update{Flags: commitment.BalanceUpdate | commitment.NonceUpdate | commitment.CodeUpdate, Balance: *balance, Nonce: 1, CodeHash: empty.CodeHash}})
 			for slotIndex := range slotsPerAddress {
 				slot := make([]byte, 32)
-				binary.BigEndian.PutUint64(slot[24:], uint64(addressIndex*slotsPerAddress+slotIndex))
+				slotValue := uint64(addressIndex*slotsPerAddress + slotIndex)
+				if kind == "whale" {
+					slotValue = uint64(64 + (slotIndex%16)*256 + slotIndex/16)
+				}
+				binary.BigEndian.PutUint64(slot[24:], slotValue)
 				plain := append(bytes.Clone(address), slot...)
 				var raw [eip8297.ValueLength]byte
 				raw[len(raw)-1] = value
@@ -185,11 +234,21 @@ func feedBenchFixtureFor(kind string) feedBenchFixture {
 
 func feedBenchReaderFor(fixture feedBenchFixture) *feedBenchReader {
 	values := make(map[string][]byte)
+	batchAccounts := make(map[string]struct{})
+	for _, leaf := range fixture.batch {
+		if len(leaf.plain) == 20 {
+			batchAccounts[string(leaf.plain)] = struct{}{}
+		}
+	}
 	leaves := append(append([]feedBenchLeaf(nil), fixture.seed...), fixture.batch...)
 	for i := range leaves {
 		leaf := &leaves[i]
 		if len(leaf.plain) == 20 {
-			account := accounts.Account{Nonce: leaf.state.Nonce, Balance: leaf.state.Balance, CodeHash: accounts.EmptyCodeHash}
+			balance := leaf.state.Balance
+			if _, ok := batchAccounts[string(leaf.plain)]; ok {
+				balance.SetUint64(99)
+			}
+			account := accounts.Account{Nonce: leaf.state.Nonce, Balance: balance, CodeHash: accounts.EmptyCodeHash}
 			values[feedBenchValueKey(kv.AccountsDomain, leaf.plain)] = accounts.SerialiseV3(&account)
 		} else {
 			values[feedBenchValueKey(kv.StorageDomain, leaf.plain)] = bytes.Clone(leaf.state.Storage[:])
@@ -236,6 +295,80 @@ func feedBenchRecords(records map[string][]byte) map[string][]byte {
 	return result
 }
 
+func feedBenchExpectedRoot(fixture feedBenchFixture, reader *feedBenchReader) common.Hash {
+	values := make(map[string]pbt.Op)
+	for _, leaves := range [][]feedBenchLeaf{fixture.seed, fixture.batch} {
+		for _, op := range feedBenchOps(leaves) {
+			values[string(op.Key)] = op
+		}
+	}
+	for _, leaf := range fixture.batch {
+		if len(leaf.plain) != 20 {
+			continue
+		}
+		account, err := reader.Account(leaf.plain)
+		if err != nil {
+			panic(err)
+		}
+		basic, err := eip8297.EncodeBasicData(account.Nonce, &account.Balance, 0)
+		if err != nil {
+			panic(err)
+		}
+		key := eip8297.TreeKeyAccount(leaf.plain, eip8297.BasicDataLeafKey)
+		values[string(key)] = pbt.Op{Key: key, Value: basic}
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	entries := make([]eip8297.Entry, 0, len(keys))
+	for _, key := range keys {
+		op := values[key]
+		entries = append(entries, eip8297.Entry{Key: op.Key, Value: op.Value[:]})
+	}
+	return eip8297.StateRootWithHash(entries, eip8297.SelectedHash())
+}
+
+func feedBenchFactory(base map[string][]byte, workers int) commitment.TrieContextFactory {
+	contexts := make([]commitment.PatriciaContext, workers)
+	for i := range contexts {
+		contexts[i] = newFeedBenchContext(base, true, nil)
+	}
+	var next atomic.Int32
+	return func(context.Context) (commitment.PatriciaContext, func()) {
+		index := int(next.Add(1)) - 1
+		if index >= len(contexts) {
+			return newFeedBenchContext(base, true, nil), func() {}
+		}
+		return contexts[index], func() {}
+	}
+}
+
+func feedBenchParallelProbe(b *testing.B, base map[string][]byte, ops []pbt.Op, workers int) int32 {
+	b.Helper()
+	trie := pbt.NewTrie(newFeedBenchContext(base, true, nil))
+	trie.SetTrieContextFactory(feedBenchFactory(base, workers))
+	var active, peak atomic.Int32
+	trie.SetCoreActivityHook(func(start bool) {
+		if !start {
+			active.Add(-1)
+			return
+		}
+		current := active.Add(1)
+		for {
+			old := peak.Load()
+			if old >= current || peak.CompareAndSwap(old, current) {
+				break
+			}
+		}
+		runtime.Gosched()
+	})
+	_, err := trie.ProcessParallelContext(context.Background(), ops, workers)
+	require.NoError(b, err)
+	return peak.Load()
+}
+
 func feedBenchKeyOnlyUpdates(tb testing.TB, leaves []feedBenchLeaf) *commitment.Updates {
 	tb.Helper()
 	previous := commitment.PBinHashSuiteName()
@@ -263,34 +396,31 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 	reader := feedBenchReaderFor(fixture)
 	keys := feedBenchPlainKeys(fixture.batch)
 	state := feedBenchState(fixture.seed, fixture.batch)
+	wantRoot := feedBenchExpectedRoot(fixture, reader)
+	var peak int32
+	if workers > 1 && expectParallel {
+		probeFeed, err := commitmentdb.BinFeedFromState(keys, nil, nil, reader)
+		require.NoError(b, err)
+		probeOps, err := pbt.TranslateFeed(probeFeed)
+		require.NoError(b, err)
+		peak = feedBenchParallelProbe(b, newBase, probeOps, workers)
+		require.Greater(b, peak, int32(1))
+	}
 	var newDurations, oldDurations []time.Duration
+	var newAllocations, oldAllocations uint64
 	for round := range 5 {
 		newContext := newFeedBenchContext(newBase, true, state)
 		newTrie := pbt.NewTrie(newContext)
-		newTrie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) {
-			return newFeedBenchContext(newBase, true, state), func() {}
-		})
-		var active, peak atomic.Int32
-		newTrie.SetCoreActivityHook(func(start bool) {
-			if !start {
-				active.Add(-1)
-				return
-			}
-			current := active.Add(1)
-			for {
-				old := peak.Load()
-				if old >= current || peak.CompareAndSwap(old, current) {
-					break
-				}
-			}
-			runtime.Gosched()
-		})
+		newTrie.SetTrieContextFactory(feedBenchFactory(newBase, workers))
 		oldContext := newFeedBenchContext(oldBase, true, state)
+		oldContext.reader = reader
 		oldTrie := commitment.NewPBinPatriciaHashed(oldContext)
 		require.NoError(b, oldTrie.SetPBinHashSuite(commitment.PBinHashBlake3))
 		oldUpdates := feedBenchKeyOnlyUpdates(b, fixture.batch)
 		if round%2 == 0 {
 			before := benchmarkUptime()
+			var allocBefore runtime.MemStats
+			runtime.ReadMemStats(&allocBefore)
 			start := time.Now()
 			feed, feedErr := commitmentdb.BinFeedFromState(keys, nil, nil, reader)
 			require.NoError(b, feedErr)
@@ -299,28 +429,38 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 			newRoot, processErr := newTrie.ProcessParallelContext(context.Background(), ops, workers)
 			require.NoError(b, processErr)
 			newDurations = append(newDurations, time.Since(start))
+			var allocAfter runtime.MemStats
+			runtime.ReadMemStats(&allocAfter)
+			newAllocations += allocAfter.TotalAlloc - allocBefore.TotalAlloc
 			after := benchmarkUptime()
-			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d", round, before, after, peak.Load())
-			if workers > 1 && expectParallel {
-				require.Greater(b, peak.Load(), int32(1))
-			}
+			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d", round, before, after, peak)
 			before = benchmarkUptime()
+			runtime.ReadMemStats(&allocBefore)
 			start = time.Now()
 			oldRoot, processErr := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
 			oldDurations = append(oldDurations, time.Since(start))
+			runtime.ReadMemStats(&allocAfter)
+			oldAllocations += allocAfter.TotalAlloc - allocBefore.TotalAlloc
 			after = benchmarkUptime()
 			require.NoError(b, processErr)
 			b.Logf("old round=%d uptime-before=%s uptime-after=%s", round, before, after)
-			require.Equal(b, oldRoot, newRoot[:])
+			require.Equal(b, wantRoot[:], oldRoot)
+			require.Equal(b, wantRoot[:], newRoot[:])
 		} else {
 			before := benchmarkUptime()
+			var allocBefore runtime.MemStats
+			runtime.ReadMemStats(&allocBefore)
 			start := time.Now()
 			oldRoot, processErr := oldTrie.Process(context.Background(), oldUpdates, "benchmark", nil, commitment.WarmupConfig{})
 			oldDurations = append(oldDurations, time.Since(start))
+			var allocAfter runtime.MemStats
+			runtime.ReadMemStats(&allocAfter)
+			oldAllocations += allocAfter.TotalAlloc - allocBefore.TotalAlloc
 			after := benchmarkUptime()
 			require.NoError(b, processErr)
 			b.Logf("old round=%d uptime-before=%s uptime-after=%s", round, before, after)
 			before = benchmarkUptime()
+			runtime.ReadMemStats(&allocBefore)
 			start = time.Now()
 			feed, feedErr := commitmentdb.BinFeedFromState(keys, nil, nil, reader)
 			require.NoError(b, feedErr)
@@ -328,13 +468,13 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 			require.NoError(b, translateErr)
 			newRoot, processErr := newTrie.ProcessParallelContext(context.Background(), ops, workers)
 			newDurations = append(newDurations, time.Since(start))
+			runtime.ReadMemStats(&allocAfter)
+			newAllocations += allocAfter.TotalAlloc - allocBefore.TotalAlloc
 			after = benchmarkUptime()
 			require.NoError(b, processErr)
-			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d", round, before, after, peak.Load())
-			if workers > 1 && expectParallel {
-				require.Greater(b, peak.Load(), int32(1))
-			}
-			require.Equal(b, oldRoot, newRoot[:])
+			b.Logf("new round=%d uptime-before=%s uptime-after=%s peak=%d", round, before, after, peak)
+			require.Equal(b, wantRoot[:], oldRoot)
+			require.Equal(b, wantRoot[:], newRoot[:])
 		}
 		oldUpdates.Close()
 		oldTrie.Release()
@@ -351,6 +491,8 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 	keysCount := float64(len(fixture.batch))
 	b.ReportMetric(float64(newMin.Microseconds())/keysCount, "new-ms/1k")
 	b.ReportMetric(float64(oldMin.Microseconds())/keysCount, "old-ms/1k")
+	b.ReportMetric(float64(newAllocations)/(5<<20), "new-alloc-MiB/round")
+	b.ReportMetric(float64(oldAllocations)/(5<<20), "old-alloc-MiB/round")
 }
 
 func BenchmarkPBinCompareFeedTip(b *testing.B) {

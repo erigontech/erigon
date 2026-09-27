@@ -48,7 +48,7 @@ func (t *Trie) loadRoot() (*treeRoot, error) {
 	case RowRoot:
 		path := t.rootRecordPath()
 		t.root.form = RowRoot
-		t.root.row = rowFromRecord(path, rootKey, data, &record)
+		t.root.row = t.rowFromRecord(path, rootKey, data, &record)
 		t.rows[string(rootKey)] = t.root.row
 	case LeafRoot:
 		t.root.form = LeafRoot
@@ -92,7 +92,7 @@ func (t *Trie) loadRow(path eip8297.Bitpath) (*rowNode, error) {
 	if record.Form != RowRoot {
 		return nil, fmt.Errorf("row %x has form %d", key, record.Form)
 	}
-	row := rowFromRecord(path, key, data, &record)
+	row := t.rowFromRecord(path, key, data, &record)
 	t.rows[string(key)] = row
 	return row, nil
 }

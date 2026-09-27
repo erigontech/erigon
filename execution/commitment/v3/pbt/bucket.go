@@ -207,7 +207,7 @@ func (t *Trie) bucketKeysFromRecord(key []byte) ([][]byte, error) {
 	case LeafRoot:
 		return [][]byte{bytes.Clone(record.Cells[0].Key)}, nil
 	case RowRoot:
-		row = rowFromRecord(path, key, data, &record)
+		row = t.rowFromRecord(path, key, data, &record)
 		t.rows[string(key)] = row
 	case ExtRoot:
 		window := ((path.BitLen + record.SelfExt.BitLen) / 4) * 4

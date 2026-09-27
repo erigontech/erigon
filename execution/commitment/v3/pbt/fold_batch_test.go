@@ -18,9 +18,13 @@ package pbt
 
 import (
 	"bytes"
+	"context"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 func TestTrieFoldsDirtyRowsOncePerBatch(t *testing.T) {
@@ -32,6 +36,10 @@ func TestTrieFoldsDirtyRowsOncePerBatch(t *testing.T) {
 	require.NoError(t, err)
 
 	folded := make(map[string]int)
+	var hashCalls atomic.Int64
+	previousHashHook := hashHook
+	hashHook = func([]byte) { hashCalls.Add(1) }
+	t.Cleanup(func() { hashHook = previousHashHook })
 	trie := NewTrie(ctx)
 	trie.SetFoldHook(func(key []byte) { folded[string(bytes.Clone(key))]++ })
 	_, err = trie.Process([]Op{{Key: keyA, Value: testTrieValue(4)}, {Key: keyB, Value: testTrieValue(5)}})
@@ -40,4 +48,21 @@ func TestTrieFoldsDirtyRowsOncePerBatch(t *testing.T) {
 	for key, count := range folded {
 		require.Equal(t, 1, count, "row %x folded more than once", []byte(key))
 	}
+	require.Equal(t, int64(5), hashCalls.Load())
+}
+
+func TestTrieHashHookSeesParallelRows(t *testing.T) {
+	ctx := newTrieTestContext()
+	var hashCalls atomic.Int64
+	previousHashHook := hashHook
+	hashHook = func([]byte) { hashCalls.Add(1) }
+	t.Cleanup(func() { hashHook = previousHashHook })
+	trie := NewTrie(ctx)
+	trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) { return ctx, func() {} })
+	_, err := trie.ProcessParallel([]Op{
+		{Key: trieCodeKey(0, 0, 1), Value: testTrieValue(1)},
+		{Key: trieCodeKey(0x80, 0, 2), Value: testTrieValue(2)},
+	}, 2)
+	require.NoError(t, err)
+	require.Positive(t, hashCalls.Load())
 }

@@ -259,7 +259,7 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 	oldPath := root.self
 	if window == t.rootRecordPath().BitLen {
 		rootPath := t.rootRecordPath()
-		row := newRow(rootPath, t.rootRecordKey(), root.raw)
+		row := t.newRow(rootPath, t.rootRecordKey(), root.raw)
 		oldSlot := slotAt(&oldPath, rootPath.BitLen)
 		newSlot := slotAt(&path, rootPath.BitLen)
 		oldPrefix := oldPath.Slice(rootPath.BitLen+4, oldPath.BitLen)
@@ -277,7 +277,7 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 		return nil
 	}
 	rowPath := path.Slice(0, window)
-	row, err := newRowFromBranch(rowPath, key, value, oldPath, root.left, root.right)
+	row, err := t.newRowFromBranch(rowPath, key, value, oldPath, root.left, root.right)
 	if err != nil {
 		return err
 	}
@@ -394,7 +394,7 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 	}
 	window := (d / 4) * 4
 	childPath := path.Slice(0, window)
-	child, err := newRowFromBranch(childPath, key, value, branchPath, cell.Left, cell.Right)
+	child, err := t.newRowFromBranch(childPath, key, value, branchPath, cell.Left, cell.Right)
 	if err != nil {
 		return err
 	}
@@ -426,12 +426,8 @@ func (t *Trie) refreshRouting() error {
 	if t.root == nil {
 		return nil
 	}
-	dirty := make([]*rowNode, 0, len(t.dirtyRows))
-	for _, row := range t.dirtyRows {
-		dirty = append(dirty, row)
-	}
-	sort.SliceStable(dirty, func(i, j int) bool { return dirty[i].path.BitLen > dirty[j].path.BitLen })
-	for _, row := range dirty {
+	sort.SliceStable(t.routingRows, func(i, j int) bool { return t.routingRows[i].path.BitLen > t.routingRows[j].path.BitLen })
+	for _, row := range t.routingRows {
 		if t.stopsUpperPath(&row.path) {
 			continue
 		}
@@ -442,6 +438,7 @@ func (t *Trie) refreshRouting() error {
 			return err
 		}
 	}
+	t.clearRoutingRows()
 	switch t.root.form {
 	case RowRoot:
 		return nil
@@ -732,18 +729,18 @@ func (t *Trie) twoLeafRow(path eip8297.Bitpath, keyA []byte, valueA [eip8297.Val
 	if a == b {
 		return nil, errInsertKey
 	}
-	row := newRow(path, nil, nil)
+	row := t.newRow(path, nil, nil)
 	row.cells[a] = leafCell(keyA, valueA)
 	row.cells[b] = leafCell(keyB, valueB)
 	row.markDirty()
 	return row, nil
 }
 
-func newRowFromBranch(path eip8297.Bitpath, key []byte, value [eip8297.ValueLength]byte, oldPath eip8297.Bitpath, left, right common.Hash) (*rowNode, error) {
+func (t *Trie) newRowFromBranch(path eip8297.Bitpath, key []byte, value [eip8297.ValueLength]byte, oldPath eip8297.Bitpath, left, right common.Hash) (*rowNode, error) {
 	if oldPath.BitLen < path.BitLen+4 {
 		return nil, errInsertKey
 	}
-	row := newRow(path, nil, nil)
+	row := t.newRow(path, nil, nil)
 	newSlot := int(keyBit(path.BitLen, key))
 	oldSlot := int(oldPath.Bit(path.BitLen)*8 + oldPath.Bit(path.BitLen+1)*4 + oldPath.Bit(path.BitLen+2)*2 + oldPath.Bit(path.BitLen+3))
 	row.cells[newSlot] = leafCell(key, value)
