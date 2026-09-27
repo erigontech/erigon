@@ -43,7 +43,7 @@ type LogsFilter struct {
 	topics          *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal  [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
 	pollingCriteria *filters.FilterCriteria
-	sender          Sub[*types.RPCLog] // nil for aggregate subscriber, for appropriate stream server otherwise
+	sender          Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 // Close closes the sender associated with the LogsFilter.
@@ -64,7 +64,7 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 	}
 }
 
-func newLogsFilter(sender Sub[*types.RPCLog], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria) *LogsFilter {
+func newLogsFilter(sender Sub[*types.Log], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria) *LogsFilter {
 	filter := &LogsFilter{
 		addrs:           concurrent.NewSyncMap[common.Address, int](),
 		topics:          concurrent.NewSyncMap[common.Hash, int](),

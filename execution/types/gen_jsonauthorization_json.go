@@ -17,12 +17,20 @@ func (x *JsonAuthorization) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
+	if err := x.writeJSONFields(s); err != nil {
+		return err
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+// writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
+func (x *JsonAuthorization) writeJSONFields(s *jsonstream.StackStream) error {
 	ethjson.Quantity256(s, "chainId", (*uint256.Int)(&x.ChainID))
 	ethjson.Data(s, "address", x.Address[:])
 	ethjson.Quantity(s, "nonce", x.Nonce)
 	ethjson.Quantity(s, "yParity", x.YParity)
 	ethjson.Quantity256(s, "r", (*uint256.Int)(&x.R))
 	ethjson.Quantity256(s, "s", (*uint256.Int)(&x.S))
-	s.WriteObjectEnd()
 	return nil
 }

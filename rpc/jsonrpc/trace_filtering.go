@@ -583,6 +583,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			if isPos {
 				continue
 			}
+			// the genesis block is not mined, so it pays no rewards
+			if blockNum == 0 {
+				continue
+			}
 
 			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
@@ -1098,6 +1102,10 @@ const (
 )
 
 func (m *TraceFilterMode) UnmarshalJSON(data []byte) error {
+	// An explicit null is the same as an omitted mode: the default, intersection.
+	if string(data) == "null" {
+		return nil
+	}
 	var mode string
 	if err := json.Unmarshal(data, &mode); err != nil {
 		return err

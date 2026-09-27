@@ -67,23 +67,9 @@ func legacyMarshalReceipt(
 		logsBloom = types.CreateBloom(types.Receipts{receipt})
 	}
 
-	var logsToMarshal any
-	if withBlockTimestamp {
-		if receipt.Logs != nil {
-			rpcLogs := make([]*types.RPCLog, 0, len(receipt.Logs))
-			for _, l := range receipt.Logs {
-				rpcLogs = append(rpcLogs, types.ToRPCTransactionLog(l, header))
-			}
-			logsToMarshal = rpcLogs
-		} else {
-			logsToMarshal = make([]*types.RPCLog, 0)
-		}
-	} else {
-		if receipt.Logs == nil {
-			logsToMarshal = make([]*types.Log, 0)
-		} else {
-			logsToMarshal = receipt.Logs
-		}
+	logsToMarshal := make([]map[string]any, 0, len(receipt.Logs))
+	for _, l := range receipt.Logs {
+		logsToMarshal = append(logsToMarshal, legacyLogFields(l, withBlockTimestamp, header.Time))
 	}
 
 	fields := map[string]any{
@@ -128,6 +114,26 @@ func legacyMarshalReceipt(
 		fields["blobGasUsed"] = hexutil.Uint64(misc.GetBlobGasUsed(numBlobs))
 	}
 
+	return fields
+}
+
+// legacyLogFields spells the log object out by hand, so the oracle keeps its shape
+// even if types.Log's own encoder drops a field.
+func legacyLogFields(l *types.Log, withBlockTimestamp bool, timestamp uint64) map[string]any {
+	fields := map[string]any{
+		"address":          l.Address,
+		"topics":           l.Topics,
+		"data":             l.Data,
+		"blockNumber":      l.BlockNumber,
+		"transactionHash":  l.TxHash,
+		"transactionIndex": l.TxIndex,
+		"blockHash":        l.BlockHash,
+		"logIndex":         l.Index,
+		"removed":          l.Removed,
+	}
+	if withBlockTimestamp {
+		fields["blockTimestamp"] = hexutil.Uint64(timestamp)
+	}
 	return fields
 }
 
