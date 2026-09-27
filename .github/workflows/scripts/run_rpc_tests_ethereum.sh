@@ -43,6 +43,10 @@ DISABLED_TEST_LIST=(
   web3_clientVersion/test_1.json
   # pending in tracing methods returns -32602 since #24345; re-enable with the rpc-tests release that includes erigontech/rpc-tests#608
   debug_traceBlockByNumber/test_25.json
+  # a trace_filter bound past the head returns -32602 since #24357; re-enable with the rpc-tests release that includes erigontech/rpc-tests#611
+  trace_filter/test_16.json
+  trace_filter/test_22.json
+  trace_filter/test_23.json
 )
 
 # Transform the array into a comma-separated string
