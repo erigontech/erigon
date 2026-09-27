@@ -71,6 +71,36 @@ func TestTranslateFeedMergeOperationsCanBeProcessedInSingleOperationBatches(t *t
 	require.Equal(t, want, got)
 }
 
+func TestProcessFeedMergeSplitsExistingCodeHashLeaf(t *testing.T) {
+	first := feedAccount(common.Hex2Bytes("0000000000000000000000000000000000000001"))
+	first.CodeWritten = true
+	first.Code = []byte{}
+	first.CodeHash = empty.CodeHash
+	second := feedAccount(common.Hex2Bytes("0000000000000000000000000000000000000002"))
+	second.CodeWritten = true
+	second.Code = []byte{}
+	second.CodeHash = empty.CodeHash
+	updated := feedAccount(first.Address)
+	updated.Nonce = 7
+	updated.Code = []byte{}
+	updated.CodeHash = empty.CodeHash
+
+	assertFeedState(t,
+		[]commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{first, second}}, {Accounts: []commitment.PBinFeedAccount{updated, second}}},
+		[][]eip8297.State{{feedState(first), feedState(second)}, {feedState(updated), feedState(second)}},
+	)
+}
+
+func TestProcessFeedZeroMergeAbsentLeafIsNoOp(t *testing.T) {
+	first := feedAccount(common.Hex2Bytes("0000000000000000000000000000000000000001"))
+	first.Code = []byte{}
+	first.CodeHash = empty.CodeHash
+	second := feedAccount(common.Hex2Bytes("0000000000000000000000000000000000000002"))
+	second.Code = []byte{}
+	second.CodeHash = empty.CodeHash
+	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{first, second}}}, [][]eip8297.State{{feedState(first), feedState(second)}})
+}
+
 func TestTranslateFeedRejectsNil(t *testing.T) {
 	_, err := TranslateFeed(nil)
 	require.ErrorContains(t, err, "nil feed")

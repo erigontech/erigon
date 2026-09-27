@@ -529,6 +529,27 @@ func TestTrieParallelChurnParity(t *testing.T) {
 			require.Equal(t, referenceRoot, serialRoot)
 			require.Equal(t, referenceRoot, parallelRoot)
 			updateChurnState(state, branchMove)
+			mergeBatches, mergeFinal := mergeChurnBatches()
+			for mergeIndex, mergeBatch := range mergeBatches {
+				serialRoot, err = NewTrie(serialContext).Process(mergeBatch)
+				require.NoError(t, err, "merge batch=%d", mergeIndex)
+				parallelRoot, err = NewTrie(parallelContext).ProcessParallel(mergeBatch, workers)
+				require.NoError(t, err, "merge batch=%d", mergeIndex)
+				referenceRoot, err = NewTrie(referenceContext).Process(mergeBatch)
+				require.NoError(t, err, "merge batch=%d", mergeIndex)
+				require.Equal(t, referenceRoot, serialRoot, "merge batch=%d", mergeIndex)
+				require.Equal(t, referenceRoot, parallelRoot, "merge batch=%d", mergeIndex)
+				require.Equal(t, serialContext.records, parallelContext.records, "merge batch=%d", mergeIndex)
+				require.Equal(t, referenceContext.records, serialContext.records, "merge batch=%d", mergeIndex)
+				if mergeIndex == 0 {
+					updateChurnState(state, mergeBatch)
+				} else {
+					for _, entry := range mergeFinal {
+						state[string(entry.Key)] = entry
+					}
+				}
+				assertPersistedTrie(t, parallelContext.trieTestContext, churnEntries(state))
+			}
 			for batch := range 64 {
 				ops := churnBatch(rng, keys, prefixes, state)
 				serialRoot, err := NewTrie(serialContext).Process(ops)

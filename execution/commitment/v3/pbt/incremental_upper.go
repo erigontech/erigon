@@ -263,7 +263,7 @@ func (t *Trie) replaceSubtreeRow(row *rowNode, prefix *eip8297.Bitpath, result p
 
 func (t *Trie) replaceRowCell(row *rowNode, slot int, prefix *eip8297.Bitpath, result phaseBucketResult) (bool, error) {
 	if !result.present {
-		row.removeCell(slot)
+		row.cells[slot] = rowCell{}
 		row.markCellDirty(slot)
 		t.markDirty(row)
 		return true, nil
@@ -276,7 +276,7 @@ func (t *Trie) replaceRowCell(row *rowNode, slot int, prefix *eip8297.Bitpath, r
 	if err != nil {
 		return false, err
 	}
-	row.setCell(slot, cell)
+	row.cells[slot] = cell
 	row.markCellDirty(slot)
 	t.markDirty(row)
 	return true, nil
@@ -417,8 +417,8 @@ func (t *Trie) subtreeRow(path eip8297.Bitpath, old, added subtreeCell) (*rowNod
 	if err != nil {
 		return nil, err
 	}
-	row.setCell(oldSlot, oldCell)
-	row.setCell(newSlot, newCell)
+	row.cells[oldSlot] = oldCell
+	row.cells[newSlot] = newCell
 	if oldCell.child != nil {
 		oldCell.child.parent = row
 		oldCell.child.parentSlot = oldSlot
@@ -643,7 +643,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 }
 
 func setBranchOrLeaf(row *rowNode, slot int, cell rowCell) {
-	row.setCell(slot, cell)
+	row.cells[slot] = cell
 	row.markCellDirty(slot)
 }
 

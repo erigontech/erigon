@@ -23,8 +23,10 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -112,6 +114,7 @@ func runTrieChurn(t *testing.T, seed int64) {
 	}
 	rng := rand.New(rand.NewSource(seed))
 	keys, prefixes := churnKeys()
+	mergeBatches, mergeFinal := mergeChurnBatches()
 	state := make(map[string]Op)
 	ctx := newTrieTestContext()
 	forms := make(map[RootForm]bool)
@@ -131,6 +134,8 @@ func runTrieChurn(t *testing.T, seed int64) {
 			ops = []Op{{Key: trieCodeKey(0x10, 0, 2), Value: testTrieValue(3)}}
 		case 4:
 			ops = []Op{{Key: trieCodeKey(0, 0, 1)}, {Key: trieCodeKey(0x10, 0, 2)}}
+		case 5, 6:
+			ops = mergeBatches[batch-5]
 		default:
 			ops = churnBatch(rng, keys, prefixes, state)
 		}
@@ -140,7 +145,16 @@ func runTrieChurn(t *testing.T, seed int64) {
 		if err != nil {
 			t.Fatalf("seed=%d batch=%d process: %v ops=%x", seed, batch, err, churnOpKeys(ops))
 		}
-		updateChurnState(state, ops)
+		switch batch {
+		case 5:
+			updateChurnState(state, ops)
+		case 6:
+			for _, entry := range mergeFinal {
+				state[string(entry.Key)] = entry
+			}
+		default:
+			updateChurnState(state, ops)
+		}
 		entries := churnEntries(state)
 		want := eip8297.StateRootWithHash(entriesFromOps(entries), eip8297.SelectedHash())
 		if root != want {
@@ -301,6 +315,41 @@ func churnEntries(state map[string]Op) []Op {
 	}
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
 	return entries
+}
+
+func mergeChurnBatches() ([][]Op, []Op) {
+	addresses := [][]byte{
+		bytes.Repeat([]byte{0x11}, 20),
+		bytes.Repeat([]byte{0x22}, 20),
+		bytes.Repeat([]byte{0x33}, 20),
+	}
+	codeValue := eip8297.CodeHashValue(common.Hash{})
+	initial := []Op{
+		{Key: eip8297.TreeKeyAccount(addresses[0], eip8297.CodeHashLeafKey), Value: codeValue},
+		{Key: eip8297.TreeKeyAccount(addresses[1], eip8297.CodeHashLeafKey), Value: codeValue},
+	}
+	balance := *new(uint256.Int)
+	update := []Op{
+		{Key: eip8297.TreeKeyAccount(addresses[0], eip8297.BasicDataLeafKey), merge: &feedMerge{kind: mergeBasicData, nonce: 7, balance: balance, codeHash: common.Hash{}}},
+		{Key: eip8297.TreeKeyAccount(addresses[0], eip8297.CodeHashLeafKey), merge: &feedMerge{kind: mergeCodeHash, codeHash: common.Hash{}}},
+		{Key: eip8297.TreeKeyAccount(addresses[1], eip8297.BasicDataLeafKey), merge: &feedMerge{kind: mergeBasicData, balance: balance, codeHash: common.Hash{}}},
+		{Key: eip8297.TreeKeyAccount(addresses[1], eip8297.CodeHashLeafKey), merge: &feedMerge{kind: mergeCodeHash, codeHash: common.Hash{}}},
+		{Key: eip8297.TreeKeyAccount(addresses[2], eip8297.CodeHashLeafKey), merge: &feedMerge{kind: mergeCodeHash, codeHash: common.Hash{}}},
+	}
+	sort.Slice(update, func(i, j int) bool { return bytes.Compare(update[i].Key, update[j].Key) < 0 })
+	basic, err := eip8297.EncodeBasicData(7, &balance, 0)
+	if err != nil {
+		panic(err)
+	}
+	final := []Op{
+		initial[0],
+		{Key: eip8297.TreeKeyAccount(addresses[0], eip8297.BasicDataLeafKey), Value: basic},
+		initial[1],
+		{Key: eip8297.TreeKeyAccount(addresses[2], eip8297.CodeHashLeafKey), Value: codeValue},
+	}
+	sort.Slice(initial, func(i, j int) bool { return bytes.Compare(initial[i].Key, initial[j].Key) < 0 })
+	sort.Slice(final, func(i, j int) bool { return bytes.Compare(final[i].Key, final[j].Key) < 0 })
+	return [][]Op{initial, update}, final
 }
 
 func formatChurnSeed(seed int64) string {

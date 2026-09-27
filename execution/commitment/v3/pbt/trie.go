@@ -76,8 +76,6 @@ type Trie struct {
 	routingRows            []*rowNode
 	rowChunks              []*rowChunk
 	rowChunkIndex          int
-	rowCellChunks          []*rowCellChunk
-	recordChunks           []*recordChunk
 	cellChunks             []*cellChunk
 	cellChunkIndex         int
 	bucketDirty            map[string][]byte
@@ -211,12 +209,6 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 		chunk.used = 0
 	}
 	t.rowChunkIndex = 0
-	for _, chunk := range t.rowCellChunks {
-		chunk.used = 0
-	}
-	for _, chunk := range t.recordChunks {
-		chunk.used = 0
-	}
 	for _, chunk := range t.cellChunks {
 		chunk.used = 0
 	}
@@ -290,17 +282,19 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	t.rememberPrev(t.rootRecordKey(), t.root.prev)
 	t.deltas = t.deltas[:0]
 	for i := range ops {
-		if err := t.coreApply(&ops[i]); err != nil {
+		op := ops[i]
+		op.Key = bytes.Clone(op.Key)
+		if err := t.coreApply(&op); err != nil {
 			return common.Hash{}, err
 		}
 		var err error
 		switch {
-		case len(ops[i].Drop) != 0:
-			if len(ops[i].Drop) != 33 || (ops[i].Drop[0] != eip8297.AccountZone && ops[i].Drop[0] != eip8297.StorageZone) {
+		case len(op.Drop) != 0:
+			if len(op.Drop) != 33 || (op.Drop[0] != eip8297.AccountZone && op.Drop[0] != eip8297.StorageZone) {
 				err = errInsertKey
-			} else if ops[i].Drop[0] == eip8297.StorageZone {
+			} else if op.Drop[0] == eip8297.StorageZone {
 				var bucketKey []byte
-				bucketKey, err = bucketKeyForPrefix(ops[i].Drop)
+				bucketKey, err = bucketKeyForPrefix(op.Drop)
 				if err == nil {
 					t.touchBucket(bucketKey)
 				}
@@ -309,13 +303,13 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 				err = errInsertKey
 				break
 			}
-			err = t.dropPrefix(ops[i].Drop)
-		case ops[i].merge != nil:
-			err = t.applyMerge(ops[i])
-		case ops[i].Value == ([eip8297.ValueLength]byte{}):
-			if len(ops[i].Key) == eip8297.StorageKeyLength && ops[i].Key[0] == eip8297.StorageZone {
+			err = t.dropPrefix(op.Drop)
+		case op.merge != nil:
+			err = t.applyMerge(op)
+		case op.Value == ([eip8297.ValueLength]byte{}):
+			if len(op.Key) == eip8297.StorageKeyLength && op.Key[0] == eip8297.StorageZone {
 				var bucketKey []byte
-				bucketKey, err = bucketKeyForStorage(ops[i].Key)
+				bucketKey, err = bucketKeyForStorage(op.Key)
 				if err == nil {
 					t.touchBucket(bucketKey)
 				}
@@ -323,11 +317,11 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 			if err != nil {
 				break
 			}
-			err = t.remove(ops[i].Key)
+			err = t.remove(op.Key)
 		default:
-			if len(ops[i].Key) == eip8297.StorageKeyLength && ops[i].Key[0] == eip8297.StorageZone {
+			if len(op.Key) == eip8297.StorageKeyLength && op.Key[0] == eip8297.StorageZone {
 				var bucketKey []byte
-				bucketKey, err = bucketKeyForStorage(ops[i].Key)
+				bucketKey, err = bucketKeyForStorage(op.Key)
 				if err == nil {
 					t.touchBucket(bucketKey)
 				}
@@ -335,7 +329,7 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 			if err != nil {
 				break
 			}
-			err = t.insert(ops[i].Key, ops[i].Value)
+			err = t.insert(op.Key, op.Value)
 		}
 		if err != nil {
 			return common.Hash{}, err
@@ -523,14 +517,14 @@ func (t *Trie) registerRow(row *rowNode) {
 			return
 		}
 		row.key = key
+		row.name = string(key)
 	}
-	name := string(row.key)
 	if len(row.prev) != 0 {
-		t.rememberPrevName(name, row.prev)
+		t.rememberPrevName(row.name, row.prev)
 	}
-	t.rows[name] = row
+	t.rows[row.name] = row
 	if row.dirty {
-		t.dirtyRows[name] = row
+		t.dirtyRows[row.name] = row
 		if !row.routing {
 			row.routing = true
 			t.routingRows = append(t.routingRows, row)

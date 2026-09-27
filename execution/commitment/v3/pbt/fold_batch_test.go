@@ -116,9 +116,33 @@ func TestTrieSteadyStateAllocations(t *testing.T) {
 	}
 	runtime.ReadMemStats(&after)
 	t.Logf("steady-state allocations=%.2f per op=%.2f bytes per op=%.2f", allocs, allocs/float64(len(ops)), float64(after.TotalAlloc-before.TotalAlloc)/float64(3*len(ops)))
-	limit := 16.0
+	limit := 14.0
 	if race.Enabled {
-		limit = 24.0
+		limit = 21.0
+	}
+	require.Less(t, allocs/float64(len(ops)), limit)
+}
+
+func TestTrieParallelSteadyStateAllocations(t *testing.T) {
+	ops := make([]Op, 0, 64)
+	for i := range 64 {
+		ops = append(ops, Op{Key: trieCodeKey(byte(i*4), byte(i), byte(i+1)), Value: testTrieValue(byte(i))})
+	}
+	ctx := newTrieTestContext()
+	trie := NewTrie(ctx)
+	trie.SetTrieContextFactory(func(context.Context) (commitment.PatriciaContext, func()) { return ctx, func() {} })
+	_, err := trie.ProcessParallel(ops, 2)
+	require.NoError(t, err)
+	allocs := testing.AllocsPerRun(10, func() {
+		trie.ResetContext(ctx)
+		_, err = trie.ProcessParallel(ops, 2)
+		if err != nil {
+			t.Fatalf("process: %v", err)
+		}
+	})
+	limit := 32.0
+	if race.Enabled {
+		limit = 48.0
 	}
 	require.Less(t, allocs/float64(len(ops)), limit)
 }

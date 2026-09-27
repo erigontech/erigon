@@ -156,27 +156,25 @@ func TestTriePersistsEveryChangedRow(t *testing.T) {
 	assertPersistedTrie(t, ctx, entries)
 }
 
-func TestLoadedRowMaterializesOnlyChangedCells(t *testing.T) {
+func TestTrieOwnsOperationKeys(t *testing.T) {
 	keyA := trieCodeKey(0, 0, 1)
-	keyB := trieCodeKey(0, 2, 2)
+	keyACopy := bytes.Clone(keyA)
+	keyB := trieCodeKey(0x80, 0, 2)
 	ctx := newTrieTestContext()
-	_, err := NewTrie(ctx).Process([]Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}})
+	trie := NewTrie(ctx)
+	_, err := trie.Process([]Op{{Key: keyA, Value: testTrieValue(1)}})
+	require.NoError(t, err)
+	keyA[0] ^= 0xff
+	_, err = trie.Process([]Op{{Key: keyB, Value: testTrieValue(2)}})
 	require.NoError(t, err)
 
-	trie := NewTrie(ctx)
-	_, err = trie.Process([]Op{{Key: keyA, Value: testTrieValue(3)}})
+	wantContext := newTrieTestContext()
+	want, err := NewTrie(wantContext).Process([]Op{{Key: keyACopy, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}})
 	require.NoError(t, err)
-	loaded := 0
-	for _, chunk := range trie.rowChunks {
-		for _, row := range chunk.rows[:chunk.used] {
-			if len(row.raw) == 0 {
-				continue
-			}
-			loaded++
-			require.LessOrEqual(t, len(row.cells), 1)
-		}
-	}
-	require.NotZero(t, loaded)
+	got, err := NewTrie(ctx).Process(nil)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	require.Equal(t, wantContext.records, ctx.records)
 }
 
 func TestTrieBatchReadsOnlyPreviousRightEdge(t *testing.T) {
