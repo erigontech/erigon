@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 type callContext struct {
@@ -207,6 +208,11 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if string(want) != string(res) {
 				t.Fatalf("trace mismatch\n have: %v\n want: %v\n", string(res), string(want))
 			}
+			if tracer.MarshalFastJSONTo != nil {
+				fast, err := jsonstream.Marshal(fastJSON(tracer.MarshalFastJSONTo))
+				require.NoError(t, err)
+				require.Equal(t, string(res), string(fast))
+			}
 			// Sanity check: compare top call's gas used against vm result
 			type simpleResult struct {
 				GasUsed hexutil.Uint64
@@ -230,6 +236,10 @@ var evmRevert = []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.REVER
 
 // evmCallTo returns a 34-byte EVM snippet that CALLs a 20-byte address whose last byte is addr.
 // The return value is discarded (POP).
+type fastJSON func(*jsonstream.StackStream) error
+
+func (f fastJSON) MarshalFastJSONTo(s *jsonstream.StackStream) error { return f(s) }
+
 func evmCallTo(addr byte) []byte {
 	return []byte{
 		byte(vm.PUSH1), 0x00, // retSize

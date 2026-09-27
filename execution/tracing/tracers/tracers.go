@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 // Context contains some contextual infos for a transaction execution that is not
@@ -44,6 +45,8 @@ type Context struct {
 type Tracer struct {
 	*tracing.Hooks
 	GetResult func() (json.RawMessage, error)
+	// MarshalFastJSONTo, when set, streams what GetResult would return; on error it writes nothing.
+	MarshalFastJSONTo func(*jsonstream.StackStream) error
 	// Stop terminates execution of the tracer at the first opportune moment.
 	Stop func(err error)
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func init() {
@@ -68,6 +69,68 @@ type callFrame struct {
 	Logs           []callLog       `json:"logs,omitempty"`
 	Value          *hexutil.U256   `json:"value,omitempty"`
 	TypeStr        string          `json:"type"`
+}
+
+func (f *callFrame) marshalFastJSONTo(s *jsonstream.StackStream) {
+	s.WriteObjectStart()
+	s.Field("from").WriteHex(f.From[:])
+	jsonstream.Text(s, "gas", &f.Gas)
+	if f.StateGas != 0 {
+		jsonstream.Text(s, "stateGasReservoir", &f.StateGas)
+	}
+	jsonstream.Text(s, "gasUsed", &f.GasUsed)
+	if f.RegularGasUsed != nil {
+		jsonstream.Text(s, "regularGasUsed", f.RegularGasUsed)
+	}
+	if f.StateGasUsed != nil {
+		jsonstream.Text(s, "stateGasUsed", f.StateGasUsed)
+	}
+	if f.GasRefund != nil {
+		jsonstream.Text(s, "gasRefund", f.GasRefund)
+	}
+	if f.To != nil {
+		s.Field("to").WriteHex(f.To[:])
+	}
+	s.Field("input").WriteHex(f.Input)
+	if len(f.Output) > 0 {
+		s.Field("output").WriteHex(f.Output)
+	}
+	if f.Error != "" {
+		writeHTMLEscaped(s.Field("error"), f.Error)
+	}
+	if f.Revertal != "" {
+		writeHTMLEscaped(s.Field("revertReason"), f.Revertal)
+	}
+	if len(f.Calls) > 0 {
+		s.Field("calls")
+		jsonstream.ArrayValue(s, f.Calls, func(s *jsonstream.StackStream, c *callFrame) { c.marshalFastJSONTo(s) })
+	}
+	if len(f.Logs) > 0 {
+		s.Field("logs")
+		jsonstream.ArrayValue(s, f.Logs, func(s *jsonstream.StackStream, l *callLog) { l.marshalFastJSONTo(s) })
+	}
+	if f.Value != nil {
+		jsonstream.Text(s, "value", f.Value)
+	}
+	s.Field("type").WriteString(f.TypeStr)
+	s.WriteObjectEnd()
+}
+
+func (l *callLog) marshalFastJSONTo(s *jsonstream.StackStream) {
+	s.WriteObjectStart()
+	jsonstream.Text(s, "index", &l.Index)
+	s.Field("address").WriteHex(l.Address[:])
+	s.Field("topics")
+	jsonstream.ArrayValue(s, l.Topics, func(s *jsonstream.StackStream, h *common.Hash) { s.WriteHex(h[:]) })
+	s.Field("data").WriteHex(l.Data)
+	jsonstream.Text(s, "position", &l.Position)
+	s.WriteObjectEnd()
+}
+
+// writeHTMLEscaped keeps encoding/json's escaping of <, > and & and of invalid UTF-8, which WriteString does not.
+func writeHTMLEscaped(s *jsonstream.StackStream, v string) {
+	b, _ := json.Marshal(v)
+	s.WriteRawBytes(b)
 }
 
 // setType keeps the opcode and its wire spelling in step.
@@ -144,8 +207,9 @@ func newCallTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Tracer, 
 			OnExitV2:  t.OnExitV2,
 			OnLog:     t.OnLog,
 		},
-		GetResult: t.GetResult,
-		Stop:      t.Stop,
+		GetResult:         t.GetResult,
+		MarshalFastJSONTo: t.MarshalFastJSONTo,
+		Stop:              t.Stop,
 	}, nil
 }
 
@@ -285,16 +349,11 @@ func (t *callTracer) OnLog(log *types.Log) {
 // GetResult returns the json-encoded nested list of call traces, and any
 // error arising from the encoding or forceful termination (via `Stop`).
 func (t *callTracer) GetResult() (json.RawMessage, error) {
-	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
-		// can happen if top-level is a call to precompile
-		// and includePrecompiles is false
-		// do not return err, just empty result
-		return nil, nil
+	root, err := t.root()
+	if root == nil || err != nil {
+		return nil, err
 	}
-	if len(t.callstack) != 1 {
-		return nil, errors.New("incorrect number of top-level calls")
-	}
-	res, err := json.Marshal(t.callstack[0])
+	res, err := json.Marshal(root)
 	if err != nil {
 		return nil, err
 	}
@@ -302,6 +361,29 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 		return res, *p
 	}
 	return res, nil
+}
+
+func (t *callTracer) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	root, err := t.root()
+	if root == nil || err != nil {
+		return err
+	}
+	if p := t.reason.Load(); p != nil {
+		return *p
+	}
+	root.marshalFastJSONTo(s)
+	return nil
+}
+
+// root is nil without an error when the top-level call went to a precompile and includePrecompiles is false.
+func (t *callTracer) root() (*callFrame, error) {
+	if len(t.callstack) == 0 && !t.config.IncludePrecompiles {
+		return nil, nil
+	}
+	if len(t.callstack) != 1 {
+		return nil, errors.New("incorrect number of top-level calls")
+	}
+	return &t.callstack[0], nil
 }
 
 // Stop terminates execution of the tracer at the first opportune moment.
