@@ -401,13 +401,11 @@ func legacyCommitmentAsOf(dt *DomainRoTx, key []byte, txNum uint64) ([]byte, err
 func resolveLegacyHistory(key []byte, entries []v3.LegacyEntry) ([]byte, error) {
 	var value []byte
 	var kind v3.LegacyKind
-	for i, e := range entries {
+	for _, e := range entries {
 		switch {
-		case i == 0 || e.Kind > kind:
+		case len(e.Value) == 0 || e.Kind < kind:
+		case value == nil || e.Kind > kind:
 			value, kind = e.Value, e.Kind
-		case e.Kind < kind || len(e.Value) == 0:
-		case len(value) == 0:
-			value = e.Value
 		case !bytes.Equal(e.Value, value):
 			return nil, fmt.Errorf("%w: two history values for %x", v3.ErrLegacyConflict, key)
 		}
