@@ -40,6 +40,10 @@ var (
 	hashScratchPool sync.Pool
 )
 
+type hashScratchBuffer struct {
+	bytes []byte
+}
+
 func rowRoutingResult(row *rowNode) (FoldResult, error) {
 	var occupied [maxCells]int
 	slots := row.occupiedInto(occupied[:0])
@@ -298,27 +302,32 @@ func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, 
 }
 
 func branchHash(prefix *eip8297.Bitpath, left, right *common.Hash) common.Hash {
-	preimage := hashScratch(1 + 2 + (int(prefix.BitLen)+7)/8 + 64)
-	preimage = eip8297.BranchPreimage(preimage[:0], prefix, left, right)
+	scratch := getHashScratch(1 + 2 + (int(prefix.BitLen)+7)/8 + 64)
+	preimage := eip8297.BranchPreimage(scratch.bytes[:0], prefix, left, right)
 	hash := hashBytes(preimage)
-	hashScratchPool.Put(preimage[:0])
+	scratch.bytes = preimage[:0]
+	hashScratchPool.Put(scratch)
 	return hash
 }
 
 func leafHash(cell *Cell) common.Hash {
-	preimage := hashScratch(1 + len(cell.Key) + eip8297.ValueLength)
-	preimage = eip8297.LeafPreimage(preimage[:0], cell.Key, cell.Value[:])
+	scratch := getHashScratch(1 + len(cell.Key) + eip8297.ValueLength)
+	preimage := eip8297.LeafPreimage(scratch.bytes[:0], cell.Key, cell.Value[:])
 	hash := hashBytes(preimage)
-	hashScratchPool.Put(preimage[:0])
+	scratch.bytes = preimage[:0]
+	hashScratchPool.Put(scratch)
 	return hash
 }
 
-func hashScratch(size int) []byte {
-	preimage, _ := hashScratchPool.Get().([]byte)
-	if cap(preimage) < size {
-		return make([]byte, 0, size)
+func getHashScratch(size int) *hashScratchBuffer {
+	scratch, _ := hashScratchPool.Get().(*hashScratchBuffer)
+	if scratch == nil {
+		return &hashScratchBuffer{bytes: make([]byte, 0, size)}
 	}
-	return preimage[:0]
+	if cap(scratch.bytes) < size {
+		scratch.bytes = make([]byte, 0, size)
+	}
+	return scratch
 }
 
 func hashBytes(preimage []byte) common.Hash {
