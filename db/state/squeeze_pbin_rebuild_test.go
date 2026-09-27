@@ -147,7 +147,7 @@ func TestPBinRebuildBatchStreamBoundsLiveHeap(t *testing.T) {
 		}
 		return nil
 	}, func(emit func(pbt.Op) error) error {
-		for i := 0; i < operationCount; i++ {
+		for i := range operationCount {
 			slot := make([]byte, 32)
 			binary.BigEndian.PutUint32(slot[28:], uint32(i))
 			if err := emit(pbt.Op{Key: eip8297.TreeKeyStorage(address, slot), Value: [32]byte{1}}); err != nil {
@@ -186,7 +186,7 @@ func TestPBinRebuildOpStreamHeapDoesNotGrowWithInput(t *testing.T) {
 			return nil
 		}, func(emit func(pbt.Op) error) error {
 			address := bytes.Repeat([]byte{0x31}, 20)
-			for i := 0; i < operationCount; i++ {
+			for i := range operationCount {
 				slot := make([]byte, 32)
 				binary.BigEndian.PutUint32(slot[28:], uint32(i))
 				if err := emit(pbt.Op{Key: eip8297.TreeKeyStorage(address, slot), Value: [32]byte{1}}); err != nil {

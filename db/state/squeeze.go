@@ -2008,12 +2008,6 @@ func pbinForEachRebuildBatchAfter(ops []pbt.Op, tmpDir string, maxOps, maxBytes 
 	})
 }
 
-func pbinForEachRebuildFeedBatchAfter(feed *commitment.PBinFeed, tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, bool) error) error {
-	return pbinForEachRebuildOpStreamAfter(tmpDir, maxOps, maxBytes, afterKey, visit, func(emit func(pbt.Op) error) error {
-		return pbt.ForEachFeedOp(feed, emit)
-	})
-}
-
 func pbinForEachRebuildOpStreamsAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, streams []func(func(pbt.Op) error) error, visit func([]pbt.Op, bool) error) error {
 	return pbinForEachRebuildOpStreamsLookaheadAfter(tmpDir, maxOps, maxBytes, afterKey, func(batch []pbt.Op, _ []byte, final bool) error {
 		return visit(batch, final)

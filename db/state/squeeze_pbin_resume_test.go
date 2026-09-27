@@ -159,7 +159,7 @@ func TestPBinRebuildOverlayHeapStaysBoundedByRightEdge(t *testing.T) {
 		lastPath := eip8297.PathFromBits(maxKey[:33], 264)
 		lastRow, err := pbt.EncodeRowKey(&lastPath)
 		require.NoError(t, err)
-		for i := 0; i < count; i++ {
+		for i := range count {
 			path := eip8297.PathFromBits([]byte{byte(i >> 16), byte(i >> 8), byte(i)}, 24)
 			key, err := pbt.EncodeRowKey(&path)
 			require.NoError(t, err)

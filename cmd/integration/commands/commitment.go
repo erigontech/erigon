@@ -648,8 +648,7 @@ func validatePBinRebuildCheckpoints(src, out datadir.Dirs) error {
 			continue
 		}
 		checkpointPath := filepath.Join(out.Tmp, entry.Name())
-		if strings.HasSuffix(entry.Name(), ".rows") {
-			checkpointName := strings.TrimSuffix(entry.Name(), ".rows")
+		if checkpointName, ok := strings.CutSuffix(entry.Name(), ".rows"); ok {
 			if _, err := os.Stat(filepath.Join(out.Tmp, checkpointName)); err != nil {
 				return fmt.Errorf("commitment rebuild: spill has no checkpoint: %s", entry.Name())
 			}
