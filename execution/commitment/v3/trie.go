@@ -38,6 +38,8 @@ type Trie struct {
 	deferUpdates    bool
 	deferred        deltaParts
 	collapseTracer  commitment.CollapseTracer
+	preRecs         map[string][]byte
+	preRoot         []byte
 }
 
 func NewTrie(tmpdir string, _ commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
@@ -121,10 +123,13 @@ func (t *Trie) Process(
 		defer warmuper.CloseAndWait()
 	}
 	var sorted func([]feedEntry) error
+	t.preRecs, t.preRoot = nil, nil
 	if t.collapseTracer != nil {
 		if t.ctx != nil && t.ctxFactory == nil {
 			inner := t.ctx
-			t.ctx = &recordCache{PatriciaContext: inner, recs: make(map[string][]byte)}
+			cache := &recordCache{PatriciaContext: inner, recs: make(map[string][]byte)}
+			t.ctx = cache
+			t.preRecs, t.preRoot = cache.recs, bytes.Clone(t.root)
 			defer func() { t.ctx = inner }()
 		}
 		sorted = func(items []feedEntry) error { return traceCollapses(t.ctx, items, t.collapseTracer) }

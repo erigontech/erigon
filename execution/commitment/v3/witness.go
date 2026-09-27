@@ -62,11 +62,16 @@ func (t *Trie) WitnessesByHash(ctx context.Context, updates *commitment.Updates,
 		return nil, nil, nil, errTrieContext
 	}
 	keys := updates.CollectedHashedKeys()
-	w := &witnessWalk{ctx: t.ctx, exclusion: produceExclusionProofs, byHash: make(map[string][]byte), nodes: make(map[string]*witnessNode), roots: make(map[string]*witnessRoot), exts: make(map[string]struct{})}
 	want, err := t.RootHash()
 	if err != nil {
 		return nil, nil, nil, err
 	}
+	reads := t.ctx
+	if t.preRecs != nil && bytes.Equal(t.preRoot, t.root) {
+		reads = &recordCache{PatriciaContext: t.ctx, recs: t.preRecs}
+	}
+	t.preRecs, t.preRoot = nil, nil
+	w := &witnessWalk{ctx: reads, exclusion: produceExclusionProofs, byHash: make(map[string][]byte), nodes: make(map[string]*witnessNode), roots: make(map[string]*witnessRoot), exts: make(map[string]struct{})}
 	for _, key := range keys {
 		if err := ctx.Err(); err != nil {
 			return nil, nil, nil, err
