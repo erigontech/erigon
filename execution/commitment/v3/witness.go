@@ -83,6 +83,14 @@ func (w *witnessWalk) emit(rlp []byte, hash [32]byte) {
 	}
 }
 
+func (w *witnessWalk) seen(key string) bool {
+	if _, ok := w.exts[key]; ok {
+		return true
+	}
+	w.exts[key] = struct{}{}
+	return false
+}
+
 func (w *witnessWalk) load(plane byte, addrHash, path []byte) (*witnessNode, error) {
 	key := string(nodeKey(plane, addrHash, path, nil))
 	if wn, ok := w.nodes[key]; ok {
@@ -204,8 +212,7 @@ func (w *witnessWalk) descend(plane byte, addrHash, fullKey []byte, b *node, pat
 		ext := b.childExtAt(nib)
 		childPath := append(append(append(make([]byte, 0, len(path)+1+len(ext)), path...), byte(nib)), ext...)
 		if len(ext) != 0 {
-			if _, ok := w.exts[string(childPath)]; !ok {
-				w.exts[string(childPath)] = struct{}{}
+			if extKey := string(nodeKey(plane, addrHash, childPath, nil)); !w.seen(extKey) {
 				rlp := appendExtensionRLP(nil, ext, b.childHashAt(nib))
 				w.emit(rlp, keccak.Sum256(rlp))
 			}

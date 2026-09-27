@@ -212,6 +212,7 @@ type witnessShape struct {
 	slots           int
 	accountPrefixes [][]byte
 	slotPrefixes    [][]byte
+	sharedSlots     bool
 	batch           func(*rand.Rand, *witnessBed) []commitmenttest.Op
 }
 
@@ -227,6 +228,7 @@ func witnessState(rng *rand.Rand, shape witnessShape) []commitmenttest.Op {
 		addrs = append(addrs, addr)
 		ops = append(ops, commitmenttest.Op{Key: addr, Account: randomWitnessAccount(rng)})
 	}
+	var shared [][]byte
 	for _, addr := range addrs {
 		count := shape.slots
 		if count > 0 && len(shape.slotPrefixes) == 0 {
@@ -237,7 +239,12 @@ func witnessState(rng *rand.Rand, shape witnessShape) []commitmenttest.Op {
 			if len(shape.slotPrefixes) != 0 {
 				prefix = shape.slotPrefixes[j%len(shape.slotPrefixes)]
 			}
+			if shape.sharedSlots && j < len(shared) {
+				ops = append(ops, commitmenttest.Op{Key: append(bytes.Clone(addr), shared[j]...), Storage: randomWitnessValue(rng)})
+				continue
+			}
 			slot := craftKey(rng, length.Hash, prefix, slotNibbles(addr))
+			shared = append(shared, slot)
 			ops = append(ops, commitmenttest.Op{Key: append(bytes.Clone(addr), slot...), Storage: randomWitnessValue(rng)})
 		}
 	}
@@ -338,6 +345,7 @@ func TestWitnessMatchesHPH(t *testing.T) {
 		{name: "inner-extension", accounts: 6, accountPrefixes: [][]byte{{0x1, 0x2, 0x3}, {0x1, 0x2, 0x3}, {0x4}, {0x9}}},
 		{name: "storage-root-extension", accounts: 2, slots: 3, slotPrefixes: [][]byte{{0x5, 0x5}}},
 		{name: "storage-inner-extension", accounts: 1, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}},
+		{name: "shared-storage-extension", accounts: 3, slots: 5, slotPrefixes: [][]byte{{0x3, 0xa, 0x1}, {0x3, 0xa, 0x1}, {0xc}}, sharedSlots: true},
 	}
 	for _, shape := range shapes {
 		t.Run(shape.name, func(t *testing.T) {
