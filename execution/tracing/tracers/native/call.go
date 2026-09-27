@@ -43,94 +43,57 @@ func init() {
 	register("callTracer", newCallTracer)
 }
 
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type callLog -out gen_calllog_fastjson.go
 type callLog struct {
-	Index    hexutil.Uint64 `json:"index"`
-	Address  common.Address `json:"address"`
-	Topics   []common.Hash  `json:"topics"`
-	Data     hexutil.Bytes  `json:"data"`
-	Position hexutil.Uint   `json:"position"`
+	Index    hexutil.Uint64 `json:"index" ethjson:"quantity"`
+	Address  common.Address `json:"address" ethjson:"data"`
+	Topics   []common.Hash  `json:"topics" ethjson:"datalist"`
+	Data     hexutil.Bytes  `json:"data" ethjson:"data"`
+	Position hexutil.Uint   `json:"position" ethjson:"quantity"`
 }
+
+type callLogs []callLog
+
+func (ls callLogs) MarshalFastJSONTo(s *jsonstream.StackStream) error { return writeObjects(s, ls) }
+
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type callFrame -out gen_callframe_fastjson.go
 
 type callFrame struct {
 	Type           vm.OpCode       `json:"-"`
-	From           common.Address  `json:"from"`
-	Gas            hexutil.Uint64  `json:"gas"`
-	StateGas       hexutil.Uint64  `json:"stateGasReservoir,omitempty"`
-	GasUsed        hexutil.Uint64  `json:"gasUsed"`                  // root frame: receipt gas after refund and floor; child frame: execution gas.
-	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty"` // amsterdam root frame: execution block contribution before refunds, with calldata floor.
-	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed,omitempty"`   // amsterdam root frame: nonnegative block contribution; child frame: signed net state usage.
-	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty"`
-	To             *common.Address `json:"to,omitempty"`
-	Input          hexutil.Bytes   `json:"input"`
-	Output         hexutil.Bytes   `json:"output,omitempty"`
-	Error          string          `json:"error,omitempty"`
-	Revertal       string          `json:"revertReason,omitempty"`
-	Calls          []callFrame     `json:"calls,omitempty"`
-	Logs           []callLog       `json:"logs,omitempty"`
-	Value          *hexutil.U256   `json:"value,omitempty"`
-	TypeStr        string          `json:"type"`
+	From           common.Address  `json:"from" ethjson:"data"`
+	Gas            hexutil.Uint64  `json:"gas" ethjson:"quantity"`
+	StateGas       hexutil.Uint64  `json:"stateGasReservoir,omitempty" ethjson:"quantity"`
+	GasUsed        hexutil.Uint64  `json:"gasUsed" ethjson:"quantity"`                  // root frame: receipt gas after refund and floor; child frame: execution gas.
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed,omitempty" ethjson:"quantity"` // amsterdam root frame: execution block contribution before refunds, with calldata floor.
+	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed,omitempty" ethjson:"quantity"`   // amsterdam root frame: nonnegative block contribution; child frame: signed net state usage.
+	GasRefund      *hexutil.Uint64 `json:"gasRefund,omitempty" ethjson:"quantity"`
+	To             *common.Address `json:"to,omitempty" ethjson:"data"`
+	Input          hexutil.Bytes   `json:"input" ethjson:"data"`
+	Output         hexutil.Bytes   `json:"output,omitempty" ethjson:"data"`
+	Error          string          `json:"error,omitempty" ethjson:"string"`
+	Revertal       string          `json:"revertReason,omitempty" ethjson:"string"`
+	Calls          callFrames      `json:"calls,omitempty" ethjson:"objects"`
+	Logs           callLogs        `json:"logs,omitempty" ethjson:"objects"`
+	Value          *hexutil.U256   `json:"value,omitempty" ethjson:"quantity"`
+	TypeStr        string          `json:"type" ethjson:"string"`
 }
 
-func (f *callFrame) marshalFastJSONTo(s *jsonstream.StackStream) {
-	s.WriteObjectStart()
-	s.Field("from").WriteHex(f.From[:])
-	jsonstream.Text(s, "gas", &f.Gas)
-	if f.StateGas != 0 {
-		jsonstream.Text(s, "stateGasReservoir", &f.StateGas)
-	}
-	jsonstream.Text(s, "gasUsed", &f.GasUsed)
-	if f.RegularGasUsed != nil {
-		jsonstream.Text(s, "regularGasUsed", f.RegularGasUsed)
-	}
-	if f.StateGasUsed != nil {
-		jsonstream.Text(s, "stateGasUsed", f.StateGasUsed)
-	}
-	if f.GasRefund != nil {
-		jsonstream.Text(s, "gasRefund", f.GasRefund)
-	}
-	if f.To != nil {
-		s.Field("to").WriteHex(f.To[:])
-	}
-	s.Field("input").WriteHex(f.Input)
-	if len(f.Output) > 0 {
-		s.Field("output").WriteHex(f.Output)
-	}
-	if f.Error != "" {
-		writeHTMLEscaped(s.Field("error"), f.Error)
-	}
-	if f.Revertal != "" {
-		writeHTMLEscaped(s.Field("revertReason"), f.Revertal)
-	}
-	if len(f.Calls) > 0 {
-		s.Field("calls")
-		jsonstream.ArrayValue(s, f.Calls, func(s *jsonstream.StackStream, c *callFrame) { c.marshalFastJSONTo(s) })
-	}
-	if len(f.Logs) > 0 {
-		s.Field("logs")
-		jsonstream.ArrayValue(s, f.Logs, func(s *jsonstream.StackStream, l *callLog) { l.marshalFastJSONTo(s) })
-	}
-	if f.Value != nil {
-		jsonstream.Text(s, "value", f.Value)
-	}
-	s.Field("type").WriteString(f.TypeStr)
-	s.WriteObjectEnd()
-}
+type callFrames []callFrame
 
-func (l *callLog) marshalFastJSONTo(s *jsonstream.StackStream) {
-	s.WriteObjectStart()
-	jsonstream.Text(s, "index", &l.Index)
-	s.Field("address").WriteHex(l.Address[:])
-	s.Field("topics")
-	jsonstream.ArrayValue(s, l.Topics, func(s *jsonstream.StackStream, h *common.Hash) { s.WriteHex(h[:]) })
-	s.Field("data").WriteHex(l.Data)
-	jsonstream.Text(s, "position", &l.Position)
-	s.WriteObjectEnd()
-}
+func (fs callFrames) MarshalFastJSONTo(s *jsonstream.StackStream) error { return writeObjects(s, fs) }
 
-// writeHTMLEscaped keeps encoding/json's escaping of <, > and & and of invalid UTF-8, which WriteString does not.
-func writeHTMLEscaped(s *jsonstream.StackStream, v string) {
-	b, _ := json.Marshal(v)
-	s.WriteRawBytes(b)
+func writeObjects[E any, P interface {
+	*E
+	jsonstream.Marshaler
+}](s *jsonstream.StackStream, items []E) error {
+	s.WriteArrayStart()
+	for i := range items {
+		if err := P(&items[i]).MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.WriteArrayEnd()
+	return nil
 }
 
 // setType keeps the opcode and its wire spelling in step.
@@ -371,8 +334,7 @@ func (t *callTracer) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if p := t.reason.Load(); p != nil {
 		return *p
 	}
-	root.marshalFastJSONTo(s)
-	return nil
+	return root.MarshalFastJSONTo(s)
 }
 
 // root is nil without an error when the top-level call went to a precompile and includePrecompiles is false.
