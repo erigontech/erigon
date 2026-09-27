@@ -63,6 +63,14 @@ func (ts ParityTraces) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	return nil
 }
 
+func (t *ParityTrace) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	if err := t.checkKinds(); err != nil {
+		return err
+	}
+	t.writeTo(s)
+	return nil
+}
+
 func (t *ParityTrace) checkKinds() error {
 	switch t.Action.(type) {
 	case nil, *CallTraceAction, *CreateTraceAction, *SuicideTraceAction, *RewardTraceAction:
