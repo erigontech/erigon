@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	_ "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -127,6 +128,117 @@ func testDbAggregatorWithCommitmentHistory(t *testing.T, stepSize uint64, steps 
 	require.NoError(t, rwTx.Commit())
 	require.NoError(t, agg.BuildFiles(db, txCount, unboundedFinalityCtx))
 	return db, agg, roots
+}
+
+func storageSlotPairs(tb testing.TB) [2][2][]byte {
+	tb.Helper()
+	byNibble := map[byte][][]byte{}
+	var pairs [2][2][]byte
+	found := 0
+	for i := uint64(1); found < 2; i++ {
+		slot := make([]byte, length.Hash)
+		binary.BigEndian.PutUint64(slot[length.Hash-8:], i)
+		nibble := crypto.Keccak256(slot)[0] >> 4
+		byNibble[nibble] = append(byNibble[nibble], slot)
+		if len(byNibble[nibble]) == 2 {
+			pairs[found] = [2][]byte{byNibble[nibble][0], byNibble[nibble][1]}
+			found++
+		}
+	}
+	return pairs
+}
+
+func TestConvertCommitmentFiles_V3HistoryOrphanStorageRoot(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	const stepSize, steps = 4, 2
+	db, agg := testDbAndAggregatorv3(t, stepSize)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
+	ctx := t.Context()
+
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	defer domains.Close()
+
+	addrs, _ := generateInputData(t, length.Addr, 1, 4)
+	owner := addrs[0]
+	pairs := storageSlotPairs(t)
+	slots := [][]byte{pairs[0][0], pairs[0][1], pairs[1][0], pairs[1][1]}
+	slot := func(s []byte) []byte { return append(bytes.Clone(owner), s...) }
+	put := func(d kv.Domain, k, v []byte, txNum uint64) {
+		prev, _, getErr := domains.GetLatest(d, rwTx, k)
+		require.NoError(t, getErr)
+		require.NoError(t, domains.DomainPut(d, rwTx, k, v, txNum, prev))
+	}
+	del := func(d kv.Domain, k []byte, txNum uint64) {
+		prev, _, getErr := domains.GetLatest(d, rwTx, k)
+		require.NoError(t, getErr)
+		require.NoError(t, domains.DomainDel(d, rwTx, k, txNum, prev))
+	}
+	putAccount := func(addr []byte, txNum uint64) {
+		acc := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(txNum + 1), CodeHash: accounts.EmptyCodeHash}
+		put(kv.AccountsDomain, addr, accounts.SerialiseV3(&acc), txNum)
+	}
+
+	roots := map[uint64][]byte{}
+	for txNum := range uint64(stepSize * steps) {
+		switch txNum {
+		case 0:
+			for _, a := range addrs {
+				putAccount(a, txNum)
+			}
+			for _, s := range slots {
+				put(kv.StorageDomain, slot(s), []byte{1}, txNum)
+			}
+		case 1:
+			for _, s := range slots {
+				del(kv.StorageDomain, slot(s), txNum)
+			}
+			del(kv.AccountsDomain, owner, txNum)
+		case 2:
+			putAccount(owner, txNum)
+			put(kv.StorageDomain, slot(pairs[0][0]), []byte{2}, txNum)
+		case 3:
+			put(kv.StorageDomain, slot(pairs[1][0]), []byte{3}, txNum)
+		default:
+			putAccount(addrs[1+int(txNum)%3], txNum)
+		}
+		root, rootErr := domains.ComputeCommitment(ctx, rwTx, true, txNum, txNum, "", nil)
+		require.NoError(t, rootErr)
+		roots[txNum] = root
+	}
+	require.NoError(t, domains.Flush(ctx, rwTx))
+	require.NoError(t, rwTx.Commit())
+	require.NoError(t, agg.BuildFiles(db, stepSize*steps, unboundedFinalityCtx))
+
+	ownerPath := commitment.KeyToHexNibbleHash(owner)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	orphan, _, err := roTx.GetAsOf(kv.CommitmentDomain, nibbles.HexToCompact(ownerPath), 3)
+	require.NoError(t, err)
+	roTx.Rollback()
+	require.NotEmpty(t, orphan, "legacy storage root record of the recreated account is expected to survive its deletion")
+
+	runOrchestrator(t, db, state.ConvertOpts{TargetV3: true})
+
+	roTx, err = db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	latestState, _, err := roTx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	roTx.Rollback()
+	_, lastFrozenCommit, _, err := commitment.DecodeCommitmentV3State(latestState)
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, lastFrozenCommit, uint64(3))
+	for txNum := range lastFrozenCommit + 1 {
+		root, rootErr := state.DebugCommitmentV3RootAsOf(ctx, agg, txNum+1)
+		require.NoErrorf(t, rootErr, "records as of txNum %d", txNum+1)
+		require.Equalf(t, roots[txNum], root, "root as of txNum %d", txNum+1)
+	}
 }
 
 func TestConvertCommitmentFiles_V3History(t *testing.T) {

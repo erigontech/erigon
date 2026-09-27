@@ -400,14 +400,17 @@ func legacyCommitmentAsOf(dt *DomainRoTx, key []byte, txNum uint64) ([]byte, err
 
 func resolveLegacyHistory(key []byte, entries []v3.LegacyEntry) ([]byte, error) {
 	var value []byte
-	for _, e := range entries {
-		if len(e.Value) == 0 {
-			continue
-		}
-		if value != nil && !bytes.Equal(e.Value, value) {
+	var kind v3.LegacyKind
+	for i, e := range entries {
+		switch {
+		case i == 0 || e.Kind > kind:
+			value, kind = e.Value, e.Kind
+		case e.Kind < kind || len(e.Value) == 0:
+		case len(value) == 0:
+			value = e.Value
+		case !bytes.Equal(e.Value, value):
 			return nil, fmt.Errorf("%w: two history values for %x", v3.ErrLegacyConflict, key)
 		}
-		value = e.Value
 	}
 	return value, nil
 }
