@@ -1108,7 +1108,7 @@ func TestTraceCallNullMembers(t *testing.T) {
 	// A contract creation whose init code returns the word 42.
 	const initCode = "0x602a60005260206000f3"
 	full := map[string]any{
-		"from": bankAddr, "gas": "0x493e0", "maxFeePerGas": "0x77359400", "maxPriorityFeePerGas": "0x0",
+		"from": bankAddr, "gas": "0x493e0", "maxFeePerGas": "0x0", "maxPriorityFeePerGas": "0x0",
 		"value": "0x0", "data": initCode, "accessList": []any{}, "nonce": "0x0",
 		"chainId": hexutil.Uint64(m.ChainConfig.ChainID.Uint64()),
 	}
