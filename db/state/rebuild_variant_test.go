@@ -413,12 +413,20 @@ func rebuildVariantMemoryDatadir(t *testing.T, slots int) (kv.TemporalRwDB, *sta
 
 func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) uint64 {
 	t.Helper()
+	runtime.GC()
+	var baseline runtime.MemStats
+	runtime.ReadMemStats(&baseline)
 	var samples []uint64
 	root, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
 		Variant:        commitment.VariantBinPatriciaTrie,
 		PBinBatchOps:   1000,
 		PBinBatchBytes: 1 << 20,
 		PBinMemorySample: func(value uint64) {
+			if value > baseline.Alloc {
+				value -= baseline.Alloc
+			} else {
+				value = 0
+			}
 			samples = append(samples, value)
 		},
 	})
