@@ -322,6 +322,10 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty, omitzero bo
 		}
 	case "quantity":
 		bare := deref(t)
+		writer := "Quantity"
+		if b, ok := bare.Underlying().(*types.Basic); ok && b.Info()&types.IsUnsigned == 0 {
+			writer = "SignedQuantity"
+		}
 		switch {
 		case is256(bare) && pointer:
 			write = fmt.Sprintf("ethjson.Quantity256(s, %q, (*uint256.Int)(%s))", name, ref)
@@ -331,18 +335,12 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty, omitzero bo
 			// uint256.Int is an array of four words, and encoding/json never calls an array
 			// empty, so omitempty cannot leave a zero one out.
 			omitempty = false
+		case pointer:
+			write = fmt.Sprintf("ethjson.%s(s, %q, *%s)", writer, name, ref)
+			present = ref + " != nil"
 		default:
-			writer := "Quantity"
-			if b, ok := bare.Underlying().(*types.Basic); ok && b.Info()&types.IsUnsigned == 0 {
-				writer = "SignedQuantity"
-			}
-			if pointer {
-				write = fmt.Sprintf("ethjson.%s(s, %q, *%s)", writer, name, ref)
-				present = ref + " != nil"
-			} else {
-				write = fmt.Sprintf("ethjson.%s(s, %q, %s)", writer, name, ref)
-				present = ref + " != 0"
-			}
+			write = fmt.Sprintf("ethjson.%s(s, %q, %s)", writer, name, ref)
+			present = ref + " != 0"
 		}
 	default:
 		return "", fmt.Errorf("unknown ethjson form %q", form)

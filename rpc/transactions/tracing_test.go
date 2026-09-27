@@ -215,9 +215,6 @@ func assembleWithLogConfig(t *testing.T, cfg *logger.LogConfig, tracerName *stri
 	return err
 }
 
-// execution-apis gives the opcode logger's limit a minimum of 0, and a negative
-// one would suppress every step, so it must be refused rather than served as an
-// empty trace.
 // A tracer that fails before writing leaves a lazy "result" field unwritten, so the response carries only "error".
 func TestWriteTracerResultKeepsLazyFieldUnwrittenOnError(t *testing.T) {
 	var buf bytes.Buffer
@@ -227,6 +224,9 @@ func TestWriteTracerResultKeepsLazyFieldUnwrittenOnError(t *testing.T) {
 	require.False(t, result.Written())
 }
 
+// execution-apis gives the opcode logger's limit a minimum of 0, and a negative
+// one would suppress every step, so it must be refused rather than served as an
+// empty trace.
 func TestAssembleTracerRejectsNegativeLimit(t *testing.T) {
 	err := assembleWithLogConfig(t, &logger.LogConfig{Limit: -1}, nil)
 
