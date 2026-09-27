@@ -477,8 +477,10 @@ func TestFilterNullMembers(t *testing.T) {
 		}
 	})
 
+	// toBlock is the head, so the range stays valid when an omitted fromBlock
+	// defaults to the latest block.
 	full := map[string]any{
-		"fromBlock": "0x1", "toBlock": "0x2",
+		"fromBlock": "0x1", "toBlock": "0x3",
 		"fromAddress": []common.Address{sender, relay}, "toAddress": []common.Address{sink},
 		"mode": TraceFilterModeUnion, "after": 1, "count": 2,
 	}
