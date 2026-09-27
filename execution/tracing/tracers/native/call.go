@@ -328,8 +328,12 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 
 func (t *callTracer) MarshalFastJSONTo(s jsonstream.Stream) error {
 	root, err := t.root()
-	if root == nil || err != nil {
+	if err != nil {
 		return err
+	}
+	if root == nil {
+		s.WriteNil()
+		return nil
 	}
 	if p := t.reason.Load(); p != nil {
 		return *p

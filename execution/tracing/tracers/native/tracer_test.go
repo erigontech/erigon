@@ -251,3 +251,17 @@ func TestCallTracerFastJSONMatchesGetResult(t *testing.T) {
 	require.EqualError(t, tracer.MarshalFastJSONTo(result), "stopped")
 	require.False(t, result.Written(), "a stopped tracer leaves the result field unwritten")
 }
+
+func TestCallTracerFastJSONWritesNullForExcludedPrecompileRoot(t *testing.T) {
+	tracer, err := tracers.New("callTracer", &tracers.Context{}, json.RawMessage(`{"includePrecompiles":false}`))
+	require.NoError(t, err)
+	tracer.OnTxStart(&tracing.VMContext{Rules: &chain.Rules{}},
+		types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, 100_000, nil, nil), accounts.ZeroAddress)
+	tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, true, nil, mdgas.MdGas{Execution: 1000}, uint256.Int{}, nil)
+	tracer.EmitExit(0, nil, mdgas.MdGasUsage{Execution: 100}, nil, false)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: 100}, mdgas.TxnGasUsage{}, nil)
+
+	got, err := jsonstream.Marshal(fastJSON(tracer.MarshalFastJSONTo))
+	require.NoError(t, err)
+	require.Equal(t, "null", string(got))
+}
