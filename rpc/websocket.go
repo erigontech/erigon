@@ -467,6 +467,7 @@ func (wc *websocketCodec) peerInfo() PeerInfo {
 }
 
 func (wc *websocketCodec) WriteJSON(ctx context.Context, v any) error {
+	wc.resetPing()
 	err := wc.jsonCodec.WriteJSON(ctx, v)
 	if err == nil {
 		wc.resetPing()

@@ -635,6 +635,59 @@ func TestWebsocketUnansweredPingClosesConn(t *testing.T) {
 	}
 }
 
+// A ping due while a slow write still has budget must not close the connection: coder's ping
+// gives up on the write lock after 5s, well before the write's own deadline.
+func TestWebsocketPingDuringSlowWriteKeepsConn(t *testing.T) {
+	t.Parallel()
+
+	codecs := make(chan *websocketCodec, 1)
+	httpsrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hw := &hijackRecorder{ResponseWriter: w}
+		conn, err := websocket.Accept(hw, r, nil)
+		if err != nil {
+			return
+		}
+		wc := newWebsocketCodec(conn, hw.conn, r.Host, r.Header, r.RemoteAddr)
+		defer wc.Close()
+		codecs <- wc
+		for {
+			if _, _, err := conn.Read(context.Background()); err != nil {
+				return
+			}
+		}
+	}))
+	defer httpsrv.Close()
+
+	conn, resp, err := websocket.Dial(t.Context(), "ws:"+strings.TrimPrefix(httpsrv.URL, "http:"), nil)
+	if err != nil {
+		if resp != nil && resp.Body != nil {
+			resp.Body.Close()
+		}
+		t.Fatalf("can't dial: %v", err)
+	}
+	defer func() { _ = conn.CloseNow() }()
+	conn.SetReadLimit(-1)
+
+	wc := <-codecs
+	wc.writeTimeout = 3 * wsPingWriteTimeout
+	payload := rawResponse(`"` + strings.Repeat("x", 32<<20) + `"`)
+	wc.pingTimer.Reset(100 * time.Millisecond)
+	writeErr := make(chan error, 1)
+	go func() { writeErr <- wc.WriteJSON(context.Background(), payload) }()
+
+	time.Sleep(wsPingWriteTimeout + 2*time.Second)
+	_, data, err := conn.Read(t.Context())
+	if err != nil {
+		t.Fatalf("the connection was closed during a write that still had budget: %v", err)
+	}
+	if len(data) != len(payload) {
+		t.Fatalf("got %d bytes, want %d", len(data), len(payload))
+	}
+	if err := <-writeErr; err != nil {
+		t.Fatalf("write failed: %v", err)
+	}
+}
+
 type writeCountingConn struct {
 	net.Conn
 	writes *atomic.Int64
