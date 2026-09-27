@@ -232,6 +232,8 @@ func TestCallTracerFastJSONMatchesGetResult(t *testing.T) {
 	tracer.OnLog(&types.Log{Address: to.Value(), Topics: []common.Hash{{0x0b}}})
 	tracer.EmitEnter(1, byte(vm.CREATE2), to, to, false, nil, mdgas.MdGas{Execution: 800}, uint256.Int{}, nil)
 	tracer.EmitExit(1, nil, mdgas.MdGasUsage{Execution: 20, State: -30}, errors.New("a<b>&c\xff"), false)
+	tracer.EmitEnter(1, byte(vm.CALL), to, to, false, nil, mdgas.MdGas{Execution: 800}, uint256.Int{}, nil)
+	tracer.EmitExit(1, nil, mdgas.MdGasUsage{Execution: 20}, errors.New("a<b>&c"), false)
 	tracer.EmitExit(0, []byte{9}, mdgas.MdGasUsage{Execution: 100, State: 50}, nil, false)
 	tracer.EmitTxEnd(&types.Receipt{GasUsed: 37_000},
 		mdgas.TxnGasUsage{BlockExecutionGasUsed: 30_000, BlockStateGasUsed: 12_000, GasRefund: 5_000}, nil)
