@@ -73,8 +73,8 @@ type TraceCallParam struct {
 	MaxFeePerGas         *hexutil.U256     `json:"maxFeePerGas"`
 	MaxFeePerBlobGas     *hexutil.U256     `json:"maxFeePerBlobGas"`
 	Value                *hexutil.U256     `json:"value"`
-	Data                 hexutil.Bytes     `json:"data"`
-	Input                hexutil.Bytes     `json:"input"`
+	Data                 *hexutil.Bytes    `json:"data"`
+	Input                *hexutil.Bytes    `json:"input"`
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
 	traceTypes           []string
@@ -227,9 +227,9 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	}
 	var data []byte
 	if args.Input != nil {
-		data = args.Input
+		data = *args.Input
 	} else if args.Data != nil {
-		data = args.Data
+		data = *args.Data
 	}
 	var accessList types.AccessList
 	if args.AccessList != nil {
@@ -1893,7 +1893,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+	// A signed transaction pays for its own gas, so no gas bailout: the sender
+	// is charged for value and gas as it would be in a block.
+	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err

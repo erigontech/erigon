@@ -935,7 +935,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			}
 			requestRoot, hashErr := signedEnvelope.HashSSZ()
 			if hashErr != nil {
-				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				beaconhttp.NewEndpointError(http.StatusBadRequest, hashErr).WriteTo(w)
 				return
 			}
 			retry, retrying, retryClaimed = a.claimExecutionPayloadEnvelopeRetry(gossipKey, requestRoot)

@@ -21,6 +21,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"math/big"
 	"sync"
 	"testing"
 
@@ -30,6 +32,7 @@ import (
 	"github.com/valyala/fastjson"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
@@ -340,7 +343,7 @@ func TestFilterModeValidation(t *testing.T) {
 	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
 	client := rpc.DialInProc(server, log.New())
 	t.Cleanup(func() { client.Close(); server.Stop() })
-	for _, mode := range []any{"garbage", "INTERSECTION", "", nil, 1} {
+	for _, mode := range []any{"garbage", "INTERSECTION", "", 1} {
 		t.Run(fmt.Sprint(mode), func(t *testing.T) {
 			var result json.RawMessage
 			err := client.CallContext(t.Context(), &result, "trace_filter", map[string]any{"mode": mode, "count": 0})
@@ -349,6 +352,105 @@ func TestFilterModeValidation(t *testing.T) {
 			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
 		})
 	}
+}
+
+// An explicit null for an optional trace_filter member is the same as omitting it.
+func TestFilterNullMembers(t *testing.T) {
+	key, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	relay, sink, other := common.Address{1}, common.Address{2}, common.Address{3}
+	// The relay calls the sink: GAS is the gas, and value, arguments and return data are zero.
+	relayCode := append([]byte{0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x60, 0x00, 0x73}, sink[:]...)
+	relayCode = append(relayCode, 0x5a, 0xf1, 0x00)
+	m := execmoduletester.New(t, execmoduletester.WithKey(key), execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config: chain.TestChainBerlinConfig,
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: big.NewInt(common.Ether)},
+			relay:  {Code: relayCode},
+		},
+	}))
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	// Every block holds a call to the relay, which calls the sink, and a transfer to other.
+	signer := types.LatestSigner(m.ChainConfig)
+	blocks, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+		for _, rcv := range []common.Address{relay, other} {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(sender), rcv, new(uint256.Int), 100_000, new(uint256.Int), nil), *signer, key)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(blocks))
+
+	traces := func(t *testing.T, req map[string]any) string {
+		t.Helper()
+		var result json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &result, "trace_filter", req))
+		return string(result)
+	}
+	filter := func(t *testing.T, req map[string]any) []int {
+		t.Helper()
+		return blockNumbersFromTraces(t, []byte(traces(t, req)))
+	}
+
+	t.Run("null mode is intersection", func(t *testing.T) {
+		for _, tc := range []struct {
+			name                string
+			from, to            []common.Address
+			intersection, union []int
+		}{
+			// The address indexes share only the relay call, so it is the only transaction traced.
+			// Of its two traces, only relay -> sink is from a listed sender to a listed recipient;
+			// sender -> relay matches the from list alone.
+			{"per-trace match", []common.Address{sender, relay}, []common.Address{sink}, []int{1, 2, 3}, []int{1, 1, 1, 2, 2, 2, 3, 3, 3}},
+			// The address indexes share no transaction, so the intersection traces nothing.
+			{"address index", []common.Address{sink}, []common.Address{other}, []int{}, []int{1, 2, 3}},
+			// Block rewards skip the per-trace match, so only the index intersection keeps out the
+			// rewards of the miner, the zero address.
+			{"reward", []common.Address{sender}, []common.Address{{}}, []int{}, []int{1, 1, 1, 2, 2, 2, 3, 3, 3}},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				req := func(mode ...any) map[string]any {
+					r := map[string]any{"fromBlock": "0x1", "toBlock": "0x3", "fromAddress": tc.from, "toAddress": tc.to}
+					if len(mode) > 0 {
+						r["mode"] = mode[0]
+					}
+					return r
+				}
+				require.Equal(t, tc.union, filter(t, req(TraceFilterModeUnion)))
+				require.Equal(t, tc.intersection, filter(t, req(TraceFilterModeIntersection)))
+				require.Equal(t, tc.intersection, filter(t, req()))
+				require.Equal(t, tc.intersection, filter(t, req(nil)))
+			})
+		}
+	})
+
+	full := map[string]any{
+		"fromBlock": "0x1", "toBlock": "0x2",
+		"fromAddress": []common.Address{sender, relay}, "toAddress": []common.Address{sink},
+		"mode": TraceFilterModeUnion, "after": 1, "count": 2,
+	}
+	for member := range full {
+		t.Run(member, func(t *testing.T) {
+			omitted := maps.Clone(full)
+			delete(omitted, member)
+			null := maps.Clone(omitted)
+			null[member] = nil
+			require.JSONEq(t, traces(t, omitted), traces(t, null))
+		})
+	}
+	t.Run("all", func(t *testing.T) {
+		null := map[string]any{}
+		for member := range full {
+			null[member] = nil
+		}
+		require.JSONEq(t, traces(t, map[string]any{}), traces(t, null))
+	})
 }
 
 func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {

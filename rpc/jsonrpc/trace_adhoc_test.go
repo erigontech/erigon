@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -653,6 +654,96 @@ func TestRawTransactionAllTraceTypes(t *testing.T) {
 	require.NotNil(t, result.VmTrace, "VmTrace must be initialised")
 }
 
+// stateDiffBalanceDelta returns an account's balance change (to - from) as
+// reported in a trace stateDiff.
+func stateDiffBalanceDelta(t *testing.T, diff map[accounts.Address]*StateDiffAccount, addr common.Address) *big.Int {
+	t.Helper()
+	acc, ok := diff[accounts.InternAddress(addr)]
+	require.True(t, ok, "%x must appear in stateDiff", addr)
+	switch v := acc.Balance.(type) {
+	case string:
+		require.Equal(t, "=", v)
+		return new(big.Int)
+	case map[string]*StateDiffBalance:
+		return new(big.Int).Sub(v["*"].To.ToInt(), v["*"].From.ToInt())
+	case map[string]*hexutil.U256:
+		if born, ok := v["+"]; ok {
+			return born.ToInt()
+		}
+		return new(big.Int).Neg(v["-"].ToInt())
+	default:
+		t.Fatalf("unexpected balance diff type %T", acc.Balance)
+		return nil
+	}
+}
+
+// TestRawTransactionStateDiffChargesFees checks that a signed transaction's
+// stateDiff is the transaction's actual transition: the sender pays value plus
+// gasUsed times the effective gas price, the fee recipient gets the tip, the
+// base fee is burned, and no other ether appears or disappears. A sender that
+// cannot pay for its gas is rejected.
+func TestRawTransactionStateDiffChargesFees(t *testing.T) {
+	c := newBaseFeeTestChain(t, chain.TestChainOsakaConfig)
+	coinbase := common.HexToAddress("0xc0ffee")
+	c.mineBlock(t, func(block *blockgen.BlockGen) { block.SetCoinbase(coinbase) })
+	baseFee := c.head.BaseFee()
+	require.Positive(t, baseFee.Sign())
+
+	recipient := common.HexToAddress("0x1234")
+	tipCap := uint256.NewInt(2_000_000_000)
+	rawTransfer := func(value *uint256.Int) []byte {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    0,
+				To:       &recipient,
+				Value:    *value,
+				GasLimit: 50_000, // above the 21000 used, so unused gas must not be charged
+			},
+			ChainID: *c.signer.ChainID(),
+			TipCap:  *tipCap,
+			FeeCap:  *uint256.NewInt(100_000_000_000),
+		}, *c.signer, c.bankKey)
+		require.NoError(t, err)
+		var buf bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&buf))
+		return buf.Bytes()
+	}
+
+	t.Run("stateDiff is the real transition", func(t *testing.T) {
+		value := uint256.NewInt(1)
+		result, err := c.traceAPI().RawTransaction(context.Background(), rawTransfer(value), []string{TraceTypeStateDiff})
+		require.NoError(t, err)
+
+		const gasUsed = 21_000
+		tip := new(big.Int).Mul(big.NewInt(gasUsed), tipCap.ToBig())
+		burn := new(big.Int).Mul(big.NewInt(gasUsed), baseFee.ToBig())
+		senderPays := new(big.Int).Add(value.ToBig(), tip)
+		senderPays.Add(senderPays, burn)
+
+		sender := stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress)
+		require.Equal(t, new(big.Int).Neg(senderPays).String(), sender.String(), "sender pays value + gasUsed * effective gas price")
+		require.Equal(t, tip.String(), stateDiffBalanceDelta(t, result.StateDiff, coinbase).String(), "fee recipient gets the tip")
+		require.Equal(t, value.ToBig().String(), stateDiffBalanceDelta(t, result.StateDiff, recipient).String())
+
+		total := new(big.Int)
+		for addr := range result.StateDiff {
+			total.Add(total, stateDiffBalanceDelta(t, result.StateDiff, addr.Value()))
+		}
+		require.Equal(t, new(big.Int).Neg(burn).String(), total.String(), "only the base fee leaves circulation")
+	})
+
+	t.Run("sender that cannot pay gas limit * fee cap is rejected", func(t *testing.T) {
+		// 100 ether in the bank, minus 0.001 ether: enough for value + 50000 gas at the
+		// effective price (under 3 gwei), not enough for 50000 gas at the 100 gwei fee cap.
+		value, overflow := uint256.FromBig(new(big.Int).Sub(new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), big.NewInt(1e15)))
+		require.False(t, overflow)
+		require.Less(t, new(uint256.Int).Add(baseFee, tipCap).Uint64(), uint64(3_000_000_000))
+		result, err := c.traceAPI().RawTransaction(context.Background(), rawTransfer(value), []string{TraceTypeTrace})
+		require.ErrorIs(t, err, protocol.ErrInsufficientFunds)
+		require.Nil(t, result)
+	})
+}
+
 func TestParseOeTracerConfigRejectsCustomTracer(t *testing.T) {
 	tracer := "callTracer"
 	_, err := parseOeTracerConfig(&config.TraceConfig{Tracer: &tracer})
@@ -929,6 +1020,10 @@ func TestTraceCallInputField(t *testing.T) {
 		{name: "input", fields: `"input":"0xbb"`, output: "0xbb"},
 		{name: "equal", fields: `"data":"0xcc","input":"0xcc"`, output: "0xcc"},
 		{name: "input wins", fields: `"data":"0xaa","input":"0xbb"`, output: "0xbb"},
+		{name: "empty input wins", fields: `"data":"0xaa","input":"0x"`, output: "0x"},
+		{name: "null input", fields: `"data":"0xaa","input":null`, output: "0xaa"},
+		{name: "null data", fields: `"data":null,"input":"0xbb"`, output: "0xbb"},
+		{name: "both null", fields: `"data":null,"input":null`, output: "0x"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var args TraceCallParam
@@ -955,6 +1050,91 @@ func TestCallManyInputField(t *testing.T) {
 	created, ok := results[0].Trace[0].Result.(*CreateTraceResult)
 	require.True(t, ok)
 	require.Equal(t, "0x602a60005260206000f3", created.Code.String())
+}
+
+// An explicit null for an optional call-object member is the same as omitting it, in both
+// trace_call and trace_callMany. A null to keeps its meaning: the call creates a contract.
+func TestTraceCallNullMembers(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	traceCall := func(t *testing.T, call map[string]any) json.RawMessage {
+		t.Helper()
+		var result json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &result, "trace_call", call, []string{TraceTypeTrace}, "latest"))
+		return result
+	}
+	traceCallMany := func(t *testing.T, call map[string]any) json.RawMessage {
+		t.Helper()
+		var results []json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &results, "trace_callMany", [][]any{{call, []string{TraceTypeTrace}}}, "latest"))
+		require.Len(t, results, 1)
+		return results[0]
+	}
+
+	// A contract creation whose init code returns the word 42.
+	const initCode = "0x602a60005260206000f3"
+	full := map[string]any{
+		"from": bankAddr, "gas": "0x493e0", "maxFeePerGas": "0x77359400", "maxPriorityFeePerGas": "0x0",
+		"value": "0x0", "data": initCode, "accessList": []any{}, "nonce": "0x0",
+		"chainId": hexutil.Uint64(m.ChainConfig.ChainID.Uint64()),
+	}
+	// Members absent from the base call: setting them to null must not change it.
+	nullOnly := []string{"to", "input", "gasPrice", "maxFeePerBlobGas", "blobVersionedHashes", "authorizationList", "type"}
+	for name, trace := range map[string]func(*testing.T, map[string]any) json.RawMessage{"trace_call": traceCall, "trace_callMany": traceCallMany} {
+		t.Run(name, func(t *testing.T) {
+			var want struct {
+				Output hexutil.Bytes `json:"output"`
+				Trace  []struct {
+					Type string `json:"type"`
+				} `json:"trace"`
+			}
+			require.NoError(t, json.Unmarshal(trace(t, full), &want))
+			require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", want.Output.String())
+			require.Equal(t, "create", want.Trace[0].Type)
+
+			for member := range full {
+				t.Run(member, func(t *testing.T) {
+					omitted := maps.Clone(full)
+					delete(omitted, member)
+					null := maps.Clone(omitted)
+					null[member] = nil
+					require.JSONEq(t, string(trace(t, omitted)), string(trace(t, null)))
+				})
+			}
+			for _, member := range nullOnly {
+				t.Run(member, func(t *testing.T) {
+					null := maps.Clone(full)
+					null[member] = nil
+					require.JSONEq(t, string(trace(t, full)), string(trace(t, null)))
+				})
+			}
+			t.Run("calldata in input", func(t *testing.T) {
+				input := maps.Clone(full)
+				delete(input, "data")
+				input["input"] = initCode
+				null := maps.Clone(input)
+				null["data"] = nil
+				require.JSONEq(t, string(trace(t, full)), string(trace(t, input)))
+				require.JSONEq(t, string(trace(t, input)), string(trace(t, null)))
+			})
+			t.Run("all", func(t *testing.T) {
+				null := map[string]any{"data": initCode}
+				for _, member := range nullOnly {
+					null[member] = nil
+				}
+				for member := range full {
+					if member != "data" {
+						null[member] = nil
+					}
+				}
+				require.JSONEq(t, string(trace(t, map[string]any{"data": initCode})), string(trace(t, null)))
+			})
+		})
+	}
 }
 
 // runtimeReturningOpcode returns the given zero-argument opcode's value as a

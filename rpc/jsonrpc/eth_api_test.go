@@ -592,6 +592,27 @@ func TestGraphQLChainIDServesCachedConfigWithoutReadTx(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+func TestGraphQLBlockDetailsSkipReceiptsWithoutTxs(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewGraphQLAPI(newBaseApiForTest(m), m.DB, nil, nil, &rpccfg.GraphQLApiConfig{})
+
+	yes, no := true, false
+	withTxs, err := api.GetBlockDetails(m.Ctx, 1, &yes)
+	require.NoError(t, err)
+	require.NotEmpty(t, withTxs["receipts"])
+
+	hash := withTxs["block"].(*ethapi.RPCBlock).Hash
+	for _, details := range []func() (map[string]any, error){
+		func() (map[string]any, error) { return api.GetBlockDetails(m.Ctx, 1, &no) },
+		func() (map[string]any, error) { return api.GetBlockDetailsByHash(m.Ctx, *hash, &no) },
+	} {
+		got, err := details()
+		require.NoError(t, err)
+		require.NotNil(t, got["block"])
+		require.NotContains(t, got, "receipts")
+	}
+}
+
 // A pooled transaction is priced at its fee cap, and carries no location.
 func TestNewRPCPendingTransactionGasPriceIsFeeCap(t *testing.T) {
 	feeCap := uint256.NewInt(1_000_000_000)
@@ -671,7 +692,7 @@ func TestTraceCallExcludesNextBlockSystemCall(t *testing.T) {
 	traceAPI := NewTraceAPI(newBaseApiForTest(m), m.DB, &rpccfg.TraceApiConfig{})
 	traceRead := func(slot common.Hash) common.Hash {
 		t.Helper()
-		res, err := traceAPI.Call(context.Background(), TraceCallParam{To: &historyAddr, Data: slot[:]}, []string{"trace"}, at, nil)
+		res, err := traceAPI.Call(context.Background(), TraceCallParam{To: &historyAddr, Data: new(hexutil.Bytes(slot[:]))}, []string{"trace"}, at, nil)
 		require.NoError(t, err)
 		return common.BytesToHash(res.Output)
 	}
@@ -724,7 +745,7 @@ func TestTraceCallManyExcludesNextBlockSystemCall(t *testing.T) {
 	}
 	traceCall := func(t *testing.T, at rpc.BlockNumberOrHash, data hexutil.Bytes) common.Hash {
 		t.Helper()
-		res, err := traceAPI.Call(context.Background(), TraceCallParam{To: &historyAddr, Data: data}, []string{"trace"}, &at, nil)
+		res, err := traceAPI.Call(context.Background(), TraceCallParam{To: &historyAddr, Data: &data}, []string{"trace"}, &at, nil)
 		require.NoError(t, err)
 		return common.BytesToHash(res.Output)
 	}
@@ -745,7 +766,7 @@ func TestTraceCallManyExcludesNextBlockSystemCall(t *testing.T) {
 	}
 	readHistory := func(t *testing.T, at rpc.BlockNumberOrHash, n uint64) common.Hash {
 		t.Helper()
-		got := traceCallMany(t, at, TraceCallParam{To: &historyAddr, Data: slot(n)})[0]
+		got := traceCallMany(t, at, TraceCallParam{To: &historyAddr, Data: new(slot(n))})[0]
 		require.Equal(t, traceCall(t, at, slot(n)), got, "one-item trace_callMany differs from trace_call for slot %d", n)
 		return got
 	}
@@ -771,9 +792,9 @@ func TestTraceCallManyExcludesNextBlockSystemCall(t *testing.T) {
 	t.Run("sequential", func(t *testing.T) {
 		store := append(slot(1), slot(42)...)
 		outputs := traceCallMany(t, rpc.BlockNumberOrHashWithNumber(bn),
-			TraceCallParam{To: &storeAddr, Data: store},
-			TraceCallParam{To: &storeAddr, Data: slot(1)},
-			TraceCallParam{To: &historyAddr, Data: slot(bn)},
+			TraceCallParam{To: &storeAddr, Data: &store},
+			TraceCallParam{To: &storeAddr, Data: new(slot(1))},
+			TraceCallParam{To: &historyAddr, Data: new(slot(bn))},
 		)
 		require.Equal(t, common.BigToHash(big.NewInt(42)), outputs[1], "the second call reads the first call's write")
 		require.Equal(t, common.Hash{}, outputs[2], "slot %d is written by block %d", bn, bn+1)
