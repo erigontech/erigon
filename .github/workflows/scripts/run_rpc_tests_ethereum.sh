@@ -39,6 +39,8 @@ DISABLED_TEST_LIST=(
   net_version/test_1.json
   txpool_status/test_1.json
   web3_clientVersion/test_1.json
+  # pending in tracing methods returns -32602 since #24345; re-enable with the rpc-tests release that includes erigontech/rpc-tests#608
+  debug_traceBlockByNumber/test_25.json
 )
 
 # Transform the array into a comma-separated string
