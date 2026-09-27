@@ -2732,11 +2732,12 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	if name != kv.CommitmentDomain {
 		return at.d[name].GetAsOf(k, ts, tx)
 	}
-	if v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx); err != nil || ok {
-		if len(v) == 0 {
-			return nil, false, err
-		}
-		return v, true, nil
+	v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		return v, len(v) != 0, nil
 	}
 	v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	return v, ok, err
