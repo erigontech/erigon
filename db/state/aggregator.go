@@ -2729,10 +2729,16 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 }
 
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
-	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
-	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
+	if name != kv.CommitmentDomain {
+		return at.d[name].GetAsOf(k, ts, tx)
 	}
+	if v, ok, err = at.d[name].ht.HistorySeek(k, ts, tx); err != nil || ok {
+		if len(v) == 0 {
+			return nil, false, err
+		}
+		return v, true, nil
+	}
+	v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	return v, ok, err
 }
 

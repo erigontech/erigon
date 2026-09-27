@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -1807,4 +1808,38 @@ func TestReceiptAsOf_InFlightBlockLogIndex(t *testing.T) {
 	_, _, got, err := rawtemporaldb.ReceiptAsOf(sd.BlockOverlay().NewReadView(tx), inFlightTxNum+1)
 	require.NoError(t, err)
 	require.Equal(t, inFlightLogIdx, got, "must serve the in-flight block's log index, not the last committed one")
+}
+
+func TestCommitmentGetAsOfBeforeKeyCreation(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	ctx := t.Context()
+	db := newTestDb(t, 1000)
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	key, first, second := []byte{0x40, 0x01, 0x02}, []byte("first"), []byte("second")
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, first, 5, nil))
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, rwTx, key, second, 9, first))
+	require.NoError(t, domains.Flush(ctx, rwTx))
+
+	for _, tc := range []struct {
+		ts   uint64
+		want []byte
+	}{{3, nil}, {5, nil}, {6, first}, {9, first}, {10, second}} {
+		got, ok, err := rwTx.GetAsOf(kv.CommitmentDomain, key, tc.ts)
+		require.NoError(t, err)
+		if tc.want == nil {
+			require.False(t, ok, "ts=%d: key not created yet, got %x", tc.ts, got)
+			continue
+		}
+		require.True(t, ok, "ts=%d", tc.ts)
+		require.Equal(t, tc.want, got, "ts=%d", tc.ts)
+	}
 }
