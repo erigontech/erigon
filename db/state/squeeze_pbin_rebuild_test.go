@@ -104,20 +104,3 @@ func TestPBinRebuildBatchStreamPreservesOperations(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, want[0], got)
 }
-
-func TestPBinRebuildOpStreamsKeepOneGlobalTreeKeyOrder(t *testing.T) {
-	low := pbt.Op{Key: []byte{0x00, 0x01}}
-	high := pbt.Op{Key: []byte{0xff, 0x01}}
-	var got []pbt.Op
-	err := pbinForEachRebuildOpStreamsAfter(t.TempDir(), 1, 1<<20, nil, []func(func(pbt.Op) error) error{
-		func(emit func(pbt.Op) error) error { return emit(high) },
-		func(emit func(pbt.Op) error) error { return emit(low) },
-	}, func(batch []pbt.Op, _ bool) error {
-		got = append(got, batch...)
-		return nil
-	})
-	require.NoError(t, err)
-	require.Len(t, got, 2)
-	require.Equal(t, low.Key, got[0].Key)
-	require.Equal(t, high.Key, got[1].Key)
-}

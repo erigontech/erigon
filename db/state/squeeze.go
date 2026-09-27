@@ -1449,7 +1449,10 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	var err error
 	var plainKeyCollector *etl.Collector
 	var plainKeyTmpDir string
-	if cfg.Variant == commitment.VariantBinPatriciaTrie {
+	_, processPBinOps := sd.GetCommitmentCtx().Trie().(interface {
+		ProcessPBinOps(context.Context, []pbt.Op, func(*commitment.CommitProgress)) ([]byte, error)
+	})
+	if cfg.Variant == commitment.VariantBinPatriciaTrie && processPBinOps {
 		plainKeyTmpDir, err = os.MkdirTemp("", "erigon-pbin-rebuild-keys-")
 		if err != nil {
 			return nil, err
@@ -1461,7 +1464,11 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	if removals != nil && len(visComFiles) > 0 {
 		rf := time.Now()
 		touched, err := removals(func(key []byte) error {
-			return plainKeyCollector.Collect(key, []byte{})
+			if processPBinOps {
+				return plainKeyCollector.Collect(key, []byte{})
+			}
+			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			return nil
 		})
 		if err != nil {
 			return nil, fmt.Errorf("%s: inherited removals: %w", cfg.LogPrefix, err)
@@ -1475,8 +1482,15 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	for ok, key, value := next(); ; ok, key, value = next() {
 		if len(key) > 0 {
 			if cfg.Variant == commitment.VariantBinPatriciaTrie {
-				if collectErr == nil {
-					collectErr = plainKeyCollector.Collect(key, []byte{})
+				if processPBinOps {
+					if collectErr == nil {
+						collectErr = plainKeyCollector.Collect(key, []byte{})
+					}
+				} else {
+					sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+					if len(key) == length.Addr {
+						sd.GetCommitmentCtx().TouchKey(kv.CodeDomain, string(key), nil)
+					}
 				}
 				processed++
 				if !ok {
@@ -1491,11 +1505,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 					domain = kv.StorageDomain
 				}
 				sd.GetCommitmentCtx().TouchKey(domain, string(key), value)
-			case commitment.VariantBinPatriciaTrie:
-				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), value)
-				if len(key) == length.Addr {
-					sd.GetCommitmentCtx().TouchKey(kv.CodeDomain, string(key), value)
-				}
 			default:
 				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
 			}
@@ -1512,7 +1521,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	collectionSpent := time.Since(sf)
 	var codeStats commitment.PBinCodeStats
 	var rh []byte
-	if cfg.Variant == commitment.VariantBinPatriciaTrie {
+	if cfg.Variant == commitment.VariantBinPatriciaTrie && processPBinOps {
 		if err := plainKeyCollector.Flush(); err != nil {
 			return nil, err
 		}
@@ -1536,87 +1545,80 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		if cfg.PBinBatchBytes != 0 {
 			batchBytes = int(cfg.PBinBatchBytes)
 		}
-		_, processPBinOps := sd.GetCommitmentCtx().Trie().(interface {
-			ProcessPBinOps(context.Context, []pbt.Op, func(*commitment.CommitProgress)) ([]byte, error)
-		})
-		if !processPBinOps {
-			rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
-			if err != nil {
-				return nil, err
+		checkpoint, err := readPBinRebuildCheckpoint(cfg.PBinResumePath, RebuildTarget{Variant: cfg.PBinTargetVariant, HashName: cfg.PBinTargetHash})
+		if err != nil {
+			return nil, err
+		}
+		var overlay *pbinRebuildOverlay
+		var resumeKey []byte
+		if checkpoint != nil {
+			overlay = newPBinRebuildOverlay().withSpill(checkpoint.SpillPath)
+			for key, write := range checkpoint.Writes {
+				overlay.writes[key] = pbinRebuildWrite{data: write.Data, prev: write.Prev}
 			}
-		} else {
-			checkpoint, err := readPBinRebuildCheckpoint(cfg.PBinResumePath, RebuildTarget{Variant: cfg.PBinTargetVariant, HashName: cfg.PBinTargetHash})
-			if err != nil {
-				return nil, err
-			}
-			var overlay *pbinRebuildOverlay
-			var resumeKey []byte
-			if checkpoint != nil {
-				overlay = newPBinRebuildOverlay().withSpill(checkpoint.SpillPath)
-				for key, write := range checkpoint.Writes {
-					overlay.writes[key] = pbinRebuildWrite{data: write.Data, prev: write.Prev}
+			resumeKey = checkpoint.LastKey
+		}
+		processedBatch := false
+		emitter := pbt.NewRebuildFeedOpEmitter()
+		err = pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, nextKey []byte, final bool) error {
+			processedBatch = true
+			sd.GetCommitmentCtx().SetPBinOps(batch)
+			var current *pbinRebuildOverlay
+			var readKeys [][]byte
+			rh, err = sd.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
+				if overlay == nil {
+					spillPath := ""
+					if cfg.PBinResumePath != "" {
+						spillPath = cfg.PBinResumePath + ".rows"
+					}
+					overlay = newPBinRebuildOverlay().withSpill(spillPath)
 				}
-				resumeKey = checkpoint.LastKey
-			}
-			processedBatch := false
-			emitter := pbt.NewRebuildFeedOpEmitter()
-			err = pbinForEachRebuildOpStreamsLookaheadAfter(tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, nextKey []byte, final bool) error {
-				processedBatch = true
-				sd.GetCommitmentCtx().SetPBinOps(batch)
-				var current *pbinRebuildOverlay
-				var readKeys [][]byte
-				rh, err = sd.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
-					if overlay == nil {
-						spillPath := ""
-						if cfg.PBinResumePath != "" {
-							spillPath = cfg.PBinResumePath + ".rows"
-						}
-						overlay = newPBinRebuildOverlay().withSpill(spillPath)
-					}
-					current = overlay.withInner(inner).withRelease(func(key []byte) {
-						sd.GetMemBatch().(*TemporalMemBatch).ForgetLatest(kv.CommitmentDomain, key)
-					}).withRead(func(key []byte) {
-						readKeys = append(readKeys, bytes.Clone(key))
-					})
-					if err := current.restoreSpill(); err != nil {
-						current.err = err
-					}
-					return current
+				current = overlay.withInner(inner).withRelease(func(key []byte) {
+					sd.GetMemBatch().(*TemporalMemBatch).ForgetLatest(kv.CommitmentDomain, key)
+				}).withRead(func(key []byte) {
+					readKeys = append(readKeys, bytes.Clone(key))
 				})
-				if err != nil {
-					return err
+				if err := current.restoreSpill(); err != nil {
+					current.err = err
 				}
-				if cfg.PBinReadSample != nil {
-					cfg.PBinReadSample(batch, readKeys)
-				}
-				if cfg.PBinMemorySample != nil {
-					runtime.GC()
-					var memory runtime.MemStats
-					runtime.ReadMemStats(&memory)
-					cfg.PBinMemorySample(memory.Alloc)
-				}
-				if final {
-					if err := current.Flush(); err != nil {
-						return err
-					}
-					return removePBinRebuildCheckpoint(cfg.PBinResumePath)
-				}
-				if err := current.FlushFinished(nextKey); err != nil {
-					return err
-				}
-				return writePBinRebuildCheckpoint(cfg.PBinResumePath, batchOperationKey(batch[len(batch)-1]), overlay, RebuildTarget{Variant: cfg.PBinTargetVariant, HashName: cfg.PBinTargetHash})
-			}, []func(func(pbt.Op) error) error{
-				func(emit func(pbt.Op) error) error {
-					return pbinRebuildFeedStream(plainKeyCollector, reader, emitter, emit)
-				},
+				return current
 			})
 			if err != nil {
-				return nil, err
+				return err
 			}
-			codeStats = emitter.Stats()
-			if !processedBatch {
-				return nil, errors.New("commitment rebuild: binary operation set is empty")
+			if cfg.PBinReadSample != nil {
+				cfg.PBinReadSample(batch, readKeys)
 			}
+			if cfg.PBinMemorySample != nil {
+				runtime.GC()
+				var memory runtime.MemStats
+				runtime.ReadMemStats(&memory)
+				cfg.PBinMemorySample(memory.Alloc)
+			}
+			if final {
+				if err := current.Flush(); err != nil {
+					return err
+				}
+				return removePBinRebuildCheckpoint(cfg.PBinResumePath)
+			}
+			if err := current.FlushFinished(nextKey); err != nil {
+				return err
+			}
+			return writePBinRebuildCheckpoint(cfg.PBinResumePath, batchOperationKey(batch[len(batch)-1]), overlay, RebuildTarget{Variant: cfg.PBinTargetVariant, HashName: cfg.PBinTargetHash})
+		}, func(emit func(pbt.Op) error) error {
+			return pbinRebuildFeedStream(plainKeyCollector, reader, emitter, emit)
+		})
+		if err != nil {
+			return nil, err
+		}
+		codeStats = emitter.Stats()
+		if !processedBatch {
+			return nil, errors.New("commitment rebuild: binary operation set is empty")
+		}
+	} else if cfg.Variant == commitment.VariantBinPatriciaTrie {
+		rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
+		if err != nil {
+			return nil, err
 		}
 	} else {
 		rh, err = sd.GetCommitmentCtx().ComputeCommitment(ctx, tx, true, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil)
@@ -2083,23 +2085,6 @@ func pbinForEachRebuildBatchAfter(ops []pbt.Op, tmpDir string, maxOps, maxBytes 
 	return pbinForEachRebuildOpStreamAfter(tmpDir, maxOps, maxBytes, afterKey, visit, func(emit func(pbt.Op) error) error {
 		for i := range ops {
 			if err := emit(ops[i]); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-}
-
-func pbinForEachRebuildOpStreamsAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, streams []func(func(pbt.Op) error) error, visit func([]pbt.Op, bool) error) error {
-	return pbinForEachRebuildOpStreamsLookaheadAfter(tmpDir, maxOps, maxBytes, afterKey, func(batch []pbt.Op, _ []byte, final bool) error {
-		return visit(batch, final)
-	}, streams)
-}
-
-func pbinForEachRebuildOpStreamsLookaheadAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, streams []func(func(pbt.Op) error) error) error {
-	return pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, maxOps, maxBytes, afterKey, visit, func(emit func(pbt.Op) error) error {
-		for _, stream := range streams {
-			if err := stream(emit); err != nil {
 				return err
 			}
 		}
