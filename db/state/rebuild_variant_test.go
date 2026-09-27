@@ -20,10 +20,14 @@
 package state_test
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/binary"
+	"encoding/gob"
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -40,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -273,6 +278,175 @@ func TestRebuildCommitmentFilesBinTargetRejectsLegacyPBinState(t *testing.T) {
 		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
 	require.Error(t, err)
 	require.ErrorContains(t, err, "format")
+}
+
+type rebuildPBinCheckpointFixture struct {
+	LastKey       []byte
+	SpillPath     string
+	SpillSize     int64
+	SpillChecksum []byte
+	TargetVariant commitment.TrieVariant
+	TargetHash    string
+}
+
+func writeRebuildPBinCheckpointFixture(t *testing.T, path string, checkpoint rebuildPBinCheckpointFixture) {
+	t.Helper()
+	var data bytes.Buffer
+	require.NoError(t, gob.NewEncoder(&data).Encode(checkpoint))
+	require.NoError(t, os.WriteFile(path, data.Bytes(), 0o644))
+}
+
+func rebuildVariantCheckpointPath(t *testing.T, dirs datadir.Dirs) string {
+	t.Helper()
+	files, err := dir.ListFiles(dirs.SnapDomain)
+	require.NoError(t, err)
+	for _, file := range files {
+		parsed, _, ok := snaptype.ParseFileName(dirs.SnapDomain, file)
+		if ok && parsed.TypeString == kv.AccountsDomain.String() {
+			from := uint64(parsed.From) * rebuildVariantStepSize
+			to := uint64(parsed.To) * rebuildVariantStepSize
+			return filepath.Join(dirs.Tmp, fmt.Sprintf("pbin-rebuild-%d-%d.checkpoint", from, to))
+		}
+	}
+	t.Fatal("missing account source file")
+	return ""
+}
+
+func TestRebuildCommitmentFilesRefusesChangedPBinCheckpointTarget(t *testing.T) {
+	db, _, dirs := rebuildVariantDatadir(t)
+	writeRebuildPBinCheckpointFixture(t, rebuildVariantCheckpointPath(t, dirs), rebuildPBinCheckpointFixture{
+		LastKey:       []byte{1},
+		TargetVariant: commitment.VariantBinPatriciaTrie,
+		TargetHash:    commitment.PBinHashKeccak,
+	})
+
+	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
+		Variant:  commitment.VariantBinPatriciaTrie,
+		HashName: commitment.PBinHashBlake3,
+	})
+	require.ErrorContains(t, err, "checkpoint target differs")
+}
+
+func TestRebuildCommitmentFilesRefusesSwappedPBinCheckpointSpill(t *testing.T) {
+	db, _, dirs := rebuildVariantDatadir(t)
+	checkpointPath := rebuildVariantCheckpointPath(t, dirs)
+	spillPath := checkpointPath + ".rows"
+	spill := []byte{4, 5, 6}
+	want := sha256.Sum256([]byte{1, 2, 3})
+	require.NoError(t, os.WriteFile(spillPath, spill, 0o644))
+	writeRebuildPBinCheckpointFixture(t, checkpointPath, rebuildPBinCheckpointFixture{
+		LastKey:       []byte{1},
+		SpillPath:     spillPath,
+		SpillSize:     int64(len(spill)),
+		SpillChecksum: want[:],
+		TargetVariant: commitment.VariantBinPatriciaTrie,
+		TargetHash:    commitment.PBinHashBlake3,
+	})
+
+	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
+		Variant:  commitment.VariantBinPatriciaTrie,
+		HashName: commitment.PBinHashBlake3,
+	})
+	require.ErrorContains(t, err, "checkpoint and spill disagree")
+	require.ErrorContains(t, err, "restart into a fresh output datadir")
+}
+
+func rebuildVariantMemoryDatadir(t *testing.T, slots int) (kv.TemporalRwDB, *state.Aggregator) {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE),
+		fmt.Appendf(nil, "step_size = %d\nsteps_in_frozen_file = 8\nreferences_in_commitment_branches = false\n", rebuildVariantStepSize), 0o644))
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).InMem(dirs.Chaindata).
+		GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	t.Cleanup(rawDB.Close)
+	agg := rebuildVariantAgg(t, rawDB, dirs)
+	db, err := temporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	t.Cleanup(db.Close)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(),
+		execctx.WithTrieConfig(rebuildVariantTrieCfg(commitment.VariantHexPatriciaTrie)))
+	require.NoError(t, err)
+	sd.DiscardWrites(kv.CommitmentDomain)
+	addr := rebuildVariantAddr(1)
+	for txNum := uint64(0); txNum < rebuildVariantStepSize*4; txNum++ {
+		account := accounts.Account{Nonce: txNum + 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+		prev, _, err := sd.GetLatest(kv.AccountsDomain, rwTx, addr)
+		require.NoError(t, err)
+		require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, addr, accounts.SerialiseV3(&account), txNum, prev))
+		if txNum == 0 {
+			for i := range slots {
+				slot := make([]byte, length.Addr+length.Hash)
+				copy(slot, addr)
+				binary.BigEndian.PutUint64(slot[length.Addr+length.Hash-8:], uint64(i))
+				require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, slot, []byte{1, 2, 3}, txNum, nil))
+			}
+		} else {
+			guardSlot := append(append([]byte{}, addr...), make([]byte, length.Hash)...)
+			prev, _, err := sd.GetLatest(kv.StorageDomain, rwTx, guardSlot)
+			require.NoError(t, err)
+			require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTx, guardSlot, []byte{4, 5, 6}, txNum, prev))
+		}
+	}
+	require.NoError(t, sd.Flush(t.Context(), rwTx))
+	require.NoError(t, rwTx.Commit())
+	sd.Close()
+	require.NoError(t, agg.BuildFiles(db, rebuildVariantStepSize*4, unboundedFinalityCtx))
+	agg.Close()
+	paths, err := dir.ListFiles(dirs.SnapDomain)
+	require.NoError(t, err)
+	for _, path := range paths {
+		if strings.Contains(filepath.Base(path), kv.CommitmentDomain.String()) {
+			require.NoError(t, dir.RemoveFile(path))
+		}
+	}
+	agg = rebuildVariantAgg(t, rawDB, dirs)
+	db, err = temporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	t.Cleanup(db.Close)
+	return db, agg
+}
+
+func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) uint64 {
+	t.Helper()
+	var samples []uint64
+	root, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
+		Variant:        commitment.VariantBinPatriciaTrie,
+		PBinBatchOps:   1000,
+		PBinBatchBytes: 1 << 20,
+		PBinMemorySample: func(value uint64) {
+			samples = append(samples, value)
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, root)
+	require.NotEmpty(t, samples)
+	var peak uint64
+	for _, sample := range samples {
+		peak = max(peak, sample)
+	}
+	runtime.GC()
+	return peak
+}
+
+func TestRebuildCommitmentFilesBinTargetMemoryDoesNotGrowWithSlots(t *testing.T) {
+	smallDB, _ := rebuildVariantMemoryDatadir(t, 200_000)
+	smallPeak := rebuildVariantMeasuredMemory(t, smallDB)
+	largeDB, _ := rebuildVariantMemoryDatadir(t, 650_000)
+	largePeak := rebuildVariantMeasuredMemory(t, largeDB)
+	ceiling := uint64(128<<20) + 1<<20 + 1000*4096
+	t.Logf("production rebuild live heap after GC: slots=200000 peak=%d slots=650000 peak=%d ceiling=%d", smallPeak, largePeak, ceiling)
+	require.LessOrEqual(t, smallPeak, ceiling)
+	require.LessOrEqual(t, largePeak, ceiling)
+	difference := uint64(0)
+	if largePeak >= smallPeak {
+		difference = largePeak - smallPeak
+	} else {
+		difference = smallPeak - largePeak
+	}
+	require.LessOrEqual(t, difference, uint64(32<<20))
 }
 
 func TestRebuildCommitmentFilesBinTargetStagedOutputSkipsSourceCheckpoint(t *testing.T) {

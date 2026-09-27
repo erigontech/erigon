@@ -19,7 +19,6 @@ package state
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"runtime"
 	"testing"
@@ -105,54 +104,6 @@ func TestPBinRebuildOverlayReadsPendingRowsBeforeFiles(t *testing.T) {
 	_, _, err = overlay.Branch([]byte("other"))
 	require.NoError(t, err)
 	require.Equal(t, 1, inner.reads)
-}
-
-func TestPBinRebuildBatchesReadOnlyRightEdgeRows(t *testing.T) {
-	codeOp := func(prefix, value byte) pbt.Op {
-		key := make([]byte, eip8297.CodeKeyLength)
-		key[0] = eip8297.CodeZone
-		key[1] = prefix
-		key[len(key)-1] = prefix + 1
-		return pbt.Op{Key: key, Value: [32]byte{value}}
-	}
-	ops := []pbt.Op{
-		codeOp(0, 1),
-		codeOp(0x10, 2),
-		codeOp(0x20, 3),
-	}
-	inner := &pbinRebuildContextStub{records: make(map[string][]byte)}
-	var batches int
-	err := pbinForEachRebuildOpStreamLookaheadAfter(t.TempDir(), 1, 1<<20, nil, func(batch []pbt.Op, _ []byte, _ bool) error {
-		inner.readKeys = nil
-		_, err := pbt.NewTrie(inner).Process(batch)
-		if err != nil {
-			return err
-		}
-		path := eip8297.PathFromBits(batch[0].Key, int16(len(batch[0].Key)*8))
-		for _, key := range inner.readKeys {
-			if bytes.Equal(key, pbt.GlobalRootKey()) {
-				continue
-			}
-			rowPath, err := eip8297.DecodeBitPath(key)
-			if err != nil {
-				return err
-			}
-			if !path.HasPrefix(&rowPath) {
-				return fmt.Errorf("read completed row %x outside right edge", key)
-			}
-		}
-		batches++
-		return nil
-	}, func(emit func(pbt.Op) error) error {
-		for _, op := range ops {
-			if err := emit(op); err != nil {
-				return err
-			}
-		}
-		return nil
-	})
-	require.NoError(t, err)
-	require.Equal(t, len(ops), batches)
 }
 
 func TestPBinRebuildCheckpointResumesAfterLargestTreeKey(t *testing.T) {

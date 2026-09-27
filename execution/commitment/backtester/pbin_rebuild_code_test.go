@@ -270,10 +270,11 @@ func TestPBinRebuildSharedCodeAcrossShards(t *testing.T) {
 	db, agg = pbinM1AWipeCommitment(t, db, agg, dirs, stepSize)
 
 	// Pinned, not machine-derived: the split is the whole point of the fixture.
-	rebuiltRoot, report, err, peak := pbinM1AMeasuredRebuild(t, db,
+	rebuiltRoot, report, err, peak, samples := pbinM1AMeasuredRebuild(t, db,
 		state.RebuildTarget{MaxShardSteps: commitment.DefaultRebuildShardMaxSteps})
 	require.NoError(t, err)
 	require.Positive(t, peak)
+	require.NotEmpty(t, samples)
 	t.Logf("peak allocation: %d bytes", peak)
 	require.Len(t, report.Ranges, 1)
 	require.Len(t, report.Ranges[0].Shards, 1)

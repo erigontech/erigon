@@ -3,6 +3,7 @@ package state
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/binary"
 	"encoding/gob"
 	"encoding/hex"
@@ -890,9 +891,11 @@ type RebuildTarget struct {
 	Variant  commitment.TrieVariant
 	HashName string // H for a bin target; empty keeps the suite this process selected
 	// MaxShardSteps caps how many steps one shard covers; 0 sizes it from the machine.
-	MaxShardSteps  uint64
-	PBinBatchOps   uint64
-	PBinBatchBytes uint64
+	MaxShardSteps    uint64
+	PBinBatchOps     uint64
+	PBinBatchBytes   uint64
+	PBinMemorySample func(uint64)
+	PBinReadSample   func([]pbt.Op, [][]byte)
 }
 
 // DefaultRebuildTarget is what a rebuild produces when the caller names no
@@ -917,9 +920,13 @@ func (t RebuildTarget) Resolve() (RebuildTarget, error) {
 	case "":
 		shardSteps := t.MaxShardSteps
 		batchOps, batchBytes := t.PBinBatchOps, t.PBinBatchBytes
+		memorySample := t.PBinMemorySample
+		readSample := t.PBinReadSample
 		t = DefaultRebuildTarget()
 		t.MaxShardSteps = shardSteps
 		t.PBinBatchOps, t.PBinBatchBytes = batchOps, batchBytes
+		t.PBinMemorySample = memorySample
+		t.PBinReadSample = readSample
 	case commitment.VariantBinPatriciaTrie:
 		if t.HashName == "" {
 			t.HashName = commitment.PBinHashSuiteName()
@@ -1253,11 +1260,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				domains.EnableParaTrieDB(rwDb)
 			}
 
-			var removals func(*execctx.SharedDomains) (uint64, error)
+			var removals func(func([]byte) error) (uint64, error)
 			if firstShard && target.Variant == commitment.VariantBinPatriciaTrie {
-				removals = func(sd *execctx.SharedDomains) (uint64, error) {
+				removals = func(collect func([]byte) error) (uint64, error) {
 					from, to := r.FromTo()
-					return touchRangeRemovals(acRo, sd, from, to)
+					return touchRangeRemovals(acRo, from, to, collect)
 				}
 			}
 			firstShard = false
@@ -1270,11 +1277,15 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				TxnTo:    rangeToTxNum,
 				Keys:     totalKeys,
 
-				BlockNumber:    blockNum,
-				TxnNumber:      currentTxNum,
-				LogPrefix:      fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
-				PBinBatchOps:   target.PBinBatchOps,
-				PBinBatchBytes: target.PBinBatchBytes,
+				BlockNumber:       blockNum,
+				TxnNumber:         currentTxNum,
+				LogPrefix:         fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
+				PBinBatchOps:      target.PBinBatchOps,
+				PBinBatchBytes:    target.PBinBatchBytes,
+				PBinTargetVariant: target.Variant,
+				PBinTargetHash:    target.HashName,
+				PBinMemorySample:  target.PBinMemorySample,
+				PBinReadSample:    target.PBinReadSample,
 				PBinResumePath: func() string {
 					if target.Variant != commitment.VariantBinPatriciaTrie {
 						return ""
@@ -1392,7 +1403,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 // order while the trie is ordered by tree key, so a removal can land in a later
 // shard than the one re-hashing the branch that still names its leaf, where the
 // bin trie reads it absent and the forward-only fold can no longer drop it.
-func touchRangeRemovals(acRo *AggregatorRoTx, sd *execctx.SharedDomains, fromTxNum, toTxNum uint64) (uint64, error) {
+func touchRangeRemovals(acRo *AggregatorRoTx, fromTxNum, toTxNum uint64, collect func([]byte) error) (uint64, error) {
 	var touched uint64
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
 		s, err := acRo.FileStream(d, fromTxNum, toTxNum)
@@ -1408,7 +1419,10 @@ func touchRangeRemovals(acRo *AggregatorRoTx, sd *execctx.SharedDomains, fromTxN
 			if len(v) > 0 {
 				continue
 			}
-			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(k), nil)
+			if err := collect(k); err != nil {
+				s.Close()
+				return touched, err
+			}
 			touched++
 		}
 		s.Close()
@@ -1416,7 +1430,7 @@ func touchRangeRemovals(acRo *AggregatorRoTx, sd *execctx.SharedDomains, fromTxN
 	return touched, nil
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte, []byte), removals func(*execctx.SharedDomains) (uint64, error), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
+func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte, []byte), removals func(func([]byte) error) (uint64, error), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
@@ -1430,16 +1444,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 	// Only a range that inherits commitment files can hold a leaf this range
 	// removes; a range building its own tree never inserts one.
-	if removals != nil && len(visComFiles) > 0 {
-		rf := time.Now()
-		touched, err := removals(sd)
-		if err != nil {
-			return nil, fmt.Errorf("%s: inherited removals: %w", cfg.LogPrefix, err)
-		}
-		logger.Info(cfg.LogPrefix+" applied inherited removals", "keys", common.PrettyCounter(touched),
-			"spent", time.Since(rf).String())
-	}
-
 	sf := time.Now()
 	var processed uint64
 	var err error
@@ -1454,6 +1458,17 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		plainKeyCollector = etl.NewCollector("[rebuild_commitment_pbin_keys]", plainKeyTmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
 		defer plainKeyCollector.Close()
 	}
+	if removals != nil && len(visComFiles) > 0 {
+		rf := time.Now()
+		touched, err := removals(func(key []byte) error {
+			return plainKeyCollector.Collect(key, []byte{})
+		})
+		if err != nil {
+			return nil, fmt.Errorf("%s: inherited removals: %w", cfg.LogPrefix, err)
+		}
+		logger.Info(cfg.LogPrefix+" applied inherited removals", "keys", common.PrettyCounter(touched),
+			"spent", time.Since(rf).String())
+	}
 	var collectErr error
 	// next() signals "no more keys" as (false, nil) but a shard boundary as
 	// (false, key), so the key has to be checked separately from ok.
@@ -1462,10 +1477,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			if cfg.Variant == commitment.VariantBinPatriciaTrie {
 				if collectErr == nil {
 					collectErr = plainKeyCollector.Collect(key, []byte{})
-				}
-				sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
-				if len(key) == length.Addr {
-					sd.GetCommitmentCtx().TouchKey(kv.CodeDomain, string(key), nil)
 				}
 				processed++
 				if !ok {
@@ -1502,11 +1513,6 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	var codeStats commitment.PBinCodeStats
 	var rh []byte
 	if cfg.Variant == commitment.VariantBinPatriciaTrie {
-		for key := range sd.GetCommitmentCtx().GetUpdates().PlainKeys() {
-			if err := plainKeyCollector.Collect([]byte(key), []byte{}); err != nil {
-				return nil, err
-			}
-		}
 		if err := plainKeyCollector.Flush(); err != nil {
 			return nil, err
 		}
@@ -1533,7 +1539,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 				return nil, err
 			}
 		} else {
-			checkpoint, err := readPBinRebuildCheckpoint(cfg.PBinResumePath)
+			checkpoint, err := readPBinRebuildCheckpoint(cfg.PBinResumePath, RebuildTarget{Variant: cfg.PBinTargetVariant, HashName: cfg.PBinTargetHash})
 			if err != nil {
 				return nil, err
 			}
@@ -1548,10 +1554,11 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			}
 			processedBatch := false
 			emitter := pbt.NewRebuildFeedOpEmitter()
-			err = pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, nextKey []byte, final bool) error {
+			err = pbinForEachRebuildOpStreamsLookaheadAfter(tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, nextKey []byte, final bool) error {
 				processedBatch = true
 				sd.GetCommitmentCtx().SetPBinOps(batch)
 				var current *pbinRebuildOverlay
+				var readKeys [][]byte
 				rh, err = sd.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, cfg.BlockNumber, cfg.TxnNumber, fmt.Sprintf("%d-%d", cfg.StepFrom, cfg.StepTo), nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 					if overlay == nil {
 						spillPath := ""
@@ -1562,6 +1569,8 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 					}
 					current = overlay.withInner(inner).withRelease(func(key []byte) {
 						sd.GetMemBatch().(*TemporalMemBatch).ForgetLatest(kv.CommitmentDomain, key)
+					}).withRead(func(key []byte) {
+						readKeys = append(readKeys, bytes.Clone(key))
 					})
 					if err := current.restoreSpill(); err != nil {
 						current.err = err
@@ -1570,6 +1579,15 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 				})
 				if err != nil {
 					return err
+				}
+				if cfg.PBinReadSample != nil {
+					cfg.PBinReadSample(batch, readKeys)
+				}
+				if cfg.PBinMemorySample != nil {
+					runtime.GC()
+					var memory runtime.MemStats
+					runtime.ReadMemStats(&memory)
+					cfg.PBinMemorySample(memory.Alloc)
 				}
 				if final {
 					if err := current.Flush(); err != nil {
@@ -1580,9 +1598,11 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 				if err := current.FlushFinished(nextKey); err != nil {
 					return err
 				}
-				return writePBinRebuildCheckpoint(cfg.PBinResumePath, batchOperationKey(batch[len(batch)-1]), overlay)
-			}, func(emit func(pbt.Op) error) error {
-				return pbinRebuildFeedStream(plainKeyCollector, reader, emitter, emit)
+				return writePBinRebuildCheckpoint(cfg.PBinResumePath, batchOperationKey(batch[len(batch)-1]), overlay, RebuildTarget{Variant: cfg.PBinTargetVariant, HashName: cfg.PBinTargetHash})
+			}, []func(func(pbt.Op) error) error{
+				func(emit func(pbt.Op) error) error {
+					return pbinRebuildFeedStream(plainKeyCollector, reader, emitter, emit)
+				},
 			})
 			if err != nil {
 				return nil, err
@@ -1630,13 +1650,10 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 
 func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader, emitter *pbt.FeedOpEmitter, emit func(pbt.Op) error) error {
 	var address []byte
-	var slots [][]byte
 	var previousKey []byte
-	flush := func() error {
-		if len(address) == 0 {
-			return nil
-		}
-		account, err := commitmentdb.BinFeedAccountFromState(address, slots, true, false, reader)
+	var emitted bool
+	emitAccount := func() error {
+		account, err := commitmentdb.BinFeedAccountFromState(address, nil, true, false, reader)
 		if err != nil {
 			return err
 		}
@@ -1644,6 +1661,7 @@ func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader,
 			account.CodeWritten = false
 			account.Code = nil
 		}
+		emitted = true
 		return emitter.EmitAccount(account, emit)
 	}
 	err := keys.Load(nil, "", func(key, _ []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
@@ -1656,21 +1674,29 @@ func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader,
 		previousKey = bytes.Clone(key)
 		keyAddress := key[:length.Addr]
 		if !bytes.Equal(address, keyAddress) {
-			if err := flush(); err != nil {
+			address = bytes.Clone(keyAddress)
+			emitted = false
+		}
+		if !emitted {
+			if err := emitAccount(); err != nil {
 				return err
 			}
-			address = bytes.Clone(keyAddress)
-			slots = slots[:0]
 		}
 		if len(key) == length.Addr+length.Hash {
-			slots = append(slots, bytes.Clone(key[length.Addr:]))
+			slot, err := commitmentdb.BinFeedStorageSlotFromState(address, key[length.Addr:], reader)
+			if err != nil {
+				return err
+			}
+			if err := emitter.EmitStorageSlot(address, slot, emit); err != nil {
+				return err
+			}
 		}
 		return nil
 	}, etl.TransformArgs{})
 	if err != nil {
 		return err
 	}
-	return flush()
+	return nil
 }
 
 type pbinRebuildWrite struct {
@@ -1686,6 +1712,7 @@ type pbinRebuildOverlay struct {
 	inner     commitment.PatriciaContext
 	writes    map[string]pbinRebuildWrite
 	release   func([]byte)
+	read      func([]byte)
 	spillPath string
 	restored  bool
 	err       error
@@ -1760,6 +1787,11 @@ func (o *pbinRebuildOverlay) withRelease(release func([]byte)) *pbinRebuildOverl
 	return o
 }
 
+func (o *pbinRebuildOverlay) withRead(read func([]byte)) *pbinRebuildOverlay {
+	o.read = read
+	return o
+}
+
 func (o *pbinRebuildOverlay) withSpill(path string) *pbinRebuildOverlay {
 	o.spillPath = path
 	return o
@@ -1771,6 +1803,9 @@ func (o *pbinRebuildOverlay) Branch(prefix []byte) ([]byte, kv.Step, error) {
 	}
 	if write, ok := o.writes[string(prefix)]; ok {
 		return bytes.Clone(write.data), 0, nil
+	}
+	if o.read != nil {
+		o.read(prefix)
 	}
 	return o.inner.Branch(prefix)
 }
@@ -1845,13 +1880,16 @@ type pbinRebuildCheckpointWrite struct {
 }
 
 type pbinRebuildCheckpoint struct {
-	LastKey   []byte
-	Writes    map[string]pbinRebuildCheckpointWrite
-	SpillPath string
-	SpillSize int64
+	LastKey       []byte
+	Writes        map[string]pbinRebuildCheckpointWrite
+	SpillPath     string
+	SpillSize     int64
+	SpillChecksum []byte
+	TargetVariant commitment.TrieVariant
+	TargetHash    string
 }
 
-func readPBinRebuildCheckpoint(path string) (*pbinRebuildCheckpoint, error) {
+func readPBinRebuildCheckpoint(path string, targets ...RebuildTarget) (*pbinRebuildCheckpoint, error) {
 	if path == "" {
 		return nil, nil
 	}
@@ -1866,29 +1904,50 @@ func readPBinRebuildCheckpoint(path string) (*pbinRebuildCheckpoint, error) {
 	if err := gob.NewDecoder(bytes.NewReader(data)).Decode(checkpoint); err != nil {
 		return nil, err
 	}
+	if len(targets) != 0 && (checkpoint.TargetVariant != targets[0].Variant || checkpoint.TargetHash != targets[0].HashName) {
+		return nil, fmt.Errorf("commitment rebuild: checkpoint target differs; restart into a fresh output datadir")
+	}
 	if checkpoint.SpillPath != "" {
 		info, err := os.Stat(checkpoint.SpillPath)
 		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil, fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
+			}
 			return nil, err
 		}
 		if info.Size() != checkpoint.SpillSize {
-			return nil, fmt.Errorf("commitment rebuild: checkpoint and spill disagree")
+			return nil, fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
+		}
+		checksum, err := pbinRebuildSpillChecksum(checkpoint.SpillPath)
+		if err != nil {
+			return nil, err
+		}
+		if len(checkpoint.SpillChecksum) == 0 || !bytes.Equal(checksum, checkpoint.SpillChecksum) {
+			return nil, fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
 		}
 	}
 	return checkpoint, nil
 }
 
-func writePBinRebuildCheckpoint(path string, lastKey []byte, overlay *pbinRebuildOverlay) error {
+func writePBinRebuildCheckpoint(path string, lastKey []byte, overlay *pbinRebuildOverlay, targets ...RebuildTarget) error {
 	if path == "" {
 		return nil
 	}
 	checkpoint := pbinRebuildCheckpoint{LastKey: bytes.Clone(lastKey), Writes: make(map[string]pbinRebuildCheckpointWrite, len(overlay.writes)), SpillPath: overlay.spillPath}
+	if len(targets) != 0 {
+		checkpoint.TargetVariant = targets[0].Variant
+		checkpoint.TargetHash = targets[0].HashName
+	}
 	if overlay.spillPath != "" {
 		info, err := os.Stat(overlay.spillPath)
 		if err != nil {
 			return err
 		}
 		checkpoint.SpillSize = info.Size()
+		checkpoint.SpillChecksum, err = pbinRebuildSpillChecksum(overlay.spillPath)
+		if err != nil {
+			return err
+		}
 	}
 	for key, write := range overlay.writes {
 		checkpoint.Writes[key] = pbinRebuildCheckpointWrite{Data: bytes.Clone(write.data), Prev: bytes.Clone(write.prev)}
@@ -1911,6 +1970,19 @@ func writePBinRebuildCheckpoint(path string, lastKey []byte, overlay *pbinRebuil
 		return err
 	}
 	return os.Rename(tmpPath, path)
+}
+
+func pbinRebuildSpillChecksum(path string) ([]byte, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return nil, err
+	}
+	return hash.Sum(nil), nil
 }
 
 func removePBinRebuildCheckpoint(path string) error {
@@ -1971,21 +2043,25 @@ type codeStatsTrie interface {
 }
 
 type rebuiltCommitment struct {
-	Variant        commitment.TrieVariant
-	RootHash       []byte // root hash of this commitment. set once commit is finished
-	StepFrom       kv.Step
-	StepTo         kv.Step
-	TxnFrom        uint64
-	TxnTo          uint64
-	Keys           uint64 // amount of keys in this range
-	KeysProcessed  uint64 // amount of keys this shard walked. set once commit is finished
-	CodeStats      commitment.PBinCodeStats
-	BlockNumber    uint64 // block number for this commitment
-	TxnNumber      uint64 // tx number for this commitment
-	LogPrefix      string
-	PBinBatchOps   uint64
-	PBinBatchBytes uint64
-	PBinResumePath string
+	Variant           commitment.TrieVariant
+	RootHash          []byte // root hash of this commitment. set once commit is finished
+	StepFrom          kv.Step
+	StepTo            kv.Step
+	TxnFrom           uint64
+	TxnTo             uint64
+	Keys              uint64 // amount of keys in this range
+	KeysProcessed     uint64 // amount of keys this shard walked. set once commit is finished
+	CodeStats         commitment.PBinCodeStats
+	BlockNumber       uint64 // block number for this commitment
+	TxnNumber         uint64 // tx number for this commitment
+	LogPrefix         string
+	PBinBatchOps      uint64
+	PBinBatchBytes    uint64
+	PBinTargetVariant commitment.TrieVariant
+	PBinTargetHash    string
+	PBinMemorySample  func(uint64)
+	PBinReadSample    func([]pbt.Op, [][]byte)
+	PBinResumePath    string
 }
 
 const (

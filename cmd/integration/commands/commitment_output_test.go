@@ -326,13 +326,17 @@ func TestStageRebuildOutputRejectsPBinCheckpointSpillMismatch(t *testing.T) {
 	require.NoError(t, os.WriteFile(spill, []byte{1, 2}, 0o644))
 	var data bytes.Buffer
 	require.NoError(t, gob.NewEncoder(&data).Encode(stagedPBinRebuildCheckpoint{
-		LastKey:   []byte{1},
-		SpillPath: spill,
-		SpillSize: 3,
+		LastKey:       []byte{1},
+		SpillPath:     spill,
+		SpillSize:     2,
+		SpillChecksum: []byte{3, 4},
+		TargetVariant: commitment.VariantBinPatriciaTrie,
+		TargetHash:    commitment.PBinHashBlake3,
 	}))
 	require.NoError(t, os.WriteFile(checkpoint, data.Bytes(), 0o644))
 	_, err = stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
 	require.ErrorContains(t, err, "disagree")
+	require.ErrorContains(t, err, "restart into a fresh output datadir")
 }
 
 func TestStageRebuildOutputRejectsOrphanPBinSpill(t *testing.T) {
@@ -348,7 +352,11 @@ func TestStageRebuildOutputRejectsOrphanPBinSpill(t *testing.T) {
 func writeTestPBinCheckpoint(t *testing.T, path string) {
 	t.Helper()
 	var data bytes.Buffer
-	require.NoError(t, gob.NewEncoder(&data).Encode(stagedPBinRebuildCheckpoint{LastKey: []byte{1}}))
+	require.NoError(t, gob.NewEncoder(&data).Encode(stagedPBinRebuildCheckpoint{
+		LastKey:       []byte{1},
+		TargetVariant: commitment.VariantBinPatriciaTrie,
+		TargetHash:    commitment.PBinHashBlake3,
+	}))
 	require.NoError(t, os.WriteFile(path, data.Bytes(), 0o644))
 }
 

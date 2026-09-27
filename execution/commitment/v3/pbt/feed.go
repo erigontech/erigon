@@ -182,16 +182,26 @@ func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit fun
 		}
 	}
 	for _, slot := range account.Slots {
-		if len(slot.Key) > length.Hash || len(slot.Value) > eip8297.ValueLength {
-			return fmt.Errorf("pbin: slot key or value is too long")
-		}
-		key := eip8297.TreeKeyStorage(address, slot.Key)
-		value := eip8297.EncodeStorageValue(slot.Value)
-		if err := emit(Op{Key: key, Value: value}); err != nil {
+		if err := e.EmitStorageSlot(address, slot, emit); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func (e *FeedOpEmitter) EmitStorageSlot(address []byte, slot commitment.PBinFeedSlot, emit func(Op) error) error {
+	if emit == nil {
+		return fmt.Errorf("pbin: nil operation emitter")
+	}
+	if len(address) != length.Addr {
+		return fmt.Errorf("pbin: address has length %d, want %d", len(address), length.Addr)
+	}
+	if len(slot.Key) > length.Hash || len(slot.Value) > eip8297.ValueLength {
+		return fmt.Errorf("pbin: slot key or value is too long")
+	}
+	key := eip8297.TreeKeyStorage(address, slot.Key)
+	value := eip8297.EncodeStorageValue(slot.Value)
+	return emit(Op{Key: key, Value: value})
 }
 
 func (e *FeedOpEmitter) Stats() commitment.PBinCodeStats { return e.stats }

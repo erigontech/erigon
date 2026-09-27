@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execfinality"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -304,8 +305,10 @@ func pbinM1AAssertNewEngineRecords(t *testing.T, db kv.TemporalRwDB) {
 	require.NoError(t, pbt.ValidateEngineStateBlob(state))
 }
 
-func pbinM1AMeasuredRebuild(t *testing.T, db kv.TemporalRwDB, target state.RebuildTarget) ([]byte, *state.RebuildReport, error, uint64) {
+func pbinM1AMeasuredRebuild(t *testing.T, db kv.TemporalRwDB, target state.RebuildTarget) ([]byte, *state.RebuildReport, error, uint64, []uint64) {
 	t.Helper()
+	var samples []uint64
+	target.PBinMemorySample = func(value uint64) { samples = append(samples, value) }
 	var initial runtime.MemStats
 	runtime.ReadMemStats(&initial)
 	var peak atomic.Uint64
@@ -338,7 +341,7 @@ func pbinM1AMeasuredRebuild(t *testing.T, db kv.TemporalRwDB, target state.Rebui
 	close(done)
 	sampler.Wait()
 	updatePeak()
-	return root, report, err, peak.Load()
+	return root, report, err, peak.Load(), samples
 }
 
 // Counts branch records gone from the db table, so a latest read of them can
@@ -446,9 +449,16 @@ func TestPBinM1ARebuildTreeKeyBatchesPreserveRecords(t *testing.T) {
 	wantRecords := pbinM1ABranchRecords(t, incremental)
 	require.Equal(t, wantRoot, pbinM1ARestoredRoot(t, incremental))
 	rebuilt, agg = pbinM1AWipeCommitment(t, rebuilt, agg, dirs, pbinM1AStepSize)
-	rebuiltRoot, report, err, peak := pbinM1AMeasuredRebuild(t, rebuilt, state.RebuildTarget{PBinBatchOps: 3, PBinBatchBytes: 1024})
+	rebuiltRoot, report, err, peak, samples := pbinM1AMeasuredRebuild(t, rebuilt, state.RebuildTarget{PBinBatchOps: 3, PBinBatchBytes: 1024})
 	require.NoError(t, err)
 	require.Positive(t, peak)
+	require.Greater(t, len(samples), 1)
+	minimum, maximum := samples[0], samples[0]
+	for _, sample := range samples[1:] {
+		minimum = min(minimum, sample)
+		maximum = max(maximum, sample)
+	}
+	t.Logf("production rebuild live heap after GC: min=%d max=%d samples=%d", minimum, maximum, len(samples))
 	t.Logf("peak allocation: %d bytes", peak)
 	require.Equal(t, wantRoot, rebuiltRoot)
 	require.NotEmpty(t, report.Ranges)
@@ -467,6 +477,58 @@ func TestPBinM1ARebuildTreeKeyBatchesPreserveRecords(t *testing.T) {
 	require.ElementsMatch(t, wantKeys, gotKeys)
 	require.Equal(t, wantRecords, gotRecords)
 	pbinM1AAssertNewEngineRecords(t, rebuilt)
+}
+
+func TestPBinM1AProductionRebuildReadsOnlyTheRightEdge(t *testing.T) {
+	pbinM1ABinVariant(t)
+	db, agg, dirs := pbinM1ANewDatadir(t, pbinM1AStepSize)
+	pbinForwardRun(t, db, pbinM1AStepSize, 0, 4*pbinM1AStepSize, pbinM1AFixture(), pbinM1ASlots)
+	require.NoError(t, agg.BuildFiles(db, 4*pbinM1AStepSize, unboundedFinalityCtx))
+	db, _ = pbinM1AWipeCommitment(t, db, agg, dirs, pbinM1AStepSize)
+	var batches, totalReads int
+	root, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
+		PBinBatchOps:   3,
+		PBinBatchBytes: 1024,
+		PBinReadSample: func(batch []pbt.Op, reads [][]byte) {
+			totalReads += len(reads)
+			paths := make([]eip8297.Bitpath, 0, len(batch))
+			for _, op := range batch {
+				key := op.Key
+				if len(op.Drop) != 0 {
+					key = op.Drop
+				}
+				paths = append(paths, eip8297.PathFromBits(key, int16(len(key)*8)))
+			}
+			for _, key := range reads {
+				if bytes.Equal(key, pbt.GlobalRootKey()) {
+					continue
+				}
+				if len(key) == 0 || key[len(key)-1] > 7 {
+					continue
+				}
+				rowPath, decodeErr := eip8297.DecodeBitPath(key)
+				if decodeErr != nil {
+					t.Errorf("invalid read key %x: %v", key, decodeErr)
+					continue
+				}
+				var touched bool
+				for i := range paths {
+					if paths[i].HasPrefix(&rowPath) {
+						touched = true
+						break
+					}
+				}
+				if !touched {
+					t.Errorf("read completed row %x outside batch paths", key)
+				}
+			}
+			batches++
+		},
+	})
+	require.NoError(t, err)
+	require.NotEmpty(t, root)
+	require.Greater(t, batches, 1)
+	require.Positive(t, totalReads)
 }
 
 func TestPBinM1ARebuildTreeKeyBatchSizes(t *testing.T) {

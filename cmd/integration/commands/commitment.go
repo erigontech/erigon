@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"cmp"
 	"context"
+	"crypto/sha256"
 	"encoding/gob"
 	"encoding/hex"
 	"errors"
@@ -485,7 +486,7 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 		}
 	}
 	if resume {
-		if err := validateStagedOutput(src, out); err != nil {
+		if err := validateStagedOutput(src, out, o.settings()); err != nil {
 			return nil, err
 		}
 	}
@@ -533,14 +534,14 @@ func datadirHasFiles(root string) (bool, error) {
 	return hasFiles, err
 }
 
-func validateStagedOutput(src, out datadir.Dirs) error {
+func validateStagedOutput(src, out datadir.Dirs, want *dbstate.ErigonDBSettings) error {
 	if _, err := os.Stat(out.DataDir); err != nil {
 		if os.IsNotExist(err) {
 			return nil
 		}
 		return err
 	}
-	if err := validatePBinRebuildCheckpoints(src, out); err != nil {
+	if err := validatePBinRebuildCheckpoints(src, out, want); err != nil {
 		return err
 	}
 	return filepath.WalkDir(out.DataDir, func(path string, entry os.DirEntry, err error) error {
@@ -600,10 +601,13 @@ type stagedPBinRebuildCheckpointWrite struct {
 }
 
 type stagedPBinRebuildCheckpoint struct {
-	LastKey   []byte
-	Writes    map[string]stagedPBinRebuildCheckpointWrite
-	SpillPath string
-	SpillSize int64
+	LastKey       []byte
+	Writes        map[string]stagedPBinRebuildCheckpointWrite
+	SpillPath     string
+	SpillSize     int64
+	SpillChecksum []byte
+	TargetVariant commitment.TrieVariant
+	TargetHash    string
 }
 
 func isPBinRebuildCheckpointName(name string) bool {
@@ -627,7 +631,7 @@ func pbinRebuildCheckpointRange(name string) (uint64, uint64, error) {
 	return from, to, nil
 }
 
-func validatePBinRebuildCheckpoints(src, out datadir.Dirs) error {
+func validatePBinRebuildCheckpoints(src, out datadir.Dirs, want *dbstate.ErigonDBSettings) error {
 	entries, err := os.ReadDir(out.Tmp)
 	if os.IsNotExist(err) {
 		return nil
@@ -665,6 +669,9 @@ func validatePBinRebuildCheckpoints(src, out datadir.Dirs) error {
 		if len(checkpoint.LastKey) == 0 {
 			return fmt.Errorf("commitment rebuild: invalid checkpoint %s: missing last key", entry.Name())
 		}
+		if want.TrieVariantName() != dbstate.TrieVariantBin || checkpoint.TargetVariant != commitment.VariantBinPatriciaTrie || checkpoint.TargetHash != want.TrieHashName() {
+			return fmt.Errorf("commitment rebuild: checkpoint target differs; restart into a fresh output datadir")
+		}
 		from, to, err := pbinRebuildCheckpointRange(entry.Name())
 		if err != nil {
 			return err
@@ -682,13 +689,32 @@ func validatePBinRebuildCheckpoints(src, out datadir.Dirs) error {
 			}
 			info, err := os.Stat(expected)
 			if err != nil {
+				if os.IsNotExist(err) {
+					return fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
+				}
 				return fmt.Errorf("commitment rebuild: checkpoint %s has no spill", entry.Name())
 			}
 			if info.Size() != checkpoint.SpillSize {
-				return fmt.Errorf("commitment rebuild: checkpoint and spill disagree")
+				return fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
+			}
+			spill, err := os.Open(expected)
+			if err != nil {
+				return err
+			}
+			hash := sha256.New()
+			_, copyErr := io.Copy(hash, spill)
+			closeErr := spill.Close()
+			if copyErr != nil {
+				return copyErr
+			}
+			if closeErr != nil {
+				return closeErr
+			}
+			if len(checkpoint.SpillChecksum) == 0 || !bytes.Equal(hash.Sum(nil), checkpoint.SpillChecksum) {
+				return fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
 			}
 		} else if _, err := os.Stat(filepath.Join(out.Tmp, entry.Name()+".rows")); err == nil {
-			return fmt.Errorf("commitment rebuild: checkpoint and spill disagree")
+			return fmt.Errorf("commitment rebuild: checkpoint and spill disagree; restart into a fresh output datadir")
 		} else if !os.IsNotExist(err) {
 			return err
 		}
