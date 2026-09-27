@@ -26,7 +26,8 @@ import (
 )
 
 type rowCell struct {
-	Cell
+	*Cell
+	Kind  CellKind
 	child *rowNode
 }
 
@@ -42,8 +43,8 @@ type rowNode struct {
 	folded     bool
 	foldResult FoldResult
 	refs       *commitment.LeafRefs
-	refCells   [maxCells]Cell
 	refMask    uint16
+	dirtyCells uint16
 	parent     *rowNode
 	parentSlot int
 	cells      [maxCells]rowCell
@@ -91,7 +92,9 @@ func (n *rowNode) record() Record {
 	var record Record
 	record.Form = RowRoot
 	for slot := range n.cells {
-		record.Cells[slot] = n.cells[slot].Cell
+		if n.cells[slot].Kind != EmptyCell {
+			record.Cells[slot] = *n.cells[slot].Cell
+		}
 	}
 	return record
 }
@@ -121,16 +124,20 @@ func (n *rowNode) markDirty() {
 	n.folded = false
 }
 
+func (n *rowNode) markCellDirty(slot int) {
+	n.dirtyCells |= uint16(1) << slot
+}
+
 func (n *rowNode) cell(slot int) *rowCell {
 	return &n.cells[slot]
 }
 
 func leafCell(key []byte, value [eip8297.ValueLength]byte) rowCell {
-	return rowCell{Cell: Cell{Kind: LeafCell, Key: bytes.Clone(key), Value: value}}
+	return rowCell{Cell: &Cell{Kind: LeafCell, Key: bytes.Clone(key), Value: value}, Kind: LeafCell}
 }
 
 func branchCell(prefix eip8297.Bitpath, left, right common.Hash) rowCell {
-	return rowCell{Cell: Cell{Kind: BranchCell, Prefix: prefix, Left: left, Right: right}}
+	return rowCell{Cell: &Cell{Kind: BranchCell, Prefix: prefix, Left: left, Right: right}, Kind: BranchCell}
 }
 
 func rowKeyForPath(path *eip8297.Bitpath) ([]byte, error) {
@@ -143,7 +150,10 @@ func rowKeyForPath(path *eip8297.Bitpath) ([]byte, error) {
 func rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNode {
 	n := newRow(path, key, raw)
 	for slot := range n.cells {
-		n.cells[slot].Cell = record.Cells[slot]
+		if record.Cells[slot].Kind != EmptyCell {
+			cell := record.Cells[slot]
+			n.cells[slot] = rowCell{Cell: &cell, Kind: cell.Kind}
+		}
 	}
 	return n
 }
@@ -173,22 +183,26 @@ func (t *Trie) newRow(path eip8297.Bitpath, key, raw []byte) *rowNode {
 func (t *Trie) rowFromRecord(path eip8297.Bitpath, key, raw []byte, record *Record) *rowNode {
 	n := t.newRow(path, key, raw)
 	for slot := range n.cells {
-		n.cells[slot].Cell = record.Cells[slot]
+		if record.Cells[slot].Kind != EmptyCell {
+			cell := record.Cells[slot]
+			n.cells[slot] = rowCell{Cell: &cell, Kind: cell.Kind}
+		}
 	}
 	if refs := leafRefsOf(t.ctx, key, raw); refs != nil {
 		n.refs = refs
 		n.refMask = refs.Mask
-		n.refCells = record.Cells
 	}
 	return n
 }
 
 func setLeaf(n *rowNode, slot int, key []byte, value [eip8297.ValueLength]byte) {
 	n.cells[slot] = leafCell(key, value)
+	n.markCellDirty(slot)
 }
 
 func setBranch(n *rowNode, slot int, cell rowCell) {
 	n.cells[slot] = cell
+	n.markCellDirty(slot)
 }
 
 func rowFoldResult(n *rowNode) (FoldResult, error) {

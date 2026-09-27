@@ -17,7 +17,6 @@
 package pbt
 
 import (
-	"bytes"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -108,12 +107,9 @@ func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to
 	return nil
 }
 
-func sameCell(a, b Cell) bool {
-	return a.Kind == b.Kind && bytes.Equal(a.Key, b.Key) && a.Value == b.Value && a.Prefix == b.Prefix && a.Left == b.Left && a.Right == b.Right
-}
-
 func (n *rowNode) cachedCellHash(slot int) (common.Hash, bool) {
-	if n.refs == nil || n.refMask&(uint16(1)<<slot) == 0 || !sameCell(n.cells[slot].Cell, n.refCells[slot]) {
+	bit := uint16(1) << slot
+	if n.refs == nil || n.refMask&bit == 0 || n.dirtyCells&bit != 0 {
 		return common.Hash{}, false
 	}
 	index := 0

@@ -1018,6 +1018,10 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		return nil, nil, err
 	}
 	report = &RebuildReport{Target: target}
+	a := rwDb.(HasAgg).Agg().(*Aggregator)
+	if err := validatePBinRebuildCheckpoints(a.dirs.Tmp, target); err != nil {
+		return nil, nil, err
+	}
 	logger.Info("[commitment_rebuild] target", "variant", target.Variant, "hash", target.HashName)
 	if target.Variant == commitment.VariantBinPatriciaTrie {
 		restoreHashSuite, err := bindPBinHashSuite(target.HashName)
@@ -1027,7 +1031,6 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		defer restoreHashSuite()
 	}
 
-	a := rwDb.(HasAgg).Agg().(*Aggregator)
 	if target.Variant == commitment.VariantBinPatriciaTrie {
 		roTx, err := rwDb.BeginTemporalRo(ctx)
 		if err != nil {
@@ -1446,6 +1449,16 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	// removes; a range building its own tree never inserts one.
 	sf := time.Now()
 	var processed uint64
+	sampleMemory := func() {
+		if cfg.PBinMemorySample == nil {
+			return
+		}
+		runtime.GC()
+		var memory runtime.MemStats
+		runtime.ReadMemStats(&memory)
+		cfg.PBinMemorySample(memory.Alloc)
+	}
+	sampleMemory()
 	var err error
 	var plainKeyCollector *etl.Collector
 	var plainKeyTmpDir string
@@ -1458,7 +1471,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			return nil, err
 		}
 		defer func() { _ = dir.RemoveAll(plainKeyTmpDir) }()
-		plainKeyCollector = etl.NewCollector("[rebuild_commitment_pbin_keys]", plainKeyTmpDir, etl.NewSortableBuffer(1*datasize.MB), log.Root())
+		plainKeyCollector = etl.NewCollector("[rebuild_commitment_pbin_keys]", plainKeyTmpDir, etl.NewSortableBuffer(pbinRebuildKeyCollectorBufferBudget), log.Root())
 		defer plainKeyCollector.Close()
 	}
 	if removals != nil && len(visComFiles) > 0 {
@@ -1493,6 +1506,9 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 					}
 				}
 				processed++
+				if processed%pbinRebuildMemorySampleInterval == 0 {
+					sampleMemory()
+				}
 				if !ok {
 					break
 				}
@@ -1525,12 +1541,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		if err := plainKeyCollector.Flush(); err != nil {
 			return nil, err
 		}
-		if cfg.PBinMemorySample != nil {
-			runtime.GC()
-			var memory runtime.MemStats
-			runtime.ReadMemStats(&memory)
-			cfg.PBinMemorySample(memory.Alloc)
-		}
+		sampleMemory()
 		reader := commitmentdb.NewFilesOnlyStateReader(tx, cfg.TxnNumber)
 		tmpDir, err := os.MkdirTemp("", "erigon-pbin-rebuild-")
 		if err != nil {
@@ -1589,12 +1600,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			if cfg.PBinReadSample != nil {
 				cfg.PBinReadSample(batch, readKeys)
 			}
-			if cfg.PBinMemorySample != nil {
-				runtime.GC()
-				var memory runtime.MemStats
-				runtime.ReadMemStats(&memory)
-				cfg.PBinMemorySample(memory.Alloc)
-			}
+			sampleMemory()
 			if final {
 				if err := current.Flush(); err != nil {
 					return err
@@ -1606,7 +1612,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			}
 			return writePBinRebuildCheckpoint(cfg.PBinResumePath, batchOperationKey(batch[len(batch)-1]), overlay, RebuildTarget{Variant: cfg.PBinTargetVariant, HashName: cfg.PBinTargetHash})
 		}, func(emit func(pbt.Op) error) error {
-			return pbinRebuildFeedStream(plainKeyCollector, reader, emitter, emit)
+			return pbinRebuildFeedStreamWithSample(plainKeyCollector, reader, emitter, emit, sampleMemory)
 		})
 		if err != nil {
 			return nil, err
@@ -1652,9 +1658,15 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 }
 
 func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader, emitter *pbt.FeedOpEmitter, emit func(pbt.Op) error) error {
+	return pbinRebuildFeedStreamWithSample(keys, reader, emitter, emit, nil)
+}
+
+func pbinRebuildFeedStreamWithSample(keys *etl.Collector, reader commitmentdb.StateReader, emitter *pbt.FeedOpEmitter, emit func(pbt.Op) error, sample func()) error {
 	var address []byte
 	var previousKey []byte
 	var emitted bool
+	var accountExists bool
+	var processed uint64
 	emitAccount := func() error {
 		account, err := commitmentdb.BinFeedAccountFromState(address, nil, true, false, reader)
 		if err != nil {
@@ -1664,6 +1676,7 @@ func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader,
 			account.CodeWritten = false
 			account.Code = nil
 		}
+		accountExists = account.Exists
 		emitted = true
 		return emitter.EmitAccount(account, emit)
 	}
@@ -1685,7 +1698,7 @@ func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader,
 				return err
 			}
 		}
-		if len(key) == length.Addr+length.Hash {
+		if len(key) == length.Addr+length.Hash && accountExists {
 			slot, err := commitmentdb.BinFeedStorageSlotFromState(address, key[length.Addr:], reader)
 			if err != nil {
 				return err
@@ -1693,6 +1706,10 @@ func pbinRebuildFeedStream(keys *etl.Collector, reader commitmentdb.StateReader,
 			if err := emitter.EmitStorageSlot(address, slot, emit); err != nil {
 				return err
 			}
+		}
+		processed++
+		if sample != nil && processed%pbinRebuildMemorySampleInterval == 0 {
+			sample()
 		}
 		return nil
 	}, etl.TransformArgs{})
@@ -1892,6 +1909,22 @@ type pbinRebuildCheckpoint struct {
 	TargetHash    string
 }
 
+func validatePBinRebuildCheckpoints(tmpDir string, target RebuildTarget) error {
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		return err
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasPrefix(entry.Name(), "pbin-rebuild-") || !strings.HasSuffix(entry.Name(), ".checkpoint") {
+			continue
+		}
+		if _, err := readPBinRebuildCheckpoint(filepath.Join(tmpDir, entry.Name()), target); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func readPBinRebuildCheckpoint(path string, targets ...RebuildTarget) (*pbinRebuildCheckpoint, error) {
 	if path == "" {
 		return nil, nil
@@ -2068,8 +2101,11 @@ type rebuiltCommitment struct {
 }
 
 const (
-	pbinRebuildMaxOps   = 100_000
-	pbinRebuildMaxBytes = 64 << 20
+	pbinRebuildMaxOps                   = 100_000
+	pbinRebuildMaxBytes                 = 64 << 20
+	pbinRebuildKeyCollectorBufferBudget = 1 * datasize.MB
+	pbinRebuildOpCollectorBufferBudget  = 64 * datasize.MB
+	pbinRebuildMemorySampleInterval     = 64 * 1024
 )
 
 func pbinForEachRebuildBatch(ops []pbt.Op, tmpDir string, maxOps, maxBytes int, visit func([]pbt.Op, bool) error) error {
@@ -2094,7 +2130,7 @@ func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterK
 }
 
 func pbinForEachRebuildOpStreamLookaheadAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error) error {
-	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root())
+	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(pbinRebuildOpCollectorBufferBudget), log.Root())
 	defer collector.Close()
 	emit := func(op pbt.Op) error {
 		key := batchOperationKey(op)

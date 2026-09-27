@@ -140,7 +140,7 @@ func (t *Trie) bucketDescriptorInRow(row *rowNode, bucketPath *eip8297.Bitpath) 
 			return bucketDescriptor{}, false, err
 		}
 		if cell.Key[0] == eip8297.StorageZone && pathHasPrefix(&path, bucketPath) {
-			return bucketDescriptor{form: LeafRoot, leaf: cell.Cell}, true, nil
+			return bucketDescriptor{form: LeafRoot, leaf: *cell.Cell}, true, nil
 		}
 	case BranchCell:
 		full := branchPath(row, slot, cell)
@@ -363,7 +363,7 @@ func (t *Trie) expectedBucketRecords() (map[string]bucketDescriptor, error) {
 					return err
 				}
 				bucketPath := path.Slice(0, 264)
-				if err := add(&bucketPath, bucketDescriptor{form: LeafRoot, leaf: cell.Cell}); err != nil {
+				if err := add(&bucketPath, bucketDescriptor{form: LeafRoot, leaf: *cell.Cell}); err != nil {
 					return err
 				}
 			case BranchCell:

@@ -63,11 +63,12 @@ type feedBenchContext struct {
 	accounts map[string]commitment.Update
 	storage  map[string]commitment.Update
 	reader   *feedBenchReader
+	refs     map[string]*commitment.LeafRefs
 	discard  bool
 }
 
 func newFeedBenchContext(records map[string][]byte, discard bool, leaves []feedBenchLeaf) *feedBenchContext {
-	ctx := &feedBenchContext{records: make(map[string][]byte, len(records)), accounts: make(map[string]commitment.Update), storage: make(map[string]commitment.Update), discard: discard}
+	ctx := &feedBenchContext{records: make(map[string][]byte, len(records)), accounts: make(map[string]commitment.Update), storage: make(map[string]commitment.Update), refs: make(map[string]*commitment.LeafRefs), discard: discard}
 	for key, value := range records {
 		ctx.records[key] = bytes.Clone(value)
 	}
@@ -80,6 +81,14 @@ func newFeedBenchContext(records map[string][]byte, discard bool, leaves []feedB
 		}
 	}
 	return ctx
+}
+
+func (c *feedBenchContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	ref := c.refs[string(key)]
+	if ref == nil || !bytes.Equal(c.records[string(key)], data) {
+		return nil
+	}
+	return ref
 }
 
 func (c *feedBenchContext) Branch(key []byte) ([]byte, kv.Step, error) {
@@ -332,10 +341,12 @@ func feedBenchExpectedRoot(fixture feedBenchFixture, reader *feedBenchReader) co
 	return eip8297.StateRootWithHash(entries, eip8297.SelectedHash())
 }
 
-func feedBenchFactory(base map[string][]byte, workers int) commitment.TrieContextFactory {
+func feedBenchFactory(base map[string][]byte, workers int, refs map[string]*commitment.LeafRefs) commitment.TrieContextFactory {
 	contexts := make([]commitment.PatriciaContext, workers)
 	for i := range contexts {
-		contexts[i] = newFeedBenchContext(base, true, nil)
+		ctx := newFeedBenchContext(base, true, nil)
+		ctx.refs = refs
+		contexts[i] = ctx
 	}
 	var next atomic.Int32
 	return func(context.Context) (commitment.PatriciaContext, func()) {
@@ -350,7 +361,7 @@ func feedBenchFactory(base map[string][]byte, workers int) commitment.TrieContex
 func feedBenchParallelProbe(b *testing.B, base map[string][]byte, ops []pbt.Op, workers int) int32 {
 	b.Helper()
 	trie := pbt.NewTrie(newFeedBenchContext(base, true, nil))
-	trie.SetTrieContextFactory(feedBenchFactory(base, workers))
+	trie.SetTrieContextFactory(feedBenchFactory(base, workers, nil))
 	var active, peak atomic.Int32
 	trie.SetCoreActivityHook(func(start bool) {
 		if !start {
@@ -380,7 +391,24 @@ func feedBenchKeyOnlyUpdates(tb testing.TB, leaves []feedBenchLeaf) *commitment.
 	return updates
 }
 
-func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectParallel bool) {
+func feedBenchPrefetchRecords(base map[string][]byte, leaves []feedBenchLeaf) map[string]*commitment.LeafRefs {
+	refs := make(map[string]*commitment.LeafRefs)
+	read := func(key []byte) []byte {
+		data := base[string(key)]
+		if len(data) != 0 {
+			if ref := pbt.ComputeLeafRefs(key, data); ref != nil {
+				refs[string(key)] = ref
+			}
+		}
+		return data
+	}
+	for i := range leaves {
+		pbt.PrefetchPath(read, leaves[i].key)
+	}
+	return refs
+}
+
+func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectParallel, prefetch bool) {
 	seedOps := feedBenchOps(fixture.seed)
 	newSeed := newFeedBenchContext(nil, false, fixture.seed)
 	newSeedRoot, err := pbt.NewTrie(newSeed).Process(seedOps)
@@ -395,10 +423,20 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 	require.Equal(b, oldSeedRoot, newSeedRoot[:])
 	seedUpdates.Close()
 	oldBase := feedBenchRecords(oldSeed.records)
+	var prefetched map[string]*commitment.LeafRefs
+	if prefetch {
+		prefetched = feedBenchPrefetchRecords(newBase, fixture.batch)
+	}
 	reader := feedBenchReaderFor(fixture)
 	keys := feedBenchPlainKeys(fixture.batch)
 	state := feedBenchState(fixture.seed, fixture.batch)
 	wantRoot := feedBenchExpectedRoot(fixture, reader)
+	newTrie := pbt.NewTrie(newFeedBenchContext(newBase, true, state))
+	newTrie.SetTrieContextFactory(feedBenchFactory(newBase, workers, prefetched))
+	oldTrie.Reset()
+	oldContext := newFeedBenchContext(oldBase, true, state)
+	oldContext.reader = reader
+	oldTrie.ResetContext(oldContext)
 	var peak int32
 	if workers > 1 && expectParallel {
 		probeFeed, err := commitmentdb.BinFeedFromState(keys, nil, nil, reader)
@@ -412,12 +450,12 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 	var newAllocations, oldAllocations uint64
 	for round := range 5 {
 		newContext := newFeedBenchContext(newBase, true, state)
-		newTrie := pbt.NewTrie(newContext)
-		newTrie.SetTrieContextFactory(feedBenchFactory(newBase, workers))
-		oldContext := newFeedBenchContext(oldBase, true, state)
+		newContext.refs = prefetched
+		newTrie.ResetContext(newContext)
+		oldTrie.Reset()
+		oldContext = newFeedBenchContext(oldBase, true, state)
 		oldContext.reader = reader
-		oldTrie := commitment.NewPBinPatriciaHashed(oldContext)
-		require.NoError(b, oldTrie.SetPBinHashSuite(commitment.PBinHashBlake3))
+		oldTrie.ResetContext(oldContext)
 		if round%2 == 0 {
 			before := benchmarkUptime()
 			var allocBefore runtime.MemStats
@@ -481,8 +519,8 @@ func feedBenchRun(b *testing.B, fixture feedBenchFixture, workers int, expectPar
 			require.Equal(b, wantRoot[:], oldRoot)
 			require.Equal(b, wantRoot[:], newRoot[:])
 		}
-		oldTrie.Release()
 	}
+	oldTrie.Release()
 	newMin, oldMin := newDurations[0], oldDurations[0]
 	for i := 1; i < len(newDurations); i++ {
 		if newDurations[i] < newMin {
@@ -508,7 +546,11 @@ func BenchmarkPBinCompareFeedTip(b *testing.B) {
 	require.NoError(b, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	fixture := feedBenchFixtureFor("tip")
 	for _, workers := range []int{1, physicalCoreCount()} {
-		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) { feedBenchRun(b, fixture, workers, true) })
+		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) {
+			for _, prefetch := range []bool{false, true} {
+				b.Run("prefetch="+strconv.FormatBool(prefetch), func(b *testing.B) { feedBenchRun(b, fixture, workers, true, prefetch) })
+			}
+		})
 	}
 }
 
@@ -521,7 +563,11 @@ func BenchmarkPBinCompareFeedWhale(b *testing.B) {
 	require.NoError(b, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	fixture := feedBenchFixtureFor("whale")
 	for _, workers := range []int{1, physicalCoreCount()} {
-		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) { feedBenchRun(b, fixture, workers, true) })
+		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) {
+			for _, prefetch := range []bool{false, true} {
+				b.Run("prefetch="+strconv.FormatBool(prefetch), func(b *testing.B) { feedBenchRun(b, fixture, workers, true, prefetch) })
+			}
+		})
 	}
 }
 
@@ -534,7 +580,11 @@ func BenchmarkPBinCompareFeedRebuild(b *testing.B) {
 	require.NoError(b, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 	fixture := feedBenchFixtureFor("rebuild")
 	for _, workers := range []int{1, physicalCoreCount()} {
-		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) { feedBenchRun(b, fixture, workers, true) })
+		b.Run("workers="+strconv.Itoa(workers), func(b *testing.B) {
+			for _, prefetch := range []bool{false, true} {
+				b.Run("prefetch="+strconv.FormatBool(prefetch), func(b *testing.B) { feedBenchRun(b, fixture, workers, true, prefetch) })
+			}
+		})
 	}
 }
 

@@ -27,7 +27,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -50,14 +49,20 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 const (
-	rebuildVariantStepSize = uint64(8)
-	rebuildVariantSteps    = 4
-	rebuildVariantAccounts = 6
-	rebuildVariantSlots    = 4
+	rebuildVariantStepSize           = uint64(8)
+	rebuildVariantSteps              = 4
+	rebuildVariantAccounts           = 6
+	rebuildVariantSlots              = 4
+	rebuildVariantKeyCollectorBudget = uint64(1 << 20)
+	rebuildVariantOpCollectorBudget  = uint64(64 << 20)
+	rebuildVariantRightEdgeBudget    = uint64(1000 * 4096)
+	rebuildVariantFixedBudget        = uint64(1 << 20)
 )
 
 func rebuildVariantAddr(i int) []byte {
@@ -327,12 +332,41 @@ func TestRebuildCommitmentFilesRefusesChangedPBinCheckpointTarget(t *testing.T) 
 	require.ErrorContains(t, err, "checkpoint target differs")
 }
 
+func TestRebuildCommitmentFilesRefusesPBinCheckpointForHexTarget(t *testing.T) {
+	db, _, dirs := rebuildVariantDatadir(t)
+	writeRebuildPBinCheckpointFixture(t, rebuildVariantCheckpointPath(t, dirs), rebuildPBinCheckpointFixture{
+		LastKey:       []byte{1},
+		TargetVariant: commitment.VariantBinPatriciaTrie,
+		TargetHash:    commitment.PBinHashKeccak,
+	})
+	before := rebuildVariantCommitmentFiles(t, dirs)
+
+	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
+		Variant: commitment.VariantHexPatriciaTrie,
+	})
+	require.ErrorContains(t, err, "checkpoint target differs")
+	require.ErrorContains(t, err, "restart into a fresh output datadir")
+	require.Equal(t, before, rebuildVariantCommitmentFiles(t, dirs))
+}
+
 func TestRebuildCommitmentFilesRefusesSwappedPBinCheckpointSpill(t *testing.T) {
 	db, _, dirs := rebuildVariantDatadir(t)
 	checkpointPath := rebuildVariantCheckpointPath(t, dirs)
 	spillPath := checkpointPath + ".rows"
-	spill := []byte{4, 5, 6}
-	want := sha256.Sum256([]byte{1, 2, 3})
+	rootKey := pbt.GlobalRootKey()
+	firstKey := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x11}, length.Addr), eip8297.BasicDataLeafKey)
+	secondKey := eip8297.TreeKeyAccount(bytes.Repeat([]byte{0x22}, length.Addr), eip8297.BasicDataLeafKey)
+	firstRecord := pbt.Record{Form: pbt.LeafRoot}
+	firstRecord.Cells[0] = pbt.Cell{Kind: pbt.LeafCell, Key: firstKey}
+	secondRecord := pbt.Record{Form: pbt.LeafRoot}
+	secondRecord.Cells[0] = pbt.Cell{Kind: pbt.LeafCell, Key: secondKey}
+	firstData, err := pbt.EncodeRecord(rootKey, &firstRecord)
+	require.NoError(t, err)
+	secondData, err := pbt.EncodeRecord(rootKey, &secondRecord)
+	require.NoError(t, err)
+	firstSpill := rebuildVariantSpillBytes(rootKey, firstData, nil)
+	spill := rebuildVariantSpillBytes(rootKey, secondData, nil)
+	want := sha256.Sum256(firstSpill)
 	require.NoError(t, os.WriteFile(spillPath, spill, 0o644))
 	writeRebuildPBinCheckpointFixture(t, checkpointPath, rebuildPBinCheckpointFixture{
 		LastKey:       []byte{1},
@@ -343,12 +377,22 @@ func TestRebuildCommitmentFilesRefusesSwappedPBinCheckpointSpill(t *testing.T) {
 		TargetHash:    commitment.PBinHashBlake3,
 	})
 
-	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
+	_, _, err = state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
 		Variant:  commitment.VariantBinPatriciaTrie,
 		HashName: commitment.PBinHashBlake3,
 	})
 	require.ErrorContains(t, err, "checkpoint and spill disagree")
 	require.ErrorContains(t, err, "restart into a fresh output datadir")
+}
+
+func rebuildVariantSpillBytes(key, data, prev []byte) []byte {
+	result := make([]byte, 12, 12+len(key)+len(data)+len(prev))
+	binary.BigEndian.PutUint32(result[0:4], uint32(len(key)))
+	binary.BigEndian.PutUint32(result[4:8], uint32(len(data)))
+	binary.BigEndian.PutUint32(result[8:12], uint32(len(prev)))
+	result = append(result, key...)
+	result = append(result, data...)
+	return append(result, prev...)
 }
 
 func rebuildVariantMemoryDatadir(t *testing.T, slots int) (kv.TemporalRwDB, *state.Aggregator) {
@@ -411,57 +455,56 @@ func rebuildVariantMemoryDatadir(t *testing.T, slots int) (kv.TemporalRwDB, *sta
 	return db, agg
 }
 
-func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) uint64 {
+func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) (uint64, uint64) {
 	t.Helper()
-	runtime.GC()
-	var baseline runtime.MemStats
-	runtime.ReadMemStats(&baseline)
 	var samples []uint64
 	root, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{
 		Variant:        commitment.VariantBinPatriciaTrie,
 		PBinBatchOps:   1000,
 		PBinBatchBytes: 1 << 20,
 		PBinMemorySample: func(value uint64) {
-			if value > baseline.Alloc {
-				value -= baseline.Alloc
-			} else {
-				value = 0
-			}
 			samples = append(samples, value)
 		},
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.NotEmpty(t, samples)
-	var peak uint64
+	baseline := samples[0]
+	peak := baseline
 	for _, sample := range samples {
 		peak = max(peak, sample)
 	}
-	runtime.GC()
-	return peak
+	require.NotZero(t, peak)
+	return baseline, peak
 }
 
 func TestRebuildCommitmentFilesBinTargetMemoryDoesNotGrowWithSlots(t *testing.T) {
-	var smallPeak, largePeak uint64
+	var smallBaseline, smallPeak, mediumBaseline, mediumPeak, largeBaseline, largePeak uint64
 	t.Run("200000", func(t *testing.T) {
 		db, _ := rebuildVariantMemoryDatadir(t, 200_000)
-		smallPeak = rebuildVariantMeasuredMemory(t, db)
+		smallBaseline, smallPeak = rebuildVariantMeasuredMemory(t, db)
 	})
 	t.Run("650000", func(t *testing.T) {
 		db, _ := rebuildVariantMemoryDatadir(t, 650_000)
-		largePeak = rebuildVariantMeasuredMemory(t, db)
+		mediumBaseline, mediumPeak = rebuildVariantMeasuredMemory(t, db)
 	})
-	ceiling := uint64(128<<20) + 1<<20 + 1000*4096
-	t.Logf("production rebuild live heap after GC: slots=200000 peak=%d slots=650000 peak=%d ceiling=%d", smallPeak, largePeak, ceiling)
-	require.LessOrEqual(t, smallPeak, ceiling)
-	require.LessOrEqual(t, largePeak, ceiling)
-	difference := uint64(0)
-	if largePeak >= smallPeak {
-		difference = largePeak - smallPeak
-	} else {
-		difference = smallPeak - largePeak
+	t.Run("1300000", func(t *testing.T) {
+		db, _ := rebuildVariantMemoryDatadir(t, 1_300_000)
+		largeBaseline, largePeak = rebuildVariantMeasuredMemory(t, db)
+	})
+	ceiling := rebuildVariantKeyCollectorBudget + rebuildVariantOpCollectorBudget + rebuildVariantFixedBudget + rebuildVariantRightEdgeBudget
+	t.Logf("production rebuild live heap after GC: slots=200000 baseline=%d peak=%d slots=650000 baseline=%d peak=%d slots=1300000 baseline=%d peak=%d ceiling=%d", smallBaseline, smallPeak, mediumBaseline, mediumPeak, largeBaseline, largePeak, ceiling)
+	growth := func(baseline, peak uint64) uint64 {
+		if peak <= baseline {
+			return 0
+		}
+		return peak - baseline
 	}
-	require.LessOrEqual(t, difference, uint64(32<<20))
+	_, _, largeGrowth := growth(smallBaseline, smallPeak), growth(mediumBaseline, mediumPeak), growth(largeBaseline, largePeak)
+	require.LessOrEqual(t, smallPeak, smallBaseline+ceiling)
+	require.LessOrEqual(t, mediumPeak, mediumBaseline+ceiling)
+	require.LessOrEqual(t, largePeak, largeBaseline+ceiling)
+	require.LessOrEqual(t, largeGrowth, uint64(64<<20))
 }
 
 func TestRebuildCommitmentFilesBinTargetStagedOutputSkipsSourceCheckpoint(t *testing.T) {

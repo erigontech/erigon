@@ -252,6 +252,7 @@ func (t *Trie) replaceSubtreeRow(row *rowNode, prefix *eip8297.Bitpath, result p
 		}
 		replaced, err := t.replaceSubtreeRow(child, prefix, result)
 		if replaced {
+			row.markCellDirty(slot)
 			t.markDirty(row)
 		}
 		return replaced, err
@@ -263,6 +264,7 @@ func (t *Trie) replaceSubtreeRow(row *rowNode, prefix *eip8297.Bitpath, result p
 func (t *Trie) replaceRowCell(row *rowNode, slot int, prefix *eip8297.Bitpath, result phaseBucketResult) (bool, error) {
 	if !result.present {
 		row.cells[slot] = rowCell{}
+		row.markCellDirty(slot)
 		t.markDirty(row)
 		return true, nil
 	}
@@ -275,6 +277,7 @@ func (t *Trie) replaceRowCell(row *rowNode, slot int, prefix *eip8297.Bitpath, r
 		return false, err
 	}
 	row.cells[slot] = cell
+	row.markCellDirty(slot)
 	t.markDirty(row)
 	return true, nil
 }
@@ -365,7 +368,7 @@ func (t *Trie) descriptorAtRow(row *rowNode, prefix *eip8297.Bitpath) (bucketDes
 			return bucketDescriptor{}, false, err
 		}
 		if pathHasPrefix(&path, prefix) {
-			return bucketDescriptor{form: LeafRoot, leaf: cell.Cell}, true, nil
+			return bucketDescriptor{form: LeafRoot, leaf: *cell.Cell}, true, nil
 		}
 		return bucketDescriptor{}, false, nil
 	case BranchCell:
@@ -436,7 +439,7 @@ func (t *Trie) insertSubtree(subtree subtreeCell) error {
 	if root.form == RowRoot && root.row == nil {
 		if subtree.cell.Kind == LeafCell {
 			root.form = LeafRoot
-			root.leaf = subtree.cell.Cell
+			root.leaf = *subtree.cell.Cell
 		} else {
 			root.form = ExtRoot
 			root.self = subtree.path
@@ -456,7 +459,7 @@ func (t *Trie) insertSubtree(subtree subtreeCell) error {
 			if subtree.cell.Kind != LeafCell {
 				return errInsertKey
 			}
-			root.leaf = subtree.cell.Cell
+			root.leaf = *subtree.cell.Cell
 			return nil
 		}
 		old := subtreeCell{path: oldPath, cell: leafCell(root.leaf.Key, root.leaf.Value)}
@@ -641,6 +644,7 @@ func (t *Trie) insertSubtreeRow(row *rowNode, subtree subtreeCell) error {
 
 func setBranchOrLeaf(row *rowNode, slot int, cell rowCell) {
 	row.cells[slot] = cell
+	row.markCellDirty(slot)
 }
 
 func (t *Trie) emptyRoot() {

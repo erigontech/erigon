@@ -267,7 +267,7 @@ func foldReferenceRows(t *testing.T, built *referenceRows, sum eip8297.HashFn) {
 			if cell.Kind != BranchCell {
 				continue
 			}
-			split := branchSplit(&rowNode{path: parentPath}, slot, &rowCell{Cell: *cell})
+			split := branchSplit(&rowNode{path: parentPath}, slot, &rowCell{Cell: cell, Kind: cell.Kind})
 			childPath, err := rowChildPath(&rowNode{path: parentPath}, slot, cell.Prefix, split)
 			require.NoError(t, err)
 			childKey := string(rootKey(childPath))

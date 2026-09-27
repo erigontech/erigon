@@ -106,7 +106,11 @@ func (t *Trie) droppedLeaf(key []byte) bool {
 func (t *Trie) originalLeaf(key []byte) (*Cell, error) {
 	name := string(key)
 	if _, ok := t.originalLeafSeen[name]; !ok {
-		cell, found, err := t.lookupLeaf(key)
+		lookup := t.lookupLeafRaw
+		if t.ownedPrefix != nil {
+			lookup = t.lookupLeaf
+		}
+		cell, found, err := lookup(key)
 		if err != nil {
 			return nil, err
 		}
@@ -155,6 +159,101 @@ func (t *Trie) lookupLeaf(key []byte) (Cell, bool, error) {
 	}
 }
 
+func (t *Trie) lookupLeafRaw(key []byte) (Cell, bool, error) {
+	path, err := keyPath(key)
+	if err != nil {
+		return Cell{}, false, err
+	}
+	rootKey := t.rootRecordKey()
+	raw, _, err := t.ctx.Branch(rootKey)
+	if err != nil {
+		return Cell{}, false, err
+	}
+	if len(raw) == 0 {
+		return Cell{}, false, nil
+	}
+	record, err := DecodeRecord(rootKey, raw)
+	if err != nil {
+		return Cell{}, false, err
+	}
+	switch record.Form {
+	case LeafRoot:
+		return record.Cells[0], bytes.Equal(record.Cells[0].Key, key), nil
+	case ExtRoot:
+		prefix := t.rootRecordPath()
+		prefix.Append(&record.SelfExt)
+		if !pathHasPrefix(&path, &prefix) {
+			return Cell{}, false, nil
+		}
+		rowPath := prefix.Slice(0, (prefix.BitLen/4)*4)
+		rowKey, err := EncodeRowKey(&rowPath)
+		if err != nil {
+			return Cell{}, false, err
+		}
+		return t.lookupRawRow(rowKey, &rowPath, &path, key)
+	case RowRoot:
+		rowPath := t.rootRecordPath()
+		return t.lookupRawRow(rootKey, &rowPath, &path, key)
+	default:
+		return Cell{}, false, fmt.Errorf("unknown root form %d", record.Form)
+	}
+}
+
+func (t *Trie) lookupRawRow(rowKey []byte, rowPath, path *eip8297.Bitpath, key []byte) (Cell, bool, error) {
+	raw, _, err := t.ctx.Branch(rowKey)
+	if err != nil {
+		return Cell{}, false, err
+	}
+	if len(raw) == 0 {
+		return Cell{}, false, nil
+	}
+	record, err := DecodeRecord(rowKey, raw)
+	if err != nil {
+		return Cell{}, false, err
+	}
+	if !pathHasPrefix(path, rowPath) || path.BitLen < rowPath.BitLen+4 {
+		return Cell{}, false, nil
+	}
+	slot := slotAt(path, rowPath.BitLen)
+	cell := record.Cells[slot]
+	switch cell.Kind {
+	case EmptyCell:
+		return Cell{}, false, nil
+	case LeafCell:
+		return cell, bytes.Equal(cell.Key, key), nil
+	case BranchCell:
+		full := rawBranchPath(rowPath, slot, &cell)
+		if !pathHasPrefix(path, &full) {
+			return Cell{}, false, nil
+		}
+		childPath := rawChildPath(rowPath, slot, &cell.Prefix)
+		childKey, err := EncodeRowKey(&childPath)
+		if err != nil {
+			return Cell{}, false, err
+		}
+		return t.lookupRawRow(childKey, &childPath, path, key)
+	default:
+		return Cell{}, false, errInsertKey
+	}
+}
+
+func rawBranchPath(rowPath *eip8297.Bitpath, slot int, cell *Cell) eip8297.Bitpath {
+	path := *rowPath
+	var slotPath eip8297.Bitpath
+	for i := range 4 {
+		slotPath.AppendBit(uint64((slot >> (3 - i)) & 1))
+	}
+	path.Append(&slotPath)
+	path.Append(&cell.Prefix)
+	return path
+}
+
+func rawChildPath(rowPath *eip8297.Bitpath, slot int, prefix *eip8297.Bitpath) eip8297.Bitpath {
+	path := rawBranchPath(rowPath, slot, &Cell{Prefix: *prefix})
+	window := (path.BitLen / 4) * 4
+	return path.Slice(0, window)
+}
+
 func (t *Trie) lookupRowLeaf(row *rowNode, path *eip8297.Bitpath, key []byte) (Cell, bool, error) {
 	if !pathHasPrefix(path, &row.path) || path.BitLen < row.path.BitLen+4 {
 		return Cell{}, false, nil
@@ -164,7 +263,7 @@ func (t *Trie) lookupRowLeaf(row *rowNode, path *eip8297.Bitpath, key []byte) (C
 	case EmptyCell:
 		return Cell{}, false, nil
 	case LeafCell:
-		return cell.Cell, bytes.Equal(cell.Key, key), nil
+		return *cell.Cell, bytes.Equal(cell.Key, key), nil
 	case BranchCell:
 		full := branchPath(row, slotAt(path, row.path.BitLen), cell)
 		if !pathHasPrefix(path, &full) {
@@ -194,7 +293,7 @@ func (t *Trie) insert(key []byte, value [eip8297.ValueLength]byte) error {
 	}
 	if root.form == RowRoot && root.row == nil {
 		root.form = LeafRoot
-		root.leaf = leafCell(key, value).Cell
+		root.leaf = *leafCell(key, value).Cell
 		root.raw = nil
 		return nil
 	}
@@ -208,7 +307,7 @@ func (t *Trie) insert(key []byte, value [eip8297.ValueLength]byte) error {
 		}
 		d := firstDifference(&oldPath, &path)
 		if oldPath.BitLen == path.BitLen && d == oldPath.BitLen {
-			root.leaf = leafCell(key, value).Cell
+			root.leaf = *leafCell(key, value).Cell
 			return nil
 		}
 		return t.splitRootLeaf(root, oldPath, root.leaf, path, key, value, d)
@@ -519,6 +618,7 @@ func (t *Trie) removeFromRow(row *rowNode, path eip8297.Bitpath, key []byte) (bo
 			return false, nil
 		}
 		row.cells[slot] = rowCell{}
+		row.markCellDirty(slot)
 		t.markDirty(row)
 		return true, nil
 	case BranchCell:
@@ -589,7 +689,7 @@ func (t *Trie) normalizeRootRow(root *treeRoot, row *rowNode) error {
 	cell := row.cell(slots[0])
 	if cell.Kind == LeafCell {
 		root.form = LeafRoot
-		root.leaf = cell.Cell
+		root.leaf = *cell.Cell
 	} else {
 		full := branchPath(row, slots[0], cell)
 		root.form = ExtRoot
@@ -656,6 +756,7 @@ func (t *Trie) normalizeRow(row *rowNode) error {
 		}
 		parent.cells[row.parentSlot] = cell
 	}
+	parent.markCellDirty(row.parentSlot)
 	t.markDirty(parent)
 	return nil
 }
@@ -682,6 +783,7 @@ func (t *Trie) refreshBranch(parent *rowNode, slot int, child *rowNode) error {
 	if child.occupiedCount() == 0 {
 		parent.cells[slot] = rowCell{}
 		child.tombstone = true
+		parent.markCellDirty(slot)
 		t.markDirty(parent)
 		return nil
 	}
@@ -708,6 +810,7 @@ func (t *Trie) refreshBranch(parent *rowNode, slot int, child *rowNode) error {
 		cell.Prefix = child.path.Slice(start, split)
 	}
 	cell.child = child
+	parent.markCellDirty(slot)
 	t.markDirty(parent)
 	return nil
 }

@@ -122,6 +122,7 @@ func (t *Trie) foldDirtyRows() error {
 			cell := row.cell(slots[0])
 			cell.Prefix = path.Slice(start, path.BitLen)
 			cell.Left, cell.Right = left, right
+			row.markCellDirty(slots[0])
 		}
 		if len(slots) == 0 {
 			continue
@@ -138,6 +139,7 @@ func (t *Trie) foldDirtyRows() error {
 			}
 			cell.Prefix = path.Slice(start, path.BitLen)
 			cell.Left, cell.Right = left, right
+			row.parent.markCellDirty(row.parentSlot)
 		}
 		if t.root != nil && t.root.row == row {
 			t.foldedRoot = branchHash(&path, &left, &right)
@@ -185,7 +187,7 @@ func (t *Trie) rowDescriptor(row *rowNode) (eip8297.Bitpath, common.Hash, common
 			if err != nil {
 				return eip8297.Bitpath{}, common.Hash{}, common.Hash{}, err
 			}
-			return path, leafHash(&cell.Cell), common.Hash{}, nil
+			return path, leafHash(cell.Cell), common.Hash{}, nil
 		case BranchCell:
 			return branchPath(row, slots[0], cell), cell.Left, cell.Right, nil
 		default:

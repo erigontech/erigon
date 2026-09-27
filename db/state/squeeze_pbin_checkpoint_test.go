@@ -14,30 +14,27 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package pbt
+package state
 
 import (
-	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
-func (t *Trie) addDelta(key, data, prev []byte) {
-	if bytes.Equal(data, prev) {
-		return
-	}
-	t.deltas = append(t.deltas, commitment.BranchDelta{
-		Key: bytes.Clone(key), Data: data, Prev: prev,
-	})
-}
-
-func (t *Trie) TakeDeltas() []commitment.BranchDelta {
-	deltas := make([]commitment.BranchDelta, len(t.deltas))
-	for i := range t.deltas {
-		deltas[i] = commitment.BranchDelta{
-			Key: bytes.Clone(t.deltas[i].Key), Data: bytes.Clone(t.deltas[i].Data), Prev: bytes.Clone(t.deltas[i].Prev),
-		}
-	}
-	t.deltas = nil
-	return deltas
+func TestReadPBinRebuildCheckpointRejectsChangedSpill(t *testing.T) {
+	dir := t.TempDir()
+	spillPath := filepath.Join(dir, "rows")
+	checkpointPath := filepath.Join(dir, "checkpoint")
+	require.NoError(t, os.WriteFile(spillPath, []byte{1, 2, 3}, 0o644))
+	overlay := newPBinRebuildOverlay().withSpill(spillPath)
+	target := RebuildTarget{Variant: commitment.VariantBinPatriciaTrie, HashName: commitment.PBinHashBlake3}
+	require.NoError(t, writePBinRebuildCheckpoint(checkpointPath, []byte{1}, overlay, target))
+	require.NoError(t, os.WriteFile(spillPath, []byte{4, 5, 6}, 0o644))
+	_, err := readPBinRebuildCheckpoint(checkpointPath, target)
+	require.ErrorContains(t, err, "checkpoint and spill disagree")
 }
