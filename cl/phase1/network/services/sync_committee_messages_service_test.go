@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	syncpoolmock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
+	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 )
@@ -105,4 +106,46 @@ func TestSyncCommitteesSuccess(t *testing.T) {
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
 	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg))
 	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg)) // Silent ignore: returns nil if done twice
+}
+
+// TestSyncCommitteesIgnoresReplacementWithDifferentContent proves a second
+// message for the same (subnet, slot, validator_index) - the seen-key - is
+// ignored without ever verifying its signature when its content differs
+// from the first, already-verified message. Before this, a cache hit
+// returned nil unconditionally, so different (and here, never verified)
+// bytes were treated as an already-validated message and would reach
+// PublishBackground/gossip forwarding the same way a genuinely valid
+// message would.
+func TestSyncCommitteesIgnoresReplacementWithDifferentContent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockFuncs := &mockFuncs{ctrl: ctrl}
+	saveSignatureGlobals(t)
+	blsVerifyMultipleSignatures = mockFuncs.BlsVerifyMultipleSignatures
+
+	state, msg := getObjectsForSyncCommitteesServiceTest(t, ctrl)
+	// Exactly one verification call is ever expected: gomock fails the test
+	// if the replacement below triggers a second one.
+	ctrl.RecordCall(mockFuncs, "BlsVerifyMultipleSignatures", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil)
+	s, synced, ethClock := setupSyncCommitteesServiceTest(t, ctrl)
+	require.NoError(t, synced.OnHeadState(state))
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(msg.SyncCommitteeMessage.Slot).Return(true).AnyTimes()
+	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg))
+
+	replacement := &SyncCommitteeMessageForGossip{
+		SyncCommitteeMessage: &cltypes.SyncCommitteeMessage{
+			Slot:            msg.SyncCommitteeMessage.Slot,
+			BeaconBlockRoot: common.Hash{0xff},
+			ValidatorIndex:  msg.SyncCommitteeMessage.ValidatorIndex,
+			Signature:       common.Bytes96{}, // zero signature: would fail verification if ever checked
+		},
+		ImmediateVerification: true,
+	}
+	err := s.ProcessMessage(context.Background(), new(uint64), replacement)
+	require.ErrorIs(t, err, ErrIgnore)
+
+	// The rejected replacement must not have disturbed the original entry:
+	// a genuine retry of the first message is still a silent, verification-free duplicate.
+	require.NoError(t, s.ProcessMessage(context.Background(), new(uint64), msg))
 }

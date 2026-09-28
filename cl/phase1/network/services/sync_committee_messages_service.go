@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -41,6 +42,16 @@ type seenSyncCommitteeMessage struct {
 	subnet         uint64
 	slot           uint64
 	validatorIndex uint64
+}
+
+// verifiedSyncCommitteeMessage is what the seen-key cache actually
+// authenticated: the content of the one message that was signature-checked
+// for that key, not just the key itself. A later submission under the same
+// key is only a genuine duplicate - safe to treat as already-validated
+// without re-verifying - if it carries this same content.
+type verifiedSyncCommitteeMessage struct {
+	beaconBlockRoot common.Hash
+	signature       common.Bytes96
 }
 
 type syncCommitteeMessagesService struct {
@@ -129,9 +140,17 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 			return fmt.Errorf("validator is not into any subnet %d", *subnet)
 		}
 		// [IGNORE] There has been no other valid sync committee message for the declared slot for the validator referenced by sync_committee_message.validator_index.
-
-		if _, ok := s.seenSyncCommitteeMessages.Load(seenSyncCommitteeMessageIdentifier); ok {
-			return nil
+		//
+		// A hit here means some message for this key was already verified, not that this one was:
+		// only a submission carrying that same content is a genuine duplicate, safe to wave through
+		// without re-verifying. Anything else - a forged replacement, or a bug - is ignored exactly
+		// like a first-time duplicate would be, without ever checking its signature.
+		if verified, ok := s.seenSyncCommitteeMessages.Load(seenSyncCommitteeMessageIdentifier); ok {
+			v := verified.(verifiedSyncCommitteeMessage)
+			if v.beaconBlockRoot == msg.SyncCommitteeMessage.BeaconBlockRoot && v.signature == msg.SyncCommitteeMessage.Signature {
+				return nil
+			}
+			return ErrIgnore
 		}
 		// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
 		signature, signingRoot, pubKey, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
@@ -144,7 +163,10 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 			Pks:         [][]byte{pubKey},
 			SendingPeer: msg.Receiver,
 			F: func() {
-				s.seenSyncCommitteeMessages.Store(seenSyncCommitteeMessageIdentifier, struct{}{})
+				s.seenSyncCommitteeMessages.Store(seenSyncCommitteeMessageIdentifier, verifiedSyncCommitteeMessage{
+					beaconBlockRoot: msg.SyncCommitteeMessage.BeaconBlockRoot,
+					signature:       msg.SyncCommitteeMessage.Signature,
+				})
 				s.cleanupOldSyncCommitteeMessages() // cleanup old messages
 				// ImmediateVerification is sequential so using the headState directly is safe
 				if msg.ImmediateVerification {
