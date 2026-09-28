@@ -29,6 +29,7 @@ const (
 	ElectraVersion   StateVersion = 5
 	FuluVersion      StateVersion = 6
 	GloasVersion     StateVersion = 7
+	HezeVersion      StateVersion = 8
 )
 
 func (v StateVersion) String() string {
@@ -49,6 +50,8 @@ func (v StateVersion) String() string {
 		return "fulu"
 	case GloasVersion:
 		return "gloas"
+	// case HezeVersion:
+	// 	return "heze"
 	default:
 		panic("unsupported fork version")
 	}
@@ -93,6 +96,8 @@ func StringToClVersion(s string) (StateVersion, error) {
 		return FuluVersion, nil
 	case "gloas":
 		return GloasVersion, nil
+	// case "heze":
+	// 	return HezeVersion, nil
 	default:
 		return 0, fmt.Errorf("unsupported fork version %s", s)
 	}

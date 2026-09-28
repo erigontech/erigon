@@ -673,6 +673,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		ValidationStatus: validationStatus,
 		LatestValidHash:  lvh,
 	}
+	res, checked := e.readAheader.ReadInclusionListResult(blockHash)
+	if checked {
+		result.InclusionListSatisfied = &res
+	}
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -13,6 +14,7 @@ import (
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -34,6 +36,11 @@ type BlockReadAheader struct {
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
 	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
+	// inclusionLists is the only copy of each IL (never persisted), so unlike
+	// the other caches a miss cannot fall back to the DB.
+	inclusionLists *lru.Cache[common.Hash, inclusionListEntry]
+	// inclusionListsMu makes each read-modify-write of an entry atomic.
+	inclusionListsMu sync.Mutex
 
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
@@ -47,6 +54,26 @@ type BlockReadAheader struct {
 	// cursors — disconnected from the cache layer the EVM actually reads.
 	// Mirrors reth's CachedReads / ExecutionCache "same hashmap" property.
 	stateCache *cache.StateCache
+}
+
+type inclusionListEntry struct {
+	txns types.Transactions
+	hash common.Hash
+	// satisfied is nil until the IL check has run for this block and IL.
+	satisfied *bool
+}
+
+func newInclusionListEntry(txns types.Transactions) inclusionListEntry {
+	txnHashes := make([]common.Hash, len(txns))
+	for i, txn := range txns {
+		txnHashes[i] = txn.Hash()
+	}
+	slices.SortFunc(txnHashes, func(a, b common.Hash) int { return bytes.Compare(a[:], b[:]) })
+	buf := make([]byte, 0, len(txnHashes)*length.Hash)
+	for _, h := range txnHashes {
+		buf = append(buf, h[:]...)
+	}
+	return inclusionListEntry{txns: txns, hash: crypto.Keccak256Hash(buf)}
 }
 
 func NewBlockReadAheader() *BlockReadAheader {
@@ -66,12 +93,17 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
+	ils, err := lru.New[common.Hash, inclusionListEntry](1)
+	if err != nil {
+		panic(err)
+	}
 	return &BlockReadAheader{
-		headers:    headers,
-		bodies:     bodies,
-		senders:    senders,
-		bals:       bals,
-		warmupGate: semaphore.NewWeighted(1),
+		headers:        headers,
+		bodies:         bodies,
+		senders:        senders,
+		bals:           bals,
+		inclusionLists: ils,
+		warmupGate:     semaphore.NewWeighted(1),
 	}
 }
 
@@ -220,6 +252,30 @@ func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *type
 		return
 	}
 	bra.bals.Add(blockHash, bal)
+}
+
+func (bra *BlockReadAheader) AddInclusionList(blockHash common.Hash, il types.Transactions) {
+	if il == nil {
+		return
+	}
+	entry := newInclusionListEntry(il)
+	bra.inclusionListsMu.Lock()
+	defer bra.inclusionListsMu.Unlock()
+	if cached, ok := bra.inclusionLists.Get(blockHash); ok && cached.hash == entry.hash {
+		return
+	}
+	bra.inclusionLists.Add(blockHash, entry)
+}
+
+func (bra *BlockReadAheader) SetInclusionListResult(blockHash common.Hash, satisfied bool) {
+	bra.inclusionListsMu.Lock()
+	defer bra.inclusionListsMu.Unlock()
+	cached, ok := bra.inclusionLists.Get(blockHash)
+	if !ok {
+		return
+	}
+	cached.satisfied = &satisfied
+	bra.inclusionLists.Add(blockHash, cached)
 }
 
 const balWarmupStorageChunkSize = 64
@@ -478,6 +534,19 @@ func (bra *BlockReadAheader) warmTxns(ctx context.Context, db kv.RoDB, txns type
 
 func (bra *BlockReadAheader) ReadBodyWithTransactions(blockHash common.Hash) (*types.Body, bool) {
 	return bra.bodies.Get(blockHash)
+}
+
+func (bra *BlockReadAheader) ReadInclusionList(blockHash common.Hash) (types.Transactions, bool) {
+	cached, ok := bra.inclusionLists.Get(blockHash)
+	return cached.txns, ok
+}
+
+func (bra *BlockReadAheader) ReadInclusionListResult(blockHash common.Hash) (bool, bool) {
+	cached, ok := bra.inclusionLists.Get(blockHash)
+	if !ok || cached.satisfied == nil {
+		return false, false
+	}
+	return *cached.satisfied, true
 }
 
 func (bra *BlockReadAheader) ReadBlockWithSenders(blockHash common.Hash) (*types.Block, bool) {

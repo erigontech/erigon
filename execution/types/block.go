@@ -830,6 +830,10 @@ type Block struct {
 	transactions Transactions
 	withdrawals  []*Withdrawal
 
+	// il is the EIP-7805 inclusion list; it is not part of the block's
+	// RLP encoding or hash.
+	il Transactions
+
 	// bal is the EIP-7928 sidecar. The header carries its commitment; the
 	// sidecar itself is not part of the block's RLP encoding or hash.
 	bal *BlockAccessListSidecar
@@ -1410,6 +1414,9 @@ func (b *Block) BlockAccessList() BlockAccessList { return b.bal.BlockAccessList
 // BlockAccessListSidecar returns the block's immutable EIP-7928 sidecar.
 func (b *Block) BlockAccessListSidecar() *BlockAccessListSidecar { return b.bal }
 
+// InclusionList returns the block's inclusion list.
+func (b *Block) InclusionList() Transactions { return b.il }
+
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
 func (b *Block) HeaderNoCopy() *Header { return b.header }
@@ -1570,12 +1577,18 @@ func (b *Block) Copy() *Block {
 		}
 	}
 
+	var inclusionList Transactions
+	if b.il != nil {
+		inclusionList = CopyTxs(b.il)
+	}
+
 	newB := &Block{
 		header:       CopyHeader(b.header),
 		uncles:       uncles,
 		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
 		bal:          b.bal.copy(),
+		il:           inclusionList,
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1594,6 +1607,7 @@ func (b *Block) WithSeal(header *Header) *Block {
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
 		bal:          b.bal,
+		il:           b.il,
 	}
 }
 
@@ -1606,6 +1620,22 @@ func (b *Block) WithBlockAccessListSidecar(bal *BlockAccessListSidecar) *Block {
 		withdrawals:        b.withdrawals,
 		bal:                bal,
 		binaryTransactions: b.binaryTransactions,
+		il:                 b.il,
+	}
+	newB.size.Store(b.size.Load())
+	return newB
+}
+
+// WithInclusionList returns a block sharing b's immutable data with the supplied inclusion list.
+func (b *Block) WithInclusionList(il Transactions) *Block {
+	newB := &Block{
+		header:             b.header,
+		transactions:       b.transactions,
+		uncles:             b.uncles,
+		withdrawals:        b.withdrawals,
+		bal:                b.bal,
+		binaryTransactions: b.binaryTransactions,
+		il:                 il,
 	}
 	newB.size.Store(b.size.Load())
 	return newB
