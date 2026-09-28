@@ -1108,6 +1108,11 @@ var (
 		Usage: "set the cors' allow credentials",
 		Value: false,
 	}
+	BeaconApiForceClientGraffitiFlag = cli.BoolFlag{
+		Name:  "beacon.api.force-client-graffiti",
+		Usage: "use the validator-supplied graffiti verbatim instead of prefixing it with the EL+CL client identification segment",
+		Value: false,
+	}
 	BeaconApiAllowMethodsFlag = cli.StringSliceFlag{
 		Name:  "beacon.api.cors.allow-methods",
 		Usage: "set the cors' allow methods",
@@ -1843,6 +1848,7 @@ func setBeaconAPI(ctx *cli.Command, cfg *ethconfig.Config) error {
 	cfg.CaplinConfig.BeaconAPIRouter.AllowedMethods = ctx.StringSlice(BeaconApiAllowMethodsFlag.Name)
 	cfg.CaplinConfig.BeaconAPIRouter.AllowedOrigins = ctx.StringSlice(BeaconApiAllowOriginsFlag.Name)
 	cfg.CaplinConfig.BeaconAPIRouter.AllowCredentials = ctx.Bool(BeaconApiAllowCredentialsFlag.Name)
+	cfg.CaplinConfig.BeaconAPIRouter.ForceClientGraffiti = ctx.Bool(BeaconApiForceClientGraffitiFlag.Name)
 	return nil
 }
 

@@ -103,16 +103,50 @@ const (
 // produced block still reaches attesters in time to earn the proposer boost.
 const payloadPublicationDivisor = 4
 
-// defaultGraffiti is used when the validator does not specify a graffiti. It follows the
-// client-version graffiti standard, encoding the execution and consensus client codes and
-// their commit prefixes so client-diversity tooling can attribute proposed blocks. See
+// identificationSegment builds the client-version graffiti standard's EL+CL code and commit
+// prefix segment, so client-diversity tooling can attribute proposed blocks. See
 // https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
-func (a *ApiHandler) defaultGraffiti() common.Hash {
-	graffiti := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
+func (a *ApiHandler) identificationSegment() string {
+	segment := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
 	if el := a.executionClientVersion(); el != nil {
-		graffiti = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + graffiti
+		segment = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + segment
 	}
-	return graffitiFromString(graffiti)
+	return segment
+}
+
+// defaultGraffiti is used when the validator does not specify a graffiti.
+func (a *ApiHandler) defaultGraffiti() common.Hash {
+	return graffitiFromString(a.identificationSegment())
+}
+
+// combinedGraffiti prefixes the identification segment (see defaultGraffiti) to a
+// caller-supplied graffiti. The segment always occupies a fixed offset at the start of the
+// 32-byte graffiti field, so client-diversity tooling can read it without a length-dependent
+// lookup; the caller's own text is truncated to whatever room remains instead.
+func (a *ApiHandler) combinedGraffiti(custom common.Hash) common.Hash {
+	segment := a.identificationSegment()
+	customText := bytes.TrimRight(custom[:], "\x00")
+	if len(customText) == 0 {
+		return graffitiFromString(segment)
+	}
+	if available := len(custom) - len(segment) - 1; len(customText) > available {
+		customText = customText[:available]
+	}
+	return graffitiFromString(segment + " " + string(customText))
+}
+
+// requestGraffiti resolves the graffiti for a block-production request: the identification
+// standard applies both when the caller omits graffiti entirely and, by default, when the
+// caller supplies one, unless the operator opted out via --beacon.api.force-client-graffiti,
+// in which case caller-supplied graffiti is used verbatim.
+func (a *ApiHandler) requestGraffiti(hasCustom bool, custom common.Hash) common.Hash {
+	if !hasCustom {
+		return a.defaultGraffiti()
+	}
+	if a.routerCfg.ForceClientGraffiti {
+		return custom
+	}
+	return a.combinedGraffiti(custom)
 }
 
 // elClientVersionUnavailable is a sentinel cached when the execution client does not
@@ -601,9 +635,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	}
 	var graffiti common.Hash
 	if r.URL.Query().Has("graffiti") {
-		graffiti = common.HexToHash(r.URL.Query().Get("graffiti"))
+		graffiti = a.requestGraffiti(true, common.HexToHash(r.URL.Query().Get("graffiti")))
 	} else {
-		graffiti = a.defaultGraffiti()
+		graffiti = a.requestGraffiti(false, common.Hash{})
 	}
 
 	targetSlotStr := chi.URLParam(r, "slot")

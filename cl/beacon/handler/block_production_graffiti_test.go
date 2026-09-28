@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/version"
@@ -60,14 +62,14 @@ func TestFetchExecutionClientVersion(t *testing.T) {
 		ctrl := gomock.NewController(t)
 		engine := execution_client.NewMockExecutionEngine(ctrl)
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
-			Return([]engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil).
+			Return([]engine_types.ClientVersionV1{{Code: "EG", Commit: "0xc3d4e5f6"}}, nil).
 			Times(1)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
 		a.fetchExecutionClientVersion()
 		got := a.elClientVersion.Load()
 		require.NotNil(t, got)
-		require.Equal(t, "GE", got.Code)
+		require.Equal(t, "EG", got.Code)
 	})
 
 	t.Run("method-not-found is cached as unavailable", func(t *testing.T) {
@@ -101,7 +103,7 @@ func TestFetchExecutionClientVersion(t *testing.T) {
 			engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
 				Return(nil, errors.New("timeout")),
 			engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
-				Return([]engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil),
+				Return([]engine_types.ClientVersionV1{{Code: "EG", Commit: "0xc3d4e5f6"}}, nil),
 		)
 
 		a := &ApiHandler{engine: engine, version: "1.2.3"}
@@ -110,7 +112,7 @@ func TestFetchExecutionClientVersion(t *testing.T) {
 		a.fetchExecutionClientVersion()
 		got := a.elClientVersion.Load()
 		require.NotNil(t, got)
-		require.Equal(t, "GE", got.Code)
+		require.Equal(t, "EG", got.Code)
 	})
 }
 
@@ -119,14 +121,14 @@ func TestDefaultGraffiti(t *testing.T) {
 
 	t.Run("cached execution client version yields full graffiti", func(t *testing.T) {
 		a := &ApiHandler{version: "1.2.3"}
-		a.elClientVersion.Store(&engine_types.ClientVersionV1{Code: "GE", Commit: "0xc3d4e5f6"})
-		require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
+		a.elClientVersion.Store(&engine_types.ClientVersionV1{Code: "EG", Commit: "0xc3d4e5f6"})
+		require.Equal(t, "EGc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
 	})
 
 	t.Run("over-long execution client code is clamped to two bytes", func(t *testing.T) {
 		a := &ApiHandler{version: "1.2.3"}
-		a.elClientVersion.Store(&engine_types.ClientVersionV1{Code: "GETH", Commit: "0xc3d4e5f6"})
-		require.Equal(t, "GEc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
+		a.elClientVersion.Store(&engine_types.ClientVersionV1{Code: "EGXX", Commit: "0xc3d4e5f6"})
+		require.Equal(t, "EGc3d4"+caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
 	})
 
 	t.Run("cached-unavailable yields consensus-only", func(t *testing.T) {
@@ -147,7 +149,7 @@ func TestDefaultGraffiti(t *testing.T) {
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
 			DoAndReturn(func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
 				<-release
-				return []engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil
+				return []engine_types.ClientVersionV1{{Code: "EG", Commit: "0xc3d4e5f6"}}, nil
 			}).
 			Times(1)
 
@@ -156,7 +158,7 @@ func TestDefaultGraffiti(t *testing.T) {
 		require.Equal(t, caplinClientCode+clCommit, graffitiText(a.defaultGraffiti()))
 		close(release)
 		require.Eventually(t, func() bool {
-			return graffitiText(a.defaultGraffiti()) == "GEc3d4"+caplinClientCode+clCommit
+			return graffitiText(a.defaultGraffiti()) == "EGc3d4"+caplinClientCode+clCommit
 		}, time.Second, time.Millisecond)
 	})
 
@@ -167,7 +169,7 @@ func TestDefaultGraffiti(t *testing.T) {
 		engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
 			DoAndReturn(func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
 				<-release
-				return []engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil
+				return []engine_types.ClientVersionV1{{Code: "EG", Commit: "0xc3d4e5f6"}}, nil
 			}).
 			Times(1)
 
@@ -181,7 +183,7 @@ func TestDefaultGraffiti(t *testing.T) {
 		wg.Wait() // returns while the engine call is still blocked, proving proposals never block on it
 		close(release)
 		require.Eventually(t, func() bool {
-			return graffitiText(a.defaultGraffiti()) == "GEc3d4"+caplinClientCode+clCommit
+			return graffitiText(a.defaultGraffiti()) == "EGc3d4"+caplinClientCode+clCommit
 		}, time.Second, time.Millisecond)
 	})
 
@@ -193,7 +195,7 @@ func TestDefaultGraffiti(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			engine := execution_client.NewMockExecutionEngine(ctrl)
 			engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
-				Return([]engine_types.ClientVersionV1{{Code: "GE", Commit: "0xc3d4e5f6"}}, nil).
+				Return([]engine_types.ClientVersionV1{{Code: "EG", Commit: "0xc3d4e5f6"}}, nil).
 				Times(1)
 
 			a := &ApiHandler{engine: engine, version: "1.2.3"}
@@ -211,5 +213,88 @@ func TestDefaultGraffiti(t *testing.T) {
 				return a.elClientVersion.Load() != nil && !a.elClientVersionFetching.Load()
 			}, 200*time.Millisecond, time.Millisecond)
 		}
+	})
+}
+
+func TestCombinedGraffiti(t *testing.T) {
+	clCommit := graffitiCommitPrefix(version.GitCommit)
+
+	withELVersion := func() *ApiHandler {
+		a := &ApiHandler{version: "1.2.3"}
+		a.elClientVersion.Store(&engine_types.ClientVersionV1{Code: "EG", Commit: "0xc3d4e5f6"})
+		return a
+	}
+
+	t.Run("short custom graffiti is prefixed with the full EL+CL segment", func(t *testing.T) {
+		a := withELVersion()
+		custom := graffitiFromString("pool.eth")
+		got := graffitiText(a.combinedGraffiti(custom))
+		require.Equal(t, "EGc3d4"+caplinClientCode+clCommit+" pool.eth", got)
+	})
+
+	t.Run("custom graffiti is truncated to fit the 32-byte field", func(t *testing.T) {
+		a := withELVersion()
+		segment := "EGc3d4" + caplinClientCode + clCommit // 12 bytes
+		var zero common.Hash
+		available := len(zero) - len(segment) - 1 // 19 bytes left for custom text + separator
+		long := strings.Repeat("x", available+5)
+		custom := graffitiFromString(long)
+
+		got := graffitiText(a.combinedGraffiti(custom))
+
+		require.Equal(t, segment+" "+long[:available], got)
+		require.LessOrEqual(t, len(got), len(zero))
+	})
+
+	t.Run("empty custom graffiti yields the identification segment with no trailing separator", func(t *testing.T) {
+		a := withELVersion()
+		got := graffitiText(a.combinedGraffiti(common.Hash{}))
+		require.Equal(t, "EGc3d4"+caplinClientCode+clCommit, got)
+	})
+
+	t.Run("consensus-only segment leaves more room for custom graffiti", func(t *testing.T) {
+		a := &ApiHandler{version: "1.2.3"}     // no cached EL version: consensus-only segment
+		segment := caplinClientCode + clCommit // 6 bytes
+		var zero common.Hash
+		available := len(zero) - len(segment) - 1 // 25 bytes left for custom text + separator
+		long := strings.Repeat("y", available+3)
+		custom := graffitiFromString(long)
+
+		got := graffitiText(a.combinedGraffiti(custom))
+
+		require.Equal(t, segment+" "+long[:available], got)
+	})
+}
+
+func TestRequestGraffiti(t *testing.T) {
+	clCommit := graffitiCommitPrefix(version.GitCommit)
+
+	newHandler := func(forceClientGraffiti bool) *ApiHandler {
+		return &ApiHandler{
+			version:   "1.2.3",
+			routerCfg: &beacon_router_configuration.RouterConfiguration{ForceClientGraffiti: forceClientGraffiti},
+		}
+	}
+
+	t.Run("no custom graffiti uses the default regardless of the flag", func(t *testing.T) {
+		for _, force := range []bool{false, true} {
+			a := newHandler(force)
+			got := graffitiText(a.requestGraffiti(false, common.Hash{}))
+			require.Equal(t, caplinClientCode+clCommit, got)
+		}
+	})
+
+	t.Run("custom graffiti is combined by default", func(t *testing.T) {
+		a := newHandler(false)
+		custom := graffitiFromString("pool.eth")
+		got := graffitiText(a.requestGraffiti(true, custom))
+		require.Equal(t, caplinClientCode+clCommit+" pool.eth", got)
+	})
+
+	t.Run("ForceClientGraffiti opts out of combining and returns the caller's graffiti verbatim", func(t *testing.T) {
+		a := newHandler(true)
+		custom := graffitiFromString("pool.eth")
+		got := a.requestGraffiti(true, custom)
+		require.Equal(t, custom, got)
 	})
 }

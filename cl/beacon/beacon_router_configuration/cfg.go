@@ -43,6 +43,11 @@ type RouterConfiguration struct {
 	Node       bool
 	Validator  bool
 	Lighthouse bool
+
+	// ForceClientGraffiti opts out of the client-version graffiti standard for
+	// caller-supplied graffiti: it is used verbatim instead of being prefixed with the
+	// EL+CL identification segment. See ApiHandler.requestGraffiti.
+	ForceClientGraffiti bool
 }
 
 func (r *RouterConfiguration) UnwrapEndpointsList(l []string) error {
