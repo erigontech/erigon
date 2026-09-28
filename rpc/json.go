@@ -106,14 +106,6 @@ func (msg *jsonrpcMessage) errorResponse(err error) *jsonrpcMessage {
 	return resp
 }
 
-// fastJSONMarshalerTo encodes an RPC result straight into the response stream. Only a
-// type above rpc/jsonstream can name the stream; a type below it implements encoding.TextAppender
-// instead and the stream quotes the text. An implementation that fails after its first write
-// leaves part of the result behind, so that response carries both result and error.
-type fastJSONMarshalerTo interface {
-	MarshalFastJSONTo(s *jsonstream.StackStream) error
-}
-
 // writeResponse streams result into stream as the response; a result that fails to encode becomes the error.
 // The id is copied verbatim, so unlike json.Marshal it keeps '<', '>', '&' and U+2028/2029 unescaped.
 func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) error {
@@ -121,7 +113,7 @@ func (msg *jsonrpcMessage) writeResponse(stream jsonstream.Stream, result any) e
 		if isNilPointer(result) {
 			return json.NewEncoder(encoderWriter{rs}).Encode(result)
 		}
-		if fm, ok := result.(fastJSONMarshalerTo); ok {
+		if fm, ok := result.(jsonstream.Marshaler); ok {
 			if err := fm.MarshalFastJSONTo(rs.Open()); err != nil {
 				return err
 			}

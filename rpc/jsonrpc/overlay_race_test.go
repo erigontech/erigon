@@ -1066,7 +1066,7 @@ func TestTraceRawTransactionUsesHeaderCacheInCommittedView(t *testing.T) {
 		err:             errors.New("unexpected header database read"),
 	}
 
-	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	encoded, _, _ := signedTransferAtLatest(t, m)
 	result, err := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{}).RawTransaction(m.Ctx, encoded, []string{TraceTypeTrace})
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -1546,6 +1546,17 @@ func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
 	err := api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, stream)
 
 	require.NoError(t, err)
+}
+
+// TestTraceFilter_OmittedBoundsUseExecutionProgress pins that both omitted
+// bounds resolve to the executed tip, not to a forkchoice head ahead of it.
+func TestTraceFilter_OmittedBoundsUseExecutionProgress(t *testing.T) {
+	m, _ := newBlockAheadOfExecutionTester(t)
+	api := newTraceApiForTest(m)
+
+	stream := jsonstream.New(nil)
+	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, stream))
+	require.Equal(t, []int{overlayRaceChainSize}, blockNumbersFromTraces(t, stream.Buffer()))
 }
 
 // TestGetModifiedAccountsByHash_FutureStartBlockErrors pins that ByHash rejects
@@ -2122,7 +2133,7 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 			name: "graphql_getBlockDetails",
 			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
 				api := NewGraphQLAPI(h.base, db, newEthApiForTest(h.base, db, nil, nil), nil, &rpccfg.GraphQLApiConfig{})
-				return api.GetBlockDetails(h.m.Ctx, head(h))
+				return api.GetBlockDetails(h.m.Ctx, head(h), nil)
 			},
 			hashOf: detailsHash,
 		},
@@ -2664,7 +2675,7 @@ func TestGraphQLGetBlockDetails_PinsOverlayView(t *testing.T) {
 	base, m, overlayHeader := newOverlayReceiptsUnpublishTestAPI(t)
 	api := NewGraphQLAPI(base, m.DB, newEthApiForTest(base, m.DB, nil, nil), nil, &rpccfg.GraphQLApiConfig{})
 
-	details, err := api.GetBlockDetails(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	details, err := api.GetBlockDetails(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()), nil)
 	require.NoError(t, err)
 	require.NotNil(t, details)
 }

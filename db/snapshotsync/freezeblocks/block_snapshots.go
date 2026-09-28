@@ -1017,7 +1017,7 @@ func RemoveIncompatibleIndices(dirs datadir.Dirs) error {
 	for _, fPath := range l {
 		index, err := recsplit.OpenIndex(fPath)
 		if err != nil {
-			if errors.Is(err, recsplit.IncompatibleErr) {
+			if errors.Is(err, recsplit.ErrIncompatible) {
 				_, fName := filepath.Split(fPath)
 				if err = dir2.RemoveFile(fPath); err != nil {
 					log.Warn("Removing incompatible index", "file", fName, "err", err)

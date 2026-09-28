@@ -19,6 +19,7 @@ package consensus_tests
 import (
 	"fmt"
 	"io/fs"
+	"os"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -26,11 +27,20 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/spectest/spectest"
 	"github.com/erigontech/erigon/cl/transition/machine"
 )
 
 type TransitionCore struct{}
+
+func readTransitionPostState(root fs.FS, version clparams.StateVersion) (*state.CachingBeaconState, bool, error) {
+	postState, err := spectest.ReadBeaconState(root, version, spectest.PostSsz)
+	if os.IsNotExist(err) {
+		return nil, true, nil
+	}
+	return postState, false, err
+}
 
 func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err error) {
 	var meta struct {
@@ -45,7 +55,7 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 	}
 	startState, err := spectest.ReadBeaconState(root, c.Version()-1, spectest.PreSsz)
 	require.NoError(t, err)
-	stopState, err := spectest.ReadBeaconState(root, c.Version(), spectest.PostSsz)
+	stopState, expectedError, err := readTransitionPostState(root, c.Version())
 	require.NoError(t, err)
 	switch c.Version() {
 	case clparams.AltairVersion:
@@ -65,6 +75,7 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 	}
 	startSlot := startState.Slot()
 	blockIndex := 0
+	var transitionErr error
 	for {
 		testSlot, err := spectest.ReadBlockSlot(root, blockIndex)
 		require.NoError(t, err)
@@ -81,9 +92,18 @@ func (b *TransitionCore) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err
 			break
 		}
 		blockIndex++
-		if err := machine.TransitionState(c.Machine, startState, block); err != nil {
-			return fmt.Errorf("cannot transition state: %w. slot=%d. start_slot=%d", err, block.Block.Slot, startSlot)
+		transitionErr = machine.TransitionState(c.Machine, startState, block)
+		if transitionErr != nil {
+			if !expectedError {
+				return fmt.Errorf("cannot transition state: %w. slot=%d. start_slot=%d", transitionErr, block.Block.Slot, startSlot)
+			}
+			break
 		}
+	}
+	if expectedError {
+		require.Error(t, transitionErr)
+		require.EqualValues(t, meta.BlockCount, blockIndex, "only the final block may be invalid")
+		return nil
 	}
 	expectedRoot, err := stopState.HashSSZ()
 	require.NoError(t, err)
