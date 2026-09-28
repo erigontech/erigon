@@ -434,8 +434,8 @@ func (srv *Server) Start(ctx context.Context, logger log.Logger) (err error) {
 func (srv *Server) updateLocalNodeStaticAddrCache() {
 	localNodeAddr := srv.localnode.Node().URLv4()
 	srv.localnodeAddrCache.Store(&localNodeAddr)
-
 }
+
 func (srv *Server) setupLocalNode() error {
 	// Create the devp2p handshake.
 	pubkey := crypto.MarshalPubkey(&srv.PrivateKey.PublicKey)

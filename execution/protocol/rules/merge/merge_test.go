@@ -49,11 +49,11 @@ func (r readerMock) CurrentHeader() *types.Header {
 	return nil
 }
 
-func (cr readerMock) CurrentFinalizedHeader() *types.Header {
+func (r readerMock) CurrentFinalizedHeader() *types.Header {
 	return nil
 }
 
-func (cr readerMock) CurrentSafeHeader() *types.Header {
+func (r readerMock) CurrentSafeHeader() *types.Header {
 	return nil
 }
 

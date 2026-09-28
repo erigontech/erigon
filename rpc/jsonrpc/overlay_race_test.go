@@ -1548,6 +1548,17 @@ func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestTraceFilter_OmittedBoundsUseExecutionProgress pins that both omitted
+// bounds resolve to the executed tip, not to a forkchoice head ahead of it.
+func TestTraceFilter_OmittedBoundsUseExecutionProgress(t *testing.T) {
+	m, _ := newBlockAheadOfExecutionTester(t)
+	api := newTraceApiForTest(m)
+
+	stream := jsonstream.New(nil)
+	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, stream))
+	require.Equal(t, []int{overlayRaceChainSize}, blockNumbersFromTraces(t, stream.Buffer()))
+}
+
 // TestGetModifiedAccountsByHash_FutureStartBlockErrors pins that ByHash rejects
 // a not-yet-executed start block like its ByNumber twin, instead of returning
 // a silent result from a clamped txnum range.
@@ -2122,7 +2133,7 @@ func TestPublishCycleDuringTxAcquisition(t *testing.T) {
 			name: "graphql_getBlockDetails",
 			call: func(t *testing.T, h *overlayAheadHarness, db kv.TemporalRoDB) (any, error) {
 				api := NewGraphQLAPI(h.base, db, newEthApiForTest(h.base, db, nil, nil), nil, &rpccfg.GraphQLApiConfig{})
-				return api.GetBlockDetails(h.m.Ctx, head(h))
+				return api.GetBlockDetails(h.m.Ctx, head(h), nil)
 			},
 			hashOf: detailsHash,
 		},
@@ -2664,7 +2675,7 @@ func TestGraphQLGetBlockDetails_PinsOverlayView(t *testing.T) {
 	base, m, overlayHeader := newOverlayReceiptsUnpublishTestAPI(t)
 	api := NewGraphQLAPI(base, m.DB, newEthApiForTest(base, m.DB, nil, nil), nil, &rpccfg.GraphQLApiConfig{})
 
-	details, err := api.GetBlockDetails(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	details, err := api.GetBlockDetails(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()), nil)
 	require.NoError(t, err)
 	require.NotNil(t, details)
 }

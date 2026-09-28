@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
@@ -83,7 +84,7 @@ func (al accessList) addSlot(address common.Address, slot common.Hash) {
 
 // cloneExcluding copies al without the excluded addresses, sharing no maps with
 // it and renumbering order so it stays dense. The exclusion is not redundant:
-// the SLOAD/SSTORE path of OnOpcode adds the executing address without
+// the SLOAD/SSTORE path of OnOpcodeV2 adds the executing address without
 // consulting excl, so an excluded address can be in al.
 func (al accessList) cloneExcluding(excl map[common.Address]struct{}) accessList {
 	byOrder := make([]common.Address, len(al))
@@ -230,7 +231,7 @@ func (a *AccessListTracer) markUsedBeforeCreation(addr common.Address) {
 	a.usedBeforeCreation[addr] = struct{}{}
 }
 
-// accessListOpcodes are the only opcodes OnOpcode reacts to; the rest fall through
+// accessListOpcodes are the only opcodes OnOpcodeV2 reacts to; the rest fall through
 // its switch, so the interpreter is told not to deliver them at all.
 var accessListOpcodes = tracing.NewOpcodeMask(
 	byte(vm.SLOAD), byte(vm.SSTORE),
@@ -242,12 +243,12 @@ var accessListOpcodes = tracing.NewOpcodeMask(
 
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
-		OnOpcode:     a.OnOpcode,
+		OnOpcodeV2:   a.OnOpcodeV2,
 		OnOpcodeMask: accessListOpcodes,
 	}
 }
 
-func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (a *AccessListTracer) OnOpcodeV2(pc uint64, opcode byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 	// StackData crosses an interface, so it cannot inline: keep it off the
 	// opcodes that don't read the stack.
 	switch op := vm.OpCode(opcode); op {

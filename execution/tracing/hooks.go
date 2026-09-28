@@ -34,6 +34,7 @@ import (
 type OpContext interface {
 	MemoryData() []byte
 	StackData() []uint256.Int
+	Gas() mdgas.MdGas
 	Caller() accounts.Address
 	Address() accounts.Address
 	CallValue() uint256.Int

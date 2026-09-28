@@ -27,11 +27,16 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/protocol/misc"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -63,9 +68,9 @@ func runTrace(tracer *tracers.Tracer, vmctx *vmContext, chaincfg *chain.Config, 
 	}
 
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), nil, gasLimit, nil, nil), contract.Caller())
-	tracer.OnEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, []byte{}, startGas.Total(), value, contractCode)
-	ret, endGas, _, err := env.Run(contract, startGas, []byte{}, false)
-	tracer.OnExit(0, ret, startGas.Total()-endGas.Total(), err, true)
+	tracer.EmitEnter(0, byte(vm.CALL), contract.Caller(), contract.Address(), false, []byte{}, startGas, value, contractCode)
+	ret, endGas, gasUsed, err := env.Run(contract, startGas, []byte{}, false)
+	tracer.EmitExit(0, ret, gasUsed, err, true)
 	// Rest gas assumes no refund
 	tracer.EmitTxEnd(&types.Receipt{GasUsed: gasLimit - endGas.Total()}, mdgas.TxnGasUsage{}, nil)
 	if err != nil {
@@ -182,11 +187,11 @@ func TestHaltBetweenSteps(t *testing.T) {
 		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
 	}
 	tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), new(uint256.Int), 0, new(uint256.Int), nil), accounts.ZeroAddress)
-	tracer.OnEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, []byte{}, 0, uint256.Int{}, []byte{})
-	tracer.OnOpcode(0, 0, 0, 0, scope, nil, 0, nil)
+	tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, []byte{}, mdgas.MdGas{}, uint256.Int{}, []byte{})
+	tracer.EmitOpcode(0, 0, mdgas.MdGas{}, mdgas.MdGas{}, scope, nil, 0, nil)
 	timeout := errors.New("stahp")
 	tracer.Stop(timeout)
-	tracer.OnOpcode(0, 0, 0, 0, scope, nil, 0, nil)
+	tracer.EmitOpcode(0, 0, mdgas.MdGas{}, mdgas.MdGas{}, scope, nil, 0, nil)
 
 	if _, err := tracer.GetResult(); !strings.Contains(err.Error(), timeout.Error()) {
 		t.Errorf("Expected timeout error, got %v", err)
@@ -204,8 +209,8 @@ func TestNoStepExec(t *testing.T) {
 		}
 		env := vm.NewEVM(evmtypes.BlockContext{BlockNumber: 1}, evmtypes.TxContext{GasPrice: *uint256.NewInt(100)}, state.New(state.NewNoopReader()), chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
 		tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, accounts.ZeroAddress.Value(), new(uint256.Int), 0, new(uint256.Int), nil), accounts.ZeroAddress)
-		tracer.OnEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, []byte{}, 1000, uint256.Int{}, []byte{})
-		tracer.OnExit(0, nil, 0, nil, false)
+		tracer.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, []byte{}, mdgas.MdGas{Execution: 1000}, uint256.Int{}, []byte{})
+		tracer.EmitExit(0, nil, mdgas.MdGasUsage{}, nil, false)
 		ret, err := tracer.GetResult()
 		if err != nil {
 			t.Fatal(err)
@@ -268,23 +273,128 @@ func TestEnterExit(t *testing.T) {
 		t.Fatal(err)
 	}
 	// test that the enter and exit method are correctly invoked and the values passed
-	tracer, err := newJsTracer("{enters: 0, exits: 0, enterGas: 0, gasUsed: 0, step: function() {}, fault: function() {}, result: function() { return {enters: this.enters, exits: this.exits, enterGas: this.enterGas, gasUsed: this.gasUsed} }, enter: function(frame) { this.enters++; this.enterGas = frame.getGas(); }, exit: function(res) { this.exits++; this.gasUsed = res.getGasUsed(); }}", new(tracers.Context), nil)
+	tracer, err := newJsTracer(`{
+		enters: 0, exits: 0,
+		step: function() {},
+		fault: function() {},
+		result: function() {
+			return {enters: this.enters, exits: this.exits, enterGas: this.enterGas,
+				stateGasReservoir: this.stateGas, gasUsed: this.gasUsed,
+				stateGasUsed: this.stateGasUsed};
+		},
+		enter: function(frame) {
+			this.enters++;
+			this.enterGas = frame.getGas();
+			this.stateGas = frame.getStateGas();
+		},
+		exit: function(res) {
+			this.exits++;
+			this.gasUsed = res.getGasUsed();
+			this.stateGasUsed = res.getStateGasUsed();
+		}
+	}`, new(tracers.Context), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	scope := &vm.CallContext{
 		Contract: *vm.NewContract(accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, uint256.Int{}),
 	}
-	tracer.OnEnter(1, byte(vm.CALL), scope.Contract.Caller(), scope.Contract.Address(), false, []byte{}, 1000, uint256.Int{}, []byte{})
-	tracer.OnExit(1, []byte{}, 400, nil, false)
+	tracer.EmitEnter(1, byte(vm.CALL), scope.Contract.Caller(), scope.Contract.Address(), false, []byte{}, mdgas.MdGas{Execution: 1000, State: 200}, uint256.Int{}, []byte{})
+	tracer.EmitExit(1, []byte{}, mdgas.MdGasUsage{Execution: 400, State: -30, StateSpill: 10}, nil, false)
 
 	have, err := tracer.GetResult()
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := `{"enters":1,"exits":1,"enterGas":1000,"gasUsed":400}`
+	want := `{"enters":1,"exits":1,"enterGas":1000,"stateGasReservoir":200,"gasUsed":400,"stateGasUsed":-30}`
 	if string(have) != want {
 		t.Errorf("Number of invocations of enter() and exit() is wrong. Have %s, want %s\n", have, want)
+	}
+}
+
+func TestFaultStateGasWithoutStep(t *testing.T) {
+	tracer, err := newJsTracer(`{
+		fault: function(log) {
+			this.gas = [log.getGas(), log.getStateGas(), log.getCost(), log.getStateGasCost()];
+		},
+		result: function() { return this.gas; }
+	}`, nil, nil)
+	require.NoError(t, err)
+	tracer.EmitFault(0, byte(vm.SSTORE), mdgas.MdGas{Execution: 100, State: 200}, mdgas.MdGas{Execution: 10, State: 300}, nil, 1, vm.ErrOutOfGas)
+	result, err := tracer.GetResult()
+	require.NoError(t, err)
+	require.JSONEq(t, `[100,200,10,300]`, string(result))
+}
+
+func TestLegacyCallGasUsage(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		clear bool
+	}{
+		{name: "state spill"},
+		{name: "state refill", clear: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tracer, err := newJsTracer("callTracerLegacy", nil, nil)
+			require.NoError(t, err)
+			ibs := state.New(state.NewNoopReader())
+			t.Cleanup(ibs.Close)
+			parent := accounts.InternAddress(common.HexToAddress("0x2000"))
+			child := accounts.InternAddress(common.HexToAddress("0x1000"))
+			require.NoError(t, ibs.SetCode(parent, []byte{
+				byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0),
+				byte(vm.PUSH2), 0x10, 0x00, byte(vm.GAS), byte(vm.CALL), byte(vm.POP), byte(vm.STOP),
+			}, tracing.CodeChangeUnspecified))
+			value := byte(1)
+			if tc.clear {
+				require.NoError(t, ibs.SetState(child, accounts.InternKey(common.Hash{}), *uint256.NewInt(1)))
+				value = 0
+			}
+			require.NoError(t, ibs.SetCode(child, []byte{
+				byte(vm.PUSH1), value, byte(vm.PUSH0), byte(vm.SSTORE), byte(vm.STOP),
+			}, tracing.CodeChangeUnspecified))
+			var childUsage mdgas.MdGasUsage
+			onExit := tracer.OnExitV2
+			tracer.OnExitV2 = func(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
+				if depth == 1 {
+					childUsage = gasUsed
+				}
+				onExit(depth, output, gasUsed, err, reverted)
+			}
+			blockCtx := evmtypes.BlockContext{Transfer: misc.Transfer}
+			env := vm.NewEVM(blockCtx, evmtypes.TxContext{}, ibs, chain.AllProtocolChanges, vm.Config{Tracer: tracer.Hooks})
+			tracer.OnTxStart(env.GetVMContext(), types.NewTransaction(0, parent.Value(), nil, 500_000, nil, nil), accounts.ZeroAddress)
+			_, _, _, err = env.Call(accounts.ZeroAddress, parent, nil,
+				mdgas.MdGas{Execution: 500_000, State: params.StateGasPerStorageSet / 2}, uint256.Int{}, false)
+			require.NoError(t, err)
+			if tc.clear {
+				require.Negative(t, childUsage.State)
+			} else {
+				require.Positive(t, childUsage.StateSpill)
+			}
+			tracer.EmitTxEnd(&types.Receipt{}, mdgas.TxnGasUsage{}, nil)
+			result, err := tracer.GetResult()
+			require.NoError(t, err)
+			var output struct {
+				StateGas string `json:"stateGasReservoir"`
+				Calls    []struct {
+					GasUsed      string         `json:"gasUsed"`
+					StateGas     string         `json:"stateGasReservoir"`
+					StateGasUsed *hexutil.Int64 `json:"stateGasUsed"`
+				} `json:"calls"`
+			}
+			require.NoError(t, json.Unmarshal(result, &output))
+			require.Len(t, output.Calls, 1)
+			require.Equal(t, uint256.NewInt(childUsage.Execution).Hex(), output.Calls[0].GasUsed)
+			require.NotNil(t, output.Calls[0].StateGasUsed)
+			require.EqualValues(t, childUsage.State, *output.Calls[0].StateGasUsed)
+			wantStateGas := uint256.NewInt(params.StateGasPerStorageSet / 2).Hex()
+			require.Equal(t, wantStateGas, output.StateGas)
+			require.Equal(t, wantStateGas, output.Calls[0].StateGas)
+			again, err := tracer.GetResult()
+			require.NoError(t, err)
+			require.JSONEq(t, string(result), string(again))
+		})
 	}
 }
 

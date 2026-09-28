@@ -187,7 +187,7 @@ func TestSubscribeLogsIncludesBlockTimestamp(t *testing.T) {
 
 	f.OnNewLogs(event)
 
-	require.Equal(t, hexutil.Uint64(123), (<-logs).BlockTimestamp)
+	require.Equal(t, hexutil.Uint64(123), *(<-logs).BlockTimestamp)
 }
 
 func TestSubscribeLogsPublishesInitializedFilter(t *testing.T) {

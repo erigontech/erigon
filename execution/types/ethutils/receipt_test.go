@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjsontest"
 )
 
 // MarshalReceipt must reuse a Bloom the receipt already carries instead of
@@ -59,11 +60,11 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	config := chain.TestChainBerlinConfig
 
-	fields := MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
+	fields := MarshalReceipt(receipt, txn, config, header, false, false)
 	assert.Equal(t, preset, *fields.LogsBloom)
 
 	receipt.Bloom = types.Bloom{}
-	fields = MarshalReceipt(receipt, txn, config, header, common.HexToHash("0xbeef"), false, false)
+	fields = MarshalReceipt(receipt, txn, config, header, false, false)
 	assert.Equal(t, types.CreateBloom(types.Receipts{receipt}), *fields.LogsBloom)
 }
 
@@ -94,6 +95,22 @@ func TestMarshalSubscribeReceiptKeepsZeroSender(t *testing.T) {
 	receipt := MarshalSubscribeReceipt(reply)
 	require.NotNil(t, receipt.From)
 	assert.Equal(t, common.Address{}, *receipt.From)
+}
+
+// A transfer to the zero address must not look like a contract creation: only an
+// unset "to" marshals to null.
+func TestMarshalSubscribeReceiptKeepsZeroRecipient(t *testing.T) {
+	reply := &remoteproto.SubscribeReceiptsReply{
+		BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+		TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+		To:              gointerfaces.ConvertAddressToH160(common.Address{}),
+	}
+	receipt := MarshalSubscribeReceipt(reply)
+	require.NotNil(t, receipt.To)
+	assert.Equal(t, common.Address{}, *receipt.To)
+
+	reply.To = nil
+	assert.Nil(t, MarshalSubscribeReceipt(reply).To)
 }
 
 // The fast marshaller has to produce the bytes encoding/json produced, field order and
@@ -140,7 +157,7 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 				TransactionIndex:  3,
 			}
 			receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
-			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, receipt.TxHash, true, tc.withBlockTimestamp)
+			r := MarshalReceipt(receipt, &txn, chain.TestChainOsakaConfig, header, true, tc.withBlockTimestamp)
 
 			requireFastJSONMatches(t, r)
 		})
@@ -148,17 +165,15 @@ func TestRPCReceiptMarshalFastJSONTo(t *testing.T) {
 }
 
 // Every Logs shape against encoding/json. MarshalReceipt never builds a nil slice, so only a
-// direct construction reaches the typed-nil branches.
+// direct construction reaches the nil branches.
 func TestRPCReceiptMarshalFastJSONToLogShapes(t *testing.T) {
 	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
-	for name, logs := range map[string]any{
-		"nil types.Logs":    types.Logs(nil),
-		"nil []*Log":        []*types.Log(nil),
-		"nil []*RPCLog":     []*types.RPCLog(nil),
-		"untyped nil":       nil,
-		"nil in types.Logs": types.Logs{nil, {Address: to}},
-		"nil in []*Log":     []*types.Log{{Address: to}, nil},
-		"unknown shape":     []string{"a"},
+	for name, logs := range map[string]types.Logs{
+		"nil":           nil,
+		"empty":         {},
+		"nil element":   {nil, {Address: to}},
+		"stamped log":   {{Address: to, BlockTimestamp: stampedAt(7)}},
+		"unstamped log": {{Address: to}},
 	} {
 		t.Run(name, func(t *testing.T) { requireFastJSONMatches(t, &RPCReceipt{Logs: logs}) })
 	}
@@ -247,11 +262,90 @@ func TestMarshalSubscribeReceiptFullLogs(t *testing.T) {
 			BlockTimestamp:   99,
 		}},
 	})
-	require.Equal(t, []*types.RPCLog{{
-		Log: types.Log{
-			Address: addr, Topics: []common.Hash{topic}, Data: []byte{0x2a}, BlockNumber: 7,
-			TxHash: txHash, TxIndex: 2, BlockHash: blockHash, Index: 3, Removed: true,
-		},
-		BlockTimestamp: 99,
+	require.Equal(t, types.Logs{{
+		Address: addr, Topics: []common.Hash{topic}, Data: []byte{0x2a}, BlockNumber: 7,
+		TxHash: txHash, TxIndex: 2, BlockHash: blockHash, Index: 3, Removed: true,
+		BlockTimestamp: stampedAt(99),
 	}}, r.Logs)
+}
+
+// effectiveGasPrice is the base fee plus the tip, which only the backend can compute. A backend
+// that does not send it yet leaves the base fee as the best approximation available.
+func TestMarshalSubscribeReceiptEffectiveGasPrice(t *testing.T) {
+	for name, tc := range map[string]struct {
+		baseFee, effectiveGasPrice *uint256.Int
+		want                       *uint256.Int
+	}{
+		"effective gas price": {uint256.NewInt(7), uint256.NewInt(9), uint256.NewInt(9)},
+		"base fee only":       {uint256.NewInt(7), nil, uint256.NewInt(7)},
+		"neither":             {nil, nil, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			reply := &remoteproto.SubscribeReceiptsReply{
+				BlockHash:       gointerfaces.ConvertHashToH256(common.Hash{1}),
+				TransactionHash: gointerfaces.ConvertHashToH256(common.Hash{2}),
+			}
+			if tc.baseFee != nil {
+				reply.BaseFee = gointerfaces.ConvertUint256IntToH256(tc.baseFee)
+			}
+			if tc.effectiveGasPrice != nil {
+				reply.EffectiveGasPrice = gointerfaces.ConvertUint256IntToH256(tc.effectiveGasPrice)
+			}
+			got := MarshalSubscribeReceipt(reply).EffectiveGasPrice
+			if tc.want == nil {
+				assert.Nil(t, got)
+				return
+			}
+			require.NotNil(t, got)
+			assert.Equal(t, tc.want, (*uint256.Int)(got))
+		})
+	}
+}
+
+// Every RPCReceipt field says which of the spec's forms it is written as, and the encoder is
+// held to that: a dropped field, a wrong form or a reordered key fails here.
+func TestRPCReceiptMatchesItsTags(t *testing.T) {
+	t.Parallel()
+	addr := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	bloom := types.Bloom{1, 2, 3}
+	status := hexutil.Uint64(1)
+	price := hexutil.U256(*uint256.NewInt(7))
+	blobGas := hexutil.Uint64(9)
+	logs := types.Logs{{
+		Address: addr, Topics: []common.Hash{{0x01}}, Data: []byte{1, 2},
+		BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3,
+		BlockHash: common.HexToHash("0xb10c"), Index: 4, Removed: true,
+		BlockTimestamp: stampedAt(1_750_000_000),
+	}}
+
+	for name, r := range map[string]*RPCReceipt{
+		"every field set": {
+			BlockHash: common.HexToHash("0xb10c"), BlockNumber: 7,
+			TransactionHash: common.HexToHash("0xbeef"), TransactionIndex: 3,
+			From: &addr, To: &addr, Type: 2, GasUsed: 21_000, CumulativeGasUsed: 42_000,
+			ContractAddress: &addr, Logs: logs, LogsBloom: &bloom,
+			EffectiveGasPrice: &price, Status: &status, Root: hexutil.Bytes{9},
+			BlobGasPrice: &price, BlobGasUsed: &blobGas,
+		},
+		"optional fields absent": {Logs: types.Logs{}},
+		// A log no reply stamped leaves blockTimestamp out.
+		"unstamped logs": {Logs: types.Logs{{
+			Address: addr, Topics: []common.Hash{{0x01}}, Data: []byte{1, 2},
+			BlockNumber: 7, TxHash: common.HexToHash("0xbeef"), TxIndex: 3,
+			BlockHash: common.HexToHash("0xb10c"), Index: 4, Removed: true,
+		}}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			want, err := ethjsontest.ExpectedJSON(r)
+			require.NoError(t, err)
+			got, err := jsonstream.Marshal(r)
+			require.NoError(t, err)
+			require.Equal(t, string(want), string(got))
+		})
+	}
+}
+
+func stampedAt(v uint64) *hexutil.Uint64 {
+	h := hexutil.Uint64(v)
+	return &h
 }

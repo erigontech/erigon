@@ -94,8 +94,13 @@ func Put(s Stream) {
 	streamPool.Put(ss)
 }
 
+// Marshaler is a value that writes its own JSON.
+type Marshaler interface {
+	MarshalFastJSONTo(*StackStream) error
+}
+
 // Marshal encodes v into a byte slice the caller owns.
-func Marshal(v interface{ MarshalFastJSONTo(*StackStream) error }) ([]byte, error) {
+func Marshal(v Marshaler) ([]byte, error) {
 	s := Get(nil)
 	defer Put(s)
 	if err := v.MarshalFastJSONTo(s); err != nil {

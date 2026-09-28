@@ -26,6 +26,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -40,7 +41,9 @@ type jsonStructLog struct {
 	Pc            uint64              `json:"pc"`
 	Op            vm.OpCode           `json:"op"`
 	Gas           math.HexOrDecimal64 `json:"gas"`
+	StateGas      uint64              `json:"stateGasReservoir,omitempty"`
 	GasCost       math.HexOrDecimal64 `json:"gasCost"`
+	StateGasCost  uint64              `json:"stateGasCost,omitempty"`
 	Memory        hexutil.Bytes       `json:"memory"`
 	MemorySize    int                 `json:"memSize"`
 	Stack         []hexutil.U256      `json:"stack"`
@@ -60,7 +63,7 @@ type JSONLogger struct {
 // NewJSONLogger creates a new EVM tracer that prints execution steps as JSON objects
 // into the provided stream.
 func NewJSONLogger(cfg *LogConfig, writer io.Writer) *JSONLogger {
-	l := &JSONLogger{json.NewEncoder(writer), cfg, nil}
+	l := &JSONLogger{encoder: json.NewEncoder(writer), cfg: cfg}
 	if l.cfg == nil {
 		l.cfg = &LogConfig{}
 	}
@@ -72,9 +75,9 @@ func (l *JSONLogger) Tracer() *tracers.Tracer {
 		Hooks: &tracing.Hooks{
 			OnTxStart:           l.OnTxStart,
 			OnSystemCallStartV2: l.OnSystemCallStartV2,
-			OnExit:              l.OnExit,
-			OnOpcode:            l.OnOpcode,
-			OnFault:             l.OnFault,
+			OnExitV2:            l.OnExitV2,
+			OnOpcodeV2:          l.OnOpcodeV2,
+			OnFaultV2:           l.OnFaultV2,
 		},
 	}
 }
@@ -87,8 +90,8 @@ func (l *JSONLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-// OnOpcode outputs state information on the logger.
-func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+// OnOpcodeV2 outputs state information on the logger.
+func (l *JSONLogger) OnOpcodeV2(pc uint64, typ byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	stack := scope.StackData()
 	op := vm.OpCode(typ)
@@ -96,8 +99,10 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 	log := jsonStructLog{
 		Pc:            pc,
 		Op:            op,
-		Gas:           math.HexOrDecimal64(gas),
-		GasCost:       math.HexOrDecimal64(cost),
+		Gas:           math.HexOrDecimal64(gas.Execution),
+		GasCost:       math.HexOrDecimal64(cost.Execution),
+		StateGasCost:  cost.State,
+		StateGas:      gas.State,
 		MemorySize:    len(memory),
 		Depth:         depth,
 		RefundCounter: l.env.IntraBlockState.GetRefund(),
@@ -122,22 +127,26 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 	_ = l.encoder.Encode(log) //nolint:errchkjson
 }
 
-func (l *JSONLogger) OnFault(pc uint64, op byte, gas uint64, cost uint64, scope tracing.OpContext, depth int, err error) {
+func (l *JSONLogger) OnFaultV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, depth int, err error) {
 }
 
-func (l *JSONLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
+func (l *JSONLogger) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage, err error, reverted bool) {
 	if depth > 0 {
 		return
 	}
 
 	type endLog struct {
-		Output  string              `json:"output"`
-		GasUsed math.HexOrDecimal64 `json:"gasUsed"`
-		Err     string              `json:"error,omitempty"`
+		Output       string              `json:"output"`
+		GasUsed      math.HexOrDecimal64 `json:"gasUsed"`                // root frame execution gas.
+		StateGasUsed *int64              `json:"stateGasUsed,omitempty"` // amsterdam: signed net root frame state usage.
+		Err          string              `json:"error,omitempty"`
 	}
-	var errMsg string
+	log := endLog{Output: common.Bytes2Hex(output), GasUsed: math.HexOrDecimal64(gasUsed.Execution)}
+	if l.env.Rules.IsAmsterdam {
+		log.StateGasUsed = &gasUsed.State
+	}
 	if err != nil {
-		errMsg = err.Error()
+		log.Err = err.Error()
 	}
-	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), errMsg}) //nolint:errchkjson
+	_ = l.encoder.Encode(log) //nolint:errchkjson
 }

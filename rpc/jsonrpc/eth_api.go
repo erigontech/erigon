@@ -21,11 +21,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/common/dbg"
 	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
+
+	"github.com/erigontech/erigon/common/dbg"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -54,7 +55,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
-	ethapi2 "github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/gasprice"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
@@ -82,7 +82,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
@@ -100,7 +100,7 @@ type EthAPI interface {
 	NewFilter(_ context.Context, crit filters.FilterCriteria) (string, error)
 	UninstallFilter(_ context.Context, index string) (bool, error)
 	GetFilterChanges(_ context.Context, index string) ([]any, error)
-	GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error)
+	GetFilterLogs(ctx context.Context, index string) (types.Logs, error)
 	Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error)
 
 	// Account related (see ./eth_accounts.go)
@@ -117,6 +117,7 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.U256, error)
+	MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, error)
 	BaseFee(ctx context.Context) (*hexutil.U256, error)
 	BlobBaseFee(ctx context.Context) (*hexutil.U256, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
@@ -135,7 +136,7 @@ type EthAPI interface {
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
 	FillTransaction(ctx context.Context, args ethapi.CallArgs) (*ethapi.SignTransactionResult, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
-	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error)
+	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi.StateOverrides, optimizeGas *bool) (*accessListResult, error)
 
 	// Mining related (see ./eth_mining.go)
 	Coinbase(ctx context.Context) (common.Address, error)
@@ -403,7 +404,6 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 		return 0, errors.New("header number not found")
 	}
 	return *number, nil
-
 }
 
 // canonicalHeaderByNumberOrHash resolves the selector and header through tx.
@@ -482,7 +482,7 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 		if oldest == nil || block >= *oldest {
 			return nil
 		}
-		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *oldest)
+		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.ErrPruned, block, *oldest)
 	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
 }
@@ -749,7 +749,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 		return err
 	}
 	if block < amount.PruneTo(latest) {
-		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, amount.PruneTo(latest))
+		return fmt.Errorf("%w: requested block %d, %s from block %d", state.ErrPruned, block, available, amount.PruneTo(latest))
 	}
 	return nil
 }
@@ -793,7 +793,7 @@ func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, b
 		return api.checkPruneHistory(ctx, tx, block)
 	default:
 		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
-		if err == nil || !errors.Is(err, state.PrunedError) {
+		if err == nil || !errors.Is(err, state.ErrPruned) {
 			return err
 		}
 		return api.checkPruneHistory(ctx, tx, block)
