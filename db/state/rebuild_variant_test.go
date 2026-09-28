@@ -61,7 +61,7 @@ const (
 	rebuildVariantAccounts           = 6
 	rebuildVariantSlots              = 4
 	rebuildVariantKeyCollectorBudget = uint64(64 << 20)
-	rebuildVariantHeapGrowthBudget   = uint64(128 << 20)
+	rebuildVariantHeapGrowthBudget   = uint64(192 << 20)
 )
 
 func rebuildVariantAddr(i int) []byte {
