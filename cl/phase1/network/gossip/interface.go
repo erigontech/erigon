@@ -12,9 +12,9 @@ type Gossip interface {
 	// gossip topic without waiting for the network call. The implementation
 	// clones data before returning, so the caller keeps ownership of its
 	// own slice and may reuse or mutate it immediately. It never blocks -
-	// not on queue capacity, and not on shutdown - though it does check an
-	// atomic admission gate, resolve the fork digest, and log synchronously.
-	// A non-nil return means the message was never admitted to the queue
+	// not on queue capacity, and not on shutdown - though it does resolve
+	// the fork digest and log synchronously. A non-nil return means the
+	// message was never admitted to the queue
 	// (full, shut down, already expired, or the fork digest could not be
 	// resolved) - the caller knows this before it responds and should
 	// surface it, rather than the eventual network outcome, which this

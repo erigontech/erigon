@@ -22,10 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"runtime"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -93,12 +91,13 @@ var publishAcceptedCounter = metrics.GetOrCreateCounterVec(
 )
 
 // publishOutcomeCounter records exactly one terminal outcome per accepted
-// job: handoff_ok (the library accepted the local publish - not remote
-// delivery, which this package cannot observe), publish_error, panic,
-// expired (still queued past its deadline), or shutdown (drained,
-// unpublished, when the manager stopped). Every job admitted per
-// publishAcceptedCounter reaches exactly one of these; at quiescence the
-// sums must be equal.
+// job that the worker actually processes: handoff_ok (the library accepted
+// the local publish - not remote delivery, which this package cannot
+// observe), publish_error, panic, or expired (still queued past its
+// deadline). During normal operation every accepted job reaches exactly
+// one of these, so the sums are equal at quiescence; a job still queued
+// when the manager shuts down reaches none of them, since nothing is left
+// to drain it - that's the one case where the sums are allowed to diverge.
 var publishOutcomeCounter = metrics.GetOrCreateCounterVec(
 	"caplin_gossip_publish_outcome_total",
 	[]string{"topic", "outcome"},
@@ -139,41 +138,20 @@ type GossipManager struct {
 	// nowFunc returns the current time for expiry checks; time.Now unless
 	// overridden in tests.
 	nowFunc func() time.Time
-	// workerDone is closed once publishWorker has returned - after its
-	// shutdown drain has run to completion, so every admitted job has
-	// reached a terminal outcome. Tests wait on this instead of polling.
+	// workerDone is closed once publishWorker has returned. Tests wait on
+	// this instead of polling.
 	workerDone chan struct{}
 	// publishHookForTest, when non-nil, runs inside the publish worker
 	// immediately before the real Publish call. Tests use it to observe or
 	// pause a queued job at a known point.
 	publishHookForTest func(name string, data []byte)
-	// enqueueHookForTest, when non-nil, runs inside PublishBackground
-	// immediately before it enqueues, while still registered in
-	// admissionsInFlight. Tests use it to pause a producer at the exact
-	// point a shutdown race must close.
-	enqueueHookForTest func()
-	// shutdownObservedHookForTest, when non-nil, runs inside publishWorker
-	// the instant it observes ctx.Done(), before drainPublishQueueOnShutdown
-	// closes admission. Tests use it as a deterministic signal that the
-	// worker has committed to shutdown, instead of yielding the scheduler
-	// and hoping.
-	shutdownObservedHookForTest func()
-	// drainItemHookForTest, when non-nil, runs inside
-	// drainPublishQueueOnShutdown once per buffered job it accounts for.
-	// Tests use it to hold a drain in progress and observe whether a
-	// concurrent PublishBackground call blocks on it.
-	drainItemHookForTest func()
 
 	// lifetimeCtx is the context the worker watches, cancelled by Close or
-	// by NewGossipManager's parent context ending.
+	// by NewGossipManager's parent context ending. PublishBackground checks
+	// it directly, so a job admitted right before shutdown may end up
+	// queued with nothing left to drain it - that has no functional effect,
+	// since it was never going to publish either way.
 	lifetimeCtx context.Context
-	// admissionsInFlight/shutdownClosed form a closeable gate: a producer
-	// registers, checks shutdownClosed, and unregisters - never blocking.
-	// The shutdown drain sets shutdownClosed, then waits for
-	// admissionsInFlight to reach zero before touching the queue, so a
-	// producer that registered just before is still accounted for.
-	admissionsInFlight atomic.Int64
-	shutdownClosed     atomic.Bool
 	// For graceful shutdown
 	cancel context.CancelFunc
 }
@@ -221,9 +199,7 @@ func (g *GossipManager) SetPeerBanner(pb PeerBanner) {
 	g.peerBanner = pb
 }
 
-// Close gracefully shuts down the GossipManager and all its goroutines. See
-// drainPublishQueueOnShutdown for why the race-free admission guarantee
-// lives there rather than here.
+// Close gracefully shuts down the GossipManager and all its goroutines.
 func (g *GossipManager) Close() error {
 	g.cancel()
 	return nil
@@ -419,37 +395,27 @@ func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.B
 	return topicHandle.topic.Publish(ctx, compressedData)
 }
 
-func (g *GossipManager) rejectShutdown(name string, logCtx []any) error {
-	publishQueueDroppedCounter.WithLabelValues(name, "shutdown").Inc()
-	fields := append([]any{"topic", name}, logCtx...)
-	log.Debug("[GossipManager] gossip manager shut down, dropping message", fields...)
-	return ErrGossipManagerShutdown
-}
-
 // PublishBackground queues data for asynchronous publish to the given
 // gossip topic without waiting for the network call: the actual publish
 // runs on this GossipManager's own background worker. It never blocks the
-// caller - not on queue capacity, and not on a shutdown drain in progress -
-// though it does resolve the fork digest, log synchronously, and clone
-// data (the caller keeps ownership of its own slice; the worker reads its
-// own copy later). The fork digest is captured now, at enqueue time,
-// rather than re-resolved when the worker drains the job, so a message
-// accepted just before a fork activates still publishes to the topic it
-// was validated against.
+// caller - not on queue capacity, and not on shutdown - though it does
+// resolve the fork digest, log synchronously, and clone data (the caller
+// keeps ownership of its own slice; the worker reads its own copy later).
+// The fork digest is captured now, at enqueue time, rather than
+// re-resolved when the worker drains the job, so a message accepted just
+// before a fork activates still publishes to the topic it was validated
+// against.
 //
 // A non-nil return means the message was never admitted: the caller learns
 // this before it responds, rather than it being invisible behind an HTTP
 // 200. expiry, if non-zero, is the latest time this message is still worth
 // publishing - checked here and again just before the actual publish.
 func (g *GossipManager) PublishBackground(name string, data []byte, expiry time.Time, logCtx ...any) error {
-	g.admissionsInFlight.Add(1)
-	defer g.admissionsInFlight.Add(-1)
-	// shutdownClosed alone isn't enough: it's only set once the worker is
-	// scheduled and observes ctx.Done(), which can lag real cancellation.
-	// lifetimeCtx.Err() is a plain, already non-blocking check that reflects
-	// cancellation the instant it happens, closing that window.
-	if g.shutdownClosed.Load() || g.lifetimeCtx.Err() != nil {
-		return g.rejectShutdown(name, logCtx)
+	if g.lifetimeCtx.Err() != nil {
+		publishQueueDroppedCounter.WithLabelValues(name, "shutdown").Inc()
+		fields := append([]any{"topic", name}, logCtx...)
+		log.Debug("[GossipManager] gossip manager shut down, dropping message", fields...)
+		return ErrGossipManagerShutdown
 	}
 	if !expiry.IsZero() && g.nowFunc().After(expiry) {
 		publishQueueDroppedCounter.WithLabelValues(name, "expired").Inc()
@@ -463,9 +429,6 @@ func (g *GossipManager) PublishBackground(name string, data []byte, expiry time.
 		fields := append([]any{"topic", name, "err", err}, logCtx...)
 		log.Warn("[GossipManager] failed to resolve fork digest, dropping message", fields...)
 		return fmt.Errorf("%w: %w", ErrPublishForkDigest, err)
-	}
-	if g.enqueueHookForTest != nil {
-		g.enqueueHookForTest()
 	}
 	// Cloned so a caller reusing or mutating data after this call returns
 	// can't change what the worker publishes later - the synchronous
@@ -490,38 +453,9 @@ func (g *GossipManager) publishWorker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			if g.shutdownObservedHookForTest != nil {
-				g.shutdownObservedHookForTest()
-			}
-			g.drainPublishQueueOnShutdown()
 			return
 		case job := <-g.publishQueue:
 			g.runPublishJob(ctx, job)
-		}
-	}
-}
-
-// drainPublishQueueOnShutdown accounts for whatever is left buffered in the
-// queue once the worker stops. Once the wait below returns, no
-// PublishBackground call can still be trying to enqueue, so anything left
-// is final and gets a terminal outcome (outcome=shutdown), not a second
-// admission-rejection.
-func (g *GossipManager) drainPublishQueueOnShutdown() {
-	g.shutdownClosed.Store(true)
-	for g.admissionsInFlight.Load() > 0 {
-		runtime.Gosched()
-	}
-	for {
-		select {
-		case job := <-g.publishQueue:
-			if g.drainItemHookForTest != nil {
-				g.drainItemHookForTest()
-			}
-			publishOutcomeCounter.WithLabelValues(job.name, "shutdown").Inc()
-			fields := append([]any{"topic", job.name}, job.logCtx...)
-			log.Debug("[GossipManager] gossip manager shut down, dropping queued message", fields...)
-		default:
-			return
 		}
 	}
 }
