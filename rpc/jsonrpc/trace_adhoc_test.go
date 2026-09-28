@@ -102,6 +102,34 @@ func TestCoinbaseBalance(t *testing.T) {
 	if _, ok := results[1].StateDiff[accounts.ZeroAddress]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
 	}
+	sender := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	for _, res := range results {
+		requireSenderPaysGas(t, res.StateDiff, sender, big.NewInt(1))
+	}
+}
+
+func TestTraceCallChargesSenderForGas(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+	gas := hexutil.Uint64(90_000)
+	args := traceCallValueTransfer()
+	args.Gas = &gas
+	args.GasPrice = (*hexutil.U256)(uint256.NewInt(20_000_000_000))
+
+	result, err := api.Call(context.Background(), args, []string{TraceTypeStateDiff}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	requireSenderPaysGas(t, result.StateDiff, *args.From, args.Value.ToInt())
+}
+
+func requireSenderPaysGas(t *testing.T, diff map[accounts.Address]*StateDiffAccount, sender common.Address, value *big.Int) {
+	t.Helper()
+	acc, ok := diff[accounts.InternAddress(sender)]
+	require.True(t, ok, "sender must appear in stateDiff")
+	balance, ok := acc.Balance.(map[string]*StateDiffBalance)
+	require.True(t, ok, "sender balance must change, got %v", acc.Balance)
+	paid := new(big.Int).Sub(balance["*"].From.ToInt(), balance["*"].To.ToInt())
+	require.Positive(t, paid.Cmp(value), "sender must pay for gas on top of value %s, paid %s", value, paid)
 }
 
 func internedAddress(addr string) accounts.Address {
@@ -744,6 +772,32 @@ func TestRawTransactionStateDiffChargesFees(t *testing.T) {
 	})
 }
 
+// A signed transaction runs in the latest block's environment, so GASLIMIT reads that
+// block's gas limit, as NUMBER and BASEFEE read its number and base fee.
+func TestRawTransactionGasLimit(t *testing.T) {
+	c := newBaseFeeTestChain(t, chain.TestChainOsakaConfig)
+	contract := c.deployOpcodeContract(t, opGaslimit)
+
+	txn, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{
+			Nonce:    1, // the deployment used nonce 0
+			To:       &contract,
+			GasLimit: 100_000,
+		},
+		ChainID: *c.signer.ChainID(),
+		TipCap:  *uint256.NewInt(1),
+		FeeCap:  *uint256.NewInt(1_000_000_000_000),
+	}, *c.signer, c.bankKey)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&buf))
+
+	result, err := c.traceAPI().RawTransaction(context.Background(), buf.Bytes(), []string{TraceTypeTrace})
+	require.NoError(t, err)
+	gasLimit := common.BigToHash(new(big.Int).SetUint64(c.head.GasLimit()))
+	require.Equal(t, gasLimit.Hex(), result.Output.String())
+}
+
 func TestParseOeTracerConfigRejectsCustomTracer(t *testing.T) {
 	tracer := "callTracer"
 	_, err := parseOeTracerConfig(&config.TraceConfig{Tracer: &tracer})
@@ -791,9 +845,11 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 
 	// EVM bytecode: GASPRICE (0x3a), PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
 	gasPriceCode := hexutil.Bytes{0x3a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	gas := hexutil.Uint64(100_000)
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:                 &bankAddr,
 		To:                   &contractAddr,
+		Gas:                  &gas,
 		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
 		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}, []string{TraceTypeTrace}, nil, &config.TraceConfig{
@@ -1078,7 +1134,7 @@ func TestTraceCallNullMembers(t *testing.T) {
 	// A contract creation whose init code returns the word 42.
 	const initCode = "0x602a60005260206000f3"
 	full := map[string]any{
-		"from": bankAddr, "gas": "0x493e0", "maxFeePerGas": "0x77359400", "maxPriorityFeePerGas": "0x0",
+		"from": bankAddr, "gas": "0x493e0", "maxFeePerGas": "0x0", "maxPriorityFeePerGas": "0x0",
 		"value": "0x0", "data": initCode, "accessList": []any{}, "nonce": "0x0",
 		"chainId": hexutil.Uint64(m.ChainConfig.ChainID.Uint64()),
 	}
@@ -1307,7 +1363,7 @@ func TestCallManyBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	contractAddr := c.deployOpcodeContract(t, opGasprice)
 	api := c.traceAPI()
 
-	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
+	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"gas":"0x186a0","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
 		c.bankAddress.Hex(), contractAddr.Hex())
 
 	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, traceConfigWithBaseFeeOverride(uint256.NewInt(10)))
@@ -1612,6 +1668,45 @@ func TestTraceCallWithoutTraceTypes(t *testing.T) {
 	require.Nil(t, result.StateDiff)
 }
 
+// A chainId for another chain makes a call object invalid whatever the state, so trace_call
+// and trace_callMany reject it as invalid params instead of running the call.
+func TestTraceCallRejectsOtherChainID(t *testing.T) {
+	m, _, bank := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	own := fmt.Sprintf(`{"from":%q,"to":%q,"chainId":"0x539"}`, bank.Hex(), bank.Hex())
+	other := fmt.Sprintf(`{"from":%q,"to":%q,"chainId":"0x1"}`, bank.Hex(), bank.Hex())
+	requireRejected := func(t *testing.T, err error) {
+		t.Helper()
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+		require.ErrorContains(t, err, "chainId does not match node's (have=1, want=1337)")
+	}
+
+	// The chainId is checked before the block is resolved, so an unknown block does not hide it.
+	unknownNum := rpc.BlockNumber(1_000_000)
+	for name, block := range map[string]*rpc.BlockNumberOrHash{
+		"latest":  nil,
+		"unknown": {BlockNumber: &unknownNum},
+	} {
+		t.Run("trace_call/"+name, func(t *testing.T) {
+			var args TraceCallParam
+			require.NoError(t, json.Unmarshal([]byte(other), &args))
+			result, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, block, nil)
+			requireRejected(t, err)
+			require.Nil(t, result)
+		})
+
+		t.Run("trace_callMany/"+name, func(t *testing.T) {
+			bundle := json.RawMessage("[[" + own + `,["trace"]],[` + other + `,["trace"]]]`)
+			result, err := api.CallMany(context.Background(), bundle, block, nil)
+			requireRejected(t, err)
+			require.ErrorContains(t, err, "call 1:")
+			require.Nil(t, result)
+		})
+	}
+}
+
 func TestRawTransactionWithoutTraceTypes(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -1667,7 +1762,7 @@ func TestCallManyHistoricalParentPinsStateBoundary(t *testing.T) {
 	parent := &rpc.BlockNumberOrHash{BlockNumber: &parentNum}
 
 	const bundle = `[
-	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x0"},["trace"]],
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0100000000000000000000000000000000000000","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["stateDiff"]]
 ]`
 
@@ -2057,11 +2152,12 @@ func TestTraceCallFields(t *testing.T) {
 		require.Equal(t, common.Hash{}.Hex(), withoutHash.Output.String())
 	})
 
-	// As in eth_call, the nonce and chainId are not checked against the state or the chain,
-	// so neither changes how the call runs.
+	// As in eth_call, the nonce is not checked against the state, and the chain's own chainId
+	// is accepted, so neither changes how the call runs. TestTraceCallRejectsOtherChainID covers
+	// a chainId for another chain.
 	for _, tc := range []struct{ name, fields string }{
 		{name: "nonce", fields: `,"nonce":"0x7"`},
-		{name: "chainId", fields: `,"chainId":"0x1"`},
+		{name: "chainId", fields: `,"chainId":"0x539"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, word42, traceCall(t, callObject(marker, tc.fields)).Output.String())
