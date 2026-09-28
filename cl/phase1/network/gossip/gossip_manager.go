@@ -405,13 +405,13 @@ func (g *GossipManager) publishToDigest(ctx context.Context, forkDigest common.B
 	if topicHandle == nil {
 		return fmt.Errorf("topic not found: %s", topic)
 	}
-	// Log peer count for attestation and sync-committee topics to help diagnose propagation issues
-	if gossip.IsTopicBeaconAttestation(name) || gossip.IsTopicSyncCommittee(name) {
+	// Log peer count for attestation topics to help diagnose propagation issues
+	if gossip.IsTopicBeaconAttestation(name) {
 		peerCount := len(g.p2p.Pubsub().ListPeers(topic))
 		if peerCount == 0 {
-			log.Warn("[Gossip] Publishing with NO peers on subnet", "topic", name, "peerCount", peerCount)
+			log.Warn("[Gossip] Publishing attestation with NO peers on subnet", "topic", name, "peerCount", peerCount)
 		} else if peerCount < 3 {
-			log.Debug("[Gossip] Publishing with low peer count", "topic", name, "peerCount", peerCount)
+			log.Debug("[Gossip] Publishing attestation with low peer count", "topic", name, "peerCount", peerCount)
 		}
 	}
 	// Note: before publishing the message to the network, Publish() internally runs the validator function.
@@ -476,8 +476,11 @@ func (g *GossipManager) PublishBackground(name string, data []byte, expiry time.
 		return nil
 	default:
 		publishQueueDroppedCounter.WithLabelValues(name, "queue_full").Inc()
+		// Debug, not Warn: under congestion this can fire hundreds of times
+		// per slot: publishQueueDroppedCounter is the aggregate signal, and
+		// callers with a request-level view can log a summary themselves.
 		fields := append([]any{"topic", name}, logCtx...)
-		log.Warn("[GossipManager] publish queue full, dropping message", fields...)
+		log.Debug("[GossipManager] publish queue full, dropping message", fields...)
 		return ErrPublishQueueFull
 	}
 }
@@ -499,12 +502,10 @@ func (g *GossipManager) publishWorker(ctx context.Context) {
 }
 
 // drainPublishQueueOnShutdown accounts for whatever is left buffered in the
-// queue once the worker stops. Closing the gate here - rather than in
-// Close, which production code never calls; see the lifetimeCtx field
-// comment - makes this race-free regardless of why ctx was cancelled: once
-// the wait below returns, no PublishBackground call can still be trying to
-// enqueue, so anything left in the queue is truly final and gets a
-// terminal outcome (outcome=shutdown), not a second admission-rejection.
+// queue once the worker stops. Once the wait below returns, no
+// PublishBackground call can still be trying to enqueue, so anything left
+// is final and gets a terminal outcome (outcome=shutdown), not a second
+// admission-rejection.
 func (g *GossipManager) drainPublishQueueOnShutdown() {
 	g.shutdownClosed.Store(true)
 	for g.admissionsInFlight.Load() > 0 {

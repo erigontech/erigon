@@ -480,6 +480,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 
 	failures := []poolingFailure{}
 	var admissionErr error
+	var admissionFailureCount int
 	for idx, v := range msgs {
 		var publishingSubnets []uint64
 		if err := a.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -523,21 +524,22 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 				failures = append(failures, poolingFailure{Index: idx, Message: err.Error()})
 				break
 			}
-			// Published in the background so the gossip validation/publish
-			// pipeline's latency isn't added to this request's response time.
-			// A non-nil return means the message was never admitted to the
-			// queue - a known failure, not an unknowable later network one -
-			// so it is surfaced below rather than swallowed behind a 200.
-			// ErrPublishJobExpired is excluded: a message whose window has
-			// already closed by the time it reached admission is expected,
-			// not a server-side fault.
+			// A non-nil return is a known admission failure, surfaced below
+			// rather than swallowed behind a 200; ErrPublishJobExpired is
+			// excluded since a closed window isn't a server-side fault.
 			if pubErr := a.gossipManager.PublishBackground(
 				gossip.TopicNameSyncCommittee(int(subnetId)), encodedSSZ, expiry,
 				"validatorIndex", v.ValidatorIndex, "subnet", subnetId, "slot", v.Slot,
-			); pubErr != nil && !errors.Is(pubErr, networkgossip.ErrPublishJobExpired) && admissionErr == nil {
-				admissionErr = pubErr
+			); pubErr != nil && !errors.Is(pubErr, networkgossip.ErrPublishJobExpired) {
+				admissionFailureCount++
+				if admissionErr == nil {
+					admissionErr = pubErr
+				}
 			}
 		}
+	}
+	if admissionFailureCount > 0 {
+		log.Warn("[Beacon REST] sync-committee publish admission failed", "count", admissionFailureCount, "err", admissionErr)
 	}
 	if len(failures) > 0 {
 		// Validation failures take precedence over admission failures in the

@@ -22,6 +22,7 @@ import (
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -517,6 +518,66 @@ func TestPoolSyncCommitteesReturns500OnAdmissionFailure(t *testing.T) {
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusInternalServerError, resp.StatusCode,
 		"a known admission failure must not be hidden behind a 200")
+}
+
+// TestPoolSyncCommitteesLogsAdmissionFailuresOncePerRequest proves a batch
+// with several admission failures produces one aggregate Warn log with a
+// count, not one Warn per failed message - which under queue congestion
+// (up to a full sync-committee burst) could otherwise be hundreds of lines
+// for a single request.
+func TestPoolSyncCommitteesLogsAdmissionFailuresOncePerRequest(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{Slot: 1, BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8}, ValidatorIndex: 3},
+		{Slot: 1, BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8}, ValidatorIndex: 3},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	var publishAttempts atomic.Int32
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(name string, data []byte, expiry time.Time, logCtx ...any) error {
+			publishAttempts.Add(1)
+			return gossip.ErrPublishQueueFull
+		},
+	).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	records := make(chan *log.Record, 64)
+	prevHandler := log.Root().GetHandler()
+	log.Root().SetHandler(log.ChannelHandler(records))
+	defer log.Root().SetHandler(prevHandler)
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+
+	var summaries []*log.Record
+	for {
+		select {
+		case r := <-records:
+			if r.Msg == "[Beacon REST] sync-committee publish admission failed" {
+				summaries = append(summaries, r)
+			}
+			continue
+		default:
+		}
+		break
+	}
+	require.Len(t, summaries, 1, "must log the admission-failure summary exactly once per request, not once per message")
+	require.Contains(t, summaries[0].Ctx, "count")
+	require.Contains(t, summaries[0].Ctx, int(publishAttempts.Load()))
 }
 
 // TestPoolSyncCommitteesDoesNotSurface500ForExpiredAdmission proves an
