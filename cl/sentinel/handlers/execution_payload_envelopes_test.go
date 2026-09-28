@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams/initial_state"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
@@ -59,6 +60,8 @@ type executionPayloadEnvelopesByRangeTestCase struct {
 	incompleteBody      bool
 	emptyRange          bool
 	headIndexMismatch   bool
+	historicalMismatch  bool
+	headAncestorMatches bool
 	requestCount        uint64
 	canonicalBlockCount uint64
 	allPayloadsFull     bool
@@ -83,6 +86,22 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		{name: "canonical block with nil body", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBody: true, wantResponsePrefix: ResourceUnavailablePrefix},
 		{name: "empty slot range ignores later incomplete block", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBlock: true, emptyRange: true},
 		{name: "head and canonical index mismatch", headPayloadStatus: cltypes.PayloadStatusFull, headIndexMismatch: true, wantResponsePrefix: ResourceUnavailablePrefix},
+		{
+			name:                "historical range remains available while canonical head catches up",
+			headPayloadStatus:   cltypes.PayloadStatusFull,
+			headIndexMismatch:   true,
+			historicalMismatch:  true,
+			headAncestorMatches: true,
+			requestCount:        3,
+		},
+		{
+			name:               "historical range on stale branch is unavailable",
+			headPayloadStatus:  cltypes.PayloadStatusFull,
+			headIndexMismatch:  true,
+			historicalMismatch: true,
+			requestCount:       3,
+			wantResponsePrefix: ResourceUnavailablePrefix,
+		},
 		{
 			name:                "first full payload at scan limit is returned",
 			headPayloadStatus:   cltypes.PayloadStatusFull,
@@ -263,6 +282,13 @@ func testExecutionPayloadEnvelopesByRangeHandler(
 	}
 	if tc.headIndexMismatch {
 		fcMock.HeadVal = common.Hash{0xee}
+	}
+	if tc.historicalMismatch {
+		expEnvelopes = expEnvelopes[:1]
+		if tc.headAncestorMatches {
+			ancestorIndex := tc.requestCount
+			fcMock.Ancestors[startSlot+ancestorIndex] = forkchoice.ForkChoiceNode{Root: canonicalRoots[ancestorIndex]}
+		}
 	}
 	if tc.wantEnvelopeCount != 0 {
 		expEnvelopes = expEnvelopes[:tc.wantEnvelopeCount]

@@ -101,9 +101,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if err != nil {
 		return err
 	}
-	if canonicalHeadSlot != headSlot || canonicalHeadRoot != head.Root {
-		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
-	}
+	headIndexMatches := canonicalHeadSlot == headSlot && canonicalHeadRoot == head.Root
 	type responseCandidate struct {
 		root  common.Hash
 		epoch uint64
@@ -115,6 +113,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 		block *cltypes.SignedBeaconBlock
 	}
 	var pending *canonicalBlock
+	var lastCanonical *canonicalBlock
 	canonicalUnavailable := false
 	canonicalReadLimit := maxPayloads
 	if canonicalReadLimit != math.MaxUint64 {
@@ -132,6 +131,7 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 			return false
 		}
 		current := &canonicalBlock{root: root, slot: slot, block: block}
+		lastCanonical = current
 		if pending != nil {
 			if current.block.Block.ParentRoot != pending.root {
 				canonicalUnavailable = true
@@ -164,6 +164,11 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	}
 	if canonicalUnavailable {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+	}
+	if !headIndexMatches {
+		if lastCanonical == nil || c.forkChoiceReader.Ancestor(head.Root, lastCanonical.slot).Root != lastCanonical.root {
+			return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+		}
 	}
 	if pending != nil {
 		if pending.slot != headSlot || pending.root != head.Root {

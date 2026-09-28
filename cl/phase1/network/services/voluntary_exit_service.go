@@ -19,6 +19,7 @@ package services
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -119,6 +120,9 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		currentEpoch = s.ethClock.GetEpochAtSlot(s.ethClock.GetSlotByTime(now))
 	}
 	if voluntaryExit.Epoch > currentEpoch {
+		if msg.ImmediateVerification {
+			return errors.New("exits must specify an epoch when they become valid; they are not valid before then")
+		}
 		return ErrIgnore
 	}
 
@@ -138,9 +142,11 @@ func (s *voluntaryExitService) ProcessMessage(ctx context.Context, subnet *uint6
 		curEpoch := state.Slot() / s.beaconCfg.SlotsPerEpoch
 
 		if val.ExitEpoch() != s.beaconCfg.FarFutureEpoch {
+			if msg.ImmediateVerification {
+				return fmt.Errorf("verify exit has not been initiated. exitEpoch: %d, farFutureEpoch: %d", val.ExitEpoch(), s.beaconCfg.FarFutureEpoch)
+			}
 			return ErrIgnore
 		}
-
 		// Verify the validator is active
 		// assert is_active_validator(validator, get_current_epoch(state))
 		if !val.Active(curEpoch) {

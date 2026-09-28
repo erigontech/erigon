@@ -323,11 +323,26 @@ func (t *voluntaryExitTestSuite) TestFutureExitIgnoredBeforeHeadLookup() {
 	}
 	t.syncedData.UnsetHeadState()
 	for _, epoch := range []uint64{101, math.MaxUint64} {
-		msg := &SignedVoluntaryExitForGossip{SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: epoch, ValidatorIndex: 10}}, ImmediateVerification: true}
+		msg := &SignedVoluntaryExitForGossip{SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: epoch, ValidatorIndex: 10}}}
 		t.Require().ErrorIs(service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 		t.Require().False(service.seen.Contains(10))
 		t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(10))
 	}
+}
+
+func (t *voluntaryExitTestSuite) TestImmediateFutureExitReturnsValidationErrorBeforeHeadLookup() {
+	service := t.voluntaryExitService.(*voluntaryExitService)
+	cfg := clparams.MainnetBeaconConfig
+	service.beaconCfg = &cfg
+	service.ethClock = eth_clock.NewEthereumClock(1000, common.Hash{}, &cfg)
+	service.now = func() time.Time {
+		return service.ethClock.GetSlotTime(101 * cfg.SlotsPerEpoch).Add(-500*time.Millisecond - time.Millisecond)
+	}
+	t.syncedData.UnsetHeadState()
+	msg := &SignedVoluntaryExitForGossip{SignedVoluntaryExit: &cltypes.SignedVoluntaryExit{VoluntaryExit: &cltypes.VoluntaryExit{Epoch: 101, ValidatorIndex: 10}}, ImmediateVerification: true}
+	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "exits must specify an epoch when they become valid; they are not valid before then")
+	t.Require().False(service.seen.Contains(10))
+	t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(10))
 }
 
 func (t *voluntaryExitTestSuite) TestExitAcceptedAtClockDisparityWithLaggingHead() {
@@ -404,7 +419,15 @@ func (t *voluntaryExitTestSuite) TestExitTenureRejectsWhenClockAlsoPrecedesEligi
 
 func (t *voluntaryExitTestSuite) TestInitiatedExitIgnoredBeforeActivity() {
 	service, msg := t.exitAtEpochs(100, 100, 0, 0, 99)
+	msg.ImmediateVerification = false
 	t.Require().ErrorIs(service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
+	t.Require().False(service.seen.Contains(10))
+	t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(10))
+}
+
+func (t *voluntaryExitTestSuite) TestImmediateInitiatedExitReturnsValidationError() {
+	service, msg := t.exitAtEpochs(100, 100, 0, 0, 99)
+	t.Require().EqualError(service.ProcessMessage(context.Background(), nil, msg), "verify exit has not been initiated. exitEpoch: 99, farFutureEpoch: 18446744073709551615")
 	t.Require().False(service.seen.Contains(10))
 	t.Require().False(t.operationsPool.VoluntaryExitsPool.Has(10))
 }
