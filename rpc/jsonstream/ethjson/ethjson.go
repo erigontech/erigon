@@ -52,7 +52,7 @@ func String(s *jsonstream.StackStream, name string, v string) {
 	s.Field(name)
 	for i := 0; i < len(v); i++ {
 		if c := v[i]; c < 0x20 || c >= 0x7f || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
-			b, _ := json.Marshal(v)
+			b, _ := json.Marshal(v) //nolint:errchkjson
 			s.WriteRawBytes(b)
 			return
 		}
