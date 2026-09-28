@@ -1943,7 +1943,7 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 		if !ok {
 			return fmt.Errorf("findBlockNum(%d) not found", rcacheDomainProgress)
 		}
-		to = rcacheTip + 1 // exclusive upper bound
+		to = rcacheTip
 		logger.Info("[check-rcache-root-at-blk-range] auto-detected --to", "to", to)
 	}
 	var seed int64
