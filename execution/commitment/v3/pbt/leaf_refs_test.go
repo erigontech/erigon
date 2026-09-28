@@ -133,6 +133,25 @@ func TestPBinLeafRefsRejectChangedBranchPrefix(t *testing.T) {
 	require.Equal(t, cacheOff.records, cacheOn.records)
 }
 
+func TestPBinLeafRefsRejectChangedOccupancyInternalHash(t *testing.T) {
+	ops := fullRowFoldOps()
+	cacheOff := newTrieTestContext()
+	cacheOn := &allLeafRefsTestContext{trieTestContext: newTrieTestContext()}
+	_, err := NewTrie(cacheOff).Process(ops)
+	require.NoError(t, err)
+	_, err = NewTrie(cacheOn).Process(ops)
+	require.NoError(t, err)
+	key := ops[7].Key
+	cacheOffTrie := NewTrie(cacheOff)
+	cacheOnTrie := NewTrie(cacheOn)
+	want, err := cacheOffTrie.Process([]Op{{Key: key}})
+	require.NoError(t, err)
+	got, err := cacheOnTrie.Process([]Op{{Key: key}})
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	require.Equal(t, cacheOff.records, cacheOn.records)
+}
+
 func TestPBinComputeLeafRefsHashesEveryRowCell(t *testing.T) {
 	key := GlobalRootKey()
 	address := make([]byte, 20)

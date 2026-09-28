@@ -181,6 +181,9 @@ func (t *Trie) foldRowResult(row *rowNode) (FoldResult, error) {
 	if t.foldHook != nil {
 		t.foldHook(row.key)
 	}
+	if foldRefHook != nil {
+		foldRefHook(row.refs != nil)
+	}
 	record := row.record()
 	node, err := foldRowWithRefs(row.path, &record, row)
 	if err != nil {

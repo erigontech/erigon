@@ -16,8 +16,19 @@
 
 package commitment
 
+type PBinInternalRef struct {
+	Mask        uint16
+	ParentSplit int16
+	Split       int16
+	Prefix      []byte
+	Left        [32]byte
+	Right       [32]byte
+	Hash        [32]byte
+}
+
 type LeafRefs struct {
-	Mask     uint16
-	Refs     [][32]byte
-	Prefixes [][]byte
+	Mask         uint16
+	Refs         [][32]byte
+	Prefixes     [][]byte
+	PBinInternal []PBinInternalRef
 }

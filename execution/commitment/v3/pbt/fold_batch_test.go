@@ -186,3 +186,59 @@ func TestTrieHashHookCountsBucketAndJoinRows(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, int64(33), hashCalls.Load())
 }
+
+func TestTrieDirtyPathFoldUsesCachedInternalHashes(t *testing.T) {
+	ops := fullRowFoldOps()
+	ctx := &cachedLeafRefsTestContext{trieTestContext: newTrieTestContext(), refs: make(map[string]*commitment.LeafRefs)}
+	trie := NewTrie(ctx)
+	_, err := trie.Process(ops)
+	require.NoError(t, err)
+	for key, data := range ctx.records {
+		ctx.refs[key] = ComputeLeafRefs([]byte(key), data)
+	}
+
+	var hashCalls atomic.Int64
+	var foldedRows atomic.Int64
+	var foldedRowsWithRefs atomic.Int64
+	previousHashHook := hashHook
+	previousFoldRefHook := foldRefHook
+	hashHook = func([]byte) { hashCalls.Add(1) }
+	foldRefHook = func(hasRefs bool) {
+		foldedRows.Add(1)
+		if hasRefs {
+			foldedRowsWithRefs.Add(1)
+		}
+	}
+	t.Cleanup(func() {
+		hashHook = previousHashHook
+		foldRefHook = previousFoldRefHook
+	})
+	_, err = trie.Process([]Op{{Key: ops[7].Key, Value: testTrieValue(0xf7)}})
+	require.NoError(t, err)
+	require.LessOrEqual(t, hashCalls.Load(), int64(6))
+	require.Equal(t, int64(1), foldedRows.Load())
+	require.Equal(t, int64(1), foldedRowsWithRefs.Load())
+}
+
+type cachedLeafRefsTestContext struct {
+	*trieTestContext
+	refs map[string]*commitment.LeafRefs
+}
+
+func (c *cachedLeafRefsTestContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
+	if refs, ok := c.refs[string(key)]; ok {
+		return refs
+	}
+	refs := ComputeLeafRefs(key, data)
+	c.refs[string(key)] = refs
+	return refs
+}
+
+func fullRowFoldOps() []Op {
+	ops := make([]Op, 16)
+	for slot := range ops {
+		ops[slot] = Op{Key: trieCodeKey(byte(slot<<4), 0, byte(slot+1)), Value: testTrieValue(byte(slot + 1))}
+	}
+	sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+	return ops
+}

@@ -52,10 +52,11 @@ func ComputeLeafRefs(key, data []byte) *commitment.LeafRefs {
 	hashes := [maxCells]common.Hash{}
 	prefixes := [maxCells][]byte{}
 	mask := uint16(0)
-	if err := computeCellRefs(parsed.path, &record, slots, 0, len(slots), parsed.path.BitLen, &hashes, &prefixes, &mask); err != nil {
+	internal := make([]commitment.PBinInternalRef, 0, len(slots)-1)
+	if _, err := computeCellRefs(parsed.path, &record, slots, 0, len(slots), parsed.path.BitLen, true, &hashes, &prefixes, &mask, &internal); err != nil {
 		return nil
 	}
-	refs := &commitment.LeafRefs{Mask: mask, Refs: make([][32]byte, 0, len(slots)), Prefixes: make([][]byte, 0, len(slots))}
+	refs := &commitment.LeafRefs{Mask: mask, Refs: make([][32]byte, 0, len(slots)), Prefixes: make([][]byte, 0, len(slots)), PBinInternal: internal}
 	for slot := range maxCells {
 		if mask&(uint16(1)<<slot) != 0 {
 			refs.Refs = append(refs.Refs, hashes[slot])
@@ -77,7 +78,7 @@ func PrefetchPath(read func([]byte) []byte, key []byte) {
 	}
 }
 
-func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16, hashes *[maxCells]common.Hash, prefixes *[maxCells][]byte, mask *uint16) error {
+func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16, root bool, hashes *[maxCells]common.Hash, prefixes *[maxCells][]byte, mask *uint16, internal *[]commitment.PBinInternalRef) (foldNode, error) {
 	if to-from > 1 {
 		split := firstSlotSplit(slots[from], slots[to-1], path.BitLen)
 		middle := from
@@ -85,12 +86,32 @@ func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to
 			middle++
 		}
 		if middle == from || middle == to {
-			return fmt.Errorf("row cells do not split at bit %d", split)
+			return foldNode{}, fmt.Errorf("row cells do not split at bit %d", split)
 		}
-		if err := computeCellRefs(path, record, slots, from, middle, split, hashes, prefixes, mask); err != nil {
-			return err
+		left, err := computeCellRefs(path, record, slots, from, middle, split, false, hashes, prefixes, mask, internal)
+		if err != nil {
+			return foldNode{}, err
 		}
-		return computeCellRefs(path, record, slots, middle, to, split, hashes, prefixes, mask)
+		right, err := computeCellRefs(path, record, slots, middle, to, split, false, hashes, prefixes, mask, internal)
+		if err != nil {
+			return foldNode{}, err
+		}
+		fromBit := parentSplit + 1
+		if root {
+			fromBit = path.BitLen
+		}
+		prefix := rowPrefix(&path, slots[from], fromBit, split)
+		hash := branchHash(&prefix, &left.hash, &right.hash)
+		*internal = append(*internal, commitment.PBinInternalRef{
+			Mask:        slotsMask(slots, from, to),
+			ParentSplit: parentSplit,
+			Split:       split,
+			Prefix:      eip8297.EncodeBitPath(&prefix),
+			Left:        left.hash,
+			Right:       right.hash,
+			Hash:        hash,
+		})
+		return foldNode{split: split, left: left.hash, right: right.hash, hash: hash}, nil
 	}
 	slot := slots[from]
 	cell := &record.Cells[slot]
@@ -104,11 +125,19 @@ func computeCellRefs(path eip8297.Bitpath, record *Record, slots []int, from, to
 		hash = branchHash(&prefix, &cell.Left, &cell.Right)
 		prefixes[slot] = eip8297.EncodeBitPath(&prefix)
 	default:
-		return fmt.Errorf("row cell %d is empty", slot)
+		return foldNode{}, fmt.Errorf("row cell %d is empty", slot)
 	}
 	hashes[slot] = hash
 	*mask |= uint16(1) << slot
-	return nil
+	return foldNode{hash: hash}, nil
+}
+
+func slotsMask(slots []int, from, to int) uint16 {
+	var mask uint16
+	for _, slot := range slots[from:to] {
+		mask |= uint16(1) << slot
+	}
+	return mask
 }
 
 func (n *rowNode) cachedCellHash(slot int, prefix *eip8297.Bitpath) (common.Hash, bool) {
@@ -126,4 +155,24 @@ func (n *rowNode) cachedCellHash(slot int, prefix *eip8297.Bitpath) (common.Hash
 		return common.Hash{}, false
 	}
 	return common.Hash(n.refs.Refs[index]), true
+}
+
+func (n *rowNode) cachedInternalHash(mask uint16, parentSplit, split int16, prefix *eip8297.Bitpath) (foldNode, bool) {
+	if n.refs == nil || n.dirtyCells&mask != 0 {
+		return foldNode{}, false
+	}
+	wantPrefix := eip8297.EncodeBitPath(prefix)
+	for i := range n.refs.PBinInternal {
+		ref := &n.refs.PBinInternal[i]
+		if ref.Mask != mask || ref.ParentSplit != parentSplit || ref.Split != split || !bytes.Equal(ref.Prefix, wantPrefix) {
+			continue
+		}
+		return foldNode{
+			split: split,
+			left:  common.Hash(ref.Left),
+			right: common.Hash(ref.Right),
+			hash:  common.Hash(ref.Hash),
+		}, true
+	}
+	return foldNode{}, false
 }

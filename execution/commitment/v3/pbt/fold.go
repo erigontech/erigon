@@ -28,6 +28,7 @@ import (
 type foldNode struct {
 	split       int16
 	left, right common.Hash
+	hash        common.Hash
 }
 
 type FoldResult struct {
@@ -37,6 +38,7 @@ type FoldResult struct {
 
 var (
 	hashHook        func([]byte)
+	foldRefHook     func(bool)
 	hashScratchPool sync.Pool
 )
 
@@ -239,6 +241,13 @@ func foldRowWithRefs(path eip8297.Bitpath, record *Record, refs *rowNode) (foldN
 	if len(slots) < 2 {
 		return foldNode{}, fmt.Errorf("row must contain at least two cells")
 	}
+	split := firstSlotSplit(slots[0], slots[len(slots)-1], path.BitLen)
+	prefix := rowPrefix(&path, slots[0], path.BitLen, split)
+	if refs != nil {
+		if node, ok := refs.cachedInternalHash(slotsMask(slots, 0, len(slots)), path.BitLen, split, &prefix); ok {
+			return node, nil
+		}
+	}
 	node, err := foldRange(path, record, slots, 0, len(slots), path.BitLen, refs)
 	if err != nil {
 		return foldNode{}, err
@@ -268,11 +277,18 @@ func foldRange(path eip8297.Bitpath, record *Record, slots []int, from, to int, 
 
 func foldChild(path eip8297.Bitpath, record *Record, slots []int, from, to int, parentSplit int16, refs *rowNode) (common.Hash, error) {
 	if to-from > 1 {
+		split := firstSlotSplit(slots[from], slots[to-1], path.BitLen)
+		prefix := rowPrefix(&path, slots[from], parentSplit+1, split)
+		if refs != nil {
+			if node, ok := refs.cachedInternalHash(slotsMask(slots, from, to), parentSplit, split, &prefix); ok {
+				return node.hash, nil
+			}
+		}
 		node, err := foldRange(path, record, slots, from, to, parentSplit, refs)
 		if err != nil {
 			return common.Hash{}, err
 		}
-		prefix := rowPrefix(&path, slots[from], parentSplit+1, node.split)
+		prefix = rowPrefix(&path, slots[from], parentSplit+1, node.split)
 		return branchHash(&prefix, &node.left, &node.right), nil
 	}
 	cell := &record.Cells[slots[from]]
