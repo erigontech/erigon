@@ -104,9 +104,11 @@ reported. How they appear depends on the method:
 `gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
 `trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
 `trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
-`trace_call` and `trace_callMany` take no such parameter and always enable it
-internally, so everything below applies to them unconditionally. `trace_rawTransaction`
-never enables it: a signed transaction pays for its gas as it would in a block. The gas
+`trace_call`, `trace_callMany` and `trace_rawTransaction` never enable it.
+`trace_call` and `trace_callMany` run each call object with the fees and block
+environment `eth_call` gives it: a call with no gas price runs free and sees `BASEFEE` 0,
+and a priced call is checked and pays for its gas. A signed transaction passed to
+`trace_rawTransaction` pays for its gas as it would in a block. The gas
 is bought before execution, so `BALANCE(ORIGIN)`, or `SELFBALANCE` in a delegated sender,
 reads the balance after that charge; this shows in `trace` and `vmTrace` as well as in
 `stateDiff`.

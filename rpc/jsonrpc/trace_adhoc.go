@@ -22,7 +22,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math"
 	"strings"
 
 	"github.com/holiman/uint256"
@@ -30,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -84,6 +82,16 @@ type TraceCallParam struct {
 	ChainID             *hexutil.U256             `json:"chainId"`
 	BlobVersionedHashes []common.Hash             `json:"blobVersionedHashes"`
 	AuthorizationList   []types.JsonAuthorization `json:"authorizationList"`
+}
+
+// UnmarshalJSON decodes a call object and rejects one whose data and input disagree, as
+// ethapi.CallArgs does.
+func (args *TraceCallParam) UnmarshalJSON(raw []byte) error {
+	type traceCallParam TraceCallParam
+	if err := json.Unmarshal(raw, (*traceCallParam)(args)); err != nil {
+		return err
+	}
+	return ethapi.CheckCallData(args.Data, args.Input)
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -158,103 +166,52 @@ type VmTraceStore struct {
 	Val string `json:"val"`
 }
 
-// ToMessage converts CallArgs to the Message type used by the core evm
+// toCallArgs returns args as the eth_call arguments they describe.
+func (args *TraceCallParam) toCallArgs() ethapi.CallArgs {
+	return ethapi.CallArgs{
+		From:                 args.From,
+		To:                   args.To,
+		Gas:                  args.Gas,
+		GasPrice:             args.GasPrice,
+		MaxPriorityFeePerGas: args.MaxPriorityFeePerGas,
+		MaxFeePerGas:         args.MaxFeePerGas,
+		MaxFeePerBlobGas:     args.MaxFeePerBlobGas,
+		Value:                args.Value,
+		Data:                 args.Data,
+		Input:                args.Input,
+		Nonce:                args.Nonce,
+		AccessList:           args.AccessList,
+		ChainID:              args.ChainID,
+		BlobVersionedHashes:  args.BlobVersionedHashes,
+		AuthorizationList:    args.AuthorizationList,
+	}
+}
+
+// ToMessage converts args to the Message eth_call would run for them: omitted fees are zero,
+// and a call with no gas price is not repriced to the base fee.
 func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*types.Message, error) {
-	// Set sender address or use zero address if none specified.
-	var addr accounts.Address
-	if args.From != nil {
-		addr = accounts.InternAddress(*args.From)
-	}
+	callArgs := args.toCallArgs()
+	return callArgs.ToMessage(globalGasCap, baseFee)
+}
 
-	// Set default gas & gas price if none were set
-	gas := globalGasCap
-	if gas == 0 {
-		gas = uint64(math.MaxUint64 / 2)
-	}
-	if args.Gas != nil {
-		gas = uint64(*args.Gas)
-	}
-	if globalGasCap != 0 && globalGasCap < gas {
-		log.Warn("Caller gas above allowance, capping", "requested", gas, "cap", globalGasCap)
-		gas = globalGasCap
-	}
-	var (
-		gasPrice         *uint256.Int
-		gasFeeCap        *uint256.Int
-		gasTipCap        *uint256.Int
-		maxFeePerBlobGas *uint256.Int
-	)
-	if baseFee == nil {
-		// If there's no basefee, then it must be a non-1559 execution
-		gasPrice = new(uint256.Int)
-		if args.GasPrice != nil {
-			gasPrice.Set((*uint256.Int)(args.GasPrice))
-		}
-		gasFeeCap, gasTipCap = gasPrice, gasPrice
-	} else {
-		// A basefee is provided, necessitating 1559-type execution
-		if args.GasPrice != nil {
-			// User specified the legacy gas field, convert to 1559 gas typing
-			gasPrice = new(uint256.Int).Set((*uint256.Int)(args.GasPrice))
-			gasFeeCap, gasTipCap = gasPrice, gasPrice
-		} else {
-			// User specified 1559 gas fields (or none), use those
-			gasFeeCap = new(uint256.Int)
-			if args.MaxFeePerGas != nil {
-				gasFeeCap.Set((*uint256.Int)(args.MaxFeePerGas))
-			}
-			gasTipCap = new(uint256.Int)
-			if args.MaxPriorityFeePerGas != nil {
-				gasTipCap.Set((*uint256.Int)(args.MaxPriorityFeePerGas))
-			}
-			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
-			gasPrice = new(uint256.Int)
-			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
-				*gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
-			}
-		}
-		if args.MaxFeePerBlobGas != nil {
-			maxFeePerBlobGas = new(uint256.Int).Set((*uint256.Int)(args.MaxFeePerBlobGas))
-		}
-	}
-	value := new(uint256.Int)
-	if args.Value != nil {
-		value.Set((*uint256.Int)(args.Value))
-	}
-	var data []byte
-	if args.Input != nil {
-		data = *args.Input
-	} else if args.Data != nil {
-		data = *args.Data
-	}
-	var accessList types.AccessList
-	if args.AccessList != nil {
-		accessList = *args.AccessList
-	}
+// callValidationError is a call rejected before execution, with the code eth_simulateV1 gives it.
+type callValidationError struct {
+	err  error
+	code int
+}
 
-	var to accounts.Address
-	if args.To != nil {
-		to = accounts.InternAddress(*args.To)
+func (e *callValidationError) Error() string  { return e.err.Error() }
+func (e *callValidationError) ErrorCode() int { return e.code }
+func (e *callValidationError) Unwrap() error  { return e.err }
+
+// callError gives a call that fails validation the error code eth_simulateV1 gives it, and
+// returns any other error unchanged.
+func callError(err error) error {
+	var coded *rpc.CustomError
+	if errors.As(txValidationError(err), &coded) && coded.Code != rpc.ErrCodeInternalError {
+		return &callValidationError{err: err, code: coded.Code}
 	}
-	var nonce uint64
-	if args.Nonce != nil {
-		nonce = uint64(*args.Nonce)
-	}
-	msg := types.NewMessage(addr, to, nonce, value, gas, gasPrice, gasFeeCap, gasTipCap, data, accessList, false /* checkNonce */, false /* checkTransaction */, false /* checkGas */, false /* isFree */, maxFeePerBlobGas)
-	if args.BlobVersionedHashes != nil {
-		msg.SetBlobVersionedHashes(args.BlobVersionedHashes)
-	}
-	if args.AuthorizationList != nil {
-		authorizations := make([]types.Authorization, len(args.AuthorizationList))
-		for i := range args.AuthorizationList {
-			var err error
-			if authorizations[i], err = args.AuthorizationList[i].ToAuthorization(); err != nil {
-				return nil, err
-			}
-		}
-		msg.SetAuthorizations(authorizations)
-	}
-	return msg, nil
+	return err
 }
 
 // overrideBaseFee is a nil-safe wrapper around (*ethapi.BlockOverrides).OverrideBaseFee.
@@ -263,6 +220,14 @@ func overrideBaseFee(traceConfig *config.TraceConfig, baseFee *uint256.Int) *uin
 		return baseFee
 	}
 	return traceConfig.BlockOverrides.OverrideBaseFee(baseFee)
+}
+
+// overrideHeader is a nil-safe wrapper around (*ethapi.BlockOverrides).OverrideHeader.
+func overrideHeader(traceConfig *config.TraceConfig, header *types.Header) *types.Header {
+	if traceConfig == nil {
+		return header
+	}
+	return traceConfig.BlockOverrides.OverrideHeader(header)
 }
 
 // overrideBlockContext applies traceConfig's BlockOverrides (if any) to blockCtx.
@@ -1281,14 +1246,13 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if traceConfig != nil {
 		blockOverrides = traceConfig.BlockOverrides
 	}
-	blockCtx := transactions.NewEVMBlockContext(engine, header, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
-	blockCtx.GasLimit = math.MaxUint64
-	blockCtx.MaxGasLimit = true
+	effectiveHeader := blockOverrides.OverrideHeader(header)
+	blockCtx := transactions.NewEVMBlockContext(engine, effectiveHeader, blockNrOrHash.RequireCanonical, tx, api._blockReader, chainConfig)
 	if err := blockOverrides.Override(&blockCtx); err != nil {
 		return nil, err
 	}
 
-	baseFee := &blockCtx.BaseFee
+	baseFee := effectiveHeader.BaseFee
 	msg, err := args.ToMessage(api.gasCap, baseFee)
 	if err != nil {
 		return nil, err
@@ -1325,7 +1289,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
-		return nil, err
+		return nil, callError(err)
 	}
 	if vmConfig.Tracer.HasTxEndHook() {
 		vmConfig.Tracer.EmitTxEnd(&types.Receipt{GasUsed: execResult.ReceiptGasUsed}, execResult.TxnGasUsage, nil)
@@ -1492,9 +1456,11 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig)
-
-	return trace, err
+		txns, msgs, callParams, overrideHeader(traceConfig, parentHeader), parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig)
+	if err != nil {
+		return nil, callError(err)
+	}
+	return trace, nil
 }
 
 // advanceTxNum moves the history reader with the transaction index. Block
