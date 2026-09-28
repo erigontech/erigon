@@ -492,7 +492,9 @@ func (tx *Tx) NewMemBatch(ioMetrics any) kv.TemporalMemBatch {
 	return state.NewTemporalMemBatch(tx, ioMetrics)
 }
 
-func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error {
+// ST1016 is reported here, not on AsyncClone: staticcheck aggregates the
+// finding for the whole RwTx type at one representative method.
+func (tx *RwTx) Apply(ctx context.Context, f func(tx kv.Tx) error) error { //nolint:staticcheck
 	tx.tx.mu.RLock()
 	applyTx := tx.RwTx
 	tx.tx.mu.RUnlock()

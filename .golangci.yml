@@ -115,15 +115,6 @@ linters:
       - linters:
           - modernize
         path: _grpc\.pb\.go
-      # RwTx.AsyncClone keeps receiver "rwtx", not "tx" like RwTx's other methods:
-      # renaming it would make the embedded tx{} composite literal in its body
-      # ambiguous with the receiver. staticcheck reports ST1016 for the whole
-      # RwTx type at one representative line, not the outlier method itself, so
-      # a //nolint comment on AsyncClone can't target it.
-      - linters:
-          - staticcheck
-        text: "^ST1016:"
-        path: "db/kv/temporal/kv_temporal\\.go$"
       # shadow runs under db/ only for now; the rest of the tree is not swept yet.
       - linters:
           - govet
