@@ -200,8 +200,8 @@ func toBlobTxJSON(tx *BlobTx) *txJSON {
 	return &enc
 }
 
-func (stx *BlobTx) MarshalJSON() ([]byte, error) {
-	return json.Marshal(toBlobTxJSON(stx))
+func (btx *BlobTx) MarshalJSON() ([]byte, error) {
+	return json.Marshal(toBlobTxJSON(btx))
 }
 
 func (txw *BlobTxWrapper) MarshalJSON() ([]byte, error) {
