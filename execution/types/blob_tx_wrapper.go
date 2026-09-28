@@ -281,9 +281,9 @@ func (c KZGCommitment) ComputeVersionedHash() common.Hash {
 
 /* BlobTxWrapper methods */
 
-// WithSidecar returns a copy of stx wrapped with the sidecar of sc.
-func (stx *BlobTx) WithSidecar(sc *BlobTxWrapper) *BlobTxWrapper {
-	return &BlobTxWrapper{Tx: stx.copyData(), WrapperVersion: sc.WrapperVersion, Blobs: sc.Blobs, Commitments: sc.Commitments, Proofs: sc.Proofs}
+// WithSidecar returns a copy of btx wrapped with the sidecar of sc.
+func (btx *BlobTx) WithSidecar(sc *BlobTxWrapper) *BlobTxWrapper {
+	return &BlobTxWrapper{Tx: btx.copyData(), WrapperVersion: sc.WrapperVersion, Blobs: sc.Blobs, Commitments: sc.Commitments, Proofs: sc.Proofs}
 }
 
 // VerifyProofs checks the KZG proofs against the blobs and commitments: cell proofs
