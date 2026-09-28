@@ -100,6 +100,11 @@ func (me *downloadBatch) addAllItems(ctx context.Context, items []preverifiedSna
 		if ctx.Err() != nil {
 			return context.Cause(ctx)
 		}
+		// Already held in full: adding it would reopen the data file for
+		// writing, truncating a file the aggregator may have mapped.
+		if haveCompletePayload(me.d.snapDir(), it.Name) {
+			continue
+		}
 		err := me.addDownload(it)
 		if err != nil {
 			err = fmt.Errorf("downloading snapshot %s (infohash %s): %w", it.Name, it.InfoHash.HexString(), err)
