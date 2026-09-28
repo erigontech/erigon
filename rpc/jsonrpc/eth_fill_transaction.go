@@ -86,10 +86,6 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 		args.Nonce = (*hexutil.Uint64)(&nonce)
 	}
 
-	if args.Data != nil && args.Input != nil && !bytes.Equal(*args.Data, *args.Input) {
-		return nil, errors.New(`both "data" and "input" are set and not equal. Please use "input" to pass transaction call data`)
-	}
-
 	if args.BlobVersionedHashes != nil {
 		if n := len(args.BlobVersionedHashes); n == 0 {
 			return nil, errors.New("need at least 1 blob for a blob transaction")
