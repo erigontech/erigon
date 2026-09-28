@@ -37,7 +37,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/snaptype"
-	"github.com/erigontech/erigon/db/version"
 	ver "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
@@ -254,7 +253,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		for _, typ := range types {
 			if typeName == typ.Name() {
-				var versions version.Versions
+				var versions ver.Versions
 				if strings.HasSuffix(p.Name, "idx") {
 					versions = typ.Indexes()[idxIndex].Version
 				} else {
