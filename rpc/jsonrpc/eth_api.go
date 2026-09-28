@@ -840,13 +840,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 		return err
 	}
 	floor := amount.PruneTo(latest)
-	if block < floor {
-		return fmt.Errorf("%w: requested block %d, %s from block %d", state.PrunedError, block, available, floor)
-	}
-	if block >= latest {
-		return nil
-	}
-	if onDiskFloor != nil {
+	if block >= floor && block < latest && onDiskFloor != nil {
 		actual, err := onDiskFloor(latest)
 		if err != nil {
 			return err

@@ -468,6 +468,8 @@ func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx
 
 // MinimumBlockAvailable returns the first block covered by every block-snapshot
 // type in tx's pinned view, falling back to MDBX when the snapshot set is incomplete.
+// tx must carry a pinned block-files view, even for MDBX-only reads.
+// A nil tx or a tx without that view causes a panic.
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	view := r.view(tx)
 	var snapshotMin uint64
