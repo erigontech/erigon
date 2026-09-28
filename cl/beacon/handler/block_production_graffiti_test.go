@@ -24,6 +24,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
@@ -236,7 +238,7 @@ func TestCombinedGraffiti(t *testing.T) {
 		a := withELVersion()
 		segment := "EGc3d4" + caplinClientCode + clCommit // 12 bytes
 		var zero common.Hash
-		available := len(zero) - len(segment) - 1 // 19 bytes left for custom text + separator
+		available := len(zero) - len(segment) - 1 // 19 bytes for custom text (1 more for the separator)
 		long := strings.Repeat("x", available+5)
 		custom := graffitiFromString(long)
 
@@ -256,7 +258,7 @@ func TestCombinedGraffiti(t *testing.T) {
 		a := &ApiHandler{version: "1.2.3"}     // no cached EL version: consensus-only segment
 		segment := caplinClientCode + clCommit // 6 bytes
 		var zero common.Hash
-		available := len(zero) - len(segment) - 1 // 25 bytes left for custom text + separator
+		available := len(zero) - len(segment) - 1 // 25 bytes for custom text (1 more for the separator)
 		long := strings.Repeat("y", available+3)
 		custom := graffitiFromString(long)
 
@@ -264,15 +266,54 @@ func TestCombinedGraffiti(t *testing.T) {
 
 		require.Equal(t, segment+" "+long[:available], got)
 	})
+
+	t.Run("truncation backs off to a UTF-8 rune boundary", func(t *testing.T) {
+		a := withELVersion()
+		segment := "EGc3d4" + caplinClientCode + clCommit // 12 bytes
+		var zero common.Hash
+		available := len(zero) - len(segment) - 1
+		require.Equal(t, 19, available, "test below assumes this exact byte budget")
+		// "ab" (2 bytes) + five 4-byte runes: byte 19 of 22 lands inside the last rune.
+		long := "ab" + strings.Repeat("🎉", 5)
+		custom := graffitiFromString(long)
+
+		text := graffitiText(a.combinedGraffiti(custom))
+
+		require.True(t, utf8.ValidString(text), "truncated graffiti must be valid UTF-8: %q", text)
+		require.Equal(t, segment+" ab"+strings.Repeat("🎉", 4), text)
+	})
+
+	t.Run("short caller graffiti decoded by graffitiFromHex is not silently dropped", func(t *testing.T) {
+		a := withELVersion()
+		custom := graffitiFromHex("0x01") // right-padded: content at byte 0, not byte 31
+		got := graffitiText(a.combinedGraffiti(custom))
+		require.Equal(t, "EGc3d4"+caplinClientCode+clCommit+" \x01", got)
+	})
+}
+
+func TestGraffitiFromHex(t *testing.T) {
+	t.Run("a full 32-byte value matches common.HexToHash", func(t *testing.T) {
+		full := "0x" + strings.Repeat("ab", 32)
+		require.Equal(t, common.HexToHash(full), graffitiFromHex(full))
+	})
+
+	t.Run("a short value is zero-padded on the right, not the left", func(t *testing.T) {
+		var want common.Hash
+		want[0] = 0x01
+		require.Equal(t, want, graffitiFromHex("0x01"))
+		// common.HexToHash treats short input as a right-aligned number instead,
+		// placing the byte at the end: exactly the mismatch this helper avoids.
+		require.NotEqual(t, common.HexToHash("0x01"), graffitiFromHex("0x01"))
+	})
 }
 
 func TestRequestGraffiti(t *testing.T) {
 	clCommit := graffitiCommitPrefix(version.GitCommit)
 
-	newHandler := func(forceClientGraffiti bool) *ApiHandler {
+	newHandler := func(preserveGraffiti bool) *ApiHandler {
 		return &ApiHandler{
 			version:   "1.2.3",
-			routerCfg: &beacon_router_configuration.RouterConfiguration{ForceClientGraffiti: forceClientGraffiti},
+			routerCfg: &beacon_router_configuration.RouterConfiguration{PreserveGraffiti: preserveGraffiti},
 		}
 	}
 
@@ -291,10 +332,51 @@ func TestRequestGraffiti(t *testing.T) {
 		require.Equal(t, caplinClientCode+clCommit+" pool.eth", got)
 	})
 
-	t.Run("ForceClientGraffiti opts out of combining and returns the caller's graffiti verbatim", func(t *testing.T) {
+	t.Run("PreserveGraffiti opts out of combining and returns the caller's graffiti verbatim", func(t *testing.T) {
 		a := newHandler(true)
 		custom := graffitiFromString("pool.eth")
 		got := a.requestGraffiti(true, custom)
 		require.Equal(t, custom, got)
 	})
+}
+
+func TestLogGraffitiIdentificationOnce(t *testing.T) {
+	getLogs := captureAllProductionLogs(t)
+	a := &ApiHandler{version: "1.2.3", logger: log.Root()}
+
+	a.logGraffitiIdentificationOnce()
+	a.logGraffitiIdentificationOnce()
+	a.logGraffitiIdentificationOnce()
+
+	require.Equal(t, 1, strings.Count(getLogs(), "Default graffiti updated"))
+}
+
+func TestLogGraffitiIdentification(t *testing.T) {
+	getLogs := captureAllProductionLogs(t)
+
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	release := make(chan struct{})
+	engine.EXPECT().GetClientVersionV1(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error) {
+			<-release
+			return []engine_types.ClientVersionV1{{Code: "EG", Commit: "0xc3d4e5f6"}}, nil
+		}).
+		Times(1)
+
+	a := &ApiHandler{engine: engine, version: "1.2.3", logger: log.Root()}
+	a.LogGraffitiIdentification()
+
+	// The startup log fires synchronously, before the (async) execution client lookup
+	// could possibly have resolved.
+	require.Contains(t, getLogs(), "Default graffiti")
+	require.NotContains(t, getLogs(), "Default graffiti updated")
+
+	close(release)
+	require.Eventually(t, func() bool {
+		return strings.Contains(getLogs(), "Default graffiti updated")
+	}, time.Second, time.Millisecond)
+
+	require.Equal(t, 1, strings.Count(getLogs(), "Default graffiti updated"),
+		"the resolution log must fire exactly once, not once per call site or per retry")
 }

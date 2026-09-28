@@ -3044,10 +3044,7 @@ func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing
 			Blobs: []hexutil.Bytes{blob}, Commitments: []hexutil.Bytes{commitment}, Proofs: []hexutil.Bytes{proof},
 		}, nil, big.NewInt(1_000_000_000), nil)
 	handler.engine = engine
-	// Graffiti resolution now queries the execution client's version to build the
-	// identification segment; short-circuit that with a cached "unavailable" so this
-	// unrelated test doesn't need to mock GetClientVersionV1 too.
-	handler.elClientVersion.Store(elClientVersionUnavailable)
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 	handler.selfBuildPayloads = evictingSelfBuildPayloadCache{}
 	handler.blobBundles = evictingBlobBundleCache{}
 
@@ -3576,10 +3573,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
 		Times(2)
 	handler.engine = engine
-	// Graffiti resolution now queries the execution client's version to build the
-	// identification segment; short-circuit that with a cached "unavailable" so this
-	// unrelated test doesn't need to mock GetClientVersionV1 too.
-	handler.elClientVersion.Store(elClientVersionUnavailable)
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 
 	produce := func() *cltypes.BeaconBlock {
 		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(

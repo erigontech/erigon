@@ -63,15 +63,15 @@ func runCaplinNode(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 	rcfg := beacon_router_configuration.RouterConfiguration{
-		Protocol:            cfg.BeaconProtocol,
-		Address:             cfg.BeaconAddr,
-		ReadTimeTimeout:     cfg.BeaconApiReadTimeout,
-		WriteTimeout:        cfg.BeaconApiWriteTimeout,
-		IdleTimeout:         cfg.BeaconApiWriteTimeout,
-		AllowedOrigins:      cfg.AllowedOrigins,
-		AllowedMethods:      cfg.AllowedMethods,
-		AllowCredentials:    cfg.AllowCredentials,
-		ForceClientGraffiti: cfg.ForceClientGraffiti,
+		Protocol:         cfg.BeaconProtocol,
+		Address:          cfg.BeaconAddr,
+		ReadTimeTimeout:  cfg.BeaconApiReadTimeout,
+		WriteTimeout:     cfg.BeaconApiWriteTimeout,
+		IdleTimeout:      cfg.BeaconApiWriteTimeout,
+		AllowedOrigins:   cfg.AllowedOrigins,
+		AllowedMethods:   cfg.AllowedMethods,
+		AllowCredentials: cfg.AllowCredentials,
+		PreserveGraffiti: cfg.PreserveGraffiti,
 	}
 	if err := rcfg.UnwrapEndpointsList(cfg.AllowedEndpoints); err != nil {
 		return err

@@ -233,7 +233,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.BeaconApiAllowMethodsFlag,
 	&utils.BeaconApiAllowOriginsFlag,
 	&utils.BeaconApiAllowCredentialsFlag,
-	&utils.BeaconApiForceClientGraffitiFlag,
+	&utils.BeaconApiPreserveGraffitiFlag,
 	&utils.BeaconApiPortFlag,
 	&utils.BeaconApiReadTimeoutFlag,
 	&utils.BeaconApiWriteTimeoutFlag,
