@@ -1807,9 +1807,9 @@ func (res *ReadResult) Version() Version {
 	}
 }
 
-func (mvr ReadResult) Status() int {
-	if mvr.depIdx != UnknownDep {
-		if mvr.incarnation == -1 {
+func (res ReadResult) Status() int {
+	if res.depIdx != UnknownDep {
+		if res.incarnation == -1 {
 			return MVReadResultDependency
 		} else {
 			return MVReadResultDone
