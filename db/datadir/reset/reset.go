@@ -128,9 +128,9 @@ type resetItemInfo struct {
 	inPreverified bool
 }
 
-func (me *Reset) doSnapshots() (err error) {
-	snapDir := me.dataDirOsPath().Join(datadir.SnapDir)
-	ra := me.makeRemoveAll(snapDir)
+func (reset *Reset) doSnapshots() (err error) {
+	snapDir := reset.dataDirOsPath().Join(datadir.SnapDir)
+	ra := reset.makeRemoveAll(snapDir)
 	// Data files retained this pass, keyed by their preverified name. A data file is walked before
 	// its sibling ".torrent" (os.ReadDir sorts, and "x.ef" < "x.ef.torrent"), so when an incorrect
 	// torrent is later removed we can retract the stale data file it vouched for.
@@ -139,17 +139,17 @@ func (me *Reset) doSnapshots() (err error) {
 		itemName := string(filePath.mustLocalRelSlash(snapDir))
 		itemName, _ = strings.CutSuffix(itemName, ".part")
 		itemName, isTorrent := strings.CutSuffix(itemName, ".torrent")
-		item, ok := me.PreverifiedSnapshots.Get(itemName)
-		doRemove := me.decideRemove(resetItemInfo{
+		item, ok := reset.PreverifiedSnapshots.Get(itemName)
+		doRemove := reset.decideRemove(resetItemInfo{
 			filePath:      filePath,
 			snapName:      itemName,
 			hash:          func() g.Option[string] { return g.OptionFromTuple(item.Hash, ok) }(),
 			isTorrent:     isTorrent,
 			inPreverified: ok,
 		})
-		stats := &me.stats.retained
+		stats := &reset.stats.retained
 		if doRemove {
-			stats = &me.stats.removed
+			stats = &reset.stats.removed
 			err = inner(filePath, info)
 			if err != nil {
 				return fmt.Errorf("removing file %v: %w", filePath, err)
@@ -162,8 +162,8 @@ func (me *Reset) doSnapshots() (err error) {
 						return fmt.Errorf("removing stale data file %v: %w", dataPath, err)
 					}
 					delete(retainedDataFiles, itemName)
-					me.stats.retained.DataFiles--
-					me.stats.removed.DataFiles++
+					reset.stats.retained.DataFiles--
+					reset.stats.removed.DataFiles++
 				}
 			}
 		} else if !isTorrent {
@@ -182,17 +182,17 @@ func (me *Reset) doSnapshots() (err error) {
 }
 
 // Decides whether to remove a file, and logs the reasoning.
-func (me *Reset) decideRemove(file resetItemInfo) bool {
-	logger := me.Logger
+func (reset *Reset) decideRemove(file resetItemInfo) bool {
+	logger := reset.Logger
 	name := file.snapName
 	if !file.inPreverified {
-		if !me.RemoveUnknown {
+		if !reset.RemoveUnknown {
 			logger.Debug("skipping unknown file", "name", name)
 		}
-		return me.RemoveUnknown
+		return reset.RemoveUnknown
 	}
 	if file.isTorrent {
-		mi, err := me.loadMetainfoFromFile(file.filePath)
+		mi, err := reset.loadMetainfoFromFile(file.filePath)
 		if err != nil {
 			logger.Error("error loading metainfo file", "name", name, "err", err)
 			return true
@@ -215,7 +215,7 @@ func (me *Reset) decideRemove(file resetItemInfo) bool {
 	}
 }
 
-func (me *Reset) loadMetainfoFromFile(path OsFilePath) (mi *metainfo.MetaInfo, err error) {
+func (reset *Reset) loadMetainfoFromFile(path OsFilePath) (mi *metainfo.MetaInfo, err error) {
 	f, err := os.Open(string(path))
 	if err != nil {
 		return

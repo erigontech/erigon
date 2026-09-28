@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
-	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	statelru "github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
@@ -264,7 +263,7 @@ type childrens struct {
 // NewForkChoiceStore initialize a new store from the given anchor state, either genesis or checkpoint sync state.
 func NewForkChoiceStore(
 	ethClock eth_clock.EthereumClock,
-	anchorState *state2.CachingBeaconState,
+	anchorState *state.CachingBeaconState,
 	engine execution_client.ExecutionEngine,
 	operationsPool pool.OperationsPool,
 	forkGraph fork_graph.ForkGraph,
@@ -283,7 +282,7 @@ func NewForkChoiceStore(
 
 	anchorCheckpoint := solid.Checkpoint{
 		Root:  anchorRoot,
-		Epoch: state2.Epoch(anchorState.BeaconState),
+		Epoch: state.Epoch(anchorState.BeaconState),
 	}
 
 	verifiedExecutionPayload, err := lru.New[common.Hash, struct{}](65536)
@@ -698,13 +697,13 @@ func (f *ForkChoiceStore) AnchorExecutionPayloadBuilderIndex() (uint64, bool) {
 	return f.anchorExecutionPayloadBuilderIndex, f.anchorHasExecutionPayloadBid
 }
 
-func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+func (f *ForkChoiceStore) GetStateAtBlockRoot(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	return f.forkGraph.GetState(blockRoot, alwaysCopy)
 }
 
-func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state2.CachingBeaconState) error) error {
+func (f *ForkChoiceStore) ViewStateAtBlockRoot(blockRoot common.Hash, fn func(*state.CachingBeaconState) error) error {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 	blockState, err := f.forkGraph.GetState(blockRoot, false)

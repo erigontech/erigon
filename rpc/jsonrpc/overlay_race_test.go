@@ -1548,6 +1548,17 @@ func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
 	require.NoError(t, err)
 }
 
+// TestTraceFilter_OmittedBoundsUseExecutionProgress pins that both omitted
+// bounds resolve to the executed tip, not to a forkchoice head ahead of it.
+func TestTraceFilter_OmittedBoundsUseExecutionProgress(t *testing.T) {
+	m, _ := newBlockAheadOfExecutionTester(t)
+	api := newTraceApiForTest(m)
+
+	stream := jsonstream.New(nil)
+	require.NoError(t, api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, stream))
+	require.Equal(t, []int{overlayRaceChainSize}, blockNumbersFromTraces(t, stream.Buffer()))
+}
+
 // TestGetModifiedAccountsByHash_FutureStartBlockErrors pins that ByHash rejects
 // a not-yet-executed start block like its ByNumber twin, instead of returning
 // a silent result from a clamped txnum range.
