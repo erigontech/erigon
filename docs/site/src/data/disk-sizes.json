@@ -1,67 +1,103 @@
 {
   "ci_last_updated": "2026-08-24",
   "networks": {
-    "mainnet": {
+    "chiado": {
       "archive": {
-        "bytes": 2032210546379,
-        "display": "2.03 TB",
-        "measured_at": "2026-07-19",
+        "bytes": 29975248896,
+        "display": "29.98 GB",
+        "measured_at": "2026-09-20",
         "source": "manual"
       },
       "full": {
-        "bytes": 419040837312,
-        "display": "419.04 GB",
-        "measured_at": "2026-07-19",
+        "bytes": 16065540096,
+        "display": "16.07 GB",
+        "measured_at": "2026-09-20",
         "source": "manual"
       },
       "minimal": {
-        "bytes": 478402613248,
-        "display": "478.40 GB",
-        "measured_at": "2026-08-24",
-        "source": "ci"
+        "bytes": 16004575232,
+        "display": "16.00 GB",
+        "measured_at": "2026-09-20",
+        "source": "manual"
       }
     },
     "gnosis": {
       "archive": {
-        "bytes": 673591206484,
-        "display": "673.59 GB",
-        "measured_at": "2026-07-21",
+        "bytes": 803350437888,
+        "display": "803.35 GB",
+        "measured_at": "2026-09-19",
         "source": "manual"
       },
       "full": {
-        "bytes": 220098790979,
-        "display": "220.10 GB",
-        "measured_at": "2026-07-21",
+        "bytes": 314352332800,
+        "display": "314.35 GB",
+        "measured_at": "2026-09-19",
         "source": "manual"
       },
       "minimal": {
-        "bytes": 304668426240,
-        "display": "304.67 GB",
-        "measured_at": "2026-08-24",
-        "source": "ci"
-      }
-    },
-    "sepolia": {
-      "archive": {
-        "bytes": 1095748761644,
-        "display": "1.10 TB",
-        "measured_at": "2026-07-29",
+        "bytes": 311747514368,
+        "display": "311.75 GB",
+        "measured_at": "2026-09-19",
         "source": "manual"
       }
     },
     "hoodi": {
       "archive": {
-        "bytes": 133727771520,
-        "display": "133.73 GB",
-        "measured_at": "2026-07-29",
+        "bytes": 132916133888,
+        "display": "132.92 GB",
+        "measured_at": "2026-09-20",
+        "source": "manual"
+      },
+      "full": {
+        "bytes": 62863290368,
+        "display": "62.86 GB",
+        "measured_at": "2026-09-20",
+        "source": "manual"
+      },
+      "minimal": {
+        "bytes": 58886643712,
+        "display": "58.89 GB",
+        "measured_at": "2026-09-20",
         "source": "manual"
       }
     },
-    "chiado": {
+    "mainnet": {
       "archive": {
-        "bytes": 29643543816,
-        "display": "29.64 GB",
-        "measured_at": "2026-07-29",
+        "bytes": 2248422940672,
+        "display": "2.25 TB",
+        "measured_at": "2026-09-17",
+        "source": "manual"
+      },
+      "full": {
+        "bytes": 534944866304,
+        "display": "534.94 GB",
+        "measured_at": "2026-09-19",
+        "source": "manual"
+      },
+      "minimal": {
+        "bytes": 510823034880,
+        "display": "510.82 GB",
+        "measured_at": "2026-09-19",
+        "source": "manual"
+      }
+    },
+    "sepolia": {
+      "archive": {
+        "bytes": 1124215902208,
+        "display": "1.12 TB",
+        "measured_at": "2026-09-18",
+        "source": "manual"
+      },
+      "full": {
+        "bytes": 301822181376,
+        "display": "301.82 GB",
+        "measured_at": "2026-09-19",
+        "source": "manual"
+      },
+      "minimal": {
+        "bytes": 272594530304,
+        "display": "272.59 GB",
+        "measured_at": "2026-09-20",
         "source": "manual"
       }
     }
