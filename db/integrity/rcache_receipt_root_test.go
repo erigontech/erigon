@@ -1,0 +1,158 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package integrity_test
+
+import (
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/integrity"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/types"
+)
+
+func enableHistoricalRCache(t *testing.T) {
+	saved := statecfg.Schema.RCacheDomain
+	statecfg.EnableHistoricalRCache()
+	t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
+}
+
+func newRCacheChain(t *testing.T, txsPerBlock []int, hole int) (kv.TemporalRwDB, *freezeblocks.BlockReader) {
+	t.Helper()
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
+	br := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
+
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	require.NoError(t, err)
+	defer doms.Close()
+	putter := doms.AsPutDel(tx)
+
+	txNum := uint64(0)
+	for b, n := range txsPerBlock {
+		receipts := make(types.Receipts, n)
+		for i := range receipts {
+			receipts[i] = &types.Receipt{
+				Status:            types.ReceiptStatusSuccessful,
+				CumulativeGasUsed: uint64(21_000 * (i + 1)),
+				TransactionIndex:  uint(i),
+				Logs:              []*types.Log{},
+			}
+		}
+		write := func(r *types.Receipt) {
+			if b != hole {
+				require.NoError(t, rawdb.WriteReceiptCacheV2(putter, r, txNum))
+			}
+			txNum++
+		}
+		write(nil)
+		for _, r := range receipts {
+			write(r)
+		}
+		write(nil)
+		require.NoError(t, rawdbv3.TxNums.Append(tx, uint64(b), txNum-1))
+
+		for _, r := range receipts {
+			r.Bloom = types.CreateBloom(types.Receipts{r})
+		}
+		h := &types.Header{Number: *uint256.NewInt(uint64(b)), ReceiptHash: types.DeriveSha(receipts)}
+		require.NoError(t, rawdb.WriteHeader(tx, h))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, h.Hash(), uint64(b)))
+	}
+	require.NoError(t, doms.Flush(ctx, tx))
+	doms.Close()
+	require.NoError(t, tx.Commit())
+	return db, br
+}
+
+func TestReceiptRootIntegrity(t *testing.T) {
+	enableHistoricalRCache(t)
+
+	txsPerBlock := []int{0, 2, 0, 0, 1, 0, 3, 0}
+	const emptyBlock, txBlock = 3, 4
+
+	tests := []struct {
+		name    string
+		hole    int
+		wantErr bool
+	}{
+		{name: "complete", hole: -1},
+		{name: "hole over empty block", hole: emptyBlock, wantErr: true},
+		{name: "hole over block with txs", hole: txBlock, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			logger := log.New()
+			ctx := t.Context()
+			db, br := newRCacheChain(t, txsPerBlock, tt.hole)
+
+			sc, err := integrity.NewSamplerCfg(1, 1.0)
+			require.NoError(t, err)
+			err = integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, br, chain.AllProtocolChanges, 1, uint64(len(txsPerBlock)), true, logger)
+			if !tt.wantErr {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, integrity.ErrIntegrity)
+			require.ErrorIs(t, integrity.CheckRCacheRootAtBlk(ctx, db, br, chain.AllProtocolChanges, uint64(tt.hole), true, logger), integrity.ErrIntegrity)
+		})
+	}
+}
+
+func TestReceiptRootIntegrity_FilesOnlyTip(t *testing.T) {
+	enableHistoricalRCache(t)
+	ctx := t.Context()
+
+	db, br := newRCacheChain(t, []int{0, 2, 0, 0, 2, 1, 0, 0}, -1)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
+		for _, table := range db.Debug().DomainTables(kv.RCacheDomain) {
+			if err := tx.ClearTable(table); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.Equal(t, uint64(16), tx.Debug().DomainProgress(kv.RCacheDomain))
+	tx.Rollback()
+
+	sc, err := integrity.NewSamplerCfg(1, 1.0)
+	require.NoError(t, err)
+	require.NoError(t, integrity.CheckReceiptRootIntegrity(ctx, sc, db, br, chain.AllProtocolChanges, true, log.New()))
+}
