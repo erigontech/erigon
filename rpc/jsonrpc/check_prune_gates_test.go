@@ -485,7 +485,7 @@ func TestHistoryGateUsesEarliestDomainFloor(t *testing.T) {
 
 	floors, err := apis.eth.readHistoryStartBlocks(ctx, view, chainInfo.head)
 	require.NoError(t, err)
-	require.Equal(t, uint64(7), floors.block)
+	require.Equal(t, uint64(7), floors.wholeBlock)
 }
 
 func TestHistoryGatePropagatesBackendError(t *testing.T) {

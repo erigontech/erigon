@@ -177,8 +177,8 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if err != nil {
 		return nil, err
 	}
-	stateOldest = max(stateOldest, onDiskFloors.state)
-	historyOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.block)
+	stateOldest = max(stateOldest, onDiskFloors.postState)
+	historyOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.wholeBlock)
 	replayOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.replay)
 
 	var stateproofs CapabilityField
