@@ -64,6 +64,7 @@ bin datadir with the execution-committed bin root. In-place rebuilds and hex tar
 before staging and before any commitment file or table is touched. Existing codeless accounts are
 emitted with empty code in every range, so their code size, code-hash and delegation leaves are
 rewritten from the current account instead of retaining fields from the preceding range.
+A rebuilt output is a bin datadir; execution can continue from it only after the EIP-8347 fork.
 
 `erigondb.toml` records `trie_variant`, `trie_hash`, and per-domain freeze state. Changing the
 embedding or selected binary hash suite requires rebuilding the binary datadir from genesis.
