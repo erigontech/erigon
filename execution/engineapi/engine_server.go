@@ -500,7 +500,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
+	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
 	}
@@ -538,8 +538,12 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	return payloadStatus, nil
 }
 
+// defaultReadinessWait is how long a request waits for a busy execution module before answering
+// SYNCING.
+const defaultReadinessWait = 500 * time.Millisecond
+
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
-func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool) (*engine_types.PayloadStatus, error) {
+func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -664,7 +668,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForResponse(500*time.Millisecond, func() (bool, error) {
+	waitingForExecutionReady, err := waitForResponse(readinessWait, func() (bool, error) {
 		isReady, err := e.chainRW.Ready(ctx)
 		return !isReady, err
 	})
@@ -781,7 +785,14 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	e.logger.Debug("[ForkChoiceUpdated] processing new request", newReqLogInfoArgs...)
-	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false)
+	readinessWait := defaultReadinessWait
+	if payloadAttributes != nil {
+		// The previous head's flush, commit and prune keep the module busy after its forkchoice
+		// update has already answered. Answering SYNCING here drops the payload build - and with
+		// it the proposal - so wait as long as the AssembleBlock step below would.
+		readinessWait = time.Duration(e.config.SecondsPerSlot()) * time.Second
+	}
+	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false, readinessWait)
 	if err != nil {
 		return nil, err
 	}
