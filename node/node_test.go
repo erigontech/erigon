@@ -36,9 +36,7 @@ import (
 	"github.com/erigontech/erigon/p2p"
 )
 
-var (
-	testNodeKey, _ = crypto.GenerateKey()
-)
+var testNodeKey, _ = crypto.GenerateKey()
 
 func testNodeConfig(t *testing.T) *nodecfg.Config {
 	return &nodecfg.Config{
@@ -381,8 +379,7 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 	}
 	// Stop the stack, verify failure and check all terminations
 	err = stack.Close()
-	var stopErr *StopError
-	if !errors.As(err, &stopErr) {
+	if stopErr, ok := errors.AsType[*StopError](err); !ok {
 		t.Fatalf("termination failure mismatch: have %v, want StopError", err)
 	} else {
 		failer := reflect.TypeFor[*InstrumentedService]()

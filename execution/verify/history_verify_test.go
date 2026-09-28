@@ -21,7 +21,7 @@ import (
 	"github.com/erigontech/erigon/execution/verify"
 )
 
-var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false)
+var unboundedFinalityCtx = execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums)
 
 // TestHistoryVerification_SimpleBlocks is an integration test that generates blocks
 // with state changes, builds snapshot files, and verifies history via re-execution.
@@ -84,7 +84,7 @@ func TestHistoryVerification_SimpleBlocks(t *testing.T) {
 	t.Logf("Last txNum: %d, stepSize: %d, steps: %d", lastTxNum, agg.StepSize(), lastTxNum/agg.StepSize())
 
 	// Build files.
-	err = agg.BuildFiles(lastTxNum, unboundedFinalityCtx)
+	err = agg.BuildFiles(m.DB, lastTxNum, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	if agg.EndTxNumMinimax() == 0 {
@@ -178,7 +178,7 @@ func TestHistoryVerification_WithUserTransactions(t *testing.T) {
 	t.Logf("Last txNum: %d, stepSize: %d, steps: %d", lastTxNum, agg.StepSize(), lastTxNum/agg.StepSize())
 
 	// Build files.
-	err = agg.BuildFiles(lastTxNum, unboundedFinalityCtx)
+	err = agg.BuildFiles(m.DB, lastTxNum, unboundedFinalityCtx)
 	require.NoError(t, err)
 
 	if agg.EndTxNumMinimax() == 0 {

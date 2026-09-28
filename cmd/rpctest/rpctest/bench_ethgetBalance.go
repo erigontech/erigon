@@ -148,7 +148,8 @@ func BenchEthGetBalanceRandomAccount(erigonURL string, concurentRequests int) er
 
 			m.Unlock()
 
-			fmt.Printf("Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
+			fmt.Printf(
+				"Latency 50p: %.2fms 90p: %.2fms 99p: %.2fms RPS: %.2f req/s\n",
 				p50,
 				p90,
 				p99,
@@ -156,7 +157,6 @@ func BenchEthGetBalanceRandomAccount(erigonURL string, concurentRequests int) er
 			)
 
 		}
-
 	}()
 
 	reqQueue := make(chan struct{}, concurentRequests)

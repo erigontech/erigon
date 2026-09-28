@@ -17,36 +17,47 @@ type noopBlockOperationProcessor struct{}
 func (noopBlockOperationProcessor) ProcessProposerSlashing(abstract.BeaconState, *cltypes.ProposerSlashing) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessAttesterSlashing(abstract.BeaconState, *cltypes.AttesterSlashing) error {
 	return nil
 }
-func (noopBlockOperationProcessor) ProcessAttestations(abstract.BeaconState, *solid.ListSSZ[*solid.Attestation]) error {
+
+func (noopBlockOperationProcessor) ProcessAttestations(abstract.BeaconState, *solid.ListSSZ[*solid.Attestation], uint64) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessDeposit(abstract.BeaconState, *cltypes.Deposit) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessVoluntaryExit(abstract.BeaconState, *cltypes.SignedVoluntaryExit) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessBlsToExecutionChange(abstract.BeaconState, *cltypes.SignedBLSToExecutionChange) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessDepositRequest(abstract.BeaconState, *solid.DepositRequest) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessWithdrawalRequest(abstract.BeaconState, *solid.WithdrawalRequest) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessConsolidationRequest(abstract.BeaconState, *solid.ConsolidationRequest) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessBuilderDepositRequest(abstract.BeaconState, *solid.BuilderDepositRequest) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessBuilderExitRequest(abstract.BeaconState, *solid.BuilderExitRequest) error {
 	return nil
 }
+
 func (noopBlockOperationProcessor) ProcessPayloadAttestation(abstract.BeaconState, *cltypes.PayloadAttestation) error {
 	return nil
 }
@@ -90,7 +101,7 @@ func TestProcessOperationsRejectsOversizedGloasLists(t *testing.T) {
 			require.NoError(t, validateGloasOperationCounts(body, &cfg))
 			test.append(body)
 
-			_, _, _, err := ProcessOperations(noopBlockOperationProcessor{}, s, body)
+			_, _, _, err := ProcessOperations(noopBlockOperationProcessor{}, s, body, 0)
 			require.ErrorContains(t, err, "too many "+test.name)
 		})
 	}

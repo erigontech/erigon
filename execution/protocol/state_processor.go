@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -56,9 +57,11 @@ func SetGasUsed(h *types.Header, gu *GasUsed) {
 // indicating the block was invalid.
 func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPool, ibs *state.IntraBlockState,
 	stateWriter state.StateWriter, header *types.Header, txn types.Transaction, gasUsed *GasUsed,
-	evm *vm.EVM, cfg vm.Config) (*types.Receipt, error) {
+	evm *vm.EVM, cfg vm.Config,
+) (*types.Receipt, error) {
 	var (
 		receipt *types.Receipt
+		result  *evmtypes.ExecutionResult
 		err     error
 	)
 
@@ -74,9 +77,13 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 		if cfg.Tracer.OnTxStart != nil {
 			cfg.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 		}
-		if cfg.Tracer.OnTxEnd != nil {
+		if cfg.Tracer.HasTxEndHook() {
 			defer func() {
-				cfg.Tracer.OnTxEnd(receipt, err)
+				var txnGasUsage mdgas.TxnGasUsage
+				if result != nil {
+					txnGasUsage = result.TxnGasUsage
+				}
+				cfg.Tracer.EmitTxEnd(receipt, txnGasUsage, err)
 			}()
 		}
 	}
@@ -88,11 +95,12 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
-	result, err := ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+	result, err = ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		return nil, err
 	}
-	if err := ibs.FinalizeTx(rules, stateWriter); err != nil {
+	err = ibs.FinalizeTx(rules, stateWriter)
+	if err != nil {
 		return nil, err
 	}
 	gasUsed.Receipt += result.ReceiptGasUsed

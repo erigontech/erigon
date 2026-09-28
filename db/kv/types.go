@@ -21,9 +21,11 @@ func (n Num) Uint64() uint64 {
 func (x Num) EncToBytes(x8Bytes bool) (out []byte) {
 	return EncToBytes(x, x8Bytes)
 }
+
 func (x Num) EncTo8Bytes() (out []byte) {
 	return EncToBytes(x, true)
 }
+
 func (x RootNum) EncTo8Bytes() (out []byte) {
 	return EncToBytes(x, true)
 }

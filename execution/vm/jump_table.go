@@ -78,6 +78,11 @@ var (
 // of those a dependent load off a separately-allocated struct.
 type JumpTable [256]operation
 
+func (op *operation) NumPush() int { return op.numPush }
+
+// UsesMemory reports whether the operation reads or writes memory.
+func (op *operation) UsesMemory() bool { return op.memorySize != nil }
+
 func validateAndFillMaxStack(jt *JumpTable) {
 	for i := range jt {
 		op := &jt[i]
@@ -266,7 +271,6 @@ func newSpuriousDragonInstructionSet() JumpTable {
 	instructionSet[EXP].dynamicGas = gasExpEIP160
 	validateAndFillMaxStack(&instructionSet)
 	return instructionSet
-
 }
 
 // EIP 150 a.k.a Tangerine Whistle

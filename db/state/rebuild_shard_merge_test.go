@@ -54,7 +54,7 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		stepSize:                         stepSize,
 		disableCommitmentBranchTransform: true,
 	})
-	require.NoError(t, agg.BuildFiles(uint64(txCount), unboundedFinalityCtx))
+	require.NoError(t, agg.BuildFiles(db, uint64(txCount), unboundedFinalityCtx))
 
 	var rootInFiles []byte
 	var fPaths []string
@@ -85,7 +85,7 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 		agg.Close()
 	}
 
-	agg = testAgg(t, db, agg.Dirs(), stepSize, log.New())
+	agg = testAgg(t, agg.Dirs(), stepSize, log.New())
 	db, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	defer db.Close()
@@ -107,7 +107,7 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 			require.NoError(t, dir.RemoveFile(fn))
 		}
 	}
-	require.NoError(t, agg.OpenFolder())
+	require.NoError(t, agg.OpenFolder(db))
 
 	finalRoot, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
 	require.NoError(t, err)

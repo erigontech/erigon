@@ -54,6 +54,7 @@ import (
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/downloader/downloadergrpc"
 	"github.com/erigontech/erigon/db/fromdb"
+	"github.com/erigontech/erigon/db/kv/backup"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -66,7 +67,7 @@ import (
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
 
-	_ "github.com/erigontech/erigon/db/snaptype2" //hack
+	_ "github.com/erigontech/erigon/db/snaptype2" // hack
 )
 
 func main() {
@@ -103,6 +104,7 @@ var (
 	targetFile           string
 	disableIPV6          bool
 	disableIPV4          bool
+	disableTCP           bool
 	seedbox              bool
 	dbWritemap           bool
 	all                  bool
@@ -111,7 +113,7 @@ var (
 
 var cobraFlagValues struct {
 	webseeds string
-	//preverifiedSource string
+	// preverifiedSource string
 	datadir      string
 	chainTomlURL string
 }
@@ -138,6 +140,7 @@ func init() {
 	rootCmd.Flags().StringVar(&staticPeersStr, utils.TorrentStaticPeersFlag.Name, utils.TorrentStaticPeersFlag.Value, utils.TorrentStaticPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV6, "downloader.disable.ipv6", utils.DisableIPV6.Value, utils.DisableIPV6.Usage)
 	rootCmd.Flags().BoolVar(&disableIPV4, "downloader.disable.ipv4", utils.DisableIPV4.Value, utils.DisableIPV4.Usage)
+	rootCmd.Flags().BoolVar(&disableTCP, utils.DisableTCP.Name, utils.DisableTCP.Value, utils.DisableTCP.Usage)
 	rootCmd.Flags().BoolVar(&seedbox, "seedbox", false, "Turns downloader into independent (doesn't need Erigon) software which discover/download/seed new files - useful for Erigon network, and can work on very cheap hardware. It will: 1) download .torrent from webseed 2) download new files after upgrade 3) we planing add discovery of new files soon")
 	rootCmd.Flags().BoolVar(&dbWritemap, utils.DbWriteMapFlag.Name, utils.DbWriteMapFlag.Value, utils.DbWriteMapFlag.Usage)
 	rootCmd.PersistentFlags().BoolVar(&verify, "verify", false, utils.DownloaderVerifyFlag.Usage)
@@ -224,7 +227,7 @@ var rootCmd = &cobra.Command{
 func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	ctx := cmd.Context()
 	dirs := datadir.New(cobraFlagValues.datadir)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 		return err
 	}
 	if err := checkChainName(ctx, dirs, chain); err != nil {
@@ -291,6 +294,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		downloadercfg.NewCfgOpts{
 			DownloadRateLimit: downloadRate.TorrentRateLimit(),
 			UploadRateLimit:   uploadRate.TorrentRateLimit(),
+			DisableTCP:        g.Some(disableTCP),
 		},
 	)
 	if err != nil {
@@ -402,10 +406,7 @@ var printTorrentHashes = &cobra.Command{
 	Example: "go run ./cmd/downloader torrent_hashes --datadir <your_datadir>",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "downloader")
-		if err := doPrintTorrentHashes(cmd.Context(), logger); err != nil {
-			log.Error(err.Error())
-		}
-		return nil
+		return doPrintTorrentHashes(cmd.Context(), logger)
 	},
 }
 
@@ -477,6 +478,7 @@ var torrentCat = &cobra.Command{
 		return err
 	},
 }
+
 var torrentClean = &cobra.Command{
 	Use:     "torrent_clean",
 	Short:   "RemoveFile all .torrent files from datadir directory",
@@ -537,7 +539,7 @@ func manifestVerify(ctx context.Context, logger log.Logger) error {
 	if len(webseedsList) == 0 { // fallback to default if exact list not passed
 		if known, ok := snapcfg.GetEmbeddedWebseeds(chain); ok {
 			for _, s := range known {
-				//TODO: enable validation of this buckets also. skipping to make CI useful.
+				// TODO: enable validation of this buckets also. skipping to make CI useful.
 				if strings.Contains(s, "erigon2-v2") {
 					continue
 				}
@@ -601,7 +603,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 		//".kv", ".kvi", ".bt", ".kvei", // e3 domain
 		//".v", ".vi", //e3 hist
 		//".ef", ".efi", //e3 idx
-		".txt", //salt-state.txt, salt-blocks.txt, manifest.txt
+		".txt", // salt-state.txt, salt-blocks.txt, manifest.txt
 	}
 	l, _ := dir.ListFiles(dirs.Snap, extList...)
 	for _, fPath := range l {
@@ -633,7 +635,7 @@ func manifest(ctx context.Context, logger log.Logger) error {
 
 func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(cobraFlagValues.datadir)
-	if err := datadir.ApplyMigrations(dirs); err != nil {
+	if err := backup.ApplyMigrations(ctx, dirs, logger); err != nil {
 		return err
 	}
 
@@ -692,7 +694,7 @@ func doPrintTorrentHashes(ctx context.Context, logger log.Logger) error {
 		logger.Info("amount of lines in target file is equal or greater than amount of lines in snapshot dir", "old", len(oldLines), "new", len(res))
 		return nil
 	}
-	if err := os.WriteFile(targetFile, serialized, 0644); err != nil { // nolint
+	if err := os.WriteFile(targetFile, serialized, 0o644); err != nil { // nolint
 		return err
 	}
 	return nil

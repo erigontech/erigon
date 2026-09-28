@@ -271,7 +271,7 @@ func (p *Program) InputAddressToStack(inputOffset uint32) *Program {
 
 // Mstore stores the provided data (into the memory area starting at memStart).
 func (p *Program) Mstore(data []byte, memStart uint32) *Program {
-	var idx = 0
+	idx := 0
 	// We need to store it in chunks of 32 bytes
 	for ; idx+32 <= len(data); idx += 32 {
 		chunk := data[idx : idx+32]

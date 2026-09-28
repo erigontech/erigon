@@ -89,8 +89,9 @@ func TestCodeBitmapSWAREquivalence(t *testing.T) {
 	}
 	edges := [][]byte{{}, {0x5b}, {0x60}, {0x7f}, {0x00}}
 	for n := range 48 {
-		edges = append(edges,
-			append([]byte{0x7f}, make([]byte, n)...),       // PUSH32 + n bytes
+		edges = append(
+			edges,
+			append([]byte{0x7f}, make([]byte, n)...), // PUSH32 + n bytes
 			append([]byte{0x5b, 0x7f}, make([]byte, n)...), // JUMPDEST, PUSH32, ...
 			append(make([]byte, n), 0x7f),                  // trailing PUSH32
 		)
@@ -99,17 +100,5 @@ func TestCodeBitmapSWAREquivalence(t *testing.T) {
 		if !equalBitvec(codeBitmap(code), codeBitmapRef(code)) {
 			t.Fatalf("edge mismatch code=%x", code)
 		}
-	}
-}
-
-// BenchmarkJumpdestAnalysisJumpdest24k mirrors the EIP-2780
-// unique_code_jumpdest receiver: 24KiB of JUMPDEST with no PUSH data.
-func BenchmarkJumpdestAnalysisJumpdest24k(b *testing.B) {
-	code := make([]byte, 24576)
-	for i := range code {
-		code[i] = 0x5b
-	}
-	for b.Loop() {
-		codeBitmap(code)
 	}
 }

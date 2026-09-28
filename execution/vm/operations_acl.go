@@ -102,7 +102,7 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 			if original.IsZero() { // reset to original inexistent slot (2.2.2.1)
 				evm.IntraBlockState().AddRefund(writeCreate)
 				if stateCreate > 0 {
-					callContext.refillStateGas(stateCreate)
+					callContext.refillStateGas(stateCreate, nil, tracing.GasChangeIgnored)
 				}
 			} else { // reset to original existing slot (2.2.2.2)
 				evm.IntraBlockState().AddRefund(writeExisting)
@@ -181,7 +181,7 @@ func makeCallVariantGasCallEIP2929(oldCalculator gasFunc) gasFunc {
 		if !warmAccess {
 			// Charge the remaining difference here already, to correctly calculate available
 			// gas for call
-			if _, ok := useGas(scopeGas.Execution, coldCost, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
+			if scopeGas.Execution < coldCost {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 			evm.IntraBlockState().AddAddressToAccessList(addr)
@@ -247,7 +247,7 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 		// If the caller cannot afford the cost, this change will be rolled back
 		if !evm.IntraBlockState().AddressInAccessList(address) {
 			gas.Execution = coldAccountAccessCost(evm.chainRules)
-			if _, ok := useGas(scopeGas.Execution, gas.Execution, evm.Config().Tracer, tracing.GasChangeCallStorageColdAccess); !ok {
+			if scopeGas.Execution < gas.Execution {
 				return mdgas.MdGas{}, ErrOutOfGas
 			}
 			evm.IntraBlockState().AddAddressToAccessList(address)

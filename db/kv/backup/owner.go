@@ -21,7 +21,11 @@ package backup
 import (
 	"os"
 	"syscall"
+
+	"github.com/erigontech/erigon/db/kv"
 )
+
+func closeBeforeRename(kv.RoDB) {}
 
 // restoreOwner gives path the uid/gid src was stat'ed with, so a compaction run
 // as root doesn't leave behind a data file the node's own user can't open.

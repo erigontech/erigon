@@ -257,7 +257,7 @@ jobs:
       - name: Setup go env and cache
         uses: actions/setup-go@v7
         with:
-          go-version: '>=1.25'
+          go-version: '>=1.26'
 
       # Build erigon from the checked-out commit, then wrap it with Hive's
       # prebuilt-image client Dockerfile — avoids cloning the ephemeral

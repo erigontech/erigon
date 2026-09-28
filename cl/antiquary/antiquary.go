@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -158,15 +159,6 @@ func (a *Antiquary) Loop() error {
 	if err := a.sn.BuildMissingIndices(a.ctx, a.logger); err != nil {
 		return err
 	}
-	var from uint64
-	if err := a.mainDB.View(a.ctx, func(tx kv.Tx) error {
-		var err error
-		from, err = beacon_indicies.ReadLastBeaconSnapshot(tx)
-		return err
-	}); err != nil {
-		return err
-	}
-
 	logInterval := time.NewTicker(30 * time.Second)
 	if err := a.sn.OpenFolder(); err != nil {
 		return err
@@ -178,30 +170,17 @@ func (a *Antiquary) Loop() error {
 	}
 
 	defer logInterval.Stop()
-	available := a.sn.BlocksAvailable()
-	if from > available {
-		a.logger.Warn("[Antiquary] Snapshot progress is ahead of visible snapshots", "progress", from, "available", available)
-		from = clampBeaconSnapshotProgress(from, available)
-	}
-	indexedTo := from
-	for {
-		frozenSlots := a.sn.BlocksAvailable()
-		if indexedTo >= frozenSlots {
-			break
-		}
-		a.logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", indexedTo, "to", frozenSlots)
-		err := indexBeaconSnapshots(a.ctx, a.mainDB, indexedTo, frozenSlots, antiquaryIndexBatchSlots, a.sn.ReadHeader, func(slot uint64) {
+	indexedTo, err := rebuildBeaconSnapshotIndex(a.ctx, a.mainDB, a.sn.BlocksAvailable, a.sn.ReadHeader,
+		antiquaryIndexBatchSlots, func(slot uint64) {
 			select {
 			case <-logInterval.C:
-				a.logger.Info("[Antiquary] Processed snapshots", "progress", slot, "target", frozenSlots)
+				a.logger.Info("[Antiquary] Processed snapshots", "progress", slot)
 			case <-a.ctx.Done():
 			default:
 			}
-		})
-		if err != nil {
-			return err
-		}
-		indexedTo = frozenSlots
+		}, a.logger)
+	if err != nil {
+		return err
 	}
 
 	if a.stateSn != nil {
@@ -274,6 +253,42 @@ func clampBeaconSnapshotProgress(progress, available uint64) uint64 {
 		return available
 	}
 	return progress
+}
+
+// rebuildBeaconSnapshotIndex indexes the visible snapshot range, resuming from the persisted
+// cursor, which is the first slot not yet indexed.
+func rebuildBeaconSnapshotIndex(ctx context.Context, db kv.RwDB, blocksAvailable func() uint64, readHeader readBeaconSnapshotHeaderFunc, batchSize uint64, onProgress func(slot uint64), logger log.Logger) (uint64, error) {
+	var from uint64
+	if err := db.View(ctx, func(tx kv.Tx) error {
+		var err error
+		from, err = beacon_indicies.ReadLastBeaconSnapshot(tx)
+		return err
+	}); err != nil {
+		return 0, err
+	}
+	if available := blocksAvailable(); from > 0 && from-1 > available {
+		logger.Warn("[Antiquary] Snapshot progress is ahead of visible snapshots", "progress", from, "available", available)
+		from = clampBeaconSnapshotProgress(from, available)
+	}
+	indexedTo := uint64(0)
+	if from > 0 {
+		indexedTo = from - 1
+	}
+	for {
+		tip := blocksAvailable()
+		if tip == 0 || from > tip {
+			return indexedTo, nil
+		}
+		logger.Info("[Antiquary] Stopping Caplin to process historical indicies", "from", from, "to", tip)
+		// tip is the inclusive last readable slot and indexBeaconSnapshots takes an exclusive
+		// bound, so the tip needs tip+1 to be indexed at all. It is served from the snapshot path,
+		// which does not consult the canonical index, so leaving it out gives readers a block with
+		// no root for as long as the tip stays put.
+		if err := indexBeaconSnapshots(ctx, db, from, tip+1, batchSize, readHeader, onProgress); err != nil {
+			return indexedTo, err
+		}
+		from, indexedTo = tip+1, tip
+	}
 }
 
 func indexBeaconSnapshots(ctx context.Context, db kv.RwDB, from, to, batchSize uint64, readHeader readBeaconSnapshotHeaderFunc, onProgress func(slot uint64)) error {
@@ -394,16 +409,16 @@ func (a *Antiquary) antiquate() error {
 	}
 
 	var from, to uint64
-	var err error
 
 	if err := a.mainDB.View(a.ctx, func(roTx kv.Tx) error {
 		// read the last beacon snapshots
 		from = a.sn.BlocksAvailable() + 1
 		// read the finalized head
-		to, err = beacon_indicies.ReadHighestFinalized(roTx)
+		highest, err := beacon_indicies.ReadHighestFinalized(roTx)
 		if err != nil {
 			return err
 		}
+		to = highest
 		return nil
 	}); err != nil {
 		return err
@@ -457,6 +472,41 @@ func (a *Antiquary) NotifyBlobBackfilled(completed bool) {
 	a.blobBackfilled.Store(completed)
 }
 
+const caplinSnapshotBuildSemaWeight int64 = 1
+
+// blobCompressWorkers picks the compression parallelism for a dump, with a func to release the
+// shared build limiter.
+//
+// One worker keeps steady-state retirement from competing with execution. Catching up may use the
+// full estimate, but only while holding the limiter that admits one kind of snapshot build at a
+// time, since EL retirement sizes its own workers from the same estimate of the host. A limiter it
+// cannot take drops the dump to one worker rather than skipping it: the blob gate stays shut until
+// the whole range lands, so retiring slowly beats not retiring.
+func (a *Antiquary) blobCompressWorkers(from, to uint64) (int, func()) {
+	noop := func() {}
+	if !isBlobBacklog(from, to) {
+		return 1, noop
+	}
+	if a.snBuildSema == nil {
+		return estimate.CompressSnapshot.Workers(), noop
+	}
+	if !a.snBuildSema.TryAcquire(caplinSnapshotBuildSemaWeight) {
+		return 1, noop
+	}
+	return estimate.CompressSnapshot.Workers(), func() {
+		a.snBuildSema.Release(caplinSnapshotBuildSemaWeight)
+	}
+}
+
+// isBlobBacklog reports whether the pending range is a catch-up rather than the single chunk
+// retired at the tip, which is what decides how many workers the compression may use.
+//
+// The span is the one DumpBlobsSidecar counts chunks with: it breaks once `toSlot-i` drops below a
+// merge limit, so two chunks are compressed exactly when the span reaches two of them.
+func isBlobBacklog(from, to uint64) bool {
+	return to >= from && to-from >= 2*snaptype.CaplinMergeLimit
+}
+
 func (a *Antiquary) antiquateBlobs() error {
 	if !a.snapgen {
 		return nil
@@ -503,7 +553,13 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 
 	// now, we need to retire the blobs
-	if err := freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, 1, blobCountFn, log.LvlDebug, a.logger); err != nil {
+	// The build slot is held for the compression only: opening the folder, seeding and pruning
+	// below draw nothing from the build budget, and EL retirement blocks on the same slot.
+	if err := func() error {
+		compressWorkers, releaseBuildSlot := a.blobCompressWorkers(currentBlobsProgress, to)
+		defer releaseBuildSlot()
+		return freezeblocks.DumpBlobsSidecar(a.ctx, a.blobStorage, a.mainDB, currentBlobsProgress, to, a.sn.Salt, a.dirs, compressWorkers, blobCountFn, log.LvlDebug, a.logger)
+	}(); err != nil {
 		return err
 	}
 	to = (to / snaptype.CaplinMergeLimit) * snaptype.CaplinMergeLimit

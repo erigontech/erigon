@@ -18,7 +18,6 @@ package vm
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -120,30 +119,5 @@ func TestMemoryResizeCapacity(t *testing.T) {
 	m.Resize(2*memoryPageSize + 32)
 	if got := cap(m.store); got != 4*memoryPageSize {
 		t.Fatalf("grow past two pages: cap %d, want %d", got, 4*memoryPageSize)
-	}
-}
-
-func BenchmarkResize(b *testing.B) {
-	memory := NewMemory()
-	var i uint64
-	for b.Loop() {
-		memory.Resize(i)
-		i++
-	}
-}
-
-// BenchmarkResizeCold grows a fresh memory word-by-word, the pattern a call
-// frame sees when it gets a CallContext whose buffer the pool has not warmed.
-func BenchmarkResizeCold(b *testing.B) {
-	for _, target := range []uint64{4 * 1024, 64 * 1024, 1024 * 1024} {
-		b.Run(fmt.Sprintf("%dKiB", target/1024), func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				var m Memory
-				for size := uint64(32); size <= target; size += 32 {
-					m.Resize(size)
-				}
-			}
-		})
 	}
 }

@@ -19,7 +19,6 @@ func buildTestSeq(baseNum uint64, vals ...uint64) []byte {
 }
 
 func TestMultiEncSeq(t *testing.T) {
-
 	t.Run("plain elias fano", func(t *testing.T) {
 		b := make([]byte, 0)
 
@@ -275,14 +274,16 @@ func TestMergeEncodingBoundary(t *testing.T) {
 	}
 
 	// 8+8=16: must stay simple encoding
-	raw16 := merge(1000,
+	raw16 := merge(
+		1000,
 		buildTestSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
 		buildTestSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016),
 	)
 	require.Equal(t, byte(SimpleEncoding)|15, raw16[0], "8+8=16 must use simple encoding")
 
 	// 8+9=17: must flip to rebased EF
-	raw17 := merge(1000,
+	raw17 := merge(
+		1000,
 		buildTestSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
 		buildTestSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017),
 	)
@@ -345,39 +346,6 @@ func TestBuilderFreeFunctions(t *testing.T) {
 
 	_, _, ok = Seek(baseNum, raw, 5016)
 	require.False(t, ok)
-}
-
-func BenchmarkMerge(b *testing.B) {
-	const baseNum = 1_000_000
-	const n = 500 // elements per sequence
-
-	raw1 := func() []byte {
-		sb := NewBuilder(baseNum, n, baseNum+n*2-2)
-		for i := range uint64(n) {
-			sb.AddOffset(baseNum + i*2)
-		}
-		sb.Build()
-		return sb.AppendBytes(nil)
-	}()
-	raw2 := func() []byte {
-		sb := NewBuilder(baseNum, n, baseNum+n*2+n*2-2)
-		for i := range uint64(n) {
-			sb.AddOffset(baseNum + n*2 + i*2)
-		}
-		sb.Build()
-		return sb.AppendBytes(nil)
-	}()
-
-	var s1, s2 SequenceReader
-	var merged SequenceBuilder
-	for b.Loop() {
-		s1.Reset(baseNum, raw1)
-		s2.Reset(baseNum, raw2)
-		if err := merged.Merge(&s1, &s2, baseNum); err != nil {
-			b.Fatal(err)
-		}
-		_ = merged.AppendBytes(nil)
-	}
 }
 
 func requireSequenceChecks(t *testing.T, s *SequenceReader) {

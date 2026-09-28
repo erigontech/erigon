@@ -102,8 +102,10 @@ func TestSendTxnPropagate(t *testing.T) {
 						Peer: &typesproto.PeerInfo{
 							Id:   r.PeerId.String(),
 							Caps: []string{"eth/68"},
-						}}, nil
-				}).AnyTimes()
+						},
+					}, nil
+				},
+			).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
 		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
@@ -213,8 +215,10 @@ func TestSendTxnPropagate(t *testing.T) {
 						Peer: &typesproto.PeerInfo{
 							Id:   r.PeerId.String(),
 							Caps: []string{"eth/68"},
-						}}, nil
-				}).AnyTimes()
+						},
+					}, nil
+				},
+			).AnyTimes()
 
 		m := NewMockSentry(ctx, sentryServer)
 		sentryClient, err := direct.NewSentryClientDirect(direct.ETH68, m)
@@ -336,9 +340,11 @@ func (ms *MockSentry) Send(req *sentryproto.InboundMessage) (errs []error) {
 func (ms *MockSentry) SetStatus(context.Context, *sentryproto.StatusData) (*sentryproto.SetStatusReply, error) {
 	return &sentryproto.SetStatusReply{}, nil
 }
+
 func (ms *MockSentry) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
+
 func (ms *MockSentry) Messages(req *sentryproto.MessagesRequest, stream sentryproto.Sentry_MessagesServer) error {
 	ms.lock.Lock()
 	if ms.streams == nil {

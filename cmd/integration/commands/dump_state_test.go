@@ -251,52 +251,6 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 	return tx
 }
 
-func BenchmarkDumpStateToTSV(b *testing.B) {
-	const accountCount = 20_000
-	tx := seedManyAccounts(b, accountCount)
-	logger := log.New()
-
-	b.Run("count_only", func(b *testing.B) {
-		for b.Loop() {
-			res, err := dumpStateToTSV(context.Background(), tx, 1, true, 0, nil, io.Discard, logger)
-			require.NoError(b, err)
-			require.Equal(b, uint64(accountCount), res.Matched)
-		}
-	})
-
-	b.Run("decode_no_write", func(b *testing.B) {
-		for b.Loop() {
-			res, err := dumpStateToTSV(context.Background(), tx, 1, true, 0, uint256.NewInt(0), io.Discard, logger)
-			require.NoError(b, err)
-			require.Equal(b, uint64(accountCount), res.Matched)
-		}
-	})
-
-	b.Run("decode_and_write", func(b *testing.B) {
-		for b.Loop() {
-			res, err := dumpStateToTSV(context.Background(), tx, 1, false, 0, nil, io.Discard, logger)
-			require.NoError(b, err)
-			require.Equal(b, uint64(accountCount), res.Matched)
-		}
-	})
-
-	// The codec is built once, as it is for a real dump: a zstd encoder allocates its
-	// window up front, which would otherwise dominate at this payload size.
-	for _, kind := range []string{"gzip", "zstd"} {
-		b.Run("write_"+kind, func(b *testing.B) {
-			comp, err := newCompressor(kind, io.Discard)
-			require.NoError(b, err)
-			defer comp.Close() //nolint:errcheck // benchmark teardown
-
-			for b.Loop() {
-				res, err := dumpStateToTSV(context.Background(), tx, 1, false, 0, nil, comp, logger)
-				require.NoError(b, err)
-				require.Equal(b, uint64(accountCount), res.Matched)
-			}
-		})
-	}
-}
-
 func TestNewCompressor_Unknown(t *testing.T) {
 	t.Parallel()
 
@@ -675,7 +629,8 @@ func TestResolveExecTarget_ChainTipLoopReachesTarget(t *testing.T) {
 
 // TestExecCommandsExposeParallelCommitment pins the flag on every integration
 // command that computes commitment. Without it the flag is unknown on stage_exec,
-// so integration can only ever run the sequential trie.
+// so integration is stuck on whatever COMMITMENT_PARALLEL selected and
+// cannot switch tries.
 func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -688,23 +643,26 @@ func TestExecCommandsExposeParallelCommitment(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NotNil(t, tc.cmd.Flags().Lookup(utils.ExperimentalParallelCommitmentFlag.Name),
-				"command cannot select the parallel trie")
+				"command cannot select the commitment trie")
 		})
 	}
 }
 
-// TestWithExperimentalCommitmentFollowsErigonDefault pins integration's default to
-// erigon's own flag default, so flipping it in one place cannot leave the two
-// binaries computing commitment with different tries.
-func TestWithExperimentalCommitmentFollowsErigonDefault(t *testing.T) {
-	defer func(v bool) { utils.ExperimentalParallelCommitmentFlag.Value = v }(utils.ExperimentalParallelCommitmentFlag.Value)
+func TestWithExperimentalCommitmentResolution(t *testing.T) {
 	defer func(v bool) { statecfg.ExperimentalParallelCommitment = v }(statecfg.ExperimentalParallelCommitment)
 
-	utils.ExperimentalParallelCommitmentFlag.Value = true
-	statecfg.ExperimentalParallelCommitment = false
+	resolve := func(seed bool, args ...string) bool {
+		statecfg.ExperimentalParallelCommitment = seed
+		cmd := &cobra.Command{Use: "probe"}
+		withExperimentalCommitment(cmd)
+		require.NoError(t, cmd.Flags().Parse(args))
+		return statecfg.ExperimentalParallelCommitment
+	}
 
-	withExperimentalCommitment(&cobra.Command{Use: "probe"})
-
-	require.True(t, statecfg.ExperimentalParallelCommitment,
-		"integration ignored erigon's default and would run the sequential trie")
+	for _, seed := range []bool{true, false} {
+		require.Equal(t, seed, resolve(seed),
+			"integration overrode COMMITMENT_PARALLEL with the flag default")
+		require.True(t, resolve(seed, "--"+utils.ExperimentalParallelCommitmentFlag.Name+"=true"))
+		require.False(t, resolve(seed, "--"+utils.ExperimentalParallelCommitmentFlag.Name+"=false"))
+	}
 }

@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/cmd/txnbench/internal/bench"
-	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 	"os"
 	"time"
+
+	"github.com/erigontech/erigon/cmd/txnbench/internal/bench"
+	"github.com/erigontech/erigon/cmd/txnbench/internal/rpcclient"
 
 	"github.com/spf13/cobra"
 )

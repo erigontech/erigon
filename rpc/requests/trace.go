@@ -53,16 +53,16 @@ type TraceCallAction struct {
 	To            common.Address `json:"to"`
 	Address       common.Address `json:"address"`
 	RefundAddress common.Address `json:"refundAddress"`
-	Gas           hexutil.Big    `json:"gas"`
-	Value         hexutil.Big    `json:"value"`
-	Balance       hexutil.Big    `json:"balance"`
+	Gas           hexutil.U256   `json:"gas"`
+	Value         hexutil.U256   `json:"value"`
+	Balance       hexutil.U256   `json:"balance"`
 	Init          hexutil.Bytes  `json:"init"`
 	Input         hexutil.Bytes  `json:"input"`
 	CallType      string         `json:"callType"`
 }
 
 type CallResult struct {
-	GasUsed hexutil.Big    `json:"gasUsed"`
+	GasUsed hexutil.U256   `json:"gasUsed"`
 	Output  hexutil.Bytes  `json:"output"`
 	Address common.Address `json:"address"`
 	Code    hexutil.Bytes  `json:"code"`
@@ -113,7 +113,6 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	}
 
 	argsVal, err := json.Marshal(args)
-
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +122,6 @@ func (reqGen *requestGenerator) TraceCall(blockRef rpc.BlockReference, args etha
 	}
 
 	optsVal, err := json.Marshal(traceOpts)
-
 	if err != nil {
 		return nil, err
 	}

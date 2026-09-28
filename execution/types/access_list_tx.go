@@ -31,16 +31,30 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
+
+var ErrAccessListPreBerlin = errors.New("eip-2930 transactions require Berlin")
+
+//go:generate go run github.com/erigontech/erigon/cmd/tools/jsongen -type AccessTuple
 
 // AccessTuple is the element type of an access list.
 type AccessTuple struct {
-	Address     common.Address `json:"address"`
-	StorageKeys []common.Hash  `json:"storageKeys"`
+	Address     common.Address `json:"address" ethjson:"data"`
+	StorageKeys []common.Hash  `json:"storageKeys" ethjson:"datalist"`
 }
 
 // AccessList is an EIP-2930 access list.
 type AccessList []AccessTuple
+
+// MarshalFastJSONTo writes the list as a bare array. The receiver must stay a value, so the
+// type itself satisfies the fast-JSON interface.
+func (al AccessList) MarshalFastJSONTo(s *jsonstream.StackStream) error {
+	jsonstream.ArrayValue(s, al, writeAccessTupleElem)
+	return nil
+}
+
+func writeAccessTupleElem(s *jsonstream.StackStream, a *AccessTuple) { _ = a.MarshalFastJSONTo(s) }
 
 // StorageKeys returns the total number of storage keys in the access list.
 func (al AccessList) StorageKeys() int {
@@ -244,7 +258,6 @@ func (tx *AccessListTx) encodePayload(w io.Writer, b []byte, payloadSize, access
 		return err
 	}
 	return nil
-
 }
 
 // EncodeRLP implements rlp.Encoder
@@ -269,10 +282,46 @@ func (tx *AccessListTx) EncodeRLP(w io.Writer) error {
 	return nil
 }
 
+// countAccessList walks the tuple headers for exact counts. A key list must end
+// inside its own tuple: rlp.Prefix only checks a length against the whole
+// payload, so overlapping tuples could otherwise count the same bytes twice.
+func countAccessList(raw []byte) (tuples, keys int) {
+	for pos := 0; pos < len(raw); {
+		tuplePos, tupleLen, isList, err := rlp.Prefix(raw, pos)
+		if err != nil || !isList {
+			return
+		}
+		// A valid tuple opens with a 20-byte address, encoded in 21 bytes.
+		keyPos, keyLen, isList, err := rlp.Prefix(raw, tuplePos+21)
+		if err != nil || !isList || keyPos+keyLen > tuplePos+tupleLen {
+			return
+		}
+		tuples++
+		keys += keyLen / 33
+		pos = tuplePos + tupleLen
+	}
+	return
+}
+
 func decodeAccessList(al *AccessList, s *rlp.Stream) error {
-	_, err := s.List()
+	l, err := s.List()
 	if err != nil {
 		return fmt.Errorf("open accessList: %w", err)
+	}
+	*al = (*al)[:0] // both paths below must agree
+	// One arena backs every tuple's StorageKeys, but only when the pre-walk
+	// sized it. Growing a shared arena instead would copy every key decoded so
+	// far and keep each retired array alive through the earlier tuples' views,
+	// so a reader that cannot be walked gets an exact slice per tuple. An empty
+	// list is left alone: allocating it would decode to [] where the caller
+	// marshals null.
+	var keys []common.Hash
+	arena := false
+	if raw := s.Peek(); l > 0 && uint64(len(raw)) >= l {
+		nTuples, nKeys := countAccessList(raw[:l])
+		*al = make(AccessList, 0, nTuples)
+		keys = make([]common.Hash, 0, nKeys)
+		arena = true
 	}
 	i := 0
 	for _, err = s.List(); err == nil; _, err = s.List() {
@@ -282,7 +331,13 @@ func decodeAccessList(al *AccessList, s *rlp.Stream) error {
 		if tuple.Address, err = s.Addr(); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
-		if tuple.StorageKeys, err = decodeHashList(s); err != nil {
+		if arena {
+			start := len(keys)
+			if keys, err = decodeHashListTo(s, keys); err != nil {
+				return fmt.Errorf("read StorageKeys: %w", err)
+			}
+			tuple.StorageKeys = keys[start:len(keys):len(keys)]
+		} else if tuple.StorageKeys, err = decodeHashListTo(s, nil); err != nil {
 			return fmt.Errorf("read StorageKeys: %w", err)
 		}
 		// end of tuple
@@ -372,7 +427,7 @@ func (tx *AccessListTx) AsMessage(s Signer, _ *uint256.Int, rules *chain.Rules) 
 	}
 
 	if !rules.IsBerlin {
-		return nil, errors.New("eip-2930 transactions require Berlin")
+		return nil, ErrAccessListPreBerlin
 	}
 
 	var err error
@@ -429,7 +484,8 @@ func (tx *AccessListTx) SigningHash(chainID *uint256.Int) common.Hash {
 			Value:      &tx.Value,
 			Data:       tx.Data,
 			AccessList: tx.AccessList,
-		})
+		},
+	)
 }
 
 func (tx *AccessListTx) Type() byte { return AccessListTxType }

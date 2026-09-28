@@ -59,6 +59,7 @@ var cmdMdbxTopDup = &cobra.Command{
 		}
 	},
 }
+
 var cmdCompareBucket = &cobra.Command{
 	Use:   "compare_bucket",
 	Short: "compare bucket to the same bucket in '--chaindata.reference'",
@@ -233,6 +234,7 @@ func compareStates(ctx context.Context, chaindata string, referenceChaindata str
 
 	return nil
 }
+
 func compareBucketBetweenDatabases(ctx context.Context, chaindata string, referenceChaindata string, bucket string) error {
 	db := mdbx2.MustOpen(chaindata)
 	defer db.Close()

@@ -39,9 +39,11 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 )
 
-var testAddrHex = "970e8128ab834e8eac17ab8e3812f010678cf791"
-var testPrivHex = "289c2857d4598e37fb9647507e47a309d6133539bf21a8b9cb6df88fd5232032"
-var testPubkeyHex = "7db227d7094ce215c3a0f57e1bcc732551fe351f94249471934567e0f5dc1bf795962b8cccb87a2eb56b29fbe37d614e2f4c3c45b789ae4f1f51f4cb21972ffd"
+var (
+	testAddrHex   = "970e8128ab834e8eac17ab8e3812f010678cf791"
+	testPrivHex   = "289c2857d4598e37fb9647507e47a309d6133539bf21a8b9cb6df88fd5232032"
+	testPubkeyHex = "7db227d7094ce215c3a0f57e1bcc732551fe351f94249471934567e0f5dc1bf795962b8cccb87a2eb56b29fbe37d614e2f4c3c45b789ae4f1f51f4cb21972ffd"
+)
 
 // These tests are sanity checks.
 // They should ensure that we don't e.g. use Sha3-224 instead of Sha3-256
@@ -167,13 +169,6 @@ func TestToECDSAErrors(t *testing.T) {
 	}
 	if _, err := HexToECDSA("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"); err == nil {
 		t.Fatal("HexToECDSA should've returned error")
-	}
-}
-
-func BenchmarkSha3(b *testing.B) {
-	a := []byte("hello world")
-	for b.Loop() {
-		Keccak256(a)
 	}
 }
 
@@ -416,62 +411,7 @@ func TestPythonIntegration(t *testing.T) {
 	t.Logf("msg: %x, privkey: %s sig: %x\n", msg1, kh, sig1)
 }
 
-var benchPayload = make([]byte, 500)
-var benchPayload1 = make([]byte, 1)
-
-var sinkHash common.Hash
-var sinkBytes []byte
-
-func BenchmarkKeccak256Hash(b *testing.B) {
-	b.Run("1", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			sinkHash = Keccak256Hash(benchPayload1)
-		}
-	})
-	b.Run("500", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			sinkHash = Keccak256Hash(benchPayload)
-		}
-	})
-	// A caller-local buffer: it must not escape to the heap.
-	b.Run("local32", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			var buf [32]byte
-			sinkHash = Keccak256Hash(buf[:])
-		}
-	})
-}
-
-func BenchmarkKeccak256(b *testing.B) {
-	b.Run("500", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			sinkBytes = Keccak256(benchPayload)
-		}
-	})
-	// The rlpx shape: two 32-byte inputs joined on the stack.
-	b.Run("two32", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			var x, y [32]byte
-			sinkBytes = Keccak256(x[:], y[:])
-		}
-	})
-	// A join too large for the stack buffer.
-	b.Run("joined", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			sinkBytes = Keccak256(benchPayload, benchPayload)
-		}
-	})
-	b.Run("local32", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			var buf [32]byte
-			sinkBytes = Keccak256(buf[:])
-		}
-	})
-}
+var (
+	sinkHash  common.Hash
+	sinkBytes []byte
+)

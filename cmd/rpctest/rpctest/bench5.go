@@ -23,7 +23,6 @@ import (
 )
 
 func Bench5(erigonURL string) error {
-
 	file, err := os.Open("txs.txt")
 	if err != nil {
 		panic(err)

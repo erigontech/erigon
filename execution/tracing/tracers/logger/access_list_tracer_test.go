@@ -17,7 +17,6 @@
 package logger
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +24,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -100,34 +100,48 @@ func TestTracer_AccessList_Equal(t *testing.T) {
 		equal bool
 	}{
 		{"empty", func(accessList) {}, func(accessList) {}, true},
-		{"same slots inserted in a different order",
+		{
+			"same slots inserted in a different order",
 			oneAddrTwoSlots,
 			func(al accessList) { al.addSlot(addr, slot2); al.addSlot(addr, slot1) },
-			true},
-		{"other has an extra address",
+			true,
+		},
+		{
+			"other has an extra address",
 			oneAddrTwoSlots,
 			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
-			false},
-		{"receiver has an extra address",
+			false,
+		},
+		{
+			"receiver has an extra address",
 			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
 			oneAddrTwoSlots,
-			false},
-		{"same address count, different addresses",
+			false,
+		},
+		{
+			"same address count, different addresses",
 			func(al accessList) { al.addAddress(addr) },
 			func(al accessList) { al.addAddress(addr2) },
-			false},
-		{"same slot count, different slots",
+			false,
+		},
+		{
+			"same slot count, different slots",
 			oneAddrTwoSlots,
 			func(al accessList) { al.addSlot(addr, slot1); al.addSlot(addr, slot3) },
-			false},
-		{"other has an extra slot",
+			false,
+		},
+		{
+			"other has an extra slot",
 			func(al accessList) { al.addSlot(addr, slot1) },
 			oneAddrTwoSlots,
-			false},
-		{"address-only vs address with a slot",
+			false,
+		},
+		{
+			"address-only vs address with a slot",
 			func(al accessList) { al.addAddress(addr) },
 			func(al accessList) { al.addSlot(addr, slot1) },
-			false},
+			false,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			a, b := build(tc.a), build(tc.b)
@@ -186,7 +200,7 @@ func TestOnOpcodeReadsStackOnlyWhenUsed(t *testing.T) {
 				address: accounts.InternAddress(addr),
 				stack:   make([]uint256.Int, 8),
 			}}
-			NewAccessListTracer(nil, nil, nil).OnOpcode(0, byte(tc.op), 100, 3, scope, nil, 1, nil)
+			NewAccessListTracer(nil, nil, nil).OnOpcodeV2(0, byte(tc.op), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 			require.Equal(t, tc.reads, scope.stackReads)
 		})
 	}
@@ -307,68 +321,9 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 		address: accounts.InternAddress(addr),
 		stack:   []uint256.Int{*new(uint256.Int).SetBytes(slot2[:])},
 	}
-	seeded.OnOpcode(0, byte(vm.SLOAD), 100, 3, scope, nil, 1, nil)
+	seeded.OnOpcodeV2(0, byte(vm.SLOAD), mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
 
 	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot1, slot2}}}, seeded.AccessList())
 	require.True(t, seeded.UsedBeforeCreation(addr))
 	require.Empty(t, seeded.CreatedContracts())
-}
-
-func BenchmarkAccessListTracerSeed(b *testing.B) {
-	// Real eth_createAccessList lists are small: a handful of addresses with a
-	// few slots each. The wide shapes are here for scale.
-	for _, shape := range []struct{ nAddrs, nSlots int }{
-		{1, 1}, {1, 5}, {1, 17}, {3, 5}, {5, 20}, {30, 20},
-	} {
-		prev := NewAccessListTracer(nil, nil, nil)
-		for a := range shape.nAddrs {
-			address := common.BytesToAddress([]byte{byte(a + 1)})
-			for s := range shape.nSlots {
-				prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
-			}
-		}
-		// AccessList() is built either way, so only the seeding half differs.
-		acl := prev.AccessList()
-		name := fmt.Sprintf("%dx%d", shape.nAddrs, shape.nSlots)
-
-		b.Run(name+"/roundTrip", func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				_ = NewAccessListTracer(acl, nil, nil)
-			}
-		})
-		b.Run(name+"/seedNew", func(b *testing.B) {
-			b.ReportAllocs()
-			for b.Loop() {
-				_ = prev.SeedNew(nil)
-			}
-		})
-	}
-}
-
-// Storage and calls are a small minority of what executes.
-var benchOpcodes = func() []byte {
-	ops := make([]byte, 0, 256)
-	for range 40 {
-		ops = append(ops,
-			byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.DUP1), byte(vm.SWAP1),
-			byte(vm.ADD), byte(vm.MSTORE), byte(vm.JUMPDEST), byte(vm.POP))
-	}
-	ops = append(ops, byte(vm.SLOAD), byte(vm.SSTORE), byte(vm.CALL), byte(vm.BALANCE))
-	return ops
-}()
-
-func BenchmarkAccessListTracerOnOpcode(b *testing.B) {
-	scope := &testOpContext{
-		address: accounts.InternAddress(addr),
-		stack:   make([]uint256.Int, 8),
-	}
-	tracer := NewAccessListTracer(nil, nil, nil)
-
-	b.ReportAllocs()
-	i := 0
-	for b.Loop() {
-		tracer.OnOpcode(uint64(i), benchOpcodes[i%len(benchOpcodes)], 100, 3, scope, nil, 1, nil)
-		i++
-	}
 }
