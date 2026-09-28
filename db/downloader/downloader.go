@@ -2961,8 +2961,18 @@ func (d *Downloader) afterAddForDownloadMissingMetainfo(t *torrent.Torrent, name
 	t.AddSources(slices.Collect(d.webseedMetainfoUrls(name)))
 	d.afterAddForDownload(t)
 	d.spawn(func() {
-		d.delayedGotInfoHandler(t)
+		d.delayedGotInfoHandler(t, name)
 	})
+}
+
+// infoBytesMatchInfoHash reports whether the info a torrent ended up with is
+// the info its infohash names. Metainfo reaches a torrent as an input, from
+// peers and from sources, and carries the piece hashes the payload is then
+// verified against — so info from a peer holding another generation completes
+// that generation under the infohash we asked for.
+func infoBytesMatchInfoHash(t *torrent.Torrent) bool {
+	mi := t.Metainfo()
+	return mi.HashInfoBytes() == t.InfoHash()
 }
 
 // This is a workaround for a minor edge case: We have no existing way to wait for infos for
@@ -2974,14 +2984,23 @@ func (d *Downloader) afterAddForDownloadMissingMetainfo(t *torrent.Torrent, name
 // peer stall, filter change, Delete during download.
 // Sidecar-exists-iff-payload-complete keeps the datadir orphan-free
 // without a background sweep.
-func (d *Downloader) delayedGotInfoHandler(t *torrent.Torrent) {
+func (d *Downloader) delayedGotInfoHandler(t *torrent.Torrent, name string) {
 	select {
 	// Make sure this handler stops if Downloader.Delete is called on it.
 	case <-t.Closed():
 		return
 	case <-t.GotInfo():
 	}
-	d.log(log.LvlDebug, "got metainfo from network", "name", t.Name(), "infohash", t.InfoHash())
+	if !infoBytesMatchInfoHash(t) {
+		received := t.Metainfo()
+		d.log(log.LvlError, "dropping snapshot whose metainfo is not the one it was requested at",
+			"name", name,
+			"requested", t.InfoHash().HexString(),
+			"received", received.HashInfoBytes().HexString())
+		d.DropTorrentByName(name)
+		return
+	}
+	d.log(log.LvlDebug, "got metainfo from network", "name", name, "infohash", t.InfoHash())
 	t.DownloadAll()
 	d.waitAndSaveMetainfoOnComplete(t)
 }
