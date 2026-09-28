@@ -327,7 +327,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	if postState {
 		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
 	} else {
-		err = api.BaseAPI.checkPruneTransactionHistory(ctx, dbtx, blockNumber)
+		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, dbtx, blockNumber, uint64(*config.TxIndex))
 	}
 	if err != nil {
 		return err
@@ -441,7 +441,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	if postState {
 		err = api.BaseAPI.checkPruneState(ctx, tx, blockNum)
 	} else {
-		err = api.BaseAPI.checkPruneTransactionHistory(ctx, tx, blockNum)
+		err = api.BaseAPI.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(*simulateContext.TransactionIndex))
 	}
 	if err != nil {
 		return err

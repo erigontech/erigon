@@ -493,9 +493,25 @@ func (api *BaseAPI) checkPruneStateAfterSystemTx(ctx context.Context, tx kv.Tx, 
 // checkPruneTransactionHistory requires the first user transaction's pre-state,
 // at Min(block)+1, after the block's initial system transaction.
 func (api *BaseAPI) checkPruneTransactionHistory(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneTransactionHistoryAtIndex(ctx, tx, block, 0)
+}
+
+func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx kv.Tx, block, txIndex uint64) error {
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
 		floors, err := api.historyStartBlocks(ctx, tx, head)
-		return floors.replay, err
+		if err != nil || txIndex == 0 || block >= floors.replay {
+			return floors.replay, err
+		}
+		// The block-level replay floor may reject an indexed read whose pre-state
+		// survives. Check its exact txNum only when that floor would reject it.
+		minTxNum, err := api._txNumReader.Min(ctx, tx, block)
+		if err != nil {
+			return 0, err
+		}
+		if minTxNum+txIndex+1 >= floors.startTxNum {
+			return block, nil
+		}
+		return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
 	})
 }
 
@@ -541,6 +557,7 @@ func (api *BaseAPI) blocksAvailableFrom(ctx context.Context, tx kv.Tx, head uint
 }
 
 type historyPruneFloors struct {
+	startTxNum         uint64
 	state              uint64
 	stateAfterSystemTx uint64
 	block              uint64
@@ -576,7 +593,7 @@ func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.Tx, head u
 		}
 		// State queries read at the next block's start, while whole-block history
 		// reads need this block's start. Transaction replay skips the initial system tx.
-		floors := historyPruneFloors{state: block, stateAfterSystemTx: block, block: block, replay: block}
+		floors := historyPruneFloors{startTxNum: startTxNum, state: block, stateAfterSystemTx: block, block: block, replay: block}
 		if startTxNum > blockStartTxNum {
 			floors.block = min(block+1, head)
 		} else if block > 0 {
@@ -590,7 +607,7 @@ func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.Tx, head u
 		return floors, nil
 	}
 	// No historical block can be proven available; the current state remains readable.
-	return historyPruneFloors{state: head, stateAfterSystemTx: head, block: head, replay: head}, nil
+	return historyPruneFloors{startTxNum: startTxNum, state: head, stateAfterSystemTx: head, block: head, replay: head}, nil
 }
 
 func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {

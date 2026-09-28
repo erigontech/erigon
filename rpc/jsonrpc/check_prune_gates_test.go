@@ -27,6 +27,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
@@ -39,13 +40,17 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -88,6 +93,7 @@ func TestPruneGateBoundary(t *testing.T) {
 		{"state", func(b uint64) error { return apis.eth.checkPruneState(ctx, tx, b) }, "history is available"},
 		{"state_after_system_tx", func(b uint64) error { return apis.eth.checkPruneStateAfterSystemTx(ctx, tx, b) }, "history is available"},
 		{"replay", func(b uint64) error { return apis.eth.checkPruneTransactionHistory(ctx, tx, b) }, "history is available"},
+		{"indexed_history", func(b uint64) error { return apis.eth.checkPruneTransactionHistoryAtIndex(ctx, tx, b, 1) }, "history is available"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.NoError(t, tc.gate(oldest), "the oldest retained block is served")
@@ -289,6 +295,99 @@ func TestReplayGateMatchesReaderAtHistoryStart(t *testing.T) {
 	}
 }
 
+func TestIndexedHistoryGateMatchesReader(t *testing.T) {
+	t.Parallel()
+	ctx := t.Context()
+	storageAddr := common.HexToAddress("0xcafe")
+	storageKey, storageValue := common.Hash{31: 1}, common.Hash{31: 2}
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc: types.GenesisAlloc{
+				testAddr:    {Balance: big.NewInt(1_000_000_000)},
+				storageAddr: {Balance: big.NewInt(0), Code: []byte{0}, Storage: map[common.Hash]common.Hash{storageKey: storageValue}},
+			},
+			Difficulty: uint256.NewInt(1),
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	signer := types.LatestSignerForChainID(nil)
+	c, err := m.GenerateChain(4, func(_ int, block *blockgen.BlockGen) {
+		for range 2 {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{}, uint256.NewInt(1), 21000, nil, nil), *signer, testKey)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+	tx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, err = prune.EnsureNotChanged(tx, prune.ArchiveMode)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	api := newDebugApiForTest(m)
+	baseline := newDebugApiForTest(m)
+	ro, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer ro.Rollback()
+	block := c.Blocks[1]
+	require.Len(t, block.Transactions(), 2)
+	startTxNum, err := api._txNumReader.Min(ctx, ro, block.NumberU64())
+	require.NoError(t, err)
+	view := historyFloorTx{TemporalTx: ro, startTxNum: startTxNum + 2}
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, view, block.NumberU64(), 1, api._txNumReader)
+	require.NoError(t, err)
+	account, err := reader.ReadAccountData(accounts.InternAddress(testAddr))
+	require.NoError(t, err)
+	require.NotNil(t, account)
+	_, err = rpchelper.CreateHistoryStateReader(ctx, view, block.NumberU64(), 0, api._txNumReader)
+	require.ErrorIs(t, err, state.ErrPruned)
+	err = api.checkPruneTransactionHistoryAtIndex(ctx, view, block.NumberU64()-1, 1)
+	require.ErrorIs(t, err, state.ErrPruned)
+	require.Contains(t, err.Error(), fmt.Sprintf("history is available from txNum %d", view.startTxNum))
+	api.db = historyFloorDB{TemporalRoDB: api.db, startTxNum: view.startTxNum}
+
+	for _, tc := range []struct {
+		name string
+		call func(*DebugAPIImpl, uint64) (any, error)
+	}{
+		{"accountAt", func(api *DebugAPIImpl, index uint64) (any, error) {
+			return api.AccountAt(ctx, block.Hash(), index, testAddr)
+		}},
+		{"storageRangeAt", func(api *DebugAPIImpl, index uint64) (any, error) {
+			return api.StorageRangeAt(ctx, block.Hash(), index, storageAddr, nil, 1)
+		}},
+		{"traceCall", func(api *DebugAPIImpl, index uint64) (any, error) {
+			ref := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
+			txIndex := hexutil.Uint(index)
+			return streamedResult(func(stream jsonstream.Stream) error {
+				return api.TraceCall(ctx, pruneGatingCallArgs(), &ref, &tracersConfig.TraceConfig{TxIndex: &txIndex}, stream)
+			})
+		}},
+		{"traceCallMany", func(api *DebugAPIImpl, index uint64) (any, error) {
+			bundles, simulate := pruneGatingBundle(block.NumberU64())
+			txIndex := int(index)
+			simulate.TransactionIndex = &txIndex
+			return streamedResult(func(stream jsonstream.Stream) error {
+				return api.TraceCallMany(ctx, bundles, simulate, nil, stream)
+			})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want, err := tc.call(baseline, 1)
+			require.NoError(t, err)
+			got, err := tc.call(api, 1)
+			require.NoError(t, err, "the requested transaction's pre-state is retained")
+			require.Equal(t, want, got)
+			_, err = tc.call(api, 0)
+			require.ErrorIs(t, err, state.ErrPruned, "the preceding transaction's pre-state is pruned")
+		})
+	}
+}
+
 func TestCallGateMatchesReaderAfterSystemTransaction(t *testing.T) {
 	t.Parallel()
 
@@ -424,6 +523,7 @@ func TestHistoryGateKeepsLatestWithoutHistoricalState(t *testing.T) {
 	require.ErrorIs(t, apis.eth.checkPruneStateAfterSystemTx(ctx, view, chainInfo.head-1), state.ErrPruned)
 	require.NoError(t, apis.eth.checkPruneTransactionHistory(ctx, view, chainInfo.head))
 	require.ErrorIs(t, apis.eth.checkPruneTransactionHistory(ctx, view, chainInfo.head-1), state.ErrPruned)
+	require.ErrorIs(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, view, chainInfo.head-1, 1), state.ErrPruned)
 }
 
 func TestHistoryEndpointsUseOnDiskFloor(t *testing.T) {
@@ -519,6 +619,7 @@ func TestPruneGatesSkipPhysicalFloorsAtHead(t *testing.T) {
 	require.NoError(t, apis.eth.checkPruneState(ctx, historyTx, chainInfo.head))
 	require.NoError(t, apis.eth.checkPruneStateAfterSystemTx(ctx, historyTx, chainInfo.head))
 	require.NoError(t, apis.eth.checkPruneTransactionHistory(ctx, historyTx, chainInfo.head))
+	require.NoError(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, historyTx, chainInfo.head, 1))
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.head))
 	require.Zero(t, historyCalls.Load())
 	require.Zero(t, blocks.calls.Load())
@@ -545,6 +646,7 @@ func TestPruneGatesSkipPhysicalFloorsBelowConfiguredCutoff(t *testing.T) {
 	require.ErrorIs(t, apis.eth.checkPruneState(ctx, historyTx, configuredFloor-1), state.ErrPruned)
 	require.ErrorIs(t, apis.eth.checkPruneStateAfterSystemTx(ctx, historyTx, configuredFloor-1), state.ErrPruned)
 	require.ErrorIs(t, apis.eth.checkPruneTransactionHistory(ctx, historyTx, configuredFloor-1), state.ErrPruned)
+	require.ErrorIs(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, historyTx, configuredFloor-1, 1), state.ErrPruned)
 	require.ErrorIs(t, apis.eth.checkPruneBlocks(ctx, tx, configuredFloor-1), state.ErrPruned)
 	require.Zero(t, historyCalls.Load())
 	require.Zero(t, blocks.calls.Load())
@@ -574,6 +676,7 @@ func TestPruneGatesReusePhysicalFloorsAtSameHead(t *testing.T) {
 		require.NoError(t, apis.eth.checkPruneState(ctx, historyTx, chainInfo.head-1))
 		require.NoError(t, apis.eth.checkPruneStateAfterSystemTx(ctx, historyTx, chainInfo.head-1))
 		require.NoError(t, apis.eth.checkPruneTransactionHistory(ctx, historyTx, chainInfo.head-1))
+		require.NoError(t, apis.eth.checkPruneTransactionHistoryAtIndex(ctx, historyTx, chainInfo.head-1, 1))
 		require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.head-1))
 	}
 	require.Equal(t, int64(3), historyCalls.Load())
