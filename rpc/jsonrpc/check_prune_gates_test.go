@@ -2141,10 +2141,8 @@ func TestLogsByBlockHashReportsAMissingBody(t *testing.T) {
 	require.ErrorContains(t, err, "block not found")
 }
 
-// TestCapabilitiesDropTheWindowAtTheForkBoundary pins the retention rendered when the
-// receipt boundary is a fork height rather than a window: a client computing
-// head - retentionBlocks from a window strategy would land far below the oldest block
-// the same field advertises.
+// TestCapabilitiesDropTheWindowAtTheForkBoundary checks that a fixed fork
+// boundary is not reported as a rolling deletion window.
 func TestCapabilitiesDropTheWindowAtTheForkBoundary(t *testing.T) {
 	t.Parallel()
 

@@ -538,7 +538,8 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 
 				if fees.header == nil {
-					// No block and no error: requesting into the future (possible reorg).
+					// Missing blocks may be pruned, beyond the current head, or unavailable
+					// after a reorg.
 					blockResults[idx].missing = true
 					continue
 				}

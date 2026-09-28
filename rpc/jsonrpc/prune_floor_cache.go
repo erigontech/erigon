@@ -41,10 +41,10 @@ const (
 )
 
 // pruneFloorCache caches successful floor reads and coalesces concurrent loads
-// by key. Every key contains the exact chain head; local block-floor keys also
-// contain the pinned snapshot generation because visible files can change
-// without a new head. The TTL bounds staleness from physical changes the key
-// cannot identify.
+// by key. Keys include the exact head and, for local block floors, the pinned
+// snapshot generation. Different pinned file views can coexist at one head,
+// so a TTL alone cannot prevent sharing the wrong floor. The TTL instead
+// bounds staleness from physical changes not represented by the key.
 type pruneFloorCache[T any] struct {
 	mu     sync.Mutex
 	values *lru.BasicLRU[pruneFloorCacheKey, *concurrent.CachedValue[pruneFloorValue[T]]]

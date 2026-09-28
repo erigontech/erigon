@@ -223,8 +223,8 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		if historyOldest < byzantium {
 			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, historyOldest, pruneMode.History)
 		} else {
-			// A fork height is not a window: keeping the amount would advertise a
-			// retention whose head - retentionBlocks lands below this oldest block.
+			// The fork sets a fixed availability boundary, not a rolling deletion
+			// window, so it has no retention distance of its own to report.
 			receiptsOldest, receiptsAmount = byzantium, prune.KeepAllBlocksPruneMode
 		}
 	}
@@ -793,8 +793,8 @@ func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.Bl
 }
 
 func (b *GasPriceOracleBackend) isBlockAvailable(ctx context.Context, number uint64) (bool, error) {
-	// One backend serves one request through a pinned transaction, so its physical
-	// block floor is stable and needs to be resolved only once.
+	// Resolve the floor once per backend to avoid repeated availability lookups.
+	// Local files are pinned, but remote lookups use a separate server-side view.
 	b.blocksFloorOnce.Do(func() {
 		head, err := rpchelper.GetLatestBlockNumber(b.tx)
 		if err != nil {

@@ -466,8 +466,10 @@ func (r *BlockReader) FrozenBlocksObserved() (uint64, bool) { return r.sn.Blocks
 // must ask the same generation it reads from, not the live set that may be ahead of it.
 func (r *BlockReader) FrozenBlocksInView(tx kv.Getter) uint64 { return r.view(tx).BlocksAvailable() }
 
-// MinimumBlockAvailable returns the first block covered by every block-snapshot
-// type in tx's pinned view, falling back to MDBX when the snapshot set is incomplete.
+// MinimumBlockAvailable returns a best-effort block-availability floor from tx's
+// pinned snapshots, falling back to MDBX when the snapshot set is incomplete.
+// If MDBX has no body after genesis, it keeps the bound from the available snapshot
+// types; this does not guarantee that a complete block exists at that height.
 // tx must carry a pinned block-files view, even for MDBX-only reads.
 // A nil tx or a tx without that view causes a panic.
 func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
