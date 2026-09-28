@@ -414,11 +414,7 @@ func (cell *cell) hashStorageKey(keccak keccak.KeccakState, accountKeyLen, downO
 
 func (cell *cell) reset() {
 	cell.accountAddrLen = 0
-	cell.storageAddrLen = 0
-	cell.hashedExtLen = 0
-	cell.extLen = 0
-	cell.hashLen = 0
-	cell.stateHashLen = 0
+	cell.resetStorage()
 	cell.loaded = cellLoadNone
 	clear(cell.hashedExtension[:])
 	clear(cell.extension[:])
@@ -426,6 +422,15 @@ func (cell *cell) reset() {
 	clear(cell.storageAddr[:])
 	clear(cell.hash[:])
 	cell.Update.Reset()
+}
+
+func (cell *cell) resetStorage() {
+	cell.storageAddrLen = 0
+	cell.hashedExtLen = 0
+	cell.extLen = 0
+	cell.hashLen = 0
+	cell.stateHashLen = 0
+	cell.loaded &= cellLoadAccount
 }
 
 func (cell *cell) FullString() string {
@@ -2027,8 +2032,11 @@ func (hph *HexPatriciaHashed) foldDelete(row int, nibble, upDepth int16, upCell 
 			}
 		}
 	}
-
-	upCell.reset()
+	if upDepth == 64 {
+		upCell.resetStorage()
+	} else {
+		upCell.reset()
+	}
 	return hph.collectDeleteUpdate(updateKey, row)
 }
 
