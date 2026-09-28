@@ -24,17 +24,21 @@ import (
 	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
-// haveCompletePayload reports whether name's payload is already on disk and
-// finished. The metainfo sidecar is written only once the payload completes,
-// so a sidecar that parses, beside the data file, is the completion signal.
-// A malformed or info-less sidecar proves nothing and leaves the file to be
-// re-fetched, which is the existing repair path.
+// haveCompletePayload reports whether the payload requested for name under
+// want is already on disk and finished. The metainfo sidecar is written only
+// once the payload completes, so a sidecar that parses and declares want,
+// beside the data file, is the completion signal. A malformed or info-less
+// sidecar proves nothing and leaves the file to be re-fetched, which is the
+// existing repair path.
 //
 // Re-downloading a finished file is not harmless: the torrent client opens the
 // data file for writing, which truncates it, and any mapping the aggregator
 // holds over that file is invalidated — the next read faults with SIGBUS,
 // killing the process. A file we already hold in full is never worth that.
-func haveCompletePayload(snapDir, name string) bool {
+// A file held under another infohash is a different generation: it is not what
+// was asked for, and reporting it as held pairs it with the requested
+// generation's siblings.
+func haveCompletePayload(snapDir, name string, want metainfo.Hash) bool {
 	dataPath := snapshotinv.ResolveExistingPath(snapDir, name)
 	if _, err := os.Stat(dataPath); err != nil {
 		return false
@@ -46,5 +50,5 @@ func haveCompletePayload(snapDir, name string) bool {
 	if _, err := mi.UnmarshalInfo(); err != nil {
 		return false
 	}
-	return true
+	return mi.HashInfoBytes() == want
 }

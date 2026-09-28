@@ -102,7 +102,7 @@ func (me *downloadBatch) addAllItems(ctx context.Context, items []preverifiedSna
 		}
 		// Already held in full: adding it would reopen the data file for
 		// writing, truncating a file the aggregator may have mapped.
-		if haveCompletePayload(me.d.snapDir(), it.Name) {
+		if haveCompletePayload(me.d.snapDir(), it.Name, it.InfoHash) {
 			continue
 		}
 		err := me.addDownload(it)
