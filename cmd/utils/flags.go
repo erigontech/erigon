@@ -866,7 +866,7 @@ var (
 	DbSafeNoSyncFlag = cli.BoolFlag{
 		Name:  "db.safe.nosync",
 		Usage: "Let writes reach the disk in the background: after a power cut the node resumes from the last flushed point and re-syncs the seconds in between, and the database is intact either way. Disable to flush before every commit returns",
-		Value: true,
+		Value: false,
 	}
 	DbWriteMapFlag = cli.BoolFlag{
 		Name:  "db.writemap",
