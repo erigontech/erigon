@@ -177,11 +177,24 @@ func (p *branchPrefetcher) putDomain(domain kv.Domain, key, data []byte, step kv
 	s.records[prefetchRecordKey(domain, key)] = prefetchedRecord{data: data, step: step, refs: refs}
 	s.mu.Unlock()
 	size := len(key) + len(data)
-	if refs != nil {
-		size += 32 * len(refs.Refs)
-	}
+	size += leafRefsSize(refs)
 	p.bytes.Add(int64(size))
 	return data
+}
+
+func leafRefsSize(refs *commitment.LeafRefs) int {
+	if refs == nil {
+		return 0
+	}
+	size := 32 * len(refs.Refs)
+	for _, prefix := range refs.Prefixes {
+		size += len(prefix)
+	}
+	for i := range refs.PBinInternal {
+		ref := &refs.PBinInternal[i]
+		size += 2 + 2 + 2 + 32 + 32 + 32 + len(ref.Prefix)
+	}
+	return size
 }
 
 func (p *branchPrefetcher) run(ctx context.Context, db kv.TemporalRoDB) {

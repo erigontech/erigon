@@ -189,12 +189,12 @@ func TestTrieHashHookCountsBucketAndJoinRows(t *testing.T) {
 
 func TestTrieDirtyPathFoldUsesCachedInternalHashes(t *testing.T) {
 	ops := fullRowFoldOps()
-	ctx := &cachedLeafRefsTestContext{trieTestContext: newTrieTestContext(), refs: make(map[string]*commitment.LeafRefs)}
+	ctx := &cachedLeafRefsTestContext{trieTestContext: newTrieTestContext(), refs: make(map[string]cachedLeafRef)}
 	trie := NewTrie(ctx)
 	_, err := trie.Process(ops)
 	require.NoError(t, err)
 	for key, data := range ctx.records {
-		ctx.refs[key] = ComputeLeafRefs([]byte(key), data)
+		ctx.refs[key] = cachedLeafRef{data: bytes.Clone(data), refs: ComputeLeafRefs([]byte(key), data)}
 	}
 
 	var hashCalls atomic.Int64
@@ -222,16 +222,19 @@ func TestTrieDirtyPathFoldUsesCachedInternalHashes(t *testing.T) {
 
 type cachedLeafRefsTestContext struct {
 	*trieTestContext
-	refs map[string]*commitment.LeafRefs
+	refs map[string]cachedLeafRef
+}
+
+type cachedLeafRef struct {
+	data []byte
+	refs *commitment.LeafRefs
 }
 
 func (c *cachedLeafRefsTestContext) LeafRefs(key, data []byte) *commitment.LeafRefs {
-	if refs, ok := c.refs[string(key)]; ok {
-		return refs
+	if refs, ok := c.refs[string(key)]; ok && bytes.Equal(refs.data, data) {
+		return refs.refs
 	}
-	refs := ComputeLeafRefs(key, data)
-	c.refs[string(key)] = refs
-	return refs
+	return nil
 }
 
 func fullRowFoldOps() []Op {
