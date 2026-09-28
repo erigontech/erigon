@@ -212,6 +212,7 @@ func TestPBinConformanceEmbedding(t *testing.T) {
 func TestPBinConformanceTrieRoots(t *testing.T) {
 	for _, vector := range loadConformance(t).TrieRoots {
 		t.Run(vector.Name, func(t *testing.T) {
+			t.Log("reference-only: generic binary-trie fixture uses synthetic keys outside the allocated EIP-8297 state")
 			entries := make([]Entry, 0, len(vector.Entries))
 			for _, entry := range vector.Entries {
 				entries = append(entries, Entry{Key: unhex(t, entry.Key), Value: unhex(t, entry.Value)})

@@ -9,9 +9,11 @@ node for every level.
 
 An account or code key is 34 bytes: a zone byte, a 32-byte position, and a one-byte sub-index.
 An account key uses zone `0x00` and the hash of the left-padded address. A code chunk uses zone
-`0x01` and the hash of its code hash and chunk group. Storage keys are 66 bytes: zone `0xff`, the
-address stem, the storage-group hash, and the slot sub-index. `TreeKeyAccount`, `TreeKeyCodeChunk`,
-and `TreeKeyStorage` in `eip8297/keys.go` derive these keys.
+`0x01` and the hash of its code hash and chunk group. Storage slots 0 through 63 live in the
+account header and use 34-byte account-zone keys with sub-indices 64 through 127. Slots 64 and
+above use 66-byte storage-zone keys: zone `0xff`, the address stem, the storage-group hash, and
+the slot sub-index. `TreeKeyAccount`, `TreeKeyCodeChunk`, and `TreeKeyStorage` in `eip8297/keys.go`
+derive these keys.
 
 Rows use `AppendBitPath` in `eip8297/bitpath.go`: packed path bits followed by the number of used
 bits in the final byte. Row keys are nibble-aligned. `{0x08}` is the global root key; it is outside

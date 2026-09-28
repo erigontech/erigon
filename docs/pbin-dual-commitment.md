@@ -21,7 +21,7 @@ refused.
 
 ## Feed and execution
 
-The binary arm consumes `commitment.PBinFeed`, assembled by `BinFeedFromState` in
+The execution binary arm consumes `commitment.PBinFeed`, assembled by `BinFeedFromState` in
 `execution/commitment/commitmentdb/pbin_feed.go`. The feed contains final account fields, final
 code bytes when the address is in `codeKeys`, final changed slots, code-write and wipe status.
 `TranslateFeed` in `execution/commitment/v3/pbt/feed.go` derives the sorted, unique operation list
@@ -54,9 +54,11 @@ aggregator option.
 
 The binary trie stores rows and fixed bucket-root records. `docs/pbin-encoding.md` describes the
 key derivation, record bytes, root forms and fold. Rebuilds in `RebuildCommitmentFiles` in
-`db/state/squeeze.go` translate the plain state through `BinFeedFromState`, sort by tree key for
-each source range, cut bounded batches, and resume after the recorded completed key. Pending
-commitment writes form the read overlay while a range is processed.
+`db/state/squeeze.go` stream plain-state keys through `BinFeedAccountFromState` and
+`BinFeedStorageSlotFromState` in `execution/commitment/commitmentdb/pbin_feed.go` into the
+binary feed emitter, sort by tree key for each source range, cut bounded batches, and resume after
+the recorded completed key. Pending commitment writes form the read overlay while a range is
+processed.
 
 `erigondb.toml` records `trie_variant`, `trie_hash`, and per-domain freeze state. Changing the
 embedding or selected binary hash suite requires rebuilding the binary datadir from genesis.
@@ -70,4 +72,5 @@ leaves the binary domain canonical when the schedule has flipped.
 `debug_shadowStateRoot` reports the non-canonical root stored by
 `rawdb.WriteShadowStateRoot`. `debug_executionWitness` refuses binary blocks with
 `ErrBinCommitmentUnsupported`; `eth_getProof` and `eth_getWitness` have the same refusal for
-binary blocks. Hex blocks before activation continue to serve the hex witness path.
+binary blocks. With v3-hex, `debug_executionWitness` also refuses hex blocks because the v3 hex
+trie does not provide the HPH witness implementation.

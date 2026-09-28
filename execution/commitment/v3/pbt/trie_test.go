@@ -181,25 +181,43 @@ func TestTrieOwnsOperationKeys(t *testing.T) {
 func TestTrieResetsPendingRoundAtProcessEntry(t *testing.T) {
 	ctx := newTrieTestContext()
 	trie := NewTrie(ctx)
-	keyA := trieCodeKey(0, 0, 1)
-	keyB := trieCodeKey(0, 2, 2)
-	keyC := trieCodeKey(0, 8, 3)
-	keyD := trieCodeKey(0x10, 0, 4)
-
-	_, err := trie.ProcessParallel([]Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}, {Key: keyC, Value: testTrieValue(3)}}, 2)
+	first := make([]Op, 0, 16)
+	for i := range 16 {
+		index := byte(i)
+		first = append(first, Op{Key: trieCodeKey(index<<4, index, index+1), Value: testTrieValue(index + 1)})
+	}
+	sort.Slice(first, func(i, j int) bool { return bytes.Compare(first[i].Key, first[j].Key) < 0 })
+	_, err := trie.ProcessParallel(first, 4)
 	require.NoError(t, err)
+	externalValue := testTrieValue(90)
+	_, err = NewTrie(ctx).Process([]Op{{Key: first[8].Key, Value: externalValue}})
+	require.NoError(t, err)
+	second := make([]Op, 0, 16)
+	final := append([]Op(nil), first...)
+	final[8].Value = externalValue
+	for i := range 8 {
+		index := byte(i)
+		key := first[i].Key
+		value := testTrieValue(32 + index)
+		second = append(second, Op{Key: key, Value: value})
+		final[i].Value = value
+	}
+	for i := range 8 {
+		index := byte(i)
+		key := trieCodeKey(index<<4|0x08, index+1, 64+index)
+		value := testTrieValue(64 + index)
+		second = append(second, Op{Key: key, Value: value})
+		final = append(final, Op{Key: key, Value: value})
+	}
+	sort.Slice(second, func(i, j int) bool { return bytes.Compare(second[i].Key, second[j].Key) < 0 })
+	sort.Slice(final, func(i, j int) bool { return bytes.Compare(final[i].Key, final[j].Key) < 0 })
 	var got common.Hash
 	require.NotPanics(t, func() {
-		got, err = trie.Process([]Op{{Key: keyB, Value: testTrieValue(4)}, {Key: keyD, Value: testTrieValue(5)}})
+		got, err = trie.ProcessParallel(second, 4)
 	})
 	require.NoError(t, err)
 	wantContext := newTrieTestContext()
-	want, err := NewTrie(wantContext).Process([]Op{
-		{Key: keyA, Value: testTrieValue(1)},
-		{Key: keyB, Value: testTrieValue(4)},
-		{Key: keyC, Value: testTrieValue(3)},
-		{Key: keyD, Value: testTrieValue(5)},
-	})
+	want, err := NewTrie(wantContext).Process(final)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 	require.Equal(t, wantContext.records, ctx.records)

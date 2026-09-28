@@ -17,10 +17,13 @@
 package pbt
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"math/big"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 
@@ -45,6 +48,26 @@ type pbtConformance struct {
 		} `json:"accounts"`
 		Root string `json:"root"`
 	} `json:"pbt_state"`
+}
+
+type pbtSpecVectors struct {
+	TrieVectors []struct {
+		Name    string `json:"name"`
+		Entries []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"entries"`
+		Root string `json:"root"`
+	} `json:"trie_vectors"`
+	SequenceVectors []struct {
+		Seed int `json:"seed"`
+		Ops  []struct {
+			Op    string `json:"op"`
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"ops"`
+		RootsAfter []string `json:"roots_after"`
+	} `json:"sequence_vectors"`
 }
 
 func loadPBTConformance(t *testing.T) *pbtConformance {
@@ -74,6 +97,17 @@ func pbtConformanceSlot(t *testing.T, value string) []byte {
 	return slot[:]
 }
 
+func loadPBTSpecVectors(t *testing.T) *pbtSpecVectors {
+	t.Helper()
+	raw, err := os.ReadFile("../../testdata/eip8297_vectors.json")
+	require.NoError(t, err)
+	v := new(pbtSpecVectors)
+	require.NoError(t, json.Unmarshal(raw, v))
+	require.NotEmpty(t, v.TrieVectors)
+	require.NotEmpty(t, v.SequenceVectors)
+	return v
+}
+
 func TestPBinConformancePBTState(t *testing.T) {
 	previous := eip8297.HashSuiteName()
 	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
@@ -100,12 +134,71 @@ func TestPBinConformancePBTState(t *testing.T) {
 				feed.Accounts = append(feed.Accounts, feedAccount)
 			}
 			want := eip8297.StateRootWithHash(eip8297.EmbedState([][]eip8297.State{states}), eip8297.SelectedHash())
-			require.Equal(t, common.HexToHash(vector.Root), want)
+			recorded := common.HexToHash(vector.Root)
 			ctx := newTrieTestContext()
 			got, err := NewTrie(ctx).ProcessFeed(&feed)
 			require.NoError(t, err)
+			require.Equal(t, recorded, got)
+			require.Equal(t, recorded, want)
 			require.Equal(t, want, got)
 			require.NoError(t, NewTrie(ctx).Verify())
 		})
 	}
+}
+
+func TestPBinEngineMatchesSpecTrieRoots(t *testing.T) {
+	previous := eip8297.HashSuiteName()
+	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
+	for _, vector := range loadPBTSpecVectors(t).TrieVectors {
+		t.Run(vector.Name, func(t *testing.T) {
+			ops := make([]Op, 0, len(vector.Entries))
+			entries := make([]eip8297.Entry, 0, len(vector.Entries))
+			for _, entry := range vector.Entries {
+				key := pbtConformanceHex(t, entry.Key)
+				value := pbtConformanceHex(t, entry.Value)
+				ops = append(ops, Op{Key: key, Value: valueArray(value)})
+				entries = append(entries, eip8297.Entry{Key: key, Value: value})
+			}
+			sort.Slice(ops, func(i, j int) bool { return bytes.Compare(ops[i].Key, ops[j].Key) < 0 })
+			want := common.HexToHash(vector.Root)
+			if vector.Name == "full_header_stem" {
+				require.Equal(t, want, eip8297.StateRootWithHash(entries, eip8297.SelectedHash()))
+				t.Log("reference-only: full_header_stem carries an invalid DELEGATION marker")
+				return
+			}
+			got, err := NewTrie(newTrieTestContext()).Process(ops)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			require.Equal(t, want, eip8297.StateRootWithHash(entries, eip8297.SelectedHash()))
+		})
+	}
+}
+
+func TestPBinEngineMatchesSpecSequenceRoots(t *testing.T) {
+	previous := eip8297.HashSuiteName()
+	t.Cleanup(func() { require.NoError(t, eip8297.SetHashSuite(previous)) })
+	require.NoError(t, eip8297.SetHashSuite(eip8297.HashBlake3))
+	for _, vector := range loadPBTSpecVectors(t).SequenceVectors {
+		t.Run(fmt.Sprintf("seed-%d", vector.Seed), func(t *testing.T) {
+			require.Len(t, vector.Ops, len(vector.RootsAfter))
+			trie := NewTrie(newTrieTestContext())
+			for i, operation := range vector.Ops {
+				key := pbtConformanceHex(t, operation.Key)
+				op := Op{Key: key}
+				if operation.Op != "delete" {
+					op.Value = valueArray(pbtConformanceHex(t, operation.Value))
+				}
+				got, err := trie.Process([]Op{op})
+				require.NoError(t, err)
+				require.Equal(t, common.HexToHash(vector.RootsAfter[i]), got, "operation %d", i)
+			}
+		})
+	}
+}
+
+func valueArray(value []byte) [eip8297.ValueLength]byte {
+	var out [eip8297.ValueLength]byte
+	copy(out[:], value)
+	return out
 }

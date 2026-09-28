@@ -198,15 +198,34 @@ func TestPBinDigestCacheFollowsSelectedHashSuite(t *testing.T) {
 	previous := HashSuiteName()
 	t.Cleanup(func() { require.NoError(t, SetHashSuite(previous)) })
 	address := referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314")
+	cache := DigestCache{}
 
 	require.NoError(t, SetHashSuite(HashKeccak))
-	keccakKey := TreeKeyAccount(address, BasicDataLeafKey)
+	keccakKey := cache.AccountKey(address, BasicDataLeafKey)
 	require.NoError(t, SetHashSuite(HashBlake3))
-	got := TreeKeyAccount(address, BasicDataLeafKey)
-	cache := DigestCache{Sum: func(data []byte) common.Hash { return common.Hash(blake3.Sum256(data)) }}
-	want := cache.AccountKey(address, BasicDataLeafKey)
+	got := cache.AccountKey(address, BasicDataLeafKey)
+	expectedCache := DigestCache{Sum: func(data []byte) common.Hash { return common.Hash(blake3.Sum256(data)) }}
+	want := expectedCache.AccountKey(address, BasicDataLeafKey)
 	require.NotEqual(t, keccakKey, got)
 	require.Equal(t, want, got)
+
+	slot := referenceSlotBytes(256)
+	cache = DigestCache{}
+	require.NoError(t, SetHashSuite(HashKeccak))
+	keccakStorageKey := cache.StorageKey(address, slot)
+	require.NoError(t, SetHashSuite(HashBlake3))
+	gotStorageKey := cache.StorageKey(address, slot)
+	expectedStorageKey := expectedCache.StorageKey(address, slot)
+	require.NotEqual(t, keccakStorageKey, gotStorageKey)
+	require.Equal(t, expectedStorageKey, gotStorageKey)
+
+	hasher := KeyHasher()
+	require.NoError(t, SetHashSuite(HashKeccak))
+	keccakPooledKey := hasher(address)
+	require.NoError(t, SetHashSuite(HashBlake3))
+	gotPooledKey := hasher(address)
+	require.Equal(t, want, gotPooledKey)
+	require.NotEqual(t, keccakPooledKey, gotPooledKey)
 }
 
 // The keyHasher contract: the primary leaf's tree key, sized 34 or 66 by zone.

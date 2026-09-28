@@ -158,12 +158,26 @@ type DigestCache struct {
 	addr32 [32]byte
 	stem   [32]byte
 	valid  bool
+	suite  string
 
 	groupIndex [31]byte
 	groupHash  [32]byte
 	groupValid bool
 
 	buf [64]byte
+}
+
+func (c *DigestCache) bindSelectedSuite() {
+	if c.Sum != nil {
+		return
+	}
+	suite := HashSuiteName()
+	if c.suite == suite {
+		return
+	}
+	c.valid = false
+	c.groupValid = false
+	c.suite = suite
 }
 
 func (c *DigestCache) hash(preimage []byte) [32]byte {
@@ -174,6 +188,7 @@ func (c *DigestCache) hash(preimage []byte) [32]byte {
 }
 
 func (c *DigestCache) stemDigest(addr32 *[32]byte) *[32]byte {
+	c.bindSelectedSuite()
 	if c.valid && c.addr32 == *addr32 {
 		return &c.stem
 	}
@@ -187,6 +202,7 @@ func (c *DigestCache) stemDigest(addr32 *[32]byte) *[32]byte {
 // groupDigest hashes addr32 || tree_index, where tree_index is slot>>8 as a
 // 32-byte big-endian value: a zero byte followed by the slot's top 31 bytes.
 func (c *DigestCache) groupDigest(addr32, slot32 *[32]byte) *[32]byte {
+	c.bindSelectedSuite()
 	idx := (*[31]byte)(slot32[:31])
 	if c.groupValid && c.addr32 == *addr32 && c.groupIndex == *idx {
 		return &c.groupHash

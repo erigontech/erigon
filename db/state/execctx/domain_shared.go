@@ -384,7 +384,17 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
 		}
 	}
-	if len(commitmentDomains) > 1 && o.trieCfg.Variant == commitment.VariantHexPatriciaTrie {
+	if len(commitmentDomains) > 1 && o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
+		switch {
+		case statecfg.ExperimentalCommitmentV3:
+			o.trieCfg.Variant = commitment.VariantCommitmentV3
+		case statecfg.ExperimentalParallelCommitment:
+			o.trieCfg.Variant = commitment.VariantParallelHexPatricia
+		default:
+			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
+		}
+	}
+	if len(commitmentDomains) > 1 && o.trieCfg.Variant != commitment.VariantCommitmentV3 {
 		return nil, ErrHexBinRequiresV3
 	}
 	commitmentDomain := commitmentDomains[0]

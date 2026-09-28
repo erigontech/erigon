@@ -172,16 +172,26 @@ func TestSharedDomainsHexOnlyUsesConfiguredV3(t *testing.T) {
 func TestSharedDomainsDualRejectsExplicitHPH(t *testing.T) {
 	withDualCommitmentFlags(t)
 
-	db := newTestDb(t, 16)
-	tx, err := db.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
+	for _, variant := range []struct {
+		name  string
+		value commitment.TrieVariant
+	}{
+		{name: "empty", value: ""},
+		{name: "hph", value: commitment.VariantHexPatriciaTrie},
+		{name: "parallel", value: commitment.VariantParallelHexPatricia},
+	} {
+		t.Run(variant.name, func(t *testing.T) {
+			db := newTestDb(t, 16)
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
 
-	cfg := commitment.DefaultTrieConfig()
-	cfg.Variant = commitment.VariantHexPatriciaTrie
-	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg))
-	require.ErrorIs(t, err, execctx.ErrHexBinRequiresV3)
-	require.Nil(t, sd)
+			cfg := commitment.TrieConfig{Variant: variant.value}
+			sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg))
+			require.ErrorIs(t, err, execctx.ErrHexBinRequiresV3)
+			require.Nil(t, sd)
+		})
+	}
 }
 
 func TestSharedDomainsV3SeekRestoresCommittedPosition(t *testing.T) {
