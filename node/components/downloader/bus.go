@@ -30,6 +30,7 @@ import (
 	dl "github.com/erigontech/erigon/db/downloader"
 	"github.com/erigontech/erigon/node/app/event"
 	"github.com/erigontech/erigon/node/components/storage/flow"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
@@ -240,7 +241,7 @@ func (p *Provider) fetchPeerSidecar(ctx context.Context, peerID string, infoHash
 	// with its own bounded timeout instead.
 	if existing, ok := client.Torrent(infoHash); ok {
 		if info := existing.Info(); info != nil && len(info.Files) == 0 && kind.parseName(info.Name) {
-			if data, rerr := os.ReadFile(filepath.Join(p.dirs.Snap, info.Name)); rerr == nil {
+			if data, rerr := os.ReadFile(filepath.Join(p.dirs.Snap, info.Name)); rerr == nil { //nolint:gocritic // sidecars live at the root
 				fetch.data = data
 				return data, nil
 			}
@@ -358,7 +359,10 @@ func (p *Provider) onDownloadRequested(req flow.DownloadRequested) {
 		return
 	}
 
-	localPath := filepath.Join(p.dirs.Snap, req.FileName)
+	// Bare basename from the flow layer: state files live under domain/,
+	// history/, idx/ or accessor/, so joining it to the root stats a path
+	// that never exists and reports a completed download as failed.
+	localPath := snapshot.ResolveExistingPath(p.dirs.Snap, req.FileName)
 	fi, statErr := os.Stat(localPath)
 	if statErr != nil || fi.Size() == 0 {
 		var reason string
@@ -408,7 +412,7 @@ func (p *Provider) downloadUntilStalled(fileName string, protoReq *downloaderpro
 	done := make(chan error, 1)
 	go func() { done <- p.Client.Download(ctx, protoReq) }()
 
-	localPath := filepath.Join(p.dirs.Snap, fileName)
+	localPath := snapshot.ResolveExistingPath(p.dirs.Snap, fileName)
 	ticker := time.NewTicker(stallTimeout / 10)
 	defer ticker.Stop()
 

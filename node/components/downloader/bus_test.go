@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/node/app/util"
 	"github.com/erigontech/erigon/node/app/workerpool"
 	"github.com/erigontech/erigon/node/components/storage/flow"
+	"github.com/erigontech/erigon/node/components/storage/snapshot"
 	downloaderproto "github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
@@ -46,9 +47,19 @@ type fakeClient struct {
 	writeSize    int64
 	rootDir      string
 	blockForever bool
+	// writeSubdir puts the payload in a kind subdir, as the real downloader
+	// does for state files (the publisher's torrent info.Name carries the
+	// prefix) while the flow event still names it by bare basename.
+	writeSubdir  string
 	growSteps    int
 	growInterval time.Duration
 	downloadArgs []*downloaderproto.DownloadRequest
+}
+
+func (c *fakeClient) writeSubdirOf() string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.writeSubdir
 }
 
 func (c *fakeClient) Download(ctx context.Context, req *downloaderproto.DownloadRequest) error {
@@ -91,7 +102,7 @@ func (c *fakeClient) Download(ctx context.Context, req *downloaderproto.Download
 	}
 	if writeSize > 0 {
 		for _, item := range req.Items {
-			target := filepath.Join(rootDir, item.Path)
+			target := filepath.Join(rootDir, c.writeSubdirOf(), item.Path)
 			if mkErr := os.MkdirAll(filepath.Dir(target), 0o755); mkErr != nil {
 				return mkErr
 			}
@@ -224,7 +235,7 @@ func TestBindBusDownloadComplete(t *testing.T) {
 	defer mu.Unlock()
 	require.Equal(t, req.FileName, completes[0].FileName)
 	require.Equal(t, req.InfoHash, completes[0].InfoHash)
-	require.Equal(t, filepath.Join(env.p.dirs.Snap, req.FileName), completes[0].LocalPath)
+	require.Equal(t, snapshot.ResolveExistingPath(env.p.dirs.Snap, req.FileName), completes[0].LocalPath)
 	require.Equal(t, int64(1234), completes[0].Size)
 	require.Equal(t, 1, env.client.callCount())
 }
@@ -358,4 +369,51 @@ func TestBindBusSlowDownloadIsNotCancelled(t *testing.T) {
 	defer mu.Unlock()
 	require.Empty(t, failed, "a download that kept making progress was cancelled")
 	require.Len(t, completed, 1)
+}
+
+// TestBindBusDownloadComplete_StateFileInKindSubdir pins that a completed
+// download is recognised when the payload landed in its kind subdir.
+//
+// Flow names a snapshot file by bare basename, but a state file is written
+// under domain/ (history/, idx/, accessor/) because that is what the
+// publisher's torrent info.Name carries. Resolving the name against the
+// snapshots root alone stats a path that never exists, so a download that
+// completed is published as DownloadFailed and re-requested.
+func TestBindBusDownloadComplete_StateFileInKindSubdir(t *testing.T) {
+	env := newBusTestEnv(t, &fakeClient{writeSize: 4096, writeSubdir: "domain"})
+	defer env.close(t)
+
+	var completes []flow.DownloadComplete
+	var failures []flow.DownloadFailed
+	var mu sync.Mutex
+	require.NoError(t, env.bus.Subscribe(func(e flow.DownloadComplete) {
+		mu.Lock()
+		completes = append(completes, e)
+		mu.Unlock()
+	}))
+	require.NoError(t, env.bus.Subscribe(func(e flow.DownloadFailed) {
+		mu.Lock()
+		failures = append(failures, e)
+		mu.Unlock()
+	}))
+	require.NoError(t, env.p.BindBus(context.Background(), env.bus))
+
+	env.bus.Publish(flow.DownloadRequested{
+		FileName: "v2.1-commitment.331-332.kvi",
+		InfoHash: [20]byte{9, 9, 9},
+	})
+
+	waitFor(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(completes)+len(failures) > 0
+	}, 10*time.Second, "DownloadComplete or DownloadFailed")
+
+	mu.Lock()
+	defer mu.Unlock()
+	require.Empty(t, failures,
+		"a file written to domain/ is on disk; reporting it failed re-requests a "+
+			"download that already succeeded")
+	require.Len(t, completes, 1)
+	require.Equal(t, int64(4096), completes[0].Size)
 }
