@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"path/filepath"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	clutils "github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
@@ -159,6 +161,56 @@ func TestCoordinatorRecordsOnlyPublishedBids(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCoordinatorLogsTelemetryOnlyForPublishedBids(t *testing.T) {
+	var logs bytes.Buffer
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+
+	config := gloasCoordinatorConfig()
+	input := validCoordinatorSlotInput(config)
+	assembled := validCoordinatorPayload(&config, input, big.NewInt(2_000_000_000))
+	assembled.Eth1Block.GasUsed = 456_789
+	assembled.Eth1Block.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{0x01}, {0x02}})
+
+	failed := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payload: assembled},
+		&coordinatorPublisher{err: errors.New("unavailable")},
+		1,
+	)
+	_, err := failed.RunSlot(t.Context(), input)
+	require.ErrorContains(t, err, "publish bid")
+	require.NotContains(t, logs.String(), "Embedded builder bid published")
+
+	succeeded := NewCoordinator(
+		&config,
+		new(coordinatorSigner),
+		FixedMarginStrategy{Margin: 1},
+		&coordinatorAssembler{payload: assembled},
+		new(coordinatorPublisher),
+		1,
+	)
+	_, err = succeeded.RunSlot(t.Context(), input)
+	require.NoError(t, err)
+	output := logs.String()
+	require.Equal(t, 1, bytes.Count(logs.Bytes(), []byte("Embedded builder bid published")))
+	require.Contains(t, output, "slot="+fmt.Sprint(input.Slot))
+	require.Contains(t, output, "parentBlockRoot="+fmt.Sprint(input.ParentBlockRoot))
+	require.Contains(t, output, "parentBlockHash="+fmt.Sprint(input.ParentBlockHash))
+	require.Contains(t, output, "blockHash="+fmt.Sprint(assembled.Eth1Block.BlockHash))
+	require.Contains(t, output, "blockValueWei=2000000000")
+	require.Contains(t, output, "bidValueGwei=2")
+	require.Contains(t, output, "availableBidValueGwei="+fmt.Sprint(input.AvailableBidValueGwei))
+	require.Contains(t, output, "txs=2")
+	require.Contains(t, output, "gasUsed=456789")
+	require.Contains(t, output, "blobs=0")
+	require.Contains(t, output, "assembly=")
+	require.Contains(t, output, "privateOrderflowWindow=0s")
 }
 
 type blockingCoordinatorPublisher struct {

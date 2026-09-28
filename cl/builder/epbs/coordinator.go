@@ -498,6 +498,20 @@ func (c *Coordinator) runSlotGuarded(
 		return signedBid, fmt.Errorf("epbs/coordinator: publish bid: %w", publishErr)
 	}
 	c.status.RecordBid(input.Slot, bidValue)
+	log.Info("Embedded builder bid published",
+		"slot", input.Slot,
+		"parentBlockRoot", input.ParentBlockRoot,
+		"parentBlockHash", input.ParentBlockHash,
+		"blockHash", payload.BlockHash,
+		"blockValueWei", assembled.BlockValue,
+		"bidValueGwei", bidValue,
+		"availableBidValueGwei", input.AvailableBidValueGwei,
+		"txs", len(payload.Transactions.UnderlyngReference()),
+		"gasUsed", payload.GasUsed,
+		"blobs", commitments.Len(),
+		"assembly", assemblyElapsed,
+		"privateOrderflowWindow", c.privateOrderflowWindow,
+	)
 	return signedBid, nil
 }
 
