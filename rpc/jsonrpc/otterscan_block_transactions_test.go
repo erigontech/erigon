@@ -30,8 +30,8 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
-// Pages run backwards from the end of the block, and the transactions and the
-// receipts are cropped separately, so the two can drift apart.
+// Pages run backwards from the end of the block; walking them all must rebuild
+// the full block with every transaction paired with its own receipt.
 func TestOtsGetBlockTransactionsPaging(t *testing.T) {
 	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewOtterscanAPI(newBaseApiForTest(m), m.DB, 25)
