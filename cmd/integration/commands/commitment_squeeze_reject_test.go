@@ -87,6 +87,20 @@ func TestCommitmentRebuildRefusesSqueezeBeforeAnyWork(t *testing.T) {
 	require.ErrorContains(t, err, "--squeeze")
 }
 
+func TestCommitmentRebuildRefusesHexBinSourceBeforeAnyWork(t *testing.T) {
+	src := hexBinSourceDatadirFixture(t)
+	before := snapshotTree(t, src.Snap)
+	withRebuildFlags(t, func() {
+		datadirCli = src.DataDir
+		reset = true
+	})
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	err := commitmentRebuild(db, context.Background(), log.New(), hexTarget(t), nil)
+	require.ErrorContains(t, err, "supported command")
+	require.Equal(t, before, snapshotTree(t, src.Snap))
+}
+
 // Every one of these writes to the source datadir or to files the staged output
 // does not hold, so the refusal has to come from the flags alone — the run is
 // rejected before the output datadir is created and the source is hardlinked in.

@@ -24,14 +24,18 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/spf13/cobra"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/node/debug"
+	"github.com/erigontech/erigon/node/logging"
 )
 
 const (
@@ -160,7 +164,7 @@ func TestRequireRebuildOutputForBinTarget(t *testing.T) {
 	require.NoError(t, requireRebuildOutput(hex, ""))
 }
 
-func TestResolveCommitmentRebuildTargetUsesDualDatadirHexArm(t *testing.T) {
+func TestResolveCommitmentRebuildTargetUsesProcessFlags(t *testing.T) {
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousParallel := statecfg.ExperimentalParallelCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
@@ -171,7 +175,6 @@ func TestResolveCommitmentRebuildTargetUsesDualDatadirHexArm(t *testing.T) {
 		statecfg.ExperimentalCommitmentV3 = previousV3
 		statecfg.BinCommitmentHash = previousHash
 	})
-	dirs := hexBinSourceDatadirFixture(t)
 	for _, tc := range []struct {
 		name     string
 		bin      bool
@@ -179,8 +182,8 @@ func TestResolveCommitmentRebuildTargetUsesDualDatadirHexArm(t *testing.T) {
 		v3       bool
 		variant  commitment.TrieVariant
 	}{
-		{name: "flagless", variant: commitment.VariantCommitmentV3},
-		{name: "parallel", parallel: true, variant: commitment.VariantCommitmentV3},
+		{name: "flagless", variant: commitment.VariantHexPatriciaTrie},
+		{name: "parallel", parallel: true, variant: commitment.VariantParallelHexPatricia},
 		{name: "v3", v3: true, variant: commitment.VariantCommitmentV3},
 		{name: "bin", bin: true, variant: commitment.VariantBinPatriciaTrie},
 	} {
@@ -189,9 +192,67 @@ func TestResolveCommitmentRebuildTargetUsesDualDatadirHexArm(t *testing.T) {
 			statecfg.ExperimentalParallelCommitment = tc.parallel
 			statecfg.ExperimentalCommitmentV3 = tc.v3
 			statecfg.BinCommitmentHash = commitment.PBinHashBlake3
-			target, err := resolveCommitmentRebuildTarget(dirs)
+			target, err := resolveCommitmentRebuildTarget()
 			require.NoError(t, err)
 			require.Equal(t, tc.variant, target.Variant)
+		})
+	}
+}
+
+func TestCommitmentRebuildRunRefusesHexBinSource(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousDatadir := datadirCli
+	previousOutput := rebuildOutputDatadir
+	previousNoHistory := noHistory
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		datadirCli = previousDatadir
+		rebuildOutputDatadir = previousOutput
+		noHistory = previousNoHistory
+	})
+	src := hexBinSourceDatadirFixture(t)
+	before := snapshotTree(t, src.Snap)
+	for _, tc := range []struct {
+		name     string
+		parallel bool
+		v3       bool
+		output   bool
+	}{
+		{name: "flagless-in-place"},
+		{name: "parallel-in-place", parallel: true},
+		{name: "v3-in-place", v3: true},
+		{name: "flagless-output", output: true},
+		{name: "parallel-output", parallel: true, output: true},
+		{name: "v3-output", v3: true, output: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statecfg.ExperimentalBinCommitment = false
+			statecfg.ExperimentalParallelCommitment = tc.parallel
+			statecfg.ExperimentalCommitmentV3 = tc.v3
+			statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+			datadirCli = src.DataDir
+			rebuildOutputDatadir = ""
+			noHistory = false
+			if tc.output {
+				rebuildOutputDatadir = filepath.Join(t.TempDir(), "output")
+				noHistory = true
+			}
+			cmd := &cobra.Command{Use: "rebuild", Run: cmdCommitmentRebuild.Run}
+			utils.CobraFlags(cmd, debug.Flags, utils.MetricFlags, logging.Flags)
+			cmd.Flags().AddFlagSet(cmd.PersistentFlags())
+			cmd.SetContext(t.Context())
+			require.NotPanics(t, func() { cmd.Run(cmd, nil) })
+			require.Equal(t, before, snapshotTree(t, src.Snap))
+			if tc.output {
+				_, err := os.Stat(rebuildOutputDatadir)
+				require.ErrorIs(t, err, os.ErrNotExist)
+			}
 		})
 	}
 }
@@ -462,7 +523,7 @@ func withBinCommitmentProcess(t *testing.T, hash string) {
 // file into it, so the settings resolver has to accept it under the same bin flags
 // that made the target bin in the first place.
 func TestStagedRebuildOutputOpensUnderTheBinFlag(t *testing.T) {
-	src := sourceDatadirFixture(t)
+	src := hexBinSourceDatadirFixture(t)
 	withBinCommitmentProcess(t, commitment.PBinHashBlake3)
 
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
@@ -492,11 +553,11 @@ func TestStagedRebuildOutputDescribesBinBeforeItFinishes(t *testing.T) {
 // variant, so hex files written into a bin datadir are read back as bin.
 func TestRebuildRefusesHexTargetOnBinSource(t *testing.T) {
 	binSrc := binSourceDatadirFixture(t)
-	require.ErrorContains(t, refuseRebuildIntoBinSource(hexTarget(t), binSrc), "bin commitment trie")
-	require.NoError(t, refuseRebuildIntoBinSource(binTarget(t), binSrc))
-	require.NoError(t, refuseRebuildIntoBinSource(hexTarget(t), sourceDatadirFixture(t)))
+	require.ErrorContains(t, refuseRebuildFromSource(hexTarget(t), binSrc, false), "bin commitment trie")
+	require.NoError(t, refuseRebuildFromSource(binTarget(t), binSrc, true))
+	require.NoError(t, refuseRebuildFromSource(hexTarget(t), sourceDatadirFixture(t), false))
 	// A datadir with no erigondb.toml predates the file and is hex.
-	require.NoError(t, refuseRebuildIntoBinSource(hexTarget(t), datadir.New(t.TempDir())))
+	require.NoError(t, refuseRebuildFromSource(hexTarget(t), datadir.New(t.TempDir()), false))
 }
 
 // --resume keeps the commitment files the interrupted run wrote. Continuing under

@@ -395,23 +395,29 @@ func refuseSqueezeForBinTarget(target dbstate.RebuildTarget, squeeze bool) error
 	return errors.New("--squeeze cannot run against a bin rebuild target: squeeze replaces plain keys in BranchData values, and a bin branch payload is not BranchData — its field bits carry other meanings, so the pass would rewrite bytes that are not plain keys")
 }
 
-// refuseRebuildIntoBinSource refuses a rebuild that would write hex commitment
-// files into a datadir recorded as bin: a commitment .kv names no trie variant,
-// so the new files are indistinguishable from the bin ones beside them. The
-// target is resolved from the flags, before anything reads the datadir.
-func refuseRebuildIntoBinSource(target dbstate.RebuildTarget, src datadir.Dirs) error {
+func refuseRebuildFromSettings(target dbstate.RebuildTarget, source *dbstate.ErigonDBSettings, sourcePath string, hasOutput bool) error {
+	if source.TrieVariantName() == dbstate.TrieVariantHexBin {
+		if target.Variant == commitment.VariantBinPatriciaTrie && hasOutput {
+			return nil
+		}
+		return fmt.Errorf("commitment rebuild: source datadir %s uses hex+bin; the supported command is integration commitment rebuild --experimental.bin-commitment --experimental.bin-commitment.hash=%s --output.datadir=<fresh-dir> --no-history", sourcePath, source.TrieHashName())
+	}
+	if source.TrieVariantName() != dbstate.TrieVariantBin || target.Variant == commitment.VariantBinPatriciaTrie || hasOutput {
+		return nil
+	}
+	return fmt.Errorf("commitment rebuild: source datadir %s was built with the bin commitment trie, but the target is %s; rerun with --experimental.bin-commitment --experimental.bin-commitment.hash=%s and --output.datadir",
+		sourcePath, target.Variant, source.TrieHashName())
+}
+
+func refuseRebuildFromSource(target dbstate.RebuildTarget, src datadir.Dirs, hasOutput bool) error {
 	source, err := dbstate.ReadErigonDBSettings(src)
 	if errors.Is(err, fs.ErrNotExist) {
-		return nil // no erigondb.toml predates the file; a bin datadir always has one
+		return nil
 	}
 	if err != nil {
 		return fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
 	}
-	if source.TrieVariantName() != dbstate.TrieVariantBin || target.Variant == commitment.VariantBinPatriciaTrie {
-		return nil
-	}
-	return fmt.Errorf("commitment rebuild: source datadir %s was built with the bin commitment trie, but the target is %s; rerun with --experimental.bin-commitment --experimental.bin-commitment.hash=%s and --output.datadir",
-		src.DataDir, target.Variant, source.TrieHashName())
+	return refuseRebuildFromSettings(target, source, src.DataDir, hasOutput)
 }
 
 func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger) (*rebuildOutput, error) {
@@ -928,23 +934,20 @@ var cmdCommitmentRebuild = &cobra.Command{
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 
-		// The scheme to produce is decided here and passed down, so the rebuild never
-		// re-reads it from process state further in.
-		target, err := resolveCommitmentRebuildTarget(datadir.Open(datadirCli))
+		sourceDirs := datadir.Open(datadirCli)
+		target, err := resolveCommitmentRebuildTarget()
 		if err != nil {
 			logger.Error(err.Error())
 			return
 		}
 		target.MaxShardSteps = rebuildMaxShardSteps
-		if err := requireRebuildOutput(target, rebuildOutputDatadir); err != nil {
+		if err := refuseRebuildFromSource(target, sourceDirs, rebuildOutputDatadir != ""); err != nil {
 			logger.Error(err.Error())
 			return
 		}
-		if rebuildOutputDatadir == "" {
-			if err := refuseRebuildIntoBinSource(target, datadir.Open(datadirCli)); err != nil {
-				logger.Error(err.Error())
-				return
-			}
+		if err := requireRebuildOutput(target, rebuildOutputDatadir); err != nil {
+			logger.Error(err.Error())
+			return
 		}
 		// Staging creates the output datadir and hardlinks the source into it, so a
 		// flag combination that cannot run has to be refused ahead of it.
@@ -983,20 +986,8 @@ var cmdCommitmentRebuild = &cobra.Command{
 	},
 }
 
-func resolveCommitmentRebuildTarget(dirs datadir.Dirs) (dbstate.RebuildTarget, error) {
-	target := dbstate.DefaultRebuildTarget()
-	settings, err := dbstate.ReadErigonDBSettings(dirs)
-	if errors.Is(err, fs.ErrNotExist) {
-		return target.Resolve()
-	}
-	if err != nil {
-		return dbstate.RebuildTarget{}, fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
-	}
-	if settings.TrieVariantName() == dbstate.TrieVariantHexBin && target.Variant != commitment.VariantBinPatriciaTrie {
-		target.Variant = commitment.VariantCommitmentV3
-		target.HashName = ""
-	}
-	return target.Resolve()
+func resolveCommitmentRebuildTarget() (dbstate.RebuildTarget, error) {
+	return dbstate.DefaultRebuildTarget().Resolve()
 }
 
 // checkRebuildFlags refuses the flag combinations a rebuild cannot honour. It runs
@@ -1028,11 +1019,28 @@ func commitmentRebuildDomain(target dbstate.RebuildTarget, domains []kv.Domain) 
 }
 
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, rebuildTarget dbstate.RebuildTarget, out *rebuildOutput) error {
+	dirs := datadir.New(datadirCli)
+	var source *dbstate.ErigonDBSettings
+	if out != nil {
+		source = out.source
+	} else {
+		var err error
+		source, err = dbstate.ReadErigonDBSettings(dirs)
+		if errors.Is(err, fs.ErrNotExist) {
+			source = nil
+		} else if err != nil {
+			return fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
+		}
+	}
+	if source != nil {
+		if err := refuseRebuildFromSettings(rebuildTarget, source, dirs.DataDir, out != nil); err != nil {
+			return err
+		}
+	}
 	if err := checkRebuildFlags(rebuildTarget, out != nil); err != nil {
 		return err
 	}
 
-	dirs := datadir.New(datadirCli)
 	if reset {
 		return rawdbreset.Reset(ctx, db, stages.Execution)
 	}
