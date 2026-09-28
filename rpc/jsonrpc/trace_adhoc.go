@@ -438,6 +438,18 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 	return tx, nil
 }
 
+// checkChainID rejects a call object whose chainId names another chain. Such a call is invalid
+// whatever the state, so it is invalid params rather than an execution error.
+func (args *TraceCallParam) checkChainID(chainID *uint256.Int) error {
+	if args.ChainID == nil {
+		return nil
+	}
+	if have := (*uint256.Int)(args.ChainID); !have.Eq(chainID) {
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", have, chainID)}
+	}
+	return nil
+}
+
 func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
@@ -1191,6 +1203,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
+	if err := args.checkChainID(chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
 	if blockNrOrHash == nil {
@@ -1407,6 +1422,15 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	}
 	if tok != json.Delim(']') {
 		return nil, errors.New("expected end of array of [callparam, tracetypes]")
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range callParams {
+		if err := callParams[i].checkChainID(chainConfig.ChainID); err != nil {
+			return nil, fmt.Errorf("call %d: %w", i, err)
+		}
 	}
 	var baseFee *uint256.Int
 	if parentNrOrHash == nil {
@@ -1878,9 +1902,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	msg.SetCheckGas(false)
 
 	txCtx := protocol.NewEVMTxContext(msg)
-
-	blockCtx.GasLimit = math.MaxUint64
-	blockCtx.MaxGasLimit = true
 
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	storeEVM(evm)
