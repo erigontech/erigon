@@ -157,14 +157,17 @@ func TestOpenFolderRejectsLegacyPBinStateInFiles(t *testing.T) {
 func TestOpenFolderRejectsLegacyPBinStateInDualDomain(t *testing.T) {
 	oldBin := statecfg.ExperimentalBinCommitment
 	oldHexBin := statecfg.ExperimentalHexBinCommitment
+	oldV3 := statecfg.ExperimentalCommitmentV3
 	oldSchema := statecfg.Schema
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = oldBin
 		statecfg.ExperimentalHexBinCommitment = oldHexBin
+		statecfg.ExperimentalCommitmentV3 = oldV3
 		statecfg.Schema = oldSchema
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentBinDomain)
 
