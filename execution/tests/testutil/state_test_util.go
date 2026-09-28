@@ -21,7 +21,6 @@ package testutil
 
 import (
 	"context"
-	context2 "context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -301,7 +300,7 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 	blockNum, txNum := readBlockNr, uint64(1)
 
 	defer func() {
-		rootBytes, rootBytesErr := sd.ComputeCommitment(context2.Background(), tx, true, blockNum, txNum, "", nil)
+		rootBytes, rootBytesErr := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 		if rootBytesErr != nil {
 			if err != nil {
 				err = fmt.Errorf("ComputeCommitment: %w: %w", rootBytesErr, err)
@@ -438,7 +437,7 @@ func MakePreState(rules *chain.Rules, db kv.TemporalRoDB, tx kv.TemporalRwTx, al
 	if err != nil {
 		return nil, err
 	}
-	if err := sd.Flush(context2.Background(), tx); err != nil {
+	if err := sd.Flush(context.Background(), tx); err != nil {
 		return nil, err
 	}
 	return statedb, nil

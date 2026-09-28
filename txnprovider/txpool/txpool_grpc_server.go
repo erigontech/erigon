@@ -41,8 +41,6 @@ import (
 var TxPoolAPIVersion = &typesproto.VersionReply{Major: 1, Minor: 0, Patch: 0}
 
 type txPool interface {
-	ValidateSerializedTxn(serializedTxn []byte) error
-
 	PeekBest(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64) (bool, error)
 	GetRlp(tx kv.Tx, hash []byte) ([]byte, error)
 	AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcfg.DiscardReason, error)
@@ -186,7 +184,7 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 
 	var slots TxnSlots
 	parseCtx := NewTxnParseContext(s.chainID).ChainIDRequired()
-	parseCtx.ValidateRLP(s.txPool.ValidateSerializedTxn)
+	parseCtx.ValidateRLP(ValidateSerializedTxn)
 
 	reply := &txpoolproto.AddReply{Imported: make([]txpoolproto.ImportResult, len(in.RlpTxs)), Errors: make([]string, len(in.RlpTxs))}
 

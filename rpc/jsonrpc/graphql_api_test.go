@@ -123,6 +123,10 @@ func TestGraphQLReceiptFeeCapsMatchRPCTransaction(t *testing.T) {
 			DynamicFeeTransaction: dynamicFee(),
 			MaxFeePerBlobGas:      *uint256.NewInt(50),
 		}},
+		{"blobWrapper", &types.BlobTxWrapper{Tx: types.BlobTx{
+			DynamicFeeTransaction: dynamicFee(),
+			MaxFeePerBlobGas:      *uint256.NewInt(50),
+		}}},
 		{"setCode", &types.SetCodeTransaction{DynamicFeeTransaction: dynamicFee()}},
 		{"accountAbstraction", &types.AccountAbstractionTransaction{
 			NonceKey:      uint256.NewInt(0),
@@ -146,6 +150,7 @@ func TestGraphQLReceiptFeeCapsMatchRPCTransaction(t *testing.T) {
 
 			assert.Equal(t, (*uint256.Int)(want.MaxFeePerGas), got.MaxFeePerGas, "maxFeePerGas")
 			assert.Equal(t, (*uint256.Int)(want.MaxPriorityFeePerGas), got.MaxPriorityFeePerGas, "maxPriorityFeePerGas")
+			assert.Equal(t, want.MaxFeePerBlobGas, got.MaxFeePerBlobGas, "maxFeePerBlobGas")
 		})
 	}
 }

@@ -99,7 +99,7 @@ type Filters struct {
 	pendingReceiptsUpdate atomic.Bool
 	onNewSnapshot         func()
 
-	logsStores         *concurrent.SyncMap[LogsSubID, types.RPCLogs]
+	logsStores         *concurrent.SyncMap[LogsSubID, types.Logs]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	trackedSubs        *concurrent.SyncMap[SubscriptionID, trackedSub]
@@ -131,7 +131,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		receiptsSubs:       NewReceiptsFilterAggregator(),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
-		logsStores:         concurrent.NewSyncMap[LogsSubID, types.RPCLogs](),
+		logsStores:         concurrent.NewSyncMap[LogsSubID, types.Logs](),
 		pendingHeadsStores: concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		trackedSubs:        concurrent.NewSyncMap[SubscriptionID, trackedSub](),
@@ -768,7 +768,7 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
 // installed and the error is returned.
-func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.RPCLog, LogsSubID, error) {
+func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
 	if err := criteria.ValidateTopicPositions(); err != nil {
 		return nil, "", err
 	}
@@ -786,7 +786,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 			criteria.Topics[i] = slices.Clone(criteria.Topics[i])
 		}
 	}
-	sub := newChanSub[*types.RPCLog](size, protocol)
+	sub := newChanSub[*types.Log](size, protocol)
 	f := newLogsFilter(sub, criteria, pollingCriteria)
 	id := ff.logsSubs.insertLogsFilter(f)
 
@@ -1022,8 +1022,8 @@ func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 }
 
 // AddLogs adds logs to the store associated with the given subscription ID.
-func (ff *Filters) AddLogs(id LogsSubID, log *types.RPCLog) {
-	ff.logsStores.Do(id, func(st types.RPCLogs, ok bool) (types.RPCLogs, bool) {
+func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
+	ff.logsStores.Do(id, func(st types.Logs, ok bool) (types.Logs, bool) {
 		// Drop (and clear) the entry when the subscription is gone: reads are gated
 		// on the subscription's existence, so a late write from the forwarding
 		// goroutine draining a closed channel would orphan the entry forever.
@@ -1033,14 +1033,14 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.RPCLog) {
 			return nil, false
 		}
 		if !ok {
-			st = make(types.RPCLogs, 0)
+			st = make(types.Logs, 0)
 		}
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
 			excessLogs := len(st) + 1 - maxLogs
 			if excessLogs >= len(st) {
-				st = types.RPCLogs{}
+				st = types.Logs{}
 			} else {
 				st = st[excessLogs:]
 			}
@@ -1054,7 +1054,7 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.RPCLog) {
 
 // ReadLogs reads logs from the store associated with the given subscription ID.
 // It returns the logs and a boolean indicating whether the logs were found.
-func (ff *Filters) ReadLogs(id LogsSubID) (types.RPCLogs, bool) {
+func (ff *Filters) ReadLogs(id LogsSubID) (types.Logs, bool) {
 	return ff.logsStores.Delete(id)
 }
 

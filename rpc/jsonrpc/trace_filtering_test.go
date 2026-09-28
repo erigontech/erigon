@@ -133,7 +133,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,
-		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, nil)
+		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, false /* noBaseFee */, nil)
 	require.NoError(t, err)
 	require.Len(t, sequentialResults, len(txs))
 
@@ -588,6 +588,9 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 		},
 	} {
 		requireFastJSONMatchesReflection(t, name, ts)
+		for i := range ts {
+			requireFastJSONMatchesReflection(t, fmt.Sprintf("%s trace %d", name, i), &ts[i])
+		}
 	}
 
 	stream := jsonstream.Get(nil)
@@ -597,7 +600,7 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 	require.Empty(t, stream.Buffer(), "an unsupported action fails before the first write")
 }
 
-func requireFastJSONMatchesReflection(t *testing.T, name string, ts ParityTraces) {
+func requireFastJSONMatchesReflection(t *testing.T, name string, ts jsonstream.Marshaler) {
 	t.Helper()
 	want, err := json.Marshal(ts)
 	require.NoError(t, err, name)

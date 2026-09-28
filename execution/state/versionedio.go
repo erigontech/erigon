@@ -2152,47 +2152,47 @@ func (s *WriteSet) copyMissingFrom(src *WriteSet) {
 }
 
 // Merge returns the union of prev and next, with next winning on (addr,path,key).
-func (prev *WriteSet) Merge(next *WriteSet) *WriteSet {
-	if prev.IsEmpty() {
+func (s *WriteSet) Merge(next *WriteSet) *WriteSet {
+	if s.IsEmpty() {
 		return next
 	}
 	if next.IsEmpty() {
-		return prev
+		return s
 	}
 	out := &WriteSet{}
-	out.copyFrom(prev)
+	out.copyFrom(s)
 	out.copyFrom(next)
 	return out
 }
 
-// MergeInto folds prev's entries into next in place and returns the surviving
+// MergeInto folds s's entries into next in place and returns the surviving
 // set, next winning on (addr, path, key). That is next, except that an empty
-// side short-circuits to the other one — so the result can be prev, and a
+// side short-circuits to the other one — so the result can be s, and a
 // caller that releases or mutates it must compare identity first. Unlike Merge
 // it shares *VersionedWrite pointers instead of cloning, so next must be
 // exclusively owned by the caller and neither side may mutate a shared
-// VersionedWrite in place afterwards; prev's maps are never touched, so
-// map-level deletes on prev stay safe.
-func (prev *WriteSet) MergeInto(next *WriteSet) *WriteSet {
-	if prev.IsEmpty() {
+// VersionedWrite in place afterwards; s's maps are never touched, so
+// map-level deletes on s stay safe.
+func (s *WriteSet) MergeInto(next *WriteSet) *WriteSet {
+	if s.IsEmpty() {
 		return next
 	}
 	if next.IsEmpty() {
-		return prev
+		return s
 	}
-	next.copyMissingFrom(prev)
+	next.copyMissingFrom(s)
 	return next
 }
 
 // hasNewWrite: returns true if the current set has a new write compared to the input
-func (writes *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
-	if writes.IsEmpty() {
+func (s *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
+	if s.IsEmpty() {
 		return false
 	}
-	if cmpSet.IsEmpty() || writes.Count() > cmpSet.Count() {
+	if cmpSet.IsEmpty() || s.Count() > cmpSet.Count() {
 		return true
 	}
-	for h := range writes.AllHeaders() {
+	for h := range s.AllHeaders() {
 		if !cmpSet.hasHeader(h) {
 			return true
 		}
@@ -2212,17 +2212,17 @@ func (writes *WriteSet) HasNewWrite(cmpSet *WriteSet) bool {
 //   - delta: the absolute difference between stale write and stale read
 //   - increase: true if the TX increased the balance, false if decreased
 //   - found: true if both a stale read and write were found and a non-zero delta computed
-func (writes *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet) (stripped *WriteSet, delta uint256.Int, increase bool, found bool) {
-	stripped = writes
-	if writes == nil || addr.IsNil() {
+func (s *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet) (stripped *WriteSet, delta uint256.Int, increase bool, found bool) {
+	stripped = s
+	if s == nil || addr.IsNil() {
 		return
 	}
-	bw, hasWrite := writes.balance[addr]
+	bw, hasWrite := s.balance[addr]
 	if !readSet.hasAddr(addr) {
 		// TX didn't read this address — no delta to compute. Still strip the
 		// write to prevent stale cache pollution.
 		if hasWrite {
-			delete(writes.balance, addr)
+			delete(s.balance, addr)
 		}
 		return
 	}
@@ -2232,7 +2232,7 @@ func (writes *WriteSet) StripBalanceWrite(addr accounts.Address, readSet ReadSet
 	}
 	staleRead := balRead.Val
 	staleWrite := bw.Val
-	delete(writes.balance, addr)
+	delete(s.balance, addr)
 	if staleWrite.Gt(&staleRead) {
 		delta.Sub(&staleWrite, &staleRead)
 		increase = true
@@ -2634,10 +2634,10 @@ type accountState struct {
 }
 
 // check pre- and post-values, add to BAL if different
-func (a *accountState) finalize() {
-	applyToBalance(a.balance, a.changes, a.initialBalanceValue)
-	applyToNonce(a.nonce, a.changes)
-	applyToCode(a.code, a.changes, a.initialCodeEmpty)
+func (account *accountState) finalize() {
+	applyToBalance(account.balance, account.changes, account.initialBalanceValue)
+	applyToNonce(account.nonce, account.changes)
+	applyToCode(account.code, account.changes, account.initialCodeEmpty)
 }
 
 type fieldTracker[T any] struct {
@@ -2739,11 +2739,11 @@ func (ct *changeTracker[T]) apply(applyFn func(uint32, T)) {
 	}
 }
 
-func (a *accountState) setBalanceValue(v uint256.Int) {
-	if a.balanceValue == nil {
-		a.balanceValue = &uint256.Int{}
+func (account *accountState) setBalanceValue(v uint256.Int) {
+	if account.balanceValue == nil {
+		account.balanceValue = &uint256.Int{}
 	}
-	*a.balanceValue = v
+	*account.balanceValue = v
 }
 
 func newAccountState(addr accounts.Address) *accountState {
