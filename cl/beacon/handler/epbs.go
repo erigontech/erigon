@@ -725,7 +725,7 @@ func decodeProposerPreferencesRequest(w http.ResponseWriter, r *http.Request, ca
 
 func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Request, reqs []*cltypes.SignedProposerPreferences) {
 	if len(reqs) == 0 {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("empty proposer preferences request")).WriteTo(w)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("empty proposer preferences request")).WriteTo(w)
 		return
 	}
 	failures := make([]poolingFailure, 0)
@@ -1418,7 +1418,7 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 		return
 	}
 	if req.Message == nil {
-		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed execution payload bid")).WriteTo(w)
+		beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("missing message in signed execution payload bid")).WriteTo(w)
 		return
 	}
 
@@ -1474,7 +1474,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadBid(w http.ResponseWriter,
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
-			fmt.Errorf("execution payload bids not available before GLOAS fork"))
+			errors.New("execution payload bids not available before GLOAS fork"))
 	}
 	currentSlot := a.ethClock.GetCurrentSlot()
 	if slot < currentSlot || slot-currentSlot > 1 {
@@ -1678,7 +1678,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelope(w http.ResponseWr
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
-			fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
+			errors.New("execution payload envelopes not available before GLOAS fork"))
 	}
 
 	envelope, ok := a.selfBuildEnvelopeForSlot(slot, func(envelope *cltypes.ExecutionPayloadEnvelope) bool {

@@ -173,7 +173,7 @@ func (s *executionPayloadBidService) DecodeGossipMessage(_ peer.ID, data []byte,
 // [New in Gloas:EIP7732]
 func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedExecutionPayloadBid) error {
 	if msg == nil || msg.Message == nil {
-		return fmt.Errorf("nil execution payload bid message")
+		return errors.New("nil execution payload bid message")
 	}
 
 	bid := msg.Message
