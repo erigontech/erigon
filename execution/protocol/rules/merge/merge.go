@@ -479,9 +479,9 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 			return syscall(addr, data, state, header, false /* constCall */)
 		}, tracer, vmContext)
 	}
-	if config.IsPrague(header.Time) {
-		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
-			return err
+	if config.IsPrague(header.Time) && header.Number.Sign() != 0 {
+		if _, err := syscall(params.HistoryStorageAddress, header.ParentHash[:], state, header, false /* constCall */); err != nil {
+			logger.Warn("Failed to call history storage contract", "err", err)
 		}
 	}
 	return nil

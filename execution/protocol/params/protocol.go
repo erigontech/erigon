@@ -32,6 +32,7 @@ const (
 	MaxBlockGasLimit     uint64 = 0x7fffffffffffffff // Maximum the block gas limit may ever be.
 	MaxTxnGasLimit       uint64 = 16_777_216         // See EIP-7825: Transaction Gas Limit Cap.
 	GenesisGasLimit      uint64 = 4712388            // Gas limit of the Genesis block.
+	MaxTxnTotalGasLimit  uint64 = 4_294_967_295      // See EIP-8037: TX_MAX_TOTAL_GAS_LIMIT.
 
 	MaximumExtraDataSize  uint64 = 32    // Maximum size extra data may be after Genesis.
 	CallValueTransferGas  uint64 = 9000  // Paid for CALL when the value transfer is non-zero.

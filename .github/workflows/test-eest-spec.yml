@@ -35,11 +35,14 @@ jobs:
       - id: load
         env:
           CACHE_WARMING_ONLY: ${{ inputs.cache-warming-only }}
+          # Set false when devnet fixtures add coverage beyond stable.
+          SKIP_DEVNET_SHARDS: 'true'
         run: |
           if [ "$CACHE_WARMING_ONLY" = "true" ]; then
             echo 'matrix=[{"shard":"build","target":"evm"},{"shard":"build-race","target":"evm.race"}]' >> "$GITHUB_OUTPUT"
           else
-            echo "matrix=$(yq -o=json -I=0 '.' tools/eest-spec-shards.yml)" >> "$GITHUB_OUTPUT"
+            matrix=$(yq -o=json '.' tools/eest-spec-shards.yml | jq -c '[.[] | select(env.SKIP_DEVNET_SHARDS != "true" or (.shard | contains("-devnet") | not))]')
+            echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           fi
 
   eest-spec-tests:

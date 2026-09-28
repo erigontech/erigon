@@ -465,7 +465,12 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: false
-  run: 'fork_(Osaka|BPO)'
+  run: 'fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)'
+- shard: blocktests-stable-race-amsterdam-sequential
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: false
+  run: 'fork_(Amsterdam|BPO2ToAmsterdam)'
 - shard: blocktests-stable-race-pre-cancun-parallel
   workers: 12
   max-allowed-failures: 0
@@ -485,7 +490,12 @@
   workers: 12
   max-allowed-failures: 0
   commitment-parallel: true
-  run: 'fork_(Osaka|BPO)'
+  run: 'fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)'
+- shard: blocktests-stable-race-amsterdam-parallel
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: true
+  run: 'fork_(Amsterdam|BPO2ToAmsterdam)'
 - shard: blocktests-devnet-race-amsterdam-sequential
   workers: 12
   max-allowed-failures: 0

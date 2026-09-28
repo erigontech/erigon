@@ -11,10 +11,10 @@
     "ref": "tests-glamsterdam-devnet@v8.1.4"
   },
   "eest_stable": {
-    "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v20.0.2/fixtures.tar.gz",
-    "sha256": "1280540950a4c3470a421416b6f35458a9b635827265c29e5aef1ae839ae1788",
-    "size": 540487005,
-    "ref": "tests@v20.0.2"
+    "url": "https://github.com/ethereum/execution-specs/releases/download/tests%40v21.0.0/fixtures.tar.gz",
+    "sha256": "dd642a261ac63f910b85c47d2549d2bb3ae4ad044fb5e852657f783441483bb2",
+    "size": 998114541,
+    "ref": "tests@v21.0.0"
   },
   "eest_zkevm": {
     "url": "https://github.com/ethereum/execution-specs/releases/download/tests-zkevm%40v0.8.4/fixtures_zkevm.tar.gz",

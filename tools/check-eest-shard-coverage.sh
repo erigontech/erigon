@@ -8,7 +8,7 @@
 #
 # The fork-split families each run every fork exactly once — spec race shards
 # (eest-spec-shards.yml `run` regexes) over blockchain_test, and stable/devnet
-# hive consume-enginex shards (test-hive-eest.yml sim-limit) over
+# hive consume-enginex shards (hive-eest-shards.yml sim-limit) over
 # blockchain_test_engine_x. A gap silently never runs a fork; an overlap runs
 # it twice.
 #
@@ -22,7 +22,7 @@ here=$(cd "$(dirname "$0")/.." && pwd)
 stable_index="${1:-$here/test-fixtures-cache/eest_stable/fixtures/.meta/index.json}"
 devnet_index="${2:-$here/test-fixtures-cache/eest_devnet/fixtures/.meta/index.json}"
 shards="$here/tools/eest-spec-shards.yml"
-hive="$here/.github/workflows/test-hive-eest.yml"
+hive="$here/tools/hive-eest-shards.yml"
 
 for tool in jq yq awk; do
 	command -v "$tool" >/dev/null 2>&1 || { echo "check-eest-shard-coverage: $tool not found in PATH" >&2; exit 1; }
@@ -84,7 +84,7 @@ check_transaction_race_shards() {
 }
 hive_consume_enginex_regexes() {
 	local fixture_set="$1"
-	yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
+	yq -o=json '.' "$hive" \
 		| jq -r --arg fixture_set "$fixture_set" '.[] | select(.sim=="consume-enginex" and .["fixtures-tarball"]==$fixture_set) | "\(.shard)=\(.["sim-limit"])"' \
 		| sort -u
 }
@@ -137,6 +137,6 @@ fi
 if (( rc == 0 )); then
 	echo "EEST shard coverage OK."
 else
-	echo "EEST shard coverage FAILED: fix the transaction race-shard names or race run regexes in tools/eest-spec-shards.yml, or the Hive matrix in .github/workflows/test-hive-eest.yml." >&2
+	echo "EEST shard coverage FAILED: fix the transaction race-shard names or race run regexes in tools/eest-spec-shards.yml, or the Hive matrix in tools/hive-eest-shards.yml." >&2
 fi
 exit $rc
