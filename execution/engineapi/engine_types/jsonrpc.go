@@ -161,7 +161,7 @@ type PayloadStatusV2 struct {
 	Status                 EngineStatus      `json:"status"`
 	ValidationError        *StringifiedError `json:"validationError"`
 	LatestValidHash        *common.Hash      `json:"latestValidHash"`
-	InclusionListSatisfied bool              `json:"inclusionListSatisfied"`
+	InclusionListSatisfied *bool             `json:"inclusionListSatisfied"`
 	CriticalError          error             `json:"-"`
 }
 

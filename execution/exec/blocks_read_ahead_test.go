@@ -441,6 +441,61 @@ func TestBlockReadAheaderKeepsEmptyInclusionList(t *testing.T) {
 	require.Empty(t, got)
 }
 
+func testInclusionListTxn(nonce uint64) types.Transaction {
+	return types.NewTransaction(nonce, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)
+}
+
+func TestBlockReadAheaderReturnsInclusionListResult(t *testing.T) {
+	bra := NewBlockReadAheader()
+	blockHash := common.Hash{1}
+	bra.AddInclusionList(blockHash, types.Transactions{testInclusionListTxn(0)})
+	bra.SetInclusionListResult(blockHash, false)
+	satisfied, ok := bra.ReadInclusionListResult(blockHash)
+	require.True(t, ok)
+	require.False(t, satisfied)
+}
+
+func TestBlockReadAheaderMissesUncheckedInclusionListResult(t *testing.T) {
+	bra := NewBlockReadAheader()
+	blockHash := common.Hash{1}
+	bra.AddInclusionList(blockHash, types.Transactions{testInclusionListTxn(0)})
+	_, ok := bra.ReadInclusionListResult(blockHash)
+	require.False(t, ok)
+}
+
+func TestBlockReadAheaderIgnoresResultWithoutInclusionList(t *testing.T) {
+	bra := NewBlockReadAheader()
+	blockHash := common.Hash{1}
+	bra.SetInclusionListResult(blockHash, true)
+	_, ok := bra.ReadInclusionListResult(blockHash)
+	require.False(t, ok)
+}
+
+func TestBlockReadAheaderKeepsResultForSameInclusionList(t *testing.T) {
+	bra := NewBlockReadAheader()
+	blockHash := common.Hash{1}
+	bra.AddInclusionList(blockHash, types.Transactions{testInclusionListTxn(0), testInclusionListTxn(1)})
+	bra.SetInclusionListResult(blockHash, true)
+	bra.AddInclusionList(blockHash, types.Transactions{testInclusionListTxn(1), testInclusionListTxn(0)})
+	satisfied, ok := bra.ReadInclusionListResult(blockHash)
+	require.True(t, ok)
+	require.True(t, satisfied)
+}
+
+func TestBlockReadAheaderClearsResultForDifferentInclusionList(t *testing.T) {
+	bra := NewBlockReadAheader()
+	blockHash := common.Hash{1}
+	bra.AddInclusionList(blockHash, types.Transactions{testInclusionListTxn(0), testInclusionListTxn(0)})
+	bra.SetInclusionListResult(blockHash, true)
+	newIL := types.Transactions{testInclusionListTxn(0), testInclusionListTxn(1)}
+	bra.AddInclusionList(blockHash, newIL)
+	_, ok := bra.ReadInclusionListResult(blockHash)
+	require.False(t, ok)
+	got, ok := bra.ReadInclusionList(blockHash)
+	require.True(t, ok)
+	require.Equal(t, newIL, got)
+}
+
 func TestBlockReadAheaderPrefersCachedBlockAccessList(t *testing.T) {
 	oldReadAhead := dbg.ReadAhead
 	dbg.SetReadAhead(true)

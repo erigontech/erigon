@@ -641,6 +641,7 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 		{name: "bpo4Time", what: "BPO4 fork timestamp", timestamp: c.Bpo4Time},
 		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time},
 		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
+		{name: "bogotaTime", what: "Bogota fork timestamp", timestamp: c.BogotaTime, outOfOrder: true},
 		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
 	}
 }
