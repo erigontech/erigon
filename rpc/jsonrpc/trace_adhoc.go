@@ -211,10 +211,6 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			gasPrice = new(uint256.Int)
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
 				*gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
-			} else {
-				// This means gasFeeCap == 0, gasTipCap == 0
-				gasPrice.Set(baseFee)
-				gasFeeCap, gasTipCap = gasPrice, gasPrice
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -327,6 +323,11 @@ type OeTracer struct {
 	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
 	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 	config       OeTracerConfig
+}
+
+func (args *TraceCallParam) zeroUnpricedBlobBaseFee(blockCtx *evmtypes.BlockContext) {
+	callArgs := ethapi.CallArgs{MaxFeePerBlobGas: args.MaxFeePerBlobGas, BlobVersionedHashes: args.BlobVersionedHashes}
+	callArgs.ZeroUnpricedBlobBaseFee(blockCtx)
 }
 
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
@@ -1273,7 +1274,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	ot.compat = api.compatibility
-	vmConfig := vm.Config{}
+	vmConfig := vm.Config{NoBaseFee: true}
 	if traceTypeTrace || traceTypeVmTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
@@ -1311,7 +1312,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+	args.zeroUnpricedBlobBaseFee(&blockCtx)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
 	}
@@ -1325,7 +1327,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
@@ -1495,7 +1497,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, false /* advanceTxNum */, traceConfig)
+		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig)
 
 	return trace, err
 }
@@ -1506,7 +1508,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout, advanceTxNum bool,
+	header *types.Header, requireCanonical, gasBailout, advanceTxNum, noBaseFee bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1566,7 +1568,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
-		vmConfig := vm.Config{}
+		vmConfig := vm.Config{NoBaseFee: noBaseFee}
 		if traceTypeTrace || traceTypeVmTrace {
 			var ot OeTracer
 			ot.config, err = parseOeTracerConfig(traceConfig)
@@ -1606,7 +1608,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			ibs.SetHooks(tracer.Hooks)
 		}
 		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		txBlockCtx := blockCtx
+		if noBaseFee {
+			args.zeroUnpricedBlobBaseFee(&txBlockCtx)
+		}
+		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(txBlockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
