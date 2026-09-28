@@ -507,6 +507,47 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	require.Equal(t, wantBytes, gotBytes, "builder-path witness must be byte-identical to on-demand")
 }
 
+func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx := context.Background()
+	require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	const blockNum = uint64(3)
+	hash, _ := buildTestChainHeader(t, m, blockNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	require.True(t, api.buildAndCache(ctx, blockNum, hash))
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the builder must cache the running build's result, not build again")
+}
+
+func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
+	ctx := context.Background()
+	const buildNum = uint64(6)
+	m, pin, hash := insertHeadCaptureChain(t, ctx, buildNum)
+
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+	api.witnessCache = newWitnessResultCache(96, 0, true, true)
+	running := mkResult()
+	registerFinishedBuild(api.witnessCache, hash, running)
+
+	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+	defer next.close()
+	cached, ok := api.witnessCache.Get(hash)
+	require.True(t, ok)
+	require.Same(t, running, cached, "the head-capture builder must cache the running build's result, not build again")
+}
+
 // insertHeadCaptureChain enables historical commitment, builds a module with no inserted
 // blocks, commits blocks 1..buildNum-1, pins that snapshot as parent(buildNum), then commits
 // buildNum. It returns the module, the still-open parent pin, and buildNum's canonical hash —

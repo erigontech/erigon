@@ -1620,6 +1620,17 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 		require.Equal(t, uint64(1), witnessCacheMissCounter.GetValueUint64()-missBefore, "a miss increments the miss counter once")
 	})
 
+	t.Run("legacy miss joins the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, false, false)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a legacy miss must take the running build's result, not build again")
+	})
+
 	t.Run("nil cache path unaffected", func(t *testing.T) {
 		api.witnessCache = nil
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
