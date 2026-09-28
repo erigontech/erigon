@@ -85,6 +85,9 @@ func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
 func TestPostPtcDutiesDeduplicatesRepeatedCommitteeSeats(t *testing.T) {
 	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
+	previousPostStateForkEpoch := postState.BeaconConfig().GloasForkEpoch
+	t.Cleanup(func() { postState.BeaconConfig().GloasForkEpoch = previousPostStateForkEpoch })
+	postState.BeaconConfig().GloasForkEpoch = 0
 	postState.SetVersion(clparams.GloasVersion)
 
 	slotsPerEpoch := handler.beaconChainCfg.SlotsPerEpoch
