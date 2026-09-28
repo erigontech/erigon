@@ -13,9 +13,11 @@ canonical and hex is shadow. A frozen hex domain remains readable but rejects wr
 below its recorded freeze point.
 
 `NewSharedDomains` in `db/state/execctx/domain_shared.go` constructs the dual pair as
-`VariantCommitmentV3` plus `VariantBinPatriciaTrie`. An explicit HPH configuration is rejected
-for a dual datadir. `reconcileTrieVariant` in `db/state/erigondb_settings.go` also refuses a
-hex+bin datadir without the v3 hex setting and refuses binary-only startup with v3 enabled.
+`VariantCommitmentV3` plus `VariantBinPatriciaTrie`. When it opens a hex+bin datadir,
+`reconcileTrieVariant` in `db/state/erigondb_settings.go` enables v3-hex for the hex domain and
+logs that choice, even when the process was started without the v3 flag. An explicit HPH
+configuration is rejected for a dual datadir, and binary-only startup with v3 enabled remains
+refused.
 
 ## Feed and execution
 

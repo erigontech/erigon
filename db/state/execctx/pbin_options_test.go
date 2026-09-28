@@ -23,6 +23,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -321,6 +322,40 @@ func TestSharedDomainsDualDefaultUsesV3HexArm(t *testing.T) {
 	require.NoError(t, err)
 	defer sd.Close()
 
+	require.Equal(t, commitment.VariantCommitmentV3, sd.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().Variant())
+	require.Equal(t, commitment.VariantBinPatriciaTrie, sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().Variant())
+}
+
+func TestHexBinDatadirWithoutV3FlagUsesV3HexArm(t *testing.T) {
+	originalBin := statecfg.ExperimentalBinCommitment
+	originalHexBin := statecfg.ExperimentalHexBinCommitment
+	originalV3 := statecfg.ExperimentalCommitmentV3
+	originalSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = originalBin
+		statecfg.ExperimentalHexBinCommitment = originalHexBin
+		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.Schema = originalSchema
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = false
+	statecfg.Schema = originalSchema
+
+	settings, err := dbstate.ResolveErigonDBSettings(datadir.New(t.TempDir()), log.New(), true)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
+	require.True(t, statecfg.ExperimentalCommitmentV3)
+	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
+
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
 	require.Equal(t, commitment.VariantCommitmentV3, sd.GetCommitmentCtxForDomain(kv.CommitmentDomain).Trie().Variant())
 	require.Equal(t, commitment.VariantBinPatriciaTrie, sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().Variant())
 }

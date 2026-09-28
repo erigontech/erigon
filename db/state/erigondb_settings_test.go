@@ -82,22 +82,27 @@ func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
 	}
 }
 
-func TestReconcileTrieVariantHexBinRequiresV3Hex(t *testing.T) {
+func TestReconcileTrieVariantHexBinEnablesV3Hex(t *testing.T) {
 	originalBin := statecfg.ExperimentalBinCommitment
 	originalHexBin := statecfg.ExperimentalHexBinCommitment
 	originalV3 := statecfg.ExperimentalCommitmentV3
+	originalSchema := statecfg.Schema
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = originalBin
 		statecfg.ExperimentalHexBinCommitment = originalHexBin
 		statecfg.ExperimentalCommitmentV3 = originalV3
+		statecfg.Schema = originalSchema
 	})
 	variant := TrieVariantHexBin
 	refs := false
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = false
+	statecfg.Schema = originalSchema
 	err := reconcileTrieVariant(&ErigonDBSettings{TrieVariant: &variant, ReferencesInCommitmentBranches: &refs}, log.New())
-	require.ErrorContains(t, err, "v3-hex")
+	require.NoError(t, err)
+	require.True(t, statecfg.ExperimentalCommitmentV3)
+	require.True(t, statecfg.Schema.CommitmentDomain.CommitmentV3Records)
 }
 
 func TestReconcileTrieVariantBinRefusesV3Hex(t *testing.T) {
