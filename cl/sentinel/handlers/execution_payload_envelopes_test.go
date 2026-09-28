@@ -83,7 +83,13 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		{name: "canonical block with nil body", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBody: true, wantResponsePrefix: ResourceUnavailablePrefix},
 		{name: "empty slot range ignores later incomplete block", headPayloadStatus: cltypes.PayloadStatusFull, incompleteBlock: true, emptyRange: true},
 		{name: "head and canonical index mismatch", headPayloadStatus: cltypes.PayloadStatusFull, headIndexMismatch: true, wantResponsePrefix: ResourceUnavailablePrefix},
-		{name: "request span may exceed response limit", headPayloadStatus: cltypes.PayloadStatusFull, requestCount: 129},
+		{
+			name:                "first full payload at scan limit is returned",
+			headPayloadStatus:   cltypes.PayloadStatusFull,
+			requestCount:        129,
+			canonicalBlockCount: 129,
+			allPayloadsEmpty:    true,
+		},
 		{
 			name:                "response remains capped for a larger request span",
 			headPayloadStatus:   cltypes.PayloadStatusFull,
@@ -93,12 +99,21 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 			wantEnvelopeCount:   128,
 		},
 		{
-			name:                "candidate scan remains capped for empty payloads",
+			name:                "exhausted candidate scan is unavailable",
 			headPayloadStatus:   cltypes.PayloadStatusEmpty,
 			requestCount:        130,
 			canonicalBlockCount: 130,
 			allPayloadsEmpty:    true,
 			incompleteBlockAt:   129,
+			wantResponsePrefix:  ResourceUnavailablePrefix,
+		},
+		{
+			name:                "first full payload beyond scan limit is unavailable",
+			headPayloadStatus:   cltypes.PayloadStatusFull,
+			requestCount:        130,
+			canonicalBlockCount: 130,
+			allPayloadsEmpty:    true,
+			wantResponsePrefix:  ResourceUnavailablePrefix,
 		},
 		{
 			name:              "maximum count pays the bounded response cost",

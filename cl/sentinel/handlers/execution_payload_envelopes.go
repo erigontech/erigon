@@ -168,6 +168,9 @@ func (c *ConsensusHandlers) executionPayloadEnvelopesByRangeHandler(s network.St
 	if pending != nil {
 		if pending.slot != headSlot || pending.root != head.Root {
 			if scanLimitReached {
+				if len(responseCandidates) == 0 {
+					return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
+				}
 				pending = nil
 			} else {
 				return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
