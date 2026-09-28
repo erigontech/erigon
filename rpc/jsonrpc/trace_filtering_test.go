@@ -133,7 +133,7 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 
 	// Sequential path — uses the stateReader/ibs prepared above.
 	sequentialResults, _, err := api.doCallBlock(ctx, tx, stateReader, sc, cachedWriter, ibs, txs, msgs,
-		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, nil)
+		callParams, header, parentNrOrHash.RequireCanonical, false, true /* advanceTxNum */, false /* noBaseFee */, nil)
 	require.NoError(t, err)
 	require.Len(t, sequentialResults, len(txs))
 
@@ -557,21 +557,29 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 		"nil":   nil,
 		"empty": {},
 		"state gas": {
-			{Action: &CreateTraceAction{StateGas: new(hexutil.Uint64(100))},
-				Result: &CreateTraceResult{StateGasUsed: new(hexutil.Int64(50))}, Type: "create"},
+			{
+				Action: &CreateTraceAction{StateGas: new(hexutil.Uint64(100))},
+				Result: &CreateTraceResult{StateGasUsed: new(hexutil.Int64(50))}, Type: "create",
+			},
 			{Action: &CallTraceAction{}, Result: &TraceResult{StateGasUsed: new(hexutil.Int64(-50))}, Type: "call"},
 		},
 		"zero state gas": {
-			{Action: &CreateTraceAction{StateGas: new(hexutil.Uint64)},
-				Result: &CreateTraceResult{StateGasUsed: new(hexutil.Int64)}, Type: "create"},
+			{
+				Action: &CreateTraceAction{StateGas: new(hexutil.Uint64)},
+				Result: &CreateTraceResult{StateGasUsed: new(hexutil.Int64)}, Type: "create",
+			},
 			{Action: &CallTraceAction{}, Result: &TraceResult{StateGasUsed: new(hexutil.Int64)}, Type: "call"},
 		},
 		"all kinds": {
-			{Action: &CallTraceAction{From: addr, CallType: "delegatecall", Gas: u(1), Input: hexutil.Bytes{1}, To: addr, Value: u(2)},
+			{
+				Action:    &CallTraceAction{From: addr, CallType: "delegatecall", Gas: u(1), Input: hexutil.Bytes{1}, To: addr, Value: u(2)},
 				BlockHash: &hash, BlockNumber: &num, Result: &TraceResult{GasUsed: &gasUsed, Output: hexutil.Bytes{3}},
-				Subtraces: 2, TraceAddress: []int{}, TransactionHash: &hash, TransactionPosition: &pos, Type: "call"},
-			{Action: &CreateTraceAction{From: addr, CreationMethod: "create2", Gas: u(5)},
-				Result: &CreateTraceResult{Address: &addr, Code: hexutil.Bytes{0x60}, GasUsed: &gasUsed}, TraceAddress: []int{0, 1}, Type: "create"},
+				Subtraces: 2, TraceAddress: []int{}, TransactionHash: &hash, TransactionPosition: &pos, Type: "call",
+			},
+			{
+				Action: &CreateTraceAction{From: addr, CreationMethod: "create2", Gas: u(5)},
+				Result: &CreateTraceResult{Address: &addr, Code: hexutil.Bytes{0x60}, GasUsed: &gasUsed}, TraceAddress: []int{0, 1}, Type: "create",
+			},
 			{Action: &CreateTraceAction{}, Error: "out of gas", Result: &CreateTraceResult{}, Type: "create"},
 			{Action: &SuicideTraceAction{Address: addr, RefundAddress: addr, Balance: u(9)}, TraceAddress: []int{3}, Type: "suicide"},
 			{Action: &RewardTraceAction{Author: addr, RewardType: "block", Value: u(2e18)}, BlockHash: &hash, BlockNumber: &num, Type: "reward"},
@@ -580,6 +588,9 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 		},
 	} {
 		requireFastJSONMatchesReflection(t, name, ts)
+		for i := range ts {
+			requireFastJSONMatchesReflection(t, fmt.Sprintf("%s trace %d", name, i), &ts[i])
+		}
 	}
 
 	stream := jsonstream.Get(nil)
@@ -589,7 +600,7 @@ func TestParityTracesMarshalFastJSONMatchesReflection(t *testing.T) {
 	require.Empty(t, stream.Buffer(), "an unsupported action fails before the first write")
 }
 
-func requireFastJSONMatchesReflection(t *testing.T, name string, ts ParityTraces) {
+func requireFastJSONMatchesReflection(t *testing.T, name string, ts jsonstream.Marshaler) {
 	t.Helper()
 	want, err := json.Marshal(ts)
 	require.NoError(t, err, name)

@@ -71,8 +71,10 @@ func NewServer(batchConcurrency uint, traceRequests, debugSingleRequest, disable
 	if batchConcurrency == 0 {
 		batchConcurrency = minBatchConcurrency
 	}
-	server := &Server{services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
-		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold}
+	server := &Server{
+		services: serviceRegistry{logger: logger}, idgen: randomIDGenerator(), codecs: mapset.NewSet[ServerCodec](), batchConcurrency: batchConcurrency,
+		disableStreaming: disableStreaming, traceRequests: traceRequests, debugSingleRequest: debugSingleRequest, logger: logger, rpcSlowLogThreshold: rpcSlowLogThreshold,
+	}
 	server.run.Store(true)
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.

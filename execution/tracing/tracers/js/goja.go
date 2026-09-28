@@ -669,11 +669,11 @@ func (mo *memoryObj) Length() int {
 	return len(mo.memory)
 }
 
-func (m *memoryObj) setupObject() *goja.Object {
-	o := m.vm.NewObject()
-	_ = o.Set("slice", m.vm.ToValue(m.Slice))
-	_ = o.Set("getUint", m.vm.ToValue(m.GetUint))
-	_ = o.Set("length", m.vm.ToValue(m.Length))
+func (mo *memoryObj) setupObject() *goja.Object {
+	o := mo.vm.NewObject()
+	_ = o.Set("slice", mo.vm.ToValue(mo.Slice))
+	_ = o.Set("getUint", mo.vm.ToValue(mo.GetUint))
+	_ = o.Set("length", mo.vm.ToValue(mo.Length))
 	return o
 }
 
@@ -873,12 +873,12 @@ func (co *contractObj) GetInput() goja.Value {
 	return res
 }
 
-func (c *contractObj) setupObject() *goja.Object {
-	o := c.vm.NewObject()
-	_ = o.Set("getCaller", c.vm.ToValue(c.GetCaller))
-	_ = o.Set("getAddress", c.vm.ToValue(c.GetAddress))
-	_ = o.Set("getValue", c.vm.ToValue(c.GetValue))
-	_ = o.Set("getInput", c.vm.ToValue(c.GetInput))
+func (co *contractObj) setupObject() *goja.Object {
+	o := co.vm.NewObject()
+	_ = o.Set("getCaller", co.vm.ToValue(co.GetCaller))
+	_ = o.Set("getAddress", co.vm.ToValue(co.GetAddress))
+	_ = o.Set("getValue", co.vm.ToValue(co.GetValue))
+	_ = o.Set("getInput", co.vm.ToValue(co.GetInput))
 	return o
 }
 

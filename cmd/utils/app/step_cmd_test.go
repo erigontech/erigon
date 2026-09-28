@@ -136,7 +136,7 @@ func TestStepRebaseKeepBlocksFailsWithoutChaindata(t *testing.T) {
 func writeTestErigonDBSettings(t *testing.T, dirs datadir.Dirs, stepSize, stepsInFrozenFile uint64) {
 	t.Helper()
 	content := fmt.Sprintf("step_size = %d\nsteps_in_frozen_file = %d\n", stepSize, stepsInFrozenFile)
-	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), []byte(content), 0644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, state.ERIGONDB_SETTINGS_FILE), []byte(content), 0o644))
 }
 
 func writeTestChaindata(t *testing.T, dirs datadir.Dirs) {
@@ -164,5 +164,5 @@ func openTestChaindata(t *testing.T, dirs datadir.Dirs) kv.RwDB {
 
 func writeTestFile(t *testing.T, path string) {
 	t.Helper()
-	require.NoError(t, os.WriteFile(path, []byte("x"), 0644))
+	require.NoError(t, os.WriteFile(path, []byte("x"), 0o644))
 }

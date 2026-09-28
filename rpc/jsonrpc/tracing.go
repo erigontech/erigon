@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -42,8 +41,9 @@ import (
 )
 
 // errPendingNotSupported prevents committed tracing from silently substituting
-// the latest executed block for pending.
-var errPendingNotSupported = errors.New("tracing on top of pending is not supported")
+// the latest executed block for pending. Committed tracing has no pending block,
+// so pending is an invalid parameter.
+var errPendingNotSupported = &rpc.InvalidParamsError{Message: "tracing on top of pending is not supported"}
 
 func rejectPendingNumber(blockNr rpc.BlockNumber) error {
 	if blockNr == rpc.PendingBlockNumber {

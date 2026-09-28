@@ -21,20 +21,30 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/etl"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestPreparePreimagesOutputRemovesStaleMetadata(t *testing.T) {
@@ -70,6 +80,168 @@ func TestCheckRootPin(t *testing.T) {
 	require.ErrorContains(t, err, otherRoot.Hex())
 
 	require.ErrorContains(t, checkRootPin(root, nil, 5), "header")
+}
+
+func TestPinnedStateRoot(t *testing.T) {
+	allocs := []struct {
+		name     string
+		accounts [][]byte
+		slots    []byte
+	}{
+		{name: "leaf", accounts: [][]byte{addr(0xaa)}},
+		{name: "leaf_storage", accounts: [][]byte{addr(0xaa)}, slots: []byte{1, 2}},
+		{name: "leaf_single_storage", accounts: [][]byte{addr(0xaa)}, slots: []byte{1}},
+		{name: "extension", accounts: [][]byte{addr(0xaa), append(make([]byte, 19), 3)}},
+		{name: "branch", accounts: [][]byte{addr(0xaa), addr(0xbb)}},
+	}
+
+	for _, alloc := range allocs {
+		t.Run(alloc.name, func(t *testing.T) {
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			want := seedState(t, db, 0, alloc.accounts, alloc.slots)
+			roTx, err := db.BeginTemporalRo(t.Context())
+			require.NoError(t, err)
+			defer roTx.Rollback()
+
+			root, err := pinnedStateRoot(t.Context(), roTx, log.New())
+			require.NoError(t, err)
+			require.Equal(t, want, root)
+		})
+	}
+
+	t.Run("empty", func(t *testing.T) {
+		db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+		roTx, err := db.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer roTx.Rollback()
+
+		root, err := pinnedStateRoot(t.Context(), roTx, log.New())
+		require.NoError(t, err)
+		require.Equal(t, empty.RootHash, root)
+	})
+}
+
+func seedState(t *testing.T, db kv.TemporalRwDB, execBlock uint64, addresses [][]byte, slots []byte) common.Hash {
+	t.Helper()
+	ctx := t.Context()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+
+	account := accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	for _, address := range addresses {
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, address, accounts.SerialiseV3(&account), 1, nil))
+	}
+	for _, fill := range slots {
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, rwTx, storageKey(addresses[0], slot(fill)), slot(fill), 1, nil))
+	}
+	rh, err := domains.ComputeCommitment(ctx, rwTx, true, 0, 1, "", nil)
+	require.NoError(t, err)
+	require.NoError(t, domains.Flush(ctx, rwTx))
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Execution, execBlock))
+	require.NoError(t, rwTx.Commit())
+	return common.BytesToHash(rh)
+}
+
+func TestRunExportRefusesBeforeOutput(t *testing.T) {
+	for _, testCase := range []struct {
+		name     string
+		existing bool
+	}{
+		{name: "missing out dir"},
+		{name: "existing out dir", existing: true},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			ctx := t.Context()
+			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+			seedState(t, db, 0, [][]byte{addr(0xaa)}, nil)
+			roTx, err := db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer roTx.Rollback()
+
+			outDir := filepath.Join(t.TempDir(), "out")
+			var before map[string][]byte
+			if testCase.existing {
+				require.NoError(t, os.MkdirAll(outDir, 0o755))
+				require.NoError(t, os.WriteFile(filepath.Join(outDir, preimagesMetaFileName), []byte("sentinel metadata\n"), 0o644))
+				require.NoError(t, os.WriteFile(filepath.Join(outDir, "existing.bin"), []byte("existing file\n"), 0o644))
+				before = snapshotFiles(t, outDir)
+			}
+			tmpDir := t.TempDir()
+			headerAt := func(uint64) (*types.Header, error) {
+				return &types.Header{Root: common.HexToHash("0x02")}, nil
+			}
+
+			err = runExport(ctx, roTx, headerAt, outDir, tmpDir, log.New())
+			require.Error(t, err)
+			if testCase.existing {
+				require.Equal(t, before, snapshotFiles(t, outDir))
+			} else {
+				_, statErr := os.Stat(outDir)
+				require.ErrorIs(t, statErr, os.ErrNotExist)
+			}
+			_, statErr := os.Stat(filepath.Join(tmpDir, preimagesScratchDirName))
+			require.ErrorIs(t, statErr, os.ErrNotExist)
+		})
+	}
+}
+
+func snapshotFiles(t *testing.T, root string) map[string][]byte {
+	t.Helper()
+	fsys := os.DirFS(root)
+	files := map[string][]byte{}
+	require.NoError(t, fs.WalkDir(fsys, ".", func(path string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			files[path+"/"] = nil
+			return err
+		}
+		files[path], err = fs.ReadFile(fsys, path)
+		return err
+	}))
+	return files
+}
+
+func TestRunExportWritesExecutionPin(t *testing.T) {
+	ctx := t.Context()
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	root := seedState(t, db, 7, [][]byte{addr(0xaa)}, nil)
+	roTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	outDir := t.TempDir()
+	tmpDir := t.TempDir()
+	headerAt := func(block uint64) (*types.Header, error) {
+		return map[uint64]*types.Header{7: {Root: root}}[block], nil
+	}
+
+	require.NoError(t, runExport(ctx, roTx, headerAt, outDir, tmpDir, log.New()))
+	metadataJSON, err := os.ReadFile(filepath.Join(outDir, preimagesMetaFileName))
+	require.NoError(t, err)
+	var metadata preimagesMeta
+	require.NoError(t, json.Unmarshal(metadataJSON, &metadata))
+	require.Equal(t, uint64(7), metadata.Block)
+	require.Equal(t, root.Hex(), metadata.StateRoot)
+	require.Equal(t, uint64(1), metadata.Accounts)
+	require.Zero(t, metadata.Storage)
+}
+
+func TestRunExportWrapsHeaderLookupError(t *testing.T) {
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	seedState(t, db, 10, [][]byte{addr(0xaa)}, nil)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	lookupErr := errors.New("header lookup failed")
+	headerAt := func(uint64) (*types.Header, error) { return nil, lookupErr }
+	err = runExport(t.Context(), roTx, headerAt, t.TempDir(), t.TempDir(), log.New())
+	require.ErrorIs(t, err, lookupErr)
+	require.ErrorContains(t, err, "block 10")
 }
 
 type kvPair struct {
@@ -123,7 +295,7 @@ func exportPreimages(t *testing.T, ctx context.Context, accounts, storage stream
 	if opts.bufferSize == 0 {
 		opts.bufferSize = etl.BufferOptimalSize
 	}
-	collector := etl.NewCollector(t.Name(), t.TempDir(), etl.NewSortableBuffer(opts.bufferSize), log.New())
+	collector := etl.NewCollector(t.Name(), t.TempDir(), etl.NewSortableBuffer(opts.bufferSize), log.New()).SortAndFlushInBackground(true)
 	defer collector.Close()
 
 	collected, err := collectHashedPreimages(ctx, accounts, storage, collector, opts.onCollect)

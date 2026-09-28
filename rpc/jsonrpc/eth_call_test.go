@@ -76,8 +76,8 @@ func TestEstimateGas(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTestEthAPIWithFilters(t, m)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
@@ -190,6 +190,26 @@ func TestEstimateGasEIP2780SubTxGasTransfers(t *testing.T) {
 	}, nil, nil, nil)
 	require.NoError(t, err)
 	require.Equal(t, hexutil.Uint64(15_000), distinctGas)
+}
+
+// A caller's gas cap is honoured once some transaction could fit under it,
+// which after EIP-2780 starts at TX_BASE (12000) rather than 21000. A cap of
+// 14000 must therefore bound a 15000-gas transfer instead of being dropped.
+func TestEstimateGasEIP2780HonoursSubTxGasCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	m, bankAddr, _, receiverAddr := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+
+	gasCap := hexutil.Uint64(14_000)
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &receiverAddr,
+		Gas:  &gasCap,
+	}, nil, nil, nil)
+	require.ErrorContains(t, err, "gas required exceeds allowance (14000)")
 }
 
 // gasGuardCode succeeds only while more than 10000 gas remains, so its minimum
@@ -781,10 +801,10 @@ func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	api := newEthApiForTest(newBaseApiWithFiltersForTest(nil, stateCache, m), m.DB, nil, nil)
-	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
-	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
 	blockNumberOrHash := rpc.BlockNumberOrHashWithHash(common.HexToHash("0x3fcb7c0d4569fddc89cbea54b42f163e0c789351d98810a513895ab44b47020b"), true)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	_, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &from,
@@ -805,7 +825,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 	callDataBytes := hexutil.Bytes(callData)
 
 	blockNumberOrHash := rpc.BlockNumberOrHashWithNumber(ethCallBlockNumber)
-	var blockNumberOrHashRef = &blockNumberOrHash
+	blockNumberOrHashRef := &blockNumberOrHash
 
 	_, err := api.Call(context.Background(), ethapi.CallArgs{
 		From: &bankAddress,
@@ -816,7 +836,7 @@ func TestEthCallToPrunedBlock(t *testing.T) {
 }
 
 func TestGetProof(t *testing.T) {
-	var maxGetProofRewindBlockCount = 1   // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
+	maxGetProofRewindBlockCount := 1      // Note, this is unsafe for parallel tests, but, this test is the only consumer for now
 	statecfg.EnableHistoricalCommitment() // enable commitment history to test historical proofs
 	m, bankAddr, contractAddr, receiverAddress := chainWithDeployedContract(t)
 	cfg := &rpccfg.EthApiConfig{
@@ -1120,7 +1140,7 @@ func TestGetProofGenesisPrunedCommitmentHistory(t *testing.T) {
 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	proof, err := api.GetProof(ctx, bankAddr, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(0)))
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 	require.Nil(t, proof)
 }
 

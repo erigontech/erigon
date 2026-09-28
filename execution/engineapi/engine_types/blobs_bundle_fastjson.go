@@ -21,28 +21,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// MarshalFastJSONTo streams the getPayload blobs bundle blob by blob, byte-identical to
-// json.Marshal of the bundle.
-func (b *BlobsBundle) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	writeBlobsBundle(s, b)
-	return nil
-}
-
-func writeBlobsBundle(s *jsonstream.StackStream, b *BlobsBundle) {
-	if b == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	s.Field("commitments")
-	jsonstream.ArrayValue(s, b.Commitments, writeHex)
-	s.Field("proofs")
-	jsonstream.ArrayValue(s, b.Proofs, writeHex)
-	s.Field("blobs")
-	jsonstream.ArrayValue(s, b.Blobs, writeHex)
-	s.WriteObjectEnd()
-}
-
 // MarshalFastJSONTo writes the getPayload envelope, byte-identical to json.Marshal(r).
 func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	if r == nil {
@@ -54,7 +32,9 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.StackStream) error 
 	r.ExecutionPayload.writeTo(s)
 	jsonstream.Text(s, "blockValue", r.BlockValue)
 	s.Field("blobsBundle")
-	writeBlobsBundle(s, r.BlobsBundle)
+	if err := r.BlobsBundle.MarshalFastJSONTo(s); err != nil {
+		return err
+	}
 	s.Field("executionRequests")
 	jsonstream.ArrayValue(s, r.ExecutionRequests, writeHex)
 	s.Field("shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
@@ -85,7 +65,7 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.StackStream) {
 	s.Field("transactions")
 	jsonstream.ArrayValue(s, p.Transactions, writeHex)
 	s.Field("withdrawals")
-	jsonstream.ArrayValue(s, p.Withdrawals, writeWithdrawal)
+	_ = types.Withdrawals(p.Withdrawals).MarshalFastJSONTo(s)
 	jsonstream.Text(s, "blobGasUsed", p.BlobGasUsed)
 	jsonstream.Text(s, "excessBlobGas", p.ExcessBlobGas)
 	if p.SlotNumber != nil {
@@ -96,6 +76,3 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.StackStream) {
 	}
 	s.WriteObjectEnd()
 }
-
-// writeWithdrawal never fails: Withdrawal.MarshalFastJSONTo reports no error.
-func writeWithdrawal(s *jsonstream.StackStream, w **types.Withdrawal) { _ = (*w).MarshalFastJSONTo(s) }

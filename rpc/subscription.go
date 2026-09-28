@@ -227,7 +227,7 @@ func (n *RemoteNotifier) Notify(id ID, data any) error {
 }
 
 func writeNotificationResult(s *jsonstream.StackStream, data any) error {
-	if fm, ok := data.(fastJSONMarshalerTo); ok && !isNilPointer(data) {
+	if fm, ok := data.(jsonstream.Marshaler); ok && !isNilPointer(data) {
 		if err := fm.MarshalFastJSONTo(s); err != nil {
 			return err
 		}

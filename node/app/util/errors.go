@@ -49,7 +49,6 @@ func DescriptiveErrors(packageName string, descriptive bool) {
 // parsed values to call `DescriptiveErrors`.  The value is case insensitive.
 
 func ParseDescriptiveErrors(values []string) {
-
 	for _, value := range values {
 		if pkg, desc, ok := strings.Cut(value, ":"); ok {
 			switch strings.ToLower(desc) {
@@ -146,7 +145,6 @@ func WrapPrefix(e any, prefix string, skip int) *Error {
 		stack:  err.stack,
 		prefix: prefix,
 	}
-
 }
 
 // Errorf creates a new error with the given message. You can use it
@@ -158,7 +156,6 @@ func Errorf(format string, a ...any) *Error {
 
 // Error returns the underlying error's message.
 func (err *Error) Error() string {
-
 	msg := err.Err.Error()
 	if err.prefix != "" {
 		msg = fmt.Sprintf("%s: %s", err.prefix, msg)
@@ -168,7 +165,6 @@ func (err *Error) Error() string {
 }
 
 func (err *Error) Is(original error) bool {
-
 	if errors.Is(err.Err, original) {
 		return true
 	}
