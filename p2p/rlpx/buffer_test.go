@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestReadBufferReset(t *testing.T) {
@@ -77,9 +78,13 @@ func TestReadBufferGrowsWithInput(t *testing.T) {
 	var b readBuffer
 	data, err := b.read(readerFunc(func(p []byte) (int, error) {
 		received := len(input) - r.Len()
-		assert.LessOrEqual(t, cap(b.data), 4*max(4096, received))
+		require.LessOrEqual(t, cap(b.data), 4*max(4096, received))
 		return r.Read(p[:min(len(p), 127)])
 	}), len(input))
 	assert.NoError(t, err)
 	assert.Equal(t, input, data)
 }
+
+type readerFunc func([]byte) (int, error)
+
+func (f readerFunc) Read(p []byte) (int, error) { return f(p) }

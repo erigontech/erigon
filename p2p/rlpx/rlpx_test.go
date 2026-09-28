@@ -32,6 +32,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/crypto/ecies"
@@ -181,15 +182,11 @@ func TestFrameReadHeaderOnly(t *testing.T) {
 
 	input := bytes.NewReader(header)
 	_, err := receiver.session.readFrame(readerFunc(func(p []byte) (int, error) {
-		assert.LessOrEqual(t, cap(receiver.session.rbuf.data), 64*1024)
+		require.LessOrEqual(t, cap(receiver.session.rbuf.data), 64*1024)
 		return input.Read(p)
 	}))
 	assert.ErrorIs(t, err, io.EOF)
 }
-
-type readerFunc func([]byte) (int, error)
-
-func (f readerFunc) Read(p []byte) (int, error) { return f(p) }
 
 type fakeHash []byte
 
