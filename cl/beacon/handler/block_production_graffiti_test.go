@@ -289,6 +289,24 @@ func TestCombinedGraffiti(t *testing.T) {
 		got := graffitiText(a.combinedGraffiti(custom))
 		require.Equal(t, "EGc3d4"+caplinClientCode+clCommit+" \x01", got)
 	})
+
+	t.Run("non-UTF-8 custom graffiti keeps its bytes instead of being erased", func(t *testing.T) {
+		a := withELVersion()
+		segment := "EGc3d4" + caplinClientCode + clCommit // 12 bytes
+		var zero common.Hash
+		available := len(zero) - len(segment) - 1
+		require.Equal(t, 19, available, "test below assumes this exact byte budget")
+
+		// 0xFF is invalid at any position in UTF-8, so a naive rune-boundary backoff
+		// never finds a stopping point and would strip the whole thing.
+		raw := bytes.Repeat([]byte{0xFF}, available+3)
+		var custom common.Hash
+		copy(custom[:], raw)
+
+		got := graffitiText(a.combinedGraffiti(custom))
+
+		require.Equal(t, segment+" "+string(bytes.Repeat([]byte{0xFF}, available)), got)
+	})
 }
 
 func TestGraffitiFromHex(t *testing.T) {
@@ -349,6 +367,21 @@ func TestLogGraffitiIdentificationOnce(t *testing.T) {
 	a.logGraffitiIdentificationOnce()
 
 	require.Equal(t, 1, strings.Count(getLogs(), "Default graffiti updated"))
+}
+
+func TestWarnGraffitiTruncatedOnce(t *testing.T) {
+	getLogs := captureAllProductionLogs(t)
+	a := &ApiHandler{version: "1.2.3", logger: log.Root()}
+	a.elClientVersion.Store(&engine_types.ClientVersionV1{Code: "EG", Commit: "0xc3d4e5f6"})
+	long := graffitiFromString(strings.Repeat("x", 25)) // exceeds the 19-byte budget
+
+	require.Equal(t, 0, strings.Count(getLogs(), "truncated"))
+
+	a.combinedGraffiti(long)
+	a.combinedGraffiti(long)
+	a.combinedGraffiti(long)
+
+	require.Equal(t, 1, strings.Count(getLogs(), "truncated"))
 }
 
 func TestLogGraffitiIdentification(t *testing.T) {

@@ -44,9 +44,8 @@ type RouterConfiguration struct {
 	Validator  bool
 	Lighthouse bool
 
-	// PreserveGraffiti opts out of the client-version graffiti standard for caller-supplied
-	// graffiti: it is used verbatim instead of being prefixed with the EL+CL identification
-	// segment. See ApiHandler.requestGraffiti.
+	// PreserveGraffiti uses caller-supplied graffiti verbatim instead of prefixing it with
+	// the EL+CL identification segment.
 	PreserveGraffiti bool
 }
 
