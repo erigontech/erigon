@@ -165,6 +165,20 @@ func newTestPoolWithFundedSender(t *testing.T, codeHash accounts.CodeHash) (cont
 	return ctx, pool, poolDB, coreDB, sender
 }
 
+func TestAddLocalTxnsRejectsTotalGasAboveCap(t *testing.T) {
+	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+	pool.blockGasLimit.Store(2 * math.MaxUint32)
+	txn := newTestTxnSlot(0, 0, 1, 2, uint64(math.MaxUint32)+1)
+	txn.IDHash[0] = 1
+	var txns TxnSlots
+	txns.Append(txn, sender[:], true)
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{txpoolcfg.GasLimitTooHigh}, reasons)
+	pending, baseFee, queued := pool.CountContent()
+	require.Zero(t, pending+baseFee+queued)
+}
+
 func TestAddLocalTxnsRejectsTipAboveFeeCap(t *testing.T) {
 	ctx, pool, _, _, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
