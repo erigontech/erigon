@@ -21,6 +21,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
@@ -28,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
-	"github.com/stretchr/testify/require"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 type pbinAbsentAccountReader struct {
@@ -77,4 +81,58 @@ func TestPBinRebuildSkipsStorageForAbsentAccount(t *testing.T) {
 	for _, op := range ops {
 		require.False(t, bytes.Equal(op.Key, storageKey) && len(op.Drop) == 0)
 	}
+}
+
+type pbinExistingCodelessReader struct {
+	address []byte
+	account []byte
+}
+
+func (r *pbinExistingCodelessReader) WithHistory() bool { return false }
+
+func (r *pbinExistingCodelessReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *pbinExistingCodelessReader) Read(domain kv.Domain, key []byte, _ uint64) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && bytes.Equal(key, r.address) {
+		return bytes.Clone(r.account), 0, nil
+	}
+	if domain == kv.CodeDomain && bytes.Equal(key, r.address) {
+		return append(append([]byte(nil), eip8297.DelegationMarker[:]...), r.address...), 0, nil
+	}
+	return nil, 0, nil
+}
+
+func (r *pbinExistingCodelessReader) Clone(kv.TemporalTx) commitmentdb.StateReader { return r }
+
+func (r *pbinExistingCodelessReader) CloneForWorker(context.Context, kv.TemporalTx) commitmentdb.StateReader {
+	return r
+}
+
+func TestPBinRebuildFeedRewritesExistingCodelessCodeFields(t *testing.T) {
+	address := bytes.Repeat([]byte{0x42}, length.Addr)
+	account := accounts.Account{Nonce: 7, Balance: *uint256.NewInt(9), CodeHash: accounts.EmptyCodeHash}
+	plainKeys := etl.NewCollector("pbin-rebuild-feed-codeless-test", t.TempDir(), etl.NewSortableBuffer(1024), log.Root())
+	defer plainKeys.Close()
+	require.NoError(t, plainKeys.Collect(address, nil))
+	require.NoError(t, plainKeys.Flush())
+
+	reader := &pbinExistingCodelessReader{address: address, account: accounts.SerialiseV3(&account)}
+	emitter := pbt.NewRebuildFeedOpEmitter()
+	var ops []pbt.Op
+	require.NoError(t, pbinRebuildFeedStream(plainKeys, reader, emitter, func(op pbt.Op) error {
+		ops = append(ops, op)
+		return nil
+	}))
+
+	basic, err := eip8297.EncodeBasicData(account.Nonce, &account.Balance, 0)
+	require.NoError(t, err)
+	codeHash := eip8297.CodeHashValue(common.Hash{})
+	keys := map[string]pbt.Op{}
+	for _, op := range ops {
+		keys[string(op.Key)] = op
+	}
+	require.Equal(t, basic, keys[string(eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey))].Value)
+	require.Equal(t, codeHash, keys[string(eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey))].Value)
+	_, ok := keys[string(eip8297.TreeKeyAccount(address, eip8297.DelegationLeafKey))]
+	require.True(t, ok)
 }

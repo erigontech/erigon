@@ -1682,10 +1682,6 @@ func pbinRebuildFeedStreamWithSample(keys *etl.Collector, reader commitmentdb.St
 		if err != nil {
 			return err
 		}
-		if !account.Exists || eip8297.IsEmptyCodeHash(account.CodeHash) {
-			account.CodeWritten = false
-			account.Code = nil
-		}
 		accountExists = account.Exists
 		emitted = true
 		return emitter.EmitAccount(account, emit)

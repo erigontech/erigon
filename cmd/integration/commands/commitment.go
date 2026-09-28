@@ -930,13 +930,12 @@ var cmdCommitmentRebuild = &cobra.Command{
 
 		// The scheme to produce is decided here and passed down, so the rebuild never
 		// re-reads it from process state further in.
-		target := dbstate.DefaultRebuildTarget()
-		target.MaxShardSteps = rebuildMaxShardSteps
-		target, err := target.Resolve()
+		target, err := resolveCommitmentRebuildTarget(datadir.Open(datadirCli))
 		if err != nil {
 			logger.Error(err.Error())
 			return
 		}
+		target.MaxShardSteps = rebuildMaxShardSteps
 		if err := requireRebuildOutput(target, rebuildOutputDatadir); err != nil {
 			logger.Error(err.Error())
 			return
@@ -982,6 +981,22 @@ var cmdCommitmentRebuild = &cobra.Command{
 			return
 		}
 	},
+}
+
+func resolveCommitmentRebuildTarget(dirs datadir.Dirs) (dbstate.RebuildTarget, error) {
+	target := dbstate.DefaultRebuildTarget()
+	settings, err := dbstate.ReadErigonDBSettings(dirs)
+	if errors.Is(err, fs.ErrNotExist) {
+		return target.Resolve()
+	}
+	if err != nil {
+		return dbstate.RebuildTarget{}, fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
+	}
+	if settings.TrieVariantName() == dbstate.TrieVariantHexBin && target.Variant != commitment.VariantBinPatriciaTrie {
+		target.Variant = commitment.VariantCommitmentV3
+		target.HashName = ""
+	}
+	return target.Resolve()
 }
 
 // checkRebuildFlags refuses the flag combinations a rebuild cannot honour. It runs

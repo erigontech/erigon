@@ -50,3 +50,10 @@ func TestRemoveContents(t *testing.T) {
 
 	require.Empty(t, list)
 }
+
+func TestPBinCommitmentWarningNamesRefusedMethods(t *testing.T) {
+	for _, method := range []string{"eth_getProof", "eth_getWitness", "debug_executionWitness"} {
+		require.Contains(t, pbinCommitmentUnsupportedMethods, method)
+	}
+	require.NotContains(t, pbinCommitmentUnsupportedMethods, "debug_executionWitness is supported")
+}

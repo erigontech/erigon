@@ -121,6 +121,8 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
+const pbinCommitmentUnsupportedMethods = "eth_getProof, eth_getWitness, debug_executionWitness, eth_simulateV1, receipt regeneration, deferred commitment updates, collapse tracing and trie traces"
+
 // Config contains the configuration options of the ETH protocol.
 //
 // Deprecated: use ethconfig.Config instead.
@@ -392,7 +394,7 @@ func New(
 		if commitment.PBinHashSuiteName() == commitment.PBinHashKeccak {
 			peers = "agrees with no other client"
 		}
-		logger.Warn("EXPERIMENTAL BINARY COMMITMENT TRIE IS ENABLED: roots follow EIP-8297 and "+peers+"; eth_getProof, eth_getWitness, eth_simulateV1, receipt regeneration, deferred commitment updates, collapse tracing and trie traces are unsupported and refuse rather than degrade; debug_executionWitness is supported and verifies each witness by stateless re-execution before returning it",
+		logger.Warn("EXPERIMENTAL BINARY COMMITMENT TRIE IS ENABLED: roots follow EIP-8297 and "+peers+"; "+pbinCommitmentUnsupportedMethods+" are unsupported and refuse rather than degrade",
 			"hash", commitment.PBinHashSuiteName())
 	}
 

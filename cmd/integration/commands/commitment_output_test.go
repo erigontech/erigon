@@ -84,6 +84,21 @@ func binSourceDatadirFixture(t *testing.T) datadir.Dirs {
 	return dirs
 }
 
+func hexBinSourceDatadirFixture(t *testing.T) datadir.Dirs {
+	t.Helper()
+	dirs := sourceDatadirFixture(t)
+	refs := false
+	variant, hash := dbstate.TrieVariantHexBin, commitment.PBinHashBlake3
+	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
+		StepSize:                       testSourceStepSize,
+		StepsInFrozenFile:              testSourceStepsInFrozenFile,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+		TrieHash:                       &hash,
+	}))
+	return dirs
+}
+
 func hexTarget(t *testing.T) dbstate.RebuildTarget {
 	t.Helper()
 	target, err := dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}.Resolve()
@@ -143,6 +158,42 @@ func TestRequireRebuildOutputForBinTarget(t *testing.T) {
 	hex, err := dbstate.RebuildTarget{Variant: commitment.VariantHexPatriciaTrie}.Resolve()
 	require.NoError(t, err)
 	require.NoError(t, requireRebuildOutput(hex, ""))
+}
+
+func TestResolveCommitmentRebuildTargetUsesDualDatadirHexArm(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousParallel := statecfg.ExperimentalParallelCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalParallelCommitment = previousParallel
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+	})
+	dirs := hexBinSourceDatadirFixture(t)
+	for _, tc := range []struct {
+		name     string
+		bin      bool
+		parallel bool
+		v3       bool
+		variant  commitment.TrieVariant
+	}{
+		{name: "flagless", variant: commitment.VariantCommitmentV3},
+		{name: "parallel", parallel: true, variant: commitment.VariantCommitmentV3},
+		{name: "v3", v3: true, variant: commitment.VariantCommitmentV3},
+		{name: "bin", bin: true, variant: commitment.VariantBinPatriciaTrie},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			statecfg.ExperimentalBinCommitment = tc.bin
+			statecfg.ExperimentalParallelCommitment = tc.parallel
+			statecfg.ExperimentalCommitmentV3 = tc.v3
+			statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+			target, err := resolveCommitmentRebuildTarget(dirs)
+			require.NoError(t, err)
+			require.Equal(t, tc.variant, target.Variant)
+		})
+	}
 }
 
 func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {

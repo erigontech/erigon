@@ -58,7 +58,12 @@ key derivation, record bytes, root forms and fold. Rebuilds in `RebuildCommitmen
 `BinFeedStorageSlotFromState` in `execution/commitment/commitmentdb/pbin_feed.go` into the
 binary feed emitter, sort by tree key for each source range, cut bounded batches, and resume after
 the recorded completed key. Pending commitment writes form the read overlay while a range is
-processed.
+processed. On a dual datadir, a hex target uses v3-hex and a bin target uses v3-bin; target
+selection follows the datadir before any source commitment files or tables are removed. A refused
+target leaves both untouched. Rebuild a bin domain into a fresh output datadir, and rebuild the
+hex domain in place only when the datadir's hex arm is v3-hex. Existing codeless accounts are
+emitted with empty code in every range, so their code size, code-hash and delegation leaves are
+rewritten from the current account instead of retaining fields from the preceding range.
 
 `erigondb.toml` records `trie_variant`, `trie_hash`, and per-domain freeze state. Changing the
 embedding or selected binary hash suite requires rebuilding the binary datadir from genesis.

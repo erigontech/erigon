@@ -23,6 +23,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 )
@@ -78,9 +80,10 @@ func TestRefuseSqueezeForBinTarget(t *testing.T) {
 // the check has to run before the rebuild reads the database or the filesystem,
 // so a version that squeezes first and errors last cannot pass.
 func TestCommitmentRebuildRefusesSqueezeBeforeAnyWork(t *testing.T) {
-	withRebuildFlags(t, func() { squeeze = true })
+	withRebuildFlags(t, func() { squeeze, reset = true, true })
 
-	err := commitmentRebuild(nil, context.Background(), log.New(), binTarget(t), nil)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	err := commitmentRebuild(db, context.Background(), log.New(), binTarget(t), nil)
 	require.ErrorContains(t, err, "--squeeze")
 }
 
