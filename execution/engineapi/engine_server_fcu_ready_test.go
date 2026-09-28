@@ -18,6 +18,7 @@ package engineapi
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -35,15 +36,19 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-// busyUntilModule reports the execution module as not ready until readyAt, the way the module's
+// busyUntilModule reports the execution module as not ready for busyFor, the way the module's
 // semaphore stays held while a previous forkchoice update's flush, commit and prune run in the
-// background.
+// background. The busy interval starts at the first Ready call rather than at construction, so
+// slow test setup cannot use it up before the request under test arrives.
 type busyUntilModule struct {
 	*stubExecutionModule
+	busyFor time.Duration
+	once    sync.Once
 	readyAt time.Time
 }
 
 func (m *busyUntilModule) Ready(context.Context) (bool, error) {
+	m.once.Do(func() { m.readyAt = time.Now().Add(m.busyFor) })
 	return time.Now().After(m.readyAt), nil
 }
 
@@ -78,7 +83,7 @@ func TestForkchoiceUpdatedWithAttributesWaitsOutPostForkchoiceWork(t *testing.T)
 		},
 	}
 	// Longer than the readiness check's current half-second budget, far shorter than a slot.
-	module := &busyUntilModule{stubExecutionModule: stub, readyAt: time.Now().Add(600 * time.Millisecond)}
+	module := &busyUntilModule{stubExecutionModule: stub, busyFor: 600 * time.Millisecond}
 
 	cfg := preCancunChainConfig()
 	ctx := context.Background()
@@ -116,7 +121,7 @@ func TestForkchoiceUpdatedWithoutAttributesStillAnswersSyncingQuickly(t *testing
 			return execmodule.ForkChoiceState{HeadHash: common.Hash{0x99}}, nil
 		},
 	}
-	module := &busyUntilModule{stubExecutionModule: stub, readyAt: time.Now().Add(5 * time.Second)}
+	module := &busyUntilModule{stubExecutionModule: stub, busyFor: 5 * time.Second}
 
 	cfg := preCancunChainConfig()
 	ctx := context.Background()
