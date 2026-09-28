@@ -307,6 +307,25 @@ func TestCombinedGraffiti(t *testing.T) {
 
 		require.Equal(t, segment+" "+string(bytes.Repeat([]byte{0xFF}, available)), got)
 	})
+
+	t.Run("an invalid byte within budget is not mistaken for a split rune", func(t *testing.T) {
+		a := withELVersion()
+		segment := "EGc3d4" + caplinClientCode + clCommit // 12 bytes
+		var zero common.Hash
+		available := len(zero) - len(segment) - 1
+		require.Equal(t, 19, available, "test below assumes this exact byte budget")
+
+		// The whole text is not valid UTF-8 (the 0xFF at index 18), but that byte still
+		// sits within the 19-byte budget and must survive the cut.
+		raw := append(bytes.Repeat([]byte("a"), available-1), 0xFF)
+		raw = append(raw, []byte("bbbbb")...)
+		var custom common.Hash
+		copy(custom[:], raw)
+
+		got := graffitiText(a.combinedGraffiti(custom))
+
+		require.Equal(t, segment+" "+string(raw[:available]), got)
+	})
 }
 
 func TestGraffitiFromHex(t *testing.T) {
@@ -336,8 +355,8 @@ func TestRequestGraffiti(t *testing.T) {
 	}
 
 	t.Run("no custom graffiti uses the default regardless of the flag", func(t *testing.T) {
-		for _, force := range []bool{false, true} {
-			a := newHandler(force)
+		for _, preserve := range []bool{false, true} {
+			a := newHandler(preserve)
 			got := graffitiText(a.requestGraffiti(false, common.Hash{}))
 			require.Equal(t, caplinClientCode+clCommit, got)
 		}

@@ -3594,6 +3594,11 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 
 	selfBuiltBlock := produce()
 	require.Equal(t, uint64(clparams.BuilderIndexSelfBuild), selfBuiltBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
+	// Exercises the graffiti wiring end-to-end (graffitiFromHex, requestGraffiti,
+	// combinedGraffiti), not just those functions directly: the request's graffiti=0x01
+	// combines with the (EL-unavailable) consensus-only identification segment.
+	clCommit := graffitiCommitPrefix(dbversion.GitCommit)
+	require.Equal(t, graffitiFromString(caplinClientCode+clCommit+" \x01"), selfBuiltBlock.Body.Graffiti)
 	selfBuiltRoot, err := selfBuiltBlock.HashSSZ()
 	require.NoError(t, err)
 	key := selfBuildEnvelopeKey{Slot: fixture.block.Slot, BeaconBlockRoot: common.Hash(selfBuiltRoot)}
@@ -3605,87 +3610,6 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 	require.Equal(t, fixture.externalBid.Message.BuilderIndex, externalBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
 	_, found = handler.selfBuildEnvelopes.Get(key)
 	require.True(t, found)
-}
-
-// TestGetEthV3ValidatorBlockAppliesGraffitiIdentification exercises the graffiti wiring at the
-// HTTP call site end-to-end (graffitiFromHex, requestGraffiti, combinedGraffiti), not just the
-// functions directly, by asserting on a real produced block's Body.Graffiti.
-func TestGetEthV3ValidatorBlockAppliesGraffitiIdentification(t *testing.T) {
-	fixture := newGloasBidSelectionFixture(t, gloasBidSelectionOptions{slotOffset: 1})
-	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-	handler.beaconChainCfg = fixture.block.Cfg
-	forkEpoch := state.Epoch(fixture.productionState)
-	handler.beaconChainCfg.AltairForkEpoch = forkEpoch
-	handler.beaconChainCfg.BellatrixForkEpoch = forkEpoch
-	handler.beaconChainCfg.CapellaForkEpoch = forkEpoch
-	handler.beaconChainCfg.DenebForkEpoch = forkEpoch
-	handler.beaconChainCfg.ElectraForkEpoch = forkEpoch
-	handler.beaconChainCfg.FuluForkEpoch = forkEpoch
-	handler.beaconChainCfg.GloasForkEpoch = forkEpoch
-	handler.beaconChainCfg.InitializeForkSchedule()
-	headState, err := fixture.productionState.Copy()
-	require.NoError(t, err)
-	require.NoError(t, headState.SetSlot(fixture.block.Slot-1))
-	headStateRoot, err := headState.HashSSZ()
-	require.NoError(t, err)
-	headHeader := headState.LatestBlockHeader()
-	headHeader.Root = common.Hash(headStateRoot)
-	headState.SetLatestBlockHeader(&headHeader)
-	headRootRaw, err := headHeader.HashSSZ()
-	require.NoError(t, err)
-	headRoot := common.Hash(headRootRaw)
-	fixture.externalBid.Message.ParentBlockRoot = headRoot
-	fixture.bidKey.ParentBlockRoot = headRoot
-	syncedData := synced_data.NewSyncedDataManager(handler.beaconChainCfg, true)
-	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, headRoot))
-	handler.syncedData = syncedData
-	forkchoiceStore.HeadVal = headRoot
-	forkchoiceStore.HeadSlotVal = headState.Slot()
-	handler.epbsPool = pool.NewEpbsPool()
-	syncPool := sync_pool_mock.NewMockSyncContributionPool(gomock.NewController(t))
-	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
-		Return(cltypes.NewSyncAggregateWithSize(int(handler.beaconChainCfg.SyncCommitteeSize/8)), nil).
-		Times(1)
-	handler.syncMessagePool = syncPool
-
-	payload := cltypes.NewEth1Block(clparams.GloasVersion, handler.beaconChainCfg)
-	payload.ParentHash = fixture.externalBid.Message.ParentBlockHash
-	payload.BlockHash = common.Hash{0x66}
-	payload.PrevRandao = fixture.externalBid.Message.PrevRandao
-	payload.FeeRecipient = common.Address{0x77}
-	payload.GasLimit = 30_000_000
-	payload.Extra = solid.NewExtraData()
-	payload.Transactions = solid.NewTransactionsSSZFromTransactions(nil)
-	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
-	payload.SlotNumber = fixture.block.Slot
-
-	engine := execution_client.NewMockExecutionEngine(gomock.NewController(t))
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), clparams.GloasVersion).
-		Return([]byte{1}, nil).
-		Times(1)
-	engine.EXPECT().GetAssembledBlock(gomock.Any(), []byte{1}, clparams.GloasVersion).
-		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
-		Times(1)
-	handler.engine = engine
-	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
-
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
-		"/eth/v3/validator/blocks/%d?randao_reveal=%s&skip_randao_verification=true&graffiti=%s",
-		fixture.block.Slot,
-		(common.Bytes96{}).String(),
-		hexutil.Encode([]byte("pool.eth")),
-	), http.NoBody)
-	routeContext := chi.NewRouteContext()
-	routeContext.URLParams.Add("slot", fmt.Sprint(fixture.block.Slot))
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
-
-	response, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
-	require.NoError(t, err)
-	producedBlock, ok := response.Data.(*cltypes.BeaconBlock)
-	require.True(t, ok)
-
-	clCommit := graffitiCommitPrefix(dbversion.GitCommit)
-	require.Equal(t, graffitiFromString(caplinClientCode+clCommit+" pool.eth"), producedBlock.Body.Graffiti)
 }
 
 func TestSelfBuildEnvelopeCacheSeparatesBlockRoots(t *testing.T) {

@@ -108,8 +108,12 @@ const payloadPublicationDivisor = 4
 // prefix segment, so client-diversity tooling can attribute proposed blocks. See
 // https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
 func (a *ApiHandler) identificationSegment() string {
+	return identificationSegmentFor(a.executionClientVersion())
+}
+
+func identificationSegmentFor(el *engine_types.ClientVersionV1) string {
 	segment := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
-	if el := a.executionClientVersion(); el != nil {
+	if el != nil {
 		segment = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + segment
 	}
 	return segment
@@ -136,23 +140,17 @@ func (a *ApiHandler) combinedGraffiti(custom common.Hash) common.Hash {
 	return graffitiFromString(segment + " " + string(customText))
 }
 
-// truncateAtRuneBoundary cuts text to at most n bytes, backing off at most UTFMax-1 bytes to
-// clear a rune split by the cut. Graffiti isn't required to be UTF-8, so it keeps the hard cut
-// if no boundary turns up within that budget.
+// truncateAtRuneBoundary cuts text to at most n bytes. For genuinely non-UTF-8 text (graffiti
+// isn't required to be UTF-8), it cuts exactly at n; otherwise it backs off to clear a rune
+// the cut would otherwise split.
 func truncateAtRuneBoundary(text []byte, n int) []byte {
-	cut := text[:n]
-	backedOff := cut
-	for len(backedOff) > 0 && len(cut)-len(backedOff) < utf8.UTFMax {
-		if r, size := utf8.DecodeLastRune(backedOff); r == utf8.RuneError && size == 1 {
-			backedOff = backedOff[:len(backedOff)-1]
-			continue
-		}
-		break
+	if !utf8.Valid(text) {
+		return text[:n]
 	}
-	if len(cut)-len(backedOff) < utf8.UTFMax {
-		return backedOff
+	for n > 0 && !utf8.RuneStart(text[n]) {
+		n--
 	}
-	return cut
+	return text[:n]
 }
 
 // warnGraffitiTruncatedOnce warns, once, that supplied graffiti has been truncated to fit the
@@ -187,11 +185,12 @@ func (a *ApiHandler) requestGraffiti(hasCustom bool, custom common.Hash) common.
 }
 
 // LogGraffitiIdentification logs the default graffiti identification segment once, intended
-// to be called at beacon-node startup, and triggers the execution client's version lookup so
-// logGraffitiIdentificationOnce can log it again once that resolves.
+// to be called at beacon-node startup, then triggers the execution client's version lookup so
+// logGraffitiIdentificationOnce can log it again once that resolves. Logging first, from only
+// the cached value, keeps the trigger from racing the log line if the lookup resolves fast.
 func (a *ApiHandler) LogGraffitiIdentification() {
 	if a.logger != nil {
-		a.logger.Info("[Beacon API] Default graffiti", "segment", a.identificationSegment())
+		a.logger.Info("[Beacon API] Default graffiti", "segment", identificationSegmentFor(a.cachedExecutionClientVersion()))
 	}
 	a.triggerELClientVersionFetch()
 }
@@ -217,11 +216,17 @@ var elClientVersionUnavailable = &engine_types.ClientVersionV1{}
 // consensus-only graffiti and later proposals pick up the execution client code once the
 // fetch has populated the cache (the version is static for the lifetime of a connection).
 func (a *ApiHandler) executionClientVersion() *engine_types.ClientVersionV1 {
-	if cached := a.elClientVersion.Load(); cached != nil {
-		return normalizeELClientVersion(cached)
+	if cached := a.cachedExecutionClientVersion(); cached != nil {
+		return cached
 	}
 	a.triggerELClientVersionFetch()
 	return nil
+}
+
+// cachedExecutionClientVersion returns the connected execution client's version if already
+// cached, without triggering a fetch.
+func (a *ApiHandler) cachedExecutionClientVersion() *engine_types.ClientVersionV1 {
+	return normalizeELClientVersion(a.elClientVersion.Load())
 }
 
 // triggerELClientVersionFetch starts a single background fetch of the execution client
