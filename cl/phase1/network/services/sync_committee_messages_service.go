@@ -52,6 +52,12 @@ type seenSyncCommitteeMessage struct {
 type verifiedSyncCommitteeMessage struct {
 	beaconBlockRoot common.Hash
 	signature       common.Bytes96
+	// published is set by MarkPublished once a caller has successfully
+	// admitted this exact content to the gossip publish queue. Until then,
+	// a matching duplicate still returns nil so a retry after a failed
+	// admission attempt (e.g. the queue was full) gets another chance to
+	// publish, rather than being silently dropped by the seen-key cache.
+	published bool
 }
 
 type syncCommitteeMessagesService struct {
@@ -144,13 +150,18 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		// A hit here means some message for this key was already verified, not that this one was:
 		// only a submission carrying that same content is a genuine duplicate, safe to wave through
 		// without re-verifying. Anything else - a forged replacement, or a bug - is ignored exactly
-		// like a first-time duplicate would be, without ever checking its signature.
+		// like a first-time duplicate would be, without ever checking its signature. A genuine
+		// duplicate is only ignored once it has actually been published; until then it still returns
+		// nil so a caller whose earlier admission attempt failed gets another chance.
 		if verified, ok := s.seenSyncCommitteeMessages.Load(seenSyncCommitteeMessageIdentifier); ok {
 			v := verified.(verifiedSyncCommitteeMessage)
-			if v.beaconBlockRoot == msg.SyncCommitteeMessage.BeaconBlockRoot && v.signature == msg.SyncCommitteeMessage.Signature {
-				return nil
+			if v.beaconBlockRoot != msg.SyncCommitteeMessage.BeaconBlockRoot || v.signature != msg.SyncCommitteeMessage.Signature {
+				return ErrIgnore
 			}
-			return ErrIgnore
+			if v.published {
+				return ErrIgnore
+			}
+			return nil
 		}
 		// [REJECT] The signature is valid for the message beacon_block_root for the validator referenced by validator_index
 		signature, signingRoot, pubKey, err := verifySyncCommitteeMessageSignature(headState, msg.SyncCommitteeMessage)
@@ -197,6 +208,27 @@ func (s *syncCommitteeMessagesService) ProcessMessage(ctx context.Context, subne
 		// gossip ourselves or ban the peer which sent that particular invalid signature.
 		return nil
 	})
+}
+
+// MarkPublished records that content ProcessMessage already verified for
+// this key was successfully admitted to the gossip publish queue. A later
+// submission of that same content becomes ErrIgnore instead of nil, so a
+// caller does not spend another admission attempt on a message already
+// queued. If the entry no longer exists (evicted, or never verified with
+// this content), there is nothing to mark - the next submission of this
+// content is simply verified as if it were new.
+func (s *syncCommitteeMessagesService) MarkPublished(subnet, slot, validatorIndex uint64, beaconBlockRoot common.Hash, signature common.Bytes96) {
+	key := seenSyncCommitteeMessage{subnet: subnet, slot: slot, validatorIndex: validatorIndex}
+	verified, ok := s.seenSyncCommitteeMessages.Load(key)
+	if !ok {
+		return
+	}
+	v := verified.(verifiedSyncCommitteeMessage)
+	if v.beaconBlockRoot != beaconBlockRoot || v.signature != signature || v.published {
+		return
+	}
+	v.published = true
+	s.seenSyncCommitteeMessages.CompareAndSwap(key, verified, v)
 }
 
 // cleanupOldSyncCommitteeMessages removes old sync committee messages from the cache
