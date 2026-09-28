@@ -73,8 +73,8 @@ type TraceCallParam struct {
 	MaxFeePerGas         *hexutil.U256     `json:"maxFeePerGas"`
 	MaxFeePerBlobGas     *hexutil.U256     `json:"maxFeePerBlobGas"`
 	Value                *hexutil.U256     `json:"value"`
-	Data                 hexutil.Bytes     `json:"data"`
-	Input                hexutil.Bytes     `json:"input"`
+	Data                 *hexutil.Bytes    `json:"data"`
+	Input                *hexutil.Bytes    `json:"input"`
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
 	traceTypes           []string
@@ -211,10 +211,6 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 			gasPrice = new(uint256.Int)
 			if !gasFeeCap.IsZero() || !gasTipCap.IsZero() {
 				*gasPrice = u256.Min(u256.Add(*gasTipCap, *baseFee), *gasFeeCap)
-			} else {
-				// This means gasFeeCap == 0, gasTipCap == 0
-				gasPrice.Set(baseFee)
-				gasFeeCap, gasTipCap = gasPrice, gasPrice
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
@@ -227,9 +223,9 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 	}
 	var data []byte
 	if args.Input != nil {
-		data = args.Input
+		data = *args.Input
 	} else if args.Data != nil {
-		data = args.Data
+		data = *args.Data
 	}
 	var accessList types.AccessList
 	if args.AccessList != nil {
@@ -327,6 +323,11 @@ type OeTracer struct {
 	vmOpStack    []*VmTraceOp // Stack of vmTrace operations as call depth increases
 	idx          []string     // Prefix for the "idx" inside operations, for easier navigation
 	config       OeTracerConfig
+}
+
+func (args *TraceCallParam) zeroUnpricedBlobBaseFee(blockCtx *evmtypes.BlockContext) {
+	callArgs := ethapi.CallArgs{MaxFeePerBlobGas: args.MaxFeePerBlobGas, BlobVersionedHashes: args.BlobVersionedHashes}
+	callArgs.ZeroUnpricedBlobBaseFee(blockCtx)
 }
 
 // ToTransaction converts CallArgs to the Transaction type used by the core evm
@@ -438,6 +439,18 @@ func (args *TraceCallParam) ToTransaction(globalGasCap uint64, baseFee *uint256.
 	return tx, nil
 }
 
+// checkChainID rejects a call object whose chainId names another chain. Such a call is invalid
+// whatever the state, so it is invalid params rather than an execution error.
+func (args *TraceCallParam) checkChainID(chainID *uint256.Int) error {
+	if args.ChainID == nil {
+		return nil
+	}
+	if have := (*uint256.Int)(args.ChainID); !have.Eq(chainID) {
+		return &rpc.InvalidParamsError{Message: fmt.Sprintf("chainId does not match node's (have=%v, want=%v)", have, chainID)}
+	}
+	return nil
+}
+
 func (ot *OeTracer) Tracer() *tracers.Tracer {
 	return &tracers.Tracer{
 		Hooks: &tracing.Hooks{
@@ -471,7 +484,10 @@ func (ot *OeTracer) captureStartOrEnter(deep bool, typ vm.OpCode, from accounts.
 		}
 		if ot.lastVmOp != nil {
 			vmTrace = &VmTrace{Ops: []*VmTraceOp{}}
-			ot.lastVmOp.Sub = vmTrace
+			// SELFDESTRUCT enters a frame that runs no code, so it gets no sub.
+			if typ != vm.SELFDESTRUCT {
+				ot.lastVmOp.Sub = vmTrace
+			}
 			ot.vmOpStack = append(ot.vmOpStack, ot.lastVmOp)
 		} else {
 			vmTrace = ot.r.VmTrace
@@ -580,6 +596,10 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 		if len(ot.vmOpStack) > 0 {
 			ot.lastOffStack = ot.vmOpStack[len(ot.vmOpStack)-1]
 			ot.vmOpStack = ot.vmOpStack[:len(ot.vmOpStack)-1]
+			// A call or create that fails its depth, balance or nonce check runs no code, so it gets no sub.
+			if errors.Is(err, vm.ErrDepth) || errors.Is(err, vm.ErrInsufficientBalance) || errors.Is(err, vm.ErrNonceUintOverflow) {
+				ot.lastOffStack.Sub = nil
+			}
 		}
 		if !ot.compat && deep {
 			ot.idx = ot.idx[:len(ot.idx)-1]
@@ -1184,6 +1204,9 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if err != nil {
 		return nil, err
 	}
+	if err := args.checkChainID(chainConfig.ChainID); err != nil {
+		return nil, err
+	}
 	engine := api.engine()
 
 	if blockNrOrHash == nil {
@@ -1251,7 +1274,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 	ot.compat = api.compatibility
-	vmConfig := vm.Config{}
+	vmConfig := vm.Config{NoBaseFee: true}
 	if traceTypeTrace || traceTypeVmTrace {
 		ot.r = traceResult
 		ot.traceAddr = []int{}
@@ -1289,7 +1312,8 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		}
 	}
 
-	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+	args.zeroUnpricedBlobBaseFee(&blockCtx)
+	evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(blockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 	if precompiles != nil {
 		evm.SetPrecompiles(precompiles)
 	}
@@ -1303,7 +1327,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err
@@ -1401,6 +1425,15 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if tok != json.Delim(']') {
 		return nil, errors.New("expected end of array of [callparam, tracetypes]")
 	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	for i := range callParams {
+		if err := callParams[i].checkChainID(chainConfig.ChainID); err != nil {
+			return nil, fmt.Errorf("call %d: %w", i, err)
+		}
+	}
 	var baseFee *uint256.Int
 	if parentNrOrHash == nil {
 		num := rpc.LatestBlockNumber
@@ -1450,7 +1483,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, 0, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNumber, latest, -1, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1464,7 +1497,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	defer ibs.Close()
 
 	trace, _, err := api.doCallBlock(ctx, tx, stateReader, stateCache, cachedWriter, ibs,
-		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, true /* gasBailout */, false /* advanceTxNum */, traceConfig)
+		txns, msgs, callParams, parentHeader, parentNrOrHash.RequireCanonical, false /* gasBailout */, false /* advanceTxNum */, true /* noBaseFee */, traceConfig)
 
 	return trace, err
 }
@@ -1475,7 +1508,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
 	txns []types.Transaction, msgs []*types.Message, callParams []TraceCallParam,
-	header *types.Header, requireCanonical, gasBailout, advanceTxNum bool,
+	header *types.Header, requireCanonical, gasBailout, advanceTxNum, noBaseFee bool,
 	traceConfig *config.TraceConfig,
 ) ([]*TraceCallResult, *tracing.Hooks, error) {
 	chainConfig, err := api.chainConfig(ctx, dbtx)
@@ -1535,7 +1568,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		}
 
 		traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
-		vmConfig := vm.Config{}
+		vmConfig := vm.Config{NoBaseFee: noBaseFee}
 		if traceTypeTrace || traceTypeVmTrace {
 			var ot OeTracer
 			ot.config, err = parseOeTracerConfig(traceConfig)
@@ -1575,7 +1608,11 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			ibs.SetHooks(tracer.Hooks)
 		}
 		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		txBlockCtx := blockCtx
+		if noBaseFee {
+			args.zeroUnpricedBlobBaseFee(&txBlockCtx)
+		}
+		evm := vm.NewEVM(vm.ZeroUnpricedBaseFee(txBlockCtx, txCtx, vmConfig), txCtx, ibs, chainConfig, vmConfig)
 		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
 		if tracer != nil && tracer.Hooks.OnTxStart != nil {
@@ -1872,9 +1909,6 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 
 	txCtx := protocol.NewEVMTxContext(msg)
 
-	blockCtx.GasLimit = math.MaxUint64
-	blockCtx.MaxGasLimit = true
-
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	storeEVM(evm)
 
@@ -1886,7 +1920,9 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
 		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
 	}
-	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, true /* gasBailout */, engine)
+	// A signed transaction pays for its own gas, so no gas bailout: the sender
+	// is charged for value and gas as it would be in a block.
+	execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 	if err != nil {
 		vmConfig.Tracer.EmitTxEnd(nil, mdgas.TxnGasUsage{}, err)
 		return nil, err

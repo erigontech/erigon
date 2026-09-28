@@ -341,7 +341,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			// Fee history stops at the first unavailable block rather than skipping
 			// to newer blocks. If the oldest block is pruned, return an empty result,
 			// matching the missing-block path below.
-			if errors.Is(err, state.PrunedError) {
+			if errors.Is(err, state.ErrPruned) {
 				err = nil
 			}
 			return common.Big0, nil, nil, nil, nil, nil, err

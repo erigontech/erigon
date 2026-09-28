@@ -1168,7 +1168,7 @@ func (c *AuRa) CalculateRewards(_ *chain.Config, header *types.Header, _ []*type
 		reward = c.cfg.BlockReward[i]
 	}
 	if !found {
-		return nil, errors.New("Current block's reward is not found; this indicates a chain config error")
+		return nil, errors.New("current block's reward is not found; this indicates a chain config error")
 	}
 
 	r := rules.Reward{Beneficiary: accounts.InternAddress(header.Coinbase), Kind: rules.RewardAuthor, Amount: *reward.amount}

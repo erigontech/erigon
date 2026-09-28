@@ -1031,71 +1031,71 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-func (bb Body) EncodingSize() int {
-	payloadSize, _, _, _ := bb.payloadSize()
+func (b Body) EncodingSize() int {
+	payloadSize, _, _, _ := b.payloadSize()
 	return payloadSize
 }
 
-func (bb Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
+func (b Body) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Transactions
-	txsLen += EncodingSizeGenericList(bb.Transactions)
+	txsLen += EncodingSizeGenericList(b.Transactions)
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	unclesLen += EncodingSizeGenericList(bb.Uncles)
+	unclesLen += EncodingSizeGenericList(b.Uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
-	if bb.Withdrawals != nil {
-		withdrawalsLen += EncodingSizeGenericList(bb.Withdrawals)
+	if b.Withdrawals != nil {
+		withdrawalsLen += EncodingSizeGenericList(b.Withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
-func (bb Body) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
+func (b Body) EncodeRLP(w io.Writer) error {
+	payloadSize, txsLen, unclesLen, withdrawalsLen := b.payloadSize()
 
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
+	buf := rlp.NewEncodingBuf()
+	defer buf.Release()
 	// prefix
-	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, buf[:]); err != nil {
 		return err
 	}
 	// encode Transactions
-	if err := encodeRLPGeneric(bb.Transactions, txsLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(b.Transactions, txsLen, w, buf[:]); err != nil {
 		return err
 	}
 	// encode Uncles
-	if err := encodeRLPGeneric(bb.Uncles, unclesLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(b.Uncles, unclesLen, w, buf[:]); err != nil {
 		return err
 	}
 	// encode Withdrawals
-	if bb.Withdrawals != nil {
-		if err := encodeRLPGeneric(bb.Withdrawals, withdrawalsLen, w, b[:]); err != nil {
+	if b.Withdrawals != nil {
+		if err := encodeRLPGeneric(b.Withdrawals, withdrawalsLen, w, buf[:]); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (bb *Body) DecodeRLP(s *rlp.Stream) error {
+func (b *Body) DecodeRLP(s *rlp.Stream) error {
 	_, err := s.List()
 	if err != nil {
 		return err
 	}
 	// decode Transactions
-	if err := decodeTxns(&bb.Transactions, s); err != nil {
+	if err := decodeTxns(&b.Transactions, s); err != nil {
 		return err
 	}
 	// decode Uncles
-	if err := decodeUncles(&bb.Uncles, s); err != nil {
+	if err := decodeUncles(&b.Uncles, s); err != nil {
 		return err
 	}
 	// decode Withdrawals
-	bb.Withdrawals = []*Withdrawal{}
-	if err := decodeWithdrawals(&bb.Withdrawals, s); err != nil {
+	b.Withdrawals = []*Withdrawal{}
+	if err := decodeWithdrawals(&b.Withdrawals, s); err != nil {
 		return err
 	}
 
@@ -1273,88 +1273,88 @@ func CopyHeader(h *Header) *Header {
 }
 
 // DecodeRLP decodes the Ethereum
-func (bb *Block) DecodeRLP(s *rlp.Stream) error {
+func (b *Block) DecodeRLP(s *rlp.Stream) error {
 	size, err := s.List()
 	if err != nil {
 		return err
 	}
-	bb.size.Store(uint64(rlp.ListLen(int(size))))
+	b.size.Store(uint64(rlp.ListLen(int(size))))
 
 	// decode header
 	var h Header
 	if err := h.DecodeRLP(s); err != nil {
 		return err
 	}
-	bb.header = &h
+	b.header = &h
 
 	// decode Transactions
-	if err := decodeTxns((*[]Transaction)(&bb.transactions), s); err != nil {
+	if err := decodeTxns((*[]Transaction)(&b.transactions), s); err != nil {
 		return err
 	}
 	// decode Uncles
-	if err := decodeUncles(&bb.uncles, s); err != nil {
+	if err := decodeUncles(&b.uncles, s); err != nil {
 		return err
 	}
 	// decode Withdrawals
-	bb.withdrawals = []*Withdrawal{}
-	if err := decodeWithdrawals(&bb.withdrawals, s); err != nil {
+	b.withdrawals = []*Withdrawal{}
+	if err := decodeWithdrawals(&b.withdrawals, s); err != nil {
 		return err
 	}
 	return s.ListEnd()
 }
 
-func (bb *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
+func (b *Block) payloadSize() (payloadSize int, txsLen, unclesLen, withdrawalsLen int) {
 	// size of Header
-	headerLen := bb.header.EncodingSize()
+	headerLen := b.header.EncodingSize()
 	payloadSize += rlp.ListPrefixLen(headerLen) + headerLen
 
 	// size of Transactions
-	txsLen += EncodingSizeGenericList(bb.transactions)
+	txsLen += EncodingSizeGenericList(b.transactions)
 	payloadSize += rlp.ListPrefixLen(txsLen) + txsLen
 
 	// size of Uncles
-	unclesLen += EncodingSizeGenericList(bb.uncles)
+	unclesLen += EncodingSizeGenericList(b.uncles)
 	payloadSize += rlp.ListPrefixLen(unclesLen) + unclesLen
 
 	// size of Withdrawals
-	if bb.withdrawals != nil {
-		withdrawalsLen += EncodingSizeGenericList(bb.withdrawals)
+	if b.withdrawals != nil {
+		withdrawalsLen += EncodingSizeGenericList(b.withdrawals)
 		payloadSize += rlp.ListPrefixLen(withdrawalsLen) + withdrawalsLen
 	}
 
 	return payloadSize, txsLen, unclesLen, withdrawalsLen
 }
 
-func (bb *Block) EncodingSize() int {
-	payloadSize, _, _, _ := bb.payloadSize()
+func (b *Block) EncodingSize() int {
+	payloadSize, _, _, _ := b.payloadSize()
 	return payloadSize
 }
 
 // EncodeRLP serializes b into the Ethereum RLP block format.
-func (bb *Block) EncodeRLP(w io.Writer) error {
-	payloadSize, txsLen, unclesLen, withdrawalsLen := bb.payloadSize()
+func (b *Block) EncodeRLP(w io.Writer) error {
+	payloadSize, txsLen, unclesLen, withdrawalsLen := b.payloadSize()
 
-	b := rlp.NewEncodingBuf()
-	defer b.Release()
+	buf := rlp.NewEncodingBuf()
+	defer buf.Release()
 	// prefix
-	if err := rlp.EncodeListPrefix(payloadSize, w, b[:]); err != nil {
+	if err := rlp.EncodeListPrefix(payloadSize, w, buf[:]); err != nil {
 		return err
 	}
 	// encode Header
-	if err := bb.header.EncodeRLP(w); err != nil {
+	if err := b.header.EncodeRLP(w); err != nil {
 		return err
 	}
 	// encode Transactions
-	if err := encodeRLPGeneric(bb.transactions, txsLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(b.transactions, txsLen, w, buf[:]); err != nil {
 		return err
 	}
 	// encode Uncles
-	if err := encodeRLPGeneric(bb.uncles, unclesLen, w, b[:]); err != nil {
+	if err := encodeRLPGeneric(b.uncles, unclesLen, w, buf[:]); err != nil {
 		return err
 	}
 	// encode Withdrawals
-	if bb.withdrawals != nil {
-		if err := encodeRLPGeneric(bb.withdrawals, withdrawalsLen, w, b[:]); err != nil {
+	if b.withdrawals != nil {
+		if err := encodeRLPGeneric(b.withdrawals, withdrawalsLen, w, buf[:]); err != nil {
 			return err
 		}
 	}
