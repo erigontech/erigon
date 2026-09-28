@@ -192,6 +192,26 @@ func TestEstimateGasEIP2780SubTxGasTransfers(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(15_000), distinctGas)
 }
 
+// A caller's gas cap is honoured once some transaction could fit under it,
+// which after EIP-2780 starts at TX_BASE (12000) rather than 21000. A cap of
+// 14000 must therefore bound a 15000-gas transfer instead of being dropped.
+func TestEstimateGasEIP2780HonoursSubTxGasCap(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	m, bankAddr, _, receiverAddr := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newTestEthAPIWithFilters(t, m)
+
+	gasCap := hexutil.Uint64(14_000)
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+		From: &bankAddr,
+		To:   &receiverAddr,
+		Gas:  &gasCap,
+	}, nil, nil, nil)
+	require.ErrorContains(t, err, "gas required exceeds allowance (14000)")
+}
+
 // gasGuardCode succeeds only while more than 10000 gas remains, so its minimum
 // viable gas limit is far above the gas a single unconstrained trial reports.
 //
