@@ -676,13 +676,15 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 				byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.SSTORE),
 				byte(vm.STOP),
 			}, tracing.CodeChangeUnspecified))
-			evm := newTestEVM(ibs, chain.AllProtocolChanges, blockGasLimit)
+			var changes []gasChange
+			evm := gasTracingEVM(ibs, chain.AllProtocolChanges, &changes)
 			msg := types.NewMessage(
 				sender, recipient, 0, uint256.NewInt(0), blockGasLimit,
 				uint256.NewInt(0), uint256.NewInt(0), uint256.NewInt(0),
 				make([]byte, test.dataLen), nil, false, false, true, false, nil,
 			)
-			result, err := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0)).Execute(!test.noRefunds, test.gasBailout)
+			executor := NewTxnExecutor(evm, msg, NewGasPool(blockGasLimit, 0))
+			result, err := executor.Execute(!test.noRefunds, test.gasBailout)
 			require.NoError(t, err)
 			require.NoError(t, result.Err)
 			require.Equal(t, result.MaxGasUsed, result.ReceiptGasUsed)
@@ -690,7 +692,104 @@ func TestGasRefundWithCalldataFloor(t *testing.T) {
 			require.Zero(t, result.BlockStateGasUsed)
 			require.EqualValues(t, 10_000, ibs.GetRefund())
 			require.Equal(t, test.wantRefund, result.GasRefund)
+			var txnChanges []gasChange
+			for _, change := range changes {
+				if change.reason == tracing.GasChangeTxRefunds || change.reason == tracing.GasChangeTxDataFloor || change.reason == tracing.GasChangeTxLeftOverReturned {
+					txnChanges = append(txnChanges, change)
+				}
+			}
+			gasLeft := executor.gasRemaining.Total()
+			var wantChanges []gasChange
+			if !test.noRefunds && !test.gasBailout {
+				wantChanges = append(wantChanges, gasChange{
+					old:    mdgas.MdGas{Execution: gasLeft},
+					new:    mdgas.MdGas{Execution: gasLeft + test.wantRefund},
+					reason: tracing.GasChangeTxRefunds,
+				})
+				gasLeft += test.wantRefund
+			}
+			wantChanges = append(wantChanges, gasChange{
+				old:    mdgas.MdGas{Execution: gasLeft},
+				new:    mdgas.MdGas{Execution: blockGasLimit - result.ReceiptGasUsed},
+				reason: tracing.GasChangeTxDataFloor,
+			})
+			if !test.noRefunds && !test.gasBailout {
+				wantChanges = append(wantChanges, gasChange{
+					old:    mdgas.MdGas{Execution: blockGasLimit - result.ReceiptGasUsed},
+					reason: tracing.GasChangeTxLeftOverReturned,
+				})
+			}
+			require.Equal(t, wantChanges, txnChanges)
 		})
+	}
+}
+
+func TestGasChangeTxReturn(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		config   *chain.Config
+		gasLimit uint64
+		fail     bool
+	}{
+		{name: "pre-amsterdam", config: chain.TestChainOsakaConfig, gasLimit: 100_000},
+		{name: "state reservoir", config: chain.AllProtocolChanges, gasLimit: params.MaxTxnGasLimit + 100_000},
+		{name: "exceptional halt", config: chain.AllProtocolChanges, gasLimit: 100_000, fail: true},
+		{name: "exceptional halt with state reservoir", config: chain.AllProtocolChanges, gasLimit: params.MaxTxnGasLimit + 100_000, fail: true},
+	} {
+		for _, hook := range []string{"v1", "v2"} {
+			t.Run(test.name+"/"+hook, func(t *testing.T) {
+				const initialBalance = 30_000_000
+				sender := accounts.InternAddress(common.HexToAddress("0x1000"))
+				recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
+				ibs := state.New(state.NewNoopReader())
+				defer ibs.Close()
+				require.NoError(t, ibs.SetBalance(sender, *uint256.NewInt(initialBalance), tracing.BalanceChangeUnspecified))
+				code := []byte{byte(vm.STOP)}
+				if test.fail {
+					code = []byte{byte(vm.INVALID)}
+				}
+				require.NoError(t, ibs.SetCode(recipient, code, tracing.CodeChangeUnspecified))
+				var changes []gasChange
+				evm := gasTracingEVM(ibs, test.config, &changes)
+				if hook == "v1" {
+					hooks := evm.Config().Tracer
+					record := hooks.OnGasChangeV2
+					hooks.OnGasChangeV2 = nil
+					hooks.OnGasChange = func(old, new uint64, reason tracing.GasChangeReason) {
+						record(mdgas.MdGas{Execution: old}, mdgas.MdGas{Execution: new}, reason)
+					}
+				}
+				msg := types.NewMessage(sender, recipient, 0, uint256.NewInt(0), test.gasLimit,
+					uint256.NewInt(1), uint256.NewInt(1), uint256.NewInt(1), nil, nil, false, false, true, false, nil)
+				executor := NewTxnExecutor(evm, msg, NewGasPool(initialBalance, 0))
+				result, err := executor.Execute(true, false)
+				require.NoError(t, err)
+				if test.fail {
+					require.Error(t, result.Err)
+				} else {
+					require.NoError(t, result.Err)
+				}
+				require.Zero(t, result.GasRefund)
+				if test.gasLimit > params.MaxTxnGasLimit {
+					require.EqualValues(t, 100_000, executor.gasRemaining.State)
+				}
+				var txnChanges []gasChange
+				for _, change := range changes {
+					if change.reason == tracing.GasChangeTxRefunds || change.reason == tracing.GasChangeTxDataFloor || change.reason == tracing.GasChangeTxLeftOverReturned {
+						txnChanges = append(txnChanges, change)
+					}
+				}
+				gasLeft := mdgas.MdGas{Execution: test.gasLimit - result.ReceiptGasUsed}
+				wantChanges := []gasChange{{old: gasLeft, new: gasLeft, reason: tracing.GasChangeTxRefunds}}
+				if gasLeft.Execution != 0 {
+					wantChanges = append(wantChanges, gasChange{old: gasLeft, reason: tracing.GasChangeTxLeftOverReturned})
+				}
+				require.Equal(t, wantChanges, txnChanges)
+				balance, err := ibs.GetBalance(sender)
+				require.NoError(t, err)
+				require.Equal(t, *uint256.NewInt(initialBalance - result.ReceiptGasUsed), balance)
+			})
+		}
 	}
 }
 

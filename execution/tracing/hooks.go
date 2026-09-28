@@ -445,6 +445,8 @@ const (
 	GasChangeTxAuthorization GasChangeReason = 20
 	// GasChangeRefundAccountCreation is state gas refunded for cancelled account creation.
 	GasChangeRefundAccountCreation GasChangeReason = 21
+	// gas charged to reach the transaction calldata floor.
+	GasChangeTxDataFloor GasChangeReason = 22
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
