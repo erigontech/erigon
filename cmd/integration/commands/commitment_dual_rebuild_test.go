@@ -44,6 +44,7 @@ import (
 	chainpkg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/execfinality"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/logging"
@@ -96,6 +97,67 @@ func TestCommitmentRebuildBinTargetOnExecutedHexBinDatadir(t *testing.T) {
 			require.Equal(t, before, after)
 		})
 	}
+}
+
+func TestCommitmentRebuildRunResetOnExecutedHexBinDatadir(t *testing.T) {
+	fixture := newExecutedHexBinRebuildFixture(t, commitment.PBinHashKeccak)
+	fixture.close()
+	beforeFiles := snapshotTree(t, fixture.dirs.Snap)
+	setExecutionProgress(t, fixture.rawPath, 7)
+
+	previousDatadir := datadirCli
+	previousChaindata := chaindata
+	previousOutput := rebuildOutputDatadir
+	previousNoHistory := noHistory
+	previousYes := yes
+	previousReset := reset
+	t.Cleanup(func() {
+		datadirCli = previousDatadir
+		chaindata = previousChaindata
+		rebuildOutputDatadir = previousOutput
+		noHistory = previousNoHistory
+		yes = previousYes
+		reset = previousReset
+	})
+	datadirCli = fixture.dirs.DataDir
+	chaindata = fixture.dirs.Chaindata
+	rebuildOutputDatadir = ""
+	noHistory = false
+	yes = true
+	reset = true
+
+	cmd := &cobra.Command{Use: "rebuild", Run: cmdCommitmentRebuild.Run}
+	utils.CobraFlags(cmd, debug.Flags, utils.MetricFlags, logging.Flags)
+	cmd.Flags().AddFlagSet(cmd.PersistentFlags())
+	cmd.SetContext(t.Context())
+	cmd.Run(cmd, nil)
+
+	require.Equal(t, uint64(0), readExecutionStageProgress(t, fixture.rawPath))
+	require.Equal(t, beforeFiles, snapshotTree(t, fixture.dirs.Snap))
+	root, state := reopenBinSource(t, fixture.dirs.DataDir, fixture.rawPath)
+	require.Equal(t, fixture.root, root)
+	require.Equal(t, fixture.state, state)
+}
+
+func setExecutionProgress(t *testing.T, rawPath string, progress uint64) {
+	t.Helper()
+	db := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
+	defer db.Close()
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		return stages.SaveStageProgress(tx, stages.Execution, progress)
+	}))
+}
+
+func readExecutionStageProgress(t *testing.T, rawPath string) uint64 {
+	t.Helper()
+	db := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
+	defer db.Close()
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	progress, err := stages.GetStageProgress(tx, stages.Execution)
+	require.NoError(t, err)
+	return progress
 }
 
 type executedHexBinRebuildFixture struct {
@@ -367,4 +429,30 @@ func reopenBinOutput(t *testing.T, output, rawPath string) ([]byte, []byte) {
 	stateValue, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	return root, bytes.Clone(stateValue)
+}
+
+func reopenBinSource(t *testing.T, source, rawPath string) ([]byte, []byte) {
+	t.Helper()
+	dirs := datadir.Open(source)
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	t.Cleanup(agg.Close)
+	rawDB := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
+	t.Cleanup(rawDB.Close)
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := temporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	t.Cleanup(db.Close)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	root, err := sd.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
+	require.NoError(t, err)
+	state, _, err := tx.GetLatest(kv.CommitmentBinDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	return root, bytes.Clone(state)
 }

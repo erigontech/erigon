@@ -941,6 +941,22 @@ var cmdCommitmentRebuild = &cobra.Command{
 			return
 		}
 		target.MaxShardSteps = rebuildMaxShardSteps
+		if err := checkRebuildFlags(target, rebuildOutputDatadir != ""); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+		if reset {
+			db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+			if err != nil {
+				logger.Error("Opening DB", "error", err)
+				return
+			}
+			defer db.Close()
+			if err := rawdbreset.Reset(ctx, db, stages.Execution); err != nil {
+				logger.Error(err.Error())
+			}
+			return
+		}
 		if err := refuseRebuildFromSource(target, sourceDirs, rebuildOutputDatadir != ""); err != nil {
 			logger.Error(err.Error())
 			return
@@ -949,13 +965,6 @@ var cmdCommitmentRebuild = &cobra.Command{
 			logger.Error(err.Error())
 			return
 		}
-		// Staging creates the output datadir and hardlinks the source into it, so a
-		// flag combination that cannot run has to be refused ahead of it.
-		if err := checkRebuildFlags(target, rebuildOutputDatadir != ""); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-
 		var out *rebuildOutput
 		if rebuildOutputDatadir != "" {
 			if out, err = stageRebuildOutput(datadir.Open(datadirCli), rebuildOutputDatadir, target, resume, logger); err != nil {
@@ -1019,6 +1028,13 @@ func commitmentRebuildDomain(target dbstate.RebuildTarget, domains []kv.Domain) 
 }
 
 func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logger, rebuildTarget dbstate.RebuildTarget, out *rebuildOutput) error {
+	if err := checkRebuildFlags(rebuildTarget, out != nil); err != nil {
+		return err
+	}
+	if reset {
+		return rawdbreset.Reset(ctx, db, stages.Execution)
+	}
+
 	dirs := datadir.New(datadirCli)
 	var source *dbstate.ErigonDBSettings
 	if out != nil {
@@ -1036,13 +1052,6 @@ func commitmentRebuild(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 		if err := refuseRebuildFromSettings(rebuildTarget, source, dirs.DataDir, out != nil); err != nil {
 			return err
 		}
-	}
-	if err := checkRebuildFlags(rebuildTarget, out != nil); err != nil {
-		return err
-	}
-
-	if reset {
-		return rawdbreset.Reset(ctx, db, stages.Execution)
 	}
 	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	rebuildDomain := commitmentRebuildDomain(rebuildTarget, agg.CommitmentDomains())

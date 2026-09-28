@@ -92,7 +92,6 @@ func TestCommitmentRebuildRefusesHexBinSourceBeforeAnyWork(t *testing.T) {
 	before := snapshotTree(t, src.Snap)
 	withRebuildFlags(t, func() {
 		datadirCli = src.DataDir
-		reset = true
 	})
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
