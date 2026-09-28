@@ -86,10 +86,10 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // fields cannot be resurrected, and it carries at most the balance EIP-8246
 // preserves plus its storage-delete cascade — Normalize drops the nonce,
 // incarnation and code hash, and assertSelfDestructNormalized pins that.
-func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
-	if writes != nil && !writes.IsEmpty() {
+func (s *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
+	if s != nil && !s.IsEmpty() {
 		if dbg.AssertEnabled {
-			writes.assertSelfDestructNormalized()
+			s.assertSelfDestructNormalized()
 		}
 		// One buffer for every storage key this call writes: consumers copy what they keep.
 		// Made on the first slot, since an array here escapes even when unused.
@@ -123,40 +123,40 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 		}
 		// Range the typed collections directly rather than AllHeaders()+GetX —
 		// the header walk plus a second per-value map probe is strictly more work.
-		for a, vw := range writes.Balances() {
+		for a, vw := range s.Balances() {
 			d := ensure(a)
 			d.balance = vw.Val
 			d.hasBalance = true
 		}
-		for a, vw := range writes.Nonces() {
+		for a, vw := range s.Nonces() {
 			d := ensure(a)
 			d.nonce = vw.Val
 			d.hasNonce = true
 		}
-		for a, vw := range writes.Incarnations() {
+		for a, vw := range s.Incarnations() {
 			d := ensure(a)
 			d.incarnation = vw.Val
 			d.hasIncarnation = true
 		}
 		// CodeHashes before Codes: an explicit CodeHashPath write wins; a code
 		// write only supplies the hash when no explicit one was recorded.
-		for a, vw := range writes.CodeHashes() {
+		for a, vw := range s.CodeHashes() {
 			d := ensure(a)
 			d.codeHash = vw.Val
 			d.hasCodeHash = true
 		}
-		for a, vw := range writes.Codes() {
+		for a, vw := range s.Codes() {
 			d := ensure(a)
 			d.code = vw.Val.Bytes
 			d.codeWritten = true
 		}
-		for a, vw := range writes.SelfDestructs() {
+		for a, vw := range s.SelfDestructs() {
 			ensure(a).selfDestruct = vw.Val
 		}
-		for a, vw := range writes.createContract {
+		for a, vw := range s.createContract {
 			ensure(a).createContract = vw.Val
 		}
-		for a, byKey := range writes.Storages() {
+		for a, byKey := range s.Storages() {
 			d := ensure(a)
 			for k, vw := range byKey {
 				d.storage = append(d.storage, storageItem{k, vw.Val})

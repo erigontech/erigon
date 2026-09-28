@@ -125,7 +125,7 @@ func TestTraceCallUsesCommittedState(t *testing.T) {
 	result, err := api.Call(m.Ctx, TraceCallParam{
 		From: &bankAddress,
 		To:   &contractAddress,
-		Data: input,
+		Data: &input,
 	}, []string{TraceTypeTrace}, &latest, nil)
 	require.NoError(t, err)
 

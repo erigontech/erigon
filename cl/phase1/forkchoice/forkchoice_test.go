@@ -813,8 +813,8 @@ type getFinalizedExecutionHashForkGraph struct {
 	hasBlockEquivocation  bool
 }
 
-func (f *getFinalizedExecutionHashForkGraph) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
-	return f.hasBlockEquivocation
+func (g *getFinalizedExecutionHashForkGraph) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
+	return g.hasBlockEquivocation
 }
 
 func TestOnBlockWithEquivocationCheckRejectsKnownGloasConflict(t *testing.T) {
