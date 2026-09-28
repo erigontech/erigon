@@ -203,8 +203,7 @@ const (
 	P256VerifyGasEIP7951 uint64 = 6900
 
 	// EIP-2935: Historical block hashes in state
-	BlockHashHistoryServeWindow uint64 = 8191
-	BlockHashOldWindow          uint64 = 256
+	BlockHashOldWindow uint64 = 256
 
 	// EIP-7702: Set EOA account code
 	SetCodeMagicPrefix  = byte(0x05)

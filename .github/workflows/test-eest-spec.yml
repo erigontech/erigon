@@ -16,6 +16,10 @@ defaults:
 permissions:
   contents: read
 
+env:
+  # Set false when devnet fixtures add coverage beyond stable.
+  SKIP_DEVNET_SHARDS: 'true'
+
 jobs:
   # Matrix entries (shard / workers / max-allowed-failures) come from
   # tools/eest-spec-shards.yml so this workflow and tools/run-eest-spec-test.sh
@@ -35,8 +39,6 @@ jobs:
       - id: load
         env:
           CACHE_WARMING_ONLY: ${{ inputs.cache-warming-only }}
-          # Set false when devnet fixtures add coverage beyond stable.
-          SKIP_DEVNET_SHARDS: 'true'
         run: |
           if [ "$CACHE_WARMING_ONLY" = "true" ]; then
             echo 'matrix=[{"shard":"build","target":"evm"},{"shard":"build-race","target":"evm.race"}]' >> "$GITHUB_OUTPUT"
