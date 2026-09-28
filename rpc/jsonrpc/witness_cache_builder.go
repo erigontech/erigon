@@ -383,8 +383,14 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	start := time.Now()
-	result, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+	result, err := api.witnessCache.buildOnce(ctx, hash, func() (*ExecutionWitnessResult, error) {
+		start := time.Now()
+		r, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+		if err == nil {
+			witnessCacheBuildDuration.ObserveDuration(start)
+		}
+		return r, err
+	})
 	if err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
@@ -394,7 +400,6 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	witnessCacheBuildDuration.ObserveDuration(start)
 	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true
@@ -467,8 +472,14 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	start := time.Now()
-	result, err := api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
+	result, err := api.witnessCache.buildOnce(ctx, hash, func() (*ExecutionWitnessResult, error) {
+		start := time.Now()
+		r, err := api.buildWitnessResultHeadCapture(ctx, committedTx, pin.tx, info, witnessModeLegacy)
+		if err == nil {
+			witnessCacheBuildDuration.ObserveDuration(start)
+		}
+		return r, err
+	})
 	if err != nil {
 		if errors.Is(err, errWitnessVerifyFailed) {
 			witnessCacheBuildFailVerifyCounter.Inc()
@@ -478,7 +489,6 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 		log.Warn("[witness-cache] build witness", "block", num, "err", err)
 		return false
 	}
-	witnessCacheBuildDuration.ObserveDuration(start)
 	api.storeWitness(num, hash, result)
 	witnessCacheBuildOKCounter.Inc()
 	return true

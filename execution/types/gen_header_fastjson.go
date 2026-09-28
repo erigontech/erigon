@@ -17,6 +17,15 @@ func (x *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		return nil
 	}
 	s.WriteObjectStart()
+	if err := x.writeJSONFields(s); err != nil {
+		return err
+	}
+	s.WriteObjectEnd()
+	return nil
+}
+
+// writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
+func (x *Header) writeJSONFields(s *jsonstream.StackStream) error {
 	ethjson.Data(s, "parentHash", x.ParentHash[:])
 	ethjson.Data(s, "sha3Uncles", x.UncleHash[:])
 	ethjson.Data(s, "miner", x.Coinbase[:])
@@ -77,6 +86,5 @@ func (x *Header) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 		ethjson.Quantity(s, "slotNumber", *x.SlotNumber)
 	}
 	x.writeComputedJSON(s)
-	s.WriteObjectEnd()
 	return nil
 }

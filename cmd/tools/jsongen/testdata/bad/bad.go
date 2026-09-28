@@ -51,6 +51,11 @@ type UnknownOption struct {
 	Count uint64 `json:"count,omitzero" ethjson:"quantity"`
 }
 
+// A struct writes itself, and nothing can say whether encoding/json would have left it out.
 type OmitemptyObjects struct {
-	Logs jsonstream.Marshaler `json:"logs,omitempty" ethjson:"objects"`
+	Body selfWriter `json:"body,omitempty" ethjson:"objects"`
 }
+
+type selfWriter struct{}
+
+func (selfWriter) MarshalFastJSONTo(*jsonstream.StackStream) error { return nil }

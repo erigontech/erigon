@@ -572,6 +572,17 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		require.Same(t, sentinel, result, "a cached by-number request serves the stored pointer")
 	})
 
+	t.Run("by-number miss waits for the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, true, true)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a cache-only miss must serve the running build, not out-of-window")
+	})
+
 	t.Run("by-hash orphan is reorged-away, never serves the resident entry", func(t *testing.T) {
 		// Store a non-canonical fork header at height 1 so a by-hash request resolves to
 		// block 1 but the hash differs from the canonical one.

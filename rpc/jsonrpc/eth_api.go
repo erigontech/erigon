@@ -83,7 +83,7 @@ type EthAPI interface {
 
 	// Receipt related (see ./eth_receipts.go)
 	GetTransactionReceipt(ctx context.Context, hash common.Hash) (*ethutils.RPCReceipt, error)
-	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error)
+	GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.Logs, error)
 	GetBlockReceipts(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) (ethutils.RPCReceipts, error)
 
 	// Block access list related (see ./eth_block_access_list.go)
@@ -101,7 +101,7 @@ type EthAPI interface {
 	NewFilter(_ context.Context, crit filters.FilterCriteria) (string, error)
 	UninstallFilter(_ context.Context, index string) (bool, error)
 	GetFilterChanges(_ context.Context, index string) ([]any, error)
-	GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error)
+	GetFilterLogs(ctx context.Context, index string) (types.Logs, error)
 	Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc.Subscription, error)
 
 	// Account related (see ./eth_accounts.go)
@@ -118,6 +118,7 @@ type EthAPI interface {
 	ChainId(ctx context.Context) (hexutil.Uint64, error) /* called eth_protocolVersion elsewhere */
 	ProtocolVersion(_ context.Context) (hexutil.Uint, error)
 	GasPrice(_ context.Context) (*hexutil.U256, error)
+	MaxPriorityFeePerGas(ctx context.Context) (*hexutil.U256, error)
 	BaseFee(ctx context.Context) (*hexutil.U256, error)
 	BlobBaseFee(ctx context.Context) (*hexutil.U256, error)
 	Config(ctx context.Context, timeArg *hexutil.Uint64) (*EthConfigResp, error)
