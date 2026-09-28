@@ -198,6 +198,14 @@ func New(
 	torrentConfig.MaxUnverifiedBytes = 0
 
 	torrentConfig.MetainfoSourcesMerger = func(t *torrent.Torrent, info *metainfo.MetaInfo) error {
+		// A metainfo source is an untrusted peer like any other, and may hold
+		// a different generation of the file under the same name. Info bytes
+		// are an input here: whatever is installed becomes the torrent's own
+		// piece hashes, so the payload that completes is the one they
+		// describe, whatever infohash was asked for.
+		if got := info.HashInfoBytes(); got != t.InfoHash() {
+			return fmt.Errorf("metainfo source has infohash %v, torrent is %v", got, t.InfoHash())
+		}
 		return t.SetInfoBytes(info.InfoBytes)
 	}
 
