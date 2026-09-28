@@ -449,7 +449,7 @@ func (p *Provider) onForkBootstrapRequired(e flow.ForkBootstrapRequired) {
 			}
 			return
 		}
-		out := v2ToPeerManifest(ForkBootstrapParentPeerID, manifest)
+		out := v2ToPeerManifest(ForkBootstrapParentPeerID, "fork-bootstrap", manifest)
 		if logger != nil {
 			logger.Info("[manifest_exchange] fork bootstrap: publishing parent manifest as synthetic peer event",
 				"parent", e.Parent,
@@ -674,7 +674,7 @@ func (p *Provider) fetchAndPublish(ctx context.Context, peerID string, infoHash,
 		}
 	}
 
-	bus.Publish(v2ToPeerManifest(peerID, manifest))
+	bus.Publish(v2ToPeerManifest(peerID, hex.EncodeToString(infoHash[:]), manifest))
 }
 
 // writePeerManifestCache atomically writes a peer's chain.toml bytes

@@ -186,12 +186,17 @@ type TrustPromoted struct {
 // inspect FileEntry.Kind to filter. Blocks holds top-level block .seg.
 // Caplin, Meta, Salt are flat slices keyed by their respective Kind.
 type PeerManifestReceived struct {
-	PeerID  string
-	Domains map[snapshot.Domain][]*snapshot.FileEntry
-	Blocks  []*snapshot.FileEntry
-	Caplin  []*snapshot.FileEntry
-	Meta    []*snapshot.FileEntry
-	Salt    []*snapshot.FileEntry
+	PeerID string
+	// Generation identifies the manifest these entries came from (its
+	// info-hash, hex). Recorded so a coordinate assembled from more than one
+	// generation can be named at the point it happens, rather than inferred
+	// later from the sizes of the files it left on disk.
+	Generation string
+	Domains    map[snapshot.Domain][]*snapshot.FileEntry
+	Blocks     []*snapshot.FileEntry
+	Caplin     []*snapshot.FileEntry
+	Meta       []*snapshot.FileEntry
+	Salt       []*snapshot.FileEntry
 }
 
 // PeerDeparted fires when a peer leaves; its manifest is no longer authoritative.

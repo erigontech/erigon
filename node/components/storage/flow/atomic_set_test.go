@@ -17,10 +17,13 @@
 package flow
 
 import (
+	"context"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
 
@@ -81,3 +84,47 @@ func TestStaleCoordinates_UnheldAndUnhashedAreNotStale(t *testing.T) {
 	}
 	require.Empty(t, staleCoordinates(peer, held))
 }
+
+// TestWarnOnMixedGeneration pins that a coordinate claimed from two manifest
+// generations is named where it happens.
+//
+// A primary and its accessor must come from one generation; an accessor built
+// from a different primary indexes past the end of the one it is paired with.
+// That only surfaces much later, as an out-of-range read inside seg.Getter, by
+// which point neither source is recoverable from the process state.
+func TestWarnOnMixedGeneration(t *testing.T) {
+	var mu sync.Mutex
+	var lines []string
+	logger := log.New()
+	logger.SetHandler(&captureHandler{onLog: func(msg string) {
+		mu.Lock()
+		defer mu.Unlock()
+		lines = append(lines, msg)
+	}})
+	o := &Orchestrator{
+		peerFiles: map[string]*peerFileClaim{},
+		log:       logger,
+	}
+
+	kv := &snapshot.FileEntry{Name: "domain/v2.2-commitment.332-333.kv"}
+	kvi := &snapshot.FileEntry{Name: "domain/v2.1-commitment.332-333.kvi"}
+
+	o.recordPeerClaimLocked(kv, "peer", "gen-b")
+	require.Empty(t, lines, "a single generation is not a conflict")
+
+	o.recordPeerClaimLocked(kvi, "peer", "gen-a")
+	require.Len(t, lines, 1,
+		"the accessor arriving from a different generation than its primary must be reported")
+	require.Contains(t, lines[0], "coordinate spans manifest generations")
+}
+
+// captureHandler records log messages so a test can assert on what was
+// reported rather than on a side effect.
+type captureHandler struct{ onLog func(string) }
+
+func (h *captureHandler) Log(r *log.Record) error {
+	h.onLog(r.Msg)
+	return nil
+}
+
+func (h *captureHandler) Enabled(context.Context, log.Lvl) bool { return true }

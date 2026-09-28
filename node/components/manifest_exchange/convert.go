@@ -30,8 +30,8 @@ import (
 // shape the orchestrator subscribes to. Malformed hex in hash fields and
 // unrecognised trust strings are tolerated: the offending entry is dropped,
 // not the whole manifest.
-func v2ToPeerManifest(peerID string, m *downloader.ChainTomlV2) flow.PeerManifestReceived {
-	out := flow.PeerManifestReceived{PeerID: peerID}
+func v2ToPeerManifest(peerID, generation string, m *downloader.ChainTomlV2) flow.PeerManifestReceived {
+	out := flow.PeerManifestReceived{PeerID: peerID, Generation: generation}
 	if m == nil {
 		return out
 	}

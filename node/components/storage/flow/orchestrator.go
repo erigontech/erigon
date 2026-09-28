@@ -598,6 +598,38 @@ type TrustFilter interface {
 type peerFileClaim struct {
 	entry *snapshot.FileEntry
 	peers map[string]struct{}
+	// generation is the manifest this claim's hash came from. Members of one
+	// coordinate must come from the same generation: an accessor built from a
+	// different primary indexes past the end of the one it is paired with.
+	generation string
+}
+
+// warnOnMixedGeneration reports a coordinate whose members are claimed from
+// more than one manifest generation. The pairing only breaks later, when a
+// reader follows the accessor into the primary, so name it here where both
+// sources are still known.
+func (o *Orchestrator) warnOnMixedGeneration(entry *snapshot.FileEntry, generation string) {
+	if o.log == nil || generation == "" {
+		return
+	}
+	coord, ok := snapshot.CoordinateOf(entry.Name)
+	if !ok {
+		return
+	}
+	for name, claim := range o.peerFiles {
+		if claim == nil || claim.generation == "" || claim.generation == generation {
+			continue
+		}
+		other, ok := snapshot.CoordinateOf(name)
+		if !ok || other != coord {
+			continue
+		}
+		o.log.Warn("[flow] coordinate spans manifest generations",
+			"coordinate", fmt.Sprintf("%s.%d-%d", coord.Type, coord.From, coord.To),
+			"file", entry.Name, "generation", generation,
+			"sibling", name, "siblingGeneration", claim.generation)
+		return
+	}
 }
 
 // New creates a flow orchestrator bound to the given bus and inventory.
@@ -828,18 +860,18 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	}
 
 	for domain, peerEntries := range e.Domains {
-		o.requestGapsFor(domain, peerEntries, e.PeerID)
+		o.requestGapsFor(domain, peerEntries, e.PeerID, e.Generation)
 	}
 	// Block files use zero Domain — handle separately.
-	o.requestGapsFor("", e.Blocks, e.PeerID)
+	o.requestGapsFor("", e.Blocks, e.PeerID, e.Generation)
 
 	// Non-ranged categories. Meta + salt are phase-1 prerequisites (the
 	// EL can't start without the chain config / salts), so they count
 	// toward statePending and gate initialStateReady. Caplin is phase 2
 	// (EL doesn't need it to start exec, CL pulls it in the background).
-	o.requestSimpleGaps(e.Meta, e.PeerID, true /* phase1 */)
-	o.requestSimpleGaps(e.Salt, e.PeerID, true /* phase1 */)
-	o.requestSimpleGaps(e.Caplin, e.PeerID, false /* phase1 */)
+	o.requestSimpleGaps(e.Meta, e.PeerID, e.Generation, true /* phase1 */)
+	o.requestSimpleGaps(e.Salt, e.PeerID, e.Generation, true /* phase1 */)
+	o.requestSimpleGaps(e.Caplin, e.PeerID, e.Generation, false /* phase1 */)
 
 	// Clear awaitingBootstrap when the bootstrap-from-preverified
 	// synthetic manifest finishes processing — by this point
@@ -892,7 +924,7 @@ func (o *Orchestrator) MarkAwaitingBootstrap() {
 //     post-download bookkeeping errors with "salt not found on ReloadSalt".
 //   - phase1=false → queue behind stateReadyFired (current "blocks gate"
 //     behaviour). Use for caplin — the EL doesn't need it to start exec.
-func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peerID string, phase1 bool) {
+func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peerID, generation string, phase1 bool) {
 	if len(peerEntries) == 0 {
 		return
 	}
@@ -901,7 +933,7 @@ func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peer
 	// only if the trust filter rejects the peer.
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
-		o.recordPeerClaimLocked(entry, peerID)
+		o.recordPeerClaimLocked(entry, peerID, generation)
 	}
 	o.peerMu.Unlock()
 
@@ -963,10 +995,10 @@ func (o *Orchestrator) requestSimpleGaps(peerEntries []*snapshot.FileEntry, peer
 // vs .kvi) are non-interchangeable, so coverage is checked per role. Within
 // a role, a larger merged file subsumes smaller unmerged files — this is how
 // merge-divergent peer manifests are rationalised without duplicate work.
-func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*snapshot.FileEntry, peerID string) {
+func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*snapshot.FileEntry, peerID, generation string) {
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
-		o.recordPeerClaimLocked(entry, peerID)
+		o.recordPeerClaimLocked(entry, peerID, generation)
 	}
 	o.peerMu.Unlock()
 
@@ -1489,11 +1521,16 @@ func (o *Orchestrator) PeerFilesCount() int {
 // only add to the peer set (entries are immutable here — the orchestrator
 // trusts that two honest advertisers of the same name agree on the
 // shape; mismatches are a validation-phase concern).
-func (o *Orchestrator) recordPeerClaimLocked(entry *snapshot.FileEntry, peerID string) {
+func (o *Orchestrator) recordPeerClaimLocked(entry *snapshot.FileEntry, peerID, generation string) {
 	claim, ok := o.peerFiles[entry.Name]
 	if !ok {
-		claim = &peerFileClaim{entry: entry, peers: map[string]struct{}{}}
+		o.warnOnMixedGeneration(entry, generation)
+		claim = &peerFileClaim{entry: entry, peers: map[string]struct{}{}, generation: generation}
 		o.peerFiles[entry.Name] = claim
+	}
+	if generation != "" && claim.generation != generation {
+		o.warnOnMixedGeneration(entry, generation)
+		claim.generation = generation
 	}
 	if peerID != "" {
 		claim.peers[peerID] = struct{}{}

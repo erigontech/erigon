@@ -44,7 +44,7 @@ func TestV2ToPeerManifest_AccessorKind(t *testing.T) {
 		},
 	}
 
-	out := v2ToPeerManifest("peer-1", m)
+	out := v2ToPeerManifest("peer-1", "gen-a", m)
 
 	entries := out.Domains[snapshot.DomainAccounts]
 	require.Len(t, entries, 2)
@@ -81,7 +81,7 @@ func TestAccessor_EndToEndRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	parsed, err := downloader.ParseV2(data)
 	require.NoError(t, err)
-	peer := v2ToPeerManifest("peer", parsed)
+	peer := v2ToPeerManifest("peer", "gen-a", parsed)
 
 	kinds := map[string]snapshot.FileKind{}
 	for _, e := range peer.Domains[snapshot.DomainAccounts] {
@@ -125,7 +125,7 @@ func TestBlockList_StateFileKindSurvivesRoundTrip(t *testing.T) {
 	require.NoError(t, err)
 	parsed, err := downloader.ParseV2(data)
 	require.NoError(t, err)
-	peer := v2ToPeerManifest("peer", parsed)
+	peer := v2ToPeerManifest("peer", "gen-a", parsed)
 
 	got := map[string]snapshot.FileKind{}
 	for _, e := range peer.Blocks {
