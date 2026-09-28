@@ -2248,7 +2248,7 @@ func TestGetProofSystemContractSlotMatchesProof(t *testing.T) {
 	gspec := &types.Genesis{
 		Config: chainConfig,
 		Alloc: types.GenesisAlloc{
-			historyAddr:                 {Balance: big.NewInt(0), Code: []byte{0x00}, Nonce: 1},
+			historyAddr:                 {Balance: big.NewInt(0), Code: sloadStub, Nonce: 1},
 			common.HexToAddress("0x01"): {Balance: big.NewInt(1)},
 		},
 	}
