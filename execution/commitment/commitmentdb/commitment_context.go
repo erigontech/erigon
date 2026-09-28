@@ -252,10 +252,6 @@ func (sdc *SharedDomainsCommitmentContext) GetUpdates() *commitment.Updates {
 	return sdc.updates
 }
 
-func (sdc *SharedDomainsCommitmentContext) NewBinUpdates(plainKeys map[string]struct{}) *commitment.Updates {
-	return commitment.NewBinUpdates(sdc.tmpDir, plainKeys)
-}
-
 // SetUpdates replaces the updates buffer. Used by the commitment calculator
 // to install its accumulated touches before calling ComputeCommitment.
 func (sdc *SharedDomainsCommitmentContext) SetUpdates(updates *commitment.Updates) {
@@ -432,22 +428,6 @@ func (sdc *SharedDomainsCommitmentContext) TouchHashedKey(hashedKey []byte) {
 		return
 	}
 	sdc.updates.TouchHashedKey(hashedKey)
-}
-
-type witnessTrie interface {
-	Witnesses(ctx context.Context, updates *commitment.Updates, produceExclusionProofs bool) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error)
-}
-
-var _ witnessTrie = (*commitment.HexPatriciaHashed)(nil)
-
-// witnessCapture runs the on-the-fly fold and returns the captured superset node
-// set (root first), the fold's hashed keys, and the root hash.
-func (sdc *SharedDomainsCommitmentContext) witnessCapture(ctx context.Context, produceExclusionProofs bool) (nodes [][]byte, provedKeys [][]byte, rootHash []byte, err error) {
-	capturer, ok := sdc.Trie().(witnessTrie)
-	if !ok {
-		return nil, nil, nil, fmt.Errorf("commitment trie %T captures no witness", sdc.Trie())
-	}
-	return capturer.Witnesses(ctx, sdc.updates, produceExclusionProofs)
 }
 
 func (sdc *SharedDomainsCommitmentContext) WitnessNodesByHash(ctx context.Context) (map[string][]byte, []byte, error) {
@@ -800,11 +780,10 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			processor, ok := sdc.patriciaTrie.(interface {
 				ProcessPBinFeed(context.Context, *commitment.PBinFeed, func(*commitment.CommitProgress)) ([]byte, error)
 			})
-			if ok {
-				rootHash, err = processor.ProcessPBinFeed(ctx, pbinFeed, onProgress)
-			} else {
-				rootHash, err = sdc.patriciaTrie.Process(ctx, sdc.updates, logPrefix, onProgress, warmupConfig)
+			if !ok {
+				return nil, errors.New("pbin: trie does not process feeds")
 			}
+			rootHash, err = processor.ProcessPBinFeed(ctx, pbinFeed, onProgress)
 		}
 	case feed != nil:
 		rootHash, err = sdc.patriciaTrie.(v3Trie).ProcessFeed(ctx, feed, onProgress)

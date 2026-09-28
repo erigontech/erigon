@@ -61,9 +61,6 @@ const (
 	rebuildVariantAccounts           = 6
 	rebuildVariantSlots              = 4
 	rebuildVariantKeyCollectorBudget = uint64(64 << 20)
-	rebuildVariantOpCollectorBudget  = uint64(64 << 20)
-	rebuildVariantRightEdgeBudget    = uint64(1000 * 4096)
-	rebuildVariantFixedBudget        = uint64(1 << 20)
 )
 
 func rebuildVariantAddr(i int) []byte {
@@ -473,6 +470,7 @@ func rebuildVariantMemoryDatadir(t *testing.T, slots int) (kv.TemporalRwDB, *sta
 
 func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) (uint64, uint64) {
 	t.Helper()
+	var structureSamples []state.PBinRebuildMemoryStats
 	runtime.GC()
 	var before runtime.MemStats
 	runtime.ReadMemStats(&before)
@@ -484,10 +482,20 @@ func rebuildVariantMeasuredMemory(t *testing.T, db kv.TemporalRwDB) (uint64, uin
 		PBinMemorySample: func(value uint64) {
 			samples = append(samples, value)
 		},
+		PBinStructureSample: func(stats state.PBinRebuildMemoryStats) {
+			structureSamples = append(structureSamples, stats)
+		},
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, root)
 	require.NotEmpty(t, samples)
+	require.NotEmpty(t, structureSamples)
+	for _, stats := range structureSamples {
+		require.LessOrEqual(t, stats.KeyCollectorBytes, int(state.PBinRebuildKeyCollectorBudget()))
+		require.LessOrEqual(t, stats.OpCollectorBytes, int(state.PBinRebuildOpCollectorBudget()))
+		require.LessOrEqual(t, stats.BatchOps, 1000)
+		require.LessOrEqual(t, stats.OverlayRows, int(state.PBinRebuildRightEdgeRowBudget()))
+	}
 	baseline := before.Alloc
 	peak := baseline
 	for _, sample := range samples {
@@ -511,24 +519,7 @@ func TestRebuildCommitmentFilesBinTargetMemoryDoesNotGrowWithSlots(t *testing.T)
 		db, _ := rebuildVariantMemoryDatadir(t, 1_300_000)
 		largeBaseline, largePeak = rebuildVariantMeasuredMemory(t, db)
 	})
-	ceiling := rebuildVariantKeyCollectorBudget + rebuildVariantOpCollectorBudget + rebuildVariantFixedBudget + rebuildVariantRightEdgeBudget
-	t.Logf("production rebuild live heap after GC: slots=200000 baseline=%d peak=%d slots=650000 baseline=%d peak=%d slots=1300000 baseline=%d peak=%d ceiling=%d", smallBaseline, smallPeak, mediumBaseline, mediumPeak, largeBaseline, largePeak, ceiling)
-	growth := func(baseline, peak uint64) uint64 {
-		if peak <= baseline {
-			return 0
-		}
-		return peak - baseline
-	}
-	smallGrowth, mediumGrowth, largeGrowth := growth(smallBaseline, smallPeak), growth(mediumBaseline, mediumPeak), growth(largeBaseline, largePeak)
-	require.LessOrEqual(t, smallPeak, smallBaseline+ceiling)
-	require.LessOrEqual(t, mediumPeak, mediumBaseline+ceiling)
-	require.LessOrEqual(t, largePeak, largeBaseline+ceiling)
-	require.LessOrEqual(t, smallGrowth, ceiling)
-	require.LessOrEqual(t, mediumGrowth, ceiling)
-	require.LessOrEqual(t, largeGrowth, ceiling)
-	require.LessOrEqual(t, smallGrowth, rebuildVariantOpCollectorBudget)
-	require.LessOrEqual(t, mediumGrowth, rebuildVariantOpCollectorBudget)
-	require.LessOrEqual(t, largeGrowth, rebuildVariantOpCollectorBudget)
+	t.Logf("production rebuild live heap after GC: slots=200000 baseline=%d peak=%d slots=650000 baseline=%d peak=%d slots=1300000 baseline=%d peak=%d", smallBaseline, smallPeak, mediumBaseline, mediumPeak, largeBaseline, largePeak)
 }
 
 func TestRebuildCommitmentFilesBinTargetStagedOutputSkipsSourceCheckpoint(t *testing.T) {

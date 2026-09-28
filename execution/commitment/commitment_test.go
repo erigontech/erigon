@@ -862,27 +862,6 @@ func TestUpdatesPlainKeys_AllModes(t *testing.T) {
 	}
 }
 
-func TestNewBinUpdatesFromPlainKeys(t *testing.T) {
-	t.Parallel()
-
-	accountKey := string(bytes.Repeat([]byte{0x01}, length.Addr))
-	storageKey := string(append(bytes.Repeat([]byte{0x01}, length.Addr), bytes.Repeat([]byte{0x02}, length.Hash)...))
-	deletedKey := string(bytes.Repeat([]byte{0x03}, length.Addr))
-	hexUpdates := NewUpdates(ModeUpdate, t.TempDir(), KeyToHexNibbleHash)
-	defer hexUpdates.Close()
-	for _, key := range []string{accountKey, storageKey, deletedKey} {
-		hexUpdates.TouchPlainKey(key, []byte("value"), hexUpdates.TouchStorage)
-	}
-	hexUpdates.TouchPlainKey(deletedKey, nil, hexUpdates.TouchStorage)
-	plainKeys := hexUpdates.PlainKeys()
-	updates := NewBinUpdates(t.TempDir(), plainKeys)
-	defer updates.Close()
-
-	require.Equal(t, ModeDirect, updates.Mode())
-	require.Equal(t, plainKeys, updates.PlainKeys())
-	require.EqualValues(t, len(plainKeys), updates.Size())
-}
-
 func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	t.Parallel()
 
@@ -925,14 +904,6 @@ func TestCommitmentMetricsSinkSeparatesFolds(t *testing.T) {
 	key2[0] = 2
 	ctx := &metricsPatriciaContext{}
 
-	binUpdates := NewBinUpdates(t.TempDir(), map[string]struct{}{string(key): {}, string(key2): {}})
-	binTrie := NewPBinPatriciaHashed(ctx)
-	binTrie.SetMetricsEnabled(false)
-	_, err := binTrie.Process(t.Context(), binUpdates, "bin", nil, WarmupConfig{})
-	require.NoError(t, err)
-	binUpdates.Close()
-	binTrie.Release()
-
 	require.Equal(t, loadsBefore, mxTrieStateLoadRate.GetValueUint64())
 	require.Equal(t, skipsBefore, mxTrieStateSkipRate.GetValueUint64())
 
@@ -941,7 +912,7 @@ func TestCommitmentMetricsSinkSeparatesFolds(t *testing.T) {
 	hexUpdates.TouchPlainKey(string(key2), nil, nil)
 	hexTrie := NewHexPatriciaHashed(length.Addr, ctx, DefaultTrieConfig())
 	hexTrie.SetMetricsEnabled(true)
-	_, err = hexTrie.Process(t.Context(), hexUpdates, "hex", nil, WarmupConfig{})
+	_, err := hexTrie.Process(t.Context(), hexUpdates, "hex", nil, WarmupConfig{})
 	require.NoError(t, err)
 	hexUpdates.Close()
 	hexTrie.Release()

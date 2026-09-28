@@ -69,19 +69,9 @@ func sourceDatadirFixture(t *testing.T) datadir.Dirs {
 	return dirs
 }
 
-// binSourceDatadirFixture is a source datadir that records the bin trie. It
-// carries no commitment history: convert-format rewrites domain files only.
 func binSourceDatadirFixture(t *testing.T) datadir.Dirs {
 	t.Helper()
 	dirs := sourceDatadirFixture(t)
-	for _, p := range []string{
-		filepath.Join(dirs.SnapHistory, "v1.0-commitment.0-64.v"),
-		filepath.Join(dirs.SnapIdx, "v1.0-commitment.0-64.ef"),
-		filepath.Join(dirs.SnapAccessors, "v1.0-commitment.0-64.vi"),
-		filepath.Join(dirs.SnapAccessors, "v1.0-commitment.0-64.efi"),
-	} {
-		require.NoError(t, dir.RemoveFile(p))
-	}
 	refs := false
 	variant, hash := dbstate.TrieVariantBin, commitment.PBinHashBlake3
 	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
@@ -155,28 +145,6 @@ func TestRequireRebuildOutputForBinTarget(t *testing.T) {
 	require.NoError(t, requireRebuildOutput(hex, ""))
 }
 
-func TestRequireConvertFormatOutput(t *testing.T) {
-	require.ErrorContains(t, requireConvertFormatOutput(""), "--output.datadir")
-	require.NoError(t, requireConvertFormatOutput(t.TempDir()))
-}
-
-func TestConvertFormatRegistersOutputFlags(t *testing.T) {
-	for _, name := range []string{"output.datadir", "resume", "verify.sample"} {
-		require.NotNil(t, cmdCommitmentConvertFormat.Flags().Lookup(name), name)
-	}
-}
-
-func TestConvertFormatHelpDescribesOutputDatadirModel(t *testing.T) {
-	help := cmdCommitmentConvertFormat.Long
-	require.Contains(t, help, "--output.datadir")
-	require.Contains(t, help, "--resume")
-	require.Contains(t, help, "--verify.sample")
-	require.Contains(t, help, "datadir remains unchanged")
-	require.NotContains(t, help, "backup/domains")
-	require.NotContains(t, help, "--restore")
-	require.NotContains(t, help, "--continue")
-}
-
 func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
@@ -209,47 +177,6 @@ func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {
 	require.ErrorIs(t, err, os.ErrNotExist)
 	_, err = os.Stat(filepath.Join(out.dirs.SnapAccessors, "v1.0-commitment.0-64.efi"))
 	require.ErrorIs(t, err, os.ErrNotExist)
-}
-
-func TestLinkCommitmentSnapshotsLinksAllCommitmentFiles(t *testing.T) {
-	src := sourceDatadirFixture(t)
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), dbstate.RebuildTarget{}, false, log.New(), preserveSourceSettings)
-	require.NoError(t, err)
-
-	linked, err := linkCommitmentSnapshots(src.Snap, out.dirs.Snap)
-	require.NoError(t, err)
-	require.Equal(t, 6, linked)
-	require.NoError(t, filepath.WalkDir(src.Snap, func(srcPath string, entry os.DirEntry, err error) error {
-		if err != nil || entry.IsDir() || entry.Name() == dbstate.ERIGONDB_SETTINGS_FILE {
-			return err
-		}
-		require.True(t, entry.Type().IsRegular(), srcPath)
-		rel, err := filepath.Rel(src.Snap, srcPath)
-		require.NoError(t, err)
-		srcInfo, err := os.Stat(srcPath)
-		require.NoError(t, err)
-		outInfo, err := os.Stat(filepath.Join(out.dirs.Snap, rel))
-		require.NoError(t, err)
-		require.True(t, os.SameFile(srcInfo, outInfo), "%s must be a hardlink", rel)
-		return nil
-	}))
-
-	for _, name := range []string{
-		"domain/v1.0-commitment.0-64.kv",
-		"domain/v1.0-commitment.0-64.kvi",
-		"history/v1.0-commitment.0-64.v",
-		"idx/v1.0-commitment.0-64.ef",
-		"accessor/v1.0-commitment.0-64.vi",
-		"accessor/v1.0-commitment.0-64.efi",
-	} {
-		srcPath := filepath.Join(src.Snap, name)
-		outPath := filepath.Join(out.dirs.Snap, name)
-		srcInfo, err := os.Stat(srcPath)
-		require.NoError(t, err)
-		outInfo, err := os.Stat(outPath)
-		require.NoError(t, err)
-		require.True(t, os.SameFile(srcInfo, outInfo), "%s must be a hardlink", name)
-	}
 }
 
 func TestStageRebuildOutputLeavesSourceIntact(t *testing.T) {
@@ -431,56 +358,6 @@ func TestRebuildOutputSettingsHexTargetCarriesSourceRefs(t *testing.T) {
 	require.Nil(t, final.TrieVariant)
 	require.Nil(t, final.TrieHash)
 	require.True(t, final.RefsInCommitmentBranches())
-}
-
-func TestConvertFormatOutputPreservesSourceSettings(t *testing.T) {
-	src := binSourceDatadirFixture(t)
-	settingsPath := filepath.Join(src.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
-	sourceSettings, err := os.ReadFile(settingsPath)
-	require.NoError(t, err)
-
-	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), dbstate.RebuildTarget{}, false, log.New(), preserveSourceSettings)
-	require.NoError(t, err)
-
-	outputSettings, err := os.ReadFile(filepath.Join(out.dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE))
-	require.NoError(t, err)
-	require.Equal(t, sourceSettings, outputSettings)
-
-	sourceInfo, err := os.Stat(settingsPath)
-	require.NoError(t, err)
-	outputInfo, err := os.Stat(filepath.Join(out.dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE))
-	require.NoError(t, err)
-	require.False(t, os.SameFile(sourceInfo, outputInfo))
-}
-
-func TestConvertFormatStagingLeavesSourceSnapshotsUnchanged(t *testing.T) {
-	src := binSourceDatadirFixture(t)
-	before := snapshotTree(t, src.Snap)
-
-	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), dbstate.RebuildTarget{}, false, log.New(), preserveSourceSettings)
-	require.NoError(t, err)
-
-	require.Equal(t, before, snapshotTree(t, src.Snap))
-}
-
-func TestConvertFormatRequiresBinarySource(t *testing.T) {
-	require.ErrorContains(t, requireConvertFormatSource(sourceDatadirFixture(t)), "requires a binary-trie")
-	require.NoError(t, requireConvertFormatSource(binSourceDatadirFixture(t)))
-}
-
-func TestConvertFormatRefusesCommitmentHistory(t *testing.T) {
-	for _, planted := range []struct {
-		dir  func(datadir.Dirs) string
-		name string
-	}{
-		{func(d datadir.Dirs) string { return d.SnapHistory }, "v1.0-commitment.0-64.v"},
-		{func(d datadir.Dirs) string { return d.SnapIdx }, "v1.0-commitment.0-64.ef"},
-		{func(d datadir.Dirs) string { return d.SnapAccessors }, "v1.0-commitment.0-64.vi"},
-	} {
-		src := binSourceDatadirFixture(t)
-		require.NoError(t, os.WriteFile(filepath.Join(planted.dir(src), planted.name), []byte{}, 0o644))
-		require.ErrorContains(t, requireConvertFormatSource(src), "commitment history", planted.name)
-	}
 }
 
 func TestStageRebuildOutputDoesNotCreateSourceMigrations(t *testing.T) {

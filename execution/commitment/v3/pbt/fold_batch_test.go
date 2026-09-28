@@ -91,6 +91,26 @@ func TestTrieRowArenaReusesAllChunksAfterReset(t *testing.T) {
 	}
 }
 
+func TestTrieCellArenaReusesAllChunksAfterReset(t *testing.T) {
+	ops := make([]Op, 1000)
+	for i := range ops {
+		ops[i] = Op{Key: trieCodeKey(byte(i>>8), byte(i), byte(i)), Value: testTrieValue(byte(i))}
+	}
+	trie := NewTrie(newTrieTestContext())
+	chunks := 0
+	for range 10 {
+		trie.ResetContext(newTrieTestContext())
+		_, err := trie.Process(ops)
+		require.NoError(t, err)
+		if chunks == 0 {
+			chunks = len(trie.cellChunks)
+		}
+		if len(trie.cellChunks) != chunks {
+			t.Fatalf("cell arena retained %d chunks", len(trie.cellChunks))
+		}
+	}
+}
+
 func TestTrieSteadyStateAllocations(t *testing.T) {
 	ops := make([]Op, 0, 64)
 	for i := range 64 {

@@ -891,11 +891,12 @@ type RebuildTarget struct {
 	Variant  commitment.TrieVariant
 	HashName string // H for a bin target; empty keeps the suite this process selected
 	// MaxShardSteps caps how many steps one shard covers; 0 sizes it from the machine.
-	MaxShardSteps    uint64
-	PBinBatchOps     uint64
-	PBinBatchBytes   uint64
-	PBinMemorySample func(uint64)
-	PBinReadSample   func([]pbt.Op, [][]byte)
+	MaxShardSteps       uint64
+	PBinBatchOps        uint64
+	PBinBatchBytes      uint64
+	PBinMemorySample    func(uint64)
+	PBinReadSample      func([]pbt.Op, [][]byte)
+	PBinStructureSample func(PBinRebuildMemoryStats)
 }
 
 // DefaultRebuildTarget is what a rebuild produces when the caller names no
@@ -922,11 +923,13 @@ func (t RebuildTarget) Resolve() (RebuildTarget, error) {
 		batchOps, batchBytes := t.PBinBatchOps, t.PBinBatchBytes
 		memorySample := t.PBinMemorySample
 		readSample := t.PBinReadSample
+		structureSample := t.PBinStructureSample
 		t = DefaultRebuildTarget()
 		t.MaxShardSteps = shardSteps
 		t.PBinBatchOps, t.PBinBatchBytes = batchOps, batchBytes
 		t.PBinMemorySample = memorySample
 		t.PBinReadSample = readSample
+		t.PBinStructureSample = structureSample
 	case commitment.VariantBinPatriciaTrie:
 		if t.HashName == "" {
 			t.HashName = commitment.PBinHashSuiteName()
@@ -1280,15 +1283,16 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				TxnTo:    rangeToTxNum,
 				Keys:     totalKeys,
 
-				BlockNumber:       blockNum,
-				TxnNumber:         currentTxNum,
-				LogPrefix:         fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
-				PBinBatchOps:      target.PBinBatchOps,
-				PBinBatchBytes:    target.PBinBatchBytes,
-				PBinTargetVariant: target.Variant,
-				PBinTargetHash:    target.HashName,
-				PBinMemorySample:  target.PBinMemorySample,
-				PBinReadSample:    target.PBinReadSample,
+				BlockNumber:         blockNum,
+				TxnNumber:           currentTxNum,
+				LogPrefix:           fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
+				PBinBatchOps:        target.PBinBatchOps,
+				PBinBatchBytes:      target.PBinBatchBytes,
+				PBinTargetVariant:   target.Variant,
+				PBinTargetHash:      target.HashName,
+				PBinMemorySample:    target.PBinMemorySample,
+				PBinReadSample:      target.PBinReadSample,
+				PBinStructureSample: target.PBinStructureSample,
 				PBinResumePath: func() string {
 					if target.Variant != commitment.VariantBinPatriciaTrie {
 						return ""
@@ -1458,14 +1462,16 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		runtime.ReadMemStats(&memory)
 		cfg.PBinMemorySample(memory.Alloc)
 	}
+	sampleStructure := func(stats PBinRebuildMemoryStats) {
+		if cfg.PBinStructureSample != nil {
+			cfg.PBinStructureSample(stats)
+		}
+	}
 	sampleMemory()
 	var err error
 	var plainKeyCollector *etl.Collector
 	var plainKeyTmpDir string
-	_, processPBinOps := sd.GetCommitmentCtx().Trie().(interface {
-		ProcessPBinOps(context.Context, []pbt.Op, func(*commitment.CommitProgress)) ([]byte, error)
-	})
-	if cfg.Variant == commitment.VariantBinPatriciaTrie && processPBinOps {
+	if cfg.Variant == commitment.VariantBinPatriciaTrie {
 		plainKeyTmpDir, err = os.MkdirTemp("", "erigon-pbin-rebuild-keys-")
 		if err != nil {
 			return nil, err
@@ -1477,7 +1483,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	if removals != nil && len(visComFiles) > 0 {
 		rf := time.Now()
 		touched, err := removals(func(key []byte) error {
-			if processPBinOps {
+			if cfg.Variant == commitment.VariantBinPatriciaTrie {
 				return plainKeyCollector.Collect(key, []byte{})
 			}
 			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
@@ -1495,19 +1501,17 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	for ok, key, value := next(); ; ok, key, value = next() {
 		if len(key) > 0 {
 			if cfg.Variant == commitment.VariantBinPatriciaTrie {
-				if processPBinOps {
-					if collectErr == nil {
-						collectErr = plainKeyCollector.Collect(key, []byte{})
-					}
-				} else {
-					sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
-					if len(key) == length.Addr {
-						sd.GetCommitmentCtx().TouchKey(kv.CodeDomain, string(key), nil)
-					}
+				if collectErr == nil {
+					collectErr = plainKeyCollector.Collect(key, []byte{})
 				}
 				processed++
 				if processed%pbinRebuildMemorySampleInterval == 0 {
 					sampleMemory()
+				}
+				if plainKeyCollector != nil {
+					sampleStructure(PBinRebuildMemoryStats{
+						KeyCollectorBytes: plainKeyCollector.InMemorySize(),
+					})
 				}
 				if !ok {
 					break
@@ -1537,7 +1541,7 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	collectionSpent := time.Since(sf)
 	var codeStats commitment.PBinCodeStats
 	var rh []byte
-	if cfg.Variant == commitment.VariantBinPatriciaTrie && processPBinOps {
+	if cfg.Variant == commitment.VariantBinPatriciaTrie {
 		if err := plainKeyCollector.Flush(); err != nil {
 			return nil, err
 		}
@@ -1571,8 +1575,9 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		}
 		processedBatch := false
 		emitter := pbt.NewRebuildFeedOpEmitter()
-		err = pbinForEachRebuildOpStreamLookaheadAfter(tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, nextKey []byte, final bool) error {
+		err = pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir, batchOps, batchBytes, resumeKey, func(batch []pbt.Op, nextKey []byte, final bool) error {
 			processedBatch = true
+			sampleStructure(PBinRebuildMemoryStats{BatchOps: len(batch)})
 			sd.GetCommitmentCtx().SetPBinOps(batch)
 			var current *pbinRebuildOverlay
 			var readKeys [][]byte
@@ -1600,6 +1605,9 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			if cfg.PBinReadSample != nil {
 				cfg.PBinReadSample(batch, readKeys)
 			}
+			if current != nil {
+				sampleStructure(PBinRebuildMemoryStats{OverlayRows: len(current.writes), BatchOps: len(batch)})
+			}
 			sampleMemory()
 			if final {
 				if err := current.Flush(); err != nil {
@@ -1613,6 +1621,8 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 			return writePBinRebuildCheckpoint(cfg.PBinResumePath, batchOperationKey(batch[len(batch)-1]), overlay, RebuildTarget{Variant: cfg.PBinTargetVariant, HashName: cfg.PBinTargetHash})
 		}, func(emit func(pbt.Op) error) error {
 			return pbinRebuildFeedStreamWithSample(plainKeyCollector, reader, emitter, emit, sampleMemory)
+		}, func(bytes int) {
+			sampleStructure(PBinRebuildMemoryStats{OpCollectorBytes: bytes})
 		})
 		if err != nil {
 			return nil, err
@@ -2079,25 +2089,33 @@ type codeStatsTrie interface {
 }
 
 type rebuiltCommitment struct {
-	Variant           commitment.TrieVariant
-	RootHash          []byte // root hash of this commitment. set once commit is finished
-	StepFrom          kv.Step
-	StepTo            kv.Step
-	TxnFrom           uint64
-	TxnTo             uint64
-	Keys              uint64 // amount of keys in this range
-	KeysProcessed     uint64 // amount of keys this shard walked. set once commit is finished
-	CodeStats         commitment.PBinCodeStats
-	BlockNumber       uint64 // block number for this commitment
-	TxnNumber         uint64 // tx number for this commitment
-	LogPrefix         string
-	PBinBatchOps      uint64
-	PBinBatchBytes    uint64
-	PBinTargetVariant commitment.TrieVariant
-	PBinTargetHash    string
-	PBinMemorySample  func(uint64)
-	PBinReadSample    func([]pbt.Op, [][]byte)
-	PBinResumePath    string
+	Variant             commitment.TrieVariant
+	RootHash            []byte // root hash of this commitment. set once commit is finished
+	StepFrom            kv.Step
+	StepTo              kv.Step
+	TxnFrom             uint64
+	TxnTo               uint64
+	Keys                uint64 // amount of keys in this range
+	KeysProcessed       uint64 // amount of keys this shard walked. set once commit is finished
+	CodeStats           commitment.PBinCodeStats
+	BlockNumber         uint64 // block number for this commitment
+	TxnNumber           uint64 // tx number for this commitment
+	LogPrefix           string
+	PBinBatchOps        uint64
+	PBinBatchBytes      uint64
+	PBinTargetVariant   commitment.TrieVariant
+	PBinTargetHash      string
+	PBinMemorySample    func(uint64)
+	PBinReadSample      func([]pbt.Op, [][]byte)
+	PBinStructureSample func(PBinRebuildMemoryStats)
+	PBinResumePath      string
+}
+
+type PBinRebuildMemoryStats struct {
+	KeyCollectorBytes int
+	OpCollectorBytes  int
+	OverlayRows       int
+	BatchOps          int
 }
 
 const (
@@ -2105,8 +2123,15 @@ const (
 	pbinRebuildMaxBytes                 = 64 << 20
 	pbinRebuildKeyCollectorBufferBudget = 64 * datasize.MB
 	pbinRebuildOpCollectorBufferBudget  = 64 * datasize.MB
+	pbinRebuildRightEdgeRowBudget       = 100_000
 	pbinRebuildMemorySampleInterval     = 64 * 1024
 )
+
+func PBinRebuildKeyCollectorBudget() uint64 { return uint64(pbinRebuildKeyCollectorBufferBudget) }
+
+func PBinRebuildOpCollectorBudget() uint64 { return uint64(pbinRebuildOpCollectorBufferBudget) }
+
+func PBinRebuildRightEdgeRowBudget() uint64 { return pbinRebuildRightEdgeRowBudget }
 
 func pbinForEachRebuildBatch(ops []pbt.Op, tmpDir string, maxOps, maxBytes int, visit func([]pbt.Op, bool) error) error {
 	return pbinForEachRebuildBatchAfter(ops, tmpDir, maxOps, maxBytes, nil, visit)
@@ -2130,6 +2155,10 @@ func pbinForEachRebuildOpStreamAfter(tmpDir string, maxOps, maxBytes int, afterK
 }
 
 func pbinForEachRebuildOpStreamLookaheadAfter(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error) error {
+	return pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir, maxOps, maxBytes, afterKey, visit, stream, nil)
+}
+
+func pbinForEachRebuildOpStreamLookaheadAfterWithSample(tmpDir string, maxOps, maxBytes int, afterKey []byte, visit func([]pbt.Op, []byte, bool) error, stream func(func(pbt.Op) error) error, sample func(int)) error {
 	collector := etl.NewCollector("[rebuild_commitment_pbin]", tmpDir, etl.NewSortableBuffer(pbinRebuildOpCollectorBufferBudget), log.Root())
 	defer collector.Close()
 	emit := func(op pbt.Op) error {
@@ -2140,6 +2169,9 @@ func pbinForEachRebuildOpStreamLookaheadAfter(tmpDir string, maxOps, maxBytes in
 		}
 		if err := collector.Collect(key, encoded); err != nil {
 			return err
+		}
+		if sample != nil {
+			sample(collector.InMemorySize())
 		}
 		return nil
 	}

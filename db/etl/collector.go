@@ -157,6 +157,16 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 	return c
 }
 
+func (c *Collector) InMemorySize() int {
+	if c.buf == nil {
+		return 0
+	}
+	if sized, ok := c.buf.(interface{ Size() int }); ok {
+		return sized.Size()
+	}
+	return 0
+}
+
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	if c.buf == nil || c.buf.Len() == 0 {
 		return nil

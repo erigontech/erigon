@@ -36,6 +36,14 @@ import (
 type conformanceVectors struct {
 	Source       string `json:"source"`
 	SourceCommit string `json:"source_commit"`
+	TrieRoots    []struct {
+		Name    string `json:"name"`
+		Entries []struct {
+			Key   string `json:"key"`
+			Value string `json:"value"`
+		} `json:"entries"`
+		Root string `json:"root"`
+	} `json:"trie_roots"`
 
 	Embedding struct {
 		Address20       string            `json:"address20"`
@@ -99,6 +107,9 @@ func validateConformance(v *conformanceVectors) error {
 	if len(v.EncodeBasicData) == 0 {
 		return fmt.Errorf("conformance basic-data collection is empty")
 	}
+	if len(v.TrieRoots) == 0 {
+		return fmt.Errorf("conformance trie-roots collection is empty")
+	}
 	return nil
 }
 
@@ -146,6 +157,19 @@ func TestPBinConformanceEmbedding(t *testing.T) {
 		id, err := strconv.Atoi(chunk)
 		require.NoError(t, err)
 		require.Equal(t, want, hexKey(keys.CodeChunkKey(codeHash, id)), chunk)
+	}
+}
+
+func TestPBinConformanceTrieRoots(t *testing.T) {
+	for _, vector := range loadConformance(t).TrieRoots {
+		t.Run(vector.Name, func(t *testing.T) {
+			entries := make([]Entry, 0, len(vector.Entries))
+			for _, entry := range vector.Entries {
+				entries = append(entries, Entry{Key: unhex(t, entry.Key), Value: unhex(t, entry.Value)})
+			}
+			root := StateRootWithHash(entries, blake3Hash)
+			require.Equal(t, vector.Root, "0x"+hex.EncodeToString(root[:]))
+		})
 	}
 }
 

@@ -393,7 +393,7 @@ func TestSharedDomainsCodeKeysFollowTouchedUpdates(t *testing.T) {
 	address := make([]byte, 20)
 	sdc.TouchKey(kv.CodeDomain, string(address), []byte{1})
 	require.Equal(t, map[string]struct{}{string(address): {}}, sdc.CodeKeys())
-	sdc.SetUpdates(sdc.NewBinUpdates(nil))
+	sdc.SetUpdates(commitment.NewUpdates(commitment.ModeDirect, "", commitment.KeyToHexNibbleHash))
 	require.Empty(t, sdc.CodeKeys())
 }
 

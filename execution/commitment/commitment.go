@@ -185,9 +185,7 @@ type TrieVariant string
 const (
 	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
-	// VariantBinPatriciaTrie is EIP-8297's binary tree. Experimental: a
-	// whole-datadir property resolved at first start, sequential only, and
-	// unsupported on the paths listed in PBinPatriciaHashed's doc.
+	// VariantBinPatriciaTrie is EIP-8297's binary tree.
 	VariantBinPatriciaTrie  TrieVariant = "bin-patricia-hashed"
 	VariantCommitmentV3     TrieVariant = "commitment-v3"
 	CommitmentV3StateMarker byte        = 0x04
@@ -229,6 +227,7 @@ func IsCommitmentStateKey(key []byte) bool {
 var (
 	NewCommitmentV3Trie  func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
 	NewCommitmentBinTrie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+	ErrPBinUnsupported   = errors.New("pbin: unsupported under the bin commitment variant")
 )
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
@@ -244,15 +243,10 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
 		return trie, tree
 	case VariantBinPatriciaTrie:
-		if NewCommitmentBinTrie != nil {
-			return NewCommitmentBinTrie(tmpdir, cfg)
+		if NewCommitmentBinTrie == nil {
+			panic("binary trie selected without importing execution/commitment/v3/pbt")
 		}
-		// ModeDirect regardless of the argument: the parallel prefix trie is a
-		// hex-nibble structure and the binary key space has no nibbles.
-		trie := NewPBinPatriciaHashed(nil)
-		trie.setHashSuite(pbinSelectedSum())
-		tree := NewBinUpdates(tmpdir, nil)
-		return trie, tree
+		return NewCommitmentBinTrie(tmpdir, cfg)
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
@@ -1636,14 +1630,6 @@ func (t *Updates) ForEach(fn func(string, *Update)) {
 		update := *item.update
 		fn(key, &update)
 	}
-}
-
-func NewBinUpdates(tmpdir string, plainKeys map[string]struct{}) *Updates {
-	updates := NewUpdates(ModeDirect, tmpdir, pbinKeyHasherWith(pbinSelectedSum()))
-	for key := range plainKeys {
-		updates.TouchPlainKey(key, nil, nil)
-	}
-	return updates
 }
 
 func (t *Updates) Size() (updates uint64) {

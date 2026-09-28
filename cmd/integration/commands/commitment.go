@@ -153,14 +153,6 @@ func init() {
 	withConvertFlags(cmdCommitmentConvert)
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
 
-	// commitment convert-format
-	withChain(cmdCommitmentConvertFormat)
-	withDataDir(cmdCommitmentConvertFormat)
-	withConfig(cmdCommitmentConvertFormat)
-	withExperimentalCommitment(cmdCommitmentConvertFormat)
-	withConvertFormatFlags(cmdCommitmentConvertFormat)
-	commitmentCmd.AddCommand(cmdCommitmentConvertFormat)
-
 	// commitment visualize
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeOutputDir, "output", "", "existing directory to store output HTML. By default, same as commitment files")
 	cmdCommitmentVisualize.Flags().IntVarP(&visualizeConcurrency, "concurrency", "j", 4, "amount of concurrently processed files")
@@ -392,13 +384,6 @@ func requireRebuildOutput(target dbstate.RebuildTarget, outPath string) error {
 	return nil
 }
 
-func requireConvertFormatOutput(outPath string) error {
-	if outPath == "" {
-		return errors.New("commitment convert-format needs --output.datadir: the source datadir is a read-only input")
-	}
-	return nil
-}
-
 // refuseSqueezeForBinTarget rejects --squeeze for a bin rebuild. Squeeze rewrites
 // commitment values through BranchData, and a bin branch payload is not BranchData:
 // the same field bits name different things in the two encodings, so the pass would
@@ -429,23 +414,9 @@ func refuseRebuildIntoBinSource(target dbstate.RebuildTarget, src datadir.Dirs) 
 		src.DataDir, target.Variant, source.TrieHashName())
 }
 
-type stageRebuildOutputMode uint8
-
-const (
-	writeTargetSettings stageRebuildOutputMode = iota
-	preserveSourceSettings
-)
-
-func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger, modes ...stageRebuildOutputMode) (*rebuildOutput, error) {
+func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger) (*rebuildOutput, error) {
 	if outPath == "" {
 		return nil, errors.New("commitment rebuild: empty output datadir")
-	}
-	mode := writeTargetSettings
-	if len(modes) > 0 {
-		mode = modes[0]
-	}
-	if len(modes) > 1 {
-		return nil, errors.New("commitment rebuild: more than one output staging mode")
 	}
 	// Nesting either way makes the hardlink walk descend into what it is creating.
 	// Checked before datadir.New, which would create that tree inside the source.
@@ -480,7 +451,7 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 	}
 
 	o := &rebuildOutput{dirs: out, target: target, source: source}
-	if len(existing) > 0 && mode != preserveSourceSettings {
+	if len(existing) > 0 {
 		if err := requireKeptFilesMatchTarget(out, o.settings()); err != nil {
 			return nil, err
 		}
@@ -496,24 +467,8 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 		return nil, err
 	}
 
-	if mode == preserveSourceSettings {
-		sourceSettingsPath := filepath.Join(src.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
-		outputSettingsPath := filepath.Join(out.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
-		settingsData, err := os.ReadFile(sourceSettingsPath)
-		if err != nil {
-			return nil, fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
-		}
-		if err := os.WriteFile(outputSettingsPath, settingsData, 0o644); err != nil {
-			return nil, fmt.Errorf("commitment rebuild: copy source erigondb.toml: %w", err)
-		}
-	} else {
-		// The toml names the target before the rebuild starts, not after it finishes:
-		// the rebuild reopens this directory as a datadir, and the settings resolver
-		// refuses a bin run against a directory that reads as hex. It also leaves an
-		// interrupted run self-describing rather than passing its bin files off as hex.
-		if err := dbstate.WriteErigonDBSettings(out, o.settings()); err != nil {
-			return nil, err
-		}
+	if err := dbstate.WriteErigonDBSettings(out, o.settings()); err != nil {
+		return nil, err
 	}
 	logger.Info("[commitment_rebuild] staged output datadir", "path", out.DataDir,
 		"linkedFiles", linked, "keptCommitmentFiles", len(existing))
@@ -966,43 +921,6 @@ func linkSnapshotsExceptCommitment(srcRoot, dstRoot string) (int, error) {
 	return linked, err
 }
 
-func linkCommitmentSnapshots(srcRoot, dstRoot string) (int, error) {
-	linked := 0
-	err := filepath.WalkDir(srcRoot, func(p string, d os.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		rel, err := filepath.Rel(srcRoot, p)
-		if err != nil {
-			return err
-		}
-		dst := filepath.Join(dstRoot, rel)
-		if d.IsDir() {
-			if rel == "." {
-				return nil
-			}
-			return os.MkdirAll(dst, 0o755)
-		}
-		if !d.Type().IsRegular() {
-			return fmt.Errorf("commitment convert-format: %s is not a regular file; the output can only be staged from a tree the hardlink walk can reproduce", p)
-		}
-		if !isCommitmentFileName(d.Name()) {
-			return nil
-		}
-		if _, err := os.Lstat(dst); err == nil {
-			return nil
-		} else if !os.IsNotExist(err) {
-			return err
-		}
-		if err := os.Link(p, dst); err != nil {
-			return fmt.Errorf("commitment convert-format: hardlink %s: %w (the output datadir must be on the same filesystem as the source)", rel, err)
-		}
-		linked++
-		return nil
-	})
-	return linked, err
-}
-
 // integration commitment rebuild
 var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "rebuild",
@@ -1402,120 +1320,6 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
-}
-
-// integration commitment convert-format
-var cmdCommitmentConvertFormat = &cobra.Command{
-	Use:   "convert-format",
-	Short: "Rewrite binary-trie commitment .kv files into the current pbin record format",
-	Long: `Offline, one-way converter for a datadir built before the pbin record format
-carried a version. It drops the touchMap/afterMap header and the per-field
-lengths from every branch record, omits the prefix on storage leaves, and adds
-the format byte to the trie state blob.
-
-Every rewritten record is read back at its own depth and compared before it is
-written, so a record whose omitted prefix is not the derivable one fails the run
-rather than shipping.
-
-An input record naming one cell triggers an intentional panic because it cannot
-come from the pbin folding algorithm. That failure can leave partial output;
-investigate the output and do not resume that run.
-
-The command requires --output.datadir. It stages the source tree there with
-hardlinks, then replaces only legacy commitment files in the output. The source
-datadir remains unchanged; the output must be separate from the source and on
-the same filesystem. Files already in the current format stay hardlinked and
-are left alone.
-
-Use --resume to continue an interrupted conversion. Complete output shards are
-kept and incomplete shards are retried. Use --verify.sample=N to sequentially
-read back every N-th converted legacy branch record; zero disables this check.
-There is no backup or restore mode: remove the output datadir to discard it.
-
-Example:
-  integration commitment convert-format --datadir /path/to/source --output.datadir /path/to/output --chain mainnet --verify.sample=1000`,
-	Run: func(cmd *cobra.Command, args []string) {
-		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		if err := requireConvertFormatOutput(rebuildOutputDatadir); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-
-		src := datadir.Open(datadirCli)
-		if err := requireConvertFormatSource(src); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-		out, err := stageRebuildOutput(src, rebuildOutputDatadir, dbstate.RebuildTarget{}, resume, logger, preserveSourceSettings)
-		if err != nil {
-			logger.Error(err.Error())
-			return
-		}
-		if _, err := linkCommitmentSnapshots(src.Snap, out.dirs.Snap); err != nil {
-			logger.Error(err.Error())
-			return
-		}
-		datadirCli = out.dirs.DataDir
-
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata).Readonly(true), false, chain, logger)
-		if err != nil {
-			logger.Error("Opening DB", "error", err)
-			return
-		}
-		defer db.Close()
-
-		if err := commitmentConvertFormat(db, ctx, logger); err != nil {
-			if !errors.Is(err, context.Canceled) {
-				logger.Error(err.Error())
-			}
-			return
-		}
-	},
-}
-
-func requireConvertFormatSource(src datadir.Dirs) error {
-	settings, err := dbstate.ReadErigonDBSettings(src)
-	if err != nil {
-		return fmt.Errorf("commitment convert-format: read source erigondb.toml: %w", err)
-	}
-	if settings.TrieVariantName() != dbstate.TrieVariantBin {
-		return fmt.Errorf("commitment convert-format requires a binary-trie source datadir, got %s", settings.TrieVariantName())
-	}
-	return requireNoCommitmentHistory(src)
-}
-
-// Conversion rewrites domain .kv files only, so a datadir built with
-// --keep.execution.proofs would keep serving pre-version records out of history.
-func requireNoCommitmentHistory(src datadir.Dirs) error {
-	for _, root := range []string{src.SnapHistory, src.SnapIdx, src.SnapAccessors} {
-		entries, err := os.ReadDir(root)
-		if err != nil {
-			if os.IsNotExist(err) {
-				continue
-			}
-			return err
-		}
-		for _, e := range entries {
-			if e.IsDir() || !isCommitmentFileName(e.Name()) {
-				continue
-			}
-			return fmt.Errorf("commitment convert-format: %s is commitment history, which this command does not rewrite; convert a datadir without it", filepath.Join(root, e.Name()))
-		}
-	}
-	return nil
-}
-
-func commitmentConvertFormat(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-	agg.PresetOfflineMerge()
-	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
-	agg.DisableAllDependencies()
-	defer agg.MadvNormal().DisableReadAhead()
-
-	acRo := agg.BeginFilesRo()
-	defer acRo.Close()
-
-	return dbstate.ConvertPBinRecordFiles(ctx, acRo, logger, convertFormatVerifySample)
 }
 
 // integration commitment visualize

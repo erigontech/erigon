@@ -18,17 +18,16 @@ package state_test
 
 import (
 	"encoding/binary"
-	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -121,39 +120,35 @@ func TestOpenFolderAcceptsFreshPBinDatadir(t *testing.T) {
 }
 
 func TestOpenFolderRejectsLegacyPBinStateInFiles(t *testing.T) {
-	fixture := newPBinOutputFixture(t, true, false)
-	fixture.output.Close()
-	entries, err := os.ReadDir(filepath.Dir(fixture.outputPath))
-	require.NoError(t, err)
-	for _, entry := range entries {
-		if strings.Contains(entry.Name(), "-commitment.") && !strings.HasSuffix(entry.Name(), ".kv") {
-			require.NoError(t, dir.RemoveFile(filepath.Join(filepath.Dir(fixture.outputPath), entry.Name())))
-		}
-	}
+	oldBin := statecfg.ExperimentalBinCommitment
+	oldSchema := statecfg.Schema
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = oldBin
+		statecfg.Schema = oldSchema
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 
-	settings, err := state.ReadErigonDBSettings(fixture.output.Dirs())
-	require.NoError(t, err)
-	prepared := state.NewTest(fixture.output.Dirs()).
-		StepSize(fixture.output.StepSize()).
-		WithErigonDBSettings(settings).
-		Logger(log.New()).
-		MustOpen(t.Context())
-	t.Cleanup(prepared.Close)
-	require.NoError(t, prepared.OpenFolder(fixture.db))
-	require.NoError(t, prepared.BuildMissedAccessors(t.Context(), fixture.db, 2))
-	prepared.Close()
-
+	dirs := datadir.New(t.TempDir())
 	variant, hash := state.TrieVariantBin, commitment.PBinHashBlake3
-	settings.TrieVariant = &variant
-	settings.TrieHash = &hash
-	require.NoError(t, state.WriteErigonDBSettings(fixture.output.Dirs(), settings))
+	settings := &state.ErigonDBSettings{StepSize: 1, StepsInFrozenFile: 1, TrieVariant: &variant, TrieHash: &hash}
+	initialSettings := &state.ErigonDBSettings{StepSize: 1, StepsInFrozenFile: 1}
+	require.NoError(t, state.WriteErigonDBSettings(dirs, initialSettings))
+	path := filepath.Join(dirs.SnapDomain, "v1.0-commitment.0-1.kv")
+	compressor, err := seg.NewCompressor(t.Context(), "legacy-pbin-state", path, dirs.Tmp, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	require.NoError(t, compressor.AddWord(commitmentdb.KeyCommitmentState))
+	require.NoError(t, compressor.AddWord(pbinOpenStateEnvelope([]byte{commitment.PBinStateMarker, 0x10, 0, 0})))
+	require.NoError(t, compressor.Compress())
+	compressor.Close()
 
-	output := state.NewTest(fixture.output.Dirs()).
-		StepSize(fixture.output.StepSize()).
-		WithErigonDBSettings(settings).
-		Logger(log.New()).
-		MustOpen(t.Context())
+	output := state.NewTest(dirs).StepSize(1).WithErigonDBSettings(initialSettings).Logger(log.New()).MustOpen(t.Context())
 	t.Cleanup(output.Close)
+	require.NoError(t, output.OpenFolder(nil))
+	require.NoError(t, output.BuildMissedAccessors(t.Context(), nil, 2))
+	output.Close()
+	require.NoError(t, state.WriteErigonDBSettings(dirs, settings))
+	output = state.NewTest(dirs).StepSize(1).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
 	err = output.OpenFolder(nil)
 	require.ErrorContains(t, err, "OpenFolder")
 	require.ErrorContains(t, err, "rebuild the bin commitment domain")

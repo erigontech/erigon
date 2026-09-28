@@ -1174,8 +1174,11 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 		defer pin.Close()
 	}
 
-	binUpdates := binCtx.NewBinUpdates(hexUpdates.PlainKeys())
+	binUpdates := commitment.NewUpdates(commitment.ModeDirect, "", commitment.KeyToHexNibbleHash)
 	defer binUpdates.Close()
+	for key := range hexUpdates.PlainKeys() {
+		binUpdates.TouchPlainKey(key, nil, nil)
+	}
 	hexArm := commitmentFoldArm{
 		ctx:     hexCtx,
 		reader:  cloneCommitmentReader(reader, hexTx, kv.CommitmentDomain, t.lastTxNum+1),

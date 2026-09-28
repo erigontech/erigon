@@ -23,6 +23,10 @@ import (
 
 const PBinRowStateFormat byte = 0x20
 
+const PBinStateMarker byte = 0xB1
+
+func IsPBinState(buf []byte) bool { return len(buf) > 0 && buf[0] == PBinStateMarker }
+
 func PBinValidateRowStateFormat(buf []byte) error {
 	if len(buf) < 2 || !IsPBinState(buf) {
 		return fmt.Errorf("pbin: state requires rebuild: not a pbin blob")

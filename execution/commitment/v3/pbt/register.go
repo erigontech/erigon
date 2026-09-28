@@ -35,7 +35,7 @@ func init() {
 }
 
 func newRegisteredTrie(tmpdir string, cfg commitment.TrieConfig) (commitment.Trie, *commitment.Updates) {
-	return &registeredTrie{Trie: NewTrie(nil), workers: cfg.WarmupNumWorkersOrDefault()}, commitment.NewBinUpdates(tmpdir, nil)
+	return &registeredTrie{Trie: NewTrie(nil), workers: cfg.WarmupNumWorkersOrDefault()}, commitment.NewUpdates(commitment.ModeDirect, tmpdir, commitment.KeyToHexNibbleHash)
 }
 
 func (t *registeredTrie) RootHash() ([]byte, error) {
@@ -49,6 +49,12 @@ func (t *registeredTrie) RootHash() ([]byte, error) {
 func (t *registeredTrie) SetTraceWriter(io.Writer) {}
 
 func (t *registeredTrie) Variant() commitment.TrieVariant { return commitment.VariantBinPatriciaTrie }
+
+func (t *registeredTrie) EncodeCurrentState(buf []byte) ([]byte, error) {
+	return t.Trie.EncodeCurrentState(buf)
+}
+
+func (t *registeredTrie) SetState(buf []byte) error { return t.Trie.SetState(buf) }
 
 func (t *registeredTrie) Reset() { t.Trie.Reset() }
 
