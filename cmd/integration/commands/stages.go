@@ -571,7 +571,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			if err != nil {
 				return err
 			}
-			withoutSenders.Body().SendersFromTxs() //remove senders info from txs
+			withoutSenders.Body().SendersFromTxs() // remove senders info from txs
 			txs := withoutSenders.Transactions()
 			if txs.Len() != len(senders) {
 				logger.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
@@ -1017,7 +1017,8 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 			txTask := result.Task.(*exec.TxTask)
 			lastBlockNum = txTask.BlockNumber()
 			return nil
-		})
+		},
+	)
 
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -1140,7 +1141,7 @@ func printAppliedMigrations(migrationsDB kv.RwDB, ctx context.Context, logger lo
 		if err != nil {
 			return err
 		}
-		var appliedStrs = make([]string, len(applied))
+		appliedStrs := make([]string, len(applied))
 		i := 0
 		for k := range applied {
 			appliedStrs[i] = k
@@ -1158,9 +1159,11 @@ func removeMigration(migrationsDB kv.RwDB, ctx context.Context) error {
 	})
 }
 
-var openSnapshotOnce sync.Once
-var _allSnapshotsSingleton *blocksnapshots.RoSnapshots
-var _allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
+var (
+	openSnapshotOnce             sync.Once
+	_allSnapshotsSingleton       *blocksnapshots.RoSnapshots
+	_allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
+)
 
 func newTemporalDB(ctx context.Context, db kv.RwDB, logger log.Logger) (kv.TemporalRwDB, error) {
 	var err error
@@ -1242,9 +1245,11 @@ func logSnapshotStats(ctx context.Context, db kv.TemporalRoDB, blockSnaps *block
 	})
 }
 
-var openBlockReaderOnce sync.Once
-var _blockReaderSingleton dbservices.FullBlockReader
-var _blockWriterSingleton *blockio.BlockWriter
+var (
+	openBlockReaderOnce   sync.Once
+	_blockReaderSingleton dbservices.FullBlockReader
+	_blockWriterSingleton *blockio.BlockWriter
+)
 
 func blocksIO(db kv.TemporalRwDB, logger log.Logger) (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {

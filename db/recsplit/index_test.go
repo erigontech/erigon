@@ -97,6 +97,6 @@ func TestForwardCompatibility(t *testing.T) {
 	t.Run("disallow_unknown", func(t *testing.T) {
 		features := Features(0xff)
 		err := onlyKnownFeatures(features)
-		assert.ErrorIs(t, err, IncompatibleErr)
+		assert.ErrorIs(t, err, ErrIncompatible)
 	})
 }
