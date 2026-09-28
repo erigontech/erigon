@@ -11,7 +11,6 @@ concurrency:
 
 permissions:
   contents: read
-  actions: write
 
 jobs:
   load-matrix:
@@ -225,6 +224,9 @@ jobs:
 
   test-hive-eest:
     needs: load-matrix
+    permissions:
+      contents: read
+      actions: write
     runs-on: ${{ matrix.runner == 'ubuntu-latest' && 'ubuntu-latest' || fromJSON('{"group":"hive"}') }}
     timeout-minutes: 60
     name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.commitment_mode }})
