@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -896,7 +897,7 @@ type historyFloorTx struct {
 }
 
 func (tx historyFloorTx) BlockFilesRoTx() *blocksnapshots.View {
-	return tx.TemporalTx.(interface{ BlockFilesRoTx() *blocksnapshots.View }).BlockFilesRoTx()
+	return tx.TemporalTx.(freezeblocks.HasBlockFilesRoTx).BlockFilesRoTx()
 }
 
 func (tx historyFloorTx) Debug() kv.TemporalDebugTx {

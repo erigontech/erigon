@@ -476,14 +476,8 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 	view := r.view(tx)
 	var snapshotMin uint64
 	if view.BlocksAvailable() > 0 {
-		snapshotTypes := []snaptype.Type{
-			snaptype2.Headers,
-			snaptype2.Bodies,
-			snaptype2.Transactions,
-		}
-
 		complete := true
-		for _, snapType := range snapshotTypes {
+		for _, snapType := range snaptype2.BlockSnapshotTypes {
 			segments := view.Segments(snapType)
 			if len(segments) == 0 {
 				complete = false

@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -2294,25 +2295,6 @@ func TestBlocksGateSkipsAnEmptySampledBlock(t *testing.T) {
 		"an empty candidate is skipped, and a later one shows the datadir holds pre-merge transactions")
 }
 
-// prunedHistoryTx makes state history look retired above the whole chain. Preparing an
-// execution environment reads that boundary before it can build a reader, so this is
-// what a block whose receipts have to be re-executed hits on a pruned node.
-type prunedHistoryTx struct {
-	kv.TemporalTx
-}
-
-func (tx prunedHistoryTx) Debug() kv.TemporalDebugTx {
-	return prunedHistoryDebugTx{tx.TemporalTx.Debug()}
-}
-
-type prunedHistoryDebugTx struct {
-	kv.TemporalDebugTx
-}
-
-func (prunedHistoryDebugTx) HistoryStartFrom(kv.Domain) (uint64, error) {
-	return math.MaxUint64, nil
-}
-
 type countingHistoryFloorTx struct {
 	kv.TemporalTx
 	calls *atomic.Int64
@@ -2339,7 +2321,7 @@ type domainHistoryFloorTx struct {
 }
 
 func (tx domainHistoryFloorTx) BlockFilesRoTx() *blocksnapshots.View {
-	return tx.TemporalTx.(interface{ BlockFilesRoTx() *blocksnapshots.View }).BlockFilesRoTx()
+	return tx.TemporalTx.(freezeblocks.HasBlockFilesRoTx).BlockFilesRoTx()
 }
 
 func (tx domainHistoryFloorTx) Debug() kv.TemporalDebugTx {
@@ -2390,7 +2372,7 @@ func TestEmptyBlockReceiptsNeedNoStateHistory(t *testing.T) {
 
 	chainConfig, err := apis.eth.chainConfig(ctx, tx)
 	require.NoError(t, err)
-	view := prunedHistoryTx{tx}
+	view := historyFloorTx{TemporalTx: tx, startTxNum: math.MaxUint64}
 
 	empty, err := apis.eth.blockByNumberWithSenders(ctx, tx, chainInfo.empty.num)
 	require.NoError(t, err)

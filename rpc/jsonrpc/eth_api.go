@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
@@ -629,7 +629,7 @@ func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head ui
 // blockFilesGeneration returns zero when tx has no local pinned snapshot view;
 // those callers rely on the cache TTL to refresh their physical floor.
 func blockFilesGeneration(tx kv.Tx) uint64 {
-	provider, ok := tx.(interface{ BlockFilesRoTx() *blocksnapshots.View })
+	provider, ok := tx.(freezeblocks.HasBlockFilesRoTx)
 	if !ok {
 		return 0
 	}
