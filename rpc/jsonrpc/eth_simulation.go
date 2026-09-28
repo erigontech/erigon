@@ -125,7 +125,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	if err := api.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+	if err := api.checkPruneState(ctx, tx, blockNumber); err != nil {
 		return nil, err
 	}
 

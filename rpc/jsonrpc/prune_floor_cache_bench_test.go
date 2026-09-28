@@ -23,7 +23,7 @@ import (
 )
 
 func BenchmarkPruneFloorCacheHit(b *testing.B) {
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 	read := func() (uint64, error) { return 1, nil }
 	if _, err := cache.get(context.Background(), 1, read); err != nil {
 		b.Fatal(err)

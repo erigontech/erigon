@@ -1364,7 +1364,10 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	if err := rpchelper.CheckBlockExecuted(tx, blockNum); err != nil {
 		return nil, err
 	}
-	if err := api.checkBlockHistoryAvailable(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		return nil, err
+	}
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return nil, err
 	}
 

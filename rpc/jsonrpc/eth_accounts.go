@@ -53,7 +53,7 @@ func (api *APIImpl) stateReaderAt(ctx context.Context, blockNrOrHash rpc.BlockNu
 		return nil, nil, err
 	}
 
-	if err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber); err != nil {
+	if err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber); err != nil {
 		tx.Rollback()
 		return nil, nil, err
 	}
@@ -171,7 +171,7 @@ func (api *APIImpl) GetStorageValues(ctx context.Context, requests map[common.Ad
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}

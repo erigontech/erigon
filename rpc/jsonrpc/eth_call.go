@@ -130,7 +130,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		return nil, fmt.Errorf("header not found")
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, header.Number.Uint64())
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, tx, header.Number.Uint64())
 	if err != nil {
 		return nil, err
 	}
@@ -205,7 +205,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 
 	blockNum := header.Number
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum.Uint64())
+	err = api.BaseAPI.checkPruneStateAfterSystemTx(ctx, dbtx, blockNum.Uint64())
 	if err != nil {
 		return 0, err
 	}
@@ -477,7 +477,7 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, roTx, blockNumber)
+	err = api.BaseAPI.checkPruneState(ctx, roTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -982,7 +982,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		stateReader = rpchelper.CreateLatestCachedStateReader(cacheView, tx)
 	} else {
 
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber+1)
+		err = api.BaseAPI.checkPruneTransactionHistory(ctx, tx, blockNumber+1)
 		if err != nil {
 			return nil, err
 		}

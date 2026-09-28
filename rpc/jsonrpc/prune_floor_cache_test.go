@@ -35,7 +35,7 @@ func TestPruneFloorCacheRefreshesAtNewHead(t *testing.T) {
 	t.Parallel()
 
 	var reads atomic.Uint64
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 	read := func() (uint64, error) { return reads.Add(1), nil }
 
 	floor, err := cache.get(t.Context(), 10, read)
@@ -54,7 +54,7 @@ func TestPruneFloorCacheSeparatesFileViewsAtSameHead(t *testing.T) {
 	t.Parallel()
 
 	var reads atomic.Uint64
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 	read := func() (uint64, error) { return reads.Add(1), nil }
 
 	first := pruneFloorCacheKey{head: 10, snapshotGeneration: 1}
@@ -77,7 +77,7 @@ func TestPruneFloorCacheRefreshesAtSameHeadAfterExpiry(t *testing.T) {
 
 	now := time.Unix(1, 0)
 	var reads atomic.Uint64
-	cache := pruneFloorCache{
+	cache := pruneFloorCache[uint64]{
 		ttl: time.Second,
 		now: func() time.Time { return now },
 	}
@@ -102,7 +102,7 @@ func TestPruneFloorCacheFailedRefreshDoesNotRenewExpiredValue(t *testing.T) {
 	t.Parallel()
 
 	now := time.Unix(1, 0)
-	cache := pruneFloorCache{ttl: time.Second, now: func() time.Time { return now }}
+	cache := pruneFloorCache[uint64]{ttl: time.Second, now: func() time.Time { return now }}
 	floor, err := cache.get(t.Context(), 10, func() (uint64, error) { return 7, nil })
 	require.NoError(t, err)
 	require.Equal(t, uint64(7), floor)
@@ -123,7 +123,7 @@ func TestPruneFloorCacheCoalescesConcurrentReadsAtSameHead(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	var reads atomic.Uint64
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 	read := func() (uint64, error) {
 		if reads.Add(1) == 1 {
 			close(started)
@@ -163,7 +163,7 @@ func TestPruneFloorCacheLoadsDifferentHeadsConcurrently(t *testing.T) {
 
 	firstStarted := make(chan struct{})
 	releaseFirst := make(chan struct{})
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 	firstResult := make(chan pruneFloorCacheResult, 1)
 	go func() {
 		floor, err := cache.get(t.Context(), 10, func() (uint64, error) {
@@ -204,7 +204,7 @@ func TestPruneFloorCacheLoadsDifferentHeadsConcurrently(t *testing.T) {
 func TestPruneFloorCacheWaiterHonorsContext(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 	leaderResult := make(chan pruneFloorCacheResult, 1)
 	go func() {
 		floor, err := cache.get(t.Context(), 10, func() (uint64, error) {
@@ -242,7 +242,7 @@ func TestPruneFloorCacheWaiterRetriesAfterLeaderError(t *testing.T) {
 	wantErr := errors.New("leader read failed")
 	started := make(chan struct{})
 	release := make(chan struct{})
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 	leaderResult := make(chan pruneFloorCacheResult, 1)
 	go func() {
 		floor, err := cache.get(t.Context(), 10, func() (uint64, error) {
@@ -275,7 +275,7 @@ func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {
 	started := make(chan struct{})
 	release := make(chan struct{})
 	returned := make(chan error, 1)
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 
 	go func() {
 		_, err := cache.get(ctx, 1, func() (uint64, error) {
@@ -299,7 +299,7 @@ func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {
 }
 
 func TestPruneFloorCacheRecoversAfterReadPanic(t *testing.T) {
-	cache := pruneFloorCache{ttl: time.Hour}
+	cache := pruneFloorCache[uint64]{ttl: time.Hour}
 	require.PanicsWithValue(t, "read failed", func() {
 		_, _ = cache.get(t.Context(), 10, func() (uint64, error) {
 			panic("read failed")

@@ -323,7 +323,12 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 		return fmt.Errorf("get block number: %w", err)
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNumber)
+	postState := config == nil || config.TxIndex == nil || isLatest
+	if postState {
+		err = api.BaseAPI.checkPruneState(ctx, dbtx, blockNumber)
+	} else {
+		err = api.BaseAPI.checkPruneTransactionHistory(ctx, dbtx, blockNumber)
+	}
 	if err != nil {
 		return err
 	}
@@ -334,7 +339,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 	}
 
 	var stateReader state.StateReader
-	if config == nil || config.TxIndex == nil || isLatest {
+	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, -1, api._txNumReader)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
@@ -432,7 +437,12 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	postState := simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest
+	if postState {
+		err = api.BaseAPI.checkPruneState(ctx, tx, blockNum)
+	} else {
+		err = api.BaseAPI.checkPruneTransactionHistory(ctx, tx, blockNum)
+	}
 	if err != nil {
 		return err
 	}
@@ -453,7 +463,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 		return err
 	}
 
-	if simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest {
+	if postState {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, -1, api._txNumReader)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)

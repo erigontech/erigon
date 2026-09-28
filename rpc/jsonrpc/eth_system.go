@@ -173,11 +173,13 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if err != nil {
 		return nil, err
 	}
-	onDiskOldest, err := api.stateHistoryStartBlock(ctx, tx, headBlock)
+	onDiskFloors, err := api.historyStartBlocks(ctx, tx, headBlock)
 	if err != nil {
 		return nil, err
 	}
-	stateOldest = max(stateOldest, onDiskOldest)
+	stateOldest = max(stateOldest, onDiskFloors.state)
+	historyOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.block)
+	replayOldest := max(pruneMode.History.PruneTo(headBlock), onDiskFloors.replay)
 
 	var stateproofs CapabilityField
 	if keepExecutionProofs {
@@ -199,14 +201,14 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	// --prune.receipts.distance window when one is set, and alongside history otherwise.
 	// Below a window of its own the read falls back to re-execution, which reaches as far
 	// as history, so the wider of the two decides. This mirrors checkReceiptsAvailable.
-	receiptsOldest, receiptsAmount := stateOldest, pruneMode.History
+	receiptsOldest, receiptsAmount := replayOldest, pruneMode.History
 	if persistReceipts && receipts.PersistedReceiptsServed() {
 		switch amount := pruneMode.ReceiptsAmount(); {
 		case amount == prune.KeepAllReceiptsPruneMode:
 			receiptsOldest, receiptsAmount = 0, amount
 		case !amount.Enabled():
 		default:
-			receiptsOldest, receiptsAmount = widerRetention(amount.PruneTo(headBlock), amount, stateOldest, pruneMode.History)
+			receiptsOldest, receiptsAmount = widerRetention(amount.PruneTo(headBlock), amount, replayOldest, pruneMode.History)
 		}
 	}
 	// Below Byzantium the receipt carries a post state the cache does not store, so
@@ -218,8 +220,8 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 		byzantium = *chainConfig.ByzantiumBlock
 	}
 	if receipts.PostStateCalculated(chainConfig, receiptsOldest, keepExecutionProofs, api._blockReader) {
-		if stateOldest < byzantium {
-			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
+		if historyOldest < byzantium {
+			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, historyOldest, pruneMode.History)
 		} else {
 			// A fork height is not a window: keeping the amount would advertise a
 			// retention whose head - retentionBlocks lands below this oldest block.
@@ -235,7 +237,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	// standalone indices retired at the history cutoff whatever the receipt retention is.
 	// The field takes that stricter form: an unfiltered query reads straight from the
 	// receipts and reaches further back than advertised.
-	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
+	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, historyOldest, pruneMode.History)
 	logsField := avail(logsOldest, logsAmount)
 
 	return &CapabilitiesResult{

@@ -25,8 +25,8 @@ import (
 	"github.com/erigontech/erigon/common/lru"
 )
 
-type pruneFloorValue struct {
-	floor     uint64
+type pruneFloorValue[T any] struct {
+	floor     T
 	expiresAt time.Time
 }
 
@@ -45,36 +45,37 @@ const (
 // contain the pinned snapshot generation because visible files can change
 // without a new head. The TTL bounds staleness from physical changes the key
 // cannot identify.
-type pruneFloorCache struct {
+type pruneFloorCache[T any] struct {
 	mu     sync.Mutex
-	values *lru.BasicLRU[pruneFloorCacheKey, *concurrent.CachedValue[pruneFloorValue]]
+	values *lru.BasicLRU[pruneFloorCacheKey, *concurrent.CachedValue[pruneFloorValue[T]]]
 	ttl    time.Duration
 	now    func() time.Time
 }
 
-func (c *pruneFloorCache) timeNow() time.Time {
+func (c *pruneFloorCache[T]) timeNow() time.Time {
 	if c.now != nil {
 		return c.now()
 	}
 	return time.Now()
 }
 
-func (c *pruneFloorCache) cacheTTL() time.Duration {
+func (c *pruneFloorCache[T]) cacheTTL() time.Duration {
 	if c.ttl > 0 {
 		return c.ttl
 	}
 	return defaultPruneFloorCacheTTL
 }
 
-func (c *pruneFloorCache) get(ctx context.Context, head uint64, read func() (uint64, error)) (uint64, error) {
+func (c *pruneFloorCache[T]) get(ctx context.Context, head uint64, read func() (T, error)) (T, error) {
 	return c.getForKey(ctx, pruneFloorCacheKey{head: head}, read)
 }
 
-func (c *pruneFloorCache) getForKey(ctx context.Context, key pruneFloorCacheKey, read func() (uint64, error)) (uint64, error) {
+func (c *pruneFloorCache[T]) getForKey(ctx context.Context, key pruneFloorCacheKey, read func() (T, error)) (T, error) {
+	var zero T
 	cell := c.valueForKey(key)
 	for {
 		if err := ctx.Err(); err != nil {
-			return 0, err
+			return zero, err
 		}
 		// CachedValue measures freshness from the last attempt, including failures.
 		// Only a successful read may extend this floor's lifetime.
@@ -83,39 +84,39 @@ func (c *pruneFloorCache) getForKey(ctx context.Context, key pruneFloorCacheKey,
 		}
 		// Produce runs read synchronously so it cannot outlive the caller's
 		// transaction. Waiters can cancel without interrupting that read.
-		value, ran, err := cell.Produce(ctx, func() (pruneFloorValue, bool, error) {
+		value, ran, err := cell.Produce(ctx, func() (pruneFloorValue[T], bool, error) {
 			// Another producer may have refreshed the value before we claimed this load.
 			if value, observed, _ := cell.Load(); observed && c.timeNow().Before(value.expiresAt) {
 				return value, false, nil
 			}
 			floor, err := read()
-			return pruneFloorValue{floor: floor, expiresAt: c.timeNow().Add(c.cacheTTL())}, true, err
+			return pruneFloorValue[T]{floor: floor, expiresAt: c.timeNow().Add(c.cacheTTL())}, true, err
 		})
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return 0, ctxErr
+			return zero, ctxErr
 		}
 		if err == nil {
 			return value.floor, nil
 		}
 		if ran {
-			return 0, err
+			return zero, err
 		}
 		// A shared failure may belong to the producer's context or transaction.
 		// Retry through this caller's read instead of inheriting that failure.
 	}
 }
 
-func (c *pruneFloorCache) valueForKey(key pruneFloorCacheKey) *concurrent.CachedValue[pruneFloorValue] {
+func (c *pruneFloorCache[T]) valueForKey(key pruneFloorCacheKey) *concurrent.CachedValue[pruneFloorValue[T]] {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if c.values == nil {
-		values := lru.NewBasicLRU[pruneFloorCacheKey, *concurrent.CachedValue[pruneFloorValue]](pruneFloorCacheSize)
+		values := lru.NewBasicLRU[pruneFloorCacheKey, *concurrent.CachedValue[pruneFloorValue[T]]](pruneFloorCacheSize)
 		c.values = &values
 	}
 	if value, ok := c.values.Get(key); ok {
 		return value
 	}
-	value := new(concurrent.CachedValue[pruneFloorValue])
+	value := new(concurrent.CachedValue[pruneFloorValue[T]])
 	c.values.Add(key, value)
 	return value
 }

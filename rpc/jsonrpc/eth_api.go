@@ -166,8 +166,8 @@ type BaseAPI struct {
 	// shorter than the verdict's, since the data it waits for can arrive at any time.
 	_preMergeUnsettled    atomic.Pointer[unsettledProbe]
 	_preMergeUnsettledTTL time.Duration
-	_historyPruneFloor    pruneFloorCache
-	_blocksPruneFloor     pruneFloorCache
+	_historyPruneFloor    pruneFloorCache[historyPruneFloors]
+	_blocksPruneFloor     pruneFloorCache[uint64]
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -466,11 +466,36 @@ const defaultUnsettledPreMergeTTL = time.Second
 // sequence, which a stored TxCount includes.
 const systemTxsPerBlock = 2
 
-// checkPruneHistory gates historical state reads on both configured retention
-// and the state-history floor currently available on disk.
+// checkPruneHistory requires history from the block's first system transaction.
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
-		return api.stateHistoryStartBlock(ctx, tx, head)
+		floors, err := api.historyStartBlocks(ctx, tx, head)
+		return floors.block, err
+	})
+}
+
+// checkPruneState requires the state after the block, read at Min(block+1).
+func (api *BaseAPI) checkPruneState(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+		floors, err := api.historyStartBlocks(ctx, tx, head)
+		return floors.state, err
+	})
+}
+
+// checkPruneStateAfterSystemTx matches state readers opened at Min(block+1)+1.
+func (api *BaseAPI) checkPruneStateAfterSystemTx(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+		floors, err := api.historyStartBlocks(ctx, tx, head)
+		return floors.stateAfterSystemTx, err
+	})
+}
+
+// checkPruneTransactionHistory requires the first user transaction's pre-state,
+// at Min(block)+1, after the block's initial system transaction.
+func (api *BaseAPI) checkPruneTransactionHistory(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
+		floors, err := api.historyStartBlocks(ctx, tx, head)
+		return floors.replay, err
 	})
 }
 
@@ -515,40 +540,57 @@ func (api *BaseAPI) blocksAvailableFrom(ctx context.Context, tx kv.Tx, head uint
 	return floor, nil
 }
 
-func (api *BaseAPI) stateHistoryStartBlock(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
-	return api._historyPruneFloor.get(ctx, head, func() (uint64, error) {
-		return api.readStateHistoryStartBlock(ctx, tx, head)
+type historyPruneFloors struct {
+	state              uint64
+	stateAfterSystemTx uint64
+	block              uint64
+	replay             uint64
+}
+
+func (api *BaseAPI) historyStartBlocks(ctx context.Context, tx kv.Tx, head uint64) (historyPruneFloors, error) {
+	return api._historyPruneFloor.get(ctx, head, func() (historyPruneFloors, error) {
+		return api.readHistoryStartBlocks(ctx, tx, head)
 	})
 }
 
-func (api *BaseAPI) readStateHistoryStartBlock(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
+func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.Tx, head uint64) (historyPruneFloors, error) {
 	ttx, ok := tx.(kv.TemporalTx)
 	if !ok {
-		return 0, nil
+		return historyPruneFloors{}, nil
 	}
 	startTxNum, err := state.StateHistoryStartTxNum(ttx)
 	if err != nil {
-		return 0, err
+		return historyPruneFloors{}, err
 	}
 	if startTxNum == 0 {
-		return 0, nil
+		return historyPruneFloors{}, nil
 	}
 	block, ok, err := api._txNumReader.FindBlockNum(ctx, tx, startTxNum)
 	if err != nil {
-		return 0, err
+		return historyPruneFloors{}, err
 	}
 	if ok {
 		blockStartTxNum, err := api._txNumReader.Min(ctx, tx, block)
 		if err != nil {
-			return 0, err
+			return historyPruneFloors{}, err
 		}
+		// State queries read at the next block's start, while whole-block history
+		// reads need this block's start. Transaction replay skips the initial system tx.
+		floors := historyPruneFloors{state: block, stateAfterSystemTx: block, block: block, replay: block}
 		if startTxNum > blockStartTxNum {
-			return min(block+1, head), nil
+			floors.block = min(block+1, head)
+		} else if block > 0 {
+			floors.state = block - 1
 		}
-		return block, nil
+		if startTxNum > blockStartTxNum+1 {
+			floors.replay = min(block+1, head)
+		} else if block > 0 {
+			floors.stateAfterSystemTx = block - 1
+		}
+		return floors, nil
 	}
 	// No historical block can be proven available; the current state remains readable.
-	return head, nil
+	return historyPruneFloors{state: head, stateAfterSystemTx: head, block: head, replay: head}, nil
 }
 
 func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
@@ -853,9 +895,8 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	return nil
 }
 
-// checkReceiptsAvailable gates endpoints serving the full receipts of a block. Below
-// Byzantium those carry a post state the cache does not store, so the block has to be
-// re-executed and reaches only as far back as state history.
+// Pre-Byzantium post-state roots are not cached. Rebuilding them needs history
+// from the initial system transaction, not just the first user transaction.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	computed, err := api.postStateCalculated(ctx, tx, block)
 	if err != nil {
@@ -879,7 +920,7 @@ func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, b
 		return err
 	}
 	if !persisted || !receipts.PersistedReceiptsServed() {
-		return api.checkPruneHistory(ctx, tx, block)
+		return api.checkPruneTransactionHistory(ctx, tx, block)
 	}
 	p, err := api.pruneMode(tx)
 	if err != nil || p == nil {
@@ -889,13 +930,13 @@ func (api *BaseAPI) checkReceiptSourceAvailable(ctx context.Context, tx kv.Tx, b
 	case amount == prune.KeepAllReceiptsPruneMode:
 		return nil
 	case !amount.Enabled():
-		return api.checkPruneHistory(ctx, tx, block)
+		return api.checkPruneTransactionHistory(ctx, tx, block)
 	default:
 		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available", nil)
 		if err == nil || !errors.Is(err, state.ErrPruned) {
 			return err
 		}
-		return api.checkPruneHistory(ctx, tx, block)
+		return api.checkPruneTransactionHistory(ctx, tx, block)
 	}
 }
 
@@ -945,13 +986,13 @@ func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint
 	return api.checkPruneHistory(ctx, tx, block)
 }
 
-// checkBlockHistoryAvailable gates endpoints that re-execute a block: they read its
-// transactions from the body and start from the state history preceding it.
+// checkBlockHistoryAvailable gates transaction replay, which needs block
+// transactions and state history from the first user transaction.
 func (api *BaseAPI) checkBlockHistoryAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
 		return err
 	}
-	return api.checkPruneHistory(ctx, tx, block)
+	return api.checkPruneTransactionHistory(ctx, tx, block)
 }
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {

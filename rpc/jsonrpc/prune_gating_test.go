@@ -72,7 +72,7 @@ type pruneGateBoundary int
 
 const (
 	gatedByBlocks        pruneGateBoundary = iota // Mode.Blocks via checkPruneBlocks
-	gatedByHistory                                // Mode.History via checkPruneHistory
+	gatedByHistory                                // Mode.History
 	gatedByReceipts                               // Mode.Receipts-unless-following-history via checkReceiptsAvailable
 	gatedByBlockReceipts                          // both of the above via checkBlockReceiptsAvailable
 	gatedByBlockHistory                           // Mode.Blocks and Mode.History via checkBlockHistoryAvailable
