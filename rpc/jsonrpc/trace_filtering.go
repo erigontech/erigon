@@ -327,12 +327,13 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 	defer dbtx.Rollback()
 
-	var fromBlock uint64
-	var toBlock uint64
-	var err error
-	if req.FromBlock == nil {
-		fromBlock = 0
-	} else {
+	// Omitted bounds default to the latest executed block, as in eth_getLogs.
+	latest, err := rpchelper.GetLatestExecutedBlockNumber(dbtx)
+	if err != nil {
+		return err
+	}
+	fromBlock, toBlock := latest, latest
+	if req.FromBlock != nil {
 		fromBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.FromBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -342,13 +343,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			return err
 		}
 	}
-
-	if req.ToBlock == nil {
-		toBlock, err = rpchelper.GetLatestExecutedBlockNumber(dbtx)
-		if err != nil {
-			return err
-		}
-	} else {
+	if req.ToBlock != nil {
 		toBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.ToBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
@@ -366,7 +361,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		}
 	}
 	if fromBlock > toBlock {
-		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
+		return &rpc.CustomError{Message: fmt.Sprintf("%s: fromBlock %d is greater than toBlock %d", errInvalidBlockRange, fromBlock, toBlock), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	// if we've pruned this history away for this block then just return early
@@ -451,7 +446,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			stream.WriteArrayStart()
 			first = false
 		}
-		tr.writeTo(stream.Open())
+		tr.marshalFastJSONTo(stream.Open())
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return false, err
 		}
@@ -803,7 +798,7 @@ func (api *TraceAPIImpl) callBlock(
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, traceConfig)
+			header, true /* requireCanonical */, gasBailOut /* gasBailout */, true /* advanceTxNum */, false /* noBaseFee */, traceConfig)
 	}
 
 	if cmErr != nil {
@@ -1102,6 +1097,10 @@ const (
 )
 
 func (m *TraceFilterMode) UnmarshalJSON(data []byte) error {
+	// An explicit null is the same as an omitted mode: the default, intersection.
+	if string(data) == "null" {
+		return nil
+	}
 	var mode string
 	if err := json.Unmarshal(data, &mode); err != nil {
 		return err

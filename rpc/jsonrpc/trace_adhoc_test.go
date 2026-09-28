@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"math/big"
 	"os"
 	"path/filepath"
@@ -37,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/chain"
@@ -100,6 +102,34 @@ func TestCoinbaseBalance(t *testing.T) {
 	if _, ok := results[1].StateDiff[accounts.ZeroAddress]; !ok {
 		t.Errorf("expected balance increase for coinbase (zero address)")
 	}
+	sender := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	for _, res := range results {
+		requireSenderPaysGas(t, res.StateDiff, sender, big.NewInt(1))
+	}
+}
+
+func TestTraceCallChargesSenderForGas(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+	gas := hexutil.Uint64(90_000)
+	args := traceCallValueTransfer()
+	args.Gas = &gas
+	args.GasPrice = (*hexutil.U256)(uint256.NewInt(20_000_000_000))
+
+	result, err := api.Call(context.Background(), args, []string{TraceTypeStateDiff}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	requireSenderPaysGas(t, result.StateDiff, *args.From, args.Value.ToInt())
+}
+
+func requireSenderPaysGas(t *testing.T, diff map[accounts.Address]*StateDiffAccount, sender common.Address, value *big.Int) {
+	t.Helper()
+	acc, ok := diff[accounts.InternAddress(sender)]
+	require.True(t, ok, "sender must appear in stateDiff")
+	balance, ok := acc.Balance.(map[string]*StateDiffBalance)
+	require.True(t, ok, "sender balance must change, got %v", acc.Balance)
+	paid := new(big.Int).Sub(balance["*"].From.ToInt(), balance["*"].To.ToInt())
+	require.Positive(t, paid.Cmp(value), "sender must pay for gas on top of value %s, paid %s", value, paid)
 }
 
 func internedAddress(addr string) accounts.Address {
@@ -639,6 +669,122 @@ func TestRawTransactionAllTraceTypes(t *testing.T) {
 	require.NotNil(t, result.VmTrace, "VmTrace must be initialised")
 }
 
+// stateDiffBalanceDelta returns an account's balance change (to - from) as
+// reported in a trace stateDiff.
+func stateDiffBalanceDelta(t *testing.T, diff map[accounts.Address]*StateDiffAccount, addr common.Address) *big.Int {
+	t.Helper()
+	acc, ok := diff[accounts.InternAddress(addr)]
+	require.True(t, ok, "%x must appear in stateDiff", addr)
+	switch v := acc.Balance.(type) {
+	case string:
+		require.Equal(t, "=", v)
+		return new(big.Int)
+	case map[string]*StateDiffBalance:
+		return new(big.Int).Sub(v["*"].To.ToInt(), v["*"].From.ToInt())
+	case map[string]*hexutil.U256:
+		if born, ok := v["+"]; ok {
+			return born.ToInt()
+		}
+		return new(big.Int).Neg(v["-"].ToInt())
+	default:
+		t.Fatalf("unexpected balance diff type %T", acc.Balance)
+		return nil
+	}
+}
+
+// TestRawTransactionStateDiffChargesFees checks that a signed transaction's
+// stateDiff is the transaction's actual transition: the sender pays value plus
+// gasUsed times the effective gas price, the fee recipient gets the tip, the
+// base fee is burned, and no other ether appears or disappears. A sender that
+// cannot pay for its gas is rejected.
+func TestRawTransactionStateDiffChargesFees(t *testing.T) {
+	c := newBaseFeeTestChain(t, chain.TestChainOsakaConfig)
+	coinbase := common.HexToAddress("0xc0ffee")
+	c.mineBlock(t, func(block *blockgen.BlockGen) { block.SetCoinbase(coinbase) })
+	baseFee := c.head.BaseFee()
+	require.Positive(t, baseFee.Sign())
+
+	recipient := common.HexToAddress("0x1234")
+	tipCap := uint256.NewInt(2_000_000_000)
+	rawTransfer := func(value *uint256.Int) []byte {
+		txn, err := types.SignTx(&types.DynamicFeeTransaction{
+			CommonTx: types.CommonTx{
+				Nonce:    0,
+				To:       &recipient,
+				Value:    *value,
+				GasLimit: 50_000, // above the 21000 used, so unused gas must not be charged
+			},
+			ChainID: *c.signer.ChainID(),
+			TipCap:  *tipCap,
+			FeeCap:  *uint256.NewInt(100_000_000_000),
+		}, *c.signer, c.bankKey)
+		require.NoError(t, err)
+		var buf bytes.Buffer
+		require.NoError(t, txn.MarshalBinary(&buf))
+		return buf.Bytes()
+	}
+
+	t.Run("stateDiff is the real transition", func(t *testing.T) {
+		value := uint256.NewInt(1)
+		result, err := c.traceAPI().RawTransaction(context.Background(), rawTransfer(value), []string{TraceTypeStateDiff})
+		require.NoError(t, err)
+
+		const gasUsed = 21_000
+		tip := new(big.Int).Mul(big.NewInt(gasUsed), tipCap.ToBig())
+		burn := new(big.Int).Mul(big.NewInt(gasUsed), baseFee.ToBig())
+		senderPays := new(big.Int).Add(value.ToBig(), tip)
+		senderPays.Add(senderPays, burn)
+
+		sender := stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress)
+		require.Equal(t, new(big.Int).Neg(senderPays).String(), sender.String(), "sender pays value + gasUsed * effective gas price")
+		require.Equal(t, tip.String(), stateDiffBalanceDelta(t, result.StateDiff, coinbase).String(), "fee recipient gets the tip")
+		require.Equal(t, value.ToBig().String(), stateDiffBalanceDelta(t, result.StateDiff, recipient).String())
+
+		total := new(big.Int)
+		for addr := range result.StateDiff {
+			total.Add(total, stateDiffBalanceDelta(t, result.StateDiff, addr.Value()))
+		}
+		require.Equal(t, new(big.Int).Neg(burn).String(), total.String(), "only the base fee leaves circulation")
+	})
+
+	t.Run("sender that cannot pay gas limit * fee cap is rejected", func(t *testing.T) {
+		// 100 ether in the bank, minus 0.001 ether: enough for value + 50000 gas at the
+		// effective price (under 3 gwei), not enough for 50000 gas at the 100 gwei fee cap.
+		value, overflow := uint256.FromBig(new(big.Int).Sub(new(big.Int).Exp(big.NewInt(10), big.NewInt(20), nil), big.NewInt(1e15)))
+		require.False(t, overflow)
+		require.Less(t, new(uint256.Int).Add(baseFee, tipCap).Uint64(), uint64(3_000_000_000))
+		result, err := c.traceAPI().RawTransaction(context.Background(), rawTransfer(value), []string{TraceTypeTrace})
+		require.ErrorIs(t, err, protocol.ErrInsufficientFunds)
+		require.Nil(t, result)
+	})
+}
+
+// A signed transaction runs in the latest block's environment, so GASLIMIT reads that
+// block's gas limit, as NUMBER and BASEFEE read its number and base fee.
+func TestRawTransactionGasLimit(t *testing.T) {
+	c := newBaseFeeTestChain(t, chain.TestChainOsakaConfig)
+	contract := c.deployOpcodeContract(t, opGaslimit)
+
+	txn, err := types.SignTx(&types.DynamicFeeTransaction{
+		CommonTx: types.CommonTx{
+			Nonce:    1, // the deployment used nonce 0
+			To:       &contract,
+			GasLimit: 100_000,
+		},
+		ChainID: *c.signer.ChainID(),
+		TipCap:  *uint256.NewInt(1),
+		FeeCap:  *uint256.NewInt(1_000_000_000_000),
+	}, *c.signer, c.bankKey)
+	require.NoError(t, err)
+	var buf bytes.Buffer
+	require.NoError(t, txn.MarshalBinary(&buf))
+
+	result, err := c.traceAPI().RawTransaction(context.Background(), buf.Bytes(), []string{TraceTypeTrace})
+	require.NoError(t, err)
+	gasLimit := common.BigToHash(new(big.Int).SetUint64(c.head.GasLimit()))
+	require.Equal(t, gasLimit.Hex(), result.Output.String())
+}
+
 func TestParseOeTracerConfigRejectsCustomTracer(t *testing.T) {
 	tracer := "callTracer"
 	_, err := parseOeTracerConfig(&config.TraceConfig{Tracer: &tracer})
@@ -686,9 +832,11 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 
 	// EVM bytecode: GASPRICE (0x3a), PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN
 	gasPriceCode := hexutil.Bytes{0x3a, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
+	gas := hexutil.Uint64(100_000)
 	result, err := api.Call(context.Background(), TraceCallParam{
 		From:                 &bankAddr,
 		To:                   &contractAddr,
+		Gas:                  &gas,
 		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
 		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}, []string{TraceTypeTrace}, nil, &config.TraceConfig{
@@ -808,7 +956,257 @@ func TestTraceCallStateDiffOmitsUntouchedOverriddenAccount(t *testing.T) {
 	require.NotContains(t, result.StateDiff, accounts.InternAddress(untouched))
 }
 
+// vmTrace attaches a sub only to call and create ops that run a child frame.
+func TestTraceCallVmTraceSubs(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0004")
+
+	for _, tc := range []struct {
+		name   string
+		code   []byte
+		nonce  hexutil.Uint64
+		extra  ethapi.StateOverrides
+		pc     int
+		frame  string
+		hasSub bool
+	}{
+		{
+			name:   "call without code",
+			code:   []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.GAS), byte(vm.CALL), byte(vm.STOP)},
+			pc:     7,
+			frame:  CALL,
+			hasSub: true,
+		},
+		{
+			name:  "call with insufficient balance",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.GAS), byte(vm.CALL), byte(vm.STOP)},
+			pc:    8,
+			frame: CALL,
+		},
+		{
+			name:  "create with insufficient balance",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.CREATE), byte(vm.STOP)},
+			pc:    4,
+			frame: CREATE,
+		},
+		{
+			name:  "create with nonce overflow",
+			code:  []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE), byte(vm.STOP)},
+			nonce: math.MaxUint64,
+			pc:    3,
+			frame: CREATE,
+		},
+		{
+			name: "create with address collision",
+			code: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE), byte(vm.STOP)},
+			extra: ethapi.StateOverrides{
+				accounts.InternAddress(types.CreateAddress(target, 0)): {Nonce: new(hexutil.Uint64(1))},
+			},
+			pc:     3,
+			frame:  CREATE,
+			hasSub: true,
+		},
+		{
+			name:  "selfdestruct",
+			code:  []byte{byte(vm.PUSH0), byte(vm.SELFDESTRUCT)},
+			pc:    1,
+			frame: SUICIDE,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := hexutil.Bytes(tc.code)
+			overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code, Nonce: &tc.nonce}}
+			maps.Copy(overrides, tc.extra)
+			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
+				[]string{TraceTypeTrace, TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+			require.NoError(t, err)
+			require.Len(t, result.Trace, 2)
+			require.Equal(t, tc.frame, result.Trace[1].Type)
+
+			var op *VmTraceOp
+			for _, o := range result.VmTrace.Ops {
+				if o.Pc == tc.pc {
+					op = o
+				}
+			}
+			require.NotNil(t, op)
+			if tc.hasSub {
+				require.NotNil(t, op.Sub)
+			} else {
+				require.Nil(t, op.Sub)
+			}
+		})
+	}
+}
+
+// revertInit is init code that reverts with 0xdeadbeef after 17 gas.
+var revertInit = []byte{byte(vm.PUSH4), 0xde, 0xad, 0xbe, 0xef, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 4, byte(vm.PUSH1), 28, byte(vm.REVERT)}
+
+// A reverted frame keeps a result, {gasUsed, output}, for CREATE too: a reverted CREATE deploys
+// nothing, so it has no address or code.
+func TestTraceCallRevertedFrames(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0004")
+	callee := common.HexToAddress("0x00000000000000000000000000000000000000ca")
+	// Runs revertInit through CREATE: PUSH12 revertInit, PUSH0, MSTORE, PUSH1 12, PUSH1 20, PUSH0, CREATE, STOP
+	create := append(append([]byte{byte(vm.PUSH1) + byte(len(revertInit)) - 1}, revertInit...),
+		byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), byte(len(revertInit)), byte(vm.PUSH1), byte(32-len(revertInit)),
+		byte(vm.PUSH0), byte(vm.CREATE), byte(vm.STOP))
+	// Calls callee, whose code is revertInit, with no value or data.
+	call := []byte{
+		byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 0xca,
+		byte(vm.GAS), byte(vm.CALL), byte(vm.STOP),
+	}
+	gas := new(hexutil.Uint64(1_000_000))
+
+	for _, tc := range []struct {
+		name  string
+		args  TraceCallParam
+		code  []byte
+		frame int
+	}{
+		{name: "nested create", args: TraceCallParam{From: &bankAddr, To: &target, Gas: gas}, code: create, frame: 1},
+		{name: "create at the root", args: TraceCallParam{From: &bankAddr, Data: new(hexutil.Bytes(revertInit)), Gas: gas}},
+		{name: "call", args: TraceCallParam{From: &bankAddr, To: &target, Gas: gas}, code: call, frame: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, calleeCode := hexutil.Bytes(tc.code), hexutil.Bytes(revertInit)
+			overrides := ethapi.StateOverrides{
+				accounts.InternAddress(target): {Code: &code},
+				accounts.InternAddress(callee): {Code: &calleeCode},
+			}
+			result, err := api.Call(context.Background(), tc.args, []string{TraceTypeTrace}, nil,
+				&config.TraceConfig{StateOverrides: &overrides})
+			require.NoError(t, err)
+			require.Len(t, result.Trace, tc.frame+1)
+			frame := result.Trace[tc.frame]
+			require.Equal(t, "Reverted", frame.Error)
+			encoded, err := json.Marshal(frame.Result)
+			require.NoError(t, err)
+			require.JSONEq(t, `{"gasUsed":"0x11","output":"0xdeadbeef"}`, string(encoded))
+		})
+	}
+}
+
+// createCode returns code that runs init, at most 32 bytes, through CREATE with the given value.
+func createCode(value byte, init []byte) []byte {
+	code := append([]byte{byte(vm.PUSH1) + byte(len(init)) - 1}, init...)
+	return append(code, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), byte(len(init)), byte(vm.PUSH1), byte(32-len(init)),
+		byte(vm.PUSH1), value, byte(vm.CREATE), byte(vm.STOP))
+}
+
+// callCode returns code that calls addr with the given value and the first size bytes of memory.
+func callCode(op vm.OpCode, addr byte, value byte, size byte) []byte {
+	code := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), size, byte(vm.PUSH0)}
+	if op == vm.CALL {
+		code = append(code, byte(vm.PUSH1), value)
+	}
+	return append(code, byte(vm.PUSH1), addr, byte(vm.GAS), byte(op), byte(vm.STOP))
+}
+
+// A frame that fails other than by reverting reports the draft's failure label and no result.
+func TestTraceCallFailureLabels(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0004")
+	const callee = 0xca
+	// bn256Add of (1, 1), which is not on the curve, and the zero point.
+	badPoint := append([]byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 1, byte(vm.PUSH1), 32, byte(vm.MSTORE)},
+		callCode(vm.CALL, 0x06, 1, 128)...)
+
+	for _, tc := range []struct {
+		name    string
+		code    []byte
+		callee  []byte
+		nonce   hexutil.Uint64
+		balance uint64
+		extra   ethapi.StateOverrides
+		error   string
+	}{
+		{name: "call with insufficient balance", code: callCode(vm.CALL, callee, 1, 0), error: "Insufficient balance for transfer"},
+		{name: "create with insufficient balance", code: createCode(1, []byte{byte(vm.STOP)}), error: "Insufficient balance for transfer"},
+		{name: "create with nonce overflow", code: createCode(0, []byte{byte(vm.STOP)}), nonce: math.MaxUint64, error: "Nonce overflow"},
+		{
+			name: "create with address collision", code: createCode(0, []byte{byte(vm.STOP)}),
+			extra: ethapi.StateOverrides{accounts.InternAddress(types.CreateAddress(target, 0)): {Nonce: new(hexutil.Uint64(1))}},
+			error: "Contract address collision",
+		},
+		{
+			name: "create2 with address collision", code: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE2), byte(vm.STOP)},
+			extra: ethapi.StateOverrides{
+				accounts.InternAddress(types.CreateAddress2(target, [32]byte{}, accounts.EmptyCodeHash)): {Nonce: new(hexutil.Uint64(1))},
+			},
+			error: "Contract address collision",
+		},
+		{
+			name:  "create over the code size limit",
+			code:  createCode(0, []byte{byte(vm.PUSH2), byte((params.MaxCodeSize + 1) >> 8), byte((params.MaxCodeSize + 1) & 0xff), byte(vm.PUSH0), byte(vm.RETURN)}),
+			error: "Out of gas",
+		},
+		{
+			name:  "create of code starting with 0xEF",
+			code:  createCode(0, []byte{byte(vm.PUSH1), 0xef, byte(vm.PUSH0), byte(vm.MSTORE8), byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.RETURN)}),
+			error: "Invalid code",
+		},
+		{name: "out of gas", code: createCode(0, []byte{byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.JUMP)}), error: "Out of gas"},
+		{name: "invalid instruction", code: createCode(0, []byte{byte(vm.INVALID)}), error: "Bad instruction"},
+		{name: "bad jump destination", code: createCode(0, []byte{byte(vm.PUSH0), byte(vm.JUMP)}), error: "Bad jump destination"},
+		{name: "stack underflow", code: createCode(0, []byte{byte(vm.POP)}), error: "Stack underflow"},
+		{
+			name:  "stack overflow",
+			code:  createCode(0, []byte{byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.JUMP)}),
+			error: "Out of stack",
+		},
+		{
+			name:  "return data out of bounds",
+			code:  createCode(0, []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.RETURNDATACOPY)}),
+			error: "Out of bounds",
+		},
+		{
+			name: "write in a static call", code: callCode(vm.STATICCALL, callee, 0, 0),
+			callee: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.SSTORE)}, error: "Mutable Call In Static Context",
+		},
+		{name: "precompile failure", code: badPoint, balance: 1, error: "Built-in failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code, calleeCode := hexutil.Bytes(tc.code), hexutil.Bytes(tc.callee)
+			balance := new(hexutil.U256(*uint256.NewInt(tc.balance)))
+			overrides := ethapi.StateOverrides{
+				accounts.InternAddress(target):                                {Code: &code, Nonce: &tc.nonce, Balance: &balance},
+				accounts.InternAddress(common.BytesToAddress([]byte{callee})): {Code: &calleeCode},
+			}
+			maps.Copy(overrides, tc.extra)
+			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target, Gas: new(hexutil.Uint64(1_000_000))},
+				[]string{TraceTypeTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+			require.NoError(t, err)
+			require.Len(t, result.Trace, 2)
+			require.Equal(t, tc.error, result.Trace[1].Error)
+			require.Nil(t, result.Trace[1].Result)
+		})
+	}
+}
+
+// A CALL or CREATE deeper than the call depth limit fails its precheck with "Max call depth exceeded".
+func TestOeTracerDepthLabel(t *testing.T) {
+	for _, op := range []vm.OpCode{vm.CALL, vm.CREATE} {
+		t.Run(op.String(), func(t *testing.T) {
+			result := &TraceCallResult{}
+			hooks := (&OeTracer{r: result}).Tracer().Hooks
+			hooks.EmitEnter(0, byte(vm.CALL), accounts.ZeroAddress, accounts.ZeroAddress, false, nil, mdgas.MdGas{Execution: 1000}, uint256.Int{}, nil)
+			hooks.EmitEnter(1, byte(op), accounts.ZeroAddress, accounts.ZeroAddress, false, nil, mdgas.MdGas{Execution: 900}, uint256.Int{}, nil)
+			hooks.EmitExit(1, nil, mdgas.MdGasUsage{}, vm.ErrDepth, false)
+			hooks.EmitExit(0, nil, mdgas.MdGasUsage{Execution: 100}, nil, false)
+			require.Len(t, result.Trace, 2)
+			require.Equal(t, "Max call depth exceeded", result.Trace[1].Error)
+			require.Nil(t, result.Trace[1].Result)
+		})
+	}
+}
+
 // Call data takes the same data/input precedence as eth_call: input wins when both are set.
+// Call data comes from data or input, as in eth_call. Both may be set only to the same value.
 func TestTraceCallInputField(t *testing.T) {
 	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
 	api := newTraceApiForTest(m)
@@ -830,11 +1228,21 @@ func TestTraceCallInputField(t *testing.T) {
 		{name: "data", fields: `"data":"0xaa"`, output: "0xaa"},
 		{name: "input", fields: `"input":"0xbb"`, output: "0xbb"},
 		{name: "equal", fields: `"data":"0xcc","input":"0xcc"`, output: "0xcc"},
-		{name: "input wins", fields: `"data":"0xaa","input":"0xbb"`, output: "0xbb"},
+		{name: "differ", fields: `"data":"0xaa","input":"0xbb"`},
+		{name: "empty input", fields: `"data":"0xaa","input":"0x"`},
+		{name: "null input", fields: `"data":"0xaa","input":null`, output: "0xaa"},
+		{name: "null data", fields: `"data":null,"input":"0xbb"`, output: "0xbb"},
+		{name: "both null", fields: `"data":null,"input":null`, output: "0x"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var args TraceCallParam
 			call := fmt.Sprintf(`{"from":%q,"to":%q,%s}`, bankAddr.Hex(), echo.Hex(), tc.fields)
+			if tc.output == "" {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, json.Unmarshal([]byte(call), &args), &rpcErr)
+				require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+				return
+			}
 			require.NoError(t, json.Unmarshal([]byte(call), &args))
 
 			result, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, nil, traceConfig)
@@ -859,6 +1267,92 @@ func TestCallManyInputField(t *testing.T) {
 	require.Equal(t, "0x602a60005260206000f3", created.Code.String())
 }
 
+// An explicit null for an optional call-object member is the same as omitting it, in both
+// trace_call and trace_callMany. A null to keeps its meaning: the call creates a contract.
+func TestTraceCallNullMembers(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.AllProtocolChanges)
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	traceCall := func(t *testing.T, call map[string]any) json.RawMessage {
+		t.Helper()
+		var result json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &result, "trace_call", call, []string{TraceTypeTrace}, "latest"))
+		return result
+	}
+	traceCallMany := func(t *testing.T, call map[string]any) json.RawMessage {
+		t.Helper()
+		var results []json.RawMessage
+		require.NoError(t, client.CallContext(t.Context(), &results, "trace_callMany", [][]any{{call, []string{TraceTypeTrace}}}, "latest"))
+		require.Len(t, results, 1)
+		return results[0]
+	}
+
+	// A contract creation whose init code returns the word 42. It is unpriced, as eth_call runs it
+	// without fee checks, so omitting from or gas cannot make it unaffordable.
+	const initCode = "0x602a60005260206000f3"
+	full := map[string]any{
+		"from": bankAddr, "gas": "0x493e0", "maxFeePerGas": "0x0", "maxPriorityFeePerGas": "0x0",
+		"value": "0x0", "data": initCode, "accessList": []any{}, "nonce": "0x0",
+		"chainId": hexutil.Uint64(m.ChainConfig.ChainID.Uint64()),
+	}
+	// Members absent from the base call: setting them to null must not change it.
+	nullOnly := []string{"to", "input", "gasPrice", "maxFeePerBlobGas", "blobVersionedHashes", "authorizationList", "type"}
+	for name, trace := range map[string]func(*testing.T, map[string]any) json.RawMessage{"trace_call": traceCall, "trace_callMany": traceCallMany} {
+		t.Run(name, func(t *testing.T) {
+			var want struct {
+				Output hexutil.Bytes `json:"output"`
+				Trace  []struct {
+					Type string `json:"type"`
+				} `json:"trace"`
+			}
+			require.NoError(t, json.Unmarshal(trace(t, full), &want))
+			require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000002a", want.Output.String())
+			require.Equal(t, "create", want.Trace[0].Type)
+
+			for member := range full {
+				t.Run(member, func(t *testing.T) {
+					omitted := maps.Clone(full)
+					delete(omitted, member)
+					null := maps.Clone(omitted)
+					null[member] = nil
+					require.JSONEq(t, string(trace(t, omitted)), string(trace(t, null)))
+				})
+			}
+			for _, member := range nullOnly {
+				t.Run(member, func(t *testing.T) {
+					null := maps.Clone(full)
+					null[member] = nil
+					require.JSONEq(t, string(trace(t, full)), string(trace(t, null)))
+				})
+			}
+			t.Run("calldata in input", func(t *testing.T) {
+				input := maps.Clone(full)
+				delete(input, "data")
+				input["input"] = initCode
+				null := maps.Clone(input)
+				null["data"] = nil
+				require.JSONEq(t, string(trace(t, full)), string(trace(t, input)))
+				require.JSONEq(t, string(trace(t, input)), string(trace(t, null)))
+			})
+			t.Run("all", func(t *testing.T) {
+				null := map[string]any{"data": initCode}
+				for _, member := range nullOnly {
+					null[member] = nil
+				}
+				for member := range full {
+					if member != "data" {
+						null[member] = nil
+					}
+				}
+				require.JSONEq(t, string(trace(t, map[string]any{"data": initCode})), string(trace(t, null)))
+			})
+		})
+	}
+}
+
 // runtimeReturningOpcode returns the given zero-argument opcode's value as a
 // 32-byte word: <opcode>, PUSH1 0x00, MSTORE, PUSH1 0x20, PUSH1 0x00, RETURN.
 func runtimeReturningOpcode(opcode byte) []byte {
@@ -868,7 +1362,11 @@ func runtimeReturningOpcode(opcode byte) []byte {
 // deployCodeReturningOpcode returns CREATE init code that deploys a contract
 // whose runtime is runtimeReturningOpcode.
 func deployCodeReturningOpcode(opcode byte) []byte {
-	runtime := runtimeReturningOpcode(opcode)
+	return deployCode(runtimeReturningOpcode(opcode))
+}
+
+// deployCode returns CREATE init code that deploys runtime (at most 255 bytes).
+func deployCode(runtime []byte) []byte {
 	initHeader := []byte{
 		0x60, byte(len(runtime)), // PUSH1 length
 		0x60, 0x0c, // PUSH1 12 (runtime offset in initcode)
@@ -1029,7 +1527,7 @@ func TestCallManyBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 	contractAddr := c.deployOpcodeContract(t, opGasprice)
 	api := c.traceAPI()
 
-	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
+	calls := fmt.Sprintf(`[[{"from":%q,"to":%q,"gas":"0x186a0","maxFeePerGas":"0x77359400","maxPriorityFeePerGas":"0x2"},["trace"]]]`,
 		c.bankAddress.Hex(), contractAddr.Hex())
 
 	results, err := api.CallMany(context.Background(), json.RawMessage(calls), nil, traceConfigWithBaseFeeOverride(uint256.NewInt(10)))
@@ -1334,6 +1832,45 @@ func TestTraceCallWithoutTraceTypes(t *testing.T) {
 	require.Nil(t, result.StateDiff)
 }
 
+// A chainId for another chain makes a call object invalid whatever the state, so trace_call
+// and trace_callMany reject it as invalid params instead of running the call.
+func TestTraceCallRejectsOtherChainID(t *testing.T) {
+	m, _, bank := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	own := fmt.Sprintf(`{"from":%q,"to":%q,"chainId":"0x539"}`, bank.Hex(), bank.Hex())
+	other := fmt.Sprintf(`{"from":%q,"to":%q,"chainId":"0x1"}`, bank.Hex(), bank.Hex())
+	requireRejected := func(t *testing.T, err error) {
+		t.Helper()
+		var rpcErr rpc.Error
+		require.ErrorAs(t, err, &rpcErr)
+		require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+		require.ErrorContains(t, err, "chainId does not match node's (have=1, want=1337)")
+	}
+
+	// The chainId is checked before the block is resolved, so an unknown block does not hide it.
+	unknownNum := rpc.BlockNumber(1_000_000)
+	for name, block := range map[string]*rpc.BlockNumberOrHash{
+		"latest":  nil,
+		"unknown": {BlockNumber: &unknownNum},
+	} {
+		t.Run("trace_call/"+name, func(t *testing.T) {
+			var args TraceCallParam
+			require.NoError(t, json.Unmarshal([]byte(other), &args))
+			result, err := api.Call(context.Background(), args, []string{TraceTypeTrace}, block, nil)
+			requireRejected(t, err)
+			require.Nil(t, result)
+		})
+
+		t.Run("trace_callMany/"+name, func(t *testing.T) {
+			bundle := json.RawMessage("[[" + own + `,["trace"]],[` + other + `,["trace"]]]`)
+			result, err := api.CallMany(context.Background(), bundle, block, nil)
+			requireRejected(t, err)
+			require.ErrorContains(t, err, "call 1:")
+			require.Nil(t, result)
+		})
+	}
+}
+
 func TestRawTransactionWithoutTraceTypes(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -1389,7 +1926,7 @@ func TestCallManyHistoricalParentPinsStateBoundary(t *testing.T) {
 	parent := &rpc.BlockNumberOrHash{BlockNumber: &parentNum}
 
 	const bundle = `[
-	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["trace"]],
+	[{"from":"0x14627ea0e2B27b817DbfF94c3dA383bB73F8C30b","to":"0x703c4b2bD70c169f5717101CaeE543299Fc946C7","gas":"0x5208","gasPrice":"0x0","value":"0x0"},["trace"]],
 	[{"from":"0x71562b71999873db5b286df957af199ec94617f7","to":"0x0100000000000000000000000000000000000000","gas":"0x5208","gasPrice":"0x0","value":"0x1"},["stateDiff"]]
 ]`
 
@@ -1779,11 +2316,12 @@ func TestTraceCallFields(t *testing.T) {
 		require.Equal(t, common.Hash{}.Hex(), withoutHash.Output.String())
 	})
 
-	// As in eth_call, the nonce and chainId are not checked against the state or the chain,
-	// so neither changes how the call runs.
+	// As in eth_call, the nonce is not checked against the state, and the chain's own chainId
+	// is accepted, so neither changes how the call runs. TestTraceCallRejectsOtherChainID covers
+	// a chainId for another chain.
 	for _, tc := range []struct{ name, fields string }{
 		{name: "nonce", fields: `,"nonce":"0x7"`},
-		{name: "chainId", fields: `,"chainId":"0x1"`},
+		{name: "chainId", fields: `,"chainId":"0x539"`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			require.Equal(t, word42, traceCall(t, callObject(marker, tc.fields)).Output.String())
@@ -1932,6 +2470,316 @@ func TestRawTransactionValidatesAgainstLatestState(t *testing.T) {
 		tx := valid
 		tx.gasLimit = params.TxGas + 5_000 // enough to start, not enough for the SSTORE
 		result := traceValid(t, tx)
-		require.Equal(t, vm.ErrOutOfGas.Error(), result.Trace[0].Error)
+		require.Equal(t, "Out of gas", result.Trace[0].Error)
 	})
+}
+
+// feeProbeRuntime returns six words: GASPRICE, BASEFEE, GASLIMIT, BALANCE(CALLER),
+// BALANCE(COINBASE) and BLOBBASEFEE.
+var feeProbeRuntime = []byte{
+	byte(vm.GASPRICE), byte(vm.PUSH0), byte(vm.MSTORE),
+	byte(vm.BASEFEE), byte(vm.PUSH1), 0x20, byte(vm.MSTORE),
+	byte(vm.GASLIMIT), byte(vm.PUSH1), 0x40, byte(vm.MSTORE),
+	byte(vm.CALLER), byte(vm.BALANCE), byte(vm.PUSH1), 0x60, byte(vm.MSTORE),
+	byte(vm.COINBASE), byte(vm.BALANCE), byte(vm.PUSH1), 0x80, byte(vm.MSTORE),
+	byte(vm.BLOBBASEFEE), byte(vm.PUSH1), 0xa0, byte(vm.MSTORE),
+	byte(vm.PUSH1), 0xc0, byte(vm.PUSH0), byte(vm.RETURN),
+}
+
+type feeProbe struct {
+	gasPrice, baseFee, gasLimit, callerBalance, coinbaseBalance, blobBaseFee *big.Int
+}
+
+func readFeeProbe(t *testing.T, output hexutil.Bytes) feeProbe {
+	t.Helper()
+	require.Len(t, output, 6*32)
+	word := func(i int) *big.Int { return new(big.Int).SetBytes(output[i*32 : (i+1)*32]) }
+	return feeProbe{word(0), word(1), word(2), word(3), word(4), word(5)}
+}
+
+// feeProbeChain mines a block with a fixed coinbase that deploys feeProbeRuntime and
+// gives poor 1000 wei, so calls run against a block with a positive base fee.
+type feeProbeChain struct {
+	*baseFeeTestChain
+	coinbase, probe, poor common.Address
+	header                *types.Header
+}
+
+func newFeeProbeChain(t *testing.T) *feeProbeChain {
+	c := &feeProbeChain{
+		baseFeeTestChain: newBaseFeeTestChain(t, chain.TestChainOsakaConfig),
+		coinbase:         common.HexToAddress("0xc0ffee"),
+		poor:             common.HexToAddress("0x9002"),
+	}
+	c.mineBlock(t, func(block *blockgen.BlockGen) {
+		block.SetCoinbase(c.coinbase)
+		nonce := block.TxNonce(c.bankAddress)
+		deploy, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: nonce, GasLimit: 500_000, Data: deployCode(feeProbeRuntime)},
+			GasPrice: *uint256.NewInt(10_000_000_000),
+		}, *c.signer, c.bankKey)
+		require.NoError(t, err)
+		block.AddTx(deploy)
+		c.probe = types.CreateAddress(c.bankAddress, nonce)
+		fund, err := types.SignTx(&types.LegacyTx{
+			CommonTx: types.CommonTx{Nonce: nonce + 1, GasLimit: params.TxGas, To: &c.poor, Value: *uint256.NewInt(1000)},
+			GasPrice: *uint256.NewInt(10_000_000_000),
+		}, *c.signer, c.bankKey)
+		require.NoError(t, err)
+		block.AddTx(fund)
+	})
+	c.header = c.head.Header()
+	require.Positive(t, c.header.BaseFee.Sign())
+	return c
+}
+
+// call returns a call object sending 7 wei to the probe with 100000 gas, plus fields.
+func (c *feeProbeChain) call(from common.Address, fields string) string {
+	return fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x186a0","value":"0x7"%s}`, from.Hex(), c.probe.Hex(), fields)
+}
+
+func requireBigEqual(t *testing.T, want, got *big.Int, msgAndArgs ...any) {
+	t.Helper()
+	require.Equal(t, want.String(), got.String(), msgAndArgs...)
+}
+
+func requireErrorCode(t *testing.T, err error, code int) {
+	t.Helper()
+	var coded rpc.Error
+	require.ErrorAs(t, err, &coded)
+	require.Equal(t, code, coded.ErrorCode(), coded.Error())
+}
+
+// TestTraceCallFeeEnvironmentMatchesEthCall checks that trace_call runs a call object
+// with the fees and block environment eth_call gives it: an unpriced call runs free
+// with GASPRICE and BASEFEE 0, a priced call is validated and pays like a transaction,
+// and GASLIMIT is the block's.
+func TestTraceCallFeeEnvironmentMatchesEthCall(t *testing.T) {
+	c := newFeeProbeChain(t)
+	traceAPI := c.traceAPI()
+	ethAPI := newEthApiForTest(newBaseApiForTest(c.m), c.m.DB, nil, nil)
+	baseFee := c.header.BaseFee.ToBig()
+	value := big.NewInt(7)
+
+	traceCall := func(t *testing.T, call string) (*TraceCallResult, error) {
+		t.Helper()
+		var args TraceCallParam
+		require.NoError(t, json.Unmarshal([]byte(call), &args))
+		return traceAPI.Call(context.Background(), args, []string{TraceTypeStateDiff}, nil, nil)
+	}
+	ethCall := func(t *testing.T, call string) (hexutil.Bytes, error) {
+		t.Helper()
+		var args ethapi.CallArgs
+		require.NoError(t, json.Unmarshal([]byte(call), &args))
+		return ethAPI.Call(context.Background(), args, nil, nil, nil)
+	}
+	// traceMatchesEthCall runs call through both methods and returns the trace_call result.
+	traceMatchesEthCall := func(t *testing.T, call string) *TraceCallResult {
+		t.Helper()
+		result, err := traceCall(t, call)
+		require.NoError(t, err)
+		ethOutput, err := ethCall(t, call)
+		require.NoError(t, err)
+		require.Equal(t, ethOutput, result.Output, "trace_call and eth_call see the same environment")
+		return result
+	}
+
+	for _, tc := range []struct{ name, fields string }{
+		{name: "omitted fees"},
+		{name: "zero gasPrice", fields: `,"gasPrice":"0x0"`},
+		{name: "zero fee caps", fields: `,"maxFeePerGas":"0x0","maxPriorityFeePerGas":"0x0"`},
+		{name: "zero tip only", fields: `,"maxPriorityFeePerGas":"0x0"`},
+		{name: "zero cap only", fields: `,"maxFeePerGas":"0x0"`},
+	} {
+		t.Run("unpriced call runs free: "+tc.name, func(t *testing.T) {
+			result := traceMatchesEthCall(t, c.call(c.bankAddress, tc.fields))
+			probe := readFeeProbe(t, result.Output)
+			require.Zero(t, probe.gasPrice.Sign(), "GASPRICE")
+			require.Zero(t, probe.baseFee.Sign(), "BASEFEE")
+			require.Equal(t, c.header.GasLimit, probe.gasLimit.Uint64(), "GASLIMIT is the block's")
+			require.Positive(t, probe.blobBaseFee.Sign(), "a call without blobs keeps the block's BLOBBASEFEE")
+
+			requireBigEqual(t, new(big.Int).Neg(value), stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress), "the sender pays only the value")
+			requireBigEqual(t, value, stateDiffBalanceDelta(t, result.StateDiff, c.probe))
+			if coinbase, ok := result.StateDiff[accounts.InternAddress(c.coinbase)]; ok {
+				require.Equal(t, "=", coinbase.Balance, "the fee recipient gets nothing")
+			}
+		})
+	}
+
+	price := new(big.Int).Add(baseFee, big.NewInt(2))
+	for _, tc := range []struct{ name, fields string }{
+		{name: "gasPrice", fields: fmt.Sprintf(`,"gasPrice":%q`, hexutil.EncodeBig(price))},
+		{name: "fee caps", fields: fmt.Sprintf(`,"maxFeePerGas":%q,"maxPriorityFeePerGas":"0x2"`, hexutil.EncodeBig(new(big.Int).Mul(baseFee, big.NewInt(2))))},
+	} {
+		t.Run("priced call pays like a transaction: "+tc.name, func(t *testing.T) {
+			result := traceMatchesEthCall(t, c.call(c.bankAddress, tc.fields))
+			probe := readFeeProbe(t, result.Output)
+			requireBigEqual(t, price, probe.gasPrice, "GASPRICE")
+			requireBigEqual(t, baseFee, probe.baseFee, "BASEFEE")
+			require.Equal(t, c.header.GasLimit, probe.gasLimit.Uint64(), "GASLIMIT is the block's")
+
+			sender, ok := result.StateDiff[accounts.InternAddress(c.bankAddress)].Balance.(map[string]*StateDiffBalance)
+			require.True(t, ok)
+			upfront := new(big.Int).Mul(big.NewInt(100_000), price)
+			requireBigEqual(t, new(big.Int).Sub(sender["*"].From.ToInt(), new(big.Int).Add(upfront, value)), probe.callerBalance,
+				"BALANCE(CALLER) sees the upfront gas payment and the value")
+
+			tip := stateDiffBalanceDelta(t, result.StateDiff, c.coinbase)
+			gasUsed, rem := new(big.Int).QuoRem(tip, big.NewInt(2), new(big.Int))
+			require.Zero(t, rem.Sign())
+			require.Greater(t, gasUsed.Uint64(), uint64(params.TxGas))
+			require.Less(t, gasUsed.Uint64(), uint64(100_000), "unused gas is refunded")
+			paid := new(big.Int).Add(new(big.Int).Mul(gasUsed, price), value)
+			requireBigEqual(t, new(big.Int).Neg(paid), stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress), "the sender pays gasUsed * price + value")
+
+			total := new(big.Int)
+			for addr := range result.StateDiff {
+				total.Add(total, stateDiffBalanceDelta(t, result.StateDiff, addr.Value()))
+			}
+			requireBigEqual(t, new(big.Int).Neg(new(big.Int).Mul(gasUsed, baseFee)), total, "only the base fee leaves circulation")
+		})
+	}
+
+	t.Run("priced transfer pays for exactly its intrinsic gas", func(t *testing.T) {
+		recipient := common.HexToAddress("0x1234")
+		call := fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x186a0","value":"0x7","gasPrice":%q}`, c.bankAddress.Hex(), recipient.Hex(), hexutil.EncodeBig(price))
+		result, err := traceCall(t, call)
+		require.NoError(t, err)
+		gasUsed := big.NewInt(int64(params.TxGas))
+		requireBigEqual(t, new(big.Int).Neg(new(big.Int).Add(new(big.Int).Mul(gasUsed, price), value)), stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress))
+		requireBigEqual(t, new(big.Int).Mul(gasUsed, big.NewInt(2)), stateDiffBalanceDelta(t, result.StateDiff, c.coinbase))
+		requireBigEqual(t, value, stateDiffBalanceDelta(t, result.StateDiff, recipient))
+	})
+
+	blobHash := `"blobVersionedHashes":["0x0100000000000000000000000000000000000000000000000000000000000001"]`
+	t.Run("unpriced blobs see a zero BLOBBASEFEE", func(t *testing.T) {
+		result := traceMatchesEthCall(t, c.call(c.bankAddress, ","+blobHash))
+		require.Zero(t, readFeeProbe(t, result.Output).blobBaseFee.Sign())
+	})
+
+	t.Run("priced blobs pay the blob fee", func(t *testing.T) {
+		result := traceMatchesEthCall(t, c.call(c.bankAddress, fmt.Sprintf(`,"gasPrice":%q,"maxFeePerBlobGas":"0x3b9aca00",%s`, hexutil.EncodeBig(price), blobHash)))
+		blobBaseFee := readFeeProbe(t, result.Output).blobBaseFee
+		require.Positive(t, blobBaseFee.Sign())
+		gasUsed := new(big.Int).Div(stateDiffBalanceDelta(t, result.StateDiff, c.coinbase), big.NewInt(2))
+		paid := new(big.Int).Add(new(big.Int).Mul(gasUsed, price), value)
+		paid.Add(paid, new(big.Int).Mul(new(big.Int).SetUint64(params.GasPerBlob), blobBaseFee))
+		requireBigEqual(t, new(big.Int).Neg(paid), stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress), "the sender also pays blob gas * BLOBBASEFEE")
+	})
+
+	unfunded := common.HexToAddress("0xdead")
+	for _, tc := range []struct {
+		name string
+		call string
+		code int
+		is   error
+	}{
+		{name: "price below the base fee", call: c.call(c.bankAddress, `,"gasPrice":"0x1"`), code: rpc.ErrCodeBaseFeeTooLow, is: protocol.ErrFeeCapTooLow},
+		{name: "fee cap below the base fee", call: c.call(c.bankAddress, `,"maxFeePerGas":"0x1","maxPriorityFeePerGas":"0x1"`), code: rpc.ErrCodeBaseFeeTooLow, is: protocol.ErrFeeCapTooLow},
+		{name: "tip above the fee cap", call: c.call(c.bankAddress, `,"maxPriorityFeePerGas":"0x1"`), code: rpc.ErrCodeInvalidParams, is: protocol.ErrTipAboveFeeCap},
+		{name: "sender can pay the value but not the gas", call: c.call(c.poor, fmt.Sprintf(`,"gasPrice":%q`, hexutil.EncodeBig(price))), code: rpc.ErrCodeInsufficientFunds, is: protocol.ErrInsufficientFunds},
+		{name: "sender cannot pay the value", call: c.call(unfunded, ""), code: rpc.ErrCodeInsufficientFunds, is: protocol.ErrInsufficientFunds},
+	} {
+		t.Run("rejected: "+tc.name, func(t *testing.T) {
+			_, err := ethCall(t, tc.call)
+			require.Error(t, err, "eth_call rejects it too")
+			result, err := traceCall(t, tc.call)
+			require.Nil(t, result)
+			requireErrorCode(t, err, tc.code)
+			require.ErrorIs(t, err, tc.is)
+		})
+	}
+
+	t.Run("the poor sender's free call runs", func(t *testing.T) {
+		traceMatchesEthCall(t, c.call(c.poor, ""))
+	})
+}
+
+// TestTraceCallPreLondonFeesMatchEthCall checks that before London, where eth_call
+// ignores the EIP-1559 fee fields, trace_call ignores them too.
+func TestTraceCallPreLondonFeesMatchEthCall(t *testing.T) {
+	c := newBaseFeeTestChain(t, chain.TestChainBerlinConfig)
+	probe := c.deployOpcodeContract(t, opGasprice)
+	call := fmt.Sprintf(`{"from":%q,"to":%q,"gas":"0x186a0","value":"0x7","maxFeePerGas":"0x2","maxPriorityFeePerGas":"0x1"}`, c.bankAddress.Hex(), probe.Hex())
+
+	var ethArgs ethapi.CallArgs
+	require.NoError(t, json.Unmarshal([]byte(call), &ethArgs))
+	ethOutput, err := newEthApiForTest(newBaseApiForTest(c.m), c.m.DB, nil, nil).Call(context.Background(), ethArgs, nil, nil, nil)
+	require.NoError(t, err)
+
+	var traceArgs TraceCallParam
+	require.NoError(t, json.Unmarshal([]byte(call), &traceArgs))
+	result, err := c.traceAPI().Call(context.Background(), traceArgs, []string{TraceTypeStateDiff}, nil, nil)
+	require.NoError(t, err)
+	require.Equal(t, ethOutput, result.Output)
+	require.Equal(t, common.Hash{}.Hex(), result.Output.String(), "GASPRICE")
+	requireBigEqual(t, big.NewInt(-7), stateDiffBalanceDelta(t, result.StateDiff, c.bankAddress), "the sender pays only the value")
+}
+
+// TestTraceCallManyChargesEachCall checks that each trace_callMany call runs in its own
+// fee environment and pays like the first, on the state the calls before it left.
+func TestTraceCallManyChargesEachCall(t *testing.T) {
+	c := newFeeProbeChain(t)
+	api := c.traceAPI()
+	baseFee := c.header.BaseFee.ToBig()
+	price := new(big.Int).Add(baseFee, big.NewInt(2))
+	value := big.NewInt(7)
+
+	priced := c.call(c.bankAddress, fmt.Sprintf(`,"gasPrice":%q`, hexutil.EncodeBig(price)))
+	free := c.call(c.bankAddress, "")
+	callMany := func(t *testing.T, secondTraceType string) []*TraceCallResult {
+		t.Helper()
+		bundle := fmt.Sprintf(`[[%s,["stateDiff"]],[%s,[%q]],[%s,["stateDiff"]],[%s,["stateDiff"]]]`, free, priced, secondTraceType, priced, free)
+		results, err := api.CallMany(context.Background(), json.RawMessage(bundle), nil, nil)
+		require.NoError(t, err)
+		require.Len(t, results, 4)
+		return results
+	}
+	results := callMany(t, TraceTypeStateDiff)
+	probes := make([]feeProbe, len(results))
+	for i, result := range results {
+		probes[i] = readFeeProbe(t, result.Output)
+	}
+
+	for i, wantBaseFee := range []*big.Int{new(big.Int), baseFee, baseFee, new(big.Int)} {
+		requireBigEqual(t, wantBaseFee, probes[i].baseFee, "BASEFEE of call %d", i)
+		require.Equal(t, c.header.GasLimit, probes[i].gasLimit.Uint64(), "GASLIMIT of call %d", i)
+	}
+
+	// Each call's sender balance starts where the previous call left it.
+	senderBefore := func(i int) *big.Int {
+		sender, ok := results[i].StateDiff[accounts.InternAddress(c.bankAddress)].Balance.(map[string]*StateDiffBalance)
+		require.True(t, ok)
+		return sender["*"].From.ToInt()
+	}
+	start := senderBefore(0)
+	charge := func(i int) *big.Int {
+		gasUsed := new(big.Int).Div(stateDiffBalanceDelta(t, results[i].StateDiff, c.coinbase), big.NewInt(2))
+		require.Greater(t, gasUsed.Uint64(), uint64(params.TxGas))
+		return new(big.Int).Add(new(big.Int).Mul(gasUsed, price), value)
+	}
+	upfront := new(big.Int).Add(new(big.Int).Mul(big.NewInt(100_000), price), value)
+
+	afterFirst := new(big.Int).Sub(start, value)
+	requireBigEqual(t, new(big.Int).Sub(afterFirst, upfront), probes[1].callerBalance, "the second call pays upfront after the first")
+	afterSecond := new(big.Int).Sub(afterFirst, charge(1))
+	requireBigEqual(t, afterSecond, senderBefore(2), "the third call starts from the second call's charge")
+	requireBigEqual(t, new(big.Int).Sub(afterSecond, upfront), probes[2].callerBalance)
+	afterThird := new(big.Int).Sub(afterSecond, charge(2))
+	requireBigEqual(t, afterThird, senderBefore(3))
+	requireBigEqual(t, new(big.Int).Sub(afterThird, value), probes[3].callerBalance, "a free call after priced ones pays nothing")
+
+	// The second call's charge carries over when it is traced without stateDiff.
+	traced := callMany(t, TraceTypeTrace)
+	require.Equal(t, results[2].StateDiff, traced[2].StateDiff)
+	require.Equal(t, results[3].Output, traced[3].Output)
+
+	// A call priced below the base fee fails the bundle with eth_simulateV1's code.
+	belowBase := c.call(c.bankAddress, `,"gasPrice":"0x1"`)
+	rejected, err := api.CallMany(context.Background(), json.RawMessage(fmt.Sprintf(`[[%s,["trace"]],[%s,["trace"]]]`, free, belowBase)), nil, nil)
+	require.Nil(t, rejected)
+	requireErrorCode(t, err, rpc.ErrCodeBaseFeeTooLow)
+	require.ErrorIs(t, err, protocol.ErrFeeCapTooLow)
+	require.Contains(t, err.Error(), "txIndex 1")
 }
