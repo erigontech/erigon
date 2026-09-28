@@ -288,7 +288,7 @@ func (s *proposerPreferencesService) validateProposerPreferencesWithState(msg *c
 		return fmt.Errorf("signature verification error: %w", err)
 	}
 	if !valid {
-		return fmt.Errorf("invalid proposer preferences signature")
+		return errors.New("invalid proposer preferences signature")
 	}
 	return nil
 }
