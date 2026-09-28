@@ -221,6 +221,20 @@ func (blobs Blobs) ComputeCommitmentsAndProofs() (commitments []KZGCommitment, v
 	return commitments, versionedHashes, proofs, nil
 }
 
+// ComputeCommitments returns the KZG commitments of the blobs.
+func (blobs Blobs) ComputeCommitments() ([]KZGCommitment, error) {
+	commitments := make([]KZGCommitment, len(blobs))
+	kzgCtx := libkzg.Ctx()
+	for i := range blobs {
+		commitment, err := kzgCtx.BlobToKZGCommitment((*goethkzg.Blob)(&blobs[i]), 1 /*numGoRoutines*/)
+		if err != nil {
+			return nil, fmt.Errorf("could not convert blob to commitment: %w", err)
+		}
+		commitments[i] = KZGCommitment(commitment)
+	}
+	return commitments, nil
+}
+
 // ComputeCellProofs returns the EIP-7594 cell proofs of the blobs, CellsPerExtBlob per blob.
 func (blobs Blobs) ComputeCellProofs() (KZGProofs, error) {
 	kzgCtx := libkzg.Ctx()

@@ -521,7 +521,9 @@ func argsWithFilledSidecar(t *testing.T, api *APIImpl) (ethapi.CallArgs, *types.
 	wrapper := decodeFilledBlobTx(t, filled.Raw)
 	args := testBlobCallArgs()
 	args.Commitments = []hexutil.Bytes{wrapper.Commitments[0][:]}
-	args.Proofs = []hexutil.Bytes{wrapper.Proofs[0][:]}
+	for i := range wrapper.Proofs {
+		args.Proofs = append(args.Proofs, wrapper.Proofs[i][:])
+	}
 	return args, wrapper
 }
 
@@ -591,6 +593,24 @@ func TestFillTransactionBlobsInvalidProof(t *testing.T) {
 	api, _ := newBlobApiForTest(t, false, 0)
 	args, _ := argsWithFilledSidecar(t, api)
 	args.Proofs = args.Commitments
+
+	_, err := api.FillTransaction(context.Background(), args)
+	require.ErrorContains(t, err, "failed to verify blob proof")
+}
+
+func TestFillTransactionBlobsWithCellProofsOnOsaka(t *testing.T) {
+	api, _ := newBlobApiForTest(t, true, 0)
+	args, want := argsWithFilledSidecar(t, api)
+
+	result, err := api.FillTransaction(context.Background(), args)
+	require.NoError(t, err)
+	require.Equal(t, want, decodeFilledBlobTx(t, result.Raw))
+}
+
+func TestFillTransactionBlobsInvalidCellProofOnOsaka(t *testing.T) {
+	api, _ := newBlobApiForTest(t, true, 0)
+	args, _ := argsWithFilledSidecar(t, api)
+	args.Proofs[0], args.Proofs[1] = args.Proofs[1], args.Proofs[0]
 
 	_, err := api.FillTransaction(context.Background(), args)
 	require.ErrorContains(t, err, "failed to verify blob proof")

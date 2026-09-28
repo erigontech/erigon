@@ -225,16 +225,19 @@ func buildBlobSidecar(args *ethapi.CallArgs, cellProofs bool) (*types.BlobTxWrap
 	}
 
 	var err error
-	if commitments == nil {
+	switch {
+	case commitments == nil && cellProofs:
+		if sidecar.Commitments, err = sidecar.Blobs.ComputeCommitments(); err != nil {
+			return nil, err
+		}
+		if sidecar.Proofs, err = sidecar.Blobs.ComputeCellProofs(); err != nil {
+			return nil, err
+		}
+	case commitments == nil:
 		if sidecar.Commitments, _, sidecar.Proofs, err = sidecar.Blobs.ComputeCommitmentsAndProofs(); err != nil {
 			return nil, err
 		}
-		if cellProofs {
-			if sidecar.Proofs, err = sidecar.Blobs.ComputeCellProofs(); err != nil {
-				return nil, err
-			}
-		}
-	} else {
+	default:
 		if sidecar.Commitments, err = parse48[types.KZGCommitment]("commitments", commitments); err != nil {
 			return nil, err
 		}
