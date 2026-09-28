@@ -593,14 +593,9 @@ func (ot *OeTracer) captureEndOrExit(deep bool, output []byte, gasUsed mdgas.MdG
 	if err != nil && !ignoreError {
 		if errors.Is(err, vm.ErrExecutionReverted) {
 			topTrace.Error = "Reverted"
-			switch topTrace.Type {
-			case CALL:
-				topTrace.Result.(*TraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
-				topTrace.Result.(*TraceResult).Output = bytes.Clone(output)
-			case CREATE:
-				topTrace.Result.(*CreateTraceResult).GasUsed = (*hexutil.U256)(uint256.NewInt(gasUsed.Execution))
-				topTrace.Result.(*CreateTraceResult).Code = bytes.Clone(output)
-			}
+			// A reverted CREATE deploys nothing, so it reports its revert data as a call does,
+			// without the address it would have occupied.
+			topTrace.Result = &TraceResult{GasUsed: (*hexutil.U256)(uint256.NewInt(gasUsed.Execution)), Output: bytes.Clone(output)}
 		} else {
 			topTrace.Result = nil
 			topTrace.Error = err.Error()
