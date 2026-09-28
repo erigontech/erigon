@@ -1604,6 +1604,51 @@ func TestModeUpdatePreservesAccountAcrossStorageFold(t *testing.T) {
 	require.Equal(t, expected, actual)
 }
 
+func TestCarriedAccountUpdateSurvivesStorageDeletion(t *testing.T) {
+	t.Parallel()
+	const addr = "6bcd941e6621fb7ec22c0dff03d7d6cc9b5921d8"
+	const codeHash = "5ea78a5e3cec82b66117982ea93e22a8e0018a9a8adac0ef093ca1aca0e78466"
+	const slot1 = "0000000000000000000000000000000000000000000000000000000000000000"
+	const slot2 = "0000000000000000000000000000000000000000000000000000000000000001"
+	finalKeys, finalUpdates := NewUpdateBuilder().
+		Balance(addr, 99).Nonce(addr, 1).CodeHash(addr, codeHash).Build()
+	want, _ := sequentialRoot(t, finalKeys, finalUpdates)
+	for _, slots := range [][]string{{slot1}, {slot1, slot2}} {
+		initialBuilder := NewUpdateBuilder().Balance(addr, 100).Nonce(addr, 1).CodeHash(addr, codeHash)
+		changedBuilder := NewUpdateBuilder().Balance(addr, 99).Nonce(addr, 1).CodeHash(addr, codeHash)
+		for _, slot := range slots {
+			initialBuilder.Storage(addr, slot, "01")
+			changedBuilder.DeleteStorage(addr, slot)
+		}
+		initialKeys, initialUpdates := initialBuilder.Build()
+		changedKeys, changedUpdates := changedBuilder.Build()
+		for _, mode := range []Mode{ModeUpdate, ModeParallel} {
+			t.Run(fmt.Sprintf("%d_slots/%s", len(slots), mode), func(t *testing.T) {
+				ms := NewMockState(t)
+				ms.SetConcurrentCommitment(true)
+				var trie Trie
+				if mode == ModeParallel {
+					trie = newParTrie(t, ms, 2)
+				} else {
+					trie = newSeqTrie(t, ms)
+				}
+				defer trie.Release()
+				require.NoError(t, ms.applyPlainUpdates(initialKeys, initialUpdates))
+				initial := WrapKeyUpdates(t, mode, KeyToHexNibbleHash, initialKeys, initialUpdates)
+				defer initial.Close()
+				processRoot(t, trie, initial)
+				changed := NewUpdates(mode, t.TempDir(), KeyToHexNibbleHash)
+				defer changed.Close()
+				for i, key := range changedKeys {
+					changed.TouchPlainKeyDirect(string(key), &changedUpdates[i])
+				}
+				got := processRoot(t, trie, changed)
+				require.Equal(t, want, got)
+			})
+		}
+	}
+}
+
 func TestSetTraceWriter_NilWriterSafe(t *testing.T) {
 	t.Parallel()
 

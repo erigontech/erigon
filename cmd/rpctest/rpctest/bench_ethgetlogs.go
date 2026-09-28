@@ -81,10 +81,10 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			return fmt.Errorf("Could not get modified accounts (Erigon): %w\n", res.Err)
+			return fmt.Errorf("could not get modified accounts (Erigon): %w", res.Err)
 		}
 		if mag.Error != nil {
-			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
+			return fmt.Errorf("error getting modified accounts (Erigon): %d %s", mag.Error.Code, mag.Error.Message)
 		}
 		if res.Err == nil && mag.Error == nil {
 			accountSet := extractAccountMap(&mag)
@@ -410,7 +410,7 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 				panic(fmt.Errorf("[ethGetLogsRandomBlock] could not get logs bn %d err %s", bn, res.Err.Error()))
 			}
 			if resp.Error != nil {
-				panic(fmt.Errorf("Error getting logs (Erigon): %d %s", resp.Error.Code, resp.Error.Message))
+				panic(fmt.Errorf("error getting logs (Erigon): %d %s", resp.Error.Code, resp.Error.Message))
 			}
 
 			reqLatency := int(time.Since(launchedAt).Microseconds())
