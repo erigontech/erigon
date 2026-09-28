@@ -1,167 +1,71 @@
-# Dual commitment and binary-trie migration
+# Dual commitment
 
-Erigon can keep the hex Patricia trie and the EIP-8297 partitioned binary trie in lockstep while
-changing which root is canonical. This is the migration mode for the devnet work described here;
-it does not add snapshot publication, mid-window catch-up, or automatic finality-based freezing.
+Erigon's migration mode keeps a v3 hex trie and a v3 binary trie current for the same executed
+blocks. The hex trie is in `kv.CommitmentDomain`; the binary trie is in `kv.CommitmentBinDomain`.
+The binary-only mode uses the existing commitment domain with the binary algorithm.
 
 ## Domains and roles
 
-The implementation keeps two concerns separate:
+`canonicalCommitmentDomain` in `execution/stagedsync/committer.go` selects the block's canonical
+domain from the chain schedule. It does not use the process-global variant flag. Before
+`binaryTrieTime`, hex is canonical and binary is shadow. At and after that time, binary is
+canonical and hex is shadow. A frozen hex domain remains readable but rejects writes and folds
+below its recorded freeze point.
 
-- A commitment domain owns one trie algorithm for the lifetime of a datadir.
-- The block timestamp determines whether that domain is canonical for that block.
+`NewSharedDomains` in `db/state/execctx/domain_shared.go` constructs the dual pair as
+`VariantCommitmentV3` plus `VariantBinPatriciaTrie`. An explicit HPH configuration is rejected
+for a dual datadir. `reconcileTrieVariant` in `db/state/erigondb_settings.go` also refuses a
+hex+bin datadir without the v3 hex setting and refuses binary-only startup with v3 enabled.
 
-`kv.CommitmentDomain` (`db/kv/tables.go`) is the existing commitment domain. In `hex+bin` mode,
-`kv.CommitmentBinDomain` is the second domain and uses the `commitment-bin` tables and snapshot
-filename prefix. The binary trie itself is implemented by `PBinPatriciaHashed`
-(`execution/commitment/pbin_patricia_hashed.go`).
+## Feed and execution
 
-| Block | Hex domain | Binary domain |
-|---|---|---|
-| Before `binaryTrieTime` | Canonical and header-checked | Shadow, computed and recorded |
-| At and after `binaryTrieTime` | Shadow, computed and recorded | Canonical and header-checked |
-| After the hex freeze | Frozen and retained | Canonical and computed |
+The binary arm consumes `commitment.PBinFeed`, assembled by `BinFeedFromState` in
+`execution/commitment/commitmentdb/pbin_feed.go`. The feed contains final account fields, final
+code bytes when the address is in `codeKeys`, final changed slots, code-write and wipe status.
+`TranslateFeed` in `execution/commitment/v3/pbt/feed.go` derives the sorted, unique operation list
+for the row trie. Chunks are content-addressed, deduplicated per batch and retained after insertion.
 
-Both roots are computed from block 0 in `hex+bin` mode. The swap changes the header check and the
-role of the roots, not the domains or their stored state. `Config.IsBinaryTrie` in
-`execution/chain/chain_config.go` is the block-time predicate used by the committer and block-aware
-RPC paths.
+There are three input sources:
 
-## Datadir modes
+- SharedDomains records dirty plain keys and code-domain touches, then clears the code-key set
+  after it consumes or discards the touched keys.
+- calcState records dirty plain keys, code writes and execution-derived wipes, including CREATE
+  storage wipes, and reads through `asOfStateReader`.
+- BAL reads account and code changes from `LoadFromBALUpTo`. BAL has no create marker, so its
+  `wiped` set stays empty. CREATE over storage is a known BAL gap in both arms; on other blocks
+  the BAL roots equal the non-BAL path.
 
-`trie_variant` in `erigondb.toml` is resolved by `ResolveErigonDBSettings` and
-`reconcileTrieVariant` (`db/state/erigondb_settings.go`). It is fixed when the datadir is created.
+The two arms use the same block feed and run concurrently. The binary arm uses
+`ProcessParallel` in `execution/commitment/v3/pbt`; worker contexts are installed through
+`SetTrieContextFactory`. Hex shadow writes use `BufferedPatriciaContext` and are replayed only
+after both arms succeed. A shadow fold or replay failure stops that domain through
+`recordStoppedCommitmentDomains` without invalidating the block. The step-boundary path resets
+its block flags once after both arms complete.
 
-| Mode | Chain configuration | Commitment storage |
-|---|---|---|
-| `hex` | No `binaryTrieTime` | Existing `kv.CommitmentDomain`, using the hex trie |
-| `bin` | `binaryTrieTime` equals genesis time | Existing commitment domain, using the binary trie |
-| `hex+bin` | `binaryTrieTime` is after genesis time | Hex in `kv.CommitmentDomain`; binary in `kv.CommitmentBinDomain` |
+## State and files
 
-To initialize a new migration datadir, set `COMMITMENT_HEX_BIN=true` on the first invocation.
-Without it, initialization refuses the post-genesis schedule and, unless `COMMITMENT_BIN` is set,
-records no `trie_variant`, so a retry with the variable succeeds on the same datadir.
-The genesis must schedule `amsterdamTime` no later than `binaryTrieTime`, and `binaryTrieTime`
-must be after the genesis timestamp. For example, with a migration genesis at `./pbt-genesis.json`:
+The binary state blob uses marker `0xb1` and row format `0x20`, validated by
+`PBinValidateRowStateFormat` in `execution/commitment/pbin_state_format.go`. Legacy flags and the
+removed `0x10` format are refused at datadir open with an instruction to rebuild the binary
+commitment domain. A staged rebuild validates only its output files through the `newTemporalDB`
+aggregator option.
 
-```sh
-COMMITMENT_HEX_BIN=true ./build/bin/erigon init --datadir=./pbt-data ./pbt-genesis.json
-./build/bin/erigon --datadir=./pbt-data
-```
+The binary trie stores rows and fixed bucket-root records. `docs/pbin-encoding.md` describes the
+key derivation, record bytes, root forms and fold. Rebuilds in `RebuildCommitmentFiles` in
+`db/state/squeeze.go` translate the plain state through `BinFeedFromState`, sort by tree key for
+each source range, cut bounded batches, and resume after the recorded completed key. Pending
+commitment writes form the read overlay while a range is processed.
 
-Initialization records `trie_variant = "hex+bin"` in `./pbt-data/snapshots/erigondb.toml`;
-subsequent starts read the stored mode. Setting `COMMITMENT_BIN` alone selects binary-only storage
-and does not enable a post-genesis migration. Select the mode before initializing the datadir;
-changing an existing datadir's mode requires rebuilding it from genesis.
+`erigondb.toml` records `trie_variant`, `trie_hash`, and per-domain freeze state. Changing the
+embedding or selected binary hash suite requires rebuilding the binary datadir from genesis.
 
-The binary hash suite is stored as `trie_hash`; it is meaningful only when the datadir contains a
-binary trie. The domain schemas are defined in `db/state/statecfg/state_schema.go`. The binary domain
-does not use references in commitment branches, history snapshots, or the hex branch cache.
+## Freeze and RPC
 
-The settings file also contains `frozen_at_txnum`, keyed by domain name. Changing a trie embedding
-or hash suite is not an in-place migration: rebuild a binary datadir from genesis.
+`integration commitment freeze` registers the v3 setting and reads each domain's state with the
+variant-specific state key. It freezes the selected hex domain at its recorded transaction and
+leaves the binary domain canonical when the schedule has flipped.
 
-## Execution and reorganisation
-
-`commitmentCalculator.computeDualFromUpdatesWithRole` (`execution/stagedsync/committer.go`) fans a
-block's touched plain-key set into two folds. The hex arm uses the normal update mode; the binary arm
-builds `ModeDirect` updates from the same keys and reads values from the state domains. Each arm has a
-worker read transaction pinned to the parent view. Binary branch writes are held by
-`BufferedPatriciaContext` (`execution/commitment/commitmentdb/buffered_context.go`) until both folds
-join, then replayed on the calculator goroutine.
-
-Dual mode uses this calculator for every block, including when parallel execution and BAL options
-are disabled. The touched-key collector remains hex-owned across the swap. BAL compute-ahead reads
-changed accounts, storage, and code from the BAL and unchanged values from the block's starting state.
-
-The canonical arm checks the header root and reports `ErrWrongTrieRoot` on a mismatch. The shadow arm
-records its root and does not invalidate the block if its fold fails; it is marked stopped for the
-run, including later execution batches and context recreation. A shadow failure is therefore
-observable without turning a migration comparison into a consensus failure.
-
-Shadow roots are stored by `WriteShadowStateRoot` (`db/rawdb/accessors_shadow_root.go`) under
-`dbutils.BlockBodyKey(number, hash)`. The block hash is part of the key, so competing blocks at one
-height do not overwrite one another. `PruneBlocks` and `TruncateBlocks` (`db/rawdb/accessors_chain.go`)
-remove these records with their block data. Finality does not, because the activation block's witness
-reads its parent's record.
-
-Diffsets now carry a version and domain count in `serializeKeys` and `deserializeKeys`
-(`db/state/changeset/state_changeset.go`). The reader accepts the old six-domain framing and leaves
-new trailing domains empty when an older record is read. This lets an unwind across the flip restore
-both domains without migration-specific rollback logic.
-
-## Aggregation and files
-
-The canonical domain is exposed by `Aggregator.CanonicalCommitmentDomain`
-(`db/state/aggregator.go`) and is re-derived from the head block time when the aggregator opens. The
-state minimax used for file building and merge alignment includes accounts, storage, code, and only
-that canonical commitment domain through `kv.StateDomains` (`db/kv/tables.go`). A stopped, frozen, or
-not-yet-built shadow domain therefore does not stall canonical file production.
-
-Referenced hex branches retain a read view of their exact account and storage file ranges through
-`aggregatorVisible` (`db/state/aggregator.go`). Those dependencies remain readable when newer merged
-files replace the ranges used by ordinary state reads, including after the hex domain stops or freezes.
-
-The binary domain has no hex branch-cache trunk and no inter-domain dependency. Its files use names
-such as `v1.0-commitment-bin.0-1024.kv`; `ParseFileName` and the snapshot command name tables handle
-the hyphenated type through `db/snaptype/files.go`.
-
-## Freezing the hex domain
-
-Freezing is explicit and operator-triggered:
-
-```text
-./build/bin/integration commitment freeze --datadir=./pbt-data --trie hex
-```
-
-The command requires aligned commitment domains after activation. It calls `Aggregator.FreezeDomain`
-(`db/state/aggregator.go`) at the saved commitment transaction number and persists the result in
-`erigondb.toml`. After the freeze, the hex domain's files remain
-available but the committer does not fold it, `DomainPut` rejects writes to it, merges skip it, and an
-unwind below the freeze point is rejected. The frozen state survives restart. There is no automatic
-finality trigger in this migration implementation.
-
-## Debug API
-
-The private debug API in `rpc/jsonrpc/debug_api.go` exposes two migration observations:
-
-- `debug_shadowStateRoot(blockHash)` returns the non-canonical root recorded for that block, or
-  `null` when no shadow root is available.
-- `debug_migrationProgress` returns `mode`, `activationTime`, `flipped`, and `shadowStopped`.
-  `flipped` is derived from the current head timestamp and `binaryTrieTime`; it is not persisted.
-  `shadowStopped` reads the stop marker of the current shadow domain, so a frozen hex domain or a
-  head that execution has not reached yet does not report a stopped shadow.
-
-These methods make it possible to compare the shadow window with another client and to distinguish a
-stopped shadow fold from a canonical execution failure.
-
-A shadow fold error stops that domain. Execution records the stop with
-`WriteCommitmentDomainStopped` (`db/rawdb/accessors_shadow_root.go`) in the transaction that commits
-the block; the aggregator restores it when it opens, so a restart skips the stopped domain instead of
-refusing a torn datadir. `ResetExec` (`execution/stagedsync/rawdbreset/reset_stages.go`) clears it.
-
-`debug_executionWitness` seeks only the selected trie's parent state. At the activation block, its
-binary parent root comes from the parent's shadow-root record because the parent header still carries
-the hex root. `buildWitnessResult` (`rpc/jsonrpc/debug_execution_witness.go`) reports an error if that
-shadow-root record is unavailable.
-The explicit commitment-history option enables history and history snapshots for both domains through
-`EnableHistoricalCommitment` (`db/state/statecfg/state_schema.go`).
-
-`eth_simulateV1` keeps both live tries current across simulated blocks and selects each returned
-state root by the simulated timestamp. Frozen hex is excluded from post-activation folds.
-Historical replay uses the selected domain in temporary storage with independent freeze settings;
-`ComputeCustomCommitmentFromStateHistory` (`rpc/rpchelper/commitment.go`) leaves the source freeze
-marker unchanged.
-
-`eth_getProof` and `eth_getWitness` fold only the hex trie. On a `hex+bin` datadir they return
-`ErrBinCommitmentUnsupported` for a block at or after `binaryTrieTime`.
-
-## Compatibility
-
-A datadir without `binaryTrieTime` remains hex-only: it registers the existing commitment domain,
-keeps the existing genesis header, and can read legacy diffsets. A binary-only datadir remains a
-single-domain binary trie. Only `hex+bin` adds the second commitment domain and the dual-fold path.
-
-The binary tree's key, cell, node-hash, and witness encodings are documented in
-`docs/pbin-encoding.md`; the domain split selects where those records live and which root is placed
-in the header, but does not change those encodings.
+`debug_shadowStateRoot` reports the non-canonical root stored by
+`rawdb.WriteShadowStateRoot`. `debug_executionWitness` refuses binary blocks with
+`ErrBinCommitmentUnsupported`; `eth_getProof` and `eth_getWitness` have the same refusal for
+binary blocks. Hex blocks before activation continue to serve the hex witness path.

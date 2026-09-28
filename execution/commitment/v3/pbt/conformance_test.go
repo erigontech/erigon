@@ -100,6 +100,7 @@ func TestPBinConformancePBTState(t *testing.T) {
 				feed.Accounts = append(feed.Accounts, feedAccount)
 			}
 			want := eip8297.StateRootWithHash(eip8297.EmbedState([][]eip8297.State{states}), eip8297.SelectedHash())
+			require.Equal(t, common.HexToHash(vector.Root), want)
 			ctx := newTrieTestContext()
 			got, err := NewTrie(ctx).ProcessFeed(&feed)
 			require.NoError(t, err)

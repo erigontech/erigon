@@ -100,6 +100,27 @@ func TestPBinHexOnlyCommitmentRefusesBin(t *testing.T) {
 	require.Nil(t, sd)
 }
 
+func TestNewSharedDomainsReturnsBinRegistrationError(t *testing.T) {
+	withBinCommitmentFlag(t, true)
+	previous := commitment.NewCommitmentBinTrie
+	t.Cleanup(func() { commitment.NewCommitmentBinTrie = previous })
+	commitment.NewCommitmentBinTrie = nil
+
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	var sd *execctx.SharedDomains
+	require.NotPanics(t, func() {
+		var setupErr error
+		sd, setupErr = execctx.NewSharedDomains(t.Context(), tx, log.New())
+		err = setupErr
+	})
+	require.ErrorContains(t, err, "binary trie selected without importing")
+	require.Nil(t, sd)
+}
+
 func TestPBinHexOnlyCommitmentDemotesParallel(t *testing.T) {
 	withBinCommitmentFlag(t, false)
 	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
@@ -145,6 +166,21 @@ func TestSharedDomainsHexOnlyUsesConfiguredV3(t *testing.T) {
 	defer sd.Close()
 
 	require.Equal(t, commitment.VariantCommitmentV3, sd.GetCommitmentCtx().Trie().Variant())
+}
+
+func TestSharedDomainsDualRejectsExplicitHPH(t *testing.T) {
+	withDualCommitmentFlags(t)
+
+	db := newTestDb(t, 16)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantHexPatriciaTrie
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg))
+	require.ErrorIs(t, err, execctx.ErrHexBinRequiresV3)
+	require.Nil(t, sd)
 }
 
 func TestSharedDomainsV3SeekRestoresCommittedPosition(t *testing.T) {

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math/big"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -32,6 +33,54 @@ import (
 
 	"github.com/erigontech/erigon/common"
 )
+
+type specVectorFile struct {
+	TrieVectors     []specTrieVector     `json:"trie_vectors"`
+	SequenceVectors []specSequenceVector `json:"sequence_vectors"`
+}
+
+type specTrieVector struct {
+	Name    string `json:"name"`
+	Entries []struct {
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	} `json:"entries"`
+	Root string `json:"root"`
+}
+
+type specSequenceVector struct {
+	Seed int `json:"seed"`
+	Ops  []struct {
+		Op    string `json:"op"`
+		Key   string `json:"key"`
+		Value string `json:"value"`
+	} `json:"ops"`
+	RootsAfter []string `json:"roots_after"`
+}
+
+func loadSpecVectors(t *testing.T) specVectorFile {
+	t.Helper()
+	raw, err := os.ReadFile("../testdata/eip8297_vectors.json")
+	require.NoError(t, err)
+	var vectors specVectorFile
+	require.NoError(t, json.Unmarshal(raw, &vectors))
+	require.NotEmpty(t, vectors.TrieVectors)
+	require.NotEmpty(t, vectors.SequenceVectors)
+	return vectors
+}
+
+func specEntries(values map[string][]byte) []Entry {
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	slices.Sort(keys)
+	entries := make([]Entry, 0, len(keys))
+	for _, key := range keys {
+		entries = append(entries, Entry{Key: []byte(key), Value: values[key]})
+	}
+	return entries
+}
 
 type conformanceVectors struct {
 	Source       string `json:"source"`
@@ -193,6 +242,53 @@ func TestPBinConformanceEncodeBasicData(t *testing.T) {
 			got, err := EncodeBasicData(vector.Nonce, balance, vector.CodeSize)
 			require.NoError(t, err)
 			require.Equal(t, vector.Encoded, "0x"+hex.EncodeToString(got[:]))
+		})
+	}
+}
+
+func TestPBinOracleMatchesSpecTrieRoots(t *testing.T) {
+	for _, vector := range loadSpecVectors(t).TrieVectors {
+		t.Run(vector.Name, func(t *testing.T) {
+			entries := make([]Entry, 0, len(vector.Entries))
+			for _, entry := range vector.Entries {
+				entries = append(entries, Entry{Key: unhex(t, entry.Key), Value: unhex(t, entry.Value)})
+			}
+			root := StateRootWithHash(entries, blake3Hash)
+			require.Equal(t, common.HexToHash(vector.Root), root)
+		})
+	}
+}
+
+func TestPBinOracleMatchesSpecSequenceRoots(t *testing.T) {
+	for _, vector := range loadSpecVectors(t).SequenceVectors {
+		t.Run(strconv.Itoa(vector.Seed), func(t *testing.T) {
+			values := make(map[string][]byte)
+			require.Len(t, vector.Ops, len(vector.RootsAfter))
+			for i, op := range vector.Ops {
+				key := unhex(t, op.Key)
+				if op.Op == "delete" {
+					delete(values, string(key))
+				} else {
+					values[string(key)] = unhex(t, op.Value)
+				}
+				root := StateRootWithHash(specEntries(values), blake3Hash)
+				require.Equal(t, common.HexToHash(vector.RootsAfter[i]), root, "operation %d", i)
+			}
+		})
+	}
+}
+
+func TestPBinBlake3SuiteMatchesSpecRoots(t *testing.T) {
+	previous := HashSuiteName()
+	t.Cleanup(func() { require.NoError(t, SetHashSuite(previous)) })
+	require.NoError(t, SetHashSuite(HashBlake3))
+	for _, vector := range loadSpecVectors(t).TrieVectors {
+		t.Run(vector.Name, func(t *testing.T) {
+			entries := make([]Entry, 0, len(vector.Entries))
+			for _, entry := range vector.Entries {
+				entries = append(entries, Entry{Key: unhex(t, entry.Key), Value: unhex(t, entry.Value)})
+			}
+			require.Equal(t, common.HexToHash(vector.Root), StateRootWithHash(entries, SelectedHash()))
 		})
 	}
 }

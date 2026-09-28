@@ -25,6 +25,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -172,6 +173,33 @@ func TestTrieOwnsOperationKeys(t *testing.T) {
 	want, err := NewTrie(wantContext).Process([]Op{{Key: keyACopy, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}})
 	require.NoError(t, err)
 	got, err := NewTrie(ctx).Process(nil)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	require.Equal(t, wantContext.records, ctx.records)
+}
+
+func TestTrieResetsPendingRoundAtProcessEntry(t *testing.T) {
+	ctx := newTrieTestContext()
+	trie := NewTrie(ctx)
+	keyA := trieCodeKey(0, 0, 1)
+	keyB := trieCodeKey(0, 2, 2)
+	keyC := trieCodeKey(0, 8, 3)
+	keyD := trieCodeKey(0x10, 0, 4)
+
+	_, err := trie.ProcessParallel([]Op{{Key: keyA, Value: testTrieValue(1)}, {Key: keyB, Value: testTrieValue(2)}, {Key: keyC, Value: testTrieValue(3)}}, 2)
+	require.NoError(t, err)
+	var got common.Hash
+	require.NotPanics(t, func() {
+		got, err = trie.Process([]Op{{Key: keyB, Value: testTrieValue(4)}, {Key: keyD, Value: testTrieValue(5)}})
+	})
+	require.NoError(t, err)
+	wantContext := newTrieTestContext()
+	want, err := NewTrie(wantContext).Process([]Op{
+		{Key: keyA, Value: testTrieValue(1)},
+		{Key: keyB, Value: testTrieValue(4)},
+		{Key: keyC, Value: testTrieValue(3)},
+		{Key: keyD, Value: testTrieValue(5)},
+	})
 	require.NoError(t, err)
 	require.Equal(t, want, got)
 	require.Equal(t, wantContext.records, ctx.records)

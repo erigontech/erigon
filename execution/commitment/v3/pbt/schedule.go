@@ -294,6 +294,9 @@ func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers, th
 	if err := ctx.Err(); err != nil {
 		return common.Hash{}, err
 	}
+	if t.roundPending {
+		t.ResetContext(t.ctx)
+	}
 	if t.ctx == nil || workers == 1 || len(ops) < 2 {
 		return t.Process(ops)
 	}
@@ -301,5 +304,9 @@ func (t *Trie) processParallelContext(ctx context.Context, ops []Op, workers, th
 	if err != nil {
 		return common.Hash{}, err
 	}
-	return t.processParallelPhaseA(ctx, workers, plan, ops)
+	hash, err := t.processParallelPhaseA(ctx, workers, plan, ops)
+	if err == nil {
+		t.roundPending = true
+	}
+	return hash, err
 }

@@ -68,6 +68,7 @@ type Trie struct {
 	upperStops             []eip8297.Bitpath
 	root                   *treeRoot
 	rootLoaded             bool
+	roundPending           bool
 	rootDirty              bool
 	foldedRoot             common.Hash
 	foldedRootReady        bool
@@ -193,6 +194,7 @@ func (t *Trie) ResetContext(ctx commitment.PatriciaContext) {
 	t.phaseBase = nil
 	t.root = nil
 	t.rootLoaded = false
+	t.roundPending = false
 	t.rootDirty = false
 	t.foldedRoot = common.Hash{}
 	t.foldedRootReady = false
@@ -246,9 +248,13 @@ func (t *Trie) Process(ops []Op) (common.Hash, error) {
 	if t.ctx == nil {
 		return common.Hash{}, fmt.Errorf("nil Patricia context")
 	}
+	if t.roundPending {
+		t.ResetContext(t.ctx)
+	}
 	if err := validateOps(ops); err != nil {
 		return common.Hash{}, err
 	}
+	t.roundPending = true
 	if t.roundPrev == nil {
 		t.roundPrev = make(map[string][]byte)
 	} else {

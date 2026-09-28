@@ -61,6 +61,7 @@ const (
 	rebuildVariantAccounts           = 6
 	rebuildVariantSlots              = 4
 	rebuildVariantKeyCollectorBudget = uint64(64 << 20)
+	rebuildVariantHeapGrowthBudget   = uint64(128 << 20)
 )
 
 func rebuildVariantAddr(i int) []byte {
@@ -280,6 +281,20 @@ func TestRebuildCommitmentFilesBinTargetOnHexDatadir(t *testing.T) {
 	rebuildVariantReportCounts(t, hexReport, hexRoot, variantBefore)
 	require.NotEqual(t, hexRoot, binRoot, "bin and hex commit different key spaces under different hashes")
 	require.Equal(t, hexRoot, rebuildVariantRestoredRoot(t, hexDB, hexAgg, commitment.VariantHexPatriciaTrie))
+}
+
+func TestRebuildCommitmentFilesReturnsBinRegistrationError(t *testing.T) {
+	db, _, _ := rebuildVariantDatadir(t)
+	previous := commitment.NewCommitmentBinTrie
+	t.Cleanup(func() { commitment.NewCommitmentBinTrie = previous })
+	commitment.NewCommitmentBinTrie = nil
+
+	var err error
+	require.NotPanics(t, func() {
+		_, _, err = state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false,
+			state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
+	})
+	require.ErrorContains(t, err, "binary trie selected without importing")
 }
 
 func TestRebuildCommitmentFilesBinTargetRejectsLegacyPBinState(t *testing.T) {
@@ -520,6 +535,11 @@ func TestRebuildCommitmentFilesBinTargetMemoryDoesNotGrowWithSlots(t *testing.T)
 		largeBaseline, largePeak = rebuildVariantMeasuredMemory(t, db)
 	})
 	t.Logf("production rebuild live heap after GC: slots=200000 baseline=%d peak=%d slots=650000 baseline=%d peak=%d slots=1300000 baseline=%d peak=%d", smallBaseline, smallPeak, mediumBaseline, mediumPeak, largeBaseline, largePeak)
+	largeGrowth := uint64(0)
+	if largePeak > largeBaseline {
+		largeGrowth = largePeak - largeBaseline
+	}
+	require.LessOrEqual(t, largeGrowth, rebuildVariantHeapGrowthBudget)
 }
 
 func TestRebuildCommitmentFilesBinTargetStagedOutputSkipsSourceCheckpoint(t *testing.T) {

@@ -17,7 +17,6 @@
 package commitmentdb_test
 
 import (
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -69,27 +68,12 @@ func (s *pbinStubSharedDomains) Metrics() *kvmetrics.DomainMetrics { return nil 
 
 func (s *pbinStubSharedDomains) HasSharedBranchCache() bool { return s.sharedCache }
 
-func pbinRecoverMessage(t *testing.T, fn func()) (msg string) {
-	t.Helper()
-	defer func() {
-		if r := recover(); r != nil {
-			msg = fmt.Sprint(r)
-		}
-	}()
-	fn()
-	return ""
-}
-
 // Why bin must not share the cache: TestPBinBranchCacheTrunkSlotCollision.
 func TestPBinCtorRefusesSharedBranchCache(t *testing.T) {
-	t.Parallel()
-
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	msg := pbinRecoverMessage(t, func() {
-		commitmentdb.NewSharedDomainsCommitmentContext(&pbinStubSharedDomains{sharedCache: true}, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
-	})
-	require.Contains(t, msg, "branch cache")
+	_, err := commitmentdb.NewSharedDomainsCommitmentContext(&pbinStubSharedDomains{sharedCache: true}, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	require.ErrorContains(t, err, "branch cache")
 }
 
 // The reason the bin variant must not share the BranchCache: the trunk-slot
@@ -149,13 +133,8 @@ func TestPBinSharedDomainsHasNoSharedBranchCache(t *testing.T) {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
 
-	var sd *execctx.SharedDomains
-	msg := pbinRecoverMessage(t, func() {
-		var sdErr error
-		sd, sdErr = execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg))
-		require.NoError(t, sdErr)
-	})
-	require.Empty(t, msg)
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg))
+	require.NoError(t, err)
 	defer sd.Close()
 	require.False(t, sd.HasSharedBranchCache())
 }

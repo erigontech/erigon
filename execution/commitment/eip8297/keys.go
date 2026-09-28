@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"sync"
 
-	keccak "github.com/erigontech/fastkeccak"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
@@ -131,8 +129,7 @@ type KeyHasherFunc func(key []byte) []byte
 
 func KeyHasher() KeyHasherFunc { return KeyHasherWith(nil) }
 
-// KeyHasherWith derives keys under sum, nil meaning Keccak-256. Callers swap
-// the hash here and on node hashing together through setHashSuite.
+// KeyHasherWith derives keys under sum, or under the selected suite when sum is nil.
 //
 // The digest cache is pooled rather than captured because Updates.NewEmpty copies
 // the hasher value: a captured cache would be written by two buffers hashing
@@ -173,7 +170,7 @@ func (c *DigestCache) hash(preimage []byte) [32]byte {
 	if c.Sum != nil {
 		return c.Sum(preimage)
 	}
-	return keccak.Sum256(preimage)
+	return HashBytes(preimage)
 }
 
 func (c *DigestCache) stemDigest(addr32 *[32]byte) *[32]byte {

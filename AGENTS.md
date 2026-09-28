@@ -145,7 +145,7 @@ Don't sign commits, pr's, issues, comments.
 
 Selecting the binary trie is process-global, not a per-tester option: set `statecfg.ExperimentalBinCommitment` and `statecfg.BinCommitmentHash`, then `commitment.SetPBinHashSuite`. Calling `SetPBinHashSuite` alone is undone by the settings resolver's keccak default. A test that flips these must restore them in `t.Cleanup` and must not call `t.Parallel` — a concurrent hex test reads the same globals.
 
-The EIP-8297 embedding is not versioned on disk. `erigondb.toml` records `trie_variant` and `trie_hash` and guards a change of either, but nothing records which embedding wrote the state — so a change to key derivation or leaf layout silently recomputes different roots over an existing bin datadir. Rebuild bin datadirs from genesis whenever the embedding changes.
+The EIP-8297 engine lives in `execution/commitment/v3/pbt`; shared rules and the independent reference live in `execution/commitment/eip8297`. Binary state uses the `0xB1` marker and row format `0x20`, checked by `PBinValidateRowStateFormat`; legacy binary formats are refused at datadir open. `BinFeedFromState` in `execution/commitment/commitmentdb/pbin_feed.go` is the input adapter for SharedDomains, calcState and BAL sources. `erigondb.toml` records `trie_variant` and `trie_hash`, but the embedding itself is not versioned, so rebuild bin datadirs from genesis whenever key derivation or leaf layout changes.
 
 Dual commitment keeps trie ownership and canonical role separate. `kv.CommitmentDomain` is the hex
 domain and `kv.CommitmentBinDomain` is the binary domain in `hex+bin` mode; a binary-only datadir

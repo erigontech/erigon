@@ -230,30 +230,32 @@ var (
 	ErrPBinUnsupported   = errors.New("pbin: unsupported under the bin commitment variant")
 )
 
-func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
+func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates, error) {
 	switch cfg.Variant {
 	case VariantCommitmentV3:
 		if NewCommitmentV3Trie == nil {
-			panic("commitment v3 selected without importing execution/commitment/v3")
+			return nil, nil, errors.New("commitment: v3 selected without importing execution/commitment/v3")
 		}
-		return NewCommitmentV3Trie(tmpdir, cfg)
+		trie, updates := NewCommitmentV3Trie(tmpdir, cfg)
+		return trie, updates, nil
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
-		return trie, tree
+		return trie, tree, nil
 	case VariantBinPatriciaTrie:
 		if NewCommitmentBinTrie == nil {
-			panic("binary trie selected without importing execution/commitment/v3/pbt")
+			return nil, nil, errors.New("commitment: binary trie selected without importing execution/commitment/v3/pbt")
 		}
-		return NewCommitmentBinTrie(tmpdir, cfg)
+		trie, updates := NewCommitmentBinTrie(tmpdir, cfg)
+		return trie, updates, nil
 	case VariantHexPatriciaTrie:
 		fallthrough
 	default:
 
 		trie := NewHexPatriciaHashed(length.Addr, nil, cfg)
 		tree := NewUpdates(mode, tmpdir, KeyToHexNibbleHash)
-		return trie, tree
+		return trie, tree, nil
 	}
 }
 

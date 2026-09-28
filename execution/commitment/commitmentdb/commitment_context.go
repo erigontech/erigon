@@ -159,7 +159,11 @@ func (sdc *SharedDomainsCommitmentContext) EnableParaTrieDB(db kv.TemporalRoDB) 
 	cfg := sdc.pendingCfg
 	cfg.Variant = sdc.pendingVariant
 	sdc.updates.Close()
-	sdc.patriciaTrie, sdc.updates = commitment.InitializeTrieAndUpdates(commitment.ModeDirect, sdc.tmpDir, cfg)
+	var err error
+	sdc.patriciaTrie, sdc.updates, err = commitment.InitializeTrieAndUpdates(commitment.ModeDirect, sdc.tmpDir, cfg)
+	if err != nil {
+		panic(err)
+	}
 	if ppht, ok := sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed); ok {
 		// State may already be restored (SeekCommitment can run before the DB
 		// is wired); adopting the trie carries it over losslessly.
@@ -295,7 +299,7 @@ func (sdc *SharedDomainsCommitmentContext) SetMetricsEnabled(enabled bool) {
 	}
 }
 
-func NewSharedDomainsCommitmentContext(sd sd, commitmentDomain kv.Domain, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) *SharedDomainsCommitmentContext {
+func NewSharedDomainsCommitmentContext(sd sd, commitmentDomain kv.Domain, mode commitment.Mode, tmpDir string, cfg commitment.TrieConfig) (*SharedDomainsCommitmentContext, error) {
 	variant := cfg.Variant
 	if variant == "" {
 		variant = commitment.VariantHexPatriciaTrie
@@ -309,7 +313,7 @@ func NewSharedDomainsCommitmentContext(sd sd, commitmentDomain kv.Domain, mode c
 			sharedBranchCache = domainAware.HasSharedBranchCacheFor(commitmentDomain)
 		}
 		if sharedBranchCache {
-			panic("commitment variant " + string(variant) + " cannot use the shared branch cache: bit-path keys collide in its trunk slots")
+			return nil, fmt.Errorf("commitment variant %s cannot use the shared branch cache: bit-path keys collide in its trunk slots", variant)
 		}
 	}
 	ctx := &SharedDomainsCommitmentContext{
@@ -333,8 +337,12 @@ func NewSharedDomainsCommitmentContext(sd sd, commitmentDomain kv.Domain, mode c
 		cfg.Variant = commitment.VariantHexPatriciaTrie
 		ctx.pendingCfg = cfg
 	}
-	ctx.patriciaTrie, ctx.updates = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
-	return ctx
+	var err error
+	ctx.patriciaTrie, ctx.updates, err = commitment.InitializeTrieAndUpdates(mode, tmpDir, cfg)
+	if err != nil {
+		return nil, err
+	}
+	return ctx, nil
 }
 
 func (sdc *SharedDomainsCommitmentContext) CommitmentDomain() kv.Domain {

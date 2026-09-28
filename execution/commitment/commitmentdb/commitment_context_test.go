@@ -242,7 +242,8 @@ func seekContext(t *testing.T, domain kv.Domain, variant commitment.TrieVariant,
 	t.Helper()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = variant
-	sdc := NewSharedDomainsCommitmentContext(seekSharedDomains{}, domain, commitment.ModeDirect, t.TempDir(), cfg)
+	sdc, err := NewSharedDomainsCommitmentContext(seekSharedDomains{}, domain, commitment.ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	if withState {
 		stateful, ok := sdc.patriciaTrie.(commitment.StatefulTrie)
 		require.True(t, ok)
@@ -361,7 +362,8 @@ func Test_NewSharedDomainsCommitmentContext_AcceptsBinVariant(t *testing.T) {
 
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	sdc := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	sdc, err := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	defer sdc.Close()
 	require.Equal(t, commitment.VariantBinPatriciaTrie, sdc.Trie().Variant())
 	require.Equal(t, commitment.VariantBinPatriciaTrie, sdc.variant)
@@ -388,7 +390,8 @@ func TestCommitmentContextUsesBoundBinDomain(t *testing.T) {
 func TestSharedDomainsCodeKeysFollowTouchedUpdates(t *testing.T) {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	sdc := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	sdc, err := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	t.Cleanup(sdc.Close)
 	address := make([]byte, 20)
 	sdc.TouchKey(kv.CodeDomain, string(address), []byte{1})
@@ -400,7 +403,8 @@ func TestSharedDomainsCodeKeysFollowTouchedUpdates(t *testing.T) {
 func TestSharedDomainsCodeKeysClearOnResetPaths(t *testing.T) {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
-	sdc := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	sdc, err := NewSharedDomainsCommitmentContext(nil, kv.CommitmentBinDomain, commitment.ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	t.Cleanup(sdc.Close)
 	address := make([]byte, 20)
 	sdc.TouchKey(kv.CodeDomain, string(address), []byte{1})
@@ -413,12 +417,13 @@ func TestSharedDomainsCodeKeysClearOnResetPaths(t *testing.T) {
 
 func TestSharedDomainsCodeKeysClearAfterCompute(t *testing.T) {
 	rec := &commitmentTimeRecorder{}
-	sdc := NewSharedDomainsCommitmentContext(rec, kv.CommitmentDomain, commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{})
+	sdc, err := NewSharedDomainsCommitmentContext(rec, kv.CommitmentDomain, commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{})
+	require.NoError(t, err)
 	t.Cleanup(sdc.Close)
 	sdc.SetStateReader(&testStateReader{})
 	sdc.TouchKey(kv.CodeDomain, string(make([]byte, 20)), []byte{1})
 	require.NotEmpty(t, sdc.CodeKeys())
-	_, err := sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
+	_, err = sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
 	require.NoError(t, err)
 	require.Empty(t, sdc.CodeKeys())
 }
@@ -597,9 +602,10 @@ func (r *commitmentTimeRecorder) AddCommitmentTime(time.Duration) { r.calls++ }
 func TestComputeCommitmentReportsItsDuration(t *testing.T) {
 	t.Parallel()
 	rec := &commitmentTimeRecorder{}
-	sdc := NewSharedDomainsCommitmentContext(rec, kv.CommitmentDomain, commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{})
+	sdc, err := NewSharedDomainsCommitmentContext(rec, kv.CommitmentDomain, commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{})
+	require.NoError(t, err)
 
-	_, err := sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
+	_, err = sdc.ComputeCommitment(t.Context(), nil, false, 0, 0, "", nil)
 	require.NoError(t, err)
 	require.Equal(t, 1, rec.calls)
 }

@@ -61,7 +61,8 @@ func pbinStateTestCtx(t *testing.T, variant commitment.TrieVariant) *SharedDomai
 	if variant == commitment.VariantBinPatriciaTrie {
 		domain = kv.CommitmentBinDomain
 	}
-	sdc := NewSharedDomainsCommitmentContext(&pbinStateStubSD{}, domain, commitment.ModeDirect, t.TempDir(), cfg)
+	sdc, err := NewSharedDomainsCommitmentContext(&pbinStateStubSD{}, domain, commitment.ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	t.Cleanup(sdc.Close)
 	return sdc
 }

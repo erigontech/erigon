@@ -1071,7 +1071,8 @@ func TestInitializeTrieAndUpdates_ParallelVariant(t *testing.T) {
 
 	cfg := DefaultTrieConfig()
 	cfg.Variant = VariantParallelHexPatricia
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	trie, upd, err := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	defer upd.Close()
 	defer trie.Release()
 
@@ -1087,7 +1088,8 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 
 	cfg := DefaultTrieConfig()
 	cfg.Variant = VariantHexPatriciaTrie
-	trie, upd := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	trie, upd, err := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	defer upd.Close()
 	defer trie.Release()
 

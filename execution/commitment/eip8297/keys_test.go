@@ -25,6 +25,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/crypto/sha3"
+	"lukechampine.com/blake3"
+
+	"github.com/erigontech/erigon/common"
 )
 
 // pbinTestKeccak is an independent Keccak-256 (x/crypto, not the fastkeccak the
@@ -189,6 +192,21 @@ func TestPBinAddr32Padding(t *testing.T) {
 	key := TreeKeyAccount(addr, BasicDataLeafKey)
 	require.Equal(t, referenceKeccak(t, referenceAddress32(addr)), key[1:33])
 	require.NotEqual(t, referenceKeccak(t, addr), key[1:33])
+}
+
+func TestPBinDigestCacheFollowsSelectedHashSuite(t *testing.T) {
+	previous := HashSuiteName()
+	t.Cleanup(func() { require.NoError(t, SetHashSuite(previous)) })
+	address := referenceAddressHex(t, "0102030405060708090a0b0c0d0e0f1011121314")
+
+	require.NoError(t, SetHashSuite(HashKeccak))
+	keccakKey := TreeKeyAccount(address, BasicDataLeafKey)
+	require.NoError(t, SetHashSuite(HashBlake3))
+	got := TreeKeyAccount(address, BasicDataLeafKey)
+	cache := DigestCache{Sum: func(data []byte) common.Hash { return common.Hash(blake3.Sum256(data)) }}
+	want := cache.AccountKey(address, BasicDataLeafKey)
+	require.NotEqual(t, keccakKey, got)
+	require.Equal(t, want, got)
 }
 
 // The keyHasher contract: the primary leaf's tree key, sized 34 or 66 by zone.

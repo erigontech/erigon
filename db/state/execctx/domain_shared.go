@@ -384,6 +384,9 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
 		}
 	}
+	if len(commitmentDomains) > 1 && o.trieCfg.Variant == commitment.VariantHexPatriciaTrie {
+		return nil, ErrHexBinRequiresV3
+	}
 	commitmentDomain := commitmentDomains[0]
 	if o.commitmentDomain != nil {
 		requestedDomain := *o.commitmentDomain
@@ -448,7 +451,10 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 				cfg.Variant = commitment.VariantHexPatriciaTrie
 			}
 		}
-		ctx := commitmentdb.NewSharedDomainsCommitmentContext(sd, domain, commitment.ModeDirect, tx.Debug().Dirs().Tmp, cfg)
+		ctx, err := commitmentdb.NewSharedDomainsCommitmentContext(sd, domain, commitment.ModeDirect, tx.Debug().Dirs().Tmp, cfg)
+		if err != nil {
+			return nil, err
+		}
 		sd.commitmentCtxs[domain] = ctx
 		if domain == commitmentDomain {
 			sd.sdCtx = ctx

@@ -26,7 +26,8 @@ import (
 )
 
 func TestInitializeTrieAndUpdatesBinUsesRows(t *testing.T) {
-	trie, updates := commitment.InitializeTrieAndUpdates(commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{Variant: commitment.VariantBinPatriciaTrie})
+	trie, updates, err := commitment.InitializeTrieAndUpdates(commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{Variant: commitment.VariantBinPatriciaTrie})
+	require.NoError(t, err)
 	defer updates.Close()
 	defer trie.Release()
 
@@ -39,7 +40,8 @@ func TestInitializeTrieAndUpdatesBinUsesRows(t *testing.T) {
 }
 
 func TestRegisteredTrieStateUsesRowFormat(t *testing.T) {
-	trie, updates := commitment.InitializeTrieAndUpdates(commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{Variant: commitment.VariantBinPatriciaTrie})
+	trie, updates, err := commitment.InitializeTrieAndUpdates(commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{Variant: commitment.VariantBinPatriciaTrie})
+	require.NoError(t, err)
 	defer updates.Close()
 	defer trie.Release()
 
@@ -58,4 +60,16 @@ func TestRowStateFormatRejectsLegacyFormats(t *testing.T) {
 		require.Error(t, err, "legacy flags %d must be rejected", format)
 	}
 	require.Error(t, commitment.PBinValidateRowStateFormat([]byte{commitment.PBinStateMarker, 0x10}))
+}
+
+func TestInitializeTrieAndUpdatesBinReturnsRegistrationError(t *testing.T) {
+	previous := commitment.NewCommitmentBinTrie
+	t.Cleanup(func() { commitment.NewCommitmentBinTrie = previous })
+	commitment.NewCommitmentBinTrie = nil
+
+	var err error
+	require.NotPanics(t, func() {
+		_, _, err = commitment.InitializeTrieAndUpdates(commitment.ModeDirect, t.TempDir(), commitment.TrieConfig{Variant: commitment.VariantBinPatriciaTrie})
+	})
+	require.EqualError(t, err, "commitment: binary trie selected without importing execution/commitment/v3/pbt")
 }

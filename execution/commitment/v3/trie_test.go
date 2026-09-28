@@ -30,7 +30,8 @@ import (
 func TestInitializeTrieAndUpdatesV3(t *testing.T) {
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV3
-	trie, updates := commitment.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
+	trie, updates, err := commitment.InitializeTrieAndUpdates(commitment.ModeCollect, t.TempDir(), cfg)
+	require.NoError(t, err)
 
 	require.IsType(t, &Trie{}, trie)
 	require.Equal(t, commitment.ModeCollect, updates.Mode())

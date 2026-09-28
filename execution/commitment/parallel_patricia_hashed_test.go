@@ -910,7 +910,8 @@ func reusedInstanceIncrementalRoot(t *testing.T, variant TrieVariant, workers in
 
 	cfg := DefaultTrieConfig()
 	cfg.Variant = variant
-	trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	trie, ut, err := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
+	require.NoError(t, err)
 	defer ut.Close()
 	defer trie.Release()
 	pt := trie.(*ParallelPatriciaHashed)

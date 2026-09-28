@@ -27,6 +27,8 @@ import (
 // declared itself hex-only (WithHexCommitmentOnly) over a bin-variant datadir.
 var ErrBinCommitmentUnsupported = errors.New("this code path supports the hex commitment trie only, and the datadir uses the bin trie")
 
+var ErrHexBinRequiresV3 = errors.New("hex+bin requires VariantCommitmentV3 for the hex arm and VariantBinPatriciaTrie for the bin arm")
+
 type sharedDomainOptions struct {
 	trieCfg              commitment.TrieConfig
 	useSharedBranchCache bool
