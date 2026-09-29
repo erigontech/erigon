@@ -829,7 +829,7 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	build := func() (*ExecutionWitnessResult, error) {
 		return api.buildWitnessResult(ctx, tx, nil, info, request.mode, request.trie)
 	}
-	if api.witnessCache == nil || request.mode != witnessModeLegacy {
+	if api.witnessCache == nil || request.mode != witnessModeLegacy || request.trie != defaultTrie {
 		return build()
 	}
 	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build)

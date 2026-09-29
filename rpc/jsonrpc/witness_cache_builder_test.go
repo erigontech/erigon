@@ -531,6 +531,37 @@ func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
 	require.Same(t, running, cached, "the builder must cache the running build's result, not build again")
 }
 
+func TestWitnessCacheSkipsDefaultPBT(t *testing.T) {
+	api, m := pbinWitnessFixture(t, 30)
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	ctx := t.Context()
+	var block3Hash, block4Hash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		block3Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 3)
+		if err != nil {
+			return err
+		}
+		block4Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 4)
+		return err
+	}))
+	failuresBefore := witnessCacheBuildFailOtherCounter.GetValueUint64()
+	require.False(t, api.buildAndCache(ctx, 3, block3Hash))
+	require.Equal(t, failuresBefore, witnessCacheBuildFailOtherCounter.GetValueUint64())
+	require.False(t, api.witnessCache.Contains(block3Hash))
+
+	committedTx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer committedTx.Rollback()
+	pinTx, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer pinTx.Rollback()
+	pin := &rollingPin{tx: pinTx, num: 3, hash: block3Hash}
+	require.False(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 4, block4Hash))
+	require.Equal(t, failuresBefore, witnessCacheBuildFailOtherCounter.GetValueUint64())
+	require.False(t, api.witnessCache.Contains(block4Hash))
+}
+
 func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {
 	ctx := context.Background()
 	const buildNum = uint64(6)

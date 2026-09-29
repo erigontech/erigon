@@ -18,7 +18,9 @@ package jsonrpc
 
 import (
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -105,6 +107,54 @@ func TestWitnessCacheRoutesByTrie(t *testing.T) {
 	require.False(t, hit)
 	require.False(t, reorgedAway)
 	require.Nil(t, result)
+}
+
+func TestExecutionWitnessNonDefaultTrieDoesNotJoinBuild(t *testing.T) {
+	api, m := pbinWitnessFixture(t, 30)
+	cache := newWitnessResultCache(96, 0, false, false)
+	api.witnessCache = cache
+	block := uint64(3)
+	var hash common.Hash
+	require.NoError(t, m.DB.View(t.Context(), func(tx kv.Tx) error {
+		var err error
+		hash, _, err = m.BlockReader.CanonicalHash(t.Context(), tx, block)
+		return err
+	}))
+	started := make(chan struct{})
+	release := make(chan struct{})
+	buildErr := errors.New("default trie build is still running")
+	buildDone := make(chan struct{})
+	buildResultErr := make(chan error, 1)
+	go func() {
+		defer close(buildDone)
+		_, err := cache.buildOnce(t.Context(), hash, func() (*ExecutionWitnessResult, error) {
+			close(started)
+			<-release
+			return nil, buildErr
+		})
+		buildResultErr <- err
+	}()
+	<-started
+	mpt := "mpt"
+	requestDone := make(chan struct{})
+	var result *ExecutionWitnessResult
+	var err error
+	go func() {
+		result, err = api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block)), nil, &mpt)
+		close(requestDone)
+	}()
+	select {
+	case <-requestDone:
+	case <-time.After(5 * time.Second):
+		close(release)
+		<-buildDone
+		t.Fatal("the non-default trie request joined the default-trie build")
+	}
+	close(release)
+	<-buildDone
+	require.ErrorIs(t, <-buildResultErr, buildErr)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.State)
 }
 
 func TestWitnessCacheOnlyRejectsNonDefaultTrie(t *testing.T) {

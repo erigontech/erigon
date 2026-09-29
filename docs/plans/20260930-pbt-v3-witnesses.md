@@ -367,13 +367,13 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `execution/commitment/eip8297/witness/testdata/geth_blobs.json`
 - Create: `execution/commitment/eip8297/witness/testdata/README.md`
 
-- [ ] generate format vectors (not witness fixtures) with a program in a scratch module outside this repository, pinned
+- [x] generate format vectors (not witness fixtures) with a program in a scratch module outside this repository, pinned
       to geth-pbt `origin/pbt` `793dedb`: blobs and hashes of hand-built nodes (leaf; branch with and without prefix;
       groups at position 0 and above; a one-value stem); commit only the JSON and a README naming the ref and how the
       vectors were made
-- [ ] add the codec signatures with stubs; write tests that decode each vector and recompute its hash; confirm they fail
+- [x] add the codec signatures with stubs; write tests that decode each vector and recompute its hash; confirm they fail
       at the hash comparison
-- [ ] implement leaf and branch blobs through `eip8297.LeafPreimage` / `BranchPreimage`, and group record encode and
+- [x] implement leaf and branch blobs through `eip8297.LeafPreimage` / `BranchPreimage`, and group record encode and
       decode. Decoding rejects:
       - k < 2;
       - a length mismatch;
@@ -381,14 +381,14 @@ demand; a cache-only node serves the default trie only and returns a distinct er
       - a position beyond the stem;
       - a stem length outside the allowed set;
       - a stem failing geth's `validateStem` rules
-- [ ] implement the positional group fold and path encoding (empty root path, `AppendBitPrefix` otherwise, ordering by
+- [x] implement the positional group fold and path encoding (empty root path, `AppendBitPrefix` otherwise, ordering by
       encoded bytes)
-- [ ] write tests:
+- [x] write tests:
       - round trips and rejects;
       - group hashes equal the root of an `eip8297` reference tree built from the same leaves with the consumed prefix
         removed;
       - `go list -deps` confirms the package imports no engine package
-- [ ] run tests - must pass before task 6
+- [x] run tests - must pass before task 6
 
 ### Task 6: Node model operations and driver
 
@@ -525,7 +525,7 @@ demand; a cache-only node serves the default trie only and returns a distinct er
       - the root blob always present.
 - [ ] shape the response (parallel `keys`/`state` sorted by path, content-keyed `codes`, RLP `headers`, empty-witness
       form) and run the verifier on every pbt witness before serving it
-- [ ] apply the availability rules to pbt; the eager cache builder builds the default trie (pbt after the fork)
+- [ ] apply the availability rules to pbt; the eager cache builder builds the default trie (pbt after the fork), removing the pre-Task-11 pbt skip
 - [ ] write tests:
       - pbt refusals: hex-only datadir, bin shadow not running at the parent, pruned bin history, missing shadow root;
       - cache behaviour after the fork
