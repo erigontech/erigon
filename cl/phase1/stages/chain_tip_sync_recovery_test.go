@@ -543,7 +543,7 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 		markRetained: true,
 	}
 	replay := storedParentPayloadReplay{
-		deadline: time.Now().Add(-time.Second),
+		deadline: time.Now().Add(10 * time.Millisecond),
 		results:  make(map[common.Hash]bool),
 	}
 	engine := &testExecutionEngine{}
@@ -618,4 +618,56 @@ func TestStoredParentPayloadReplayRejectsApplyFailure(t *testing.T) {
 	require.False(t, accepted)
 	require.EqualValues(t, execution_client.PayloadStatusNone, store.marked)
 	require.Zero(t, replay.remaining)
+}
+
+func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
+	const unchanged = execution_client.PayloadStatus(99)
+	root := common.Hash{1}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+	payload.BlockHash = common.Hash{2}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: root,
+		Payload:         payload,
+	}}
+	newStore := func() *storedParentPayloadTestStore {
+		return &storedParentPayloadTestStore{
+			has:          true,
+			block:        cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion),
+			markRetained: true,
+			marked:       unchanged,
+		}
+	}
+
+	t.Run("exhausted budget", func(t *testing.T) {
+		store := newStore()
+		engine := &testExecutionEngine{payloadStatus: execution_client.PayloadStatusValidated}
+		cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: engine, gloasPayloadValidator: engine}
+		replay := storedParentPayloadReplay{
+			budget:    gloasPayloadRetryBudget,
+			deadline:  time.Now().Add(-time.Millisecond),
+			remaining: 1,
+			results:   make(map[common.Hash]bool),
+		}
+
+		require.False(t, replay.accepted(t.Context(), cfg, store, root, envelope, forkchoice.ErrIgnore))
+		require.Zero(t, engine.newPayloadCalls)
+		require.Equal(t, unchanged, store.marked)
+		require.Empty(t, store.requeued)
+	})
+
+	t.Run("deadline during validation", func(t *testing.T) {
+		store := newStore()
+		engine := &testExecutionEngine{newPayloadFn: func(ctx context.Context) (execution_client.PayloadStatus, error) {
+			<-ctx.Done()
+			return execution_client.PayloadStatusNone, ctx.Err()
+		}}
+		cfg := &Cfg{beaconCfg: &clparams.MainnetBeaconConfig, executionClient: engine, gloasPayloadValidator: engine}
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		defer cancel()
+
+		require.False(t, ensureStoredParentPayloadAccepted(ctx, cfg, store, root, envelope))
+		require.Equal(t, 1, engine.newPayloadCalls)
+		require.Equal(t, unchanged, store.marked)
+		require.Empty(t, store.requeued)
+	})
 }
