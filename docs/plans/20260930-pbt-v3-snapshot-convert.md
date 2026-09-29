@@ -296,16 +296,16 @@
 - Modify: `db/state/domain_stream.go`
 - Create: `db/state/domain_stream_stamp_test.go`
 
-- [ ] add the stamp accessor with a stub. Write tests:
+- [x] add the stamp accessor with a stub. Write tests:
       - a key whose newest value is in a file reports that file's range;
       - a DB value reports its step;
       - a key present in several files and the DB reports the newest source.
 
       Confirm they fail at the stamp assertions.
-- [ ] record `nextStamp` in `advanceInFiles` beside the selected key and value, before equal-key cursors advance
-- [ ] write tests for iteration through `DomainRoTx.DebugRangeLatest` and `DebugRangeLatestFromFiles`, and for keys
+- [x] record `nextStamp` in `advanceInFiles` beside the selected key and value, before equal-key cursors advance
+- [x] write tests for iteration through `DomainRoTx.DebugRangeLatest` and `DebugRangeLatestFromFiles`, and for keys
       deleted in a newer range
-- [ ] run tests - must pass before task 2
+- [x] run tests - must pass before task 2
 
 ### Task 2: Streaming reference root
 
