@@ -26,6 +26,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -129,7 +130,7 @@ func (w *PBinRangeWriter) Write(ctx context.Context, tx kv.TemporalTx, domains *
 	}
 	defer func() {
 		_ = stampFile.Close()
-		_ = os.Remove(stampFile.Name())
+		_ = dir.RemoveFile(stampFile.Name())
 	}()
 	var (
 		overlay *pbinRebuildOverlay
@@ -259,24 +260,24 @@ func (w *PBinRangeWriter) buildFiles(ctx context.Context, state []byte) error {
 		collation := Collation{valuesComp: valuesComp, valuesPath: valuesPath}
 		writer := seg.NewWriter(valuesComp, seg.CompressNone)
 		err = w.ranges[i].collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
-			if _, err := writer.Write(key); err != nil {
-				return err
+			if _, writeErr := writer.Write(key); writeErr != nil {
+				return writeErr
 			}
-			_, err := writer.Write(value)
-			return err
+			_, valueErr := writer.Write(value)
+			return valueErr
 		}, etl.TransformArgs{})
 		if err != nil {
 			valuesComp.Close()
 			return err
 		}
 		if i == len(w.ranges)-1 && len(state) != 0 {
-			if _, err := writer.Write(commitment.KeyCommitmentState); err != nil {
+			if _, stateKeyErr := writer.Write(commitment.KeyCommitmentState); stateKeyErr != nil {
 				valuesComp.Close()
-				return err
+				return stateKeyErr
 			}
-			if _, err := writer.Write(state); err != nil {
+			if _, stateValueErr := writer.Write(state); stateValueErr != nil {
 				valuesComp.Close()
-				return err
+				return stateValueErr
 			}
 		}
 		collation.valuesCount = valuesComp.Count() / 2
@@ -368,8 +369,7 @@ func (t *pbinRowStampTracker) stamp(key []byte) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	name := string(key)
-	if stamp, ok := t.closed[name]; ok {
+	if stamp, ok := t.closed[string(key)]; ok {
 		return stamp, nil
 	}
 	for i := range t.open {

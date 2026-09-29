@@ -145,8 +145,8 @@ func TestPBinRangeWriterWritesEmptyTargetRange(t *testing.T) {
 	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
 	_, err = writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 		for _, entry := range entries {
-			if err := emit(state.PBinLeaf{Key: entry.Key, Value: entry.Value}); err != nil {
-				return err
+			if emitErr := emit(state.PBinLeaf{Key: entry.Key, Value: entry.Value}); emitErr != nil {
+				return emitErr
 			}
 		}
 		return nil
@@ -206,8 +206,8 @@ func TestPBinRangeWriterStampsRowsByMaximumLeafAndKeepsEmptyRanges(t *testing.T)
 	}
 	root, err := writer.Write(t.Context(), tx, domains, func(emit func(state.PBinLeaf) error) error {
 		for _, leaf := range leaves {
-			if err := emit(leaf); err != nil {
-				return err
+			if emitErr := emit(leaf); emitErr != nil {
+				return emitErr
 			}
 		}
 		return nil
@@ -313,6 +313,7 @@ func writePBinRangeWriterAccounts(t *testing.T, db kv.TemporalRwDB, endTxNum uin
 	for i := uint64(0); i < endTxNum; i += 8 {
 		tx, err := db.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
+		defer tx.Rollback()
 		cfg := commitment.DefaultTrieConfig()
 		cfg.Variant = commitment.VariantCommitmentV3
 		domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentDomain))
