@@ -107,6 +107,47 @@ wait_publisher_tip() {
   return 1
 }
 
+CONSUMER_DATADIR="${CONSUMER_DATADIR:-/erigon/tmp/erigon-hoodi-soak.continuous}"
+CONSUMER_STDERR_LOG="${CONSUMER_STDERR_LOG:-/tmp/erigon-hoodi.log}"
+
+# The consumer's logs live in its datadir and in the launcher's stdout file,
+# both of which the next cycle wipes. Keeping a copy beside the cycle's result
+# is what makes a passed cycle auditable afterwards — which route it
+# bootstrapped over, where its bytes came from, what it seeded back.
+preserve_consumer_logs() {
+  local out="$1"
+  if [[ -f "$CONSUMER_DATADIR/logs/erigon.log" ]]; then
+    gzip -c "$CONSUMER_DATADIR/logs/erigon.log" >"$out/consumer-erigon.log.gz" || true
+  fi
+  if [[ -f "$CONSUMER_STDERR_LOG" ]]; then
+    gzip -c "$CONSUMER_STDERR_LOG" >"$out/consumer-stderr.log.gz" || true
+  fi
+}
+
+# Leg M exists to exercise the publisher→consumer route. The consumer also has
+# the public webseeds configured, so it can satisfy every file from the CDN and
+# still pass — leaving the route untested while the cycle reports OK. Require
+# positive evidence of both halves: a peer manifest reached the orchestrator,
+# and bytes arrived from a peer.
+assert_publisher_route_used() {
+  local out="$1" log="$CONSUMER_DATADIR/logs/erigon.log"
+  if [[ ! -f "$log" ]]; then
+    echo "[continuous-soak] FAIL leg M: no consumer log at $log to verify the publisher route" | tee -a "$out/verdict.txt"
+    return 2
+  fi
+  local manifests peer_bytes
+  manifests=$(grep -c "onPeerManifestReceived" "$log" || true)
+  peer_bytes=$(grep -oE "peer-download=[0-9.]+[KMG]?B/s" "$log" | grep -cv "=0B/s" || true)
+  echo "[continuous-soak] leg M route: peer manifests=$manifests peer-download samples=$peer_bytes" \
+    | tee -a "$out/verdict.txt"
+  if [[ "$manifests" -eq 0 || "$peer_bytes" -eq 0 ]]; then
+    echo "[continuous-soak] FAIL leg M: publisher route unused (manifests=$manifests peer-download=$peer_bytes)" \
+      | tee -a "$out/verdict.txt"
+    return 2
+  fi
+  return 0
+}
+
 run_leg_p() {
   local cycle="$1"
   local out="$RESULTS_DIR/cycle-$(printf '%03d' "$cycle")-legP"
@@ -120,6 +161,7 @@ run_leg_p() {
     >"$out/soak.log" 2>&1
   local rc=$?
   echo "$rc" >"$out/exit-code"
+  preserve_consumer_logs "$out"
   return "$rc"
 }
 
@@ -176,6 +218,11 @@ run_leg_m() {
     >"$out/soak.log" 2>&1
   local rc=$?
   echo "$rc" >"$out/exit-code"
+  preserve_consumer_logs "$out"
+
+  if [[ "$rc" == "0" ]]; then
+    assert_publisher_route_used "$out" || return 2
+  fi
 
   # Post-check: manifest path MUST have been the actual bootstrap route.
   # Leg M passes --snap.bootstrap-from-preverified=false so the synthetic-
