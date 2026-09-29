@@ -383,11 +383,7 @@ func determineParentEnvelopeRoots(cfg *Cfg, blocks []*cltypes.SignedBeaconBlock)
 		}
 		hasEnvelope := cfg.forkChoice.HasEnvelope(common.Hash(parentRoot))
 		status, statusFound := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(common.Hash(parentRoot))
-		gasLimitFound := false
-		if parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid(); parentBid != nil && parentBid.Message != nil {
-			_, gasLimitFound = cfg.forkChoice.GetExecutionPayloadGasLimit(parentBid.Message.BlockHash)
-		}
-		if parentEnvelopeNeedsRecovery(block, parentBlock, hasEnvelope, status, statusFound, gasLimitFound) {
+		if parentEnvelopeNeedsRecovery(block, parentBlock, hasEnvelope, status, statusFound) {
 			roots = append(roots, parentRoot)
 			seen[parentRoot] = struct{}{}
 		}
@@ -408,12 +404,11 @@ func storedParentReplayRequired(child, parent *cltypes.SignedBeaconBlock, wasSto
 	return wasStored && parentEnvelopeRequired(child, parent)
 }
 
-func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound, gasLimitFound bool) bool {
+func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound bool) bool {
 	if !parentEnvelopeRequired(child, parent) || (statusFound && status == execution_client.PayloadStatusInvalidated) {
 		return false
 	}
-	gasLimitRequired := status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
-	return !stored || !statusFound || status == execution_client.PayloadStatusNone || (gasLimitRequired && !gasLimitFound)
+	return !stored || !statusFound || status == execution_client.PayloadStatusNone
 }
 
 // fetchParentEnvelopes batch-fetches execution payload envelopes for the given roots.

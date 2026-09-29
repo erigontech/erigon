@@ -1191,7 +1191,7 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	engine := &testExecutionEngine{supportInsertion: false}
-	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
 		<-ctx.Done()
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
@@ -1367,13 +1367,13 @@ type testExecutionEngine struct {
 	supportInsertion bool
 	payloadStatus    execution_client.PayloadStatus
 	newPayloadCalls  int
-	newPayloadFn     func(context.Context) (execution_client.PayloadStatus, error)
+	newPayloadFn     func(context.Context, *cltypes.Eth1Block) (execution_client.PayloadStatus, error)
 }
 
-func (t *testExecutionEngine) NewPayload(ctx context.Context, _ *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+func (t *testExecutionEngine) NewPayload(ctx context.Context, payload *cltypes.Eth1Block, _ *common.Hash, _ []common.Hash, _ []hexutil.Bytes) (execution_client.PayloadStatus, error) {
 	t.newPayloadCalls++
 	if t.newPayloadFn != nil {
-		return t.newPayloadFn(ctx)
+		return t.newPayloadFn(ctx, payload)
 	}
 	return t.payloadStatus, nil
 }

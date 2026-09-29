@@ -57,10 +57,9 @@ type storedParentPayloadTestStore struct {
 
 type chainTipBatchForkGraph struct {
 	fork_graph.ForkGraph
-	parentRoot  common.Hash
-	parentBlock *cltypes.SignedBeaconBlock
-	envelope    *cltypes.SignedExecutionPayloadEnvelope
-	added       map[common.Hash]int
+	parents   map[common.Hash]*cltypes.SignedBeaconBlock
+	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	added     map[common.Hash]int
 }
 
 func (g *chainTipBatchForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state2.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
@@ -73,32 +72,33 @@ func (g *chainTipBatchForkGraph) AddChainSegment(block *cltypes.SignedBeaconBloc
 }
 
 func (g *chainTipBatchForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
-	if root == g.parentRoot {
-		return g.parentBlock.SignedBeaconBlockHeader().Header, true
+	if parent, ok := g.parents[root]; ok {
+		return parent.SignedBeaconBlockHeader().Header, true
 	}
 	return g.ForkGraph.GetHeader(root)
 }
 
 func (g *chainTipBatchForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
-	if root == g.parentRoot {
-		return g.parentBlock, true
+	if parent, ok := g.parents[root]; ok {
+		return parent, true
 	}
 	return g.ForkGraph.GetBlock(root)
 }
 
 func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
-	return root == g.parentRoot || g.ForkGraph.HasEnvelope(root)
+	_, ok := g.envelopes[root]
+	return ok || g.ForkGraph.HasEnvelope(root)
 }
 
 func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-	if root == g.parentRoot {
-		return g.envelope, nil
+	if envelope, ok := g.envelopes[root]; ok {
+		return envelope, nil
 	}
 	return g.ForkGraph.ReadEnvelopeFromDisk(root)
 }
 
 func (g *chainTipBatchForkGraph) IsBlockRetained(root common.Hash) bool {
-	if root == g.parentRoot {
+	if _, ok := g.parents[root]; ok {
 		return true
 	}
 	guard, ok := g.ForkGraph.(interface{ IsBlockRetained(common.Hash) bool })
@@ -164,11 +164,14 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 	baseGraph, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
 	graph := &chainTipBatchForkGraph{
-		ForkGraph:   baseGraph,
-		parentRoot:  parentRoot,
-		parentBlock: parent,
-		envelope:    envelope,
-		added:       make(map[common.Hash]int),
+		ForkGraph: baseGraph,
+		parents: map[common.Hash]*cltypes.SignedBeaconBlock{
+			parentRoot: parent,
+		},
+		envelopes: map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
+			parentRoot: envelope,
+		},
+		added: make(map[common.Hash]int),
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconCfg)
 	store, err := forkchoice.NewForkChoiceStore(
@@ -210,6 +213,68 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 		gloasPayloadValidator: engine,
 	}
 	return stageCfg, graph, parentRoot, fullChild, emptyChild, engine
+}
+
+func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
+	for _, test := range []struct {
+		name    string
+		verdict execution_client.PayloadStatus
+	}{
+		{name: "not validated", verdict: execution_client.PayloadStatusNotValidated},
+		{name: "validated", verdict: execution_client.PayloadStatusValidated},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, graph, parentARoot, childA, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusValidated)
+			parentA := graph.parents[parentARoot]
+			parentB := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+			parentB.Block.Slot = parentA.Block.Slot
+			parentB.Block.ParentRoot = parentA.Block.ParentRoot
+			parentB.Block.Body.GetSignedExecutionPayloadBid().Message = parentA.Block.Body.GetSignedExecutionPayloadBid().Message.Copy()
+			parentB.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{2}
+			parentBRoot, err := parentB.Block.HashSSZ()
+			require.NoError(t, err)
+
+			encodedEnvelope, err := graph.envelopes[parentARoot].EncodeSSZ(nil)
+			require.NoError(t, err)
+			envelopeB := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg.beaconCfg)}
+			require.NoError(t, envelopeB.DecodeSSZ(encodedEnvelope, int(clparams.GloasVersion)))
+			envelopeB.Message.BeaconBlockRoot = parentBRoot
+			envelopeB.Message.Payload.BlockHash = parentB.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
+			graph.parents[parentBRoot] = parentB
+			graph.envelopes[parentBRoot] = envelopeB
+			cfg.forkChoice.MarkPayloadStatus(parentBRoot, envelopeB.Message.Payload.BlockHash, test.verdict)
+			_, found := cfg.forkChoice.GetExecutionPayloadGasLimit(envelopeB.Message.Payload.BlockHash)
+			require.False(t, found)
+
+			childB := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+			childB.Block.Slot = parentB.Block.Slot + 1
+			childB.Block.ParentRoot = parentBRoot
+			childB.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parentB.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
+			childARoot, err := childA.Block.HashSSZ()
+			require.NoError(t, err)
+			childBRoot, err := childB.Block.HashSSZ()
+			require.NoError(t, err)
+
+			var replayedPayload common.Hash
+			var replayBudget time.Duration
+			engine.newPayloadFn = func(ctx context.Context, payload *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+				deadline, ok := ctx.Deadline()
+				require.True(t, ok)
+				replayedPayload = payload.BlockHash
+				replayBudget = time.Until(deadline)
+				return execution_client.PayloadStatusValidated, nil
+			}
+
+			seen := make(map[common.Hash]struct{})
+			processChainTipBatch(t.Context(), cfg, Args{targetSlot: childB.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{childA, childB}, seen)
+
+			require.Equal(t, 1, engine.newPayloadCalls)
+			require.Equal(t, graph.envelopes[parentARoot].Message.Payload.BlockHash, replayedPayload)
+			require.Greater(t, replayBudget, gloasPayloadRetryBudget*3/4)
+			require.Equal(t, 1, graph.added[common.Hash(childARoot)])
+			require.Equal(t, 1, graph.added[common.Hash(childBRoot)])
+		})
+	}
 }
 
 func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
@@ -401,12 +466,13 @@ func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {
 	require.False(t, parentEnvelopeRequired(nil, parent))
 	require.False(t, parentEnvelopeRequired(child, nil))
 	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{1}
-	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusValidated, true, true))
-	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusValidated, true, false))
-	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, true, true))
-	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, false, true))
-	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusInvalidated, true, false))
-	require.False(t, parentEnvelopeNeedsRecovery(child, parent, false, execution_client.PayloadStatusInvalidated, true, false))
+	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusValidated, true))
+	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNotValidated, true))
+	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, true))
+	require.True(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusNone, false))
+	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusInvalidated, true))
+	require.False(t, parentEnvelopeNeedsRecovery(child, parent, false, execution_client.PayloadStatusInvalidated, true))
+	require.True(t, parentEnvelopeNeedsRecovery(child, parent, false, execution_client.PayloadStatusNone, false))
 }
 
 func TestStoredParentReplayRequiredOnlyForFullSibling(t *testing.T) {
@@ -547,7 +613,7 @@ func TestStoredParentPayloadReplaySharesBudgetAndCachesResult(t *testing.T) {
 		results:  make(map[common.Hash]bool),
 	}
 	engine := &testExecutionEngine{}
-	engine.newPayloadFn = func(ctx context.Context) (execution_client.PayloadStatus, error) {
+	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
 		<-ctx.Done()
 		return execution_client.PayloadStatusNone, ctx.Err()
 	}
@@ -657,7 +723,7 @@ func TestStoredParentPayloadReplayWithoutVerdictKeepsStatus(t *testing.T) {
 
 	t.Run("deadline during validation", func(t *testing.T) {
 		store := newStore()
-		engine := &testExecutionEngine{newPayloadFn: func(ctx context.Context) (execution_client.PayloadStatus, error) {
+		engine := &testExecutionEngine{newPayloadFn: func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
 			<-ctx.Done()
 			return execution_client.PayloadStatusNone, ctx.Err()
 		}}
