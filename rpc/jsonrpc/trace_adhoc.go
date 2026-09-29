@@ -1681,7 +1681,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 
 func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader state.StateReader,
 	stateCache *shards.StateCache, cachedWriter state.StateWriter, ibs *state.IntraBlockState,
-	msg *types.Message, callParam TraceCallParam,
+	txn types.Transaction, callParam TraceCallParam,
 	header *types.Header, requireCanonical, gasBailout bool, txIndex int,
 	traceConfig *config.TraceConfig,
 ) (*TraceCallResult, error) {
@@ -1714,6 +1714,15 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	blockCtx := transactions.NewEVMBlockContext(engine, header, requireCanonical, dbtx, api._blockReader, chainConfig)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
 		return nil, err
+	}
+	chainRules := blockCtx.Rules(chainConfig)
+	signer := types.MakeSigner(chainConfig, blockCtx.BlockNumber, blockCtx.Time)
+	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
+	}
+	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, chainRules)
+	if err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
 	}
 
 	if isHistoricalStateReader {
@@ -1779,12 +1788,14 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
 	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
+	if vmConfig.Tracer != nil && vmConfig.Tracer.OnTxStart != nil {
+		vmConfig.Tracer.OnTxStart(evm.GetVMContext(), txn, msg.From())
+	}
 	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
 
-	chainRules := blockCtx.Rules(chainConfig)
 	traceResult.Output = bytes.Clone(execResult.ReturnData)
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)

@@ -451,6 +451,76 @@ func TestReplayBlockTransactions(t *testing.T) {
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
+func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {
+	m, generated, calls := gasTracingTestChain(t)
+	api := newTraceApiForTest(m)
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	parent := rpc.BlockNumberOrHashWithNumber(0)
+	blockTraces, err := api.Block(m.Ctx, 1, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, blockTraces, len(calls))
+	expectedStateGas := []int64{int64(params.StateGasPerStorageSet), 0}
+	for i, call := range calls {
+		result, ok := blockTraces[i].Result.(*TraceResult)
+		require.True(t, ok)
+		require.NotNil(t, result.GasUsed)
+		require.Positive(t, result.GasUsed.ToInt().Uint64())
+		require.NotNil(t, result.StateGasUsed)
+		require.EqualValues(t, expectedStateGas[i], *result.StateGasUsed)
+
+		hash := generated.Blocks[0].Transactions()[i].Hash()
+		txnTraces, err := api.Transaction(m.Ctx, hash, nil, nil)
+		require.NoError(t, err)
+		require.Len(t, txnTraces, 1)
+		require.Equal(t, result, txnTraces[0].Result, "transaction %d", i)
+
+		replay, err := api.ReplayTransaction(m.Ctx, hash, []string{TraceTypeTrace}, nil, nil)
+		require.NoError(t, err)
+		require.Len(t, replay.Trace, 1)
+		require.Equal(t, result, replay.Trace[0].Result, "replay transaction %d", i)
+
+		var callConfig *config.TraceConfig
+		if i == 1 {
+			callConfig = &config.TraceConfig{StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(*call.To): {
+					StateDiff: &map[common.Hash]common.Hash{{}: common.HexToHash("0x1")},
+				},
+			}}
+		}
+		callTrace, err := api.Call(m.Ctx, TraceCallParam{
+			From: call.From, To: call.To, Gas: call.Gas, GasPrice: call.GasPrice,
+			Nonce: call.Nonce, Data: call.Data,
+		}, []string{TraceTypeTrace}, &parent, callConfig)
+		require.NoError(t, err)
+		require.Len(t, callTrace.Trace, 1)
+		require.Equal(t, result, callTrace.Trace[0].Result, "call %d", i)
+	}
+
+	for _, traceTypes := range [][]string{{TraceTypeTrace}, {TraceTypeTrace, TraceTypeStateDiff}} {
+		t.Run(strings.Join(traceTypes, "_"), func(t *testing.T) {
+			replays, err := api.ReplayBlockTransactions(m.Ctx, block, traceTypes, nil, nil)
+			require.NoError(t, err)
+			require.Len(t, replays, len(calls))
+
+			manyCalls := make([][2]any, len(calls))
+			for i, call := range calls {
+				manyCalls[i] = [2]any{call, traceTypes}
+			}
+			encoded, err := json.Marshal(manyCalls)
+			require.NoError(t, err)
+			manyTraces, err := api.CallMany(m.Ctx, encoded, &parent, nil)
+			require.NoError(t, err)
+			require.Len(t, manyTraces, len(calls))
+			for i, trace := range blockTraces {
+				require.Len(t, replays[i].Trace, 1)
+				require.Equal(t, trace.Result, replays[i].Trace[0].Result, "block replay %d", i)
+				require.Len(t, manyTraces[i].Trace, 1)
+				require.Equal(t, trace.Result, manyTraces[i].Trace[0].Result, "call-many %d", i)
+			}
+		})
+	}
+}
+
 func TestOeTracer(t *testing.T) {
 	type callContext struct {
 		Number              math.HexOrDecimal64 `json:"number"`
