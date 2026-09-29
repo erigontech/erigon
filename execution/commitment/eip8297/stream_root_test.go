@@ -112,10 +112,10 @@ func streamRootEntries() []Entry {
 	for i := range 2 {
 		address := referenceAddress(uint64(100 + i))
 		var balance uint256.Int
-		balance.SetUint64(i + 1)
+		balance.SetUint64(uint64(i + 1))
 		states = append(states, State{
 			Address: address,
-			Nonce:   i + 1,
+			Nonce:   uint64(i + 1),
 			Balance: balance,
 			Slots: map[string][]byte{
 				string(referenceSlot(0)):   {byte(i + 1)},
