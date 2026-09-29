@@ -519,7 +519,8 @@ func TestValidateRead_StoragePath_ValueTiebreaker(t *testing.T) {
 // value. Completing a published version with a different value is therefore a
 // one-value-per-version violation and panics under assert. Because a version-
 // consistent read is thus always value-consistent, no read-side re-check of the
-// value is required — this is why validation carries no value-aware MapRead guard.
+// value is required for correctness; the value tiebreaker only admits the reverse
+// case, a version mismatch whose value did not move.
 func TestOneValuePerVersion_WriteSideForbidsValueChange(t *testing.T) {
 	// Not parallel: this test toggles the process-global dbg.AssertEnabled, which
 	// markCellComplete reads from other tests' MarkWritesComplete calls.
