@@ -1125,16 +1125,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
-				// Save the block's changeset by hash BEFORE sending the blockResult, so
-				// the calculator can find it via GetChangesetByHash and record its
-				// branch diffs into block N's CS. Saving after sendResult would let the
-				// calculator race ahead, look up an unsaved CS, and leak branch deltas
-				// into the next block's CS. ensureChangesetAccumulator covers an empty
-				// block that created no accumulator via a tx-result.
+				// Covers an empty block that created no accumulator via a tx-result; the
+				// save must land before the blockResult, else the calculator races ahead,
+				// looks up an unsaved CS and leaks branch deltas into the next block's CS.
 				pe.ensureChangesetAccumulator(blockResult.BlockNum, blockResult.BlockHash)
-				if pe.currentChangeSet != nil {
-					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
-				}
 
 				// Decide the stop BEFORE sending, so a terminal stop publishes the
 				// stopCause before blockResult(M) crosses the channel: the calculator
