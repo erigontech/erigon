@@ -187,12 +187,18 @@ func TestRunMethodStreamableEnvelope(t *testing.T) {
 		write func(jsonstream.Stream) error
 		want  string
 	}{
-		"value": {func(s jsonstream.Stream) error { s.WriteEmptyObject(); return nil },
-			`{"jsonrpc":"2.0","id":1,"result":{}}`},
-		"nothing written": {func(jsonstream.Stream) error { return nil },
-			`{"jsonrpc":"2.0","id":1,"result":null}`},
-		"error before any value": {func(jsonstream.Stream) error { return boom },
-			`{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"boom"}}`},
+		"value": {
+			func(s jsonstream.Stream) error { s.WriteEmptyObject(); return nil },
+			`{"jsonrpc":"2.0","id":1,"result":{}}`,
+		},
+		"nothing written": {
+			func(jsonstream.Stream) error { return nil },
+			`{"jsonrpc":"2.0","id":1,"result":null}`,
+		},
+		"error before any value": {
+			func(jsonstream.Stream) error { return boom },
+			`{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"boom"}}`,
+		},
 		"error inside a partial value": {func(s jsonstream.Stream) error {
 			s.WriteArrayStart()
 			s.WriteString("a")
