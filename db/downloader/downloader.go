@@ -67,6 +67,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	snapshotinv "github.com/erigontech/erigon/node/components/storage/snapshot"
 	storagesnapshot "github.com/erigontech/erigon/node/components/storage/snapshot"
 	"github.com/erigontech/erigon/p2p/enr"
 )
@@ -1894,7 +1895,7 @@ func (d *Downloader) invalidateData(name snapshotName, preverifiedInfoHash metai
 	// to wait until another torrent is fetched, and then we mistake a non-partial file with
 	// the correct size as being complete.
 	from := d.filePathForName(name)
-	to := d.filePathForName(name + ".part")
+	to := from + ".part"
 	err = os.Rename(from, to)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -2726,12 +2727,12 @@ func (d *Downloader) DropTorrentByName(name string) {
 }
 
 func (d *Downloader) dropTorrentByNameLocked(name string) {
-	t, ok := d.torrentsByName[name]
+	t, ok := d.torrentsByName[snapshotNameKey(name)]
 	if !ok {
 		return
 	}
 	t.Drop()
-	g.MustDelete(d.torrentsByName, name)
+	g.MustDelete(d.torrentsByName, snapshotNameKey(name))
 	delete(d.downloads, t)
 }
 
@@ -2755,6 +2756,7 @@ func (d *Downloader) DropRebuiltByName(name string) {
 
 // Delete - stop seeding, remove file, remove .torrent. TODO: Double check the usage of this.
 func (d *Downloader) Delete(name string) error {
+	name = snapshotNameKey(name)
 	// The merge moves a superseded file's bytes into the merged directory
 	// before reporting it deleted, so their presence is what distinguishes
 	// "consolidated away" from "gone". The former stays fetchable for peers
@@ -2798,6 +2800,7 @@ func (d *Downloader) Delete(name string) error {
 // A file whose metainfo is not loaded cannot be re-registered; it is
 // simply unseeded.
 func (d *Downloader) Supersede(name string) error {
+	name = snapshotNameKey(name)
 	d.lock.Lock()
 	defer d.lock.Unlock()
 
@@ -2827,8 +2830,16 @@ func (d *Downloader) Supersede(name string) error {
 	return nil
 }
 
+// Names reach the downloader both as a bare basename, from the aggregator's
+// merge and unwind callbacks, and as the layout-relative path the flow and the
+// publisher's torrents use. They name one file, so both must resolve to one
+// path and one registration key.
+func snapshotNameKey(name string) string {
+	return filepath.ToSlash(snapshotinv.RelPathForName(filepath.ToSlash(name)))
+}
+
 func (d *Downloader) filePathForName(name string) string {
-	return filepath.Join(d.snapDir(), filepath.FromSlash(name))
+	return snapshotinv.ResolveExistingPath(d.snapDir(), filepath.ToSlash(name))
 }
 
 func (d *Downloader) metainfoFilePathForName(name string) string {
@@ -2837,6 +2848,7 @@ func (d *Downloader) metainfoFilePathForName(name string) string {
 
 // This does all the checks: Valid name, no overlaps on infohash and names.
 func (d *Downloader) getExistingSnapshotTorrent(name string, infoHash metainfo.Hash) (t *torrent.Torrent, ok bool, err error) {
+	name = snapshotNameKey(name)
 	if !IsSnapNameAllowed(name) {
 		err = errors.New("invalid snapshot name")
 		return
@@ -2867,6 +2879,7 @@ func (d *Downloader) getExistingSnapshotTorrent(name string, infoHash metainfo.H
 // Central function through which all must pass. Does name and infoHash validation (in
 // getExistingSnapshotTorrent).
 func (d *Downloader) addTorrent(name string, infoHash metainfo.Hash) (t *torrent.Torrent, new bool, err error) {
+	name = snapshotNameKey(name)
 	t, ok, err := d.getExistingSnapshotTorrent(name, infoHash)
 	if err != nil || ok {
 		return
