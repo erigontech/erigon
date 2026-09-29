@@ -72,8 +72,7 @@ func (r *PBinWitnessResolver) Resolve(path []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	key := string(witness.PBinPath(&walk))
-	blob, ok := r.nodes[key]
+	blob, ok := r.nodes[string(witness.PBinPath(&walk))]
 	if !ok {
 		return nil, nil
 	}
@@ -114,7 +113,7 @@ func (r *PBinWitnessResolver) load() error {
 	}
 	entries := make(map[string]pbinResolverEntry)
 	var rootPath eip8297.Bitpath
-	if err := r.collectRecord(rootPath, GlobalRootKey(), record, entries); err != nil {
+	if err := r.collectRecord(rootPath, GlobalRootKey(), &record, entries); err != nil {
 		r.loadErr = err
 		return err
 	}
@@ -136,7 +135,7 @@ func (r *PBinWitnessResolver) load() error {
 	return nil
 }
 
-func (r *PBinWitnessResolver) collectRecord(path eip8297.Bitpath, key []byte, record Record, entries map[string]pbinResolverEntry) error {
+func (r *PBinWitnessResolver) collectRecord(path eip8297.Bitpath, key []byte, record *Record, entries map[string]pbinResolverEntry) error {
 	switch record.Form {
 	case LeafRoot:
 		return r.addLeaf(record.Cells[0], entries)
@@ -175,16 +174,16 @@ func (r *PBinWitnessResolver) collectRecordAt(path eip8297.Bitpath, entries map[
 	if err != nil {
 		return err
 	}
-	return r.collectRecord(path, key, record, entries)
+	return r.collectRecord(path, key, &record, entries)
 }
 
-func (r *PBinWitnessResolver) collectRow(path eip8297.Bitpath, record Record, entries map[string]pbinResolverEntry) error {
-	if len(occupiedSlots(&record)) >= 2 {
+func (r *PBinWitnessResolver) collectRow(path eip8297.Bitpath, record *Record, entries map[string]pbinResolverEntry) error {
+	if len(occupiedSlots(record)) >= 2 {
 		key, err := rowKeyForPath(&path)
 		if err != nil {
 			return err
 		}
-		if _, err := FoldRow(key, &record); err != nil {
+		if _, err := FoldRow(key, record); err != nil {
 			return err
 		}
 	}
