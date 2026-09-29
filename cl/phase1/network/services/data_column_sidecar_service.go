@@ -50,13 +50,9 @@ type dataColumnSidecarService struct {
 	columnSidecarStorage blob_storage.DataColumnStorage
 	emitters             *beaconevents.EventEmitter
 
-	// [New in Gloas:EIP7732] Pending sidecars waiting for their blocks.
-	pendingGloasSidecars *pendingJobQueue[pendingGloasSidecarKey, pendingGloasSidecar]
-}
-
-type pendingGloasSidecar struct {
-	sidecar *cltypes.DataColumnSidecar
-	subnet  *uint64
+	// Key by the full sidecar root so an unverified candidate cannot suppress
+	// another candidate for the same block and column.
+	pendingGloasSidecars *pendingJobQueue[common.Hash, *cltypes.DataColumnSidecar]
 }
 
 // seenSidecarKey is used for Fulu (pre-GLOAS) seen tracking
@@ -71,17 +67,6 @@ type seenSidecarKey struct {
 type seenGloasSidecarKey struct {
 	beaconBlockRoot common.Hash
 	index           uint64
-}
-
-// pendingGloasSidecarKey includes the full message root because candidates enter
-// the pending queue before validation. This prevents an invalid candidate from
-// suppressing another for the same block and column. Slot is retained for expiry
-// diagnostics.
-type pendingGloasSidecarKey struct {
-	beaconBlockRoot common.Hash
-	index           uint64
-	slot            uint64
-	messageRoot     common.Hash
 }
 
 func NewDataColumnSidecarService(
@@ -116,7 +101,7 @@ func NewDataColumnSidecarService(
 	return s
 }
 
-func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[pendingGloasSidecarKey, pendingGloasSidecar] {
+func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[common.Hash, *cltypes.DataColumnSidecar] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
 		name:          "gloas_data_column_sidecar",
 		capacity:      maxPendingGloasSidecars,
@@ -125,9 +110,9 @@ func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Conte
 	},
 		s.tryProcessPendingGloasSidecar,
 		nil,
-		func(key pendingGloasSidecarKey, _ pendingGloasSidecar) {
+		func(_ common.Hash, sidecar *cltypes.DataColumnSidecar) {
 			log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
-				"slot", key.slot, "blockRoot", key.beaconBlockRoot.String(), "index", key.index)
+				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
 		})
 }
 
@@ -328,7 +313,7 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 	// If not yet seen, queue for deferred validation.
 	block, ok := s.forkChoice.GetBlock(blockRoot)
 	if !ok {
-		s.scheduleSidecarForLaterProcessing(msg, subnet)
+		s.scheduleSidecarForLaterProcessing(msg)
 		return ErrIgnore
 	}
 
@@ -406,36 +391,19 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 }
 
 // scheduleSidecarForLaterProcessing queues a GLOAS sidecar until its block arrives.
-func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar, subnet *uint64) {
-	err := s.pendingGloasSidecars.enqueueLazy(pendingGloasSidecar{
-		sidecar: sidecar,
-		subnet:  subnet,
-	}, func() (pendingGloasSidecarKey, error) { return pendingGloasSidecarKeyFor(sidecar) })
+func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar) {
+	err := s.pendingGloasSidecars.enqueueLazy(sidecar, func() (common.Hash, error) { return sidecar.HashSSZ() })
 	if err != nil && !errors.Is(err, errPendingJobQueueFull) {
 		log.Warn("[dataColumnSidecarService] failed to hash pending GLOAS sidecar",
 			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
 	}
 }
 
-func pendingGloasSidecarKeyFor(sidecar *cltypes.DataColumnSidecar) (pendingGloasSidecarKey, error) {
-	root, err := sidecar.HashSSZ()
-	if err != nil {
-		return pendingGloasSidecarKey{}, err
-	}
-	return pendingGloasSidecarKey{
-		beaconBlockRoot: sidecar.BeaconBlockRoot,
-		index:           sidecar.Index,
-		slot:            sidecar.Slot,
-		messageRoot:     common.Hash(root),
-	}, nil
-}
-
 func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
 	ctx context.Context,
-	_ pendingGloasSidecarKey,
-	pending pendingGloasSidecar,
+	_ common.Hash,
+	sidecar *cltypes.DataColumnSidecar,
 ) pendingJobDecision {
-	sidecar := pending.sidecar
 	if sidecar.Slot <= s.forkChoice.FinalizedSlot() {
 		log.Debug("[dataColumnSidecarService] pending GLOAS sidecar slot is now finalized",
 			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
@@ -446,7 +414,8 @@ func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
 	}
 	// Keep the entry while processing. If the referenced block disappears, any
 	// re-enqueue must deduplicate against this job and preserve its expiry window.
-	if err := s.processGloasMessage(ctx, pending.subnet, sidecar); err != nil {
+	// Subnet validation already ran before queue admission.
+	if err := s.processGloasMessage(ctx, nil, sidecar); err != nil {
 		if errors.Is(err, ErrIgnore) {
 			if _, ok := s.forkChoice.GetBlock(sidecar.BeaconBlockRoot); !ok {
 				return pendingJobKeep
