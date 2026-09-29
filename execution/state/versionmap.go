@@ -17,9 +17,11 @@ import (
 
 type statusFlag uint
 
-const FlagDone statusFlag = 0
-const FlagEstimate statusFlag = 1
-const UnknownDep = -2
+const (
+	FlagDone     statusFlag = 0
+	FlagEstimate statusFlag = 1
+	UnknownDep              = -2
+)
 
 type AccountPath int8
 
@@ -1223,7 +1225,8 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 	isAbsent func(T) bool,
 	recordField func(*accounts.Account) T,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
-	traceInvalid bool, tracePrefix string) VersionValidity {
+	traceInvalid bool, tracePrefix string,
+) VersionValidity {
 	// One typed read supplies BOTH the status (for the version check) and the
 	// live value (for the rare tiebreaker) — no second lookup, no boxing. The
 	// tiebreaker branch in validateReadImpl only fires when rr is Done, so eq
@@ -1273,25 +1276,32 @@ func validateRead[T any](vm *VersionMap, txIndex int, addr accounts.Address, pat
 func liveBalance(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	return vm.ReadBalance(a, tx)
 }
+
 func liveNonce(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
 	return vm.ReadNonce(a, tx)
 }
+
 func liveIncarnation(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (uint64, ReadResult, bool) {
 	return vm.ReadIncarnation(a, tx)
 }
+
 func liveCodeHash(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (accounts.CodeHash, ReadResult, bool) {
 	return vm.ReadCodeHash(a, tx)
 }
+
 func liveAddress(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (*accounts.Account, ReadResult, bool) {
 	return vm.ReadAddress(a, tx)
 }
+
 func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx int) (uint256.Int, ReadResult, bool) {
 	return vm.ReadStorage(a, k, tx)
 }
+
 func liveCode(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) ([]byte, ReadResult, bool) {
 	c, res, ok := vm.ReadCode(a, tx)
 	return c.Bytes, res, ok
 }
+
 func liveCodeSize(vm *VersionMap, a accounts.Address, _ accounts.StorageKey, tx int) (int, ReadResult, bool) {
 	return vm.ReadCodeSize(a, tx)
 }
@@ -1378,8 +1388,8 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	matchesRecord func() bool,
 	absent bool,
 	checkVersion func(readVersion, writeVersion Version) VersionValidity,
-	traceInvalid bool, tracePrefix string, recursive bool) VersionValidity {
-
+	traceInvalid bool, tracePrefix string, recursive bool,
+) VersionValidity {
 	valid := VersionValid
 	invReason := ""
 	switch rr.Status() {
@@ -1736,7 +1746,9 @@ func getCellNonce() *WriteCell[uint64] { return cellPoolNonce.Get().(*WriteCell[
 func getCellIncarnation() *WriteCell[uint64] {
 	return cellPoolIncarnation.Get().(*WriteCell[uint64])
 }
+
 func getCellCode() *WriteCell[accounts.Code] { return cellPoolCode.Get().(*WriteCell[accounts.Code]) }
+
 func getCellCodeHash() *WriteCell[accounts.CodeHash] {
 	return cellPoolCodeHash.Get().(*WriteCell[accounts.CodeHash])
 }
@@ -1744,6 +1756,7 @@ func getCellCodeSize() *WriteCell[int] { return cellPoolCodeSize.Get().(*WriteCe
 func getCellCreateContract() *WriteCell[bool] {
 	return cellPoolCreateContract.Get().(*WriteCell[bool])
 }
+
 func getCellStorage() *WriteCell[uint256.Int] {
 	return cellPoolStorage.Get().(*WriteCell[uint256.Int])
 }
@@ -1817,12 +1830,12 @@ func (res *ReadResult) Version() Version {
 	}
 }
 
-func (mvr ReadResult) Status() int {
-	if mvr.depIdx != UnknownDep {
-		if mvr.validated {
+func (res ReadResult) Status() int {
+	if res.depIdx != UnknownDep {
+		if res.validated {
 			return MVReadResultValidated
 		}
-		if mvr.incarnation == -1 {
+		if res.incarnation == -1 {
 			return MVReadResultDependency
 		} else {
 			return MVReadResultDone
@@ -1926,7 +1939,7 @@ func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
 
 const FlagValidated statusFlag = 2
 
-func (mvr ReadResult) resolved() bool {
-	s := mvr.Status()
+func (res ReadResult) resolved() bool {
+	s := res.Status()
 	return s == MVReadResultDone || s == MVReadResultValidated
 }

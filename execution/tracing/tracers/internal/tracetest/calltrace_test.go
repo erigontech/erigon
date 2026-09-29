@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 type callContext struct {
@@ -131,9 +132,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 		t.Run(camel(strings.TrimSuffix(file.Name(), ".json")), func(t *testing.T) {
 			t.Parallel()
 
-			var (
-				test = new(callTracerTest)
-			)
+			test := new(callTracerTest)
 			// Call tracer test found, read if from disk
 			if blob, err := os.ReadFile(filepath.Join("testdata", dirPath, file.Name())); err != nil {
 				t.Fatalf("failed to read testcase: %v", err)
@@ -185,7 +184,7 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if err != nil {
 				t.Fatalf("failed to execute transaction: %v", err)
 			}
-			tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+			tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 			// Retrieve the trace result and compare against the expected.
 			res, err := tracer.GetResult()
 			if err != nil {
@@ -209,6 +208,11 @@ func testCallTracer(tracerName string, dirPath string, t *testing.T) {
 			if string(want) != string(res) {
 				t.Fatalf("trace mismatch\n have: %v\n want: %v\n", string(res), string(want))
 			}
+			if tracer.MarshalFastJSONTo != nil {
+				fast, err := jsonstream.Marshal(fastJSON(tracer.MarshalFastJSONTo))
+				require.NoError(t, err)
+				require.Equal(t, string(res), string(fast))
+			}
 			// Sanity check: compare top call's gas used against vm result
 			type simpleResult struct {
 				GasUsed hexutil.Uint64
@@ -229,6 +233,10 @@ var evmLog0 = []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
 
 // evmRevert is a 5-byte EVM snippet that REVERTs with no return data.
 var evmRevert = []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.REVERT)}
+
+type fastJSON func(jsonstream.Stream) error
+
+func (f fastJSON) MarshalFastJSONTo(s *jsonstream.StackStream) error { return f(s) }
 
 // evmCallTo returns a 34-byte EVM snippet that CALLs a 20-byte address whose last byte is addr.
 // The return value is discarded (POP).
@@ -325,7 +333,7 @@ func TestCallTracerWithLogPositionAfterRevert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -419,7 +427,7 @@ func TestCallTracerWithLogPositionMixedSubcalls(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -527,7 +535,7 @@ func TestCallTracerWithLogPositionInCreate(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 
 	res, err := tracer.GetResult()
 	if err != nil {
@@ -550,7 +558,7 @@ func TestCallTracerWithLogPositionInCreate(t *testing.T) {
 // txn to A, A calls B with zero value. B does not already exist.
 // Expected: that enter/exit is invoked and the inner call is shown in the result
 func TestZeroValueToNotExitCall(t *testing.T) {
-	var to = common.HexToAddress("0x00000000000000000000000000000000deadbeef")
+	to := common.HexToAddress("0x00000000000000000000000000000000deadbeef")
 	privkey, err := crypto.HexToECDSA("0000000000000000deadbeef00000000000000000000000000000000deadbeef")
 	if err != nil {
 		t.Fatalf("err %v", err)
@@ -580,12 +588,12 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 		Difficulty:  *uint256.NewInt(0x30000),
 		GasLimit:    uint64(6000000),
 	}
-	var code = []byte{
+	code := []byte{
 		byte(vm.PUSH1), 0x0, byte(vm.DUP1), byte(vm.DUP1), byte(vm.DUP1), // in and outs zero
 		byte(vm.DUP1), byte(vm.PUSH1), 0xff, byte(vm.GAS), // value=0,address=0xff, gas=GAS
 		byte(vm.CALL),
 	}
-	var alloc = types.GenesisAlloc{
+	alloc := types.GenesisAlloc{
 		to: types.GenesisAccount{
 			Nonce: 1,
 			Code:  code,
@@ -619,7 +627,7 @@ func TestZeroValueToNotExitCall(t *testing.T) {
 	if err != nil {
 		t.Fatalf("failed to execute transaction: %v", err)
 	}
-	tracer.OnTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, err)
+	tracer.EmitTxEnd(&types.Receipt{GasUsed: vmRet.ReceiptGasUsed}, vmRet.TxnGasUsage, err)
 	// Retrieve the trace result and compare against the etalon
 	res, err := tracer.GetResult()
 	if err != nil {
