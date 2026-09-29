@@ -208,15 +208,12 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter
 
 	if crit.BlockHash != nil {
-		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		number, err := api.BaseAPI.resolveLogsBlockHash(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return nil, err
 		}
-		if header == nil {
-			return nil, fmt.Errorf("block header not found %x", *crit.BlockHash)
-		}
-		begin = header.Number.Uint64()
-		end = header.Number.Uint64()
+		begin = number
+		end = number
 	} else {
 		begin, end, err = logRangeLatestOnly(tx, crit)
 		if err != nil {
