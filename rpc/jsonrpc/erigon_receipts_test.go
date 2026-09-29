@@ -50,7 +50,8 @@ func TestGetLogsFromPersistedReceipts(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = false // assertions re-execute instead of serving the persistent cache
 
-	m := execmoduletester.New(t,
+	m := execmoduletester.New(
+		t,
 		execmoduletester.WithGenesisSpec(&types.Genesis{
 			Config: chain.TestChainBerlinConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
@@ -121,7 +122,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
+	expectedRPCLogs := make(types.Logs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
@@ -134,19 +135,18 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	require.NotNil(t, actual)
 	assert.Equal(expectedRPCLogs, actual)
 
-	expectedLog := &types.RPCLog{
-		Log: types.Log{
-			Address:     common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
-			Topics:      []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
-			Data:        []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
-			BlockNumber: 10,
-			TxHash:      common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
-			TxIndex:     0,
-			BlockHash:   common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
-			Index:       0,
-			Removed:     false,
-		},
-		BlockTimestamp: 100,
+	stampedAt := hexutil.Uint64(100)
+	expectedLog := &types.Log{
+		Address:        common.HexToAddress("0x3CB5b6E26e0f37F2514D45641F15Bd6fEC2E0c4c"),
+		Topics:         []common.Hash{common.HexToHash("0x68f6a0f063c25c6678c443b9a484086f15ba8f91f60218695d32a5251f2050eb")},
+		Data:           []byte{0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 151, 160, 176, 241, 203, 220, 75, 75, 222, 127, 170, 33, 171, 34, 107, 143, 20, 185, 234, 201},
+		BlockNumber:    10,
+		TxHash:         common.HexToHash("0xb6449d8e167a8826d050afe4c9f07095236ff769a985f02649b1023c2ded2059"),
+		TxIndex:        0,
+		BlockHash:      common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef"),
+		Index:          0,
+		Removed:        false,
+		BlockTimestamp: &stampedAt,
 	}
 	assert.Equal(expectedLog, actual[0])
 }
@@ -158,7 +158,7 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	api := NewErigonAPI(newBaseApiForTest(m), db, nil)
 	expectedLogs, _ := api.GetLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())})
 
-	expectedRPCLogs := make(types.RPCLogs, 0, len(expectedLogs))
+	expectedRPCLogs := make(types.Logs, 0, len(expectedLogs))
 	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedRPCLogs = append(expectedRPCLogs, expectedLog)
 	}
@@ -573,7 +573,7 @@ func TestGetLogsByHashIncludesBlockTimestamp(t *testing.T) {
 	for _, txLogs := range byHash {
 		for _, l := range txLogs {
 			require.Equal(t, expected[0].BlockTimestamp, l.BlockTimestamp)
-			require.NotZero(t, l.BlockTimestamp)
+			require.NotZero(t, *l.BlockTimestamp)
 			seen++
 		}
 	}
@@ -608,7 +608,7 @@ func TestGetLogsByHashCachedReceiptsIncludeBlockTimestamp(t *testing.T) {
 	var seen int
 	for _, txLogs := range cachedLogs {
 		for _, l := range txLogs {
-			require.NotZero(t, l.BlockTimestamp)
+			require.NotZero(t, *l.BlockTimestamp)
 			seen++
 		}
 	}

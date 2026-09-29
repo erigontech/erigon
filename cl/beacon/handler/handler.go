@@ -233,6 +233,8 @@ type ApiHandler struct {
 	engine                             execution_client.ExecutionEngine
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
 	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
+	elIdentificationLogOnce            sync.Once                                    // Logs the resolved default graffiti identification exactly once.
+	graffitiTruncatedWarnOnce          sync.Once                                    // Warns that graffiti was truncated exactly once.
 	syncMessagePool                    sync_contribution_pool.SyncContributionPool
 	committeeSub                       committee_subscription.CommitteeSubscribe
 	attestationProducer                attestation_producer.AttestationDataProducer

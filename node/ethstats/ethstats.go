@@ -56,10 +56,8 @@ const (
 	historyUpdateRange = 50
 )
 
-var (
-	// urlRegex is a regular expression for parsing netstats connection URL
-	urlRegex = regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
-)
+// urlRegex is a regular expression for parsing netstats connection URL
+var urlRegex = regexp.MustCompile("([^:@]*)(:([^@]*))?@(.+)")
 
 // Service implements an Ethereum netstats reporting daemon that pushes local
 // chain statistics up to a monitoring server.
@@ -126,7 +124,8 @@ func (w *connWrapper) Close() error {
 
 // New returns a monitoring service ready for stats reporting.
 func New(node *node.Node, servers []*sentry.GrpcServer, chainDB kv.RoDB, blockReader dbservices.FullBlockReader,
-	url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient) error {
+	url string, networkid uint64, quitCh <-chan struct{}, headCh chan [][]byte, txPoolRpcClient txpoolproto.TxpoolClient,
+) error {
 	// Parse the netstats connection url
 	parts := urlRegex.FindStringSubmatch(url)
 	if len(parts) != 5 {

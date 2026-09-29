@@ -26,8 +26,8 @@ import (
 )
 
 var (
-	NO_GENESIS_TIME_ERR    error = errors.New("genesis time is not set")
-	NO_VALIDATOR_ROOT_HASH error = errors.New("genesis validators root is not set")
+	ErrNoGenesisTime       error = errors.New("genesis time is not set")
+	ErrNoValidatorRootHash error = errors.New("genesis validators root is not set")
 )
 
 func ComputeDomain(

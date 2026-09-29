@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -1310,7 +1311,7 @@ func (r *BlockReader) txnByHash(txnHash common.Hash, segments []*snapshotsync.Vi
 // system transactions at the block boundaries. ok is false when the block or
 // that transaction does not exist.
 func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (types.Transaction, bool, error) {
-	sender, txnRlp, err := r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock)
+	sender, txnRlp, err := r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock, true)
 	if err != nil || txnRlp == nil {
 		return nil, false, err
 	}
@@ -1326,7 +1327,7 @@ func (r *BlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNu
 
 // TxnHashByIdxInBlock is TxnByIdxInBlock that hashes the stored encoding instead of decoding it.
 func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) (common.Hash, bool, error) {
-	_, txnRlp, err := r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock)
+	_, txnRlp, err := r.txnRlpByIdxInBlock(ctx, tx, blockNum, txIdxInBlock, false)
 	if err != nil || txnRlp == nil {
 		return common.Hash{}, false, err
 	}
@@ -1334,9 +1335,9 @@ func (r *BlockReader) TxnHashByIdxInBlock(ctx context.Context, tx kv.Getter, blo
 	return hash, err == nil, err
 }
 
-// txnRlpByIdxInBlock returns the sender (frozen blocks only) and the stored encoding of the i-th
-// transaction; the encoding is nil when the block or that transaction does not exist.
-func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int) ([]byte, []byte, error) {
+// txnRlpByIdxInBlock returns the stored sender, nil when there is none, and the stored encoding
+// of the i-th transaction; the encoding is nil when the block or that transaction does not exist.
+func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, txIdxInBlock int, withSender bool) ([]byte, []byte, error) {
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
 	if blockNum == 0 || maxBlockNumInFiles == 0 || blockNum > maxBlockNumInFiles {
 		canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockNum)
@@ -1344,7 +1345,14 @@ func (r *BlockReader) txnRlpByIdxInBlock(ctx context.Context, tx kv.Getter, bloc
 			return nil, nil, err
 		}
 		txnRlp, err := rawdb.TxnRlpByIdxInBlock(tx, canonicalHash, blockNum, txIdxInBlock)
-		return nil, txnRlp, err
+		if err != nil || txnRlp == nil || !withSender {
+			return nil, txnRlp, err
+		}
+		senders, err := tx.GetOne(kv.Senders, dbutils.BlockBodyKey(blockNum, canonicalHash))
+		if err != nil || len(senders) < (txIdxInBlock+1)*length.Addr {
+			return nil, txnRlp, err
+		}
+		return senders[txIdxInBlock*length.Addr : (txIdxInBlock+1)*length.Addr], txnRlp, nil
 	}
 
 	seg, ok := r.viewSingleFile(tx, snaptype2.Bodies, blockNum)

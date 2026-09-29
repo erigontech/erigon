@@ -256,7 +256,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			// If we would prune by txnum then txTo prune should be available after prune is finished
 			require.EqualValues(t, pruneIters*int(pruneLimit)+prunedInStep0, int(binary.BigEndian.Uint64(txn)-1))
 		})
-
 	}) // hash_prune
 
 	t.Run("scan_prune", func(t *testing.T) {
@@ -427,7 +426,6 @@ func TestInvIndexPruningCorrectness(t *testing.T) {
 			require.NoError(t, err)
 			require.EqualValues(t, pruneTo, binary.BigEndian.Uint64(txn))
 		})
-
 	}) // scan_prune
 }
 
@@ -1082,7 +1080,7 @@ func TestInvIndex_OpenFolder(t *testing.T) {
 
 	err := dir.RemoveFile(fn)
 	require.NoError(t, err)
-	err = os.WriteFile(fn, make([]byte, 33), 0644)
+	err = os.WriteFile(fn, make([]byte, 33), 0o644)
 	require.NoError(t, err)
 
 	scanDirsRes, err := scanDirs(ii.dirs)

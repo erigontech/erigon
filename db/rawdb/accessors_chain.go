@@ -197,6 +197,7 @@ func ReadHeaderNumber(db kv.Getter, hash common.Hash) *uint64 {
 	number := binary.BigEndian.Uint64(data)
 	return &number
 }
+
 func ReadBadHeaderNumber(db kv.Getter, hash common.Hash) (*uint64, error) {
 	data, err := db.GetOne(kv.BadHeaderNumber, hash[:])
 	if err != nil {
@@ -362,7 +363,7 @@ func ReadHeader(db kv.Getter, hash common.Hash, number uint64) *types.Header {
 		log.Error("Invalid block header RLP", "hash", hash, "number", number, "err", err)
 		return nil
 	}
-	return header
+	return types.NewHeaderFromStorage(hash, header)
 }
 
 func ReadCurrentBlockNumber(db kv.Getter) *uint64 {
@@ -438,6 +439,7 @@ func WriteHeader(db kv.RwTx, header *types.Header) error {
 	}
 	return nil
 }
+
 func WriteHeaderRaw(db kv.StatelessRwTx, number uint64, hash common.Hash, headerRlp []byte, skipIndexing bool) error {
 	if err := db.Put(kv.Headers, dbutils.HeaderKey(number, hash), headerRlp); err != nil {
 		return err
@@ -494,9 +496,9 @@ func TxnByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdx
 
 // TxnRlpByIdxInBlock returns the stored encoding of the i-th transaction of a block, or nil when it does not exist.
 func TxnRlpByIdxInBlock(db kv.Getter, blockHash common.Hash, blockNum uint64, txIdxInBlock int) ([]byte, error) {
-	b, err := ReadBodyForStorageByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
+	b, ok, err := ReadBodyOnlyTxnByKey(db, dbutils.BlockBodyKey(blockNum, blockHash))
 	// TxCount includes the two system txns; txn ids are global, so an unchecked index reads another block
-	if err != nil || b == nil || txIdxInBlock < 0 || txIdxInBlock >= int(b.TxCount)-2 {
+	if err != nil || !ok || txIdxInBlock < 0 || txIdxInBlock >= int(b.TxCount)-2 {
 		return nil, err
 	}
 	v, err := db.GetOne(kv.EthTx, hexutil.EncodeTs(b.BaseTxnID.At(txIdxInBlock)))
@@ -614,6 +616,15 @@ func RawTransactionsRange(db kv.Getter, from, to uint64) (res [][]byte, err erro
 		}
 	}
 	return
+}
+
+func ReadBodyOnlyTxnByKey(db kv.Getter, k []byte) (b types.BodyOnlyTxn, ok bool, err error) {
+	bodyRlp, err := db.GetOne(kv.BlockBody, k)
+	if err != nil || len(bodyRlp) == 0 {
+		return b, false, err
+	}
+	err = b.DecodeRLPBytes(bodyRlp)
+	return b, err == nil, err
 }
 
 func ReadBodyForStorageByKey(db kv.Getter, k []byte) (*types.BodyForStorage, error) {
@@ -792,16 +803,15 @@ func AppendCanonicalTxNums(tx kv.RwTx, from uint64) error {
 			break
 		}
 
-		data := ReadStorageBodyRLP(tx, h, blockNum)
-		if len(data) == 0 {
-			break
-		}
-		bodyForStorage := types.BodyForStorage{}
-		if err := rlp.DecodeBytes(data, &bodyForStorage); err != nil {
+		body, ok, err := ReadBodyOnlyTxnByKey(tx, dbutils.BlockBodyKey(blockNum, h))
+		if err != nil {
 			return err
 		}
+		if !ok {
+			break
+		}
 
-		nextBaseTxNum += int(bodyForStorage.TxCount)
+		nextBaseTxNum += int(body.TxCount)
 		err = rawdbv3.TxNums.Append(tx, blockNum, uint64(nextBaseTxNum-1))
 		if err != nil {
 			return err
@@ -925,13 +935,14 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 	if err != nil {
 		return deleted, err
 	}
-	if firstK == nil { //nothing to delete
+	if firstK == nil { // nothing to delete
 		return deleted, err
 	}
 	blockFrom := binary.BigEndian.Uint64(firstK)
 	stopAtBlock := min(blockTo, blockFrom+uint64(blocksDeleteLimit))
 
-	var b *types.BodyForStorage
+	var b types.BodyOnlyTxn
+	var ok bool
 
 	for k, _, err := c.Current(); k != nil; k, _, err = c.Next() {
 		if err != nil {
@@ -943,11 +954,11 @@ func PruneBlocks(tx kv.RwTx, blockTo uint64, blocksDeleteLimit int) (deleted int
 			break
 		}
 
-		b, err = ReadBodyForStorageByKey(tx, k)
+		b, ok, err = ReadBodyOnlyTxnByKey(tx, k)
 		if err != nil {
 			return deleted, err
 		}
-		if b == nil {
+		if !ok {
 			log.Debug("PruneBlocks: block body not found", "height", n)
 		} else {
 			txIDBytes := make([]byte, 8)
@@ -992,15 +1003,15 @@ func TruncateCanonicalChain(ctx context.Context, db kv.RwTx, from uint64) error 
 func TruncateBlocks(ctx context.Context, tx kv.RwTx, blockFrom uint64) error {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	if blockFrom < 1 { //protect genesis
+	if blockFrom < 1 { // protect genesis
 		blockFrom = 1
 	}
 	return tx.ForEach(kv.Headers, hexutil.EncodeTs(blockFrom), func(k, v []byte) error {
-		b, err := ReadBodyForStorageByKey(tx, k)
+		b, ok, err := ReadBodyOnlyTxnByKey(tx, k)
 		if err != nil {
 			return err
 		}
-		if b != nil {
+		if ok {
 			txIDBytes := make([]byte, 8)
 			for txID := b.BaseTxnID.U64(); txID <= b.BaseTxnID.LastSystemTx(b.TxCount); txID++ {
 				binary.BigEndian.PutUint64(txIDBytes, txID)
@@ -1079,12 +1090,14 @@ func DeleteNewerEpochs(tx kv.RwTx, number uint64) error {
 		return tx.Delete(kv.Epoch, k)
 	})
 }
+
 func ReadEpoch(tx kv.Tx, blockNum uint64, blockHash common.Hash) (transitionProof []byte, err error) {
 	k := make([]byte, dbutils.NumberLength+length.Hash)
 	binary.BigEndian.PutUint64(k, blockNum)
 	copy(k[dbutils.NumberLength:], blockHash[:])
 	return tx.GetOne(kv.Epoch, k)
 }
+
 func FindEpochBeforeOrEqualNumber(tx kv.Tx, n uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
 	c, err := tx.Cursor(kv.Epoch)
 	if err != nil {
@@ -1257,6 +1270,7 @@ func WriteDBSchemaVersion(tx kv.RwTx) error {
 	}
 	return nil
 }
+
 func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err error) {
 	existingVersion, err := tx.GetOne(kv.DatabaseInfo, kv.DBSchemaVersionKey)
 	if err != nil {
@@ -1274,6 +1288,7 @@ func ReadDBSchemaVersion(tx kv.Tx) (major, minor, patch uint32, ok bool, err err
 	patch = binary.BigEndian.Uint32(existingVersion[8:])
 	return major, minor, patch, true, nil
 }
+
 func ReadDBCommitmentHistoryEnabled(tx kv.Tx) (bool, bool, error) {
 	commitmentHistoryEnabled, err := tx.GetOne(kv.DatabaseInfo, kv.CommitmentLayoutFlagKey)
 	if err != nil {
@@ -1293,6 +1308,7 @@ func ReadDBCommitmentHistoryEnabled(tx kv.Tx) (bool, bool, error) {
 	}
 	return false, false, fmt.Errorf("incorrect value of DB commitment history enabled flag: %x", commitmentHistoryEnabled)
 }
+
 func WriteDBCommitmentHistoryEnabled(tx kv.RwTx, enabled bool) error {
 	var value []byte
 	if enabled {

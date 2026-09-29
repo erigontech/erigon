@@ -33,6 +33,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
 
@@ -81,10 +82,12 @@ const (
 	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
 )
 
-var errBuilderNotEnabled = errors.New("builder is not enabled")
-var errPublishedBlockValidation = errors.New("published block validation failed")
-var errPublishedBlockDataStorage = errors.New("published block data storage failed")
-var errPublishedBlockAccepted = errors.New("published block broadcast before integration rejection")
+var (
+	errBuilderNotEnabled         = errors.New("builder is not enabled")
+	errPublishedBlockValidation  = errors.New("published block validation failed")
+	errPublishedBlockDataStorage = errors.New("published block data storage failed")
+	errPublishedBlockAccepted    = errors.New("published block broadcast before integration rejection")
+)
 
 const (
 	caplinClientCode = "CN"
@@ -101,16 +104,116 @@ const (
 // produced block still reaches attesters in time to earn the proposer boost.
 const payloadPublicationDivisor = 4
 
-// defaultGraffiti is used when the validator does not specify a graffiti. It follows the
-// client-version graffiti standard, encoding the execution and consensus client codes and
-// their commit prefixes so client-diversity tooling can attribute proposed blocks. See
+// identificationSegment builds the client-version graffiti standard's EL+CL code and commit
+// prefix segment, so client-diversity tooling can attribute proposed blocks. See
 // https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md
-func (a *ApiHandler) defaultGraffiti() common.Hash {
-	graffiti := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
-	if el := a.executionClientVersion(); el != nil {
-		graffiti = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + graffiti
+func (a *ApiHandler) identificationSegment() string {
+	return identificationSegmentFor(a.executionClientVersion())
+}
+
+func identificationSegmentFor(el *engine_types.ClientVersionV1) string {
+	segment := caplinClientCode + graffitiCommitPrefix(version.GitCommit)
+	if el != nil {
+		segment = graffitiClientCode(el.Code) + graffitiCommitPrefix(el.Commit) + segment
 	}
-	return graffitiFromString(graffiti)
+	return segment
+}
+
+// defaultGraffiti is used when the validator does not specify a graffiti.
+func (a *ApiHandler) defaultGraffiti() common.Hash {
+	return graffitiFromString(a.identificationSegment())
+}
+
+// combinedGraffiti prefixes the identification segment (see defaultGraffiti) to a
+// caller-supplied graffiti, truncating the caller's text to whatever room remains in the
+// 32-byte field.
+func (a *ApiHandler) combinedGraffiti(custom common.Hash) common.Hash {
+	customText := bytes.TrimRight(custom[:], "\x00")
+	if len(customText) == 0 {
+		return a.defaultGraffiti()
+	}
+	segment := a.identificationSegment()
+	if available := len(custom) - len(segment) - 1; len(customText) > available {
+		customText = truncateAtRuneBoundary(customText, available)
+		a.warnGraffitiTruncatedOnce()
+	}
+	return graffitiFromString(segment + " " + string(customText))
+}
+
+// truncateAtRuneBoundary cuts text to at most n bytes, backing off up to UTFMax-1 bytes to
+// clear a rune the cut would otherwise split. It looks only at the n bytes being kept, so
+// invalid bytes beyond the cut (graffiti isn't required to be UTF-8) can't suppress this.
+// Go's utf8 package cannot tell a truncated-but-otherwise-valid lead byte apart from a byte
+// that is simply never valid, so within that bound this may drop a genuinely standalone
+// invalid byte along with a truly split rune; it never drops more than that bound, and it
+// keeps the hard cut if no boundary turns up within it.
+func truncateAtRuneBoundary(text []byte, n int) []byte {
+	cut := text[:n]
+	backedOff := cut
+	for len(backedOff) > 0 && len(cut)-len(backedOff) < utf8.UTFMax {
+		if r, size := utf8.DecodeLastRune(backedOff); r == utf8.RuneError && size == 1 {
+			backedOff = backedOff[:len(backedOff)-1]
+			continue
+		}
+		break
+	}
+	if len(cut)-len(backedOff) < utf8.UTFMax {
+		return backedOff
+	}
+	return cut
+}
+
+// warnGraffitiTruncatedOnce warns, once, that supplied graffiti has been truncated to fit the
+// identification segment.
+func (a *ApiHandler) warnGraffitiTruncatedOnce() {
+	if a.logger == nil {
+		return
+	}
+	a.graffitiTruncatedWarnOnce.Do(func() {
+		a.logger.Warn("[Beacon API] Supplied graffiti truncated to fit the EL+CL identification segment; set --beacon.api.preserve-graffiti to disable")
+	})
+}
+
+// graffitiFromHex decodes a hex-encoded graffiti query parameter, right-padding it to match
+// the client-version standard instead of common.HexToHash's left-pad-as-a-number convention.
+func graffitiFromHex(s string) common.Hash {
+	var graffiti common.Hash
+	copy(graffiti[:], hexutil.FromHex(s))
+	return graffiti
+}
+
+// requestGraffiti resolves the graffiti for a block-production request, applying the
+// identification standard unless the operator opted out via --beacon.api.preserve-graffiti.
+func (a *ApiHandler) requestGraffiti(hasCustom bool, custom common.Hash) common.Hash {
+	if !hasCustom {
+		return a.defaultGraffiti()
+	}
+	if a.routerCfg.PreserveGraffiti {
+		return custom
+	}
+	return a.combinedGraffiti(custom)
+}
+
+// LogGraffitiIdentification logs the default graffiti identification segment once, intended
+// to be called at beacon-node startup, then triggers the execution client's version lookup so
+// logGraffitiIdentificationOnce can log it again once that resolves. Logging first, from only
+// the cached value, keeps the trigger from racing the log line if the lookup resolves fast.
+func (a *ApiHandler) LogGraffitiIdentification() {
+	if a.logger != nil {
+		a.logger.Info("[Beacon API] Default graffiti", "segment", identificationSegmentFor(a.cachedExecutionClientVersion()))
+	}
+	a.triggerELClientVersionFetch()
+}
+
+// logGraffitiIdentificationOnce logs the resolved default graffiti identification segment
+// exactly once, even if a retry after a transient engine error calls it again.
+func (a *ApiHandler) logGraffitiIdentificationOnce() {
+	if a.logger == nil {
+		return
+	}
+	a.elIdentificationLogOnce.Do(func() {
+		a.logger.Info("[Beacon API] Default graffiti updated", "segment", a.identificationSegment())
+	})
 }
 
 // elClientVersionUnavailable is a sentinel cached when the execution client does not
@@ -123,11 +226,17 @@ var elClientVersionUnavailable = &engine_types.ClientVersionV1{}
 // consensus-only graffiti and later proposals pick up the execution client code once the
 // fetch has populated the cache (the version is static for the lifetime of a connection).
 func (a *ApiHandler) executionClientVersion() *engine_types.ClientVersionV1 {
-	if cached := a.elClientVersion.Load(); cached != nil {
-		return normalizeELClientVersion(cached)
+	if cached := a.cachedExecutionClientVersion(); cached != nil {
+		return cached
 	}
 	a.triggerELClientVersionFetch()
 	return nil
+}
+
+// cachedExecutionClientVersion returns the connected execution client's version if already
+// cached, without triggering a fetch.
+func (a *ApiHandler) cachedExecutionClientVersion() *engine_types.ClientVersionV1 {
+	return normalizeELClientVersion(a.elClientVersion.Load())
 }
 
 // triggerELClientVersionFetch starts a single background fetch of the execution client
@@ -172,6 +281,9 @@ func (a *ApiHandler) fetchExecutionClientVersion() {
 	}
 	el := versions[0]
 	a.elClientVersion.Store(&el)
+	// Only this path changes the logged segment: the unavailable sentinel above still
+	// resolves to the same consensus-only segment already logged at startup.
+	a.logGraffitiIdentificationOnce()
 }
 
 func normalizeELClientVersion(v *engine_types.ClientVersionV1) *engine_types.ClientVersionV1 {
@@ -597,12 +709,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if r.URL.Query().Has("skip_randao_verification") {
 		randaoReveal = common.Bytes96{0xc0} // infinity bls signature
 	}
-	var graffiti common.Hash
-	if r.URL.Query().Has("graffiti") {
-		graffiti = common.HexToHash(r.URL.Query().Get("graffiti"))
-	} else {
-		graffiti = a.defaultGraffiti()
-	}
+	query := r.URL.Query()
+	graffiti := a.requestGraffiti(query.Has("graffiti"), graffitiFromHex(query.Get("graffiti")))
 
 	targetSlotStr := chi.URLParam(r, "slot")
 	targetSlot, err := strconv.ParseUint(targetSlotStr, 10, 64)
@@ -3281,8 +3389,8 @@ func computeAttestationReward(
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
 	var parentSlot uint64
-	if s.Version() >= clparams.GloasVersion && s.GetLatestExecutionPayloadBid() != nil {
-		parentSlot = s.GetLatestExecutionPayloadBid().Slot
+	if s.Version() >= clparams.GloasVersion {
+		parentSlot = s.LatestBlockHeader().Slot
 	}
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(

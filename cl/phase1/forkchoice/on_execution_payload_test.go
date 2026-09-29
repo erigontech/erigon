@@ -97,6 +97,7 @@ func (g *persistedEnvelopeForkGraph) DumpEnvelopeOnDisk(_ common.Hash, envelope 
 	g.envelope = envelope
 	return nil
 }
+
 func (g *persistedEnvelopeForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	return g.envelope, nil
 }
@@ -178,6 +179,7 @@ func (g *concurrentPayloadValidationForkGraph) MarkPayloadAccepted(_ common.Hash
 	g.verified.Store(verified)
 	g.accepted.Store(true)
 }
+
 func (g *concurrentPayloadValidationForkGraph) ClearPayloadAccepted(common.Hash) {
 	g.accepted.Store(false)
 	g.verified.Store(false)
@@ -356,6 +358,7 @@ func (g *persistingEnvelopeForkGraph) IsBlockInvalid(common.Hash) bool { return 
 func (*persistingEnvelopeForkGraph) IsPayloadUnavailable(common.Hash) bool {
 	return false
 }
+
 func (g *persistingEnvelopeForkGraph) PayloadAccepted(common.Hash) (bool, bool) {
 	return g.verified.Load(), g.accepted.Load()
 }
@@ -365,10 +368,12 @@ func (g *persistingEnvelopeForkGraph) MarkPayloadAccepted(_ common.Hash, verifie
 	g.verified.Store(verified)
 	g.accepted.Store(true)
 }
+
 func (g *persistingEnvelopeForkGraph) ClearPayloadAccepted(common.Hash) {
 	g.verified.Store(false)
 	g.accepted.Store(false)
 }
+
 func (g *persistingEnvelopeForkGraph) MarkHeaderAsInvalid(common.Hash) {
 	g.invalid.Store(true)
 	g.ClearPayloadAccepted(common.Hash{})
@@ -566,12 +571,14 @@ func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool { return root 
 func (g pendingRetryForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
 	return nil, false
 }
+
 func (g pendingRetryForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if root != g.completed {
 		return nil, nil
 	}
 	return g.completedEnvelope, nil
 }
+
 func (g pendingRetryForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
 	return nil, nil
 }
@@ -853,6 +860,9 @@ func TestOnExecutionPayloadWithoutEngineMarksPayloadOptimistic(t *testing.T) {
 	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
 	require.True(t, ok)
 	require.Equal(t, execution_client.PayloadStatus(execution_client.PayloadStatusNotValidated), status)
+	exits, ok := f.GetCachedParentBuilderExitRequests(root)
+	require.True(t, ok)
+	require.Empty(t, exits)
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesDropsStaleStorageFailure(t *testing.T) {
@@ -3550,6 +3560,28 @@ func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
 		t.Run(fmt.Sprintf("valid=%t", valid), func(t *testing.T) {
 			cfg, blockState, block, envelope := validAdmissionCancellationFixture(t)
 			require.NoError(t, envelope.Message.Payload.BlockAccessList.SetBytes([]byte{0xc0}))
+			exit := solid.BuilderExitRequest{SourceAddress: common.HexToAddress("0x1234")}
+			envelope.Message.ExecutionRequests.BuilderExits.Append(&exit)
+			requestsRoot, err := envelope.Message.ExecutionRequests.HashSSZ()
+			require.NoError(t, err)
+			bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+			bid.ExecutionRequestsRoot = requestsRoot
+			requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(cfg, envelope.Message.ExecutionRequests))
+			blockHash, err := envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
+			require.NoError(t, err)
+			envelope.Message.Payload.BlockHash = blockHash
+			bid.BlockHash = blockHash
+			bodyRoot, err := block.Block.Body.HashSSZ()
+			require.NoError(t, err)
+			blockState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{
+				Slot:          block.Block.Slot,
+				ProposerIndex: block.Block.ProposerIndex,
+				ParentRoot:    block.Block.ParentRoot,
+				BodyRoot:      bodyRoot,
+			})
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			envelope.Message.BeaconBlockRoot = blockRoot
 			if !valid {
 				envelope.Message.Payload.GasUsed++
 			}
@@ -3584,6 +3616,9 @@ func TestLocalSelfBuildValidatesPayloadHashWhenEngineUnavailable(t *testing.T) {
 			if valid {
 				require.NoError(t, err)
 				require.True(t, graph.HasEnvelope(envelope.Message.BeaconBlockRoot))
+				exits, ok := f.GetCachedParentBuilderExitRequests(envelope.Message.BeaconBlockRoot)
+				require.True(t, ok)
+				require.Equal(t, []solid.BuilderExitRequest{exit}, exits)
 				require.Len(t, f.pendingELPayloads, 1)
 			} else {
 				require.ErrorContains(t, err, "mismatching hash")
@@ -4331,7 +4366,8 @@ func TestValidateExecutionPayloadEnvelopeForConsensusRechecksAfterEL(t *testing.
 						graph.block = nil
 					}
 					return execution_client.PayloadStatusValidated, nil
-				})
+				},
+			)
 			require.Error(t, store.ValidateExecutionPayloadEnvelopeForConsensus(t.Context(), envelope))
 		})
 	}

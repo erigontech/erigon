@@ -175,15 +175,11 @@ func TestEngineApiGeneratedPayloadIncludesBlockAccessList(t *testing.T) {
 
 		senderBalanceChange := findBalanceChange(senderChanges, balIndex)
 		require.NotNilf(t, senderBalanceChange, "missing sender balance change at index %d\n%s", balIndex, bal.DebugString())
-		expectedSenderBalance, overflow := uint256.FromBig(senderBalance)
-		require.False(t, overflow)
-		require.True(t, senderBalanceChange.Value.Eq(expectedSenderBalance))
+		require.True(t, senderBalanceChange.Value.Eq(senderBalance))
 
 		receiverBalanceChange := findBalanceChange(receiverChanges, balIndex)
 		require.NotNilf(t, receiverBalanceChange, "missing receiver balance change at index %d\n%s", balIndex, bal.DebugString())
-		expectedReceiverBalance, overflow := uint256.FromBig(receiverBalance)
-		require.False(t, overflow)
-		require.True(t, receiverBalanceChange.Value.Eq(expectedReceiverBalance))
+		require.True(t, receiverBalanceChange.Value.Eq(receiverBalance))
 
 		senderNonceChange := findNonceChange(senderChanges, balIndex)
 		require.NotNilf(t, senderNonceChange, "missing sender nonce change at index %d\n%s", balIndex, bal.DebugString())
@@ -336,8 +332,6 @@ func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
 		coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 		gasPrice, err := eat.RpcApiClient.GasPrice()
 		require.NoError(t, err)
-		gasPriceU256, overflow := uint256.FromBig(gasPrice)
-		require.False(t, overflow)
 
 		// init: 600b600c600039600b6000f3   -> return the 11-byte runtime
 		// code: 6002600055 6001600055 00   -> SSTORE(0,2); SSTORE(0,1); STOP
@@ -346,7 +340,7 @@ func TestEngineApiBALStorageNoOpWriteOmitted(t *testing.T) {
 		signTx := func(nonce uint64, to *common.Address, data []byte, gas uint64) types.Transaction {
 			tx, err := types.SignTx(&types.LegacyTx{
 				CommonTx: types.CommonTx{Nonce: nonce, GasLimit: gas, To: to, Value: uint256.Int{}, Data: data},
-				GasPrice: *gasPriceU256,
+				GasPrice: *gasPrice,
 			}, *signer, eat.CoinbaseKey)
 			require.NoError(t, err)
 			return tx
@@ -485,10 +479,8 @@ func TestEngineApiBALMultiTxBlock(t *testing.T) {
 			"expected contract storage change at mint index %d\n%s", mintIdx, bal.DebugString())
 
 		// Verify final balances match BAL entries
-		senderBalance, err := eat.RpcApiClient.GetBalance(sender, rpc.LatestBlock)
+		expectedSenderBal, err := eat.RpcApiClient.GetBalance(sender, rpc.LatestBlock)
 		require.NoError(t, err)
-		expectedSenderBal, overflow := uint256.FromBig(senderBalance)
-		require.False(t, overflow)
 
 		// The last BAL entry for the sender should reflect the final balance
 		lastSenderBalChange := findBalanceChange(senderChanges, mintIdx)
@@ -624,7 +616,7 @@ func TestEngineApiBALMixedBlock(t *testing.T) {
 
 		withdrawalBalance, err := eat.RpcApiClient.GetBalance(withdrawalReceiver, rpc.LatestBlock)
 		require.NoError(t, err)
-		expectedWithdrawalWei := new(big.Int).Mul(big.NewInt(1000), big.NewInt(1e9))
+		expectedWithdrawalWei := uint256.NewInt(1000 * 1e9)
 		require.Equal(t, expectedWithdrawalWei, withdrawalBalance)
 
 		// --- Verify system contracts appear in BAL ---
@@ -801,8 +793,6 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 		require.NoError(t, err)
 		gasPrice, err := eat.RpcApiClient.GasPrice()
 		require.NoError(t, err)
-		gasPriceU256, overflow := uint256.FromBig(gasPrice)
-		require.False(t, overflow, "gas price overflows uint256")
 
 		// SSTORE-then-SELFDESTRUCT init code. See the docstring above for
 		// the bytecode breakdown.
@@ -822,7 +812,7 @@ func TestEngineApiBALCreateSSTOREThenSelfdestructInInitCode(t *testing.T) {
 				Value:    uint256.Int{},
 				Data:     initCode,
 			},
-			GasPrice: *gasPriceU256,
+			GasPrice: *gasPrice,
 		}
 		signedCreateTx, err := types.SignTx(createTx, *signer, eat.CoinbaseKey)
 		require.NoError(t, err)
@@ -1054,11 +1044,9 @@ func signCreateTx(t *testing.T, eat engineapitester.EngineApiTester, key *ecdsa.
 	require.NoError(t, err)
 	gasPrice, err := eat.RpcApiClient.GasPrice()
 	require.NoError(t, err)
-	gasPriceU256, overflow := uint256.FromBig(gasPrice)
-	require.False(t, overflow, "gas price overflows uint256")
 	tx, err := types.SignTx(&types.LegacyTx{
 		CommonTx: types.CommonTx{Nonce: nonce.Uint64(), GasLimit: 1_000_000, To: nil, Value: value, Data: initCode},
-		GasPrice: *gasPriceU256,
+		GasPrice: *gasPrice,
 	}, *signer, key)
 	require.NoError(t, err)
 	return tx
