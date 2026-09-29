@@ -705,7 +705,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 	} else {
 		st.txnGasUsedB4Refunds = intrinsicGas + totalGasUsed.Execution
 	}
-	gasLeft := st.msg.Gas() - st.txnGasUsedB4Refunds
+	gasLeft := st.gasRemaining
 	gasTracing := vmConfig.Tracer.HasGasChangeHook()
 	applyRefunds := refunds && !gasBailout
 	var refund uint64
@@ -714,26 +714,30 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		if rules.IsLondon {
 			refundQuotient = params.RefundQuotientEIP3529
 		}
-		var old uint64
+		var old mdgas.MdGas
 		if gasTracing {
 			old = gasLeft
 		}
 		refund = min(st.txnGasUsedB4Refunds/refundQuotient, st.state.GetRefund())
-		gasLeft += refund
+		gasLeft.Execution += refund
 		if gasTracing {
-			vmConfig.Tracer.EmitGasChange(mdgas.MdGas{Execution: old}, mdgas.MdGas{Execution: gasLeft}, tracing.GasChangeTxRefunds)
+			vmConfig.Tracer.EmitGasChange(old, gasLeft, tracing.GasChangeTxRefunds)
 		}
 	}
-	st.txnGasUsed = st.msg.Gas() - gasLeft
+	st.txnGasUsed = st.msg.Gas() - gasLeft.Total()
 	if st.txnGasUsed < intrinsicGasResult.FloorGasCost && (rules.IsAmsterdam || (rules.IsPrague && applyRefunds)) {
-		var old uint64
+		var old mdgas.MdGas
 		if gasTracing {
 			old = gasLeft
 		}
-		gasLeft = st.msg.Gas() - intrinsicGasResult.FloorGasCost
+		floorAdjustment := intrinsicGasResult.FloorGasCost - st.txnGasUsed
+		executionAdjustment := min(floorAdjustment, gasLeft.Execution)
+		gasLeft.Execution -= executionAdjustment
+		// calls that skip the execution gas cap can pay part of the floor from state gas.
+		gasLeft.State -= floorAdjustment - executionAdjustment
 		st.txnGasUsed = intrinsicGasResult.FloorGasCost
 		if gasTracing {
-			vmConfig.Tracer.EmitGasChange(mdgas.MdGas{Execution: old}, mdgas.MdGas{Execution: gasLeft}, tracing.GasChangeTxDataFloor)
+			vmConfig.Tracer.EmitGasChange(old, gasLeft, tracing.GasChangeTxDataFloor)
 		}
 	}
 	if applyRefunds {
@@ -974,17 +978,17 @@ func (st *TxnExecutor) verifyAuthorities(auths []types.Authorization, chainID *u
 	return gasRemaining, gasUsed, nil
 }
 
-func (st *TxnExecutor) refundGas(gasLeft uint64) error {
+func (st *TxnExecutor) refundGas(gasLeft mdgas.MdGas) error {
 	// Return ETH for remaining gas, exchanged at the original rate.
-	remaining := u256.Mul(u256.U64(gasLeft), *st.gasPrice)
+	remaining := u256.Mul(u256.U64(gasLeft.Total()), *st.gasPrice)
 	if dbg.TraceGas || st.state.Trace() || dbg.TraceAccount(st.msg.From().Handle()) {
 		fmt.Printf("%d (%d.%d) Refund %x: remaining: %d, price: %d val: %s\n", st.state.BlockNumber(), st.state.TxIndex(), st.state.Incarnation(), st.msg.From(), st.gasRemaining, st.gasPrice, remaining.String())
 	}
 	if err := st.state.AddBalance(st.msg.From(), remaining, tracing.BalanceIncreaseGasReturn); err != nil {
 		return err
 	}
-	if tracer := st.evm.Config().Tracer; gasLeft > 0 && tracer.HasGasChangeHook() {
-		tracer.EmitGasChange(mdgas.MdGas{Execution: gasLeft}, mdgas.MdGas{}, tracing.GasChangeTxLeftOverReturned)
+	if tracer := st.evm.Config().Tracer; gasLeft.Total() > 0 && tracer.HasGasChangeHook() {
+		tracer.EmitGasChange(gasLeft, mdgas.MdGas{}, tracing.GasChangeTxLeftOverReturned)
 	}
 	return nil
 }
