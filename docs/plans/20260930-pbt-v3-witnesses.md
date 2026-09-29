@@ -450,13 +450,13 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `execution/commitment/commitmentdb/pbt_witness.go`
 - Create: `execution/commitment/commitmentdb/pbt_witness_test.go`
 
-- [ ] add `(*Trie).Witness(ctx, input)` with a stub; write a test that the builder's output for a small block equals the
+- [x] add `(*Trie).Witness(ctx, input)` with a stub; write a test that the builder's output for a small block equals the
       node set the model resolves when driven over the same pre-state; confirm it fails at the set comparison
-- [ ] implement `Witness`, running the driver over the row resolver and returning paths and blobs sorted by path plus the
+- [x] implement `Witness`, running the driver over the row resolver and returning paths and blobs sorted by path plus the
       post-root
-- [ ] dispatch to it from `commitmentdb` in `pbt_witness.go`, next to v3's `witnessTrie`, for the bin variant only
-- [ ] write tests for the dispatch on bin-only and hex+bin datadirs and for the refusal on hex-only
-- [ ] run tests - must pass before task 9
+- [x] dispatch to it from `commitmentdb` in `pbt_witness.go`, next to v3's `witnessTrie`, for the bin variant only
+- [x] write tests for the dispatch on bin-only and hex+bin datadirs and for the refusal on hex-only
+- [x] run tests - must pass before task 9
 
 ### Task 9: Recorder provenance and the pbt input adapter
 
