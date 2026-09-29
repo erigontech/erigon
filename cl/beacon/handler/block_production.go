@@ -35,6 +35,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/go-chi/chi/v5"
 
 	"github.com/erigontech/erigon/cl/abstract"
@@ -64,6 +65,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/attestation_producer"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -2181,6 +2183,9 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
+	if err := a.addRequestBlobBundles(block); err != nil {
+		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
 	waitForIntegration := apiVersion == 2
 	forwardToBuilder := func() {
 		a.forwardPublishedBlockToBuilder(r.Header.Get("Eth-Builder-Url"), block.SignedBlock)
@@ -2195,6 +2200,83 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
 	return newBeaconResponse(nil), nil
+}
+
+// addRequestBlobBundles caches the blobs sent with a published block, so that a beacon node that
+// did not produce the block can still build its sidecars. Bundles already cached are kept; the rest
+// are KZG-verified before any of them is added.
+func (a *ApiHandler) addRequestBlobBundles(block *cltypes.DenebSignedBeaconBlock) error {
+	if block.Blobs == nil || block.Blobs.Len() == 0 {
+		return nil
+	}
+	cellProofs := block.SignedBlock.Version() >= clparams.FuluVersion
+	proofsPerBlob := 1
+	if cellProofs {
+		proofsPerBlob = int(a.beaconChainCfg.NumberOfColumns)
+	}
+	commitments := block.SignedBlock.Block.Body.GetBlobKzgCommitments()
+	if commitments == nil || commitments.Len() != block.Blobs.Len() ||
+		block.KZGProofs == nil || block.KZGProofs.Len() != block.Blobs.Len()*proofsPerBlob {
+		return errors.New("blobs and kzg_proofs do not match the block's blob commitments")
+	}
+	bundles := make([]BlobBundle, 0, block.Blobs.Len())
+	for i := range block.Blobs.Len() {
+		commitment := common.Bytes48(*commitments.Get(i))
+		if _, ok := a.blobBundles.Get(commitment); ok {
+			continue
+		}
+		proofs := make([]common.Bytes48, proofsPerBlob)
+		for j := range proofs {
+			proofs[j] = common.Bytes48(*block.KZGProofs.Get(i*proofsPerBlob + j))
+		}
+		bundles = append(bundles, BlobBundle{Commitment: commitment, Blob: block.Blobs.Get(i), KzgProofs: proofs})
+	}
+	if err := verifyBlobBundles(bundles, cellProofs); err != nil {
+		return fmt.Errorf("invalid blob kzg proofs: %w", err)
+	}
+	for _, bundle := range bundles {
+		a.blobBundles.Add(bundle.Commitment, bundle)
+	}
+	return nil
+}
+
+func verifyBlobBundles(bundles []BlobBundle, cellProofs bool) error {
+	if len(bundles) == 0 {
+		return nil
+	}
+	if !cellProofs {
+		blobs := make([]*goethkzg.Blob, len(bundles))
+		commitments := make([]goethkzg.KZGCommitment, len(bundles))
+		proofs := make([]goethkzg.KZGProof, len(bundles))
+		for i, bundle := range bundles {
+			blobs[i] = (*goethkzg.Blob)(bundle.Blob)
+			commitments[i] = goethkzg.KZGCommitment(bundle.Commitment)
+			proofs[i] = goethkzg.KZGProof(bundle.KzgProofs[0])
+		}
+		return kzg.Ctx().VerifyBlobKZGProofBatch(blobs, commitments, proofs)
+	}
+	var (
+		commitments []goethkzg.KZGCommitment
+		cellIndices []uint64
+		cells       []*goethkzg.Cell
+		proofs      []goethkzg.KZGProof
+	)
+	for _, bundle := range bundles {
+		blobCells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 0)
+		if err != nil {
+			return err
+		}
+		if len(bundle.KzgProofs) != len(blobCells) {
+			return fmt.Errorf("expected %d cell proofs per blob, got %d", len(blobCells), len(bundle.KzgProofs))
+		}
+		for j, cell := range &blobCells {
+			commitments = append(commitments, goethkzg.KZGCommitment(bundle.Commitment))
+			cellIndices = append(cellIndices, uint64(j))
+			cells = append(cells, cell)
+			proofs = append(proofs, goethkzg.KZGProof(bundle.KzgProofs[j]))
+		}
+	}
+	return kzg.Ctx().VerifyCellKZGProofBatch(commitments, cellIndices, cells, proofs)
 }
 
 func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cltypes.SignedBeaconBlock) {
