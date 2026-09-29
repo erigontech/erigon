@@ -84,7 +84,7 @@ check_transaction_race_shards() {
 }
 hive_consume_enginex_regexes() {
 	local fixture_set="$1"
-	yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
+	yq -o=json '.jobs.load-matrix.steps[] | select(.id == "load") | .env.SHARDS | from_yaml' "$hive" \
 		| jq -r --arg fixture_set "$fixture_set" '.[] | select(.sim=="consume-enginex" and .["fixtures-tarball"]==$fixture_set) | "\(.shard)=\(.["sim-limit"])"' \
 		| sort -u
 }

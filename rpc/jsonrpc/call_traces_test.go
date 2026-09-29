@@ -337,6 +337,103 @@ func TestFilterAddressIntersection(t *testing.T) {
 	}
 }
 
+// TestFilterRangeDefaults checks that omitted bounds default to the latest
+// executed block, as in eth_getLogs, and that a reversed range, including one
+// whose start is that implicit latest block, is invalid params.
+func TestFilterRangeDefaults(t *testing.T) {
+	m := execmoduletester.New(t)
+	chain, err := m.GenerateChain(5, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chain))
+
+	server := rpc.NewServer(50, false, false, true, log.New(), 100)
+	require.NoError(t, server.RegisterName("trace", newTraceApiForTest(m)))
+	client := rpc.DialInProc(server, log.New())
+	t.Cleanup(func() { client.Close(); server.Stop() })
+
+	for _, tc := range []struct {
+		name string
+		req  map[string]any
+		want []int // nil means -32602
+	}{
+		{"no bounds", map[string]any{}, []int{5}},
+		{"null bounds", map[string]any{"fromBlock": nil, "toBlock": nil}, []int{5}},
+		{"from only", map[string]any{"fromBlock": "0x3"}, []int{3, 4, 5}},
+		{"from earliest", map[string]any{"fromBlock": "earliest"}, []int{1, 2, 3, 4, 5}},
+		{"to latest", map[string]any{"toBlock": "latest"}, []int{5}},
+		{"to head", map[string]any{"toBlock": "0x5"}, []int{5}},
+		{"to before head", map[string]any{"toBlock": "0x2"}, nil},
+		{"explicit", map[string]any{"fromBlock": "0x1", "toBlock": "0x2"}, []int{1, 2}},
+		{"explicit reversed", map[string]any{"fromBlock": "0x3", "toBlock": "0x2"}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var result json.RawMessage
+			err := client.CallContext(t.Context(), &result, "trace_filter", tc.req)
+			if tc.want == nil {
+				var rpcErr rpc.Error
+				require.ErrorAs(t, err, &rpcErr)
+				require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+				require.ErrorContains(t, err, errInvalidBlockRange)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.want, blockNumbersFromTraces(t, result))
+		})
+	}
+}
+
+// A failed CREATE deploys no contract, so trace_filter does not match it by the address it would have
+// occupied, at the top level or nested.
+func TestFilterFailedCreateHasNoRecipient(t *testing.T) {
+	m := execmoduletester.New(t)
+	// PUSH4 0xdeadbeef, PUSH1 0, MSTORE, PUSH1 4, PUSH1 28, REVERT
+	revert := common.FromHex("0x63deadbeef6000526004601cfd")
+	// Runs revert through CREATE and succeeds: PUSH13 revert, PUSH1 0, MSTORE, PUSH1 13, PUSH1 19, PUSH1 0, CREATE, POP, STOP
+	factory := append(append([]byte{0x6c}, revert...), 0x60, 0x00, 0x52, 0x60, 13, 0x60, 19, 0x60, 0x00, 0xf0, 0x50, 0x00)
+	chain, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		signer := types.LatestSigner(m.ChainConfig)
+		for _, init := range [][]byte{revert, factory} {
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(m.Address), new(uint256.Int), 100_000, new(uint256.Int), init), *signer, m.Key)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chain))
+	api := newTraceApiForTest(m)
+
+	failed := types.CreateAddress(m.Address, 0)
+	deployed := types.CreateAddress(m.Address, 1)
+	nested := types.CreateAddress(deployed, 1)
+	block := rpc.BlockNumber(1)
+	filter := func(from, to []*common.Address) []map[string]any {
+		t.Helper()
+		stream := jsonstream.New(nil)
+		req := TraceFilterRequest{
+			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &block},
+			ToBlock:     &rpc.BlockNumberOrHash{BlockNumber: &block},
+			FromAddress: from, ToAddress: to,
+		}
+		require.NoError(t, api.Filter(context.Background(), req, new(bool), nil, stream))
+		var traces []map[string]any
+		require.NoError(t, json.Unmarshal(stream.Buffer(), &traces))
+		return traces
+	}
+
+	assert.Empty(t, filter(nil, []*common.Address{&failed}), "top-level failed create")
+	assert.Empty(t, filter(nil, []*common.Address{&nested}), "nested failed create")
+	assert.Empty(t, filter([]*common.Address{&m.Address}, []*common.Address{&failed}), "intersection with the sender")
+
+	created := filter(nil, []*common.Address{&deployed})
+	require.Len(t, created, 1, "a successful create matches its address")
+	require.Nil(t, created[0]["error"])
+	byFactory := filter([]*common.Address{&deployed}, nil)
+	require.Len(t, byFactory, 1, "a nested failed create matches its sender")
+	require.Equal(t, "Reverted", byFactory[0]["error"])
+}
+
 func TestFilterModeValidation(t *testing.T) {
 	m := execmoduletester.New(t)
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)
@@ -430,8 +527,10 @@ func TestFilterNullMembers(t *testing.T) {
 		}
 	})
 
+	// toBlock is the head, so the range stays valid when an omitted fromBlock
+	// defaults to the latest block.
 	full := map[string]any{
-		"fromBlock": "0x1", "toBlock": "0x2",
+		"fromBlock": "0x1", "toBlock": "0x3",
 		"fromAddress": []common.Address{sender, relay}, "toAddress": []common.Address{sink},
 		"mode": TraceFilterModeUnion, "after": 1, "count": 2,
 	}

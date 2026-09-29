@@ -789,8 +789,8 @@ func rpcToolCalls() []toolCall {
 		{
 			name: "trace_filter", desc: "Search Parity-style traces by block range and addresses",
 			params: []param{
-				{name: "fromBlock", desc: "Start block", kind: pString},
-				{name: "toBlock", desc: "End block", kind: pString},
+				{name: "fromBlock", desc: "Start block (default: latest executed; earliest scans from genesis)", kind: pString},
+				{name: "toBlock", desc: "End block (default: latest executed)", kind: pString},
 				{name: "fromAddress", desc: "Sender address(es), single or JSON array", kind: pString},
 				{name: "toAddress", desc: "Recipient address(es), single or JSON array", kind: pString},
 				{name: "mode", desc: "Address filter mode: intersection (default) or union", kind: pString},

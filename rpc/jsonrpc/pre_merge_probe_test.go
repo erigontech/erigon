@@ -474,7 +474,7 @@ func TestPreMergeGateRefusesExpiredDataItsCountCannotConfirm(t *testing.T) {
 	api := preMergeGateAPI(reader, probeSparseMergeHeight)
 
 	for block := uint64(1); block < probeSparseMergeHeight; block++ {
-		require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, block), state.PrunedError,
+		require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, block), state.ErrPruned,
 			"bodies without their transactions are expiry, whatever the count says")
 	}
 }
@@ -489,7 +489,7 @@ func TestPreMergeGateLeavesAMissingSearchBodyUnanswered(t *testing.T) {
 	reader.missing = map[uint64]bool{6: true}
 	api := preMergeGateAPI(reader, probeSparseMergeHeight)
 
-	require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, 1), state.PrunedError,
+	require.ErrorIs(t, api.checkPruneBlocks(t.Context(), nil, 1), state.ErrPruned,
 		"a body the search needs and cannot read does not open the gate")
 	_, observed, _ := api._preMergeData.Load()
 	require.False(t, observed, "a question left open is not an observation")
