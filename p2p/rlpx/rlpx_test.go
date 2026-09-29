@@ -188,6 +188,22 @@ func TestFrameReadHeaderOnly(t *testing.T) {
 	assert.ErrorIs(t, err, io.EOF)
 }
 
+func TestFrameReadUsesCurrentBuffer(t *testing.T) {
+	sender, receiver := createPeers(t)
+	defer sender.Close()
+	defer receiver.Close()
+
+	data := bytes.Repeat([]byte{1, 2, 3, 4}, 32)
+	var wire bytes.Buffer
+	require.NoError(t, sender.session.writeFrame(&wire, 1, data))
+	receiver.session.rbuf = readBuffer{data: make([]byte, 0, wire.Len()-16)}
+
+	frame, err := receiver.session.readFrame(&wire)
+	require.NoError(t, err)
+	require.Equal(t, append([]byte{1}, data...), frame)
+	require.Same(t, &receiver.session.rbuf.data[32], &frame[0])
+}
+
 type fakeHash []byte
 
 func (fakeHash) Write(p []byte) (int, error) { return len(p), nil }
