@@ -1267,8 +1267,8 @@ func TestAccountAt(t *testing.T) {
 	})
 	t.Run("large transaction index", func(t *testing.T) {
 		result, err := api.AccountAt(m.Ctx, blockHash10, 1024, contract)
-		require.NoError(t, err)
-		require.Equal(t, 42, int(result.Nonce))
+		require.ErrorContains(t, err, "transaction index out of bounds")
+		require.Nil(t, result)
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)

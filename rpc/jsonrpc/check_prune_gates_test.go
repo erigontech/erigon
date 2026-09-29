@@ -390,7 +390,7 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 			require.NoError(t, err, "the position after the last user transaction is valid")
 			for _, index := range []uint64{uint64(len(block.Transactions()) + 1), 10_000, math.MaxUint64 - 1} {
 				_, err = tc.call(api, index)
-				require.ErrorIs(t, err, state.ErrPruned, "index %d must not bypass the history floor", index)
+				require.ErrorContains(t, err, "transaction index out of bounds", "index %d", index)
 			}
 		})
 	}
@@ -480,6 +480,21 @@ func TestCallGateMatchesReaderAfterSystemTransaction(t *testing.T) {
 	block = rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber - 1))
 	_, err = apis.eth.Call(ctx, pruneGatingCallArgs(), &block, nil, nil)
 	require.ErrorIs(t, err, state.ErrPruned, "the preceding call position is below retained history")
+}
+
+func TestTraceCallManyRejectsNegativeTransactionIndex(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	for _, block := range []uint64{chainInfo.head, chainInfo.old.num} {
+		bundles, simulate := pruneGatingBundle(block)
+		for _, index := range []int{-2, math.MinInt} {
+			simulate.TransactionIndex = &index
+			_, err := streamedResult(func(stream jsonstream.Stream) error {
+				return apis.debug.TraceCallMany(t.Context(), bundles, simulate, nil, stream)
+			})
+			require.ErrorContains(t, err, fmt.Sprintf("transaction index out of bounds: %d", index))
+		}
+	}
 }
 
 func TestExecutionWitnessNeedsInitialSystemHistory(t *testing.T) {
