@@ -104,9 +104,11 @@ reported. How they appear depends on the method:
 `gasBailOut` relaxes the balance rules during replay. It is exposed as a parameter by
 `trace_replayBlockTransactions`, `trace_replayTransaction`, `trace_block`,
 `trace_transaction`, `trace_get` and `trace_filter`, defaulting to `false` in each.
-`trace_call` and `trace_callMany` take no such parameter and always enable it
-internally, so everything below applies to them unconditionally. `trace_rawTransaction`
-never enables it: a signed transaction pays for its gas as it would in a block. The gas
+`trace_call`, `trace_callMany` and `trace_rawTransaction` never enable it.
+`trace_call` and `trace_callMany` run each call object with the fees and block
+environment `eth_call` gives it: a call with no gas price runs free and sees `BASEFEE` 0,
+and a priced call is checked and pays for its gas. A signed transaction passed to
+`trace_rawTransaction` pays for its gas as it would in a block. The gas
 is bought before execution, so `BALANCE(ORIGIN)`, or `SELFBALANCE` in a delegated sender,
 reads the balance after that charge; this shows in `trace` and `vmTrace` as well as in
 `stateDiff`.
@@ -191,8 +193,8 @@ A `TraceEntry` represents a single call frame (root call, internal call, contrac
 | Field | Type | Description |
 | --- | --- | --- |
 | `action` | Object | The action that initiated this call frame. Shape depends on `type` (see **Action variants**). |
-| `result` | Object \| null | The outcome of the action. `null` if the call frame errored. See **Result variants**. |
-| `error` | String | (Optional) Present when the call frame errored. `"Reverted"` (title-cased) is the only special-cased value; all other errors are the verbatim Go error string, e.g. `"out of gas"`, `"invalid opcode: ..."`. For `"Reverted"`, `result` is still populated with `gasUsed` and `output` (or `code`/`address` for a `create` frame); for other errors, `result` is `null`. |
+| `result` | Object \| null | The outcome of the action. `null` if the call frame failed other than by reverting. See **Result variants**. |
+| `error` | String | (Optional) Present when the call frame failed, with a Parity-style label: `"Reverted"`, `"Out of gas"`, `"Bad instruction"`, `"Bad jump destination"`, `"Stack underflow"`, `"Out of stack"`, `"Mutable Call In Static Context"`, `"Built-in failed"` (a precompile failure), `"Out of bounds"`, `"Invalid code"` (created code starting with `0xEF`), `"Contract address collision"`, `"Nonce overflow"`, `"Insufficient balance for transfer"` or `"Max call depth exceeded"`. A code deposit failure, including code above the EIP-170 size limit, is `"Out of gas"`. Any other failure keeps its Go error text. For `"Reverted"`, `result` holds `gasUsed` and `output`, the revert data, for a `create` frame too; for other errors, `result` is `null`. |
 | `subtraces` | QUANTITY | Number of direct child call frames produced by this frame. Used together with `traceAddress` to reconstruct the call tree from a flat list. |
 | `traceAddress` | Array of QUANTITY | Path to this frame inside the call tree. Empty array `[]` for the root call; `[0]` is the first child of the root; `[1, 0]` is the first child of the second child of the root, etc. |
 | `type` | String | One of `"call"`, `"create"`, `"suicide"` (self-destruct), `"reward"` (block/uncle reward — appears in `trace_block` and in `trace_filter` results when the filter matches block coinbases or uncle authors). |
@@ -260,6 +262,8 @@ The `result` object's shape depends on `type`:
 | `gasUsed` | QUANTITY | Gas consumed by the creation. |
 | `code` | DATA | Deployed runtime bytecode of the new contract. |
 | `address` | DATA, 20 BYTES | Address of the newly deployed contract. |
+
+A reverted `create` frame deploys no contract, so its `result` has the `call` shape, `gasUsed` and `output`, with the revert data as `output`. `trace_filter` does not match a failed `create` by the address it would have occupied.
 
 **`type: "suicide"` and `type: "reward"`**
 

@@ -865,6 +865,98 @@ func TestPoolSyncCommitteesUsesCalculatedExpiry(t *testing.T) {
 	}
 }
 
+// TestPoolSyncCommitteesMarksMessagePublishedOnSuccessfulAdmission proves
+// the handler reports a successful PublishBackground admission back to the
+// sync-committee service, with the message's own content, so a later
+// duplicate submission can be recognized as already published.
+func TestPoolSyncCommitteesMarksMessagePublishedOnSuccessfulAdmission(t *testing.T) {
+	msg := &cltypes.SyncCommitteeMessage{
+		Slot:            1,
+		BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+		ValidatorIndex:  3,
+		Signature:       common.Bytes96{9},
+	}
+	msgs := []*cltypes.SyncCommitteeMessage{msg}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockSyncCommittee := services_mock.NewMockSyncCommitteeMessagesService(ctrl)
+	mockSyncCommittee.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	markPublishedCalled := make(chan struct{}, 1)
+	mockSyncCommittee.EXPECT().MarkPublished(gomock.Any(), msg.Slot, msg.ValidatorIndex, msg.BeaconBlockRoot, msg.Signature).DoAndReturn(
+		func(subnet, slot, validatorIndex uint64, root common.Hash, signature common.Bytes96) {
+			select {
+			case markPublishedCalled <- struct{}{}:
+			default:
+			}
+		},
+	).AnyTimes()
+	handler.syncCommitteeMessagesService = mockSyncCommittee
+
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, 200, resp.StatusCode)
+
+	select {
+	case <-markPublishedCalled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("MarkPublished was never called after a successful admission")
+	}
+}
+
+// TestPoolSyncCommitteesDoesNotMarkPublishedOnAdmissionFailure proves the
+// handler does not report a message as published when PublishBackground
+// itself failed, so a retry of the same content still gets a real chance to
+// publish instead of being ignored as already-done.
+func TestPoolSyncCommitteesDoesNotMarkPublishedOnAdmissionFailure(t *testing.T) {
+	msgs := []*cltypes.SyncCommitteeMessage{
+		{
+			Slot:            1,
+			BeaconBlockRoot: common.Hash{1, 2, 3, 4, 5, 6, 7, 8},
+			ValidatorIndex:  3,
+		},
+	}
+	_, _, _, s, _, handler, _, sd, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	require.NoError(t, sd.OnHeadState(s))
+
+	ctrl := gomock.NewController(t)
+	mockSyncCommittee := services_mock.NewMockSyncCommitteeMessagesService(ctrl)
+	mockSyncCommittee.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	mockSyncCommittee.EXPECT().MarkPublished(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.syncCommitteeMessagesService = mockSyncCommittee
+
+	mockGossip := gossip_mock.NewMockGossip(ctrl)
+	mockGossip.EXPECT().PublishBackground(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Return(gossip.ErrPublishQueueFull).AnyTimes()
+	handler.gossipManager = mockGossip
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+
+	body, err := json.Marshal(msgs)
+	require.NoError(t, err)
+	postReq, err := http.NewRequestWithContext(t.Context(), "POST", server.URL+"/eth/v1/beacon/pool/sync_committees", bytes.NewBuffer(body))
+	require.NoError(t, err)
+	postReq.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(postReq)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusInternalServerError, resp.StatusCode)
+}
+
 func TestPoolSyncContributionAndProofs(t *testing.T) {
 	aggrBits := make([]byte, cltypes.DefaultSyncCommitteeAggregationBitsSize)
 	aggrBits[0] = 1

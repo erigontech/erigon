@@ -72,6 +72,14 @@ func (x *Sample) writeJSONFields(s *jsonstream.StackStream) error {
 	} else {
 		ethjson.Quantity256(s, "ptrBig", (*uint256.Int)(x.PtrBig))
 	}
+	ethjson.SignedQuantity(s, "signed", x.Signed)
+	if x.PtrSigned != nil {
+		ethjson.SignedQuantity(s, "ptrSigned", *x.PtrSigned)
+	}
+	ethjson.String(s, "str", x.Str)
+	if x.OptStr != "" {
+		ethjson.String(s, "optStr", x.OptStr)
+	}
 	s.Field("flag").WriteBool(x.Flag)
 	if x.OptFlag {
 		s.Field("optFlag").WriteBool(x.OptFlag)
