@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
@@ -293,6 +294,24 @@ func TestWarmBALPropagatesWorkerCancellation(t *testing.T) {
 	bal := types.BlockAccessList{{Address: common.Address{19: 1}}}
 	err := NewBlockReadAheader().warmBAL(ctx, db, bal, nil, balCodeWarmupNone, 1)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestWarmBALSkipsCommitmentWarmupOnV3(t *testing.T) {
+	defer func(v bool) { statecfg.ExperimentalCommitmentV3 = v }(statecfg.ExperimentalCommitmentV3)
+	defer func(v int) { dbg.TrieBALWarmupers = v }(dbg.TrieBALWarmupers)
+	statecfg.ExperimentalCommitmentV3, dbg.TrieBALWarmupers = true, 2
+
+	tx := new(commitmentRecordingTx)
+	db := &singleTxRoDB{tx: tx}
+	bal := types.BlockAccessList{{
+		Address:        common.Address{19: 2},
+		BalanceChanges: []*types.BalanceChange{{Value: *uint256.NewInt(1)}},
+	}}
+	require.NoError(t, NewBlockReadAheader().warmBAL(t.Context(), db, bal, nil, balCodeWarmupNone, 1))
+
+	tx.mu.Lock()
+	defer tx.mu.Unlock()
+	require.NotContains(t, tx.domains, kv.CommitmentDomain, "the HPH-keyed BAL commitment warmup finds nothing on a v3 trie")
 }
 
 func TestWarmBALContinuesAfterReadError(t *testing.T) {

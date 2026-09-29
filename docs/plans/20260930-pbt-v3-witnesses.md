@@ -276,23 +276,23 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Modify: `execution/commitment/v3/trie_test.go`, `execution/commitment/v3/phase_a_test.go`
 - Delete: `execution/commitment/v3/wipe_test.go`, `execution/commitment/zz_statehash_test.go`
 
-- [ ] merge `awskii/v3-commitment` at its head at plan start into `awskii/pbt-v3-witness`; record the merged sha in the
-      plan
-- [ ] resolve every conflicted file as listed under Merge resolutions, re-checking `committer.go` against the merged head
-- [ ] delete the `VariantCommitmentV3` early return in `buildWitnessResult` and turn
+- [x] merge `awskii/v3-commitment` at its head at plan start (`9fdf5a9777b`) into `awskii/pbt-v3-witness`; record the
+      merged sha in the plan
+- [x] resolve every conflicted file as listed under Merge resolutions, re-checking `committer.go` against the merged head
+- [x] delete the `VariantCommitmentV3` early return in `buildWitnessResult` and turn
       `TestPBinDualV3HexExecutionWitnessRefuses` into a served-witness test
-- [ ] run v3's witness and history suites on the merged tree:
+- [x] run v3's witness and history suites on the merged tree:
       - `execution/commitment/v3`;
       - `db/state` (`GetAsOf`);
       - `rpc/jsonrpc`: `TestWitnessesMatchHPHUnderCommitmentV3` and the witness cache tests
-- [ ] run the step-boundary and dual committer tests:
+- [x] run the step-boundary and dual committer tests:
       - `TestHandleMessage_BlockEndStateFollowsMidBlockStepCheckpoint`;
       - `TestDualCompletionStopsShadowOnReplayError`;
       - `TestCommitmentCalculatorDualFold`;
       - `TestStoppedShadowSurvivesCalculatorReplacement`.
 
       Mutation-check the `ResetBlockFlags` resolution: an unconditional reset turns the mid-block test red.
-- [ ] run the affected packages, `make lint` and `make erigon integration`; commit the merge - must pass before task 2
+- [x] run the affected packages, `make lint` and `make erigon integration`; commit the merge - must pass before task 2
 
 ### Task 2: Guards for hex witnesses on hex+bin datadirs
 

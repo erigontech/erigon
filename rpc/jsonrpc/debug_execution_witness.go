@@ -778,14 +778,21 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
+	build := func() (*ExecutionWitnessResult, error) {
+		return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
+	}
+	if api.witnessCache == nil || resolvedMode != witnessModeLegacy {
+		return build()
+	}
+	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build)
 }
 
 // serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
-// is enabled and holds an exact (num, hash) match for the requested block. A nil
-// cache, a canonical request, an unresolvable block, or a miss all report hit=false
-// so the caller falls through to the unchanged on-demand build (or, in cache-only mode,
-// to the typed out-of-window error). A by-hash request whose block number is no longer
+// is enabled and holds an exact (num, hash) match for the requested block. On a
+// cache-only node a miss first waits for a running build of that hash. A nil cache,
+// a canonical request, an unresolvable block, or a miss all report hit=false so the
+// caller falls through to the on-demand build (or, in cache-only mode, to the typed
+// out-of-window error). A by-hash request whose block number is no longer
 // canonical never serves its still-resident entry; reorgedAway then flags the distinct
 // orphan case so the cache-only caller can report it separately from a plain miss.
 func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (result *ExecutionWitnessResult, hit, reorgedAway bool) {
@@ -818,6 +825,9 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 		}
 	}
 	result, ok := api.witnessCache.Get(hash)
+	if !ok && api.witnessCache.CacheOnly() {
+		result, ok = api.witnessCache.awaitBuild(ctx, hash)
+	}
 	if ok {
 		witnessCacheHitCounter.Inc()
 	} else {
@@ -930,10 +940,6 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
 	commitmentDomain = sdCtx.CommitmentDomain()
-	if sdCtx.Trie().Variant() == commitment.VariantCommitmentV3 {
-		_, _, err := sdCtx.WitnessNodes(ctx, false)
-		return nil, err
-	}
 
 	// Get the expected parent state root for verification
 	var expectedParentRoot common.Hash
@@ -1067,10 +1073,11 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 				continue
 			}
 		}
-		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), nil)
+		sdCtx.TouchKey(kv.AccountsDomain, string(plainKey), postEnc)
 	}
 	for addr := range a.CodeAddrs {
-		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
+		postEnc, _, _ := post.Read(kv.AccountsDomain, addr[:], stepSize)
+		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), postEnc)
 	}
 	for addr, keys := range a.Storage {
 		for key := range keys {
@@ -1084,7 +1091,7 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 					continue
 				}
 			}
-			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), nil)
+			sdCtx.TouchKey(kv.StorageDomain, string(plainKey), postEnc)
 		}
 	}
 }

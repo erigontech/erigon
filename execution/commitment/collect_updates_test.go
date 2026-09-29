@@ -17,6 +17,8 @@
 package commitment
 
 import (
+	"bytes"
+	"slices"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -52,4 +54,20 @@ func TestCollectUniqueFallsBackOutsideCollectMode(t *testing.T) {
 	u.TouchPlainKeyUnique("a", &Update{Flags: NonceUpdate, Nonce: 1})
 	u.TouchPlainKeyUnique("a", &Update{Flags: BalanceUpdate})
 	require.Equal(t, uint64(1), u.Size())
+}
+
+func TestCollectedHashedKeysIncludeHashedTouches(t *testing.T) {
+	u := NewUpdates(ModeCollect, t.TempDir(), KeyToHexNibbleHash)
+	account := []byte("0123456789abcdefghij")
+	other := []byte("jihgfedcba9876543210")
+	u.TouchPlainKey(string(account), nil, func(*KeyUpdate, []byte) {})
+	u.TouchPlainKeyDirect(string(account), &Update{Flags: NonceUpdate, Nonce: 1})
+	u.TouchPlainKeyUnique(string(other), &Update{Flags: NonceUpdate, Nonce: 2})
+	partial := []byte{0x3, 0x0, 0xa}
+	u.TouchHashedKey(partial)
+	u.TouchHashedKey(partial)
+
+	want := [][]byte{partial, KeyToHexNibbleHash(account), KeyToHexNibbleHash(other)}
+	slices.SortFunc(want, bytes.Compare)
+	require.Equal(t, want, u.CollectedHashedKeys())
 }

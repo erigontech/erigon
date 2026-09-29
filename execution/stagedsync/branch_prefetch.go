@@ -24,12 +24,15 @@ import (
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common"
+	keccak "github.com/erigontech/fastkeccak"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	v3 "github.com/erigontech/erigon/execution/commitment/v3"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var branchPrefetchEnabled = dbg.EnvBool("COMMITMENT_V3_PREFETCH", true)
@@ -73,6 +76,8 @@ type branchPrefetcher struct {
 	bytes   atomic.Int64
 	domains []kv.Domain
 	bin     map[kv.Domain]bool
+
+	hits, misses, dropped, drained atomic.Uint64
 }
 
 func newBranchPrefetcher(ctx context.Context, db kv.TemporalRoDB, domains []kv.Domain, binDomains map[kv.Domain]bool) *branchPrefetcher {
@@ -97,6 +102,25 @@ func (p *branchPrefetcher) add(it prefetchItem) {
 	select {
 	case p.work <- it:
 	default:
+		p.dropped.Add(1)
+	}
+}
+
+func (p *branchPrefetcher) addBAL(bal types.BlockAccessList) {
+	if p == nil {
+		return
+	}
+	for i := range bal {
+		ac := &bal[i]
+		if len(ac.BalanceChanges)+len(ac.NonceChanges)+len(ac.CodeChanges)+len(ac.StorageChanges) == 0 {
+			continue
+		}
+		account := keccak.Sum256(ac.Address[:])
+		p.add(prefetchItem{account: account})
+		for _, sc := range ac.StorageChanges {
+			slot := sc.Slot.Value()
+			p.add(prefetchItem{account: account, slot: keccak.Sum256(slot[:]), storage: true})
+		}
 	}
 }
 
@@ -105,15 +129,16 @@ func (p *branchPrefetcher) pause() {
 		return
 	}
 	p.gate.Lock()
-	p.drain()
+	p.drained.Add(uint64(p.drain()))
 }
 
-func (p *branchPrefetcher) drain() {
+func (p *branchPrefetcher) drain() (n int) {
 	for {
 		select {
 		case <-p.work:
+			n++
 		default:
-			return
+			return n
 		}
 	}
 }

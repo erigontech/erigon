@@ -17,6 +17,8 @@
 package jsonrpc
 
 import (
+	"context"
+	"errors"
 	"math"
 	"sync"
 	"unsafe"
@@ -69,7 +71,17 @@ type witnessResultCache struct {
 	mu            sync.Mutex
 	residentBytes int
 	entryBytes    map[common.Hash]int
+	building      map[common.Hash]*witnessBuild
 }
+
+type witnessBuild struct {
+	done      chan struct{}
+	result    *ExecutionWitnessResult
+	err       error
+	abandoned bool
+}
+
+var errWitnessBuildPanicked = errors.New("witness build panicked")
 
 // WitnessCacheCapacity is the number of witnesses the cache actually holds for a
 // requested block count, after clamping to witnessCacheMaxBlocks.
@@ -87,6 +99,7 @@ func newWitnessResultCache(blocks uint, maxBytes int, headCapture, cacheOnly boo
 		cacheOnly:   cacheOnly,
 		maxBytes:    maxBytes,
 		entryBytes:  make(map[common.Hash]int),
+		building:    make(map[common.Hash]*witnessBuild),
 	}
 	cache, err := lru.NewWithEvict[common.Hash, *ExecutionWitnessResult](int(WitnessCacheCapacity(blocks)), c.onEvict)
 	if err != nil {
@@ -115,6 +128,56 @@ func (c *witnessResultCache) store(num uint64, hash common.Hash, r *ExecutionWit
 	r.headerByNumber = nil // only the build's BLOCKHASH lookups read it
 	c.Add(hash, r)
 	c.feed.publish(witnessPush{num: num, hash: hash, result: r})
+}
+
+func (c *witnessResultCache) buildOnce(ctx context.Context, hash common.Hash, build func() (*ExecutionWitnessResult, error)) (*ExecutionWitnessResult, error) {
+	for {
+		c.mu.Lock()
+		b, running := c.building[hash]
+		if !running {
+			b = &witnessBuild{done: make(chan struct{}), err: errWitnessBuildPanicked}
+			c.building[hash] = b
+		}
+		c.mu.Unlock()
+		if !running {
+			return c.lead(ctx, hash, b, build)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-b.done:
+		}
+		if !b.abandoned {
+			return b.result, b.err
+		}
+	}
+}
+
+func (c *witnessResultCache) lead(ctx context.Context, hash common.Hash, b *witnessBuild, build func() (*ExecutionWitnessResult, error)) (*ExecutionWitnessResult, error) {
+	defer func() {
+		c.mu.Lock()
+		delete(c.building, hash)
+		c.mu.Unlock()
+		close(b.done)
+	}()
+	b.result, b.err = build()
+	b.abandoned = b.err != nil && ctx.Err() != nil
+	return b.result, b.err
+}
+
+func (c *witnessResultCache) awaitBuild(ctx context.Context, hash common.Hash) (*ExecutionWitnessResult, bool) {
+	c.mu.Lock()
+	b, running := c.building[hash]
+	c.mu.Unlock()
+	if !running {
+		return nil, false
+	}
+	select {
+	case <-ctx.Done():
+		return nil, false
+	case <-b.done:
+		return b.result, b.err == nil
+	}
 }
 
 func (c *witnessResultCache) subscribe() chan witnessPush     { return c.feed.subscribe() }

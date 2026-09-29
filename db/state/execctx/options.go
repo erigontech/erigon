@@ -95,7 +95,7 @@ func WithParaTrieDB(db kv.TemporalRoDB) SharedDomainOption {
 // compute a hex root over a datadir the executor reads as bin.
 func WithSequentialCommitment() SharedDomainOption {
 	return func(o *sharedDomainOptions) {
-		if o.trieCfg.Variant != commitment.VariantBinPatriciaTrie {
+		if o.trieCfg.Variant == commitment.VariantParallelHexPatricia {
 			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
 		}
 	}

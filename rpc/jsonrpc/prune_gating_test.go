@@ -256,10 +256,10 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		return apis.ots.GetBlockTransactions(ctx, rpc.BlockNumber(ref.num), 0, 10)
 	}},
 	{"graphql_getBlockDetails", gatedByBlockReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return apis.graphql.GetBlockDetails(ctx, rpc.BlockNumber(ref.num))
+		return apis.graphql.GetBlockDetails(ctx, rpc.BlockNumber(ref.num), nil)
 	}},
 	{"graphql_getBlockDetailsByHash", gatedByBlockReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
-		return apis.graphql.GetBlockDetailsByHash(ctx, ref.hash)
+		return apis.graphql.GetBlockDetailsByHash(ctx, ref.hash, nil)
 	}},
 	// Header endpoints read the header alone: a retention window takes away
 	// transactions and state history, never headers.

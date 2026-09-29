@@ -199,10 +199,11 @@ func TestPBinDualExecutionWitnessRefusesBin(t *testing.T) {
 	}
 }
 
-func TestPBinDualV3HexExecutionWitnessRefuses(t *testing.T) {
+func TestPBinDualV3HexExecutionWitnessServed(t *testing.T) {
 	api, _ := pbinWitnessFixture(t, 30)
 	n := rpc.BlockNumber(2)
-	_, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "shared domains commitment context doesn't have HexPatriciaHashed")
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, result.State)
 }

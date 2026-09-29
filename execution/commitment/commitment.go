@@ -1442,7 +1442,8 @@ type Updates struct {
 	directBytes    int
 	directMemLimit int
 
-	collected []collectedUpdate
+	collected     []collectedUpdate
+	hashedTouches [][]byte
 
 	batchSlab []KeyUpdate
 
@@ -1783,6 +1784,7 @@ func (t *Updates) Drain(fn func(plainKey string, update *Update) error) error {
 		}
 	}
 	t.collected = t.collected[:0]
+	t.hashedTouches = t.hashedTouches[:0]
 	for key, item := range t.treeIdx {
 		if err := fn(key, item.update); err != nil {
 			return err
@@ -1815,8 +1817,25 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 	case ModeUpdate:
 		pivot := &KeyUpdate{hashedKey: bytes.Clone(hashedKey), update: new(Update)}
 		t.tree.ReplaceOrInsert(pivot)
+	case ModeCollect:
+		if len(hashedKey) != 0 {
+			t.hashedTouches = append(t.hashedTouches, bytes.Clone(hashedKey))
+		}
 	default:
 	}
+}
+
+func (t *Updates) CollectedHashedKeys() [][]byte {
+	keys := make([][]byte, 0, len(t.collected)+len(t.treeIdx)+len(t.hashedTouches))
+	for i := range t.collected {
+		keys = append(keys, bytes.Clone(t.hashKey([]byte(t.collected[i].plainKey))))
+	}
+	for key := range t.treeIdx {
+		keys = append(keys, bytes.Clone(t.hashKey([]byte(key))))
+	}
+	keys = append(keys, t.hashedTouches...)
+	slices.SortFunc(keys, bytes.Compare)
+	return slices.CompactFunc(keys, bytes.Equal)
 }
 
 func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
@@ -2140,6 +2159,7 @@ func (t *Updates) Reset() {
 	case ModeCollect:
 		clear(t.treeIdx)
 		t.collected = t.collected[:0]
+		t.hashedTouches = t.hashedTouches[:0]
 	default:
 	}
 	t.batchSlab = t.batchSlab[:0]

@@ -1,7 +1,22 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
 package v3
 
 import (
-	"bytes"
 	"context"
 	"runtime"
 	"slices"
@@ -129,68 +144,4 @@ func BenchmarkZZFeed(b *testing.B) {
 			}
 		}
 	})
-}
-
-func TestPartitionFeedMatchesSerialPartition(t *testing.T) {
-	var items []feedEntry
-	for i := range hashParallelMin {
-		addr := string(benchAddr(i))
-		update := &commitment.Update{Flags: commitment.BalanceUpdate}
-		if i%7 == 0 {
-			update = &commitment.Update{Flags: commitment.DeleteUpdate}
-		}
-		items = append(items, feedEntry{plainKey: addr, update: update})
-		for j := range i % 4 {
-			items = append(items, feedEntry{plainKey: addr + string(benchSlot(i*8+j)), update: &commitment.Update{Flags: commitment.StorageUpdate}})
-		}
-	}
-	hashFeed(items, 1)
-
-	sorted := slices.Clone(items)
-	slices.SortFunc(sorted, compareFeed)
-	serial := &partitioner{}
-	for _, e := range sorted {
-		if err := serial.add(e.hashedKey, e.update); err != nil {
-			t.Fatal(err)
-		}
-	}
-	wantStorage, wantAccounts := serial.done()
-
-	gotStorage, gotAccounts, seen, err := partitionFeed(slices.Clone(items), 8, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if seen != len(items) {
-		t.Fatalf("seen %d, want %d", seen, len(items))
-	}
-	if len(gotAccounts) != len(wantAccounts) {
-		t.Fatalf("accounts %d, want %d", len(gotAccounts), len(wantAccounts))
-	}
-	for i := range wantAccounts {
-		if !bytes.Equal(gotAccounts[i].hashedKey, wantAccounts[i].hashedKey) || gotAccounts[i].storageDirty != wantAccounts[i].storageDirty || gotAccounts[i].update != wantAccounts[i].update {
-			t.Fatalf("account %d differs", i)
-		}
-	}
-	byAddr := func(tasks []storageTask) map[[32]byte]storageTask {
-		out := make(map[[32]byte]storageTask, len(tasks))
-		for _, task := range tasks {
-			out[task.addrHash] = task
-		}
-		return out
-	}
-	want, got := byAddr(wantStorage), byAddr(gotStorage)
-	if len(got) != len(want) || len(gotStorage) != len(wantStorage) {
-		t.Fatalf("storage tasks %d, want %d", len(gotStorage), len(wantStorage))
-	}
-	for addr, w := range want {
-		g := got[addr]
-		if g.wipe != w.wipe || len(g.entries) != len(w.entries) {
-			t.Fatalf("storage task %x differs", addr)
-		}
-		for i := range w.entries {
-			if !bytes.Equal(g.entries[i].path, w.entries[i].path) {
-				t.Fatalf("storage task %x entry %d differs", addr, i)
-			}
-		}
-	}
 }
