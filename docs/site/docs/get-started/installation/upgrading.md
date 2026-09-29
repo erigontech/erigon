@@ -17,6 +17,8 @@ Updating to the latest version of Erigon gives you access to the latest features
 
 ## Upgrading from 3.6 to 3.7
 
+{/* llms-pinned-version: [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) */}
+
 A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-sync. Before restarting on the new version, check the following:
 
 * **CPU baseline**: amd64 binaries and Docker images now require the `x86-64-v2` baseline (SSE4.2, POPCNT). The separate `amd64v2` tarball and `linux/amd64/v2` Docker platform are gone; use the standard amd64 artifacts. Building from source requires Go 1.26 or newer. See [Hardware Requirements](../hardware-requirements).
