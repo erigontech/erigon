@@ -400,6 +400,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 
 // TraceCall implements debug_traceCallMany. Returns Geth style call traces.
 func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+	if simulateContext.TransactionIndex != nil && *simulateContext.TransactionIndex < -1 {
+		return fmt.Errorf("transaction index out of bounds: %d", *simulateContext.TransactionIndex)
+	}
 	if err := requireBlockSelector(simulateContext.BlockNumber); err != nil {
 		return err
 	}

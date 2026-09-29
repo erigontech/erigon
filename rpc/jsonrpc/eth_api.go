@@ -497,6 +497,23 @@ func (api *BaseAPI) checkPruneTransactionHistory(ctx context.Context, tx kv.Tx, 
 }
 
 func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx kv.Tx, block, txIndex uint64) error {
+	var minTxNum uint64
+	if txIndex > 0 {
+		var err error
+		minTxNum, err = api._txNumReader.Min(ctx, tx, block)
+		if err != nil {
+			return err
+		}
+		maxTxNum, err := api._txNumReader.Max(ctx, tx, block)
+		if err != nil {
+			return err
+		}
+		// Max names the final system transaction. Its pre-state is the valid
+		// position after all user transactions; larger indices leave the block.
+		if maxTxNum <= minTxNum || txIndex >= maxTxNum-minTxNum {
+			return fmt.Errorf("transaction index out of bounds: %d", txIndex)
+		}
+	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
 		floors, err := api.historyStartBlocks(ctx, tx, head)
 		if err != nil || txIndex == 0 || block >= floors.replay {
@@ -504,17 +521,7 @@ func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx 
 		}
 		// The block-level replay floor may reject an indexed read whose pre-state
 		// survives. Check its exact txNum only when that floor would reject it.
-		minTxNum, err := api._txNumReader.Min(ctx, tx, block)
-		if err != nil {
-			return 0, err
-		}
-		maxTxNum, err := api._txNumReader.Max(ctx, tx, block)
-		if err != nil {
-			return 0, err
-		}
-		// Only a position in this block can bypass its replay floor. Max names the
-		// final system transaction, whose pre-state follows all user transactions.
-		if maxTxNum > minTxNum && txIndex < maxTxNum-minTxNum && minTxNum+txIndex+1 >= floors.startTxNum {
+		if minTxNum+txIndex+1 >= floors.startTxNum {
 			return block, nil
 		}
 		return 0, fmt.Errorf("%w: requested block %d at transaction index %d, history is available from txNum %d", state.ErrPruned, block, txIndex, floors.startTxNum)
