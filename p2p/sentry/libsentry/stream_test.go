@@ -22,17 +22,19 @@ import (
 	"io"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func TestSentryStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
-	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	s, c := newTestSentryStream(t)
 
 	const flood = libsentry.MessagesQueueSize * 10
 	for i := range flood {
@@ -56,7 +58,9 @@ func TestSentryStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
 }
 
 func TestSentryStreamS_BoundsQueuedPayloadBytes(t *testing.T) {
-	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	s, c := newTestSentryStream(t)
+	dropped := metrics.GetOrCreateCounter(`p2p_sentry_queue_dropped_messages_total{limit="bytes"}`)
+	before := dropped.GetValueUint64()
 	data := make([]byte, 10*1024*1024)
 	for i := range 20 {
 		require.NoError(t, s.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId(i), Data: data}))
@@ -72,10 +76,11 @@ func TestSentryStreamS_BoundsQueuedPayloadBytes(t *testing.T) {
 		queuedBytes += len(message.Data)
 	}
 	require.LessOrEqual(t, queuedBytes, 64*1024*1024)
+	require.Equal(t, before+14, dropped.GetValueUint64(), "only evicted messages count as dropped")
 }
 
 func TestSentryStreamS_ReceiveReleasesByteBudget(t *testing.T) {
-	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	s, c := newTestSentryStream(t)
 	data := make([]byte, 10*1024*1024)
 	for i := range 6 {
 		require.NoError(t, s.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId(i), Data: data}))
@@ -94,9 +99,7 @@ func TestSentryStreamS_ReceiveReleasesByteBudget(t *testing.T) {
 }
 
 func TestSentryStream_ConcurrentSendAndReceive(t *testing.T) {
-	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
-	defer cancel()
-	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	s, c := newTestSentryStream(t)
 	var producers sync.WaitGroup
 	for range 4 {
 		producers.Go(func() {
@@ -123,8 +126,37 @@ func TestSentryStream_ReceiveCanceled(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 }
 
+func TestSentryStream_SendCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	s, _ := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	cancel()
+	err := s.Send(&sentryproto.InboundMessage{})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestSentryStream_SendAfterClose(t *testing.T) {
+	s, c := newTestSentryStream(t)
+	s.Close()
+	err := s.Send(&sentryproto.InboundMessage{})
+	require.ErrorIs(t, err, io.EOF)
+	require.Empty(t, drainMessages(t, c))
+}
+
+func TestSentryStream_RejectsOversizeMessage(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, c := newTestSentryStream(t)
+		err := s.Send(&sentryproto.InboundMessage{Data: make([]byte, libsentry.MessagesQueueByteLimit+1)})
+		require.ErrorContains(t, err, "exceeds queue byte limit")
+		require.NoError(t, s.Send(&sentryproto.InboundMessage{Data: []byte{1}}))
+		s.Close()
+		messages := drainMessages(t, c)
+		require.Len(t, messages, 1)
+		require.Equal(t, []byte{1}, messages[0].Data)
+	})
+}
+
 func TestSentryStream_ErrorAfterMessages(t *testing.T) {
-	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	s, c := newTestSentryStream(t)
 	require.NoError(t, s.Send(&sentryproto.InboundMessage{Data: []byte{1}}))
 	s.Err(io.ErrUnexpectedEOF)
 	s.Close()
@@ -135,6 +167,13 @@ func TestSentryStream_ErrorAfterMessages(t *testing.T) {
 	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 	_, err = c.Recv()
 	require.ErrorIs(t, err, io.EOF)
+}
+
+func newTestSentryStream(t *testing.T) (*libsentry.SentryStreamS[*sentryproto.InboundMessage], *libsentry.SentryStreamC[*sentryproto.InboundMessage]) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	t.Cleanup(cancel)
+	return libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
 }
 
 func drainMessages(t *testing.T, c *libsentry.SentryStreamC[*sentryproto.InboundMessage]) []*sentryproto.InboundMessage {

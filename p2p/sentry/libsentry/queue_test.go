@@ -22,12 +22,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/node/gointerfaces/sentryproto"
-	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 func TestSentryQueue_NoEvictionBelowThreshold(t *testing.T) {
-	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	s, c := newTestSentryStream(t)
 	for range 512 {
 		require.NoError(t, s.Send(&sentryproto.InboundMessage{}))
 	}
@@ -36,7 +36,9 @@ func TestSentryQueue_NoEvictionBelowThreshold(t *testing.T) {
 }
 
 func TestSentryQueue_DropsQuarterFromOldest(t *testing.T) {
-	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	s, c := newTestSentryStream(t)
+	dropped := metrics.GetOrCreateCounter(`p2p_sentry_queue_dropped_messages_total{limit="count"}`)
+	before := dropped.GetValueUint64()
 	for i := range 600 {
 		require.NoError(t, s.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId(i)}))
 	}
@@ -45,10 +47,11 @@ func TestSentryQueue_DropsQuarterFromOldest(t *testing.T) {
 	require.Len(t, messages, 344)
 	assert.Equal(t, sentryproto.MessageId(256), messages[0].Id)
 	assert.Equal(t, sentryproto.MessageId(599), messages[len(messages)-1].Id)
+	require.Equal(t, before+256, dropped.GetValueUint64(), "only evicted messages count as dropped")
 }
 
 func TestSentryQueue_EmptyClose(t *testing.T) {
-	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	s, c := newTestSentryStream(t)
 	s.Close()
 	s.Close()
 	require.Empty(t, drainMessages(t, c))

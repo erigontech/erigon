@@ -24,6 +24,8 @@ import (
 
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
+
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 const (
@@ -32,6 +34,11 @@ const (
 	// MessagesQueueByteLimit bounds serialized data waiting in each queue.
 	// In-flight messages and decoded objects are outside this budget.
 	MessagesQueueByteLimit = 64 * 1024 * 1024
+)
+
+var (
+	sentryQueueDroppedByBytes = metrics.GetOrCreateCounter(`p2p_sentry_queue_dropped_messages_total{limit="bytes"}`)
+	sentryQueueDroppedByCount = metrics.GetOrCreateCounter(`p2p_sentry_queue_dropped_messages_total{limit="count"}`)
 )
 
 type streamReply[T protoreflect.ProtoMessage] struct {
@@ -62,14 +69,22 @@ func (q *messageQueue[T]) push(message T, err error) error {
 	}
 	for q.bytes+size > MessagesQueueByteLimit {
 		q.pop()
+		sentryQueueDroppedByBytes.Inc()
 	}
-	q.items <- streamReply[T]{message: message, err: err, size: size}
+	// Eviction must leave space. Blocking here would hold mu and prevent
+	// receivers from freeing a slot, so a broken invariant must fail loudly.
+	select {
+	case q.items <- streamReply[T]{message: message, err: err, size: size}:
+	default:
+		panic("sentry queue: push to full queue")
+	}
 	q.bytes += size
 	// Evict in batches so slow consumers see recent traffic and the queue
 	// has room for the next burst of small messages.
 	if len(q.items) > cap(q.items)/2 {
 		for range cap(q.items) / 4 {
 			q.pop()
+			sentryQueueDroppedByCount.Inc()
 		}
 	}
 	q.notify()
@@ -78,9 +93,13 @@ func (q *messageQueue[T]) push(message T, err error) error {
 
 // pop requires mu to be held and items to be non-empty.
 func (q *messageQueue[T]) pop() streamReply[T] {
-	item := <-q.items
-	q.bytes -= item.size
-	return item
+	select {
+	case item := <-q.items:
+		q.bytes -= item.size
+		return item
+	default:
+		panic("sentry queue: pop from empty queue")
+	}
 }
 
 // notify coalesces wake-ups. Receivers must recheck items and signal again
