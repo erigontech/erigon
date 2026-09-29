@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 
 	"github.com/holiman/uint256"
@@ -18,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -938,6 +940,122 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode, requestedTrie)
 }
 
+func witnessTrieName(trie witnessTrie) string {
+	if trie == witnessTriePBT {
+		return "pbt"
+	}
+	return "mpt"
+}
+
+func witnessAnchorForBlock(tx kv.TemporalTx, header *types.Header, blockNum uint64, trie witnessTrie, chainConfig *chain.Config) (common.Hash, error) {
+	trieName := witnessTrieName(trie)
+	if (trie == witnessTriePBT) == chainConfig.IsBinaryTrie(header.Time) {
+		return header.Root, nil
+	}
+	shadowRoot, err := rawdb.ReadShadowStateRoot(tx, header.Hash(), blockNum)
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("%s witness shadow root for block %d: %w", trieName, blockNum, err)
+	}
+	if len(shadowRoot) != len(common.Hash{}) || common.BytesToHash(shadowRoot) == (common.Hash{}) {
+		return common.Hash{}, fmt.Errorf("%s witness shadow root missing for block %d", trieName, blockNum)
+	}
+	return common.BytesToHash(shadowRoot), nil
+}
+
+func (api *DebugAPIImpl) witnessAnchors(ctx context.Context, tx kv.TemporalTx, info *witnessBlockInfo, trie witnessTrie, chainConfig *chain.Config) (common.Hash, common.Hash, error) {
+	blockHeader := info.Block.HeaderNoCopy()
+	parentHeader := blockHeader
+	if info.BlockNum > 0 {
+		var err error
+		parentHeader, err = api._blockReader.HeaderByNumber(ctx, tx, info.ParentNum)
+		if err != nil {
+			return common.Hash{}, common.Hash{}, err
+		}
+		if parentHeader == nil {
+			return common.Hash{}, common.Hash{}, fmt.Errorf("parent header %d not found", info.ParentNum)
+		}
+	}
+	parentRoot, err := witnessAnchorForBlock(tx, parentHeader, info.ParentNum, trie, chainConfig)
+	if err != nil {
+		return common.Hash{}, common.Hash{}, err
+	}
+	postRoot, err := witnessAnchorForBlock(tx, blockHeader, info.BlockNum, trie, chainConfig)
+	if err != nil {
+		return common.Hash{}, common.Hash{}, err
+	}
+	return parentRoot, postRoot, nil
+}
+
+func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.TemporalTx, info *witnessBlockInfo, trie witnessTrie, chainConfig *chain.Config, skipHistory bool) error {
+	trieName := witnessTrieName(trie)
+	domain := kv.CommitmentDomain
+	if trie == witnessTriePBT {
+		domain = kv.CommitmentBinDomain
+	}
+	variant := dbstate.TrieVariantHex
+	settings, err := dbstate.ReadErigonDBSettings(api.dirs)
+	if err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return err
+	}
+	if settings != nil {
+		variant = settings.TrieVariantName()
+	}
+	if (trie == witnessTrieMPT && variant == dbstate.TrieVariantBin) || (trie == witnessTriePBT && variant == dbstate.TrieVariantHex) {
+		return fmt.Errorf("%s commitment domain is missing from datadir", trieName)
+	}
+	provider, ok := tx.AggTx().(interface{ CommitmentDomains() []kv.Domain })
+	if !ok {
+		return fmt.Errorf("%s commitment domain is unavailable", trieName)
+	}
+	hasDomain := slices.Contains(provider.CommitmentDomains(), domain)
+	if trie == witnessTriePBT && variant == dbstate.TrieVariantBin {
+		hasDomain = slices.Contains(provider.CommitmentDomains(), kv.CommitmentDomain)
+	}
+	if !hasDomain {
+		return fmt.Errorf("%s commitment domain is missing from datadir", trieName)
+	}
+
+	parentTxNum := uint64(0)
+	if info.BlockNum > 0 {
+		parentTxNum, err = api._txNumReader.Max(ctx, tx, info.ParentNum)
+		if err != nil {
+			return err
+		}
+	}
+	lifecycle, hasLifecycle := tx.AggTx().(interface {
+		IsDomainFrozen(kv.Domain) (uint64, bool)
+		CommitmentDomainStopped(kv.Domain) bool
+	})
+	frozenAt, frozen := uint64(0), false
+	if hasLifecycle {
+		frozenAt, frozen = lifecycle.IsDomainFrozen(domain)
+	}
+	if settingsFrozenAt, settingsFrozen := settings.FrozenAt(domain); settingsFrozen {
+		frozenAt, frozen = settingsFrozenAt, true
+	}
+	if frozen && frozenAt < parentTxNum {
+		return fmt.Errorf("%s commitment is frozen before parent block %d at txnum %d", trieName, info.ParentNum, frozenAt)
+	}
+	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, domain)
+	if err != nil {
+		return err
+	}
+	if hasLifecycle && lifecycle.CommitmentDomainStopped(domain) {
+		stopped = true
+	}
+	if stopped && tx.Debug().DomainProgress(domain) < parentTxNum {
+		return fmt.Errorf("%s commitment was stopped before parent block %d", trieName, info.ParentNum)
+	}
+	if !skipHistory {
+		historyStart := tx.Debug().HistoryStartFrom(domain)
+		if info.FirstTxNumInBlock < historyStart {
+			return fmt.Errorf("%s commitment history pruned: start %d, last tx: %d", trieName, historyStart, info.FirstTxNumInBlock)
+		}
+	}
+	_, _, err = api.witnessAnchors(ctx, tx, info, trie, chainConfig)
+	return err
+}
+
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
 // against an open temporal tx: re-execute to record accesses, fold the commitment trie,
 // collect ancestor headers, verify statelessly, then append the legacy empty-storage node
@@ -964,6 +1082,13 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if binTrie {
 		commitmentDomain = kv.CommitmentBinDomain
 	}
+	if err := api.checkWitnessAvailability(ctx, tx, info, requestedTrie, chainConfig, hc != nil); err != nil {
+		return nil, err
+	}
+	parentRoot, postRoot, err := api.witnessAnchors(ctx, tx, info, requestedTrie, chainConfig)
+	if err != nil {
+		return nil, err
+	}
 
 	engine := api.engine()
 
@@ -988,40 +1113,8 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	}
 	defer domains.Close()
 	sdCtx := domains.GetCommitmentContext()
-	commitmentDomain = sdCtx.CommitmentDomain()
 
-	// Get the expected parent state root for verification
-	var expectedParentRoot common.Hash
-
-	// Get the parent header for state root verification
-	parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
-	if err != nil {
-		return nil, err
-	}
-	if parentHeader == nil {
-		return nil, fmt.Errorf("parent header %d not found", parentNum)
-	}
-	expectedParentRoot = parentHeader.Root
-	if binTrie && !chainConfig.IsBinaryTrie(parentHeader.Time) {
-		shadowRoot, err := rawdb.ReadShadowStateRoot(tx, parentHeader.Hash(), parentNum)
-		if err != nil {
-			return nil, fmt.Errorf("read binary parent shadow root: %w", err)
-		}
-		if len(shadowRoot) != 32 {
-			return nil, fmt.Errorf("binary parent shadow root missing or invalid for block %d (%s)", parentNum, parentHeader.Hash())
-		}
-		expectedParentRoot = common.BytesToHash(shadowRoot)
-	}
-	log.Debug("expected parent root", "stateRoot", expectedParentRoot)
-
-	// Head-capture reads parent commitment from the pinned snapshot, not commitment
-	// history, so the history-availability check only applies to the durable path.
-	if hc == nil {
-		commitmentStartingTxNum := tx.Debug().HistoryStartFrom(commitmentDomain)
-		if firstTxNumInBlock < commitmentStartingTxNum {
-			return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
-		}
-	}
+	log.Debug("expected parent root", "stateRoot", parentRoot)
 
 	if accessed.isEmpty() { // nothing touched, return empty witness
 		return result, nil
@@ -1029,14 +1122,14 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, mode, binTrie)
+		postRoot, accessed, mode, binTrie)
 	if err != nil {
 		return nil, err
 	}
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.
-	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
+	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, parentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
 	if err != nil {
 		return nil, err
 	}
@@ -1053,7 +1146,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if !ok {
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
-	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
+	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine, postRoot); err != nil {
 		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
@@ -1614,6 +1707,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 	result *ExecutionWitnessResult,
 	block *types.Block,
 	fullEngine rules.Engine,
+	expectedRoot common.Hash,
 ) error {
 	if witnessVerifySkipped() {
 		return nil
@@ -1624,7 +1718,7 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("failed to get chain config: %w", err)
 	}
 
-	return verifyWitnessAgainstBlock(ctx, result, block, chainCfg, fullEngine)
+	return verifyWitnessAgainstBlock(ctx, result, block, chainCfg, fullEngine, expectedRoot)
 }
 
 func witnessVerifySkipped() bool {
@@ -1640,6 +1734,7 @@ func verifyWitnessAgainstBlock(
 	block *types.Block,
 	chainCfg *chain.Config,
 	fullEngine rules.Engine,
+	expectedRoot common.Hash,
 ) error {
 	var (
 		newStateRoot common.Hash
@@ -1647,7 +1742,7 @@ func verifyWitnessAgainstBlock(
 		usedSlots    map[common.Hash]struct{}
 	)
 	var stateless *witnessStateless
-	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine, expectedRoot)
 	if stateless != nil {
 		usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
 	}
@@ -1655,7 +1750,6 @@ func verifyWitnessAgainstBlock(
 		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
 
-	expectedRoot := block.Root()
 	if newStateRoot != expectedRoot {
 		return fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
@@ -2189,11 +2283,11 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 
 // execBlockStatelessly executes the block statelessly.
 // It decodes the witness trie, executes all transactions and returns the resulting state root
-func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine) (postStateRoot common.Hash, stateless *witnessStateless, err error) {
+func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, expectedRoot common.Hash) (postStateRoot common.Hash, stateless *witnessStateless, err error) {
 	// Skip verification for genesis block - it has no transactions to execute
 	// but has pre-allocated accounts which would cause a state root mismatch
 	if block.NumberU64() == 0 {
-		return block.Root(), nil, nil
+		return expectedRoot, nil, nil
 	}
 
 	// Skip verification if the witness trie is empty

@@ -72,23 +72,35 @@ func enableCommitmentHistoryFlag(t *testing.T, db kv.TemporalRwDB) {
 	}))
 }
 
-func pbinWitnessFixture(t *testing.T, activation uint64) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+func pbinWitnessFixture(t *testing.T, activation uint64, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
 	t.Helper()
-	withBinCommitmentDatadir(t)
 	withCommitmentHistory(t)
+	dual := activation > 0
+	if len(dualOption) > 0 {
+		dual = dualOption[0]
+	}
+	hexOnly := len(dualOption) > 0 && !dual && activation == 0
 	var options []execmoduletester.Option
-	if activation > 0 {
+	if (activation == 0 && !hexOnly) || dual {
+		withBinCommitmentDatadir(t)
+	}
+	if activation > 0 || hexOnly {
 		previousDual := statecfg.ExperimentalHexBinCommitment
 		previousV3, previousSchema := statecfg.ExperimentalCommitmentV3, statecfg.Schema
+		previousBin := statecfg.ExperimentalBinCommitment
 		t.Cleanup(func() {
 			statecfg.ExperimentalHexBinCommitment = previousDual
 			statecfg.ExperimentalCommitmentV3 = previousV3
+			statecfg.ExperimentalBinCommitment = previousBin
 			statecfg.Schema = previousSchema
 		})
-		statecfg.ExperimentalHexBinCommitment = true
+		statecfg.ExperimentalHexBinCommitment = dual
 		statecfg.ExperimentalCommitmentV3 = true
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
-		options = append(options, execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))
+		statecfg.ExperimentalBinCommitment = dual
+		if dual {
+			options = append(options, execmoduletester.WithEnableDomain(kv.CommitmentBinDomain))
+		}
 	}
 	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	require.NoError(t, err)
@@ -96,7 +108,10 @@ func pbinWitnessFixture(t *testing.T, activation uint64) (*DebugAPIImpl, *execmo
 	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	amsterdam := uint64(0)
 	config := chain.AllProtocolChanges.Copy()
-	config.AmsterdamTime, config.BinaryTrieTime = &amsterdam, &activation
+	config.AmsterdamTime = &amsterdam
+	if !hexOnly {
+		config.BinaryTrieTime = &activation
+	}
 	balance := new(big.Int).Mul(big.NewInt(10), new(big.Int).SetUint64(common.Ether))
 	genesis := &types.Genesis{Config: config, Difficulty: uint256.NewInt(0), Alloc: types.GenesisAlloc{from: {Balance: new(big.Int).Set(balance)}, to: {Balance: big.NewInt(0), Nonce: 1, Code: common.FromHex("0x60003560005500")}}, GasLimit: 30_000_000, BaseFee: uint256.NewInt(0)}
 	for i := range 256 {

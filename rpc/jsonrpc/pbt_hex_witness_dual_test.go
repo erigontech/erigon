@@ -25,6 +25,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -135,27 +136,54 @@ func seedPBTWitnessGenesis(t *testing.T, m *execmoduletester.ExecModuleTester, g
 }
 
 func TestPBTPreForkProofParity(t *testing.T) {
-	address := common.Address{1}
-	keys := []hexutil.Bytes{{0}}
 	selector := rpc.BlockNumberOrHashWithNumber(2)
-	var hexOnly, dual any
-	t.Run("hex", func(t *testing.T) {
-		configurePBTWitnessGlobals(t, true, false)
-		m := newPBTWitnessModule(t, false)
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-		var err error
-		hexOnly, err = api.GetProof(t.Context(), address, keys, &selector)
-		require.NoError(t, err)
-	})
-	t.Run("hex+bin", func(t *testing.T) {
-		configurePBTWitnessGlobals(t, true, true)
-		m := newPBTWitnessModule(t, true)
-		api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
-		var err error
-		dual, err = api.GetProof(t.Context(), address, keys, &selector)
-		require.NoError(t, err)
-	})
-	require.Equal(t, hexOnly, dual)
+	addresses := []struct {
+		name string
+		addr common.Address
+		keys []hexutil.Bytes
+	}{
+		{name: "account", addr: common.Address{1}, keys: []hexutil.Bytes{{0}}},
+		{name: "storage", addr: common.HexToAddress("0x1000000000000000000000000000000000000001"), keys: []hexutil.Bytes{{0}}},
+		{name: "missing account", addr: common.HexToAddress("0x2000000000000000000000000000000000000002")},
+	}
+	proofs := make([][]byte, 0, len(addresses)*2)
+	for _, tc := range []struct {
+		name string
+		dual bool
+	}{
+		{name: "hex"},
+		{name: "hex+bin", dual: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			configurePBTWitnessGlobals(t, true, tc.dual)
+			activation := uint64(30)
+			if !tc.dual {
+				activation = 0
+			}
+			_, m := pbinWitnessFixture(t, activation, tc.dual)
+			ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+			for _, address := range addresses {
+				t.Run(address.name, func(t *testing.T) {
+					proof, err := ethAPI.GetProof(t.Context(), address.addr, address.keys, &selector)
+					require.NoError(t, err)
+					encoded, err := json.Marshal(proof)
+					require.NoError(t, err)
+					proofs = append(proofs, encoded)
+					if address.name == "storage" {
+						require.Len(t, proof.StorageProof, 1)
+						require.NotEqual(t, uint64(0), (*uint256.Int)(proof.StorageProof[0].Value).Uint64())
+					}
+					if address.name == "missing account" {
+						require.NotEmpty(t, proof.AccountProof)
+					}
+				})
+			}
+		})
+	}
+	require.Len(t, proofs, len(addresses)*2)
+	for i, address := range addresses {
+		require.Equal(t, proofs[i], proofs[len(addresses)+i], address.name)
+	}
 }
 
 func TestPBinGetWitnessRefusesBin(t *testing.T) {
@@ -218,12 +246,9 @@ func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
 	require.NotEmpty(t, proofBefore.AccountProof)
 	require.Len(t, proofBefore.StorageProof, 1)
 
-	tx, err := m.DB.BeginTemporalRo(t.Context())
+	_, state := readDualCommittedCommitmentState(t, t.Context(), m.DB)
+	_, txNum, _, err := commitment.DecodeCommitmentV3State(state)
 	require.NoError(t, err)
-	defer tx.Rollback()
-	txNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, 2)
-	require.NoError(t, err)
-	tx.Rollback()
 	agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 	require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
 	settingsPath := filepath.Join(m.Dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
@@ -250,6 +275,16 @@ func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
 	frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
 	require.True(t, frozen)
 	require.Equal(t, txNum, frozenAt)
+
+	writeTx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer writeTx.Rollback()
+	domains, err := execctx.NewSharedDomains(t.Context(), writeTx, log.New())
+	require.NoError(t, err)
+	defer domains.Close()
+	require.ErrorContains(t, domains.DomainPut(kv.CommitmentDomain, writeTx, []byte("branch"), []byte("value"), txNum+1, nil), "is frozen")
+	_, currentState := readDualCommittedCommitmentState(t, t.Context(), m.DB)
+	require.Equal(t, state, currentState)
 }
 
 func TestDebugExecutionWitnessReportsPrunedCommitmentHistory(t *testing.T) {

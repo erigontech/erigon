@@ -24,9 +24,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/rpc"
@@ -78,8 +80,31 @@ func collectChainWitnesses(t *testing.T, commitmentV3, dual bool) chainWitnesses
 		witness, err := ethAPI.GetWitness(ctx, at)
 		require.NoError(t, err, "block %d eth_getWitness", n)
 		out.GetWitness = append(out.GetWitness, witness)
+		if dual {
+			assertDualCommitmentState(t, m, n)
+		}
 	}
 	return out
+}
+
+func assertDualCommitmentState(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum uint64) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	blockHash, _, err := m.BlockReader.CanonicalHash(t.Context(), tx, blockNum)
+	require.NoError(t, err)
+	shadowRoot, err := rawdb.ReadShadowStateRoot(tx, blockHash, blockNum)
+	require.NoError(t, err)
+	require.Len(t, shadowRoot, 32)
+	require.NotEqual(t, common.Hash{}, common.BytesToHash(shadowRoot))
+	maxTxNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, blockNum)
+	require.NoError(t, err)
+	state, ok, err := tx.GetAsOf(kv.CommitmentBinDomain, commitmentdb.KeyCommitmentState, maxTxNum+1)
+	require.NoError(t, err)
+	require.True(t, ok)
+	_, stateBlockNum := commitmentdb.DecodeTxBlockNums(state)
+	require.Equal(t, blockNum, stateBlockNum)
 }
 
 func TestWitnessesMatchHPHUnderCommitmentV3(t *testing.T) {

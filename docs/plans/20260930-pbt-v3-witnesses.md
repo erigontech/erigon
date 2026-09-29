@@ -345,18 +345,19 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_trie_test.go`
 
-- [ ] write tests:
+- [x] write tests:
       - mpt for a post-fork block inside the transition window, anchored at shadow roots;
       - for both a hex stop and a hex freeze, the last parent that is served and the first that is refused;
-      - mpt on a bin-only datadir.
+      - mpt on a bin-only datadir;
+      - a missing shadow root and an independently opened rpcdaemon database.
 
       Confirm they fail at the anchor or availability assertion.
-- [ ] replace the `binTrie && !IsBinaryTrie(parent)` special case with the anchor table
-- [ ] implement the availability rules through `Aggregator.IsDomainFrozen`, `ErigonDBSettings.FrozenAt`,
+- [x] replace the `binTrie && !IsBinaryTrie(parent)` special case with the anchor table
+- [x] implement the availability rules through `Aggregator.IsDomainFrozen`, `ErigonDBSettings.FrozenAt`,
       `rawdb.ReadCommitmentDomainStopped`, domain progress and `HistoryStartFrom`, with errors naming the failed
       condition. Expose any getter not reachable from `rpc/` and list its file here
-- [ ] write a test for a standalone rpcdaemon reading the same state
-- [ ] run tests - must pass before task 5
+- [x] write a test for a standalone rpcdaemon reading the same state
+- [x] run tests - must pass before task 5
 
 ### Task 5: Node model blob format and hashing
 

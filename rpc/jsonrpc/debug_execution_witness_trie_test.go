@@ -17,14 +17,24 @@
 package jsonrpc
 
 import (
+	"encoding/json"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func TestResolveWitnessRequest(t *testing.T) {
@@ -127,4 +137,140 @@ func TestExecutionWitnessPBTNotServed(t *testing.T) {
 			require.Nil(t, result)
 		})
 	}
+}
+
+func TestExecutionWitnessMPTAnchorsTransition(t *testing.T) {
+	previousAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+	api, _ := pbinWitnessFixture(t, 30)
+	mpt := "mpt"
+	for _, block := range []rpc.BlockNumber{3, 4} {
+		t.Run(block.String(), func(t *testing.T) {
+			result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(block), nil, &mpt)
+			require.NoError(t, err)
+			require.NotEmpty(t, result.State)
+		})
+	}
+}
+
+func TestExecutionWitnessMPTMissingShadowRoot(t *testing.T) {
+	api, m := pbinWitnessFixture(t, 30)
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		block := rawdb.ReadHeaderByNumber(tx, 4)
+		require.NotNil(t, block)
+		return tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(4, block.Hash()))
+	}))
+	mpt := "mpt"
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(4), nil, &mpt)
+	require.ErrorContains(t, err, "mpt")
+	require.ErrorContains(t, err, "block 4")
+	require.ErrorContains(t, err, "shadow root")
+	require.Nil(t, result)
+}
+
+func TestExecutionWitnessMPTAvailability(t *testing.T) {
+	t.Run("frozen", func(t *testing.T) {
+		api, m := pbinWitnessFixture(t, 30)
+		tx, err := m.DB.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		txNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, 2)
+		require.NoError(t, err)
+		agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		require.NoError(t, agg.FreezeDomain(kv.CommitmentDomain, txNum))
+		mpt := "mpt"
+		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(3), nil, &mpt)
+		require.NoError(t, err)
+		require.NotEmpty(t, result.State)
+		result, err = api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(4), nil, &mpt)
+		require.ErrorContains(t, err, "mpt commitment is frozen")
+		require.Nil(t, result)
+	})
+
+	t.Run("bin-only", func(t *testing.T) {
+		api, _ := pbinWitnessFixture(t, 0)
+		mpt := "mpt"
+		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(2), nil, &mpt)
+		require.ErrorContains(t, err, "mpt commitment domain is missing")
+		require.Nil(t, result)
+	})
+}
+
+func TestExecutionWitnessMPTStoppedAvailability(t *testing.T) {
+	t.Run("last parent served", func(t *testing.T) {
+		api, m := pbinWitnessFixture(t, 30)
+		require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+			return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain)
+		}))
+		mpt := "mpt"
+		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(3), nil, &mpt)
+		require.NoError(t, err)
+		require.NotEmpty(t, result.State)
+	})
+
+	t.Run("first parent refused", func(t *testing.T) {
+		api, m := pbinWitnessFixture(t, 30)
+		require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+			for _, table := range m.DB.Debug().DomainTables(kv.CommitmentDomain) {
+				if err := tx.ClearTable(table); err != nil {
+					return err
+				}
+			}
+			return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain)
+		}))
+		mpt := "mpt"
+		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(4), nil, &mpt)
+		require.ErrorContains(t, err, "mpt commitment was stopped before parent")
+		require.Nil(t, result)
+	})
+}
+
+func TestExecutionWitnessMPTStandaloneDatabase(t *testing.T) {
+	_, m := pbinWitnessFixture(t, 30)
+	primaryDB, ok := m.DB.(*temporal.DB)
+	require.True(t, ok)
+	primaryRawDB, ok := primaryDB.InternalDB().(*mdbx.MdbxKV)
+	require.True(t, ok)
+	blockFiles := primaryDB.DebugBlockFiles()
+	rawPath := primaryRawDB.Path()
+	primaryDB.Close()
+	openAPI := func(readonly bool) (*DebugAPIImpl, *temporal.DB) {
+		rawDB, err := mdbx.New(dbcfg.ChainDB, log.New()).Readonly(readonly).Path(rawPath).Open(t.Context())
+		require.NoError(t, err)
+		agg, err := dbstate.NewTest(m.Dirs).Logger(log.New()).Open(t.Context())
+		require.NoError(t, err)
+		db, err := temporal.New(rawDB, agg, blockFiles)
+		require.NoError(t, err)
+		api := NewPrivateDebugAPI(NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), db, nil, &rpccfg.DebugApiConfig{})
+		return api, db
+	}
+	mpt := "mpt"
+	selector := rpc.BlockNumberOrHashWithNumber(4)
+	primaryAPI, primaryDB := openAPI(false)
+	primary, err := primaryAPI.ExecutionWitness(t.Context(), selector, nil, &mpt)
+	require.NoError(t, err)
+	primaryJSON, err := json.Marshal(primary)
+	require.NoError(t, err)
+	primaryDB.Close()
+	standaloneAPI, standaloneDB := openAPI(true)
+	standalone, err := standaloneAPI.ExecutionWitness(t.Context(), selector, nil, &mpt)
+	require.NoError(t, err)
+	standaloneJSON, err := json.Marshal(standalone)
+	require.NoError(t, err)
+	require.Equal(t, primaryJSON, standaloneJSON)
+	standaloneDB.Close()
+
+	primaryAPI, primaryDB = openAPI(false)
+	require.NoError(t, primaryDB.Update(t.Context(), func(tx kv.RwTx) error {
+		block := rawdb.ReadHeaderByNumber(tx, 4)
+		require.NotNil(t, block)
+		return tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(4, block.Hash()))
+	}))
+	_, primaryErr := primaryAPI.ExecutionWitness(t.Context(), selector, nil, &mpt)
+	primaryDB.Close()
+	standaloneAPI, standaloneDB = openAPI(true)
+	_, standaloneErr := standaloneAPI.ExecutionWitness(t.Context(), selector, nil, &mpt)
+	require.EqualError(t, standaloneErr, primaryErr.Error())
+	standaloneDB.Close()
 }

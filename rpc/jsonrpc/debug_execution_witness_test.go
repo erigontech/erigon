@@ -785,10 +785,10 @@ func TestWitnessStatelessVerifyOnlyRunsUnderAssert(t *testing.T) {
 	bad := &ExecutionWitnessResult{State: []hexutil.Bytes{{0xde, 0xad, 0xbe, 0xef}}}
 
 	dbg.AssertEnabled = false
-	require.NoError(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
+	require.NoError(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine, block.Root()),
 		"without the gate a witness is never replayed, so a wrong one passes")
 
 	dbg.AssertEnabled = true
-	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine),
+	require.Error(t, api.verifyWitnessStateless(ctx, tx, bad, block, fullEngine, block.Root()),
 		"under the gate the stateless replay rejects a wrong witness")
 }
