@@ -404,6 +404,7 @@ func gasCreate2Eip3860(evm *EVM, callContext *CallContext, availableGas mdgas.Md
 }
 
 type createGasPreparation struct {
+	initCode    []byte
 	address     accounts.Address
 	codeHash    accounts.CodeHash
 	preparation createPreparation
@@ -420,7 +421,12 @@ func gasCreateAccount(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	if create2 {
 		offset := callContext.Stack.back(1).Uint64()
 		size := callContext.Stack.back(2).Uint64()
-		input := codeAndHash{code: getData(callContext.Memory.Data(), offset, size)}
+		if size > 0 {
+			prepared.initCode = make([]byte, size)
+			memory := callContext.Memory.Data()
+			copy(prepared.initCode, memory[min(offset, uint64(len(memory))):])
+		}
+		input := codeAndHash{code: prepared.initCode}
 		prepared.codeHash = input.Hash()
 		prepared.address = accounts.InternAddress(types.CreateAddress2(caller.Value(), callContext.Stack.back(3).Bytes32(), prepared.codeHash))
 	} else {

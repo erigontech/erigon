@@ -439,8 +439,8 @@ const (
 	GasChangeRefundRevertedState GasChangeReason = 17
 	// GasChangeCallGasForwarded is gas forwarded to a child call.
 	GasChangeCallGasForwarded GasChangeReason = 18
-	// GasChangeCallNewAccount is state gas charged for creating an account.
-	GasChangeCallNewAccount GasChangeReason = 19
+	// state gas charged for account creation before the transaction's first frame.
+	GasChangeRuntimeNewAccount GasChangeReason = 19
 	// GasChangeTxAuthorization is gas charged for processing an EIP-7702 authorization.
 	GasChangeTxAuthorization GasChangeReason = 20
 	// GasChangeRefundAccountCreation is state gas refunded for cancelled account creation.
