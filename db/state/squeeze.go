@@ -1739,6 +1739,8 @@ type pbinRebuildOverlay struct {
 	writes    map[string]pbinRebuildWrite
 	release   func([]byte)
 	read      func([]byte)
+	write     func([]byte, []byte, []byte) error
+	finished  func() error
 	spillPath string
 	restored  bool
 	err       error
@@ -1783,6 +1785,12 @@ func (o *pbinRebuildOverlay) FlushFinished(nextKey []byte) error {
 		if o.inner == nil {
 			return errors.New("commitment rebuild: overlay has no inner context")
 		}
+		if o.write != nil {
+			if err := o.write([]byte(key), write.data, write.prev); err != nil {
+				o.err = err
+				return err
+			}
+		}
 		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
 			return err
 		}
@@ -1793,6 +1801,12 @@ func (o *pbinRebuildOverlay) FlushFinished(nextKey []byte) error {
 	}
 	if spill != nil {
 		if err := spill.Sync(); err != nil {
+			return err
+		}
+	}
+	if o.finished != nil {
+		if err := o.finished(); err != nil {
+			o.err = err
 			return err
 		}
 	}
@@ -1815,6 +1829,16 @@ func (o *pbinRebuildOverlay) withRelease(release func([]byte)) *pbinRebuildOverl
 
 func (o *pbinRebuildOverlay) withRead(read func([]byte)) *pbinRebuildOverlay {
 	o.read = read
+	return o
+}
+
+func (o *pbinRebuildOverlay) withWrite(write func([]byte, []byte, []byte) error) *pbinRebuildOverlay {
+	o.write = write
+	return o
+}
+
+func (o *pbinRebuildOverlay) withFinished(finished func() error) *pbinRebuildOverlay {
+	o.finished = finished
 	return o
 }
 
@@ -1862,8 +1886,26 @@ func (o *pbinRebuildOverlay) Flush() error {
 	if o.err != nil {
 		return o.err
 	}
-	for key, write := range o.writes {
+	keys := make([]string, 0, len(o.writes))
+	for key := range o.writes {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, key := range keys {
+		write := o.writes[key]
+		if o.write != nil {
+			if err := o.write([]byte(key), write.data, write.prev); err != nil {
+				o.err = err
+				return err
+			}
+		}
 		if err := o.inner.PutBranch([]byte(key), write.data, write.prev); err != nil {
+			return err
+		}
+	}
+	if o.finished != nil {
+		if err := o.finished(); err != nil {
+			o.err = err
 			return err
 		}
 	}

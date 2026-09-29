@@ -89,6 +89,49 @@ func TestForEachPBinLeafEmptyState(t *testing.T) {
 	require.Equal(t, eip8297.EmptyTreeHash, root)
 }
 
+func TestForEachPBinLeafEIP8297ZeroValuesAndDeletionDropsCodeWhenLastHolderIsDeleted(t *testing.T) {
+	selectPBinLeafStreamHash(t)
+	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)
+	code := []byte{0x60, 0x01, 0x60, 0x00, 0x52}
+	address := pbinLeafStreamAddress(0x11)
+	writePBinLeafStreamRange(t, db, 0, pbinLeafStreamStepSize, []pbinLeafStreamAccount{
+		{address: address, code: code, codeWritten: true, nonce: 1, balance: 1},
+	})
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	previous, _, err := sd.GetLatest(kv.AccountsDomain, tx, address)
+	require.NoError(t, err)
+	require.NoError(t, sd.DomainDel(kv.AccountsDomain, tx, address, pbinLeafStreamStepSize, previous))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	writePBinLeafStreamStates(t, db, pbinLeafStreamStepSize, []pbinLeafStreamAccount{
+		{address: pbinLeafStreamAddress(0x22), nonce: 2, balance: 2},
+	})
+	writePBinLeafStreamStates(t, db, 2*pbinLeafStreamStepSize, []pbinLeafStreamAccount{
+		{address: pbinLeafStreamAddress(0x33), nonce: 3, balance: 3},
+	})
+	require.NoError(t, agg.BuildFiles(db, 2*pbinLeafStreamStepSize, unboundedFinalityCtx))
+	leaves := pbinLeafStreamLeaves(t, db, agg, true)
+	codeChunkKey := eip8297.TreeKeyCodeChunk(crypto.Keccak256Hash(code), 0)
+	entries := make([]eip8297.Entry, 0, len(leaves))
+	for _, leaf := range leaves {
+		require.NotEqual(t, codeChunkKey, leaf.Key)
+		entries = append(entries, eip8297.Entry{Key: leaf.Key, Value: leaf.Value})
+	}
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
+	require.NoError(t, err)
+	for _, leaf := range leaves {
+		require.NoError(t, builder.Add(leaf.Key, leaf.Value))
+	}
+	root, err := builder.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, eip8297.StateRootWithHash(entries, eip8297.SelectedHash()), root)
+}
+
 func TestForEachPBinLeafCombinesStamps(t *testing.T) {
 	selectPBinLeafStreamHash(t)
 	db, agg := testDbAndAggregatorv3(t, pbinLeafStreamStepSize)

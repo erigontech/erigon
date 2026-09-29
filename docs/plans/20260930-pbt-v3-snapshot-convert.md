@@ -367,20 +367,20 @@
 - Create: `db/state/pbt_range_writer.go`
 - Create: `db/state/pbt_range_writer_test.go`
 
-- [ ] add the writer signature with a stub. Write tests on a test datadir:
+- [x] add the writer signature with a stub. Write tests on a test datadir:
       - the leaf stream runs through `pbinForEachRebuildOpStreamLookaheadAfterWithSample` and `pbinRebuildOverlay` into
         the range writer;
       - row stamps equal the max leaf stamp under each prefix, including a row created after its leaves were folded;
       - every range up to S gets a file, and an empty range yields an empty file that merges.
 
       Confirm they fail at the stamp and file assertions.
-- [ ] implement row stamping from the sorted leaf stream and the mapping of stamps to the published accounts ranges
-- [ ] build one file per range with `(*Domain).buildFileRange` from a sorted `Collation`, writing the commitment-state
+- [x] implement row stamping from the sorted leaf stream and the mapping of stamps to the published accounts ranges
+- [x] build one file per range with `(*Domain).buildFileRange` from a sorted `Collation`, writing the commitment-state
       record in the newest range
-- [ ] write tests:
+- [x] write tests:
       - the aggregator's visible files after writing: no hidden state files;
       - a merge across the written ranges
-- [ ] run tests - must pass before task 6
+- [x] run tests - must pass before task 6
 
 ### Task 6: convert-pbt command
 
