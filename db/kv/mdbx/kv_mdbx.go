@@ -828,22 +828,10 @@ func (db *MdbxKV) BeginRo(ctx context.Context) (txn kv.Tx, err error) {
 		return nil, errors.New("db closed")
 	}
 
-	if kv.IsNonBlockingAcquire(ctx) {
-		if !db.roTxsLimiter.TryAcquire(1) {
-			db.trackTxEnd()
-			dbRoTxOverloaded.Inc()
-			return nil, kv.ErrReadTxLimitExceeded
-		}
-	} else if semErr := db.roTxsLimiter.Acquire(ctx, 1); semErr != nil {
-		db.trackTxEnd()
-		return nil, fmt.Errorf("mdbx.MdbxKV.BeginRo: roTxsLimiter error %w", semErr)
-	}
-
 	defer func() {
 		if txn == nil {
 			// on error, or if there is whatever reason that we don't return a tx,
 			// we need to free up the limiter slot, otherwise it could lead to deadlocks
-			db.roTxsLimiter.Release(1)
 			db.trackTxEnd()
 		}
 	}()
@@ -1431,9 +1419,7 @@ func (tx *MdbxTx) Commit() error {
 		tx.db.unregisterLiveTx(tx, "COMMIT")
 		tx.tx = nil
 		tx.db.trackTxEnd()
-		if tx.readOnly {
-			tx.db.roTxsLimiter.Release(1)
-		} else {
+		if !tx.readOnly {
 			runtime.UnlockOSThread()
 		}
 		tx.db.leakDetector.Del(tx.traceID)
@@ -1506,9 +1492,7 @@ func (tx *MdbxTx) Rollback() {
 	}
 	tx.db.unregisterLiveTx(tx, "ROLLBACK")
 	tx.db.trackTxEnd()
-	if tx.readOnly {
-		tx.db.roTxsLimiter.Release(1)
-	} else {
+	if !tx.readOnly {
 		runtime.UnlockOSThread()
 	}
 	tx.db.leakDetector.Del(tx.traceID)
