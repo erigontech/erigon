@@ -113,7 +113,6 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 			assert.True(t, result.values.needMerge)
 		}
 	})
-
 }
 
 // TestHistoryStaticFilesInRange_DetectsGapInSourceFiles pins that a gap in
@@ -1031,7 +1030,8 @@ func Test_mergeEliasFano(t *testing.T) {
 		644951, 644995, 682653,
 		644988, 644987, 644946, 644994,
 		644942, 644945, 644941, 644940,
-		644939, 644938, 644792, 644787}
+		644939, 644938, 644792, 644787,
+	}
 	slices.Sort(secondList)
 	second := eliasfano32.NewEliasFano(uint64(len(secondList)), uint64(secondList[len(secondList)-1]))
 
@@ -1377,7 +1377,7 @@ func TestHistoryAndIIAlignment(t *testing.T) {
 	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
-	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
+	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context())
 	t.Cleanup(agg.Close)
 	setup := func() (account *Domain) {
 		require.NoError(t, agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger))

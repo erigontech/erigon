@@ -19,10 +19,12 @@ package jsonrpc
 import (
 	"math"
 	"sync"
+	"unsafe"
 
 	lru "github.com/hashicorp/golang-lru/v2"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 )
 
 const (
@@ -100,17 +102,19 @@ func (c *witnessResultCache) HeadCapture() bool { return c.headCapture }
 // CacheOnly reports whether a serve miss must fail out-of-window instead of recomputing.
 func (c *witnessResultCache) CacheOnly() bool { return c.cacheOnly }
 
-// ResidentBytes reports the total pre-marshaled JSON bytes currently cached.
+// ResidentBytes reports the estimated bytes of the witnesses currently cached.
 func (c *witnessResultCache) ResidentBytes() int {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.residentBytes
 }
 
-// store is the build paths' insert: it caches the pre-marshaled witness and publishes it.
-func (c *witnessResultCache) store(num uint64, hash common.Hash, enc []byte) {
-	c.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
-	c.feed.publish(witnessPush{num: num, hash: hash, json: enc})
+// store is the build paths' insert: it caches the witness and publishes it. The result is
+// shared with readers from here on and must not change.
+func (c *witnessResultCache) store(num uint64, hash common.Hash, r *ExecutionWitnessResult) {
+	r.headerByNumber = nil // only the build's BLOCKHASH lookups read it
+	c.Add(hash, r)
+	c.feed.publish(witnessPush{num: num, hash: hash, result: r})
 }
 
 func (c *witnessResultCache) subscribe() chan witnessPush     { return c.feed.subscribe() }
@@ -164,10 +168,18 @@ func (c *witnessResultCache) onEvict(hash common.Hash, _ *ExecutionWitnessResult
 	c.mu.Unlock()
 }
 
-// witnessResultSize is the resident cost of a cached result: its pre-marshaled JSON.
+// witnessResultSize estimates a cached result's resident bytes: each byte string plus its slice header.
 func witnessResultSize(r *ExecutionWitnessResult) int {
 	if r == nil {
 		return 0
 	}
-	return len(r.cachedJSON)
+	n := 0
+	for _, list := range [][]hexutil.Bytes{r.State, r.Codes, r.Keys, r.Headers} {
+		for _, b := range list {
+			n += len(b) + sliceHeaderBytes
+		}
+	}
+	return n
 }
+
+const sliceHeaderBytes = int(unsafe.Sizeof([]byte(nil)))

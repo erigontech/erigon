@@ -41,8 +41,8 @@ func (bus *ManagedEventBus) String() string {
 func (bus *ManagedEventBus) Register(object any, fns ...any) (err error) {
 	objectVal := reflect.ValueOf(object)
 	if len(fns) == 0 {
-		for i := 0; i < objectVal.NumMethod(); i++ {
-			if method := objectVal.Method(i); method.Type().NumIn() > 0 && method.Type().NumOut() == 0 {
+		for _, method := range objectVal.Methods() {
+			if method.Type().NumIn() > 0 && method.Type().NumOut() == 0 {
 				fns = append(fns, method.Interface())
 			}
 		}
@@ -80,7 +80,6 @@ func (bus *ManagedEventBus) UnregisterAll(object any) error {
 	bus.registrationLock.Lock()
 	for _, fn := range bus.registrations[objectPtr] {
 		err := bus.eventBus.Unsubscribe(fn)
-
 		if err != nil {
 			return err
 		}

@@ -33,28 +33,29 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 )
 
-func initializeDbNonDupSort(rwTx kv.RwTx) {
-	rwTx.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value"))
-	rwTx.Put(kv.HeaderNumber, []byte("CAAA"), []byte("value1"))
-	rwTx.Put(kv.HeaderNumber, []byte("CBAA"), []byte("value2"))
-	rwTx.Put(kv.HeaderNumber, []byte("CCAA"), []byte("value3"))
+func initializeDbNonDupSort(tb testing.TB, rwTx kv.RwTx) {
+	tb.Helper()
+	require.NoError(tb, rwTx.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value")))
+	require.NoError(tb, rwTx.Put(kv.HeaderNumber, []byte("CAAA"), []byte("value1")))
+	require.NoError(tb, rwTx.Put(kv.HeaderNumber, []byte("CBAA"), []byte("value2")))
+	require.NoError(tb, rwTx.Put(kv.HeaderNumber, []byte("CCAA"), []byte("value3")))
 }
 
 func TestPutAppendHas(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.5")))
-	//MDBX's APPEND checking only keys, not values
+	// MDBX's APPEND checking only keys, not values
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
 	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("CBAA"), []byte("value3.5")))
-	//MDBX's APPEND checking only keys, not values
+	// MDBX's APPEND checking only keys, not values
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
 	require.NoError(t, batch.AppendDup(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
 	// Pure Go backend allows out-of-order Append (no MDBX ordering check).
@@ -78,13 +79,13 @@ func TestPutAppendHas(t *testing.T) {
 func TestLastMiningDB(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
-	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
-	batch.Put(kv.HeaderNumber, []byte("BCAA"), []byte("value5"))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("BCAA"), []byte("value5")))
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
@@ -105,13 +106,13 @@ func TestLastMiningDB(t *testing.T) {
 func TestLastMiningMem(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
-	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
-	batch.Put(kv.HeaderNumber, []byte("DCAA"), []byte("value5"))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("DCAA"), []byte("value5")))
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
@@ -132,16 +133,16 @@ func TestLastMiningMem(t *testing.T) {
 func TestDeleteMining(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
-	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
-	batch.Put(kv.HeaderNumber, []byte("DCAA"), []byte("value5"))
-	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("DCAA"), []byte("value5")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5")))
 
-	batch.Delete(kv.HeaderNumber, []byte("BAAA"))
-	batch.Delete(kv.HeaderNumber, []byte("CBAA"))
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("BAAA")))
+	require.NoError(t, batch.Delete(kv.HeaderNumber, []byte("CBAA")))
 
 	cursor, err := batch.Cursor(kv.HeaderNumber)
 	require.NoError(t, err)
@@ -161,13 +162,13 @@ func TestDeleteMining(t *testing.T) {
 func TestFlush(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
-	batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4"))
-	batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value5"))
-	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("BAAA"), []byte("value4")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value5")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5")))
 
 	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
@@ -186,14 +187,14 @@ func TestFlush(t *testing.T) {
 func TestFlushAppendPath(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx) // seeds AAAA..CCAA
+	initializeDbNonDupSort(t, rwTx) // seeds AAAA..CCAA
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
 	// All keys strictly greater than CCAA → Append path.
-	batch.Put(kv.HeaderNumber, []byte("DAAA"), []byte("v-d"))
-	batch.Put(kv.HeaderNumber, []byte("EAAA"), []byte("v-e"))
-	batch.Put(kv.HeaderNumber, []byte("FAAA"), []byte("v-f"))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("DAAA"), []byte("v-d")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("EAAA"), []byte("v-e")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("FAAA"), []byte("v-f")))
 
 	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
@@ -216,8 +217,8 @@ func TestFlushEmptyDestinationPlain(t *testing.T) {
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
-	batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("v1"))
-	batch.Put(kv.HeaderNumber, []byte("BBBB"), []byte("v2"))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("v1")))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("BBBB"), []byte("v2")))
 
 	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
@@ -236,7 +237,7 @@ func TestFlushEmptyDestinationPlain(t *testing.T) {
 func TestFlushDupsortNonEmptyDestination(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbDupSort(rwTx) // seeds key1=(1.1, 1.3), key3=(3.1, 3.3)
+	initializeDbDupSort(t, rwTx) // seeds key1=(1.1, 1.3), key3=(3.1, 3.3)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
@@ -290,12 +291,12 @@ func TestFlushEmptyDestinationDupsort(t *testing.T) {
 func TestForEach(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
-	batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5"))
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("FCAA"), []byte("value5")))
 	require.NoError(t, batch.Flush(t.Context(), rwTx))
 
 	var keys []string
@@ -347,7 +348,7 @@ func newTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 func TestPrefix(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	kvs1, err := rwTx.Prefix(kv.HeaderNumber, []byte("AB"))
 	require.NoError(t, err)
@@ -386,7 +387,7 @@ func TestPrefix(t *testing.T) {
 func TestForAmount(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
@@ -420,7 +421,7 @@ func TestForAmount(t *testing.T) {
 func TestGetOneAfterClearBucket(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
@@ -441,7 +442,7 @@ func TestGetOneAfterClearBucket(t *testing.T) {
 func TestSeekExactAfterClearBucket(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
@@ -476,7 +477,7 @@ func TestSeekExactAfterClearBucket(t *testing.T) {
 func TestFirstAfterClearBucket(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
@@ -506,7 +507,7 @@ func TestFirstAfterClearBucket(t *testing.T) {
 func TestIncReadSequence(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbNonDupSort(rwTx)
+	initializeDbNonDupSort(t, rwTx)
 	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
@@ -688,23 +689,24 @@ func TestMemoryMutationFlushDoesNotOverwriteUnchangedStateVersion(t *testing.T) 
 		"the overlay's explicit table writes must still be flushed")
 }
 
-func initializeDbDupSort(rwTx kv.RwTx) {
-	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1"))
-	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.1"))
-	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.3"))
-	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3"))
+func initializeDbDupSort(tb testing.TB, rwTx kv.RwTx) {
+	tb.Helper()
+	require.NoError(tb, rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1")))
+	require.NoError(tb, rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.1")))
+	require.NoError(tb, rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.3")))
+	require.NoError(tb, rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3")))
 }
 
 func TestNext(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbDupSort(rwTx)
+	initializeDbDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
 
-	batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2"))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.2")))
 
 	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
@@ -744,14 +746,14 @@ func TestNext(t *testing.T) {
 func TestNextNoDup(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbDupSort(rwTx)
+	initializeDbDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
 
-	batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.1"))
-	batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.2"))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.1")))
+	require.NoError(t, batch.Put(kv.TblAccountVals, []byte("key2"), []byte("value2.2")))
 
 	cursor, err := batch.CursorDupSort(kv.TblAccountVals)
 	require.NoError(t, err)
@@ -773,7 +775,7 @@ func TestNextNoDup(t *testing.T) {
 func TestDeleteCurrentDuplicates(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbDupSort(rwTx)
+	initializeDbDupSort(t, rwTx)
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
@@ -809,8 +811,8 @@ func TestDeleteCurrentDuplicates(t *testing.T) {
 func TestSeekBothRange(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1"))
-	rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3"))
+	require.NoError(t, rwTx.Put(kv.TblAccountVals, []byte("key1"), []byte("value1.1")))
+	require.NoError(t, rwTx.Put(kv.TblAccountVals, []byte("key3"), []byte("value3.3")))
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
@@ -833,20 +835,21 @@ func TestSeekBothRange(t *testing.T) {
 	require.Equal(t, "value3.3", string(v))
 }
 
-func initializeDbHeaders(rwTx kv.RwTx) {
-	rwTx.Put(kv.Headers, []byte("A"), []byte("0"))
-	rwTx.Put(kv.Headers, []byte("A..........................._______________________________A"), []byte("1"))
-	rwTx.Put(kv.Headers, []byte("A..........................._______________________________C"), []byte("2"))
-	rwTx.Put(kv.Headers, []byte("B"), []byte("8"))
-	rwTx.Put(kv.Headers, []byte("C"), []byte("9"))
-	rwTx.Put(kv.Headers, []byte("D..........................._______________________________A"), []byte("3"))
-	rwTx.Put(kv.Headers, []byte("D..........................._______________________________C"), []byte("4"))
+func initializeDbHeaders(tb testing.TB, rwTx kv.RwTx) {
+	tb.Helper()
+	require.NoError(tb, rwTx.Put(kv.Headers, []byte("A"), []byte("0")))
+	require.NoError(tb, rwTx.Put(kv.Headers, []byte("A..........................._______________________________A"), []byte("1")))
+	require.NoError(tb, rwTx.Put(kv.Headers, []byte("A..........................._______________________________C"), []byte("2")))
+	require.NoError(tb, rwTx.Put(kv.Headers, []byte("B"), []byte("8")))
+	require.NoError(tb, rwTx.Put(kv.Headers, []byte("C"), []byte("9")))
+	require.NoError(tb, rwTx.Put(kv.Headers, []byte("D..........................._______________________________A"), []byte("3")))
+	require.NoError(tb, rwTx.Put(kv.Headers, []byte("D..........................._______________________________C"), []byte("4")))
 }
 
 func TestGetOne(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
-	initializeDbHeaders(rwTx)
+	initializeDbHeaders(t, rwTx)
 
 	require.NoError(t, rwTx.Put(kv.Headers, []byte("A..........................."), []byte("?")))
 
@@ -1059,6 +1062,84 @@ func TestDomainReadErrorsPropagate(t *testing.T) {
 
 			_, _, err = tx.HistorySeek(kv.ReceiptDomain, key, 1)
 			require.ErrorIs(t, err, wantErr, "HistorySeek must propagate the DomainReader error")
+		})
+	}
+}
+
+// historyDisabledDomainReader stands in for an in-memory batch that keeps only the latest value per
+// key: it has no historical answer to give, and says so with kv.ErrInMemHistoryDisabled. Receipts
+// are still served from memory, matching the carve-out in TemporalMemBatch.GetAsOf.
+type historyDisabledDomainReader struct{ receipt []byte }
+
+func (r historyDisabledDomainReader) GetAsOf(name kv.Domain, _ []byte, _ uint64) ([]byte, bool, error) {
+	if name == kv.ReceiptDomain {
+		return r.receipt, true, nil
+	}
+	return nil, false, kv.ErrInMemHistoryDisabled
+}
+
+func (r historyDisabledDomainReader) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	return r.GetAsOf(name, k, ts)
+}
+
+// committedTemporalTx answers every history read with a fixed value, standing in for the backing
+// transaction that holds the committed history.
+type committedTemporalTx struct {
+	kv.TemporalTx
+	val []byte
+}
+
+func (t *committedTemporalTx) GetAsOf(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return t.val, true, nil
+}
+
+func (t *committedTemporalTx) HistorySeek(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return t.val, true, nil
+}
+
+// TestHistoryDisabledFallsThrough covers both overlay read views: when the DomainReader reports that
+// it holds no history, the read must reach the backing tx instead of failing, while receipt reads
+// keep being answered from memory.
+func TestHistoryDisabledFallsThrough(t *testing.T) {
+	t.Parallel()
+
+	_, rwTx := newTestTx(t)
+	committed := []byte("committed")
+	backingTx := &committedTemporalTx{TemporalTx: rwTx, val: committed}
+
+	batch, err := membatchwithdb.NewMemoryBatch(backingTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	inMemReceipt := []byte("in-memory receipt")
+	batch.DomainReader = historyDisabledDomainReader{receipt: inMemReceipt}
+
+	key := []byte{0x3}
+	for name, tx := range map[string]kv.TemporalTx{
+		"MemoryMutation":          batch,
+		"OverlayTemporalReadView": batch.NewTemporalReadView(backingTx),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+				t.Run(domain.String(), func(t *testing.T) {
+					val, ok, err := tx.GetAsOf(domain, key, 1)
+					require.NoError(t, err, "GetAsOf must fall through to the backing tx")
+					require.True(t, ok)
+					require.Equal(t, committed, val)
+
+					val, ok, err = tx.HistorySeek(domain, key, 1)
+					require.NoError(t, err, "HistorySeek must fall through to the backing tx")
+					require.True(t, ok)
+					require.Equal(t, committed, val)
+				})
+			}
+
+			t.Run("ReceiptDomain", func(t *testing.T) {
+				val, ok, err := tx.GetAsOf(kv.ReceiptDomain, key, 1)
+				require.NoError(t, err)
+				require.True(t, ok)
+				require.Equal(t, inMemReceipt, val, "receipts must still come from the overlay")
+			})
 		})
 	}
 }

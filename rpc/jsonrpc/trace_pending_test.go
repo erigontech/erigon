@@ -31,6 +31,15 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
+// requirePendingRejected checks that err rejects "pending" as an invalid parameter (-32602).
+func requirePendingRejected(t *testing.T, err error) {
+	t.Helper()
+	require.ErrorIs(t, err, errPendingNotSupported)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+}
+
 // Tracing methods with a block selector reject "pending": they replay on the
 // committed view, which has no pending block. Accepting the tag would answer
 // for the latest executed block and report it as pending.
@@ -43,47 +52,47 @@ func TestTracingRejectsPendingTag(t *testing.T) {
 	traceAPI := newTraceApiForTest(m)
 
 	t.Run("debug_traceCall", func(t *testing.T) {
-		err := debugAPI.TraceCall(ctx, ethapi.CallArgs{}, pendingNrOrHash, nil, jsonstream.New(io.Discard))
-		require.ErrorIs(t, err, errPendingNotSupported)
+		err := debugAPI.TraceCall(ctx, ethapi.CallArgs{}, &pendingNrOrHash, nil, jsonstream.New(io.Discard))
+		requirePendingRejected(t, err)
 	})
 
 	t.Run("debug_traceCallMany", func(t *testing.T) {
 		err := debugAPI.TraceCallMany(ctx, nil, StateContext{BlockNumber: pendingNrOrHash}, nil, jsonstream.New(io.Discard))
-		require.ErrorIs(t, err, errPendingNotSupported)
+		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_call", func(t *testing.T) {
 		_, err := traceAPI.Call(ctx, TraceCallParam{}, []string{TraceTypeTrace}, &pendingNrOrHash, nil)
-		require.ErrorIs(t, err, errPendingNotSupported)
+		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_callMany", func(t *testing.T) {
 		_, err := traceAPI.CallMany(ctx, json.RawMessage("[]"), &pendingNrOrHash, nil)
-		require.ErrorIs(t, err, errPendingNotSupported)
+		requirePendingRejected(t, err)
 	})
 
 	t.Run("debug_traceBlockByNumber", func(t *testing.T) {
 		err := debugAPI.TraceBlockByNumber(ctx, rpc.PendingBlockNumber, nil, jsonstream.New(io.Discard))
-		require.ErrorIs(t, err, errPendingNotSupported)
+		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_block", func(t *testing.T) {
 		_, err := traceAPI.Block(ctx, rpc.PendingBlockNumber, nil, nil)
-		require.ErrorIs(t, err, errPendingNotSupported)
+		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_replayBlockTransactions", func(t *testing.T) {
 		_, err := traceAPI.ReplayBlockTransactions(ctx, pendingNrOrHash, []string{TraceTypeTrace}, nil, nil)
-		require.ErrorIs(t, err, errPendingNotSupported)
+		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_filter fromBlock", func(t *testing.T) {
 		err := traceAPI.Filter(ctx, TraceFilterRequest{FromBlock: &pendingNrOrHash}, nil, nil, jsonstream.New(io.Discard))
-		require.ErrorIs(t, err, errPendingNotSupported)
+		requirePendingRejected(t, err)
 	})
 
 	t.Run("trace_filter toBlock", func(t *testing.T) {
 		err := traceAPI.Filter(ctx, TraceFilterRequest{ToBlock: &pendingNrOrHash}, nil, nil, jsonstream.New(io.Discard))
-		require.ErrorIs(t, err, errPendingNotSupported)
+		requirePendingRejected(t, err)
 	})
 }

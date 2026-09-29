@@ -114,12 +114,10 @@ func TestEth66EmptyMessages(t *testing.T) {
 			t.Errorf("test %d, type %T, have\n\t%x\nwant\n\t%x", i, msg, have, want)
 		}
 	}
-
 }
 
 // TestEth66Messages tests the encoding of all redefined eth66 messages
 func TestEth66Messages(t *testing.T) {
-
 	// Some basic structs used during testing
 	var (
 		header       *types.Header
@@ -359,30 +357,6 @@ func TestEth71ProtocolRegistration(t *testing.T) {
 	if got := rev[sentryproto.MessageId_BLOCK_ACCESS_LISTS_71]; got != BlockAccessListsMsg {
 		t.Errorf("FromProto[ETH71][BLOCK_ACCESS_LISTS_71] = %v, want BlockAccessListsMsg", got)
 	}
-}
-
-// BenchmarkHashOrNumberEncodeRLP pins why the hash branch encodes through a pointer:
-// a common.Hash boxed by value is not addressable, so the reflection encoder copies
-// it with reflect.New before it can take a byte slice of it.
-func BenchmarkHashOrNumberEncodeRLP(b *testing.B) {
-	hn := &HashOrNumber{Hash: common.Hash{1, 2, 3}}
-
-	b.Run("byValue", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			if err := rlp.Encode(io.Discard, hn.Hash); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
-	b.Run("byPointer", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			if err := rlp.Encode(io.Discard, &hn.Hash); err != nil {
-				b.Fatal(err)
-			}
-		}
-	})
 }
 
 // TestHashOrNumberEncodeRLPPointerIsAllocFree pins both EncodeRLP branches: the

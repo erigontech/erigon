@@ -24,12 +24,12 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
-
 	tests := map[string]struct {
 		params   []byte
 		expected string
@@ -91,21 +91,21 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				}
 				if id == 4 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyArray()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
 				if id == 5 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyObject()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
 				if id == 6 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyArray()
 					// intentionally leave the result object open: the tracer erroring out
 					// mid-write must not leave the response's "result" object unclosed.
@@ -124,7 +124,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				streamable:  true,
 			}
 
-			args, err := parsePositionalArguments((msg).Params, cb.argTypes)
+			args, err := parsePositionalArguments(msg.Params, cb.argTypes)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +133,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			stream := jsonstream.New(&buf)
 
 			h := handler{}
-			h.runMethod(context.Background(), &msg, cb, args, stream)
+			_, _ = h.runMethod(context.Background(), &msg, cb, args, stream)
 
 			stream.Flush()
 
@@ -141,7 +141,6 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			assert.Equal(t, testParams.expected, output, "expected output should match")
 		})
 	}
-
 }
 
 // Smoke test for the streamable-callback path: runMethod writes the result
@@ -176,6 +175,36 @@ func TestRunMethodStreamable(t *testing.T) {
 
 	h := handler{}
 	assert.NotPanics(t, func() {
-		h.runMethod(ctx, &msg, cb, args, stream)
+		_, _ = h.runMethod(ctx, &msg, cb, args, stream)
 	})
+}
+
+// runMethod answers inside the stream, so the error it reports is the only signal left for the
+// failure metric and the "[rpc] served" warning.
+func TestRunMethodReportsAnsweredError(t *testing.T) {
+	msg := jsonrpcMessage{Version: vsn, ID: []byte("1"), Method: "test_test"}
+	for name, cb := range map[string]*callback{
+		"streamable": {
+			fn:         reflect.ValueOf(func(stream jsonstream.Stream) error { return errors.New("boom") }),
+			errPos:     0,
+			streamable: true,
+		},
+		"result encode failure": {
+			fn:     reflect.ValueOf(func() (any, error) { return failingFastJSON{}, nil }),
+			errPos: 1,
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			h := handler{}
+
+			answer, err := h.runMethod(context.Background(), &msg, cb, nil, stream)
+
+			require.Error(t, err)
+			require.Nil(t, answer, "the response is already in the stream")
+			require.NoError(t, stream.Flush())
+			require.Contains(t, buf.String(), `"error":`)
+		})
+	}
 }

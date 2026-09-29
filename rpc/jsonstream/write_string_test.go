@@ -19,12 +19,13 @@ package jsonstream
 import (
 	"bytes"
 	"encoding/json"
-	"io"
 	"math/rand"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/dbg"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -57,6 +58,16 @@ func parityCases() []string {
 	return cases
 }
 
+func escapeFreeCases() []string {
+	var cases []string
+	for _, val := range parityCases() {
+		if escapeIndex(val) == len(val) {
+			cases = append(cases, val)
+		}
+	}
+	return cases
+}
+
 // TestWriteStringFastMatchesJsoniter pins that bulk-copying escape-free runs
 // produces exactly what jsoniter's per-byte path would, including the escapes it
 // deliberately does not apply (HTML characters are left alone: Erigon uses
@@ -73,8 +84,11 @@ func TestWriteStringFastMatchesJsoniter(t *testing.T) {
 	}
 }
 
+// TestWriteObjectFieldFastMatchesJsoniter covers only names without escapes: a
+// field name comes from a source literal or a hex string, so writeObjectFieldFast
+// does not scan for them.
 func TestWriteObjectFieldFastMatchesJsoniter(t *testing.T) {
-	for _, name := range parityCases() {
+	for _, name := range escapeFreeCases() {
 		want := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64)
 		want.WriteObjectField(name)
 
@@ -85,6 +99,14 @@ func TestWriteObjectFieldFastMatchesJsoniter(t *testing.T) {
 	}
 }
 
+func TestWriteObjectFieldFastAssertsEscapes(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+	stream := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64)
+	require.Panics(t, func() { writeObjectFieldFast(stream, `odd"name`) })
+	require.NotPanics(t, func() { writeObjectFieldFast(stream, "oddName") })
+}
+
 // TestWriteStringThroughWrappers exercises the composition the parity test
 // cannot see: a string written through New crosses the flush threshold, keeps
 // the field/comma stack straight, and survives a value larger than the buffer.
@@ -93,17 +115,16 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 		var out bytes.Buffer
 		s := New(&out)
 		s.WriteObjectStart()
-		s.WriteObjectField(`odd"name`)
+		s.Field("oddName")
 		s.WriteString("0x" + strings.Repeat("ab", 32))
-		s.WriteMore()
-		s.WriteObjectField("clean")
+		s.Field("clean")
 		s.WriteString("short")
 		require.NoError(t, s.ClosePending(0))
 		require.NoError(t, s.Flush())
 
 		var decoded map[string]string
 		require.NoError(t, json.Unmarshal(out.Bytes(), &decoded))
-		require.Equal(t, "0x"+strings.Repeat("ab", 32), decoded[`odd"name`])
+		require.Equal(t, "0x"+strings.Repeat("ab", 32), decoded["oddName"])
 		require.Equal(t, "short", decoded["clean"])
 	})
 
@@ -113,10 +134,7 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 		s.WriteArrayStart()
 		val := strings.Repeat("c", 4096)
 		n := 2*FlushThreshold/len(val) + 1
-		for i := range n {
-			if i > 0 {
-				s.WriteMore()
-			}
+		for range n {
 			s.WriteString(val)
 		}
 		s.WriteArrayEnd()
@@ -150,62 +168,4 @@ func TestWriteStringThroughWrappers(t *testing.T) {
 		require.Less(t, len(s.stream.Buffer()), 2*FlushThreshold)
 		require.Error(t, s.Flush(), "the failure must still be reported")
 	})
-}
-
-// benchWriteString drives one write path over a fixed value, recycling the
-// buffer instead of flushing so the measurement holds no io and no growth.
-func benchWriteString(b *testing.B, write func(*jsoniter.Stream, string), val string) {
-	b.Helper()
-	s := jsoniter.NewStream(jsoniter.ConfigDefault, io.Discard, InitialBufferSize)
-	b.ReportAllocs()
-	for b.Loop() {
-		write(s, val)
-		if len(s.Buffer()) >= FlushThreshold {
-			s.SetBuffer(s.Buffer()[:0])
-		}
-	}
-}
-
-// BenchmarkWriteString measures both paths in one binary, so the jsoniter
-// sub-benchmark is the baseline the fast one is compared against:
-// benchstat -col /impl pairs them per shape.
-func BenchmarkWriteString(b *testing.B) {
-	longClean := "0x" + strings.Repeat("ab", 2048)
-	for _, tc := range []struct{ name, val string }{
-		{"op3", "ADD"},
-		{"op6", "SWAP16"},
-		{"hex18", "0x1234567890abcdef"},
-		{"storageKey66", "0x" + strings.Repeat("ab", 32)},
-		{"escapeEarly", `a "quoted" value`},
-		{"clean4k", longClean},
-		{"escapeLate4k", longClean + `"`},
-		{"quotes4k", strings.Repeat(`"`, 4096)},
-		{"backslashes4k", strings.Repeat("\\", 4096)},
-		{"ctrl4k", strings.Repeat("\x00", 4096)},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			b.Run("impl=jsoniter", func(b *testing.B) {
-				benchWriteString(b, (*jsoniter.Stream).WriteString, tc.val)
-			})
-			b.Run("impl=fast", func(b *testing.B) {
-				benchWriteString(b, writeStringFast, tc.val)
-			})
-		})
-	}
-}
-
-func BenchmarkWriteObjectField(b *testing.B) {
-	for _, tc := range []struct{ name, val string }{
-		{"gas", "gas"},
-		{"storageKey66", "0x" + strings.Repeat("ab", 32)},
-	} {
-		b.Run(tc.name, func(b *testing.B) {
-			b.Run("impl=jsoniter", func(b *testing.B) {
-				benchWriteString(b, (*jsoniter.Stream).WriteObjectField, tc.val)
-			})
-			b.Run("impl=fast", func(b *testing.B) {
-				benchWriteString(b, writeObjectFieldFast, tc.val)
-			})
-		})
-	}
 }

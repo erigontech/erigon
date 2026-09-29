@@ -10,7 +10,6 @@ import (
 )
 
 func TestMultiEncodingSeqBuilder(t *testing.T) {
-
 	t.Run("singleton sequence", func(t *testing.T) {
 		builder := NewBuilder(1000, 1, 1005)
 		builder.AddOffset(1005)
@@ -60,7 +59,8 @@ func TestMultiEncodingSeqBuilder(t *testing.T) {
 				"0000001D"+
 				"0000001F"+
 				"00000021"+
-				"00000023"), b)
+				"00000023",
+		), b)
 	})
 
 	t.Run("large sequences must use rebased elias fano", func(t *testing.T) {
@@ -182,25 +182,6 @@ func TestBuilderReset(t *testing.T) {
 		require.Same(t, ef1, b.rebasedEf, "rebasedEf should be reused")
 		check(t, 5000, large2)
 	})
-}
-
-func BenchmarkBuilder(b *testing.B) {
-	const baseNum = 1_000_000
-	const n = 500
-
-	vals := make([]uint64, n)
-	for i := range vals {
-		vals[i] = baseNum + uint64(i)*2
-	}
-
-	for b.Loop() {
-		sb := NewBuilder(baseNum, n, vals[n-1])
-		for _, v := range vals {
-			sb.AddOffset(v)
-		}
-		sb.Build()
-		_ = sb.AppendBytes(nil)
-	}
 }
 
 // TestBuilderRoundTrip verifies that serialized output can be read back correctly via

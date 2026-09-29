@@ -176,7 +176,7 @@ func (f *ForkChoiceStore) payloadAttestationValidationContext(
 	return f.payloadAttestationContexts.get(ctx, blockRoot, func() (*payloadAttestationValidationContext, error) {
 		blockState, err := f.GetStateAtBlockRoot(blockRoot, true)
 		if err != nil {
-			return nil, err
+			return nil, fmt.Errorf("%w: block state unavailable for root %v: %w", ErrIgnore, blockRoot, err)
 		}
 		if blockState == nil {
 			return nil, fmt.Errorf("%w: block state not found for root %v", ErrIgnore, blockRoot)

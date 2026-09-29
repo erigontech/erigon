@@ -356,7 +356,7 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 		},
 		"eoa non-zero value": {
 			hasValue:          true,
-			expectedExecution: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.TransferLogCostEIP2780 + params.TxValueCostEIP2780,
+			expectedExecution: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.TxValueCostEIP2780,
 		},
 		"creation zero value": {
 			creation:          true,
@@ -365,7 +365,7 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 		"creation non-zero value": {
 			creation:          true,
 			hasValue:          true,
-			expectedExecution: params.TxBaseEIP2780 + params.CreateAccessEIP2780 + params.TransferLogCostEIP2780,
+			expectedExecution: params.TxBaseEIP2780 + params.CreateAccessEIP2780,
 		},
 	}
 	for name, c := range cases {
@@ -422,6 +422,36 @@ func TestEIP2780AuthorizationStateGasIsRuntime(t *testing.T) {
 		ExecutionGas: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + 2*params.ExecutionPerAuthBaseCostEIP8038,
 		FloorGasCost: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780,
 	}, result)
+}
+
+func TestEIP8038AccessListIntrinsicGas(t *testing.T) {
+	cases := map[string]struct {
+		accessListLen  uint64
+		storageKeysLen uint64
+		expectedGas    uint64
+	}{
+		"address": {
+			accessListLen: 1,
+			expectedGas:   2_900,
+		},
+		"address and storage key": {
+			accessListLen:  1,
+			storageKeysLen: 1,
+			expectedGas:    4_900,
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+				AccessListLen:  tc.accessListLen,
+				StorageKeysLen: tc.storageKeysLen,
+				IsEIP2780:      true,
+			})
+			assert.False(t, overflow)
+			expectedGas := params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + tc.expectedGas
+			assert.Equal(t, expectedGas, result.ExecutionGas)
+		})
+	}
 }
 
 func TestAmsterdamAAIntrinsicGas(t *testing.T) {
@@ -494,4 +524,14 @@ func TestEIP7981NotActive(t *testing.T) {
 	assert.Equal(t, params.TxGas+32*params.TxDataNonZeroGasEIP2028+params.TxAccessListAddressGas+2*params.TxAccessListStorageKeyGas, result.ExecutionGas)
 	// Floor (EIP-7976, access list not included): 21000 + (32*4)*16 = 23048
 	assert.Equal(t, params.TxGas+32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976, result.FloorGasCost)
+}
+
+// TestMinTxGas pins MinTxGas to the cheapest transaction the intrinsic gas
+// rules allow, a zero-value self-transfer, on both sides of EIP-2780.
+func TestMinTxGas(t *testing.T) {
+	for _, isEIP2780 := range []bool{false, true} {
+		cheapest, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{IsSelfTransfer: true, IsEIP2780: isEIP2780})
+		assert.False(t, overflow)
+		assert.Equal(t, cheapest.ExecutionGas, MinTxGas(isEIP2780), "isEIP2780=%v", isEIP2780)
+	}
 }

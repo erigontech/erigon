@@ -23,10 +23,10 @@ import (
 )
 
 // golang.org/s/draft-fuzzing-design
-//go doc testing
-//go doc testing.F
-//go doc testing.F.AddRemoteTxns
-//go doc testing.F.Fuzz
+// go doc testing
+// go doc testing.F
+// go doc testing.F.AddRemoteTxns
+// go doc testing.F.Fuzz
 
 // go test -trimpath -v -fuzz=Fuzz -fuzztime=10s ./txpool
 

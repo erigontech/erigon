@@ -27,7 +27,6 @@ import (
 )
 
 type pendingJob[M any] struct {
-	mu           sync.Mutex
 	msg          M
 	creationTime time.Time
 }
@@ -38,15 +37,6 @@ type pendingJobQueueOptions struct {
 	expiry        time.Duration
 	checkInterval time.Duration
 }
-
-type pendingJobEnqueueResult uint8
-
-const (
-	pendingJobEnqueueError pendingJobEnqueueResult = iota
-	pendingJobEnqueued
-	pendingJobDuplicate
-	pendingJobQueueFull
-)
 
 type pendingJobDecision uint8
 
@@ -64,30 +54,16 @@ var pendingJobQueueRejectedCounter = metrics.GetOrCreateCounterVec(
 
 var errPendingJobQueueFull = errors.New("pending job queue full")
 
-func pendingJobAdmissionError(result pendingJobEnqueueResult, err error) error {
-	if err != nil {
-		return err
-	}
-	if result == pendingJobQueueFull {
-		return errPendingJobQueueFull
-	}
-	return nil
-}
-
 // pendingJobQueue retries dependency-blocked jobs on the single processing loop
 // started by newPendingJobQueue. Jobs remain until the service callback requests
 // removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	pendingJobQueueOptions
-	// tryProcess callbacks run sequentially, but may overlap mergeDuplicate.
-	// Mutable messages must synchronize their own shared state. mergeDuplicate
-	// and onExpired hold the entry lock and must not enqueue the same key;
-	// onExpired runs immediately before removal. processAfterRemove runs only
-	// after successful removal, so it may re-enqueue.
+	// tryProcess runs sequentially while the job is still stored. onExpired
+	// and processAfterRemove run only after successful removal.
 	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
 	processAfterRemove func(ctx context.Context, key K, msg M)
 	onExpired          func(key K, msg M)
-	mergeDuplicate     func(existing, incoming M)
 
 	jobs sync.Map // K -> *pendingJob[M]
 	// count includes stored jobs and reservations held by in-flight enqueues. It
@@ -107,7 +83,6 @@ func newPendingJobQueue[K comparable, M any](
 	tryProcess func(ctx context.Context, key K, msg M) pendingJobDecision,
 	processAfterRemove func(ctx context.Context, key K, msg M),
 	onExpired func(key K, msg M),
-	mergeDuplicate func(existing, incoming M),
 ) *pendingJobQueue[K, M] {
 	if options.capacity <= 0 {
 		panic("pending job queue capacity must be positive")
@@ -133,7 +108,6 @@ func newPendingJobQueue[K comparable, M any](
 		tryProcess:             tryProcess,
 		processAfterRemove:     processAfterRemove,
 		onExpired:              onExpired,
-		mergeDuplicate:         mergeDuplicate,
 		wakeLoop:               make(chan struct{}, 1),
 		cancelLoop:             cancelLoop,
 		fullCounter:            pendingJobQueueRejectedCounter.WithLabelValues(options.name),
@@ -149,22 +123,19 @@ func (q *pendingJobQueue[K, M]) stopAndWait() {
 	q.loopWG.Wait()
 }
 
-// enqueueKey checks for a duplicate before reserving capacity. Callers that
-// already know the key can therefore merge state even when the queue is full.
-func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) pendingJobEnqueueResult {
-	for {
-		value, ok := q.jobs.Load(key)
-		if !ok {
-			break
-		}
-		if q.mergeStoredDuplicate(key, value.(*pendingJob[M]), msg) {
-			return pendingJobDuplicate
-		}
+// enqueueKey returns the retained message, including when a duplicate arrives at capacity.
+func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) (M, error) {
+	if stored, ok := q.jobs.Load(key); ok {
+		return stored.(*pendingJob[M]).msg, nil
 	}
 	if !q.reserve() {
-		return pendingJobQueueFull
+		if stored, ok := q.jobs.Load(key); ok {
+			return stored.(*pendingJob[M]).msg, nil
+		}
+		var zero M
+		return zero, errPendingJobQueueFull
 	}
-	return q.storeReserved(key, msg)
+	return q.storeReserved(key, msg), nil
 }
 
 // enqueueLazy reserves capacity before building the key so a full queue skips
@@ -172,9 +143,9 @@ func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) pendingJobEnqueueResult
 // reported as full because detecting it would require building the key. Storage
 // keeps or releases the reservation; deferred cleanup handles key-construction
 // errors and panics.
-func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (pendingJobEnqueueResult, error) {
+func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
 	if !q.reserve() {
-		return pendingJobQueueFull, nil
+		return errPendingJobQueueFull
 	}
 
 	reservationOwned := true
@@ -186,11 +157,11 @@ func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (
 
 	key, err := buildKey()
 	if err != nil {
-		return pendingJobEnqueueError, err
+		return err
 	}
-	result := q.storeReserved(key, msg)
+	q.storeReserved(key, msg)
 	reservationOwned = false
-	return result, nil
+	return nil
 }
 
 func (q *pendingJobQueue[K, M]) reserve() bool {
@@ -208,44 +179,21 @@ func (q *pendingJobQueue[K, M]) reserve() bool {
 
 // storeReserved transfers the caller's reservation to a new job, or releases
 // it if the key is already present.
-func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueResult {
+func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) M {
 	candidate := &pendingJob[M]{
 		msg:          msg,
 		creationTime: time.Now(),
 	}
-	for {
-		value, loaded := q.jobs.LoadOrStore(key, candidate)
-		if !loaded {
-			break
-		}
-		if !q.mergeStoredDuplicate(key, value.(*pendingJob[M]), msg) {
-			continue
-		}
+	if stored, loaded := q.jobs.LoadOrStore(key, candidate); loaded {
 		q.count.Add(-1)
-		return pendingJobDuplicate
+		return stored.(*pendingJob[M]).msg
 	}
 	// Wake notifications may coalesce; count determines whether work remains.
 	select {
 	case q.wakeLoop <- struct{}{}:
 	default:
 	}
-	return pendingJobEnqueued
-}
-
-// mergeStoredDuplicate confirms that existing is still current before merging.
-// The entry lock serializes the merge with expiry and removal; callbacks remain
-// responsible for synchronizing mutable message state with tryProcess.
-func (q *pendingJobQueue[K, M]) mergeStoredDuplicate(key K, existing *pendingJob[M], incoming M) bool {
-	existing.mu.Lock()
-	defer existing.mu.Unlock()
-	current, ok := q.jobs.Load(key)
-	if !ok || current != existing {
-		return false
-	}
-	if q.mergeDuplicate != nil {
-		q.mergeDuplicate(existing.msg, incoming)
-	}
-	return true
+	return msg
 }
 
 func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
@@ -301,13 +249,9 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 		k := key.(K)
 		job := value.(*pendingJob[M])
 		if time.Since(job.creationTime) > q.expiry {
-			job.mu.Lock()
-			current, stored := q.jobs.Load(k)
-			if stored && current == job {
+			if q.remove(k, job) {
 				q.onExpired(k, job.msg)
-				q.remove(k, job)
 			}
-			job.mu.Unlock()
 			return true
 		}
 
@@ -324,9 +268,7 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 			panic("invalid pending job decision")
 		}
 
-		job.mu.Lock()
 		removed := q.remove(k, job)
-		job.mu.Unlock()
 		if removed && decision == pendingJobRemoveThenProcess {
 			q.processAfterRemove(ctx, k, job.msg)
 		}

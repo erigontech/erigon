@@ -48,8 +48,10 @@ type structInfoReceiver interface {
 }
 
 // HashCollector gets called whenever there might be a need to create intermediate hash record
-type HashCollector func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
-type StorageHashCollector func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
+type (
+	HashCollector        func(keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
+	StorageHashCollector func(accWithInc []byte, keyHex []byte, hasState, hasTree, hasHash uint16, hashes, rootHash []byte) error
+)
 
 func calcPrecLen(groups []uint16) int {
 	if len(groups) == 0 {
@@ -113,15 +115,14 @@ func GenStructStep(
 	trace bool,
 ) ([]uint16, []uint16, []uint16, error) {
 	for precLen, buildExtensions := calcPrecLen(groups), false; precLen >= 0; precLen, buildExtensions = calcPrecLen(groups), true {
-		var precExists = len(groups) > 0
+		precExists := len(groups) > 0
 		// Calculate the prefix of the smallest prefix group containing curr
 		var precLen int
 		if len(groups) > 0 {
 			precLen = len(groups) - 1
 		}
 		succLen := nibbles.CommonPrefixLen(succ, curr)
-		var maxLen int
-		maxLen = max(precLen, succLen)
+		maxLen := max(precLen, succLen)
 		if trace || maxLen >= len(curr) {
 			fmt.Printf("curr: %x, succ: %x, maxLen %d, groups: %b, precLen: %d, succLen: %d, buildExtensions: %t\n", curr, succ, maxLen, groups, precLen, succLen, buildExtensions)
 		}

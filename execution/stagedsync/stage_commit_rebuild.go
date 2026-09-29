@@ -22,7 +22,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/dbfinality"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
@@ -62,10 +61,10 @@ func RebuildPatriciaTrieBasedOnFiles(ctx context.Context, cfg TrieCfg, squeeze b
 }
 
 func RebuildPatriciaTrieWithHistory(ctx context.Context, cfg TrieCfg, squeeze bool) (common.Hash, error) {
-	var finalityCtx dbfinality.Context
+	var finalityCtx kv.FinalityContext
 	if err := cfg.db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		finalityCtx, err = execfinality.Resolve(tx, cfg.maxReorgDepth, false)
+		finalityCtx, err = execfinality.Resolve(tx, cfg.maxReorgDepth, false, cfg.blockReader.TxnumReader())
 		return err
 	}); err != nil {
 		return trie.EmptyRoot, err

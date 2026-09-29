@@ -150,14 +150,8 @@ func (b *bucketStore) encodeTo(path string, v ssz.Marshaler) error {
 		return err
 	}
 	defer fh.Close()
-	// EncodeAndWrite flushes in a defer and discards that error, so a short write is
-	// only observable on the writer it was handed.
-	w := &errWriter{w: fh}
-	if err := ssz_snappy.EncodeAndWrite(w, v); err != nil {
+	if err := ssz_snappy.EncodeAndWrite(fh, v); err != nil {
 		return err
-	}
-	if w.err != nil {
-		return w.err
 	}
 	if err := fh.Sync(); err != nil {
 		return err
@@ -214,22 +208,6 @@ func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uin
 	defer fh.Close()
 	_, err = io.Copy(w, fh)
 	return err
-}
-
-type errWriter struct {
-	w   io.Writer
-	err error
-}
-
-func (e *errWriter) Write(p []byte) (int, error) {
-	n, err := e.w.Write(p)
-	if err == nil && n < len(p) {
-		err = io.ErrShortWrite
-	}
-	if err != nil && e.err == nil {
-		e.err = err
-	}
-	return n, err
 }
 
 // pruneBelow removes every bucket that ends before slot. It attempts all of them and

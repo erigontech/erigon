@@ -471,9 +471,16 @@ func TestPause(t *testing.T) {
 	case <-time.After(time.Millisecond):
 	}
 
-	// Check that task was enqueued
-	if wp.WaitingQueueSize() != 1 {
-		t.Error("waiting queue size should be 1")
+	// Check that task was enqueued. Submit only sends on the task channel; the
+	// dispatcher moves the task onto the waiting queue, so the size is eventually
+	// consistent and never correct at the moment Submit returns.
+	enqueued := time.After(5 * time.Second)
+	for wp.WaitingQueueSize() != 1 {
+		select {
+		case <-enqueued:
+			t.Fatal("waiting queue size should be 1")
+		case <-time.After(time.Millisecond):
+		}
 	}
 
 	// Cancel context to unpause workers.
@@ -659,77 +666,3 @@ func countReady(w *WorkerPool) int {
 Run benchmarking with: go test -bench '.'
 
 */
-
-func BenchmarkEnqueue(b *testing.B) {
-	wp := New(1)
-	defer wp.Stop()
-	releaseChan := make(chan struct{})
-
-	b.ResetTimer()
-
-	// Start workers, and have them all wait on a channel before completing.
-	for i := 0; i < b.N; i++ {
-		wp.Submit(func() { <-releaseChan })
-	}
-	close(releaseChan)
-}
-
-func BenchmarkEnqueue2(b *testing.B) {
-	wp := New(2)
-	defer wp.Stop()
-
-	b.ResetTimer()
-
-	// Start workers, and have them all wait on a channel before completing.
-	for i := 0; i < b.N; i++ {
-		releaseChan := make(chan struct{})
-		for range 64 {
-			wp.Submit(func() { <-releaseChan })
-		}
-		close(releaseChan)
-	}
-}
-
-func BenchmarkExecute1Worker(b *testing.B) {
-	benchmarkExecWorkers(1, b)
-}
-
-func BenchmarkExecute2Worker(b *testing.B) {
-	benchmarkExecWorkers(2, b)
-}
-
-func BenchmarkExecute4Workers(b *testing.B) {
-	benchmarkExecWorkers(4, b)
-}
-
-func BenchmarkExecute16Workers(b *testing.B) {
-	benchmarkExecWorkers(16, b)
-}
-
-func BenchmarkExecute64Workers(b *testing.B) {
-	benchmarkExecWorkers(64, b)
-}
-
-func BenchmarkExecute1024Workers(b *testing.B) {
-	benchmarkExecWorkers(1024, b)
-}
-
-func benchmarkExecWorkers(n int, b *testing.B) {
-	wp := New(n)
-	defer wp.Stop()
-	var allDone sync.WaitGroup
-	allDone.Add(b.N * n)
-
-	b.ResetTimer()
-
-	// Start workers, and have them all wait on a channel before completing.
-	for i := 0; i < b.N; i++ {
-		for range n {
-			wp.Submit(func() {
-				//time.Sleep(100 * time.Microsecond)
-				allDone.Done()
-			})
-		}
-	}
-	allDone.Wait()
-}

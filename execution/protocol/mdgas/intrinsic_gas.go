@@ -79,13 +79,10 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 		result.ExecutionGas = params.TxBaseEIP2780
 		if args.IsContractCreation {
 			result.ExecutionGas += params.CreateAccessEIP2780
-			if args.HasValue {
-				result.ExecutionGas += params.TransferLogCostEIP2780
-			}
 		} else if !args.IsSelfTransfer {
 			result.ExecutionGas += params.ColdAccountAccessEIP2780
 			if args.HasValue {
-				result.ExecutionGas += params.TransferLogCostEIP2780 + params.TxValueCostEIP2780
+				result.ExecutionGas += params.TxValueCostEIP2780
 			}
 		}
 	case args.IsContractCreation && args.IsEIP2:
@@ -286,6 +283,15 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 	}
 
 	return result, false
+}
+
+// MinTxGas is the least intrinsic gas of any non-AA transaction: the cost of a
+// zero-value self-transfer.
+func MinTxGas(isEIP2780 bool) uint64 {
+	if isEIP2780 {
+		return params.TxBaseEIP2780
+	}
+	return params.TxGas
 }
 
 // toWordSize returns the ceiled word size required for memory expansion.

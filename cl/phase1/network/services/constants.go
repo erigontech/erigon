@@ -33,18 +33,17 @@ const (
 	blockJobsIntervalTick         = 50 * time.Millisecond
 	blockELRetryInitialDelay      = 250 * time.Millisecond
 	blockELRetryMaxDelay          = 2 * time.Second
-	blobJobsIntervalTick          = 5 * time.Millisecond
 	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
 	blockJobExpiry                = 30 * time.Second
-	blobJobExpiry                 = 30 * time.Second
 	attestationJobExpiry          = 30 * time.Minute
 	singleAttestationJobExpiry    = 6 * time.Second
+	maximumGossipClockDisparity   = 500 * time.Millisecond
 )
 
 var (
 	ErrIgnore                          = errors.New("ignore") // ErrIgnore is used to indicate that the message should be ignored.
-	ErrBidQueued                       = errors.New("bid queued")
+	ErrProposerPreferenceAlreadySeen   = errors.New("already seen proposer preferences")
 	ErrAttestationQueued               = errors.New("attestation queued")
 	ErrBlockYoungerThanParent          = errors.New("block is younger than parent")
 	ErrInvalidCommitmentsCount         = errors.New("invalid commitments count")

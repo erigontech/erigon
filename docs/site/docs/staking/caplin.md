@@ -27,6 +27,7 @@ erigon \
   --caplin.discovery.addr=0.0.0.0 \
   --caplin.discovery.port=4000 \
   --caplin.discovery.tcpport=4001 \
+  --caplin.discovery.quicport=4001 \
   --beacon.api=beacon,validator,builder,config,debug,events,node,lighthouse 
 ```
 
@@ -79,3 +80,34 @@ If you have existing validator keys, import them:
 ```bash
 lighthouse account validator import --directory <path_to_validator_keys>
 ```
+
+## 3. Block Production Behaviour
+
+### 3.1. Payload Preparation Ahead of the Proposer Slot
+
+Since v3.6, Caplin primes the execution layer one slot before the slot this node is due to propose, so the execution layer has already begun assembling a payload when the proposal is requested. There is no flag for this; it is on whenever all of the following hold:
+
+* The Beacon API is running with the `validator` namespace enabled — for example `--beacon.api=beacon,validator,...` as in the command above. Without `validator`, preparation never starts.
+* A validator client has registered a fee recipient for the proposer index, which Lighthouse does through the standard `prepare_beacon_proposer` call. A node with no registered validators never does the work.
+* Caplin is driving the in-process execution layer. Passing `--caplin.use-engine-api` switches Caplin onto the Engine API and **disables the Beacon API entirely** — Erigon logs `Beacon API is automatically disabled` if you also passed `--beacon.api`. Staking through Caplin is not possible in that mode: there is no `validator` namespace, so block production and duties are unavailable, not just payload preparation.
+
+Preparation looks at most one slot ahead, and it does not alter execution-layer fork choice — it only starts the builder early. To confirm it is running, look for these lines in the Erigon log:
+
+```
+PayloadPreparation: watching for proposals
+PayloadPreparation: primed execution layer
+```
+
+Preparation is skipped for the Gloas (EIP-7732) fork, where builders gossip bids instead, and before Capella.
+
+### 3.2. Fork-Choice Head Published Before the Head-State Copy
+
+Since v3.6, Caplin publishes the head chosen by fork choice as soon as it is selected, rather than after the head beacon state has been copied. Beacon API endpoints that only need the head block identity — such as `/eth/v1/beacon/blocks/head` and `/eth/v2/debug/beacon/heads` — therefore reflect a new head sooner. Endpoints that read the head *state* are unchanged, and a node that is still syncing continues to return `503`. There is no flag for this.
+
+### 3.3. Default Block Graffiti
+
+Since v3.6, when the validator client does not supply a graffiti, Caplin fills it with the proposing node's connected execution and consensus clients, following the [Engine API client-identification standard](https://github.com/ethereum/execution-apis/blob/main/src/engine/identification.md). The value is a two-letter execution client code and the first four hex characters of its commit, followed by Caplin's own code `CN` and the first four hex characters of the Erigon commit — for example `EGa53eCNa53e` when Caplin is paired with Erigon. If the execution client does not answer `engine_getClientVersionV1`, or has not answered it yet, the graffiti carries the consensus half only (`CN` plus commit). The graffiti always names the locally connected execution client. An external builder's bid does not change it: the graffiti is written into the beacon body before the payload is chosen, and the winning bid replaces only the execution side of the block — so the value still identifies the proposing node's own clients, not whoever built the payload.
+
+Since v3.8, this identification segment is also combined with a validator-client-supplied graffiti by default, rather than being replaced by it: the segment occupies a fixed offset at the start of the 32-byte field, followed by a single space and as much of the supplied graffiti as fits in the remaining bytes (19 with the execution client resolved, 25 without). A supplied value that fits alongside the segment is kept in full; a longer one is truncated, backing off to a valid UTF-8 rune boundary where possible. Set `--beacon.api.preserve-graffiti` to use the supplied graffiti exactly as given instead, with no combining or truncation.
+
+The only way to override the default is per block, through the Beacon API: a validator client that sends a `graffiti` query parameter on a validator block-production endpoint — `GET /eth/v2/validator/blocks/{slot}` (deprecated), `GET /eth/v3/validator/blocks/{slot}` or `GET /eth/v4/validator/blocks/{slot}` — has its value combined with the identification segment as above, or used as-is with `--beacon.api.preserve-graffiti`. The parameter is read as a 32-byte hex value, as the Beacon API specification requires, and is not validated: a malformed value is not rejected. A shorter hex value is right-padded with zeros — its bytes come first, matching the identification standard's own convention, rather than the left-padding used before v3.8 — and a longer one keeps its first 32 bytes rather than its last 32. On the default combining path, an all-zero or empty value is treated the same as no graffiti supplied at all; with `--beacon.api.preserve-graffiti`, an explicit empty or all-zero query produces an all-zero graffiti instead, since that path returns the supplied value as-is rather than falling back to the identification segment. Note that a validator client which sets graffiti by default — including its own client string — now has it combined with Caplin's identification segment rather than replacing it, unless `--beacon.api.preserve-graffiti` is set.
