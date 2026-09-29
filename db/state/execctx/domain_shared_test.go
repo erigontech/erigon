@@ -1903,8 +1903,7 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, len(state1), 16)
 
-	storedTx1, storedBlock1 :=
-		commitmentdb.DecodeTxBlockNums(state1)
+	storedTx1, storedBlock1 := commitmentdb.DecodeTxBlockNums(state1)
 
 	require.Equal(t, block1, storedBlock1)
 	require.Equal(t, txNum1, storedTx1)
@@ -1951,8 +1950,7 @@ func TestSharedDomain_ZeroUpdateCommitmentAdvancesProgress(t *testing.T) {
 	require.NoError(t, err)
 	require.Greater(t, len(state2), 16)
 
-	storedTx2, storedBlock2 :=
-		commitmentdb.DecodeTxBlockNums(state2)
+	storedTx2, storedBlock2 := commitmentdb.DecodeTxBlockNums(state2)
 
 	require.Equal(t, block2, storedBlock2)
 	require.Equal(t, txNum2, storedTx2)
