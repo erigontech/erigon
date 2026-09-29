@@ -24,6 +24,7 @@ import (
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
+// NewSentryStream returns the sending and receiving ends of a shared bounded queue.
 func NewSentryStream[T protoreflect.ProtoMessage](ctx context.Context) (*SentryStreamS[T], *SentryStreamC[T]) {
 	queue := &messageQueue[T]{
 		items: make(chan streamReply[T], MessagesQueueSize),
@@ -38,6 +39,8 @@ type SentryStreamS[T protoreflect.ProtoMessage] struct {
 	grpc.ServerStream
 }
 
+// Send evicts old messages as needed instead of waiting for a slow receiver.
+// The caller must not modify m while it is queued.
 func (s *SentryStreamS[T]) Send(m T) error {
 	if err := s.Ctx.Err(); err != nil {
 		return err
@@ -55,6 +58,8 @@ func (s *SentryStreamS[T]) Err(err error) {
 	_ = s.queue.push(zero, err)
 }
 
+// Close rejects new sends. Receivers can drain queued messages before EOF
+// unless their context is canceled.
 func (s *SentryStreamS[T]) Close() {
 	s.queue.close()
 }

@@ -27,7 +27,10 @@ import (
 )
 
 const (
-	MessagesQueueSize      = 1024
+	// MessagesQueueSize bounds bookkeeping overhead for small messages.
+	MessagesQueueSize = 1024
+	// MessagesQueueByteLimit bounds serialized data waiting in each queue.
+	// In-flight messages and decoded objects are outside this budget.
 	MessagesQueueByteLimit = 64 * 1024 * 1024
 )
 
@@ -37,6 +40,8 @@ type streamReply[T protoreflect.ProtoMessage] struct {
 	size    int
 }
 
+// messageQueue keeps eviction and receiving under the same lock, so each
+// item releases its byte budget exactly once. All access to items holds mu.
 type messageQueue[T protoreflect.ProtoMessage] struct {
 	mu     sync.Mutex
 	items  chan streamReply[T]
@@ -60,6 +65,8 @@ func (q *messageQueue[T]) push(message T, err error) error {
 	}
 	q.items <- streamReply[T]{message: message, err: err, size: size}
 	q.bytes += size
+	// Evict in batches so slow consumers see recent traffic and the queue
+	// has room for the next burst of small messages.
 	if len(q.items) > cap(q.items)/2 {
 		for range cap(q.items) / 4 {
 			q.pop()
@@ -69,12 +76,15 @@ func (q *messageQueue[T]) push(message T, err error) error {
 	return nil
 }
 
+// pop requires mu to be held and items to be non-empty.
 func (q *messageQueue[T]) pop() streamReply[T] {
 	item := <-q.items
 	q.bytes -= item.size
 	return item
 }
 
+// notify coalesces wake-ups. Receivers must recheck items and signal again
+// when messages remain. The caller must hold mu to avoid signaling after close.
 func (q *messageQueue[T]) notify() {
 	if !q.closed && len(q.items) > 0 {
 		select {

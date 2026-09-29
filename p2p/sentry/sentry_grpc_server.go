@@ -354,7 +354,9 @@ const (
 	// maxBlockHashesPerMsg caps the [hash, number] entries accepted in one NewBlockHashes packet; peers exceeding it are disconnected.
 	maxBlockHashesPerMsg = 4096
 	// maxNewBlockHashesBytes caps the wire bytes buffered before the entry count is checked, so an oversized packet is dropped before its payload is read.
-	maxNewBlockHashesBytes             = maxBlockHashesPerMsg * 48
+	maxNewBlockHashesBytes = maxBlockHashesPerMsg * 48
+	// Each peer gets independent limits for full blocks and block hashes.
+	// Short bursts are allowed; sustained announcement floods disconnect the peer.
 	blockAnnouncementsBurst            = 30
 	blockAnnouncementsRate  rate.Limit = 10
 )
