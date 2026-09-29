@@ -791,3 +791,52 @@ func TestShadowCrossCheck_Mismatch(t *testing.T) {
 	require.Error(t, res.err, "a divergent computed-ahead root must fail the block")
 	require.ErrorIs(t, res.err, ErrWrongTrieRoot, "shadow mismatch must surface as ErrWrongTrieRoot")
 }
+
+// TestStepBoundaryRecordsIntoTheExecutorsChangeset pins the executor side of the
+// hash routing: block N's accumulator must be findable by hash while N is still
+// executing. The mid-block step checkpoint routes its commitment writes through
+// GetChangesetByHash, so an accumulator published only at block end leaves those
+// writes out of the unwind diff and commitment stays ahead of the state after a
+// reorg.
+func TestStepBoundaryRecordsIntoTheExecutorsChangeset(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+	blockHash := common.Hash{0xCD}
+
+	db, tx, doms := setupStepTest(t)
+
+	pe := &parallelExecutor{txExecutor: txExecutor{doms: doms, logger: logger}}
+	pe.changesetWindowStart = 1
+	pe.maxBlockNum = 100
+	pe.ensureChangesetAccumulator(1, blockHash)
+	ownCS := pe.currentChangeSet
+	require.NotNil(t, ownCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out, state.NewLayeredDomainReader(doms, nil, nil))
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	const stepEdgeTxNum = stepSize - 1
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, accounts.SerialiseV3(&acc), txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			rules:     &chain.Rules{},
+			blockNum:  1,
+			blockHash: blockHash,
+			txNum:     txNum,
+			writes:    nonceBalanceWrites(addr, txNum, bal),
+		})
+	}
+
+	require.Positive(t, ownCS.Diffs[kv.CommitmentDomain].Len(),
+		"the mid-block checkpoint must record its commitment writes into the changeset the executor opened for the block")
+}

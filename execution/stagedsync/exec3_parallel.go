@@ -143,6 +143,8 @@ type parallelExecutor struct {
 	currentChangeSet *changeset.StateChangeSet
 	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
+	// currentChangeSetHash is the hash currentChangeSet was last saved under.
+	currentChangeSetHash common.Hash
 }
 
 // stopKind classifies why the executor was asked to stop. It maps directly
@@ -207,18 +209,27 @@ func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
 // block-specific StateChangeSet, to be saved by hash and bound transiently by
 // the apply fold and the committer. Idempotent; a no-op outside the changeset
-// window. Exec-loop only.
-func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
+// window. A zero blockHash defers the save to the first caller that knows it.
+// Exec-loop only.
+func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64, blockHash common.Hash) {
 	if blockNum < pe.changesetWindowStart || blockNum == 0 || blockNum > pe.maxBlockNum {
 		return
 	}
-	if pe.currentChangeSet != nil && pe.currentChangeSetBlock == blockNum {
-		return
+	if pe.currentChangeSet == nil || pe.currentChangeSetBlock != blockNum {
+		// A stale changeset for a different block was already saved by hash, so
+		// overwriting it here loses nothing.
+		pe.currentChangeSet = &changeset.StateChangeSet{}
+		pe.currentChangeSetBlock = blockNum
+		pe.currentChangeSetHash = common.Hash{}
 	}
-	// A stale changeset for a different block was already saved by hash, so
-	// overwriting it here loses nothing.
-	pe.currentChangeSet = &changeset.StateChangeSet{}
-	pe.currentChangeSetBlock = blockNum
+	// Save by hash as soon as the block starts, not only at its end: the
+	// calculator's mid-block step-boundary checkpoint routes its commitment
+	// writes through GetChangesetByHash, and an unsaved changeset drops them from
+	// the unwind diff, leaving commitment ahead of the state after a reorg.
+	if blockHash != (common.Hash{}) && blockHash != pe.currentChangeSetHash {
+		pe.currentChangeSetHash = blockHash
+		pe.domains().SavePastChangesetAccumulator(blockHash, blockNum, pe.currentChangeSet)
+	}
 }
 
 // clearChangesetAccumulator detaches the current changeset accumulator after
@@ -226,6 +237,7 @@ func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
 func (pe *parallelExecutor) clearChangesetAccumulator() {
 	pe.currentChangeSet = nil
 	pe.currentChangeSetBlock = 0
+	pe.currentChangeSetHash = common.Hash{}
 }
 
 // bindBlockChangesetForFold binds block N's saved changeset (by hash) so the
@@ -373,7 +385,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// never race on SharedDomains.mem.
 	pe.changesetWindowStart = changesetWindowStart(pe.cfg.syncCfg.AlwaysGenerateChangesets,
 		pe.cfg.syncCfg.MaxReorgDepth, pe.cfg.blockReader.FrozenBlocks(), startBlockNum, maxBlockNum)
-	pe.ensureChangesetAccumulator(startBlockNum)
+	pe.ensureChangesetAccumulator(startBlockNum, common.Hash{})
 
 	// Start the commitment calculator. Blocks from the changeset window onward must
 	// compute per-block — otherwise batch-mode dedupes branch updates across the
@@ -1119,7 +1131,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// calculator race ahead, look up an unsaved CS, and leak branch deltas
 				// into the next block's CS. ensureChangesetAccumulator covers an empty
 				// block that created no accumulator via a tx-result.
-				pe.ensureChangesetAccumulator(blockResult.BlockNum)
+				pe.ensureChangesetAccumulator(blockResult.BlockNum, blockResult.BlockHash)
 				if pe.currentChangeSet != nil {
 					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
 				}
@@ -1203,7 +1215,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			if ok {
 				// Fast-path install of the next block's changeset accumulator, still in
 				// the exec loop (single-writer); lazily installed on first apply otherwise.
-				pe.ensureChangesetAccumulator(blockExecutor.blockNum)
+				pe.ensureChangesetAccumulator(blockExecutor.blockNum, blockExecutor.blockHash)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
@@ -1501,7 +1513,7 @@ func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.
 	// Ensure this block's changeset accumulator is installed before its
 	// writes are applied — covers blocks scheduled out of band (with no
 	// preceding blockResult to trigger the fast-path install above).
-	pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
+	pe.ensureChangesetAccumulator(txResult.Version().BlockNum, blockExecutor.blockHash)
 
 	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 }
