@@ -20,12 +20,38 @@ import (
 	"bytes"
 	"fmt"
 	"reflect"
+
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
 func (t *Trie) Verify() error {
 	if t.ctx == nil {
 		return fmt.Errorf("nil Patricia context")
 	}
+	verifier := &Trie{
+		ctx:                   t.ctx,
+		rootKey:               bytes.Clone(t.rootKey),
+		rootPath:              t.rootPath,
+		bucketMode:            t.bucketMode,
+		upperOnly:             t.upperOnly,
+		suppressRoot:          t.suppressRoot,
+		suppressBucketRecords: t.suppressBucketRecords,
+		rows:                  make(map[string]*rowNode),
+		dirtyRows:             make(map[string]*rowNode),
+		bucketDirty:           make(map[string][]byte),
+		mergeCreatedStems:     make(map[string]struct{}),
+	}
+	if t.ownedPrefix != nil {
+		prefix := *t.ownedPrefix
+		verifier.ownedPrefix = &prefix
+	}
+	if len(t.upperStops) != 0 {
+		verifier.upperStops = append([]eip8297.Bitpath(nil), t.upperStops...)
+	}
+	return verifier.verify()
+}
+
+func (t *Trie) verify() error {
 	root, err := t.loadRoot()
 	if err != nil {
 		return err
