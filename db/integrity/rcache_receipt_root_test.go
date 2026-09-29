@@ -43,7 +43,7 @@ func enableHistoricalRCache(t *testing.T) {
 	t.Cleanup(func() { statecfg.Schema.RCacheDomain = saved })
 }
 
-func newRCacheChain(t *testing.T, txsPerBlock []int, hole int) (kv.TemporalRwDB, *freezeblocks.BlockReader) {
+func newRCacheChain(t *testing.T, txsPerBlock []int, skip map[uint64]bool) (kv.TemporalRwDB, *freezeblocks.BlockReader) {
 	t.Helper()
 	ctx := t.Context()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()), temporaltest.WithStepSize(16))
@@ -69,7 +69,7 @@ func newRCacheChain(t *testing.T, txsPerBlock []int, hole int) (kv.TemporalRwDB,
 			}
 		}
 		write := func(r *types.Receipt) {
-			if b != hole {
+			if !skip[txNum] {
 				require.NoError(t, rawdb.WriteReceiptCacheV2(putter, r, txNum))
 			}
 			txNum++
@@ -98,33 +98,37 @@ func TestReceiptRootIntegrity(t *testing.T) {
 	enableHistoricalRCache(t)
 
 	txsPerBlock := []int{0, 2, 0, 0, 1, 0, 3, 0}
-	const emptyBlock, txBlock = 3, 4
 
 	tests := []struct {
-		name    string
-		hole    int
-		wantErr bool
+		name  string
+		skip  []uint64
+		block uint64
 	}{
-		{name: "complete", hole: -1},
-		{name: "hole over empty block", hole: emptyBlock, wantErr: true},
-		{name: "hole over block with txs", hole: txBlock, wantErr: true},
+		{name: "complete"},
+		{name: "hole over empty block", skip: []uint64{8, 9}, block: 3},
+		{name: "hole over block with txs", skip: []uint64{10, 11, 12}, block: 4},
+		{name: "missing system txNum in block with txs", skip: []uint64{10}, block: 4},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 			logger := log.New()
 			ctx := t.Context()
-			db, br := newRCacheChain(t, txsPerBlock, tt.hole)
+			skip := map[uint64]bool{}
+			for _, txNum := range tt.skip {
+				skip[txNum] = true
+			}
+			db, br := newRCacheChain(t, txsPerBlock, skip)
 
 			sc, err := integrity.NewSamplerCfg(1, 1.0)
 			require.NoError(t, err)
 			err = integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, br, chain.AllProtocolChanges, 1, uint64(len(txsPerBlock)), true, logger)
-			if !tt.wantErr {
+			if len(tt.skip) == 0 {
 				require.NoError(t, err)
 				return
 			}
 			require.ErrorIs(t, err, integrity.ErrIntegrity)
-			require.ErrorIs(t, integrity.CheckRCacheRootAtBlk(ctx, db, br, chain.AllProtocolChanges, uint64(tt.hole), true, logger), integrity.ErrIntegrity)
+			require.ErrorIs(t, integrity.CheckRCacheRootAtBlk(ctx, db, br, chain.AllProtocolChanges, tt.block, true, logger), integrity.ErrIntegrity)
 		})
 	}
 }
@@ -133,7 +137,7 @@ func TestReceiptRootIntegrity_FilesOnlyTip(t *testing.T) {
 	enableHistoricalRCache(t)
 	ctx := t.Context()
 
-	db, br := newRCacheChain(t, []int{0, 2, 0, 0, 2, 1, 0, 0}, -1)
+	db, br := newRCacheChain(t, []int{0, 2, 0, 0, 2, 1, 0, 0}, nil)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
 	require.NoError(t, agg.BuildFiles2(ctx, db, 0, 1, unboundedFinalityCtx, false))
 	agg.WaitForFiles()
