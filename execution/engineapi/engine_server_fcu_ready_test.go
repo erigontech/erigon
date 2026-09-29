@@ -52,10 +52,10 @@ func (m *busyUntilModule) Ready(context.Context) (bool, error) {
 	return time.Now().After(m.readyAt), nil
 }
 
-// TestForkchoiceUpdatedWithAttributesWaitsOutPostForkchoiceWork reproduces #24371: a
-// forkchoiceUpdated carrying payload attributes for an already-known head must not come back
-// SYNCING without a payload id just because the module is briefly busy with the previous head's
-// background flush/commit/prune - the same request would get a payload id half a second later.
+// TestForkchoiceUpdatedWithAttributesWaitsOutPostForkchoiceWork proves a forkchoiceUpdated
+// carrying payload attributes for an already-known head does not come back SYNCING without a
+// payload id just because the execution module is briefly busy with the previous head's
+// background flush/commit/prune.
 func TestForkchoiceUpdatedWithAttributesWaitsOutPostForkchoiceWork(t *testing.T) {
 	t.Parallel()
 
@@ -133,4 +133,35 @@ func TestForkchoiceUpdatedWithoutAttributesStillAnswersSyncingQuickly(t *testing
 	require.NoError(t, err)
 	require.Equal(t, engine_types.SyncingStatus, resp.PayloadStatus.Status)
 	require.Less(t, time.Since(start), 2*time.Second)
+}
+
+// TestAttributesReadinessWaitCapsLongSlotChains pins the chain-agnostic formula: a chain's own
+// slot time is used as-is unless it exceeds maxAttributesReadinessWait, in which case the cap
+// applies instead.
+func TestAttributesReadinessWaitCapsLongSlotChains(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, 5*time.Second, attributesReadinessWait(5), "Gnosis/Chiado slot time is under the cap and must be used unchanged")
+	require.Equal(t, 6*time.Second, attributesReadinessWait(6), "a slot time exactly at the cap must be used unchanged")
+	require.Equal(t, maxAttributesReadinessWait, attributesReadinessWait(12), "mainnet/Hoodi slot time exceeds the cap and must be capped")
+}
+
+// TestWaitForResponseReturnsPromptlyOnContextCancellation proves waitForResponse stops polling as
+// soon as its context is done, instead of continuing to poll until maxWait elapses.
+func TestWaitForResponseReturnsPromptlyOnContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		cancel()
+	}()
+
+	start := time.Now()
+	busy, err := waitForResponse(ctx, time.Minute, func() (bool, error) {
+		return true, nil
+	})
+	require.ErrorIs(t, err, context.Canceled)
+	require.True(t, busy)
+	require.Less(t, time.Since(start), time.Second)
 }

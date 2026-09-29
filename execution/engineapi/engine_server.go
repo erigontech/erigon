@@ -542,6 +542,20 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 // SYNCING.
 const defaultReadinessWait = 500 * time.Millisecond
 
+// maxAttributesReadinessWait bounds the longer readiness wait used when payload attributes are
+// present (see forkchoiceUpdated). A full slot is too long on chains with long slot times: it can
+// exceed a consensus client's own client-side timeout for this call, which fails the request
+// outright instead of getting the SYNCING answer this wait exists to produce. Chains with a
+// shorter slot time are unaffected, since the wait is bounded by whichever of the two is smaller.
+const maxAttributesReadinessWait = 6 * time.Second
+
+// attributesReadinessWait returns the readiness wait forkchoiceUpdated uses when payload
+// attributes are present: a full slot, capped so long-slot chains don't exceed
+// maxAttributesReadinessWait.
+func attributesReadinessWait(secondsPerSlot uint64) time.Duration {
+	return min(time.Duration(secondsPerSlot)*time.Second, maxAttributesReadinessWait)
+}
+
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
 func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
@@ -644,7 +658,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForResponse(ctx, 50*time.Millisecond, func() (bool, error) {
 			if parent == nil {
 				parent = e.chainRW.GetHeaderByHash(ctx, parentHash)
 			}
@@ -654,7 +668,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForResponse(ctx, 50*time.Millisecond, func() (bool, error) {
 			return header == nil && e.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			e.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
@@ -668,7 +682,7 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForResponse(readinessWait, func() (bool, error) {
+	waitingForExecutionReady, err := waitForResponse(ctx, readinessWait, func() (bool, error) {
 		isReady, err := e.chainRW.Ready(ctx)
 		return !isReady, err
 	})
@@ -705,7 +719,7 @@ func (e *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	var assembled execmodule.AssembledBlockResult
 	var err error
 
-	execBusy, err := waitForResponse(time.Duration(e.config.SecondsPerSlot())*time.Second, func() (bool, error) {
+	execBusy, err := waitForResponse(ctx, time.Duration(e.config.SecondsPerSlot())*time.Second, func() (bool, error) {
 		assembled, err = e.executionService.GetAssembledBlock(ctx, payloadId)
 		if err != nil {
 			return false, err
@@ -789,8 +803,9 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if payloadAttributes != nil {
 		// The previous head's flush, commit and prune keep the module busy after its forkchoice
 		// update has already answered. Answering SYNCING here drops the payload build - and with
-		// it the proposal - so wait as long as the AssembleBlock step below would.
-		readinessWait = time.Duration(e.config.SecondsPerSlot()) * time.Second
+		// it the proposal - so wait as long as the AssembleBlock step below would, capped so a
+		// long-slot chain can't turn this into a client-side timeout instead of a clean SYNCING.
+		readinessWait = attributesReadinessWait(e.config.SecondsPerSlot())
 	}
 	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false, readinessWait)
 	if err != nil {
@@ -891,7 +906,7 @@ func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	var assembled execmodule.AssembleBlockResult
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
-	execBusy, err := waitForResponse(time.Duration(e.config.SecondsPerSlot())*time.Second, func() (bool, error) {
+	execBusy, err := waitForResponse(ctx, time.Duration(e.config.SecondsPerSlot())*time.Second, func() (bool, error) {
 		assembled, err = e.executionService.AssembleBlock(ctx, assembleParams)
 		if err != nil {
 			return false, err
@@ -1017,7 +1032,7 @@ func (e *EngineServer) HandleNewPayload(
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			var respondSyncing bool
-			if _, _ = waitForResponse(waitTime, func() (bool, error) {
+			if _, _ = waitForResponse(ctx, waitTime, func() (bool, error) {
 				status := e.blockDownloader.Status()
 				respondSyncing = status != engine_block_downloader.Synced
 				// no point in waiting if the downloader is no longer syncing (e.g. it's dropped the download request)
@@ -1383,15 +1398,21 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 }
 
-func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
+func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {
 		return false, err
 	}
 	checkInterval := 10 * time.Millisecond
 	maxChecks := int64(maxWait) / int64(checkInterval)
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
 	for range maxChecks {
-		time.Sleep(checkInterval)
+		select {
+		case <-ctx.Done():
+			return true, ctx.Err()
+		case <-ticker.C:
+		}
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {
 			return shouldWait, err
