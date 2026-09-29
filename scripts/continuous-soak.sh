@@ -153,13 +153,13 @@ run_leg_p() {
   local out="$RESULTS_DIR/cycle-$(printf '%03d' "$cycle")-legP"
   mkdir -p "$out"
   echo "[continuous-soak] cycle $cycle leg P → $out"
+  local rc=0
   env -u PUBLISHER_ENR -u PUBLISHER_TRUST_ROOT \
     ITER="$ITER" RANDOMIZE_DEPTHS="$RANDOMIZE_DEPTHS" \
     LAUNCH_CMD=scripts/erigon-launch-hoodi-soak.sh \
     DATADIR=/erigon/tmp/erigon-hoodi-soak.continuous \
     scripts/unwind-fresh-sync-then-soak.sh \
-    >"$out/soak.log" 2>&1
-  local rc=$?
+    >"$out/soak.log" 2>&1 || rc=$?
   echo "$rc" >"$out/exit-code"
   preserve_consumer_logs "$out"
   return "$rc"
@@ -209,14 +209,14 @@ run_leg_m() {
     echo "[continuous-soak] archive publisher not running; leg-M with master only" >>"$out/publisher-info.txt"
   fi
 
+  local rc=0
   env PUBLISHER_ENR="$ENR" PUBLISHER_TRUST_ROOT="$TRUST_ROOT" \
     ${ARCHIVE_ENV:+ARCHIVE_ENR="$ARCHIVE_ENR" ARCHIVE_TRUST_ROOT="$ARCHIVE_TRUST_ROOT"} \
     ITER="$ITER" RANDOMIZE_DEPTHS="$RANDOMIZE_DEPTHS" \
     LAUNCH_CMD=scripts/erigon-launch-hoodi-soak.sh \
     DATADIR=/erigon/tmp/erigon-hoodi-soak.continuous \
     scripts/unwind-fresh-sync-then-soak.sh \
-    >"$out/soak.log" 2>&1
-  local rc=$?
+    >"$out/soak.log" 2>&1 || rc=$?
   echo "$rc" >"$out/exit-code"
   preserve_consumer_logs "$out"
 
