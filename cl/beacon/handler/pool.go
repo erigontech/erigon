@@ -527,10 +527,16 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 			// A non-nil return is a known admission failure, surfaced below
 			// rather than swallowed behind a 200; ErrPublishJobExpired is
 			// excluded since a closed window isn't a server-side fault.
-			if pubErr := a.gossipManager.PublishBackground(
+			pubErr := a.gossipManager.PublishBackground(
 				gossip.TopicNameSyncCommittee(int(subnetId)), encodedSSZ, expiry,
 				"validatorIndex", v.ValidatorIndex, "subnet", subnetId, "slot", v.Slot,
-			); pubErr != nil && !errors.Is(pubErr, networkgossip.ErrPublishJobExpired) {
+			)
+			if pubErr == nil {
+				// So a later duplicate submission of this same, already-verified
+				// content can be ignored instead of spending another admission
+				// attempt on it.
+				a.syncCommitteeMessagesService.MarkPublished(subnetId, v.Slot, v.ValidatorIndex, v.BeaconBlockRoot, v.Signature)
+			} else if !errors.Is(pubErr, networkgossip.ErrPublishJobExpired) {
 				admissionFailureCount++
 				if admissionErr == nil {
 					admissionErr = pubErr
