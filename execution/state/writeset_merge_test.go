@@ -415,6 +415,26 @@ func TestVersionedIOReleaseOutputMaps(t *testing.T) {
 	NewVersionedIO(1).ReleaseOutputMaps()
 }
 
+func TestVersionedIOReleaseReadSetsKeepsOutputs(t *testing.T) {
+	io := NewVersionedIO(1)
+	reads := ReadSet{}
+	reads.SetCode(mergeAddr(1), VersionedRead[[]byte]{Val: make([]byte, 48<<10)})
+	io.RecordReads(Version{TxIndex: 0}, reads)
+	ws, _ := mergeIntoFixture()
+	io.RecordWrites(Version{TxIndex: 0}, ws)
+
+	require.NotZero(t, io.ReadCount())
+	require.NotZero(t, io.WriteCount())
+	io.ReleaseReadSets()
+
+	require.Zero(t, io.ReadCount())
+	require.NotZero(t, io.WriteCount())
+	require.Nil(t, io.inputs)
+
+	io.ReleaseReadSets()
+	NewVersionedIO(1).ReleaseReadSets()
+}
+
 var sinkWS *WriteSet
 
 // The production consumers that walk a whole set do not go through the guarded

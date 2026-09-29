@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -210,4 +212,38 @@ func TestAddTransactionsDoesNotSatisfyDependencyWithRevertedTarget(t *testing.T)
 	require.Equal(t, types.Transactions{targetTxn}, block.Txns)
 	require.Len(t, block.Receipts, 1)
 	require.Equal(t, uint64(types.ReceiptStatusFailed), block.Receipts[0].Status)
+}
+
+func TestAssembleBlockReleasesBALReadSets(t *testing.T) {
+	config := chain.AllProtocolChanges.Copy()
+	config.AmsterdamTime = nil
+	reader := &assemblerStateReader{}
+	ibs := state.New(reader)
+	defer ibs.Close()
+	_, tx := temporaltest.NewTestTx(t)
+	parent := types.NewEmptyHeaderForAssembling()
+	parent.Number.SetUint64(0)
+	parent.Time = 0
+	parent.Difficulty.SetUint64(1)
+	require.NoError(t, rawdb.WriteHeader(tx, parent))
+	header := types.NewEmptyHeaderForAssembling()
+	header.ParentHash = parent.Hash()
+	header.Number.SetUint64(1)
+	header.GasLimit = 1_000_000
+	header.Time = 1
+	header.BaseFee = uint256.NewInt(1)
+	assembler := NewBlockAssembler(AssemblerCfg{
+		ChainConfig:     config,
+		Engine:          ethash.NewFaker(),
+		ExperimentalBAL: true,
+	}, &AssembledBlock{Header: header})
+	codeAddress := accounts.InternAddress(common.Address{0x41})
+	reads := state.ReadSet{}
+	reads.SetCode(codeAddress, state.VersionedRead[[]byte]{Val: make([]byte, 48<<10)})
+	assembler.balIO.RecordReads(state.Version{TxIndex: 0}, reads)
+
+	_, err := assembler.AssembleBlock(reader, ibs, tx, log.Root())
+	require.NoError(t, err)
+	require.Equal(t, types.BlockAccessList{{Address: codeAddress}}, assembler.BlockAccessList)
+	require.Zero(t, assembler.balIO.ReadCount())
 }

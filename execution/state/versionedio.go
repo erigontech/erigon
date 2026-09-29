@@ -2284,6 +2284,11 @@ func (io *VersionedIO) ReadCount() (count int64) {
 	return count
 }
 
+// ReleaseReadSets drops recorded reads after their final consumer.
+func (io *VersionedIO) ReleaseReadSets() {
+	io.inputs = nil
+}
+
 func (io *VersionedIO) HasReads(txnIdx int) bool {
 	if len(io.inputs) <= txnIdx+1 {
 		return false

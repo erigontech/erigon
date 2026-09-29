@@ -469,6 +469,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		ibs.FlushWritesToVersionMap(writes)
 		ibs.ResetVersionedIO()
 		ba.BlockAccessList = ba.balIO.AsBlockAccessList()
+		ba.balIO.ReleaseReadSets()
 		// Only embed the BAL hash in the header for Amsterdam+ chains.
 		// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed
 		// and validated but NOT included in the block header, because the
