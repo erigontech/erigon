@@ -240,7 +240,8 @@ func (cs *MultiClient) getBlockHeaders66(ctx context.Context, inreq *sentryproto
 	return nil
 }
 
-// getBlockAccessLists71 answers an eth/71 request with stored BALs.
+// getBlockAccessLists71 answers an eth/71 GetBlockAccessLists request with a
+// BlockAccessLists response whose entries match the requested hash order.
 func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryproto.InboundMessage, sentry sentryproto.SentryClient) error {
 	var query eth.GetBlockAccessListsPacket66
 	if err := rlp.DecodeBytes(inreq.Data, &query); err != nil {

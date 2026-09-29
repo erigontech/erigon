@@ -179,13 +179,17 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 // empty (e.g. a chain without system contracts)".
 var notAvailableSentinel = rlp.RawValue{0x80}
 
-// AnswerGetBlockAccessListsQuery returns stored BALs in request order, using 0x80
-// for unavailable entries. Peer requests must not trigger block re-execution.
+// AnswerGetBlockAccessListsQuery returns stored, RLP-encoded BALs in request order
+// for eth/71. Missing BALs use the unavailable entry (0x80), including unknown,
+// pre-Amsterdam, and pruned blocks. A stored empty BAL remains 0xc0.
+// Returned BAL bytes must be consumed before the database transaction closes.
 func AnswerGetBlockAccessListsQuery(ctx context.Context, db kv.Tx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader) []rlp.RawValue {
 	var bytes int
 	bals := make([]rlp.RawValue, 0, len(query))
 
 	for lookups, hash := range query {
+		// Truncation lets peers retry the remaining hashes; padding with 0x80
+		// would incorrectly mark unprocessed BALs as unavailable.
 		if bytes >= softResponseLimit || len(bals) >= MaxBlockAccessListsServe ||
 			lookups >= 2*MaxBlockAccessListsServe {
 			break
@@ -199,6 +203,8 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, db kv.Tx, query GetBloc
 		}
 		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
 		if len(bal) == 0 {
+			// Replaying pruned blocks would let peer requests occupy the shared
+			// upload loop with historical execution and delay other peers' requests.
 			bals = append(bals, notAvailableSentinel)
 			bytes += len(notAvailableSentinel)
 			continue

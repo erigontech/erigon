@@ -213,6 +213,9 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 	}
 }
 
+// TestGetBlockAccessListsResponseMatrix checks stored and unavailable BALs
+// through sentry. Pruned blocks retain executable history, so these cases
+// detect accidental reintroduction of peer-triggered block replay.
 func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 	t.Parallel()
 	if !dbg.Exec3Parallel {
