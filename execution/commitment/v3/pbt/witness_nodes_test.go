@@ -99,13 +99,18 @@ func TestPBinWitnessResolverRejectsBadRows(t *testing.T) {
 		ctx := newTrieTestContext()
 		_, err := NewTrie(ctx).Process(entriesToOps(entries))
 		require.NoError(t, err)
+		wantNodes, _ := pbinOracleNodes(t, entries)
+		var removed string
 		for key := range ctx.records {
 			if key != string(GlobalRootKey()) {
+				removed = key
 				delete(ctx.records, key)
 				break
 			}
 		}
-		_, err = NewPBinWitnessResolver(ctx).RootHash()
+		require.NotEmpty(t, removed)
+		resolver := NewPBinWitnessResolver(ctx)
+		_, err = resolver.Resolve(wantNodes[len(wantNodes)-1].path)
 		require.ErrorContains(t, err, "row")
 	})
 	t.Run("corrupt row", func(t *testing.T) {
@@ -121,10 +126,147 @@ func TestPBinWitnessResolverRejectsBadRows(t *testing.T) {
 		group := witness.PBinGroup{Position: 1, Stem: bytes.Clone(key[:len(key)-1]), Subs: []byte{0, 1}, Values: [][]byte{testTrieValueBytes(1), testTrieValueBytes(2)}}
 		blob, err := witness.PBinEncodeGroup(group)
 		require.NoError(t, err)
-		resolver := &PBinWitnessResolver{loaded: true, nodes: map[string][]byte{"": blob}}
-		_, err = resolver.Resolve(nil)
-		require.ErrorContains(t, err, "group position")
+		require.ErrorContains(t, pbinValidateWitnessBlob(nil, blob), "group position")
 	})
+}
+
+func TestPBinWitnessResolverRejectsCorruptGroup(t *testing.T) {
+	pbinUseBlake3(t)
+	var codeHash common.Hash
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyCodeChunk(codeHash, 0), Value: pbinResolverValue(1, 1)},
+		{Key: eip8297.TreeKeyCodeChunk(codeHash, 1), Value: pbinResolverValue(1, 2)},
+	}
+	t.Run("root", func(t *testing.T) {
+		ctx := newTrieTestContext()
+		_, err := NewTrie(ctx).Process(entriesToOps(entries))
+		require.NoError(t, err)
+		pbinCorruptLeaf(t, ctx, entries[1].Key, 6)
+		_, err = NewPBinWitnessResolver(ctx).Resolve(nil)
+		require.ErrorContains(t, err, "pointer")
+	})
+	t.Run("below branch", func(t *testing.T) {
+		all := append(pbinResolverEntries(), randomEntries(0x8297, 96)...)
+		sort.Slice(all, func(i, j int) bool { return bytes.Compare(all[i].Key, all[j].Key) < 0 })
+		ctx := newTrieTestContext()
+		_, err := NewTrie(ctx).Process(entriesToOps(all))
+		require.NoError(t, err)
+		wantNodes, _ := pbinOracleNodes(t, all)
+		var target []byte
+		for _, node := range wantNodes {
+			decoded, decodeErr := witness.PBinDecodeBlob(node.blob)
+			require.NoError(t, decodeErr)
+			if decoded.Group != nil {
+				target = node.path
+				break
+			}
+		}
+		require.NotEmpty(t, target)
+		_, err = NewPBinWitnessResolver(ctx).Resolve(target)
+		require.NoError(t, err)
+		var corruptKey []byte
+		for _, node := range wantNodes {
+			decoded, decodeErr := witness.PBinDecodeBlob(node.blob)
+			require.NoError(t, decodeErr)
+			if decoded.Group != nil && bytes.Equal(node.path, target) {
+				corruptKey = append(append([]byte{}, decoded.Group.Stem...), decoded.Group.Subs[0])
+				break
+			}
+		}
+		require.NotEmpty(t, corruptKey)
+		pbinCorruptLeaf(t, ctx, corruptKey, 6)
+		_, err = NewPBinWitnessResolver(ctx).Resolve(target)
+		require.Error(t, err)
+	})
+}
+
+func TestPBinWitnessResolverRootReadBound(t *testing.T) {
+	pbinUseBlake3(t)
+	for _, count := range []int{10000, 100000} {
+		t.Run(fmt.Sprintf("%d", count), func(t *testing.T) {
+			entries := pbinLargeEntries(int64(0x8297+count), count)
+			sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
+			ctx := newTrieTestContext()
+			_, err := NewTrie(ctx).Process(entriesToOps(entries))
+			require.NoError(t, err)
+			resolver := NewPBinWitnessResolver(ctx)
+			reads := 0
+			read := resolver.read
+			resolver.read = func(key []byte) ([]byte, error) {
+				reads++
+				return read(key)
+			}
+			_, err = resolver.RootHash()
+			require.NoError(t, err)
+			require.LessOrEqual(t, reads, 2, "root resolution reads the whole tree")
+			path := pbinLargeNodePath(t, ctx)
+			reads = 0
+			_, err = resolver.Resolve(witness.PBinPath(&path))
+			require.NoError(t, err)
+			require.LessOrEqual(t, reads, int(path.BitLen/4)+17, "single-node resolution reads unrelated rows")
+		})
+	}
+}
+
+func pbinLargeNodePath(t *testing.T, ctx *trieTestContext) eip8297.Bitpath {
+	t.Helper()
+	data := ctx.records[string(GlobalRootKey())]
+	record, err := DecodeRecord(GlobalRootKey(), data)
+	require.NoError(t, err)
+	if record.Form == ExtRoot {
+		path := record.SelfExt
+		path.AppendBit(0)
+		return path
+	}
+	slots := occupiedSlots(&record)
+	result, err := FoldRow(GlobalRootKey(), &record)
+	require.NoError(t, err)
+	path := rowPrefix(&eip8297.Bitpath{}, slots[0], 0, result.Split)
+	path.AppendBit(0)
+	return path
+}
+
+func pbinLargeEntries(seed int64, count int) []eip8297.Entry {
+	entries := randomEntries(seed, count)
+	for i := range entries {
+		seed := byte(i)
+		switch entries[i].Key[0] {
+		case eip8297.AccountZone:
+			switch entries[i].Key[len(entries[i].Key)-1] {
+			case eip8297.BasicDataLeafKey:
+				entries[i].Value = testTrieValueBytes(seed)
+			case eip8297.DelegationLeafKey:
+				delegation := append([]byte{}, eip8297.DelegationMarker[:]...)
+				delegation = append(delegation, make([]byte, eip8297.DelegationCodeLength-len(delegation))...)
+				encoded := eip8297.EncodeDelegation(delegation)
+				entries[i].Value = encoded[:]
+			default:
+				entries[i].Value = pbinResolverValue(seed, seed)
+			}
+		default:
+			entries[i].Value = pbinResolverValue(seed, seed)
+		}
+	}
+	return entries
+}
+
+func pbinCorruptLeaf(t *testing.T, ctx *trieTestContext, key []byte, suffix byte) {
+	t.Helper()
+	for recordKey, raw := range ctx.records {
+		record, err := DecodeRecord([]byte(recordKey), raw)
+		require.NoError(t, err)
+		for slot := range record.Cells {
+			cell := &record.Cells[slot]
+			if cell.Kind != LeafCell || !bytes.Equal(cell.Key, key) {
+				continue
+			}
+			cell.Value[len(cell.Value)-1] = suffix
+			ctx.records[recordKey], err = EncodeRecord([]byte(recordKey), &record)
+			require.NoError(t, err)
+			return
+		}
+	}
+	t.Fatalf("leaf %x not found", key)
 }
 
 func pbinUseBlake3(t *testing.T) {
