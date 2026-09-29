@@ -84,7 +84,9 @@ func TestForEachPBinLeafEmptyState(t *testing.T) {
 	builder, err := eip8297.NewStreamRootBuilder(eip8297.SelectedHash())
 	require.NoError(t, err)
 	require.Empty(t, leaves)
-	require.Equal(t, eip8297.EmptyTreeHash, builder.RootHash())
+	root, err := builder.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, eip8297.EmptyTreeHash, root)
 }
 
 func TestForEachPBinLeafCombinesStamps(t *testing.T) {
@@ -135,7 +137,9 @@ func pbinLeafStreamAssertRoot(t *testing.T, want common.Hash, leaves []state.PBi
 	for _, leaf := range leaves {
 		require.NoError(t, builder.Add(leaf.Key, leaf.Value))
 	}
-	require.Equal(t, want, builder.RootHash())
+	root, err := builder.RootHash()
+	require.NoError(t, err)
+	require.Equal(t, want, root)
 	require.NotEmpty(t, leaves)
 }
 

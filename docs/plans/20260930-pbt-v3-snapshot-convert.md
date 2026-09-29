@@ -352,13 +352,14 @@
 - Create: `execution/stagedsync/stage_execute_floor_test.go`
 - Create: `db/state/execctx/domain_shared_floor_test.go`
 
-- [ ] add the conversion-point fields; write a settings round-trip test and confirm it fails before the fields exist
-- [ ] write one test per site: an unwind argument U <= C is refused by `CanUnwindToBlockNum`/`CanUnwindBeforeBlockNum`,
-      by `UnwindExecutionStage`/`unwindExec3`, and on the in-memory `SharedDomains.Unwind` path; U > C passes. Confirm
-      each fails at its refusal assertion
-- [ ] enforce the floor at each site, choosing between caller-side checks and an error return on
+- [x] add the conversion-point fields; write a settings round-trip test and confirm it fails before the fields exist
+- [x] write one test per site: block-numbered unwinds refuse U < C_block while U = C_block passes at
+      `CanUnwindToBlockNum`/`CanUnwindBeforeBlockNum` and `UnwindExecutionStage`/`unwindExec3`; the in-memory
+      tx-number path refuses txNumUnwindTo <= C_txNum while a greater tx number passes. Confirm each fails at its
+      refusal assertion
+- [x] enforce the floor at each site, choosing between caller-side checks and an error return on
       `SharedDomains.Unwind` by the smaller diff
-- [ ] run tests - must pass before task 5
+- [x] run tests - must pass before task 5
 
 ### Task 5: Engine feed and range writer
 

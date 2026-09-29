@@ -155,6 +155,17 @@ func (cfg ExecuteBlockCfg) WithAuthor(author accounts.Address) ExecuteBlockCfg {
 
 var ErrTooDeepUnwind = errors.New("too deep unwind")
 
+func checkUnwindConversionPoint(dirs datadir.Dirs, txNum uint64) error {
+	blockNum, conversionTxNum, ok, err := state.ReadErigonDBConversionPoint(dirs)
+	if err != nil {
+		return err
+	}
+	if ok && txNum <= conversionTxNum {
+		return fmt.Errorf("unwind txNum %d reaches conversion point block %d txNum %d", txNum, blockNum, conversionTxNum)
+	}
+	return nil
+}
+
 // findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
 // When no canonical hash is recorded at that height (e.g. the block is no longer canonical
 // after a reorg) it falls back to the stored header.
@@ -507,6 +518,9 @@ func unwindDomsToBlock(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.
 	if err != nil {
 		return 0, err
 	}
+	if err := checkUnwindConversionPoint(rwTx.Debug().Dirs(), txNum); err != nil {
+		return 0, err
+	}
 	doms.Unwind(txNum, changeset) // drops [txNum, ∞)
 	doms.SetTxNum(txNum)
 	return txNum, nil
@@ -536,6 +550,13 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 	if !ok {
+		conversionBlock, _, hasConversionPoint, conversionErr := state.ReadErigonDBConversionPoint(rwTx.Debug().Dirs())
+		if conversionErr != nil {
+			return conversionErr
+		}
+		if hasConversionPoint && u.UnwindPoint < conversionBlock {
+			return fmt.Errorf("%w: requested block %d is below conversion point block %d", ErrTooDeepUnwind, u.UnwindPoint, conversionBlock)
+		}
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
 

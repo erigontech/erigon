@@ -61,6 +61,29 @@ func TestErigonDBSettingsRoundTrip(t *testing.T) {
 	require.True(t, *got.ReferencesInCommitmentBranches)
 }
 
+func TestErigonDBSettingsConversionPointRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "erigondb.toml")
+	blockNum, txNum := uint64(123), uint64(456)
+	require.NoError(t, writeErigonDBSettings(path, &ErigonDBSettings{
+		StepSize: 100, StepsInFrozenFile: 8,
+		ConversionBlockNum: &blockNum, ConversionTxNum: &txNum,
+	}))
+
+	got, err := readErigonDBSettings(path)
+	require.NoError(t, err)
+	blockNum, txNum, ok, err := got.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(123), blockNum)
+	require.Equal(t, uint64(456), txNum)
+	_, _, ok, err = (&ErigonDBSettings{}).ConversionPoint()
+	require.NoError(t, err)
+	require.False(t, ok)
+	_, _, ok, err = (&ErigonDBSettings{ConversionBlockNum: &blockNum}).ConversionPoint()
+	require.ErrorContains(t, err, "requires conversion_block and conversion_txnum")
+	require.False(t, ok)
+}
+
 func TestErigonDBSettingsTrieVariantRoundTrip(t *testing.T) {
 	t.Parallel()
 	for _, variant := range []string{TrieVariantHex, TrieVariantBin, TrieVariantHexBin} {

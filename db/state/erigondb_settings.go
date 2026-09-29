@@ -32,6 +32,8 @@ type ErigonDBSettings struct {
 	TrieVariant                    *string           `toml:"trie_variant,omitempty"`
 	TrieHash                       *string           `toml:"trie_hash,omitempty"`
 	FrozenAtTxNum                  map[string]uint64 `toml:"frozen_at_txnum,omitempty"`
+	ConversionBlockNum             *uint64           `toml:"conversion_block,omitempty"`
+	ConversionTxNum                *uint64           `toml:"conversion_txnum,omitempty"`
 }
 
 // RefsInCommitmentBranches resolves the commitment "references in branches" regime,
@@ -66,6 +68,18 @@ func (s *ErigonDBSettings) FrozenAt(domain kv.Domain) (uint64, bool) {
 	}
 	txNum, ok := s.FrozenAtTxNum[domain.String()]
 	return txNum, ok
+}
+
+func (s *ErigonDBSettings) ConversionPoint() (blockNum, txNum uint64, ok bool, err error) {
+	blockSet := s != nil && s.ConversionBlockNum != nil
+	txSet := s != nil && s.ConversionTxNum != nil
+	if !blockSet && !txSet {
+		return 0, 0, false, nil
+	}
+	if blockSet != txSet {
+		return 0, 0, false, errors.New("erigondb.toml: conversion point requires conversion_block and conversion_txnum")
+	}
+	return *s.ConversionBlockNum, *s.ConversionTxNum, true, nil
 }
 
 func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
@@ -132,6 +146,17 @@ func reconcileTrieVariant(s *ErigonDBSettings, logger log.Logger) error {
 // can inspect a datadir it is not running on.
 func ReadErigonDBSettings(dirs datadir.Dirs) (*ErigonDBSettings, error) {
 	return readErigonDBSettings(filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE))
+}
+
+func ReadErigonDBConversionPoint(dirs datadir.Dirs) (blockNum, txNum uint64, ok bool, err error) {
+	settings, err := ReadErigonDBSettings(dirs)
+	if errors.Is(err, os.ErrNotExist) {
+		return 0, 0, false, nil
+	}
+	if err != nil {
+		return 0, 0, false, err
+	}
+	return settings.ConversionPoint()
 }
 
 // WriteErigonDBSettings writes a datadir's erigondb.toml.

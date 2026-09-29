@@ -41,6 +41,7 @@ type StreamRootBuilder struct {
 	prevBits []byte
 	lastLeaf common.Hash
 	hasLeaf  bool
+	err      error
 }
 
 func NewStreamRootBuilder(sum HashFn) (*StreamRootBuilder, error) {
@@ -51,17 +52,20 @@ func NewStreamRootBuilder(sum HashFn) (*StreamRootBuilder, error) {
 }
 
 func (b *StreamRootBuilder) Add(key, value []byte) error {
+	if b.err != nil {
+		return b.err
+	}
 	if len(key) == 0 || len(key) > maxReferenceKeyLength {
-		return fmt.Errorf("eip8297: key length %d out of range", len(key))
+		return b.fail(fmt.Errorf("eip8297: key length %d out of range", len(key)))
 	}
 	if len(value) != ValueLength {
-		return fmt.Errorf("eip8297: value of %d bytes, want %d", len(value), ValueLength)
+		return b.fail(fmt.Errorf("eip8297: value of %d bytes, want %d", len(value), ValueLength))
 	}
 	if isZeroStreamRootValue(value) {
-		return errors.New("eip8297: zero values are not stored")
+		return b.fail(errors.New("eip8297: zero values are not stored"))
 	}
 	if b.hasLeaf && bytes.Compare(key, b.prevKey) <= 0 {
-		return errors.New("eip8297: stream keys are not strictly ascending")
+		return b.fail(errors.New("eip8297: stream keys are not strictly ascending"))
 	}
 
 	bits := bytesToBits(key)
@@ -69,7 +73,7 @@ func (b *StreamRootBuilder) Add(key, value []byte) error {
 	if b.hasLeaf {
 		commonBits := streamRootCommonPrefix(b.prevBits, bits)
 		if commonBits == len(b.prevBits) || commonBits == len(bits) {
-			return errors.New("eip8297: stream keys are not prefix-free")
+			return b.fail(errors.New("eip8297: stream keys are not prefix-free"))
 		}
 
 		subtree := b.lastLeaf
@@ -114,15 +118,23 @@ func (b *StreamRootBuilder) Add(key, value []byte) error {
 	return nil
 }
 
-func (b *StreamRootBuilder) RootHash() common.Hash {
+func (b *StreamRootBuilder) RootHash() (common.Hash, error) {
+	if b.err != nil {
+		return common.Hash{}, b.err
+	}
 	if !b.hasLeaf {
-		return EmptyTreeHash
+		return EmptyTreeHash, nil
 	}
 	root := b.lastLeaf
 	for _, branch := range slices.Backward(b.branches) {
 		root = b.hashBranch(branch.prefix, branch.left, root)
 	}
-	return root
+	return root, nil
+}
+
+func (b *StreamRootBuilder) fail(err error) error {
+	b.err = err
+	return err
 }
 
 func (b *StreamRootBuilder) hashLeaf(key, value []byte) common.Hash {

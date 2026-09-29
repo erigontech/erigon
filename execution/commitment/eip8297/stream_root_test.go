@@ -18,6 +18,7 @@ package eip8297
 
 import (
 	"bytes"
+	"fmt"
 	"math/rand"
 	"slices"
 	"testing"
@@ -46,7 +47,9 @@ func TestStreamRootBuilderMatchesReference(t *testing.T) {
 					for _, entry := range corpus.entries {
 						require.NoError(t, builder.Add(entry.Key, entry.Value))
 					}
-					require.Equal(t, StateRootWithHash(corpus.entries, sum), builder.RootHash())
+					root, err := builder.RootHash()
+					require.NoError(t, err)
+					require.Equal(t, StateRootWithHash(corpus.entries, sum), root)
 				})
 			}
 		})
@@ -61,7 +64,9 @@ func TestStreamRootBuilderEmpty(t *testing.T) {
 			require.NoError(t, SetHashSuite(suite))
 			builder, err := NewStreamRootBuilder(streamRootHash(suite))
 			require.NoError(t, err)
-			require.Equal(t, EmptyTreeHash, builder.RootHash())
+			root, err := builder.RootHash()
+			require.NoError(t, err)
+			require.Equal(t, EmptyTreeHash, root)
 		})
 	}
 }
@@ -105,6 +110,70 @@ func TestStreamRootBuilderRejectsInvalidLeaves(t *testing.T) {
 			require.Error(t, test.call(builder))
 		})
 	}
+}
+
+func TestStreamRootBuilderErrorsAreSticky(t *testing.T) {
+	entries := streamRootEntries()
+	tests := []struct {
+		name       string
+		invalid    func(*StreamRootBuilder, []Entry) error
+		extraAfter bool
+	}{
+		{name: "unsorted", invalid: func(builder *StreamRootBuilder, accepted []Entry) error {
+			if len(accepted) == 0 {
+				require.NoError(t, builder.Add(entries[0].Key, entries[0].Value))
+			}
+			return builder.Add(acceptedKeyBefore(entries, len(accepted)), entries[0].Value)
+		}, extraAfter: true},
+		{name: "duplicate", invalid: func(builder *StreamRootBuilder, accepted []Entry) error {
+			if len(accepted) == 0 {
+				require.NoError(t, builder.Add(entries[0].Key, entries[0].Value))
+			}
+			return builder.Add(entries[0].Key, entries[0].Value)
+		}, extraAfter: true},
+		{name: "value length", invalid: func(builder *StreamRootBuilder, _ []Entry) error {
+			return builder.Add(entries[0].Key, entries[0].Value[:ValueLength-1])
+		}},
+		{name: "zero value", invalid: func(builder *StreamRootBuilder, _ []Entry) error {
+			return builder.Add(entries[0].Key, make([]byte, ValueLength))
+		}},
+		{name: "prefix", invalid: func(builder *StreamRootBuilder, accepted []Entry) error {
+			if len(accepted) == 0 {
+				require.NoError(t, builder.Add(entries[0].Key, entries[0].Value))
+			}
+			key := append([]byte(nil), entries[max(0, len(accepted)-1)].Key...)
+			return builder.Add(append(key, 0), entries[0].Value)
+		}, extraAfter: true},
+	}
+
+	for _, test := range tests {
+		for _, count := range []int{0, 1, 3} {
+			t.Run(fmt.Sprintf("%s/%d", test.name, count), func(t *testing.T) {
+				builder, err := NewStreamRootBuilder(streamRootHash(HashKeccak))
+				require.NoError(t, err)
+				accepted := entries[:count]
+				for _, entry := range accepted {
+					require.NoError(t, builder.Add(entry.Key, entry.Value))
+				}
+				firstErr := test.invalid(builder, accepted)
+				require.Error(t, firstErr)
+				validIndex := count
+				if test.extraAfter && count == 0 {
+					validIndex = 1
+				}
+				require.ErrorIs(t, builder.Add(entries[validIndex].Key, entries[validIndex].Value), firstErr)
+				_, rootErr := builder.RootHash()
+				require.ErrorIs(t, rootErr, firstErr)
+			})
+		}
+	}
+}
+
+func acceptedKeyBefore(entries []Entry, count int) []byte {
+	if count == 0 {
+		return entries[0].Key
+	}
+	return entries[count-1].Key
 }
 
 func streamRootEntries() []Entry {
