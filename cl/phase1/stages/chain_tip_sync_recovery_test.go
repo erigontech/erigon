@@ -5,14 +5,26 @@ import (
 	"testing"
 	"time"
 
+	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
+	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type orderedPayloadValidator struct {
@@ -43,6 +55,64 @@ type storedParentPayloadTestStore struct {
 	requeued     []forkchoice.PendingELPayload
 }
 
+type chainTipBatchForkGraph struct {
+	fork_graph.ForkGraph
+	parentRoot  common.Hash
+	parentBlock *cltypes.SignedBeaconBlock
+	envelope    *cltypes.SignedExecutionPayloadEnvelope
+	added       map[common.Hash]int
+}
+
+func (g *chainTipBatchForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state2.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, fork_graph.InvalidBlock, err
+	}
+	g.added[common.Hash(root)]++
+	return nil, fork_graph.PreValidated, nil
+}
+
+func (g *chainTipBatchForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if root == g.parentRoot {
+		return g.parentBlock.SignedBeaconBlockHeader().Header, true
+	}
+	return g.ForkGraph.GetHeader(root)
+}
+
+func (g *chainTipBatchForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	if root == g.parentRoot {
+		return g.parentBlock, true
+	}
+	return g.ForkGraph.GetBlock(root)
+}
+
+func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
+	return root == g.parentRoot || g.ForkGraph.HasEnvelope(root)
+}
+
+func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if root == g.parentRoot {
+		return g.envelope, nil
+	}
+	return g.ForkGraph.ReadEnvelopeFromDisk(root)
+}
+
+func (g *chainTipBatchForkGraph) IsBlockRetained(root common.Hash) bool {
+	if root == g.parentRoot {
+		return true
+	}
+	guard, ok := g.ForkGraph.(interface{ IsBlockRetained(common.Hash) bool })
+	return ok && guard.IsBlockRetained(root)
+}
+
+func (g *chainTipBatchForkGraph) WithRetainedBlock(root common.Hash, fn func(func(common.Hash) bool)) bool {
+	if !g.IsBlockRetained(root) {
+		return false
+	}
+	fn(g.IsBlockRetained)
+	return true
+}
+
 func (s *storedParentPayloadTestStore) HasEnvelope(common.Hash) bool { return s.has }
 
 func (s *storedParentPayloadTestStore) GetRecentExecutionPayloadStatusByRoot(common.Hash) (execution_client.PayloadStatus, bool) {
@@ -61,6 +131,146 @@ func (s *storedParentPayloadTestStore) MarkPayloadStatusAndGasLimitIfRetained(_ 
 
 func (s *storedParentPayloadTestStore) RequeuePendingELPayload(payload forkchoice.PendingELPayload) {
 	s.requeued = append(s.requeued, payload)
+}
+
+func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.PayloadStatus) (*Cfg, *chainTipBatchForkGraph, common.Hash, *cltypes.SignedBeaconBlock, *cltypes.SignedBeaconBlock, *testExecutionEngine) {
+	t.Helper()
+
+	beaconCfg, anchorState, parentBid, envelope, _ := validAnchorEnvelopeFixture(t, 0)
+	beaconCfg.AltairForkEpoch = 0
+	beaconCfg.BellatrixForkEpoch = 0
+	beaconCfg.CapellaForkEpoch = 0
+	beaconCfg.DenebForkEpoch = 0
+	beaconCfg.ElectraForkEpoch = 0
+	beaconCfg.FuluForkEpoch = 0
+	beaconCfg.InitializeForkSchedule()
+	require.NoError(t, anchorState.SetSlot(63))
+	anchorRoot, err := anchorState.BlockRoot()
+	require.NoError(t, err)
+
+	parentBid.ParentBlockRoot = anchorRoot
+	envelope.Message.ParentBeaconBlockRoot = anchorRoot
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.Message.ExecutionRequests))
+	envelope.Message.Payload.BlockHash = anchorPayloadHeaderHash(t, envelope.Message.Payload, anchorRoot, requestsHash)
+	parentBid.BlockHash = envelope.Message.Payload.BlockHash
+	parent := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	parent.Block.Slot = envelope.Message.Payload.SlotNumber
+	parent.Block.ParentRoot = anchorRoot
+	parent.Block.Body.GetSignedExecutionPayloadBid().Message = parentBid
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	envelope.Message.BeaconBlockRoot = parentRoot
+
+	baseGraph, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	graph := &chainTipBatchForkGraph{
+		ForkGraph:   baseGraph,
+		parentRoot:  parentRoot,
+		parentBlock: parent,
+		envelope:    envelope,
+		added:       make(map[common.Hash]int),
+	}
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconCfg)
+	store, err := forkchoice.NewForkChoiceStore(
+		clock,
+		anchorState,
+		nil,
+		pool.NewOperationsPool(beaconCfg),
+		graph,
+		beaconevents.NewEventEmitter(),
+		synced_data.NewSyncedDataManager(beaconCfg, true),
+		nil,
+		public_keys_registry.NewInMemoryPublicKeysRegistry(),
+		validator_params.NewValidatorParams(),
+		false,
+		nil,
+	)
+	require.NoError(t, err)
+	store.OnTick((parent.Block.Slot + 1) * beaconCfg.SecondsPerSlot)
+	store.MarkPayloadStatus(parentRoot, envelope.Message.Payload.BlockHash, execution_client.PayloadStatusNone)
+	status, found := store.GetRecentExecutionPayloadStatusByRoot(parentRoot)
+	require.True(t, found)
+	require.EqualValues(t, execution_client.PayloadStatusNone, status)
+
+	fullChild := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	fullChild.Block.Slot = parent.Block.Slot + 1
+	fullChild.Block.ParentRoot = parentRoot
+	fullChild.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parentBid.BlockHash
+	emptyChild := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	emptyChild.Block.Slot = parent.Block.Slot + 1
+	emptyChild.Block.ParentRoot = parentRoot
+	emptyChild.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parentBid.ParentBlockHash
+
+	engine := &testExecutionEngine{payloadStatus: replayStatus}
+	stageCfg := &Cfg{
+		beaconCfg:             beaconCfg,
+		forkChoice:            store,
+		indiciesDB:            mdbxtest.NewTestDB(t, dbcfg.ChainDB),
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+	}
+	return stageCfg, graph, parentRoot, fullChild, emptyChild, engine
+}
+
+func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
+	t.Run("valid replay processes full child", func(t *testing.T) {
+		cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusValidated)
+		fullRoot, err := fullChild.Block.HashSSZ()
+		require.NoError(t, err)
+		seen := make(map[common.Hash]struct{})
+
+		reachedTarget := processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+
+		require.False(t, reachedTarget)
+		require.Equal(t, 1, engine.newPayloadCalls)
+		require.Equal(t, 1, graph.added[common.Hash(fullRoot)])
+		require.Contains(t, seen, common.Hash(fullRoot))
+		status, found := cfg.forkChoice.GetRecentExecutionPayloadStatusByRoot(parentRoot)
+		require.True(t, found)
+		require.EqualValues(t, execution_client.PayloadStatusValidated, status)
+	})
+
+	t.Run("missing replay verdict preserves full child for retry", func(t *testing.T) {
+		cfg, graph, _, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
+		fullRoot, err := fullChild.Block.HashSSZ()
+		require.NoError(t, err)
+		seen := make(map[common.Hash]struct{})
+
+		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+
+		require.Equal(t, 1, engine.newPayloadCalls)
+		require.Zero(t, graph.added[common.Hash(fullRoot)])
+		require.NotContains(t, seen, common.Hash(fullRoot))
+	})
+
+	for _, test := range []struct {
+		name       string
+		emptyFirst bool
+	}{
+		{name: "full then empty"},
+		{name: "empty then full", emptyFirst: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			cfg, graph, _, fullChild, emptyChild, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
+			fullRoot, err := fullChild.Block.HashSSZ()
+			require.NoError(t, err)
+			emptyRoot, err := emptyChild.Block.HashSSZ()
+			require.NoError(t, err)
+			seen := make(map[common.Hash]struct{})
+			blocks := []*cltypes.SignedBeaconBlock{fullChild, emptyChild}
+			if test.emptyFirst {
+				blocks = []*cltypes.SignedBeaconBlock{emptyChild, fullChild}
+			}
+
+			processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, blocks, seen)
+
+			require.Equal(t, 1, engine.newPayloadCalls)
+			require.Zero(t, graph.added[common.Hash(fullRoot)])
+			require.Equal(t, 1, graph.added[common.Hash(emptyRoot)])
+			require.NotContains(t, seen, common.Hash(fullRoot))
+			require.Contains(t, seen, common.Hash(emptyRoot))
+		})
+	}
 }
 
 func TestStoredParentEnvelopesRestoresReadableParents(t *testing.T) {
@@ -95,6 +305,7 @@ func TestStoredParentEnvelopesRestoresReadableParents(t *testing.T) {
 func TestStoredParentReplayRootsExcludeKnownChildren(t *testing.T) {
 	knownParent := common.Hash{1}
 	unknownParent := common.Hash{2}
+	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	knownChild := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	knownChild.Block.ParentRoot = knownParent
 	unknownChild := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
@@ -111,11 +322,71 @@ func TestStoredParentReplayRootsExcludeKnownChildren(t *testing.T) {
 		[]*cltypes.SignedBeaconBlock{knownChild, unknownChild},
 		envelopes,
 		storedRoots,
+		func(common.Hash) *cltypes.SignedBeaconBlock { return parent },
 		func(root common.Hash) bool { return root == common.Hash(knownChildRoot) },
 		func(common.Hash) bool { return false },
 	)
 
 	require.Equal(t, map[common.Hash]struct{}{unknownParent: {}}, got)
+}
+
+func TestStoredParentReplayRootsExcludeEmptyChildren(t *testing.T) {
+	parent1 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent1.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{1}
+	parent1Root, err := parent1.Block.HashSSZ()
+	require.NoError(t, err)
+	parent2 := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	parent2.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{2}
+	parent2Root, err := parent2.Block.HashSSZ()
+	require.NoError(t, err)
+
+	emptyChild := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	emptyChild.Block.ParentRoot = parent1Root
+	emptyChild.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{3}
+	knownFullChild := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	knownFullChild.Block.ParentRoot = parent1Root
+	knownFullChild.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{1}
+	knownFullChildRoot, err := knownFullChild.Block.HashSSZ()
+	require.NoError(t, err)
+	unknownFullChild := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	unknownFullChild.Block.ParentRoot = parent2Root
+	unknownFullChild.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = common.Hash{2}
+
+	envelopes := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
+		common.Hash(parent1Root): {},
+		common.Hash(parent2Root): {},
+	}
+	storedRoots := map[common.Hash]struct{}{
+		common.Hash(parent1Root): {},
+		common.Hash(parent2Root): {},
+	}
+	parents := map[common.Hash]*cltypes.SignedBeaconBlock{
+		common.Hash(parent1Root): parent1,
+		common.Hash(parent2Root): parent2,
+	}
+	parentBlock := func(root common.Hash) *cltypes.SignedBeaconBlock { return parents[root] }
+	knownBlock := func(root common.Hash) bool { return root == common.Hash(knownFullChildRoot) }
+	seenBlock := func(common.Hash) bool { return false }
+
+	got := storedParentReplayRoots(
+		[]*cltypes.SignedBeaconBlock{emptyChild, knownFullChild, parent2, unknownFullChild},
+		envelopes,
+		storedRoots,
+		parentBlock,
+		knownBlock,
+		seenBlock,
+	)
+	require.Equal(t, map[common.Hash]struct{}{common.Hash(parent2Root): {}}, got)
+
+	got = storedParentReplayRoots(
+		[]*cltypes.SignedBeaconBlock{emptyChild},
+		envelopes,
+		storedRoots,
+		parentBlock,
+		knownBlock,
+		seenBlock,
+	)
+	require.Empty(t, got)
 }
 
 func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {

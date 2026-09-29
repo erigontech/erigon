@@ -236,95 +236,8 @@ MainLoop:
 			if blocks == nil {
 				continue
 			}
-
-			// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
-			envelopeRoots, batchBlockByRoot := determineParentEnvelopeRoots(cfg, blocks.Data)
-			envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
-			storedReplayRoots := storedParentReplayRoots(
-				blocks.Data,
-				envelopes,
-				storedEnvelopeRoots,
-				func(root common.Hash) bool {
-					_, ok := cfg.forkChoice.GetHeader(root)
-					return ok
-				},
-				func(root common.Hash) bool {
-					_, ok := seenBlockRoots[root]
-					return ok
-				},
-			)
-			payloadReplay := storedParentPayloadReplay{
-				budget:    gloasPayloadRetryBudget,
-				remaining: len(storedReplayRoots),
-				results:   make(map[common.Hash]bool),
-			}
-
-			// Handle blocks received on the response channel
-			for _, block := range blocks.Data {
-				if !ensureAnchorEnvelopeForChild(ctx, cfg.forkChoice, func(recoveryCtx context.Context) error {
-					return ensureAnchorEnvelopeOnce(recoveryCtx, cfg)
-				}, block) {
-					log.Debug("[chainTipSync] anchor envelope unavailable, preserving child for retry", "slot", block.Block.Slot)
-					continue
-				}
-				// Check if the parent block is known
-				if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
-					time.Sleep(time.Millisecond)
-					continue
-				}
-
-				// Calculate the block root and check if the block is already known
-				blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
-				if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
-					// Check if the block slot is greater than or equal to the target slot
-					if block.Block.Slot >= args.targetSlot {
-						break MainLoop
-					}
-					continue
-				}
-
-				// Check if the block root has already been seen
-				if _, ok := seenBlockRoots[blockRoot]; ok {
-					continue
-				}
-
-				// [GLOAS] Apply parent's envelope before processBlock so that
-				// latestBlockHash is up-to-date for bid validation.
-				if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
-					parentRoot := block.Block.ParentRoot
-					if env, ok := envelopes[common.Hash(parentRoot)]; ok {
-						parentRoot := common.Hash(parentRoot)
-						_, wasStored := storedEnvelopeRoots[parentRoot]
-						envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg) && !wasStored)
-						if envErr != nil {
-							log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
-						}
-						parentBlock, ok := cfg.forkChoice.GetBlock(parentRoot)
-						if !ok {
-							parentBlock = batchBlockByRoot[parentRoot]
-						}
-						if storedParentReplayRequired(block, parentBlock, wasStored) && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr) {
-							continue
-						}
-					}
-				}
-
-				// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
-				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
-					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
-					if rememberBlockAfterProcess(err) {
-						seenBlockRoots[blockRoot] = struct{}{}
-					}
-					continue
-				}
-
-				// Mark the block root as seen
-				seenBlockRoots[blockRoot] = struct{}{}
-
-				// Check if the block slot is greater than or equal to the target slot
-				if block.Block.Slot >= args.targetSlot {
-					break MainLoop
-				}
+			if processChainTipBatch(ctx, cfg, args, blocks.Data, seenBlockRoots) {
+				break MainLoop
 			}
 		case <-logTicker.C:
 			// Log progress periodically
@@ -332,6 +245,94 @@ MainLoop:
 		}
 	}
 	return nil
+}
+
+func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cltypes.SignedBeaconBlock, seenBlockRoots map[common.Hash]struct{}) bool {
+	// [GLOAS] Batch-determine and fetch parent envelopes before processing blocks.
+	envelopeRoots, batchBlockByRoot := determineParentEnvelopeRoots(cfg, blocks)
+	envelopes, storedEnvelopeRoots := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
+	parentBlockByRoot := func(root common.Hash) *cltypes.SignedBeaconBlock {
+		if parentBlock, ok := cfg.forkChoice.GetBlock(root); ok {
+			return parentBlock
+		}
+		return batchBlockByRoot[root]
+	}
+	storedReplayRoots := storedParentReplayRoots(
+		blocks,
+		envelopes,
+		storedEnvelopeRoots,
+		parentBlockByRoot,
+		func(root common.Hash) bool {
+			_, ok := cfg.forkChoice.GetHeader(root)
+			return ok
+		},
+		func(root common.Hash) bool {
+			_, ok := seenBlockRoots[root]
+			return ok
+		},
+	)
+	payloadReplay := storedParentPayloadReplay{
+		budget:    gloasPayloadRetryBudget,
+		remaining: len(storedReplayRoots),
+		results:   make(map[common.Hash]bool),
+	}
+
+	for _, block := range blocks {
+		if !ensureAnchorEnvelopeForChild(ctx, cfg.forkChoice, func(recoveryCtx context.Context) error {
+			return ensureAnchorEnvelopeOnce(recoveryCtx, cfg)
+		}, block) {
+			log.Debug("[chainTipSync] anchor envelope unavailable, preserving child for retry", "slot", block.Block.Slot)
+			continue
+		}
+		if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
+			time.Sleep(time.Millisecond)
+			continue
+		}
+
+		blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
+		if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
+			if block.Block.Slot >= args.targetSlot {
+				return true
+			}
+			continue
+		}
+
+		if _, ok := seenBlockRoots[blockRoot]; ok {
+			continue
+		}
+
+		// [GLOAS] Apply parent's envelope before processBlock so that
+		// latestBlockHash is up-to-date for bid validation.
+		if block.Version() >= clparams.GloasVersion && len(envelopes) > 0 {
+			parentRoot := common.Hash(block.Block.ParentRoot)
+			if env, ok := envelopes[parentRoot]; ok {
+				_, wasStored := storedEnvelopeRoots[parentRoot]
+				envErr := cfg.forkChoice.OnExecutionPayload(ctx, env, false, canValidateGloasPayloads(cfg) && !wasStored)
+				if envErr != nil {
+					log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
+				}
+				parentBlock := parentBlockByRoot(parentRoot)
+				if storedParentReplayRequired(block, parentBlock, wasStored) && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr) {
+					continue
+				}
+			}
+		}
+
+		// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
+		if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
+			log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
+			if rememberBlockAfterProcess(err) {
+				seenBlockRoots[blockRoot] = struct{}{}
+			}
+			continue
+		}
+
+		seenBlockRoots[blockRoot] = struct{}{}
+		if block.Block.Slot >= args.targetSlot {
+			return true
+		}
+	}
+	return false
 }
 
 // fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.
@@ -489,6 +490,7 @@ func storedParentReplayRoots(
 	blocks []*cltypes.SignedBeaconBlock,
 	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	storedRoots map[common.Hash]struct{},
+	parentBlock func(common.Hash) *cltypes.SignedBeaconBlock,
 	knownBlock func(common.Hash) bool,
 	seenBlock func(common.Hash) bool,
 ) map[common.Hash]struct{} {
@@ -503,6 +505,9 @@ func storedParentReplayRoots(
 		}
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil || knownBlock(common.Hash(blockRoot)) || seenBlock(common.Hash(blockRoot)) {
+			continue
+		}
+		if !parentEnvelopeRequired(block, parentBlock(parentRoot)) {
 			continue
 		}
 		replayRoots[parentRoot] = struct{}{}
@@ -902,17 +907,13 @@ type storedParentPayloadStore interface {
 }
 
 type storedParentPayloadReplay struct {
-	budget           time.Duration
-	deadline         time.Time
-	remaining        int
-	attemptDeadlines map[common.Hash]time.Time
-	results          map[common.Hash]bool
+	budget    time.Duration
+	deadline  time.Time
+	remaining int
+	results   map[common.Hash]bool
 }
 
-func (r *storedParentPayloadReplay) attemptContext(ctx context.Context, root common.Hash) (context.Context, context.CancelFunc) {
-	if deadline, ok := r.attemptDeadlines[root]; ok {
-		return context.WithDeadline(ctx, deadline)
-	}
+func (r *storedParentPayloadReplay) attemptContext(ctx context.Context) (context.Context, context.CancelFunc) {
 	if r.deadline.IsZero() {
 		r.deadline = time.Now().Add(r.budget)
 	}
@@ -926,10 +927,6 @@ func (r *storedParentPayloadReplay) attemptContext(ctx context.Context, root com
 	if r.remaining > 0 {
 		r.remaining--
 	}
-	if r.attemptDeadlines == nil {
-		r.attemptDeadlines = make(map[common.Hash]time.Time)
-	}
-	r.attemptDeadlines[root] = attemptDeadline
 	return context.WithDeadline(ctx, attemptDeadline)
 }
 
@@ -954,7 +951,7 @@ func (r *storedParentPayloadReplay) accepted(
 		r.results[root] = false
 		return false
 	}
-	retryCtx, cancel := r.attemptContext(ctx, root)
+	retryCtx, cancel := r.attemptContext(ctx)
 	accepted := ensureStoredParentPayloadAccepted(retryCtx, cfg, store, root, envelope)
 	cancel()
 	r.results[root] = accepted
