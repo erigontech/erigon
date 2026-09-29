@@ -74,7 +74,7 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(m.Ctx, tx, m.Log)
 	require.NoError(t, err)
 	defer sd.Close()
-	require.NoError(t, sd.InitBlockOverlay(tx, t.TempDir()))
+	require.NoError(t, sd.InitBlockOverlay(tx))
 	require.NoError(t, rawtemporaldb.AppendReceiptMetadata(sd.AsPutDel(tx), overlayLogIdx, 0, 0, firstTxNum))
 
 	events := shards.NewEvents()

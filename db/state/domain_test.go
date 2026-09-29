@@ -2776,7 +2776,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Parallel()
 
 	pruningKey := common.FromHex("701b39aee8d1ee500442d2874a6e6d0cc9dad8d9")
-	writeOneKey := func(t *testing.T, d *Domain, db kv.RwDB, maxTx, stepSize uint64) {
+	writeOneKey := func(t *testing.T, d *Domain, db kv.RwDB, maxTx uint64) {
 		t.Helper()
 
 		ctx := t.Context()
@@ -2865,7 +2865,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history inside 1step", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(13), uint64(17)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
@@ -2877,7 +2877,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history between 2 steps", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(8), uint64(17)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()
@@ -2889,7 +2889,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple prune whole step", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(10)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 3*stepSize, stepSize)
+		writeOneKey(t, d, db, 3*stepSize)
 
 		ctx := t.Context()
 		rotx, err := db.BeginRo(ctx)
@@ -2932,7 +2932,7 @@ func TestDomain_PruneSimple(t *testing.T) {
 	t.Run("simple history discard", func(t *testing.T) {
 		stepSize, pruneFrom, pruneTo := uint64(10), uint64(0), uint64(20)
 		db, d := testDbAndDomainOfStep(t, statecfg.Schema.AccountsDomain, stepSize, log.New())
-		writeOneKey(t, d, db, 2*stepSize, stepSize)
+		writeOneKey(t, d, db, 2*stepSize)
 
 		domainRoTx := d.beginForTests()
 		defer domainRoTx.Close()

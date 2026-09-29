@@ -924,11 +924,11 @@ func (sd *SharedDomains) BlockOverlayTemporalTx(roTx kv.TemporalTx) kv.TemporalT
 // InitBlockOverlay creates (or replaces) the block-level metadata overlay backed by
 // the given base transaction. Writes to the overlay are visible to subsequent reads
 // and are flushed atomically alongside domain state via Flush().
-func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx, tmpDir string) error {
+func (sd *SharedDomains) InitBlockOverlay(tx kv.TemporalTx) error {
 	if old := sd.blockOverlay.Load(); old != nil {
 		old.Close()
 	}
-	overlay, err := membatchwithdb.NewMemoryBatch(tx, tmpDir, sd.logger)
+	overlay, err := membatchwithdb.NewMemoryBatch(tx)
 	if err != nil {
 		return fmt.Errorf("init block overlay: %w", err)
 	}

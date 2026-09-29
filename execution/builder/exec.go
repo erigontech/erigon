@@ -124,7 +124,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	// execution results (e.g., a tx passes the filter but fails in the EVM).
 	// These speculative writes must NOT pollute sd's commitment computation.
 	// filterSd must be backed by its own MemoryBatch to ensure full isolation.
-	filterMb, err := membatchwithdb.NewMemoryBatch(tx, cfg.tmpdir, logger)
+	filterMb, err := membatchwithdb.NewMemoryBatch(tx)
 	if err != nil {
 		return err
 	}

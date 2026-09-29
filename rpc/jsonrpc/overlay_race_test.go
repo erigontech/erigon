@@ -213,7 +213,7 @@ func newPublishedOverlayTestBase(t *testing.T, m *execmoduletester.ExecModuleTes
 	doms, err := execctx.NewSharedDomains(m.Ctx, overlayRoTx, m.Log)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
-	require.NoError(t, doms.InitBlockOverlay(overlayRoTx, m.Dirs.Tmp))
+	require.NoError(t, doms.InitBlockOverlay(overlayRoTx))
 
 	events := shards.NewEvents()
 	events.PublishOverlay(doms)
@@ -928,7 +928,7 @@ func TestGetBlockNumberReadsOnlyThePassedView(t *testing.T) {
 	replacementDomains, err := execctx.NewSharedDomains(m.Ctx, replacementTx, m.Log)
 	require.NoError(t, err)
 	defer replacementDomains.Close()
-	require.NoError(t, replacementDomains.InitBlockOverlay(replacementTx, m.Dirs.Tmp))
+	require.NoError(t, replacementDomains.InitBlockOverlay(replacementTx))
 
 	replacementHeader := types.CopyHeader(firstHeader)
 	replacementHeader.Coinbase = common.Address{2}
@@ -1686,7 +1686,7 @@ func publishOverlayHeadE(h *overlayAheadHarness, head *types.Header) error {
 		return err
 	}
 	h.t.Cleanup(doms.Close)
-	if err := doms.InitBlockOverlay(roTx, h.m.Dirs.Tmp); err != nil {
+	if err := doms.InitBlockOverlay(roTx); err != nil {
 		return err
 	}
 	if err := writeHeadBlockMarkersE(doms.BlockOverlay(), head, &types.Body{}); err != nil {

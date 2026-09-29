@@ -338,7 +338,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 		}
 	}
 
-	m, torrentClient, err := newTorrentClient(ctx, cfg.Dirs.Snap, cfg.ClientConfig)
+	m, torrentClient, err := newTorrentClient(cfg.Dirs.Snap, cfg.ClientConfig)
 	if err != nil {
 		return nil, fmt.Errorf("newTorrentClient: %w", err)
 	}
@@ -1618,7 +1618,6 @@ func openMdbx(
 // This used to return the MDBX database. Instead, that's opened separately now and should be passed
 // in if it's revived.
 func newTorrentClient(
-	ctx context.Context,
 	snapDir string,
 	cfg *torrent.ClientConfig,
 ) (
