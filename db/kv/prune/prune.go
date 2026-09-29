@@ -286,7 +286,16 @@ func TableScanningPrune(
 		}
 	}
 
-	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
+	// A step-keyed entry does not stand for one txNum: it stands for every
+	// write that landed in its step, so the last txNum it covers is the step's
+	// last. Pruning it needs files past that, not past the step's start.
+	var entryEnd uint64
+	switch mode {
+	case StepValueStorageMode, StepKeyStorageMode:
+		entryEnd = stepSize - 1
+	}
+
+	lastVal, err := tableScanningPrune(ctx, stat, filenameBase, txFrom, txTo, txNumGetter, entryEnd, valDelCursor, keysCursor, asserts, throttling, logEvery, logger, prevStat.ValueProgress, prevStat.LastPrunedValue)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +317,7 @@ func tableScanningPrune(
 	filenameBase string,
 	txFrom, txTo uint64,
 	txNumGetter func(key, val []byte) uint64,
+	entryEnd uint64, // added to an entry's txNum to reach the last txNum it stands for
 	valDelCursor kv.PseudoDupSortRwCursor,
 	keysCursor kv.RwCursorDupSort,
 	asserts bool,
@@ -366,7 +376,7 @@ func tableScanningPrune(
 
 		// All dups in prune range [txFrom, txTo): safe bulk delete.
 		// Stats reflect what is actually deleted: the full [minTxNum, maxTxNum] span.
-		if minTxNum >= txFrom && maxTxNum < txTo {
+		if minTxNum >= txFrom && maxTxNum+entryEnd < txTo {
 			if throttling != nil {
 				time.Sleep(*throttling)
 			}
@@ -407,11 +417,11 @@ func tableScanningPrune(
 					if txNumDup < txFrom {
 						continue
 					}
-					if txNumDup >= txTo {
+					if txNumDup+entryEnd >= txTo {
 						break
 					}
 				} else {
-					if txNumDup >= txTo {
+					if txNumDup+entryEnd >= txTo {
 						continue
 					}
 					if txNumDup < txFrom {
