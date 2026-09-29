@@ -226,3 +226,47 @@ func TestReadinessWaitIsBoundedWhenReadyBlocks(t *testing.T) {
 	require.Equal(t, engine_types.SyncingStatus, status.Status)
 	require.Less(t, time.Since(start), 500*time.Millisecond, "a blocking Ready must not stretch the wait past its budget")
 }
+
+// TestWaitForResponseDoesNotCallBackAfterDeadline proves no callback starts once the budget is
+// spent, even when less than one poll interval remained after the first call.
+func TestWaitForResponseDoesNotCallBackAfterDeadline(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	start := time.Now()
+	busy, err := waitForResponse(context.Background(), 5*time.Millisecond, func() (bool, error) {
+		calls++
+		if calls > 1 {
+			time.Sleep(time.Second)
+		}
+		return true, nil
+	})
+	require.NoError(t, err)
+	require.True(t, busy)
+	require.Equal(t, 1, calls, "a callback must not start after the deadline")
+	require.Less(t, time.Since(start), 100*time.Millisecond)
+}
+
+// TestWaitForResponseDoesNotCallBackAfterCancellation proves no callback starts once the context
+// is done, even when a poll tick is ready at the same moment. select picks randomly among ready
+// cases, so the scenario is repeated to make a missing check fail reliably.
+func TestWaitForResponseDoesNotCallBackAfterCancellation(t *testing.T) {
+	t.Parallel()
+
+	for range 20 {
+		ctx, cancel := context.WithCancel(context.Background())
+		calls := 0
+		busy, err := waitForResponse(ctx, time.Minute, func() (bool, error) {
+			calls++
+			if calls == 2 {
+				cancel()
+				time.Sleep(20 * time.Millisecond) // lets the next tick become ready too
+			}
+			return true, nil
+		})
+		cancel()
+		require.NoError(t, err)
+		require.True(t, busy)
+		require.Equal(t, 2, calls, "a callback must not start after cancellation")
+	}
+}

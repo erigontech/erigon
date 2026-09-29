@@ -1419,6 +1419,11 @@ func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func
 			return true, nil
 		case <-ticker.C:
 		}
+		// The tick can arrive after the deadline, or together with cancellation (select picks
+		// randomly among ready cases), so recheck both before starting another call.
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return true, nil
+		}
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {
 			return shouldWait, err
