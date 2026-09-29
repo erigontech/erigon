@@ -329,16 +329,16 @@
 - Create: `db/state/pbt_leaf_stream.go`
 - Create: `db/state/pbt_leaf_stream_test.go`
 
-- [ ] add the stream signature with a stub. Write tests:
+- [x] add the stream signature with a stub. Write tests:
       - the stream over a test datadir yields the same leaves as the pbt engine's state after executing the same chain;
       - stamps combine by max: basic data over account and code, and a chunk shared by two accounts.
 
       Confirm they fail at the leaf and stamp assertions.
-- [ ] implement the stream over accounts, storage and code (files-only or files-plus-DB), translating through
+- [x] implement the stream over accounts, storage and code (files-only or files-plus-DB), translating through
       `NewRebuildFeedOpEmitter` with `CodeWritten=true`, dropping zero values, attaching stamps in the emit callback
-- [ ] sort by tree key through ETL, keeping the max stamp of identical payloads and rejecting conflicting ones
-- [ ] write tests for delegated accounts, all-zero bytecode, code shared across accounts and an empty state
-- [ ] run tests - must pass before task 4
+- [x] sort by tree key through ETL, keeping the max stamp of identical payloads and rejecting conflicting ones
+- [x] write tests for delegated accounts, all-zero bytecode, code shared across accounts and an empty state
+- [x] run tests - must pass before task 4
 
 ### Task 4: Conversion point and unwind floor
 
