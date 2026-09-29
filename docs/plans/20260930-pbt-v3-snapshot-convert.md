@@ -313,15 +313,15 @@
 - Create: `execution/commitment/eip8297/stream_root.go`
 - Create: `execution/commitment/eip8297/stream_root_test.go`
 
-- [ ] add the builder signature with a stub. Write tests:
+- [x] add the builder signature with a stub. Write tests:
       - on random sorted leaf sets, the streaming root equals `reference.go`'s root under both suites; the sets cover
         all zones, header and overflow storage, code stems and groups of 1 to 256 values;
       - the empty stream gives the zero root.
 
       Confirm they fail at the root comparison.
-- [ ] implement the depth-bounded builder with compressed prefixes and full leaf keys; take the hash suite explicitly
-- [ ] write tests rejecting unsorted input, duplicate keys and zero values
-- [ ] run tests - must pass before task 3
+- [x] implement the depth-bounded builder with compressed prefixes and full leaf keys; take the hash suite explicitly
+- [x] write tests rejecting unsorted input, duplicate keys and zero values
+- [x] run tests - must pass before task 3
 
 ### Task 3: Shared leaf stream
 
