@@ -378,3 +378,31 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 		}
 	}
 }
+
+// TestValueTiebreaker_MapReadIncarnationBump pins the value tiebreaker for a
+// version-map read: when the writer re-executes and re-publishes the same value
+// under a new incarnation, a reader of the old version is still accurate and
+// must not be forced to re-execute.
+func TestValueTiebreaker_MapReadIncarnationBump(t *testing.T) {
+	vm := NewVersionMap(nil)
+
+	addr := accounts.InternAddress([20]byte{0x04})
+	balance := uint256.NewInt(1000)
+
+	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 1}, *balance, true)
+
+	checkVersion := func(rv, wv Version) VersionValidity {
+		if rv != wv {
+			return VersionInvalid
+		}
+		return VersionValid
+	}
+
+	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, MapRead, Version{TxIndex: 5, Incarnation: 0},
+		*balance, liveBalance, eqUint256, checkVersion, false, "")
+	assert.Equal(t, VersionValid, valid, "same value under a bumped incarnation must stay valid")
+
+	valid = validateRead(vm, 10, addr, BalancePath, accounts.NilKey, MapRead, Version{TxIndex: 5, Incarnation: 0},
+		*uint256.NewInt(999), liveBalance, eqUint256, checkVersion, false, "")
+	assert.Equal(t, VersionInvalid, valid, "a changed value must still invalidate")
+}

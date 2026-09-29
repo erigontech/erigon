@@ -1183,6 +1183,13 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
+			if valid != VersionValid && matchesLive != nil && matchesLive() {
+				// Value tiebreaker: the writer re-published under a different version but
+				// the value this read saw is still the live one, so the read is accurate.
+				// Without it one re-execution invalidates every reader of a hot cell (the
+				// block's shared gas payer) and serializes the block.
+				valid = VersionValid
+			}
 			// An origin AddressPath read is the committed baseline; re-run the create/
 			// destruct cross-checks so a concurrent lower-tx create or SELFDESTRUCT invalidates it.
 			if valid == VersionValid && path == AddressPath && rr.Version().TxIndex == originIndex {
