@@ -578,9 +578,12 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		api.witnessCache = cache
 		t.Cleanup(func() { api.witnessCache = nil })
 
+		hitBefore, awaitBefore := witnessCacheHitCounter.GetValueUint64(), witnessCacheAwaitCounter.GetValueUint64()
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
 		require.NoError(t, err)
 		require.Same(t, sentinel, result, "a cache-only miss must serve the running build, not out-of-window")
+		require.Equal(t, hitBefore, witnessCacheHitCounter.GetValueUint64(), "a joined build is not a resident hit")
+		require.Equal(t, awaitBefore+1, witnessCacheAwaitCounter.GetValueUint64(), "a joined build counts as an await")
 	})
 
 	t.Run("by-hash orphan is reorged-away, never serves the resident entry", func(t *testing.T) {

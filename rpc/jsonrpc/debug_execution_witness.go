@@ -755,13 +755,13 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 		return nil, err
 	}
 
-	build := func() (*ExecutionWitnessResult, error) {
+	build := func(ctx context.Context) (*ExecutionWitnessResult, error) {
 		return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
 	}
 	if api.witnessCache == nil || resolvedMode != witnessModeLegacy {
-		return build()
+		return build(ctx)
 	}
-	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build)
+	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build, nil)
 }
 
 // serveFromWitnessCache returns a cached legacy-mode witness when the eager cache
@@ -803,7 +803,10 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	}
 	result, ok := api.witnessCache.Get(hash)
 	if !ok && api.witnessCache.CacheOnly() {
-		result, ok = api.witnessCache.awaitBuild(ctx, hash)
+		if result, ok = api.witnessCache.awaitBuild(ctx, hash); ok {
+			witnessCacheAwaitCounter.Inc()
+			return result, true, false
+		}
 	}
 	if ok {
 		witnessCacheHitCounter.Inc()
