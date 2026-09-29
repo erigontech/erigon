@@ -466,25 +466,25 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `rpc/jsonrpc/pbt_witness_input.go`
 - Create: `rpc/jsonrpc/pbt_witness_input_test.go`
 
-- [ ] add the adapter signature with a stub. Write tests:
+- [x] add the adapter signature with a stub. Write tests:
       - a read served by the in-block overlay is not a pre-state load;
       - a read inside a reverted call is;
       - two versions of one address's code both reach the pbt `codes` set.
 
       Confirm they fail at those assertions.
-- [ ] record provenance in `RecordingState` for account and storage reads (pre-state reader or overlay); keep reads in
+- [x] record provenance in `RecordingState` for account and storage reads (pre-state reader or overlay); keep reads in
       reverted calls
-- [ ] build the content-keyed `codes` set in the pbt adapter only:
+- [x] build the content-keyed `codes` set in the pbt adapter only:
       - full code for code-size reads;
       - modified code the block never read is left out;
       - `AccessedCode` and MPT `codes` stay as they are.
-- [ ] implement the rest of the adapter: reads, net writes against pre-block values, account deletions, code deploys,
+- [x] implement the rest of the adapter: reads, net writes against pre-block values, account deletions, code deploys,
       delegation set and clear
-- [ ] write tests:
+- [x] write tests:
       - the adapter over transfers, storage deletes, deploys, self-destruct in the creation transaction and delegation
         changes;
       - MPT output unchanged, through `TestWitnessesMatchHPHUnderCommitmentV3` and the task 2 parity arm
-- [ ] run tests - must pass before task 10
+- [x] run tests - must pass before task 10
 
 ### Task 10: Stateless verifier
 

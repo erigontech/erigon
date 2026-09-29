@@ -26,7 +26,7 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297/witness"
 )
 
-func (t *Trie) Witness(ctx context.Context, input witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error) {
+func (t *Trie) Witness(ctx context.Context, expectedRoot common.Hash, input witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error) {
 	if ctx == nil {
 		return nil, nil, common.Hash{}, fmt.Errorf("pbin witness: nil context")
 	}
@@ -37,18 +37,7 @@ func (t *Trie) Witness(ctx context.Context, input witness.PBinDriverInput) ([][]
 		return nil, nil, common.Hash{}, fmt.Errorf("pbin witness: nil Patricia context")
 	}
 	resolver := NewPBinWitnessResolver(t.ctx)
-	preRoot, err := resolver.RootHash()
-	if err != nil {
-		return nil, nil, common.Hash{}, err
-	}
-	engineRoot, err := t.RootHash()
-	if err != nil {
-		return nil, nil, common.Hash{}, err
-	}
-	if engineRoot != preRoot {
-		return nil, nil, common.Hash{}, fmt.Errorf("pbin witness: resolver root %x differs from engine root %x", preRoot, engineRoot)
-	}
-	model, err := witness.NewPBinTree(preRoot, resolver.Resolve)
+	model, err := witness.NewPBinTree(expectedRoot, resolver.Resolve)
 	if err != nil {
 		return nil, nil, common.Hash{}, err
 	}

@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/witness"
 )
@@ -63,7 +64,7 @@ func TestPBinWitnessMatchesModel(t *testing.T) {
 		wantBlobs[index] = node.Blob
 	}
 
-	gotPaths, gotBlobs, gotRoot, err := NewTrie(preContext).Witness(context.Background(), input)
+	gotPaths, gotBlobs, gotRoot, err := NewTrie(preContext).Witness(context.Background(), preRoot, input)
 	require.NoError(t, err)
 	require.Equal(t, wantPaths, gotPaths, "set comparison paths")
 	require.Equal(t, wantBlobs, gotBlobs, "set comparison blobs")
@@ -79,6 +80,39 @@ func TestPBinWitnessMatchesModel(t *testing.T) {
 	engineRoot, err := NewTrie(postContext).Process(postOps)
 	require.NoError(t, err)
 	require.Equal(t, engineRoot, gotRoot, "engine post-root comparison")
+}
+
+func TestPBinWitnessUsesExpectedParentRoot(t *testing.T) {
+	pbinUseBlake3(t)
+	entries := pbinResolverEntries()[:8]
+	parent := newTrieTestContext()
+	_, err := NewTrie(parent).Process(entriesToOps(entries))
+	require.NoError(t, err)
+	parentRoot, err := NewTrie(parent).RootHash()
+	require.NoError(t, err)
+	latest := newTrieTestContext()
+	latest.records = cloneRecords(parent.records)
+	rewrite := entries[0]
+	rewrite.Value = testTrieValueBytes(0x88)
+	_, err = NewTrie(latest).Process(entriesToOps([]eip8297.Entry{rewrite}))
+	require.NoError(t, err)
+	history := &pbinResolverHistoryContext{latest: latest, parent: parent.records}
+	paths, blobs, postRoot, err := NewTrie(history).Witness(context.Background(), parentRoot, witness.PBinDriverInput{})
+	require.NoError(t, err)
+	require.NotEmpty(t, paths, "parent anchor must build a root witness")
+	wantNodes, _ := pbinOracleNodes(t, entries)
+	require.Equal(t, wantNodes[0].blob, blobs[0], "parent witness root blob")
+	require.Equal(t, parentRoot, postRoot, "an empty driver must preserve the expected parent root")
+}
+
+func TestPBinWitnessRejectsWrongExpectedRoot(t *testing.T) {
+	pbinUseBlake3(t)
+	entries := pbinResolverEntries()[:8]
+	ctx := newTrieTestContext()
+	_, err := NewTrie(ctx).Process(entriesToOps(entries))
+	require.NoError(t, err)
+	_, _, _, err = NewTrie(ctx).Witness(context.Background(), common.Hash{0xee}, witness.PBinDriverInput{})
+	require.ErrorContains(t, err, "want")
 }
 
 func pbinWitnessValueBytes(seed byte) []byte {

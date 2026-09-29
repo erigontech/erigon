@@ -36,7 +36,7 @@ type pbinWitnessDispatchTrie struct {
 
 func (t *pbinWitnessDispatchTrie) Variant() commitment.TrieVariant { return t.variant }
 
-func (t *pbinWitnessDispatchTrie) Witness(context.Context, witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error) {
+func (t *pbinWitnessDispatchTrie) Witness(context.Context, common.Hash, witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error) {
 	t.called = true
 	return [][]byte{{1}}, [][]byte{{2}}, common.Hash{3}, nil
 }
@@ -52,7 +52,7 @@ func TestPBinWitnessDispatchesBinaryDomains(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			trie := &pbinWitnessDispatchTrie{variant: commitment.VariantBinPatriciaTrie}
 			sdc := &SharedDomainsCommitmentContext{commitmentDomain: tc.domain, variant: commitment.VariantBinPatriciaTrie, patriciaTrie: trie}
-			paths, blobs, root, err := sdc.PBinWitness(context.Background(), witness.PBinDriverInput{})
+			paths, blobs, root, err := sdc.PBinWitness(context.Background(), common.Hash{}, witness.PBinDriverInput{})
 			require.NoError(t, err)
 			require.True(t, trie.called)
 			require.Equal(t, [][]byte{{1}}, paths)
@@ -65,7 +65,7 @@ func TestPBinWitnessDispatchesBinaryDomains(t *testing.T) {
 func TestPBinWitnessDispatchRefusesHex(t *testing.T) {
 	trie := &pbinWitnessDispatchTrie{variant: commitment.VariantCommitmentV3}
 	sdc := &SharedDomainsCommitmentContext{commitmentDomain: kv.CommitmentDomain, variant: commitment.VariantCommitmentV3, patriciaTrie: trie}
-	_, _, _, err := sdc.PBinWitness(context.Background(), witness.PBinDriverInput{})
+	_, _, _, err := sdc.PBinWitness(context.Background(), common.Hash{}, witness.PBinDriverInput{})
 	require.ErrorContains(t, err, "cannot build PBT witnesses")
 	require.False(t, trie.called)
 }

@@ -26,10 +26,10 @@ import (
 )
 
 type pbinWitnessTrie interface {
-	Witness(context.Context, witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error)
+	Witness(context.Context, common.Hash, witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error)
 }
 
-func (sdc *SharedDomainsCommitmentContext) PBinWitness(ctx context.Context, input witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error) {
+func (sdc *SharedDomainsCommitmentContext) PBinWitness(ctx context.Context, expectedRoot common.Hash, input witness.PBinDriverInput) ([][]byte, [][]byte, common.Hash, error) {
 	if sdc.variant != commitment.VariantBinPatriciaTrie {
 		return nil, nil, common.Hash{}, fmt.Errorf("commitment trie %s cannot build PBT witnesses", sdc.variant)
 	}
@@ -37,5 +37,5 @@ func (sdc *SharedDomainsCommitmentContext) PBinWitness(ctx context.Context, inpu
 	if !ok {
 		return nil, nil, common.Hash{}, fmt.Errorf("commitment trie %s cannot build PBT witnesses", sdc.variant)
 	}
-	return wt.Witness(ctx, input)
+	return wt.Witness(ctx, expectedRoot, input)
 }
