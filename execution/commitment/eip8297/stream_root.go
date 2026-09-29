@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 )
@@ -118,8 +119,7 @@ func (b *StreamRootBuilder) RootHash() common.Hash {
 		return EmptyTreeHash
 	}
 	root := b.lastLeaf
-	for i := len(b.branches) - 1; i >= 0; i-- {
-		branch := b.branches[i]
+	for _, branch := range slices.Backward(b.branches) {
 		root = b.hashBranch(branch.prefix, branch.left, root)
 	}
 	return root

@@ -109,8 +109,8 @@ func TestStreamRootBuilderRejectsInvalidLeaves(t *testing.T) {
 
 func streamRootEntries() []Entry {
 	states := make([]State, 0, 258)
-	for i := uint64(0); i < 2; i++ {
-		address := referenceAddress(100 + i)
+	for i := range 2 {
+		address := referenceAddress(uint64(100 + i))
 		var balance uint256.Int
 		balance.SetUint64(i + 1)
 		states = append(states, State{
@@ -153,7 +153,7 @@ func streamRootCorpora(entries []Entry) []struct {
 		{name: "deep shared prefix", entries: sortStreamEntries(referenceDeepSharedPrefixCorpus().entries)},
 	}
 	rnd := rand.New(rand.NewSource(0x8297))
-	for i := 0; i < 8; i++ {
+	for range 8 {
 		selected := make([]Entry, 1+rnd.Intn(len(entries)))
 		for j, index := range rnd.Perm(len(entries))[:len(selected)] {
 			selected[j] = entries[index]
