@@ -29,13 +29,12 @@ const (
 	proposerSlashingCacheSize     = 100
 	operationSeenCacheSize        = 16_384
 	seenBlockCacheSize            = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
-	maxPendingBlocks              = 1024
 	blockJobsIntervalTick         = 50 * time.Millisecond
-	blockELRetryInitialDelay      = 250 * time.Millisecond
-	blockELRetryMaxDelay          = 2 * time.Second
 	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
 	blockJobExpiry                = 30 * time.Second
+	blockELRetryInitialDelay      = 250 * time.Millisecond
+	blockELRetryMaxDelay          = 2 * time.Second
 	attestationJobExpiry          = 30 * time.Minute
 	singleAttestationJobExpiry    = 6 * time.Second
 	maximumGossipClockDisparity   = 500 * time.Millisecond

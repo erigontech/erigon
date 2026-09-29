@@ -49,6 +49,7 @@ var (
 	ErrInvalidSignature         = errors.New("invalid signature")
 	ErrPublishedBlockJobExpired = errors.New("published block integration expired")
 	ErrPublishedBlockJobStopped = errors.New("block service stopped")
+	errBlockStorage             = errors.New("local block storage failed")
 )
 
 var publishedBlockJobSequence atomic.Uint64
@@ -61,7 +62,6 @@ type proposerIndexAndSlot struct {
 }
 
 type blockJob struct {
-	// block is immutable; mu protects the publication lifetime and retry state.
 	block            *cltypes.SignedBeaconBlock
 	creationTime     time.Time
 	scheduleSequence uint64
@@ -74,96 +74,8 @@ type blockJob struct {
 	running             bool
 	attempt             *blockJobAttempt
 	lastAttempt         *blockJobAttempt
-
-	gossip                  bool
-	signedRoot              common.Hash
-	gossipEventSent         bool
-	persisted               bool
-	executionAndDataChecked bool
-	processingFailureAt     time.Time
-	retryAfter              time.Time
-	retryDelay              time.Duration
-}
-
-func (job *blockJob) readyToRetryLocked(now time.Time) bool {
-	return job.retryAfter.IsZero() || !now.Before(job.retryAfter)
-}
-
-func (job *blockJob) recordProcessingFailureLocked(now time.Time, err error) {
-	job.processingFailureAt = now
-	// Other dependencies stay on the fast queue interval. Retaining retryDelay
-	// ensures that a later EL failure continues the existing backoff sequence.
-	if !errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
-		job.retryAfter = time.Time{}
-		return
-	}
-	// Repeated newPayload calls do not help an unavailable EL recover faster.
-	if job.retryDelay == 0 {
-		job.retryDelay = blockELRetryInitialDelay
-	} else {
-		job.retryDelay = min(2*job.retryDelay, blockELRetryMaxDelay)
-	}
-	job.retryAfter = now.Add(job.retryDelay)
-}
-
-func (job *blockJob) processingState() (persisted, executionAndDataChecked bool) {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	return job.persisted, job.executionAndDataChecked
-}
-
-func (job *blockJob) markPersisted() {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	job.persisted = true
-}
-
-// A duplicate delivery preserves completed work and the original admission
-// time. The newest failure controls the next retry, while an existing EL delay
-// remains the base of exponential backoff.
-func mergeBlockProcessingState(existing, incoming *blockJob) {
-	if existing == incoming {
-		return
-	}
-	incoming.mu.Lock()
-	incomingPersisted := incoming.persisted
-	incomingExecutionAndDataChecked := incoming.executionAndDataChecked
-	incomingProcessingFailureAt := incoming.processingFailureAt
-	incomingRetryAfter := incoming.retryAfter
-	incomingRetryDelay := incoming.retryDelay
-	incomingSignedRoot := incoming.signedRoot
-	incomingGossip := incoming.gossip
-	incomingGossipEventSent := incoming.gossipEventSent
-	incoming.mu.Unlock()
-
-	existing.mu.Lock()
-	defer existing.mu.Unlock()
-	if incomingGossip && !existing.gossip {
-		existing.signedRoot = incomingSignedRoot
-	}
-	existing.gossip = existing.gossip || incomingGossip
-	existing.gossipEventSent = existing.gossipEventSent || incomingGossipEventSent
-	existing.persisted = existing.persisted || incomingPersisted
-	existing.executionAndDataChecked = existing.executionAndDataChecked || incomingExecutionAndDataChecked
-	if incomingProcessingFailureAt.After(existing.processingFailureAt) {
-		existing.processingFailureAt = incomingProcessingFailureAt
-		if incomingRetryAfter.IsZero() {
-			existing.retryDelay = max(existing.retryDelay, incomingRetryDelay)
-			existing.retryAfter = time.Time{}
-		} else {
-			if existing.retryDelay == 0 {
-				existing.retryDelay = incomingRetryDelay
-			} else {
-				existing.retryDelay = max(incomingRetryDelay, min(2*existing.retryDelay, blockELRetryMaxDelay))
-			}
-			existing.retryAfter = incomingProcessingFailureAt.Add(existing.retryDelay)
-		}
-	} else {
-		existing.retryDelay = max(existing.retryDelay, incomingRetryDelay)
-		if !existing.retryAfter.IsZero() {
-			existing.retryAfter = existing.processingFailureAt.Add(existing.retryDelay)
-		}
-	}
+	retryAfter          time.Time
+	retryDelay          time.Duration
 }
 
 type blockJobAttempt struct {
@@ -227,9 +139,6 @@ type blockReservation struct {
 	root       common.Hash
 	version    uint64
 	validators uint64
-	// Queued gossip stays reserved even if its history entry is evicted.
-	queued     *blockJob
-	queuedRoot common.Hash
 }
 
 type seenBlock struct {
@@ -270,9 +179,9 @@ type blockService struct {
 	validationCalls map[blockValidationContextKey]*blockValidationContextCall
 	validationSlots chan struct{}
 
-	emitter *beaconevents.EventEmitter
-	// Blocks waiting for their slot or an import dependency.
-	blocksScheduledForLaterExecution *pendingJobQueue[[32]byte, *blockJob]
+	// blocks that should be scheduled for later execution (e.g missing blobs).
+	emitter                          *beaconevents.EventEmitter
+	blocksScheduledForLaterExecution sync.Map
 	blockJobsLifecycleMu             sync.RWMutex
 	blockJobsStopped                 bool
 	// store the block in db
@@ -289,6 +198,20 @@ func NewBlockService(
 	beaconCfg *clparams.BeaconChainConfig,
 	emitter *beaconevents.EventEmitter,
 ) BlockService {
+	b := newBlockService(db, forkchoiceStore, syncedData, ethClock, beaconCfg, emitter)
+	go b.stopPublishedBlockJobsOnContext(ctx)
+	go b.loop(ctx)
+	return b
+}
+
+func newBlockService(
+	db kv.RwDB,
+	forkchoiceStore forkchoice.ForkChoiceStorage,
+	syncedData *synced_data.SyncedDataManager,
+	ethClock eth_clock.EthereumClock,
+	beaconCfg *clparams.BeaconChainConfig,
+	emitter *beaconevents.EventEmitter,
+) *blockService {
 	seenBlocksCache, err := lru.New[proposerIndexAndSlot, seenBlock]("seenblocks", seenBlockCacheSize)
 	if err != nil {
 		panic(err)
@@ -297,7 +220,7 @@ func NewBlockService(
 	if err != nil {
 		panic(err)
 	}
-	b := &blockService{
+	return &blockService{
 		forkchoiceStore: forkchoiceStore,
 		syncedData:      syncedData,
 		ethClock:        ethClock,
@@ -310,28 +233,6 @@ func NewBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
-	b.blocksScheduledForLaterExecution = b.newPendingBlockQueue(ctx)
-	go b.stopPublishedBlockJobsOnContext(ctx)
-	return b
-}
-
-func (b *blockService) newPendingBlockQueue(ctx context.Context) *pendingJobQueue[[32]byte, *blockJob] {
-	return newPendingJobQueue(ctx, pendingJobQueueOptions{
-		name:          "beacon_block",
-		capacity:      maxPendingBlocks,
-		expiry:        blockJobExpiry,
-		checkInterval: blockJobsIntervalTick,
-	}, func(ctx context.Context, root [32]byte, job *blockJob) pendingJobDecision {
-		b.processScheduledBlock(ctx, root, job, time.Now())
-		// Completion and refresh are serialized by the job lock; removal here
-		// could discard a newer store generation after the callback returns.
-		return pendingJobKeep
-	}, nil, func(_ [32]byte, job *blockJob) {
-		job.mu.Lock()
-		defer job.mu.Unlock()
-		finishBlockJobLocked(job, ErrPublishedBlockJobExpired)
-		b.finishGossipJobLocked(job, false)
-	})
 }
 
 func (b *blockService) Names() []string {
@@ -357,168 +258,24 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	}
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 
-	var admissionErr error
-	err := b.validateFirstGossip(ctx, msg, func() {
-		root, err := msg.Block.HashSSZ()
-		if err != nil {
-			admissionErr = fmt.Errorf("%w: cannot hash pending block: %v", ErrIgnore, err) //nolint:errorlint // local admission failures must not reject the peer
-			return
-		}
-		job := newBlockJob(msg, nil)
-		job.gossip = true
-		admissionErr = b.schedulePendingBlockWithRoot(root, job)
-	}, true)
-	if admissionErr != nil {
-		return admissionErr
-	}
-	if err != nil {
+	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
+	if err := b.validateFirstGossip(ctx, msg, func() { b.ScheduleBlockForLaterProcessing(msg) }, true); err != nil {
 		return err
 	}
-	root, err := msg.Block.HashSSZ()
-	if err != nil {
+	b.publishBlockGossipEvent(msg)
+	if err := b.processAndStoreBlock(ctx, msg); err != nil {
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+			errors.Is(err, forkchoice.ErrParentEnvelopePending) || errors.Is(err, forkchoice.ErrBlockTooEarly) {
+			b.ScheduleBlockForLaterProcessing(msg)
+			return nil
+		}
+		if errors.Is(err, forkchoice.ErrNewPayloadNoStatus) || errors.Is(err, errBlockStorage) {
+			b.ScheduleBlockForLaterProcessing(msg)
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
 		return err
-	}
-	job := newBlockJob(msg, nil)
-	job.gossip = true
-	if err := b.pinGossipJob(job); err != nil {
-		return err
-	}
-	if err := b.processGossipBlock(ctx, root, job); err != nil {
-		if !isPendingBlockRetryableError(err) && !errors.Is(err, ErrIgnore) {
-			job.mu.Lock()
-			b.finishGossipJobLocked(job, true)
-			job.mu.Unlock()
-			return err
-		}
-		if admissionErr := b.schedulePendingBlockWithRoot(root, job); admissionErr != nil {
-			return admissionErr
-		}
-		return fmt.Errorf("%w: block queued while a processing dependency is unavailable: %v", ErrIgnore, err) //nolint:errorlint // fork-choice sentinels must not stay matchable
-	}
-	job.mu.Lock()
-	b.finishGossipJobLocked(job, true)
-	job.mu.Unlock()
-	return nil
-}
-
-func (b *blockService) schedulePendingBlockWithRoot(root [32]byte, job *blockJob) error {
-	if job.gossip {
-		if err := b.pinGossipJob(job); err != nil {
-			return err
-		}
-	}
-	retained, _ := b.scheduleBlockJob(root, job)
-	retained.mu.Lock()
-	defer retained.mu.Unlock()
-	if retained.terminal && retained.lastAttempt.err != nil {
-		if retained != job {
-			job.mu.Lock()
-			b.finishGossipJobLocked(job, false)
-			job.mu.Unlock()
-		}
-		return fmt.Errorf("%w: pending block admission failed: %v", ErrIgnore, retained.lastAttempt.err) //nolint:errorlint // local admission failures must not reject the peer
-	}
-	if retained != job && job.gossip {
-		b.seenBlocksMu.Lock()
-		reservation := b.reservations[blockGossipKey(job.block)]
-		if reservation != nil && reservation.queued == job {
-			reservation.queued = retained
-		}
-		b.seenBlocksMu.Unlock()
-		if retained.terminal {
-			b.finishGossipJobLocked(retained, true)
-		}
 	}
 	return nil
-}
-
-func (b *blockService) pinGossipJob(job *blockJob) error {
-	job.mu.Lock()
-	defer job.mu.Unlock()
-	if job.signedRoot == (common.Hash{}) {
-		root, err := job.block.HashSSZ()
-		if err != nil {
-			return fmt.Errorf("%w: cannot hash pending block: %v", ErrIgnore, err) //nolint:errorlint // local admission failures must not reject the peer
-		}
-		job.signedRoot = common.Hash(root)
-	}
-	key := blockGossipKey(job.block)
-	b.seenBlocksMu.Lock()
-	defer b.seenBlocksMu.Unlock()
-	if seen, ok := b.seenBlocksCache.Peek(key); ok && seen.signedRoot != job.signedRoot {
-		return fmt.Errorf("%w: another block is already seen for proposer and slot", ErrIgnore)
-	}
-	reservation := b.reservations[key]
-	if reservation == nil {
-		reservation = &blockReservation{}
-		b.reservations[key] = reservation
-	}
-	if reservation.pending != nil || (reservation.queued != nil && reservation.queuedRoot != job.signedRoot) {
-		return fmt.Errorf("%w: block already reserved for proposer and slot", ErrIgnore)
-	}
-	if reservation.queued == nil {
-		reservation.queued = job
-		reservation.queuedRoot = job.signedRoot
-	}
-	return nil
-}
-
-// The caller holds job.mu. Only the job owning the reservation may release it,
-// so a late expiry cannot clear a replacement admitted under the same key.
-func (b *blockService) finishGossipJobLocked(job *blockJob, completed bool) {
-	if !job.gossip {
-		return
-	}
-	key := blockGossipKey(job.block)
-	b.seenBlocksMu.Lock()
-	defer b.seenBlocksMu.Unlock()
-	reservation := b.reservations[key]
-	if reservation == nil || reservation.queued != job {
-		return
-	}
-	reservation.queued = nil
-	if completed {
-		// Keep any replay permission granted by a failed REST publication.
-		if _, seen := b.seenBlocksCache.Peek(key); !seen {
-			b.seenBlocksCache.Add(key, seenBlock{signedRoot: job.signedRoot})
-		}
-	} else if seen, ok := b.seenBlocksCache.Peek(key); ok && seen.signedRoot == job.signedRoot {
-		b.seenBlocksCache.Remove(key)
-	}
-	b.cleanupReservationLocked(key, reservation)
-}
-
-func (b *blockService) processGossipBlock(ctx context.Context, root [32]byte, job *blockJob) error {
-	if err := b.validateBlockAfterSignature(ctx, job.block); err != nil {
-		return err
-	}
-	if b.forkchoiceStore.Slot() < job.block.Block.Slot {
-		return forkchoice.ErrBlockTooEarly
-	}
-	if err := b.processAndStoreBlock(ctx, root, job); err != nil {
-		return err
-	}
-	b.publishGossipJob(root, job)
-	return nil
-}
-
-func (b *blockService) publishGossipJob(root [32]byte, job *blockJob) {
-	job.mu.Lock()
-	publish := job.gossip && !job.gossipEventSent
-	job.gossipEventSent = true
-	job.mu.Unlock()
-	if publish {
-		b.publishBlockGossipEvent(common.Hash(root), job.block.Block.Slot)
-	}
-}
-
-func isPendingBlockRetryableError(err error) bool {
-	return errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) ||
-		errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
-		errors.Is(err, forkchoice.ErrNewPayloadNoStatus) ||
-		errors.Is(err, forkchoice.ErrParentEnvelopePending) ||
-		errors.Is(err, forkchoice.ErrMissingSegment) ||
-		errors.Is(err, forkchoice.ErrBlockTooEarly)
 }
 
 func (b *blockService) ValidateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
@@ -575,10 +332,6 @@ func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.Sig
 			return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
 		}
 		reservation := b.reservations[key]
-		if reservation != nil && reservation.queued != nil {
-			b.seenBlocksMu.Unlock()
-			return fmt.Errorf("%w: block already queued for proposer and slot", ErrIgnore)
-		}
 		if reservation != nil && reservation.pending != nil {
 			done := reservation.pending
 			b.seenBlocksMu.Unlock()
@@ -629,10 +382,6 @@ func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.Sig
 			b.seenBlocksMu.Unlock()
 			return validationErr
 		}
-		if reservation.queued != nil {
-			b.seenBlocksMu.Unlock()
-			return fmt.Errorf("%w: block already queued for proposer and slot", ErrIgnore)
-		}
 		if b.seenBlocksCache.Contains(key) || reservation.pending != nil {
 			b.cleanupReservationLocked(key, reservation)
 			b.seenBlocksMu.Unlock()
@@ -656,7 +405,7 @@ func (b *blockService) reserveGossipKey(key proposerIndexAndSlot, root common.Ha
 	if claimed {
 		return nil
 	}
-	if reservation != nil && (reservation.pending != nil || reservation.queued != nil) {
+	if reservation != nil && reservation.pending != nil {
 		return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
 	}
 	if reservation == nil {
@@ -717,7 +466,7 @@ func (b *blockService) claimGossipReplayLocked(key proposerIndexAndSlot, root co
 }
 
 func (b *blockService) cleanupReservationLocked(key proposerIndexAndSlot, reservation *blockReservation) {
-	if reservation.pending == nil && reservation.queued == nil && reservation.validators == 0 && b.reservations[key] == reservation {
+	if reservation.pending == nil && reservation.validators == 0 && b.reservations[key] == reservation {
 		delete(b.reservations, key)
 	}
 }
@@ -766,25 +515,16 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		}
 		return nil
 	}); err != nil {
+		// Only queue dependency failures after the signature has been verified.
 		return err
 	}
-	err := b.validateBlockAfterSignature(ctx, msg)
-	if errors.Is(err, ErrIgnore) && schedule != nil {
-		schedule()
-	}
-	return err
-}
-
-// Deferred blocks repeat dependency-sensitive gossip checks before any database
-// write. Their signature was already checked at admission.
-func (b *blockService) validateBlockAfterSignature(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
-	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
-	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
-	finalizedCheckpoint := b.forkchoiceStore.FinalizedCheckpoint()
 
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
+		if schedule != nil {
+			schedule()
+		}
 		return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, msg.Block.ParentRoot)
 	}
 	if parentHeader.Slot >= msg.Block.Slot {
@@ -811,6 +551,9 @@ func (b *blockService) validateBlockAfterSignature(ctx context.Context, msg *clt
 	}
 	validationContext, err := b.blockValidationContext(ctx, msg.Block.ParentRoot, msg.Block.Slot)
 	if err != nil {
+		if schedule != nil {
+			schedule()
+		}
 		return err
 	}
 	if blockVersion >= clparams.GloasVersion {
@@ -834,6 +577,9 @@ func (b *blockService) validateBlockAfterSignature(ctx context.Context, msg *clt
 		if parentIsFull {
 			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
 			if !seen || (status != execution_client.PayloadStatusValidated && status != execution_client.PayloadStatusNotValidated) {
+				if schedule != nil {
+					schedule()
+				}
 				return fmt.Errorf("%w: parent payload is not verified", ErrIgnore)
 			}
 		}
@@ -1026,11 +772,21 @@ func validateExecutionRequestsLimits(cfg *clparams.BeaconChainConfig, requests *
 	return nil
 }
 
-// publishBlockGossipEvent runs after the block has passed rejection-grade validation.
-func (b *blockService) publishBlockGossipEvent(root common.Hash, slot uint64) {
-	if b.emitter != nil {
-		b.emitter.State().SendBlockGossip(&beaconevents.BlockGossipData{Slot: slot, Block: root})
+// publishBlockGossipEvent publishes a block event which has not been processed yet
+func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock) {
+	if b.emitter == nil {
+		return
 	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		log.Debug("Failed to hash block", "block", block, "error", err)
+		return
+	}
+	// publish block to event handler
+	b.emitter.State().SendBlockGossip(&beaconevents.BlockGossipData{
+		Slot:  block.Block.Slot,
+		Block: common.Hash(blockRoot),
+	})
 }
 
 // ScheduleBlockForLaterProcessing schedules a block for later processing.
@@ -1044,6 +800,12 @@ func (b *blockService) SchedulePublishedBlockForLaterProcessing(block *cltypes.S
 }
 
 func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock, store func(context.Context) error) (*blockJob, uint64) {
+	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
+	var blockNum uint64
+	if block.Block.Body.ExecutionPayload != nil {
+		blockNum = block.Block.Body.ExecutionPayload.BlockNumber
+	}
+	log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", blockNum)
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		log.Debug("Failed to hash block", "block", block, "error", err)
@@ -1051,11 +813,7 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		return job, job.storeGeneration
 	}
 
-	return b.scheduleBlockJob(blockRoot, newBlockJob(block, store))
-}
-
-func (b *blockService) scheduleBlockJob(blockRoot [32]byte, job *blockJob) (*blockJob, uint64) {
-	block, store := job.block, job.store
+	job := newBlockJob(block, store)
 	jobGeneration := job.storeGeneration
 	b.blockJobsLifecycleMu.RLock()
 	defer b.blockJobsLifecycleMu.RUnlock()
@@ -1064,17 +822,11 @@ func (b *blockService) scheduleBlockJob(blockRoot [32]byte, job *blockJob) (*blo
 		return job, job.storeGeneration
 	}
 	for {
-		existingJob, err := b.blocksScheduledForLaterExecution.enqueueKey(blockRoot, job)
-		if err != nil {
-			log.Debug("Pending block admission failed", "slot", block.Block.Slot, "error", err)
-			job = newFailedBlockJob(block, store, err)
-			return job, job.storeGeneration
-		}
-		if existingJob == job {
-			log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "blockRoot", blockRoot)
+		existingValue, loaded := b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, job)
+		if !loaded {
 			return job, jobGeneration
 		}
-		existing, generation := b.reuseScheduledBlockJob(blockRoot, existingJob, job, store)
+		existing, generation := b.reuseScheduledBlockJob(blockRoot, existingValue.(*blockJob), job, store)
 		if existing != nil {
 			return existing, generation
 		}
@@ -1082,11 +834,10 @@ func (b *blockService) scheduleBlockJob(blockRoot [32]byte, job *blockJob) (*blo
 }
 
 func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *blockJob, store func(context.Context) error) (*blockJob, uint64) {
-	mergeBlockProcessingState(existing, job)
 	existing.mu.Lock()
 	defer existing.mu.Unlock()
-	current, ok := b.blocksScheduledForLaterExecution.jobs.Load(key)
-	if !ok || current.(*pendingJob[*blockJob]).msg != existing {
+	current, ok := b.blocksScheduledForLaterExecution.Load(key)
+	if !ok || current != existing {
 		return nil, 0
 	}
 	if store == nil {
@@ -1095,17 +846,10 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 	if job.scheduleSequence <= existing.scheduleSequence {
 		return existing, existing.storeGeneration
 	}
-	// Replacing the queue entry makes an expiry sampled before this refresh
-	// harmless: identity-checked removal cannot delete the new generation.
-	refreshedAt := time.Now()
-	refreshed := &pendingJob[*blockJob]{msg: existing, creationTime: refreshedAt}
-	if !b.blocksScheduledForLaterExecution.jobs.CompareAndSwap(key, current, refreshed) {
-		return nil, 0
-	}
 	existing.store = store
 	existing.storeGeneration++
 	existing.scheduleSequence = job.scheduleSequence
-	existing.creationTime = refreshedAt
+	existing.creationTime = time.Now()
 	if existing.terminal {
 		existing.terminal = false
 		existing.attempt = &blockJobAttempt{done: make(chan struct{})}
@@ -1113,37 +857,35 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 	return existing, existing.storeGeneration
 }
 
-func (b *blockService) processAndStoreBlock(ctx context.Context, root [32]byte, job *blockJob) error {
-	block := job.block
-	persisted, executionAndDataChecked := job.processingState()
-	if !persisted {
-		if err := b.db.View(ctx, func(tx kv.Tx) error {
-			slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
-			persisted = slot != nil
-			return err
-		}); err != nil {
-			return fmt.Errorf("%w: cannot read block storage: %v", ErrIgnore, err) //nolint:errorlint // local database errors are retryable, not invalid gossip
-		}
-		if !persisted {
-			if err := b.db.Update(ctx, func(tx kv.RwTx) error {
-				return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
-			}); err != nil {
-				return fmt.Errorf("%w: cannot store block: %v", ErrIgnore, err) //nolint:errorlint // local database errors are retryable, not invalid gossip
-			}
-		}
-		job.markPersisted()
+// processAndStoreBlock processes and stores a block
+func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.SignedBeaconBlock) error {
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return err
 	}
 
-	if _, exists := b.forkchoiceStore.GetHeader(root); !exists {
-		if err := b.forkchoiceStore.OnBlock(ctx, block, !executionAndDataChecked, true, !executionAndDataChecked); err != nil {
-			job.mu.Lock()
-			// Only OnBlock's MissingSegment result guarantees that execution
-			// and data checks completed; a publication callback may fail earlier.
-			if errors.Is(err, forkchoice.ErrMissingSegment) {
-				job.executionAndDataChecked = true
-			}
-			job.recordProcessingFailureLocked(time.Now(), err)
-			job.mu.Unlock()
+	_, headerExists := b.forkchoiceStore.GetHeader(blockRoot)
+
+	// A block the fork graph never took can be retried for 30s, so open the
+	// write tx only when the block is not already on disk.
+	var persisted bool
+	if err := b.db.View(ctx, func(tx kv.Tx) error {
+		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
+		persisted = slot != nil
+		return err
+	}); err != nil {
+		return fmt.Errorf("%w: read block index: %w", errBlockStorage, err)
+	}
+	if !persisted {
+		if err := b.db.Update(ctx, func(tx kv.RwTx) error {
+			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
+		}); err != nil {
+			return fmt.Errorf("%w: write block: %w", errBlockStorage, err)
+		}
+	}
+
+	if !headerExists {
+		if err := b.forkchoiceStore.OnBlock(ctx, block, true, true, true); err != nil {
 			return err
 		}
 		go b.importBlockOperations(block)
@@ -1151,9 +893,8 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, root [32]byte, 
 	if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 		return beacon_indicies.WriteHighestFinalized(tx, b.forkchoiceStore.FinalizedSlot())
 	}); err != nil {
-		// Fork choice has accepted the block; an auxiliary index failure must
-		// not become a peer-level rejection.
-		log.Warn("Failed to update highest finalized block after import", "slot", block.Block.Slot, "error", err)
+		// Import has succeeded; failure to update this local index is not a peer fault.
+		log.Warn("Failed to update highest finalized after block import", "slot", block.Block.Slot, "err", err)
 	}
 	return nil
 }
@@ -1183,6 +924,24 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	log.Trace("import operations", "time", time.Since(start))
 }
 
+// loop is the main loop of the block service
+func (b *blockService) loop(ctx context.Context) {
+	ticker := time.NewTicker(blockJobsIntervalTick)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			b.stopPublishedBlockJobs()
+			return
+		case <-ticker.C:
+		}
+		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+			b.processScheduledBlock(ctx, key.([32]byte), value.(*blockJob), time.Now())
+			return true
+		})
+	}
+}
+
 func (b *blockService) stopPublishedBlockJobsOnContext(ctx context.Context) {
 	<-ctx.Done()
 	b.stopPublishedBlockJobs()
@@ -1197,14 +956,20 @@ func (b *blockService) stopPublishedBlockJobs() {
 	b.blockJobsStopped = true
 	b.blockJobsLifecycleMu.Unlock()
 
-	b.blocksScheduledForLaterExecution.jobs.Range(func(key, value any) bool {
-		job := value.(*pendingJob[*blockJob]).msg
+	b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+		job := value.(*blockJob)
 		job.mu.Lock()
-		current, ok := b.blocksScheduledForLaterExecution.jobs.Load(key)
-		if ok && current.(*pendingJob[*blockJob]).msg == job {
-			finishBlockJobLocked(job, ErrPublishedBlockJobStopped)
-			b.finishGossipJobLocked(job, false)
-			b.blocksScheduledForLaterExecution.remove(key.([32]byte), current.(*pendingJob[*blockJob]))
+		current, ok := b.blocksScheduledForLaterExecution.Load(key)
+		if ok && current == job {
+			if !job.terminal {
+				job.attempt.err = ErrPublishedBlockJobStopped
+				job.attempt.generation = job.storeGeneration
+				job.lastAttempt = job.attempt
+				job.completedGeneration = job.storeGeneration
+				job.terminal = true
+				close(job.attempt.done)
+			}
+			b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
 		}
 		job.mu.Unlock()
 		return true
@@ -1218,31 +983,31 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		return
 	}
 	if now.Sub(job.creationTime) > blockJobExpiry {
-		finishBlockJobLocked(job, ErrPublishedBlockJobExpired)
-		b.finishGossipJobLocked(job, false)
-		b.removeScheduledBlockLocked(key, job)
+		if !job.terminal {
+			job.attempt.err = ErrPublishedBlockJobExpired
+			job.attempt.generation = job.storeGeneration
+			job.lastAttempt = job.attempt
+			job.completedGeneration = job.storeGeneration
+			job.terminal = true
+			close(job.attempt.done)
+		}
+		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
 		job.mu.Unlock()
 		return
 	}
-	if job.terminal || !job.readyToRetryLocked(now) {
+	if job.terminal || now.Before(job.retryAfter) {
 		job.mu.Unlock()
 		return
 	}
 	job.running = true
 	store := job.store
-	gossip := job.gossip
 	generation := job.storeGeneration
 	attempt := job.attempt
 	job.mu.Unlock()
-	var err error
-	switch {
-	case store != nil:
-		err = store(ctx)
-	case gossip:
-		err = b.processGossipBlock(ctx, key, job)
-	default:
-		err = b.processAndStoreBlock(ctx, key, job)
+	if store == nil {
+		store = func(ctx context.Context) error { return b.processAndStoreBlock(ctx, job.block) }
 	}
+	err := store(ctx)
 	job.mu.Lock()
 	job.running = false
 	if job.terminal && job.completedGeneration >= generation {
@@ -1254,14 +1019,17 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	close(attempt.done)
 	job.lastAttempt = attempt
 	latest := generation == job.storeGeneration
-	if latest && store != nil && err != nil {
-		job.recordProcessingFailureLocked(time.Now(), err)
+	// Other dependency failures keep the fast retry cadence without resetting
+	// the EL backoff. Alternating failure types must not defeat the delay.
+	if latest && errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
+		if job.retryDelay == 0 {
+			job.retryDelay = blockELRetryInitialDelay
+		} else {
+			job.retryDelay = min(2*job.retryDelay, blockELRetryMaxDelay)
+		}
+		job.retryAfter = time.Now().Add(job.retryDelay)
 	}
-	permanent := errors.Is(err, forkchoice.ErrBlockInvalid)
-	if store == nil && gossip {
-		permanent = err != nil && !isPendingBlockRetryableError(err) && !errors.Is(err, ErrIgnore)
-	}
-	terminal := latest && (err == nil || permanent)
+	terminal := latest && (err == nil || errors.Is(err, forkchoice.ErrBlockInvalid))
 	if terminal {
 		job.completedGeneration = generation
 		job.terminal = true
@@ -1269,34 +1037,11 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		job.attempt = &blockJobAttempt{done: make(chan struct{})}
 	}
 	if terminal {
-		b.finishGossipJobLocked(job, true)
-		b.removeScheduledBlockLocked(key, job)
+		b.blocksScheduledForLaterExecution.CompareAndDelete(key, job)
 	}
 	job.mu.Unlock()
 	if err != nil {
 		log.Trace("Failed to process and store block", "block", job.block, "error", err)
 		return
-	}
-	if terminal {
-		b.publishGossipJob(key, job)
-	}
-}
-
-func finishBlockJobLocked(job *blockJob, err error) {
-	if job.terminal {
-		return
-	}
-	job.attempt.err = err
-	job.attempt.generation = job.storeGeneration
-	job.lastAttempt = job.attempt
-	job.completedGeneration = job.storeGeneration
-	job.terminal = true
-	close(job.attempt.done)
-}
-
-func (b *blockService) removeScheduledBlockLocked(key [32]byte, job *blockJob) {
-	entry, ok := b.blocksScheduledForLaterExecution.jobs.Load(key)
-	if ok && entry.(*pendingJob[*blockJob]).msg == job {
-		b.blocksScheduledForLaterExecution.remove(key, entry.(*pendingJob[*blockJob]))
 	}
 }

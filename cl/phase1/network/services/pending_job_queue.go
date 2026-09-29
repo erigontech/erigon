@@ -59,8 +59,9 @@ var errPendingJobQueueFull = errors.New("pending job queue full")
 // removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	pendingJobQueueOptions
-	// tryProcess runs sequentially while the job is still stored. onExpired
-	// and processAfterRemove run only after successful removal.
+	// tryProcess runs sequentially while the job is still stored, so it must not
+	// enqueue the same key. onExpired and processAfterRemove run only after a
+	// successful removal and may re-enqueue it.
 	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
 	processAfterRemove func(ctx context.Context, key K, msg M)
 	onExpired          func(key K, msg M)
@@ -123,21 +124,6 @@ func (q *pendingJobQueue[K, M]) stopAndWait() {
 	q.loopWG.Wait()
 }
 
-// enqueueKey returns the retained message, including when a duplicate arrives at capacity.
-func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) (M, error) {
-	if stored, ok := q.jobs.Load(key); ok {
-		return stored.(*pendingJob[M]).msg, nil
-	}
-	if !q.reserve() {
-		if stored, ok := q.jobs.Load(key); ok {
-			return stored.(*pendingJob[M]).msg, nil
-		}
-		var zero M
-		return zero, errPendingJobQueueFull
-	}
-	return q.storeReserved(key, msg), nil
-}
-
 // enqueueLazy reserves capacity before building the key so a full queue skips
 // potentially expensive work. A duplicate arriving at capacity is therefore
 // reported as full because detecting it would require building the key. Storage
@@ -179,21 +165,20 @@ func (q *pendingJobQueue[K, M]) reserve() bool {
 
 // storeReserved transfers the caller's reservation to a new job, or releases
 // it if the key is already present.
-func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) M {
+func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
 	candidate := &pendingJob[M]{
 		msg:          msg,
 		creationTime: time.Now(),
 	}
-	if stored, loaded := q.jobs.LoadOrStore(key, candidate); loaded {
+	if _, loaded := q.jobs.LoadOrStore(key, candidate); loaded {
 		q.count.Add(-1)
-		return stored.(*pendingJob[M]).msg
+		return
 	}
 	// Wake notifications may coalesce; count determines whether work remains.
 	select {
 	case q.wakeLoop <- struct{}{}:
 	default:
 	}
-	return msg
 }
 
 func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {

@@ -391,28 +391,6 @@ func TestPendingJobQueueEnqueueDeduplicates(t *testing.T) {
 	require.Equal(t, "original", stored.(*pendingJob[string]).msg)
 }
 
-func TestPendingJobQueueKnownKeyReturnsRetainedMessageAtCapacity(t *testing.T) {
-	queue := newTestPendingJobQueueWithOptions(canceledPendingQueueContext(t), pendingJobQueueOptions{
-		name: t.Name(), capacity: 1, expiry: time.Minute, checkInterval: time.Millisecond,
-	})
-	retained, err := queue.enqueueKey(1, "original")
-	require.NoError(t, err)
-	require.Equal(t, "original", retained)
-	entry, ok := queue.jobs.Load(1)
-	require.True(t, ok)
-	retained, err = queue.enqueueKey(1, "duplicate")
-	require.NoError(t, err)
-	require.Equal(t, "original", retained)
-	require.EqualValues(t, 1, queue.count.Load())
-	_, err = queue.enqueueKey(2, "distinct")
-	require.ErrorIs(t, err, errPendingJobQueueFull)
-	require.True(t, queue.remove(1, entry.(*pendingJob[string])))
-	retained, err = queue.enqueueKey(1, "replacement")
-	require.NoError(t, err)
-	require.Equal(t, "replacement", retained)
-	require.EqualValues(t, 1, queue.count.Load())
-}
-
 func TestPendingJobQueueExpiryRemovesBeforeCallback(t *testing.T) {
 	var queue *pendingJobQueue[int, string]
 	callbackSawStoredJob := false
