@@ -1017,7 +1017,6 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 	rules := blockCtx.Rules(cfg)
-	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 	if err != nil {
 		return nil, err
@@ -1054,26 +1053,13 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	txnHash := txn.Hash()
-	if err := checkOverriddenSigner(traceConfig, signer, txn); err != nil {
-		return nil, fmt.Errorf("convert txn into msg: %w", err)
-	}
-	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
-	if err != nil {
-		return nil, fmt.Errorf("convert txn into msg: %w", err)
-	}
-
 	callParam := TraceCallParam{
 		txHash:     &txnHash,
 		traceTypes: traceTypes,
 	}
 
-	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
+	return api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txn, callParam,
 		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
-
-	if cmErr != nil {
-		return nil, cmErr
-	}
-	return trace, nil
 }
 
 // TraceFilterRequest represents the arguments for trace_filter
