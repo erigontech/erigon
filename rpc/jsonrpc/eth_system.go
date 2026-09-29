@@ -237,7 +237,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	// standalone indices retired at the history cutoff whatever the receipt retention is.
 	// The field takes that stricter form: an unfiltered query reads straight from the
 	// receipts and reaches further back than advertised.
-	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, historyOldest, pruneMode.History)
+	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, replayOldest, pruneMode.History)
 	logsField := avail(logsOldest, logsAmount)
 
 	return &CapabilitiesResult{

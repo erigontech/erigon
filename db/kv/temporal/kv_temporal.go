@@ -847,6 +847,10 @@ func (tx *Tx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.Tx), nil
 }
 
+// HistoryFilesGeneration identifies pinned files, not the live aggregator view.
+// Combine it with ViewID when caching values that can also come from MDBX.
+func (tx *Tx) HistoryFilesGeneration() uint64 { return tx.aggtx.Generation() }
+
 func (tx *RwTx) HistoryStartFrom(name kv.Domain) (uint64, error) {
 	return tx.historyStartFrom(name, tx.RwTx), nil
 }

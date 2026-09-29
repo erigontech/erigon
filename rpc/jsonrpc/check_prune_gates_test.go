@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -291,7 +292,7 @@ func TestReplayGateMatchesReaderAtHistoryStart(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, uint64(8), uint64(*caps.State.OldestBlock))
 			require.Equal(t, tc.firstBlock, uint64(*caps.Receipts.OldestBlock))
-			require.Equal(t, uint64(9), uint64(*caps.Logs.OldestBlock))
+			require.Equal(t, tc.firstBlock, uint64(*caps.Logs.OldestBlock))
 		})
 	}
 }
@@ -313,9 +314,9 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 		execmoduletester.WithKey(testKey),
 	)
 	signer := types.LatestSignerForChainID(nil)
-	c, err := m.GenerateChain(4, func(_ int, block *blockgen.BlockGen) {
-		for range 2 {
-			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{}, uint256.NewInt(1), 21000, nil, nil), *signer, testKey)
+	c, err := m.GenerateChain(4, func(blockIndex int, block *blockgen.BlockGen) {
+		for index := range 3 {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{byte(blockIndex), byte(index)}, uint256.NewInt(1), 21000, nil, nil), *signer, testKey)
 			require.NoError(t, err)
 			block.AddTx(txn)
 		}
@@ -335,16 +336,16 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 	require.NoError(t, err)
 	defer ro.Rollback()
 	block := c.Blocks[1]
-	require.Len(t, block.Transactions(), 2)
+	require.Len(t, block.Transactions(), 3)
 	startTxNum, err := api._txNumReader.Min(ctx, ro, block.NumberU64())
 	require.NoError(t, err)
-	view := historyFloorTx{TemporalTx: ro, startTxNum: startTxNum + 2}
-	reader, err := rpchelper.CreateHistoryStateReader(ctx, view, block.NumberU64(), 1, api._txNumReader)
+	view := historyFloorTx{TemporalTx: ro, startTxNum: startTxNum + 3}
+	reader, err := rpchelper.CreateHistoryStateReader(ctx, view, block.NumberU64(), 2, api._txNumReader)
 	require.NoError(t, err)
 	account, err := reader.ReadAccountData(accounts.InternAddress(testAddr))
 	require.NoError(t, err)
 	require.NotNil(t, account)
-	_, err = rpchelper.CreateHistoryStateReader(ctx, view, block.NumberU64(), 0, api._txNumReader)
+	_, err = rpchelper.CreateHistoryStateReader(ctx, view, block.NumberU64(), 1, api._txNumReader)
 	require.ErrorIs(t, err, state.ErrPruned)
 	err = api.checkPruneTransactionHistoryAtIndex(ctx, view, block.NumberU64()-1, 1)
 	require.ErrorIs(t, err, state.ErrPruned)
@@ -378,15 +379,72 @@ func TestIndexedHistoryGateMatchesReader(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			want, err := tc.call(baseline, 1)
+			want, err := tc.call(baseline, 2)
 			require.NoError(t, err)
-			got, err := tc.call(api, 1)
+			got, err := tc.call(api, 2)
 			require.NoError(t, err, "the requested transaction's pre-state is retained")
 			require.Equal(t, want, got)
-			_, err = tc.call(api, 0)
+			_, err = tc.call(api, 1)
 			require.ErrorIs(t, err, state.ErrPruned, "the preceding transaction's pre-state is pruned")
+			_, err = tc.call(api, uint64(len(block.Transactions())))
+			require.NoError(t, err, "the position after the last user transaction is valid")
+			for _, index := range []uint64{uint64(len(block.Transactions()) + 1), 10_000, math.MaxUint64 - 1} {
+				_, err = tc.call(api, index)
+				require.ErrorContains(t, err, "transaction index out of bounds", "index %d", index)
+			}
 		})
 	}
+
+	baselineAPIs, prunedAPIs := newPruneGatingAPIs(m), newPruneGatingAPIs(m)
+	prunedAPIs.eth.db = historyFloorDB{TemporalRoDB: prunedAPIs.eth.db, startTxNum: view.startTxNum}
+	prunedAPIs.debug.db = historyFloorDB{TemporalRoDB: prunedAPIs.debug.db, startTxNum: view.startTxNum}
+	prunedAPIs.ots.db = historyFloorDB{TemporalRoDB: prunedAPIs.ots.db, startTxNum: view.startTxNum}
+	for _, ep := range pruneGatingEndpoints {
+		switch ep.name {
+		case "debug_traceTransaction", "ots_traceTransaction", "ots_getInternalOperations", "ots_getTransactionError", "eth_getTransactionReceipt":
+		default:
+			continue
+		}
+		t.Run(ep.name, func(t *testing.T) {
+			ref := pruneGatingRef{num: block.NumberU64(), hash: block.Hash(), txHash: block.Transactions()[2].Hash()}
+			want, err := ep.call(ctx, baselineAPIs, ref)
+			require.NoError(t, err)
+			got, err := ep.call(ctx, prunedAPIs, ref)
+			require.NoError(t, err, "the requested transaction's pre-state is retained")
+			require.Equal(t, want, got)
+			ref.txHash = block.Transactions()[1].Hash()
+			_, err = ep.call(ctx, prunedAPIs, ref)
+			require.ErrorIs(t, err, state.ErrPruned)
+		})
+	}
+	for _, backwards := range []bool{false, true} {
+		t.Run(fmt.Sprintf("ots_search_backwards=%t", backwards), func(t *testing.T) {
+			search := func(api *OtterscanAPIImpl, index byte) (*TransactionsWithReceipts, error) {
+				// Each recipient occurs once, so the page only needs that transaction's history.
+				addr := common.Address{1, index}
+				if backwards {
+					return api.SearchTransactionsBefore(ctx, addr, block.NumberU64()+1, 1)
+				}
+				return api.SearchTransactionsAfter(ctx, addr, 0, 1)
+			}
+			want, err := search(baselineAPIs.ots, 2)
+			require.NoError(t, err)
+			require.Len(t, want.Txs, 1)
+			got, err := search(prunedAPIs.ots, 2)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+			_, err = search(prunedAPIs.ots, 1)
+			require.ErrorIs(t, err, state.ErrPruned)
+		})
+	}
+	t.Run("ots_search_after_boundary_block", func(t *testing.T) {
+		want, err := baselineAPIs.ots.SearchTransactionsAfter(ctx, testAddr, block.NumberU64(), 1)
+		require.NoError(t, err)
+		require.NotEmpty(t, want.Txs)
+		got, err := prunedAPIs.ots.SearchTransactionsAfter(ctx, testAddr, block.NumberU64(), 1)
+		require.NoError(t, err, "the cursor block is excluded from the search")
+		require.Equal(t, want, got)
+	})
 }
 
 func TestCallGateMatchesReaderAfterSystemTransaction(t *testing.T) {
@@ -405,6 +463,8 @@ func TestCallGateMatchesReaderAfterSystemTransaction(t *testing.T) {
 	require.NoError(t, err)
 	view := historyFloorTx{TemporalTx: tx, startTxNum: startTxNum + 1}
 
+	require.NoError(t, apis.eth.checkPruneStateAfterSystemTx(ctx, view, blockNumber))
+	require.ErrorIs(t, apis.eth.checkPruneStateAfterSystemTx(ctx, view, blockNumber-1), state.ErrPruned)
 	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, view, blockNumber, false, 0, apis.eth._txNumReader)
 	require.NoError(t, err)
 	account, err := reader.ReadAccountData(accounts.InternAddress(testAddr))
@@ -417,6 +477,24 @@ func TestCallGateMatchesReaderAfterSystemTransaction(t *testing.T) {
 	require.NoError(t, err, "the call reader starts after the initial system transaction")
 	_, err = apis.eth.GetBalance(ctx, testAddr, &block)
 	require.ErrorIs(t, err, state.ErrPruned, "account queries read before the initial system transaction")
+	block = rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(blockNumber - 1))
+	_, err = apis.eth.Call(ctx, pruneGatingCallArgs(), &block, nil, nil)
+	require.ErrorIs(t, err, state.ErrPruned, "the preceding call position is below retained history")
+}
+
+func TestTraceCallManyRejectsNegativeTransactionIndex(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	for _, block := range []uint64{chainInfo.head, chainInfo.old.num} {
+		bundles, simulate := pruneGatingBundle(block)
+		for _, index := range []int{-2, math.MinInt} {
+			simulate.TransactionIndex = &index
+			_, err := streamedResult(func(stream jsonstream.Stream) error {
+				return apis.debug.TraceCallMany(t.Context(), bundles, simulate, nil, stream)
+			})
+			require.ErrorContains(t, err, fmt.Sprintf("transaction index out of bounds: %d", index))
+		}
+	}
 }
 
 func TestExecutionWitnessNeedsInitialSystemHistory(t *testing.T) {
@@ -461,6 +539,36 @@ func TestComputedReceiptsNeedWholeBlockHistory(t *testing.T) {
 	caps, err := apis.eth.Capabilities(ctx)
 	require.NoError(t, err)
 	require.Equal(t, blockNumber+1, uint64(*caps.Receipts.OldestBlock))
+}
+
+func TestLogsGateSkipsInitialSystemHistory(t *testing.T) {
+	t.Parallel()
+	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	const block = uint64(8)
+	start, err := apis.eth._txNumReader.Min(ctx, tx, block)
+	require.NoError(t, err)
+	apis.eth.db = historyFloorDB{TemporalRoDB: apis.eth.db, startTxNum: start + 1}
+
+	for _, criteria := range []filters.FilterCriteria{
+		{},
+		{Addresses: []common.Address{testAddr}},
+		{Topics: [][]common.Hash{{{1}}}},
+	} {
+		criteria.FromBlock, criteria.ToBlock = new(big.Int).SetUint64(block), new(big.Int).SetUint64(block)
+		_, err := apis.eth.GetLogs(ctx, criteria)
+		require.NoError(t, err, "user transactions are retained for both filtered and unfiltered queries")
+		criteria.FromBlock = new(big.Int).SetUint64(block - 1)
+		_, err = apis.eth.GetLogs(ctx, criteria)
+		require.ErrorIs(t, err, state.ErrPruned)
+	}
+	caps, err := apis.eth.Capabilities(ctx)
+	require.NoError(t, err)
+	require.Equal(t, block, uint64(*caps.Logs.OldestBlock))
+	require.Equal(t, caps.Receipts.OldestBlock, caps.Logs.OldestBlock)
 }
 
 func TestHistoryGateUsesEarliestDomainFloor(t *testing.T) {
@@ -571,6 +679,12 @@ func TestBlocksGateUsesOnDiskFloor(t *testing.T) {
 
 	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(floorBlock-1), false)
 	require.ErrorIs(t, err, state.ErrPruned)
+	genesis, err := apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(0), false)
+	require.NoError(t, err, "retiring bodies preserves genesis")
+	require.NotNil(t, genesis)
+	caps, err := apis.eth.Capabilities(ctx)
+	require.NoError(t, err)
+	require.Equal(t, floorBlock, uint64(*caps.Blocks.OldestBlock), "isolated genesis does not fill the missing range")
 }
 
 func TestFeeHistoryTruncatesAtPhysicalTransactionFloor(t *testing.T) {
@@ -682,6 +796,142 @@ func TestPruneGatesReusePhysicalFloorsAtSameHead(t *testing.T) {
 	}
 	require.Equal(t, int64(3), historyCalls.Load())
 	require.Equal(t, int64(1), blocks.calls.Load())
+}
+
+func TestHistoryFloorCacheSeparatesPinnedFilesAtSameHead(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPhysicallyPrunedHistory(t, prunedHistoryConfig{mode: prune.Mode{
+		Initialised: true, History: prunedHistoryDistance, Blocks: prune.KeepAllBlocksPruneMode,
+	}})
+	apis.eth._historyPruneFloor.ttl = time.Hour
+	ctx := t.Context()
+	before, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer before.Rollback()
+	oldFloor, err := apis.eth.historyStartBlocks(ctx, before, chainInfo.head)
+	require.NoError(t, err)
+
+	end := before.Debug().TxNumsInFiles(kv.AccountsDomain)
+	retired, err := before.Debug().Retire(ctx, kv.RetireCutoffs{Default: end - prunedHistoryStepSize})
+	require.NoError(t, err)
+	require.Positive(t, retired)
+	after, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer after.Rollback()
+	require.Equal(t, before.ViewID(), after.ViewID(), "retiring files does not commit MDBX")
+	newFloor, err := apis.eth.readHistoryStartBlocks(ctx, after, chainInfo.head)
+	require.NoError(t, err)
+	require.Greater(t, newFloor.startTxNum, oldFloor.startTxNum)
+	got, err := apis.eth.historyStartBlocks(ctx, after, chainInfo.head)
+	require.NoError(t, err)
+	require.Equal(t, newFloor, got)
+	got, err = apis.eth.historyStartBlocks(ctx, before, chainInfo.head)
+	require.NoError(t, err)
+	require.Equal(t, oldFloor, got, "the older transaction still pins its retained history")
+}
+
+func TestHistoryFloorCacheDoesNotShareUnidentifiedViews(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	apis.eth._historyPruneFloor.ttl = time.Hour
+	tx, err := apis.eth.db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	for _, block := range []uint64{7, 9, 7} {
+		start, err := apis.eth._txNumReader.Min(t.Context(), tx, block)
+		require.NoError(t, err)
+		view := historyFloorTx{TemporalTx: tx, startTxNum: start}
+		want, err := apis.eth.readHistoryStartBlocks(t.Context(), view, chainInfo.head)
+		require.NoError(t, err)
+		got, err := apis.eth.historyStartBlocks(t.Context(), view, chainInfo.head)
+		require.NoError(t, err)
+		require.Equal(t, want, got)
+	}
+}
+
+func TestHistoryFloorCacheSeparatesMDBXViewsAtSameHead(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	apis.eth._historyPruneFloor.ttl = time.Hour
+	ctx := t.Context()
+	for _, block := range []uint64{7, 9} {
+		t.Run(fmt.Sprintf("floor_%d", block), func(t *testing.T) {
+			rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTx.Rollback()
+			start, err := apis.eth._txNumReader.Min(ctx, rwTx, block)
+			require.NoError(t, err)
+			var key [8]byte
+			binary.BigEndian.PutUint64(key[:], start)
+			for _, table := range []string{kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys, kv.TblCodeHistoryKeys} {
+				require.NoError(t, rwTx.ClearTable(table))
+				require.NoError(t, rwTx.Put(table, key[:], []byte{1}))
+			}
+			require.NoError(t, rwTx.Commit())
+			tx, err := apis.eth.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			want, err := apis.eth.readHistoryStartBlocks(ctx, tx, chainInfo.head)
+			require.NoError(t, err)
+			require.Equal(t, start, want.startTxNum)
+			got, err := apis.eth.historyStartBlocks(ctx, tx, chainInfo.head)
+			require.NoError(t, err)
+			require.Equal(t, want, got)
+		})
+	}
+}
+
+func TestBlockFloorCacheSeparatesMDBXViewsAtSameHead(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	apis.eth._blocksPruneFloor.ttl = time.Hour
+	ctx := t.Context()
+	before, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer before.Rollback()
+	floor, err := apis.eth.minimumBlockAvailable(ctx, before, chainInfo.head)
+	require.NoError(t, err)
+	require.Zero(t, floor)
+	const firstRetained = uint64(9)
+	dropBodies(t, apis.rwDB, 1, firstRetained)
+	after, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer after.Rollback()
+	require.Equal(t, blockFilesGeneration(before), blockFilesGeneration(after))
+	floor, err = apis.eth.minimumBlockAvailable(ctx, after, chainInfo.head)
+	require.NoError(t, err)
+	require.Equal(t, firstRetained, floor)
+	floor, err = apis.eth.minimumBlockAvailable(ctx, before, chainInfo.head)
+	require.NoError(t, err)
+	require.Zero(t, floor)
+}
+
+func TestBlockFloorCacheSeparatesFileViewsAtSameHead(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	apis.eth._blocksPruneFloor.ttl = time.Hour
+	ctx := t.Context()
+	reader := &countingMinimumBlockReader{FullBlockReader: apis.eth._blockReader}
+	apis.eth._blockReader = reader
+	before, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer before.Rollback()
+	_, err = apis.eth.minimumBlockAvailable(ctx, before, chainInfo.head)
+	require.NoError(t, err)
+	require.EqualValues(t, 1, reader.calls.Load())
+	snapshots := apis.rwDB.(freezeblocks.HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, snapshots.OpenFolder())
+	after, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer after.Rollback()
+	require.Equal(t, before.ViewID(), after.ViewID())
+	require.NotEqual(t, blockFilesGeneration(before), blockFilesGeneration(after))
+	_, err = apis.eth.minimumBlockAvailable(ctx, after, chainInfo.head)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, reader.calls.Load())
+	_, err = apis.eth.minimumBlockAvailable(ctx, before, chainInfo.head)
+	require.NoError(t, err)
+	require.EqualValues(t, 2, reader.calls.Load())
 }
 
 func TestCapabilitiesUseOnDiskFloors(t *testing.T) {
@@ -2312,6 +2562,10 @@ type countingHistoryFloorDebugTx struct {
 func (tx countingHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64, error) {
 	tx.calls.Add(1)
 	return tx.TemporalDebugTx.HistoryStartFrom(domain)
+}
+
+func (tx countingHistoryFloorDebugTx) HistoryFilesGeneration() uint64 {
+	return tx.TemporalDebugTx.(interface{ HistoryFilesGeneration() uint64 }).HistoryFilesGeneration()
 }
 
 type domainHistoryFloorTx struct {

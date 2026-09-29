@@ -32,6 +32,7 @@ type pruneFloorValue[T any] struct {
 
 type pruneFloorCacheKey struct {
 	head               uint64
+	dbViewID           uint64
 	snapshotGeneration uint64
 }
 
@@ -41,10 +42,10 @@ const (
 )
 
 // pruneFloorCache caches successful floor reads and coalesces concurrent loads
-// by key. Keys include the exact head and, for local block floors, the pinned
-// snapshot generation. Different pinned file views can coexist at one head,
-// so a TTL alone cannot prevent sharing the wrong floor. The TTL instead
-// bounds staleness from physical changes not represented by the key.
+// by key. Different pinned file views can coexist at one head, so local keys
+// also include the file generation and the MDBX view because either source
+// can determine the floor. The TTL bounds staleness from physical changes
+// not represented by the key.
 type pruneFloorCache[T any] struct {
 	mu     sync.Mutex
 	values *lru.BasicLRU[pruneFloorCacheKey, *concurrent.CachedValue[pruneFloorValue[T]]]
@@ -64,10 +65,6 @@ func (c *pruneFloorCache[T]) cacheTTL() time.Duration {
 		return c.ttl
 	}
 	return defaultPruneFloorCacheTTL
-}
-
-func (c *pruneFloorCache[T]) get(ctx context.Context, head uint64, read func() (T, error)) (T, error) {
-	return c.getForKey(ctx, pruneFloorCacheKey{head: head}, read)
 }
 
 func (c *pruneFloorCache[T]) getForKey(ctx context.Context, key pruneFloorCacheKey, read func() (T, error)) (T, error) {

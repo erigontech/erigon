@@ -235,8 +235,7 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return fmt.Errorf("genesis is not traceable")
 	}
 
-	// check pruning to ensure we have the block and the history at this block level
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
@@ -256,6 +255,9 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 	}
 	if txnIndex >= block.Transactions().Len() {
 		return fmt.Errorf("transaction %#x not found", hash)
+	}
+	if err := api.checkPruneTransactionHistoryAtIndex(ctx, tx, blockNum, uint64(txnIndex)); err != nil {
+		return err
 	}
 	engine := api.engine()
 
@@ -398,6 +400,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, re
 
 // TraceCall implements debug_traceCallMany. Returns Geth style call traces.
 func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, simulateContext StateContext, config *tracersConfig.TraceConfig, stream jsonstream.Stream) error {
+	if simulateContext.TransactionIndex != nil && *simulateContext.TransactionIndex < -1 {
+		return fmt.Errorf("transaction index out of bounds: %d", *simulateContext.TransactionIndex)
+	}
 	if err := requireBlockSelector(simulateContext.BlockNumber); err != nil {
 		return err
 	}

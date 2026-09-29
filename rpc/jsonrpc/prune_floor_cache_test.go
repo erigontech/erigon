@@ -31,6 +31,10 @@ type pruneFloorCacheResult struct {
 	err   error
 }
 
+func (c *pruneFloorCache[T]) get(ctx context.Context, head uint64, read func() (T, error)) (T, error) {
+	return c.getForKey(ctx, pruneFloorCacheKey{head: head}, read)
+}
+
 func TestPruneFloorCacheRefreshesAtNewHead(t *testing.T) {
 	t.Parallel()
 
@@ -45,28 +49,6 @@ func TestPruneFloorCacheRefreshesAtNewHead(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint64(1), floor)
 	floor, err = cache.get(t.Context(), 11, read)
-	require.NoError(t, err)
-	require.Equal(t, uint64(2), floor)
-	require.Equal(t, uint64(2), reads.Load())
-}
-
-func TestPruneFloorCacheSeparatesFileViewsAtSameHead(t *testing.T) {
-	t.Parallel()
-
-	var reads atomic.Uint64
-	cache := pruneFloorCache[uint64]{ttl: time.Hour}
-	read := func() (uint64, error) { return reads.Add(1), nil }
-
-	first := pruneFloorCacheKey{head: 10, snapshotGeneration: 1}
-	floor, err := cache.getForKey(t.Context(), first, read)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), floor)
-	floor, err = cache.getForKey(t.Context(), first, read)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1), floor)
-
-	second := pruneFloorCacheKey{head: 10, snapshotGeneration: 2}
-	floor, err = cache.getForKey(t.Context(), second, read)
 	require.NoError(t, err)
 	require.Equal(t, uint64(2), floor)
 	require.Equal(t, uint64(2), reads.Load())

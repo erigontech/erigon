@@ -953,8 +953,9 @@ func TestMinimumBlockAvailableWithoutVisibleTransactionSegments(t *testing.T) {
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
 	require.NoError(t, snapshots.OpenFolder())
 	require.NotZero(t, snapshots.BlocksAvailable(), "headers and bodies are frozen")
-	_, ok := snapshots.SegmentsMin()
-	require.False(t, ok, "the transaction segment starts above the aligned height")
+	view := snapshots.View()
+	defer view.Close()
+	require.Empty(t, view.Segments(snaptype2.Transactions), "the transaction segment starts above the aligned height")
 
 	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
@@ -999,31 +1000,29 @@ func TestMinimumBlockAvailableKeepsSegmentsWhenTheDatabaseHoldsNoBody(t *testing
 	require.Equal(t, uint64(5000), minimum, "the empty database answers nothing, so the segments stand")
 }
 
-// TestMinimumBlockAvailableTakesTheHighestTypeMinimum pins the shape chain-history expiry
-// produces: headers and bodies reach genesis, transactions do not, and the block the node
-// can serve in full is the first one every type covers.
+// A complete block needs all three segment types, regardless of which starts latest.
 func TestMinimumBlockAvailableTakesTheHighestTypeMinimum(t *testing.T) {
-	dirs := datadir.New(t.TempDir())
-	db := temporaltest.NewTestDB(t, dirs)
-	logger := log.New()
-
-	ver := version.V1_0
-	for _, typ := range []snaptype.Enum{snaptype2.Enums.Headers, snaptype2.Enums.Bodies} {
-		createTestSegmentFile(t, 0, 1000, typ, dirs.Snap, ver, logger)
-		createTestSegmentFile(t, 1000, 2000, typ, dirs.Snap, ver, logger)
+	for _, latest := range snaptype2.BlockSnapshotTypes {
+		t.Run(latest.Name(), func(t *testing.T) {
+			dirs := datadir.New(t.TempDir())
+			db := temporaltest.NewTestDB(t, dirs)
+			logger := log.New()
+			for _, typ := range snaptype2.BlockSnapshotTypes {
+				if typ.Enum() != latest.Enum() {
+					createTestSegmentFile(t, 0, 1000, typ.Enum(), dirs.Snap, version.V1_0, logger)
+				}
+				createTestSegmentFile(t, 1000, 2000, typ.Enum(), dirs.Snap, version.V1_0, logger)
+			}
+			snapshots := db.(HasBlockFiles).DebugBlockFiles()
+			require.NoError(t, snapshots.OpenFolder())
+			tx, err := db.BeginRo(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			minimum, err := NewBlockReader(snapshots).MinimumBlockAvailable(t.Context(), tx)
+			require.NoError(t, err)
+			require.Equal(t, uint64(1000), minimum)
+		})
 	}
-	createTestSegmentFile(t, 1000, 2000, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
-
-	snapshots := db.(HasBlockFiles).DebugBlockFiles()
-	require.NoError(t, snapshots.OpenFolder())
-
-	tx, err := db.BeginRo(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	minimum, err := NewBlockReader(snapshots).MinimumBlockAvailable(t.Context(), tx)
-	require.NoError(t, err)
-	require.Equal(t, uint64(1000), minimum)
 }
 
 // A transaction of a block that is still in the DB carries the sender stored for it, so the
