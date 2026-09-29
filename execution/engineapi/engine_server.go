@@ -682,8 +682,11 @@ func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForResponse(ctx, readinessWait, func() (bool, error) {
-		isReady, err := e.chainRW.Ready(ctx)
+	// Ready can block on snapshot readiness; bounding its context keeps each call inside the budget.
+	readyCtx, cancelReady := context.WithTimeout(ctx, readinessWait)
+	defer cancelReady()
+	waitingForExecutionReady, err := waitForResponse(readyCtx, readinessWait, func() (bool, error) {
+		isReady, err := e.chainRW.Ready(readyCtx)
 		return !isReady, err
 	})
 	if err != nil {
@@ -1399,18 +1402,21 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 }
 
 func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
+	deadline := time.Now().Add(maxWait)
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {
 		return false, err
 	}
 	checkInterval := 10 * time.Millisecond
-	maxChecks := int64(maxWait) / int64(checkInterval)
 	ticker := time.NewTicker(checkInterval)
 	defer ticker.Stop()
-	for range maxChecks {
+	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
-			return true, ctx.Err()
+			// Same (true, nil) a normal deadline exhaustion returns: maxWait can itself be
+			// derived from ctx, so a distinct error here would race the deadline check above
+			// for whichever fires first, making the return value nondeterministic.
+			return true, nil
 		case <-ticker.C:
 		}
 		shouldWait, err = waitCondnF()

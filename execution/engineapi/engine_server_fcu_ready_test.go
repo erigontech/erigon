@@ -161,7 +161,68 @@ func TestWaitForResponseReturnsPromptlyOnContextCancellation(t *testing.T) {
 	busy, err := waitForResponse(ctx, time.Minute, func() (bool, error) {
 		return true, nil
 	})
-	require.ErrorIs(t, err, context.Canceled)
+	require.NoError(t, err)
 	require.True(t, busy)
 	require.Less(t, time.Since(start), time.Second)
+}
+
+// TestWaitForResponseBoundsTotalWaitByElapsedTime proves maxWait is a wall-clock budget that
+// includes the callback's own time, starting with the first call, rather than a count of polls.
+func TestWaitForResponseBoundsTotalWaitByElapsedTime(t *testing.T) {
+	t.Parallel()
+
+	start := time.Now()
+	_, err := waitForResponse(context.Background(), 100*time.Millisecond, func() (bool, error) {
+		time.Sleep(100 * time.Millisecond)
+		return true, nil
+	})
+	require.NoError(t, err)
+	require.Less(t, time.Since(start), 160*time.Millisecond, "the budget must cover callback time, including the first call")
+}
+
+// snapshotsNotReadyModule mimics ExecModule.Ready while snapshots are unavailable: each call blocks
+// for up to a second, or until its context ends, and then reports not ready.
+type snapshotsNotReadyModule struct {
+	*stubExecutionModule
+}
+
+func (m *snapshotsNotReadyModule) Ready(ctx context.Context) (bool, error) {
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+	}
+	return false, nil
+}
+
+// TestReadinessWaitIsBoundedWhenReadyBlocks proves the readiness wait answers SYNCING within its
+// budget even when every Ready call blocks, instead of the budget covering only the polling sleeps.
+func TestReadinessWaitIsBoundedWhenReadyBlocks(t *testing.T) {
+	t.Parallel()
+
+	header := makeParentHeader(1000)
+	headHash := header.Hash()
+	headNumber := header.Number.Uint64()
+
+	stub := &stubExecutionModule{
+		getHeaderFunc: getHeaderReturning(headHash, header),
+		headerNumberFunc: func(context.Context, common.Hash) (*uint64, error) {
+			return &headNumber, nil
+		},
+		getForkChoiceFunc: func(context.Context) (execmodule.ForkChoiceState, error) {
+			return execmodule.ForkChoiceState{HeadHash: common.Hash{0x99}}, nil
+		},
+	}
+	module := &snapshotsNotReadyModule{stubExecutionModule: stub}
+
+	cfg := preCancunChainConfig()
+	ctx := context.Background()
+	downloader := engine_block_downloader.NewEngineBlockDownloader(ctx, log.New(), module, nil, nil, cfg, ethconfig.Sync{}, nil)
+	srv := NewEngineServer(log.New(), cfg, module, downloader, false, false, true, true, nil, nil, 0, 0)
+
+	start := time.Now()
+	status, err := srv.getQuickPayloadStatusIfPossible(ctx, headHash, 0, common.Hash{}, &engine_types.ForkChoiceState{HeadHash: headHash}, false, 200*time.Millisecond)
+	require.NoError(t, err)
+	require.NotNil(t, status)
+	require.Equal(t, engine_types.SyncingStatus, status.Status)
+	require.Less(t, time.Since(start), 500*time.Millisecond, "a blocking Ready must not stretch the wait past its budget")
 }
