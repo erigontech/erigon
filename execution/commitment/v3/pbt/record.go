@@ -206,12 +206,8 @@ func encodeRow(k recordKey, record *Record) ([]byte, error) {
 				return nil, err
 			}
 		} else {
-			keyLen, err := rowKeyLength(&k.path, slot)
-			if err != nil {
+			if err := validateBranchCell(&k.path, slot, &cell.Prefix); err != nil {
 				return nil, err
-			}
-			if int(cell.Prefix.BitLen)+int(k.path.BitLen)+4 >= keyLen*8 {
-				return nil, recordError(ExtensionLengthError, "branch prefix exceeds the key length")
 			}
 			if cell.Prefix.BitLen != 0 {
 				extMask |= bit
@@ -375,16 +371,17 @@ func decodeRow(k recordKey, data []byte) (Record, error) {
 		if err != nil {
 			return Record{}, err
 		}
-		keyLen, keyErr := rowKeyLength(&k.path, slot)
-		if keyErr != nil {
-			return Record{}, keyErr
-		}
-		if int(prefix.BitLen)+int(k.path.BitLen)+4 >= keyLen*8 {
-			return Record{}, recordError(ExtensionLengthError, "branch extension exceeds the key length")
-		}
 		record.Cells[slot].Prefix = prefix
 		record.Cells[slot].Kind = BranchCell
 		off = next
+	}
+	for slot := range maxCells {
+		if record.Cells[slot].Kind != BranchCell {
+			continue
+		}
+		if err := validateBranchCell(&k.path, slot, &record.Cells[slot].Prefix); err != nil {
+			return Record{}, err
+		}
 	}
 	for slot := range maxCells {
 		bit := uint16(1) << slot
@@ -424,6 +421,17 @@ func decodeRow(k recordKey, data []byte) (Record, error) {
 		return Record{}, recordError(LengthError, "record has trailing bytes")
 	}
 	return record, nil
+}
+
+func validateBranchCell(path *eip8297.Bitpath, slot int, prefix *eip8297.Bitpath) error {
+	keyLen, err := rowKeyLength(path, slot)
+	if err != nil {
+		return err
+	}
+	if int(prefix.BitLen)+int(path.BitLen)+4 >= keyLen*8 {
+		return recordError(ExtensionLengthError, "branch prefix exceeds the key length")
+	}
+	return nil
 }
 
 func decodeExtRoot(k recordKey, data []byte) (Record, error) {
@@ -616,6 +624,13 @@ func rowKeyLength(path *eip8297.Bitpath, slot int) (int, error) {
 		default:
 			return 0, recordError(ZoneError, "row slot uses a reserved zone")
 		}
+	}
+	if path.BitLen >= 8 {
+		keyBytes, ok := eip8297.ZoneKeyLength(byte(path.Words[0] >> 56))
+		if !ok {
+			return 0, recordError(ZoneError, "row slot uses a reserved zone")
+		}
+		return keyBytes, nil
 	}
 	zone := rowZone(path, slot)
 	keyBytes, ok := eip8297.ZoneKeyLength(zone)

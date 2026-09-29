@@ -167,6 +167,31 @@ func TestRecordRejectsInvalidRowKeys(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestRecordRejectsNonCanonicalBranches(t *testing.T) {
+	data := append([]byte{recordFormat, 0, 3, 0, 0}, make([]byte, 128)...)
+	tests := []struct {
+		name string
+		key  []byte
+		want RecordErrorRule
+	}{
+		{name: "global zone", key: GlobalRootKey(), want: ZoneError},
+		{name: "account key length", key: rowKey(268), want: ExtensionLengthError},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			record := Record{Form: RowRoot, Cells: [16]Cell{
+				0: {Kind: BranchCell},
+				1: {Kind: BranchCell},
+			}}
+			_, encodeErr := EncodeRecord(tt.key, &record)
+			require.ErrorIs(t, encodeErr, errorRule(tt.want))
+			_, err := DecodeRecord(tt.key, data)
+			require.ErrorIs(t, err, errorRule(tt.want))
+			require.Nil(t, ComputeLeafRefs(tt.key, data))
+		})
+	}
+}
+
 func TestRecordRejectsOldFormatBeforeKeyValidation(t *testing.T) {
 	data := make([]byte, 0, 68)
 	for range 2 {
@@ -307,7 +332,7 @@ func TestRecordRejectsNonCanonical(t *testing.T) {
 		{name: "suffix padding", key: validKey, data: suffixPadRow(), want: PaddingError},
 		{name: "exact length", key: validKey, data: append(baseLeaf, 0), want: LengthError},
 		{name: "compact value", key: validKey, data: compactValueRow(), want: CompactValueError},
-		{name: "suffix length", key: rowKey(528), data: append([]byte{0, 0, 3, 0, 2}, make([]byte, 64)...), want: SuffixLengthError},
+		{name: "branch length before suffix length", key: rowKey(528), data: append([]byte{0, 0, 3, 0, 2}, make([]byte, 64)...), want: ExtensionLengthError},
 		{name: "reserved zone", key: []byte{0x02, 0}, data: reservedZoneRow(), want: ZoneError},
 	}
 
@@ -379,20 +404,20 @@ func TestRecordDecodeRejectsEveryU16RowExtensionLength(t *testing.T) {
 var fuzzRecordBodies atomic.Uint64
 
 func FuzzRecordDecodeCanonical(f *testing.F) {
-	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}, rootExtensionBody(529), rootExtensionLengthBody(0xfdf2), rowExtensionLengthBody(0xfdf2)} {
+	for _, seed := range recordFuzzSeeds() {
 		f.Add(seed)
 	}
 	f.Fuzz(func(t *testing.T, data []byte) {
-		runRecordFuzzBody(data)
+		runRecordFuzzBody(t, data)
 	})
 }
 
 func TestRecordFuzzSeeds(t *testing.T) {
 	fuzzRecordBodies.Store(0)
-	for _, seed := range [][]byte{manualRowOracle(), {0}, {0x80}, {0x10, 0, 4, 0x00}, rootExtensionBody(529), rootExtensionLengthBody(0xfdf2), rowExtensionLengthBody(0xfdf2)} {
-		runRecordFuzzBody(seed)
+	for _, seed := range recordFuzzSeeds() {
+		runRecordFuzzBody(t, seed)
 	}
-	require.Equal(t, uint64(7), fuzzRecordBodies.Load())
+	require.Equal(t, uint64(len(recordFuzzSeeds())), fuzzRecordBodies.Load())
 }
 
 func sixteenCellRecord() Record {
@@ -440,9 +465,61 @@ func accountKey(slot, subIndex byte) []byte {
 	return key
 }
 
-func runRecordFuzzBody(data []byte) {
+func runRecordFuzzBody(t testing.TB, data []byte) {
+	t.Helper()
 	fuzzRecordBodies.Add(1)
-	_, _ = DecodeRecord(rowKey(8), data)
+	for _, key := range recordFuzzKeys {
+		record, err := DecodeRecord(key, data)
+		if err != nil {
+			continue
+		}
+		encoded, err := EncodeRecord(key, &record)
+		if err != nil {
+			t.Fatalf("accepted record cannot be encoded for key %x: %v", key, err)
+		}
+		if !bytes.Equal(encoded, data) {
+			t.Fatalf("accepted record changed during round trip for key %x", key)
+		}
+	}
+}
+
+func recordFuzzSeeds() [][]byte {
+	return [][]byte{
+		manualRowOracle(),
+		{0},
+		{0x80},
+		{0x10, 0, 4, 0x00},
+		rootExtensionBody(529),
+		rootExtensionLengthBody(0xfdf2),
+		rowExtensionLengthBody(0xfdf2),
+		nonCanonicalBranchRow(),
+	}
+}
+
+var recordFuzzKeys = makeRecordFuzzKeys()
+
+func makeRecordFuzzKeys() [][]byte {
+	keys := [][]byte{GlobalRootKey()}
+	for bitLen := int16(4); bitLen <= 268; bitLen += 4 {
+		keys = append(keys, rowKeyForZone(bitLen, eip8297.AccountZone))
+	}
+	for bitLen := int16(4); bitLen <= 524; bitLen += 4 {
+		keys = append(keys, rowKeyForZone(bitLen, eip8297.StorageZone))
+	}
+	return keys
+}
+
+func rowKeyForZone(bitLen int16, zone byte) []byte {
+	pathBytes := make([]byte, (int(bitLen)+7)/8)
+	if len(pathBytes) != 0 {
+		pathBytes[0] = zone
+	}
+	path := eip8297.PathFromBits(pathBytes, bitLen)
+	return eip8297.AppendBitPath(nil, &path)
+}
+
+func nonCanonicalBranchRow() []byte {
+	return append([]byte{recordFormat, 0, 3, 0, 0}, make([]byte, 128)...)
 }
 
 func hash(v byte) common.Hash {
