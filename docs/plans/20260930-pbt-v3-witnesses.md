@@ -301,22 +301,22 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `rpc/jsonrpc/pbt_hex_witness_dual_test.go`
 - Modify: `rpc/jsonrpc/eth_call.go`, `rpc/rpchelper/commitment.go` (only if a guard below exposes a gap)
 
-- [ ] extend `witness_v3_parity_test.go` with a hex+bin arm:
+- [x] extend `witness_v3_parity_test.go` with a hex+bin arm:
       - the dual globals and `statecfg.EnableHistoricalCommitment` are set and restored in `t.Cleanup`;
       - the bin domain is active, with a dual genesis as in `execution/tests/pbt_dual_commitment_test.go`;
       - legacy, canonical and `eth_getWitness` output is byte-identical to the hex-only arm for pre-fork blocks.
-- [ ] add `eth_getProof` parity for a pre-fork block on hex+bin
-- [ ] port from `binary-trie`:
+- [x] add `eth_getProof` parity for a pre-fork block on hex+bin
+- [x] port from `binary-trie`:
       - `TestPBinGetWitnessRefusesBin` and `TestPBinHexOnlyCallersStillRefuse` (`pbin_witness_reachable_test.go`);
       - `TestPBinDualPostFlipProofAndWitnessRefuse` and `TestPBinFrozenHexHistoricalWitnessAndProof`
         (`pbin_witness_dual_test.go`).
 
       These cover post-fork and bin-only refusals of `eth_getWitness`/`eth_getProof`, and historical pre-fork reads
       after the fork and after a hex freeze.
-- [ ] add a test for the pruned hex commitment history error
-- [ ] mutation-check each guard: re-inserting the early return, and bypassing the canonical-hex check in `eth_call.go`,
+- [x] add a test for the pruned hex commitment history error
+- [x] mutation-check each guard: re-inserting the early return, and bypassing the canonical-hex check in `eth_call.go`,
       each turn a named assertion red
-- [ ] run tests - must pass before task 3
+- [x] run tests - must pass before task 3
 
 ### Task 3: trie parameter and cache routing
 
