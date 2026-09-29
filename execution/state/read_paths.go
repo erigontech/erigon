@@ -854,7 +854,7 @@ func seedStorageOrigin(s *IntraBlockState, addr accounts.Address, key accounts.S
 	if s.versionMap == nil || r.source != StorageRead || r.version != UnknownVersion {
 		return
 	}
-	s.versionMap.WriteStorage(addr, key, Version{TxIndex: originIndex}, val, true)
+	s.recordStorageOrigin(addr, key, val) // origin write-set, published at flush (not a mid-read versionMap write)
 	r.hdr.Version = Version{TxIndex: originIndex}
 	r.version = Version{TxIndex: originIndex}
 }
@@ -896,7 +896,7 @@ func seedOrigin(s *IntraBlockState, addr accounts.Address) (acc *accounts.Accoun
 		return nil, UnknownSource, UnknownVersion, false, nil
 	}
 	origin := *committed
-	s.versionMap.WriteAddress(addr, Version{TxIndex: originIndex}, &origin, true)
+	s.recordAddressOrigin(addr, &origin) // origin write-set, published at flush (not a mid-read versionMap write)
 	ver = Version{TxIndex: originIndex}
 	// A destructed origin reads absent and is NOT recorded as an AddressPath read (its
 	// SD dependency travels on the field reads). Only an alive origin is recorded, so its

@@ -178,6 +178,11 @@ type IntraBlockState struct {
 	waitCommit      func(depTxIndex int) bool
 	versionedWrites WriteSet
 	versionedReads  ReadSet
+	// versionedOrigins collects committed pre-block base cells (at originIndex) that a cold
+	// read resolves this tx. Reads record here (tx-local, lock-free) instead of writing the
+	// shared versionMap mid-execution; the executor publishes them batched at flush, so the
+	// Block-STM invariant holds (versionMap mutated only at pre-exec seed and flush).
+	versionedOrigins WriteSet
 	// committedBase memoizes the per-tx committed (pre-block) account fallback for
 	// versionedAccountBase. The committed view is block-immutable, so the cached
 	// pointer is safe to share across the tx's read-only callers. Reset per tx.
@@ -351,6 +356,7 @@ func (sdb *IntraBlockState) Reset() {
 	// boundary call.  Walk the per-path maps and return every VW to its
 	// typed pool before resetting.
 	sdb.versionedWrites.ReleaseAndReset()
+	sdb.versionedOrigins.ReleaseAndReset()
 	sdb.recordAccess = false
 	sdb.accountReadDuration = 0
 	sdb.accountReadCount = 0
@@ -2487,6 +2493,11 @@ func (sdb *IntraBlockState) MakeWriteSet(chainRules *chain.Rules, stateWriter St
 // FinalizedWrites applies EIP-6780 normalization and EIP-161 filtering, then
 // returns a detached committable snapshot.
 func (sdb *IntraBlockState) FinalizedWrites(chainRules *chain.Rules) *WriteSet {
+	// Publish this tx's cold-read committed origins to the versionMap before EIP-161
+	// composition below reads it (encodeExistingEmptyRemovals builds a versionMap-backed
+	// account view). Every FinalizedWrites caller is covered here, so no read path needs
+	// to remember to publish separately.
+	sdb.PublishOrigins()
 	writes := sdb.versionedWrites.Finalize()
 	sdb.withholdCreatedEmptyAccounts(chainRules, writes)
 	sdb.encodeExistingEmptyRemovals(chainRules, writes)
@@ -3224,6 +3235,33 @@ func (sdb *IntraBlockState) ResetVersionedReads() {
 // the IntraBlockState accessor for it.
 func (sdb *IntraBlockState) VersionedWrites() *WriteSet {
 	return sdb.versionedWrites.Snapshot()
+}
+
+// recordStorageOrigin / recordAddressOrigin collect a cold committed base cell into the
+// tx-local origin set (at originIndex) instead of writing the shared versionMap mid-read.
+func (sdb *IntraBlockState) recordStorageOrigin(addr accounts.Address, key accounts.StorageKey, val uint256.Int) {
+	sdb.versionedOrigins.SetStorage(addr, key, &VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Key: key, Path: StoragePath, Version: Version{TxIndex: originIndex}},
+		Val:         val,
+	})
+}
+
+func (sdb *IntraBlockState) recordAddressOrigin(addr accounts.Address, acc *accounts.Account) {
+	sdb.versionedOrigins.SetAddress(addr, &VersionedWrite[*accounts.Account]{
+		WriteHeader: WriteHeader{Address: addr, Path: AddressPath, Version: Version{TxIndex: originIndex}},
+		Val:         acc,
+	})
+}
+
+// PublishOrigins flushes this tx's collected committed-base origins to the shared versionMap
+// in one batched, write-once pass at flush — the reads that discovered them stayed lock-free,
+// restoring the invariant that a tx never mutates the versionMap mid-execution. Idempotent
+// across txs: origins sit at originIndex with the committed value.
+func (sdb *IntraBlockState) PublishOrigins() {
+	if sdb.versionMap == nil || sdb.versionedOrigins.IsEmpty() {
+		return
+	}
+	sdb.versionMap.FlushVersionedWrites(&sdb.versionedOrigins, true, "")
 }
 
 // Apply entries in a given write set to StateDB. Note that this function does not change MVHashMap nor write set
