@@ -30,6 +30,7 @@ import (
 )
 
 func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.FullBlockReader, failFast bool) error {
+	var probs problems
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
@@ -55,11 +56,9 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.Ful
 			panic(err)
 		}
 		if !ok || hash == (common.Hash{}) {
-			err = fmt.Errorf("canonical marker not found: %d", i)
-			if failFast {
+			if err := probs.report(failFast, fmt.Errorf("canonical marker not found: %d", i)); err != nil {
 				return err
 			}
-			log.Error(err.Error())
 		}
 		header := rawdb.ReadHeader(tx, hash, i)
 		if header == nil {
@@ -68,11 +67,9 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.Ful
 		}
 		body, _, _ := rawdb.ReadBody(tx, hash, i)
 		if body == nil {
-			err = fmt.Errorf("body not found: %d", i)
-			if failFast {
+			if err := probs.report(failFast, fmt.Errorf("body not found: %d", i)); err != nil {
 				return err
 			}
-			log.Error(err.Error())
 		}
 
 		select {
@@ -83,5 +80,5 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.Ful
 		default:
 		}
 	}
-	return nil
+	return probs.verdict(string(HeaderNoGaps))
 }
