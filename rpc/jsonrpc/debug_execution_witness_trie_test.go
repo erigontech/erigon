@@ -248,6 +248,9 @@ func TestExecutionWitnessMPTAvailability(t *testing.T) {
 }
 
 func TestExecutionWitnessMPTStoppedAvailability(t *testing.T) {
+	previousAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
 	t.Run("last parent served", func(t *testing.T) {
 		api, m := pbinWitnessFixture(t, 30)
 		agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
