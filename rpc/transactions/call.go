@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -63,7 +64,7 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
+	state := newCallState(stateReader)
 	defer state.Close()
 
 	// Setup context so it may be cancelled the call has completed
@@ -328,4 +329,16 @@ func NewReusableCaller(
 		rules:          blockCtx.Rules(chainConfig),
 		message:        msg,
 	}, nil
+}
+
+var callNoMaterialize = dbg.EnvBool("RPC_CALL_NOMATERIALIZE", false)
+
+// newCallState runs eth_call on the versioned, cache-free IBS path when RPC_CALL_NOMATERIALIZE=true.
+func newCallState(r state.StateReader) *state.IntraBlockState {
+	if !callNoMaterialize {
+		return state.New(r)
+	}
+	ibs := state.NewWithVersionMap(r, state.NewVersionMap(nil))
+	ibs.SetNoMaterialize(true)
+	return ibs
 }
