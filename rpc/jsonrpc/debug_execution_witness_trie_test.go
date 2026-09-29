@@ -250,9 +250,11 @@ func TestExecutionWitnessMPTAvailability(t *testing.T) {
 func TestExecutionWitnessMPTStoppedAvailability(t *testing.T) {
 	t.Run("last parent served", func(t *testing.T) {
 		api, m := pbinWitnessFixture(t, 30)
+		agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 		require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
 			return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain)
 		}))
+		agg.StopCommitmentDomain(kv.CommitmentDomain)
 		mpt := "mpt"
 		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(3), nil, &mpt)
 		require.NoError(t, err)
@@ -261,6 +263,7 @@ func TestExecutionWitnessMPTStoppedAvailability(t *testing.T) {
 
 	t.Run("first parent refused", func(t *testing.T) {
 		api, m := pbinWitnessFixture(t, 30)
+		agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 		require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
 			for _, table := range m.DB.Debug().DomainTables(kv.CommitmentDomain) {
 				if err := tx.ClearTable(table); err != nil {
@@ -269,6 +272,7 @@ func TestExecutionWitnessMPTStoppedAvailability(t *testing.T) {
 			}
 			return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentDomain)
 		}))
+		agg.StopCommitmentDomain(kv.CommitmentDomain)
 		mpt := "mpt"
 		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(4), nil, &mpt)
 		require.ErrorContains(t, err, "mpt commitment was stopped before parent")

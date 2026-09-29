@@ -1467,8 +1467,9 @@ func detectCollapseSiblings(
 	// for this block range.
 	if seekBlockNum != parentNum {
 		return nil, fmt.Errorf(
-			"debug_executionWitness: commitment trie for block %d is at block %d instead of parent %d; "+
+			"debug_executionWitness: %s commitment trie for block %d is at block %d instead of parent %d; "+
 				"commitment history may be pruned for this block range",
+			witnessTrieName(witnessTrieMPT),
 			blockNum, seekBlockNum, parentNum,
 		)
 	}

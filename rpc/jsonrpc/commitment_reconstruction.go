@@ -52,3 +52,7 @@ type commitmentReconstructionAgg struct {
 func (*commitmentReconstructionAgg) IsDomainFrozen(kv.Domain) (uint64, bool) {
 	return 0, false
 }
+
+func (*commitmentReconstructionAgg) CommitmentDomainStopped(kv.Domain) bool {
+	return false
+}

@@ -398,16 +398,16 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `execution/commitment/eip8297/witness/tree_test.go`
 - Create: `execution/commitment/eip8297/witness/driver_test.go`
 
-- [ ] add the tree and driver signatures with stubs. Write a test that a tree built by inserting random leaf sets hashes
+- [x] add the tree and driver signatures with stubs. Write a test that a tree built by inserting random leaf sets hashes
       to the `eip8297` reference root; the sets cover all zones, header and overflow storage, code stems and groups of
       1 to 256 values. Confirm it fails at the root comparison
-- [ ] implement the tree with a `ResolveFunc` (path to blob) that loads nodes lazily, checks each blob against its
+- [x] implement the tree with a `ResolveFunc` (path to blob) that loads nodes lazily, checks each blob against its
       parent's pointer, and records each resolved path once; the root is resolved for a non-empty tree; nodes created
       during the block are never recorded
-- [ ] implement read, insert/update, delete with collapse, account deletion to the cut point, and code chunk writes
-- [ ] implement the driver in the fixed order (reads, storage pass, account updates, account deletions) returning the
+- [x] implement read, insert/update, delete with collapse, account deletion to the cut point, and code chunk writes
+- [x] implement the driver in the fixed order (reads, storage pass, account updates, account deletions) returning the
       post-root and the resolved set
-- [ ] write tests on the post-root:
+- [x] write tests on the post-root:
       - collapse cascades (two deletions under one branch);
       - absent reads;
       - header slots against overflow slots;
@@ -416,10 +416,10 @@ demand; a cache-only node serves the default trie only and returns a distinct er
       - deploys sharing code.
 
       After the driver runs, the root equals the reference root of the post-state leaves.
-- [ ] write tests on the resolved set:
+- [x] write tests on the resolved set:
       - an account deletion with overflow storage resolves only the nodes down to the cut point;
       - a collapse whose survivor was inserted earlier in the same block resolves nothing new
-- [ ] run tests - must pass before task 7
+- [x] run tests - must pass before task 7
 
 ### Task 7: Row resolver from 16-cell rows
 
