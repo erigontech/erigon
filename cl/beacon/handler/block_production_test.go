@@ -73,6 +73,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	dbversion "github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -3065,6 +3066,7 @@ func TestProduceBlockV4IncludesRequestPayloadAfterSharedCacheEviction(t *testing
 			Blobs: []hexutil.Bytes{blob}, Commitments: []hexutil.Bytes{commitment}, Proofs: []hexutil.Bytes{proof},
 		}, nil, big.NewInt(1_000_000_000), nil)
 	handler.engine = engine
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 	handler.selfBuildPayloads = evictingSelfBuildPayloadCache{}
 	handler.blobBundles = evictingBlobBundleCache{}
 
@@ -3593,6 +3595,7 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 		Return(payload, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil).
 		Times(2)
 	handler.engine = engine
+	handler.elClientVersion.Store(elClientVersionUnavailable) // avoid mocking GetClientVersionV1
 
 	produce := func() *cltypes.BeaconBlock {
 		request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf(
@@ -3612,6 +3615,11 @@ func TestGetEthV3ValidatorBlockKeepsSelfBuildEnvelopeByBlockRoot(t *testing.T) {
 
 	selfBuiltBlock := produce()
 	require.Equal(t, uint64(clparams.BuilderIndexSelfBuild), selfBuiltBlock.Body.SignedExecutionPayloadBid.Message.BuilderIndex)
+	// Exercises the graffiti wiring end-to-end (graffitiFromHex, requestGraffiti,
+	// combinedGraffiti), not just those functions directly: the request's graffiti=0x01
+	// combines with the (EL-unavailable) consensus-only identification segment.
+	clCommit := graffitiCommitPrefix(dbversion.GitCommit)
+	require.Equal(t, graffitiFromString(caplinClientCode+clCommit+" \x01"), selfBuiltBlock.Body.Graffiti)
 	selfBuiltRoot, err := selfBuiltBlock.HashSSZ()
 	require.NoError(t, err)
 	key := selfBuildEnvelopeKey{Slot: fixture.block.Slot, BeaconBlockRoot: common.Hash(selfBuiltRoot)}
