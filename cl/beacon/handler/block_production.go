@@ -140,17 +140,27 @@ func (a *ApiHandler) combinedGraffiti(custom common.Hash) common.Hash {
 	return graffitiFromString(segment + " " + string(customText))
 }
 
-// truncateAtRuneBoundary cuts text to at most n bytes. For genuinely non-UTF-8 text (graffiti
-// isn't required to be UTF-8), it cuts exactly at n; otherwise it backs off to clear a rune
-// the cut would otherwise split.
+// truncateAtRuneBoundary cuts text to at most n bytes, backing off up to UTFMax-1 bytes to
+// clear a rune the cut would otherwise split. It looks only at the n bytes being kept, so
+// invalid bytes beyond the cut (graffiti isn't required to be UTF-8) can't suppress this.
+// Go's utf8 package cannot tell a truncated-but-otherwise-valid lead byte apart from a byte
+// that is simply never valid, so within that bound this may drop a genuinely standalone
+// invalid byte along with a truly split rune; it never drops more than that bound, and it
+// keeps the hard cut if no boundary turns up within it.
 func truncateAtRuneBoundary(text []byte, n int) []byte {
-	if !utf8.Valid(text) {
-		return text[:n]
+	cut := text[:n]
+	backedOff := cut
+	for len(backedOff) > 0 && len(cut)-len(backedOff) < utf8.UTFMax {
+		if r, size := utf8.DecodeLastRune(backedOff); r == utf8.RuneError && size == 1 {
+			backedOff = backedOff[:len(backedOff)-1]
+			continue
+		}
+		break
 	}
-	for n > 0 && !utf8.RuneStart(text[n]) {
-		n--
+	if len(cut)-len(backedOff) < utf8.UTFMax {
+		return backedOff
 	}
-	return text[:n]
+	return cut
 }
 
 // warnGraffitiTruncatedOnce warns, once, that supplied graffiti has been truncated to fit the

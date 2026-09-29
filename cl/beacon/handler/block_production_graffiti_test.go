@@ -308,15 +308,17 @@ func TestCombinedGraffiti(t *testing.T) {
 		require.Equal(t, segment+" "+string(bytes.Repeat([]byte{0xFF}, available)), got)
 	})
 
-	t.Run("an invalid byte within budget is not mistaken for a split rune", func(t *testing.T) {
+	t.Run("an ambiguous invalid byte within budget may be dropped, bounded to UTFMax-1 bytes", func(t *testing.T) {
 		a := withELVersion()
 		segment := "EGc3d4" + caplinClientCode + clCommit // 12 bytes
 		var zero common.Hash
 		available := len(zero) - len(segment) - 1
 		require.Equal(t, 19, available, "test below assumes this exact byte budget")
 
-		// The whole text is not valid UTF-8 (the 0xFF at index 18), but that byte still
-		// sits within the 19-byte budget and must survive the cut.
+		// 0xFF is never valid in UTF-8, so it's within budget but still gets backed off:
+		// Go's utf8 package can't tell it apart from a truncated-but-valid lead byte. The
+		// loss is bounded to at most UTFMax-1 bytes, unlike the unbounded backoff this
+		// guards against (see the all-0xFF case below).
 		raw := append(bytes.Repeat([]byte("a"), available-1), 0xFF)
 		raw = append(raw, []byte("bbbbb")...)
 		var custom common.Hash
@@ -324,7 +326,29 @@ func TestCombinedGraffiti(t *testing.T) {
 
 		got := graffitiText(a.combinedGraffiti(custom))
 
-		require.Equal(t, segment+" "+string(raw[:available]), got)
+		require.Equal(t, segment+" "+string(raw[:available-1]), got)
+	})
+
+	t.Run("invalid bytes past the cut do not suppress rune-boundary protection", func(t *testing.T) {
+		a := withELVersion()
+		segment := "EGc3d4" + caplinClientCode + clCommit // 12 bytes
+		var zero common.Hash
+		available := len(zero) - len(segment) - 1
+		require.Equal(t, 19, available, "test below assumes this exact byte budget")
+
+		// "xy" (2 bytes) + five 4-byte runes (20 bytes) + one stray incomplete lead byte
+		// past the cut point: the stray byte alone makes the *whole* text invalid UTF-8,
+		// but it must not stop the cut (at byte 19, inside the 5th emoji) from backing off
+		// to the true rune boundary.
+		raw := append([]byte("xy"), []byte(strings.Repeat("🎉", 5))...)
+		raw = append(raw, 0xF0)
+		require.False(t, utf8.Valid(raw), "test assumes the whole slice is invalid UTF-8")
+		var custom common.Hash
+		copy(custom[:], raw)
+
+		got := graffitiText(a.combinedGraffiti(custom))
+
+		require.Equal(t, segment+" xy"+strings.Repeat("🎉", 4), got)
 	})
 }
 
