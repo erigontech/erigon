@@ -15,9 +15,12 @@ above use 66-byte storage-zone keys: zone `0xff`, the address stem, the storage-
 the slot sub-index. `TreeKeyAccount`, `TreeKeyCodeChunk`, and `TreeKeyStorage` in `eip8297/keys.go`
 derive these keys.
 
-Rows use `AppendBitPath` in `eip8297/bitpath.go`: packed path bits followed by the number of used
-bits in the final byte. Row keys are nibble-aligned. `{0x08}` is the global root key; it is outside
-the ordinary path-key space. A bucket root is the 264-bit path for `0xff || H(address32)`.
+Rows use `AppendBitPath` in `eip8297/bitpath.go`: packed path bits followed by one byte containing
+`BitLen % 8`. The final byte is therefore in the range 0 through 7; a path ending on a full byte
+uses 0, not 8. For example, an 8-bit path containing `01` is encoded as `01 00`, and
+`DecodeBitPath` rejects a trailing value of 8. Row keys are nibble-aligned. `{0x08}` is the global
+root key, not a path key and not an `AppendBitPath` encoding. A bucket root is the 264-bit path for
+`0xff || H(address32)`.
 
 ## Rows and cells
 
@@ -53,9 +56,31 @@ extension stores `u16 bitLen` followed by packed prefix bits. A leaf stores pack
 one-byte value length, and the canonical compact value.
 
 An extension root is `hdr | u16 bitLen | packed selfExt | left | right`. A leaf root is
-`hdr | packed suffix | value length | compact value`. These forms are valid only at the global
-root and a bucket root. An empty root has no record and hashes to 32 zero bytes. A zero-length
-record value is a tombstone; a 32-byte zero value is a leaf deletion before compact encoding.
+`hdr | packed suffix | value length | compact value`. The masks and every `u16 bitLen` are
+big-endian, as written by `EncodeRecord`, `encodeRow`, and `encodeExtRoot` in
+`execution/commitment/v3/pbt/record.go` and read by their decoder counterparts. The one-byte leaf
+value length is limited to 255 bytes. These forms are valid only at the global root and a bucket
+root. An empty root has no record and hashes to 32 zero bytes. A zero-length record value is a
+tombstone; a 32-byte zero value is a leaf deletion before compact encoding.
+
+Compact values follow the leaf zone and sub-index rules in `EncodeLeafValue` and `DecodeLeafValue`
+in `execution/commitment/eip8297/values.go`:
+
+- Storage leaves and account-header storage leaves remove leading zero bytes. The compact value is
+  non-empty and its first byte is non-zero.
+- Code chunks remove trailing zero bytes. The compact value is non-empty and its last byte is
+  non-zero.
+- `BASIC_DATA` starts with a big-endian `u16` whose reserved high four bits are zero. Its remaining
+  fields are `(code_size_bytes << 9) | (nonce_bytes << 5) | balance_bytes`, followed by minimal
+  big-endian field bytes in that order; zero-width fields are omitted.
+- `CODE_HASH` is empty for the empty-code hash and otherwise exactly 32 bytes.
+- `DELEGATION` is encoded as the 20-byte target. Decoding restores the `0xef0100` marker and
+  rejects any other length.
+- Other account leaves use exactly 32 bytes.
+
+`DecodeLeafValue` re-encodes the decoded 32-byte value with `EncodeLeafValue` and rejects any
+different byte sequence, so these forms have one canonical compact spelling. Zero storage values,
+zero code chunks, and zero account-header storage values are rejected.
 
 Decoding is total and canonical. It rejects an unknown format, reserved bits, contradictory root
 bits, root forms at ordinary keys, invalid mask subsets, rows with fewer than two cells, invalid

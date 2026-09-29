@@ -192,6 +192,20 @@ func TestRecordRejectsNonCanonicalBranches(t *testing.T) {
 	}
 }
 
+func TestRecordRejectsLeafSuffixPastKeyLength(t *testing.T) {
+	key := rowKey(528)
+	record := Record{Form: RowRoot, Cells: [16]Cell{
+		0: {Kind: LeafCell, Key: accountKey(0, eip8297.BasicDataLeafKey), Value: basicValue()},
+		1: {Kind: LeafCell, Key: accountKey(1, eip8297.BasicDataLeafKey), Value: basicValue()},
+	}}
+	_, err := EncodeRecord(key, &record)
+	require.ErrorIs(t, err, errorRule(SuffixLengthError))
+
+	data := []byte{recordFormat, 0, 3, 0, 3}
+	_, err = DecodeRecord(key, data)
+	require.ErrorIs(t, err, errorRule(SuffixLengthError))
+}
+
 func TestRecordRejectsOldFormatBeforeKeyValidation(t *testing.T) {
 	data := make([]byte, 0, 68)
 	for range 2 {
