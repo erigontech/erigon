@@ -60,9 +60,9 @@ var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_re
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys StorageKeysFn, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
+func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys StorageKeysFn, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
-	if s == nil {
+	if ws == nil {
 		return filtered, nil
 	}
 
@@ -121,7 +121,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
 	//      eliminate it; mainnet-rare, but cheap to get right.)
 	var sdSet map[accounts.Address]bool
-	for addr, vw := range s.selfDestruct {
+	for addr, vw := range ws.selfDestruct {
 		if vw.Version.Incarnation == incarnation && vw.Val {
 			if sdSet == nil {
 				sdSet = make(map[accounts.Address]bool)
@@ -130,7 +130,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 		}
 	}
 
-	for h := range s.AllHeaders() {
+	for h := range ws.AllHeaders() {
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
 		// takes the pure-delete branch instead of cleanup-before-recreate; drop
 		// raw StoragePath writes too (the SelfDestructPath case re-emits an
@@ -154,7 +154,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			sw, ok := s.GetStorage(h.Address, h.Key)
+			sw, ok := ws.GetStorage(h.Address, h.Key)
 			if !ok {
 				continue
 			}
@@ -220,19 +220,19 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 			if !SetAccountFieldFromMap(filtered, vm, h.Address, h.Path, h.Version, txIndex+1) {
 				switch h.Path {
 				case BalancePath:
-					if vw, ok := s.GetBalance(h.Address); ok {
+					if vw, ok := ws.GetBalance(h.Address); ok {
 						filtered.SetBalance(h.Address, vw)
 					}
 				case NoncePath:
-					if vw, ok := s.GetNonce(h.Address); ok {
+					if vw, ok := ws.GetNonce(h.Address); ok {
 						filtered.SetNonce(h.Address, vw)
 					}
 				case IncarnationPath:
-					if vw, ok := s.GetIncarnation(h.Address); ok {
+					if vw, ok := ws.GetIncarnation(h.Address); ok {
 						filtered.SetIncarnation(h.Address, vw)
 					}
 				case CodeHashPath:
-					if vw, ok := s.GetCodeHash(h.Address); ok {
+					if vw, ok := ws.GetCodeHash(h.Address); ok {
 						filtered.SetCodeHash(h.Address, vw)
 					}
 				}
@@ -241,14 +241,14 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			if vw, ok := s.GetCode(h.Address); ok {
+			if vw, ok := ws.GetCode(h.Address); ok {
 				filtered.SetCode(h.Address, vw)
 			}
 		case CreateContractPath:
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			if vw, ok := s.GetCreateContract(h.Address); ok {
+			if vw, ok := ws.GetCreateContract(h.Address); ok {
 				filtered.SetCreateContract(h.Address, vw)
 			}
 		case SelfDestructPath:
@@ -257,7 +257,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 			}
 			// Only emit storage DELETE entries when the account was actually
 			// self-destructed (val=true).
-			sdw, ok := s.GetSelfDestruct(h.Address)
+			sdw, ok := ws.GetSelfDestruct(h.Address)
 			if !ok || !sdw.Val {
 				continue
 			}
@@ -294,7 +294,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
 	allAddresses := make(map[accounts.Address]bool)
-	s.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
+	ws.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
 
 	for addr := range allAddresses {
 		if sdSet[addr] {
@@ -331,7 +331,7 @@ func (s *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, state
 		// (no per-tx FinalizeTx). Forcing defaults here resets nonce/codeHash
 		// against that canonical state (TestSelfDestructReceive).
 		hasCreateContract := false
-		if vw, ok := s.GetCreateContract(addr); ok && vw.Val {
+		if vw, ok := ws.GetCreateContract(addr); ok && vw.Val {
 			hasCreateContract = true
 		}
 
