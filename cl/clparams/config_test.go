@@ -101,6 +101,20 @@ GAS_LIMIT_SCHEDULE:
 	}
 }
 
+func TestScheduledGasLimitIsInactiveBeforeGloas(t *testing.T) {
+	config := BeaconChainConfig{
+		GloasForkEpoch: 10,
+		GasLimitSchedule: []GasLimitScheduleEntry{
+			{Epoch: 9, GasLimit: 60_000_000},
+		},
+	}
+
+	gasLimit, active := config.GetScheduledGasLimit(9)
+
+	require.False(t, active)
+	require.Zero(t, gasLimit)
+}
+
 func TestBlobSidecarServeRangeStartSlotUsesEpochBoundary(t *testing.T) {
 	cfg := BeaconChainConfig{
 		SlotsPerEpoch:                    32,

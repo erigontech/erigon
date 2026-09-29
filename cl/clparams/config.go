@@ -1180,6 +1180,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 		{412672, 15},
 		{419072, 21},
 	},
+	GasLimitSchedule: []GasLimitScheduleEntry{},
 
 	// Gloas
 	ChurnLimitQuotientGloas:              1 << 15,

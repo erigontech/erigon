@@ -916,6 +916,7 @@ func (a *ApiHandler) gloasPayloadPathForHead(head forkchoice.ForkChoiceNode, tar
 	}
 }
 
+// targetGasLimitForProposal uses proposer preferences, then the schedule, then the parent limit.
 // stateVersion is the target fork; the head state may still be from before Gloas.
 func (a *ApiHandler) targetGasLimitForProposal(
 	baseState *state.CachingBeaconState,

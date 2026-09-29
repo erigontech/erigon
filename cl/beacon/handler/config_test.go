@@ -26,18 +26,29 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
-func TestGetSpecIncludesSepoliaGasLimitSchedule(t *testing.T) {
-	network, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
-	handler := &ApiHandler{beaconChainCfg: config, netConfig: network}
-	response, err := handler.getSpec(nil, nil)
-	require.NoError(t, err)
-	encoded, err := json.Marshal(response)
-	require.NoError(t, err)
-	var spec struct {
-		Data map[string]json.RawMessage `json:"data"`
-	}
-	require.NoError(t, json.Unmarshal(encoded, &spec))
+func TestGetSpecIncludesGasLimitSchedule(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		network  clparams.NetworkType
+		schedule string
+	}{
+		{name: "mainnet", network: chainspec.MainnetChainID, schedule: `[]`},
+		{name: "sepolia", network: chainspec.SepoliaChainID, schedule: `[{"EPOCH":"353024","GAS_LIMIT":"200000000"}]`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			network, config := clparams.GetConfigsByNetwork(test.network)
+			handler := &ApiHandler{beaconChainCfg: config, netConfig: network}
+			response, err := handler.getSpec(nil, nil)
+			require.NoError(t, err)
+			encoded, err := json.Marshal(response)
+			require.NoError(t, err)
+			var spec struct {
+				Data map[string]json.RawMessage `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(encoded, &spec))
 
-	require.Contains(t, spec.Data, "GAS_LIMIT_SCHEDULE")
-	require.JSONEq(t, `[{"EPOCH":"353024","GAS_LIMIT":"200000000"}]`, string(spec.Data["GAS_LIMIT_SCHEDULE"]))
+			require.Contains(t, spec.Data, "GAS_LIMIT_SCHEDULE")
+			require.JSONEq(t, test.schedule, string(spec.Data["GAS_LIMIT_SCHEDULE"]))
+		})
+	}
 }

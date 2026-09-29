@@ -1034,25 +1034,29 @@ func TestTargetGasLimitForFirstSepoliaGloasSlot(t *testing.T) {
 	baseState.SetLatestExecutionPayloadHeader(header)
 	handler := &ApiHandler{beaconChainCfg: config}
 
-	require.Nil(t, handler.targetGasLimitForProposal(baseState, targetSlot-1, 0, clparams.FuluVersion))
-	gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
-
-	require.NotNil(t, gasLimit)
-	require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
-
-	dependentRoot, err := state.GetProposerDependentRoot(baseState, targetSlot/config.SlotsPerEpoch)
-	require.NoError(t, err)
-	handler.epbsPool = pool.NewEpbsPool()
-	for _, preferenceGasLimit := range []uint64{100_000_000, 300_000_000} {
-		handler.epbsPool.ProposerPreferences.Add(
-			pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
-			&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
-				ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: preferenceGasLimit,
-			}},
-		)
-		gasLimit = handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+	t.Run("before Gloas", func(t *testing.T) {
+		require.Nil(t, handler.targetGasLimitForProposal(baseState, targetSlot-1, 0, clparams.FuluVersion))
+	})
+	t.Run("scheduled default", func(t *testing.T) {
+		gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
 		require.NotNil(t, gasLimit)
-		require.Equal(t, hexutil.Uint64(preferenceGasLimit), *gasLimit)
+		require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
+	})
+	for _, preferenceGasLimit := range []uint64{100_000_000, 300_000_000} {
+		t.Run(fmt.Sprintf("preference %d", preferenceGasLimit), func(t *testing.T) {
+			dependentRoot, err := state.GetProposerDependentRoot(baseState, targetSlot/config.SlotsPerEpoch)
+			require.NoError(t, err)
+			handler := &ApiHandler{beaconChainCfg: config, epbsPool: pool.NewEpbsPool()}
+			handler.epbsPool.ProposerPreferences.Add(
+				pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
+				&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+					ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: preferenceGasLimit,
+				}},
+			)
+			gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+			require.NotNil(t, gasLimit)
+			require.Equal(t, hexutil.Uint64(preferenceGasLimit), *gasLimit)
+		})
 	}
 }
 
