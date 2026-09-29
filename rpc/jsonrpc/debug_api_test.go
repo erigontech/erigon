@@ -172,6 +172,69 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 }
 
+func TestTraceBlockGasUsed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+		dataSize  int
+	}{
+		{name: "pre_amsterdam"},
+		{name: "state_bound", amsterdam: true},
+		{name: "execution_bound", amsterdam: true, dataSize: 10_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			if !tc.amsterdam {
+				cfg.AmsterdamTime = nil
+			}
+			m, bankKey, bankAddress := fundedBankGenesis(t, cfg)
+			signer := types.LatestSignerForChainID(cfg.ChainID)
+			gasPrice := uint256.NewInt(1_000_000_000)
+			txns := []*types.LegacyTx{
+				types.NewTransaction(0, common.HexToAddress("0x2000"), uint256.NewInt(1), 1_000_000, gasPrice, nil),
+				types.NewTransaction(1, bankAddress, uint256.NewInt(0), 1_000_000, gasPrice, bytes.Repeat([]byte{1}, tc.dataSize)),
+			}
+			generated, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+				gen.SetCoinbase(common.Address{1})
+				for _, txn := range txns {
+					signed, err := types.SignTx(txn, *signer, bankKey)
+					require.NoError(t, err)
+					gen.AddTx(signed)
+				}
+			})
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(generated))
+			receiptGasUsed := generated.Receipts[0][1].CumulativeGasUsed
+			if tc.amsterdam {
+				require.NotEqual(t, receiptGasUsed, generated.TopBlock.GasUsed())
+			} else {
+				require.Equal(t, receiptGasUsed, generated.TopBlock.GasUsed())
+			}
+
+			previousAssert := dbg.AssertEnabled
+			dbg.AssertEnabled = true
+			t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			api := newDebugApiForTest(m)
+			require.NotPanics(t, func() {
+				require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &tracersConfig.TraceConfig{}, stream))
+			})
+			require.NoError(t, stream.Flush())
+			var traces []struct {
+				Result struct {
+					Gas uint64 `json:"gas"`
+				} `json:"result"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &traces))
+			require.Len(t, traces, len(txns))
+			for i, trace := range traces {
+				require.Equal(t, generated.Receipts[0][i].GasUsed, trace.Result.Gas)
+			}
+		})
+	}
+}
+
 func TestTraceBlockByHash(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ethApi := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
