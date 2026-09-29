@@ -248,6 +248,27 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.StateProofs))
 	})
 
+	for _, tc := range []struct {
+		name       string
+		history    prune.BlockAmount
+		commitment prune.Distance
+	}{
+		{"archive_commitment_window", prune.ArchiveMode.History, 5},
+		{"full_shorter_commitment_window", prune.Distance(testPruneDistance), 5},
+		{"unstarted_commitment_window", prune.Distance(chainSize * 3), prune.Distance(chainSize * 2)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			mode := prune.ArchiveMode
+			mode.History, mode.CommitmentHistory = tc.history, tc.commitment
+			api, head := setupAPI(t, mode, true, false)
+			result, err := api.Capabilities(t.Context())
+			require.NoError(t, err)
+			require.Equal(t, tc.history.PruneTo(head), oldest(t, result.StateProofs), "commitment files have not been retired")
+			require.Equal(t, uint64(tc.commitment), window(t, result.StateProofs))
+		})
+	}
+
 	t.Run("minimal_no_commitment", func(t *testing.T) {
 		t.Parallel()
 		api, head := setupAPI(t, testMinimalMode, false, false)

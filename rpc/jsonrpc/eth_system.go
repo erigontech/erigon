@@ -183,7 +183,21 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 
 	var stateproofs CapabilityField
 	if keepExecutionProofs {
-		stateproofs = avail(stateOldest, pruneMode.History)
+		commitmentStart, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, err
+		}
+		commitmentFloors, err := api.historyStartBlocksFromTxNum(ctx, tx, headBlock, commitmentStart)
+		if err != nil {
+			return nil, err
+		}
+		// eth_getProof gates commitment history by its on-disk start, not its
+		// configured window. Report the tighter deletion policy without moving that boundary.
+		proofAmount := pruneMode.CommitmentHistoryAmount()
+		if retentionBlocks(pruneMode.History) < retentionBlocks(proofAmount) {
+			proofAmount = pruneMode.History
+		}
+		stateproofs = avail(max(stateOldest, commitmentFloors.postState), proofAmount)
 	} else {
 		stateproofs = CapabilityField{Disabled: true}
 	}

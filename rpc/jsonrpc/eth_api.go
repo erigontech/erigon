@@ -595,6 +595,10 @@ func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx
 	if err != nil {
 		return historyPruneFloors{}, err
 	}
+	return api.historyStartBlocksFromTxNum(ctx, tx, head, startTxNum)
+}
+
+func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, head, startTxNum uint64) (historyPruneFloors, error) {
 	if startTxNum == 0 {
 		return historyPruneFloors{}, nil
 	}
