@@ -333,7 +333,7 @@ func TestGeneratedTraceApiCollision(t *testing.T) {
         },
         "blockHash": "0xc78e9674685b04e1300d62cafdae0708d030a9bc0ff7aa9eb9315da23de650dc",
         "blockNumber": 1,
-        "error": "contract address collision",
+        "error": "Contract address collision",
         "result": null,
         "subtraces": 0,
         "traceAddress": [

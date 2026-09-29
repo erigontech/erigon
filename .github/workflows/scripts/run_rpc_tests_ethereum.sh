@@ -16,6 +16,10 @@ RESULT_DIR="$2"
 DISABLED_TEST_LIST=(
   # A reversed trace_filter range returns -32602 since #24341; re-enable with the rpc-tests release that includes erigontech/rpc-tests#609
   trace_filter/test_13.json
+  # An intrinsic gas rejection in trace_call and trace_callMany returns -38013 since #24343; re-enable with the rpc-tests release that includes erigontech/rpc-tests#613
+  trace_call/test_01.json
+  trace_callMany/test_13.json
+  trace_callMany/test_14.json
   # Failing after the PR https://github.com/erigontech/erigon/pull/13617 that fixed this incompatibility
   # issues https://hive.pectra-devnet-5.ethpandaops.io/suite.html?suiteid=1738266984-51ae1a2f376e5de5e9ba68f034f80e32.json&suitename=rpc-compat
   net_listening/test_1.json

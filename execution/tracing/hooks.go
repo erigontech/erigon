@@ -151,9 +151,7 @@ type (
 	// GenesisBlockHook is called when the genesis block is being processed.
 	GenesisBlockHook = func(genesis *types.Block, alloc types.GenesisAlloc)
 
-	// OnSystemCallStartHook is called when a system call is about to be executed. Today,
-	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
-	// beacon block root.
+	// OnSystemCallStartHook is called before a system call.
 	//
 	// After this hook, the EVM call tracing will happened as usual so you will receive a `OnEnter/OnExit`
 	// as well as state hooks between this hook and the `OnSystemCallEndHook`.
@@ -166,9 +164,7 @@ type (
 	// to `OnSystemCallStartHook` for more information.
 	OnSystemCallStartHookV2 = func(vm *VMContext)
 
-	// OnSystemCallEndHook is called when a system call has finished executing. Today,
-	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
-	// beacon block root.
+	// OnSystemCallEndHook is called after a system call finishes.
 	OnSystemCallEndHook = func()
 
 	/*
@@ -316,6 +312,17 @@ func (h *Hooks) EmitGasChange(old, new mdgas.MdGas, reason GasChangeReason) {
 		h.OnGasChangeV2(old, new, reason)
 	} else if h.OnGasChange != nil {
 		h.OnGasChange(old.Execution, new.Execution, reason)
+	}
+}
+
+func (h *Hooks) EmitSystemCallStart(vmctx *VMContext) {
+	if h == nil {
+		return
+	}
+	if h.OnSystemCallStartV2 != nil && vmctx != nil {
+		h.OnSystemCallStartV2(vmctx)
+	} else if h.OnSystemCallStart != nil {
+		h.OnSystemCallStart()
 	}
 }
 
