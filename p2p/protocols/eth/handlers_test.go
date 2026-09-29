@@ -3,7 +3,6 @@ package eth
 import (
 	"bytes"
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/common"
@@ -592,10 +591,12 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	hashKnownWithBAL := common.Hash{0x01}
 	hashKnownNoBAL := common.Hash{0x02}
 	hashUnknown := common.Hash{0x03}
+	hashEmptyBAL := common.Hash{0x04}
 
 	reader := balHeaderReader{
 		hashKnownWithBAL: 100,
 		hashKnownNoBAL:   101,
+		hashEmptyBAL:     102,
 		// hashUnknown intentionally absent
 	}
 
@@ -603,12 +604,15 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	if err := rawdb.WriteBlockAccessListBytes(tx, hashKnownWithBAL, 100, bal); err != nil {
 		t.Fatalf("WriteBlockAccessListBytes: %v", err)
 	}
+	if err := rawdb.WriteBlockAccessListBytes(tx, hashEmptyBAL, 102, []byte{0xc0}); err != nil {
+		t.Fatalf("WriteBlockAccessListBytes: %v", err)
+	}
 
-	query := GetBlockAccessListsPacket{hashKnownWithBAL, hashUnknown, hashKnownNoBAL}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	query := GetBlockAccessListsPacket{hashKnownWithBAL, hashUnknown, hashKnownNoBAL, hashEmptyBAL}
+	result := AnswerGetBlockAccessListsQuery(context.Background(), tx, query, reader)
 
-	if len(result) != 3 {
-		t.Fatalf("result len: have %d, want 3", len(result))
+	if len(result) != len(query) {
+		t.Fatalf("result len: have %d, want %d", len(result), len(query))
 	}
 	if !bytes.Equal(result[0], bal) {
 		t.Errorf("result[0] (known+BAL): have %x, want %x", result[0], bal)
@@ -618,6 +622,9 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	}
 	if !bytes.Equal(result[2], []byte{0x80}) {
 		t.Errorf("result[2] (known, no BAL): have %x, want 0x80", result[2])
+	}
+	if !bytes.Equal(result[3], []byte{0xc0}) {
+		t.Errorf("result[3] (empty BAL): have %x, want 0xc0", result[3])
 	}
 }
 
@@ -657,7 +664,7 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 		query = append(query, h)
 	}
 
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	result := AnswerGetBlockAccessListsQuery(context.Background(), tx, query, reader)
 	if len(result) < 1 || len(result) >= len(query) {
 		t.Fatalf("expected truncation: have %d entries, want 1..%d", len(result), len(query)-1)
 	}
@@ -669,148 +676,41 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 	}
 }
 
-// fakeBalGetter satisfies BlockAccessListGetter for handler tests: returns the
-// configured bytes/error per hash and counts how often each hash is requested.
-type fakeBalGetter struct {
-	bals  map[common.Hash][]byte
-	errs  map[common.Hash]error
-	calls map[common.Hash]int
-}
-
-func (f *fakeBalGetter) GetBlockAccessListBytes(_ context.Context, _ *chain.Config, _ kv.TemporalTx, hash common.Hash, _ uint64) ([]byte, error) {
-	f.calls[hash]++
-	err := f.errs[hash]
-	if err != nil {
-		return nil, err
-	}
-	return f.bals[hash], nil
-}
-
-// TestAnswerGetBlockAccessListsQuery_GeneratorFallback verifies that a BAL
-// missing from the database is regenerated via the BlockAccessListGetter, that
-// stored BALs are served without consulting the getter, and that getter errors
-// or empty results degrade to the "not available" sentinel.
-func TestAnswerGetBlockAccessListsQuery_GeneratorFallback(t *testing.T) {
+func TestAnswerGetBlockAccessListsQuery_LookupLimit(t *testing.T) {
 	t.Parallel()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(context.Background())
+	tx, err := db.BeginRw(context.Background())
 	if err != nil {
-		t.Fatalf("begin rw: %v", err)
+		t.Fatal(err)
 	}
 	defer tx.Rollback()
-	hashStored := common.Hash{0x01}
-	hashRegen := common.Hash{0x02}
-	hashRegenEmpty := common.Hash{0x03}
-	hashRegenErr := common.Hash{0x04}
-	hashUnknown := common.Hash{0x05}
-	reader := balHeaderReader{
-		hashStored:     100,
-		hashRegen:      101,
-		hashRegenEmpty: 102,
-		hashRegenErr:   103,
-		// hashUnknown intentionally absent
-	}
-	storedBal := []byte{0xc3, 0x01, 0x02, 0x03}
-	regenBal := []byte{0xc3, 0x04, 0x05, 0x06}
-	if err := rawdb.WriteBlockAccessListBytes(tx, hashStored, 100, storedBal); err != nil {
-		t.Fatalf("WriteBlockAccessListBytes: %v", err)
-	}
-	getter := &fakeBalGetter{
-		bals: map[common.Hash][]byte{
-			hashStored: {0xc3, 0xde, 0xad, 0xff}, // must not be served — db copy wins
-			hashRegen:  regenBal,
-		},
-		errs:  map[common.Hash]error{hashRegenErr: errors.New("history pruned")},
-		calls: map[common.Hash]int{},
-	}
-	query := GetBlockAccessListsPacket{hashStored, hashRegen, hashRegenEmpty, hashRegenErr, hashUnknown}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
-	if len(result) != 5 {
-		t.Fatalf("result len: have %d, want 5", len(result))
-	}
-	if !bytes.Equal(result[0], storedBal) {
-		t.Errorf("result[0] (stored): have %x, want %x", result[0], storedBal)
-	}
-	if getter.calls[hashStored] != 0 {
-		t.Errorf("getter consulted for stored BAL %d times, want 0", getter.calls[hashStored])
-	}
-	if !bytes.Equal(result[1], regenBal) {
-		t.Errorf("result[1] (regenerated): have %x, want %x", result[1], regenBal)
-	}
-	if getter.calls[hashRegen] != 1 {
-		t.Errorf("getter calls for regenerated BAL: have %d, want 1", getter.calls[hashRegen])
-	}
-	if !bytes.Equal(result[2], []byte{0x80}) {
-		t.Errorf("result[2] (getter empty): have %x, want 0x80", result[2])
-	}
-	if !bytes.Equal(result[3], []byte{0x80}) {
-		t.Errorf("result[3] (getter error): have %x, want 0x80", result[3])
-	}
-	if !bytes.Equal(result[4], []byte{0x80}) {
-		t.Errorf("result[4] (unknown block): have %x, want 0x80", result[4])
-	}
-	if getter.calls[hashUnknown] != 0 {
-		t.Errorf("getter consulted for unknown block %d times, want 0", getter.calls[hashUnknown])
-	}
-}
 
-// TestAnswerGetBlockAccessListsQuery_RegenerationBudget verifies that a single
-// request triggers at most MaxBlockAccessListsRegenerate regenerations — the
-// response is truncated at the budget so the peer re-requests the remainder —
-// and that stored BALs do not consume the budget.
-func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
-	t.Parallel()
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(context.Background())
-	if err != nil {
-		t.Fatalf("begin rw: %v", err)
-	}
-	defer tx.Rollback()
-	const storedCount = 5
-	regenCount := MaxBlockAccessListsRegenerate + 8
 	reader := balHeaderReader{}
-	getter := &fakeBalGetter{
-		bals:  map[common.Hash][]byte{},
-		calls: map[common.Hash]int{},
-	}
-	storedBal := []byte{0xc3, 0x01, 0x02, 0x03}
-	regenBal := []byte{0xc3, 0x04, 0x05, 0x06}
-	query := make(GetBlockAccessListsPacket, 0, storedCount+regenCount)
-	for i := range storedCount {
-		h := common.Hash{0xaa, byte(i)}
-		num := uint64(100 + i)
-		reader[h] = num
-		if err := rawdb.WriteBlockAccessListBytes(tx, h, num, storedBal); err != nil {
-			t.Fatalf("WriteBlockAccessListBytes: %v", err)
+	query := make(GetBlockAccessListsPacket, MaxBlockAccessListsServe+1)
+	storedBAL := []byte{0xc3, 0x01, 0x02, 0x03}
+	for i := range query {
+		hash := common.Hash{byte(i >> 8), byte(i)}
+		num := uint64(i + 1)
+		reader[hash] = num
+		query[i] = hash
+		if i == MaxBlockAccessListsServe-1 {
+			if err := rawdb.WriteBlockAccessListBytes(tx, hash, num, storedBAL); err != nil {
+				t.Fatal(err)
+			}
 		}
-		query = append(query, h)
 	}
-	for i := range regenCount {
-		h := common.Hash{0xbb, byte(i)}
-		num := uint64(200 + i)
-		reader[h] = num
-		getter.bals[h] = regenBal
-		query = append(query, h)
+
+	result := AnswerGetBlockAccessListsQuery(context.Background(), tx, query, reader)
+	if len(result) != MaxBlockAccessListsServe {
+		t.Fatalf("result len: have %d, want %d", len(result), MaxBlockAccessListsServe)
 	}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
-	wantLen := storedCount + MaxBlockAccessListsRegenerate
-	if len(result) != wantLen {
-		t.Fatalf("result len: have %d, want %d (truncated at the regeneration budget)", len(result), wantLen)
-	}
-	totalCalls := 0
-	for _, n := range getter.calls {
-		totalCalls += n
-	}
-	if totalCalls != MaxBlockAccessListsRegenerate {
-		t.Errorf("getter calls: have %d, want %d", totalCalls, MaxBlockAccessListsRegenerate)
-	}
-	for i, e := range result {
-		want := regenBal
-		if i < storedCount {
-			want = storedBal
+	for i, entry := range result {
+		want := []byte{0x80}
+		if i == MaxBlockAccessListsServe-1 {
+			want = storedBAL
 		}
-		if !bytes.Equal(e, want) {
-			t.Errorf("result[%d] mismatch: have %x, want %x", i, e, want)
+		if !bytes.Equal(entry, want) {
+			t.Errorf("result[%d]: have %x, want %x", i, entry, want)
 		}
 	}
 }
