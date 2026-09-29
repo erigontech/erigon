@@ -127,7 +127,7 @@ func TestPartition(t *testing.T) {
 			require.NoError(t, serial.add(e.hashedKey, e.update))
 		}
 		wantStorage, wantAccounts := serial.done()
-		gotStorage, gotAccounts, seen, err := partitionFeed(slices.Clone(items), 8, nil)
+		gotStorage, gotAccounts, seen, err := partitionFeed(slices.Clone(items), 8)
 		require.NoError(t, err)
 		require.Equal(t, len(items), seen)
 		require.Len(t, gotAccounts, len(wantAccounts))

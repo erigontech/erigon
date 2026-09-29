@@ -176,8 +176,6 @@ func testWarmuper(ctx context.Context, factory TrieContextFactory, workers int) 
 		NumWorkers: workers,
 		MaxDepth:   64,
 		LogPrefix:  "test",
-		Key:        HexPatriciaWarmupKey,
-		Step:       HexPatriciaWarmupStep,
 	})
 }
 

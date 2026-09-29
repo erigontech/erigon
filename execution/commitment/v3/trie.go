@@ -107,20 +107,13 @@ func (t *Trie) Process(
 	updates *commitment.Updates,
 	logPrefix string,
 	onProgress func(*commitment.CommitProgress),
-	warmup commitment.WarmupConfig,
+	_ commitment.WarmupConfig,
 ) ([]byte, error) {
 	if updates == nil {
 		return nil, errors.New("commitment v3: nil updates")
 	}
 	if updates.Mode() != commitment.ModeCollect {
 		return nil, errors.New("commitment v3: Process requires ModeCollect updates")
-	}
-	var warmuper *commitment.Warmuper
-	if warmup.Enabled {
-		warmup.Key = warmupKeyV3
-		warmup.Step = warmupStepV3
-		warmuper = commitment.NewWarmuper(ctx, warmup)
-		defer warmuper.CloseAndWait()
 	}
 	var sorted func([]feedEntry) error
 	t.preRecs, t.preRoot = nil, nil
@@ -135,7 +128,7 @@ func (t *Trie) Process(
 		sorted = func(items []feedEntry) error { return traceCollapses(t.ctx, items, t.collapseTracer) }
 	}
 	return t.round(ctx, onProgress, func() ([]storageTask, []accountEntry, int, error) {
-		return partitionUpdates(ctx, updates, t.scheduleWorkers, warmuper, sorted)
+		return partitionUpdates(ctx, updates, t.scheduleWorkers, sorted)
 	})
 }
 

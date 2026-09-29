@@ -24,6 +24,7 @@ func DefaultTrieConfig() TrieConfig {
 	return TrieConfig{
 		Variant:            VariantHexPatriciaTrie,
 		DeferBranchUpdates: true,
+		EnableTrieWarmup:   true,
 	}
 }
 

@@ -89,13 +89,7 @@ func bucketBy[T any](items []T, bucket func(*T) int) [257]int {
 	return bounds
 }
 
-func warmSorted(warmuper *commitment.Warmuper, items []feedEntry) {
-	if warmuper != nil {
-		warmuper.WarmSorted(len(items), func(i int) []byte { return items[i].hashedKey })
-	}
-}
-
-func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper) ([]storageTask, []accountEntry, int, error) {
+func partitionFeed(items []feedEntry, workers int) ([]storageTask, []accountEntry, int, error) {
 	bounds := bucketBy(items, func(e *feedEntry) int { return int(e.hashedKey[0])<<4 | int(e.hashedKey[1]) })
 	var parts [256]*partitioner
 	var errs [256]error
@@ -111,7 +105,6 @@ func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper
 		}
 		parts[b] = p
 	})
-	warmSorted(warmuper, items)
 	var storage [256][]storageTask
 	var accounts [256][]accountEntry
 	for b := range parts {
@@ -123,7 +116,7 @@ func partitionFeed(items []feedEntry, workers int, warmuper *commitment.Warmuper
 	return slices.Concat(storage[:]...), slices.Concat(accounts[:]...), len(items), nil
 }
 
-func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, warmuper *commitment.Warmuper, sorted func([]feedEntry) error) ([]storageTask, []accountEntry, int, error) {
+func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers int, sorted func([]feedEntry) error) ([]storageTask, []accountEntry, int, error) {
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
@@ -140,7 +133,7 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 
 	hashFeed(items, workers)
 	if workers > 1 && len(items) >= hashParallelMin && sorted == nil {
-		return partitionFeed(items, workers, warmuper)
+		return partitionFeed(items, workers)
 	}
 	slices.SortFunc(items, compareFeed)
 	if sorted != nil {
@@ -148,7 +141,6 @@ func partitionUpdates(ctx context.Context, updates *commitment.Updates, workers 
 			return nil, nil, 0, err
 		}
 	}
-	warmSorted(warmuper, items)
 
 	p := &partitioner{}
 	for i := range items {

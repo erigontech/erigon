@@ -18,66 +18,10 @@ package v3
 
 import (
 	"bytes"
-	"context"
-	"sync"
-	"sync/atomic"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
-
-	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/commitment"
-	"github.com/erigontech/erigon/internal/commitmenttest/runner"
 )
-
-type warmupTraceContext struct {
-	commitment.PatriciaContext
-	mu   sync.Mutex
-	keys [][]byte
-}
-
-func (c *warmupTraceContext) Branch(key []byte) ([]byte, kv.Step, error) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.keys = append(c.keys, bytes.Clone(key))
-	return c.PatriciaContext.Branch(key)
-}
-
-func newV3Warmuper(ctx commitment.PatriciaContext, workers int) *commitment.Warmuper {
-	w := commitment.NewWarmuper(context.Background(), commitment.WarmupConfig{
-		CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) { return ctx, nil },
-		NumWorkers: workers,
-		MaxDepth:   commitment.WarmupMaxDepth,
-		Key:        warmupKeyV3,
-		Step:       warmupStepV3,
-	})
-	w.Start()
-	return w
-}
-
-func warmPartition(t *testing.T, w *commitment.Warmuper, updates *commitment.Updates, keys int) {
-	t.Helper()
-	defer w.CloseAndWait()
-	defer updates.Close()
-	_, _, _, err := partitionUpdates(context.Background(), updates, 4, w, nil)
-	require.NoError(t, err)
-	require.Eventually(t, func() bool { return w.Stats().KeysProcessed == uint64(keys) }, 10*time.Second, time.Millisecond)
-	w.CloseAndWait()
-}
-
-func warmKey(t *testing.T, records map[string][]byte, hashedKey []byte) [][]byte {
-	t.Helper()
-	ctx := newMockContext()
-	ctx.branches = records
-	w := newV3Warmuper(ctx, 1)
-	defer w.CloseAndWait()
-	w.WarmKey(hashedKey, 0, 0)
-	require.NoError(t, w.WaitBufferFree(0))
-	w.CloseAndWait()
-	return ctx.branchCalls
-}
 
 func TestWarmup(t *testing.T) {
 	var scratch [66]byte
@@ -87,43 +31,6 @@ func TestWarmup(t *testing.T) {
 			string(AccountNodeKey([]byte{2}, nil)): recordFixture(0, 1, 1<<3, 1<<3, 0, nil, nil, nil),
 		}
 	}
-
-	t.Run("process_starts_warmuper", func(t *testing.T) {
-		trie, updates := NewTrie(t.TempDir(), commitment.TrieConfig{})
-		defer trie.Release()
-		defer updates.Close()
-		trie.ResetContext(newMockContext())
-		address := make([]byte, 20)
-		address[0] = 1
-		update := fullAccountUpdate(1, 2, common.Hash{})
-		updates.TouchPlainKeyDirect(string(address), &update)
-		var factoryCalls atomic.Int32
-		warmupCtx := newMockContext()
-		_, err := trie.Process(context.Background(), updates, "", nil, commitment.WarmupConfig{
-			Enabled: true,
-			CtxFactory: func(context.Context) (commitment.PatriciaContext, func()) {
-				factoryCalls.Add(1)
-				return warmupCtx, nil
-			},
-			NumWorkers: 1,
-			MaxDepth:   commitment.WarmupMaxDepth,
-		})
-		require.NoError(t, err)
-		require.Equal(t, int32(1), factoryCalls.Load())
-	})
-
-	t.Run("partition_drives_warmuper", func(t *testing.T) {
-		for _, n := range []int{1, 2 * hashParallelMin} {
-			updates := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-			for i := range n {
-				update := fullAccountUpdate(1, 2, common.Hash{})
-				updates.TouchPlainKeyDirect(string(benchAddr(i)), &update)
-			}
-			warmupCtx := newMockContext()
-			warmPartition(t, newV3Warmuper(warmupCtx, 1), updates, n)
-			require.NotEmpty(t, warmupCtx.branchCalls)
-		}
-	})
 
 	t.Run("key_and_step_account_descent", func(t *testing.T) {
 		hashedKey := make([]byte, 128)
@@ -223,89 +130,5 @@ func TestWarmup(t *testing.T) {
 		require.True(t, stop)
 		_, stop = warmupStepV3(nil, make([]byte, 64), 0)
 		require.True(t, stop)
-	})
-
-	t.Run("reads_account_plane_records", func(t *testing.T) {
-		hashedKey := make([]byte, 64)
-		hashedKey[0] = 2
-		records := map[string][]byte{
-			string(AccountNodeKey(nil, nil)):       recordFixture(0, 0, 1<<2, 0, 0, nil, nil, nil),
-			string(AccountNodeKey([]byte{2}, nil)): recordFixture(0, 0, 0, 0, 0, nil, nil, nil),
-		}
-		require.Equal(t, [][]byte{AccountNodeKey(nil, nil), AccountNodeKey([]byte{2}, nil)}, warmKey(t, records, hashedKey))
-	})
-
-	t.Run("reads_storage_plane_record", func(t *testing.T) {
-		hashedKey := make([]byte, 128)
-		hashedKey[0], hashedKey[1], hashedKey[64], hashedKey[65] = 2, 3, 4, 5
-		addrHash := hashAddressPath(hashedKey[:64])
-		records := accountRecords()
-		records[string(StorageNodeKey(addrHash, nil, nil))] = recordFixture(0, 0, 1<<4, 0, 0, nil, nil, nil)
-		records[string(StorageNodeKey(addrHash, []byte{4}, nil))] = recordFixture(0, 1, 0, 1<<5, 0, nil, nil, nil)
-		var storageKeys [][]byte
-		for _, key := range warmKey(t, records, hashedKey) {
-			if len(key) != 0 && key[0] == tagStorageNode {
-				storageKeys = append(storageKeys, key)
-			}
-		}
-		require.NotEmpty(t, storageKeys)
-	})
-
-	t.Run("storage_descent_reaches_beyond_root", func(t *testing.T) {
-		trie, initial := NewTrie(t.TempDir(), commitment.TrieConfig{})
-		defer trie.Release()
-		defer initial.Close()
-		safeCtx := runner.NewMemory(runner.ContextSpec{})
-		trie.ResetContext(safeCtx)
-		address := bytes.Repeat([]byte{0x11}, 20)
-		storageKeys := make([][]byte, 0, 2)
-		seen := make(map[byte]struct{})
-		var firstNibble byte
-		for i := byte(0); len(storageKeys) < 2; i++ {
-			slot := make([]byte, 32)
-			slot[31] = i
-			plainKey := slotKey(address, slot)
-			hashedKey := commitment.KeyToHexNibbleHash(plainKey)
-			if len(storageKeys) == 0 {
-				firstNibble = hashedKey[64]
-			} else if hashedKey[64] != firstNibble {
-				continue
-			}
-			if _, ok := seen[hashedKey[65]]; ok {
-				continue
-			}
-			seen[hashedKey[65]] = struct{}{}
-			storageKeys = append(storageKeys, plainKey)
-		}
-		account := fullAccountUpdate(1, 2, common.Hash{})
-		initial.TouchPlainKeyDirect(string(address), &account)
-		for _, storageKey := range storageKeys {
-			initial.TouchPlainKeyDirect(string(storageKey), phaseAStorageUpdate([]byte{1}))
-		}
-		_, err := trie.Process(context.Background(), initial, "", nil, commitment.WarmupConfig{})
-		require.NoError(t, err)
-
-		traceCtx := &warmupTraceContext{PatriciaContext: safeCtx}
-		next := commitment.NewUpdates(commitment.ModeCollect, t.TempDir(), commitment.KeyToHexNibbleHash)
-		next.TouchPlainKeyDirect(string(address), &account)
-		for _, storageKey := range storageKeys {
-			next.TouchPlainKeyDirect(string(storageKey), phaseAStorageUpdate([]byte{2}))
-		}
-		warmPartition(t, newV3Warmuper(traceCtx, 4), next, 1+len(storageKeys))
-
-		maxStorageDepth, storageRootReads := 0, 0
-		traceCtx.mu.Lock()
-		defer traceCtx.mu.Unlock()
-		for _, key := range traceCtx.keys {
-			if len(key) == 0 || key[0] != tagStorageNode {
-				continue
-			}
-			if key[len(key)-1] == 0 {
-				storageRootReads++
-			}
-			maxStorageDepth = max(maxStorageDepth, 64+int(key[len(key)-1]))
-		}
-		require.Greater(t, maxStorageDepth, 64)
-		require.GreaterOrEqual(t, storageRootReads, 1)
 	})
 }
