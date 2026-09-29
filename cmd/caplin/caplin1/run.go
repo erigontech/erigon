@@ -664,6 +664,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			}
 		}()
 		log.Info("Beacon API started", "addr", config.BeaconAPIRouter.Address)
+		apiHandler.LogGraffitiIdentification()
 	}
 
 	stageCfg := stages.ClStagesCfg(
