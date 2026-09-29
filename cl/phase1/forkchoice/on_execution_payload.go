@@ -1150,7 +1150,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
 	if f.engine == nil && envelope.Payload != nil {
-		if _, retained := f.markPayloadStatusIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated); !retained {
+		if _, retained := f.markPayloadStatusAndGasLimitIfRetainedLocked(beaconBlockRoot, envelope.Payload.BlockHash, execution_client.PayloadStatusNotValidated, envelope.Payload.GasLimit); !retained {
 			return false, fmt.Errorf("%w: block disappeared while storing payload status for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 		}
 	}
