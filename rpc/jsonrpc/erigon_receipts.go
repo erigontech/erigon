@@ -157,7 +157,7 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("end (%d) > MaxUint32)", end), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
 
@@ -232,7 +232,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	}
 
 	// Searches the log indices and re-executes, so stored receipts cannot answer for it.
-	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
+	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
 	if err != nil {
 		return nil, err
 	}

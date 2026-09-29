@@ -179,6 +179,9 @@ func (hr *HistoryReaderV3) TracePrefix() string {
 // whose history is missing in another domain.
 func StateHistoryStartTxNum(ttx kv.TemporalTx) (uint64, error) {
 	dbg := ttx.Debug()
+	if dbg == nil {
+		return 0, errors.New("state history requires a temporal debug view")
+	}
 	var start uint64
 	for i, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		domainStart, err := dbg.HistoryStartFrom(domain)

@@ -524,16 +524,21 @@ func (api *BaseAPI) checkPruneTransactionHistoryAtIndex(ctx context.Context, tx 
 // checkPruneBlocks gates RPCs that need retained block transactions,
 // independently of state history.
 func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkPruneBlocksRange(ctx, tx, block, block)
+}
+
+func (api *BaseAPI) checkPruneBlocksRange(ctx context.Context, tx kv.Tx, from, to uint64) error {
 	expiry, oldest, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
 	if err != nil {
 		return err
 	}
-	if expiry && oldest != nil && block < *oldest {
-		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.ErrPruned, block, *oldest)
+	if expiry && oldest != nil && from < *oldest {
+		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.ErrPruned, from, *oldest)
 	}
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func(head uint64) (uint64, error) {
-		// Genesis is kept separately, even when the contiguous retained range starts later.
-		if block == 0 {
+	return api.checkPruneField(tx, from, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func(head uint64) (uint64, error) {
+		// Genesis is kept separately. It can satisfy a genesis-only read,
+		// but cannot fill a gap in a range that includes later blocks.
+		if from == 0 && to == 0 {
 			return 0, nil
 		}
 		return api.minimumBlockAvailable(ctx, tx, head)
@@ -610,7 +615,12 @@ func historyFloorCacheKey(tx kv.TemporalTx, head uint64) (pruneFloorCacheKey, bo
 	if !ok {
 		return pruneFloorCacheKey{}, false
 	}
-	return pruneFloorCacheKey{head: head, dbViewID: tx.ViewID(), snapshotGeneration: files.HistoryFilesGeneration()}, true
+	return pruneFloorCacheKey{
+		head:                   head,
+		dbViewID:               tx.ViewID(),
+		historyFilesGeneration: files.HistoryFilesGeneration(),
+		blockFilesGeneration:   blockFilesGeneration(tx),
+	}, true
 }
 
 func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {
@@ -666,7 +676,7 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 }
 
 func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
-	key := pruneFloorCacheKey{head: head, dbViewID: tx.ViewID(), snapshotGeneration: blockFilesGeneration(tx)}
+	key := pruneFloorCacheKey{head: head, dbViewID: tx.ViewID(), blockFilesGeneration: blockFilesGeneration(tx)}
 	return api._blocksPruneFloor.getForKey(ctx, key, func() (uint64, error) {
 		floor, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
 		if err != nil {
@@ -1047,29 +1057,30 @@ func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, b
 // range, which are derived from the block's transactions, plus the log indices when
 // the filter searches them. The indices are retired at the history cutoff whatever
 // the receipt retention is. Logs are read off a receipt without its post state, so
-// this takes the receipt source rather than the full-receipt gate. Every leg is a
-// lower bound, so checking the first block of the range covers all of it.
-func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
-	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+// this takes the receipt source rather than the full-receipt gate.
+func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, from, to uint64, crit filters.FilterCriteria) error {
+	if err := api.checkPruneBlocksRange(ctx, tx, from, to); err != nil {
 		return err
 	}
-	if err := api.checkReceiptSourceAvailable(ctx, tx, block, 0); err != nil {
-		return err
+	if usesLogIndex(crit) {
+		// Replay history also provides receipts when the receipt cache cannot.
+		// Log queries skip the initial system entry and only return user-transaction logs.
+		return api.checkPruneTransactionHistory(ctx, tx, from)
 	}
-	if !usesLogIndex(crit) {
-		return nil
-	}
-	// Log queries skip the initial system entry and only return user-transaction logs.
-	return api.checkPruneTransactionHistory(ctx, tx, block)
+	return api.checkReceiptSourceAvailable(ctx, tx, from, 0)
 }
 
 // checkBlockHistoryAvailable gates transaction replay, which needs block
 // transactions and state history from the first user transaction.
 func (api *BaseAPI) checkBlockHistoryAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+	return api.checkBlockHistoryRangeAvailable(ctx, tx, block, block)
+}
+
+func (api *BaseAPI) checkBlockHistoryRangeAvailable(ctx context.Context, tx kv.Tx, from, to uint64) error {
+	if err := api.checkPruneBlocksRange(ctx, tx, from, to); err != nil {
 		return err
 	}
-	return api.checkPruneTransactionHistory(ctx, tx, block)
+	return api.checkPruneTransactionHistory(ctx, tx, from)
 }
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {

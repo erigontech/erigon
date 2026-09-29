@@ -34,11 +34,14 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapcfg"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
@@ -605,9 +608,16 @@ func TestHistoryGatePropagatesBackendError(t *testing.T) {
 	defer tx.Rollback()
 
 	wantErr := errors.New("history floor unavailable")
-	view := domainHistoryFloorTx{TemporalTx: tx, err: wantErr}
+	view := domainHistoryFloorTx{TemporalTx: tx, errs: map[kv.Domain]error{kv.AccountsDomain: wantErr}}
 	_, err = apis.eth.readHistoryStartBlocks(ctx, view, chainInfo.head)
 	require.ErrorIs(t, err, wantErr)
+}
+
+func TestHistoryFloorRejectsMissingDebugView(t *testing.T) {
+	t.Parallel()
+	var api BaseAPI
+	_, err := api.historyStartBlocks(t.Context(), &membatchwithdb.MemoryMutation{}, 10)
+	require.ErrorContains(t, err, "state history requires a temporal debug view")
 }
 
 func TestHistoryGateKeepsLatestWithoutHistoricalState(t *testing.T) {
@@ -710,6 +720,104 @@ func TestFeeHistoryTruncatesAtPhysicalTransactionFloor(t *testing.T) {
 	require.Empty(t, result.Reward)
 	require.Len(t, result.BaseFee, 2)
 	require.Len(t, result.GasUsedRatio, 1)
+}
+
+func TestGenesisRangesRequireContiguousBlocks(t *testing.T) {
+	t.Parallel()
+	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	const floorBlock = uint64(9)
+	dropBodies(t, apis.rwDB, 1, floorBlock)
+	ctx := t.Context()
+
+	for _, tc := range []struct {
+		name string
+		call func(from, to uint64) (any, error)
+	}{
+		{"eth_getLogs", func(from, to uint64) (any, error) {
+			return apis.eth.GetLogs(ctx, rangeFilter(from, to))
+		}},
+		{"eth_getLogs_filtered", func(from, to uint64) (any, error) {
+			crit := rangeFilter(from, to)
+			crit.Addresses = []common.Address{testAddr}
+			return apis.eth.GetLogs(ctx, crit)
+		}},
+		{"erigon_getLogs", func(from, to uint64) (any, error) {
+			return apis.erigon.GetLogs(ctx, rangeFilter(from, to))
+		}},
+		{"erigon_getLatestLogs", func(from, to uint64) (any, error) {
+			return apis.erigon.GetLatestLogs(ctx, rangeFilter(from, to), filters.LogFilterOptions{LogCount: 10})
+		}},
+		{"overlay_getLogs", func(from, to uint64) (any, error) {
+			return apis.overlay.GetLogs(ctx, rangeFilter(from, to), nil, nil)
+		}},
+		{"trace_filter", func(from, to uint64) (any, error) {
+			req := TraceFilterRequest{
+				FromBlock: new(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(from))),
+				ToBlock:   new(rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(to))),
+			}
+			return streamedResult(func(stream jsonstream.Stream) error {
+				return apis.trace.Filter(ctx, req, new(bool), nil, stream)
+			})
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.call(0, floorBlock)
+			require.ErrorIs(t, err, state.ErrPruned, "genesis does not fill the missing blocks in a range")
+			_, err = tc.call(0, 0)
+			require.NoError(t, err, "genesis alone remains readable")
+			_, err = tc.call(floorBlock, floorBlock)
+			require.NoError(t, err, "the contiguous retained range remains readable")
+		})
+	}
+}
+
+func TestGasPriceOracleBackendBlockAvailability(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"pruned", nil},
+		{"lookup_error", errors.New("block floor unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+			reader := &countingMinimumBlockReader{FullBlockReader: &fixedMinimumBlockReader{
+				FullBlockReader: apis.eth._blockReader, floor: chainInfo.old.num + 1, err: tc.err,
+			}}
+			apis.eth._blockReader = reader
+			ctx := t.Context()
+			tx, err := apis.eth.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			backend := NewGasPriceOracleBackend(apis.eth.db, rpchelper.PinToOverlay(tx, nil), apis.eth.BaseAPI)
+
+			for _, method := range []struct {
+				name string
+				call func(pruneGatingRef) (*types.Block, error)
+			}{
+				{"by_number", func(ref pruneGatingRef) (*types.Block, error) {
+					return backend.BlockByNumber(ctx, rpc.BlockNumber(ref.num))
+				}},
+				{"by_hash_number", func(ref pruneGatingRef) (*types.Block, error) {
+					return backend.BlockByHashNumber(ctx, ref.hash, ref.num)
+				}},
+			} {
+				t.Run(method.name, func(t *testing.T) {
+					block, err := method.call(chainInfo.old)
+					require.ErrorIs(t, err, tc.err)
+					require.Nil(t, block)
+					if tc.err == nil {
+						block, err = method.call(chainInfo.recent)
+						require.NoError(t, err)
+						require.NotNil(t, block)
+						require.Equal(t, chainInfo.recent.num, block.NumberU64())
+					}
+				})
+			}
+			require.EqualValues(t, 1, reader.calls.Load(), "the backend resolves its floor only once")
+		})
+	}
 }
 
 func TestPruneGatesSkipPhysicalFloorsAtHead(t *testing.T) {
@@ -931,6 +1039,63 @@ func TestBlockFloorCacheSeparatesFileViewsAtSameHead(t *testing.T) {
 	_, err = apis.eth.minimumBlockAvailable(ctx, before, chainInfo.head)
 	require.NoError(t, err)
 	require.EqualValues(t, 2, reader.calls.Load())
+}
+
+func TestHistoryFloorCacheSeparatesBlockFileViews(t *testing.T) {
+	t.Parallel()
+	const head, historyBlock = uint64(1_000), uint64(600)
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.TestChainBerlinConfig))
+	chainData, err := m.GenerateChain(int(head), func(int, *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainData))
+	ctx := t.Context()
+	snapshots := m.DB.(freezeblocks.HasBlockFiles).DebugBlockFiles()
+	require.NoError(t, freezeblocks.DumpBlocks(ctx, 0, head, m.ChainConfig, m.Dirs.Tmp, m.Dirs.Snap,
+		m.DB, 1, log.LvlDebug, log.New(), m.BlockReader, snapcfg.KnownCfgOrDevnet(m.ChainConfig.ChainName), nil))
+	require.NoError(t, snapshots.OpenFolder())
+
+	rwTx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	start, err := m.BlockReader.TxnumReader().Min(ctx, rwTx, historyBlock)
+	require.NoError(t, err)
+	for _, table := range []string{kv.TblAccountHistoryKeys, kv.TblStorageHistoryKeys, kv.TblCodeHistoryKeys} {
+		require.NoError(t, rwTx.ClearTable(table))
+		require.NoError(t, rwTx.Put(table, hexutil.EncodeTs(start), []byte{1}))
+	}
+	for block := uint64(1); block < head; block++ {
+		require.NoError(t, rwTx.Delete(kv.MaxTxNum, hexutil.EncodeTs(block)))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	api := newBaseApiForTest(m)
+	api._historyPruneFloor.ttl = time.Hour
+	before, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer before.Rollback()
+	oldFloor, err := api.historyStartBlocks(ctx, before, head)
+	require.NoError(t, err)
+	require.Equal(t, historyBlock, oldFloor.wholeBlock)
+
+	// An incomplete block-files view can lose the txNum mapping without changing
+	// the MDBX view or the state-history files. Older readers still pin the bodies.
+	require.NoError(t, snapshots.OpenList(nil, false))
+	after, err := m.DB.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer after.Rollback()
+	require.Equal(t, before.ViewID(), after.ViewID())
+	require.Equal(t, before.Debug().(interface{ HistoryFilesGeneration() uint64 }).HistoryFilesGeneration(),
+		after.Debug().(interface{ HistoryFilesGeneration() uint64 }).HistoryFilesGeneration())
+	require.NotEqual(t, blockFilesGeneration(before), blockFilesGeneration(after))
+	want, err := api.readHistoryStartBlocks(ctx, after, head)
+	require.NoError(t, err)
+	require.NotEqual(t, oldFloor, want)
+	got, err := api.historyStartBlocks(ctx, after, head)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+	got, err = api.historyStartBlocks(ctx, before, head)
+	require.NoError(t, err)
+	require.Equal(t, oldFloor, got)
 }
 
 func TestCapabilitiesUseOnDiskFloors(t *testing.T) {
@@ -1355,7 +1520,7 @@ func TestLogsGateTakesHistoryOnlyForIndexSearch(t *testing.T) {
 		{"by_address", filters.FilterCriteria{Addresses: []common.Address{testAddr}}, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			err := apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, tc.crit)
+			err := apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, chainInfo.old.num, tc.crit)
 			if tc.fires {
 				require.ErrorIs(t, err, state.ErrPruned)
 				require.Contains(t, err.Error(), "history is available")
@@ -1389,9 +1554,9 @@ func TestLogsGateSkipsThePostStateLegPreByzantium(t *testing.T) {
 	below := pruneGatingDistance.PruneTo(pruneGatingChainLen) - 1
 	require.Less(t, below, pruneGatingByzantiumHeight, "the probed block must sit below the fork")
 
-	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, below, filters.FilterCriteria{}),
+	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, below, below, filters.FilterCriteria{}),
 		"an unfiltered query reads the kept cache, which carries every field it needs")
-	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, below, addressFilter(below)), state.ErrPruned,
+	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, below, below, addressFilter(below)), state.ErrPruned,
 		"an indexed filter searches LogAddrIdx, retired at the history cutoff")
 	require.ErrorIs(t, apis.eth.checkReceiptsAvailable(ctx, tx, below), state.ErrPruned,
 		"a full receipt still needs the post state a re-execution computes")
@@ -1423,11 +1588,11 @@ func TestCapabilitiesAgreeWithTheLogsGatePreByzantium(t *testing.T) {
 	oldest := uint64(*caps.Logs.OldestBlock)
 	require.Equal(t, pruneGatingDistance.PruneTo(pruneGatingChainLen), oldest)
 
-	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, oldest, addressFilter(oldest)),
+	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, oldest, oldest, addressFilter(oldest)),
 		"the advertised oldest block must be served")
-	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, oldest-1, addressFilter(oldest-1)), state.ErrPruned,
+	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, oldest-1, oldest-1, addressFilter(oldest-1)), state.ErrPruned,
 		"the block below the advertised oldest must be refused")
-	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, oldest-1, filters.FilterCriteria{}),
+	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, oldest-1, oldest-1, filters.FilterCriteria{}),
 		"an unfiltered query reads past the advertised boundary, never short of it")
 }
 
@@ -1449,7 +1614,7 @@ func TestLogsGateRequiresBlockBodies(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	err = apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, filters.FilterCriteria{})
+	err = apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, chainInfo.old.num, filters.FilterCriteria{})
 	require.ErrorIs(t, err, state.ErrPruned)
 	require.Contains(t, err.Error(), "blocks are available")
 }
@@ -1658,7 +1823,7 @@ func TestGatesTakeNoEmptyBlockExemption(t *testing.T) {
 		"the empty block and the one above it must sit below the history cutoff")
 
 	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, empty), state.ErrPruned)
-	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, empty, filters.FilterCriteria{}), state.ErrPruned)
+	require.ErrorIs(t, apis.eth.checkLogsAvailable(ctx, tx, empty, empty, filters.FilterCriteria{}), state.ErrPruned)
 
 	for _, tc := range []struct {
 		name string
@@ -1740,7 +1905,7 @@ func TestCapabilitiesAgreeWithGates(t *testing.T) {
 					return apis.eth.checkBlockReceiptsAvailable(ctx, tx, b)
 				}},
 				{"logs", caps.Logs, func(b uint64) error {
-					return apis.eth.checkLogsAvailable(ctx, tx, b, addressFilter(b))
+					return apis.eth.checkLogsAvailable(ctx, tx, b, b, addressFilter(b))
 				}},
 			} {
 				t.Run(pair.name, func(t *testing.T) {
@@ -2383,7 +2548,7 @@ func TestLogsByBlockHashReportsAMissingBody(t *testing.T) {
 	tx, err := apis.eth.db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
-	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, filters.FilterCriteria{}),
+	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, chainInfo.old.num, filters.FilterCriteria{}),
 		"the fixture needs a mode where no gate refuses the block")
 
 	hash := chainInfo.old.hash
@@ -2570,7 +2735,7 @@ func (tx countingHistoryFloorDebugTx) HistoryFilesGeneration() uint64 {
 type domainHistoryFloorTx struct {
 	kv.TemporalTx
 	starts map[kv.Domain]uint64
-	err    error
+	errs   map[kv.Domain]error
 }
 
 func (tx domainHistoryFloorTx) BlockFilesRoTx() *blocksnapshots.View {
@@ -2578,17 +2743,17 @@ func (tx domainHistoryFloorTx) BlockFilesRoTx() *blocksnapshots.View {
 }
 
 func (tx domainHistoryFloorTx) Debug() kv.TemporalDebugTx {
-	return domainHistoryFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), starts: tx.starts, err: tx.err}
+	return domainHistoryFloorDebugTx{TemporalDebugTx: tx.TemporalTx.Debug(), starts: tx.starts, errs: tx.errs}
 }
 
 type domainHistoryFloorDebugTx struct {
 	kv.TemporalDebugTx
 	starts map[kv.Domain]uint64
-	err    error
+	errs   map[kv.Domain]error
 }
 
 func (tx domainHistoryFloorDebugTx) HistoryStartFrom(domain kv.Domain) (uint64, error) {
-	return tx.starts[domain], tx.err
+	return tx.starts[domain], tx.errs[domain]
 }
 
 type countingMinimumBlockReader struct {
@@ -2599,10 +2764,11 @@ type countingMinimumBlockReader struct {
 type fixedMinimumBlockReader struct {
 	dbservices.FullBlockReader
 	floor uint64
+	err   error
 }
 
 func (r *fixedMinimumBlockReader) MinimumBlockAvailable(context.Context, kv.Tx) (uint64, error) {
-	return r.floor, nil
+	return r.floor, r.err
 }
 
 func (r *countingMinimumBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {

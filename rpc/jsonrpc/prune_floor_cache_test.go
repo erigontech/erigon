@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/stretchr/testify/require"
@@ -250,6 +251,49 @@ func TestPruneFloorCacheWaiterRetriesAfterLeaderError(t *testing.T) {
 	waiter := <-waiterResult
 	require.NoError(t, waiter.err)
 	require.Equal(t, uint64(8), waiter.floor)
+}
+
+func TestPruneFloorCacheFailedLoadsDoNotSerializeRetries(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		cache := pruneFloorCache[uint64]{ttl: time.Hour}
+		leaderErr := errors.New("leader read failed")
+		waiterErr := errors.New("waiter read failed")
+		release := make(chan struct{})
+		leaderResult := make(chan error, 1)
+		go func() {
+			_, err := cache.get(t.Context(), 10, func() (uint64, error) {
+				<-release
+				return 0, leaderErr
+			})
+			leaderResult <- err
+		}()
+		synctest.Wait()
+
+		const waiters = 4
+		var reads atomic.Int64
+		results := make(chan error, waiters)
+		for range waiters {
+			go func() {
+				_, err := cache.get(t.Context(), 10, func() (uint64, error) {
+					reads.Add(1)
+					time.Sleep(time.Second)
+					return 0, waiterErr
+				})
+				results <- err
+			}()
+		}
+		synctest.Wait()
+		close(release)
+		synctest.Wait()
+
+		started := reads.Load()
+		require.ErrorIs(t, <-leaderResult, leaderErr)
+		for range waiters {
+			require.ErrorIs(t, <-results, waiterErr)
+		}
+		require.Equal(t, int64(waiters), started, "each waiter retries without waiting for another failing read")
+		require.Equal(t, int64(waiters), reads.Load(), "each waiter reads only once")
+	})
 }
 
 func TestPruneFloorCacheReadFinishesBeforeCallerReturns(t *testing.T) {

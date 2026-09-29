@@ -677,12 +677,14 @@ func (s *simulator) newStateReaderForBlock(
 	if minTxNum < minHistoryTxNum {
 		return nil, 0, 0, fmt.Errorf("%w: min tx: %d", state.ErrPruned, minTxNum)
 	}
-	commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
-	if err != nil {
-		return nil, 0, 0, err
-	}
-	if s.commitmentHistory && minTxNum < commitmentStartingTxNum {
-		return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
+	if s.commitmentHistory {
+		commitmentStartingTxNum, err := tx.Debug().HistoryStartFrom(kv.CommitmentDomain)
+		if err != nil {
+			return nil, 0, 0, err
+		}
+		if minTxNum < commitmentStartingTxNum {
+			return nil, 0, 0, fmt.Errorf("%w: min commitment: %d, min tx: %d", state.ErrPruned, commitmentStartingTxNum, minTxNum)
+		}
 	}
 
 	if len(ancestors) > 0 {

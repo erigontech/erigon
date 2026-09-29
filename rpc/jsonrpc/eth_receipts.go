@@ -257,7 +257,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, end, crit); err != nil {
 		return nil, err
 	}
 

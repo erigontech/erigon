@@ -31,9 +31,10 @@ type pruneFloorValue[T any] struct {
 }
 
 type pruneFloorCacheKey struct {
-	head               uint64
-	dbViewID           uint64
-	snapshotGeneration uint64
+	head                   uint64
+	dbViewID               uint64
+	historyFilesGeneration uint64
+	blockFilesGeneration   uint64
 }
 
 const (
@@ -43,8 +44,8 @@ const (
 
 // pruneFloorCache caches successful floor reads and coalesces concurrent loads
 // by key. Different pinned file views can coexist at one head, so keys include
-// the file generation where available and the MDBX view because either source
-// can determine the floor. The TTL bounds staleness from physical changes
+// the MDBX view and file generations where available. Mapping history txNums to
+// blocks also depends on block files. The TTL bounds staleness from physical changes
 // not represented by the key.
 type pruneFloorCache[T any] struct {
 	mu     sync.Mutex
@@ -69,38 +70,36 @@ func (c *pruneFloorCache[T]) cacheTTL() time.Duration {
 
 func (c *pruneFloorCache[T]) getForKey(ctx context.Context, key pruneFloorCacheKey, read func() (T, error)) (T, error) {
 	var zero T
-	cell := c.valueForKey(key)
-	for {
-		if err := ctx.Err(); err != nil {
-			return zero, err
-		}
-		// CachedValue measures freshness from the last attempt, including failures.
-		// Only a successful read may extend this floor's lifetime.
-		if value, observed, _ := cell.Load(); observed && c.timeNow().Before(value.expiresAt) {
-			return value.floor, nil
-		}
-		// Produce runs read synchronously so it cannot outlive the caller's
-		// transaction. Waiters can cancel without interrupting that read.
-		value, ran, err := cell.Produce(ctx, func() (pruneFloorValue[T], bool, error) {
-			// Another producer may have refreshed the value before we claimed this load.
-			if value, observed, _ := cell.Load(); observed && c.timeNow().Before(value.expiresAt) {
-				return value, false, nil
-			}
-			floor, err := read()
-			return pruneFloorValue[T]{floor: floor, expiresAt: c.timeNow().Add(c.cacheTTL())}, true, err
-		})
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return zero, ctxErr
-		}
-		if err == nil {
-			return value.floor, nil
-		}
-		if ran {
-			return zero, err
-		}
-		// A shared failure may belong to the producer's context or transaction.
-		// Retry through this caller's read instead of inheriting that failure.
+	if err := ctx.Err(); err != nil {
+		return zero, err
 	}
+	cell := c.valueForKey(key)
+	// CachedValue measures freshness from the last attempt, including failures.
+	// Only a successful read may extend this floor's lifetime.
+	if value, observed, _ := cell.Load(); observed && c.timeNow().Before(value.expiresAt) {
+		return value.floor, nil
+	}
+	value, ran, err := cell.Produce(ctx, func() (pruneFloorValue[T], bool, error) {
+		// Another producer may have refreshed the value before we claimed this load.
+		if value, observed, _ := cell.Load(); observed && c.timeNow().Before(value.expiresAt) {
+			return value, false, nil
+		}
+		floor, err := read()
+		return pruneFloorValue[T]{floor: floor, expiresAt: c.timeNow().Add(c.cacheTTL())}, true, err
+	})
+	if err != nil && !ran && ctx.Err() == nil {
+		// A shared failure may belong to the producer's context or transaction.
+		// Retry once on our own view, outside the coalescer so failures do not
+		// serialize callers. Both reads stay within their caller's transaction lifetime.
+		value.floor, err = read()
+	}
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return zero, ctxErr
+	}
+	if err != nil {
+		return zero, err
+	}
+	return value.floor, nil
 }
 
 func (c *pruneFloorCache[T]) valueForKey(key pruneFloorCacheKey) *concurrent.CachedValue[pruneFloorValue[T]] {
