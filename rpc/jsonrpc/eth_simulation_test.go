@@ -691,9 +691,7 @@ func TestSimulateV1WithdrawalsOverrideCreditsBalance(t *testing.T) {
 	result, err := api.SimulateV1(context.Background(), SimulationRequest{
 		BlockStateCalls: []SimulatedBlock{
 			{
-				// The test genesis has a non-zero difficulty; withdrawals are credited only in PoS blocks.
 				BlockOverrides: &ethapi.BlockOverrides{
-					Difficulty:  (*hexutil.U256)(uint256.NewInt(0)),
 					Withdrawals: &types.Withdrawals{{Index: 0, Validator: 1, Address: recipient, Amount: 7}},
 				},
 				StateOverrides: &ethapi.StateOverrides{

@@ -343,6 +343,10 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 				parentBeaconRoot = overrides.BeaconRoot
 			}
 		}
+		difficulty := header.Difficulty
+		if s.isPostMerge(overrides.Number.Uint64(), uint64(*overrides.Time)) {
+			difficulty = uint256.Int{}
+		}
 		var slotNumber *uint64
 		if header.SlotNumber != nil {
 			slot := *header.SlotNumber + 1
@@ -353,7 +357,7 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 			ReceiptHash:           empty.ReceiptsHash,
 			TxHash:                empty.TxsHash,
 			Coinbase:              header.Coinbase,
-			Difficulty:            header.Difficulty,
+			Difficulty:            difficulty,
 			GasLimit:              header.GasLimit,
 			WithdrawalsHash:       withdrawalsHash,
 			ParentBeaconBlockRoot: parentBeaconRoot,
@@ -365,6 +369,13 @@ func (s *simulator) makeHeaders(blocks []SimulatedBlock) ([]*types.Header, error
 }
 
 // sanitizeCall checks and fills missing fields in call arguments, returning an error if it cannot fix them.
+func (s *simulator) isPostMerge(number, time uint64) bool {
+	c := s.chainConfig
+	return (c.TerminalTotalDifficulty != nil && c.TerminalTotalDifficulty.IsZero()) ||
+		(c.MergeNetsplitBlock != nil && number >= *c.MergeNetsplitBlock) ||
+		c.IsShanghai(time)
+}
+
 func (s *simulator) sanitizeCall(
 	args *ethapi.CallArgs,
 	intraBlockState *state.IntraBlockState,
