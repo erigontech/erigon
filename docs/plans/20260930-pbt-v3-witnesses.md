@@ -427,20 +427,20 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `execution/commitment/v3/pbt/witness_nodes.go`
 - Create: `execution/commitment/v3/pbt/witness_nodes_test.go`
 
-- [ ] add the resolver signature with a stub. Write the rows-against-model oracle:
+- [x] add the resolver signature with a stub. Write the rows-against-model oracle:
       - trees are built by the engine from random leaf sets, covering both storage zones, bucket forms, suffix leaves and
         groups of 1 to 256 values; `recordFuzzSeeds` holds malformed record bodies and is not a source;
       - for every node path of the model built from the same leaves, the row resolver returns the identical blob, and
         the roots are equal.
 
       Confirm it fails at the blob comparison.
-- [ ] implement node resolution at a path: branches through `foldRange`/`foldChild` with prefix rebasing, bucket
+- [x] implement node resolution at a path: branches through `foldRange`/`foldChild` with prefix rebasing, bucket
       descriptors resolved through, groups collected from rows, leaves through `DecodeRecord`, empty positions
-- [ ] write a test that rows are read as of the parent block: after a later block rewrites a row, the resolver still
+- [x] write a test that rows are read as of the parent block: after a later block rewrites a row, the resolver still
       returns the parent-block blob; confirm it fails before the history read exists
-- [ ] read rows through a `PatriciaContext` over bin commitment history as of the parent block
-- [ ] write error tests: missing row, corrupt row, a group whose depth disagrees with its path
-- [ ] run tests - must pass before task 8
+- [x] read rows through a `PatriciaContext` over bin commitment history as of the parent block
+- [x] write error tests: missing row, corrupt row, a group whose depth disagrees with its path
+- [x] run tests - must pass before task 8
 
 ### Task 8: PBT witness builder and dispatch
 
