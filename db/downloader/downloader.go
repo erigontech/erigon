@@ -430,7 +430,7 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrent
 }
 
 // I haven't removed logSeeding yet because I think Alex will want it back at some point.
-func (d *Downloader) InitBackgroundLogger(logSeeding bool) {
+func (d *Downloader) InitBackgroundLogger() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
 	if d.initedBackgroundLogger {
@@ -658,7 +658,7 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 	stats.When = time.Now()
 	interval := stats.When.Sub(prevStats.When)
 	calculateRate := func(counter func(*AggStats) uint64, rate func(*AggStats) *uint64) {
-		*rate(&stats) = calculateRate(counter(&stats), counter(&prevStats), *rate(&prevStats), interval)
+		*rate(&stats) = calculateRate(counter(&stats), counter(&prevStats), interval)
 	}
 	calculateRate(func(s *AggStats) uint64 { return s.BytesDownload }, func(s *AggStats) *uint64 { return &s.DownloadRate })
 	calculateRate(func(s *AggStats) uint64 { return s.BytesHashed }, func(s *AggStats) *uint64 { return &s.HashRate })
@@ -675,7 +675,7 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 }
 
 // Calculating rate with decay in order to avoid rate spikes
-func calculateRate(current, previous uint64, prevRate uint64, interval time.Duration) uint64 {
+func calculateRate(current, previous uint64, interval time.Duration) uint64 {
 	if interval == 0 {
 		return math.MaxUint64
 	}

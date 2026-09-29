@@ -468,7 +468,7 @@ func TestDomain_AfterPrune(t *testing.T) {
 	require.Equal(t, p2, v)
 }
 
-func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
+func fillDomain(t *testing.T, d *Domain, db kv.RwDB) uint64 {
 	t.Helper()
 	require := require.New(t)
 	ctx := t.Context()
@@ -515,7 +515,7 @@ func fillDomain(t *testing.T, d *Domain, db kv.RwDB, logger log.Logger) uint64 {
 func filledDomain(t *testing.T, logger log.Logger) (kv.RwDB, *Domain, uint64) {
 	t.Helper()
 	db, d := testDbAndDomain(t, logger)
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	return db, d, txs
 }
 
@@ -3091,7 +3091,7 @@ func testTraceKey(t *testing.T, largeVals bool) {
 	db, d := testDbAndDomain(t, logger)
 	d.HistoryLargeValues = largeVals
 
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	err := db.UpdateNosync(ctx, func(tx kv.RwTx) error {
 		collateAndMerge(t, tx, d, txs)
 		return nil
@@ -3546,7 +3546,7 @@ func filledDomainWithHashMapAccessor(t *testing.T, logger log.Logger) (kv.RwDB, 
 	d.DisableFsync()
 	t.Cleanup(d.Close)
 
-	txs := fillDomain(t, d, db, logger)
+	txs := fillDomain(t, d, db)
 	return db, d, txs
 }
 

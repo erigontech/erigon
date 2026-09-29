@@ -359,7 +359,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	}
 
 	// I'm kinda curious... but it was false before.
-	d.InitBackgroundLogger(true)
+	d.InitBackgroundLogger()
 	if seedbox {
 		var downloadItems []*downloaderproto.DownloadItem
 		snapCfg := snapcfg.KnownCfgOrDevnet(chain)
