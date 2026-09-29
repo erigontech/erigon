@@ -17,8 +17,6 @@
 package engine_types
 
 import (
-	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -31,37 +29,25 @@ type (
 )
 
 func (bs ExecutionPayloadBodies) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	jsonstream.ArrayValue(s, bs, func(s *jsonstream.StackStream, b **ExecutionPayloadBody) {
-		if *b == nil {
-			s.WriteNil()
-			return
-		}
-		s.WriteObjectStart()
-		writeBodyFields(s, (*b).Transactions, (*b).Withdrawals)
-		s.WriteObjectEnd()
-	})
-	return nil
+	return writeBodies(s, bs)
 }
 
 func (bs ExecutionPayloadBodiesV2) MarshalFastJSONTo(s *jsonstream.StackStream) error {
-	jsonstream.ArrayValue(s, bs, func(s *jsonstream.StackStream, b **ExecutionPayloadBodyV2) {
-		if *b == nil {
-			s.WriteNil()
-			return
-		}
-		s.WriteObjectStart()
-		writeBodyFields(s, (*b).Transactions, (*b).Withdrawals)
-		s.Field("blockAccessList")
-		writeHexPtr(s, &(*b).BlockAccessList)
-		s.WriteObjectEnd()
-	})
-	return nil
+	return writeBodies(s, bs)
 }
 
-// writeBodyFields writes the fields both body versions share, in their declaration order.
-func writeBodyFields(s *jsonstream.StackStream, txs []hexutil.Bytes, withdrawals []*types.Withdrawal) {
-	s.Field("transactions")
-	jsonstream.ArrayValue(s, txs, writeHex)
-	s.Field("withdrawals")
-	jsonstream.ArrayValue(s, withdrawals, writeWithdrawal)
+// writeBodies writes a nil list as null and a nil body as null, as encoding/json does.
+func writeBodies[B jsonstream.Marshaler](s *jsonstream.StackStream, bodies []B) error {
+	if bodies == nil {
+		s.WriteNil()
+		return nil
+	}
+	s.WriteArrayStart()
+	for _, b := range bodies {
+		if err := b.MarshalFastJSONTo(s); err != nil {
+			return err
+		}
+	}
+	s.WriteArrayEnd()
+	return nil
 }
