@@ -61,12 +61,7 @@ func newRCacheChain(t *testing.T, txsPerBlock []int, skip map[uint64]bool) (kv.T
 	for b, n := range txsPerBlock {
 		receipts := make(types.Receipts, n)
 		for i := range receipts {
-			receipts[i] = &types.Receipt{
-				Status:            types.ReceiptStatusSuccessful,
-				CumulativeGasUsed: uint64(21_000 * (i + 1)),
-				TransactionIndex:  uint(i),
-				Logs:              []*types.Log{},
-			}
+			receipts[i] = &types.Receipt{Status: types.ReceiptStatusSuccessful, CumulativeGasUsed: uint64(21_000 * (i + 1))}
 		}
 		write := func(r *types.Receipt) {
 			if !skip[txNum] {
@@ -80,10 +75,6 @@ func newRCacheChain(t *testing.T, txsPerBlock []int, skip map[uint64]bool) (kv.T
 		}
 		write(nil)
 		require.NoError(t, rawdbv3.TxNums.Append(tx, uint64(b), txNum-1))
-
-		for _, r := range receipts {
-			r.Bloom = types.CreateBloom(types.Receipts{r})
-		}
 		h := &types.Header{Number: *uint256.NewInt(uint64(b)), ReceiptHash: types.DeriveSha(receipts)}
 		require.NoError(t, rawdb.WriteHeader(tx, h))
 		require.NoError(t, rawdb.WriteCanonicalHash(tx, h.Hash(), uint64(b)))
@@ -120,9 +111,7 @@ func TestReceiptRootIntegrity(t *testing.T) {
 			}
 			db, br := newRCacheChain(t, txsPerBlock, skip)
 
-			sc, err := integrity.NewSamplerCfg(1, 1.0)
-			require.NoError(t, err)
-			err = integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, br, chain.AllProtocolChanges, 1, uint64(len(txsPerBlock)), true, logger)
+			err := integrity.CheckRCacheRootAtBlkRange(ctx, integrity.SamplerCfg{Seed: 1, SampleRatio: 1}, db, br, chain.AllProtocolChanges, 1, uint64(len(txsPerBlock)), true, logger)
 			if len(tt.skip) == 0 {
 				require.NoError(t, err)
 				return
@@ -156,7 +145,5 @@ func TestReceiptRootIntegrity_FilesOnlyTip(t *testing.T) {
 	require.Equal(t, uint64(16), tx.Debug().DomainProgress(kv.RCacheDomain))
 	tx.Rollback()
 
-	sc, err := integrity.NewSamplerCfg(1, 1.0)
-	require.NoError(t, err)
-	require.NoError(t, integrity.CheckReceiptRootIntegrity(ctx, sc, db, br, chain.AllProtocolChanges, true, log.New()))
+	require.NoError(t, integrity.CheckReceiptRootIntegrity(ctx, integrity.SamplerCfg{Seed: 1, SampleRatio: 1}, db, br, chain.AllProtocolChanges, true, log.New()))
 }
