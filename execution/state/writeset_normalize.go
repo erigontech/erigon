@@ -19,7 +19,10 @@ package state
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -57,16 +60,16 @@ var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_re
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
+func (ws *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys StorageKeysFn, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
-	if writes == nil {
+	if ws == nil {
 		return filtered, nil
 	}
 
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
 	// domainStorageKeys (committed before this batch), deduped — the complete
 	// set of storage slots that must be DELETE'd when addr self-destructs.
-	sdStorageSlots := func(addr accounts.Address) []accounts.StorageKey {
+	sdStorageSlots := func(addr accounts.Address) ([]accounts.StorageKey, error) {
 		seen := make(map[accounts.StorageKey]struct{})
 		var out []accounts.StorageKey
 		for _, k := range vm.StorageKeys(addr) {
@@ -75,15 +78,20 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 				out = append(out, k)
 			}
 		}
-		if domainStorageKeys != nil {
-			for _, k := range domainStorageKeys(addr) {
-				if _, ok := seen[k]; !ok {
-					seen[k] = struct{}{}
-					out = append(out, k)
-				}
+		if domainStorageKeys == nil {
+			return out, nil
+		}
+		committed, err := domainStorageKeys(addr)
+		if err != nil {
+			return nil, err
+		}
+		for _, k := range committed {
+			if _, ok := seen[k]; !ok {
+				seen[k] = struct{}{}
+				out = append(out, k)
 			}
 		}
-		return out
+		return out, nil
 	}
 
 	// Pre-scan for SD'd addresses. IBS.Selfdestruct emits 3 writes for the
@@ -113,7 +121,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	//      in agreement. (EIP-6780 narrows this pattern post-Cancun but doesn't
 	//      eliminate it; mainnet-rare, but cheap to get right.)
 	var sdSet map[accounts.Address]bool
-	for addr, vw := range writes.selfDestruct {
+	for addr, vw := range ws.selfDestruct {
 		if vw.Version.Incarnation == incarnation && vw.Val {
 			if sdSet == nil {
 				sdSet = make(map[accounts.Address]bool)
@@ -122,7 +130,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		}
 	}
 
-	for h := range writes.AllHeaders() {
+	for h := range ws.AllHeaders() {
 		// Drop account-field writes for SD'd addresses so applyVersionedWrites
 		// takes the pure-delete branch instead of cleanup-before-recreate; drop
 		// raw StoragePath writes too (the SelfDestructPath case re-emits an
@@ -146,7 +154,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			sw, ok := writes.GetStorage(h.Address, h.Key)
+			sw, ok := ws.GetStorage(h.Address, h.Key)
 			if !ok {
 				continue
 			}
@@ -212,19 +220,19 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if !SetAccountFieldFromMap(filtered, vm, h.Address, h.Path, h.Version, txIndex+1) {
 				switch h.Path {
 				case BalancePath:
-					if vw, ok := writes.GetBalance(h.Address); ok {
+					if vw, ok := ws.GetBalance(h.Address); ok {
 						filtered.SetBalance(h.Address, vw)
 					}
 				case NoncePath:
-					if vw, ok := writes.GetNonce(h.Address); ok {
+					if vw, ok := ws.GetNonce(h.Address); ok {
 						filtered.SetNonce(h.Address, vw)
 					}
 				case IncarnationPath:
-					if vw, ok := writes.GetIncarnation(h.Address); ok {
+					if vw, ok := ws.GetIncarnation(h.Address); ok {
 						filtered.SetIncarnation(h.Address, vw)
 					}
 				case CodeHashPath:
-					if vw, ok := writes.GetCodeHash(h.Address); ok {
+					if vw, ok := ws.GetCodeHash(h.Address); ok {
 						filtered.SetCodeHash(h.Address, vw)
 					}
 				}
@@ -233,14 +241,14 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			if vw, ok := writes.GetCode(h.Address); ok {
+			if vw, ok := ws.GetCode(h.Address); ok {
 				filtered.SetCode(h.Address, vw)
 			}
 		case CreateContractPath:
 			if h.Version.Incarnation != incarnation {
 				continue
 			}
-			if vw, ok := writes.GetCreateContract(h.Address); ok {
+			if vw, ok := ws.GetCreateContract(h.Address); ok {
 				filtered.SetCreateContract(h.Address, vw)
 			}
 		case SelfDestructPath:
@@ -249,12 +257,16 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			}
 			// Only emit storage DELETE entries when the account was actually
 			// self-destructed (val=true).
-			sdw, ok := writes.GetSelfDestruct(h.Address)
+			sdw, ok := ws.GetSelfDestruct(h.Address)
 			if !ok || !sdw.Val {
 				continue
 			}
 			filtered.SetSelfDestruct(h.Address, sdw)
-			for _, slot := range sdStorageSlots(h.Address) {
+			slots, err := sdStorageSlots(h.Address)
+			if err != nil {
+				return nil, err
+			}
+			for _, slot := range slots {
 				filtered.SetStorage(h.Address, slot, &VersionedWrite[uint256.Int]{
 					WriteHeader: WriteHeader{
 						Address: h.Address,
@@ -282,7 +294,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	// - Addresses whose storage writes were all filtered as no-ops
 	//   (the object was still dirty in the IBS)
 	allAddresses := make(map[accounts.Address]bool)
-	writes.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
+	ws.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
 
 	for addr := range allAddresses {
 		if sdSet[addr] {
@@ -319,7 +331,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 		// (no per-tx FinalizeTx). Forcing defaults here resets nonce/codeHash
 		// against that canonical state (TestSelfDestructReceive).
 		hasCreateContract := false
-		if vw, ok := writes.GetCreateContract(addr); ok && vw.Val {
+		if vw, ok := ws.GetCreateContract(addr); ok && vw.Val {
 			hasCreateContract = true
 		}
 
@@ -487,4 +499,42 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	}
 
 	return filtered, nil
+}
+
+// StorageKeysFn enumerates the storage slots committed for an address. Normalize
+// takes one rather than the domains directly so a test can inject a fixed set.
+type StorageKeysFn func(addr accounts.Address) ([]accounts.StorageKey, error)
+
+// CommittedStorageKeysFn binds CommittedStorageKeys to a domains/tx pair, which
+// is all production ever passes to Normalize.
+func CommittedStorageKeysFn(domains *execctx.SharedDomains, tx kv.TemporalTx) StorageKeysFn {
+	return func(addr accounts.Address) ([]accounts.StorageKey, error) {
+		return CommittedStorageKeys(domains, tx, addr)
+	}
+}
+
+// CommittedStorageKeys returns every storage slot committed for addr, the
+// domainStorageKeys input Normalize needs to emit a full self-destruct cascade.
+// The prefix walk is skipped for an address with no committed account -- see
+// hasCommittedAccount for why that probe is worth its own read.
+func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, addr accounts.Address) ([]accounts.StorageKey, error) {
+	av := addr.Value()
+	hasAcc, err := hasCommittedAccount(domains, tx, av[:])
+	if err != nil {
+		return nil, err
+	}
+	if !hasAcc {
+		return nil, assertNoCommittedStorage(domains, tx, av[:], "selfDestruct")
+	}
+	const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
+	var keys []accounts.StorageKey
+	if err := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
+		if len(k) >= addrLen+hashLen {
+			keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+		}
+		return true, nil
+	}); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }

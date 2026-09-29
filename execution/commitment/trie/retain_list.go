@@ -290,9 +290,11 @@ func NewRetainList(minLength int) *RetainList {
 func (rl *RetainList) Len() int {
 	return len(rl.hexes)
 }
+
 func (rl *RetainList) Less(i, j int) bool {
 	return bytes.Compare(rl.hexes[i], rl.hexes[j]) < 0
 }
+
 func (rl *RetainList) Swap(i, j int) {
 	rl.hexes[i], rl.hexes[j] = rl.hexes[j], rl.hexes[i]
 	rl.markers[i], rl.markers[j] = rl.markers[j], rl.markers[i]
@@ -304,7 +306,7 @@ func (rl *RetainList) AddKey(key []byte) []byte {
 }
 
 func (rl *RetainList) AddKeyWithMarker(key []byte, marker bool) []byte {
-	var nibbles = make([]byte, 2*len(key))
+	nibbles := make([]byte, 2*len(key))
 	for i, b := range key {
 		nibbles[i*2] = b / 16
 		nibbles[i*2+1] = b % 16

@@ -38,7 +38,7 @@ func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom,
 	defer cleanup()
 
 	var resultsCh chan CallResult = nil
-	var nTransactions = 0
+	nTransactions := 0
 
 	if !needCompare {
 		resultsCh = make(chan CallResult, 1000)
@@ -62,8 +62,7 @@ func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom,
 
 			nTransactions++
 
-			var request string
-			request = reqGen.ethEstimateGas(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input)
+			request := reqGen.ethEstimateGas(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input)
 
 			errCtx := fmt.Sprintf(" bn=%d hash=%s", bn, txn.Hash)
 

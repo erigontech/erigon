@@ -28,7 +28,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"unsafe"
 
 	keccak "github.com/erigontech/fastkeccak"
@@ -41,7 +40,6 @@ import (
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/common/maphash"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -50,9 +48,6 @@ import (
 )
 
 var (
-	mxTrieProcessedKeys   = metrics.GetOrCreateCounter("domain_commitment_keys")
-	mxTrieBranchesUpdated = metrics.GetOrCreateCounter("domain_commitment_updates_applied")
-
 	mxTrieStateSkipRate                 = metrics.GetOrCreateCounter("trie_state_skip_rate")
 	mxTrieStateLoadRate                 = metrics.GetOrCreateCounter("trie_state_load_rate")
 	mxTrieStateLevelledSkipRatesAccount = [...]metrics.Counter{
@@ -221,18 +216,7 @@ var deferredUpdatePool = &sync.Pool{
 	},
 }
 
-var getDeferredUpdateCount atomic.Int64
-
-func ResetDeferredUpdateMetrics() {
-	getDeferredUpdateCount.Store(0)
-}
-
-func GetDeferredUpdateMetrics() int64 {
-	return getDeferredUpdateCount.Load()
-}
-
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
-	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
 	upd.prefix = reuseBytes(upd.prefix, prefix)
@@ -281,6 +265,10 @@ type PendingCommitmentUpdate struct {
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
+	// Metrics is the producing trie's, carried so the later apply still reaches
+	// that trie's log and CSV counters. The Prometheus counters do not depend on
+	// it — publishBranchWrites bills those where the write lands.
+	Metrics *Metrics
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
@@ -298,9 +286,9 @@ type BranchEncoder struct {
 	metrics   *Metrics
 
 	deferUpdates       bool
+	callerOwnsDeferred bool
 	maxDeferredUpdates int
 	deferred           []*DeferredBranchUpdate
-	pendingPrefixes    *maphash.NonConcurrentMap[struct{}]
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -312,13 +300,8 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 
 func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
-	if defer_ {
-		if be.deferred == nil {
-			be.deferred = make([]*DeferredBranchUpdate, 0, 64)
-		}
-		if be.pendingPrefixes == nil {
-			be.pendingPrefixes = maphash.NewNonConcurrentMap[struct{}]()
-		}
+	if defer_ && be.deferred == nil {
+		be.deferred = make([]*DeferredBranchUpdate, 0, 64)
 	}
 }
 
@@ -326,23 +309,12 @@ func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
 }
 
-func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
-	if be.pendingPrefixes == nil {
-		return false
-	}
-	_, found := be.pendingPrefixes.Get(prefix)
-	return found
-}
-
 func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
 	}
-	be.deferred = be.deferred[:0]
-	if be.pendingPrefixes != nil {
-		be.pendingPrefixes.Clear()
-	}
-	ResetDeferredUpdateMetrics()
+	// Delete, not reslice: this encoder sits inside a pooled trie.
+	be.deferred = slices.Delete(be.deferred, 0, len(be.deferred))
 }
 
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
@@ -368,26 +340,29 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) error {
-	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
-	if err != nil {
+	if _, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch, be.metrics); err != nil {
 		return err
-	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(written))
 	}
 	return nil
 }
 
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// Returns the number of updates written. putBranch must copy prefix and data rather than
-// retain them: they are pooled and reused for a later, unrelated update. prevData is
-// cloned per update and carries no such constraint.
+// ApplyDeferredBranchUpdates applies the queued branch writes and returns how many
+// were written. Writes are published to the branch-write counters as they land,
+// not against a round: the caller-owned path applies from SharedDomains after the
+// producing round has already closed, so there is no round left to bill. m, when
+// non-nil, additionally carries them into that trie's log and CSV counters.
+//
+// putBranch must copy prefix and data rather than retain them: they are pooled and
+// reused for a later, unrelated update. prevData is cloned per update and carries
+// no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
-) (int, error) {
+	m *Metrics,
+) (n int, err error) {
 	if len(deferred) == 0 {
 		return 0, nil
 	}
@@ -399,20 +374,23 @@ func ApplyDeferredBranchUpdates(
 		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerMergerPool.Put(merger)
 
-		var written int
+		var written, bytesOut int
 		for _, upd := range deferred {
 			if err := mergeDeferredUpdate(upd, merger); err != nil {
+				publishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			if upd.encoded == nil {
 				continue
 			}
 			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+				publishBranchWrites(written, bytesOut, m)
 				return written, err
 			}
 			written++
+			bytesOut += len(upd.encoded)
 		}
-		mxTrieBranchesUpdated.AddInt(written)
+		publishBranchWrites(written, bytesOut, m)
 		return written, nil
 	}
 
@@ -444,17 +422,19 @@ func ApplyDeferredBranchUpdates(
 		}
 	}
 
-	var written int
+	var written, bytesOut int
 	for _, upd := range deferred {
 		if upd.encoded == nil {
 			continue
 		}
 		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
+			publishBranchWrites(written, bytesOut, m)
 			return written, err
 		}
 		written++
+		bytesOut += len(upd.encoded)
 	}
-	mxTrieBranchesUpdated.AddInt(written)
+	publishBranchWrites(written, bytesOut, m)
 	return written, nil
 }
 
@@ -462,26 +442,21 @@ func (be *BranchEncoder) setMetrics(metrics *Metrics) {
 	be.metrics = metrics
 }
 
+// prev is the record stored at prefix, empty when the branch is new. The caller
+// supplies it because the trie already read it while unfolding the row.
 func (be *BranchEncoder) CollectUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
+	if be.deferUpdates {
+		return be.CollectDeferredUpdate(ctx, prefix, bitmap, touchMap, afterMap, cells, prev)
 	}
 	if prev == nil {
 		prev = []byte{}
 	}
-
 	update, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
@@ -502,50 +477,31 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(1)
-	}
-	mxTrieBranchesUpdated.Inc()
+	publishBranchWrites(1, len(updateCopy), be.metrics)
 	return nil
 }
 
+// prev is the record stored at prefix, empty when the branch is new; see CollectUpdate.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
 	bitmap, touchMap, afterMap uint16,
 	cells *[16]cellEncodeData,
-	isNew bool,
+	prev []byte,
 ) error {
 	limit := be.maxDeferredUpdates
 	if limit == 0 {
 		limit = DefaultMaxDeferredUpdates
 	}
-	needsFlush := len(be.deferred) >= limit
-	if !needsFlush {
-		_, needsFlush = be.pendingPrefixes.Get(prefix)
-	}
-
-	if needsFlush {
+	if !be.callerOwnsDeferred && len(be.deferred) >= limit {
 		if err := be.ApplyDeferredUpdates(16, ctx.PutBranch); err != nil {
 			return err
 		}
 		be.ClearDeferred()
 	}
-
-	var prev []byte
-	var err error
-
-	if !isNew {
-		prev, _, err = ctx.Branch(prefix)
-		if err != nil {
-			return err
-		}
-	}
 	if prev == nil {
 		prev = []byte{}
 	}
-
-	be.pendingPrefixes.Set(prefix, struct{}{})
 
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
@@ -1388,8 +1344,6 @@ func (t *Updates) IsConcurrentCommitment() bool {
 
 type keyHasher func(key []byte) []byte
 
-func keyHasherNoop(key []byte) []byte { return key }
-
 func hasherReusesAddrPrefix(h keyHasher) bool {
 	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
 }
@@ -1538,13 +1492,13 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
+		if _, ok := t.keys[key]; ok {
+			return
+		}
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
-		ik := keyBytes
-		if _, ok := t.keys[key]; !ok {
-			ik = t.parallel.internKey(keyBytes)
-			t.keys[key] = struct{}{}
-		}
+		ik := t.parallel.internKey(keyBytes)
+		t.keys[key] = struct{}{}
 		t.parallel.Insert(hashedKey, ik, nil)
 	default:
 	}
@@ -1652,22 +1606,16 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 	if err != nil {
 		panic(err)
 	}
-	if c.update.Nonce != acc.Nonce {
-		c.update.Nonce = acc.Nonce
-		c.update.Flags |= NonceUpdate
+	c.update.Nonce = acc.Nonce
+	c.update.Balance.Set(&acc.Balance)
+	if acc.CodeHash.IsEmpty() {
+		c.update.CodeHash = empty.CodeHash
+	} else {
+		c.update.CodeHash = acc.CodeHash.Value()
 	}
-	if !c.update.Balance.Eq(&acc.Balance) {
-		c.update.Balance.Set(&acc.Balance)
-		c.update.Flags |= BalanceUpdate
-	}
-	if acc.CodeHash.Value() != c.update.CodeHash {
-		if acc.CodeHash.IsEmpty() {
-			c.update.CodeHash = empty.CodeHash
-		} else {
-			c.update.Flags |= CodeUpdate
-			c.update.CodeHash = acc.CodeHash.Value()
-		}
-	}
+	// val is the whole account record, so flag every field: a cell may skip its state
+	// read only when the update it was given covers the account completely.
+	c.update.Flags |= BalanceUpdate | NonceUpdate | CodeUpdate
 }
 
 func (t *Updates) TouchStorage(c *KeyUpdate, val []byte) {
@@ -1754,6 +1702,9 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 
 // fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
+	// [:cap] because the loops below reslice batchSlab many times.
+	defer func() { clear(t.batchSlab[:cap(t.batchSlab)]) }()
+
 	switch t.mode {
 	case ModeDirect:
 		cnt := len(t.keys)

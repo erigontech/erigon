@@ -21,6 +21,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"reflect"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -28,12 +29,14 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -64,8 +67,10 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
 
-var caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
-var errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+var (
+	caplinEnabledLog = "Caplin is enabled, so the engine API cannot be used. for external CL use --externalcl"
+	errCaplinEnabled = &rpc.UnsupportedForkError{Message: "caplin is enabled"}
+)
 
 type EngineServer struct {
 	blockDownloader *engine_block_downloader.EngineBlockDownloader
@@ -131,6 +136,16 @@ func (e *EngineServer) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfi
 	e.beaconCfg.Store(beaconCfg)
 }
 
+func (e *EngineServer) engineAPI() rpc.API {
+	return rpc.API{
+		Namespace: "engine",
+		Public:    true,
+		Service:   engineRPC(e),
+		Iface:     reflect.TypeFor[engineRPC](),
+		Version:   "1.0",
+	}
+}
+
 func (e *EngineServer) Start(
 	ctx context.Context,
 	httpConfig *httpcfg.HttpCfg,
@@ -164,12 +179,9 @@ func (e *EngineServer) Start(
 			Public:    true,
 			Service:   jsonrpc.EthAPI(ethImpl),
 			Version:   "1.0",
-		}, {
-			Namespace: "engine",
-			Public:    true,
-			Service:   EngineAPI(e),
-			Version:   "1.0",
-		}}
+		},
+		e.engineAPI(),
+	}
 
 	eg.Go(func() error {
 		defer e.logger.Debug("[EngineServer] engine rpc server goroutine terminated")
@@ -182,18 +194,18 @@ func (e *EngineServer) Start(
 	return eg.Wait()
 }
 
-func (s *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
-	if s.isWithdrawalsPresenceValid(time, withdrawals) {
+func (e *EngineServer) checkWithdrawalsPresence(time uint64, withdrawals types.Withdrawals) error {
+	if e.isWithdrawalsPresenceValid(time, withdrawals) {
 		return nil
 	}
-	if !s.config.IsShanghai(time) {
+	if !e.config.IsShanghai(time) {
 		return &rpc.InvalidParamsError{Message: "withdrawals before Shanghai"}
 	}
 	return &rpc.InvalidParamsError{Message: "missing withdrawals list"}
 }
 
-func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types.Withdrawals) bool {
-	if !s.config.IsShanghai(time) {
+func (e *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types.Withdrawals) bool {
+	if !e.config.IsShanghai(time) {
 		return withdrawals == nil
 	}
 	return withdrawals != nil
@@ -204,18 +216,18 @@ func (s *EngineServer) isWithdrawalsPresenceValid(time uint64, withdrawals types
 // These are independent of fork-choice sync state and so MUST run before the
 // SYNCING short-circuit, otherwise a CL that sends mismatched-version attrs
 // would never see the spec-mandated -38003/-38005.
-func (s *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
+func (e *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
 	timestamp := uint64(payloadAttributes.Timestamp)
 	if version < clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot != nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // V1/V2 attrs MUST NOT carry parentBeaconBlockRoot
 	}
-	if s.config.IsCancun(timestamp) && version < clparams.DenebVersion { // V1/V2 fcu at a Cancun timestamp
+	if e.config.IsCancun(timestamp) && version < clparams.DenebVersion { // V1/V2 fcu at a Cancun timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if s.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
+	if e.config.IsAmsterdam(timestamp) && version < clparams.GloasVersion { // V3 fcu at an Amsterdam timestamp
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if version >= clparams.CapellaVersion && !s.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
+	if version >= clparams.CapellaVersion && !e.isWithdrawalsPresenceValid(timestamp, payloadAttributes.Withdrawals) {
 		return &engine_helpers.InvalidPayloadAttributesErr // wrong V1/V2 withdrawals presence vs Shanghai
 	}
 	return nil
@@ -227,15 +239,15 @@ func (s *EngineServer) validatePayloadAttributesPreFCU(version clparams.StateVer
 // so that an unknown head is reported as SYNCING (no -38003/-38005). See the
 // hive engine-cancun "Invalid PayloadAttributes, Missing BeaconRoot,
 // Syncing=True" tests for the canonical scenario.
-func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
+func (e *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVersion, payloadAttributes *engine_types.PayloadAttributes) error {
 	timestamp := uint64(payloadAttributes.Timestamp)
 	if version >= clparams.DenebVersion && payloadAttributes.ParentBeaconBlockRoot == nil {
 		return &engine_helpers.InvalidPayloadAttributesErr // V3 attrs require parentBeaconBlockRoot (cancun.md point 8.1)
 	}
-	if !s.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 outside Cancun window (cancun.md point 8.2)
+	if !e.config.IsCancun(timestamp) && version >= clparams.DenebVersion { // V3 outside Cancun window (cancun.md point 8.2)
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
-	if !s.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion { // V4 outside Amsterdam window
+	if !e.config.IsAmsterdam(timestamp) && version >= clparams.GloasVersion { // V4 outside Amsterdam window
 		return &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 	if version >= clparams.GloasVersion && payloadAttributes.SlotNumber == nil {
@@ -253,7 +265,7 @@ func (s *EngineServer) validatePayloadAttributesPostFCU(version clparams.StateVe
 	return nil
 }
 
-func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
+func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, executionRequests []hexutil.Bytes) error {
 	if version < clparams.ElectraVersion {
 		if executionRequests != nil {
 			return &rpc.InvalidParamsError{Message: "requests in EngineAPI not supported before Prague"}
@@ -266,21 +278,21 @@ func (s *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 }
 
 // EngineNewPayload validates and possibly executes payload
-func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
+func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, version clparams.StateVersion,
 ) (*engine_types.PayloadStatus, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
-	if !s.consuming.Load() {
+	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
 
-	if s.caplin {
-		s.logger.Crit(caplinEnabledLog)
+	if e.caplin {
+		e.logger.Crit(caplinEnabledLog)
 		return nil, errCaplinEnabled
 	}
 
-	s.engineLogSpamer.RecordRequest()
-	s.logger.Debug("[NewPayload] processing new request", "blockNum", req.BlockNumber.Uint64(), "blockHash", req.BlockHash, "parentHash", req.ParentHash)
+	e.engineLogSpamer.RecordRequest()
+	e.logger.Debug("[NewPayload] processing new request", "blockNum", req.BlockNumber.Uint64(), "blockHash", req.BlockHash, "parentHash", req.ParentHash)
 	if len(req.LogsBloom) != types.BloomByteLength {
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid logsBloom length: %d", len(req.LogsBloom))}
 	}
@@ -297,7 +309,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			continue
 		}
 		if types.TypedTransactionMarshalledAsRlpString(transaction) {
-			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
+			e.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
 			invalidTransactionStatus = &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
@@ -306,7 +318,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		transactions[i], err = types.UnmarshalTransactionFromBinary(transaction, false /* blobTxnsAreWrappedWithBlobs */)
 		if err != nil {
-			s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
+			e.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
 			invalidTransactionStatus = &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
@@ -321,12 +333,16 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
+	var baseFee *uint256.Int // a null baseFeePerGas stays nil and fails validation
+	if req.BaseFeePerGas != nil {
+		baseFee = new(uint256.Int).Set((*uint256.Int)(req.BaseFeePerGas))
+	}
 	header := types.Header{
 		ParentHash:  req.ParentHash,
 		Coinbase:    req.FeeRecipient,
 		Root:        req.StateRoot,
 		Bloom:       bloom,
-		BaseFee:     uint256.MustFromBig(req.BaseFeePerGas.ToInt()),
+		BaseFee:     baseFee,
 		Extra:       req.ExtraData,
 		Number:      *uint256.NewInt(req.BlockNumber.Uint64()),
 		GasUsed:     uint64(req.GasUsed),
@@ -344,7 +360,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	if version >= clparams.CapellaVersion {
 		withdrawals = req.Withdrawals
 	}
-	if err := s.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
+	if err := e.checkWithdrawalsPresence(header.Time, withdrawals); err != nil {
 		return nil, err
 	}
 	if withdrawals != nil {
@@ -353,7 +369,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var requests types.FlatRequests
-	if err := s.checkRequestsPresence(version, executionRequests); err != nil {
+	if err := e.checkRequestsPresence(version, executionRequests); err != nil {
 		return nil, err
 	}
 	if version >= clparams.ElectraVersion {
@@ -406,8 +422,11 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		balBytes := *req.BlockAccessList
 		blockAccessList, err = types.DecodeBlockAccessListSidecarOwned(balBytes)
 		if err != nil {
-			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
-			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
+			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, err)),
+			}, nil
 		}
 		hash, err := blockAccessList.Hash()
 		if err != nil {
@@ -422,18 +441,18 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	if (!s.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
-		(!s.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
-		(s.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
+	if (!e.config.IsCancun(header.Time) && version >= clparams.DenebVersion) ||
+		(e.config.IsCancun(header.Time) && version < clparams.DenebVersion) ||
+		(!e.config.IsPrague(header.Time) && version >= clparams.ElectraVersion) ||
+		(e.config.IsPrague(header.Time) && version < clparams.ElectraVersion) || // osaka has no new newPayload method
+		(!e.config.IsAmsterdam(header.Time) && version >= clparams.GloasVersion) ||
+		(e.config.IsAmsterdam(header.Time) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
 	blockHash := req.BlockHash
 	if header.Hash() != blockHash {
-		s.logger.Error(
+		e.logger.Error(
 			"[NewPayload] invalid block hash",
 			"stated", blockHash,
 			"actual", header.Hash(),
@@ -458,12 +477,12 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	if version >= clparams.DenebVersion {
-		err := misc.ValidateBlobs(req.BlobGasUsed.Uint64(), s.config.GetMaxBlobGasPerBlock(header.Time), s.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
+		err := misc.ValidateBlobs(req.BlobGasUsed.Uint64(), e.config.GetMaxBlobGasPerBlock(header.Time), e.config.GetMaxBlobsPerBlock(header.Time), expectedBlobHashes, &transactions)
 		if errors.Is(err, misc.ErrNilBlobHashes) {
 			return nil, &rpc.InvalidParamsError{Message: "nil blob hashes array"}
 		}
 		if errors.Is(err, misc.ErrMaxBlobGasUsed) {
-			bad, latestValidHash, _ := s.blockDownloader.IsBadHeader(req.ParentHash)
+			bad, latestValidHash, _ := e.blockDownloader.IsBadHeader(req.ParentHash)
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
@@ -481,26 +500,26 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 	}
 
-	possibleStatus, err := s.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true)
+	possibleStatus, err := e.getQuickPayloadStatusIfPossible(ctx, blockHash, uint64(req.BlockNumber), header.ParentHash, nil, true, defaultReadinessWait)
 	if err != nil {
 		return nil, err
 	}
 	if possibleStatus != nil {
-		s.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
+		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
 		return possibleStatus, nil
 	}
 
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	e.lock.Lock()
+	defer e.lock.Unlock()
 
-	s.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
+	e.logger.Debug("[NewPayload] sending block", "height", header.Number, "hash", blockHash)
 	// Pass `txs` (the binary tx encodings from the CL) through as the Block's
 	// binaryTransactions cache so the downstream Block.RawBody() invocation
 	// inside InsertBlocks doesn't re-encode every tx
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
-	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
+	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -510,7 +529,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		return nil, err
 	}
-	s.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
+	e.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
 	if payloadStatus.CriticalError != nil {
 		return nil, payloadStatus.CriticalError
@@ -519,8 +538,26 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	return payloadStatus, nil
 }
 
+// defaultReadinessWait is how long a request waits for a busy execution module before answering
+// SYNCING.
+const defaultReadinessWait = 500 * time.Millisecond
+
+// maxAttributesReadinessWait bounds the longer readiness wait used when payload attributes are
+// present (see forkchoiceUpdated). A full slot is too long on chains with long slot times: it can
+// exceed a consensus client's own client-side timeout for this call, which fails the request
+// outright instead of getting the SYNCING answer this wait exists to produce. Chains with a
+// shorter slot time are unaffected, since the wait is bounded by whichever of the two is smaller.
+const maxAttributesReadinessWait = 6 * time.Second
+
+// attributesReadinessWait returns the readiness wait forkchoiceUpdated uses when payload
+// attributes are present: a full slot, capped so long-slot chains don't exceed
+// maxAttributesReadinessWait.
+func attributesReadinessWait(secondsPerSlot uint64) time.Duration {
+	return min(time.Duration(secondsPerSlot)*time.Second, maxAttributesReadinessWait)
+}
+
 // Check if we can quickly determine the status of a newPayload or forkchoiceUpdated.
-func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool) (*engine_types.PayloadStatus, error) {
+func (e *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, blockHash common.Hash, blockNumber uint64, parentHash common.Hash, forkchoiceMessage *engine_types.ForkChoiceState, newPayload bool, readinessWait time.Duration) (*engine_types.PayloadStatus, error) {
 	// Determine which prefix to use for logs
 	var prefix string
 	if newPayload {
@@ -528,12 +565,12 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 	} else {
 		prefix = "ForkChoiceUpdated"
 	}
-	if s.config.TerminalTotalDifficulty == nil {
-		s.logger.Error(fmt.Sprintf("[%s] not a proof-of-stake chain", prefix))
+	if e.config.TerminalTotalDifficulty == nil {
+		e.logger.Error(fmt.Sprintf("[%s] not a proof-of-stake chain", prefix))
 		return nil, errors.New("not a proof-of-stake chain")
 	}
 
-	headHash, finalizedHash, safeHash, err := s.chainRW.GetForkChoice(ctx)
+	headHash, finalizedHash, safeHash, err := e.chainRW.GetForkChoice(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -547,34 +584,34 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 	}
 
-	header := s.chainRW.GetHeaderByHash(ctx, blockHash)
+	header := e.chainRW.GetHeaderByHash(ctx, blockHash)
 
 	// Retrieve parent and total difficulty.
 	var parent *types.Header
 	var td *uint256.Int
 	if newPayload {
-		parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
-		td = s.chainRW.GetTd(ctx, parentHash, blockNumber-1)
+		parent = e.chainRW.GetHeaderByHash(ctx, parentHash)
+		td = e.chainRW.GetTd(ctx, parentHash, blockNumber-1)
 	} else {
-		td = s.chainRW.GetTd(ctx, blockHash, blockNumber)
+		td = e.chainRW.GetTd(ctx, blockHash, blockNumber)
 	}
 
-	if td != nil && td.Cmp(s.config.TerminalTotalDifficulty) < 0 {
-		s.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
+	if td != nil && td.Cmp(e.config.TerminalTotalDifficulty) < 0 {
+		e.logger.Warn(fmt.Sprintf("[%s] Beacon Chain request before TTD", prefix), "hash", blockHash)
 		return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &common.Hash{}, ValidationError: engine_types.NewStringifiedErrorFromString("Beacon Chain request before TTD")}, nil
 	}
 
 	var isCanonical bool
 	if header != nil {
-		isCanonical, err = s.chainRW.IsCanonicalHash(ctx, blockHash)
+		isCanonical, err = e.chainRW.IsCanonicalHash(ctx, blockHash)
 	}
 	if err != nil {
 		return nil, err
 	}
 
 	if newPayload && parent != nil && blockNumber != parent.Number.Uint64()+1 {
-		s.logger.Warn(fmt.Sprintf("[%s] Invalid block number", prefix), "headerNumber", blockNumber, "parentNumber", parent.Number.Uint64())
-		s.blockDownloader.ReportBadHeader(blockHash, parent.Hash(), "invalid block number")
+		e.logger.Warn(fmt.Sprintf("[%s] Invalid block number", prefix), "headerNumber", blockNumber, "parentNumber", parent.Number.Uint64())
+		e.blockDownloader.ReportBadHeader(blockHash, parent.Hash(), "invalid block number")
 		parentHash := parent.Hash()
 		return &engine_types.PayloadStatus{
 			Status:          engine_types.InvalidStatus,
@@ -583,13 +620,13 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		}, nil
 	}
 	// Check if we already determined if the hash is attributed to a previously received invalid header.
-	bad, lastValidHash, cachedErr := s.blockDownloader.IsBadHeader(blockHash)
+	bad, lastValidHash, cachedErr := e.blockDownloader.IsBadHeader(blockHash)
 	if bad {
-		s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
+		e.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash)
 	} else if newPayload {
-		bad, lastValidHash, cachedErr = s.blockDownloader.IsBadHeader(parentHash)
+		bad, lastValidHash, cachedErr = e.blockDownloader.IsBadHeader(parentHash)
 		if bad {
-			s.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
+			e.logger.Warn(fmt.Sprintf("[%s] Previously known bad block", prefix), "hash", blockHash, "parentHash", parentHash)
 			if cachedErr != "" {
 				cachedErr = fmt.Sprintf("ancestor %s rejected: %s", parentHash, cachedErr)
 			}
@@ -608,33 +645,33 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			// pipeline re-derives the specific error; the proper string
 			// will be re-cached via ReportBadHeader on the BadBlock path
 			// below (issues #21363 + #21364 Mode A).
-			s.logger.Debug(fmt.Sprintf("[%s] bad-block cache hit has empty validation error; re-validating to re-derive category", prefix), "hash", blockHash)
+			e.logger.Debug(fmt.Sprintf("[%s] bad-block cache hit has empty validation error; re-validating to re-derive category", prefix), "hash", blockHash)
 		} else {
-			s.blockDownloader.ReportBadHeader(blockHash, lastValidHash, cachedErr)
+			e.blockDownloader.ReportBadHeader(blockHash, lastValidHash, cachedErr)
 			return &engine_types.PayloadStatus{Status: engine_types.InvalidStatus, LatestValidHash: &lastValidHash, ValidationError: engine_types.NewStringifiedErrorFromString(cachedErr)}, nil
 		}
 	}
 
-	currentHeader := s.chainRW.CurrentHeader(ctx)
+	currentHeader := e.chainRW.CurrentHeader(ctx)
 	// If header is already validated or has a missing parent, you can either return VALID or SYNCING.
 	if newPayload {
 		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForResponse(ctx, 50*time.Millisecond, func() (bool, error) {
 			if parent == nil {
-				parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
+				parent = e.chainRW.GetHeaderByHash(ctx, parentHash)
 			}
-			return parent == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
+			return parent == nil && e.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
-			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
+			e.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS blocks", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
-			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
+		if shouldWait, _ := waitForResponse(ctx, 50*time.Millisecond, func() (bool, error) {
+			return header == nil && e.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
-			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
+			e.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 
@@ -645,8 +682,11 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForResponse(500*time.Millisecond, func() (bool, error) {
-		isReady, err := s.chainRW.Ready(ctx)
+	// Ready can block on snapshot readiness; bounding its context keeps each call inside the budget.
+	readyCtx, cancelReady := context.WithTimeout(ctx, readinessWait)
+	defer cancelReady()
+	waitingForExecutionReady, err := waitForResponse(readyCtx, readinessWait, func() (bool, error) {
+		isReady, err := e.chainRW.Ready(readyCtx)
 		return !isReady, err
 	})
 	if err != nil {
@@ -660,45 +700,44 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 }
 
 // EngineGetPayload retrieves previously assembled payload (Validators only)
-func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version clparams.StateVersion) (*engine_types.GetPayloadResponse, error) {
-	if s.caplin {
-		s.logger.Crit("[NewPayload] caplin is enabled")
+func (e *EngineServer) getPayload(ctx context.Context, payloadId uint64, version clparams.StateVersion) (*engine_types.GetPayloadResponse, error) {
+	if e.caplin {
+		e.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
 	}
-	s.engineLogSpamer.RecordRequest()
+	e.engineLogSpamer.RecordRequest()
 
-	if !s.proposing {
+	if !e.proposing {
 		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
-	if s.config.TerminalTotalDifficulty == nil {
+	if e.config.TerminalTotalDifficulty == nil {
 		return nil, errors.New("not a proof-of-stake chain")
 	}
 
-	s.logger.Debug("[GetPayload] acquiring lock")
-	s.lock.Lock()
-	defer s.lock.Unlock()
-	s.logger.Debug("[GetPayload] lock acquired")
+	e.logger.Debug("[GetPayload] acquiring lock")
+	e.lock.Lock()
+	defer e.lock.Unlock()
+	e.logger.Debug("[GetPayload] lock acquired")
 	var assembled execmodule.AssembledBlockResult
 	var err error
 
-	execBusy, err := waitForResponse(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
-		assembled, err = s.executionService.GetAssembledBlock(ctx, payloadId)
+	execBusy, err := waitForResponse(ctx, time.Duration(e.config.SecondsPerSlot())*time.Second, func() (bool, error) {
+		assembled, err = e.executionService.GetAssembledBlock(ctx, payloadId)
 		if err != nil {
 			return false, err
 		}
 		return assembled.Busy, nil
 	})
-
 	if err != nil {
 		return nil, err
 	}
 	if execBusy {
-		s.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
+		e.logger.Warn("Cannot build payload, execution is busy", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
 	if assembled.Block == nil {
-		s.logger.Warn("Payload not stored", "payloadId", payloadId)
+		e.logger.Warn("Payload not stored", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
 
@@ -707,22 +746,22 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	header := block.Header()
 
 	if header == nil {
-		s.logger.Warn("Payload build failed (nil header)", "payloadId", payloadId)
+		e.logger.Warn("Payload build failed (nil header)", "payloadId", payloadId)
 		return nil, &engine_helpers.UnknownPayloadErr
 	}
 
 	ts := header.Time
 	// Unlike later forks, Shanghai does not require an exact version match:
 	// engine_getPayloadV2 serves both Paris and Shanghai payloads.
-	if (s.config.IsShanghai(ts) && version < clparams.CapellaVersion) ||
-		(!s.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
-		(s.config.IsCancun(ts) && version < clparams.DenebVersion) ||
-		(!s.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
-		(s.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
-		(!s.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
-		(s.config.IsOsaka(ts) && version < clparams.FuluVersion) ||
-		(!s.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
-		(s.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
+	if (e.config.IsShanghai(ts) && version < clparams.CapellaVersion) ||
+		(!e.config.IsCancun(ts) && version >= clparams.DenebVersion) ||
+		(e.config.IsCancun(ts) && version < clparams.DenebVersion) ||
+		(!e.config.IsPrague(ts) && version >= clparams.ElectraVersion) ||
+		(e.config.IsPrague(ts) && version < clparams.ElectraVersion) ||
+		(!e.config.IsOsaka(ts) && version >= clparams.FuluVersion) ||
+		(e.config.IsOsaka(ts) && version < clparams.FuluVersion) ||
+		(!e.config.IsAmsterdam(ts) && version >= clparams.GloasVersion) ||
+		(e.config.IsAmsterdam(ts) && version < clparams.GloasVersion) {
 		return nil, &rpc.UnsupportedForkError{Message: "Unsupported fork"}
 	}
 
@@ -744,37 +783,45 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 }
 
 // engineForkChoiceUpdated either states new block head or request the assembling of a new block
-func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
+func (e *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *engine_types.ForkChoiceState, payloadAttributes *engine_types.PayloadAttributes, version clparams.StateVersion,
 ) (*engine_types.ForkChoiceUpdatedResponse, error) {
 	defer engineForkchoiceUpdatedDuration.ObserveDuration(time.Now())
-	if !s.consuming.Load() {
+	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
 	}
 
-	if s.caplin {
-		s.logger.Crit("[NewPayload] caplin is enabled")
+	if e.caplin {
+		e.logger.Crit("[NewPayload] caplin is enabled")
 		return nil, errCaplinEnabled
 	}
 
-	s.engineLogSpamer.RecordRequest()
+	e.engineLogSpamer.RecordRequest()
 	newReqLogInfoArgs := []any{"head", forkchoiceState.HeadHash}
 	if payloadAttributes != nil {
 		newReqLogInfoArgs = append(newReqLogInfoArgs, "parentBeaconBlockRoot", payloadAttributes.ParentBeaconBlockRoot)
 	}
 
-	s.logger.Debug("[ForkChoiceUpdated] processing new request", newReqLogInfoArgs...)
-	status, err := s.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false)
+	e.logger.Debug("[ForkChoiceUpdated] processing new request", newReqLogInfoArgs...)
+	readinessWait := defaultReadinessWait
+	if payloadAttributes != nil {
+		// The previous head's flush, commit and prune keep the module busy after its forkchoice
+		// update has already answered. Answering SYNCING here drops the payload build - and with
+		// it the proposal - so wait as long as the AssembleBlock step below would, capped so a
+		// long-slot chain can't turn this into a client-side timeout instead of a clean SYNCING.
+		readinessWait = attributesReadinessWait(e.config.SecondsPerSlot())
+	}
+	status, err := e.getQuickPayloadStatusIfPossible(ctx, forkchoiceState.HeadHash, 0, common.Hash{}, forkchoiceState, false, readinessWait)
 	if err != nil {
 		return nil, err
 	}
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	e.lock.Lock()
+	defer e.lock.Unlock()
 
 	if status == nil {
 		fcuStart := time.Now()
-		s.logger.Debug("[ForkChoiceUpdated] calling HandleForkChoice", "head", forkchoiceState.HeadHash)
-		status, err = s.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
-		s.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "elapsed", time.Since(fcuStart))
+		e.logger.Debug("[ForkChoiceUpdated] calling HandleForkChoice", "head", forkchoiceState.HeadHash)
+		status, err = e.HandleForkChoice(ctx, "ForkChoiceUpdated", forkchoiceState)
+		e.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "elapsed", time.Since(fcuStart))
 		if err != nil {
 			if errors.Is(err, rules.ErrInvalidBlock) {
 				return &engine_types.ForkChoiceUpdatedResponse{
@@ -786,13 +833,13 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 			}
 			return nil, err
 		}
-		s.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "status", status.Status)
+		e.logger.Debug("[ForkChoiceUpdated] HandleForkChoice done", "status", status.Status)
 
 		if status.CriticalError != nil {
 			return nil, status.CriticalError
 		}
 	} else {
-		s.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
+		e.logger.Debug("[ForkChoiceUpdated] got quick payload status", "status", status.Status)
 	}
 
 	// engine_forkchoiceUpdatedV2's Request section makes the "wrong version of
@@ -802,7 +849,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	// which the spec gates on the head being VALID — those run after the
 	// short-circuit so a SYNCING head is not turned into -38003/-38005.
 	if payloadAttributes != nil {
-		if err := s.validatePayloadAttributesPreFCU(version, payloadAttributes); err != nil {
+		if err := e.validatePayloadAttributesPreFCU(version, payloadAttributes); err != nil {
 			return nil, err
 		}
 	}
@@ -812,19 +859,19 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: status}, nil
 	}
 
-	if err := s.validatePayloadAttributesPostFCU(version, payloadAttributes); err != nil {
+	if err := e.validatePayloadAttributesPostFCU(version, payloadAttributes); err != nil {
 		return nil, err
 	}
 
 	timestamp := uint64(payloadAttributes.Timestamp)
 
-	if !s.proposing {
+	if !e.proposing {
 		return nil, errors.New("execution layer not running as a proposer. enable proposer by taking out the --proposer.disable flag on startup")
 	}
 
-	headHeader := s.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)
-	if headHeader == nil && s.filters != nil {
-		if sd := s.filters.LatestSD(); sd != nil {
+	headHeader := e.chainRW.GetHeaderByHash(ctx, forkchoiceState.HeadHash)
+	if headHeader == nil && e.filters != nil {
+		if sd := e.filters.LatestSD(); sd != nil {
 			if overlay := sd.BlockOverlay(); overlay != nil {
 				headHeader, _ = rawdb.ReadHeaderByHash(overlay, forkchoiceState.HeadHash)
 			}
@@ -835,7 +882,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}
 
 	if headHeader.Time >= timestamp {
-		s.logger.Debug("[ForkChoiceUpdated] payload time lte head time", "head", headHeader.Time, "payload", timestamp)
+		e.logger.Debug("[ForkChoiceUpdated] payload time lte head time", "head", headHeader.Time, "payload", timestamp)
 		return nil, &engine_helpers.InvalidPayloadAttributesErr
 	}
 
@@ -862,8 +909,8 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	var assembled execmodule.AssembleBlockResult
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
-	execBusy, err := waitForResponse(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
-		assembled, err = s.executionService.AssembleBlock(ctx, assembleParams)
+	execBusy, err := waitForResponse(ctx, time.Duration(e.config.SecondsPerSlot())*time.Second, func() (bool, error) {
+		assembled, err = e.executionService.AssembleBlock(ctx, assembleParams)
 		if err != nil {
 			return false, err
 		}
@@ -873,7 +920,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 		return nil, err
 	}
 	if execBusy {
-		s.logger.Warn("[ForkChoiceUpdated] Execution Service busy, could not fulfil Assemble Block request", "parentHash", forkchoiceState.HeadHash)
+		e.logger.Warn("[ForkChoiceUpdated] Execution Service busy, could not fulfil Assemble Block request", "parentHash", forkchoiceState.HeadHash)
 		return &engine_types.ForkChoiceUpdatedResponse{PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, PayloadId: nil}, nil
 	}
 	return &engine_types.ForkChoiceUpdatedResponse{
@@ -885,13 +932,13 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	}, nil
 }
 
-func (s *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
+func (e *EngineServer) getPayloadBodiesByHash(ctx context.Context, request []common.Hash) ([]*engine_types.ExecutionPayloadBody, error) {
 	if len(request) > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
-	s.engineLogSpamer.RecordRequest()
+	e.engineLogSpamer.RecordRequest()
 
-	bodies, err := s.chainRW.GetBodiesByHashes(ctx, request)
+	bodies, err := e.chainRW.GetBodiesByHashes(ctx, request)
 	if err != nil {
 		return nil, err
 	}
@@ -917,14 +964,14 @@ func extractPayloadBodyFromBody(body *types.RawBody) *engine_types.ExecutionPayl
 	return ret
 }
 
-func (s *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64) ([]*engine_types.ExecutionPayloadBody, error) {
+func (e *EngineServer) getPayloadBodiesByRange(ctx context.Context, start, count uint64) ([]*engine_types.ExecutionPayloadBody, error) {
 	if start == 0 || count == 0 {
 		return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid start or count, start: %v count: %v", start, count)}
 	}
 	if count > 1024 {
 		return nil, &engine_helpers.TooLargeRequestErr
 	}
-	bodies, err := s.chainRW.GetBodiesByRange(ctx, start, count)
+	bodies, err := e.chainRW.GetBodiesByRange(ctx, start, count)
 	if err != nil {
 		return nil, err
 	}
@@ -988,7 +1035,7 @@ func (e *EngineServer) HandleNewPayload(
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			var respondSyncing bool
-			if _, _ = waitForResponse(waitTime, func() (bool, error) {
+			if _, _ = waitForResponse(ctx, waitTime, func() (bool, error) {
 				status := e.blockDownloader.Status()
 				respondSyncing = status != engine_block_downloader.Synced
 				// no point in waiting if the downloader is no longer syncing (e.g. it's dropped the download request)
@@ -1113,7 +1160,7 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		GasUsed:       hexutil.Uint64(header.GasUsed),
 		Timestamp:     hexutil.Uint64(header.Time),
 		ExtraData:     header.Extra,
-		BaseFeePerGas: (*hexutil.Big)(header.BaseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(header.BaseFee),
 		BlockHash:     block.Hash(),
 		Transactions:  txs,
 	}
@@ -1159,7 +1206,7 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 
 	return &engine_types.GetPayloadResponse{
 		ExecutionPayload:  ep,
-		BlockValue:        (*hexutil.Big)(blockValue.ToBig()),
+		BlockValue:        (*hexutil.U256)(blockValue),
 		BlobsBundle:       blobsBundle,
 		ExecutionRequests: executionRequests,
 	}, nil
@@ -1235,9 +1282,12 @@ func (e *EngineServer) SetConsuming(consuming bool) {
 	e.consuming.Store(consuming)
 }
 
-func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion) (any, error) {
+func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, version clparams.StateVersion, cellIndices hexutil.Bytes) (any, error) {
 	if len(blobHashes) > 128 {
 		return nil, &engine_helpers.TooLargeRequestErr
+	}
+	if version == clparams.GloasVersion && len(cellIndices) != goethkzg.CellsPerExtBlob/8 {
+		return nil, &rpc.InvalidParamsError{Message: "indices_bitarray must be 16 bytes"}
 	}
 	if e.blobGetter == nil {
 		return nil, txpool.ErrPoolDisabled
@@ -1251,6 +1301,40 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 
 	switch version {
+	case clparams.GloasVersion:
+		indices := make([]int, 0, goethkzg.CellsPerExtBlob)
+		for i := range goethkzg.CellsPerExtBlob {
+			if cellIndices[i/8]&(1<<(i%8)) != 0 {
+				indices = append(indices, i)
+			}
+		}
+		ret := make([]*engine_types.BlobCellsAndProofsV1, len(blobHashes))
+		for i, bundle := range bundles {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			if len(bundle.Blob) != len(goethkzg.Blob{}) || len(bundle.Proofs) != goethkzg.CellsPerExtBlob {
+				continue
+			}
+			ret[i] = &engine_types.BlobCellsAndProofsV1{
+				BlobCells: make([]*hexutil.Bytes, len(indices)),
+				Proofs:    make([]*hexutil.Bytes, len(indices)),
+			}
+			if len(indices) == 0 {
+				continue
+			}
+			cells, err := kzg.Ctx().ComputeCells((*goethkzg.Blob)(bundle.Blob), 2)
+			if err != nil {
+				return nil, fmt.Errorf("compute cells for blob %s: %w", blobHashes[i], err)
+			}
+			for j, index := range indices {
+				cell := hexutil.Bytes(cells[index][:])
+				proof := hexutil.Bytes(bundle.Proofs[index][:])
+				ret[i].BlobCells[j] = &cell
+				ret[i].Proofs[j] = &proof
+			}
+		}
+		return ret, nil
 	case clparams.FuluVersion: // GetBlobsV3
 		ret := make([]*engine_types.BlobAndProofV2, len(blobHashes))
 		for i, bb := range bundles {
@@ -1317,15 +1401,29 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 }
 
-func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
+func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
+	deadline := time.Now().Add(maxWait)
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {
 		return false, err
 	}
 	checkInterval := 10 * time.Millisecond
-	maxChecks := int64(maxWait) / int64(checkInterval)
-	for range maxChecks {
-		time.Sleep(checkInterval)
+	ticker := time.NewTicker(checkInterval)
+	defer ticker.Stop()
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			// Same (true, nil) a normal deadline exhaustion returns: maxWait can itself be
+			// derived from ctx, so a distinct error here would race the deadline check above
+			// for whichever fires first, making the return value nondeterministic.
+			return true, nil
+		case <-ticker.C:
+		}
+		// The tick can arrive after the deadline, or together with cancellation (select picks
+		// randomly among ready cases), so recheck both before starting another call.
+		if ctx.Err() != nil || !time.Now().Before(deadline) {
+			return true, nil
+		}
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {
 			return shouldWait, err

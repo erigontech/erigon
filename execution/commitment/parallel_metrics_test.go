@@ -23,6 +23,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/length"
 )
 
 // buildNibbleSpread returns a corpus whose accounts land under distinct root
@@ -103,4 +105,159 @@ func TestMetricsResetClearsEveryCounter(t *testing.T) {
 	assert.Zero(t, v.Folds)
 	assert.Zero(t, v.Unfolds)
 	assert.Zero(t, v.SpentFolding)
+}
+
+func TestRoundKeysAreDistinctNotTraversals(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	var got *CommitProgress
+	_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	m := got.Metrics
+	assert.EqualValues(t, len(keys), m.RoundKeys,
+		"RoundKeys is the distinct key count handed to the trie")
+	assert.GreaterOrEqual(t, m.AddressKeys+m.StorageKeys, m.RoundKeys,
+		"traversals count cell visits, so they never undercount distinct keys")
+	assert.Positive(t, m.BranchWriteBytes, "branch write bytes are counted")
+}
+
+// Two rounds on one trie must report the second round's own numbers. Tries come
+// from a pool whose Release does not clear counters, and the parallel trie used
+// to accumulate across rounds, so both ends of the merge could carry history in.
+func TestRoundCountersDoNotAccumulateAcrossRounds(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+
+	round := func() *CommitProgress {
+		t.Helper()
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
+		}
+		var got *CommitProgress
+		_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		return got
+	}
+
+	first := round()
+	second := round()
+
+	assert.EqualValues(t, len(keys), first.Metrics.RoundKeys)
+	assert.EqualValues(t, len(keys), second.Metrics.RoundKeys,
+		"the second round reports its own key count, not the running total")
+	// Strictly less than 2x: with the pooled reset removed a worker enters the
+	// second round holding the first's traversals and adds its own, landing on
+	// exactly 2x — which an inclusive bound would admit.
+	assert.Less(t, second.Metrics.AddressKeys, first.Metrics.AddressKeys*2,
+		"traversals are per-round; a pooled worker must not carry its last round in")
+}
+
+// A branch write must reach the Prometheus counter exactly once. Billing it both
+// where it lands and again from the round's snapshot is invisible in the trie's
+// own MetricValues, so this reads the published counter instead.
+func TestBranchWritesArePublishedOnce(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+
+	beforePuts := mxBranchPuts.GetValueUint64()
+	beforeBytes := mxWriteBytes.GetValueUint64()
+
+	var got *CommitProgress
+	_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+	require.NoError(t, err)
+	require.NotNil(t, got)
+
+	require.Positive(t, got.Metrics.UpdateBranch, "the round wrote branches at all")
+	assert.EqualValues(t, got.Metrics.UpdateBranch, mxBranchPuts.GetValueUint64()-beforePuts,
+		"commitment_branch_writes_total counts each write once")
+	assert.EqualValues(t, got.Metrics.BranchWriteBytes, mxWriteBytes.GetValueUint64()-beforeBytes,
+		"commitment_branch_write_bytes_total counts each write once")
+}
+
+func TestForkedStorageReachesRoundMetrics(t *testing.T) {
+	k1, u1, _, _ := buildSubsetTouchedWhale(20260707, nibs(3, 7), nil, 700, 0)
+	fk, fu := buildMixedCorpus(555, 200)
+	keys := append(append([][]byte{}, fk...), k1...)
+	upds := append(append([]Update{}, fu...), u1...)
+
+	ms := NewMockState(t)
+	ms.SetConcurrentCommitment(true)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+	_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+
+	require.Positive(t, tr.Forks(), "the whale must take the fork walk")
+	v := tr.metrics.AsValues()
+	assert.GreaterOrEqual(t, v.AddressKeys+v.StorageKeys, uint64(len(keys)),
+		"every touched key is traversed at least once, forked storage included")
+}
+
+func TestMountFoldsAreCounted(t *testing.T) {
+	keys, upds := buildNibbleSpread(t, 16, 4)
+
+	sms := NewMockState(t)
+	require.NoError(t, sms.applyPlainUpdates(keys, upds))
+	seq := NewHexPatriciaHashed(length.Addr, sms, DefaultTrieConfig())
+	defer seq.Release()
+	su := WrapKeyUpdates(t, ModeDirect, KeyToHexNibbleHash, keys, upds)
+	defer su.Close()
+	_, err := seq.Process(context.Background(), su, "", nil, WarmupConfig{})
+	require.NoError(t, err)
+	want := seq.metrics.AsValues()
+
+	for _, grain := range []uint32{0, 2} {
+		ms := NewMockState(t)
+		require.NoError(t, ms.applyPlainUpdates(keys, upds))
+		tr := newParTrie(t, ms, 4)
+		tr.SetForkGrain(grain)
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
+		}
+		_, err := tr.Process(context.Background(), ut, "", nil, WarmupConfig{})
+		require.NoError(t, err)
+
+		v := tr.metrics.AsValues()
+		require.Positive(t, v.Folds, "the round folded at all")
+		assert.Equal(t, want.Folds, v.Folds, "grain %d, %d forks: the parallel round counts every fold the sequential engine counts", grain, tr.Forks())
+		assert.Equal(t, want.Unfolds, v.Unfolds, "grain %d, %d forks: a row a fork opens counts as the unfold the sequential engine performs", grain, tr.Forks())
+		ut.Close()
+		tr.Release()
+	}
 }

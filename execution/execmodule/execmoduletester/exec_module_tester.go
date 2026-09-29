@@ -38,6 +38,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/generics"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -172,7 +173,7 @@ func (emt *ExecModuleTester) Close() {
 		emt.ExecModule.Close()
 	}
 	if emt.tb == nil && emt.Dirs.DataDir != "" {
-		dir.RemoveAll(emt.Dirs.DataDir)
+		_ = dir.RemoveAll(emt.Dirs.DataDir)
 	}
 }
 
@@ -210,30 +211,35 @@ func (emt *ExecModuleTester) SetPeerBlockRange(context.Context, *sentryproto.Set
 func (emt *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
+
 func (emt *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
 	emt.sentMessagesMu.Lock()
 	defer emt.sentMessagesMu.Unlock()
@@ -263,12 +269,15 @@ func (emt *ExecModuleTester) Messages(req *sentryproto.MessagesRequest, stream s
 func (emt *ExecModuleTester) Peers(context.Context, *emptypb.Empty) (*sentryproto.PeersReply, error) {
 	return &sentryproto.PeersReply{}, nil
 }
+
 func (emt *ExecModuleTester) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
 	return &sentryproto.PeerCountReply{Count: 0}, nil
 }
+
 func (emt *ExecModuleTester) PeerById(context.Context, *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
 	return &sentryproto.PeerByIdReply{}, nil
 }
+
 func (emt *ExecModuleTester) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
 	return nil
 }
@@ -278,6 +287,12 @@ func (emt *ExecModuleTester) NodeInfo(context.Context, *emptypb.Empty) (*typespr
 }
 
 type Option func(*options)
+
+func WithParallelStateFlushing(enabled bool) Option {
+	return func(opts *options) {
+		opts.parallelStateFlushing = enabled
+	}
+}
 
 func WithStepSize(stepSize uint64) Option {
 	return func(opts *options) {
@@ -348,9 +363,9 @@ func WithChainConfig(cfg *chain.Config) Option {
 	}
 }
 
-func WithoutAmsterdamBuilderContracts() Option {
+func WithoutSystemContracts() Option {
 	return func(opts *options) {
-		opts.skipAmsterdamBuilderContracts = true
+		opts.skipSystemContracts = true
 	}
 }
 
@@ -373,6 +388,12 @@ func WithMaxReorgDepth(d uint64) Option {
 	}
 }
 
+func WithSlowBlockThreshold(d time.Duration) Option {
+	return func(opts *options) {
+		opts.slowBlockThreshold = &d
+	}
+}
+
 func WithFcuBackgroundPrune() Option {
 	return func(opts *options) {
 		opts.fcuBackgroundPrune = true
@@ -385,22 +406,32 @@ func WithSentryProtocol(protocol uint) Option {
 	}
 }
 
+// WithStateTransitionObserver exposes execution lifecycle boundaries to tests.
+func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Option {
+	return func(opts *options) {
+		opts.stateTransitionObserver = observer
+	}
+}
+
 type options struct {
-	stepSize                      *uint64
-	e2RetireStep                  *uint64
-	experimentalBAL               bool
-	genesis                       *types.Genesis
-	chainConfig                   *chain.Config
-	key                           *ecdsa.PrivateKey
-	engine                        rules.Engine
-	pruneMode                     *prune.Mode
-	withTxPool                    bool
-	enableDomains                 []kv.Domain
-	fcuBackgroundPrune            bool
-	alwaysGenerateChangesets      *bool
-	maxReorgDepth                 *uint64
-	sentryProtocol                uint
-	skipAmsterdamBuilderContracts bool
+	stepSize                 *uint64
+	e2RetireStep             *uint64
+	experimentalBAL          bool
+	genesis                  *types.Genesis
+	chainConfig              *chain.Config
+	key                      *ecdsa.PrivateKey
+	engine                   rules.Engine
+	pruneMode                *prune.Mode
+	withTxPool               bool
+	enableDomains            []kv.Domain
+	fcuBackgroundPrune       bool
+	parallelStateFlushing    bool
+	alwaysGenerateChangesets *bool
+	maxReorgDepth            *uint64
+	slowBlockThreshold       *time.Duration
+	sentryProtocol           uint
+	stateTransitionObserver  execmodule.StateTransitionObserver
+	skipSystemContracts      bool
 }
 
 func applyOptions(opts []Option) options {
@@ -426,7 +457,7 @@ func applyOptions(opts []Option) options {
 			},
 		}
 	}
-	if !opt.skipAmsterdamBuilderContracts {
+	if !opt.skipSystemContracts {
 		addAmsterdamBuilderContracts(opt.genesis)
 	}
 	// engine depends on genesis
@@ -482,7 +513,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		// we can't use tb.TempDir() here because some tests produce names long
 		// enough to cause 'file name too long' errors when reused as paths
 		tb.Cleanup(func() {
-			dir.RemoveAll(tmpdir)
+			_ = dir.RemoveAll(tmpdir)
 		})
 	}
 	ctrl := gomock.NewController(tb)
@@ -491,12 +522,22 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
 	cfg.BatchSize = 5 * datasize.MB
+	// One module per test, many at once: the production budget would let each
+	// claim the whole shared envelope.
+	cfg.StateCacheBudget = 1 * datasize.MB
 	cfg.Sync.BodyDownloadTimeoutSeconds = 10
-	cfg.Sync.ParallelStateFlushing = false
+	cfg.Sync.ParallelStateFlushing = opt.parallelStateFlushing
 	cfg.TxPool.Disable = !withTxPool
 	cfg.Dirs = dirs
 	if opt.alwaysGenerateChangesets != nil {
 		cfg.AlwaysGenerateChangesets = *opt.alwaysGenerateChangesets
+	}
+	if opt.slowBlockThreshold != nil {
+		cfg.Sync.SlowBlockThreshold = opt.slowBlockThreshold
+		if tb != nil {
+			prevReadMetrics := dbg.KVReadLevelledMetrics
+			tb.Cleanup(func() { dbg.KVReadLevelledMetrics = prevReadMetrics })
+		}
 	}
 	if opt.maxReorgDepth != nil {
 		cfg.Sync.MaxReorgDepth = *opt.maxReorgDepth
@@ -524,7 +565,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	logger.SetHandler(log.LvlFilterHandler(logLvl, log.StderrHandler))
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
-	dbOpts := []temporaltest.Option{temporaltest.WithReorgBlockDepth(cfg.Sync.MaxReorgDepth)}
+	var dbOpts []temporaltest.Option
 	if opt.stepSize != nil {
 		dbOpts = append(dbOpts, temporaltest.WithStepSize(*opt.stepSize))
 	}
@@ -587,7 +628,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	// Deploy Prague system contracts (EIP-7002, EIP-7251) when Prague is active.
 	// These are required for the Merge engine's FinalizeAndAssemble to process
 	// withdrawal and consolidation requests.
-	if gspec.Config.IsPrague(0) {
+	if gspec.Config.IsPrague(0) && !opt.skipSystemContracts {
 		if err := blockgen.InitPraguePreDeploys(mock.DB, gspec.Config, mock.Log); err != nil {
 			if tb != nil {
 				tb.Fatal(err)
@@ -618,7 +659,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			func() {}, /* builderNotifyNewTxns */
 			logger,
 			nil,
-			//txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
+			// txpool.WithP2PFetcherWg(&mock.ReceiveWg), // this seems unecessary now status changes are async
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
@@ -784,14 +825,16 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		hook,
 		accum,
 		mock.StateCache,
-		0, // stateCacheBudget: production default; the caches jump-grow on demand
+		cfg.StateCacheBudget,
 		logger,
 		engine,
 		cfg.Sync,
+		cfg.ExperimentalBAL,
 		cfg.FcuBackgroundPrune,
 		false, /* onlySnapDownloadOnStart */
 		readAheader,
 		func() error { return nil },
+		execmodule.WithStateTransitionObserver(opt.stateTransitionObserver),
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
@@ -814,7 +857,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	})
 	mock.StreamWg.Wait()
 
-	//app expecting that genesis will always be in db
+	// app expecting that genesis will always be in db
 	c := &blockgen.ChainPack{
 		Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},
 		Blocks:   []*types.Block{mock.Genesis},

@@ -18,6 +18,8 @@ package backup
 
 import (
 	"encoding/binary"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -25,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -81,7 +84,7 @@ func withWarmupWorkers(t *testing.T, n uint64) {
 }
 
 func TestClearTablesWarmupOff(t *testing.T) {
-	withWarmupWorkers(t, 0) // default: plain one-shot clear, no chunking
+	withWarmupWorkers(t, 0) // plain one-shot clear, no chunking
 
 	db := newWriteMapDB(t)
 	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
@@ -154,4 +157,201 @@ func TestClearTablesMultiChunkWriteMap(t *testing.T) {
 		return ClearTables(t.Context(), db, tx, testTable)
 	}))
 	require.Zero(t, tableCount(t, db))
+}
+
+const dupTestTable = "TD"
+
+func dataFileStat(t *testing.T, dbDir string) os.FileInfo {
+	t.Helper()
+	st, err := os.Stat(filepath.Join(dbDir, dataFileName))
+	require.NoError(t, err)
+	// Windows reads the file id lazily, from whatever file is at the path by then.
+	require.True(t, os.SameFile(st, st))
+	return st
+}
+
+const (
+	testRows = 20_000
+	testDups = 3 // >1, so a lost DupSort flag can't be copied into a plain table
+)
+
+var testVal = make([]byte, 1024)
+
+func openTestDB(dbDir string) kv.RwDB {
+	return mdbx.New(dbcfg.ChainDB, log.New()).Path(dbDir).
+		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{testTable: {}, dupTestTable: {Flags: kv.DupSort}}
+		}).
+		GrowthStep(4 * datasize.MB).MapSize(1 * datasize.GB).WriteMap(true).MustOpen()
+}
+
+// writeTestDB fills a db at dbDir with testRows rows, then deletes the first deleted of them.
+func writeTestDB(t *testing.T, dbDir string, deleted int) {
+	t.Helper()
+	const batch = 2_000
+	require.NoError(t, os.MkdirAll(dbDir, 0o755))
+	db := openTestDB(dbDir)
+	defer db.Close()
+	for from := 0; from < testRows; from += batch {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			c, err := tx.RwCursor(testTable)
+			require.NoError(t, err)
+			defer c.Close()
+			d, err := tx.RwCursorDupSort(dupTestTable)
+			require.NoError(t, err)
+			defer d.Close()
+			for i := from; i < from+batch; i++ {
+				require.NoError(t, c.Append(u64Key(uint64(i)), testVal))
+				for j := range testDups {
+					require.NoError(t, d.AppendDup(u64Key(uint64(i)), u64Key(uint64(i*testDups+j))))
+				}
+			}
+			return nil
+		}))
+	}
+	for from := 0; from < deleted; from += batch {
+		require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+			for i := from; i < from+batch; i++ {
+				require.NoError(t, tx.Delete(testTable, u64Key(uint64(i))))
+				require.NoError(t, tx.Delete(dupTestTable, u64Key(uint64(i))))
+			}
+			return nil
+		}))
+	}
+}
+
+// TestCompactInPlace pins the swap: compaction must leave the db openable at the
+// same path with every row intact — including tables the label's schema doesn't
+// name — and must give back the pages the deletes freed.
+func TestCompactInPlace(t *testing.T) {
+	const deleted = 18_000
+	dbDir := filepath.Join(t.TempDir(), "chaindata")
+	writeTestDB(t, dbDir, deleted)
+
+	dataFile := filepath.Join(dbDir, dataFileName)
+	require.NoError(t, os.Chmod(dataFile, 0o600))
+	before := dataFileStat(t, dbDir)
+
+	require.NoError(t, CompactInPlace(t.Context(), dbDir, dbcfg.ChainDB, log.New()))
+
+	after := dataFileStat(t, dbDir)
+	require.Less(t, after.Size(), before.Size())
+	require.Equal(t, before.Mode().Perm(), after.Mode().Perm())
+	require.FileExists(t, filepath.Join(dbDir, lockFileName))
+
+	db := openTestDB(dbDir)
+	defer db.Close()
+	require.NoError(t, db.View(t.Context(), func(tx kv.Tx) error {
+		n, err := tx.Count(testTable)
+		require.NoError(t, err)
+		require.Equal(t, uint64(testRows-deleted), n)
+
+		nd, err := tx.Count(dupTestTable)
+		require.NoError(t, err)
+		require.Equal(t, uint64((testRows-deleted)*testDups), nd)
+
+		v, err := tx.GetOne(testTable, u64Key(deleted))
+		require.NoError(t, err)
+		require.Len(t, v, len(testVal))
+
+		d, err := tx.CursorDupSort(dupTestTable)
+		require.NoError(t, err)
+		defer d.Close()
+		_, _, err = d.SeekExact(u64Key(deleted))
+		require.NoError(t, err)
+		nDups, err := d.CountDuplicates()
+		require.NoError(t, err)
+		require.Equal(t, uint64(testDups), nDups)
+		for j := range testDups {
+			got, err := d.SeekBothRange(u64Key(deleted), u64Key(uint64(deleted*testDups+j)))
+			require.NoError(t, err)
+			require.Equal(t, u64Key(uint64(deleted*testDups+j)), got)
+		}
+		return nil
+	}))
+}
+
+// TestAutoCompactDatadir: only a db over bloatRatio is rewritten.
+func TestAutoCompactDatadir(t *testing.T) {
+	withAutoCompactMinFree(t, 0)
+	dirs := datadir.New(t.TempDir())
+	writeTestDB(t, dirs.Chaindata, 18_000)
+	writeTestDB(t, dirs.TxPool, 2_000)
+	bloated, healthy := dataFileStat(t, dirs.Chaindata), dataFileStat(t, dirs.TxPool)
+
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
+
+	require.Less(t, dataFileStat(t, dirs.Chaindata).Size(), bloated.Size())
+	require.True(t, os.SameFile(healthy, dataFileStat(t, dirs.TxPool)), "a healthy db must not be rewritten")
+}
+
+// TestAutoCompactDatadirSkipsLockedDatadir: dbs of a locked datadir stay untouched.
+func TestAutoCompactDatadirSkipsLockedDatadir(t *testing.T) {
+	withAutoCompactMinFree(t, 0)
+	dirs := datadir.New(t.TempDir())
+	writeTestDB(t, dirs.Chaindata, 18_000)
+	before := dataFileStat(t, dirs.Chaindata)
+
+	unlock, err := dirs.TryFlock()
+	require.NoError(t, err)
+	defer unlock()
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
+
+	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
+}
+
+func withAutoCompactMinFree(t *testing.T, v datasize.ByteSize) {
+	t.Helper()
+	prev := autoCompactMinFree
+	autoCompactMinFree = v
+	t.Cleanup(func() { autoCompactMinFree = prev })
+}
+
+// TestAutoCompactDatadirSkipsLittleFreeSpace: a small db crossing bloatRatio is not rewritten.
+func TestAutoCompactDatadirSkipsLittleFreeSpace(t *testing.T) {
+	withAutoCompactMinFree(t, datasize.GB)
+	dirs := datadir.New(t.TempDir())
+	writeTestDB(t, dirs.Chaindata, 18_000)
+	before := dataFileStat(t, dirs.Chaindata)
+
+	require.NoError(t, ApplyMigrations(t.Context(), dirs, log.New()))
+
+	require.True(t, os.SameFile(before, dataFileStat(t, dirs.Chaindata)))
+}
+
+// TestDatadirDBs pins the three rules of the datadir scan: a db is found by its
+// mdbx.dat, the label comes from the root it sits under, and the walk reaches
+// caplin/blobs/chaindata.
+func TestDatadirDBs(t *testing.T) {
+	root := t.TempDir()
+	mkDB := func(parts ...string) string {
+		p := filepath.Join(append([]string{root}, parts...)...)
+		require.NoError(t, os.MkdirAll(p, 0o755))
+		require.NoError(t, os.WriteFile(filepath.Join(p, dataFileName), nil, 0o644))
+		return p
+	}
+	chaindata := mkDB("chaindata")
+	txpool := mkDB("txpool")
+	nodes := mkDB("nodes", "eth68")
+	blobs := mkDB("caplin", "blobs", "chaindata")
+	indexing := mkDB("caplin", "indexing")
+
+	// A staging dir lives inside a db whose own mdbx.dat stops the walk above it.
+	mkDB("chaindata", compactDirName)
+
+	found, err := datadirDBs(datadir.Open(root))
+	require.NoError(t, err)
+
+	got := map[string]kv.Label{}
+	for _, db := range found {
+		got[db.path] = db.label
+	}
+	require.Len(t, found, len(got), "a db must be reported once")
+	require.Equal(t, map[string]kv.Label{
+		chaindata: dbcfg.ChainDB,
+		txpool:    dbcfg.TxPoolDB,
+		nodes:     dbcfg.SentryDB,
+		blobs:     dbcfg.CaplinDB,
+		indexing:  dbcfg.CaplinDB,
+	}, got)
 }

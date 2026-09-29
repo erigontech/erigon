@@ -26,13 +26,12 @@ import (
 func transitionSlot(s abstract.BeaconState) error {
 	slot := s.Slot()
 	previousStateRoot := s.PreviousStateRoot()
-	var err error
-
 	if previousStateRoot == (common.Hash{}) {
-		previousStateRoot, err = s.HashSSZ()
+		root, err := s.HashSSZ()
 		if err != nil {
 			return err
 		}
+		previousStateRoot = root
 	}
 
 	beaconConfig := s.BeaconConfig()

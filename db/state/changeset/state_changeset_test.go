@@ -23,7 +23,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -187,83 +186,6 @@ func TestMergeDiffSet(t *testing.T) {
 	require.Equal(t, d1[1], merged[1])
 	require.Equal(t, d2[1], merged[2])
 	require.Equal(t, d2[2], merged[3])
-}
-
-func BenchmarkSerializeDiffSet(b *testing.B) {
-	// Create a realistic diffSet with varying sizes
-	var d []kv.DomainEntryDiff
-	for i := range 1000 {
-		key := fmt.Sprintf("key%08d_padding", i)
-		value := make([]byte, 32+i%64) // varying value sizes
-		d = append(d, kv.DomainEntryDiff{
-			Key:   key,
-			Value: value,
-		})
-	}
-
-	out := make([]byte, 0, 128*1024)
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for b.Loop() {
-		out = changeset.SerializeDiffSet(d, out[:0])
-	}
-}
-
-func BenchmarkWriteDiffSet(b *testing.B) {
-	dirs := datadir.New(b.TempDir())
-	db := mdbxtest.InMem(b, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
-	b.Cleanup(db.Close)
-
-	// Create a realistic StateChangeSet
-	diffSet := createTestDiffSet(b, 10, 100, 10, 100)
-
-	blockHash := common.Hash{0x01, 0x02, 0x03}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; b.Loop(); i++ {
-		ctx := b.Context()
-		tx, err := db.BeginRw(ctx)
-		if err != nil {
-			b.Fatal(err)
-		}
-		defer tx.Rollback() //nolint:gocritic
-		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
-			tx.Rollback()
-			b.Fatal(err)
-		}
-		tx.Rollback() // Don't commit to avoid filling up the DB
-	}
-}
-
-func BenchmarkWriteDiffSetLarge(b *testing.B) {
-	dirs := datadir.New(b.TempDir())
-	db := mdbxtest.InMem(b, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
-	b.Cleanup(db.Close)
-
-	// Create a large StateChangeSet (simulating a heavy block)
-	diffSet := createTestDiffSet(b, 1000, 5000, 10, 10_000)
-
-	blockHash := common.Hash{0x01, 0x02, 0x03}
-
-	b.ResetTimer()
-	b.ReportAllocs()
-
-	for i := 0; b.Loop(); i++ {
-		ctx := b.Context()
-		tx, err := db.BeginRw(ctx)
-		if err != nil {
-			b.Fatal(err)
-		}
-		defer tx.Rollback() //nolint:gocritic
-		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
-			tx.Rollback()
-			b.Fatal(err)
-		}
-		tx.Rollback()
-	}
 }
 
 // createTestDiffSet creates a StateChangeSet with realistic data

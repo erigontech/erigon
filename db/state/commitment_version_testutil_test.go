@@ -254,17 +254,17 @@ func buildMixedRegimeDatadir(t *testing.T, stepSize, frozenSteps uint64) (kv.Tem
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 	writeStepsKeys(t, db, agg, setA, 0, frozenSteps)
 	writeStepsKeys(t, db, agg, setB, frozenSteps, 2*frozenSteps)
-	require.NoError(t, agg.BuildFiles(2*frozenSteps*stepSize))
+	require.NoError(t, agg.BuildFiles(db, 2*frozenSteps*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, false)
 	writeStepsKeys(t, db, agg, setB, 2*frozenSteps, 3*frozenSteps)
-	require.NoError(t, agg.BuildFiles(3*frozenSteps*stepSize))
+	require.NoError(t, agg.BuildFiles(db, 3*frozenSteps*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 
 	db, agg = reopenAggregator(t, db, agg, stepSize)
-	require.NoError(t, agg.OpenFolder())
-	require.NoError(t, agg.BuildMissedAccessors(t.Context(), 1))
+	require.NoError(t, agg.OpenFolder(db))
+	require.NoError(t, agg.BuildMissedAccessors(t.Context(), db, 1))
 	return db, agg, dirs, setA, setB
 }
 
@@ -328,10 +328,10 @@ func wipeCommitment(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, dir
 		}
 	}
 
-	newAgg := testAgg(t, db, dirs, stepSize, log.New())
+	newAgg := testAgg(t, dirs, stepSize, log.New())
 	newDB, err := temporal.New(db, newAgg, nil)
 	require.NoError(t, err)
-	require.NoError(t, newAgg.OpenFolder())
+	require.NoError(t, newAgg.OpenFolder(newDB))
 
 	remaining := collectCommitmentFiles(t, dirs)
 	require.Empty(t, remaining, "commitment files must be fully removed after wipe")
@@ -344,7 +344,7 @@ func reopenAggregator(t *testing.T, db kv.TemporalRwDB, agg *state.Aggregator, s
 	dirs := agg.Dirs()
 	agg.Close()
 
-	newAgg := testAgg(t, db, dirs, stepSize, log.New())
+	newAgg := testAgg(t, dirs, stepSize, log.New())
 	newDB, err := temporal.New(db, newAgg, nil)
 	require.NoError(t, err)
 

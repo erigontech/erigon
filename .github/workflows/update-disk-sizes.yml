@@ -128,6 +128,11 @@ jobs:
           if git ls-remote --exit-code --heads origin "$BRANCH" >/dev/null 2>&1; then
             git fetch origin "$BRANCH:refs/remotes/origin/$BRANCH"
             git checkout -B "$BRANCH" "refs/remotes/origin/$BRANCH"
+            # The long-lived auto branch carries only pending disk-sizes.json
+            # edits; everything else in docs/site comes from base, unstaged so
+            # the commit below stays limited to the two data files.
+            git checkout "origin/$BASE_BRANCH" -- docs/site ':!docs/site/src/data/disk-sizes.json'
+            git reset -q
           else
             git checkout -B "$BRANCH"
           fi

@@ -17,6 +17,8 @@
 package btindex
 
 import (
+	"bytes"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -44,7 +46,7 @@ func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
 	b.Run("Get", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; b.Loop(); i++ {
-			_, _, _, _, err := index.Get(keys[i%len(keys)], getter)
+			_, _, _, _, err := index.Get(keys[i%len(keys)], nil, getter)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -59,4 +61,80 @@ func Benchmark_BtreeIndex_GetVsGetValSize(b *testing.B) {
 			}
 		}
 	})
+}
+
+func BenchmarkBtreeIndexGetValSizeCompressedCode(b *testing.B) {
+	tmp := b.TempDir()
+	logger := log.New()
+	dataPath := filepath.Join(tmp, "code.kv")
+	comp, err := seg.NewCompressor(b.Context(), "code", dataPath, tmp, seg.DefaultCfg, log.LvlDebug, logger)
+	require.NoError(b, err)
+	defer comp.Close()
+	writer := seg.NewWriter(comp, seg.CompressVals)
+	value := bytes.Repeat([]byte{0x5b}, 64*1024)
+	keys := make([][]byte, 256)
+	for i := range keys {
+		keys[i] = fmt.Appendf(nil, "%020d", i)
+		_, err = writer.Write(keys[i])
+		require.NoError(b, err)
+		_, err = writer.Write(value)
+		require.NoError(b, err)
+	}
+	require.NoError(b, comp.Compress())
+	comp.Close()
+	indexPath := filepath.Join(tmp, "code.bti")
+	buildBtreeIndex(b, dataPath, indexPath, seg.CompressVals, 1, logger, true)
+	kvFile, index, err := OpenBtreeIndexAndDataFile(indexPath, dataPath, seg.CompressVals, false)
+	require.NoError(b, err)
+	defer index.Close()
+	defer kvFile.Close()
+	getter := seg.NewReader(kvFile.MakeGetter(), seg.CompressVals)
+	b.ReportAllocs()
+	for i := 0; b.Loop(); i++ {
+		size, found, err := index.GetValSize(keys[i%len(keys)], getter)
+		if err != nil || !found || size != len(value) {
+			b.Fatalf("size=%d, found=%t, error=%v", size, found, err)
+		}
+	}
+}
+
+func BenchmarkBtIndex_Get(b *testing.B) {
+	keyCount := 1_000_000
+	if testing.Short() {
+		keyCount = 10_000
+	}
+	compress := seg.CompressKeys
+
+	for _, M := range []uint64{256, 128, 64, 32} {
+		tmp := b.TempDir()
+		kvPath := generateKV(b, tmp, 20, 10, keyCount, log.New(), compress)
+		keys, err := pivotKeysFromKV(kvPath)
+		require.NoError(b, err)
+
+		indexPath := filepath.Join(tmp, fmt.Sprintf("m%d.bt", M))
+		buildBtreeIndexWithM(b, kvPath, indexPath, compress, M, log.New())
+
+		b.Run(fmt.Sprintf("M%d", M), func(b *testing.B) {
+			decomp, bt, err := OpenBtreeIndexAndDataFile(indexPath, kvPath, compress, false)
+			require.NoError(b, err)
+			defer bt.Close()
+			defer decomp.Close()
+
+			getter := seg.NewReader(decomp.MakeGetter(), compress)
+			rnd := newRnd(uint64(b.N))
+
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				p := rnd.IntN(len(keys))
+				k, _, _, found, err := bt.Get(keys[p], nil, getter)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if !found || !bytes.Equal(keys[p], k) {
+					b.Fatal("key not found or mismatch")
+				}
+			}
+		})
+	}
 }

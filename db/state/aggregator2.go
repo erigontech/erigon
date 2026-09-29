@@ -10,11 +10,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -26,9 +24,7 @@ type AggOpts struct { //nolint:gocritic
 	stepSize                        uint64 // != 0 mean override erigondb.toml settings
 	stepsInFrozenFile               uint64 // != 0 mean override erigondb.toml settings
 	erigondbDomainStepsInFrozenFile uint64
-	reorgBlockDepth                 uint64
-
-	referencesInCommitmentBranches *bool // nil = leave global schema default untouched
+	referencesInCommitmentBranches  *bool // nil = leave global schema default untouched
 
 	genSaltIfNeed       bool
 	sanityOldNaming     bool // prevent start directory with old file names
@@ -38,10 +34,9 @@ type AggOpts struct { //nolint:gocritic
 }
 
 func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return AggOpts{ //Defaults
+	return AggOpts{ // Defaults
 		logger:          log.Root(),
 		dirs:            dirs,
-		reorgBlockDepth: dbg.MaxReorgDepth,
 		genSaltIfNeed:   false,
 		sanityOldNaming: false,
 		disableFsync:    false,
@@ -49,11 +44,11 @@ func New(dirs datadir.Dirs) AggOpts { //nolint:gocritic
 }
 
 func NewTest(dirs datadir.Dirs) AggOpts { //nolint:gocritic
-	return New(dirs).DisableFsync().GenSaltIfNeed(true).ReorgBlockDepth(0).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
+	return New(dirs).DisableFsync().GenSaltIfNeed(true).StepSize(config3.DefaultStepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile)
 }
 
-func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) { //nolint:gocritic
-	//TODO: rename `OpenFolder` to `ReopenFolder`
+func (opts AggOpts) Open(ctx context.Context) (*Aggregator, error) { //nolint:gocritic
+	// TODO: rename `OpenFolder` to `ReopenFolder`
 	if opts.sanityOldNaming {
 		if err := CheckSnapshotsCompatibility(opts.dirs); err != nil {
 			panic(err)
@@ -65,7 +60,7 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 		return nil, err
 	}
 
-	a, err := newAggregator(ctx, opts.dirs, opts.reorgBlockDepth, db, opts.logger)
+	a, err := newAggregator(ctx, opts.dirs, opts.logger)
 	if err != nil {
 		return nil, err
 	}
@@ -91,8 +86,8 @@ func (opts AggOpts) Open(ctx context.Context, db kv.RoDB) (*Aggregator, error) {
 	return a, nil
 }
 
-func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //nolint:gocritic
-	agg, err := opts.Open(ctx, db)
+func (opts AggOpts) MustOpen(ctx context.Context) *Aggregator { //nolint:gocritic
+	agg, err := opts.Open(ctx)
 	if err != nil {
 		panic(fmt.Errorf("fail to open mdbx: %w", err))
 	}
@@ -102,6 +97,7 @@ func (opts AggOpts) MustOpen(ctx context.Context, db kv.RoDB) *Aggregator { //no
 // Setters
 
 func (opts AggOpts) StepSize(s uint64) AggOpts { opts.stepSize = s; return opts } //nolint:gocritic
+
 func (opts AggOpts) StepsInFrozenFile(steps uint64) AggOpts { //nolint:gocritic
 	opts.stepsInFrozenFile = steps
 	return opts
@@ -115,10 +111,6 @@ func (opts AggOpts) ErigondbDomainStepsInFrozenFile(steps uint64) AggOpts { //no
 	opts.erigondbDomainStepsInFrozenFile = steps
 	return opts
 }
-func (opts AggOpts) ReorgBlockDepth(d uint64) AggOpts { //nolint:gocritic
-	opts.reorgBlockDepth = d
-	return opts
-}
 func (opts AggOpts) GenSaltIfNeed(v bool) AggOpts { opts.genSaltIfNeed = v; return opts }   //nolint:gocritic
 func (opts AggOpts) Logger(l log.Logger) AggOpts  { opts.logger = l; return opts }          //nolint:gocritic
 func (opts AggOpts) DisableFsync() AggOpts        { opts.disableFsync = true; return opts } //nolint:gocritic
@@ -128,6 +120,7 @@ func (opts AggOpts) DisableBranchCache() AggOpts { //nolint:gocritic
 	opts.disableBranchCache = true
 	return opts
 }
+
 func (opts AggOpts) SanityOldNaming() AggOpts { //nolint:gocritic
 	opts.sanityOldNaming = true
 	return opts
@@ -144,9 +137,10 @@ func (opts AggOpts) WithErigonDBSettings(s *ErigonDBSettings) AggOpts { //nolint
 
 type workersCfg struct {
 	mu              sync.Mutex
-	editLocks       int // >0 while background build/merge pins config; Preset* writes are no-ops
+	editLocks       int // >0 while background build/merge pins config
 	merge           int // usually 1
 	collateAndBuild int
+	pending         []func() // requests that arrived while pinned
 }
 
 func (w *workersCfg) getMerge() int {
@@ -156,11 +150,7 @@ func (w *workersCfg) getMerge() int {
 }
 
 func (w *workersCfg) setMerge(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		w.merge = n
-	}
+	w.trySet(func() { w.merge = n })
 }
 
 func (w *workersCfg) getCollateAndBuild() int {
@@ -170,20 +160,19 @@ func (w *workersCfg) getCollateAndBuild() int {
 }
 
 func (w *workersCfg) setCollateAndBuild(n int) {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		w.collateAndBuild = n
-	}
+	w.trySet(func() { w.collateAndBuild = n })
 }
 
-// trySet runs fn under mu only while editing is unlocked (no background op holds it).
+// trySet runs fn under mu, or queues it for the last unlockEditing while a background op pins
+// the config: dropping the request loses it for the process — a restart merges before any preset.
 func (w *workersCfg) trySet(fn func()) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	if w.editLocks == 0 {
-		fn()
+	if w.editLocks > 0 {
+		w.pending = append(w.pending, fn)
+		return
 	}
+	fn()
 }
 
 // lockEditing is reentrant: overlapping build/merge ops each hold a lock, and
@@ -200,13 +189,20 @@ func (w *workersCfg) unlockEditing() {
 	if w.editLocks > 0 {
 		w.editLocks--
 	}
+	if w.editLocks != 0 {
+		return
+	}
+	for _, fn := range w.pending {
+		fn()
+	}
+	w.pending = nil
 }
 
 func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 	for _, dirPath := range d.VersionedDirs() {
 		err := filepath.WalkDir(dirPath, func(path string, entry fs.DirEntry, err error) error {
 			if err != nil {
-				if os.IsNotExist(err) { //skip magically disappeared files
+				if os.IsNotExist(err) { // skip magically disappeared files
 					return nil
 				}
 				return err
@@ -217,7 +213,7 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 
 			name := entry.Name()
 			if strings.HasPrefix(name, "v1-") {
-				return errors.New("The datadir has bad snapshot files or they are " +
+				return errors.New("the datadir has bad snapshot files or they are " +
 					"incompatible with the current erigon version. If you want to upgrade from an" +
 					"older version, you may run the following to rename files to the " +
 					"new version: `erigon snapshots update-to-new-ver-format`")
@@ -243,7 +239,6 @@ func CheckSnapshotsCompatibility(d datadir.Dirs) error {
 			}
 			return nil
 		})
-
 		if err != nil {
 			return err
 		}

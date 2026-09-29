@@ -109,8 +109,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	block.Extra = solid.NewExtraData()
 	block.Extra.SetBytes(p.ExtraData)
 	if p.BaseFeePerGas != nil {
-		baseFee := uint256.MustFromBig(p.BaseFeePerGas.ToInt())
-		_, _ = baseFee.MarshalSSZAppend(block.BaseFeePerGas[:0])
+		_, _ = (*uint256.Int)(p.BaseFeePerGas).MarshalSSZAppend(block.BaseFeePerGas[:0])
 	}
 	block.BlockHash = p.BlockHash
 	txs := make([][]byte, len(p.Transactions))
@@ -121,7 +120,7 @@ func (p *ExecutionPayload) ToSSZBlock(version clparams.StateVersion) (*cltypes.E
 	if version >= clparams.CapellaVersion {
 		block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
 		for _, w := range p.Withdrawals {
-			block.Withdrawals.Append(&cltypes.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+			block.Withdrawals.Append(&cltypes.Withdrawal{Index: uint64(w.Index), Validator: uint64(w.Validator), Address: w.Address, Amount: uint64(w.Amount)})
 		}
 	}
 	if p.BlobGasUsed != nil {
@@ -160,7 +159,7 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 		GasUsed:       hexutil.Uint64(block.GasUsed),
 		Timestamp:     hexutil.Uint64(block.Time),
 		ExtraData:     block.Extra.Bytes(),
-		BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+		BaseFeePerGas: (*hexutil.U256)(baseFee),
 		BlockHash:     block.BlockHash,
 		Transactions:  make([]hexutil.Bytes, 0, len(body.Transactions)),
 		Withdrawals:   body.Withdrawals,
@@ -188,7 +187,7 @@ func ExecutionPayloadFromSSZBlock(block *cltypes.Eth1Block, version clparams.Sta
 func newWithdrawalList(ws []*types.Withdrawal) *solid.ListSSZ[*cltypes.Withdrawal] {
 	l := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(mainnetBeaconCfg.MaxWithdrawalsPerPayload), 44)
 	for _, w := range ws {
-		l.Append(&cltypes.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+		l.Append(&cltypes.Withdrawal{Index: uint64(w.Index), Validator: uint64(w.Validator), Address: w.Address, Amount: uint64(w.Amount)})
 	}
 	return l
 }
@@ -199,7 +198,7 @@ func withdrawalsFromList(l *solid.ListSSZ[*cltypes.Withdrawal]) []*types.Withdra
 	}
 	out := make([]*types.Withdrawal, 0, l.Len())
 	l.Range(func(_ int, w *cltypes.Withdrawal, _ int) bool {
-		out = append(out, &types.Withdrawal{Index: w.Index, Validator: w.Validator, Address: w.Address, Amount: w.Amount})
+		out = append(out, &types.Withdrawal{Index: hexutil.Uint64(w.Index), Validator: hexutil.Uint64(w.Validator), Address: w.Address, Amount: hexutil.Uint64(w.Amount)})
 		return true
 	})
 	return out
@@ -293,6 +292,7 @@ func (*ForkChoiceState) EncodingSizeSSZ() int { return 96 }
 func (s *ForkChoiceState) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, s.HeadHash[:], s.SafeBlockHash[:], s.FinalizedBlockHash[:])
 }
+
 func (s *ForkChoiceState) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, s.HeadHash[:], s.SafeBlockHash[:], s.FinalizedBlockHash[:])
 }
@@ -550,6 +550,7 @@ func (*BlobAndProofV1) EncodingSizeSSZ() int { return sszBlobBytes + sszKZGBytes
 func (b *BlobAndProofV1) EncodeSSZ(dst []byte) ([]byte, error) {
 	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), newKZGProof(b.Proof))
 }
+
 func (b *BlobAndProofV1) DecodeSSZ(buf []byte, version int) error {
 	blob := &cltypes.Blob{}
 	proof := &cltypes.KZGProof{}
@@ -571,6 +572,7 @@ func (b *BlobAndProofV2) EncodeSSZ(dst []byte) ([]byte, error) {
 	}
 	return ssz2.MarshalSSZ(dst, newBlob(b.Blob), proofs)
 }
+
 func (b *BlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
 	blob := &cltypes.Blob{}
 	proofs := solid.NewStaticListSSZ[*cltypes.KZGProof](sszCellsPerExtBlob, sszKZGBytes)
@@ -616,9 +618,11 @@ func (n *NullableBlobAndProofV2) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (n *NullableBlobAndProofV2) EncodingSizeSSZ() int { out, _ := n.EncodeSSZ(nil); return len(out) }
+
 func (n *NullableBlobAndProofV2) HashSSZ() ([32]byte, error) {
 	return [32]byte{}, nil
 }
+
 func (*NullableBlobAndProofV2) Clone() clonable.Clonable {
 	return &NullableBlobAndProofV2{}
 }

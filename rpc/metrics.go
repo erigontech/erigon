@@ -63,8 +63,10 @@ func getRPCMethodNames(apiList []API) (methods []string) {
 	for _, api := range apiList {
 		apiType := reflect.TypeOf(api.Service)
 
-		for i := 0; i < apiType.NumMethod(); i++ {
-			method := apiType.Method(i)
+		for method := range apiType.Methods() {
+			if !servedByIface(api.Iface, method.Name) {
+				continue
+			}
 			rpcMethod := fmt.Sprintf("%s_%s", api.Namespace, pascalToCamel(method.Name))
 			methods = append(methods, rpcMethod)
 		}
@@ -88,7 +90,6 @@ func createRPCMetricsLabel(method string, valid bool) string {
 	}
 
 	return fmt.Sprintf(`rpc_duration_seconds{method=%q,success=%q}`, method, status)
-
 }
 
 func newRPCServingTimerMS(method string, valid bool) metrics.Summary {

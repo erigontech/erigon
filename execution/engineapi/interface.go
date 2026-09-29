@@ -49,4 +49,13 @@ type EngineAPI interface {
 	GetBlobsV1(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV1, error)
 	GetBlobsV2(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error)
 	GetBlobsV3(ctx context.Context, blobHashes []common.Hash) (engine_types.BlobsBundleV2, error)
+	GetBlobsV4(ctx context.Context, blobHashes []common.Hash, cellIndices hexutil.Bytes) (engine_types.BlobsBundleV3, error)
 }
+
+// engineRPC is EngineAPI plus the methods the CL calls but never implements itself.
+type engineRPC interface {
+	EngineAPI
+	ExchangeCapabilities(fromCl []string) []string
+}
+
+var _ engineRPC = (*EngineServer)(nil)

@@ -73,7 +73,7 @@ func commitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB, []by
 	value := []byte{0, 0, 0, 0, 1}
 	writeCommitmentRows(t, db, key, nil, commitmentWrite{txNum: 5, value: value})
 	writeAggregationGuard(t, db, 20)
-	require.NoError(t, db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(stepSize))
+	require.NoError(t, db.(state.HasAgg).Agg().(*state.Aggregator).BuildFiles(db, stepSize, unboundedFinalityCtx))
 	return db, key, value
 }
 
@@ -92,7 +92,7 @@ func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB
 	writeCommitmentRows(t, db, commitmentdb.KeyCommitmentState, nil, commitmentWrite{txNum: 20, value: commitmentState})
 	writeAggregationGuard(t, db, 40)
 	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
-	require.NoError(t, agg.BuildFiles(2*stepSize))
+	require.NoError(t, agg.BuildFiles(db, 2*stepSize, unboundedFinalityCtx))
 	require.NoError(t, agg.MergeLoop(t.Context()))
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -237,4 +237,23 @@ func TestBranchCacheCommitRefreshesAfterReadThrough(t *testing.T) {
 	v, _, err := sd.GetLatest(kv.CommitmentDomain, rwTx, key)
 	require.NoError(t, err)
 	require.Equal(t, []byte("v2-branch-bytes"), v, "fresh SD must read the latest committed branch, not the stale read-through entry")
+}
+
+func TestLocalCacheUnwindDoesNotPopulateBranchCache(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := commitmentFileFixture(t, stepSize)
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: []byte{0, 0, 0, 0, 2}})
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New(), execctx.WithLocalCacheUnwind())
+	require.NoError(t, err)
+	defer sd.Close()
+	sd.Unwind(16, nil)
+	_, _, err = sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok, "a speculative session must not seed the shared branch cache")
 }

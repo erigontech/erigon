@@ -22,9 +22,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/rpc/filters"
 )
@@ -44,7 +43,7 @@ type LogsFilter struct {
 	topics          *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal  [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
 	pollingCriteria *filters.FilterCriteria
-	sender          Sub[*types.RPCLog] // nil for aggregate subscriber, for appropriate stream server otherwise
+	sender          Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 // Close closes the sender associated with the LogsFilter.
@@ -65,7 +64,7 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 	}
 }
 
-func newLogsFilter(sender Sub[*types.RPCLog], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria) *LogsFilter {
+func newLogsFilter(sender Sub[*types.Log], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria) *LogsFilter {
 	filter := &LogsFilter{
 		addrs:           concurrent.NewSyncMap[common.Address, int](),
 		topics:          concurrent.NewSyncMap[common.Hash, int](),
@@ -159,7 +158,7 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 		// Decrement the count for AllAddresses
 		activeSubscriptionsLogsAllAddressesGauge.Dec()
 	}
-	f.addrs.Range(func(addr common.Address, count int) error {
+	_ = f.addrs.Range(func(addr common.Address, count int) error {
 		a.aggLogsFilter.addrs.Do(addr, func(value int, exists bool) (int, bool) {
 			if exists {
 				// Decrement the count for subscribed address
@@ -179,7 +178,7 @@ func (a *LogsFilterAggregator) subtractLogFilters(f *LogsFilter) {
 		// Decrement the count for AllTopics
 		activeSubscriptionsLogsAllTopicsGauge.Dec()
 	}
-	f.topics.Range(func(topic common.Hash, count int) error {
+	_ = f.topics.Range(func(topic common.Hash, count int) error {
 		a.aggLogsFilter.topics.Do(topic, func(value int, exists bool) (int, bool) {
 			if exists {
 				// Decrement the count for subscribed topic
@@ -202,7 +201,7 @@ func (a *LogsFilterAggregator) addLogsFilterLocked(f *LogsFilter) {
 		// Increment the count for AllAddresses
 		activeSubscriptionsLogsAllAddressesGauge.Inc()
 	}
-	f.addrs.Range(func(addr common.Address, count int) error {
+	_ = f.addrs.Range(func(addr common.Address, count int) error {
 		// Increment the count for subscribed address
 		activeSubscriptionsLogsAddressesGauge.Inc()
 		a.aggLogsFilter.addrs.DoAndStore(addr, func(value int, exists bool) int {
@@ -215,7 +214,7 @@ func (a *LogsFilterAggregator) addLogsFilterLocked(f *LogsFilter) {
 		// Increment the count for AllTopics
 		activeSubscriptionsLogsAllTopicsGauge.Inc()
 	}
-	f.topics.Range(func(topic common.Hash, count int) error {
+	_ = f.topics.Range(func(topic common.Hash, count int) error {
 		// Increment the count for subscribed topic
 		activeSubscriptionsLogsTopicsGauge.Inc()
 		a.aggLogsFilter.topics.DoAndStore(topic, func(value int, exists bool) int {
@@ -231,12 +230,12 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 	addresses := make(map[common.Address]int)
-	a.aggLogsFilter.addrs.Range(func(k common.Address, v int) error {
+	_ = a.aggLogsFilter.addrs.Range(func(k common.Address, v int) error {
 		addresses[k] = v
 		return nil
 	})
 	topics := make(map[common.Hash]int)
-	a.aggLogsFilter.topics.Range(func(k common.Hash, v int) error {
+	_ = a.aggLogsFilter.topics.Range(func(k common.Hash, v int) error {
 		topics[k] = v
 		return nil
 	})
@@ -245,52 +244,27 @@ func (a *LogsFilterAggregator) getAggMaps() (map[common.Address]int, map[common.
 
 // distributeLog processes an event log and distributes it to all subscribed log filters.
 // It checks each filter to determine if the log should be sent based on the filter's address and topic settings.
-func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) error {
+func (a *LogsFilterAggregator) distributeLog(eventLog *remoteproto.SubscribeLogsReply) {
+	// The same log instance is sent to every matching subscriber, each reading it from
+	// its own goroutine, so it must not be mutated after the first Send.
+	lg := ethutils.RPCLogFromProto(eventLog)
+	addr, topics := lg.Address, lg.Topics
+
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 
-	var lg types.RPCLog
-	var topics []common.Hash
-
-	a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
+	_ = a.logsFilters.Range(func(k LogsSubID, filter *LogsFilter) error {
 		if filter.allAddrs == 0 {
-			_, addrOk := filter.addrs.Get(gointerfaces.ConvertH160toAddress(eventLog.Address))
-			if !addrOk {
+			if _, ok := filter.addrs.Get(addr); !ok {
 				return nil
 			}
 		}
-
-		// Pre-allocate topics slice to the required size to avoid multiple allocations
-		topics = topics[:0]
-		if cap(topics) < len(eventLog.Topics) {
-			topics = make([]common.Hash, 0, len(eventLog.Topics))
+		if filter.allTopics == 0 && !a.chooseTopics(filter, topics) {
+			return nil
 		}
-		for _, topic := range eventLog.Topics {
-			topics = append(topics, gointerfaces.ConvertH256ToHash(topic))
-		}
-
-		if filter.allTopics == 0 {
-			if !a.chooseTopics(filter, topics) {
-				return nil
-			}
-		}
-
-		// Reuse lg object to avoid creating new instances
-		lg.Address = gointerfaces.ConvertH160toAddress(eventLog.Address)
-		lg.Topics = topics
-		lg.Data = eventLog.Data
-		lg.BlockNumber = hexutil.Uint64(eventLog.BlockNumber)
-		lg.TxHash = gointerfaces.ConvertH256ToHash(eventLog.TransactionHash)
-		lg.TxIndex = hexutil.Uint(eventLog.TransactionIndex)
-		lg.BlockHash = gointerfaces.ConvertH256ToHash(eventLog.BlockHash)
-		lg.Index = hexutil.Uint(eventLog.LogIndex)
-		lg.Removed = eventLog.Removed
-		lg.BlockTimestamp = hexutil.Uint64(eventLog.BlockTimestamp)
-
-		filter.sender.Send(&lg)
+		filter.sender.Send(lg)
 		return nil
 	})
-	return nil
 }
 
 // chooseTopics checks if the log topics match the filter's topics.

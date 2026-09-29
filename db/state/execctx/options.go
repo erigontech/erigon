@@ -24,6 +24,7 @@ import (
 type sharedDomainOptions struct {
 	trieCfg              commitment.TrieConfig
 	useSharedBranchCache bool
+	localCacheUnwind     bool
 	mem                  kv.TemporalMemBatch
 	paraTrieDB           kv.TemporalRoDB
 }
@@ -41,7 +42,10 @@ func WithoutDeferredBranchUpdates() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.DeferBranchUpdates = false }
 }
 
-// WithoutSharedBranchCache keeps commitment reads within the transaction snapshot.
+// WithoutSharedBranchCache disables the aggregator-scoped commitment branch cache
+// and its adaptive pin controller. Cache entries are not view-bound, so callers
+// whose commitment reads can reach this cache while another transaction updates
+// it must pass this option.
 func WithoutSharedBranchCache() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
 }
@@ -67,4 +71,9 @@ func WithParaTrieDB(db kv.TemporalRoDB) SharedDomainOption {
 // (e.g. genesis) that wire no trie-context factory for the parallel trie.
 func WithSequentialCommitment() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg.Variant = commitment.VariantHexPatriciaTrie }
+}
+
+// WithLocalCacheUnwind defers shared-cache invalidation until adoption or commit.
+func WithLocalCacheUnwind() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.localCacheUnwind = true }
 }

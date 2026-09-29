@@ -126,15 +126,15 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 	for i := range bal {
 		ac := &bal[i]
 		entry := &types.AccountChanges{
-			Address:        accounts.InternAddress(ac.Address),
-			StorageChanges: make([]*types.SlotChanges, 0, len(ac.StorageChanges)),
+			Address:        ac.Address,
+			StorageChanges: make([]types.SlotChanges, 0, len(ac.StorageChanges)),
 			StorageReads:   make([]accounts.StorageKey, 0, len(ac.StorageReads)),
 			BalanceChanges: make([]*types.BalanceChange, 0, len(ac.BalanceChanges)),
 			NonceChanges:   make([]*types.NonceChange, 0, len(ac.NonceChanges)),
 			CodeChanges:    make([]*types.CodeChange, 0, len(ac.CodeChanges)),
 		}
 		for _, sc := range ac.StorageChanges {
-			slotChanges := &types.SlotChanges{
+			slotChanges := types.SlotChanges{
 				Slot:    accounts.InternKey(common.BytesToHash(sc.Slot)),
 				Changes: make([]*types.StorageChange, 0, len(sc.SlotChanges)),
 			}
@@ -167,7 +167,7 @@ func (bal btBlockAccessList) toBAL() types.BlockAccessList {
 				Bytecode: cc.NewCode,
 			})
 		}
-		result[i] = entry
+		result[i] = *entry
 	}
 	return result
 }
@@ -230,7 +230,7 @@ func (bt *BlockTest) newTester(tb testing.TB) (*execmoduletester.ExecModuleTeste
 	mOpts := []execmoduletester.Option{
 		execmoduletester.WithGenesisSpec(bt.genesis(config)),
 		execmoduletester.WithEngine(engine),
-		execmoduletester.WithoutAmsterdamBuilderContracts(),
+		execmoduletester.WithoutSystemContracts(),
 	}
 	if bt.ExperimentalBAL {
 		mOpts = append(mOpts, execmoduletester.WithExperimentalBAL())

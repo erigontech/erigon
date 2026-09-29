@@ -129,7 +129,8 @@ func readSSZBody(r *http.Request) ([]byte, error) {
 
 func writeSSZ(w http.ResponseWriter, obj interface {
 	EncodeSSZ([]byte) ([]byte, error)
-}) {
+},
+) {
 	out, err := obj.EncodeSSZ(nil)
 	if err != nil {
 		writeSSZError(w, http.StatusInternalServerError, err.Error())
@@ -152,8 +153,7 @@ func writeEngineError(w http.ResponseWriter, err error) {
 	if err == nil {
 		return
 	}
-	var rpcErr rpc.Error
-	if errors.As(err, &rpcErr) {
+	if rpcErr, ok := errors.AsType[rpc.Error](err); ok {
 		switch rpcErr.ErrorCode() {
 		case engine_helpers.UnknownPayloadErr.Code:
 			writeSSZError(w, http.StatusNotFound, err.Error())

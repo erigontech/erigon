@@ -59,7 +59,7 @@ func NewStateV3(domains *execctx.SharedDomains, persistReceiptsCacheV2 bool, log
 		domains:                domains,
 		logger:                 logger,
 		persistReceiptsCacheV2: persistReceiptsCacheV2,
-		//trace: true,
+		// trace: true,
 	}
 }
 
@@ -86,11 +86,14 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // fields cannot be resurrected, and it carries at most the balance EIP-8246
 // preserves plus its storage-delete cascade — Normalize drops the nonce,
 // incarnation and code hash, and assertSelfDestructNormalized pins that.
-func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
-	if writes != nil && !writes.IsEmpty() {
+func (ws *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
+	if ws != nil && !ws.IsEmpty() {
 		if dbg.AssertEnabled {
-			writes.assertSelfDestructNormalized()
+			ws.assertSelfDestructNormalized()
 		}
+		// One buffer for every storage key this call writes: consumers copy what they keep.
+		// Made on the first slot, since an array here escapes even when unused.
+		var storageKey []byte
 		// Field presence is tracked with has-flags rather than pointers: the
 		// pointer form heap-escapes one allocation per field per address.
 		type addrState struct {
@@ -120,40 +123,40 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 		}
 		// Range the typed collections directly rather than AllHeaders()+GetX —
 		// the header walk plus a second per-value map probe is strictly more work.
-		for a, vw := range writes.Balances() {
+		for a, vw := range ws.Balances() {
 			d := ensure(a)
 			d.balance = vw.Val
 			d.hasBalance = true
 		}
-		for a, vw := range writes.Nonces() {
+		for a, vw := range ws.Nonces() {
 			d := ensure(a)
 			d.nonce = vw.Val
 			d.hasNonce = true
 		}
-		for a, vw := range writes.Incarnations() {
+		for a, vw := range ws.Incarnations() {
 			d := ensure(a)
 			d.incarnation = vw.Val
 			d.hasIncarnation = true
 		}
 		// CodeHashes before Codes: an explicit CodeHashPath write wins; a code
 		// write only supplies the hash when no explicit one was recorded.
-		for a, vw := range writes.CodeHashes() {
+		for a, vw := range ws.CodeHashes() {
 			d := ensure(a)
 			d.codeHash = vw.Val
 			d.hasCodeHash = true
 		}
-		for a, vw := range writes.Codes() {
+		for a, vw := range ws.Codes() {
 			d := ensure(a)
 			d.code = vw.Val.Bytes
 			d.codeWritten = true
 		}
-		for a, vw := range writes.SelfDestructs() {
+		for a, vw := range ws.SelfDestructs() {
 			ensure(a).selfDestruct = vw.Val
 		}
-		for a, vw := range writes.createContract {
+		for a, vw := range ws.createContract {
 			ensure(a).createContract = vw.Val
 		}
-		for a, byKey := range writes.Storages() {
+		for a, byKey := range ws.Storages() {
 			d := ensure(a)
 			for k, vw := range byKey {
 				d.storage = append(d.storage, storageItem{k, vw.Val})
@@ -224,19 +227,13 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			}
 
 			// Contract creation: clear stale storage before writing new account.
-			//
-			// An address with no committed account holds no committed storage:
-			// storage is only written for an account that exists, and deleting
-			// an account wipes its storage prefix. So probe the account first —
-			// that read is served by the per-file existence filters, while the
-			// prefix walk has to seek the .bt index of every storage .kv file.
 			if d.createContract {
-				prevAcc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+				hasAcc, err := hasCommittedAccount(domains, roTx, address[:])
 				if err != nil {
 					return err
 				}
-				if len(prevAcc) == 0 {
-					if err := assertNoCommittedStorage(domains, roTx, address[:]); err != nil {
+				if !hasAcc {
+					if err := assertNoCommittedStorage(domains, roTx, address[:], "createContract"); err != nil {
 						return err
 					}
 				} else if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
@@ -314,9 +311,12 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 
 			for _, item := range d.storage {
 				key := item.key.Value()
-				composite := make([]byte, 0, len(address)+len(key))
-				composite = append(composite, address[:]...)
-				composite = append(composite, key[:]...)
+				if storageKey == nil {
+					storageKey = make([]byte, length.Addr+length.Hash)
+				}
+				copy(storageKey, address[:])
+				copy(storageKey[length.Addr:], key[:])
+				composite := storageKey
 				v := item.value.Bytes()
 				if len(v) == 0 {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
@@ -814,6 +814,9 @@ type Writer struct {
 	trace       bool
 	accumulator *shards.Accumulator
 	txNum       uint64
+	// storageKey is the address+slot the next storage write addresses. Consumers copy what
+	// they keep; the buffer holds only across sequential writes, and a Writer is used that way.
+	storageKey [length.Addr + length.Hash]byte
 }
 
 func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint64) *Writer {
@@ -821,7 +824,7 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 		tx:          tx,
 		accumulator: accumulator,
 		txNum:       txNum,
-		//trace: true,
+		// trace: true,
 	}
 }
 
@@ -832,22 +835,50 @@ func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account,
 	return nil, nil, nil, nil
 }
 
+// hasCommittedAccount probes the account domain for addr. An address with no
+// committed account holds no committed storage: storage is only written for an
+// account that exists, and deleting an account wipes its storage prefix. The
+// probe is served by the per-file existence filters, while a storage-prefix walk
+// has to seek the .bt index of every storage .kv file — the same price whether
+// the address owns a thousand slots or none.
+func hasCommittedAccount(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) (bool, error) {
+	enc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, addr)
+	if err != nil {
+		return false, err
+	}
+	return len(enc) > 0, nil
+}
+
 // assertNoCommittedStorage panics when addr has committed storage but no
-// committed account, so a violation of that invariant surfaces instead of
-// silently skipping a storage wipe. No-op unless asserts are enabled.
-func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) error {
+// committed account, so a violation of the hasCommittedAccount invariant
+// surfaces instead of silently skipping a storage wipe. The what argument names
+// the caller so a trip points at the right path. No-op unless asserts are
+// enabled.
+func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte, what string) error {
 	if !dbg.AssertEnabled {
 		return nil
 	}
-	found := 0
+	// IteratePrefix does not resolve through sd.parent, while the account probe
+	// does, so a row this walk returns may already be tombstoned there. Re-read
+	// each hit the way the probe reads, or a parent-deleted address trips the
+	// assert on a state that is valid. The re-reads happen after the walk:
+	// IteratePrefix holds the domain's RLock across the callback, and GetLatest
+	// takes it again, which a writer queued between the two turns into a deadlock.
+	var candidates [][]byte
 	if err := domains.IteratePrefix(kv.StorageDomain, addr, roTx, func(k, v []byte) (bool, error) {
-		found++
-		return false, nil
+		candidates = append(candidates, bytes.Clone(k))
+		return true, nil
 	}); err != nil {
 		return err
 	}
-	if found > 0 {
-		panic(fmt.Sprintf("createContract: %x has storage but no account", addr))
+	for _, k := range candidates {
+		cur, _, err := domains.GetLatest(kv.StorageDomain, roTx, k)
+		if err != nil {
+			return err
+		}
+		if len(cur) > 0 {
+			panic(fmt.Sprintf("%s: %x has storage but no account", what, addr))
+		}
 	}
 	return nil
 }
@@ -858,7 +889,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	}
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
-		//del, before create: to clanup code/storage
+		// del, before create: to clanup code/storage
 		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
 			return err
 		}
@@ -928,9 +959,9 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if !key.IsNil() {
 		keyValue = key.Value()
 	}
-	composite := make([]byte, 0, len(addressValue)+len(keyValue))
-	composite = append(composite, addressValue[:]...)
-	composite = append(composite, keyValue[:]...)
+	copy(w.storageKey[:], addressValue[:])
+	copy(w.storageKey[length.Addr:], keyValue[:])
+	composite := w.storageKey[:]
 	v := value.Bytes()
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
@@ -977,7 +1008,7 @@ type ReaderV3 struct {
 
 func NewReaderV3(getter execctxapi.StateGetter) *ReaderV3 {
 	return &ReaderV3{
-		//trace:  true,
+		// trace:  true,
 		getter: getter,
 	}
 }
@@ -1392,6 +1423,13 @@ func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Ac
 	return nil, nil
 }
 
+// HasAccount goes through ReadAccountData so it sees blockCache, which the promoted
+// ReaderV3 method would skip.
+func (r *CachedReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	acc, err := r.ReadAccountData(address)
+	return acc != nil, err
+}
+
 func (r *CachedReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	if r.blockCache != nil && r.readCurrent {
 		if code, ok := r.blockCache.GetCurrentCode(address); ok {
@@ -1443,20 +1481,15 @@ func (r *CachedReaderV3) ReadAccountStorage(address accounts.Address, key accoun
 	return v, ok, nil
 }
 
-func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
-	r.addr = address.Value()
-	// this is an optimization, but also checks the account is checked in the domain
-	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{}); len(enc) == 0 {
-		return false, err
-	}
-	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, r.addr[:])
-	return hasStorage, err
-}
-
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
 	return acc, err
+}
+
+func (r *ReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	r.addr = address.Value()
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
+	return len(enc) > 0, err
 }
 
 func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
@@ -1679,27 +1712,6 @@ func (r *bufferedReader) ReadAccountStorage(address accounts.Address, key accoun
 	return r.reader.ReadAccountStorage(address, key)
 }
 
-func (r *bufferedReader) HasStorage(address accounts.Address) (bool, error) {
-	r.bufferedState.accountsMutex.RLock()
-	so, ok := r.bufferedState.accounts[address]
-
-	if ok {
-		if so.data == &deleted {
-			r.bufferedState.accountsMutex.RUnlock()
-			return false, nil
-		}
-
-		if so.storage != nil && so.storage.Len() > 0 {
-			// TODO - we really need to return the first key
-			// for this we need to order the list of hashes
-			r.bufferedState.accountsMutex.RUnlock()
-			return true, nil
-		}
-	}
-	r.bufferedState.accountsMutex.RUnlock()
-	return r.reader.HasStorage(address)
-}
-
 func (r *bufferedReader) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	var code []byte
 	r.bufferedState.accountsMutex.RLock()
@@ -1784,10 +1796,11 @@ func returnReadList(v ReadLists) {
 	if v == nil {
 		return
 	}
-	//for _, tbl := range v {
-	//	clear(tbl.Keys)
-	//	clear(tbl.Vals)
-	//	tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
-	//}
+	// Not optional: Vals pins what the txn read until the list is reused.
+	for _, tbl := range v {
+		clear(tbl.Keys)
+		clear(tbl.Vals)
+		tbl.Keys, tbl.Vals = tbl.Keys[:0], tbl.Vals[:0]
+	}
 	readListPool.Put(v)
 }

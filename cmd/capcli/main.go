@@ -18,21 +18,20 @@ package main
 
 import (
 	"context"
+	"fmt"
+	"os"
 
-	"github.com/alecthomas/kong"
+	"github.com/urfave/cli/v3"
 )
 
-type Context struct {
-	context.Context
-	kctx *kong.Context
-}
-
 func main() {
-	ctx := kong.Parse(&CLI)
-	// Call the Run() method of the selected parsed command.
-	err := ctx.Run(&Context{
-		kctx:    ctx,
-		Context: context.TODO(),
-	})
-	ctx.FatalIfErrorf(err)
+	app := &cli.Command{
+		Name:     "capcli",
+		Usage:    "Caplin command line interface",
+		Commands: commands(),
+	}
+	if err := app.Run(context.Background(), os.Args); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 }

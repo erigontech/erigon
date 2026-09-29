@@ -56,6 +56,7 @@ type txlBlockReader struct {
 func (r txlBlockReader) CanPruneTo(cur uint64) uint64 {
 	return freezeblocks.CanDeleteTo(cur, r.frozen)
 }
+
 func (r txlBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 	return freezeblocks.NewBlockReader(nil).TxnumReader()
 }
@@ -77,6 +78,7 @@ func txlMinTxNum(block uint64) uint64 {
 	}
 	return 2 + (block-1)*(txlTxPerBlock+2)
 }
+
 func txlMaxTxNum(block uint64) uint64 {
 	if block == 0 {
 		return 1
@@ -152,8 +154,10 @@ func (f txlFixture) build(t *testing.T) (kv.TemporalRwTx, TxLookupCfg, *PruneSta
 
 	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(config3.DefaultPruneDistance)},
 		dir, &txlBlockReader{frozen: frozen})
-	s := &PruneState{ID: stages.TxLookup, ForwardProgress: txlBlocks, PruneProgress: f.pruneProgress,
-		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
+	s := &PruneState{
+		ID: stages.TxLookup, ForwardProgress: txlBlocks, PruneProgress: f.pruneProgress,
+		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true},
+	}
 	return tx, cfg, s
 }
 

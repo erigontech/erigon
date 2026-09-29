@@ -128,8 +128,7 @@ func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Conte
 		func(key pendingGloasSidecarKey, _ pendingGloasSidecar) {
 			log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
 				"slot", key.slot, "blockRoot", key.beaconBlockRoot.String(), "index", key.index)
-		},
-		nil)
+		})
 }
 
 func (s *dataColumnSidecarService) Names() []string {
@@ -408,11 +407,11 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 
 // scheduleSidecarForLaterProcessing queues a GLOAS sidecar until its block arrives.
 func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar, subnet *uint64) {
-	_, err := s.pendingGloasSidecars.enqueueLazy(pendingGloasSidecar{
+	err := s.pendingGloasSidecars.enqueueLazy(pendingGloasSidecar{
 		sidecar: sidecar,
 		subnet:  subnet,
 	}, func() (pendingGloasSidecarKey, error) { return pendingGloasSidecarKeyFor(sidecar) })
-	if err != nil {
+	if err != nil && !errors.Is(err, errPendingJobQueueFull) {
 		log.Warn("[dataColumnSidecarService] failed to hash pending GLOAS sidecar",
 			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
 	}
