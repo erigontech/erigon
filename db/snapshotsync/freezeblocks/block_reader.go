@@ -772,7 +772,7 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 }
 
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
-	return readBody(ctx, r, tx, hash, blockHeight, "BodyWithTransactions", rawdb.ReadBodyWithTransactions,
+	return readBody(ctx, r, tx, hash, blockHeight, rawdb.ReadBodyWithTransactions,
 		func(body *types.Body, baseTxnID uint64, txCount uint32, txnSeg *snapshotsync.VisibleSegment, buf []byte) (*types.Body, error) {
 			txs, senders, err := r.txsFromSnapshot(baseTxnID, txCount, txnSeg, buf)
 			if err != nil || txs == nil {
@@ -787,7 +787,7 @@ func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, ha
 // BodyWithRawTransactions is BodyWithTransactions with each transaction left in its binary
 // (canonical EIP-2718) encoding instead of decoded.
 func (r *BlockReader) BodyWithRawTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (*types.RawBody, error) {
-	return readBody(ctx, r, tx, hash, blockHeight, "BodyWithRawTransactions", rawdb.ReadRawBody,
+	return readBody(ctx, r, tx, hash, blockHeight, rawdb.ReadRawBody,
 		func(body *types.Body, baseTxnID uint64, txCount uint32, txnSeg *snapshotsync.VisibleSegment, buf []byte) (*types.RawBody, error) {
 			txs := make([][]byte, txCount)
 			ok, err := frozenTxns(baseTxnID, txCount, txnSeg, buf, func(i uint32, _, stored []byte) error {
@@ -804,14 +804,14 @@ func (r *BlockReader) BodyWithRawTransactions(ctx context.Context, tx kv.Getter,
 
 // readBody finds the body of block hash at blockHeight: in the db through fromDB, or else in the
 // block files, where fromFiles reads the txns of the frozen body. It returns nil when neither holds it.
-func readBody[B any](ctx context.Context, r *BlockReader, tx kv.Getter, hash common.Hash, blockHeight uint64, method string,
+func readBody[B any](ctx context.Context, r *BlockReader, tx kv.Getter, hash common.Hash, blockHeight uint64,
 	fromDB func(kv.Getter, common.Hash, uint64) (*B, error),
 	fromFiles func(body *types.Body, baseTxnID uint64, txCount uint32, txnSeg *snapshotsync.VisibleSegment, buf []byte) (*B, error),
 ) (*B, error) {
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
 	if dbgLogs {
-		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).%s(hash=%x,blk=%d) -> ", r.FrozenBlocksInView(tx), method, hash, blockHeight)
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(blocksInView=%d).readBody(hash=%x,blk=%d) -> ", r.FrozenBlocksInView(tx), hash, blockHeight)
 	}
 
 	maxBlockNumInFiles := r.FrozenBlocksInView(tx)
