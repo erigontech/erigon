@@ -111,13 +111,8 @@ type attesterSlashingErrorStore struct {
 
 type onBlockErrorStore struct {
 	forkchoice.ForkChoiceStorage
-	ready *atomic.Bool
-	calls *atomic.Int32
-}
-
-type failFirstUpdateDB struct {
-	kv.RwDB
-	failed bool
+	err   error
+	calls atomic.Int32
 }
 
 type doneObservedContext struct {
@@ -131,24 +126,13 @@ func (c *doneObservedContext) Done() <-chan struct{} {
 	return c.Context.Done()
 }
 
-func (db *failFirstUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
-	if !db.failed {
-		db.failed = true
-		return errors.New("database unavailable")
-	}
-	return db.RwDB.Update(ctx, f)
-}
-
 func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool) error {
 	return s.err
 }
 
-func (s onBlockErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+func (s *onBlockErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
 	s.calls.Add(1)
-	if !s.ready.Load() {
-		return forkchoice.ErrBlockTooEarly
-	}
-	return nil
+	return s.err
 }
 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
@@ -268,7 +252,7 @@ func TestBlockServiceIgnoresLocalExecutionFailure(t *testing.T) {
 		t.Fatal("timed out waiting for scheduled block retry")
 	}
 	require.ErrorIs(t, attempt.err, forkchoice.ErrNewPayloadNoStatus)
-	require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
+	require.Equal(t, blockRetryInitialDelay, job.retryDelay)
 	attempt = job.attempt
 	impl.processScheduledBlock(t.Context(), blockRoot, job, job.retryAfter.Add(-time.Nanosecond))
 	require.Same(t, attempt, job.attempt, "gossip retries must respect the EL backoff")
@@ -754,13 +738,11 @@ func TestBlockServiceGossipReservationCanBeReleased(t *testing.T) {
 func TestBlockServiceQueuesClockBoundaryBlockForRetry(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
-	var ready atomic.Bool
-	var calls atomic.Int32
-	service.(*blockService).forkchoiceStore = onBlockErrorStore{
+	processing := &onBlockErrorStore{
 		ForkChoiceStorage: fcu,
-		ready:             &ready,
-		calls:             &calls,
+		err:               forkchoice.ErrBlockTooEarly,
 	}
+	service.(*blockService).forkchoiceStore = processing
 
 	require.NoError(t, service.ProcessMessage(t.Context(), nil, child))
 	root, err := child.Block.HashSSZ()
@@ -773,13 +755,13 @@ func TestBlockServiceQueuesClockBoundaryBlockForRetry(t *testing.T) {
 	impl.processScheduledBlock(t.Context(), root, job, time.Now())
 	_, queued = impl.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, queued)
-	require.Equal(t, int32(2), calls.Load())
+	require.Equal(t, int32(2), processing.calls.Load())
 
-	ready.Store(true)
+	processing.err = nil
 	impl.processScheduledBlock(t.Context(), root, job, time.Now())
 	_, queued = impl.blocksScheduledForLaterExecution.Load(root)
 	require.False(t, queued)
-	require.Equal(t, int32(3), calls.Load())
+	require.Equal(t, int32(3), processing.calls.Load())
 }
 
 func TestBlockServiceCommittedReservationAllowsExactRESTReplayOnly(t *testing.T) {
@@ -862,7 +844,7 @@ func TestBlockServiceP2PDuplicateIsIgnoredBeforeHashing(t *testing.T) {
 
 func TestScheduledBlockRepairsDatabaseWhenHeaderAlreadyExists(t *testing.T) {
 	underlying := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
-	db := &failFirstUpdateDB{RwDB: underlying}
+	db := &blockDBError{RwDB: underlying, failUpdateAt: 1, updateErr: errors.New("database unavailable")}
 	fcu := mock_services.NewForkChoiceStorageMock(t)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
 	root, err := block.Block.HashSSZ()
@@ -875,10 +857,10 @@ func TestScheduledBlockRepairsDatabaseWhenHeaderAlreadyExists(t *testing.T) {
 	require.True(t, ok)
 	job := jobValue.(*blockJob)
 	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
-	require.True(t, db.failed)
+	require.ErrorIs(t, job.lastAttempt.err, db.updateErr)
 	_, ok = service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
-	service.processScheduledBlock(t.Context(), root, job, job.creationTime)
+	service.processScheduledBlock(t.Context(), root, job, job.retryAfter)
 	_, ok = service.blocksScheduledForLaterExecution.Load(root)
 	require.False(t, ok)
 
@@ -967,19 +949,29 @@ func TestPublishedBlockJobIsNotDowngradedByBlockOnlyRecovery(t *testing.T) {
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	service := &blockService{}
-	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return forkchoice.ErrNewPayloadNoStatus })
+	calls := 0
+	failure := forkchoice.ErrNewPayloadNoStatus
+	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+		calls++
+		return failure
+	})
 	fullValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
 	job := fullValue.(*blockJob)
 	service.processScheduledBlock(t.Context(), root, job, time.Now())
-	require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
+	require.Equal(t, blockRetryInitialDelay, job.retryDelay)
 	retryAfter := job.retryAfter
 	service.ScheduleBlockForLaterProcessing(block)
 	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
 	require.Same(t, fullValue, currentValue)
 	require.Equal(t, retryAfter, job.retryAfter)
-	require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
+	require.Equal(t, blockRetryInitialDelay, job.retryDelay)
+	require.NotNil(t, job.store)
+	failure = nil
+	service.processScheduledBlock(t.Context(), root, job, job.retryAfter)
+	require.Equal(t, 2, calls, "a block-only duplicate must preserve the publication callback")
+	require.NoError(t, handle.Wait(t.Context()))
 }
 
 func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
@@ -994,7 +986,7 @@ func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
 	service := &blockService{}
 	service.blocksScheduledForLaterExecution.Store(root, newer)
 	service.processScheduledBlock(t.Context(), root, newer, time.Now())
-	require.Equal(t, blockELRetryInitialDelay, newer.retryDelay)
+	require.Equal(t, blockRetryInitialDelay, newer.retryDelay)
 	retryAfter := newer.retryAfter
 
 	reused, generation := service.reuseScheduledBlockJob(root, newer, older, older.store)
@@ -1005,7 +997,7 @@ func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
 	require.True(t, ok)
 	require.Same(t, newer, currentValue)
 	require.Equal(t, retryAfter, newer.retryAfter)
-	require.Equal(t, blockELRetryInitialDelay, newer.retryDelay)
+	require.Equal(t, blockRetryInitialDelay, newer.retryDelay)
 }
 
 func TestPublishedBlockUpgradeSurvivesStaleBlockOnlyWorker(t *testing.T) {
@@ -1334,26 +1326,6 @@ func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
 	}
 }
 
-// ==================== GLOAS (EIP-7732/ePBS) Tests ====================
-//
-// NOTE: GLOAS-specific ProcessMessage tests are currently not included because:
-// 1. GLOAS-specific validation (bid checks, parent payload checks) happens AFTER
-//    signature verification in the ProcessMessage flow
-// 2. Signature verification requires properly signed blocks with matching validator keys
-// 3. We don't have GLOAS test data with valid signatures available yet
-//
-// The GLOAS validation code is tested indirectly through:
-// - Pre-GLOAS tests that verify the overall ProcessMessage flow
-// - The validation code being structurally similar to pre-GLOAS validation
-//
-// Once GLOAS test vectors with proper signatures are available, these tests can be added:
-// - TestBlockServiceGloasMismatchedParentBlockRoot
-// - TestBlockServiceGloasParentPayloadNotSeen
-// - TestBlockServiceGloasParentPayloadInvalid
-// - TestBlockServiceGloasSuccess
-//
-// For now, the GLOAS validation code path is verified by code review and integration tests.
-
 func TestValidateGloasBlockBodyLimitsRejectsOversizedOperationAndRequests(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxProposerSlashings = 1
@@ -1414,42 +1386,61 @@ func TestBlockServiceDecodeGossipMessageStrictPreGloasCompatibility(t *testing.T
 }
 
 func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing.T) {
-	service := &blockService{}
-	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
-	root, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	firstStarted := make(chan struct{})
-	firstRelease := make(chan struct{})
-	service.scheduleBlockForLaterProcessing(block, func(context.Context) error {
-		close(firstStarted)
-		<-firstRelease
-		return nil
-	})
-	firstDone := make(chan struct{})
-	go func() {
-		service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
-		close(firstDone)
-	}()
-	<-firstStarted
-	secondCalls := 0
-	handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
-		secondCalls++
-		return nil
-	})
-	waitDone := make(chan error, 1)
-	go func() { waitDone <- handle.Wait(t.Context()) }()
-	close(firstRelease)
-	<-firstDone
-	_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
-	require.True(t, scheduled)
-	select {
-	case err := <-waitDone:
-		t.Fatalf("waiter completed for superseded store generation: %v", err)
-	default:
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{name: "success"},
+		{name: "EL failure", err: forkchoice.ErrNewPayloadNoStatus},
+		{name: "storage failure", err: errBlockStorage},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &blockService{}
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			firstStarted := make(chan struct{})
+			firstRelease := make(chan struct{})
+			releaseFirst := sync.OnceFunc(func() { close(firstRelease) })
+			service.scheduleBlockForLaterProcessing(block, func(context.Context) error {
+				close(firstStarted)
+				<-firstRelease
+				return tc.err
+			})
+			job := serviceJob(t, service, root)
+			firstDone := make(chan struct{})
+			go func() {
+				service.processScheduledBlock(t.Context(), root, job, time.Now())
+				close(firstDone)
+			}()
+			t.Cleanup(func() {
+				releaseFirst()
+				<-firstDone
+			})
+			<-firstStarted
+			secondCalls := 0
+			handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+				secondCalls++
+				return nil
+			})
+			waitDone := make(chan error, 1)
+			go func() { waitDone <- handle.Wait(t.Context()) }()
+			releaseFirst()
+			<-firstDone
+			_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
+			require.True(t, scheduled)
+			require.True(t, job.retryAfter.IsZero(), "a stale attempt must not delay the new store generation")
+			require.Zero(t, job.retryDelay)
+			select {
+			case err := <-waitDone:
+				t.Fatalf("waiter completed for superseded store generation: %v", err)
+			default:
+			}
+			service.processScheduledBlock(t.Context(), root, job, time.Now())
+			require.NoError(t, <-waitDone)
+			require.Equal(t, 1, secondCalls)
+		})
 	}
-	service.processScheduledBlock(context.Background(), root, serviceJob(t, service, root), time.Now())
-	require.NoError(t, <-waitDone)
-	require.Equal(t, 1, secondCalls)
 }
 
 func TestPublishedBlockJobTransientFailureKeepsWaiterUntilRetrySucceeds(t *testing.T) {

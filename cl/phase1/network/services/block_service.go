@@ -76,6 +76,7 @@ type blockJob struct {
 	lastAttempt         *blockJobAttempt
 	retryAfter          time.Time
 	retryDelay          time.Duration
+	storageErrorLogged  bool
 }
 
 type blockJobAttempt struct {
@@ -132,6 +133,19 @@ func newFailedBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Cont
 	job.terminal = true
 	close(job.attempt.done)
 	return job
+}
+
+func (job *blockJob) logStorageError(err error) {
+	if !errors.Is(err, errBlockStorage) {
+		return
+	}
+	job.mu.Lock()
+	alreadyLogged := job.storageErrorLogged
+	job.storageErrorLogged = true
+	job.mu.Unlock()
+	if !alreadyLogged {
+		log.Warn("Failed to store beacon block", "slot", job.block.Block.Slot, "proposer", job.block.Block.ProposerIndex, "err", err)
+	}
 }
 
 type blockReservation struct {
@@ -270,7 +284,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			return nil
 		}
 		if errors.Is(err, forkchoice.ErrNewPayloadNoStatus) || errors.Is(err, errBlockStorage) {
-			b.ScheduleBlockForLaterProcessing(msg)
+			job, _ := b.scheduleBlockForLaterProcessing(msg, nil)
+			job.logStorageError(err)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		return err
@@ -498,6 +513,7 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 	}
 	finalizedCheckpoint := b.forkchoiceStore.FinalizedCheckpoint()
 
+	// Retry admission requires a verified signature.
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
@@ -515,7 +531,6 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		}
 		return nil
 	}); err != nil {
-		// Only queue dependency failures after the signature has been verified.
 		return err
 	}
 
@@ -1011,6 +1026,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		store = func(ctx context.Context) error { return b.processAndStoreBlock(ctx, job.block) }
 	}
 	err := store(ctx)
+	job.logStorageError(err)
 	job.mu.Lock()
 	job.running = false
 	if job.terminal && job.completedGeneration >= generation {
@@ -1022,13 +1038,13 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	close(attempt.done)
 	job.lastAttempt = attempt
 	latest := generation == job.storeGeneration
-	// Other dependency failures keep the fast retry cadence without resetting
-	// the EL backoff. Alternating failure types must not defeat the delay.
-	if latest && errors.Is(err, forkchoice.ErrNewPayloadNoStatus) {
+	// Preserve the accumulated delay across other errors so alternating failures
+	// cannot bypass backoff.
+	if latest && (errors.Is(err, forkchoice.ErrNewPayloadNoStatus) || errors.Is(err, errBlockStorage)) {
 		if job.retryDelay == 0 {
-			job.retryDelay = blockELRetryInitialDelay
+			job.retryDelay = blockRetryInitialDelay
 		} else {
-			job.retryDelay = min(2*job.retryDelay, blockELRetryMaxDelay)
+			job.retryDelay = min(2*job.retryDelay, blockRetryMaxDelay)
 		}
 		job.retryAfter = time.Now().Add(job.retryDelay)
 	}
