@@ -15,19 +15,6 @@ Updating to the latest version of Erigon gives you access to the latest features
 * **Terminate your Erigon**: End your current Erigon session by pressing `CTRL+C`.
 * **Backup**: Always back up your `datadir` before performing major upgrades.
 
-## Upgrading from 3.6 to 3.7
-
-{/* llms-pinned-version: [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) */}
-
-A 3.6.x node upgrades to 3.7 in place: there is no database migration and no re-sync. Before restarting on the new version, check the following:
-
-* **CPU baseline**: amd64 binaries and Docker images now require the `x86-64-v2` baseline (SSE4.2, POPCNT). The separate `amd64v2` tarball and `linux/amd64/v2` Docker platform are gone; use the standard amd64 artifacts. Building from source requires Go 1.26 or newer. See [Hardware Requirements](../hardware-requirements).
-* **Removed flags**: `--fcu.background.commit` and `--experimental.streaming-commitment` now prevent startup. Remove them from your startup arguments.
-* **Caplin with checkpoint sync disabled**: nodes running `--caplin.checkpoint-sync.disable` re-sync Caplin from genesis on upgrade unless a finalized state is saved locally. Allow checkpoint sync during the upgrade to avoid the replay.
-* **Receipts**: fresh datadirs now keep receipts by default (`--prune.include-receipts`). An existing datadir keeps the setting it was created with; changing it requires a fresh datadir. See [Pruning Modes](../../fundamentals/pruning-modes).
-* **Polygon**: Polygon chain names, datadirs and `--bor.*` / `--polygon.*` flags are no longer accepted. Use [0xPolygon/erigon](https://github.com/0xPolygon/erigon).
-* **JSON-RPC**: several endpoints are stricter or return renamed fields. Review the [v3.7.0 release notes](https://github.com/erigontech/erigon/releases/tag/v3.7.0) if you run applications against the RPC.
-
 ## Managing your Data
 
 Erigon 3.1 introduces a new snapshot format while continuing to support the old one. This means that new releases are fully compatible with your existing data. However, users who want the latest data files and data-specific fixes can perform an **optional** manual data upgrade:
@@ -40,10 +27,10 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 ### Snapshots Upgrade Options
 
 * `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: converts your existing snapshots in place to the latest format, **keeping your data**. Quicker, but you won't get the full performance benefits of freshly built snapshots.
-* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and any leftover `heimdall/` and `polygon-bridge/` directories from a former Polygon datadir) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
+* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and the Heimdall / Polygon-bridge DBs) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
 
 :::warning
-`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and any leftover Polygon aux directories) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
+`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and the Heimdall / Polygon-bridge DBs) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
 :::
 
 Choose `update-to-new-ver-format` to convert your data in place, or `reset` for a clean reset to the preverified snapshot set.
