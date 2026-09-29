@@ -56,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
@@ -1019,6 +1020,39 @@ func TestExecutionPayloadSourceAtGloasGenesis(t *testing.T) {
 			require.NoError(t, err)
 			require.Nil(t, withdrawalsState, "an EMPTY genesis parent must keep the cached withdrawals")
 		})
+	}
+}
+
+func TestTargetGasLimitForFirstSepoliaGloasSlot(t *testing.T) {
+	_, config := clparams.GetConfigsByNetwork(chainspec.SepoliaChainID)
+	baseState := state.New(config)
+	baseState.SetVersion(clparams.FuluVersion)
+	targetSlot := uint64(353024) * config.SlotsPerEpoch
+	require.NoError(t, baseState.SetSlot(targetSlot-1))
+	header := baseState.LatestExecutionPayloadHeader()
+	header.GasLimit = 60_000_000
+	baseState.SetLatestExecutionPayloadHeader(header)
+	handler := &ApiHandler{beaconChainCfg: config}
+
+	require.Nil(t, handler.targetGasLimitForProposal(baseState, targetSlot-1, 0, clparams.FuluVersion))
+	gasLimit := handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+
+	require.NotNil(t, gasLimit)
+	require.Equal(t, hexutil.Uint64(200_000_000), *gasLimit)
+
+	dependentRoot, err := state.GetProposerDependentRoot(baseState, targetSlot/config.SlotsPerEpoch)
+	require.NoError(t, err)
+	handler.epbsPool = pool.NewEpbsPool()
+	for _, preferenceGasLimit := range []uint64{100_000_000, 300_000_000} {
+		handler.epbsPool.ProposerPreferences.Add(
+			pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
+			&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+				ProposalSlot: targetSlot, DependentRoot: dependentRoot, TargetGasLimit: preferenceGasLimit,
+			}},
+		)
+		gasLimit = handler.targetGasLimitForProposal(baseState, targetSlot, 0, clparams.GloasVersion)
+		require.NotNil(t, gasLimit)
+		require.Equal(t, hexutil.Uint64(preferenceGasLimit), *gasLimit)
 	}
 }
 
