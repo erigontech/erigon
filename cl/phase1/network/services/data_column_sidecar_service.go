@@ -276,8 +276,8 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
-	// [REJECT] The sidecar is for the correct subnet. This must precede
-	// content-based IGNORE checks so source metadata cannot alter their verdict.
+	// [REJECT] Validate the subnet before queue admission so a wrong-subnet copy
+	// cannot suppress a later copy received on the correct subnet.
 	if subnet != nil && *subnet != computeSubnetForDataColumnSidecar(msg.Index) {
 		return fmt.Errorf("incorrect subnet %d for data column sidecar index %d", *subnet, msg.Index)
 	}
