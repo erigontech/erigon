@@ -70,7 +70,7 @@ func BenchmarkAccessListTracerOnOpcode(b *testing.B) {
 	b.ReportAllocs()
 	i := 0
 	for b.Loop() {
-		tracer.OnOpcodeV2(uint64(i), benchOpcodes[i%len(benchOpcodes)], mdgas.MdGas{Execution: 100}, mdgas.MdGas{Execution: 3}, scope, nil, 1, nil)
+		tracer.OnOpcodeV2(uint64(i), benchOpcodes[i%len(benchOpcodes)], mdgas.MdGas{Execution: 100}, mdgas.MdGasCost{Execution: 3}, scope, nil, 1, nil)
 		i++
 	}
 }

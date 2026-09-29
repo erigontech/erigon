@@ -70,7 +70,7 @@ func HandleRuntimeCall(evm *vm.EVM, destination accounts.Address, value uint256.
 			if err != nil {
 				return gasRemaining, gasUsed, fmt.Errorf("%w: %w", vm.ErrIntraBlockStateFailed, err)
 			}
-			if empty && !consumeGas(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallNewAccount) {
+			if empty && !consumeGas(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeRuntimeNewAccount) {
 				return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 			}
 		}
@@ -113,7 +113,7 @@ func HandleRuntimeCreate(evm *vm.EVM, destination accounts.Address, gasRemaining
 	if err != nil {
 		return gasRemaining, gasUsed, fmt.Errorf("%w: %w", vm.ErrIntraBlockStateFailed, err)
 	}
-	if empty && !consumeGas(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeCallNewAccount) {
+	if empty && !consumeGas(&gasRemaining, &gasUsed, params.StateGasNewAccount, mdgas.StateGas, evm.Config().Tracer, tracing.GasChangeRuntimeNewAccount) {
 		return gasRemaining, gasUsed, vm.ErrRuntimeOutOfGas
 	}
 	return gasRemaining, gasUsed, nil

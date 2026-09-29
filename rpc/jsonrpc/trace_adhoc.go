@@ -140,7 +140,7 @@ type VmTrace struct {
 // VmTraceOp is one element of the vmTrace ops trace
 type VmTraceOp struct {
 	Cost         int        `json:"cost"`
-	StateGasCost uint64     `json:"stateGasCost,omitempty"`
+	StateGasCost int64      `json:"stateGasCost,omitempty"`
 	Ex           *VmTraceEx `json:"ex"`
 	Pc           int        `json:"pc"`
 	Sub          *VmTrace   `json:"sub"`
@@ -682,7 +682,7 @@ func (ot *OeTracer) OnExitV2(depth int, output []byte, gasUsed mdgas.MdGasUsage,
 	ot.captureEndOrExit(depth != 0 /* deep */, output, gasUsed, err)
 }
 
-func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas, cost mdgas.MdGas, scope tracing.OpContext, rData []byte, depth int, err error) {
+func (ot *OeTracer) OnOpcodeV2(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope tracing.OpContext, rData []byte, depth int, err error) {
 	memory := scope.MemoryData()
 	st := scope.StackData()
 
