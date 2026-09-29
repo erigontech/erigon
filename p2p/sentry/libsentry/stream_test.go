@@ -17,8 +17,12 @@
 package libsentry_test
 
 import (
+	"context"
 	"encoding/binary"
+	"io"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,13 +31,8 @@ import (
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
-// Flooding Send() with no consumer must not grow the buffer beyond capacity
-// (the pre-fix 16384 chan would hold ~160 GB of peer-controlled payload at
-// the eth 10 MB limit). Eviction must drop oldest entries, preserving the
-// freshest.
 func TestSentryStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
-	ch := make(chan libsentry.StreamReply[*sentryproto.InboundMessage], libsentry.MessagesQueueSize)
-	s := &libsentry.SentryStreamS[*sentryproto.InboundMessage]{Ch: ch, Ctx: t.Context()}
+	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
 
 	const flood = libsentry.MessagesQueueSize * 10
 	for i := range flood {
@@ -42,15 +41,111 @@ func TestSentryStreamS_SendEvictsWhenConsumerSlow(t *testing.T) {
 		require.NoError(t, s.Send(&sentryproto.InboundMessage{Data: data}))
 	}
 
-	require.LessOrEqual(t, len(ch), cap(ch), "buffer must not exceed capacity")
-	require.Less(t, len(ch), flood, "eviction must have dropped entries")
+	s.Close()
+	messages := drainMessages(t, c)
+	require.LessOrEqual(t, len(messages), libsentry.MessagesQueueSize)
+	require.Less(t, len(messages), flood, "eviction must have dropped entries")
 
 	var last uint32
-	for len(ch) > 0 {
-		r := <-ch
-		require.NotNil(t, r.R)
-		last = binary.LittleEndian.Uint32(r.R.Data)
+	for _, message := range messages {
+		require.NotNil(t, message)
+		last = binary.LittleEndian.Uint32(message.Data)
 	}
 	assert.Equal(t, uint32(flood-1), last,
 		"eviction drops from the front; the most recent Send must remain queued")
+}
+
+func TestSentryStreamS_BoundsQueuedPayloadBytes(t *testing.T) {
+	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	data := make([]byte, 10*1024*1024)
+	for i := range 20 {
+		require.NoError(t, s.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId(i), Data: data}))
+	}
+
+	s.Close()
+	messages := drainMessages(t, c)
+	require.Len(t, messages, 6)
+	require.Equal(t, sentryproto.MessageId(14), messages[0].Id)
+	require.Equal(t, sentryproto.MessageId(19), messages[len(messages)-1].Id)
+	var queuedBytes int
+	for _, message := range messages {
+		queuedBytes += len(message.Data)
+	}
+	require.LessOrEqual(t, queuedBytes, 64*1024*1024)
+}
+
+func TestSentryStreamS_ReceiveReleasesByteBudget(t *testing.T) {
+	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	data := make([]byte, 10*1024*1024)
+	for i := range 6 {
+		require.NoError(t, s.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId(i), Data: data}))
+	}
+	for range 5 {
+		_, err := c.Recv()
+		require.NoError(t, err)
+	}
+	for i := range 5 {
+		require.NoError(t, s.Send(&sentryproto.InboundMessage{Id: sentryproto.MessageId(6 + i), Data: data}))
+	}
+	s.Close()
+	messages := drainMessages(t, c)
+	require.Len(t, messages, 6)
+	require.Equal(t, sentryproto.MessageId(5), messages[0].Id)
+}
+
+func TestSentryStream_ConcurrentSendAndReceive(t *testing.T) {
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	var producers sync.WaitGroup
+	for range 4 {
+		producers.Go(func() {
+			for range 1000 {
+				assert.NoError(t, s.Send(&sentryproto.InboundMessage{Data: []byte{1}}))
+			}
+		})
+	}
+	go func() {
+		producers.Wait()
+		assert.NoError(t, s.Send(&sentryproto.InboundMessage{Data: []byte{2}}))
+		s.Close()
+	}()
+	messages := drainMessages(t, c)
+	require.NotEmpty(t, messages)
+	require.Equal(t, []byte{2}, messages[len(messages)-1].Data)
+}
+
+func TestSentryStream_ReceiveCanceled(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	_, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](ctx)
+	cancel()
+	_, err := c.Recv()
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestSentryStream_ErrorAfterMessages(t *testing.T) {
+	s, c := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	require.NoError(t, s.Send(&sentryproto.InboundMessage{Data: []byte{1}}))
+	s.Err(io.ErrUnexpectedEOF)
+	s.Close()
+	message, err := c.Recv()
+	require.NoError(t, err)
+	require.Equal(t, []byte{1}, message.Data)
+	_, err = c.Recv()
+	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
+	_, err = c.Recv()
+	require.ErrorIs(t, err, io.EOF)
+}
+
+func drainMessages(t *testing.T, c *libsentry.SentryStreamC[*sentryproto.InboundMessage]) []*sentryproto.InboundMessage {
+	t.Helper()
+	var messages []*sentryproto.InboundMessage
+	for {
+		message, err := c.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			return messages
+		}
+		messages = append(messages, message)
+	}
 }

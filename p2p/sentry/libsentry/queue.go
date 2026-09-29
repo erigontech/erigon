@@ -16,31 +16,102 @@
 
 package libsentry
 
-// MessagesQueueSize bounds the per-subscriber channels that fan out inbound
-// P2P messages and peer events from a sentry to its stream consumers. Kept
-// small so that peer-driven traffic cannot push the process toward OOM via
-// the multi-MB ethp2p message size limit; paired with EvictOldestIfHalfFull
-// at fan-out writes so fresh messages are preferred when consumers fall
-// behind.
-const MessagesQueueSize = 1024
+import (
+	"context"
+	"fmt"
+	"io"
+	"sync"
 
-// EvictOldestIfHalfFull drops up to cap(ch)/4 oldest items from ch when it
-// is more than half full. Non-blocking: returns as soon as the drain target
-// is reached or ch becomes empty.
-//
-// Intended to be called right after a successful send on fan-out channels,
-// mirroring the eviction policy used by the per-subscriber Messages
-// channels in p2p/sentry.
-func EvictOldestIfHalfFull[T any](ch chan T) {
-	if len(ch) <= cap(ch)/2 {
-		return
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/reflect/protoreflect"
+)
+
+const (
+	MessagesQueueSize      = 1024
+	MessagesQueueByteLimit = 64 * 1024 * 1024
+)
+
+type streamReply[T protoreflect.ProtoMessage] struct {
+	message T
+	err     error
+	size    int
+}
+
+type messageQueue[T protoreflect.ProtoMessage] struct {
+	mu     sync.Mutex
+	items  chan streamReply[T]
+	ready  chan struct{}
+	bytes  int
+	closed bool
+}
+
+func (q *messageQueue[T]) push(message T, err error) error {
+	size := proto.Size(message)
+	if size > MessagesQueueByteLimit {
+		return fmt.Errorf("sentry message exceeds queue byte limit: %d", size)
 	}
-	drain := cap(ch) / 4
-	for range drain {
-		select {
-		case <-ch:
-		default:
-			return
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.closed {
+		return io.EOF
+	}
+	for q.bytes+size > MessagesQueueByteLimit {
+		q.pop()
+	}
+	q.items <- streamReply[T]{message: message, err: err, size: size}
+	q.bytes += size
+	if len(q.items) > cap(q.items)/2 {
+		for range cap(q.items) / 4 {
+			q.pop()
 		}
+	}
+	q.notify()
+	return nil
+}
+
+func (q *messageQueue[T]) pop() streamReply[T] {
+	item := <-q.items
+	q.bytes -= item.size
+	return item
+}
+
+func (q *messageQueue[T]) notify() {
+	if !q.closed && len(q.items) > 0 {
+		select {
+		case q.ready <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (q *messageQueue[T]) recv(ctx context.Context) (T, error) {
+	var zero T
+	for {
+		select {
+		case <-ctx.Done():
+			return zero, ctx.Err()
+		case <-q.ready:
+		}
+		q.mu.Lock()
+		if len(q.items) > 0 {
+			item := q.pop()
+			q.notify()
+			q.mu.Unlock()
+			return item.message, item.err
+		}
+		closed := q.closed
+		q.mu.Unlock()
+		if closed {
+			return zero, io.EOF
+		}
+	}
+}
+
+func (q *messageQueue[T]) close() {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if !q.closed {
+		q.closed = true
+		close(q.ready)
 	}
 }

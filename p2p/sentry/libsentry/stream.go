@@ -18,28 +18,31 @@ package libsentry
 
 import (
 	"context"
-	"io"
 
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/reflect/protoreflect"
 )
 
-type StreamReply[T protoreflect.ProtoMessage] struct {
-	R   T
-	Err error
+func NewSentryStream[T protoreflect.ProtoMessage](ctx context.Context) (*SentryStreamS[T], *SentryStreamC[T]) {
+	queue := &messageQueue[T]{
+		items: make(chan streamReply[T], MessagesQueueSize),
+		ready: make(chan struct{}, 1),
+	}
+	return &SentryStreamS[T]{queue: queue, Ctx: ctx}, &SentryStreamC[T]{queue: queue, Ctx: ctx}
 }
 
 type SentryStreamS[T protoreflect.ProtoMessage] struct {
-	Ch  chan StreamReply[T]
-	Ctx context.Context
+	queue *messageQueue[T]
+	Ctx   context.Context
 	grpc.ServerStream
 }
 
 func (s *SentryStreamS[T]) Send(m T) error {
-	s.Ch <- StreamReply[T]{R: m}
-	EvictOldestIfHalfFull(s.Ch)
-	return nil
+	if err := s.Ctx.Err(); err != nil {
+		return err
+	}
+	return s.queue.push(m, nil)
 }
 
 func (s *SentryStreamS[T]) Context() context.Context { return s.Ctx }
@@ -48,30 +51,22 @@ func (s *SentryStreamS[T]) Err(err error) {
 	if err == nil {
 		return
 	}
-	s.Ch <- StreamReply[T]{Err: err}
+	var zero T
+	_ = s.queue.push(zero, err)
 }
 
 func (s *SentryStreamS[T]) Close() {
-	if s.Ch != nil {
-		ch := s.Ch
-		s.Ch = nil
-		close(ch)
-	}
+	s.queue.close()
 }
 
 type SentryStreamC[T protoreflect.ProtoMessage] struct {
-	Ch  chan StreamReply[T]
-	Ctx context.Context
+	queue *messageQueue[T]
+	Ctx   context.Context
 	grpc.ClientStream
 }
 
 func (c *SentryStreamC[T]) Recv() (T, error) {
-	m, ok := <-c.Ch
-	if !ok {
-		var t T
-		return t, io.EOF
-	}
-	return m.R, m.Err
+	return c.queue.recv(c.Ctx)
 }
 
 func (c *SentryStreamC[T]) Context() context.Context { return c.Ctx }

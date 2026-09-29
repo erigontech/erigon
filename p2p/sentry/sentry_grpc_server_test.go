@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
+	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 )
 
 // Handles RLP encoding/decoding for p2p.Msg
@@ -805,7 +806,7 @@ func TestRunPeer_NewBlockHashesFloodKicksPeer(t *testing.T) {
 		assert.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
 	}
 
-	for range newBlockHashesBurst + 10 {
+	for range blockAnnouncementsBurst + 10 {
 		select {
 		case rw.readCh <- freshNewBlockHashesMsg(t, 1):
 		case peerErr := <-errCh:
@@ -858,6 +859,56 @@ func TestRunPeer_NormalNewBlockHashesForwarded(t *testing.T) {
 			t.Fatal("timed out waiting for forwarded NewBlockHashes")
 		}
 	}
+}
+
+func TestRunPeer_NewBlockFloodKicksPeer(t *testing.T) {
+	for _, subscribers := range []bool{true, false} {
+		t.Run(fmt.Sprintf("subscribers=%t", subscribers), func(t *testing.T) {
+			peerInfo, peerID := newTestPeerInfoWithEth(t)
+			rw := NewMockMsgReadWriter()
+			for range 40 {
+				require.NoError(t, rw.WriteMsg(p2p.Msg{
+					Code: eth.NewBlockMsg, Size: 1, Payload: bytes.NewReader([]byte{0xc0}),
+				}))
+			}
+			rw.WriteToReadBuffer(rw.ReadAllWritten())
+			forwarded := 0
+			peerErr := runPeer(t.Context(), peerID, p2p.Cap{Name: eth.ProtocolName, Version: direct.ETH68},
+				rw, peerInfo, func(sentryproto.MessageId, [64]byte, []byte) { forwarded++ },
+				func(sentryproto.MessageId) bool { return subscribers }, log.Root())
+			require.NotNil(t, peerErr)
+			require.Equal(t, p2p.PeerErrorInvalidMessage, peerErr.Code)
+			if subscribers {
+				require.Positive(t, forwarded)
+				require.Less(t, forwarded, 40)
+			} else {
+				require.Zero(t, forwarded)
+			}
+		})
+	}
+}
+
+func TestSentryServer_BoundsQueuedPayloadBytes(t *testing.T) {
+	ss := &GrpcServer{}
+	server, client := libsentry.NewSentryStream[*sentryproto.InboundMessage](t.Context())
+	defer ss.addMessagesStream([]sentryproto.MessageId{sentryproto.MessageId_NEW_BLOCK_66}, server)()
+	data := make([]byte, eth.ProtocolMaxMsgSize)
+	for range 20 {
+		ss.send(sentryproto.MessageId_NEW_BLOCK_66, [64]byte{}, data)
+	}
+	server.Close()
+	var queuedBytes, count int
+	for {
+		message, err := client.Recv()
+		if err != nil {
+			require.ErrorIs(t, err, io.EOF)
+			break
+		}
+		queuedBytes += len(message.Data)
+		count++
+	}
+	require.Equal(t, 6, count)
+	require.LessOrEqual(t, queuedBytes, libsentry.MessagesQueueByteLimit)
 }
 
 // minimalP2PServer returns an un-networked p2p.Server (no discovery, no
