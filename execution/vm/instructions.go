@@ -988,8 +988,12 @@ func opCreate2(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) 
 		endowment    = *v
 		offset, size = o.Uint64(), sz.Uint64()
 		salt         = scope.Stack.popCopy()
-		input        = scope.Memory.GetCopy(offset, size)
+		input        = scope.create.initCode
 	)
+	scope.create.initCode = nil
+	if !evm.chainRules.IsAmsterdam {
+		input = scope.Memory.GetCopy(offset, size)
+	}
 	return execCreate(pc, evm, scope, endowment, input, &salt)
 }
 

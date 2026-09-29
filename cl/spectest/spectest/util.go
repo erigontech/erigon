@@ -79,6 +79,13 @@ func ReadBeaconState(root fs.FS, version clparams.StateVersion, name string) (*s
 	if version >= clparams.GloasVersion {
 		config.GloasForkEpoch = 0
 	}
+	if configBytes, err := fs.ReadFile(root, "config.yaml"); err == nil {
+		if err := yaml.Unmarshal(configBytes, &config); err != nil {
+			return nil, fmt.Errorf("couldn't parse config: %w", err)
+		}
+	} else if !os.IsNotExist(err) {
+		return nil, fmt.Errorf("couldn't read config: %w", err)
+	}
 	testState := state.New(&config)
 	if err := utils.DecodeSSZSnappy(testState, sszSnappy, int(version)); err != nil {
 		return nil, err

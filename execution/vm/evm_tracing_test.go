@@ -551,7 +551,7 @@ func TestGasChangeV2NestedCreate(t *testing.T) {
 					return change.reason == tracing.GasChangeCallOpCode && change.old.Total()-change.new.Total() == costs[0].Execution+uint64(costs[0].State)
 				}))
 				require.False(t, slices.ContainsFunc(recorder.changes, func(change gasChange) bool {
-					return change.reason == tracing.GasChangeCallNewAccount
+					return change.reason == tracing.GasChangeRuntimeNewAccount
 				}))
 			})
 		}

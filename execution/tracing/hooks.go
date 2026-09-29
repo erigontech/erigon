@@ -151,9 +151,7 @@ type (
 	// GenesisBlockHook is called when the genesis block is being processed.
 	GenesisBlockHook = func(genesis *types.Block, alloc types.GenesisAlloc)
 
-	// OnSystemCallStartHook is called when a system call is about to be executed. Today,
-	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
-	// beacon block root.
+	// OnSystemCallStartHook is called before a system call.
 	//
 	// After this hook, the EVM call tracing will happened as usual so you will receive a `OnEnter/OnExit`
 	// as well as state hooks between this hook and the `OnSystemCallEndHook`.
@@ -166,9 +164,7 @@ type (
 	// to `OnSystemCallStartHook` for more information.
 	OnSystemCallStartHookV2 = func(vm *VMContext)
 
-	// OnSystemCallEndHook is called when a system call has finished executing. Today,
-	// this hook is invoked when the EIP-4788 system call is about to be executed to set the
-	// beacon block root.
+	// OnSystemCallEndHook is called after a system call finishes.
 	OnSystemCallEndHook = func()
 
 	/*
@@ -319,6 +315,17 @@ func (h *Hooks) EmitGasChange(old, new mdgas.MdGas, reason GasChangeReason) {
 	}
 }
 
+func (h *Hooks) EmitSystemCallStart(vmctx *VMContext) {
+	if h == nil {
+		return
+	}
+	if h.OnSystemCallStartV2 != nil && vmctx != nil {
+		h.OnSystemCallStartV2(vmctx)
+	} else if h.OnSystemCallStart != nil {
+		h.OnSystemCallStart()
+	}
+}
+
 // BalanceChangeReason is used to indicate the reason for a balance change, useful
 // for tracing and reporting.
 type BalanceChangeReason byte
@@ -439,8 +446,8 @@ const (
 	GasChangeRefundRevertedState GasChangeReason = 17
 	// GasChangeCallGasForwarded is gas forwarded to a child call.
 	GasChangeCallGasForwarded GasChangeReason = 18
-	// GasChangeCallNewAccount is state gas charged for creating an account.
-	GasChangeCallNewAccount GasChangeReason = 19
+	// state gas charged for account creation before the transaction's first frame.
+	GasChangeRuntimeNewAccount GasChangeReason = 19
 	// GasChangeTxAuthorization is gas charged for processing an EIP-7702 authorization.
 	GasChangeTxAuthorization GasChangeReason = 20
 	// GasChangeRefundAccountCreation is state gas refunded for cancelled account creation.

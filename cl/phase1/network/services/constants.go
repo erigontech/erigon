@@ -35,6 +35,7 @@ const (
 	blockJobExpiry                = 30 * time.Second
 	attestationJobExpiry          = 30 * time.Minute
 	singleAttestationJobExpiry    = 6 * time.Second
+	maximumGossipClockDisparity   = 500 * time.Millisecond
 )
 
 var (
