@@ -1084,8 +1084,10 @@ func TestBodyWithRawTransactionsMatchesDecodedBody(t *testing.T) {
 	}
 	txs := types.Transactions{
 		types.NewTransaction(0, to, uint256.NewInt(1), 21_000, uint256.NewInt(1), nil),
-		&types.AccessListTx{LegacyTx: types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1),
-			AccessList: types.AccessList{{Address: to, StorageKeys: []common.Hash{{0x01}}}}},
+		&types.AccessListTx{
+			LegacyTx: types.LegacyTx{CommonTx: types.CommonTx{Nonce: 1, To: &to, GasLimit: 21_000}, GasPrice: *uint256.NewInt(1)}, ChainID: *uint256.NewInt(1),
+			AccessList: types.AccessList{{Address: to, StorageKeys: []common.Hash{{0x01}}}},
+		},
 		func() types.Transaction { txn := dynFee(); return &txn }(),
 		&types.BlobTx{DynamicFeeTransaction: dynFee(), MaxFeePerBlobGas: *uint256.NewInt(3), BlobVersionedHashes: []common.Hash{{0x01}}},
 		&types.SetCodeTransaction{DynamicFeeTransaction: dynFee(), Authorizations: []types.Authorization{{ChainID: *uint256.NewInt(1), Address: to, Nonce: 2}}},
