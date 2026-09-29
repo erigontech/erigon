@@ -40,8 +40,8 @@ func NewHashVector(s int) HashVectorSSZ {
 	}
 }
 
-func (arr *hashVector) Bytes() []byte {
-	return arr.u.u[:arr.u.l*length.Hash]
+func (h *hashVector) Bytes() []byte {
+	return h.u.u[:h.u.l*length.Hash]
 }
 
 func (h *hashVector) Append(val common.Hash) {

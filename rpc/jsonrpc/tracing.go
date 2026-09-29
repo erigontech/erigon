@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -42,8 +42,9 @@ import (
 )
 
 // errPendingNotSupported prevents committed tracing from silently substituting
-// the latest executed block for pending.
-var errPendingNotSupported = errors.New("tracing on top of pending is not supported")
+// the latest executed block for pending. Committed tracing has no pending block,
+// so pending is an invalid parameter.
+var errPendingNotSupported = &rpc.InvalidParamsError{Message: "tracing on top of pending is not supported"}
 
 func rejectPendingNumber(blockNr rpc.BlockNumber) error {
 	if blockNr == rpc.PendingBlockNumber {
@@ -146,7 +147,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 	txns := block.Transactions()
 
-	var gasUsed uint64
+	var gasUsed protocol.GasUsed
 	inner := jsonstream.NewLazyFieldStream(stream, "result", true)
 	for txnIndex, txn := range txns {
 		txnHash := txn.Hash()
@@ -175,9 +176,10 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 					BlobHashes: msg.BlobHashes(),
 				}
 
-				var _gasUsed uint64
-				_gasUsed, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
-				gasUsed += _gasUsed
+				var txnGasUsage mdgas.TxnGasUsage
+				txnGasUsage, err = transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, inner, api.evmCallTimeout, precompiles)
+				gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
+				gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
 			}
 		}
 		if err == nil {
@@ -202,8 +204,9 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 			refunds = false
 		}
 
-		if refunds && block.GasUsed() != gasUsed {
-			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), gasUsed, blockNumber))
+		blockGasUsed := gasUsed.BlockGasUsed()
+		if refunds && block.GasUsed() != blockGasUsed {
+			panic(fmt.Errorf("assert: block.GasUsed() %d != gasUsed %d. blockNum=%d", block.GasUsed(), blockGasUsed, blockNumber))
 		}
 	}
 
