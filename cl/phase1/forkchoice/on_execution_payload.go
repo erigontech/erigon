@@ -1057,6 +1057,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("%w: OnExecutionPayload: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 	}
+	f.cacheParentBuilderExitRequests(beaconBlockRoot, signedEnvelope)
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
@@ -1213,6 +1214,7 @@ func (f *ForkChoiceStore) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvel
 	f.eth2Roots.Add(blockRoot, envelope.Payload.BlockHash)
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.cacheParentBuilderExitRequests(blockRoot, signedEnvelope)
 	f.mu.Unlock()
 
 	token, tracked, err := f.claimAnchorEnvelopeIndexRepair(blockRoot, signedEnvelope, applied)
@@ -1691,6 +1693,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 	}
+	f.cacheParentBuilderExitRequests(beaconBlockRoot, signedEnvelope)
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
 	}
