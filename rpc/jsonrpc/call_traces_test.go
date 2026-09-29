@@ -384,6 +384,56 @@ func TestFilterRangeDefaults(t *testing.T) {
 	}
 }
 
+// A failed CREATE deploys no contract, so trace_filter does not match it by the address it would have
+// occupied, at the top level or nested.
+func TestFilterFailedCreateHasNoRecipient(t *testing.T) {
+	m := execmoduletester.New(t)
+	// PUSH4 0xdeadbeef, PUSH1 0, MSTORE, PUSH1 4, PUSH1 28, REVERT
+	revert := common.FromHex("0x63deadbeef6000526004601cfd")
+	// Runs revert through CREATE and succeeds: PUSH13 revert, PUSH1 0, MSTORE, PUSH1 13, PUSH1 19, PUSH1 0, CREATE, POP, STOP
+	factory := append(append([]byte{0x6c}, revert...), 0x60, 0x00, 0x52, 0x60, 13, 0x60, 19, 0x60, 0x00, 0xf0, 0x50, 0x00)
+	chain, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
+		signer := types.LatestSigner(m.ChainConfig)
+		for _, init := range [][]byte{revert, factory} {
+			txn, err := types.SignTx(types.NewContractCreation(block.TxNonce(m.Address), new(uint256.Int), 100_000, new(uint256.Int), init), *signer, m.Key)
+			require.NoError(t, err)
+			block.AddTx(txn)
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chain))
+	api := newTraceApiForTest(m)
+
+	failed := types.CreateAddress(m.Address, 0)
+	deployed := types.CreateAddress(m.Address, 1)
+	nested := types.CreateAddress(deployed, 1)
+	block := rpc.BlockNumber(1)
+	filter := func(from, to []*common.Address) []map[string]any {
+		t.Helper()
+		stream := jsonstream.New(nil)
+		req := TraceFilterRequest{
+			FromBlock:   &rpc.BlockNumberOrHash{BlockNumber: &block},
+			ToBlock:     &rpc.BlockNumberOrHash{BlockNumber: &block},
+			FromAddress: from, ToAddress: to,
+		}
+		require.NoError(t, api.Filter(context.Background(), req, new(bool), nil, stream))
+		var traces []map[string]any
+		require.NoError(t, json.Unmarshal(stream.Buffer(), &traces))
+		return traces
+	}
+
+	assert.Empty(t, filter(nil, []*common.Address{&failed}), "top-level failed create")
+	assert.Empty(t, filter(nil, []*common.Address{&nested}), "nested failed create")
+	assert.Empty(t, filter([]*common.Address{&m.Address}, []*common.Address{&failed}), "intersection with the sender")
+
+	created := filter(nil, []*common.Address{&deployed})
+	require.Len(t, created, 1, "a successful create matches its address")
+	require.Nil(t, created[0]["error"])
+	byFactory := filter([]*common.Address{&deployed}, nil)
+	require.Len(t, byFactory, 1, "a nested failed create matches its sender")
+	require.Equal(t, "Reverted", byFactory[0]["error"])
+}
+
 func TestFilterModeValidation(t *testing.T) {
 	m := execmoduletester.New(t)
 	server := rpc.NewServer(50, false, false, true, log.New(), 100)

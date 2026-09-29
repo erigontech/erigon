@@ -66,6 +66,10 @@ type Sample struct {
 	Big        uint256.Int          `json:"big" ethjson:"quantity"`
 	OptBig     hexutil.U256         `json:"optBig,omitempty" ethjson:"quantity"`
 	PtrBig     *uint256.Int         `json:"ptrBig" ethjson:"quantity"`
+	Signed     hexutil.Int64        `json:"signed" ethjson:"quantity"`
+	PtrSigned  *hexutil.Int64       `json:"ptrSigned,omitempty" ethjson:"quantity"`
+	Str        string               `json:"str" ethjson:"string"`
+	OptStr     string               `json:"optStr,omitempty" ethjson:"string"`
 	Flag       bool                 `json:"flag" ethjson:"bool"`
 	OptFlag    bool                 `json:"optFlag,omitempty" ethjson:"bool"`
 	Logs       jsonstream.Marshaler `json:"logs" ethjson:"objects"`
