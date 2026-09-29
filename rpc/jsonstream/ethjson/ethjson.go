@@ -19,8 +19,11 @@
 package ethjson
 
 import (
+	"encoding/json"
+
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
@@ -34,6 +37,27 @@ import (
 func Quantity[T ~uint64 | ~uint](s *jsonstream.StackStream, name string, v T) {
 	s.Field(name)
 	jsonstream.HexUint64(s, uint64(v))
+}
+
+// SignedQuantity writes a signed value as hexutil.Int64 does, with a minus before the 0x. The
+// spec has no signed form; tracers use this one for a net state-gas change.
+func SignedQuantity[T ~int64](s *jsonstream.StackStream, name string, v T) {
+	s.Field(name)
+	s.WriteQuotedText(hexutil.Int64(v))
+}
+
+// String writes v exactly as encoding/json does, which escapes <, > and & and replaces invalid
+// UTF-8. A plain ASCII string, the common case, needs none of that and is written directly.
+func String(s *jsonstream.StackStream, name string, v string) {
+	s.Field(name)
+	for i := 0; i < len(v); i++ {
+		if c := v[i]; c < 0x20 || c >= 0x7f || c == '"' || c == '\\' || c == '<' || c == '>' || c == '&' {
+			b, _ := json.Marshal(v) //nolint:errchkjson
+			s.WriteRawBytes(b)
+			return
+		}
+	}
+	s.WriteString(v)
 }
 
 // Quantity256 writes a 256-bit quantity, null when the field is absent.

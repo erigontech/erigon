@@ -27,19 +27,19 @@ func _() {
 	_ = x[GasChangeCallStateGasReturned-16]
 	_ = x[GasChangeRefundRevertedState-17]
 	_ = x[GasChangeCallGasForwarded-18]
-	_ = x[GasChangeCallNewAccount-19]
+	_ = x[GasChangeRuntimeNewAccount-19]
 	_ = x[GasChangeTxAuthorization-20]
 	_ = x[GasChangeRefundAccountCreation-21]
 	_ = x[GasChangeIgnored-255]
 }
 
 const (
-	_GasChangeReason_name_0 = "GasChangeUnspecifiedGasChangeTxInitialBalanceGasChangeTxIntrinsicGasGasChangeTxRefundsGasChangeTxLeftOverReturnedGasChangeCallInitialBalanceGasChangeCallLeftOverReturnedGasChangeCallLeftOverRefundedGasChangeCallContractCreationGasChangeCallContractCreation2GasChangeCallCodeStorageGasChangeCallOpCodeGasChangeCallPrecompiledContractGasChangeCallStorageColdAccessGasChangeCallFailedExecutionGasChangeDelegatedDesignationGasChangeCallStateGasReturnedGasChangeRefundRevertedStateGasChangeCallGasForwardedGasChangeCallNewAccountGasChangeTxAuthorizationGasChangeRefundAccountCreation"
+	_GasChangeReason_name_0 = "GasChangeUnspecifiedGasChangeTxInitialBalanceGasChangeTxIntrinsicGasGasChangeTxRefundsGasChangeTxLeftOverReturnedGasChangeCallInitialBalanceGasChangeCallLeftOverReturnedGasChangeCallLeftOverRefundedGasChangeCallContractCreationGasChangeCallContractCreation2GasChangeCallCodeStorageGasChangeCallOpCodeGasChangeCallPrecompiledContractGasChangeCallStorageColdAccessGasChangeCallFailedExecutionGasChangeDelegatedDesignationGasChangeCallStateGasReturnedGasChangeRefundRevertedStateGasChangeCallGasForwardedGasChangeRuntimeNewAccountGasChangeTxAuthorizationGasChangeRefundAccountCreation"
 	_GasChangeReason_name_1 = "GasChangeIgnored"
 )
 
 var (
-	_GasChangeReason_index_0 = [...]uint16{0, 20, 45, 68, 86, 113, 140, 169, 198, 227, 257, 281, 300, 332, 362, 390, 419, 448, 476, 501, 524, 548, 578}
+	_GasChangeReason_index_0 = [...]uint16{0, 20, 45, 68, 86, 113, 140, 169, 198, 227, 257, 281, 300, 332, 362, 390, 419, 448, 476, 501, 527, 551, 581}
 )
 
 func (i GasChangeReason) String() string {

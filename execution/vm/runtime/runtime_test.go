@@ -883,7 +883,7 @@ func TestOpcodeMaskFiltersDelivery(t *testing.T) {
 				var seen []byte
 				hooks := &tracing.Hooks{OnOpcodeMask: mask}
 				if version == "v2" {
-					hooks.OnOpcodeV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ []byte, _ int, _ error) {
+					hooks.OnOpcodeV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
 						seen = append(seen, op)
 					}
 				} else {
@@ -924,10 +924,10 @@ func TestOpcodeMaskStillReportsFaults(t *testing.T) {
 			var faults []byte
 			hooks := &tracing.Hooks{OnOpcodeMask: tracing.NewOpcodeMask(byte(vm.SLOAD))}
 			if version == "v2" {
-				hooks.OnOpcodeV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ []byte, _ int, _ error) {
+				hooks.OnOpcodeV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ []byte, _ int, _ error) {
 					opcodes = append(opcodes, op)
 				}
-				hooks.OnFaultV2 = func(_ uint64, op byte, _, _ mdgas.MdGas, _ tracing.OpContext, _ int, _ error) {
+				hooks.OnFaultV2 = func(_ uint64, op byte, _ mdgas.MdGas, _ mdgas.MdGasCost, _ tracing.OpContext, _ int, _ error) {
 					faults = append(faults, op)
 				}
 			} else {
