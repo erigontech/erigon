@@ -14,8 +14,8 @@ type EncToBytesI interface {
 	EncToBytes(enc8Bytes bool) []byte
 }
 
-func (n Num) Uint64() uint64 {
-	return uint64(n)
+func (x Num) Uint64() uint64 {
+	return uint64(x)
 }
 
 func (x Num) EncToBytes(x8Bytes bool) (out []byte) {

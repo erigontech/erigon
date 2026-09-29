@@ -183,28 +183,28 @@ var Methods = struct {
 	ETHCall:                   "eth_call",
 }
 
-func (req *requestGenerator) rpcCallJSON(method RPCMethod, body string, response any) callResult {
+func (reqGen *requestGenerator) rpcCallJSON(method RPCMethod, body string, response any) callResult {
 	ctx := context.Background()
-	req.reqID++
+	reqGen.reqID++
 	start := time.Now()
-	targetUrl := "http://" + req.target
+	targetUrl := "http://" + reqGen.target
 
 	err := retryConnects(ctx, func(ctx context.Context) error {
-		return post(ctx, req.client, targetUrl, string(method), body, response, req.logger)
+		return post(ctx, reqGen.client, targetUrl, string(method), body, response, reqGen.logger)
 	})
 
 	return callResult{
 		RequestBody: body,
 		Target:      targetUrl,
 		Took:        time.Since(start),
-		RequestID:   req.reqID,
+		RequestID:   reqGen.reqID,
 		Method:      string(method),
 		Err:         err,
 	}
 }
 
-func (req *requestGenerator) rpcCall(ctx context.Context, result any, method RPCMethod, args ...any) error {
-	client, err := req.rpcClient(ctx)
+func (reqGen *requestGenerator) rpcCall(ctx context.Context, result any, method RPCMethod, args ...any) error {
+	client, err := reqGen.rpcClient(ctx)
 	if err != nil {
 		return err
 	}
@@ -214,8 +214,8 @@ func (req *requestGenerator) rpcCall(ctx context.Context, result any, method RPC
 	})
 }
 
-func (req *requestGenerator) rpcCallOnce(ctx context.Context, result any, method RPCMethod, args ...any) error {
-	client, err := req.rpcClient(ctx)
+func (reqGen *requestGenerator) rpcCallOnce(ctx context.Context, result any, method RPCMethod, args ...any) error {
+	client, err := reqGen.rpcClient(ctx)
 	if err != nil {
 		return err
 	}
@@ -280,14 +280,14 @@ func retryConnects(ctx context.Context, op func(context.Context) error) error {
 
 type PingResult callResult
 
-func (req *requestGenerator) PingErigonRpc() PingResult {
+func (reqGen *requestGenerator) PingErigonRpc() PingResult {
 	start := time.Now()
 	res := callResult{
-		RequestID: req.reqID,
+		RequestID: reqGen.reqID,
 	}
 
 	// return early if the http module has issue fetching the url
-	resp, err := http.Get("http://" + req.target) //nolint
+	resp, err := http.Get("http://" + reqGen.target) //nolint
 	if err != nil {
 		res.Took = time.Since(start)
 		res.Err = err
@@ -298,7 +298,7 @@ func (req *requestGenerator) PingErigonRpc() PingResult {
 	defer func(body io.ReadCloser) {
 		closeErr := body.Close()
 		if closeErr != nil {
-			req.logger.Warn("failed to close readCloser", "err", closeErr)
+			reqGen.logger.Warn("failed to close readCloser", "err", closeErr)
 		}
 	}(resp.Body)
 
@@ -337,22 +337,22 @@ func NewRequestGenerator(target string, logger log.Logger) RequestGenerator {
 	}
 }
 
-func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error) {
-	if req.requestClient == nil {
+func (reqGen *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error) {
+	if reqGen.requestClient == nil {
 		var err error
 		var url string
-		if strings.HasPrefix(req.target, "http") {
-			url = req.target
+		if strings.HasPrefix(reqGen.target, "http") {
+			url = reqGen.target
 		} else {
-			url = "http://" + req.target
+			url = "http://" + reqGen.target
 		}
-		req.requestClient, err = rpc.DialContext(ctx, url, req.logger)
+		reqGen.requestClient, err = rpc.DialContext(ctx, url, reqGen.logger)
 		if err != nil {
 			return nil, err
 		}
 	}
 
-	return req.requestClient, nil
+	return reqGen.requestClient, nil
 }
 
 func post(ctx context.Context, client *http.Client, url, method, request string, response any, logger log.Logger) error {
@@ -401,11 +401,11 @@ func post(ctx context.Context, client *http.Client, url, method, request string,
 }
 
 // subscribe connects to a websocket client and returns the subscription handler and a channel buffer
-func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error) {
-	if req.subscriptionClient == nil {
+func (reqGen *requestGenerator) Subscribe(ctx context.Context, method SubMethod, subChan any, args ...any) (event.Subscription, error) {
+	if reqGen.subscriptionClient == nil {
 		err := retryConnects(ctx, func(ctx context.Context) error {
 			var err error
-			req.subscriptionClient, err = rpc.DialWebsocket(ctx, "ws://"+req.target, "", req.logger)
+			reqGen.subscriptionClient, err = rpc.DialWebsocket(ctx, "ws://"+reqGen.target, "", reqGen.logger)
 			return err
 		})
 		if err != nil {
@@ -420,16 +420,16 @@ func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, su
 
 	args = append([]any{subMethod}, args...)
 
-	return req.subscriptionClient.Subscribe(ctx, namespace, subChan, args...)
+	return reqGen.subscriptionClient.Subscribe(ctx, namespace, subChan, args...)
 }
 
 // UnsubscribeAll closes all the client subscriptions and empties their global subscription channel
-func (req *requestGenerator) UnsubscribeAll() {
-	if req.subscriptionClient == nil {
+func (reqGen *requestGenerator) UnsubscribeAll() {
+	if reqGen.subscriptionClient == nil {
 		return
 	}
-	subscriptionClient := req.subscriptionClient
-	req.subscriptionClient = nil
+	subscriptionClient := reqGen.subscriptionClient
+	reqGen.subscriptionClient = nil
 	subscriptionClient.Close()
 }
 

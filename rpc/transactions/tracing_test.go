@@ -215,6 +215,15 @@ func assembleWithLogConfig(t *testing.T, cfg *logger.LogConfig, tracerName *stri
 	return err
 }
 
+// A tracer that fails before writing leaves a lazy "result" field unwritten, so the response carries only "error".
+func TestWriteTracerResultKeepsLazyFieldUnwrittenOnError(t *testing.T) {
+	var buf bytes.Buffer
+	result := jsonstream.NewLazyFieldStream(jsonstream.New(&buf), "result", false)
+	tracer := &tracers.Tracer{MarshalFastJSONTo: func(jsonstream.Stream) error { return errors.New("stopped") }}
+	require.EqualError(t, writeTracerResult(tracer, result), "stopped")
+	require.False(t, result.Written())
+}
+
 // execution-apis gives the opcode logger's limit a minimum of 0, and a negative
 // one would suppress every step, so it must be refused rather than served as an
 // empty trace.

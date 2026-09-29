@@ -535,7 +535,7 @@ var pruneGatingConfigs = []pruneGatingConfig{
 
 // TestPruneModeEndpointGating pins, for every prune mode shape, that block-data
 // endpoints serve old blocks whenever blocks are retained and that
-// state-reading endpoints return state.PrunedError outside the history window.
+// state-reading endpoints return state.ErrPruned outside the history window.
 // The chain is inserted without physical pruning and the prune mode is stored
 // afterwards, so every cell observes only the RPC-layer gate.
 func TestPruneModeEndpointGating(t *testing.T) {
@@ -559,7 +559,7 @@ func TestPruneModeEndpointGating(t *testing.T) {
 					t.Run(ep.name+"/"+leg.name, func(t *testing.T) {
 						res, err := ep.call(t.Context(), apis, leg.ref)
 						if pruneGateFires(ep.boundary, cfg, leg.ref.num, chainInfo.head) {
-							require.ErrorIs(t, err, state.PrunedError)
+							require.ErrorIs(t, err, state.ErrPruned)
 						} else {
 							require.NoError(t, err)
 							require.NotNil(t, res)
@@ -861,7 +861,7 @@ func TestGetBlockByTimestampGatesGenesisBranch(t *testing.T) {
 		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
 	})
 	_, err := apis.erigon.GetBlockByTimestamp(t.Context(), 0, false)
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 }
 
 // archiveBlocksWindowMode keeps every state history while block bodies follow a
@@ -884,5 +884,5 @@ func TestSearchTransactionsBeforeGatesScannedBlocks(t *testing.T) {
 	require.NotEmpty(t, res.Txs)
 
 	_, err = apis.ots.SearchTransactionsBefore(t.Context(), testAddr, 0, 25)
-	require.ErrorIs(t, err, state.PrunedError)
+	require.ErrorIs(t, err, state.ErrPruned)
 }
