@@ -674,6 +674,8 @@ Returns traces matching given filter
 
    The `'pending'` tag is not supported for either block bound and returns `-32602`: `trace_filter` scans committed trace history, which has no pending block.
 
+   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. A block hash that names no known block returns an error.
+
 ```js
 params: [{
   "fromBlock": "0x2ed0c4", // 3068100
