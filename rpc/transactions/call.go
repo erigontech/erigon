@@ -63,8 +63,9 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
-	defer state.Close()
+	putState := state.PutPooled
+	state := state.GetPooled(stateReader)
+	defer putState(state)
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.

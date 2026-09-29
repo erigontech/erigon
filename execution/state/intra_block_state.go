@@ -27,6 +27,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -391,6 +392,30 @@ func (sdb *IntraBlockState) Close() {
 	sdb.versionedWrites.ReleaseAndReset()
 
 	releaseResources(stateObjects, journal)
+}
+
+var ibsPool = sync.Pool{New: func() any { return New(nil) }}
+
+// GetPooled returns a reset IntraBlockState bound to r; its maps, journal and arenas keep
+// their capacity from earlier users. Return it with PutPooled.
+func GetPooled(r StateReader) *IntraBlockState {
+	sdb := ibsPool.Get().(*IntraBlockState)
+	sdb.stateReader = r
+	return sdb
+}
+
+// PutPooled resets sdb and returns it for reuse. Nothing obtained from sdb may be used after.
+func PutPooled(sdb *IntraBlockState) {
+	if sdb == nil || sdb.stateObjects == nil {
+		return
+	}
+	sdb.Reset()
+	sdb.revisions.reset()
+	sdb.stateReader = nil
+	sdb.tracingHooks = nil
+	sdb.trace = false
+	sdb.blockNum = 0
+	ibsPool.Put(sdb)
 }
 
 // The noMaterialize path never releases what it takes, so a pool draw there
