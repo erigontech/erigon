@@ -168,8 +168,8 @@ func compareTraces(trace, traceg *EthTxTrace) bool {
 }
 
 func compareJsonValues(prefix string, v, vg *fastjson.Value) error {
-	var vType = fastjson.TypeNull
-	var vgType = fastjson.TypeNull
+	vType := fastjson.TypeNull
+	vgType := fastjson.TypeNull
 	if v != nil {
 		vType = v.Type()
 	}
@@ -408,7 +408,7 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 				}
 			}
 		} else {
-			//TODO fix for two methods
+			// TODO fix for two methods
 			return compareErrors(errVal, errValg, methodNameA, errCtx, errs)
 		}
 	} else if channel != nil && (!insertOnlyIfSuccess || errVal == nil) {

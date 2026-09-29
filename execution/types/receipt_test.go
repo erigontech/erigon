@@ -661,16 +661,16 @@ func TestReceiptLogsBloomCachesDerivedBloom(t *testing.T) {
 
 	var wg sync.WaitGroup
 	for range 8 {
-		wg.Go(func() { assert.Equal(t, want, r.LogsBloom()) })
+		wg.Go(func() { assert.Equal(t, want, *r.LogsBloom()) })
 	}
 	wg.Wait()
 	require.True(t, r.Bloom.IsEmpty(), "LogsBloom must not write the shared Bloom field")
 
 	r.Logs[0].Topics[0] = common.Hash{3}
-	require.Equal(t, want, r.LogsBloom(), "a derived bloom is cached")
+	require.Equal(t, want, *r.LogsBloom(), "a derived bloom is cached")
 
 	withBloom := &Receipt{Bloom: Bloom{1}, Logs: r.Logs}
-	require.Equal(t, Bloom{1}, withBloom.LogsBloom())
+	require.Equal(t, Bloom{1}, *withBloom.LogsBloom())
 }
 
 func TestReceiptDecodeClearsDerivedBloom(t *testing.T) {
@@ -696,7 +696,7 @@ func TestReceiptDecodeClearsDerivedBloom(t *testing.T) {
 			r := &Receipt{Logs: Logs{{Address: common.Address{1}}}}
 			_ = r.LogsBloom()
 			require.NoError(t, decode(r))
-			require.Equal(t, CreateBloom(Receipts{next}), r.LogsBloom(), "a decode must not keep the bloom derived for the old logs")
+			require.Equal(t, CreateBloom(Receipts{next}), *r.LogsBloom(), "a decode must not keep the bloom derived for the old logs")
 		})
 	}
 }

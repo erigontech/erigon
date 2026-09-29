@@ -205,7 +205,6 @@ type Ethereum struct {
 }
 
 func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadir.Dirs, cfg *ethconfig.Config) error {
-
 	isCommitmentHistoryEnabled, ok, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
 	if err != nil {
 		return err
@@ -234,7 +233,8 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	if cfg.KeepExecutionProofs != isCommitmentHistoryEnabled {
 		return fmt.Errorf(
 			"flag '--prune.experimental.include-commitment-history' mismatch: db: %v; config: %v. please restart Erigon '--prune.experimental.include-commitment-history=%v' or delete the chaindata folder: %s",
-			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata)
+			isCommitmentHistoryEnabled, cfg.KeepExecutionProofs, cfg.KeepExecutionProofs, dirs.Chaindata,
+		)
 	}
 	if err := rawdb.WriteDBCommitmentHistoryEnabled(tx, cfg.KeepExecutionProofs); err != nil {
 		return err
@@ -377,7 +377,6 @@ func New(
 	var genesis *types.Block
 	var compatErr *chain.ConfigCompatError
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
-
 		genesisConfig, err := rawdb.ReadGenesis(tx)
 		if err != nil {
 			return err
@@ -828,7 +827,8 @@ func New(
 			stack.Config().PrivateApiRateLimit,
 			creds,
 			stack.Config().HealthCheck,
-			logger)
+			logger,
+		)
 		if err != nil {
 			return nil, fmt.Errorf("private api: %w", err)
 		}

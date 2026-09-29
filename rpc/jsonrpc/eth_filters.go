@@ -135,7 +135,7 @@ func (api *APIImpl) GetFilterChanges(_ context.Context, index string) ([]any, er
 }
 
 // GetFilterLogs implements eth_getFilterLogs.
-func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.RPCLogs, error) {
+func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.Logs, error) {
 	if api.filters == nil {
 		return nil, rpc.ErrNotificationsUnsupported
 	}
@@ -290,14 +290,14 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
-		func() (<-chan *types.RPCLog, func(), error) {
+		func() (<-chan *types.Log, func(), error) {
 			logs, id, err := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
 			if err != nil {
 				return nil, nil, err
 			}
 			return logs, func() { api.filters.UnsubscribeLogs(id) }, nil
 		},
-		func(emit func(payload any), h *types.RPCLog) {
+		func(emit func(payload any), h *types.Log) {
 			if h != nil {
 				emit(h)
 			}

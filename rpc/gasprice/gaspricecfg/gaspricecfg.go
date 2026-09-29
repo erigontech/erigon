@@ -24,9 +24,7 @@ import (
 
 var DefaultIgnorePrice = uint256.NewInt(2 * common.Wei)
 
-var (
-	DefaultMaxPrice = uint256.NewInt(500 * common.GWei)
-)
+var DefaultMaxPrice = uint256.NewInt(500 * common.GWei)
 
 type Config struct {
 	Blocks           int
