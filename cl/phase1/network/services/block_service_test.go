@@ -967,13 +967,19 @@ func TestPublishedBlockJobIsNotDowngradedByBlockOnlyRecovery(t *testing.T) {
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	service := &blockService{}
-	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return nil })
+	service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error { return forkchoice.ErrNewPayloadNoStatus })
 	fullValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
+	job := fullValue.(*blockJob)
+	service.processScheduledBlock(t.Context(), root, job, time.Now())
+	require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
+	retryAfter := job.retryAfter
 	service.ScheduleBlockForLaterProcessing(block)
 	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
 	require.Same(t, fullValue, currentValue)
+	require.Equal(t, retryAfter, job.retryAfter)
+	require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
 }
 
 func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
@@ -983,10 +989,13 @@ func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
 	older := newBlockJob(block, func(context.Context) error {
 		return errors.New("older store should not replace newer store")
 	})
-	newer := newBlockJob(block, func(context.Context) error { return nil })
+	newer := newBlockJob(block, func(context.Context) error { return forkchoice.ErrNewPayloadNoStatus })
 	older.creationTime = newer.creationTime
 	service := &blockService{}
 	service.blocksScheduledForLaterExecution.Store(root, newer)
+	service.processScheduledBlock(t.Context(), root, newer, time.Now())
+	require.Equal(t, blockELRetryInitialDelay, newer.retryDelay)
+	retryAfter := newer.retryAfter
 
 	reused, generation := service.reuseScheduledBlockJob(root, newer, older, older.store)
 
@@ -995,6 +1004,8 @@ func TestOlderPublishedBlockJobDoesNotReplaceNewerFullStore(t *testing.T) {
 	currentValue, ok := service.blocksScheduledForLaterExecution.Load(root)
 	require.True(t, ok)
 	require.Same(t, newer, currentValue)
+	require.Equal(t, retryAfter, newer.retryAfter)
+	require.Equal(t, blockELRetryInitialDelay, newer.retryDelay)
 }
 
 func TestPublishedBlockUpgradeSurvivesStaleBlockOnlyWorker(t *testing.T) {

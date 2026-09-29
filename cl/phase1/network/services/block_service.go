@@ -850,6 +850,9 @@ func (b *blockService) reuseScheduledBlockJob(key [32]byte, existing, job *block
 	existing.storeGeneration++
 	existing.scheduleSequence = job.scheduleSequence
 	existing.creationTime = time.Now()
+	// Retry backoff belongs to the store generation that failed.
+	existing.retryAfter = time.Time{}
+	existing.retryDelay = 0
 	if existing.terminal {
 		existing.terminal = false
 		existing.attempt = &blockJobAttempt{done: make(chan struct{})}

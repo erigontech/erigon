@@ -28,8 +28,11 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type blockDBError struct {
@@ -175,6 +178,48 @@ func TestPublishedBlockJobBacksOffExecutionFailures(t *testing.T) {
 			require.NoError(t, handle.Wait(t.Context()))
 			_, queued := service.blocksScheduledForLaterExecution.Load(root)
 			require.False(t, queued)
+		})
+	}
+}
+
+func TestPublishedBlockJobUpgradeResetsExecutionBackoff(t *testing.T) {
+	for _, previousStore := range []string{"block-only", "published"} {
+		t.Run(previousStore, func(t *testing.T) {
+			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			fcu := mock_services.NewForkChoiceStorageMock(t)
+			fcu.OnBlockErr = forkchoice.ErrNewPayloadNoStatus
+			service := &blockService{db: mdbxtest.NewTestDB(t, dbcfg.ChainDB), forkchoiceStore: fcu}
+			if previousStore == "block-only" {
+				service.ScheduleBlockForLaterProcessing(block)
+			} else {
+				service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+					return forkchoice.ErrNewPayloadNoStatus
+				})
+			}
+			job := serviceJob(t, service, root)
+			beforeBackoff := time.Now()
+			service.processScheduledBlock(t.Context(), root, job, beforeBackoff)
+			require.ErrorIs(t, job.lastAttempt.err, forkchoice.ErrNewPayloadNoStatus)
+			require.True(t, job.retryAfter.After(beforeBackoff))
+			require.Equal(t, blockELRetryInitialDelay, job.retryDelay)
+
+			calls := 0
+			failure := forkchoice.ErrNewPayloadNoStatus
+			handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+				calls++
+				return failure
+			})
+			service.processScheduledBlock(t.Context(), root, job, beforeBackoff)
+			require.Equal(t, 1, calls, "a new store generation must not inherit the old retry deadline")
+			require.Equal(t, blockELRetryInitialDelay, job.retryDelay, "a new store generation must start a fresh backoff sequence")
+
+			failure = nil
+			service.processScheduledBlock(t.Context(), root, job, job.retryAfter)
+			require.Equal(t, 2, calls)
+			require.True(t, job.terminal)
+			require.NoError(t, handle.Wait(t.Context()))
 		})
 	}
 }
