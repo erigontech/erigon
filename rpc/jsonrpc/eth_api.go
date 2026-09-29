@@ -584,25 +584,21 @@ type historyPruneFloors struct {
 func (api *BaseAPI) historyStartBlocks(ctx context.Context, tx kv.Tx, head uint64) (historyPruneFloors, error) {
 	ttx, ok := tx.(kv.TemporalTx)
 	if !ok {
-		return historyPruneFloors{}, nil
+		return historyPruneFloors{}, fmt.Errorf("history availability requires a temporal transaction, got %T", tx)
 	}
 	files, ok := ttx.Debug().(interface{ HistoryFilesGeneration() uint64 })
 	if !ok {
 		// A head alone cannot identify the history pinned by a remote or custom view.
-		return api.readHistoryStartBlocks(ctx, tx, head)
+		return api.readHistoryStartBlocks(ctx, ttx, head)
 	}
 	key := pruneFloorCacheKey{head: head, dbViewID: tx.ViewID(), snapshotGeneration: files.HistoryFilesGeneration()}
 	return api._historyPruneFloor.getForKey(ctx, key, func() (historyPruneFloors, error) {
-		return api.readHistoryStartBlocks(ctx, tx, head)
+		return api.readHistoryStartBlocks(ctx, ttx, head)
 	})
 }
 
-func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.Tx, head uint64) (historyPruneFloors, error) {
-	ttx, ok := tx.(kv.TemporalTx)
-	if !ok {
-		return historyPruneFloors{}, nil
-	}
-	startTxNum, err := state.StateHistoryStartTxNum(ttx)
+func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {
+	startTxNum, err := state.StateHistoryStartTxNum(tx)
 	if err != nil {
 		return historyPruneFloors{}, err
 	}

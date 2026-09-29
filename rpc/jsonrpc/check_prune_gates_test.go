@@ -596,6 +596,20 @@ func TestHistoryGateUsesEarliestDomainFloor(t *testing.T) {
 	require.Equal(t, uint64(7), floors.wholeBlock)
 }
 
+func TestHistoryFloorRejectsNonTemporalTransactions(t *testing.T) {
+	t.Parallel()
+	for name, tx := range map[string]kv.Tx{
+		"nil":          nil,
+		"non-temporal": struct{ kv.Tx }{},
+	} {
+		t.Run(name, func(t *testing.T) {
+			var api BaseAPI
+			_, err := api.historyStartBlocks(t.Context(), tx, 10)
+			require.ErrorContains(t, err, "history availability requires a temporal transaction")
+		})
+	}
+}
+
 func TestHistoryGatePropagatesBackendError(t *testing.T) {
 	t.Parallel()
 
