@@ -65,7 +65,7 @@ func collectChainWitnesses(t *testing.T, commitmentV3, dual bool) chainWitnesses
 		bn := rpc.BlockNumber(n)
 		at := rpc.BlockNumberOrHash{BlockNumber: &bn}
 		for _, mode := range []string{"legacy", "canonical"} {
-			result, err := debugAPI.ExecutionWitness(ctx, at, &mode)
+			result, err := debugAPI.ExecutionWitness(ctx, at, &mode, nil)
 			require.NoError(t, err, "block %d mode %s", n, mode)
 			encoded, err := json.Marshal(result)
 			require.NoError(t, err)

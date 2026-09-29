@@ -116,10 +116,22 @@ func (p *branchPrefetcher) addBAL(bal types.BlockAccessList) {
 			continue
 		}
 		account := keccak.Sum256(ac.Address[:])
-		p.add(prefetchItem{account: account})
+		item := prefetchItem{account: account, address: ac.Address}
+		var codeChange *types.CodeChange
+		for _, change := range ac.CodeChanges {
+			if change != nil && (codeChange == nil || change.Index > codeChange.Index) {
+				codeChange = change
+			}
+		}
+		if codeChange != nil {
+			item.codeHash = keccak.Sum256(codeChange.Bytecode)
+			item.codeChunks = (len(codeChange.Bytecode) + eip8297.ChunkDataLen - 1) / eip8297.ChunkDataLen
+			item.codeWritten = true
+		}
+		p.add(item)
 		for _, sc := range ac.StorageChanges {
 			slot := sc.Slot.Value()
-			p.add(prefetchItem{account: account, slot: keccak.Sum256(slot[:]), storage: true})
+			p.add(prefetchItem{account: account, slot: keccak.Sum256(slot[:]), address: ac.Address, plainSlot: slot, storage: true})
 		}
 	}
 }

@@ -583,15 +583,42 @@ const (
 	witnessModeCanonical
 )
 
-// errWitnessCanonicalHexOnly rejects an explicit canonical request under the binary
-// trie. The legacy/canonical split is an MPT distinction (empty nodes, minimum
-// siblings); bin has a single witness form, which the legacy default names.
-var errWitnessCanonicalHexOnly = errors.New("canonical witness mode is hex-only: the binary trie has a single witness form")
+type witnessTrie int
 
-// resolveWitnessMode resolves the witness mode from the request param; absent or empty,
-// it defaults to legacy. An explicit param value other than "legacy"/"canonical" is
-// rejected, as is canonical under the binary trie.
-func resolveWitnessMode(modeParam *string, binTrie bool) (witnessMode, error) {
+const (
+	witnessTrieMPT witnessTrie = iota
+	witnessTriePBT
+)
+
+type witnessRequest struct {
+	trie witnessTrie
+	mode witnessMode
+}
+
+var (
+	errWitnessPBTNotServed    = errors.New("pbt witnesses are not served yet")
+	errWitnessModeMPTOnly     = errors.New("witness mode applies to the MPT witness only")
+	errWitnessTrieUnavailable = errors.New("requested witness trie is unavailable on this cache-only node")
+)
+
+func resolveWitnessTrie(trieParam *string, binTrie bool) (witnessTrie, error) {
+	if trieParam == nil {
+		if binTrie {
+			return witnessTriePBT, nil
+		}
+		return witnessTrieMPT, nil
+	}
+	switch *trieParam {
+	case "mpt":
+		return witnessTrieMPT, nil
+	case "pbt":
+		return witnessTriePBT, nil
+	default:
+		return witnessTrieMPT, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid witness trie %q: must be \"mpt\" or \"pbt\"", *trieParam)}
+	}
+}
+
+func resolveWitnessMode(modeParam *string) (witnessMode, error) {
 	if modeParam == nil {
 		return witnessModeLegacy, nil
 	}
@@ -599,13 +626,25 @@ func resolveWitnessMode(modeParam *string, binTrie bool) (witnessMode, error) {
 	case "", "legacy":
 		return witnessModeLegacy, nil
 	case "canonical":
-		if binTrie {
-			return witnessModeLegacy, errWitnessCanonicalHexOnly
-		}
 		return witnessModeCanonical, nil
 	default:
 		return witnessModeLegacy, fmt.Errorf("invalid witness mode %q: must be \"legacy\" or \"canonical\"", *modeParam)
 	}
+}
+
+func resolveWitnessRequest(modeParam, trieParam *string, binTrie bool) (witnessRequest, error) {
+	trie, err := resolveWitnessTrie(trieParam, binTrie)
+	if err != nil {
+		return witnessRequest{}, err
+	}
+	if trie == witnessTriePBT && modeParam != nil {
+		return witnessRequest{}, errWitnessModeMPTOnly
+	}
+	mode, err := resolveWitnessMode(modeParam)
+	if err != nil {
+		return witnessRequest{}, err
+	}
+	return witnessRequest{trie: trie, mode: mode}, nil
 }
 
 // buildAccessedState re-executes a block against a recording historical-state reader
@@ -720,7 +759,7 @@ func (api *BaseAPI) buildAccessedState(
 // ExecutionWitness implements debug_executionWitness.
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
-func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
+func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode, trieParam *string) (*ExecutionWitnessResult, error) {
 	if err := rejectPendingState(blockNrOrHash); err != nil {
 		return nil, err
 	}
@@ -738,15 +777,19 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
-	if chainConfig.IsBinaryTrie(blockHeader.Time) {
-		return nil, execctx.ErrBinCommitmentUnsupported
-	}
-	resolvedMode, err := resolveWitnessMode(mode, chainConfig.IsBinaryTrie(blockHeader.Time))
+	defaultTrie, err := resolveWitnessTrie(nil, chainConfig.IsBinaryTrie(blockHeader.Time))
 	if err != nil {
 		return nil, err
 	}
+	request, err := resolveWitnessRequest(mode, trieParam, chainConfig.IsBinaryTrie(blockHeader.Time))
+	if err != nil {
+		return nil, err
+	}
+	if request.trie == witnessTriePBT {
+		return nil, errWitnessPBTNotServed
+	}
 
-	cached, ok, reorgedAway := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, resolvedMode)
+	cached, ok, reorgedAway := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, request.mode, request.trie, defaultTrie)
 	if ok {
 		return cached, nil
 	}
@@ -756,7 +799,10 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	// reported distinctly, and a canonical-mode request is rejected distinctly since the
 	// cache only ever builds legacy witnesses.
 	if api.witnessCache != nil && api.witnessCache.CacheOnly() {
-		if resolvedMode != witnessModeLegacy {
+		if request.trie != defaultTrie {
+			return nil, errWitnessTrieUnavailable
+		}
+		if request.mode != witnessModeLegacy {
 			return nil, errWitnessCanonicalUnavailable
 		}
 		if reorgedAway {
@@ -779,9 +825,9 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	}
 
 	build := func() (*ExecutionWitnessResult, error) {
-		return api.buildWitnessResult(ctx, tx, nil, info, resolvedMode)
+		return api.buildWitnessResult(ctx, tx, nil, info, request.mode, request.trie)
 	}
-	if api.witnessCache == nil || resolvedMode != witnessModeLegacy {
+	if api.witnessCache == nil || request.mode != witnessModeLegacy {
 		return build()
 	}
 	return api.witnessCache.buildOnce(ctx, info.Block.Hash(), build)
@@ -795,8 +841,8 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 // out-of-window error). A by-hash request whose block number is no longer
 // canonical never serves its still-resident entry; reorgedAway then flags the distinct
 // orphan case so the cache-only caller can report it separately from a plain miss.
-func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode) (result *ExecutionWitnessResult, hit, reorgedAway bool) {
-	if api.witnessCache == nil || mode != witnessModeLegacy {
+func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.TemporalTx, blockNrOrHash rpc.BlockNumberOrHash, mode witnessMode, trie, defaultTrie witnessTrie) (result *ExecutionWitnessResult, hit, reorgedAway bool) {
+	if api.witnessCache == nil || mode != witnessModeLegacy || trie != defaultTrie {
 		return nil, false, false
 	}
 	// Resolve without requiring canonical even when the request set requireCanonical: this
@@ -887,9 +933,9 @@ func trieReaderFor(hc *headCaptureSource, tx kv.TemporalTx, commitmentDomain kv.
 // state is read from committedTx's history exactly as the durable path does; only the
 // commitment source changes. Direct tx.GetLatest reads keep the pinned commitment
 // state independent of the build's in-memory commitment fold.
-func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, committedTx, pinnedParentTx kv.TemporalTx, info *witnessBlockInfo, mode witnessMode, requestedTrie witnessTrie) (*ExecutionWitnessResult, error) {
 	hc := &headCaptureSource{pinnedParentTx: pinnedParentTx}
-	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
+	return api.buildWitnessResult(ctx, committedTx, hc, info, mode, requestedTrie)
 }
 
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
@@ -899,7 +945,10 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 // builder, so both produce byte-identical results; never fork the build logic. A non-nil
 // hc redirects only the commitment-domain reads to a pinned parent snapshot (head-capture);
 // nil is the durable-history path.
-func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode, requestedTrie witnessTrie) (*ExecutionWitnessResult, error) {
+	if requestedTrie == witnessTriePBT {
+		return nil, errWitnessPBTNotServed
+	}
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -910,7 +959,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if err != nil {
 		return nil, err
 	}
-	binTrie := chainConfig.IsBinaryTrie(block.Time())
+	binTrie := requestedTrie == witnessTriePBT
 	commitmentDomain := kv.CommitmentDomain
 	if binTrie {
 		commitmentDomain = kv.CommitmentBinDomain

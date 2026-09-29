@@ -417,7 +417,7 @@ func TestBuildAndCacheHeadCaptureHappyPath(t *testing.T) {
 
 	onDemand := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	bn := rpc.BlockNumber(buildNum)
-	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 	require.NoError(t, err, "durable on-demand build must succeed")
 
 	next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
@@ -495,7 +495,7 @@ func TestWitnessCacheBuilderParity(t *testing.T) {
 	}, 30*time.Second, 20*time.Millisecond, "builder must populate the cache")
 
 	bn := rpc.BlockNumber(blockNum)
-	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+	want, err := onDemand.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
 	require.NoError(t, err)
 
 	// Compare the served form: the cache stores a shell carrying only pre-marshaled
@@ -620,7 +620,7 @@ func TestBuildAndCacheHeadCaptureReorgDropsLosingFork(t *testing.T) {
 	require.True(t, api.witnessCache.Contains(canonHash), "the winning canonical hash is cached")
 	require.False(t, api.witnessCache.Contains(forkHash), "the losing fork stays absent")
 
-	_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(forkHash, false), nil)
+	_, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHashWithHash(forkHash, false), nil, nil)
 	require.ErrorIs(t, err, errWitnessReorgedAway, "a by-hash request for the reorged-out sibling is out-of-window, never served")
 }
 

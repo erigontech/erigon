@@ -158,15 +158,15 @@ func pbinWitnessFixture(t *testing.T, activation uint64) (*DebugAPIImpl, *execmo
 	return newDebugApiForTest(m), m
 }
 
-func TestPBinExecutionWitnessRefusesBinOnly(t *testing.T) {
+func TestPBinExecutionWitnessNotServedBinOnly(t *testing.T) {
 	withCommitmentHistory(t)
 	withBinCommitmentDatadir(t)
 	m, _, _, _ := chainWithDeployedContract(t)
 	enableCommitmentHistoryFlag(t, m.DB)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 	bn := rpc.BlockNumber(2)
-	_, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
-	require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
+	_, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
+	require.ErrorIs(t, err, errWitnessPBTNotServed)
 }
 
 func TestPBinOnlyProofAndWitnessRefuse(t *testing.T) {
@@ -182,15 +182,15 @@ func TestPBinOnlyProofAndWitnessRefuse(t *testing.T) {
 	require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
 }
 
-func TestPBinDualExecutionWitnessRefusesBin(t *testing.T) {
+func TestPBinDualExecutionWitnessNotServedBin(t *testing.T) {
 	api, m := pbinWitnessFixture(t, 30)
 	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	for _, n := range []rpc.BlockNumber{3, 4} {
 		t.Run(n.String(), func(t *testing.T) {
 			selector := rpc.BlockNumberOrHashWithNumber(n)
-			_, err := api.ExecutionWitness(t.Context(), selector, nil)
-			require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
+			_, err := api.ExecutionWitness(t.Context(), selector, nil, nil)
+			require.ErrorIs(t, err, errWitnessPBTNotServed)
 			_, err = ethAPI.GetProof(t.Context(), address, nil, &selector)
 			require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
 			_, err = ethAPI.GetWitness(t.Context(), selector)
@@ -202,7 +202,7 @@ func TestPBinDualExecutionWitnessRefusesBin(t *testing.T) {
 func TestPBinDualV3HexExecutionWitnessServed(t *testing.T) {
 	api, _ := pbinWitnessFixture(t, 30)
 	n := rpc.BlockNumber(2)
-	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil)
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &n}, nil, nil)
 	require.NoError(t, err)
 	require.NotNil(t, result)
 	require.NotNil(t, result.State)

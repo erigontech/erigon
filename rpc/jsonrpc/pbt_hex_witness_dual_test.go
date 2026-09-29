@@ -211,7 +211,7 @@ func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
 	selector := rpc.BlockNumberOrHashWithNumber(2)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	keys := []hexutil.Bytes{{0}}
-	witnessBefore, err := api.ExecutionWitness(t.Context(), selector, nil)
+	witnessBefore, err := api.ExecutionWitness(t.Context(), selector, nil, nil)
 	require.NoError(t, err)
 	proofBefore, err := ethAPI.GetProof(t.Context(), address, keys, &selector)
 	require.NoError(t, err)
@@ -230,7 +230,7 @@ func TestPBinFrozenHexHistoricalWitnessAndProof(t *testing.T) {
 	frozenSettings, err := os.ReadFile(settingsPath)
 	require.NoError(t, err)
 
-	witnessAfter, err := newDebugApiForTest(m).ExecutionWitness(t.Context(), selector, nil)
+	witnessAfter, err := newDebugApiForTest(m).ExecutionWitness(t.Context(), selector, nil, nil)
 	require.NoError(t, err)
 	witnessBeforeJSON, err := json.Marshal(witnessBefore)
 	require.NoError(t, err)
@@ -274,7 +274,7 @@ func TestDebugExecutionWitnessReportsPrunedCommitmentHistory(t *testing.T) {
 	require.NoError(t, tx.Commit())
 
 	block := rpc.BlockNumber(2)
-	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &block}, nil)
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &block}, nil, nil)
 	require.ErrorContains(t, err, "commitment history pruned")
 	require.Nil(t, result)
 }

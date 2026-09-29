@@ -293,6 +293,8 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 
       Mutation-check the `ResetBlockFlags` resolution: an unconditional reset turns the mid-block test red.
 - [x] run the affected packages, `make lint` and `make erigon integration`; commit the merge - must pass before task 2
+- [x] ➕ fix BAL prefetch metadata for binary domains, update the queued-item assertion, and cover storage/code rows
+      through `handleBlockRequest`; mutation-check the new fields
 
 ### Task 2: Guards for hex witnesses on hex+bin datadirs
 
@@ -326,16 +328,16 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Modify: `rpc/jsonrpc/witness_cache.go`
 - Create: `rpc/jsonrpc/debug_execution_witness_trie_test.go`
 
-- [ ] add the optional `trie *string` parameter to `ExecutionWitness` in the `DebugAPI` interface and the
+- [x] add the optional `trie *string` parameter to `ExecutionWitness` in the `DebugAPI` interface and the
       implementation; pbt returns a not-yet-served sentinel error until task 11
-- [ ] write the table test for the RPC contract table (defaults on both sides of the fork, explicit values, pbt with
+- [x] write the table test for the RPC contract table (defaults on both sides of the fork, explicit values, pbt with
       `mode`, unknown values); confirm it fails at its first resolution assertion
-- [ ] implement the resolution: default through `IsBinaryTrie(block.Time)`; reject unknown values and `mode` together
+- [x] implement the resolution: default through `IsBinaryTrie(block.Time)`; reject unknown values and `mode` together
       with pbt
-- [ ] route the cache: `serveFromWitnessCache` serves only the default trie; a cache-only node returns a distinct error
+- [x] route the cache: `serveFromWitnessCache` serves only the default trie; a cache-only node returns a distinct error
       for the other
-- [ ] write tests for cache hit and miss by trie and for the cache-only refusal
-- [ ] run tests - must pass before task 4
+- [x] write tests for cache hit and miss by trie and for the cache-only refusal
+- [x] run tests - must pass before task 4
 
 ### Task 4: MPT anchors and availability
 
