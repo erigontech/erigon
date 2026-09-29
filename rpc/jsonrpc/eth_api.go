@@ -574,20 +574,43 @@ type historyPruneFloors struct {
 	replay             uint64
 }
 
+var errHistoryViewChanged = errors.New("history view changed during availability lookup")
+
 func (api *BaseAPI) historyStartBlocks(ctx context.Context, tx kv.Tx, head uint64) (historyPruneFloors, error) {
 	ttx, ok := tx.(kv.TemporalTx)
 	if !ok {
 		return historyPruneFloors{}, fmt.Errorf("history availability requires a temporal transaction, got %T", tx)
 	}
-	files, ok := ttx.Debug().(interface{ HistoryFilesGeneration() uint64 })
-	if !ok {
-		// A head alone cannot identify the history pinned by a remote or custom view.
-		return api.readHistoryStartBlocks(ctx, ttx, head)
+	for {
+		key, ok := historyFloorCacheKey(ttx, head)
+		if !ok {
+			// Older remote servers and custom views may not identify their pinned files.
+			return api.readHistoryStartBlocks(ctx, ttx, head)
+		}
+		floors, err := api._historyPruneFloor.getForKey(ctx, key, func() (historyPruneFloors, error) {
+			floors, err := api.readHistoryStartBlocks(ctx, ttx, head)
+			if err != nil {
+				return historyPruneFloors{}, err
+			}
+			// Cursor reads can renew a remote transaction. Retry instead of caching
+			// a floor read across two different views.
+			if current, ok := historyFloorCacheKey(ttx, head); !ok || current != key {
+				return historyPruneFloors{}, errHistoryViewChanged
+			}
+			return floors, nil
+		})
+		if !errors.Is(err, errHistoryViewChanged) {
+			return floors, err
+		}
 	}
-	key := pruneFloorCacheKey{head: head, dbViewID: tx.ViewID(), snapshotGeneration: files.HistoryFilesGeneration()}
-	return api._historyPruneFloor.getForKey(ctx, key, func() (historyPruneFloors, error) {
-		return api.readHistoryStartBlocks(ctx, ttx, head)
-	})
+}
+
+func historyFloorCacheKey(tx kv.TemporalTx, head uint64) (pruneFloorCacheKey, bool) {
+	files, ok := tx.Debug().(interface{ HistoryFilesGeneration() uint64 })
+	if !ok {
+		return pruneFloorCacheKey{}, false
+	}
+	return pruneFloorCacheKey{head: head, dbViewID: tx.ViewID(), snapshotGeneration: files.HistoryFilesGeneration()}, true
 }
 
 func (api *BaseAPI) readHistoryStartBlocks(ctx context.Context, tx kv.TemporalTx, head uint64) (historyPruneFloors, error) {

@@ -42,8 +42,8 @@ const (
 )
 
 // pruneFloorCache caches successful floor reads and coalesces concurrent loads
-// by key. Different pinned file views can coexist at one head, so local keys
-// also include the file generation and the MDBX view because either source
+// by key. Different pinned file views can coexist at one head, so keys include
+// the file generation where available and the MDBX view because either source
 // can determine the floor. The TTL bounds staleness from physical changes
 // not represented by the key.
 type pruneFloorCache[T any] struct {
