@@ -993,12 +993,6 @@ type retainedBlockGuard interface {
 	IsBlockRetained(common.Hash) bool
 }
 
-func (f *ForkChoiceStore) MarkPayloadStatusIfRetained(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) (execution_client.PayloadStatus, bool) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.markPayloadStatusIfRetainedLocked(blockRoot, executionBlockHash, status, nil)
-}
-
 func (f *ForkChoiceStore) MarkPayloadStatusAndGasLimitIfRetained(
 	blockRoot common.Hash,
 	executionBlockHash common.Hash,

@@ -111,7 +111,7 @@ func TestStalePayloadRetryAfterPruneIsDropped(t *testing.T) {
 	f := &ForkChoiceStore{forkGraph: payloadVoteForkGraph{hasEnvelope: true, retained: &retained, acceptedPayloads: accepted}}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: root}}
 
-	_, applied := f.MarkPayloadStatusIfRetained(root, common.HexToHash("0xabcd"), execution_client.PayloadStatusNotValidated)
+	_, applied := f.MarkPayloadStatusAndGasLimitIfRetained(root, common.HexToHash("0xabcd"), execution_client.PayloadStatusNotValidated, 36_000_000)
 	require.False(t, applied)
 	require.Empty(t, accepted)
 	f.RequeuePendingELPayload(PendingELPayload{Block: &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 1}}, Envelope: envelope})
