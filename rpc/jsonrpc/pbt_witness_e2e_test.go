@@ -71,23 +71,29 @@ func pbtCorpusChain(t *testing.T) (*DebugAPIImpl, *execmoduletester.ExecModuleTe
 	bank := pbtCorpusBank(t)
 	newAccount := common.HexToAddress("0x7500000000000000000000000000000000000000")
 	var storeA, storeB, destroyer, blockhashContract, revertContract common.Address
-	delegate := common.HexToAddress("0x000000000000000000000000000000000000cafe")
+	delegate := types.CreateAddress(bank, 4)
 	authorityKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	require.NoError(t, err)
 	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
 	setAuth, err := types.SignAuthorization(authorityKey, *chain.AllProtocolChanges.ChainID, delegate, 0)
 	require.NoError(t, err)
-	clearAuth, err := types.SignAuthorization(authorityKey, *chain.AllProtocolChanges.ChainID, common.Address{}, 1)
+	clearAuthorityKey, err := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
+	require.NoError(t, err)
+	clearAuthority := crypto.PubkeyToAddress(clearAuthorityKey.PublicKey)
+	clearSetAuth, err := types.SignAuthorization(clearAuthorityKey, *chain.AllProtocolChanges.ChainID, delegate, 0)
+	require.NoError(t, err)
+	clearAuth, err := types.SignAuthorization(clearAuthorityKey, *chain.AllProtocolChanges.ChainID, common.Address{}, 1)
 	require.NoError(t, err)
 	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	blockhashRuntime := []byte{0x60, 0x00, 0x40, 0x60, 0x00, 0x55, 0x00}
 	revertRuntime := []byte{0x5f, 0x5f, 0xfd}
-	api, m := pbinWitnessFixtureWithGeneratorN(t, 1000, 10, nil, func(i int, b *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte), addSigned func(types.Transaction), addTransactionWithChain func(common.Address, *uint256.Int, []byte)) {
+	api, m := pbinWitnessFixtureWithGeneratorN(t, 1000, 11, nil, func(i int, b *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte), addSigned func(types.Transaction), addTransactionWithChain func(common.Address, *uint256.Int, []byte)) {
 		switch i {
 		case 0:
 			addTransaction(common.HexToAddress("0x7300000000000000000000000000000000000000"), uint256.NewInt(0), nil)
 			addTransaction(newAccount, uint256.NewInt(1), nil)
 			addTransaction(authority, uint256.NewInt(1), nil)
+			addTransaction(clearAuthority, uint256.NewInt(1), nil)
 		case 1:
 			addContract(uint256.NewInt(0), []byte{0x60, 0x01, 0x60, 0x03, 0x55, 0x60, 0x02, 0x61, 0x01, 0x00, 0x55, 0x60, 0x00, 0xff})
 		case 2:
@@ -118,15 +124,20 @@ func pbtCorpusChain(t *testing.T) (*DebugAPIImpl, *execmoduletester.ExecModuleTe
 			addTransaction(revertContract, uint256.NewInt(0), nil)
 			setCodeTarget := to
 			addSigned(&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), GasLimit: 500_000, To: &setCodeTarget}, ChainID: *chain.AllProtocolChanges.ChainID, TipCap: *uint256.NewInt(1_000_000_000), FeeCap: *uint256.NewInt(10_000_000_000)}, Authorizations: []types.Authorization{setAuth}})
-			clearCodeTarget := to
-			addSigned(&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), GasLimit: 500_000, To: &clearCodeTarget}, ChainID: *chain.AllProtocolChanges.ChainID, TipCap: *uint256.NewInt(1_000_000_000), FeeCap: *uint256.NewInt(10_000_000_000)}, Authorizations: []types.Authorization{clearAuth}})
+			addTransaction(authority, uint256.NewInt(0), pbtCorpusStoreCalldata(pbtCorpusSlot(3), 1))
 			b.AddWithdrawal(&types.Withdrawal{Index: 0, Validator: 0, Address: newAccount, Amount: 1})
 		case 8:
+			addTransaction(authority, uint256.NewInt(0), pbtCorpusStoreCalldata(pbtCorpusSlot(3), 2))
 			addTransaction(destroyer, uint256.NewInt(0), pbtCorpusStoreCalldata(pbtCorpusSlot(3), 1))
 			addTransaction(destroyer, uint256.NewInt(0), pbtCorpusStoreCalldata(pbtCorpusSlot(256), 2))
 			b.AddWithdrawal(&types.Withdrawal{Index: 1, Validator: 1, Address: newAccount, Amount: 1})
+			b.AddWithdrawal(&types.Withdrawal{Index: 2, Validator: 2, Address: to, Amount: 1})
 		case 9:
 			addTransaction(destroyer, uint256.NewInt(0), nil)
+		case 10:
+			setCodeTarget := to
+			addSigned(&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), GasLimit: 500_000, To: &setCodeTarget}, ChainID: *chain.AllProtocolChanges.ChainID, TipCap: *uint256.NewInt(1_000_000_000), FeeCap: *uint256.NewInt(10_000_000_000)}, Authorizations: []types.Authorization{clearSetAuth}})
+			addSigned(&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), GasLimit: 500_000, To: &setCodeTarget}, ChainID: *chain.AllProtocolChanges.ChainID, TipCap: *uint256.NewInt(1_000_000_000), FeeCap: *uint256.NewInt(10_000_000_000)}, Authorizations: []types.Authorization{clearAuth}})
 		}
 	})
 	repairPBinPreForkShadows(t, m, 1000)
@@ -161,7 +172,7 @@ func pbtCorpusCloneWithout(result *ExecutionWitnessResult, index int) *Execution
 func TestPBinExecutionWitnessCorpus(t *testing.T) {
 	api, m := pbtCorpusChain(t)
 	pbt := "pbt"
-	for number := uint64(1); number <= 10; number++ {
+	for number := uint64(1); number <= 11; number++ {
 		number := number
 		t.Run(fmt.Sprintf("block-%d", number), func(t *testing.T) {
 			result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), nil, &pbt)

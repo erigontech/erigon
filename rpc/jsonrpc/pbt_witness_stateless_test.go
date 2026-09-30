@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -155,6 +156,65 @@ func TestPBinWitnessStatelessReplaysWithdrawal(t *testing.T) {
 	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(context.Background(), f.result, block, f.root, common.HexToHash("0x01"), chainConfig, engine), "state root mismatch")
 }
 
+func TestPBinWitnessStatelessWithdrawalUsesBasicCodeSize(t *testing.T) {
+	address := common.Address{0x63}
+	code := []byte{0x60, 0x00, 0x35, 0x60, 0x00}
+	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(7), uint64(len(code)))
+	require.NoError(t, err)
+	codeHash := eip8297.CodeHashValue(crypto.Keccak256Hash(code))
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: basic[:]},
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey), Value: codeHash[:]},
+	}
+	ctx := newPBinWitnessInputContext()
+	root, err := pbtengine.NewTrie(ctx).Process(pbinStatelessEntriesToOps(entries))
+	require.NoError(t, err)
+	paths, blobs, _, err := pbtengine.NewTrie(ctx).Witness(context.Background(), root, eipWitness.PBinDriverInput{Reads: [][]byte{entries[0].Key, entries[1].Key}})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		result.Keys[index] = paths[index]
+		result.State[index] = blobs[index]
+	}
+	postBasic, err := eip8297.EncodeBasicData(1, uint256.NewInt(7+3*common.GWei), uint64(len(code)))
+	require.NoError(t, err)
+	postContext := newPBinWitnessInputContext()
+	postContext.records = clonePBinWitnessInputRecords(ctx.records)
+	postRoot, err := pbtengine.NewTrie(postContext).Process([]pbtengine.Op{{Key: entries[0].Key, Value: postBasic}})
+	require.NoError(t, err)
+	block := types.NewBlock(&types.Header{Root: postRoot, Number: *uint256.NewInt(1), Difficulty: uint256.Int{}, GasLimit: 30_000_000, Time: 1, BaseFee: uint256.NewInt(7)}, nil, nil, nil, []*types.Withdrawal{{Index: 0, Validator: 0, Address: address, Amount: 3}}, nil)
+	engine := merge.New(ethash.NewFaker())
+	require.NoError(t, verifyPBinWitnessAgainstBlock(context.Background(), result, block, root, postRoot, pbinStatelessChainConfig(), engine))
+}
+
+func TestPBinWitnessStatelessDelegationUsesDesignatorCodeHash(t *testing.T) {
+	address := common.Address{0x64}
+	target := common.Address{0x65}
+	delegation := types.AddressToDelegation(accounts.InternAddress(target))
+	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(7), 0)
+	require.NoError(t, err)
+	delegationValue := eip8297.EncodeDelegation(delegation)
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: basic[:]},
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.DelegationLeafKey), Value: delegationValue[:]},
+	}
+	ctx := newPBinWitnessInputContext()
+	root, err := pbtengine.NewTrie(ctx).Process(pbinStatelessEntriesToOps(entries))
+	require.NoError(t, err)
+	paths, blobs, _, err := pbtengine.NewTrie(ctx).Witness(context.Background(), root, eipWitness.PBinDriverInput{Reads: [][]byte{entries[0].Key, entries[1].Key}})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		result.Keys[index] = paths[index]
+		result.State[index] = blobs[index]
+	}
+	stateless, err := newPBinWitnessStateless(result, root)
+	require.NoError(t, err)
+	account, err := stateless.ReadAccountData(accounts.InternAddress(address))
+	require.NoError(t, err)
+	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(delegation)), account.CodeHash)
+}
+
 func pbinStatelessChainConfig() *chain.Config {
 	return &chain.Config{
 		ChainID:                       uint256.NewInt(1337),
@@ -228,18 +288,25 @@ func TestPBinWitnessStatelessTamperedSystemBlobErrors(t *testing.T) {
 	system := common.Address(params.SystemAddress.Value())
 	result, root := pbinSystemAddressWitness(t, f, system)
 	tampered := cloneExecutionWitnessResult(result)
-	rootIndex := -1
+	found := false
 	for index, path := range tampered.Keys {
 		if len(path) == 0 {
-			rootIndex = index
+			continue
+		}
+		candidate := cloneExecutionWitnessResult(result)
+		candidate.State[index] = append(hexutil.Bytes(nil), candidate.State[index]...)
+		candidate.State[index][len(candidate.State[index])-1] ^= 1
+		stateless, err := newPBinWitnessStateless(candidate, root)
+		require.NoError(t, err)
+		stateless.setPBinSystemCallScope(true)
+		_, err = stateless.ReadAccountData(params.SystemAddress)
+		if err != nil {
+			require.ErrorContains(t, err, "hashes to")
+			found = true
 			break
 		}
 	}
-	require.NotEqual(t, -1, rootIndex)
-	tampered.State[rootIndex] = append(hexutil.Bytes(nil), tampered.State[rootIndex]...)
-	tampered.State[rootIndex][len(tampered.State[rootIndex])-1] ^= 1
-	_, err := newPBinWitnessStateless(tampered, root)
-	require.Error(t, err)
+	require.True(t, found, "a non-root system-address blob must be checked in system-call scope")
 }
 
 func TestPBinWitnessStatelessGenuineSystemAccessNeedsProof(t *testing.T) {

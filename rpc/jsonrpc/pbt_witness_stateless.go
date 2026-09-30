@@ -178,12 +178,12 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	account := &accounts.Account{Root: empty.RootHash}
 	account.Nonce = binary.BigEndian.Uint64(value[eip8297.BasicDataNonceOffset:])
 	account.Balance.SetBytes(value[eip8297.BasicDataBalanceOffset : eip8297.BasicDataBalanceOffset+16])
-	_, delegationPresent, err := s.readDelegation(addr)
+	delegation, delegationPresent, err := s.readDelegation(addr)
 	if err != nil {
 		return nil, err
 	}
 	if delegationPresent {
-		account.CodeHash = accounts.EmptyCodeHash
+		account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(delegation))
 		return account, nil
 	}
 	codeHash, codeHashPresent, err := s.readCodeHash(addr)
@@ -404,11 +404,20 @@ func (s *pbinWitnessStateless) codeSize(addr common.Address) (uint64, error) {
 	if code, changed := s.codeUpdates[addr]; changed {
 		return uint64(len(code)), nil
 	}
-	code, err := s.ReadAccountCode(accounts.InternAddress(addr))
+	if account, updated := s.accountUpdates[addr]; updated && account != nil && eip8297.IsEmptyCodeHash(account.CodeHash.Value()) {
+		return 0, nil
+	}
+	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.BasicDataLeafKey))
 	if err != nil {
 		return 0, err
 	}
-	return uint64(len(code)), nil
+	if !present {
+		return 0, fmt.Errorf("pbin witness: missing basic data for account %x", addr)
+	}
+	if len(value) != eip8297.ValueLength {
+		return 0, fmt.Errorf("pbin witness: basic data for %x has length %d", addr, len(value))
+	}
+	return uint64(binary.BigEndian.Uint32(value[eip8297.BasicDataCodeSizeOffset:])), nil
 }
 
 func isPBinSystemAddress(addr common.Address) bool {
