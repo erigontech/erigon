@@ -351,6 +351,7 @@ func configurePBTSourceVariant(settings *dbstate.ErigonDBSettings) {
 		statecfg.ExperimentalBinCommitment = true
 		statecfg.ExperimentalHexBinCommitment = true
 		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.InitSchemas()
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 		statecfg.BinCommitmentHash = settings.TrieHashName()
 	case dbstate.TrieVariantBin:
@@ -464,8 +465,9 @@ func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
 	if len(files) == 0 {
 		return nil
 	}
-	if files.EndRootNum() != endTxNum {
-		return fmt.Errorf("commitment convert-pbt: source state txNum %d is not at the accounts file end %d", endTxNum, files.EndRootNum())
+	last := files[len(files)-1]
+	if last.StartRootNum() > endTxNum || last.EndRootNum() < endTxNum {
+		return fmt.Errorf("commitment convert-pbt: source state txNum %d is outside the accounts file frontier [%d,%d)", endTxNum, last.StartRootNum(), last.EndRootNum())
 	}
 	return nil
 }

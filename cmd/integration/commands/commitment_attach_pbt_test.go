@@ -148,9 +148,9 @@ func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {
 	t.Run("conversion point", func(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, true)
 		writePBTAttachSettings(t, node, commitment.PBinHashBlake3, 1, 8)
-		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 7)
+		writePBTAttachSettings(t, published, commitment.PBinHashBlake3, 1, 9)
 		err := attachPBT(t.Context(), node.DataDir, published.DataDir, "", log.New())
-		require.ErrorContains(t, err, "extends past conversion txNum")
+		require.ErrorContains(t, err, "do not end at conversion txNum")
 	})
 	t.Run("published bin range", func(t *testing.T) {
 		node, published := newPBTAttachFileTrees(t, false)

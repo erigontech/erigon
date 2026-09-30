@@ -48,6 +48,7 @@ type PBTImportOptions struct {
 	BlockHash    common.Hash
 	BlockNum     uint64
 	TxNum        uint64
+	TargetDomain kv.Domain
 	Hash         eip8297.HashFn
 	Logger       log.Logger
 }
@@ -78,10 +79,22 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	if validationErr := validatePBTImportState(state, opts.Hash); validationErr != nil {
 		return common.Hash{}, validationErr
 	}
+	targetDomain := opts.TargetDomain
+	if targetDomain == 0 {
+		targetDomain = kv.CommitmentDomain
+	}
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
 	cfg.EnableTrieWarmup = false
-	domains, err := execctx.NewSharedDomains(ctx, tx, opts.Logger, execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentDomain), execctx.WithoutCommitmentSeek())
+	domainOptions := []execctx.SharedDomainOption{
+		execctx.WithTrieConfig(cfg),
+		execctx.WithCommitmentDomain(targetDomain),
+		execctx.WithoutCommitmentSeek(),
+	}
+	if targetDomain == kv.CommitmentBinDomain {
+		domainOptions = append(domainOptions, execctx.WithPBinOnly(), execctx.WithSequentialCommitment())
+	}
+	domains, err := execctx.NewSharedDomains(ctx, tx, opts.Logger, domainOptions...)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -139,7 +152,7 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 		sort.Slice(feedAccount.Slots, func(i, j int) bool { return bytes.Compare(feedAccount.Slots[i].Key, feedAccount.Slots[j].Key) < 0 })
 		feed.Accounts = append(feed.Accounts, feedAccount)
 	}
-	commitmentCtx := domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
+	commitmentCtx := domains.GetCommitmentCtxForDomain(targetDomain)
 	if commitmentCtx == nil {
 		return common.Hash{}, fmt.Errorf("pbt import: binary commitment domain is not registered")
 	}
@@ -161,6 +174,124 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	}
 	if err := domains.Flush(ctx, tx); err != nil {
 		return common.Hash{}, err
+	}
+	return root, nil
+}
+
+func ValidatePBTSnapshot(ctx context.Context, tx kv.TemporalTx, opts PBTImportOptions) error {
+	if tx == nil || opts.Snapshot == nil || opts.Preimages == nil {
+		return fmt.Errorf("pbt import: missing input")
+	}
+	if opts.Hash == nil {
+		return fmt.Errorf("pbt import: nil hash function")
+	}
+	state, err := readPBTImportState(opts)
+	if err != nil {
+		return err
+	}
+	if validationErr := validatePBTImportState(state, opts.Hash); validationErr != nil {
+		return validationErr
+	}
+	root, err := pbtImportArtifactRoot(opts.Snapshot, opts.SnapshotSize, opts.Hash)
+	if err != nil {
+		return err
+	}
+	if root != state.meta.Root {
+		return fmt.Errorf("pbt import: reference root %s differs from artifact root %s", root.Hex(), state.meta.Root.Hex())
+	}
+	header := rawdb.ReadHeader(tx, opts.BlockHash, opts.BlockNum)
+	if header == nil {
+		return fmt.Errorf("pbt import: local header %s is missing", opts.BlockHash.Hex())
+	}
+	if root != header.Root {
+		return fmt.Errorf("pbt import: reference root %s differs from header root %s", root.Hex(), header.Root.Hex())
+	}
+	return nil
+}
+
+func pbtImportArtifactRoot(snapshot io.ReaderAt, snapshotSize int64, hashFn eip8297.HashFn) (common.Hash, error) {
+	builder, err := eip8297.NewStreamRootBuilder(hashFn)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	add := func(key []byte, value [eip8297.ValueLength]byte) error {
+		return builder.Add(key, value[:])
+	}
+	meta, err := artifact.ReadSnapshotStreamAt(snapshot, snapshotSize, artifact.SnapshotStreamCallbacks{
+		Header: func(header artifact.Header) error {
+			codeSize := uint64(0)
+			switch header.Kind {
+			case 1:
+				codeSize = integerUint64(header.CodeSize)
+			case 2:
+				codeSize = eip8297.DelegationCodeLength
+			}
+			basic, encodeErr := eip8297.EncodeBasicData(integerUint64(header.Nonce), new(uint256.Int).SetBytes(header.Balance), codeSize)
+			if encodeErr != nil {
+				return encodeErr
+			}
+			if err := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey), basic); err != nil {
+				return err
+			}
+			switch header.Kind {
+			case 0, 1:
+				if err := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.CodeHashLeafKey), eip8297.CodeHashValue(header.CodeHash)); err != nil {
+					return err
+				}
+			case 2:
+				code := append(append([]byte(nil), eip8297.DelegationMarker[:]...), header.Target[:]...)
+				if err := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.DelegationLeafKey), eip8297.EncodeDelegation(code)); err != nil {
+					return err
+				}
+			}
+			for _, slot := range header.Slots {
+				value := eip8297.EncodeStorageValue(slot.Value)
+				if err := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.HeaderStorageOffset+slot.Index), value); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		Code: func(group artifact.Group) error {
+			for _, entry := range group.Entries {
+				key := eip8297.TreeKey(eip8297.CodeZone, group.StemHash[:], entry.Index)
+				if len(entry.Value) > eip8297.ValueLength {
+					return fmt.Errorf("pbt import: code chunk has invalid width")
+				}
+				var value [eip8297.ValueLength]byte
+				copy(value[eip8297.ValueLength-len(entry.Value):], entry.Value)
+				if err := add(key, value); err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+		Storage: func(addressHash common.Hash, groups func(func(artifact.Group) error) error) error {
+			return groups(func(group artifact.Group) error {
+				position := append(append([]byte(nil), addressHash[:]...), group.StemHash[:]...)
+				for _, entry := range group.Entries {
+					key := eip8297.TreeKey(eip8297.StorageZone, position, entry.Index)
+					value, decodeErr := eip8297.DecodeLeafValue(key, entry.Value)
+					if decodeErr != nil {
+						return decodeErr
+					}
+					if err := add(key, value); err != nil {
+						return err
+					}
+				}
+				return nil
+			})
+		},
+	})
+	if err != nil {
+		return common.Hash{}, fmt.Errorf("pbt import: read artifact root: %w", err)
+	}
+	root, err := builder.RootHash()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	if meta.Root != root {
+		return common.Hash{}, fmt.Errorf("pbt import: artifact root %s does not match streamed root %s", meta.Root.Hex(), root.Hex())
 	}
 	return root, nil
 }

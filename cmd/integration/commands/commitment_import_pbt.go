@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -37,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
-	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
@@ -110,8 +108,26 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if err != nil {
 		return err
 	}
-	if err := validatePBTImportArtifacts(snapshot, snapshotInfo.Size(), preimages, preimagesInfo.Size()); err != nil {
+	settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
+	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
+		return settingsErr
+	}
+	targetDomain := kv.CommitmentDomain
+	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		targetDomain = kv.CommitmentBinDomain
+	}
+	importOptions := dbstate.PBTImportOptions{
+		Snapshot: snapshot, SnapshotSize: snapshotInfo.Size(), Preimages: preimages, PreimageSize: preimagesInfo.Size(),
+		BlockHash: blockHash, BlockNum: blockNum, TxNum: txNum, TargetDomain: targetDomain, Hash: eip8297.HashBytes, Logger: logger,
+	}
+	validationTx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
 		return err
+	}
+	validationErr := dbstate.ValidatePBTSnapshot(ctx, validationTx, importOptions)
+	validationTx.Rollback()
+	if validationErr != nil {
+		return validationErr
 	}
 	if err := rawdbreset.ResetExec(ctx, db); err != nil {
 		return err
@@ -121,10 +137,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 		return err
 	}
 	defer tx.Rollback()
-	root, err := dbstate.ImportPBTSnapshot(ctx, tx, dbstate.PBTImportOptions{
-		Snapshot: snapshot, SnapshotSize: snapshotInfo.Size(), Preimages: preimages, PreimageSize: preimagesInfo.Size(),
-		BlockHash: blockHash, BlockNum: blockNum, TxNum: txNum, Hash: eip8297.HashBytes, Logger: logger,
-	})
+	root, err := dbstate.ImportPBTSnapshot(ctx, tx, importOptions)
 	if err != nil {
 		return err
 	}
@@ -133,6 +146,14 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	}
 	if err := tx.Commit(); err != nil {
 		return err
+	}
+	if targetDomain == kv.CommitmentBinDomain && settings != nil {
+		variant := dbstate.TrieVariantBin
+		settings.TrieVariant = &variant
+		settings.ReferencesInCommitmentBranches = new(bool)
+		if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
+			return err
+		}
 	}
 	logger.Info("imported PBT snapshot", "block", blockNum, "txNum", txNum, "root", root.Hex())
 	return nil
@@ -195,23 +216,14 @@ func configureImportVariant(dirs datadir.Dirs) {
 	}
 	statecfg.ExperimentalBinCommitment = settings.TrieVariantName() == dbstate.TrieVariantBin
 	statecfg.ExperimentalHexBinCommitment = settings.TrieVariantName() == dbstate.TrieVariantHexBin
-	statecfg.ExperimentalCommitmentV3 = statecfg.ExperimentalHexBinCommitment
+	statecfg.ExperimentalCommitmentV3 = false
+	if statecfg.ExperimentalBinCommitment {
+		statecfg.ExperimentalParallelCommitment = false
+	}
 	statecfg.BinCommitmentHash = settings.TrieHashName()
 	if statecfg.ExperimentalCommitmentV3 {
+		statecfg.InitSchemas()
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	}
 	_ = commitment.SetPBinHashSuite(settings.TrieHashName())
-}
-
-func validatePBTImportArtifacts(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64) error {
-	if _, err := artifact.ReadSnapshotStreamAt(snapshot, snapshotSize, artifact.SnapshotStreamCallbacks{}); err != nil {
-		return fmt.Errorf("commitment import-pbt: read snapshot: %w", err)
-	}
-	if err := artifact.ReadPreimagesStream(preimages, preimageSize, nil); err != nil {
-		return fmt.Errorf("commitment import-pbt: read preimages: %w", err)
-	}
-	if err := artifact.JoinAt(snapshot, snapshotSize, preimages, preimageSize, eip8297.HashBytes, nil); err != nil {
-		return fmt.Errorf("commitment import-pbt: join preimages: %w", err)
-	}
-	return nil
 }

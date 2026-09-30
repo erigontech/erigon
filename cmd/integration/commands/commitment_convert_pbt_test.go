@@ -49,14 +49,105 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	chainpkg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/execfinality"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
 	require.True(t, isCommitmentFileName("v1.0-commitment-bin.0-1024.kv"), "the converter must exclude commitment-bin files from its source links")
+}
+
+func TestPBTRealChainTxNumConvention(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
+	require.NoError(t, err)
+	settings, settingsErr := dbstate.ReadErigonDBSettings(fixture.Tester.Dirs)
+	require.NoError(t, settingsErr)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+	tx, err := fixture.Tester.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	blockNum, lastTxNum, err := rawdbv3.TxNums.Last(tx)
+	require.NoError(t, err)
+	t.Logf("last block=%d tx=%d", blockNum, lastTxNum)
+	tx.Rollback()
+	fixture.Tester.Close()
+	rawDB := dbCfg(dbcfg.ChainDB, fixture.Tester.Dirs.Chaindata).MustOpen()
+	agg := dbstate.New(fixture.Tester.Dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			db.Close()
+			agg.Close()
+			rawDB.Close()
+		}
+	})
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, kv.Step(lastTxNum)+1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
+	agg.WaitForFiles()
+	seekTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	seekDomains, err := execctx.NewSharedDomains(t.Context(), seekTx, log.New())
+	require.NoError(t, err)
+	gotTx, gotBlock, err := seekDomains.SeekCommitment(t.Context(), seekTx)
+	require.NoError(t, err)
+	t.Logf("seek=(%d,%d)", gotBlock, gotTx)
+	seekDomains.Close()
+	seekTx.Rollback()
+	at := agg.BeginFilesRo()
+	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
+		files := at.Files(domain)
+		if len(files) > 0 {
+			t.Logf("domain=%s files=%d first=[%d,%d) last=[%d,%d)", domain, len(files), files[0].StartRootNum(), files[0].EndRootNum(), files[len(files)-1].StartRootNum(), files[len(files)-1].EndRootNum())
+		} else {
+			t.Logf("domain=%s files=0", domain)
+		}
+		value, found, start, end, getErr := at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentV3State, ^uint64(0))
+		if domain == kv.CommitmentBinDomain {
+			value, found, start, end, getErr = at.DebugGetLatestFromFiles(domain, commitment.KeyCommitmentState, ^uint64(0))
+		}
+		require.NoError(t, getErr)
+		require.True(t, found, "commitment state file")
+		var stateBlock, stateTx uint64
+		if domain == kv.CommitmentDomain {
+			stateBlock, stateTx, _, err = commitment.DecodeCommitmentV3State(value)
+		} else {
+			stateTx, stateBlock = commitmentdb.DecodeTxBlockNums(value)
+		}
+		require.NoError(t, err)
+		t.Logf("domain=%s blockMaxTx=%d state=(%d,%d) file=[%d,%d) seek=%d", domain, lastTxNum, stateBlock, stateTx, start, end, stateTx)
+	}
+	at.Close()
+	require.Equal(t, uint64(4), blockNum)
+	closed = true
+	db.Close()
+	agg.Close()
+	rawDB.Close()
+	output := filepath.Join(t.TempDir(), "converted")
+	require.NoError(t, convertPBT(t.Context(), fixture.Tester.Dirs.DataDir, output, true, "", log.New()))
 }
 
 func TestConvertPBTHexSourceKeepHex(t *testing.T) {
@@ -449,7 +540,7 @@ func TestConvertPBTBinOnlyRefusesBeforeFork(t *testing.T) {
 	require.ErrorIs(t, statErr, os.ErrNotExist)
 }
 
-func TestConvertPBTHexStateMustBeAtSourceEnd(t *testing.T) {
+func TestConvertPBTHexStateInsideSourceFile(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
 	t.Cleanup(func() {
@@ -460,10 +551,7 @@ func TestConvertPBTHexStateMustBeAtSourceEnd(t *testing.T) {
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, _ := newPBTConversionSourceAt(t, 7)
 	output := filepath.Join(t.TempDir(), "output")
-	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
-	require.ErrorContains(t, err, "not at the accounts file end")
-	_, statErr := os.Stat(output)
-	require.ErrorIs(t, statErr, os.ErrNotExist)
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
 }
 
 func TestConvertPBTLegacyHexSourceIsRefusedAndRemoved(t *testing.T) {
@@ -556,12 +644,16 @@ func newPBTConversionSourceAt(t *testing.T, stateTx uint64) (pbtConversionSource
 	updates.TouchPlainKey(string(slot), nil, func(*commitment.KeyUpdate, []byte) {})
 	ctx := domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
 	ctx.SetUpdates(updates)
-	hexRoot, err := ctx.ComputeCommitment(t.Context(), probeTx, true, 1, 8, "conversion-source", nil)
+	multiRange := stateTx == 16
+	firstCommitmentTx := stateTx
+	if multiRange {
+		firstCommitmentTx = 8
+	}
+	hexRoot, err := ctx.ComputeCommitment(t.Context(), probeTx, true, 1, firstCommitmentTx, "conversion-source", nil)
 	require.NoError(t, err)
 	secondAddress := bytes.Repeat([]byte{0x33}, length.Addr)
 	secondSlot := append(bytes.Clone(secondAddress), bytes.Repeat([]byte{0x44}, 32)...)
 	secondAccount := accounts.Account{Nonce: 2, Balance: *uint256.NewInt(2), CodeHash: accounts.EmptyCodeHash}
-	multiRange := stateTx == 16
 	finalRoot := hexRoot
 	finalBlock := uint64(1)
 	if multiRange {
@@ -607,7 +699,7 @@ func newPBTConversionSourceAt(t *testing.T, stateTx uint64) (pbtConversionSource
 	updates.TouchPlainKey(string(slot), nil, func(*commitment.KeyUpdate, []byte) {})
 	ctx = domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
 	ctx.SetUpdates(updates)
-	computedRoot, err := ctx.ComputeCommitment(t.Context(), tx, true, 1, 8, "conversion-source", nil)
+	computedRoot, err := ctx.ComputeCommitment(t.Context(), tx, true, 1, firstCommitmentTx, "conversion-source", nil)
 	require.NoError(t, err)
 	require.Equal(t, hexRoot, computedRoot)
 	if multiRange {

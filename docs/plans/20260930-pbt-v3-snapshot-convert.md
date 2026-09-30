@@ -272,7 +272,7 @@
 - `--block` is checked against the local canonical header. N must be a block where bin is canonical (PBT from genesis,
   or after the fork); the output is bin-only.
 - steps:
-  1. strict readers and the exact-set join;
+  1. strict readers, the exact-set join, code verification and both reference-root checks;
   2. `ResetExec`;
   3. write accounts (incarnation 1 for accounts with code, 0 otherwise), storage and address-keyed code through
      `SharedDomains` at N's last txNum T; the ordinary bin commitment fold then writes the rows and the commitment-state
@@ -513,7 +513,7 @@
       - non-zero values;
       - header slots below 64;
       - storage records matched to header records by a second cursor over the header section;
-      - counts and trailing bytes.
+      - the end tag and root trailer, with only the per-record counts remaining.
 - [x] implement the strict preimage reader and the exact-set join
 - [x] write the reject tables (one case per artifact rule; for preimages: unsorted address, duplicate address, unsorted
       or duplicate slot, truncated record, trailing byte; for the join: a missing and a surplus preimage), round trips on

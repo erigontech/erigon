@@ -249,11 +249,11 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	}
 	for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
 		files := at.Files(domain)
-		if len(files) == 0 || files.EndRootNum() != txNum {
+		if len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() < txNum {
 			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
-			if file.domain != domain || !file.data || file.to*settings.StepSize > txNum {
+			if file.domain != domain || !file.data || file.from*settings.StepSize > txNum {
 				continue
 			}
 			if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
@@ -263,11 +263,11 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 	}
 	for _, domain := range []kv.Domain{kv.CommitmentDomain, kv.CommitmentBinDomain} {
 		files := at.Files(domain)
-		if len(opened[domain]) == 0 || files.EndRootNum() != txNum {
+		if len(opened[domain]) == 0 || len(files) == 0 || files[len(files)-1].StartRootNum() > txNum || files[len(files)-1].EndRootNum() < txNum {
 			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, txNum)
 		}
 		for _, file := range publishedFiles {
-			if file.domain == domain && file.data && file.to*settings.StepSize <= txNum {
+			if file.domain == domain && file.data && file.from*settings.StepSize <= txNum {
 				if _, ok := opened[domain][filepath.Clean(file.path)]; !ok {
 					return fmt.Errorf("commitment attach-pbt: published %s file %s was not opened", domain, file.path)
 				}
@@ -293,11 +293,11 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 		}},
 	}
 	for _, check := range checks {
-		value, found, _, end, err := at.DebugGetLatestFromFiles(check.domain, check.key, math.MaxUint64)
+		value, found, start, end, err := at.DebugGetLatestFromFiles(check.domain, check.key, math.MaxUint64)
 		if err != nil {
 			return err
 		}
-		if !found || end != txNum {
+		if !found || start > txNum || end < txNum {
 			return fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
 		}
 		gotBlock, gotTx, err := check.decode(value)
@@ -334,13 +334,16 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 		return err
 	}
 	for _, file := range publishedFiles {
-		if file.to*stepSize > endTxNum {
+		if file.from*stepSize > endTxNum {
 			return fmt.Errorf("commitment attach-pbt: published file %s extends past conversion txNum %d", file.path, endTxNum)
 		}
 	}
 	nodeRanges := pbtAttachRanges(nodeFiles, stepSize, endTxNum)
 	publishedRanges := pbtAttachRanges(publishedFiles, stepSize, endTxNum)
 	if err := validatePBTAttachPublishedRanges(publishedRanges, endTxNum); err != nil {
+		return err
+	}
+	if err := validatePBTAttachFrontier(publishedFiles, stepSize, endTxNum); err != nil {
 		return err
 	}
 	for _, domain := range pbtAttachDomains {
@@ -366,11 +369,30 @@ func validatePBTAttachPublishedFiles(publishedDirs datadir.Dirs, stepSize, endTx
 		return err
 	}
 	for _, file := range publishedFiles {
-		if file.to*stepSize > endTxNum {
+		if file.from*stepSize > endTxNum {
 			return fmt.Errorf("commitment attach-pbt: published file %s extends past conversion txNum %d", file.path, endTxNum)
 		}
 	}
-	return validatePBTAttachPublishedRanges(pbtAttachRanges(publishedFiles, stepSize, endTxNum), endTxNum)
+	ranges := pbtAttachRanges(publishedFiles, stepSize, endTxNum)
+	if err := validatePBTAttachPublishedRanges(ranges, endTxNum); err != nil {
+		return err
+	}
+	return validatePBTAttachFrontier(publishedFiles, stepSize, endTxNum)
+}
+
+func validatePBTAttachFrontier(files []pbtAttachFile, stepSize, endTxNum uint64) error {
+	frontiers := make(map[kv.Domain]uint64, len(pbtAttachDomains))
+	for _, file := range files {
+		if file.data && file.from*stepSize <= endTxNum && file.to*stepSize > frontiers[file.domain] {
+			frontiers[file.domain] = file.to * stepSize
+		}
+	}
+	for _, domain := range pbtAttachDomains {
+		if frontiers[domain] < endTxNum {
+			return fmt.Errorf("commitment attach-pbt: published %s files do not end at conversion txNum %d", domain, endTxNum)
+		}
+	}
+	return nil
 }
 
 func validatePBTAttachPublishedRanges(ranges map[kv.Domain][]string, endTxNum uint64) error {
@@ -388,7 +410,7 @@ func validatePBTAttachPublishedRanges(ranges map[kv.Domain][]string, endTxNum ui
 func pbtAttachRanges(files []pbtAttachFile, stepSize, endTxNum uint64) map[kv.Domain][]string {
 	ranges := make(map[kv.Domain][]string, len(pbtAttachDomains))
 	for _, file := range files {
-		if !file.data || file.to*stepSize > endTxNum {
+		if !file.data || file.from*stepSize > endTxNum {
 			continue
 		}
 		ranges[file.domain] = append(ranges[file.domain], fmt.Sprintf("%d-%d", file.from*stepSize, file.to*stepSize))
@@ -475,7 +497,7 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 		return err
 	}
 	for _, file := range publishedFiles {
-		if file.to*stepSize > endTxNum {
+		if file.from*stepSize > endTxNum {
 			continue
 		}
 		rel, err := filepath.Rel(publishedDirs.Snap, file.path)
