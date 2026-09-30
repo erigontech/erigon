@@ -59,6 +59,9 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.Ful
 			if err := probs.report(failFast, fmt.Errorf("canonical marker not found: %d", i)); err != nil {
 				return err
 			}
+			// Without a hash there is nothing to read the header and body with, and reading them
+			// anyway ends the run on the first gap it was asked to carry on past.
+			continue
 		}
 		header := rawdb.ReadHeader(tx, hash, i)
 		if header == nil {

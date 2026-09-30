@@ -47,16 +47,6 @@ func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, b
 	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(RCacheNoDups), rcacheNoDupsRange)
 }
 
-// RCacheNoDupsRange checks one block range on its own. Callers inside a fan-out use
-// rcacheNoDupsRange instead, so that one tally covers every chunk.
-func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) error {
-	var probs problems
-	if err := rcacheNoDupsRange(ctx, fromBlock, toBlock, db, blockReader, failFast, &probs); err != nil {
-		return err
-	}
-	return probs.verdict(string(RCacheNoDups))
-}
-
 func rcacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, probs *problems) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
