@@ -785,9 +785,11 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 				}
 			}
 			select {
-			case te.execRequests <- &execRequest{b.NumberU64(), b.Hash(),
+			case te.execRequests <- &execRequest{
+				b.NumberU64(), b.Hash(),
 				protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				dbBAL, txTasks, consumers, false, exhausted}:
+				dbBAL, txTasks, consumers, false, exhausted,
+			}:
 			case <-ctx.Done():
 				return ctx.Err()
 			}

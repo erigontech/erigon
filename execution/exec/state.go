@@ -425,7 +425,8 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
-	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*WorkerContext, applyWorker *WorkerContext, clear func(), err error) {
+	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger,
+) (reconWorkers []*WorkerContext, applyWorker *WorkerContext, clear func(), err error) {
 	reconWorkers = make([]*WorkerContext, workerCount)
 
 	// Worker contexts are driven per-task by the dispatcher (goroutine-per-task,

@@ -2010,7 +2010,6 @@ func (ibs *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 			account := readAccount
 
 			destructed, _, _, err := refreshSelfDestruct(ibs, addr)
-
 			if err != nil {
 				return err
 			}

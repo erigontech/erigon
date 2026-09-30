@@ -717,7 +717,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						checkReceipts := checkBloom && pe.cfg.chainConfig.IsByzantium(applyResult.BlockNum)
 
 						b, _, err := pe.cfg.blockReader.BlockWithSenders(ctx, rwTx, applyResult.BlockHash, applyResult.BlockNum)
-
 						if err != nil {
 							failInfra(fmt.Errorf("can't retrieve block %d: for post validation: %w", applyResult.BlockNum, err))
 							continue
@@ -1544,7 +1543,6 @@ func (pe *parallelExecutor) run(ctx context.Context) (context.Context, context.C
 		pe.cfg.blockReader, pe.cfg.chainConfig, pe.cfg.genesis, pe.cfg.engine,
 		pe.workerCount+1, pe.taskExecMetrics, pe.cfg.dirs, pe.logger,
 	)
-
 	if err != nil {
 		return execLoopCtx, execLoopCtxCancel, err
 	}
