@@ -272,8 +272,8 @@
 - `--block` is checked against the local canonical header. N must be a block where bin is canonical (PBT from genesis,
   or after the fork); the output is bin-only.
 - steps:
-  1. `ResetExec`;
-  2. strict readers and the exact-set join;
+  1. strict readers and the exact-set join;
+  2. `ResetExec`;
   3. write accounts (incarnation 1 for accounts with code, 0 otherwise), storage and address-keyed code through
      `SharedDomains` at N's last txNum T; the ordinary bin commitment fold then writes the rows and the commitment-state
      record at (N, T), as the genesis path does.
@@ -502,11 +502,10 @@
       with its snapshotDigest. Add the codec signatures with stubs; write tests that the writer reproduces the golden
       artifact and the reader accepts it; confirm they fail at the byte comparison
 - [x] implement the writer over a plain (key, value) iterator:
-      - minimal big-endian integers;
-      - section counts and root patched at the end;
-      - storage records buffered with a spill threshold;
+      - tagged records in zone order, followed by the end tag and the pbtRoot trailer;
+      - minimal big-endian integers and canonical single-leaf or multi-leaf storage groups;
       - refusal of kind-0 empty accounts and kind-1 size-0 code;
-      - the digest over the finished file.
+      - the digest over the complete stream, including the trailer.
 - [x] implement the strict reader:
       - widths and leading zeros;
       - kinds;

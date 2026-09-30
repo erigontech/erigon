@@ -304,8 +304,8 @@ func TestArtifactReaderRejectsUpdatedRecordRules(t *testing.T) {
 	}{
 		{name: "unknown tag 08", data: withTrailer([]byte{8})},
 		{name: "unknown tag ff", data: withTrailer([]byte{0xff})},
-		{name: "missing end tag", data: append(append([]byte{}, header()...), make([]byte, 32)...)},
-		{name: "truncated root", data: append(append(append([]byte{}, header()...), 7), make([]byte, 31)...)},
+		{name: "missing end tag", data: append(append(append([]byte{}, header()...), 0), make([]byte, 32)...)},
+		{name: "truncated root", data: append([]byte{7}, make([]byte, 31)...)},
 		{name: "trailing byte", data: append(withTrailer(header()), 0)},
 		{name: "header after code", data: withTrailer(code(), header())},
 		{name: "code after storage", data: withTrailer(header(), storage(), code())},
@@ -344,10 +344,10 @@ func TestArtifactReaderRejectsMalformedInputs(t *testing.T) {
 		data func() []byte
 	}{
 		{name: "leading zero integer", data: func() []byte {
-			broken := bytes.Clone(data)
-			broken[72] = 2
-			broken[73] = 0
-			return broken
+			broken := []byte{0}
+			broken = append(broken, make([]byte, 32)...)
+			broken = append(broken, 2, 0, 1, 0, 0, 7)
+			return append(broken, make([]byte, 32)...)
 		}},
 		{name: "header slot is not below 64", data: func() []byte {
 			broken := bytes.Clone(data)
@@ -366,6 +366,10 @@ func TestArtifactReaderRejectsMalformedInputs(t *testing.T) {
 			_, err := readSnapshot(t, test.data())
 			if test.name == "header slot is not below 64" {
 				require.ErrorContains(t, err, "header slot")
+				return
+			}
+			if test.name == "leading zero integer" {
+				require.ErrorContains(t, err, "leading zero")
 				return
 			}
 			require.Error(t, err, "the reader must reject %s", test.name)
