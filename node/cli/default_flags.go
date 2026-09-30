@@ -210,6 +210,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinDiscoveryAddrFlag,
 	&utils.CaplinDiscoveryPortFlag,
 	&utils.CaplinDiscoveryTCPPortFlag,
+	&utils.CaplinDiscoveryQUICPortFlag,
 	&utils.CaplinCheckpointSyncUrlFlag,
 	&utils.CaplinSubscribeAllTopicsFlag,
 	&utils.CaplinMaxPeerCount,

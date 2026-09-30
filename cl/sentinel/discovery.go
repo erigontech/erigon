@@ -28,6 +28,7 @@ import (
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
+	manet "github.com/multiformats/go-multiaddr/net"
 	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -47,6 +48,14 @@ const (
 	subnetSearchInterval             = 12 * time.Second // Check every slot
 	peerPruneInterval                = 60 * time.Second // How often to check for excess peers
 )
+
+func filterNonPrivatePeerAddresses(info *peer.AddrInfo) bool {
+	info.Addrs = slices.DeleteFunc(info.Addrs, func(addr multiaddr.Multiaddr) bool {
+		ip, err := manet.ToIP(addr)
+		return err != nil || ip.IsPrivate()
+	})
+	return len(info.Addrs) > 0
+}
 
 // getSubnetCoverage returns a count of peers for each attestation subnet (64 subnets)
 func (s *Sentinel) getSubnetCoverage() [attestationSubnetCount]int {
@@ -122,13 +131,11 @@ func (s *Sentinel) findPeersForSubnets(subnets []subnetSearchState) {
 		checked++
 		node := filteredIterator.Node()
 
-		// Skip private IPs unless local discovery is enabled
-		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
-			continue
-		}
-
 		peerInfo, _, err := p2p.ConvertToAddrInfo(node)
 		if err != nil {
+			continue
+		}
+		if !s.cfg.P2PConfig.LocalDiscovery && !filterNonPrivatePeerAddresses(peerInfo) {
 			continue
 		}
 
@@ -489,12 +496,12 @@ func (s *Sentinel) stickToPeers(peers []multiaddr.Multiaddr) {
 func (s *Sentinel) listenForPeers() {
 	multiAddresses := make([]multiaddr.Multiaddr, 0, len(s.cfg.NetworkConfig.StaticPeers))
 	for _, node := range s.cfg.NetworkConfig.StaticPeers {
-		addr, err := p2p.ParseStaticPeer(node)
+		addrs, err := p2p.ParseStaticPeerAddrs(node)
 		if err != nil {
 			log.Warn("Could not connect to static peer", "peer", node, "reason", err)
 			continue
 		}
-		multiAddresses = append(multiAddresses, addr)
+		multiAddresses = append(multiAddresses, addrs...)
 	}
 	log.Info("CL Sentinel static peers", "len", len(multiAddresses))
 	if len(multiAddresses) > 0 {
@@ -529,12 +536,11 @@ func (s *Sentinel) listenForPeers() {
 			log.Debug("[Sentinel] Could not convert to peer info", "err", err)
 			continue
 		}
-		s.pidToEnr.Store(peerInfo.ID, node)
-		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
-		// Skip Peer if IP was private, unless local discovery is enabled.
-		if !s.cfg.P2PConfig.LocalDiscovery && node.IP().IsPrivate() {
+		if !s.cfg.P2PConfig.LocalDiscovery && !filterNonPrivatePeerAddresses(peerInfo) {
 			continue
 		}
+		s.pidToEnr.Store(peerInfo.ID, node)
+		s.pidToEnodeId.Store(peerInfo.ID, node.ID())
 
 		if err := s.connectSem.Acquire(s.ctx, 1); err != nil {
 			if errors.Is(err, context.Canceled) {
@@ -555,6 +561,16 @@ func (s *Sentinel) listenForPeers() {
 
 func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 	peerId := conn.RemotePeer()
+	addr := conn.RemoteMultiaddr()
+	transport := conn.ConnState().Transport
+	if transport == "quic-v1" {
+		transport = "quic"
+	}
+	s.logger.Trace("[Sentinel] Peer connected",
+		"peer", peerId,
+		"direction", conn.Stat().Direction,
+		"addr", addr,
+		"transport", transport)
 	go s.handleNewConnection(peerId, func() (bool, error) {
 		return s.handshaker.ValidatePeer(s.ctx, peerId)
 	})
