@@ -1,30 +1,38 @@
 package stages
 
 import (
+	"bytes"
 	"context"
 	"testing"
 	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/public_keys_registry"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 type orderedPayloadValidator struct {
@@ -57,9 +65,25 @@ type storedParentPayloadTestStore struct {
 
 type chainTipBatchForkGraph struct {
 	fork_graph.ForkGraph
-	parents   map[common.Hash]*cltypes.SignedBeaconBlock
-	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
-	added     map[common.Hash]int
+	parents     map[common.Hash]*cltypes.SignedBeaconBlock
+	parentState *state2.CachingBeaconState
+	envelopes   map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
+	added       map[common.Hash]int
+}
+
+type chainTipBatchEnvelopeSentinel struct {
+	sentinelproto.SentinelClient
+	response []byte
+	calls    int
+}
+
+func (s *chainTipBatchEnvelopeSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	s.calls++
+	return &sentinelproto.ResponseData{Data: s.response, Peer: &sentinelproto.Peer{Pid: "envelope-peer"}}, nil
+}
+
+func (*chainTipBatchEnvelopeSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
 }
 
 func (g *chainTipBatchForkGraph) AddChainSegment(block *cltypes.SignedBeaconBlock, _ bool) (*state2.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
@@ -85,6 +109,16 @@ func (g *chainTipBatchForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeac
 	return g.ForkGraph.GetBlock(root)
 }
 
+func (g *chainTipBatchForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state2.CachingBeaconState, error) {
+	if _, ok := g.parents[root]; ok {
+		if alwaysCopy {
+			return g.parentState.Copy()
+		}
+		return g.parentState, nil
+	}
+	return g.ForkGraph.GetState(root, alwaysCopy)
+}
+
 func (g *chainTipBatchForkGraph) HasEnvelope(root common.Hash) bool {
 	_, ok := g.envelopes[root]
 	return ok || g.ForkGraph.HasEnvelope(root)
@@ -95,6 +129,11 @@ func (g *chainTipBatchForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltype
 		return envelope, nil
 	}
 	return g.ForkGraph.ReadEnvelopeFromDisk(root)
+}
+
+func (g *chainTipBatchForkGraph) DumpEnvelopeOnDisk(root common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	g.envelopes[root] = envelope
+	return nil
 }
 
 func (g *chainTipBatchForkGraph) IsBlockRetained(root common.Hash) bool {
@@ -148,18 +187,34 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 	anchorRoot, err := anchorState.BlockRoot()
 	require.NoError(t, err)
 
+	parentState, err := anchorState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, parentState.SetSlot(envelope.Message.Payload.SlotNumber))
 	parentBid.ParentBlockRoot = anchorRoot
 	envelope.Message.ParentBeaconBlockRoot = anchorRoot
+	envelope.Message.Payload.Time = state2.ComputeTimestampAtSlot(parentState, parentState.Slot())
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.Message.ExecutionRequests))
 	envelope.Message.Payload.BlockHash = anchorPayloadHeaderHash(t, envelope.Message.Payload, anchorRoot, requestsHash)
 	parentBid.BlockHash = envelope.Message.Payload.BlockHash
+	parentState.SetLatestExecutionPayloadBid(parentBid)
+	parentState.SetLatestBlockHash(envelope.Message.Payload.ParentHash)
+	parentState.SetPayloadExpectedWithdrawals(envelope.Message.Payload.Withdrawals)
 	parent := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
 	parent.Block.Slot = envelope.Message.Payload.SlotNumber
 	parent.Block.ParentRoot = anchorRoot
 	parent.Block.Body.GetSignedExecutionPayloadBid().Message = parentBid
+	parentState.SetLatestBlockHeader(parent.SignedBeaconBlockHeader().Header)
+	parent.Block.StateRoot, err = parentState.HashSSZ()
+	require.NoError(t, err)
 	parentRoot, err := parent.Block.HashSSZ()
 	require.NoError(t, err)
+	stateBlockRoot, err := parentState.BlockRoot()
+	require.NoError(t, err)
+	require.Equal(t, parentRoot, stateBlockRoot)
 	envelope.Message.BeaconBlockRoot = parentRoot
+	privKey, err := bls.NewPrivateKeyFromIKM([]byte("01234567890123456789012345678901"))
+	require.NoError(t, err)
+	signAnchorEnvelope(t, parentState, privKey, envelope, parent.Block.Slot)
 
 	baseGraph, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
 	require.NoError(t, err)
@@ -168,16 +223,18 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 		parents: map[common.Hash]*cltypes.SignedBeaconBlock{
 			parentRoot: parent,
 		},
+		parentState: parentState,
 		envelopes: map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
 			parentRoot: envelope,
 		},
 		added: make(map[common.Hash]int),
 	}
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, beaconCfg)
+	engine := &testExecutionEngine{payloadStatus: replayStatus}
 	store, err := forkchoice.NewForkChoiceStore(
 		clock,
 		anchorState,
-		nil,
+		engine,
 		pool.NewOperationsPool(beaconCfg),
 		graph,
 		beaconevents.NewEventEmitter(),
@@ -204,7 +261,6 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 	emptyChild.Block.ParentRoot = parentRoot
 	emptyChild.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parentBid.ParentBlockHash
 
-	engine := &testExecutionEngine{payloadStatus: replayStatus}
 	stageCfg := &Cfg{
 		beaconCfg:             beaconCfg,
 		forkChoice:            store,
@@ -213,6 +269,18 @@ func newChainTipBatchFixture(t *testing.T, replayStatus execution_client.Payload
 		gloasPayloadValidator: engine,
 	}
 	return stageCfg, graph, parentRoot, fullChild, emptyChild, engine
+}
+
+func newChainTipBatchEnvelopeRPC(t *testing.T, cfg *clparams.BeaconChainConfig, envelope *cltypes.SignedExecutionPayloadEnvelope) (*rpc.BeaconRpcP2P, *chainTipBatchEnvelopeSentinel) {
+	t.Helper()
+
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, digest[:]...))
+	sentinel := &chainTipBatchEnvelopeSentinel{response: response.Bytes()}
+	return rpc.NewBeaconRpcP2P(t.Context(), sentinel, cfg, clock, nil), sentinel
 }
 
 func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
@@ -278,6 +346,29 @@ func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
 }
 
 func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
+	t.Run("peer-fetched unavailable parent does not gate full child", func(t *testing.T) {
+		cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
+		fullRoot, err := fullChild.Block.HashSSZ()
+		require.NoError(t, err)
+		envelope := graph.envelopes[parentRoot]
+		peerRPC, sentinel := newChainTipBatchEnvelopeRPC(t, cfg.beaconCfg, envelope)
+		cfg.rpc = peerRPC
+		delete(graph.envelopes, parentRoot)
+		seen := make(map[common.Hash]struct{})
+
+		processChainTipBatch(t.Context(), cfg, Args{targetSlot: fullChild.Block.Slot + 1}, []*cltypes.SignedBeaconBlock{fullChild}, seen)
+
+		require.Equal(t, 1, sentinel.calls)
+		require.Equal(t, 1, engine.newPayloadCalls)
+		var storedSlot *uint64
+		require.NoError(t, cfg.indiciesDB.View(t.Context(), func(tx kv.Tx) error {
+			storedSlot, err = beacon_indicies.ReadBlockSlotByBlockRoot(tx, common.Hash(fullRoot))
+			return err
+		}))
+		require.NotNil(t, storedSlot)
+		require.Equal(t, fullChild.Block.Slot, *storedSlot)
+	})
+
 	t.Run("valid replay processes full child", func(t *testing.T) {
 		cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusValidated)
 		fullRoot, err := fullChild.Block.HashSSZ()
@@ -473,8 +564,6 @@ func TestParentEnvelopeRequiredOnlyForFullBranch(t *testing.T) {
 	require.False(t, parentEnvelopeNeedsRecovery(child, parent, true, execution_client.PayloadStatusInvalidated, true))
 	require.False(t, parentEnvelopeNeedsRecovery(child, parent, false, execution_client.PayloadStatusInvalidated, true))
 	require.True(t, parentEnvelopeNeedsRecovery(child, parent, false, execution_client.PayloadStatusNone, false))
-	require.True(t, storedParentReplayRequired(child, parent, true))
-	require.False(t, storedParentReplayRequired(child, parent, false))
 }
 
 func TestEnsureStoredParentPayloadAcceptedReplaysMissingVerdict(t *testing.T) {

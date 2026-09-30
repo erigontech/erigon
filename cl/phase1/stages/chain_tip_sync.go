@@ -312,7 +312,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 					log.Debug("[chainTipSync] failed to apply parent envelope", "slot", block.Block.Slot, "err", envErr)
 				}
 				parentBlock := parentBlockByRoot(parentRoot)
-				if storedParentReplayRequired(block, parentBlock, wasStored) && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr) {
+				if wasStored && parentEnvelopeRequired(block, parentBlock) && !payloadReplay.accepted(ctx, cfg, cfg.forkChoice, parentRoot, env, envErr) {
 					continue
 				}
 			}
@@ -398,10 +398,6 @@ func parentEnvelopeRequired(child, parent *cltypes.SignedBeaconBlock) bool {
 	childBid := child.Block.Body.GetSignedExecutionPayloadBid()
 	parentBid := parent.Block.Body.GetSignedExecutionPayloadBid()
 	return childBid != nil && childBid.Message != nil && parentBid != nil && parentBid.Message != nil && childBid.Message.ParentBlockHash == parentBid.Message.BlockHash
-}
-
-func storedParentReplayRequired(child, parent *cltypes.SignedBeaconBlock, wasStored bool) bool {
-	return wasStored && parentEnvelopeRequired(child, parent)
 }
 
 func parentEnvelopeNeedsRecovery(child, parent *cltypes.SignedBeaconBlock, stored bool, status execution_client.PayloadStatus, statusFound bool) bool {
@@ -935,9 +931,6 @@ func (r *storedParentPayloadReplay) accepted(
 ) bool {
 	if accepted, ok := r.results[root]; ok {
 		return accepted
-	}
-	if r.results == nil {
-		r.results = make(map[common.Hash]bool)
 	}
 	if applyErr != nil && !errors.Is(applyErr, forkchoice.ErrIgnore) {
 		if r.remaining > 0 {
