@@ -19,6 +19,7 @@ package engine_types
 import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // MarshalFastJSONTo writes the getPayload envelope, byte-identical to json.Marshal(r).
@@ -49,19 +50,19 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.Stream) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("parentHash").WriteHex(p.ParentHash[:])
-	s.Field("feeRecipient").WriteHex(p.FeeRecipient[:])
-	s.Field("stateRoot").WriteHex(p.StateRoot[:])
-	s.Field("receiptsRoot").WriteHex(p.ReceiptsRoot[:])
-	s.Field("logsBloom").WriteHex(p.LogsBloom)
-	s.Field("prevRandao").WriteHex(p.PrevRandao[:])
+	ethjson.Data(s, "parentHash", p.ParentHash[:])
+	ethjson.Data(s, "feeRecipient", p.FeeRecipient[:])
+	ethjson.Data(s, "stateRoot", p.StateRoot[:])
+	ethjson.Data(s, "receiptsRoot", p.ReceiptsRoot[:])
+	ethjson.Data(s, "logsBloom", p.LogsBloom)
+	ethjson.Data(s, "prevRandao", p.PrevRandao[:])
 	jsonstream.Text(s, "blockNumber", &p.BlockNumber)
 	jsonstream.Text(s, "gasLimit", &p.GasLimit)
 	jsonstream.Text(s, "gasUsed", &p.GasUsed)
 	jsonstream.Text(s, "timestamp", &p.Timestamp)
-	s.Field("extraData").WriteHex(p.ExtraData)
+	ethjson.Data(s, "extraData", p.ExtraData)
 	jsonstream.Text(s, "baseFeePerGas", p.BaseFeePerGas)
-	s.Field("blockHash").WriteHex(p.BlockHash[:])
+	ethjson.Data(s, "blockHash", p.BlockHash[:])
 	s.Field("transactions")
 	jsonstream.ArrayValue(s, p.Transactions, writeHex)
 	s.Field("withdrawals")
@@ -72,7 +73,7 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.Stream) {
 		jsonstream.Text(s, "slotNumber", p.SlotNumber)
 	}
 	if p.BlockAccessList != nil {
-		s.Field("blockAccessList").WriteHex(*p.BlockAccessList)
+		ethjson.Data(s, "blockAccessList", *p.BlockAccessList)
 	}
 	s.WriteObjectEnd()
 }

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // JsonStreamLogger is an EVM state logger and implements Tracer.
@@ -223,8 +224,7 @@ func (l *JsonStreamLogger) OnOpcodeV2(pc uint64, typ byte, gas mdgas.MdGas, cost
 		l.stream.WriteArrayEnd()
 	}
 	if l.cfg.EnableReturnData && len(rData) > 0 {
-		l.stream.Field("returnData")
-		l.stream.WriteHex(rData)
+		ethjson.Data(l.stream, "returnData", rData)
 	}
 	if outputStorage {
 		l.stream.Field("storage")

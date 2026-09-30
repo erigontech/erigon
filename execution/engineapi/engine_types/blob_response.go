@@ -19,6 +19,7 @@ package engine_types
 import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // BlobsBundleV1, BlobsBundleV2, and BlobsBundleV3 are engine_getBlobs response slices.
@@ -51,8 +52,8 @@ func writeBlobV1(s *jsonstream.Stream, bp **BlobAndProofV1) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("blob").WriteHex(b.Blob)
-	s.Field("proof").WriteHex(b.Proof)
+	ethjson.Data(s, "blob", b.Blob)
+	ethjson.Data(s, "proof", b.Proof)
 	s.WriteObjectEnd()
 }
 
@@ -63,7 +64,7 @@ func writeBlobV2(s *jsonstream.Stream, bp **BlobAndProofV2) {
 		return
 	}
 	s.WriteObjectStart()
-	s.Field("blob").WriteHex(b.Blob)
+	ethjson.Data(s, "blob", b.Blob)
 	s.Field("proofs")
 	jsonstream.ArrayValue(s, b.CellProofs, writeHex)
 	s.WriteObjectEnd()

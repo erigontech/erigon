@@ -20,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
+	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // Result structs for GetProof
@@ -40,12 +41,12 @@ type StorProofResult struct {
 
 func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	s.WriteObjectStart()
-	s.Field("address").WriteHex(r.Address[:])
+	ethjson.Data(s, "address", r.Address[:])
 	writeHexArray(s, "accountProof", r.AccountProof)
 	jsonstream.Text(s, "balance", r.Balance)
-	s.Field("codeHash").WriteHex(r.CodeHash[:])
+	ethjson.Data(s, "codeHash", r.CodeHash[:])
 	jsonstream.Text(s, "nonce", &r.Nonce)
-	s.Field("storageHash").WriteHex(r.StorageHash[:])
+	ethjson.Data(s, "storageHash", r.StorageHash[:])
 	s.Field("storageProof")
 	jsonstream.ArrayValue(s, r.StorageProof, writeStorProofElem)
 	s.WriteObjectEnd()
