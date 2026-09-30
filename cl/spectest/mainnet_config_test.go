@@ -34,16 +34,13 @@ import (
 )
 
 type configValueCount struct {
-	value any
 	node  yaml.Node
 	count int
 }
 
 func testMainnetConfig(t *testing.T) {
-	t.Helper()
-
-	reference, referenceNodes := readMainnetConfigReference(t, os.DirFS(mainnetDir))
-	referenceYAML, err := yaml.Marshal(referenceNodes)
+	reference := readMainnetConfigReference(t, os.DirFS(mainnetDir))
+	referenceYAML, err := yaml.Marshal(reference)
 	if err != nil {
 		t.Fatalf("marshal mainnet config reference: %v", err)
 	}
@@ -90,26 +87,35 @@ func testMainnetConfig(t *testing.T) {
 		"GAS_LIMIT_SCHEDULE":                  {},
 	}
 
-	for key, specValue := range reference {
+	for key, specNode := range reference {
 		if _, ok := matched[key]; ok {
 			continue
 		}
 		erigonValue, hardcodedOK := hardcoded[key]
 		_, notComparedOK := notCompared[key]
-		if hardcodedOK == notComparedOK {
-			problems = append(problems, fmt.Sprintf("%s: Erigon %v, spec %v", key, "<unknown>", specValue))
+		if hardcodedOK && notComparedOK {
+			problems = append(problems, fmt.Sprintf("%s: mapped to both hardcoded and notCompared", key))
+			continue
+		}
+		if !hardcodedOK && !notComparedOK {
+			var specValue any
+			if err := specNode.Decode(&specValue); err != nil {
+				problems = append(problems, fmt.Sprintf("%s: decode spec value: %v", key, err))
+				continue
+			}
+			problems = append(problems, fmt.Sprintf("%s: spec %v, not mapped to a Caplin config field, hardcoded or notCompared", key, specValue))
 			continue
 		}
 		if !hardcodedOK {
 			continue
 		}
-		typedSpecValue, err := decodeConfigValue(specValue, reflect.TypeOf(erigonValue))
-		if err != nil {
-			problems = append(problems, fmt.Sprintf("%s: Erigon %v, spec %v (decode: %v)", key, erigonValue, specValue, err))
+		typedSpecValue := reflect.New(reflect.TypeOf(erigonValue))
+		if err := specNode.Decode(typedSpecValue.Interface()); err != nil {
+			problems = append(problems, fmt.Sprintf("%s: Erigon %v, spec decode: %v", key, erigonValue, err))
 			continue
 		}
-		if !reflect.DeepEqual(erigonValue, typedSpecValue) {
-			problems = append(problems, fmt.Sprintf("%s: Erigon %v, spec %v", key, erigonValue, typedSpecValue))
+		if specValue := typedSpecValue.Elem().Interface(); !reflect.DeepEqual(erigonValue, specValue) {
+			problems = append(problems, fmt.Sprintf("%s: Erigon %v, spec %v", key, erigonValue, specValue))
 		}
 	}
 
@@ -119,10 +125,10 @@ func testMainnetConfig(t *testing.T) {
 	}
 }
 
-func readMainnetConfigReference(t *testing.T, root fs.FS) (map[string]any, map[string]yaml.Node) {
+func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]yaml.Node {
 	t.Helper()
 
-	values := make(map[string][]configValueCount)
+	values := make(map[string]map[string]configValueCount)
 	configFiles := 0
 	err := fs.WalkDir(root, "mainnet", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -153,22 +159,18 @@ func readMainnetConfigReference(t *testing.T, root fs.FS) (map[string]any, map[s
 			if strings.HasSuffix(key, "_FORK_EPOCH") {
 				continue
 			}
-			var value any
-			if err := node.Decode(&value); err != nil {
-				return fmt.Errorf("decode %s key %s: %w", name, key, err)
+			canonical, err := yaml.Marshal(&node)
+			if err != nil {
+				return fmt.Errorf("encode %s key %s: %w", name, key, err)
 			}
 			counts := values[key]
-			found := false
-			for i := range counts {
-				if reflect.DeepEqual(counts[i].value, value) {
-					counts[i].count++
-					found = true
-					break
-				}
+			if counts == nil {
+				counts = make(map[string]configValueCount)
 			}
-			if !found {
-				counts = append(counts, configValueCount{value: value, node: node, count: 1})
-			}
+			count := counts[string(canonical)]
+			count.node = node
+			count.count++
+			counts[string(canonical)] = count
 			values[key] = counts
 		}
 		return nil
@@ -180,22 +182,21 @@ func readMainnetConfigReference(t *testing.T, root fs.FS) (map[string]any, map[s
 		t.Fatal("no mainnet config fixtures found")
 	}
 
-	reference := make(map[string]any, len(values))
-	referenceNodes := make(map[string]yaml.Node, len(values))
+	reference := make(map[string]yaml.Node, len(values))
 	for key, counts := range values {
-		mostCommon := counts[0]
-		for _, candidate := range counts[1:] {
+		mostCommon := configValueCount{}
+		// Some fixture cases override config values, so one file does not reliably hold the spec default.
+		for _, candidate := range counts {
 			if candidate.count > mostCommon.count {
 				mostCommon = candidate
 			}
 		}
-		reference[key] = mostCommon.value
-		referenceNodes[key] = mostCommon.node
+		reference[key] = mostCommon.node
 	}
-	return reference, referenceNodes
+	return reference
 }
 
-func compareConfigFields(reference map[string]any, builtIn, spec any, matched map[string]struct{}) []string {
+func compareConfigFields(reference map[string]yaml.Node, builtIn, spec any, matched map[string]struct{}) []string {
 	builtInValue := reflect.ValueOf(builtIn)
 	specValue := reflect.ValueOf(spec)
 	builtInType := builtInValue.Type()
@@ -211,21 +212,14 @@ func compareConfigFields(reference map[string]any, builtIn, spec any, matched ma
 		matched[key] = struct{}{}
 		erigonField := builtInValue.Field(i).Interface()
 		specField := specValue.Field(i).Interface()
-		if !reflect.DeepEqual(erigonField, specField) {
+		equal := reflect.DeepEqual(erigonField, specField)
+		if erigonString, ok := erigonField.(string); ok {
+			specString, ok := specField.(string)
+			equal = ok && strings.EqualFold(erigonString, specString)
+		}
+		if !equal {
 			problems = append(problems, fmt.Sprintf("%s: Erigon %v, spec %v", key, erigonField, specField))
 		}
 	}
 	return problems
-}
-
-func decodeConfigValue(value any, valueType reflect.Type) (any, error) {
-	encoded, err := yaml.Marshal(value)
-	if err != nil {
-		return nil, err
-	}
-	decoded := reflect.New(valueType)
-	if err := yaml.Unmarshal(encoded, decoded.Interface()); err != nil {
-		return nil, err
-	}
-	return decoded.Elem().Interface(), nil
 }
