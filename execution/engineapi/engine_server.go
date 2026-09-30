@@ -281,6 +281,16 @@ func (e *EngineServer) checkRequestsPresence(version clparams.StateVersion, exec
 func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.ExecutionPayload,
 	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes, version clparams.StateVersion,
 ) (any, error) {
+	status, err := e.newPayloadStatus(ctx, req, expectedBlobHashes, parentBeaconBlockRoot, executionRequests, inclusionList, version)
+	if err != nil {
+		return nil, err
+	}
+	return payloadStatusForVersion(status, version), nil
+}
+
+func (e *EngineServer) newPayloadStatus(ctx context.Context, req *engine_types.ExecutionPayload,
+	expectedBlobHashes []common.Hash, parentBeaconBlockRoot *common.Hash, executionRequests []hexutil.Bytes, inclusionList []hexutil.Bytes, version clparams.StateVersion,
+) (*engine_types.PayloadStatusV2, error) {
 	defer engineNewPayloadDuration.ObserveDuration(time.Now())
 	if !e.consuming.Load() {
 		return nil, errors.New("engine payload consumption is not enabled")
@@ -302,7 +312,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var err error
 	txs := make([][]byte, len(req.Transactions))
 	transactions := make([]types.Transaction, len(req.Transactions))
-	var invalidTransactionStatus *engine_types.PayloadStatus
+	var invalidTransactionStatus *engine_types.PayloadStatusV2
 	for i, transaction := range req.Transactions {
 		txs[i] = transaction
 		if invalidTransactionStatus != nil {
@@ -310,7 +320,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		}
 		if types.TypedTransactionMarshalledAsRlpString(transaction) {
 			e.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
-			invalidTransactionStatus = &engine_types.PayloadStatus{
+			invalidTransactionStatus = &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
 			}
@@ -319,14 +329,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		transactions[i], err = types.UnmarshalTransactionFromBinary(transaction, false /* blobTxnsAreWrappedWithBlobs */)
 		if err != nil {
 			e.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
-			invalidTransactionStatus = &engine_types.PayloadStatus{
+			invalidTransactionStatus = &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
 			}
 			continue
 		}
 		if transactions[i].GetGasLimit() > uint64(req.GasLimit) {
-			invalidTransactionStatus = &engine_types.PayloadStatus{
+			invalidTransactionStatus = &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(protocol.ErrGasLimitReached),
 			}
@@ -423,7 +433,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		blockAccessList, err = types.DecodeBlockAccessListSidecarOwned(balBytes)
 		if err != nil {
 			e.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
-			return &engine_types.PayloadStatus{
+			return &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(fmt.Sprintf("%v: decode failed: %v", types.ErrInvalidBlockAccessList, err)),
 			}, nil
@@ -442,8 +452,8 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	var il types.Transactions
 	if version >= clparams.HezeVersion {
-		if len(inclusionList) == 0 || inclusionList == nil {
-			return nil, &rpc.InvalidParamsError{Message: "inclusion list cannot be empty"}
+		if inclusionList == nil {
+			return nil, &rpc.InvalidParamsError{Message: "inclusion list missing"}
 		}
 
 		txns := make([][]byte, len(inclusionList))
@@ -476,7 +486,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			"parentBeaconBlockRoot", parentBeaconBlockRoot,
 			"requests", executionRequests,
 		)
-		return &engine_types.PayloadStatus{
+		return &engine_types.PayloadStatusV2{
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
 		}, nil
@@ -486,7 +496,7 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if blockAccessList != nil {
 		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
-			return &engine_types.PayloadStatus{
+			return &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),
 			}, nil
@@ -503,14 +513,14 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			if !bad {
 				latestValidHash = req.ParentHash
 			}
-			return &engine_types.PayloadStatus{
+			return &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 				LatestValidHash: &latestValidHash,
 			}, nil
 		}
 		if errors.Is(err, misc.ErrMismatchBlobHashes) || errors.Is(err, misc.ErrInvalidVersionedHash) {
-			return &engine_types.PayloadStatus{
+			return &engine_types.PayloadStatusV2{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
 			}, nil
@@ -523,7 +533,12 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 	if possibleStatus != nil {
 		e.logger.Debug("[NewPayload] got quick payload status", "payloadStatus", possibleStatus)
-		return possibleStatus, nil
+		return &engine_types.PayloadStatusV2{
+			Status:          possibleStatus.Status,
+			ValidationError: possibleStatus.ValidationError,
+			LatestValidHash: possibleStatus.LatestValidHash,
+			CriticalError:   possibleStatus.CriticalError,
+		}, nil
 	}
 
 	e.lock.Lock()
@@ -538,42 +553,33 @@ func (e *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
 	block = block.WithInclusionList(il)
 	payloadStatus, err := e.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
-	if version < clparams.HezeVersion {
-		if err != nil {
-			if errors.Is(err, rules.ErrInvalidBlock) {
-				return &engine_types.PayloadStatus{
-					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedError(err),
-				}, nil
-			}
-			return nil, err
+	if err != nil {
+		if errors.Is(err, rules.ErrInvalidBlock) {
+			return &engine_types.PayloadStatusV2{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedError(err),
+			}, nil
 		}
-		e.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
+		return nil, err
+	}
+	e.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
 
-		ret := &engine_types.PayloadStatus{Status: payloadStatus.Status, ValidationError: payloadStatus.ValidationError, LatestValidHash: payloadStatus.LatestValidHash, CriticalError: payloadStatus.CriticalError}
+	if payloadStatus.CriticalError != nil {
+		return nil, payloadStatus.CriticalError
+	}
 
-		if ret.CriticalError != nil {
-			return nil, ret.CriticalError
-		}
+	return payloadStatus, nil
+}
 
-		return ret, nil
-	} else {
-		if err != nil {
-			if errors.Is(err, rules.ErrInvalidBlock) {
-				return &engine_types.PayloadStatusV2{
-					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedError(err),
-				}, nil
-			}
-			return nil, err
-		}
-		e.logger.Debug("[NewPayload] got reply", "payloadStatus", payloadStatus)
-
-		if payloadStatus.CriticalError != nil {
-			return nil, payloadStatus.CriticalError
-		}
-
-		return payloadStatus, nil
+func payloadStatusForVersion(status *engine_types.PayloadStatusV2, version clparams.StateVersion) any {
+	if version >= clparams.HezeVersion {
+		return status
+	}
+	return &engine_types.PayloadStatus{
+		Status:          status.Status,
+		ValidationError: status.ValidationError,
+		LatestValidHash: status.LatestValidHash,
+		CriticalError:   status.CriticalError,
 	}
 }
 
