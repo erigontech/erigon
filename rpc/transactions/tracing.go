@@ -106,9 +106,7 @@ func ComputeTxContext(statedb *state.IntraBlockState, engine rules.EngineReader,
 	return msg, txContext, nil
 }
 
-// TraceTx configures a new tracer according to the provided configuration, and
-// executes the given message in the provided environment. The return value will
-// be tracer dependent.
+// TraceTx writes the transaction trace to stream and returns its gas usage.
 func TraceTx(
 	ctx context.Context,
 	engine rules.EngineReader,
@@ -125,10 +123,10 @@ func TraceTx(
 	stream jsonstream.Stream,
 	callTimeout time.Duration,
 	precompiles vm.PrecompiledContracts,
-) (gasUsed uint64, err error) {
+) (txnGasUsage mdgas.TxnGasUsage, err error) {
 	tracer, streaming, cancel, err := AssembleTracer(ctx, config, txCtx.TxHash, blockNumber, blockHash, txnIndex, stream, callTimeout)
 	if err != nil {
-		return 0, err
+		return mdgas.TxnGasUsage{}, err
 	}
 	defer cancel()
 	execCb := func(evm *vm.EVM, refunds bool) (*evmtypes.ExecutionResult, error) {
@@ -146,11 +144,11 @@ func TraceTx(
 		if tracer != nil && tracer.HasTxEndHook() {
 			tracer.EmitTxEnd(&types.Receipt{GasUsed: result.ReceiptGasUsed}, result.TxnGasUsage, nil)
 		}
-		gasUsed = result.ReceiptGasUsed
+		txnGasUsage = result.TxnGasUsage
 		return result, err
 	}
 	err = ExecuteTraceTx(blockCtx, txCtx, ibs, config, chainConfig, stream, tracer, streaming, precompiles, execCb)
-	return gasUsed, err
+	return txnGasUsage, err
 }
 
 func AssembleTracer(
@@ -260,16 +258,25 @@ func ExecuteTraceTx(
 		stream.WriteHex(ret)
 		stream.WriteObjectEnd()
 	} else {
-		r, err := tracer.GetResult()
-		if err != nil {
+		if err := writeTracerResult(tracer, stream); err != nil {
 			return err
 		}
-
-		stream.WriteRawBytes(r)
 		if err := stream.Flush(); err != nil { // Client can use result of 1 tx-trace
 			return err
 		}
 	}
 
+	return nil
+}
+
+func writeTracerResult(tracer *tracers.Tracer, stream jsonstream.Stream) error {
+	if tracer.MarshalFastJSONTo != nil {
+		return tracer.MarshalFastJSONTo(stream)
+	}
+	r, err := tracer.GetResult()
+	if err != nil {
+		return err
+	}
+	stream.WriteRawBytes(r)
 	return nil
 }

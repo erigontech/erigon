@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -57,6 +58,7 @@ import (
 	tracersConfig "github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
@@ -169,6 +171,225 @@ func TestTraceBlockByNumber(t *testing.T) {
 	var er []ethapi.ExecutionResult
 	if err = json.Unmarshal(buf.Bytes(), &er); err != nil {
 		t.Fatalf("parsing result: %v", err)
+	}
+}
+
+func TestTraceBlockGasUsed(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		amsterdam bool
+		dataSize  int
+	}{
+		{name: "pre_amsterdam"},
+		{name: "state_bound", amsterdam: true},
+		{name: "execution_bound", amsterdam: true, dataSize: 10_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := chain.AllProtocolChanges.Copy()
+			if !tc.amsterdam {
+				cfg.AmsterdamTime = nil
+			}
+			m, bankKey, bankAddress := fundedBankGenesis(t, cfg)
+			signer := types.LatestSignerForChainID(cfg.ChainID)
+			gasPrice := uint256.NewInt(1_000_000_000)
+			txns := []*types.LegacyTx{
+				types.NewTransaction(0, common.HexToAddress("0x2000"), uint256.NewInt(1), 1_000_000, gasPrice, nil),
+				types.NewTransaction(1, bankAddress, uint256.NewInt(0), 1_000_000, gasPrice, bytes.Repeat([]byte{1}, tc.dataSize)),
+			}
+			generated, err := m.GenerateChain(1, func(_ int, gen *blockgen.BlockGen) {
+				gen.SetCoinbase(common.Address{1})
+				for _, txn := range txns {
+					signed, err := types.SignTx(txn, *signer, bankKey)
+					require.NoError(t, err)
+					gen.AddTx(signed)
+				}
+			})
+			require.NoError(t, err)
+			require.NoError(t, m.InsertChain(generated))
+			receiptGasUsed := generated.Receipts[0][1].CumulativeGasUsed
+			if tc.amsterdam {
+				require.NotEqual(t, receiptGasUsed, generated.TopBlock.GasUsed())
+			} else {
+				require.Equal(t, receiptGasUsed, generated.TopBlock.GasUsed())
+			}
+
+			previousAssert := dbg.AssertEnabled
+			dbg.AssertEnabled = true
+			t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+			var buf bytes.Buffer
+			stream := jsonstream.New(&buf)
+			api := newDebugApiForTest(m)
+			require.NotPanics(t, func() {
+				require.NoError(t, api.TraceBlockByNumber(m.Ctx, 1, &tracersConfig.TraceConfig{}, stream))
+			})
+			require.NoError(t, stream.Flush())
+			var traces []struct {
+				Result struct {
+					Gas uint64 `json:"gas"`
+				} `json:"result"`
+			}
+			require.NoError(t, json.Unmarshal(buf.Bytes(), &traces))
+			require.Len(t, traces, len(txns))
+			for i, trace := range traces {
+				require.Equal(t, generated.Receipts[0][i].GasUsed, trace.Result.Gas)
+			}
+		})
+	}
+}
+
+type traceGasUsage struct {
+	GasUsed        hexutil.Uint64  `json:"gasUsed"`
+	RegularGasUsed *hexutil.Uint64 `json:"regularGasUsed"`
+	StateGasUsed   *hexutil.Int64  `json:"stateGasUsed"`
+	GasRefund      *hexutil.Uint64 `json:"gasRefund"`
+}
+
+func gasTracingTestChain(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []ethapi.CallArgs) {
+	t.Helper()
+	key, err := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	require.NoError(t, err)
+	sender := crypto.PubkeyToAddress(key.PublicKey)
+	contract := common.HexToAddress("0x2000")
+	m := execmoduletester.New(t, execmoduletester.WithKey(key), execmoduletester.WithGenesisSpec(&types.Genesis{
+		Config:   chain.AllProtocolChanges.Copy(),
+		GasLimit: 60_000_000,
+		Alloc: types.GenesisAlloc{
+			sender: {Balance: big.NewInt(1e18)},
+			contract: {Nonce: 1, Code: []byte{
+				byte(vm.PUSH1), 0, byte(vm.CALLDATALOAD), byte(vm.PUSH1), 0, byte(vm.SSTORE), byte(vm.STOP),
+			}},
+			params.HistoryStorageAddress.Value(): {Nonce: 1, Code: sloadStub},
+		},
+	}))
+	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
+	gas := hexutil.Uint64(1_000_000)
+	gasPrice := uint256.NewInt(1_000_000_000)
+	calls := make([]ethapi.CallArgs, 0, 2)
+	generated, err := m.GenerateChain(2, func(i int, gen *blockgen.BlockGen) {
+		gen.SetCoinbase(common.Address{1})
+		gen.AddWithdrawal(&types.Withdrawal{Index: hexutil.Uint64(i), Address: common.Address{0x30, byte(i)}, Amount: 1})
+		if i != 0 {
+			return
+		}
+		for nonce := range uint64(2) {
+			data := make(hexutil.Bytes, 32)
+			data[31] = byte(1 - nonce)
+			txn, err := types.SignTx(types.NewTransaction(nonce, contract, uint256.NewInt(0), uint64(gas), gasPrice, data), *signer, key)
+			require.NoError(t, err)
+			gen.AddTx(txn)
+			calls = append(calls, ethapi.CallArgs{
+				From: &sender, To: &contract, Gas: &gas, GasPrice: (*hexutil.U256)(gasPrice),
+				Nonce: new(hexutil.Uint64(nonce)), Data: &data,
+			})
+		}
+	})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(generated))
+	return m, generated, calls
+}
+
+func readGasTrace(t *testing.T, result any, trace func(jsonstream.Stream) error) {
+	t.Helper()
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	require.NoError(t, trace(stream))
+	require.NoError(t, stream.Flush())
+	require.NoError(t, json.Unmarshal(buf.Bytes(), result))
+}
+
+func TestTraceGasUsageAcrossRPCPaths(t *testing.T) {
+	m, generated, calls := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	tracer := "callTracer"
+	config := &tracersConfig.TraceConfig{Tracer: &tracer}
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	var blockTraces []struct {
+		Result traceGasUsage `json:"result"`
+	}
+	readGasTrace(t, &blockTraces, func(stream jsonstream.Stream) error {
+		return api.TraceBlockByNumber(m.Ctx, 1, config, stream)
+	})
+	require.Len(t, blockTraces, len(calls))
+	for i, trace := range blockTraces {
+		require.EqualValues(t, types.ReceiptStatusSuccessful, generated.Receipts[0][i].Status)
+		require.EqualValues(t, generated.Receipts[0][i].GasUsed, trace.Result.GasUsed)
+		require.NotNil(t, trace.Result.RegularGasUsed)
+		require.Positive(t, *trace.Result.RegularGasUsed)
+		require.NotNil(t, trace.Result.StateGasUsed)
+		require.NotNil(t, trace.Result.GasRefund)
+	}
+	require.EqualValues(t, params.StateGasPerStorageSet, *blockTraces[0].Result.StateGasUsed)
+	require.Zero(t, *blockTraces[0].Result.GasRefund)
+	require.Zero(t, *blockTraces[1].Result.StateGasUsed)
+	require.Positive(t, *blockTraces[1].Result.GasRefund)
+
+	var manyTraces [][]traceGasUsage
+	readGasTrace(t, &manyTraces, func(stream jsonstream.Stream) error {
+		return api.TraceCallMany(m.Ctx, []Bundle{{Transactions: calls}}, StateContext{BlockNumber: block, TransactionIndex: new(0)}, config, stream)
+	})
+	require.Len(t, manyTraces, 1)
+	require.Len(t, manyTraces[0], len(calls))
+	for i, call := range calls {
+		var txnTrace traceGasUsage
+		readGasTrace(t, &txnTrace, func(stream jsonstream.Stream) error {
+			return api.TraceTransaction(m.Ctx, generated.Blocks[0].Transactions()[i].Hash(), config, stream)
+		})
+		require.Equal(t, blockTraces[i].Result, txnTrace, "transaction %d", i)
+
+		callConfig := *config
+		callConfig.TxIndex = new(hexutil.Uint(i))
+		var callTrace traceGasUsage
+		readGasTrace(t, &callTrace, func(stream jsonstream.Stream) error {
+			return api.TraceCall(m.Ctx, call, &block, &callConfig, stream)
+		})
+		require.Equal(t, txnTrace, callTrace, "call %d", i)
+		require.Equal(t, txnTrace, manyTraces[0][i], "call-many %d", i)
+	}
+}
+
+func TestTraceBlockGasExcludesSystemChanges(t *testing.T) {
+	m, generated, _ := gasTracingTestChain(t)
+	api := newDebugApiForTest(m)
+	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	previousAssert := dbg.AssertEnabled
+	dbg.AssertEnabled = true
+	t.Cleanup(func() { dbg.AssertEnabled = previousAssert })
+	for i, block := range generated.Blocks {
+		at := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(block.NumberU64()))
+		stored, err := ethAPI.GetStorageAt(m.Ctx, params.HistoryStorageAddress.Value(), hexutil.EncodeUint64(uint64(i)), &at)
+		require.NoError(t, err)
+		require.Equal(t, block.ParentHash(), stored)
+		require.NotEqual(t, common.Hash{}, stored)
+		require.Len(t, block.Withdrawals(), 1)
+		balance, err := ethAPI.GetBalance(m.Ctx, block.Withdrawals()[0].Address, &at)
+		require.NoError(t, err)
+		require.Equal(t, uint256.NewInt(1_000_000_000), (*uint256.Int)(balance))
+		var traces []struct {
+			TxHash common.Hash `json:"txHash"`
+			Result struct {
+				Gas            uint64 `json:"gas"`
+				RegularGasUsed uint64 `json:"regularGasUsed"`
+				StateGasUsed   uint64 `json:"stateGasUsed"`
+			} `json:"result"`
+		}
+		readGasTrace(t, &traces, func(stream jsonstream.Stream) error {
+			return api.TraceBlockByNumber(m.Ctx, rpc.BlockNumber(block.NumberU64()), nil, stream)
+		})
+		require.Len(t, traces, len(block.Transactions()))
+		var executionGasUsed uint64
+		var stateGasUsed uint64
+		for j, trace := range traces {
+			require.Equal(t, block.Transactions()[j].Hash(), trace.TxHash)
+			require.Equal(t, generated.Receipts[i][j].GasUsed, trace.Result.Gas)
+			executionGasUsed += trace.Result.RegularGasUsed
+			stateGasUsed += trace.Result.StateGasUsed
+		}
+		require.Equal(t, max(executionGasUsed, stateGasUsed), block.GasUsed())
+		if i == 0 {
+			require.EqualValues(t, params.StateGasPerStorageSet, stateGasUsed)
+		} else {
+			require.Zero(t, block.GasUsed())
+		}
 	}
 }
 

@@ -39,7 +39,7 @@ func benchJSONLoggerStep(b *testing.B, stackDepth int, memSize int) {
 
 	b.ReportAllocs()
 	for b.Loop() {
-		l.OnOpcodeV2(42, byte(vm.SSTORE), mdgas.MdGas{Execution: 1_000_000}, mdgas.MdGas{Execution: 2100}, scope, rData, 3, nil)
+		l.OnOpcodeV2(42, byte(vm.SSTORE), mdgas.MdGas{Execution: 1_000_000}, mdgas.MdGasCost{Execution: 2100}, scope, rData, 3, nil)
 	}
 }
 

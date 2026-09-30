@@ -183,7 +183,7 @@ All `trace_*` methods return objects built from the same set of fields. Each met
 | `output` | DATA | Return data of the top-level call (`0x` if no data was returned). |
 | `stateDiff` | Object \| null | Set when `"stateDiff"` is requested in the trace types array. Maps each touched account address to an object describing changes to `balance`, `nonce`, `code`, and per-key `storage` entries. `null` if not requested. |
 | `trace` | Array of TraceEntry | Set when `"trace"` is requested. Flat list of call frames executed during the transaction. Empty array (never `null`) if not requested. See **TraceEntry fields** below. |
-| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `null` if not requested. |
+| `vmTrace` | Object \| null | Set when `"vmTrace"` is requested. Step-by-step EVM trace including `code`, per-step `ops` (with `pc`, `cost`, `ex` execution result, and `sub` for nested calls). `ops` holds only operations that executed, so every `pc` lies inside `code`: an undefined opcode or a stack underflow or overflow is omitted, and an operation that halted exceptionally has `ex: null`. `null` if not requested. |
 | `transactionHash` | DATA, 32 BYTES | (Only in `trace_replayBlockTransactions` entries) Hash of the transaction this trace belongs to. |
 
 ### TraceEntry fields
@@ -673,6 +673,8 @@ Returns traces matching given filter
    * `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list and preserve the previous behavior when both lists are set. A `null` mode is the same as an omitted one. Other mode values, including `""`, return `-32602`.
 
    The `'pending'` tag is not supported for either block bound and returns `-32602`: `trace_filter` scans committed trace history, which has no pending block.
+
+   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. A block hash that names no known block returns an error.
 
 ```js
 params: [{

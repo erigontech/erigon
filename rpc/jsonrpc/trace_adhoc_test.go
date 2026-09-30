@@ -451,6 +451,76 @@ func TestReplayBlockTransactions(t *testing.T) {
 	require.Equal(t, uint64(1_000_000_000_000_000), v)
 }
 
+func TestParityTraceGasUsageAcrossRPCPaths(t *testing.T) {
+	m, generated, calls := gasTracingTestChain(t)
+	api := newTraceApiForTest(m)
+	block := rpc.BlockNumberOrHashWithNumber(1)
+	parent := rpc.BlockNumberOrHashWithNumber(0)
+	blockTraces, err := api.Block(m.Ctx, 1, nil, nil)
+	require.NoError(t, err)
+	require.Len(t, blockTraces, len(calls))
+	expectedStateGas := []int64{int64(params.StateGasPerStorageSet), 0}
+	for i, call := range calls {
+		result, ok := blockTraces[i].Result.(*TraceResult)
+		require.True(t, ok)
+		require.NotNil(t, result.GasUsed)
+		require.Positive(t, result.GasUsed.ToInt().Uint64())
+		require.NotNil(t, result.StateGasUsed)
+		require.EqualValues(t, expectedStateGas[i], *result.StateGasUsed)
+
+		hash := generated.Blocks[0].Transactions()[i].Hash()
+		txnTraces, err := api.Transaction(m.Ctx, hash, nil, nil)
+		require.NoError(t, err)
+		require.Len(t, txnTraces, 1)
+		require.Equal(t, result, txnTraces[0].Result, "transaction %d", i)
+
+		replay, err := api.ReplayTransaction(m.Ctx, hash, []string{TraceTypeTrace}, nil, nil)
+		require.NoError(t, err)
+		require.Len(t, replay.Trace, 1)
+		require.Equal(t, result, replay.Trace[0].Result, "replay transaction %d", i)
+
+		var callConfig *config.TraceConfig
+		if i == 1 {
+			callConfig = &config.TraceConfig{StateOverrides: &ethapi.StateOverrides{
+				accounts.InternAddress(*call.To): {
+					StateDiff: &map[common.Hash]common.Hash{{}: common.HexToHash("0x1")},
+				},
+			}}
+		}
+		callTrace, err := api.Call(m.Ctx, TraceCallParam{
+			From: call.From, To: call.To, Gas: call.Gas, GasPrice: call.GasPrice,
+			Nonce: call.Nonce, Data: call.Data,
+		}, []string{TraceTypeTrace}, &parent, callConfig)
+		require.NoError(t, err)
+		require.Len(t, callTrace.Trace, 1)
+		require.Equal(t, result, callTrace.Trace[0].Result, "call %d", i)
+	}
+
+	for _, traceTypes := range [][]string{{TraceTypeTrace}, {TraceTypeTrace, TraceTypeStateDiff}} {
+		t.Run(strings.Join(traceTypes, "_"), func(t *testing.T) {
+			replays, err := api.ReplayBlockTransactions(m.Ctx, block, traceTypes, nil, nil)
+			require.NoError(t, err)
+			require.Len(t, replays, len(calls))
+
+			manyCalls := make([][2]any, len(calls))
+			for i, call := range calls {
+				manyCalls[i] = [2]any{call, traceTypes}
+			}
+			encoded, err := json.Marshal(manyCalls)
+			require.NoError(t, err)
+			manyTraces, err := api.CallMany(m.Ctx, encoded, &parent, nil)
+			require.NoError(t, err)
+			require.Len(t, manyTraces, len(calls))
+			for i, trace := range blockTraces {
+				require.Len(t, replays[i].Trace, 1)
+				require.Equal(t, trace.Result, replays[i].Trace[0].Result, "block replay %d", i)
+				require.Len(t, manyTraces[i].Trace, 1)
+				require.Equal(t, trace.Result, manyTraces[i].Trace[0].Result, "call-many %d", i)
+			}
+		})
+	}
+}
+
 func TestOeTracer(t *testing.T) {
 	type callContext struct {
 		Number              math.HexOrDecimal64 `json:"number"`
@@ -1203,6 +1273,176 @@ func TestOeTracerDepthLabel(t *testing.T) {
 			require.Nil(t, result.Trace[1].Result)
 		})
 	}
+}
+
+// vmTraceSteps summarizes a vmTrace as one line per operation, with the operations of a sub indented below it
+// and an empty sub shown as "sub{}".
+func vmTraceSteps(trace *VmTrace) []string {
+	var steps []string
+	for _, op := range trace.Ops {
+		step := fmt.Sprintf("%d %s", op.Pc, op.Op)
+		if op.Ex == nil {
+			step += " halted"
+		} else {
+			step += fmt.Sprintf(" %v", op.Ex.Push)
+			if op.Ex.Mem != nil {
+				step += fmt.Sprintf(" mem %d:%s", op.Ex.Mem.Off, op.Ex.Mem.Data)
+			}
+			if op.Ex.Store != nil {
+				step += fmt.Sprintf(" store %s=%s", op.Ex.Store.Key, op.Ex.Store.Val)
+			}
+		}
+		if op.Sub != nil && len(op.Sub.Ops) == 0 {
+			step += " sub{}"
+		}
+		steps = append(steps, step)
+		if op.Sub != nil {
+			for _, sub := range vmTraceSteps(op.Sub) {
+				steps = append(steps, "  "+sub)
+			}
+		}
+	}
+	return steps
+}
+
+// A vmTrace lists the operations that executed: no STOP for code that runs off its end, no operation
+// rejected before execution, and an operation that halted exceptionally with ex null.
+func TestTraceCallVmTraceExecutedOps(t *testing.T) {
+	m, _, bankAddr := fundedBankGenesis(t, chain.TestChainOsakaConfig)
+	api := newTraceApiForTest(m)
+	target := common.HexToAddress("0x00000000000000000000000000000000cafe0005")
+	child := common.HexToAddress("0x00000000000000000000000000000000cafe0006")
+	pushChild := append([]byte{byte(vm.PUSH20)}, child[:]...)
+	// CALL child with 0xffff gas and no value, input or output; the code ends after the CALL.
+	callChild := append(append([]byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0)}, pushChild...),
+		byte(vm.PUSH2), 0xff, 0xff, byte(vm.CALL))
+	// STATICCALL child with 0xffff gas and output window [0, 32).
+	staticCallChild := append(append([]byte{byte(vm.PUSH1), 0x20, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0)}, pushChild...),
+		byte(vm.PUSH2), 0xff, 0xff, byte(vm.STATICCALL), byte(vm.STOP))
+	staticCallSteps := func(sub ...string) []string {
+		steps := []string{
+			"0 PUSH1 [0x20]", "2 PUSH0 [0x0]", "3 PUSH0 [0x0]", "4 PUSH0 [0x0]", "5 PUSH20 [0xcafe0006]", "26 PUSH2 [0xffff]",
+			"29 STATICCALL [0x0] mem 0:0x" + strings.Repeat("00", 32),
+		}
+		for _, s := range sub {
+			steps = append(steps, "  "+s)
+		}
+		return append(steps, "30 STOP []")
+	}
+
+	for _, tc := range []struct {
+		name      string
+		code      []byte
+		childCode []byte
+		want      []string
+	}{
+		{
+			name: "code runs off its end",
+			code: []byte{byte(vm.PUSH1), 1, byte(vm.PUSH1), 2, byte(vm.ADD), byte(vm.POP)},
+			want: []string{"0 PUSH1 [0x1]", "2 PUSH1 [0x2]", "4 ADD [0x3]", "5 POP []"},
+		},
+		{
+			name:      "call ends the code and its callee runs off its end",
+			code:      callChild,
+			childCode: []byte{byte(vm.PUSH1), 1, byte(vm.POP)},
+			want: []string{
+				"0 PUSH0 [0x0]", "1 PUSH0 [0x0]", "2 PUSH0 [0x0]", "3 PUSH0 [0x0]", "4 PUSH0 [0x0]", "5 PUSH20 [0xcafe0006]", "26 PUSH2 [0xffff]",
+				"29 CALL [0x1]", "  0 PUSH1 [0x1]", "  2 POP []",
+			},
+		},
+		{
+			name: "explicit stop",
+			code: []byte{byte(vm.STOP)},
+			want: []string{"0 STOP []"},
+		},
+		{
+			name: "truncated push",
+			code: []byte{byte(vm.PUSH1)},
+			want: []string{"0 PUSH1 [0x0]"},
+		},
+		{
+			name: "revert",
+			code: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.REVERT)},
+			want: []string{"0 PUSH0 [0x0]", "1 PUSH0 [0x0]", "2 REVERT []"},
+		},
+		{
+			name:      "explicit stop after a callee's stop",
+			code:      append(callChild, byte(vm.STOP)),
+			childCode: []byte{byte(vm.STOP)},
+			want: []string{
+				"0 PUSH0 [0x0]", "1 PUSH0 [0x0]", "2 PUSH0 [0x0]", "3 PUSH0 [0x0]", "4 PUSH0 [0x0]", "5 PUSH20 [0xcafe0006]", "26 PUSH2 [0xffff]",
+				"29 CALL [0x1]", "  0 STOP []", "30 STOP []",
+			},
+		},
+		{
+			name: "undefined opcode",
+			code: []byte{byte(vm.PUSH1), 1, 0x0c},
+			want: []string{"0 PUSH1 [0x1]"},
+		},
+		{
+			name: "designated invalid opcode",
+			code: []byte{byte(vm.PUSH1), 1, byte(vm.INVALID)},
+			want: []string{"0 PUSH1 [0x1]"},
+		},
+		{
+			name: "stack underflow",
+			code: []byte{byte(vm.PUSH1), 1, byte(vm.ADD)},
+			want: []string{"0 PUSH1 [0x1]"},
+		},
+		{
+			name: "invalid jump destination",
+			code: []byte{byte(vm.PUSH1), 3, byte(vm.JUMP), byte(vm.STOP)},
+			want: []string{"0 PUSH1 [0x3]", "2 JUMP halted"},
+		},
+		{
+			name:      "sstore in a static call",
+			code:      staticCallChild,
+			childCode: []byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.SSTORE)},
+			want:      staticCallSteps("0 PUSH1 [0x1]", "2 PUSH0 [0x0]", "3 SSTORE halted"),
+		},
+		{
+			name:      "create in a static call",
+			code:      staticCallChild,
+			childCode: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.CREATE)},
+			want:      staticCallSteps("0 PUSH0 [0x0]", "1 PUSH0 [0x0]", "2 PUSH0 [0x0]", "3 CREATE halted"),
+		},
+		{
+			name: "value call in a static call",
+			code: staticCallChild,
+			// CALL address 0 with value 1 and output window [0x40, 0x41).
+			childCode: []byte{
+				byte(vm.PUSH1), 1, byte(vm.PUSH1), 0x40, byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.PUSH0),
+				byte(vm.PUSH2), 0xff, 0xff, byte(vm.CALL),
+			},
+			want: staticCallSteps("0 PUSH1 [0x1]", "2 PUSH1 [0x40]", "4 PUSH0 [0x0]", "5 PUSH0 [0x0]", "6 PUSH1 [0x1]", "8 PUSH0 [0x0]",
+				"9 PUSH2 [0xffff]", "12 CALL halted"),
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			code := hexutil.Bytes(tc.code)
+			overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code}}
+			if tc.childCode != nil {
+				childCode := hexutil.Bytes(tc.childCode)
+				overrides[accounts.InternAddress(child)] = ethapi.Account{Code: &childCode}
+			}
+			result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
+				[]string{TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+			require.NoError(t, err)
+			require.Equal(t, tc.want, vmTraceSteps(result.VmTrace))
+		})
+	}
+
+	t.Run("stack overflow", func(t *testing.T) {
+		// Each pass pushes one word, until the second PUSH0 of the 1024th pass overflows the stack.
+		code := hexutil.Bytes{byte(vm.JUMPDEST), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.JUMP)}
+		overrides := ethapi.StateOverrides{accounts.InternAddress(target): {Code: &code}}
+		result, err := api.Call(context.Background(), TraceCallParam{From: &bankAddr, To: &target},
+			[]string{TraceTypeVmTrace}, nil, &config.TraceConfig{StateOverrides: &overrides})
+		require.NoError(t, err)
+		steps := vmTraceSteps(result.VmTrace)
+		require.Len(t, steps, 1023*4+2)
+		require.Equal(t, []string{"0 JUMPDEST []", "1 PUSH0 [0x0]"}, steps[len(steps)-2:])
+	})
 }
 
 // Call data takes the same data/input precedence as eth_call: input wins when both are set.
@@ -2126,13 +2366,17 @@ func TestOeTracerStateGasRemaining(t *testing.T) {
 				lastStore = result.VmTrace.Ops[len(result.VmTrace.Ops)-2]
 			}
 			require.Equal(t, "SSTORE", lastStore.Op)
-			require.EqualValues(t, remaining.Execution, lastStore.Ex.GasRemaining)
 			encoded, err := json.Marshal(result.VmTrace.Ops[2])
 			require.NoError(t, err)
 			var step map[string]any
 			require.NoError(t, json.Unmarshal(encoded, &step))
 			require.EqualValues(t, params.StateGasPerStorageSet, step["stateGasCost"])
 			require.NotContains(t, step, "stateGasSpill")
+			if tc.wantErr != nil {
+				require.Nil(t, lastStore.Ex, "an SSTORE that halted has no ex")
+				return
+			}
+			require.EqualValues(t, remaining.Execution, lastStore.Ex.GasRemaining)
 			encoded, err = json.Marshal(lastStore.Ex)
 			require.NoError(t, err)
 			var ex map[string]any
@@ -2150,17 +2394,19 @@ type vmTraceOpContext struct {
 	tracing.OpContext
 	stack  []uint256.Int
 	memory []byte
+	code   []byte
 }
 
 func (c *vmTraceOpContext) StackData() []uint256.Int { return c.stack }
 func (c *vmTraceOpContext) MemoryData() []byte       { return c.memory }
+func (c *vmTraceOpContext) Code() []byte             { return c.code }
 func (c *vmTraceOpContext) Gas() mdgas.MdGas         { return mdgas.MdGas{Execution: 1000} }
 
 // TestOeTracerCoversInstructionSet fails when an opcode of the latest fork
 // pushes or writes memory but vmTrace does not report it.
 func TestOeTracerCoversInstructionSet(t *testing.T) {
 	jt := vm.LookupInstructionSet((&evmtypes.BlockContext{}).Rules(chain.AllProtocolChanges))
-	scope := &vmTraceOpContext{stack: make([]uint256.Int, 17), memory: make([]byte, 64)}
+	scope := &vmTraceOpContext{stack: make([]uint256.Int, 17), memory: make([]byte, 64), code: make([]byte, 3)}
 	for i := range scope.stack {
 		scope.stack[i].SetOne()
 	}
@@ -2173,7 +2419,7 @@ func TestOeTracerCoversInstructionSet(t *testing.T) {
 		t.Run(op.String(), func(t *testing.T) {
 			tracer := &OeTracer{r: &TraceCallResult{VmTrace: &VmTrace{}}}
 			for pc, o := range []vm.OpCode{vm.JUMPDEST, op, vm.JUMPDEST} {
-				tracer.OnOpcodeV2(uint64(pc), byte(o), mdgas.MdGas{Execution: 1000}, mdgas.MdGas{}, scope, nil, 0, nil)
+				tracer.OnOpcodeV2(uint64(pc), byte(o), mdgas.MdGas{Execution: 1000}, mdgas.MdGasCost{}, scope, nil, 0, nil)
 			}
 			ex := tracer.r.VmTrace.Ops[1].Ex
 			require.Len(t, ex.Push, jt[op].NumPush())

@@ -120,13 +120,13 @@ type (
 	OpcodeHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, rData []byte, depth int, err error)
 
 	// OpcodeHookV2 reports execution and state gas and takes precedence over OpcodeHook.
-	OpcodeHookV2 = func(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, rData []byte, depth int, err error)
+	OpcodeHookV2 = func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, rData []byte, depth int, err error)
 
 	// FaultHook is invoked when an error occurs during the execution of an opcode.
 	FaultHook = func(pc uint64, op byte, gas, cost uint64, scope OpContext, depth int, err error)
 
 	// FaultHookV2 reports execution and state gas and takes precedence over FaultHook.
-	FaultHookV2 = func(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, depth int, err error)
+	FaultHookV2 = func(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, depth int, err error)
 
 	// GasChangeHook reports changes to the execution gas balance.
 	GasChangeHook = func(old, new uint64, reason GasChangeReason)
@@ -273,7 +273,7 @@ func (h *Hooks) HasOpcodeHook() bool {
 	return h != nil && (h.OnOpcodeV2 != nil || h.OnOpcode != nil)
 }
 
-func (h *Hooks) EmitOpcode(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, rData []byte, depth int, err error) {
+func (h *Hooks) EmitOpcode(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, rData []byte, depth int, err error) {
 	if h == nil {
 		return
 	}
@@ -288,7 +288,7 @@ func (h *Hooks) HasFaultHook() bool {
 	return h != nil && (h.OnFaultV2 != nil || h.OnFault != nil)
 }
 
-func (h *Hooks) EmitFault(pc uint64, op byte, gas, cost mdgas.MdGas, scope OpContext, depth int, err error) {
+func (h *Hooks) EmitFault(pc uint64, op byte, gas mdgas.MdGas, cost mdgas.MdGasCost, scope OpContext, depth int, err error) {
 	if h == nil {
 		return
 	}
@@ -446,12 +446,14 @@ const (
 	GasChangeRefundRevertedState GasChangeReason = 17
 	// GasChangeCallGasForwarded is gas forwarded to a child call.
 	GasChangeCallGasForwarded GasChangeReason = 18
-	// GasChangeCallNewAccount is state gas charged for creating an account.
-	GasChangeCallNewAccount GasChangeReason = 19
+	// state gas charged for account creation before the transaction's first frame.
+	GasChangeRuntimeNewAccount GasChangeReason = 19
 	// GasChangeTxAuthorization is gas charged for processing an EIP-7702 authorization.
 	GasChangeTxAuthorization GasChangeReason = 20
 	// GasChangeRefundAccountCreation is state gas refunded for cancelled account creation.
 	GasChangeRefundAccountCreation GasChangeReason = 21
+	// gas charged to reach the transaction calldata floor.
+	GasChangeTxDataFloor GasChangeReason = 22
 
 	// GasChangeIgnored is a special value that can be used to indicate that the gas change should be ignored as
 	// it will be "manually" tracked by a direct emit of the gas change event.
