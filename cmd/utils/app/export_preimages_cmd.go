@@ -47,6 +47,8 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -67,6 +69,7 @@ const (
 	// Scratch lives in a directory this command owns, so leftovers from a killed run
 	// can be cleared without touching anyone else's temp files.
 	preimagesScratchDirName = "export-preimages"
+	preimageSpillThreshold  = 1 << 20
 )
 
 var exportPreimagesCommand = cli.Command{
@@ -83,11 +86,13 @@ var exportPreimagesCommand = cli.Command{
 }
 
 type preimagesMeta struct {
-	Block     uint64 `json:"block"`
-	StateRoot string `json:"stateRoot"`
-	Order     string `json:"order"`
-	Accounts  uint64 `json:"accounts"`
-	Storage   uint64 `json:"storage"`
+	Block          uint64 `json:"block"`
+	BlockHash      string `json:"blockHash"`
+	StateRoot      string `json:"stateRoot"`
+	Order          string `json:"order"`
+	Accounts       uint64 `json:"accounts"`
+	Storage        uint64 `json:"storage"`
+	PreimageDigest string `json:"preimageDigest"`
 }
 
 func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
@@ -167,10 +172,37 @@ func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*ty
 	if err != nil {
 		return fmt.Errorf("export aborted (partial file %s): %w", framedPath, err)
 	}
+	info, err := outputFile.Stat()
+	if err != nil {
+		return err
+	}
+	if err := artifact.CheckPreimageSetAt(outputFile, info.Size(), func(yield func([]byte) error) error {
+		return state.ForEachPBinLeaf(aggTx, tx, false, func(leaf state.PBinLeaf) error {
+			if len(leaf.Key) == 0 {
+				return nil
+			}
+			switch leaf.Key[0] {
+			case eip8297.AccountZone:
+				subIndex := leaf.Key[len(leaf.Key)-1]
+				if subIndex != eip8297.BasicDataLeafKey && subIndex < eip8297.HeaderStorageOffset {
+					return nil
+				}
+			case eip8297.CodeZone:
+				return nil
+			}
+			return yield(leaf.Key)
+		})
+	}, eip8297.HashBytes); err != nil {
+		return fmt.Errorf("export aborted (preimage set): %w", err)
+	}
+	preimageDigest, err := digestPBTFile(outputFile)
+	if err != nil {
+		return err
+	}
 
 	metadata := preimagesMeta{
-		Block: pin.Block, StateRoot: pin.Root.Hex(), Order: preimagesOrderKeccak256,
-		Accounts: stats.Accounts, Storage: stats.Slots,
+		Block: pin.Block, BlockHash: header.Hash().Hex(), StateRoot: pin.Root.Hex(), Order: preimagesOrderKeccak256,
+		Accounts: stats.Accounts, Storage: stats.Slots, PreimageDigest: preimageDigest.Hex(),
 	}
 	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
 	if err != nil {
@@ -431,8 +463,46 @@ func writeHashedPreimages(
 	var stats exportPreimagesStats
 	var recordHeader [preimageAddrLen + preimageCountLen]byte
 	var accountHash common.Hash
-	slotKeys := make([]byte, 0, 1<<20)
+	slotKeys := make([]byte, 0, preimageSpillThreshold)
+	var slotSpill *os.File
+	var slotSpillName string
+	var slotCount uint64
 	pending := false
+	cleanupSlots := func() {
+		if slotSpill != nil {
+			_ = slotSpill.Close()
+			slotSpill = nil
+		}
+		if slotSpillName != "" {
+			_ = dir.RemoveFile(slotSpillName)
+			slotSpillName = ""
+		}
+	}
+	defer cleanupSlots()
+	appendSlot := func(value []byte) error {
+		if slotSpill == nil && len(slotKeys)+len(value) <= preimageSpillThreshold {
+			slotKeys = append(slotKeys, value...)
+			slotCount++
+			return nil
+		}
+		if slotSpill == nil {
+			var err error
+			slotSpill, err = os.CreateTemp("", "pbt-preimage-slots-")
+			if err != nil {
+				return err
+			}
+			slotSpillName = slotSpill.Name()
+			if _, err := slotSpill.Write(slotKeys); err != nil {
+				return err
+			}
+			slotKeys = slotKeys[:0]
+		}
+		if _, err := slotSpill.Write(value); err != nil {
+			return err
+		}
+		slotCount++
+		return nil
+	}
 
 	// slotCount precedes the slots, so a record can only be written once its last
 	// slot has arrived.
@@ -440,7 +510,6 @@ func writeHashedPreimages(
 		if !pending {
 			return nil
 		}
-		slotCount := uint64(len(slotKeys) / preimageSlotLen)
 		if slotCount > math.MaxUint32 {
 			return fmt.Errorf("account %x has %d slots (> uint32)", recordHeader[:preimageAddrLen], slotCount)
 		}
@@ -451,12 +520,23 @@ func writeHashedPreimages(
 		if _, err := writer.Write(slotKeys); err != nil {
 			return err
 		}
+		if slotSpill != nil {
+			if _, err := slotSpill.Seek(0, io.SeekStart); err != nil {
+				return err
+			}
+			if _, err := io.Copy(writer, slotSpill); err != nil {
+				return err
+			}
+		}
 		stats.Accounts++
 		stats.Slots += slotCount
-		pending = false
 		if onProgress != nil {
 			onProgress(stats)
 		}
+		cleanupSlots()
+		slotKeys = slotKeys[:0]
+		slotCount = 0
+		pending = false
 		return nil
 	}
 
@@ -472,6 +552,7 @@ func writeHashedPreimages(
 			copy(recordHeader[:preimageAddrLen], v)
 			accountHash = common.BytesToHash(k)
 			slotKeys = slotKeys[:0]
+			slotCount = 0
 			pending = true
 			return nil
 		case 2 * length.Hash:
@@ -481,8 +562,7 @@ func writeHashedPreimages(
 			if !pending || !bytes.Equal(k[:length.Hash], accountHash[:]) {
 				return fmt.Errorf("storage slot %x under account hash %x has no matching account", v, k[:length.Hash])
 			}
-			slotKeys = append(slotKeys, v...)
-			return nil
+			return appendSlot(v)
 		default:
 			return fmt.Errorf("collector: unexpected key length %d: %x", len(k), k)
 		}

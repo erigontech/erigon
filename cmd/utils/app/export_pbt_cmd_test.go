@@ -143,6 +143,13 @@ func TestRunExportPBTRefusesChangedBinRecord(t *testing.T) {
 	require.Error(t, err, "a changed bin record must refuse export")
 }
 
+func TestExportPBTBinOnlyRootCrossCheck(t *testing.T) {
+	streamRoot := common.HexToHash("0x01")
+	pinRoot := common.HexToHash("0x02")
+	err := checkExportPBTStreamRoot(streamRoot, exportPin{Variant: commitment.VariantBinPatriciaTrie, Root: pinRoot}, common.Hash{}, false)
+	require.ErrorContains(t, err, "differs from bin root")
+}
+
 func TestRunExportPBTReadbackRefusesTruncatedSnapshot(t *testing.T) {
 	selectPBTExportSuite(t)
 	db, root := newPBTExportDB(t)

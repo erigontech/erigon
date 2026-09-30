@@ -26,6 +26,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -45,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -251,6 +253,8 @@ func TestRunExportWritesExecutionPin(t *testing.T) {
 	require.NoError(t, json.Unmarshal(metadataJSON, &metadata))
 	require.Equal(t, uint64(7), metadata.Block)
 	require.Equal(t, root.Hex(), metadata.StateRoot)
+	require.Equal(t, (&types.Header{Root: root}).Hash().Hex(), metadata.BlockHash)
+	require.NotEmpty(t, metadata.PreimageDigest)
 	require.Equal(t, uint64(1), metadata.Accounts)
 	require.Zero(t, metadata.Storage)
 }
@@ -529,6 +533,69 @@ func TestWriteHashedPreimages_ReportsCompletedAccounts(t *testing.T) {
 		{Accounts: 1, Slots: 2},
 		{Accounts: 2, Slots: 3},
 	}, reports)
+}
+
+type generatedStorageKV struct {
+	address [preimageAddrLen]byte
+	count   uint64
+	next    uint64
+}
+
+func (g *generatedStorageKV) HasNext() bool { return g.next < g.count }
+
+func (g *generatedStorageKV) Next() ([]byte, []byte, error) {
+	key := make([]byte, preimageAddrLen+preimageSlotLen)
+	copy(key, g.address[:])
+	binary.BigEndian.PutUint64(key[len(key)-8:], g.next)
+	g.next++
+	return key, []byte{1}, nil
+}
+
+func (g *generatedStorageKV) Close() {}
+
+func TestWriteHashedPreimagesSpillsLargeAccount(t *testing.T) {
+	const slots = 1_200_000
+	address := addr(0xaa)
+	var addressArray [preimageAddrLen]byte
+	copy(addressArray[:], address)
+	var peak uint64
+	output, err := os.CreateTemp(t.TempDir(), "preimages-")
+	require.NoError(t, err)
+	defer output.Close()
+	stats, err := exportPreimages(t, context.Background(), &sliceKV{pairs: []kvPair{{address, []byte{1}}}}, &generatedStorageKV{address: addressArray, count: slots}, output, exportOpts{
+		bufferSize: 64 * datasize.KB,
+		onWrite: func(exportPreimagesStats) {
+			runtime.GC()
+			var memory runtime.MemStats
+			runtime.ReadMemStats(&memory)
+			peak = max(peak, memory.HeapAlloc)
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(slots), stats.Slots)
+	require.Less(t, peak, uint64(32<<20))
+	require.NoError(t, output.Sync())
+	info, err := output.Stat()
+	require.NoError(t, err)
+	require.NoError(t, output.Close())
+	input, err := os.Open(output.Name())
+	require.NoError(t, err)
+	defer input.Close()
+	var previous common.Hash
+	var count uint64
+	err = artifact.ReadPreimagesStream(input, info.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
+		return slots(func(slot [32]byte) error {
+			digest := crypto.Keccak256Hash(slot[:])
+			if count != 0 {
+				require.Less(t, bytes.Compare(previous[:], digest[:]), 0)
+			}
+			previous = digest
+			count++
+			return nil
+		})
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(slots), count)
 }
 
 // requireHashedOrder re-parses the framed file and checks the EIP-8347 ordering --

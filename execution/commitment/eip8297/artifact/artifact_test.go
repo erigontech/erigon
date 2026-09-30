@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"os"
+	"runtime"
 	"sort"
 	"testing"
 
@@ -229,10 +230,62 @@ func TestArtifactRoundTripAndEmptySnapshot(t *testing.T) {
 	}
 }
 
+func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
+	const groupCount = 16_384
+	const entriesPerGroup = 256
+	file, err := os.CreateTemp(t.TempDir(), "artifact-memory-")
+	require.NoError(t, err)
+	var peak uint64
+	value := bytes.Repeat([]byte{1}, eip8297.ValueLength)
+	digest, err := WriteSnapshot(file, common.Hash{}, func(emit func([]byte, []byte) error) error {
+		for group := range groupCount {
+			var stem [32]byte
+			binary.BigEndian.PutUint64(stem[24:], uint64(group))
+			for entry := range entriesPerGroup {
+				key := eip8297.TreeKey(eip8297.CodeZone, stem[:], byte(entry))
+				if err := emit(key, value); err != nil {
+					return err
+				}
+				if (group*entriesPerGroup+entry)%10_000 == 0 {
+					runtime.GC()
+					var memory runtime.MemStats
+					runtime.ReadMemStats(&memory)
+					peak = max(peak, memory.HeapAlloc)
+				}
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.NotEqual(t, common.Hash{}, digest)
+	require.NoError(t, file.Sync())
+	info, err := file.Stat()
+	require.NoError(t, err)
+	require.GreaterOrEqual(t, info.Size(), int64(128<<20))
+	require.NoError(t, file.Close())
+	reader, err := os.Open(file.Name())
+	require.NoError(t, err)
+	defer reader.Close()
+	runtime.GC()
+	var readPeak uint64
+	_, err = ReadSnapshotAt(reader, info.Size(), SnapshotCallbacks{
+		Code: func(Group) error {
+			var memory runtime.MemStats
+			runtime.ReadMemStats(&memory)
+			readPeak = max(readPeak, memory.HeapAlloc)
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	require.Less(t, peak, uint64(32<<20))
+	require.Less(t, readPeak, uint64(32<<20))
+}
+
 func TestWriterRejectsEmptyAccountAndZeroSizeCode(t *testing.T) {
 	position := append(make([]byte, 31), 1)
 	zeroBasic, err := eip8297.EncodeBasicData(0, uint256.NewInt(0), 0)
 	require.NoError(t, err)
+	zeroBasic[0] = 1
 	write := func(leaves []testLeaf) error {
 		var output bytes.Buffer
 		_, err := WriteSnapshot(&output, common.Hash{}, func(emit func([]byte, []byte) error) error {
@@ -245,7 +298,7 @@ func TestWriterRejectsEmptyAccountAndZeroSizeCode(t *testing.T) {
 		})
 		return err
 	}
-	require.Error(t, write([]testLeaf{{eip8297.TreeKey(eip8297.AccountZone, position, 0), zeroBasic[:]}}), "an empty kind-0 account must be refused")
+	require.ErrorContains(t, write([]testLeaf{{eip8297.TreeKey(eip8297.AccountZone, position, 0), zeroBasic[:]}}), "zero nonce and balance", "an empty kind-0 account must be refused")
 	codeBasic, err := eip8297.EncodeBasicData(1, uint256.NewInt(0), 0)
 	require.NoError(t, err)
 	require.Error(t, write([]testLeaf{
@@ -331,7 +384,8 @@ func TestPreimageJoinMergesTreeKeysAcrossAddressOrders(t *testing.T) {
 		position := eip8297.HashBytes(address32[:])
 		basic, err := eip8297.EncodeBasicData(uint64(i+1), newBalance(uint64(i+1)), 0)
 		require.NoError(t, err)
-		headerSlot := [32]byte{1}
+		headerSlot := [32]byte{}
+		headerSlot[31] = 1
 		overflowSlot := [32]byte{0x80}
 		leaves = append(leaves,
 			testLeaf{eip8297.TreeKey(eip8297.AccountZone, position[:], eip8297.BasicDataLeafKey), basic[:]},
@@ -411,6 +465,48 @@ func TestPreimageJoinMergesTreeKeysAcrossAddressOrders(t *testing.T) {
 		})
 		return input
 	}, "surplus key")
+}
+
+func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
+	address := common.Address{1}
+	address32 := eip8297.RightAlign32(address[:])
+	stem := eip8297.HashBytes(address32[:])
+	headerKey := eip8297.TreeKey(eip8297.AccountZone, stem[:], eip8297.BasicDataLeafKey)
+	headerSlot := [32]byte{}
+	headerSlot[31] = 1
+	overflowSlot := [32]byte{0x80}
+	headerSlotKey := eip8297.TreeKeyStorage(address[:], headerSlot[:])
+	overflowKey := eip8297.TreeKeyStorage(address[:], overflowSlot[:])
+	expected := [][]byte{headerKey, headerSlotKey, overflowKey}
+	record := Preimage{Address: address, Slots: [][32]byte{headerSlot, overflowSlot}}
+	var encoded bytes.Buffer
+	require.NoError(t, WritePreimages(&encoded, []Preimage{record}))
+	yieldExpected := func(yield func([]byte) error) error {
+		for _, key := range expected {
+			if err := yield(key); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	require.NoError(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes))
+	require.Error(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), func(yield func([]byte) error) error {
+		return yieldExpected(func(key []byte) error {
+			if bytes.Equal(key, headerSlotKey) {
+				return nil
+			}
+			return yield(key)
+		})
+	}, eip8297.HashBytes))
+	surplus := append([][32]byte{headerSlot, overflowSlot}, [32]byte{2})
+	sort.Slice(surplus, func(i, j int) bool {
+		a := keccak.Sum256(surplus[i][:])
+		b := keccak.Sum256(surplus[j][:])
+		return bytes.Compare(a[:], b[:]) < 0
+	})
+	encoded.Reset()
+	require.NoError(t, WritePreimages(&encoded, []Preimage{{Address: address, Slots: surplus}}))
+	require.ErrorContains(t, CheckPreimageSetAt(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), yieldExpected, eip8297.HashBytes), "surplus key")
 }
 
 type testLeaf struct {

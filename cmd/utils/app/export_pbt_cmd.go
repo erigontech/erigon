@@ -136,14 +136,12 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	if err != nil {
 		return err
 	}
-	if pin.Variant == commitment.VariantBinPatriciaTrie {
-		if root != pin.Root {
-			return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), pin.Root.Hex())
-		}
-	} else if binRoot, found, err := exportPBTBinRootAtPin(ctx, tx, pin, logger); err != nil {
+	binRoot, found, err := exportPBTBinRootAtPin(ctx, tx, pin, logger)
+	if err != nil {
 		return err
-	} else if found && root != binRoot {
-		return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), binRoot.Hex())
+	}
+	if err := checkExportPBTStreamRoot(root, pin, binRoot, found); err != nil {
+		return err
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
 		return err
@@ -290,6 +288,19 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 		return err
 	}
 	completed = true
+	return nil
+}
+
+func checkExportPBTStreamRoot(root common.Hash, pin exportPin, binRoot common.Hash, found bool) error {
+	if pin.Variant == commitment.VariantBinPatriciaTrie {
+		if root != pin.Root {
+			return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), pin.Root.Hex())
+		}
+		return nil
+	}
+	if found && root != binRoot {
+		return fmt.Errorf("export-pbt: stream root %s differs from bin root %s", root.Hex(), binRoot.Hex())
+	}
 	return nil
 }
 

@@ -550,11 +550,11 @@
 - Modify: `cmd/utils/app/export_preimages_cmd.go`
 - Modify: `cmd/utils/app/export_preimages_cmd_test.go`
 
-- [ ] write tests: the exact-set check fails on a missing and on a surplus preimage (header slots 0-63 and overflow
+- [x] write tests: the exact-set check fails on a missing and on a surplus preimage (header slots 0-63 and overflow
       entries), and the meta carries `preimageDigest` and the block hash; confirm they fail first
-- [ ] run the exact-set join from task 11 on the written file, and add `preimageDigest` and the block hash to the meta
-- [ ] add a spill threshold for the per-account preimage buffer and test a large account
-- [ ] run tests - must pass before task 14
+- [x] run the exact-set join from task 11 on the written file, and add `preimageDigest` and the block hash to the meta
+- [x] add a spill threshold for the per-account preimage buffer and test a large account
+- [x] run tests - must pass before task 14
 
 ### Task 14: import-pbt test bootstrap
 
