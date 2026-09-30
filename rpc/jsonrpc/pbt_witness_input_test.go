@@ -95,6 +95,17 @@ func TestPBinWitnessInputKeepsSystemContractReads(t *testing.T) {
 	require.Contains(t, got.Reads, eip8297.TreeKeyStorage(address[:], slot[:]), "system contract storage reads must enter the pbt input")
 }
 
+func TestPBinWitnessInputKeepsUserSystemAddressReads(t *testing.T) {
+	address := params.SystemAddress.Value()
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
+	rs := NewRecordingState(inner)
+	rs.systemAddrTouchedInTx = true
+
+	got, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.Contains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "user system-address reads must enter the pbt input")
+}
+
 func TestPBinWitnessInputKeepsRevertedCallReads(t *testing.T) {
 	address := common.HexToAddress("0x4700000000000000000000000000000000000000")
 	slot := common.HexToHash("0x80")

@@ -36,6 +36,7 @@ import (
 	eipWitness "github.com/erigontech/erigon/execution/commitment/eip8297/witness"
 	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -250,6 +251,61 @@ func TestPBinExecutionWitnessCorpus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPBinExecutionWitnessCancunSystemContracts(t *testing.T) {
+	api, m := pbtCorpusChain(t)
+	pbt := "pbt"
+	for number := uint64(1); number <= 3; number++ {
+		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), nil, &pbt)
+		require.NoError(t, err)
+		block := pbtPortBlock(t, m, number)
+		parentRoot, postRoot := pbtDualAnchors(t, m, number, witnessTriePBT)
+		require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
+		for index := range result.Keys {
+			trimmed := pbtCorpusCloneWithout(result, index)
+			require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "dropping node %d must fail", index)
+		}
+		for index := range result.Codes {
+			trimmed := pbtCorpusClone(result)
+			trimmed.Codes = append(trimmed.Codes[:index], trimmed.Codes[index+1:]...)
+			require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "dropping code %d must fail", index)
+		}
+		rootOnly := &ExecutionWitnessResult{}
+		for index, path := range result.Keys {
+			if len(path) == 0 {
+				rootOnly.Keys = []hexutil.Bytes{result.Keys[index]}
+				rootOnly.State = []hexutil.Bytes{result.State[index]}
+				break
+			}
+		}
+		require.Len(t, rootOnly.Keys, 1)
+		require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), rootOnly, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "root-only witness must fail")
+	}
+}
+
+func TestPBinExecutionWitnessUserSystemAddressRead(t *testing.T) {
+	bank := pbtCorpusBank(t)
+	var caller common.Address
+	system := params.SystemAddress.Value()
+	runtime := append([]byte{0x73}, system[:]...)
+	runtime = append(runtime, 0x31, 0x60, 0x00, 0x55, 0x00)
+	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 2, nil, func(i int, b *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+		switch i {
+		case 0:
+			caller = types.CreateAddress(bank, b.TxNonce(bank))
+			addContract(uint256.NewInt(0), pbtCorpusDeployCode(runtime))
+		case 1:
+			addTransaction(caller, uint256.NewInt(0), nil)
+		}
+	}, types.GenesisAlloc{system: {Balance: big.NewInt(5)}})
+	repairPBinPreForkShadows(t, m, 1000)
+	result := pbtPortWitness(t, api, m, 2)
+	require.NotEmpty(t, result.State)
+	stateAfter := pbtStateAfterBlock(t, m, 2)
+	value, err := stateAfter.GetState(accounts.InternAddress(caller), accounts.InternKey(common.Hash{}))
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), value.Uint64())
 }
 
 func TestPBinExecutionWitnessProvesOverflowOnlyAccountCodeHashRead(t *testing.T) {

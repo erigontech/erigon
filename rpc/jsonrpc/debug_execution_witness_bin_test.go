@@ -37,11 +37,14 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 )
+
+var pbinBeaconRootsCode = common.FromHex("0x3373fffffffffffffffffffffffffffffffffffffffe14604d57602036146024575f5ffd5b5f35801560495762001fff810690815414603c575f5ffd5b62001fff01545f5260205ff35b5f5ffd5b62001fff42064281555f359062001fff015500")
 
 func withBinCommitmentDatadir(t *testing.T) {
 	t.Helper()
@@ -170,9 +173,24 @@ func pbinWitnessFixtureWithGeneratorNConfig(t *testing.T, activation uint64, blo
 		tx, err := m.DB.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
 		defer tx.Rollback()
-		for _, address := range []common.Address{config.GetWithdrawalRequestContract().Value(), config.GetConsolidationRequestContract().Value()} {
+		addresses := []common.Address{
+			config.GetWithdrawalRequestContract().Value(),
+			config.GetConsolidationRequestContract().Value(),
+		}
+		if generator != nil {
+			addresses = append(addresses, params.BeaconRootsAddress.Value(), params.HistoryStorageAddress.Value())
+		}
+		for _, address := range addresses {
 			code, _, err := tx.GetLatest(kv.CodeDomain, address[:], kv.GetLatestOptions{})
 			require.NoError(t, err)
+			if len(code) == 0 {
+				switch address {
+				case params.BeaconRootsAddress.Value():
+					code = pbinBeaconRootsCode
+				case params.HistoryStorageAddress.Value():
+					code = []byte{0}
+				}
+			}
 			require.NotEmpty(t, code)
 			genesis.Alloc[address] = types.GenesisAccount{Balance: big.NewInt(0), Nonce: 1, Code: append([]byte(nil), code...)}
 		}

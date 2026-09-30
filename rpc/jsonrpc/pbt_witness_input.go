@@ -50,6 +50,11 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			}
 		}
 	}
+	if rs.systemAddrTouchedInTx {
+		address := params.SystemAddress.Value()
+		key := eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey)
+		readKeys[string(key)] = key
+	}
 	for address, code := range rs.PreStateCode {
 		if eip8297.IsDelegation(code) {
 			key := eip8297.TreeKeyAccount(address[:], eip8297.DelegationLeafKey)

@@ -74,12 +74,13 @@ parent pointer, and checks the root against the pre-state anchor. `replayBlockOv
 that tree, the supplied code blobs, and the in-block overlays. It applies the block's writes through the same PBT
 driver and compares the resulting root with the post-state anchor.
 
-The verifier suppresses the missing-node error only for the synthetic touch of `SYSTEM_ADDRESS`. The system-call scope
-also covers `CommitBlock`, but resolver errors are latched throughout that scope except for that synthetic touch.
-Genuine reads of the system address and system contracts need their proofs. Contract creation over an existing account
-with storage wipes that storage; creation of a previously absent account does not walk an unproved storage subtree. An
-account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is resolved. All
-supplied PBT entries must be consumed before verification succeeds.
+The verifier suppresses the missing-node error only for the synthetic system-call touch of `SYSTEM_ADDRESS`. The
+system-call scope also covers `CommitBlock`, but resolver errors are latched throughout that scope except for that
+synthetic touch. A user opcode access to `SYSTEM_ADDRESS` is retained and needs its basic-data proof, even when the
+system call has already warmed the account. Genuine reads of system contracts need their proofs. Contract creation over
+an existing account with storage wipes that storage; creation of a previously absent account does not walk an unproved
+storage subtree. An account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is
+resolved. All supplied PBT entries must be consumed before verification succeeds.
 
 ## Witness cache
 

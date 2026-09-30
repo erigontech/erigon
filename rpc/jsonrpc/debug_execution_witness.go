@@ -2523,7 +2523,7 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 	if err := engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
-	if err := ibs.FinalizeTx(blockRules, stateless); err != nil {
+	if err := withPBinSystemCallError(stateless, func() error { return ibs.FinalizeTx(blockRules, stateless) }); err != nil {
 		return fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
