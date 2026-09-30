@@ -19,4 +19,4 @@
 package vm
 
 // codeBitmap collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
-var codeBitmap = codeBitmapGeneric
+func codeBitmap(code []byte) bitvec { return codeBitmapGeneric(code) }

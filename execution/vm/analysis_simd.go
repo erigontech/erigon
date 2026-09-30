@@ -24,12 +24,14 @@ import (
 )
 
 // codeBitmap collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
-var codeBitmap = func() func([]byte) bitvec {
-	if archsimd.X86.AVX2() {
-		return codeBitmapSIMD
+func codeBitmap(code []byte) bitvec {
+	if hasAVX2 {
+		return codeBitmapSIMD(code)
 	}
-	return codeBitmapGeneric
-}()
+	return codeBitmapGeneric(code)
+}
+
+var hasAVX2 = archsimd.X86.AVX2()
 
 var (
 	jdIota = [32]uint8{0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21,
