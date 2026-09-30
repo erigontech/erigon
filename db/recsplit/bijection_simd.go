@@ -23,10 +23,9 @@ import "simd/archsimd"
 var hasAVX512 = archsimd.X86.AVX512()
 
 // findBijection is findBijectionGeneric with the eight salt candidates held in
-// one 512-bit register instead of eight scalars. AVX2 cannot run it: the
-// splitmix64 finaliser and remap16 need a 64x64 multiply, which is VPMULLQ
-// (AVX512DQ); emulating it from VPMULUDQ partial products costs more than the
-// scalar form saves.
+// one 512-bit register. AVX2 cannot host it: the 64x64 multiply both splitmix64
+// and remap16 need is VPMULLQ (AVX512DQ), and emulating it costs more than the
+// unrolled scalar form saves.
 func findBijection(bucket []uint64, salt uint64) uint64 {
 	if !hasAVX512 {
 		return findBijectionGeneric(bucket, salt)
