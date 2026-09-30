@@ -632,10 +632,10 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 	return vm.accountLifecycleAt(addr, txIdx, false)
 }
 
-// ResolvedAccountLifecycleAt ignores revival writes that have not resolved yet.
-// A tentative field write above a destruct may still be withdrawn, so validation
-// must not take it as proof the account came back; the read path wants the
-// opposite and uses AccountLifecycleAt.
+// ResolvedAccountLifecycleAt counts only sealed (Done) revival writes. Anything
+// above a destruct that is still revertible may be withdrawn, so validation must
+// not take it as proof the account came back; the read path wants the opposite
+// and uses AccountLifecycleAt.
 func (vm *VersionMap) ResolvedAccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
 	return vm.accountLifecycleAt(addr, txIdx, true)
 }
@@ -706,7 +706,10 @@ func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int, resolv
 	}
 	hi, ok := 0, false
 	cells.Descend(limit, func(k int, v *WriteCell[T]) bool {
-		if resolvedOnly && v.flag != FlagDone && v.flag != FlagValidated {
+		// Only Done proves a lasting revival: a Validated cell is still revertible
+		// until the in-order seal, and withdrawing it re-validates its own readers,
+		// not the AddressPath reader this verdict serves.
+		if resolvedOnly && v.flag != FlagDone {
 			return true
 		}
 		hi, ok = k, true

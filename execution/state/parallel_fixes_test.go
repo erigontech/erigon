@@ -506,3 +506,35 @@ func TestValueTiebreaker_UnresolvedBalanceRevivalDoesNotHideDestruct(t *testing.
 
 	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))
 }
+
+// A validated-but-unsealed revival is still revertible, so it does not end a
+// destruct either. Only a Done revival proves the account came back; counting a
+// Validated one would let the tiebreaker keep an AddressPath read that predates
+// the destruct, and withdrawing the credit re-validates its balance readers, not
+// this address reader.
+func TestValueTiebreaker_ValidatedBalanceRevivalDoesNotHideDestruct(t *testing.T) {
+	addr := getAddress(166)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(7)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 3}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 6}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3, Incarnation: 1}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+
+	credit := newWriteSet(&VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5}},
+		Val:         *uint256.NewInt(1),
+	})
+	vm.FlushVersionedWrites(credit, false, "")
+	vm.MarkWritesValidated(credit, nil)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))
+}
