@@ -37,6 +37,7 @@ import (
 	chainpkg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/stagedsync"
 	etypes "github.com/erigontech/erigon/execution/types"
 )
 
@@ -55,7 +56,7 @@ func TestCommitmentFreezeRegistersV3FlagAndSchema(t *testing.T) {
 
 func TestFreezeHexCommitmentUsesExecutedState(t *testing.T) {
 	tx, agg := newCommitmentFreezeTest(t, 40)
-	txNum, err := freezeHexCommitment(tx, agg)
+	txNum, err := stagedsync.FreezeHexCommitment(tx, agg)
 	require.NoError(t, err)
 	require.Equal(t, uint64(3), txNum)
 	frozenAt, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
@@ -70,8 +71,23 @@ func TestFreezeHexCommitmentUsesExecutedState(t *testing.T) {
 
 func TestFreezeHexCommitmentRejectsCanonicalHex(t *testing.T) {
 	tx, agg := newCommitmentFreezeTest(t, 20)
-	_, err := freezeHexCommitment(tx, agg)
+	_, err := stagedsync.FreezeHexCommitment(tx, agg)
 	require.ErrorContains(t, err, "hex commitment is still canonical")
+	_, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
+	require.False(t, frozen)
+	settings, err := dbstate.ReadErigonDBSettings(agg.Dirs())
+	require.NoError(t, err)
+	_, frozen = settings.FrozenAt(kv.CommitmentDomain)
+	require.False(t, frozen)
+}
+
+func TestFreezeHexCommitmentRejectsUnfinalizedBlock(t *testing.T) {
+	tx, agg := newCommitmentFreezeTest(t, 40)
+	genesis := &etypes.Header{Number: *uint256.NewInt(0)}
+	require.NoError(t, rawdb.WriteHeader(tx, genesis))
+	rawdb.WriteForkchoiceFinalized(tx, genesis.Hash())
+	_, err := stagedsync.FreezeHexCommitment(tx, agg)
+	require.ErrorContains(t, err, "hex commitment at block 1 is above finalized block 0")
 	_, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
 	require.False(t, frozen)
 	settings, err := dbstate.ReadErigonDBSettings(agg.Dirs())
@@ -89,7 +105,7 @@ func TestFreezeHexCommitmentRejectsUnalignedBinary(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, domains.DomainPut(kv.CommitmentBinDomain, tx, commitment.KeyCommitmentState, state, 4, nil))
 	require.NoError(t, domains.Flush(t.Context(), tx))
-	_, err = freezeHexCommitment(tx, agg)
+	_, err = stagedsync.FreezeHexCommitment(tx, agg)
 	require.ErrorContains(t, err, "binary commitment is not aligned")
 	_, frozen := agg.IsDomainFrozen(kv.CommitmentDomain)
 	require.False(t, frozen)
@@ -140,5 +156,6 @@ func newCommitmentFreezeTest(t *testing.T, blockTime uint64) (kv.TemporalRwTx, *
 	header := &etypes.Header{Number: *uint256.NewInt(1), Time: blockTime}
 	require.NoError(t, rawdb.WriteHeader(tx, header))
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
+	rawdb.WriteForkchoiceFinalized(tx, header.Hash())
 	return tx, agg
 }

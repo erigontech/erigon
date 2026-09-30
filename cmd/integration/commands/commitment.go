@@ -214,63 +214,13 @@ var cmdCommitmentFreeze = &cobra.Command{
 		}
 		defer tx.Rollback()
 		agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
-		txNum, err := freezeHexCommitment(tx, agg)
+		txNum, err := stagedsync.FreezeHexCommitment(tx, agg)
 		if err != nil {
 			logger.Error("Failed to freeze commitment domain", "error", err)
 			return
 		}
 		fmt.Printf("froze %s at txnum %d\n", kv.CommitmentDomain, txNum)
 	},
-}
-
-func freezeHexCommitment(tx kv.TemporalTx, agg *dbstate.Aggregator) (uint64, error) {
-	if !slices.Contains(agg.CommitmentDomains(), kv.CommitmentBinDomain) {
-		return 0, errors.New("freezing hex commitment requires a hex+bin datadir")
-	}
-	state, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
-	if err != nil {
-		return 0, err
-	}
-	if len(state) < 18 {
-		return 0, errors.New("hex commitment state is missing or truncated")
-	}
-	blockNum, txNum, _, err := commitment.DecodeCommitmentV3State(state)
-	if err != nil {
-		return 0, fmt.Errorf("decode hex commitment state: %w", err)
-	}
-	binaryState, _, err := tx.GetLatest(kv.CommitmentBinDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
-	if err != nil {
-		return 0, err
-	}
-	if len(binaryState) < 18 {
-		return 0, errors.New("binary commitment state is missing or truncated")
-	}
-	binaryTxNum, binaryBlockNum := commitmentdb.DecodeTxBlockNums(binaryState)
-	if binaryTxNum != txNum || binaryBlockNum != blockNum {
-		return 0, errors.New("binary commitment is not aligned with hex commitment")
-	}
-	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
-	if err != nil {
-		return 0, err
-	}
-	config, err := rawdb.ReadChainConfig(tx, genesisHash)
-	if err != nil {
-		return 0, err
-	}
-	if config == nil {
-		return 0, errors.New("chain configuration is missing")
-	}
-	header := rawdb.ReadHeaderByNumber(tx, blockNum)
-	if header == nil {
-		return 0, fmt.Errorf("header for commitment block %d is missing", blockNum)
-	}
-	if !config.IsBinaryTrie(header.Time) {
-		return 0, errors.New("hex commitment is still canonical")
-	}
-	if err := agg.FreezeDomain(kv.CommitmentDomain, txNum); err != nil {
-		return 0, err
-	}
-	return txNum, nil
 }
 
 // integration commitment branch

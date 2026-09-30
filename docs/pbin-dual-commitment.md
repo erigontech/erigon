@@ -73,7 +73,10 @@ embedding or selected binary hash suite requires rebuilding the binary datadir f
 
 `integration commitment freeze` registers the v3 setting and reads each domain's state with the
 variant-specific state key. It freezes the selected hex domain at its recorded transaction and
-leaves the binary domain canonical when the schedule has flipped.
+leaves the binary domain canonical when the schedule has flipped. `FreezeHexCommitment` in
+`execution/stagedsync/commitment_freeze.go` refuses the freeze while that block is above the last
+finalized block: an unwind below a frozen domain's transaction is rejected, so a freeze above
+finality would refuse an ordinary reorg, including one back across the activation block.
 
 `debug_shadowStateRoot` reports the non-canonical root stored by
 `rawdb.WriteShadowStateRoot`. `debug_executionWitness` refuses binary blocks with
