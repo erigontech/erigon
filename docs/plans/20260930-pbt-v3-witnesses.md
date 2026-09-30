@@ -443,6 +443,8 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - [x] run tests - must pass before task 8
 - [x] ➕ rework the resolver to read path-local rows, validate stored pointers, resolve bucket descriptors, reject
       impossible group probes early, and cover systematic shapes, corruption, and root/bucket read bounds
+- [x] ➕ repair overflow-row routing and terminal-group probes, anchor the global root, reject missing bucket
+      descriptors, and cover overflow shapes, descriptor corruption, and group-root read bounds
 
 ### Task 8: PBT witness builder and dispatch
 

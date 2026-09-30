@@ -52,7 +52,7 @@ func TestPBinWitnessMatchesModel(t *testing.T) {
 		Accounts: []witness.PBinAccountUpdate{{Address: address, Values: map[byte][]byte{eip8297.BasicDataLeafKey: pbinWitnessValueBytes(0xab)}}},
 	}
 
-	resolver := NewPBinWitnessResolver(preContext)
+	resolver := NewPBinWitnessResolver(preContext, preRoot)
 	model, err := witness.NewPBinTree(preRoot, resolver.Resolve)
 	require.NoError(t, err)
 	wantRoot, wantNodes, err := model.Apply(input)

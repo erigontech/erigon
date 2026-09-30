@@ -36,7 +36,7 @@ func (t *Trie) Witness(ctx context.Context, expectedRoot common.Hash, input witn
 	if t == nil || t.ctx == nil {
 		return nil, nil, common.Hash{}, fmt.Errorf("pbin witness: nil Patricia context")
 	}
-	resolver := NewPBinWitnessResolver(t.ctx)
+	resolver := NewPBinWitnessResolver(t.ctx, expectedRoot)
 	model, err := witness.NewPBinTree(expectedRoot, resolver.Resolve)
 	if err != nil {
 		return nil, nil, common.Hash{}, err

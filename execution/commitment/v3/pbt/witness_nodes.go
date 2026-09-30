@@ -30,8 +30,9 @@ import (
 )
 
 type PBinWitnessResolver struct {
-	read    func([]byte) ([]byte, error)
-	records map[string]pbinResolverRecord
+	read         func([]byte) ([]byte, error)
+	records      map[string]pbinResolverRecord
+	expectedRoot common.Hash
 }
 
 type pbinParentBranchContext interface {
@@ -44,8 +45,8 @@ type pbinResolverRecord struct {
 	err     error
 }
 
-func NewPBinWitnessResolver(ctx commitment.PatriciaContext) *PBinWitnessResolver {
-	resolver := &PBinWitnessResolver{records: make(map[string]pbinResolverRecord)}
+func NewPBinWitnessResolver(ctx commitment.PatriciaContext, expectedRoot common.Hash) *PBinWitnessResolver {
+	resolver := &PBinWitnessResolver{records: make(map[string]pbinResolverRecord), expectedRoot: expectedRoot}
 	if parent, ok := ctx.(pbinParentBranchContext); ok {
 		resolver.read = func(key []byte) ([]byte, error) {
 			data, _, err := parent.ParentBranch(key)
@@ -75,6 +76,9 @@ func (r *PBinWitnessResolver) Resolve(path []byte) (blob []byte, err error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := r.checkExpectedRoot(&root); err != nil {
+		return nil, err
+	}
 	if !root.present {
 		return nil, nil
 	}
@@ -96,10 +100,30 @@ func (r *PBinWitnessResolver) RootHash() (common.Hash, error) {
 	if err != nil {
 		return common.Hash{}, err
 	}
+	if err := r.checkExpectedRoot(&root); err != nil {
+		return common.Hash{}, err
+	}
 	if !root.present {
 		return eip8297.EmptyTreeHash, nil
 	}
 	return r.recordHash(GlobalRootKey(), eip8297.Bitpath{}, &root.record)
+}
+
+func (r *PBinWitnessResolver) checkExpectedRoot(root *pbinResolverRecord) error {
+	if !root.present {
+		if r.expectedRoot != eip8297.EmptyTreeHash {
+			return fmt.Errorf("pbin witness: global root record is missing, want root %x", r.expectedRoot)
+		}
+		return nil
+	}
+	hash, err := r.recordHash(GlobalRootKey(), eip8297.Bitpath{}, &root.record)
+	if err != nil {
+		return err
+	}
+	if hash != r.expectedRoot {
+		return fmt.Errorf("pbin witness: global root does not match expected root: got %x want %x", hash, r.expectedRoot)
+	}
+	return nil
 }
 
 func (r *PBinWitnessResolver) readRecord(key []byte) (pbinResolverRecord, error) {
@@ -217,14 +241,17 @@ func (r *PBinWitnessResolver) resolveExt(base eip8297.Bitpath, record *Record, n
 	if err := pbinCheckPointer(blob, expected); err != nil {
 		return nil, false, err
 	}
-	if target == node {
-		group, ok, err := r.tryGroupFromRecord(base, record, node, blob)
-		if err != nil {
-			return nil, false, err
-		}
-		if ok {
+	group, ok, err := r.tryGroupFromRecord(base, record, node, blob)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		if target == node {
 			return group, true, nil
 		}
+		return nil, false, nil
+	}
+	if target == node {
 		return blob, true, nil
 	}
 	if !target.HasPrefix(&absolute) || target.BitLen <= absolute.BitLen {
@@ -313,17 +340,15 @@ func (r *PBinWitnessResolver) resolveRange(path eip8297.Bitpath, key []byte, rec
 	if err := pbinCheckPointer(blob, expected); err != nil {
 		return nil, false, err
 	}
-	if node == wanted {
-		group, ok, err := r.tryGroupRange(path, key, record, slots, from, to, node, blob)
-		if err != nil {
-			return nil, false, err
+	group, ok, err := r.tryGroupRange(path, key, record, slots, from, to, node, blob)
+	if err != nil {
+		return nil, false, err
+	}
+	if ok {
+		if target == node {
+			return group, true, nil
 		}
-		if ok {
-			if target == node {
-				return group, true, nil
-			}
-			return nil, false, nil
-		}
+		return nil, false, nil
 	}
 	if target == node {
 		return blob, true, nil
@@ -389,14 +414,17 @@ func (r *PBinWitnessResolver) resolveSingle(path eip8297.Bitpath, key []byte, re
 		if err := pbinCheckPointer(blob, expected); err != nil {
 			return nil, false, err
 		}
-		if target == node {
-			group, ok, err := r.tryGroupChild(path, slot, cell, node, blob)
-			if err != nil {
-				return nil, false, err
-			}
-			if ok {
+		group, ok, err := r.tryGroupChild(path, slot, cell, node, blob)
+		if err != nil {
+			return nil, false, err
+		}
+		if ok {
+			if target == node {
 				return group, true, nil
 			}
+			return nil, false, nil
+		}
+		if target == node {
 			return blob, true, nil
 		}
 		if !target.HasPrefix(&node) || target.BitLen <= node.BitLen+prefix.BitLen {
@@ -444,18 +472,12 @@ func (r *PBinWitnessResolver) readChildRecord(rowPath, node eip8297.Bitpath, exp
 		if err != nil {
 			return pbinResolverRecord{}, err
 		}
-		if bucket.present {
+		if !bucket.present {
+			return pbinResolverRecord{}, fmt.Errorf("pbin witness: bucket descriptor %x is missing", witness.PBinPath(&bucketPath))
+		}
+		if rowPath.BitLen == bucketPath.BitLen {
 			if err := pbinCheckBucketDescriptor(bucketPath, &bucket.record, node, expected); err != nil {
 				return pbinResolverRecord{}, err
-			}
-			if bucket.record.Form == ExtRoot && rowPath.BitLen > bucketPath.BitLen {
-				absolute := bucketPath
-				absolute.Append(&bucket.record.SelfExt)
-				if !absolute.HasPrefix(&rowPath) && !rowPath.HasPrefix(&absolute) {
-					return pbinResolverRecord{}, fmt.Errorf("pbin witness: bucket descriptor does not contain row %x", witness.PBinPath(&rowPath))
-				}
-				absolute.Truncate((absolute.BitLen / 4) * 4)
-				rowPath = absolute
 			}
 		}
 		if rowPath.BitLen == 264 {
