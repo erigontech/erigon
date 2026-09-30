@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -151,10 +153,10 @@ func (a *CallTraceAction) marshalFastJSONTo(s *jsonstream.Stream) {
 	s.WriteObjectStart()
 	ethjson.Data(s, "from", a.From[:])
 	s.Field("callType").WriteString(a.CallType)
-	jsonstream.Text(s, "gas", &a.Gas)
+	ethjson.Quantity256(s, "gas", (*uint256.Int)(&a.Gas))
 	ethjson.Data(s, "input", a.Input)
 	ethjson.Data(s, "to", a.To[:])
-	jsonstream.Text(s, "value", &a.Value)
+	ethjson.Quantity256(s, "value", (*uint256.Int)(&a.Value))
 	s.WriteObjectEnd()
 }
 
@@ -175,12 +177,12 @@ func (a *CreateTraceAction) marshalFastJSONTo(s *jsonstream.Stream) {
 	s.WriteObjectStart()
 	ethjson.Data(s, "from", a.From[:])
 	s.Field("creationMethod").WriteString(a.CreationMethod)
-	jsonstream.Text(s, "gas", &a.Gas)
+	ethjson.Quantity256(s, "gas", (*uint256.Int)(&a.Gas))
 	if a.StateGas != nil {
 		jsonstream.Text(s, "stateGasReservoir", a.StateGas)
 	}
 	ethjson.Data(s, "init", a.Init)
-	jsonstream.Text(s, "value", &a.Value)
+	ethjson.Quantity256(s, "value", (*uint256.Int)(&a.Value))
 	s.WriteObjectEnd()
 }
 
@@ -198,7 +200,7 @@ func (a *SuicideTraceAction) marshalFastJSONTo(s *jsonstream.Stream) {
 	s.WriteObjectStart()
 	ethjson.Data(s, "address", a.Address[:])
 	ethjson.Data(s, "refundAddress", a.RefundAddress[:])
-	jsonstream.Text(s, "balance", &a.Balance)
+	ethjson.Quantity256(s, "balance", (*uint256.Int)(&a.Balance))
 	s.WriteObjectEnd()
 }
 
@@ -216,7 +218,7 @@ func (a *RewardTraceAction) marshalFastJSONTo(s *jsonstream.Stream) {
 	s.WriteObjectStart()
 	ethjson.Data(s, "author", a.Author[:])
 	s.Field("rewardType").WriteString(a.RewardType)
-	jsonstream.Text(s, "value", &a.Value)
+	ethjson.Quantity256(s, "value", (*uint256.Int)(&a.Value))
 	s.WriteObjectEnd()
 }
 

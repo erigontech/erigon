@@ -17,6 +17,8 @@
 package engine_types
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
@@ -31,7 +33,7 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	s.WriteObjectStart()
 	s.Field("executionPayload")
 	r.ExecutionPayload.writeTo(s)
-	jsonstream.Text(s, "blockValue", r.BlockValue)
+	ethjson.Quantity256(s, "blockValue", (*uint256.Int)(r.BlockValue))
 	s.Field("blobsBundle")
 	if err := r.BlobsBundle.MarshalFastJSONTo(s); err != nil {
 		return err
@@ -56,12 +58,12 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.Stream) {
 	ethjson.Data(s, "receiptsRoot", p.ReceiptsRoot[:])
 	ethjson.Data(s, "logsBloom", p.LogsBloom)
 	ethjson.Data(s, "prevRandao", p.PrevRandao[:])
-	jsonstream.Text(s, "blockNumber", &p.BlockNumber)
-	jsonstream.Text(s, "gasLimit", &p.GasLimit)
-	jsonstream.Text(s, "gasUsed", &p.GasUsed)
-	jsonstream.Text(s, "timestamp", &p.Timestamp)
+	ethjson.Quantity(s, "blockNumber", p.BlockNumber)
+	ethjson.Quantity(s, "gasLimit", p.GasLimit)
+	ethjson.Quantity(s, "gasUsed", p.GasUsed)
+	ethjson.Quantity(s, "timestamp", p.Timestamp)
 	ethjson.Data(s, "extraData", p.ExtraData)
-	jsonstream.Text(s, "baseFeePerGas", p.BaseFeePerGas)
+	ethjson.Quantity256(s, "baseFeePerGas", (*uint256.Int)(p.BaseFeePerGas))
 	ethjson.Data(s, "blockHash", p.BlockHash[:])
 	s.Field("transactions")
 	jsonstream.ArrayValue(s, p.Transactions, writeHex)

@@ -17,6 +17,8 @@
 package accounts
 
 import (
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -43,9 +45,9 @@ func (r *AccProofResult) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	s.WriteObjectStart()
 	ethjson.Data(s, "address", r.Address[:])
 	writeHexArray(s, "accountProof", r.AccountProof)
-	jsonstream.Text(s, "balance", r.Balance)
+	ethjson.Quantity256(s, "balance", (*uint256.Int)(r.Balance))
 	ethjson.Data(s, "codeHash", r.CodeHash[:])
-	jsonstream.Text(s, "nonce", &r.Nonce)
+	ethjson.Quantity(s, "nonce", r.Nonce)
 	ethjson.Data(s, "storageHash", r.StorageHash[:])
 	s.Field("storageProof")
 	jsonstream.ArrayValue(s, r.StorageProof, writeStorProofElem)
@@ -65,7 +67,7 @@ func writeHexArray(s *jsonstream.Stream, name string, nodes []hexutil.Bytes) {
 func writeStorProofElem(s *jsonstream.Stream, sp *StorProofResult) {
 	s.WriteObjectStart()
 	s.Field("key").WriteString(sp.Key)
-	jsonstream.Text(s, "value", sp.Value)
+	ethjson.Quantity256(s, "value", (*uint256.Int)(sp.Value))
 	writeHexArray(s, "proof", sp.Proof)
 	s.WriteObjectEnd()
 }
