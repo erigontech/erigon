@@ -1187,6 +1187,7 @@ func eqUint64(a, b uint64) bool       { return a == b }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
+
 func eqAccount(a, b *accounts.Account) bool {
 	return a != nil && b != nil && a.Equals(b)
 }
@@ -1565,7 +1566,7 @@ func (res ReadResult) Status() int {
 // resolved reports whether the floor holds a value at a known version: Done (sealed) or
 // Validated (pre-seal early-break). Consumers of the value treat both alike; only sealing
 // logic requires Done specifically.
-func (mvr ReadResult) resolved() bool {
-	s := mvr.Status()
+func (res ReadResult) resolved() bool {
+	s := res.Status()
 	return s == MVReadResultDone || s == MVReadResultValidated
 }

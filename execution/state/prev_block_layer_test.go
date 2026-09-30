@@ -21,9 +21,11 @@ type fakeBaseReader struct {
 func (f *fakeBaseReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
 	return f.accts[a], nil
 }
+
 func (f *fakeBaseReader) ReadAccountDataForDebug(a accounts.Address) (*accounts.Account, error) {
 	return f.accts[a], nil
 }
+
 func (f *fakeBaseReader) ReadAccountStorage(a accounts.Address, k accounts.StorageKey) (uint256.Int, bool, error) {
 	if m, ok := f.storage[a]; ok {
 		if v, ok := m[k]; ok {
@@ -32,6 +34,7 @@ func (f *fakeBaseReader) ReadAccountStorage(a accounts.Address, k accounts.Stora
 	}
 	return uint256.Int{}, false, nil
 }
+
 func (f *fakeBaseReader) HasStorage(a accounts.Address) (bool, error) {
 	return len(f.storage[a]) > 0, nil
 }

@@ -818,30 +818,39 @@ func writeSetPut[T any](m *map[accounts.Address]*VersionedWrite[T], addr account
 func (ws *WriteSet) SetAddress(addr accounts.Address, vw *VersionedWrite[*accounts.Account]) {
 	writeSetPut(&ws.address, addr, vw, wsMapPoolAddress)
 }
+
 func (ws *WriteSet) SetBalance(addr accounts.Address, vw *VersionedWrite[uint256.Int]) {
 	writeSetPut(&ws.balance, addr, vw, wsMapPoolBalance)
 }
+
 func (ws *WriteSet) SetNonce(addr accounts.Address, vw *VersionedWrite[uint64]) {
 	writeSetPut(&ws.nonce, addr, vw, wsMapPoolNonce)
 }
+
 func (ws *WriteSet) SetIncarnation(addr accounts.Address, vw *VersionedWrite[uint64]) {
 	writeSetPut(&ws.incarnation, addr, vw, wsMapPoolIncarnation)
 }
+
 func (ws *WriteSet) SetSelfDestruct(addr accounts.Address, vw *VersionedWrite[bool]) {
 	writeSetPut(&ws.selfDestruct, addr, vw, wsMapPoolSelfDestruct)
 }
+
 func (ws *WriteSet) SetCreateContract(addr accounts.Address, vw *VersionedWrite[bool]) {
 	writeSetPut(&ws.createContract, addr, vw, wsMapPoolCreateContract)
 }
+
 func (ws *WriteSet) SetCode(addr accounts.Address, vw *VersionedWrite[accounts.Code]) {
 	writeSetPut(&ws.code, addr, vw, wsMapPoolCode)
 }
+
 func (ws *WriteSet) SetCodeHash(addr accounts.Address, vw *VersionedWrite[accounts.CodeHash]) {
 	writeSetPut(&ws.codeHash, addr, vw, wsMapPoolCodeHash)
 }
+
 func (ws *WriteSet) SetCodeSize(addr accounts.Address, vw *VersionedWrite[int]) {
 	writeSetPut(&ws.codeSize, addr, vw, wsMapPoolCodeSize)
 }
+
 func (ws *WriteSet) SetStorage(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) {
 	if ws.storage == nil {
 		ws.storage = wsGetStorageOuter()
@@ -1325,42 +1334,49 @@ func (ws *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint2
 	}
 	return maps.All(ws.balance)
 }
+
 func (ws *WriteSet) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	if ws == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[uint64](nil))
 	}
 	return maps.All(ws.nonce)
 }
+
 func (ws *WriteSet) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	if ws == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[uint64](nil))
 	}
 	return maps.All(ws.incarnation)
 }
+
 func (ws *WriteSet) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
 	if ws == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
 	}
 	return maps.All(ws.selfDestruct)
 }
+
 func (ws *WriteSet) CreateContracts() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
 	if ws == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
 	}
 	return maps.All(ws.createContract)
 }
+
 func (ws *WriteSet) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
 	if ws == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[accounts.Code](nil))
 	}
 	return maps.All(ws.code)
 }
+
 func (ws *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
 	if ws == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[accounts.CodeHash](nil))
 	}
 	return maps.All(ws.codeHash)
 }
+
 func (ws *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	if ws == nil {
 		return maps.All(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int](nil))

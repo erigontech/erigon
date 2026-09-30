@@ -51,18 +51,23 @@ func (o *PrevBlockReader) SetBlock(blockNum uint64) {
 func (o *PrevBlockReader) ReadAccountData(a accounts.Address) (*accounts.Account, error) {
 	return o.chain.ReadAccountData(a)
 }
+
 func (o *PrevBlockReader) ReadAccountDataForDebug(a accounts.Address) (*accounts.Account, error) {
 	return o.chain.ReadAccountDataForDebug(a)
 }
+
 func (o *PrevBlockReader) ReadAccountStorage(a accounts.Address, k accounts.StorageKey) (uint256.Int, bool, error) {
 	return o.chain.ReadAccountStorage(a, k)
 }
+
 func (o *PrevBlockReader) ReadAccountCode(a accounts.Address) ([]byte, error) {
 	return o.chain.ReadAccountCode(a)
 }
+
 func (o *PrevBlockReader) ReadAccountCodeSize(a accounts.Address) (int, error) {
 	return o.chain.ReadAccountCodeSize(a)
 }
+
 func (o *PrevBlockReader) ReadAccountIncarnation(a accounts.Address) (uint64, error) {
 	return o.chain.ReadAccountIncarnation(a)
 }
