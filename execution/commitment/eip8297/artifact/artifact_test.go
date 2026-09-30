@@ -23,9 +23,11 @@ import (
 	"encoding/json"
 	"math/rand"
 	"os"
-	"runtime"
+	"runtime/metrics"
 	"sort"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	keccak "github.com/erigontech/fastkeccak"
 	"github.com/holiman/uint256"
@@ -41,6 +43,49 @@ import (
 type goldenArtifact struct {
 	Bytes          string `json:"bytes"`
 	SnapshotDigest string `json:"snapshotDigest"`
+}
+
+type heapSampler struct {
+	peak atomic.Uint64
+	stop chan struct{}
+	done chan struct{}
+}
+
+func startHeapSampler() *heapSampler {
+	sampler := &heapSampler{stop: make(chan struct{}), done: make(chan struct{})}
+	go func() {
+		defer close(sampler.done)
+		samples := []metrics.Sample{{Name: "/memory/classes/heap/objects:bytes"}}
+		read := func() {
+			metrics.Read(samples)
+			value := samples[0].Value.Uint64()
+			for {
+				previous := sampler.peak.Load()
+				if value <= previous || sampler.peak.CompareAndSwap(previous, value) {
+					return
+				}
+			}
+		}
+		read()
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				read()
+			case <-sampler.stop:
+				read()
+				return
+			}
+		}
+	}()
+	return sampler
+}
+
+func (s *heapSampler) stopAndRead() uint64 {
+	close(s.stop)
+	<-s.done
+	return s.peak.Load()
 }
 
 func readSnapshot(t *testing.T, data []byte) (Snapshot, error) {
@@ -371,8 +416,8 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	const entriesPerGroup = 256
 	file, err := os.CreateTemp(t.TempDir(), "artifact-memory-")
 	require.NoError(t, err)
-	var peak uint64
 	value := bytes.Repeat([]byte{1}, eip8297.ValueLength)
+	writerSampler := startHeapSampler()
 	digest, err := WriteSnapshot(file, common.Hash{}, func(emit func([]byte, []byte) error) error {
 		for group := range groupCount {
 			var stem [32]byte
@@ -382,16 +427,11 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 				if err := emit(key, value); err != nil {
 					return err
 				}
-				if (group*entriesPerGroup+entry)%10_000 == 0 {
-					runtime.GC()
-					var memory runtime.MemStats
-					runtime.ReadMemStats(&memory)
-					peak = max(peak, memory.HeapAlloc)
-				}
 			}
 		}
 		return nil
 	})
+	writerPeak := writerSampler.stopAndRead()
 	require.NoError(t, err)
 	require.NotEqual(t, common.Hash{}, digest)
 	require.NoError(t, file.Sync())
@@ -402,18 +442,13 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	reader, err := os.Open(file.Name())
 	require.NoError(t, err)
 	defer reader.Close()
-	runtime.GC()
-	var readPeak uint64
+	readerSampler := startHeapSampler()
 	_, err = ReadSnapshotAt(reader, info.Size(), SnapshotCallbacks{
-		Code: func(Group) error {
-			var memory runtime.MemStats
-			runtime.ReadMemStats(&memory)
-			readPeak = max(readPeak, memory.HeapAlloc)
-			return nil
-		},
+		Code: func(Group) error { return nil },
 	})
+	readPeak := readerSampler.stopAndRead()
 	require.NoError(t, err)
-	require.Less(t, peak, uint64(32<<20))
+	require.Less(t, writerPeak, uint64(32<<20))
 	require.Less(t, readPeak, uint64(32<<20))
 }
 
@@ -632,7 +667,7 @@ func TestCheckPreimageSetAtRejectsMissingAndSurplusKeys(t *testing.T) {
 }
 
 func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
-	const slotCount = 1_000_000
+	const slotCount = 4_300_000
 	address := common.Address{1}
 	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(1), 0)
 	require.NoError(t, err)
@@ -687,55 +722,41 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	defer preimages.Close()
 	preimageInfo, err := preimages.Stat()
 	require.NoError(t, err)
-	var readerPeak uint64
+	require.GreaterOrEqual(t, snapshotInfo.Size(), int64(128<<20))
+	require.GreaterOrEqual(t, preimageInfo.Size(), int64(128<<20))
+	readerSampler := startHeapSampler()
 	readGroups := 0
 	_, err = ReadSnapshotStreamAt(snapshot, snapshotInfo.Size(), SnapshotStreamCallbacks{
 		Storage: func(_ common.Hash, groups func(func(Group) error) error) error {
 			return groups(func(group Group) error {
 				readGroups += len(group.Entries)
-				if readGroups%10_000 == 0 {
-					runtime.GC()
-					var memory runtime.MemStats
-					runtime.ReadMemStats(&memory)
-					readerPeak = max(readerPeak, memory.HeapAlloc)
-				}
 				return nil
 			})
 		},
 	})
+	readerPeak := readerSampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readGroups)
 	require.Less(t, readerPeak, uint64(32<<20))
-	var preimagePeak uint64
+	preimageSampler := startHeapSampler()
 	readSlots := 0
 	err = ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
 		return slots(func([32]byte) error {
 			readSlots++
-			if readSlots%10_000 == 0 {
-				runtime.GC()
-				var memory runtime.MemStats
-				runtime.ReadMemStats(&memory)
-				preimagePeak = max(preimagePeak, memory.HeapAlloc)
-			}
 			return nil
 		})
 	})
+	preimagePeak := preimageSampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readSlots)
 	require.Less(t, preimagePeak, uint64(32<<20))
-	runtime.GC()
-	var peak uint64
+	joinSampler := startHeapSampler()
 	seen := 0
-	err = JoinAt(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), eip8297.HashBytes, func(common.Address, [32]byte) error {
+	err = joinAtWithBuffer(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), eip8297.HashBytes, func(common.Address, [32]byte) error {
 		seen++
-		if seen%10_000 == 0 {
-			runtime.GC()
-			var memory runtime.MemStats
-			runtime.ReadMemStats(&memory)
-			peak = max(peak, memory.HeapAlloc)
-		}
 		return nil
-	})
+	}, 1<<20, t.TempDir())
+	peak := joinSampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, slotCount, seen)
 	require.Less(t, peak, uint64(32<<20))

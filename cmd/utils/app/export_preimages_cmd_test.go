@@ -27,7 +27,11 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
+	"runtime/metrics"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -319,6 +323,49 @@ type exportOpts struct {
 	onWrite    func(exportPreimagesStats)
 }
 
+type exportHeapSampler struct {
+	peak atomic.Uint64
+	stop chan struct{}
+	done chan struct{}
+}
+
+func startExportHeapSampler() *exportHeapSampler {
+	sampler := &exportHeapSampler{stop: make(chan struct{}), done: make(chan struct{})}
+	go func() {
+		defer close(sampler.done)
+		samples := []metrics.Sample{{Name: "/memory/classes/heap/objects:bytes"}}
+		read := func() {
+			metrics.Read(samples)
+			value := samples[0].Value.Uint64()
+			for {
+				previous := sampler.peak.Load()
+				if value <= previous || sampler.peak.CompareAndSwap(previous, value) {
+					return
+				}
+			}
+		}
+		read()
+		ticker := time.NewTicker(time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				read()
+			case <-sampler.stop:
+				read()
+				return
+			}
+		}
+	}()
+	return sampler
+}
+
+func (s *exportHeapSampler) stopAndRead() uint64 {
+	close(s.stop)
+	<-s.done
+	return s.peak.Load()
+}
+
 func exportPreimages(t *testing.T, ctx context.Context, accounts, storage stream.KV, writer io.Writer, opts exportOpts) (exportPreimagesStats, error) {
 	t.Helper()
 	if opts.bufferSize == 0 {
@@ -537,6 +584,7 @@ func TestWriteHashedPreimages_ReportsCompletedAccounts(t *testing.T) {
 
 type generatedStorageKV struct {
 	address [preimageAddrLen]byte
+	key     [preimageAddrLen + preimageSlotLen]byte
 	count   uint64
 	next    uint64
 }
@@ -544,39 +592,37 @@ type generatedStorageKV struct {
 func (g *generatedStorageKV) HasNext() bool { return g.next < g.count }
 
 func (g *generatedStorageKV) Next() ([]byte, []byte, error) {
-	key := make([]byte, preimageAddrLen+preimageSlotLen)
-	copy(key, g.address[:])
-	binary.BigEndian.PutUint64(key[len(key)-8:], g.next)
+	copy(g.key[:preimageAddrLen], g.address[:])
+	binary.BigEndian.PutUint64(g.key[len(g.key)-8:], g.next)
 	g.next++
-	return key, []byte{1}, nil
+	return g.key[:], []byte{1}, nil
 }
 
 func (g *generatedStorageKV) Close() {}
 
 func TestWriteHashedPreimagesSpillsLargeAccount(t *testing.T) {
-	const slots = 1_200_000
+	const slots = 4_300_000
 	address := addr(0xaa)
 	var addressArray [preimageAddrLen]byte
 	copy(addressArray[:], address)
-	var peak uint64
 	output, err := os.CreateTemp(t.TempDir(), "preimages-")
 	require.NoError(t, err)
 	defer output.Close()
+	previousGCPercent := debug.SetGCPercent(10)
+	t.Cleanup(func() { debug.SetGCPercent(previousGCPercent) })
+	runtime.GC()
+	sampler := startExportHeapSampler()
 	stats, err := exportPreimages(t, context.Background(), &sliceKV{pairs: []kvPair{{address, []byte{1}}}}, &generatedStorageKV{address: addressArray, count: slots}, output, exportOpts{
 		bufferSize: 64 * datasize.KB,
-		onWrite: func(exportPreimagesStats) {
-			runtime.GC()
-			var memory runtime.MemStats
-			runtime.ReadMemStats(&memory)
-			peak = max(peak, memory.HeapAlloc)
-		},
 	})
+	peak := sampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, uint64(slots), stats.Slots)
 	require.Less(t, peak, uint64(32<<20))
 	require.NoError(t, output.Sync())
 	info, err := output.Stat()
 	require.NoError(t, err)
+	require.GreaterOrEqual(t, info.Size(), int64(128<<20))
 	require.NoError(t, output.Close())
 	input, err := os.Open(output.Name())
 	require.NoError(t, err)

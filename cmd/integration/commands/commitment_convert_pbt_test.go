@@ -160,6 +160,45 @@ func TestConvertPBTOutputPassesCommitmentIntegrity(t *testing.T) {
 	require.NoError(t, integrity.CheckCommitmentRoot(t.Context(), db, reader, true, log.New()))
 }
 
+func TestConvertPBTHexMultiRangeOutputPassesCommitmentIntegrity(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalBinCommitment = true
+	statecfg.ExperimentalHexBinCommitment = true
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSourceAt(t, 16)
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
+	rawDB := dbCfg(dbcfg.ChainDB, source.Chaindata).MustOpen()
+	t.Cleanup(rawDB.Close)
+	agg := dbstate.New(datadir.Open(output)).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	t.Cleanup(agg.Close)
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	t.Cleanup(db.Close)
+	reader := multiConversionIntegrityBlockReader{roots: map[uint64]common.Hash{1: readPBTFirstHexRoot(t, output, 8), 2: readPBTHexRoot(t, output)}}
+	require.NoError(t, integrity.CheckCommitmentRoot(t.Context(), db, reader, true, log.New()))
+}
+
 func TestConvertPBTEmptyStateHasZeroRoot(t *testing.T) {
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
@@ -519,6 +558,25 @@ func newPBTConversionSourceAt(t *testing.T, stateTx uint64) (pbtConversionSource
 	ctx.SetUpdates(updates)
 	hexRoot, err := ctx.ComputeCommitment(t.Context(), probeTx, true, 1, 8, "conversion-source", nil)
 	require.NoError(t, err)
+	secondAddress := bytes.Repeat([]byte{0x33}, length.Addr)
+	secondSlot := append(bytes.Clone(secondAddress), bytes.Repeat([]byte{0x44}, 32)...)
+	secondAccount := accounts.Account{Nonce: 2, Balance: *uint256.NewInt(2), CodeHash: accounts.EmptyCodeHash}
+	multiRange := stateTx == 16
+	finalRoot := hexRoot
+	finalBlock := uint64(1)
+	if multiRange {
+		finalBlock = 2
+	}
+	if multiRange {
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, probeTx, secondAddress, accounts.SerialiseV3(&secondAccount), 9, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, probeTx, secondSlot, []byte{2}, 9, nil))
+		updates = commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
+		updates.TouchPlainKey(string(secondAddress), nil, func(*commitment.KeyUpdate, []byte) {})
+		updates.TouchPlainKey(string(secondSlot), nil, func(*commitment.KeyUpdate, []byte) {})
+		ctx.SetUpdates(updates)
+		finalRoot, err = ctx.ComputeCommitment(t.Context(), probeTx, false, finalBlock, 16, "conversion-source", nil)
+		require.NoError(t, err)
+	}
 	domains.Close()
 	probeTx.Rollback()
 	tx, err := db.BeginTemporalRw(t.Context())
@@ -528,13 +586,22 @@ func newPBTConversionSourceAt(t *testing.T, stateTx uint64) (pbtConversionSource
 	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{}))
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 0, 0))
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 8))
+	if multiRange {
+		require.NoError(t, rawdbv3.TxNums.Append(tx, 2, 16))
+	}
 	domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
 	require.NoError(t, err)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), 1, nil))
 	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{1}, 1, nil))
-	hexState, err := commitment.EncodeCommitmentV3State(hexRoot, 1, stateTx, nil)
+	hexState, err := commitment.EncodeCommitmentV3State(finalRoot, finalBlock, stateTx, nil)
 	require.NoError(t, err)
-	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, hexState, stateTx-1, nil))
+	if multiRange {
+		firstState, encodeErr := commitment.EncodeCommitmentV3State(hexRoot, 1, 8, nil)
+		require.NoError(t, encodeErr)
+		require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, firstState, 7, nil))
+	} else {
+		require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, hexState, stateTx-1, nil))
+	}
 	updates = commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
 	updates.TouchPlainKey(string(address), nil, func(*commitment.KeyUpdate, []byte) {})
 	updates.TouchPlainKey(string(slot), nil, func(*commitment.KeyUpdate, []byte) {})
@@ -543,10 +610,28 @@ func newPBTConversionSourceAt(t *testing.T, stateTx uint64) (pbtConversionSource
 	computedRoot, err := ctx.ComputeCommitment(t.Context(), tx, true, 1, 8, "conversion-source", nil)
 	require.NoError(t, err)
 	require.Equal(t, hexRoot, computedRoot)
+	if multiRange {
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, secondAddress, accounts.SerialiseV3(&secondAccount), 9, nil))
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, secondSlot, []byte{2}, 9, nil))
+		updates = commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
+		updates.TouchPlainKey(string(secondAddress), nil, func(*commitment.KeyUpdate, []byte) {})
+		updates.TouchPlainKey(string(secondSlot), nil, func(*commitment.KeyUpdate, []byte) {})
+		ctx.SetUpdates(updates)
+		computedRoot, err = ctx.ComputeCommitment(t.Context(), tx, false, finalBlock, 16, "conversion-source", nil)
+		require.NoError(t, err)
+		require.Equal(t, finalRoot, computedRoot)
+		previousState, _, getErr := domains.GetLatest(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State)
+		require.NoError(t, getErr)
+		require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, hexState, stateTx-1, previousState))
+	}
 	require.NoError(t, domains.Flush(t.Context(), tx))
 	require.NoError(t, tx.Commit())
 	domains.Close()
-	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
+	toStep := kv.Step(1)
+	if multiRange {
+		toStep = 2
+	}
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, toStep, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
 	agg.WaitForFiles()
 	at := agg.BeginFilesRo()
 	require.NotEmpty(t, at.Files(kv.AccountsDomain))
@@ -730,6 +815,14 @@ func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {
 }
 
 func readPBTHexRoot(t *testing.T, output string) common.Hash {
+	return readPBTHexRootAt(t, output, ^uint64(0))
+}
+
+func readPBTFirstHexRoot(t *testing.T, output string, txNum uint64) common.Hash {
+	return readPBTHexRootAt(t, output, txNum-1)
+}
+
+func readPBTHexRootAt(t *testing.T, output string, maxTxNum uint64) common.Hash {
 	t.Helper()
 	dirs := datadir.Open(output)
 	settings, err := dbstate.ReadErigonDBSettings(dirs)
@@ -741,7 +834,7 @@ func readPBTHexRoot(t *testing.T, output string) common.Hash {
 		at.Close()
 		agg.Close()
 	}()
-	value, found, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, ^uint64(0))
+	value, found, _, _, err := at.DebugGetLatestFromFiles(kv.CommitmentDomain, commitment.KeyCommitmentV3State, maxTxNum)
 	require.NoError(t, err)
 	require.True(t, found)
 	_, _, root, err := commitment.DecodeCommitmentV3State(value)
@@ -754,10 +847,23 @@ type conversionIntegrityBlockReader struct {
 	root common.Hash
 }
 
+type multiConversionIntegrityBlockReader struct {
+	dbservices.FullBlockReader
+	roots map[uint64]common.Hash
+}
+
 func (r conversionIntegrityBlockReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
 	return &types.Header{Root: r.root}, nil
 }
 
 func (r conversionIntegrityBlockReader) TxnumReader() rawdbv3.TxNumsReader {
+	return rawdbv3.TxNums
+}
+
+func (r multiConversionIntegrityBlockReader) HeaderByNumber(_ context.Context, _ kv.Getter, blockNum uint64) (*types.Header, error) {
+	return &types.Header{Root: r.roots[blockNum]}, nil
+}
+
+func (r multiConversionIntegrityBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 	return rawdbv3.TxNums
 }

@@ -26,15 +26,20 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -53,6 +58,80 @@ func TestCheckStateVerify_VersionRegimes(t *testing.T) {
 		t.Parallel()
 		runVersionRegimeCheck(t, false)
 	})
+}
+
+func TestCheckCommitmentRootHexOnlyAcrossRangeBoundary(t *testing.T) {
+	ctx := t.Context()
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs, temporaltest.WithStepSize(8))
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	writeAndBuildRanges(t, ctx, db, agg, 64)
+
+	tx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	at := state.AggTx(tx)
+	defer at.Close()
+	roots := make(map[uint64]common.Hash)
+	for _, file := range at.Files(kv.CommitmentDomain) {
+		if !strings.HasSuffix(file.Fullpath(), ".kv") || file.EndRootNum() == 0 {
+			continue
+		}
+		for _, key := range [][]byte{commitment.KeyCommitmentV3State, commitment.KeyCommitmentState} {
+			value, found, _, _, lookupErr := at.DebugGetLatestFromFiles(kv.CommitmentDomain, key, file.EndRootNum()-1)
+			require.NoError(t, lookupErr)
+			if !found {
+				continue
+			}
+			root, blockNum, _, decodeErr := integrity.ExtractCommitmentStateRoot(key, value)
+			require.NoError(t, decodeErr)
+			roots[blockNum] = common.BytesToHash(root)
+			break
+		}
+	}
+	require.Greater(t, len(roots), 1)
+	require.NoError(t, integrity.CheckCommitmentRoot(ctx, db, rangeRootReader{roots: roots}, true, log.New()))
+}
+
+type rangeRootReader struct {
+	dbservices.FullBlockReader
+	roots map[uint64]common.Hash
+}
+
+func (r rangeRootReader) HeaderByNumber(_ context.Context, _ kv.Getter, blockNum uint64) (*types.Header, error) {
+	return &types.Header{Root: r.roots[blockNum]}, nil
+}
+
+func (rangeRootReader) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNums }
+
+func writeAndBuildRanges(t *testing.T, ctx context.Context, db kv.TemporalRwDB, agg *state.Aggregator, txs uint64) {
+	t.Helper()
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	defer domains.Close()
+	rnd := rand.New(rand.NewSource(7))
+	for txNum := uint64(1); txNum <= txs; txNum++ {
+		addr := make([]byte, length.Addr)
+		loc := make([]byte, length.Hash)
+		rnd.Read(addr)
+		rnd.Read(loc)
+		acc := accounts.Account{Nonce: txNum, Balance: *uint256.NewInt(txNum * 1000), CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addr, accounts.SerialiseV3(&acc), txNum, nil))
+		storageKey := append(bytes.Clone(addr), loc...)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, storageKey, []byte{addr[0], loc[0]}, txNum, nil))
+		_, err = domains.ComputeCommitment(ctx, tx, true, txNum, txNum, "test", nil)
+		require.NoError(t, err)
+	}
+	for blockNum := uint64(0); blockNum <= txs; blockNum++ {
+		require.NoError(t, rawdbv3.TxNums.Append(tx, blockNum, blockNum))
+	}
+	require.NoError(t, domains.Flush(ctx, tx))
+	require.NoError(t, tx.Commit())
+	require.NoError(t, agg.BuildFiles2(ctx, db, 0, 8, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
 }
 
 func runVersionRegimeCheck(t *testing.T, referencesInCommitmentBranches bool) {

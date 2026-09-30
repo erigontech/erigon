@@ -19,18 +19,19 @@ package artifact
 import (
 	"bufio"
 	"bytes"
-	"container/heap"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"os"
-	"sort"
 
+	"github.com/c2h5oh/datasize"
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -218,6 +219,10 @@ func ReadPreimagesStream(src io.ReaderAt, size int64, yield func(common.Address,
 }
 
 func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, hashFn eip8297.HashFn, yield func(common.Address, [32]byte) error) error {
+	return joinAtWithBuffer(snapshot, snapshotSize, preimages, preimageSize, hashFn, yield, etl.BufferOptimalSize, os.TempDir())
+}
+
+func joinAtWithBuffer(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64, hashFn eip8297.HashFn, yield func(common.Address, [32]byte) error, bufferSize datasize.ByteSize, tmpDir string) error {
 	if hashFn == nil {
 		hashFn = eip8297.HashBytes
 	}
@@ -265,33 +270,23 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 	if _, err := expected.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	runs, err := makeJoinRuns(preimages, preimageSize, hashFn)
-	if err != nil {
-		return err
-	}
-	defer removeJoinRuns(runs)
-	actual, err := newJoinMerge(runs)
-	if err != nil {
+	collector := etl.NewCollector("pbt-join", tmpDir, etl.NewSortableBuffer(bufferSize), log.Root())
+	defer collector.Close()
+	if err := collectJoinItems(preimages, preimageSize, hashFn, collector); err != nil {
 		return err
 	}
 	expectedReader := bufio.NewReaderSize(expected, 1<<20)
-	for {
+	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		want, wantOK, err := readJoinItem(expectedReader)
 		if err != nil {
 			return err
 		}
-		got, gotOK, err := actual.next()
+		got, err := decodeJoinItem(key, value)
 		if err != nil {
 			return err
 		}
-		if !wantOK && !gotOK {
-			return nil
-		}
 		if !wantOK {
 			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
-		}
-		if !gotOK {
-			return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
 		}
 		comparison := bytes.Compare(want.key, got.key)
 		if comparison < 0 {
@@ -301,11 +296,20 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
 		}
 		if got.hasSlot && yield != nil {
-			if err := yield(got.address, got.slot); err != nil {
-				return err
-			}
+			return yield(got.address, got.slot)
 		}
+		return nil
+	}, etl.TransformArgs{}); err != nil {
+		return err
 	}
+	want, ok, err := readJoinItem(expectedReader)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
+	}
+	return nil
 }
 
 func joinItemLabel(item joinItem) string {
@@ -316,6 +320,10 @@ func joinItemLabel(item joinItem) string {
 }
 
 func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn) error {
+	return checkPreimageSetAtWithBuffer(preimages, preimageSize, expected, hashFn, etl.BufferOptimalSize, os.TempDir())
+}
+
+func checkPreimageSetAtWithBuffer(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn, bufferSize datasize.ByteSize, tmpDir string) error {
 	if expected == nil {
 		return ErrPreimages
 	}
@@ -348,33 +356,23 @@ func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func
 	if _, err := expectedFile.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	runs, err := makeJoinRuns(preimages, preimageSize, hashFn)
-	if err != nil {
-		return err
-	}
-	defer removeJoinRuns(runs)
-	actual, err := newJoinMerge(runs)
-	if err != nil {
+	collector := etl.NewCollector("pbt-preimage-check", tmpDir, etl.NewSortableBuffer(bufferSize), log.Root())
+	defer collector.Close()
+	if err := collectJoinItems(preimages, preimageSize, hashFn, collector); err != nil {
 		return err
 	}
 	expectedReader := bufio.NewReaderSize(expectedFile, 64<<10)
-	for {
+	if err := collector.Load(nil, "", func(key, value []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		want, wantOK, err := readJoinItem(expectedReader)
 		if err != nil {
 			return err
 		}
-		got, gotOK, err := actual.next()
+		got, err := decodeJoinItem(key, value)
 		if err != nil {
 			return err
 		}
-		if !wantOK && !gotOK {
-			return nil
-		}
 		if !wantOK {
 			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
-		}
-		if !gotOK {
-			return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
 		}
 		if comparison := bytes.Compare(want.key, got.key); comparison != 0 {
 			if comparison < 0 {
@@ -382,80 +380,25 @@ func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func
 			}
 			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
 		}
+		return nil
+	}, etl.TransformArgs{}); err != nil {
+		return err
 	}
+	want, ok, err := readJoinItem(expectedReader)
+	if err != nil {
+		return err
+	}
+	if ok {
+		return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
+	}
+	return nil
 }
-
-const joinRunItems = 4096
 
 type joinItem struct {
 	key     []byte
 	address common.Address
 	slot    [32]byte
 	hasSlot bool
-}
-
-type joinRun struct {
-	file   *os.File
-	reader *bufio.Reader
-	item   joinItem
-	valid  bool
-}
-
-type joinMerge []*joinRun
-
-func (m joinMerge) Len() int           { return len(m) }
-func (m joinMerge) Less(i, j int) bool { return bytes.Compare(m[i].item.key, m[j].item.key) < 0 }
-func (m joinMerge) Swap(i, j int)      { m[i], m[j] = m[j], m[i] }
-func (m *joinMerge) Push(value any)    { *m = append(*m, value.(*joinRun)) }
-func (m *joinMerge) Pop() any {
-	old := *m
-	value := old[len(old)-1]
-	*m = old[:len(old)-1]
-	return value
-}
-
-type joinMergeReader struct{ heap joinMerge }
-
-func newJoinMerge(paths []string) (*joinMergeReader, error) {
-	result := &joinMergeReader{}
-	for _, path := range paths {
-		file, err := os.Open(path)
-		if err != nil {
-			return nil, err
-		}
-		run := &joinRun{file: file, reader: bufio.NewReaderSize(file, 64<<10)}
-		item, ok, err := readJoinItem(run.reader)
-		if err != nil {
-			_ = file.Close()
-			return nil, err
-		}
-		if !ok {
-			_ = file.Close()
-			continue
-		}
-		run.item, run.valid = item, true
-		heap.Push(&result.heap, run)
-	}
-	return result, nil
-}
-
-func (m *joinMergeReader) next() (joinItem, bool, error) {
-	if len(m.heap) == 0 {
-		return joinItem{}, false, nil
-	}
-	run := heap.Pop(&m.heap).(*joinRun)
-	item := run.item
-	next, ok, err := readJoinItem(run.reader)
-	if err != nil {
-		return joinItem{}, false, err
-	}
-	if ok {
-		run.item, run.valid = next, true
-		heap.Push(&m.heap, run)
-	} else if err := run.file.Close(); err != nil {
-		return joinItem{}, false, err
-	}
-	return item, true, nil
 }
 
 func writeJoinItem(writer *bufio.Writer, item joinItem) error {
@@ -517,39 +460,7 @@ func readJoinItem(reader *bufio.Reader) (joinItem, bool, error) {
 	return item, true, nil
 }
 
-func makeJoinRuns(src io.ReaderAt, size int64, hashFn eip8297.HashFn) ([]string, error) {
-	paths := make([]string, 0)
-	items := make([]joinItem, 0, joinRunItems)
-	flush := func() error {
-		if len(items) == 0 {
-			return nil
-		}
-		sort.Slice(items, func(i, j int) bool { return bytes.Compare(items[i].key, items[j].key) < 0 })
-		file, err := os.CreateTemp("", "pbt-join-run-")
-		if err != nil {
-			return err
-		}
-		writer := bufio.NewWriterSize(file, 1<<20)
-		for _, item := range items {
-			if err := writeJoinItem(writer, item); err != nil {
-				_ = file.Close()
-				_ = dir.RemoveFile(file.Name())
-				return err
-			}
-		}
-		if err := writer.Flush(); err != nil {
-			_ = file.Close()
-			_ = dir.RemoveFile(file.Name())
-			return err
-		}
-		if err := file.Close(); err != nil {
-			_ = dir.RemoveFile(file.Name())
-			return err
-		}
-		paths = append(paths, file.Name())
-		items = items[:0]
-		return nil
-	}
+func collectJoinItems(src io.ReaderAt, size int64, hashFn eip8297.HashFn, collector *etl.Collector) error {
 	emit := func(address common.Address, slot *[32]byte) error {
 		address32 := eip8297.RightAlign32(address[:])
 		stem := hashFn(address32[:])
@@ -562,33 +473,39 @@ func makeJoinRuns(src io.ReaderAt, size int64, hashFn eip8297.HashFn) ([]string,
 			item.slot = *slot
 			item.hasSlot = true
 		}
-		items = append(items, item)
-		if len(items) == joinRunItems {
-			return flush()
-		}
-		return nil
+		return collector.Collect(item.key, encodeJoinValue(item))
 	}
-	err := ReadPreimagesStream(src, size, func(address common.Address, slots func(func([32]byte) error) error) error {
+	return ReadPreimagesStream(src, size, func(address common.Address, slots func(func([32]byte) error) error) error {
 		if err := emit(address, nil); err != nil {
 			return err
 		}
 		return slots(func(slot [32]byte) error { return emit(address, &slot) })
 	})
-	if err != nil {
-		removeJoinRuns(paths)
-		return nil, err
-	}
-	if err := flush(); err != nil {
-		removeJoinRuns(paths)
-		return nil, err
-	}
-	return paths, nil
 }
 
-func removeJoinRuns(paths []string) {
-	for _, path := range paths {
-		_ = dir.RemoveFile(path)
+func encodeJoinValue(item joinItem) []byte {
+	if !item.hasSlot {
+		return []byte{0}
 	}
+	value := make([]byte, 1+len(item.address)+32)
+	value[0] = 1
+	copy(value[1:], item.address[:])
+	copy(value[1+len(item.address):], item.slot[:])
+	return value
+}
+
+func decodeJoinItem(key, value []byte) (joinItem, error) {
+	item := joinItem{key: bytes.Clone(key)}
+	if len(value) == 1 && value[0] == 0 {
+		return item, nil
+	}
+	if len(value) != 1+len(item.address)+32 || value[0] != 1 {
+		return joinItem{}, ErrPreimages
+	}
+	copy(item.address[:], value[1:1+len(item.address)])
+	copy(item.slot[:], value[1+len(item.address):])
+	item.hasSlot = true
+	return item, nil
 }
 
 func treeKeyWithHash(hashFn eip8297.HashFn, address, slot []byte) []byte {
