@@ -527,21 +527,21 @@
 - Create: `cmd/utils/app/export_pbt_cmd_test.go`
 - Modify: `cmd/utils/app/snapshots_cmd.go`
 
-- [ ] add the command with a stub. Write tests:
+- [x] add the command with a stub. Write tests:
       - an export on a hex+bin test datadir reads back through the strict readers and the join;
       - `pbtRoot` equals the datadir's bin root;
       - a tampered bin record in the datadir makes the export refuse.
 
       Confirm they fail at those assertions.
-- [ ] implement the command: the shared pin, the leaf stream into the codec with `pbtRoot` from the reference root, the
+- [x] implement the command: the shared pin, the leaf stream into the codec with `pbtRoot` from the reference root, the
       bin-root cross-check, the preimage file in the same view, the read-back check, the meta JSON
-- [ ] write tests:
+- [x] write tests:
       - both digests are stable across two runs;
       - the empty state;
       - a node stopped with `integration stage_exec --block B`;
       - replay equals conversion: at the same block, the export from task 8's attached node and from a node converted
         at that block give equal `snapshotDigest`
-- [ ] run tests - must pass before task 13
+- [x] run tests - must pass before task 13
 
 ### Task 13: export-preimages exact set and metadata
 
