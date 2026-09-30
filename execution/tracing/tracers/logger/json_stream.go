@@ -104,8 +104,7 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	return common.ToStringZeroCopy(append(b, '"'))
 }
 
-// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes. It goes through
-// hexEncodeBuf so a caller's local array does not escape through the Stream interface.
+// writeWord writes a word as a 0x-prefixed hex string padded to 32 bytes.
 func (l *JsonStreamLogger) writeWord(word []byte) {
 	padded := l.hexEncodeBuf[:32]
 	clear(padded[copy(padded, word):])
