@@ -18,6 +18,7 @@ package spectest
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -39,7 +41,10 @@ type configValueCount struct {
 }
 
 func testMainnetConfig(t *testing.T) {
-	reference := readMainnetConfigReference(t, os.DirFS(mainnetDir))
+	reference, err := readMainnetConfigReference(os.DirFS(mainnetDir))
+	if err != nil {
+		t.Fatalf("read mainnet config fixtures: %v", err)
+	}
 	referenceYAML, err := yaml.Marshal(reference)
 	if err != nil {
 		t.Fatalf("marshal mainnet config reference: %v", err)
@@ -82,7 +87,7 @@ func testMainnetConfig(t *testing.T) {
 		"PROPOSER_REORG_CUTOFF_BPS":           {},
 		"REORG_MAX_EPOCHS_SINCE_FINALIZATION": {},
 		"CONFIRMATION_BYZANTINE_THRESHOLD":    {},
-		"MAX_PAYLOAD_SIZE":                    {},
+		"MAX_PAYLOAD_SIZE":                    {}, // Caplin uses 15 MiB: https://github.com/erigontech/erigon/issues/24417
 		"ATTESTATION_SUBNET_EXTRA_BITS":       {},
 		"GAS_LIMIT_SCHEDULE":                  {},
 	}
@@ -125,9 +130,59 @@ func testMainnetConfig(t *testing.T) {
 	}
 }
 
-func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]*yaml.Node {
-	t.Helper()
+func TestReadMainnetConfigReference(t *testing.T) {
+	t.Run("rejects duplicate keys", func(t *testing.T) {
+		root := fstest.MapFS{
+			"mainnet/gloas/x/y/case_a/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 7500\nPAYLOAD_DUE_BPS: 7500\nPAYLOAD_DUE_BPS: 7500\n")},
+			"mainnet/gloas/x/y/case_b/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 5000\n")},
+			"mainnet/gloas/x/y/case_c/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 5000\n")},
+		}
 
+		_, err := readMainnetConfigReference(root)
+		want := "decode mainnet/gloas/x/y/case_a/config.yaml: duplicate config key PAYLOAD_DUE_BPS"
+		if err == nil || err.Error() != want {
+			t.Fatalf("unexpected error: got %v, want %q", err, want)
+		}
+	})
+
+	t.Run("rejects tied values", func(t *testing.T) {
+		root := fstest.MapFS{
+			"mainnet/gloas/x/y/case_a/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 5000\nATTESTATION_DUE_BPS: 3333\n")},
+			"mainnet/gloas/x/y/case_b/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 7500\nATTESTATION_DUE_BPS: 2500\n")},
+		}
+
+		_, err := readMainnetConfigReference(root)
+		if err == nil {
+			t.Fatal("expected tied config values to fail")
+		}
+		want := "ambiguous mainnet config values: ATTESTATION_DUE_BPS, PAYLOAD_DUE_BPS"
+		if err.Error() != want {
+			t.Fatalf("unexpected error: got %q, want %q", err, want)
+		}
+	})
+
+	t.Run("chooses majority value", func(t *testing.T) {
+		root := fstest.MapFS{
+			"mainnet/gloas/x/y/case_a/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 5000\n")},
+			"mainnet/gloas/x/y/case_b/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 5000\n")},
+			"mainnet/gloas/x/y/case_c/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 7500\n")},
+		}
+
+		reference, err := readMainnetConfigReference(root)
+		if err != nil {
+			t.Fatalf("read config reference: %v", err)
+		}
+		var got uint64
+		if err := reference["PAYLOAD_DUE_BPS"].Decode(&got); err != nil {
+			t.Fatalf("decode payload due BPS: %v", err)
+		}
+		if want := uint64(5000); got != want {
+			t.Fatalf("unexpected payload due BPS: got %d, want %d", got, want)
+		}
+	})
+}
+
+func readMainnetConfigReference(root fs.FS) (map[string]*yaml.Node, error) {
 	values := make(map[string]map[string]*configValueCount)
 	configFiles := 0
 	err := fs.WalkDir(root, "mainnet", func(name string, entry fs.DirEntry, err error) error {
@@ -159,9 +214,14 @@ func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]*yaml.Node 
 		}
 		configFiles++
 		config := document.Content[0]
+		seenKeys := make(map[string]struct{}, len(config.Content)/2)
 		for i := 0; i < len(config.Content); i += 2 {
 			key := config.Content[i].Value
 			node := config.Content[i+1]
+			if _, ok := seenKeys[key]; ok {
+				return fmt.Errorf("decode %s: duplicate config key %s", name, key)
+			}
+			seenKeys[key] = struct{}{}
 			if strings.HasSuffix(key, "_FORK_EPOCH") {
 				continue
 			}
@@ -184,24 +244,39 @@ func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]*yaml.Node 
 		return nil
 	})
 	if err != nil {
-		t.Fatalf("read mainnet config fixtures: %v", err)
+		return nil, err
 	}
 	if configFiles == 0 {
-		t.Fatal("no mainnet config fixtures found")
+		return nil, errors.New("no mainnet config fixtures found")
 	}
 
 	reference := make(map[string]*yaml.Node, len(values))
+	var tiedKeys []string
 	for key, counts := range values {
 		var mostCommon *configValueCount
+		topCount := 0
+		topValues := 0
 		// Some fixture cases override config values, so one file does not reliably hold the spec default.
 		for _, candidate := range counts {
-			if mostCommon == nil || candidate.count > mostCommon.count {
+			if candidate.count > topCount {
 				mostCommon = candidate
+				topCount = candidate.count
+				topValues = 1
+			} else if candidate.count == topCount {
+				topValues++
 			}
+		}
+		if topValues > 1 {
+			tiedKeys = append(tiedKeys, key)
+			continue
 		}
 		reference[key] = mostCommon.node
 	}
-	return reference
+	if len(tiedKeys) > 0 {
+		slices.Sort(tiedKeys)
+		return nil, fmt.Errorf("ambiguous mainnet config values: %s", strings.Join(tiedKeys, ", "))
+	}
+	return reference, nil
 }
 
 func compareConfigFields(reference map[string]*yaml.Node, builtIn, spec any, matched map[string]struct{}) []string {
