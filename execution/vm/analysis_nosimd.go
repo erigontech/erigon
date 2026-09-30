@@ -18,6 +18,5 @@
 
 package vm
 
-const hasSIMD = false
-
-func codeBitmapSIMD(code []byte) bitvec { panic("unreachable") }
+// codeBitmap collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
+var codeBitmap = codeBitmapGeneric

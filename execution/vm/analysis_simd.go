@@ -23,7 +23,13 @@ import (
 	"simd/archsimd"
 )
 
-var hasSIMD = archsimd.X86.AVX2()
+// codeBitmap collects valid jump destinations in code: JUMPDEST opcodes outside of push data.
+var codeBitmap = func() func([]byte) bitvec {
+	if archsimd.X86.AVX2() {
+		return codeBitmapSIMD
+	}
+	return codeBitmapGeneric
+}()
 
 var (
 	jdIota = [32]uint8{0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x21,
@@ -34,12 +40,14 @@ var (
 )
 
 // jdTabInit holds the constant tails of the jumpdestBitmapSIMD tables: the values for entry
-// offsets past the data written per block. Entries are stored as 0x80 + offset. Layout:
+// offsets past the data written per block. Entries are stored as 0x80 + offset. The tables start
+// at jdTabBase, so every lookup is a byte plus a non-negative constant below len(tab), which needs
+// no bounds check. Layout relative to jdTabBase:
 // TA 0 and PT 48 map a block entry to the entry into bytes 16..31 and into the next block;
 // T0 96 and T2 144 map an entry into bytes 0..7 / 16..23 to one into 8..15 / 24..31;
 // V0 192, V1 296, V2 240, V3 344 hold the instruction-start bits of each 8-byte half by entry.
-var jdTabInit = func() (t [384]byte) {
-	const ta, pt, t0, t2 = 0, 48, 96, 144
+var jdTabInit = func() (t [640]byte) {
+	const ta, pt, t0, t2 = jdTabBase, jdTabBase + 48, jdTabBase + 96, jdTabBase + 144
 	for i := 8; i < 40; i++ {
 		t[t0+i] = byte(0x78 + i - 8)
 		t[t2+i] = byte(0x78 + i - 8)
@@ -53,8 +61,6 @@ var jdTabInit = func() (t [384]byte) {
 	return t
 }()
 
-// jdTabBase shifts the jdTabInit layout so every lookup is a byte plus a non-negative
-// constant below len(tab), which needs no bounds check.
 const jdTabBase = 128
 
 // jumpdestBitmapSIMD analyzes whole 32-byte blocks branch-free and returns the offset past the
@@ -72,8 +78,7 @@ func jumpdestBitmapSIMD(code []byte, bits bitvec) (entry int) {
 	lane := archsimd.LoadUint8x32Array(&jdLane).AsInt8x32()
 	bit := archsimd.LoadUint8x32Array(&jdBit)
 
-	var tab [640]byte
-	copy(tab[jdTabBase:], jdTabInit[:])
+	tab := jdTabInit
 	e := uint8(0x80)
 	var acc uint64
 	b := 0
@@ -128,11 +133,8 @@ func jumpdestBitmapSIMD(code []byte, bits bitvec) (entry int) {
 
 func codeBitmapSIMD(code []byte) bitvec {
 	bits := make(bitvec, (len(code)+63)/64)
-	blocks := len(code) / 32
-	pc := blocks * 32
-	if blocks > 0 {
-		pc += jumpdestBitmapSIMD(code[:pc], bits)
-	}
+	pc := len(code) / 32 * 32
+	pc += jumpdestBitmapSIMD(code[:pc], bits)
 	for ; pc < len(code); pc++ {
 		if op := OpCode(code[pc]); int8(op) >= int8(PUSH1) {
 			pc += int(op - PUSH1 + 1)
