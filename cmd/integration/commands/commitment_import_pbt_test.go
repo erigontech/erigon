@@ -122,6 +122,7 @@ func TestImportPBTValidatesArtifactsBeforeReset(t *testing.T) {
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	tx, err := rawDB.BeginRw(t.Context())
 	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
 	genesis := common.Hash{9}
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
 	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{BinaryTrieTime: new(uint64)}))
