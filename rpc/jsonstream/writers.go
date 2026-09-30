@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"encoding"
+	"slices"
 	"strconv"
 
 	"github.com/holiman/uint256"
@@ -75,6 +76,18 @@ func HexUint64Field(s *StackStream, name string, v uint64) {
 	start := len(buf)
 	buf = strconv.AppendUint(append(buf, '"', '0', 'x'), v, 16)
 	s.commit(append(buf, '"'), start)
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
+// HexField writes a field name and the 0x-prefixed hex of b in one step, as HexUint64Field does.
+func HexField(s *StackStream, name string, b []byte) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	buf := s.stream.Buffer()
+	start := len(buf)
+	buf = hexutil.AppendQuoted(slices.Grow(buf, hexutil.QuotedLen(len(b))), b)
+	s.commit(buf, start)
 	s.separatorPending = true
 	flushIfFull(s.stream)
 }

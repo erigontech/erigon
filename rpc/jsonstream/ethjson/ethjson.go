@@ -67,8 +67,7 @@ func Quantity256(s *jsonstream.StackStream, name string, v *uint256.Int) {
 
 // Data writes a byte string whose length is its own, such as extraData or a log's data.
 func Data(s *jsonstream.StackStream, name string, b []byte) {
-	s.Field(name)
-	s.WriteHex(b)
+	jsonstream.HexField(s, name, b)
 }
 
 // DataList writes fixed-size values as one array field, growing the buffer once for the whole
