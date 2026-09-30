@@ -625,11 +625,19 @@ func TestMarkWritesComplete_FlagFlipPreservesValue(t *testing.T) {
 	require.Panics(t, func() { vm.MarkWritesComplete(mismatch) },
 		"completing with a changed value must panic under assert")
 
-	wrongInc := newWriteSet(
+	// Only a cell NEWER than the committing run is a violation: the equal-value
+	// write-side no-bump leaves the cell at an earlier incarnation on purpose.
+	staleRun := newWriteSet(
+		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 0}}, Val: *uint256.NewInt(100)},
+	)
+	require.Panics(t, func() { vm.MarkWritesComplete(staleRun) },
+		"completing a run older than the cell must panic under assert")
+
+	laterRun := newWriteSet(
 		&VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5, Incarnation: 2}}, Val: *uint256.NewInt(100)},
 	)
-	require.Panics(t, func() { vm.MarkWritesComplete(wrongInc) },
-		"completing a mismatched incarnation must panic under assert")
+	require.NotPanics(t, func() { vm.MarkWritesComplete(laterRun) },
+		"a cell kept at an earlier incarnation by the no-bump rule is legitimate")
 }
 
 func validateEqualVersion(readVersion, writeVersion Version) VersionValidity {
@@ -1116,6 +1124,7 @@ func TestColdFieldReadAfterReconciledLoadValidates(t *testing.T) {
 	if tr, ok := ibs.versionedReads.GetCodeHash(addr); ok {
 		require.NotEqual(t, ReadSetRead, tr.Source)
 	}
+	ibs.PublishOrigins()
 	io := NewVersionedIO(61)
 	io.RecordReads(Version{TxIndex: 60}, ibs.versionedReads)
 	require.Equal(t, VersionValid, vm.ValidateVersion(60, io, checkVersionEqual, true, ""))
