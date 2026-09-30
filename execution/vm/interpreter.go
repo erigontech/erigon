@@ -41,7 +41,6 @@ type Config struct {
 	Tracer        *tracing.Hooks
 	NoRecursion   bool // Disables call, callcode, delegate call and create
 	NoBaseFee     bool // Skips the EIP-1559 and EIP-4844 fee cap checks (needed for 0 price calls)
-	TraceJumpDest bool // Print transaction hashes where jumpdest analysis was useful
 	NoReceipts    bool // Do not calculate receipts
 	ReadOnly      bool // Do no perform any block finalisation
 	StatelessExec bool // true is certain conditions (like state trie root hash matching) need to be relaxed for stateless EVM execution
