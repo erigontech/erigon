@@ -14,10 +14,11 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !amd64 && !arm64
-
 package vm
 
 func simdImpls() map[string]func([]byte) bitvec {
-	return nil
+	if !hasNEON {
+		return nil
+	}
+	return map[string]func([]byte) bitvec{"neon": codeBitmapNEON}
 }
