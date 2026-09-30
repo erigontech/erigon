@@ -586,11 +586,11 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 **Files:**
 - none (verification only)
 
-- [ ] every requirement in the Overview is implemented
-- [ ] edge cases in the RPC contract, anchor and availability tables are covered by tests
-- [ ] run the full suites: `go test ./execution/commitment/... ./db/state/... ./execution/stagedsync/... ./rpc/jsonrpc/...`
-- [ ] run `make lint` until clean and `make erigon integration`
-- [ ] mutation-check the key guards; each must turn a named test red when reverted:
+- [x] every requirement in the Overview is implemented
+- [x] edge cases in the RPC contract, anchor and availability tables are covered by tests
+- [x] run the full suites: `go test ./execution/commitment/... ./db/state/... ./execution/stagedsync/... ./rpc/jsonrpc/...`
+- [x] run `make lint` until clean and `make erigon integration`
+- [x] mutation-check the key guards; each must turn a named test red when reverted:
       - the anchor rule;
       - the collapse survivor resolution;
       - the provenance filter;
