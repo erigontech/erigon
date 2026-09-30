@@ -203,6 +203,14 @@ type IntraBlockState struct {
 	sdProbe      map[accounts.Address]sdProbeEntry
 	sdProbeEpoch uint64
 
+	// Per-attempt memo of the shared-versionMap storage probe, sharing
+	// sdProbeEpoch. A slot's floor below txIndex cannot move for reasons this
+	// attempt must observe — its own writes land at txIndex and commit-time
+	// read-set validation re-checks every slot — so re-probing it per access
+	// only repeats the map and btree walk. Estimates are never memoized, so
+	// the dependency-wait path is untouched.
+	storageProbe map[storageProbeKey]storageProbeEntry
+
 	// noMaterialize suppresses the stateObject cache on the parallel execution
 	// path: create/write flows record only versioned cells and committed reads
 	// resolve from the state reader. Left false for genesis/RPC/serial, which
@@ -221,6 +229,18 @@ type sdProbeEntry struct {
 	res        ReadResult
 	destructed bool
 	ok         bool
+}
+
+type storageProbeKey struct {
+	addr accounts.Address
+	key  accounts.StorageKey
+}
+
+type storageProbeEntry struct {
+	epoch uint64
+	res   ReadResult
+	val   uint256.Int
+	ok    bool
 }
 
 // Create a new state from a given trie
@@ -1120,6 +1140,41 @@ func (ibs *IntraBlockState) readSelfDestructMemo(addr accounts.Address) (bool, R
 	}
 	ibs.sdProbe[addr] = sdProbeEntry{epoch: ibs.sdProbeEpoch, res: res, destructed: destructed, ok: ok}
 	return destructed, res, ok
+}
+
+// readStorageProbe returns the shared-versionMap storage floor for the current
+// execution attempt, memoizing it so the repeated SLOAD/SSTORE of one slot pays
+// a single map and btree walk. An Estimate result is returned unmemoized so the
+// caller still takes the dependency path on every access.
+func (ibs *IntraBlockState) readStorageProbe(addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadResult, bool) {
+	val, res, ok, _ := ibs.readStorageProbeMemo(addr, key)
+	return val, res, ok
+}
+
+// readStorageProbeMemo also reports whether the result came from the memo, which
+// lets a caller skip work that can only repeat a decision the first probe of
+// this slot already made in this attempt.
+func (ibs *IntraBlockState) readStorageProbeMemo(addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadResult, bool, bool) {
+	pk := storageProbeKey{addr: addr, key: key}
+	if e, hit := ibs.storageProbe[pk]; hit && e.epoch == ibs.sdProbeEpoch {
+		return e.val, e.res, e.ok, true
+	}
+	val, res, ok := ibs.versionMap.ReadStorage(addr, key, ibs.txIndex)
+	if res.Status() == MVReadResultDependency {
+		return val, res, ok, false
+	}
+	if ibs.storageProbe == nil {
+		ibs.storageProbe = make(map[storageProbeKey]storageProbeEntry, 64)
+	}
+	ibs.storageProbe[pk] = storageProbeEntry{epoch: ibs.sdProbeEpoch, res: res, val: val, ok: ok}
+	return val, res, ok, false
+}
+
+// forgetStorageProbe drops a slot's memo so the next access re-walks the map.
+// Required wherever the caller waits for a lower tx to commit: the floor it then
+// has to observe is precisely the one the memo predates.
+func (ibs *IntraBlockState) forgetStorageProbe(addr accounts.Address, key accounts.StorageKey) {
+	delete(ibs.storageProbe, storageProbeKey{addr: addr, key: key})
 }
 
 // eip8246PreservedAccount reconstructs the live account a prior tx left behind
@@ -3216,6 +3271,7 @@ func (ibs *IntraBlockState) VersionedReads() ReadSet {
 
 func (ibs *IntraBlockState) ResetVersionedIO() {
 	ibs.versionedReads = ReadSet{}
+	ibs.sdProbeEpoch++
 	ibs.versionedWrites.ReleaseAndReset()
 	ibs.dep = UnknownDep
 	ibs.recordAccess = false
@@ -3225,6 +3281,7 @@ func (ibs *IntraBlockState) ResetVersionedIO() {
 // ResetVersionedReads clears tracked versioned reads without affecting writes.
 func (ibs *IntraBlockState) ResetVersionedReads() {
 	ibs.versionedReads = ReadSet{}
+	ibs.sdProbeEpoch++
 }
 
 // VersionedWrites returns a frozen typed snapshot of this tx's recorded writes.
