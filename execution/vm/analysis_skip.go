@@ -39,12 +39,19 @@ func codeBitmapSkip(code []byte) bitvec {
 		hi := archsimd.LoadUint8x32Array((*[32]byte)(code[32:]))
 		jd := uint64(lo.Equal(c5b).ToBits()) | uint64(hi.Equal(c5b).ToBits())<<32
 		push := uint64(lo.AsInt8x32().Greater(c5f).ToBits()) | uint64(hi.AsInt8x32().Greater(c5f).ToBits())<<32
-		data := uint64(1)<<start - 1
+		chunk := (*[64]byte)(code)
+		data := uint64(1)<<(uint(start)&63) - 1
 		end := start
-		for m := push &^ data; m != 0; m &^= uint64(1)<<end - 1 {
-			p := bits.TrailingZeros64(m)
-			end = p + 1 + int(code[p]-0x5f)
-			data |= (uint64(1)<<end - 1) &^ (uint64(1)<<(p+1) - 1)
+		for m := push &^ data; m != 0; {
+			p := uint(bits.TrailingZeros64(m))
+			end = int(p) + 1 + int(chunk[p&63]-0x5f)
+			if end >= 64 { // the push data runs to the end of the chunk
+				data |= ^uint64(0) << (p & 63) << 1
+				break
+			}
+			below := uint64(1)<<(uint(end)&63) - 1
+			data |= below &^ (uint64(2)<<(p&63) - 1)
+			m &^= below
 		}
 		out[w] = jd &^ data
 		start = max(end-64, 0)
