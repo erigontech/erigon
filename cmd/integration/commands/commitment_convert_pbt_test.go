@@ -469,6 +469,36 @@ func TestConvertPBTHexBinSourceWithOrdinaryHexFlags(t *testing.T) {
 	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
 }
 
+func TestConvertPBTPostForkHeaderRootMismatch(t *testing.T) {
+	selectPBTBinaryCommandSuite(t)
+	source, err := execmoduletester.NewPBTAcceptanceChain(t, true, true)
+	require.NoError(t, err)
+	require.NoError(t, source.Tester.InsertChain(source.Chain))
+	buildPBTAcceptanceFiles(t, source)
+	rawDB := dbCfg(dbcfg.ChainDB, source.Tester.Dirs.Chaindata).MustOpen()
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		header := rawdb.ReadHeaderByNumber(tx, 4)
+		if header == nil {
+			return errors.New("header 4 is missing")
+		}
+		root := header.Root
+		root[0]++
+		header.Root = root
+		if err := rawdb.WriteHeader(tx, header); err != nil {
+			return err
+		}
+		return rawdb.WriteCanonicalHash(tx, header.Hash(), 4)
+	}))
+	rawDB.Close()
+	for _, keepHex := range []bool{true, false} {
+		output := filepath.Join(t.TempDir(), "output")
+		err = convertPBT(t.Context(), source.Tester.Dirs.DataDir, output, keepHex, "", log.New())
+		require.ErrorContains(t, err, "differs from header root")
+		_, statErr := os.Stat(output)
+		require.ErrorIs(t, statErr, os.ErrNotExist)
+	}
+}
+
 func TestConvertPBTFailureRemovesOutput(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema

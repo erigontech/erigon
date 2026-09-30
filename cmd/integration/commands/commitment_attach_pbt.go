@@ -17,6 +17,7 @@
 package commands
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -144,6 +145,9 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	}
 	if nodeSettings.StepSize != publishedSettings.StepSize {
 		return fmt.Errorf("commitment attach-pbt: step size %d differs from the node step size %d", publishedSettings.StepSize, nodeSettings.StepSize)
+	}
+	if err := validatePBTAttachSalts(nodeDirs, publishedDirs); err != nil {
+		return err
 	}
 	if marker == nil {
 		if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
@@ -297,7 +301,7 @@ func validatePBTAttachPublishedPoint(ctx context.Context, dirs datadir.Dirs, set
 		if err != nil {
 			return err
 		}
-		if !found || start > txNum || end < txNum {
+		if !found || start > txNum || end != txNum+1 {
 			return fmt.Errorf("commitment attach-pbt: published %s state is not at conversion txNum %d", check.name, txNum)
 		}
 		gotBlock, gotTx, err := check.decode(value)
@@ -515,18 +519,38 @@ func adoptPBTFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endTxNum uint
 			return err
 		}
 	}
+	return nil
+}
+
+func validatePBTAttachSalts(nodeDirs, publishedDirs datadir.Dirs) error {
 	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
-		src := filepath.Join(publishedDirs.Snap, name)
-		if _, err := os.Stat(src); errors.Is(err, fs.ErrNotExist) {
-			continue
-		} else if err != nil {
+		nodeSalt, nodeFound, err := readPBTAttachSalt(nodeDirs, name)
+		if err != nil {
 			return err
 		}
-		if err := linkOrCopyPBTFile(src, filepath.Join(nodeDirs.Snap, name)); err != nil {
+		publishedSalt, publishedFound, err := readPBTAttachSalt(publishedDirs, name)
+		if err != nil {
 			return err
+		}
+		if nodeFound != publishedFound {
+			return fmt.Errorf("commitment attach-pbt: %s presence differs: node=%t published=%t", name, nodeFound, publishedFound)
+		}
+		if nodeFound && !bytes.Equal(nodeSalt, publishedSalt) {
+			return fmt.Errorf("commitment attach-pbt: %s differs: node=%x published=%x", name, nodeSalt, publishedSalt)
 		}
 	}
 	return nil
+}
+
+func readPBTAttachSalt(dirs datadir.Dirs, name string) ([]byte, bool, error) {
+	value, err := os.ReadFile(filepath.Join(dirs.Snap, name))
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	return value, true, nil
 }
 
 func removePBTFilesPastPoint(dirs datadir.Dirs, stepSize, endTxNum uint64) error {

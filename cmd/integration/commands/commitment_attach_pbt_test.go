@@ -42,6 +42,7 @@ import (
 func TestValidatePBTAttachFilesRequiresBothCommitmentDomains(t *testing.T) {
 	node, published := newPBTAttachFileTrees(t, true)
 	require.NoError(t, validatePBTAttachFiles(node, published, 8, 7))
+	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 8), "do not end at conversion txNum")
 	require.NoError(t, dir.RemoveFile(filepath.Join(published.SnapDomain, "v1.0-commitment-bin.0-1.kv")))
 	require.ErrorContains(t, validatePBTAttachFiles(node, published, 8, 7), "commitment-bin")
 }
@@ -124,6 +125,31 @@ func TestAttachPBTResetsAndReopensAtPublishedRoot(t *testing.T) {
 	genesisDB.Close()
 	root, _ := reopenBinSource(t, source.DataDir, source.Chaindata)
 	require.Equal(t, wantRoot[:], root)
+}
+
+func TestAttachPBTRejectsDifferentStateSalt(t *testing.T) {
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, _ := newPBTConversionSource(t)
+	published := filepath.Join(t.TempDir(), "published")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, published, true, "", log.New()))
+	setExecutionProgress(t, source.Chaindata, 1)
+	require.NoError(t, os.WriteFile(filepath.Join(source.Snap, "salt-state.txt"), []byte{9, 9, 9, 9}, 0o644))
+	publishedDirs := datadir.Open(published)
+	require.NoError(t, dir.RemoveFile(filepath.Join(publishedDirs.Snap, "salt-state.txt")))
+	require.NoError(t, os.WriteFile(filepath.Join(publishedDirs.Snap, "salt-state.txt"), []byte{8, 8, 8, 8}, 0o644))
+	err := attachPBT(t.Context(), source.DataDir, published, "", log.New())
+	require.ErrorContains(t, err, "salt-state.txt")
+	require.ErrorContains(t, err, "node=09090909")
 }
 
 func TestAttachPBTRemovesOutputSettingsRefusalCases(t *testing.T) {

@@ -71,7 +71,7 @@ var cmdCommitmentImportPBT = &cobra.Command{
 	},
 }
 
-func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockText, chainName string, logger log.Logger) error {
+func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockText, chainName string, logger log.Logger) (retErr error) {
 	if dataDir == "" || snapshotPath == "" || preimagesPath == "" || blockText == "" {
 		return errors.New("commitment import-pbt: datadir, snapshot, preimages and block are required")
 	}
@@ -85,7 +85,11 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if err != nil {
 		return err
 	}
-	defer db.Close()
+	defer func() {
+		if db != nil {
+			db.Close()
+		}
+	}()
 	blockNum, txNum, err := validatePBTImportPoint(ctx, db, blockHash)
 	if err != nil {
 		return err
@@ -112,10 +116,21 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if settingsErr != nil && !errors.Is(settingsErr, os.ErrNotExist) {
 		return settingsErr
 	}
-	targetDomain := kv.CommitmentDomain
-	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
-		targetDomain = kv.CommitmentBinDomain
+	var originalSettings dbstate.ErigonDBSettings
+	settingsChanged := false
+	if settings != nil {
+		originalSettings = *settings
 	}
+	defer func() {
+		if settingsChanged && retErr != nil {
+			if db != nil {
+				db.Close()
+				db = nil
+			}
+			_ = dbstate.WriteErigonDBSettings(dirs, &originalSettings)
+		}
+	}()
+	targetDomain := kv.CommitmentDomain
 	importOptions := dbstate.PBTImportOptions{
 		Snapshot: snapshot, SnapshotSize: snapshotInfo.Size(), Preimages: preimages, PreimageSize: preimagesInfo.Size(),
 		BlockHash: blockHash, BlockNum: blockNum, TxNum: txNum, TargetDomain: targetDomain, Hash: eip8297.HashBytes, Logger: logger,
@@ -129,6 +144,22 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	validationTx.Rollback()
 	if validationErr != nil {
 		return validationErr
+	}
+	if settings != nil && settings.TrieVariantName() == dbstate.TrieVariantHexBin {
+		variant := dbstate.TrieVariantBin
+		settings.TrieVariant = &variant
+		settings.ReferencesInCommitmentBranches = new(bool)
+		db.Close()
+		db = nil
+		if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
+			return err
+		}
+		settingsChanged = true
+		configureImportVariant(dirs)
+		db, err = openDB(ctx, dbCfg(dbcfg.ChainDB, dirs.Chaindata), true, chainName, logger)
+		if err != nil {
+			return err
+		}
 	}
 	if err := rawdbreset.ResetExec(ctx, db); err != nil {
 		return err
@@ -147,14 +178,6 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	}
 	if err := tx.Commit(); err != nil {
 		return err
-	}
-	if targetDomain == kv.CommitmentBinDomain && settings != nil {
-		variant := dbstate.TrieVariantBin
-		settings.TrieVariant = &variant
-		settings.ReferencesInCommitmentBranches = new(bool)
-		if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
-			return err
-		}
 	}
 	logger.Info("imported PBT snapshot", "block", blockNum, "txNum", txNum, "root", root.Hex())
 	return nil

@@ -128,6 +128,19 @@ func TestPBTImportIntoHexBinTargetUsesBinaryState(t *testing.T) {
 	settings, err := dbstate.ReadErigonDBSettings(target.Tester.Dirs)
 	require.NoError(t, err)
 	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
+	selectPBTBinaryCommandSuite(t)
+	reopened := execmoduletester.New(t,
+		execmoduletester.WithExistingDataDir(target.Tester.Dirs),
+		execmoduletester.WithGenesisSpec(target.Genesis),
+		execmoduletester.WithKey(target.Key),
+		execmoduletester.WithStepSize(1),
+		execmoduletester.WithoutGenesisCommit(),
+	)
+	for block := conversion.TopBlock.NumberU64() + 1; block <= target.Chain.TopBlock.NumberU64(); block++ {
+		require.NoError(t, reopened.ReExecuteTo(t.Context(), block))
+		require.Equal(t, source.Chain.Headers[block-1].Root, readCurrentPBTStateRoot(t, reopened))
+	}
+	reopened.Close()
 }
 
 func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
@@ -140,6 +153,7 @@ func TestPBTAttachAcceptanceAtConversionPoint(t *testing.T) {
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
+	copyPBTAcceptanceSalts(t, node, source)
 	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 3)))
 	buildPBTAcceptanceFiles(t, source)
 	source.Tester.Close()
@@ -257,6 +271,7 @@ func TestPBTAttachedReplayMatchesConvertedState(t *testing.T) {
 
 	source, err := execmoduletester.NewPBTAcceptanceChain(t, false, false)
 	require.NoError(t, err)
+	copyPBTAcceptanceSalts(t, node, source)
 	require.NoError(t, source.Tester.InsertChain(source.Chain.Slice(0, 3)))
 	buildPBTAcceptanceFiles(t, source)
 	source.Tester.Close()
@@ -339,6 +354,15 @@ func exportConvertedPBTDigest(t *testing.T, output, rawPath string, fixture *exe
 	var meta map[string]any
 	require.NoError(t, json.Unmarshal(metaBytes, &meta))
 	return meta["snapshotDigest"]
+}
+
+func copyPBTAcceptanceSalts(t *testing.T, source, target *execmoduletester.PBTAcceptanceChain) {
+	t.Helper()
+	for _, name := range []string{"salt-state.txt", "salt-blocks.txt"} {
+		value, err := os.ReadFile(filepath.Join(source.Tester.Dirs.Snap, name))
+		require.NoError(t, err)
+		require.NoError(t, os.WriteFile(filepath.Join(target.Tester.Dirs.Snap, name), value, 0o644))
+	}
 }
 
 func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptanceChain) {
