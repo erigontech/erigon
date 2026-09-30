@@ -181,7 +181,7 @@ func assertFeedState(t *testing.T, feeds []commitment.PBinFeed, states [][]eip82
 		require.NoError(t, err)
 	}
 	entries := eip8297.EmbedState(states)
-	wantRoot := eip8297.StateRoot(entries)
+	wantRoot := eip8297.StateRootWithHash(entries, eip8297.SelectedHash())
 	gotRoot, err := NewTrie(ctx).Process(nil)
 	require.NoError(t, err)
 	require.Equal(t, wantRoot, gotRoot)
@@ -425,17 +425,23 @@ func TestProcessFeedEmptyCodeWriteLeavesCodeHash(t *testing.T) {
 	require.NoError(t, err)
 	codeHashKey := string(eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey))
 	var found bool
+	var deletedBasic bool
 	for _, op := range ops {
 		if string(op.Key) == codeHashKey {
 			found = true
 			require.Equal(t, [eip8297.ValueLength]byte(empty.CodeHash), op.Value)
 		}
+		if bytes.Equal(op.Key, eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey)) && op.Value == ([eip8297.ValueLength]byte{}) {
+			deletedBasic = true
+		}
 	}
 	require.True(t, found)
+	require.True(t, deletedBasic)
 	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{account}}}, [][]eip8297.State{{feedState(account)}})
 }
 
 func TestProcessFeedEmptyAccountStorageMatchesReference(t *testing.T) {
+	pbinUseBlake3(t)
 	address := common.Hex2Bytes("000000000000000000000000000000000000000e")
 	account := feedAccount(address)
 	account.CodeWritten = true
@@ -443,6 +449,43 @@ func TestProcessFeedEmptyAccountStorageMatchesReference(t *testing.T) {
 	account.CodeHash = empty.CodeHash
 	account.Slots = []commitment.PBinFeedSlot{{Key: []byte{0}, Value: []byte{0x01}}, {Key: []byte{1, 0}, Value: []byte{0x02}}}
 	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{account}}}, [][]eip8297.State{{feedState(account)}})
+}
+
+func TestProcessFeedEmptyAccountStorageMatchesReferenceWithoutCodeWritten(t *testing.T) {
+	pbinUseBlake3(t)
+	address := common.Hex2Bytes("000000000000000000000000000000000000000e")
+	account := feedAccount(address)
+	account.CodeHash = empty.CodeHash
+	account.Slots = []commitment.PBinFeedSlot{{Key: []byte{0}, Value: []byte{0x01}}, {Key: []byte{1, 0}, Value: []byte{0x02}}}
+	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{account}}}, [][]eip8297.State{{feedState(account)}})
+}
+
+func TestProcessFeedZeroMergeDeletesExistingBasicDataForCodeWrittenVariants(t *testing.T) {
+	pbinUseBlake3(t)
+	address := common.Hex2Bytes("000000000000000000000000000000000000000f")
+	codeHashValue := eip8297.CodeHashValue(empty.CodeHash)
+	for _, codeWritten := range []bool{false, true} {
+		first := feedAccount(address)
+		first.Balance = *uint256.NewInt(9)
+		first.CodeHash = empty.CodeHash
+		first.CodeWritten = codeWritten
+		if codeWritten {
+			first.Code = []byte{}
+		}
+		second := feedAccount(address)
+		second.CodeHash = empty.CodeHash
+		ctx := newTrieTestContext()
+		trie := NewTrie(ctx)
+		_, err := trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{first}})
+		require.NoError(t, err)
+		_, err = trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{second}})
+		require.NoError(t, err)
+		want, err := NewTrie(newTrieTestContext()).Process([]Op{{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), Value: codeHashValue}})
+		require.NoError(t, err)
+		got, err := NewTrie(ctx).Process(nil)
+		require.NoError(t, err)
+		require.Equal(t, want, got, "zero BASIC_DATA merge must delete the leaf for CodeWritten=%t", codeWritten)
+	}
 }
 
 func TestProcessFeedZeroMergeDeletesExistingBasicData(t *testing.T) {

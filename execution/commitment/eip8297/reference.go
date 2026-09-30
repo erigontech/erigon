@@ -180,7 +180,10 @@ func EmbedState(batches [][]State) []Entry {
 		lastSlotWrites := make(map[string]int)
 		for index, state := range batch {
 			address := string(state.Address)
-			if state.Deleted || state.Code != nil || state.Nonce != 0 || !state.Balance.IsZero() {
+			accountPresent := values[string(TreeKeyAccount(state.Address, BasicDataLeafKey))] != nil ||
+				values[string(TreeKeyAccount(state.Address, CodeHashLeafKey))] != nil ||
+				values[string(TreeKeyAccount(state.Address, DelegationLeafKey))] != nil
+			if state.Deleted || state.Code != nil || state.Nonce != 0 || !state.Balance.IsZero() || (len(state.Slots) != 0 && !accountPresent) {
 				lastAccounts[address] = index
 			}
 			if lastSlots[address] == nil {

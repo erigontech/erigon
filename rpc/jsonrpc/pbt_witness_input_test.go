@@ -101,8 +101,7 @@ func TestPBinWitnessInputKeepsRevertedCallReads(t *testing.T) {
 
 func TestPBinWitnessInputCodesAreContentKeyed(t *testing.T) {
 	address := common.HexToAddress("0x4800000000000000000000000000000000000000")
-	first := append([]byte(nil), eip8297.DelegationMarker[:]...)
-	first = append(first, bytes.Repeat([]byte{1}, eip8297.DelegationCodeLength-len(first))...)
+	first := []byte{0x60, 0x01, 0x60, 0x00, 0x52}
 	second := []byte{0x60, 0x01, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
 	reader := &pbinCodeReader{fakeStateReader: &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}}, codes: map[common.Address][]byte{address: first}}
 	rs := NewRecordingState(reader)
@@ -119,6 +118,7 @@ func TestPBinWitnessInputCodesAreContentKeyed(t *testing.T) {
 	require.Contains(t, got.Codes, first, "the first code version must remain in the pbt code set")
 	require.Contains(t, got.Codes, second, "the second code version must remain in the pbt code set")
 	require.NotContains(t, got.Reads, eip8297.TreeKeyCodeChunk(rs.codeHash(first), 0), "pre-state code reads do not need code chunk proofs")
+	require.NotContains(t, got.Reads, eip8297.TreeKeyCodeChunk(rs.codeHash(second), 0), "in-block code reads do not need code chunk proofs")
 	mpt := collectAccessedState(rs, witnessModeLegacy)
 	require.Contains(t, mpt.SortedCodes, hexutil.Bytes(first), "the MPT code set must retain the first code version")
 	require.Contains(t, mpt.SortedCodes, hexutil.Bytes(second), "the MPT code set must retain the second code version")
@@ -215,6 +215,18 @@ func TestPBinWitnessInputNewAccountMatchesEngineRoot(t *testing.T) {
 	engineRoot, err := pbtengine.NewTrie(postContext).Process(postOps)
 	require.NoError(t, err)
 	require.Equal(t, engineRoot, resolverRoot, "the witness driver must match the engine root for a funded new account")
+}
+
+func TestPBinWitnessInputCodelessAccountFromEmptyStateIncludesCodeHash(t *testing.T) {
+	address := common.HexToAddress("0x5200000000000000000000000000000000000000")
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {}}}
+	rs := NewRecordingState(inner)
+	updated := &accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, rs.UpdateAccountData(accounts.InternAddress(address), &accounts.Account{}, updated))
+	got, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	emptyCodeHash := eip8297.CodeHashValue(common.Hash{})
+	require.Equal(t, emptyCodeHash[:], got.Accounts[0].Values[eip8297.CodeHashLeafKey], "an empty codeless account still needs its code-hash leaf")
 }
 
 type pbinWitnessInputContext struct {

@@ -116,6 +116,13 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 				if !bytes.Equal(oldBasic, basic) {
 					update.Values = map[byte][]byte{eip8297.BasicDataLeafKey: basic}
 				}
+				if original.Nonce == 0 && original.Balance.IsZero() && original.IsEmptyCodeHash() {
+					codeHash := eip8297.CodeHashValue(original.CodeHash.Value())
+					if update.Values == nil {
+						update.Values = make(map[byte][]byte)
+					}
+					update.Values[eip8297.CodeHashLeafKey] = codeHash[:]
+				}
 			}
 		}
 		if code, modified := rs.ModifiedCode[address]; modified {

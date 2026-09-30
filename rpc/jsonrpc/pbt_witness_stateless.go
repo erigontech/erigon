@@ -200,18 +200,21 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	}
 	s.preStateAccounts[addr] = present
 	if !present {
-		var cache eip8297.DigestCache
-		storage, err := s.tree.PBinHasPrefix(cache.AccountStoragePrefix(addr[:]))
+		delegation, delegationPresent, err := s.readDelegation(addr)
 		if err != nil {
-			if errors.Is(err, commitment.ErrPBinWitnessBlinded) {
-				s.resolveError = nil
-				return nil, nil
-			}
 			return nil, err
 		}
-		if storage {
+		if delegationPresent {
 			s.preStateAccounts[addr] = true
-			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash}, nil
+			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.InternCodeHash(crypto.Keccak256Hash(delegation))}, nil
+		}
+		codeHash, codeHashPresent, err := s.readCodeHash(addr)
+		if err != nil {
+			return nil, err
+		}
+		if codeHashPresent {
+			s.preStateAccounts[addr] = true
+			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.InternCodeHash(codeHash)}, nil
 		}
 		return nil, nil
 	}
@@ -366,10 +369,20 @@ func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, _ *accoun
 
 func (s *pbinWitnessStateless) UpdateAccountCode(address accounts.Address, _ uint64, codeHash accounts.CodeHash, code []byte) error {
 	addr := address.Value()
-	s.codeUpdates[addr] = bytes.Clone(code)
-	if account, ok := s.accountUpdates[addr]; ok && account != nil {
-		account.CodeHash = codeHash
+	if _, updated := s.accountUpdates[addr]; !updated {
+		account, err := s.ReadAccountData(address)
+		if err != nil {
+			return err
+		}
+		if account == nil {
+			account = &accounts.Account{Root: empty.RootHash}
+		}
+		copyAccount := new(accounts.Account)
+		copyAccount.Copy(account)
+		s.accountUpdates[addr] = copyAccount
 	}
+	s.codeUpdates[addr] = cloneNonNil(code)
+	s.accountUpdates[addr].CodeHash = codeHash
 	return nil
 }
 
@@ -427,7 +440,7 @@ func (s *pbinWitnessStateless) Finalize(ctx context.Context) (common.Hash, error
 			if eip8297.IsDelegation(code) {
 				update.Delegation = bytes.Clone(code)
 			} else {
-				update.Code = bytes.Clone(code)
+				update.Code = cloneNonNil(code)
 			}
 		} else if delegation, present, err := s.readDelegation(addr); err != nil {
 			return common.Hash{}, err

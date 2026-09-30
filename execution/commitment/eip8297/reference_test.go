@@ -359,14 +359,14 @@ func TestEmbedStateStorageOnlyBatchKeepsAccount(t *testing.T) {
 	require.Contains(t, entries, Entry{Key: TreeKeyStorage(address, slot), Value: storage[:]})
 }
 
-func TestEmbedStateStorageOnlyFirstBatchDoesNotCreateAccount(t *testing.T) {
+func TestEmbedStateStorageOnlyFirstBatchCreatesCodelessAccount(t *testing.T) {
 	address := referenceAddress(13)
 	slot := referenceSlot(64)
 	zero := common.Hash{}
 	emptyCodeHash := CodeHashValue(zero)
 	entries := EmbedState([][]State{{{Address: address, Slots: map[string][]byte{string(slot): {0x42}}}}})
 	require.NotContains(t, entries, Entry{Key: TreeKeyAccount(address, BasicDataLeafKey)})
-	require.NotContains(t, entries, Entry{Key: TreeKeyAccount(address, CodeHashLeafKey), Value: emptyCodeHash[:]})
+	require.Contains(t, entries, Entry{Key: TreeKeyAccount(address, CodeHashLeafKey), Value: emptyCodeHash[:]})
 }
 
 func TestReferenceDelegationHelpersUseSpecBytes(t *testing.T) {

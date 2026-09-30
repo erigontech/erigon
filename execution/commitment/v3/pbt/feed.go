@@ -128,7 +128,11 @@ func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit fun
 		if err != nil {
 			return err
 		}
-		if err := emit(Op{Key: basicKey, Value: basic}); err != nil {
+		if basic == ([eip8297.ValueLength]byte{}) {
+			if err := emit(Op{Key: basicKey}); err != nil {
+				return err
+			}
+		} else if err := emit(Op{Key: basicKey, Value: basic}); err != nil {
 			return err
 		}
 		if eip8297.IsDelegation(account.Code) {

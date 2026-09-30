@@ -251,6 +251,45 @@ func TestPBinWitnessStatelessDelegationUsesDesignatorCodeHash(t *testing.T) {
 	require.Equal(t, accounts.InternCodeHash(crypto.Keccak256Hash(delegation)), account.CodeHash)
 }
 
+func TestPBinWitnessStatelessClearsDelegationToEmptyCodeHash(t *testing.T) {
+	address := common.Address{0x67}
+	target := common.Address{0x68}
+	delegation := types.AddressToDelegation(accounts.InternAddress(target))
+	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(7), 0)
+	require.NoError(t, err)
+	delegationValue := eip8297.EncodeDelegation(delegation)
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: basic[:]},
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.DelegationLeafKey), Value: delegationValue[:]},
+	}
+	ctx := newPBinWitnessInputContext()
+	root, err := pbtengine.NewTrie(ctx).Process(pbinStatelessEntriesToOps(entries))
+	require.NoError(t, err)
+	paths, blobs, _, err := pbtengine.NewTrie(ctx).Witness(context.Background(), root, eipWitness.PBinDriverInput{Reads: [][]byte{entries[0].Key, entries[1].Key}})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		result.Keys[index] = paths[index]
+		result.State[index] = blobs[index]
+	}
+	stateless, err := newPBinWitnessStateless(result, root)
+	require.NoError(t, err)
+	require.NoError(t, stateless.UpdateAccountCode(accounts.InternAddress(address), 0, accounts.EmptyCodeHash, []byte{}))
+	got, err := stateless.Finalize(context.Background())
+	require.NoError(t, err)
+	post := newPBinWitnessInputContext()
+	post.records = clonePBinWitnessInputRecords(ctx.records)
+	emptyCodeHash := eip8297.CodeHashValue(common.Hash{})
+	cache := new(eip8297.DigestCache)
+	want, err := pbtengine.NewTrie(post).Process([]pbtengine.Op{
+		pbtengine.Drop(cache.AccountHeaderStem(address[:])),
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: basic},
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash},
+	})
+	require.NoError(t, err)
+	require.Equal(t, want, got, "clearing delegation must restore the empty code-hash leaf")
+}
+
 func pbinStatelessChainConfig() *chain.Config {
 	return &chain.Config{
 		ChainID:                       uint256.NewInt(1337),
@@ -441,6 +480,30 @@ func TestPBinWitnessStatelessHasStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, present)
 	require.Equal(t, uint64(9), value.Uint64())
+}
+
+func TestPBinWitnessStatelessMissingStorageForExistingEmptyAccountErrors(t *testing.T) {
+	address := common.HexToAddress("0x6600000000000000000000000000000000000000")
+	codeHash := eip8297.CodeHashValue(common.Hash{})
+	slot := common.HexToHash("0x100")
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey), Value: codeHash[:]},
+		{Key: eip8297.TreeKeyStorage(address[:], slot[:]), Value: pbinStatelessValue(1)},
+	}
+	ctx := newPBinWitnessInputContext()
+	root, err := pbtengine.NewTrie(ctx).Process(pbinStatelessEntriesToOps(entries))
+	require.NoError(t, err)
+	paths, blobs, _, err := pbtengine.NewTrie(ctx).Witness(context.Background(), root, eipWitness.PBinDriverInput{Reads: [][]byte{entries[0].Key}})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		result.Keys[index] = paths[index]
+		result.State[index] = hexutil.Bytes(blobs[index])
+	}
+	stateless, err := newPBinWitnessStateless(result, root)
+	require.NoError(t, err)
+	err = stateless.DeleteAccount(accounts.InternAddress(address), nil)
+	require.ErrorIs(t, err, commitment.ErrPBinWitnessBlinded)
 }
 
 func TestPBinWitnessStatelessCreateOverStorageWipesStorage(t *testing.T) {

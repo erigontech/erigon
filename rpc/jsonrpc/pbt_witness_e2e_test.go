@@ -134,9 +134,10 @@ func pbtCorpusChain(t *testing.T) (*DebugAPIImpl, *execmoduletester.ExecModuleTe
 			b.AddWithdrawal(&types.Withdrawal{Index: 2, Validator: 2, Address: to, Amount: 1})
 		case 9:
 			addTransaction(destroyer, uint256.NewInt(0), nil)
-		case 10:
 			setCodeTarget := to
 			addSigned(&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), GasLimit: 500_000, To: &setCodeTarget}, ChainID: *chain.AllProtocolChanges.ChainID, TipCap: *uint256.NewInt(1_000_000_000), FeeCap: *uint256.NewInt(10_000_000_000)}, Authorizations: []types.Authorization{clearSetAuth}})
+		case 10:
+			setCodeTarget := to
 			addSigned(&types.SetCodeTransaction{DynamicFeeTransaction: types.DynamicFeeTransaction{CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), GasLimit: 500_000, To: &setCodeTarget}, ChainID: *chain.AllProtocolChanges.ChainID, TipCap: *uint256.NewInt(1_000_000_000), FeeCap: *uint256.NewInt(10_000_000_000)}, Authorizations: []types.Authorization{clearAuth}})
 		}
 	})
@@ -201,6 +202,7 @@ func TestPBinExecutionWitnessCorpus(t *testing.T) {
 			require.NotNil(t, block)
 			parentRoot := pbtCorpusAnchor(t, m, number-1)
 			postRoot := pbtCorpusAnchor(t, m, number)
+			require.Equal(t, postRoot, result.pbtPostRoot, "builder post-root for block %d", number)
 			require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 			require.NotEmpty(t, result.State)
 			if number == 8 || number == 9 {
@@ -214,6 +216,19 @@ func TestPBinExecutionWitnessCorpus(t *testing.T) {
 					require.Equal(t, uint64(1), value.Uint64())
 				} else {
 					require.Equal(t, uint64(2), value.Uint64())
+				}
+			}
+			if number == 10 || number == 11 {
+				stateAfter := pbtStateAfterBlock(t, m, number)
+				clearAuthorityKey, err := crypto.HexToECDSA("49a7b37aa6f6645917e7b807e9d1c00d4fa71f18343b0d4122a4d2df64dd6fee")
+				require.NoError(t, err)
+				clearAuthority := crypto.PubkeyToAddress(clearAuthorityKey.PublicKey)
+				codeHash, err := stateAfter.GetCodeHash(accounts.InternAddress(clearAuthority))
+				require.NoError(t, err)
+				if number == 10 {
+					require.False(t, codeHash.IsEmpty(), "delegation must be set before it is cleared")
+				} else {
+					require.True(t, codeHash.IsEmpty(), "clearing delegation must restore the empty code hash")
 				}
 			}
 			for index := range result.Keys {

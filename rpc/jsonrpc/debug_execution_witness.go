@@ -624,6 +624,7 @@ type ExecutionWitnessResult struct {
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
 	legacyRoot     hexutil.Bytes
+	pbtPostRoot    common.Hash
 }
 
 // MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
@@ -1221,7 +1222,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		}
 		result.Headers = headers
 		result.headerByNumber = byNumber
-		paths, blobs, _, err := sdCtx.PBinWitness(ctx, parentRoot, input.PBinDriverInput)
+		paths, blobs, pbtPostRoot, err := sdCtx.PBinWitness(ctx, parentRoot, input.PBinDriverInput)
 		if err != nil {
 			return nil, err
 		}
@@ -1230,6 +1231,10 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		for index := range paths {
 			result.Keys[index] = hexutil.Bytes(paths[index])
 			result.State[index] = hexutil.Bytes(blobs[index])
+		}
+		result.pbtPostRoot = pbtPostRoot
+		if pbtPostRoot != postRoot {
+			return nil, fmt.Errorf("pbin witness builder post-state root %x differs from block anchor %x", pbtPostRoot, postRoot)
 		}
 		if parentRoot == eip8297.EmptyTreeHash && len(result.State) == 0 {
 			result.Keys = nil
