@@ -48,37 +48,37 @@ func (x *Header) writeJSONFields(s *jsonstream.StackStream) error {
 		ethjson.Data(s, "auraSeal", x.AuRaSeal[:])
 	}
 	if x.BaseFee == nil {
-		jsonstream.NullField(s, "baseFeePerGas")
+		s.Field("baseFeePerGas").WriteNil()
 	} else {
 		ethjson.Quantity256(s, "baseFeePerGas", (*uint256.Int)(x.BaseFee))
 	}
 	if x.WithdrawalsHash == nil {
-		jsonstream.NullField(s, "withdrawalsRoot")
+		s.Field("withdrawalsRoot").WriteNil()
 	} else {
 		ethjson.Data(s, "withdrawalsRoot", x.WithdrawalsHash[:])
 	}
 	if x.BlobGasUsed == nil {
-		jsonstream.NullField(s, "blobGasUsed")
+		s.Field("blobGasUsed").WriteNil()
 	} else {
 		ethjson.Quantity(s, "blobGasUsed", *x.BlobGasUsed)
 	}
 	if x.ExcessBlobGas == nil {
-		jsonstream.NullField(s, "excessBlobGas")
+		s.Field("excessBlobGas").WriteNil()
 	} else {
 		ethjson.Quantity(s, "excessBlobGas", *x.ExcessBlobGas)
 	}
 	if x.ParentBeaconBlockRoot == nil {
-		jsonstream.NullField(s, "parentBeaconBlockRoot")
+		s.Field("parentBeaconBlockRoot").WriteNil()
 	} else {
 		ethjson.Data(s, "parentBeaconBlockRoot", x.ParentBeaconBlockRoot[:])
 	}
 	if x.RequestsHash == nil {
-		jsonstream.NullField(s, "requestsHash")
+		s.Field("requestsHash").WriteNil()
 	} else {
 		ethjson.Data(s, "requestsHash", x.RequestsHash[:])
 	}
 	if x.BlockAccessListHash == nil {
-		jsonstream.NullField(s, "blockAccessListHash")
+		s.Field("blockAccessListHash").WriteNil()
 	} else {
 		ethjson.Data(s, "blockAccessListHash", x.BlockAccessListHash[:])
 	}

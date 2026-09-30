@@ -279,7 +279,7 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty, omitzero bo
 	case "":
 		return "", fmt.Errorf("no ethjson tag")
 	case "bool":
-		write = fmt.Sprintf("jsonstream.BoolField(s, %q, %s)", name, ref)
+		write = fmt.Sprintf("s.Field(%q).WriteBool(%s)", name, ref)
 		present = ref
 	case "string":
 		write = fmt.Sprintf("ethjson.String(s, %q, %s)", name, ref)
@@ -357,7 +357,7 @@ func fieldStatement(ref, name, form string, t types.Type, omitempty, omitzero bo
 	case omitempty:
 		return fmt.Sprintf("\tif %s {\n\t\t%s\n\t}\n", present, write), nil
 	case pointer || iface: // absent, and the tag does not allow leaving it out
-		return fmt.Sprintf("\tif %s == nil {\n\t\tjsonstream.NullField(s, %q)\n\t} else {\n\t\t%s\n\t}\n", ref, name, write), nil
+		return fmt.Sprintf("\tif %s == nil {\n\t\ts.Field(%q).WriteNil()\n\t} else {\n\t\t%s\n\t}\n", ref, name, write), nil
 	default:
 		return "\t" + write + "\n", nil
 	}

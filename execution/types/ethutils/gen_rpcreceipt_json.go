@@ -31,12 +31,12 @@ func (x *RPCReceipt) writeJSONFields(s *jsonstream.StackStream) error {
 	ethjson.Data(s, "transactionHash", x.TransactionHash[:])
 	ethjson.Quantity(s, "transactionIndex", x.TransactionIndex)
 	if x.From == nil {
-		jsonstream.NullField(s, "from")
+		s.Field("from").WriteNil()
 	} else {
 		ethjson.Data(s, "from", x.From[:])
 	}
 	if x.To == nil {
-		jsonstream.NullField(s, "to")
+		s.Field("to").WriteNil()
 	} else {
 		ethjson.Data(s, "to", x.To[:])
 	}
@@ -44,7 +44,7 @@ func (x *RPCReceipt) writeJSONFields(s *jsonstream.StackStream) error {
 	ethjson.Quantity(s, "gasUsed", x.GasUsed)
 	ethjson.Quantity(s, "cumulativeGasUsed", x.CumulativeGasUsed)
 	if x.ContractAddress == nil {
-		jsonstream.NullField(s, "contractAddress")
+		s.Field("contractAddress").WriteNil()
 	} else {
 		ethjson.Data(s, "contractAddress", x.ContractAddress[:])
 	}
@@ -53,12 +53,12 @@ func (x *RPCReceipt) writeJSONFields(s *jsonstream.StackStream) error {
 		return err
 	}
 	if x.LogsBloom == nil {
-		jsonstream.NullField(s, "logsBloom")
+		s.Field("logsBloom").WriteNil()
 	} else {
 		ethjson.Data(s, "logsBloom", x.LogsBloom[:])
 	}
 	if x.EffectiveGasPrice == nil {
-		jsonstream.NullField(s, "effectiveGasPrice")
+		s.Field("effectiveGasPrice").WriteNil()
 	} else {
 		ethjson.Quantity256(s, "effectiveGasPrice", (*uint256.Int)(x.EffectiveGasPrice))
 	}

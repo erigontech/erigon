@@ -27,17 +27,17 @@ func (x *RPCTransaction) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 // writeJSONFields writes those fields without the enclosing object, for a type another object inlines.
 func (x *RPCTransaction) writeJSONFields(s *jsonstream.StackStream) error {
 	if x.BlockHash == nil {
-		jsonstream.NullField(s, "blockHash")
+		s.Field("blockHash").WriteNil()
 	} else {
 		ethjson.Data(s, "blockHash", x.BlockHash[:])
 	}
 	if x.BlockNumber == nil {
-		jsonstream.NullField(s, "blockNumber")
+		s.Field("blockNumber").WriteNil()
 	} else {
 		ethjson.Quantity256(s, "blockNumber", (*uint256.Int)(x.BlockNumber))
 	}
 	if x.BlockTimestamp == nil {
-		jsonstream.NullField(s, "blockTimestamp")
+		s.Field("blockTimestamp").WriteNil()
 	} else {
 		ethjson.Quantity(s, "blockTimestamp", *x.BlockTimestamp)
 	}
@@ -54,17 +54,17 @@ func (x *RPCTransaction) writeJSONFields(s *jsonstream.StackStream) error {
 	ethjson.Data(s, "input", x.Input[:])
 	ethjson.Quantity(s, "nonce", x.Nonce)
 	if x.To == nil {
-		jsonstream.NullField(s, "to")
+		s.Field("to").WriteNil()
 	} else {
 		ethjson.Data(s, "to", x.To[:])
 	}
 	if x.TransactionIndex == nil {
-		jsonstream.NullField(s, "transactionIndex")
+		s.Field("transactionIndex").WriteNil()
 	} else {
 		ethjson.Quantity(s, "transactionIndex", *x.TransactionIndex)
 	}
 	if x.Value == nil {
-		jsonstream.NullField(s, "value")
+		s.Field("value").WriteNil()
 	} else {
 		ethjson.Quantity256(s, "value", (*uint256.Int)(x.Value))
 	}
@@ -91,7 +91,7 @@ func (x *RPCTransaction) writeJSONFields(s *jsonstream.StackStream) error {
 		}
 	}
 	if x.V == nil {
-		jsonstream.NullField(s, "v")
+		s.Field("v").WriteNil()
 	} else {
 		ethjson.Quantity256(s, "v", (*uint256.Int)(x.V))
 	}
@@ -99,12 +99,12 @@ func (x *RPCTransaction) writeJSONFields(s *jsonstream.StackStream) error {
 		ethjson.Quantity256(s, "yParity", (*uint256.Int)(x.YParity))
 	}
 	if x.R == nil {
-		jsonstream.NullField(s, "r")
+		s.Field("r").WriteNil()
 	} else {
 		ethjson.Quantity256(s, "r", (*uint256.Int)(x.R))
 	}
 	if x.S == nil {
-		jsonstream.NullField(s, "s")
+		s.Field("s").WriteNil()
 	} else {
 		ethjson.Quantity256(s, "s", (*uint256.Int)(x.S))
 	}
