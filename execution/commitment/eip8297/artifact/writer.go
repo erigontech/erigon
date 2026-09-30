@@ -442,7 +442,7 @@ func (s *storageBuilder) writeTo(dst io.Writer) error {
 	_, err := io.Copy(dst, s.spill)
 	name := s.spill.Name()
 	closeErr := s.spill.Close()
-	removeErr := os.Remove(name)
+	removeErr := dir.RemoveFile(name)
 	if err == nil {
 		err = closeErr
 	}
@@ -450,30 +450,6 @@ func (s *storageBuilder) writeTo(dst io.Writer) error {
 		err = removeErr
 	}
 	s.spill = nil
-	return err
-}
-
-func appendSpilled(dst *bytes.Buffer, record []byte, threshold int) error {
-	if len(record) <= threshold {
-		_, err := dst.Write(record)
-		return err
-	}
-	f, err := os.CreateTemp("", "pbt-artifact-storage-")
-	if err != nil {
-		return err
-	}
-	name := f.Name()
-	defer func() { _ = dir.RemoveFile(name) }()
-	if _, err = f.Write(record); err == nil {
-		_, err = f.Seek(0, io.SeekStart)
-	}
-	if err == nil {
-		_, err = io.Copy(dst, f)
-	}
-	closeErr := f.Close()
-	if err == nil {
-		err = closeErr
-	}
 	return err
 }
 

@@ -141,7 +141,7 @@ func ReadPreimagesAt(src io.ReaderAt, size int64, yield func(Preimage) error) er
 		index++
 		record.Slots = make([][32]byte, 0, int(count))
 		var previousSlot common.Hash
-		for i := uint32(0); i < count; i++ {
+		for i := range count {
 			slotBytes, err := c.bytes(32)
 			if err != nil {
 				return fmt.Errorf("%w: truncated slots", ErrPreimages)
@@ -177,7 +177,7 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 	}
 	pc := preimageCursor{}
 	var headerOverflow bool
-	for i := uint64(0); i < headerCount; i++ {
+	for range headerCount {
 		header, err := readHeaderAt(&headerCursor)
 		if err != nil {
 			return err
@@ -211,7 +211,7 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 	pc = preimageCursor{}
 	var current Preimage
 	haveCurrent := false
-	for i := uint64(0); i < storageCount; i++ {
+	for range storageCount {
 		storage, err := readStorageAt(&storageCursor)
 		if err != nil {
 			return err
@@ -365,8 +365,7 @@ func matchStoragePreimage(record Preimage, storage Storage, hashFn eip8297.HashF
 	}
 	for _, group := range storage.Groups {
 		for _, entry := range group.Entries {
-			key := string(append(bytes.Clone(group.StemHash[:]), entry.Index))
-			if !matched[key] {
+			if !matched[string(append(bytes.Clone(group.StemHash[:]), entry.Index))] {
 				return fmt.Errorf("%w: missing slot", ErrPreimages)
 			}
 		}

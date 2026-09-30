@@ -30,6 +30,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/fromdb"
 	"github.com/erigontech/erigon/db/kv"
@@ -184,7 +185,7 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 		}
 	}
 	_ = preimageTemp.Close()
-	_ = os.Remove(preimageTemp.Name())
+	_ = dir.RemoveFile(preimageTemp.Name())
 	closeErr = preimageFile.Close()
 	if writeErr != nil {
 		return writeErr

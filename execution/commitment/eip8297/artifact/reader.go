@@ -27,6 +27,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
 
@@ -399,7 +400,7 @@ func spoolReader(src io.Reader, pattern string) (*os.File, func(), error) {
 	cleanup := func() {
 		name := file.Name()
 		_ = file.Close()
-		_ = os.Remove(name)
+		_ = dir.RemoveFile(name)
 	}
 	if _, err := io.Copy(file, src); err != nil {
 		cleanup()

@@ -1314,16 +1314,17 @@ func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t com
 		return
 	}
 	if !cc.hasActivationBlock {
-		if cc.hasSeenBlockResult && !cc.chainConfig.IsBinaryTrie(cc.lastTarget.blockTime) {
+		switch {
+		case cc.hasSeenBlockResult && !cc.chainConfig.IsBinaryTrie(cc.lastTarget.blockTime):
 			cc.activationBlock = t.blockNum
 			cc.hasActivationBlock = true
-		} else if cc.hasFirstBlock && cc.firstBlockNum == t.blockNum {
+		case cc.hasFirstBlock && cc.firstBlockNum == t.blockNum:
 			cc.activationBlock = t.blockNum
 			cc.hasActivationBlock = true
-		} else if cc.blockReader == nil {
+		case cc.blockReader == nil:
 			cc.activationBlock = t.blockNum
 			cc.hasActivationBlock = true
-		} else {
+		default:
 			searchBlock := t.blockNum
 			canSearch := true
 			if cc.hasFirstBlock && cc.firstBlockNum < searchBlock {
