@@ -25,6 +25,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -63,7 +64,15 @@ func DoCall(
 		}
 	*/
 
-	state := state.New(stateReader)
+	var ibs *state.IntraBlockState
+	if dbg.CallVersionedIBS {
+		ibs = state.NewWithVersionMap(stateReader, state.NewVersionMap(nil))
+		ibs.SetNoMaterialize(true)
+		ibs.SetTxContext(0, 0)
+	} else {
+		ibs = state.New(stateReader)
+	}
+	state := ibs
 	defer state.Close()
 
 	// Setup context so it may be cancelled the call has completed

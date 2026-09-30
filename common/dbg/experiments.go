@@ -47,6 +47,8 @@ var (
 	noMemstat                   = EnvBool("NO_MEMSTAT", false)
 
 	StagesOnlyBlocks = EnvBool("STAGES_ONLY_BLOCKS", false)
+	// CallVersionedIBS routes eth_call through the parallel-exec state path.
+	CallVersionedIBS = EnvBool("CALL_VERSIONED_IBS", false)
 
 	MdbxLockInRam    = EnvBool("MDBX_LOCK_IN_RAM", false)
 	MdbxNoSync       = EnvBool("MDBX_NO_FSYNC", false)
