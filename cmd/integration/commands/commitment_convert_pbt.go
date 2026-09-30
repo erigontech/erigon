@@ -351,6 +351,7 @@ func configurePBTSourceVariant(settings *dbstate.ErigonDBSettings) {
 		statecfg.ExperimentalBinCommitment = true
 		statecfg.ExperimentalHexBinCommitment = true
 		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 		statecfg.BinCommitmentHash = settings.TrieHashName()
 	case dbstate.TrieVariantBin:
 		statecfg.ExperimentalBinCommitment = true

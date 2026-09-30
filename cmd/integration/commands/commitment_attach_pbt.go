@@ -117,12 +117,17 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if err != nil {
 		return err
 	}
-	nodeSettings, err := dbstate.ReadErigonDBSettings(nodeDirs)
-	if errors.Is(err, fs.ErrNotExist) {
-		nodeSettings, err = dbstate.ResolveErigonDBSettings(nodeDirs, logger, false)
-	}
-	if err != nil {
-		return err
+	var nodeSettings *dbstate.ErigonDBSettings
+	if marker != nil {
+		nodeSettings = marker.Settings
+	} else {
+		nodeSettings, err = dbstate.ReadErigonDBSettings(nodeDirs)
+		if errors.Is(err, fs.ErrNotExist) {
+			nodeSettings, err = dbstate.ResolveErigonDBSettings(nodeDirs, logger, false)
+		}
+		if err != nil {
+			return err
+		}
 	}
 	blockNum, txNum, ok, err := publishedSettings.ConversionPoint()
 	if err != nil {
@@ -140,7 +145,11 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 	if nodeSettings.StepSize != publishedSettings.StepSize {
 		return fmt.Errorf("commitment attach-pbt: step size %d differs from the node step size %d", publishedSettings.StepSize, nodeSettings.StepSize)
 	}
-	if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
+	if marker == nil {
+		if err := validatePBTAttachFiles(nodeDirs, publishedDirs, publishedSettings.StepSize, txNum); err != nil {
+			return err
+		}
+	} else if err := validatePBTAttachPublishedFiles(publishedDirs, publishedSettings.StepSize, txNum); err != nil {
 		return err
 	}
 	rawDB := dbCfg(dbcfg.ChainDB, nodeDirs.Chaindata).MustOpen()
@@ -166,6 +175,16 @@ func attachPBT(ctx context.Context, nodePath, publishedPath, chainName string, l
 		TrieHash:                       &hash,
 		ConversionBlockNum:             &blockNum,
 		ConversionTxNum:                &txNum,
+	}
+	if marker != nil {
+		markerBlock, markerTx, markerPoint, markerErr := marker.Settings.ConversionPoint()
+		if markerErr != nil {
+			return markerErr
+		}
+		if !markerPoint || markerBlock != blockNum || markerTx != txNum {
+			return fmt.Errorf("commitment attach-pbt: marker conversion point does not match published point (%d, %d)", blockNum, txNum)
+		}
+		finalSettings = marker.Settings
 	}
 	if marker == nil {
 		if err := dbstate.WritePBTAttachMarker(nodeDirs, &dbstate.PBTAttachMarker{PublishedPath: absolutePublishedPath, Settings: finalSettings}); err != nil {
@@ -310,8 +329,8 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 	}
 	nodeRanges := pbtAttachRanges(nodeFiles, stepSize, endTxNum)
 	publishedRanges := pbtAttachRanges(publishedFiles, stepSize, endTxNum)
-	if !slices.Equal(publishedRanges[kv.CommitmentDomain], publishedRanges[kv.CommitmentBinDomain]) {
-		return fmt.Errorf("commitment attach-pbt: published commitment-bin ranges do not match commitment ranges")
+	if err := validatePBTAttachPublishedRanges(publishedRanges, endTxNum); err != nil {
+		return err
 	}
 	for _, domain := range pbtAttachDomains {
 		if (domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain) && len(publishedRanges[domain]) == 0 {
@@ -322,6 +341,34 @@ func validatePBTAttachFiles(nodeDirs, publishedDirs datadir.Dirs, stepSize, endT
 		}
 		if !slices.Equal(nodeRanges[domain], publishedRanges[domain]) {
 			return fmt.Errorf("commitment attach-pbt: ranges for %s do not match through txNum %d", domain, endTxNum)
+		}
+	}
+	return nil
+}
+
+func validatePBTAttachPublishedFiles(publishedDirs datadir.Dirs, stepSize, endTxNum uint64) error {
+	if stepSize == 0 {
+		return errors.New("commitment attach-pbt: step size is zero")
+	}
+	publishedFiles, err := pbtAttachFiles(publishedDirs)
+	if err != nil {
+		return err
+	}
+	for _, file := range publishedFiles {
+		if file.to*stepSize > endTxNum {
+			return fmt.Errorf("commitment attach-pbt: published file %s extends past conversion txNum %d", file.path, endTxNum)
+		}
+	}
+	return validatePBTAttachPublishedRanges(pbtAttachRanges(publishedFiles, stepSize, endTxNum), endTxNum)
+}
+
+func validatePBTAttachPublishedRanges(ranges map[kv.Domain][]string, endTxNum uint64) error {
+	if !slices.Equal(ranges[kv.CommitmentDomain], ranges[kv.CommitmentBinDomain]) {
+		return fmt.Errorf("commitment attach-pbt: published commitment-bin ranges do not match commitment ranges")
+	}
+	for _, domain := range pbtAttachDomains {
+		if len(ranges[domain]) == 0 {
+			return fmt.Errorf("commitment attach-pbt: published files are missing domain %s through txNum %d", domain, endTxNum)
 		}
 	}
 	return nil

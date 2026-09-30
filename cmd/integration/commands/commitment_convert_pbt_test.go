@@ -269,6 +269,65 @@ func TestConvertPBTHexBinSourceConfiguresVariantBeforeOpening(t *testing.T) {
 	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
 }
 
+func TestConvertPBTHexBinSourceWithOrdinaryHexFlags(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	previousDatadir := datadirCli
+	previousChaindata := chaindata
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+		datadirCli = previousDatadir
+		chaindata = previousChaindata
+	})
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	statecfg.BinCommitmentHash = ""
+	source, _ := newPBTConversionSource(t)
+	dualPath := filepath.Join(t.TempDir(), "dual")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, dualPath, true, "", log.New()))
+	dualRoot := readPBTBinRoot(t, dualPath, source.Chaindata)
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
+	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		forkTime := uint64(1)
+		if err := rawdb.WriteChainConfig(tx, genesisHash, &chainpkg.Config{BinaryTrieTime: &forkTime}); err != nil {
+			return err
+		}
+		header := &types.Header{Number: *uint256.NewInt(1), Time: 1, Root: dualRoot}
+		if err := rawdb.WriteHeader(tx, header); err != nil {
+			return err
+		}
+		return rawdb.WriteCanonicalHash(tx, header.Hash(), 1)
+	}))
+	rawDB.Close()
+	require.NoError(t, os.Symlink(source.Chaindata, filepath.Join(dualPath, "chaindata")))
+	dual := pbtConversionSource{Dirs: datadir.Open(dualPath)}
+	statecfg.InitSchemas()
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = false
+	statecfg.BinCommitmentHash = ""
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), dual.DataDir, output, false, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName())
+}
+
 func TestConvertPBTFailureRemovesOutput(t *testing.T) {
 	previousV3 := statecfg.ExperimentalCommitmentV3
 	previousSchema := statecfg.Schema
