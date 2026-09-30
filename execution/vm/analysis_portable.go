@@ -66,8 +66,7 @@ func codeBitmapPortable(code []byte) bitvec {
 	one := simd.BroadcastInt8s(1)
 	c5f := simd.BroadcastInt8s(0x5f)
 	c5b := simd.BroadcastInt8s(0x5b)
-	c8, c16, c24 := simd.BroadcastInt8s(8), simd.BroadcastInt8s(16), simd.BroadcastInt8s(24)
-	var win, m1 [96]int8 // lookback and chunk, with the bytes before the entry cleared; reach over 8
+	var win [96]int8 // lookback and chunk, with the bytes before the entry cleared
 	var res, conflict, cand [64]int8
 	e := walkChunk(code, 0, 0, out)
 	w := 1
@@ -80,22 +79,12 @@ func codeBitmapPortable(code []byte) bitvec {
 			c.IfElse(simd.LoadInt8s(portableIota96[j:]).GreaterEqual(simd.BroadcastInt8s(int8(32+e))), z).Store(win[j:])
 		}
 		entry := simd.BroadcastInt8s(int8(e))
-		// m1[p] is the reach of the 8 bytes before window byte p; reach over 32 bytes combines
-		// four of them, the ones 8, 16 and 24 bytes back lowered by their distance.
-		for j := 8; j < 96; j += n {
-			j = min(j, 96-n)
-			d, m := one, simd.BroadcastInt8s(-128)
-			for back := 1; back <= 8; back++ {
-				m = m.Max(simd.LoadInt8s(win[j-back:]).SubSaturated(d))
+		for j := 0; j < 64; j += n {
+			d, reach := one, simd.BroadcastInt8s(-128)
+			for back := 1; back <= 32; back++ {
+				reach = reach.Max(simd.LoadInt8s(win[32+j-back:]).SubSaturated(d))
 				d = d.Add(one)
 			}
-			m.Store(m1[j:])
-		}
-		for j := 0; j < 64; j += n {
-			reach := simd.LoadInt8s(m1[32+j:]).
-				Max(simd.LoadInt8s(m1[24+j:]).SubSaturated(c8)).
-				Max(simd.LoadInt8s(m1[16+j:]).SubSaturated(c16)).
-				Max(simd.LoadInt8s(m1[8+j:]).SubSaturated(c24))
 			covered := reach.GreaterEqual(c5f).Or(simd.LoadInt8s(portableIota[j:]).Less(entry))
 			isPush := simd.LoadInt8s(win[32+j:]).Greater(c5f)
 			isPush.And(covered).ToInt8s().Store(conflict[j:])
