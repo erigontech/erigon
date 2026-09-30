@@ -17,6 +17,7 @@
 package artifact
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
@@ -40,6 +41,17 @@ var (
 
 type Writer struct {
 	StorageSpillThreshold int
+}
+
+type artifactCountingWriter struct {
+	writer io.Writer
+	count  int64
+}
+
+func (w *artifactCountingWriter) Write(data []byte) (int, error) {
+	n, err := w.writer.Write(data)
+	w.count += int64(n)
+	return n, err
 }
 
 func NewWriter() *Writer { return &Writer{StorageSpillThreshold: 1 << 20} }
@@ -67,6 +79,8 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 	if _, err = f.Write(make([]byte, 40)); err != nil {
 		return common.Hash{}, err
 	}
+	buffered := bufio.NewWriterSize(f, 4<<20)
+	output := &artifactCountingWriter{writer: buffered, count: 40}
 	var previous []byte
 	var lastZone byte
 	var haveZone bool
@@ -76,7 +90,7 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 	var headerCount, codeCount, storageCount uint64
 	var codeCountPos, storageCountPos int64 = -1, -1
 	write := func(data []byte) error {
-		written, err := f.Write(data)
+		written, err := output.Write(data)
 		if err == nil && written != len(data) {
 			return io.ErrShortWrite
 		}
@@ -86,10 +100,7 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 		if codeCountPos >= 0 {
 			return nil
 		}
-		codeCountPos, err = f.Seek(0, io.SeekCurrent)
-		if err != nil {
-			return err
-		}
+		codeCountPos = output.count
 		return write(make([]byte, 8))
 	}
 	ensureStorageSection := func() error {
@@ -99,10 +110,7 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 		if err := ensureCodeSection(); err != nil {
 			return err
 		}
-		storageCountPos, err = f.Seek(0, io.SeekCurrent)
-		if err != nil {
-			return err
-		}
+		storageCountPos = output.count
 		return write(make([]byte, 8))
 	}
 	flushHeader := func() error {
@@ -143,7 +151,7 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 		if err := ensureStorageSection(); err != nil {
 			return err
 		}
-		if err := storage.writeTo(f); err != nil {
+		if err := storage.writeTo(output); err != nil {
 			return err
 		}
 		storageCount++
@@ -228,19 +236,28 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 	if err := ensureStorageSection(); err != nil {
 		return common.Hash{}, err
 	}
+	if err := buffered.Flush(); err != nil {
+		return common.Hash{}, err
+	}
 	patchUint64 := func(offset, value int64) error {
 		if _, err := f.Seek(offset, io.SeekStart); err != nil {
 			return err
 		}
 		var encoded [8]byte
 		binary.BigEndian.PutUint64(encoded[:], uint64(value))
-		return write(encoded[:])
+		written, err := f.Write(encoded[:])
+		if err == nil && written != len(encoded) {
+			return io.ErrShortWrite
+		}
+		return err
 	}
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return common.Hash{}, err
 	}
-	if err := write(root[:]); err != nil {
+	if written, err := f.Write(root[:]); err != nil {
 		return common.Hash{}, err
+	} else if written != len(root) {
+		return common.Hash{}, io.ErrShortWrite
 	}
 	if err := patchUint64(32, int64(headerCount)); err != nil {
 		return common.Hash{}, err

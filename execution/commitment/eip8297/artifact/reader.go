@@ -186,6 +186,9 @@ type artifactCursor struct {
 	src    io.ReaderAt
 	offset int64
 	limit  int64
+	buffer []byte
+	start  int64
+	end    int64
 }
 
 func (c *artifactCursor) remaining() int64 { return c.limit - c.offset }
@@ -195,7 +198,27 @@ func (c *artifactCursor) bytes(size int) ([]byte, error) {
 		return nil, ErrMalformed
 	}
 	data := make([]byte, size)
-	if _, err := c.src.ReadAt(data, c.offset); err != nil {
+	if size <= 64<<10 {
+		if c.buffer == nil {
+			c.buffer = make([]byte, 64<<10)
+		}
+		if c.offset < c.start || c.offset+int64(size) > c.end {
+			readSize := int64(len(c.buffer))
+			if remaining := c.limit - c.offset; remaining < readSize {
+				readSize = remaining
+			}
+			n, err := c.src.ReadAt(c.buffer[:readSize], c.offset)
+			if err != nil && !(err == io.EOF && int64(n) == readSize) {
+				return nil, ErrMalformed
+			}
+			c.start = c.offset
+			c.end = c.offset + int64(n)
+		}
+		if c.offset+int64(size) > c.end {
+			return nil, ErrMalformed
+		}
+		copy(data, c.buffer[c.offset-c.start:c.offset-c.start+int64(size)])
+	} else if _, err := c.src.ReadAt(data, c.offset); err != nil {
 		return nil, ErrMalformed
 	}
 	c.offset += int64(size)
