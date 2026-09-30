@@ -29,11 +29,9 @@ import (
 	"strings"
 	"sync/atomic"
 
-	"github.com/klauspost/compress/gzip"
 	"github.com/rs/cors"
 
 	"github.com/klauspost/compress/gzhttp"
-	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -203,10 +201,6 @@ var (
 )
 
 var (
-	gzipPoolHits     = metrics.GetOrCreateCounter(`rpc_gzip_pool_hit_total`)
-	gzipPoolMisses   = metrics.GetOrCreateCounter(`rpc_gzip_pool_miss_total`)
-	zstdPoolHits     = metrics.GetOrCreateCounter(`rpc_zstd_pool_hit_total`)
-	zstdPoolMisses   = metrics.GetOrCreateCounter(`rpc_zstd_pool_miss_total`)
 	gzipWritersInUse = metrics.GetOrCreateGauge(`rpc_gzip_writers_in_use`)
 	zstdWritersInUse = metrics.GetOrCreateGauge(`rpc_zstd_writers_in_use`)
 )
@@ -217,9 +211,9 @@ var (
 var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 	wrapper, err := gzhttp.NewWrapper(
 		gzhttp.MinSize(minGzipBodySize),
-		gzhttp.CompressionLevel(gzip.BestSpeed), // gzip only
+		gzhttp.CompressionLevel(gzipLevel), // gzip only
 		gzhttp.EnableZstd(true),
-		gzhttp.ZstdCompressionLevel(int(zstd.SpeedFastest)), // zstd only
+		gzhttp.ZstdCompressionLevel(int(zstdLevel)), // zstd only
 		gzhttp.Implementation(gzipWriterFactory),
 		gzhttp.ZstdImplementation(zstdWriterFactory),
 	)

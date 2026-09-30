@@ -21,39 +21,39 @@ import (
 	"sync"
 
 	"github.com/klauspost/compress/gzhttp/writer"
-	"github.com/klauspost/compress/gzhttp/writer/gzkp"
-	"github.com/klauspost/compress/gzhttp/writer/zstdkp"
 	"github.com/klauspost/compress/gzip"
 	"github.com/klauspost/compress/zstd"
 
 	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
-// countingPool mirrors the per-level pools of gzhttp's default writers, which
-// expose no hook to observe them. A single pool per encoder suffices because
-// gzhttp always passes the level configured on the wrapper.
-type countingPool[T any] struct {
-	pool         sync.Pool
-	hits, misses metrics.Counter
-	inUse        metrics.Gauge
+const (
+	gzipLevel = gzip.BestSpeed
+	zstdLevel = zstd.SpeedFastest
+)
+
+type writerPool[T any] struct {
+	pool  sync.Pool
+	inUse metrics.Gauge
 }
 
-func (p *countingPool[T]) get(newWriter func() T) T {
+func (p *writerPool[T]) get() T {
 	p.inUse.Inc()
-	if w, ok := p.pool.Get().(T); ok {
-		p.hits.Inc()
-		return w
-	}
-	p.misses.Inc()
-	return newWriter()
+	return p.pool.Get().(T)
 }
 
-func (p *countingPool[T]) put(w T) {
+func (p *writerPool[T]) put(w T) {
 	p.pool.Put(w)
 	p.inUse.Dec()
 }
 
-var gzipWriters = countingPool[*gzip.Writer]{hits: gzipPoolHits, misses: gzipPoolMisses, inUse: gzipWritersInUse}
+var gzipWriters = writerPool[*gzip.Writer]{
+	pool: sync.Pool{New: func() any {
+		gzw, _ := gzip.NewWriterLevel(nil, gzipLevel) // valid constant level, so no error
+		return gzw
+	}},
+	inUse: gzipWritersInUse,
+}
 
 type pooledGzipWriter struct{ *gzip.Writer }
 
@@ -68,18 +68,28 @@ func (w *pooledGzipWriter) Close() error {
 }
 
 var gzipWriterFactory = writer.GzipWriterFactory{
-	Levels: gzkp.Levels,
-	New: func(w io.Writer, level int) writer.GzipWriter {
-		gzw := gzipWriters.get(func() *gzip.Writer {
-			gzw, _ := gzip.NewWriterLevel(nil, level) // level is within Levels, so no error
-			return gzw
-		})
+	Levels: func() (int, int) { return gzipLevel, gzipLevel },
+	New: func(w io.Writer, _ int) writer.GzipWriter {
+		gzw := gzipWriters.get()
 		gzw.Reset(w)
 		return &pooledGzipWriter{gzw}
 	},
 }
 
-var zstdWriters = countingPool[*zstd.Encoder]{hits: zstdPoolHits, misses: zstdPoolMisses, inUse: zstdWritersInUse}
+// The encoder options are those of gzhttp's default zstdkp writer: they set
+// both the per-encoder memory and the output.
+var zstdWriters = writerPool[*zstd.Encoder]{
+	pool: sync.Pool{New: func() any {
+		enc, _ := zstd.NewWriter(nil,
+			zstd.WithEncoderLevel(zstdLevel),
+			zstd.WithEncoderConcurrency(1),
+			zstd.WithLowerEncoderMem(true),
+			zstd.WithWindowSize(128<<10),
+		)
+		return enc
+	}},
+	inUse: zstdWritersInUse,
+}
 
 type pooledZstdWriter struct{ *zstd.Encoder }
 
@@ -94,20 +104,10 @@ func (w *pooledZstdWriter) Close() error {
 	return err
 }
 
-// zstdWriterFactory keeps the encoder options of gzhttp's default zstdkp
-// writer: they set both the per-encoder memory and the output.
 var zstdWriterFactory = writer.ZstdWriterFactory{
-	Levels: zstdkp.Levels,
-	New: func(w io.Writer, level int) writer.ZstdWriter {
-		enc := zstdWriters.get(func() *zstd.Encoder {
-			enc, _ := zstd.NewWriter(nil,
-				zstd.WithEncoderLevel(zstd.EncoderLevel(level)),
-				zstd.WithEncoderConcurrency(1),
-				zstd.WithLowerEncoderMem(true),
-				zstd.WithWindowSize(128<<10),
-			)
-			return enc
-		})
+	Levels: func() (int, int) { return int(zstdLevel), int(zstdLevel) },
+	New: func(w io.Writer, _ int) writer.ZstdWriter {
+		enc := zstdWriters.get()
 		enc.Reset(w)
 		return &pooledZstdWriter{enc}
 	},
