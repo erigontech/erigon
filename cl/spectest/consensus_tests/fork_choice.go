@@ -17,6 +17,7 @@
 package consensus_tests
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -26,6 +27,7 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"gopkg.in/yaml.v3"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -132,6 +134,9 @@ func (f *ForkChoiceStep) StepType() string {
 	if f.Attestation != nil {
 		return "attestation"
 	}
+	if f.PayloadAttestationMessage != nil {
+		return "on_payload_attestation_message"
+	}
 	if f.Tick != nil {
 		return "on_tick"
 	}
@@ -142,18 +147,19 @@ func (f *ForkChoiceStep) StepType() string {
 }
 
 type ForkChoiceStep struct {
-	Tick             *int                     `yaml:"tick,omitempty"`
-	Valid            *bool                    `yaml:"valid,omitempty"`
-	Attestation      *string                  `yaml:"attestation,omitempty"`
-	Block            *BlockData               `yaml:",inline"`
-	Blobs            *string                  `yaml:"blobs,omitempty"`
-	Proofs           []string                 `yaml:"proofs,omitempty"`
-	PowBlock         *string                  `yaml:"pow_block,omitempty"`
-	AttesterSlashing *string                  `yaml:"attester_slashing,omitempty"`
-	BlockHash        *string                  `yaml:"block_hash,omitempty"`
-	PayloadStatus    *ForkChoicePayloadStatus `yaml:"payload_status,omitempty"`
-	ExecutionPayload *string                  `yaml:"execution_payload,omitempty"`
-	Checks           *ForkChoiceChecks        `yaml:"checks,omitempty"`
+	Tick                      *int                     `yaml:"tick,omitempty"`
+	Valid                     *bool                    `yaml:"valid,omitempty"`
+	Attestation               *string                  `yaml:"attestation,omitempty"`
+	Block                     *BlockData               `yaml:",inline"`
+	Blobs                     *string                  `yaml:"blobs,omitempty"`
+	Proofs                    []string                 `yaml:"proofs,omitempty"`
+	PowBlock                  *string                  `yaml:"pow_block,omitempty"`
+	AttesterSlashing          *string                  `yaml:"attester_slashing,omitempty"`
+	BlockHash                 *string                  `yaml:"block_hash,omitempty"`
+	PayloadStatus             *ForkChoicePayloadStatus `yaml:"payload_status,omitempty"`
+	ExecutionPayload          *string                  `yaml:"execution_payload,omitempty"`
+	PayloadAttestationMessage *string                  `yaml:"payload_attestation_message,omitempty"`
+	Checks                    *ForkChoiceChecks        `yaml:"checks,omitempty"`
 }
 
 type BlockData struct {
@@ -262,7 +268,14 @@ type ForkChoiceChecks struct {
 		Epoch *int         `yaml:"epoch,omitempty"`
 		Root  *common.Hash `yaml:"root,omitempty"`
 	} `yaml:"finalized_checkpoint,omitempty"`
-	ProposerBoostRoot *common.Hash `yaml:"proposer_boost_root,omitempty"`
+	ProposerBoostRoot           *common.Hash        `yaml:"proposer_boost_root,omitempty"`
+	PayloadTimelinessVote       *ForkChoicePTCVotes `yaml:"payload_timeliness_vote,omitempty"`
+	PayloadDataAvailabilityVote *ForkChoicePTCVotes `yaml:"payload_data_availability_vote,omitempty"`
+}
+
+type ForkChoicePTCVotes struct {
+	BlockRoot common.Hash `yaml:"block_root"`
+	Votes     []*bool     `yaml:"votes"`
 }
 
 type ForkChoicePayloadStatus struct {
@@ -321,8 +334,7 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	forkStore.SetSynced(true)
 	forkStore.InitPeerDas(peerDas)
 
-	var steps []ForkChoiceStep
-	err = spectest.ReadYml(root, "steps.yaml", &steps)
+	steps, err := readForkChoiceSteps(root)
 	require.NoError(t, err)
 
 	for stepIdx, step := range steps {
@@ -424,6 +436,16 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			} else {
 				require.Error(t, err, stepstr)
 			}
+		case "on_payload_attestation_message":
+			msg := &cltypes.PayloadAttestationMessage{Data: &cltypes.PayloadAttestationData{}}
+			err := spectest.ReadSsz(root, c.Version(), *step.PayloadAttestationMessage+".ssz_snappy", msg)
+			require.NoError(t, err, stepstr)
+			err = forkStore.OnPayloadAttestationMessage(ctx, msg, false)
+			if step.GetValid() {
+				require.NoError(t, err, stepstr)
+			} else {
+				require.Error(t, err, stepstr)
+			}
 		case "on_tick":
 			forkStore.OnTick(uint64(step.GetTick()) * 1000)
 			// TODO: onTick needs to be able to return error
@@ -436,10 +458,25 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 			chk := step.GetChecks()
 			doCheck(t, stepstr, forkStore, chk)
 		default:
+			t.Fatalf("%s: unsupported fork choice step", stepstr)
 		}
 	}
 
 	return nil
+}
+
+func readForkChoiceSteps(root fs.FS) ([]ForkChoiceStep, error) {
+	data, err := fs.ReadFile(root, "steps.yaml")
+	if err != nil {
+		return nil, err
+	}
+	decoder := yaml.NewDecoder(bytes.NewReader(data))
+	decoder.KnownFields(true)
+	var steps []ForkChoiceStep
+	if err := decoder.Decode(&steps); err != nil {
+		return nil, fmt.Errorf("decode steps.yaml: %w", err)
+	}
+	return steps, nil
 }
 
 func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e *ForkChoiceChecks) {
@@ -459,10 +496,9 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 	if e.Time != nil {
 		assert.EqualValues(t, *e.Time, store.Time(), stepstr)
 	}
-	/*if e.GenesisTime != nil {
-		// TODO:  what value to use here??
-		//assert.EqualValues(t, e.Time, store.GenesisTime())
-	}*/
+	if e.GenesisTime != nil {
+		assert.EqualValues(t, *e.GenesisTime, store.GenesisTime(), stepstr)
+	}
 	if e.ProposerBoostRoot != nil {
 		assert.Equal(t, *e.ProposerBoostRoot, store.ProposerBoostRoot(), stepstr)
 	}
@@ -485,4 +521,27 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 			assert.EqualValues(t, *e.JustifiedCheckpoint.Epoch, cp.Epoch, stepstr)
 		}
 	}
+	if e.PayloadTimelinessVote != nil {
+		timeliness, _ := store.PayloadAttestationVotes(e.PayloadTimelinessVote.BlockRoot)
+		assert.Equal(t, expectedPTCVotes(t, stepstr, e.PayloadTimelinessVote), timeliness, stepstr)
+	}
+	if e.PayloadDataAvailabilityVote != nil {
+		_, dataAvailability := store.PayloadAttestationVotes(e.PayloadDataAvailabilityVote.BlockRoot)
+		assert.Equal(t, expectedPTCVotes(t, stepstr, e.PayloadDataAvailabilityVote), dataAvailability, stepstr)
+	}
+}
+
+func expectedPTCVotes(t *testing.T, stepstr string, votes *ForkChoicePTCVotes) [clparams.PtcSize]int8 {
+	require.Len(t, votes.Votes, int(clparams.PtcSize), stepstr)
+	var expected [clparams.PtcSize]int8
+	for i, vote := range votes.Votes {
+		switch {
+		case vote == nil:
+		case *vote:
+			expected[i] = 1
+		default:
+			expected[i] = -1
+		}
+	}
+	return expected
 }

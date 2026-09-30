@@ -738,6 +738,10 @@ func (f *ForkChoiceStore) Time() uint64 {
 	return f.timeMs.Load() / 1000
 }
 
+func (f *ForkChoiceStore) GenesisTime() uint64 {
+	return f.genesisTime
+}
+
 // ProposerBoostRoot returns proposer boost root
 func (f *ForkChoiceStore) ProposerBoostRoot() common.Hash {
 	return f.proposerBoostRoot.Load().(common.Hash)
