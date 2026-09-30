@@ -28,6 +28,16 @@ const (
 	BuilderDisabledPendingPayloadStore = "pending_payload_store_unavailable"
 	BuilderStoppedRuntimeError         = "runtime_error"
 	BuilderStoppedNode                 = "node_stopping"
+
+	BuilderOutcomePublished        = "published"
+	BuilderOutcomeStaleInput       = "stale_input"
+	BuilderOutcomeInputUnavailable = "input_unavailable"
+	BuilderOutcomeExecutionBusy    = "execution_busy"
+	BuilderOutcomePayloadNotReady  = "payload_not_ready"
+	BuilderOutcomeAlreadyTracked   = "already_tracked"
+	BuilderOutcomeBidRejected      = "bid_rejected"
+	BuilderOutcomeNoBid            = "no_bid"
+	BuilderOutcomeFailed           = "failed"
 )
 
 type EmbeddedBuilderStatusSnapshot struct {
@@ -37,6 +47,8 @@ type EmbeddedBuilderStatusSnapshot struct {
 	LastAttemptSlot  uint64
 	LastBidSlot      uint64
 	LastBidValueGwei uint64
+	LastOutcomeSlot  uint64
+	LastOutcome      string
 }
 
 type EmbeddedBuilderStatus struct {
@@ -105,5 +117,24 @@ func (s *EmbeddedBuilderStatus) RecordBid(slot, valueGwei uint64) {
 	if slot >= s.snapshot.LastBidSlot {
 		s.snapshot.LastBidSlot = slot
 		s.snapshot.LastBidValueGwei = valueGwei
+	}
+	if slot >= s.snapshot.LastOutcomeSlot {
+		s.snapshot.LastOutcomeSlot = slot
+		s.snapshot.LastOutcome = BuilderOutcomePublished
+	}
+}
+
+func (s *EmbeddedBuilderStatus) RecordOutcome(slot uint64, outcome string) {
+	if s == nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if slot == s.snapshot.LastOutcomeSlot && s.snapshot.LastOutcome == BuilderOutcomePublished {
+		return
+	}
+	if slot >= s.snapshot.LastOutcomeSlot {
+		s.snapshot.LastOutcomeSlot = slot
+		s.snapshot.LastOutcome = outcome
 	}
 }

@@ -48,6 +48,8 @@ type BuilderStatus struct {
 	LastAttemptSlot  hexutil.Uint64                `json:"lastAttemptSlot"`
 	LastBidSlot      hexutil.Uint64                `json:"lastBidSlot"`
 	LastBidValueGwei hexutil.Uint64                `json:"lastBidValueGwei"`
+	LastOutcomeSlot  hexutil.Uint64                `json:"lastOutcomeSlot"`
+	LastOutcome      string                        `json:"lastOutcome,omitempty"`
 	PrivateOrderflow BuilderPrivateOrderflowStatus `json:"privateOrderflow"`
 }
 
@@ -161,7 +163,8 @@ func (api *BuilderAPIImpl) Status() BuilderStatus {
 	result := BuilderStatus{
 		Enabled: runtime.Enabled, Phase: runtime.Phase, Reason: runtime.Reason,
 		LastAttemptSlot: hexutil.Uint64(runtime.LastAttemptSlot), LastBidSlot: hexutil.Uint64(runtime.LastBidSlot),
-		LastBidValueGwei: hexutil.Uint64(runtime.LastBidValueGwei),
+		LastBidValueGwei: hexutil.Uint64(runtime.LastBidValueGwei), LastOutcomeSlot: hexutil.Uint64(runtime.LastOutcomeSlot),
+		LastOutcome: runtime.LastOutcome,
 	}
 	if api.contexts == nil || api.pool == nil {
 		return result

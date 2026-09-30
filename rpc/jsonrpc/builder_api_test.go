@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"math"
 	"sync/atomic"
 	"testing"
@@ -162,6 +163,7 @@ func TestBuilderStatusReportsRuntimeAndPrivateOrderflow(t *testing.T) {
 	status.MarkRunning()
 	status.RecordAttempt(42)
 	status.RecordBid(41, 123)
+	status.RecordOutcome(42, executionbuilder.BuilderOutcomeExecutionBusy)
 
 	contexts := executionbuilder.NewBuildContextStore()
 	slot := uint64(42)
@@ -195,6 +197,8 @@ func TestBuilderStatusReportsRuntimeAndPrivateOrderflow(t *testing.T) {
 	require.Equal(t, hexutil.Uint64(42), got.LastAttemptSlot)
 	require.Equal(t, hexutil.Uint64(41), got.LastBidSlot)
 	require.Equal(t, hexutil.Uint64(123), got.LastBidValueGwei)
+	require.Equal(t, hexutil.Uint64(42), got.LastOutcomeSlot)
+	require.Equal(t, executionbuilder.BuilderOutcomeExecutionBusy, got.LastOutcome)
 	require.True(t, got.PrivateOrderflow.Available)
 	require.True(t, got.PrivateOrderflow.Accepting)
 	require.Equal(t, hexutil.Uint64(42), got.PrivateOrderflow.ActiveSlot)
@@ -218,6 +222,13 @@ func TestBuilderStatusReportsDisabledReasonWithoutPrivateDependencies(t *testing
 	require.Equal(t, executionbuilder.BuilderDisabledPendingPayloadStore, got.Reason)
 	require.False(t, got.PrivateOrderflow.Available)
 	require.False(t, got.PrivateOrderflow.Accepting)
+
+	var raw json.RawMessage
+	require.NoError(t, client.CallContext(t.Context(), &raw, "builder_status"))
+	var fields map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(raw, &fields))
+	require.JSONEq(t, `"0x0"`, string(fields["lastOutcomeSlot"]))
+	require.NotContains(t, fields, "lastOutcome")
 }
 
 type recordingPrivateBundleSubmitter struct {

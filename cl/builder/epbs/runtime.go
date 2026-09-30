@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -98,6 +99,9 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	if err != nil {
 		return nil, fmt.Errorf("epbs/runtime: create preferences runner: %w", err)
 	}
+	runner.observeOutcome = func(slot uint64, err error) {
+		deps.Status.RecordOutcome(slot, builderAttemptOutcome(err))
+	}
 	var shadow *shadowValueCurveRunner
 	if cfg.ShadowValueCurve {
 		discarder, ok := deps.Assembler.(payloadDiscarder)
@@ -135,6 +139,27 @@ func NewRuntime(cfg epbscfg.Config, deps RuntimeDependencies) (*Runtime, error) 
 	)
 	reveals.blobData = newBlobDataPreparer(deps.BeaconConfig, deps.ColumnStorage, deps.Publisher)
 	return &Runtime{coordinator: coordinator, runner: runner, shadow: shadow, reveals: reveals, events: deps.Events, status: deps.Status}, nil
+}
+
+func builderAttemptOutcome(err error) string {
+	switch {
+	case errors.Is(err, ErrSlotInputStale):
+		return executionbuilder.BuilderOutcomeStaleInput
+	case errors.Is(err, ErrSlotInputUnavailable):
+		return executionbuilder.BuilderOutcomeInputUnavailable
+	case errors.Is(err, eladapter.ErrExecutionBusy):
+		return executionbuilder.BuilderOutcomeExecutionBusy
+	case errors.Is(err, ErrPayloadNotReady):
+		return executionbuilder.BuilderOutcomePayloadNotReady
+	case errors.Is(err, ErrAuctionAlreadyTracked):
+		return executionbuilder.BuilderOutcomeAlreadyTracked
+	case errors.Is(err, errLocalBidNotAccepted):
+		return executionbuilder.BuilderOutcomeBidRejected
+	case errors.Is(err, errValidatedPreferencesAttemptNoBid):
+		return executionbuilder.BuilderOutcomeNoBid
+	default:
+		return executionbuilder.BuilderOutcomeFailed
+	}
 }
 
 func ValidateRuntimeConfig(cfg epbscfg.Config, beaconCfg *clparams.BeaconChainConfig) error {

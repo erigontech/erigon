@@ -24,6 +24,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -713,6 +714,7 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	runtimeCfg.ShadowValueCurve = true
 	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
 	clock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	status := executionbuilder.NewEmbeddedBuilderStatus(true)
 	deps := RuntimeDependencies{
 		PendingDirectory: filepath.Join(t.TempDir(), "pending"),
 		BeaconConfig:     &cfg,
@@ -726,9 +728,13 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 		PayloadProcessor: &runtimePayloadProcessor{},
 		AcceptedBlocks:   &runtimeAcceptedBlockReader{blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock)},
 		Events:           beaconevents.NewEventEmitter(),
+		Status:           status,
 	}
 	runtime, err := NewRuntime(runtimeCfg, deps)
 	require.NoError(t, err)
+	runtime.runner.observeOutcome(7, eladapter.ErrExecutionBusy)
+	require.Equal(t, uint64(7), status.Snapshot().LastOutcomeSlot)
+	require.Equal(t, executionbuilder.BuilderOutcomeExecutionBusy, status.Snapshot().LastOutcome)
 	require.Equal(t, int(cfg.SlotsPerEpoch), runtime.runner.maxPending)
 	require.Equal(t, runtimeCfg.BidDelay, runtime.runner.bidDelay)
 	require.Equal(t, runtimeCfg.PrivateOrderflowWindow, runtime.coordinator.privateOrderflowWindow)
@@ -740,4 +746,25 @@ func TestRuntimeAppliesRunnerConfiguration(t *testing.T) {
 	deps.PendingDirectory = blockedPath
 	_, err = NewRuntime(runtimeCfg, deps)
 	require.ErrorIs(t, err, ErrPendingPayloadStore)
+}
+
+func TestBuilderAttemptOutcomeClassifiesKnownFailures(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "stale input", err: errors.Join(errors.New("resolve"), ErrSlotInputStale), want: executionbuilder.BuilderOutcomeStaleInput},
+		{name: "input unavailable", err: ErrSlotInputUnavailable, want: executionbuilder.BuilderOutcomeInputUnavailable},
+		{name: "execution busy", err: errors.Join(errors.New("assemble"), eladapter.ErrExecutionBusy), want: executionbuilder.BuilderOutcomeExecutionBusy},
+		{name: "payload not ready", err: ErrPayloadNotReady, want: executionbuilder.BuilderOutcomePayloadNotReady},
+		{name: "already tracked", err: ErrAuctionAlreadyTracked, want: executionbuilder.BuilderOutcomeAlreadyTracked},
+		{name: "bid rejected", err: errLocalBidNotAccepted, want: executionbuilder.BuilderOutcomeBidRejected},
+		{name: "no bid", err: errValidatedPreferencesAttemptNoBid, want: executionbuilder.BuilderOutcomeNoBid},
+		{name: "unknown", err: errors.New("unknown"), want: executionbuilder.BuilderOutcomeFailed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, builderAttemptOutcome(test.err))
+		})
+	}
 }

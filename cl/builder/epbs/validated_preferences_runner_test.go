@@ -733,6 +733,48 @@ func TestValidatedPreferencesRunnerObservesOnlyFirstFailurePerPreference(t *test
 	require.Empty(t, failures)
 }
 
+func TestValidatedPreferencesRunnerObservesEveryRetryOutcome(t *testing.T) {
+	clock := &manualRunnerClock{slot: 11}
+	root := common.HexToHash("0x11")
+	call := runnerCall{slot: 11, root: root}
+	retryErr := errors.New("retry failure")
+	coordinator := &recordingPreferencesCoordinator{outcomes: map[runnerCall][]runnerOutcome{
+		call: {{}, {err: retryErr}},
+	}}
+	runner, ticker, cancel, done := startTestPreferencesRunner(t, coordinator, clock, 1)
+	outcomes := make(chan error, 2)
+	runner.observeOutcome = func(_ uint64, err error) { outcomes <- err }
+
+	runner.SubmitValidatedPreferences(runnerPreferences(call.slot, call.root))
+	require.ErrorIs(t, <-outcomes, errValidatedPreferencesAttemptNoBid)
+	ticker.tick()
+	require.ErrorIs(t, <-outcomes, retryErr)
+
+	stopTestPreferencesRunner(t, cancel, done)
+}
+
+func TestValidatedPreferencesRunnerObservesTrackedOutcome(t *testing.T) {
+	clock := &manualRunnerClock{slot: 11}
+	root := common.HexToHash("0x11")
+	call := runnerCall{slot: 11, root: root}
+	coordinator := &recordingPreferencesCoordinator{outcomes: map[runnerCall][]runnerOutcome{
+		call: {{err: ErrAuctionAlreadyTracked}},
+	}}
+	runner, _, cancel, done := startTestPreferencesRunner(t, coordinator, clock, 1)
+	outcomes := make(chan error, 1)
+	runner.observeOutcome = func(_ uint64, err error) { outcomes <- err }
+
+	runner.SubmitValidatedPreferences(runnerPreferences(call.slot, call.root))
+	select {
+	case err := <-outcomes:
+		require.ErrorIs(t, err, ErrAuctionAlreadyTracked)
+	case <-time.After(time.Second):
+		t.Fatal("tracked auction outcome was not observed")
+	}
+
+	stopTestPreferencesRunner(t, cancel, done)
+}
+
 func TestValidatedPreferencesRunnerDoesNotObserveExpiredStoppingOrCanceledFailure(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -752,8 +794,10 @@ func TestValidatedPreferencesRunnerDoesNotObserveExpiredStoppingOrCanceledFailur
 				return &manualRunnerTicker{ticks: make(chan time.Time, 1)}
 			})
 			require.NoError(t, err)
-			observed := 0
-			runner.observeFailure = func(uint64, common.Hash, error) { observed++ }
+			failuresObserved := 0
+			outcomesObserved := 0
+			runner.observeFailure = func(uint64, common.Hash, error) { failuresObserved++ }
+			runner.observeOutcome = func(uint64, error) { outcomesObserved++ }
 			key := preferencesKey{slot: 11, root: common.HexToHash("0x11")}
 			runner.active = &preferencesAttempt{
 				key: key, preferences: runnerPreferences(key.slot, key.root), cancel: func() {},
@@ -764,7 +808,8 @@ func TestValidatedPreferencesRunnerDoesNotObserveExpiredStoppingOrCanceledFailur
 
 			runner.finish(preferencesAttemptResult{key: key, err: context.Canceled, canceled: test.canceled})
 
-			require.Zero(t, observed)
+			require.Zero(t, failuresObserved)
+			require.Zero(t, outcomesObserved)
 			if test.wantPending {
 				require.Contains(t, runner.pending, key)
 				require.False(t, runner.pending[key].failureObserved)

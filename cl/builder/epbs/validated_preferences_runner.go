@@ -79,6 +79,7 @@ type ValidatedPreferencesRunner struct {
 	now            func() time.Time
 	slotTime       func(uint64) time.Time
 	observeFailure func(uint64, common.Hash, error)
+	observeOutcome func(uint64, error)
 
 	mu              sync.Mutex
 	pending         map[preferencesKey]pendingPreferences
@@ -413,8 +414,16 @@ func (r *ValidatedPreferencesRunner) finish(result preferencesAttemptResult) {
 		return
 	}
 	tracked := errors.Is(result.err, ErrAuctionAlreadyTracked)
-	if tracked || result.bid != nil && result.err == nil {
+	if result.bid != nil && result.err == nil {
 		r.mu.Unlock()
+		return
+	}
+	observeOutcome := r.observeOutcome
+	if tracked {
+		r.mu.Unlock()
+		if !result.canceled && observeOutcome != nil {
+			observeOutcome(result.key.slot, result.err)
+		}
 		return
 	}
 	observeFailure := r.observeFailure
@@ -430,11 +439,14 @@ func (r *ValidatedPreferencesRunner) finish(result preferencesAttemptResult) {
 		}
 	}
 	r.mu.Unlock()
+	err := result.err
+	if err == nil {
+		err = errValidatedPreferencesAttemptNoBid
+	}
+	if !result.canceled && observeOutcome != nil {
+		observeOutcome(result.key.slot, err)
+	}
 	if firstFailure && observeFailure != nil {
-		err := result.err
-		if err == nil {
-			err = errValidatedPreferencesAttemptNoBid
-		}
 		observeFailure(result.key.slot, result.key.root, err)
 	}
 }

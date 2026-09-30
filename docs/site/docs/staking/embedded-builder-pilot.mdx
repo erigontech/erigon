@@ -57,6 +57,7 @@ The result distinguishes configuration from runtime state:
 - `reason` explains a disabled or stopped state, such as `pending_payload_store_unavailable`, `runtime_error`, or `node_stopping`.
 - `lastAttemptSlot` advances when payload assembly starts.
 - `lastBidSlot` and `lastBidValueGwei` advance only after a bid is processed and published successfully.
+- `lastOutcomeSlot` identifies the newest slot with a recorded processing result. It can advance before `lastAttemptSlot` because input resolution happens before payload assembly. `lastOutcome` is one of `published`, `stale_input`, `input_unavailable`, `execution_busy`, `payload_not_ready`, `already_tracked`, `bid_rejected`, `no_bid`, or `failed`.
 - `privateOrderflow.available` says whether the private service is wired into this process.
 - `privateOrderflow.accepting` is true only during the short admission window for the active build; it is normally false between builds.
 
@@ -114,7 +115,7 @@ The service re-simulates before admission and rejects a stale target or build co
 | --- | --- | --- |
 | `phase: starting` does not change | Caplin has not finished initializing the builder runtime | Check sync progress, Gloas configuration, builder key loading, and Caplin logs |
 | `phase: disabled` with `pending_payload_store_unavailable` | Durable pending-payload recovery could not open or recover | Check permissions and storage under `<datadir>/builder/pending` before restarting |
-| `lastAttemptSlot` advances but `lastBidSlot` does not | Assembly or bid publication is failing, or the candidate is not profitable enough to bid | Inspect the matching slot logs; do not infer a registration problem from this signal alone |
+| `lastAttemptSlot` advances but `lastBidSlot` does not | Assembly started but no bid was published | Use `lastOutcome` only when `lastOutcomeSlot` matches the slot being diagnosed; it distinguishes stale input, unavailable input, an execution build or head-alignment conflict, a payload that was not ready, an already tracked auction, a locally rejected bid, no bid produced or reserved, or an unclassified failure |
 | `lastBidSlot` advances but no canonical block appears | The bid was published but was not selected or did not become canonical | Compare competing bids and proposer selection on the network explorer |
 | `privateOrderflow.accepting` is always false | Calls are outside the configured admission window or no active build context exists | Observe `builder_status` around the configured bid delay and shorten the searcher round trip |
 
