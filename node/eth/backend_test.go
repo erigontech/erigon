@@ -6,8 +6,25 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/holiman/uint256"
+
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/chain"
 )
+
+func TestStartExecutionBeforeCliqueTransition(t *testing.T) {
+	config := &chain.Config{
+		ChainID:                 uint256.NewInt(59141),
+		Clique:                  &chain.CliqueConfig{Period: 1, Epoch: 30000},
+		TerminalTotalDifficulty: uint256.NewInt(37331807),
+	}
+	require.True(t, shouldStartExecution(config, func() *uint256.Int { return uint256.NewInt(1) }))
+	require.True(t, shouldStartExecution(config, func() *uint256.Int { return nil }))
+	config.Clique = nil
+	require.False(t, shouldStartExecution(config, func() *uint256.Int { return uint256.NewInt(1) }))
+	require.True(t, shouldStartExecution(config, func() *uint256.Int { return uint256.NewInt(37331807) }))
+}
 
 func TestRemoveContents(t *testing.T) {
 	tmpDirName := t.TempDir()
