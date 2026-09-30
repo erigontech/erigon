@@ -815,12 +815,31 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	if chainTipMode {
+		var sum batchTimings
+		var collateSum time.Duration
+		var n int
 		for bn := execProgress; bn < block; bn++ {
-			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, execStateCache, execCodeStore, logger); err != nil {
+			_, tm, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, execStateCache, execCodeStore, logger)
+			if err != nil {
 				return err
 			}
+			tCollate := time.Now()
 			if err := collateAndPrune(); err != nil {
 				return err
+			}
+			sum.setup += tm.setup
+			sum.execCommit += tm.execCommit
+			sum.commit += tm.commit
+			collateSum += time.Since(tCollate)
+			n++
+			if n%100 == 0 {
+				d := time.Duration(n)
+				logger.Info("[phase-breakdown] chaintip per-block means",
+					"blk", bn, "n", n,
+					"exec+commitment", (sum.execCommit / d).Round(time.Millisecond),
+					"commit(flush+persist)", (sum.commit / d).Round(time.Millisecond),
+					"collate", (collateSum / d).Round(time.Millisecond),
+					"setup", (sum.setup / d).Round(time.Millisecond))
 			}
 		}
 		return nil
@@ -836,7 +855,7 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	agg.LockWorkersEditing()
 
 	for {
-		execProgress, err = execBlocksBatch(ctx, db, sync, cfg, block, true, execStateCache, execCodeStore, logger)
+		execProgress, _, err = execBlocksBatch(ctx, db, sync, cfg, block, true, execStateCache, execCodeStore, logger)
 		if err != nil {
 			return err
 		}
@@ -850,23 +869,34 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	return nil
 }
 
+// batchTimings splits one chaintip batch into serial phases so the
+// exec+commitment window (the work newPayload does) is separable from the
+// flush+commit that stage_exec pays per block but a live node defers to FCU.
+type batchTimings struct {
+	setup      time.Duration // BeginRw + NewSharedDomains + StageState
+	execCommit time.Duration // SpawnExecuteBlocksStage: exec + concurrent commitment
+	commit     time.Duration // doms.Commit: flush + tx commit + BranchCache refresh
+}
+
 // execBlocksBatch runs one stage_exec batch in its own rwtx and SharedDomains:
 // exec up to toBlock (or the batch limit), then doms.Commit. Commit (not Flush)
 // refreshes the aggregator BranchCache to match committed state — a stale cache
 // makes the next batch compute a wrong trie root — and commits the tx. A fresh
 // SharedDomains per call avoids reusing a committed (spent) one. Pruning and
 // file-building are the caller's job (agg.CollateAndPrune). Returns the Execution
-// stage progress after the batch.
-func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, stateCache *cache.StateCache, codeStore *cache.CodeStore, logger log.Logger) (uint64, error) {
+// stage progress after the batch and its per-phase timings.
+func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Sync, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, initialCycle bool, stateCache *cache.StateCache, codeStore *cache.CodeStore, logger log.Logger) (uint64, batchTimings, error) {
+	var tm batchTimings
+	tSetup := time.Now()
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
-		return 0, err
+		return 0, tm, err
 	}
 	defer tx.Rollback()
 
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	if err != nil {
-		return 0, err
+		return 0, tm, err
 	}
 	defer doms.Close()
 	doms.SetInMemHistoryReads(false)
@@ -876,22 +906,28 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 
 	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
 	if err != nil {
-		return 0, err
+		return 0, tm, err
 	}
+	tm.setup = time.Since(tSetup)
 
+	tExec := time.Now()
 	if err := stagedsync.SpawnExecuteBlocksStage(s, st, doms, tx, toBlock, ctx, cfg, logger); err != nil {
 		if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
-			return 0, err
+			return 0, tm, err
 		}
 	}
+	tm.execCommit = time.Since(tExec)
+
 	progress, err := stages.GetStageProgress(tx, stages.Execution)
 	if err != nil {
-		return 0, err
+		return 0, tm, err
 	}
+	tCommit := time.Now()
 	if err := doms.Commit(ctx, tx); err != nil {
-		return 0, err
+		return 0, tm, err
 	}
-	return progress, nil
+	tm.commit = time.Since(tCommit)
+	return progress, tm, nil
 }
 
 // stageExecReplay re-executes historic blocks using conflict-free parallel workers.

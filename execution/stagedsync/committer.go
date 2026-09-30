@@ -9,6 +9,7 @@ import (
 	"runtime/pprof"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -77,6 +78,14 @@ type commitmentCalculator struct {
 	chainConfig *chain.Config
 	logPrefix   string
 	logger      log.Logger
+
+	// Instrumentation: accumulated wall-time in ComputeCommitment (trie fold +
+	// root, incl. commitment-domain reads) over this calculator's life.
+	commitmentComputeNs    atomic.Int64
+	commitmentComputeCalls atomic.Int64
+	// caReason records why compute-ahead did/didn't fire for the first block
+	// (single-block committer in chaintip): "computedAhead" or a skip reason.
+	caReason string
 
 	// updates is the calculator's OWN buffer — never shared with the
 	// execLoop or apply loop. Only this goroutine reads/writes it.
@@ -264,6 +273,15 @@ func (cc *commitmentCalculator) Start(ctx context.Context) {
 func (cc *commitmentCalculator) Stop() {
 	close(cc.done)
 	cc.wg.Wait()
+	if n := cc.commitmentComputeCalls.Load(); n > 0 {
+		reason := cc.caReason
+		if reason == "" {
+			reason = "noRequest"
+		}
+		cc.logger.Info("[commitment-time]", "block", cc.lastComputedBlock,
+			"compute", time.Duration(cc.commitmentComputeNs.Load()).Round(time.Millisecond), "calls", n,
+			"computeAhead", reason)
+	}
 	// balUpdates isn't closed here: the shared commitment context may still reference it post-exec.
 	if cc.roTx != nil {
 		cc.roTx.Rollback()
@@ -465,6 +483,9 @@ func (cc *commitmentCalculator) handleBlockRequest(ctx context.Context, req *blo
 	// (batch boundary, step checkpoint, per-block compute), poisoning a valid block,
 	// and would leak pending/computedAhead/balRoots (retaining the decoded BAL).
 	if cc.hasSeenBlockResult && req.blockNum <= cc.lastBlockResultSeen {
+		if req.blockNum == cc.firstBlockNum {
+			cc.caReason = "droppedLate"
+		}
 		return
 	}
 	mode := calcModeIncremental
@@ -503,8 +524,22 @@ func (cc *commitmentCalculator) computeAheadGateOpen(n uint64) bool {
 //     missing-BAL block accumulates without advancing the domain, so computing
 //     ahead across it would read a stale trie.
 func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64) {
+	rec := func(reason string) {
+		if n == cc.firstBlockNum {
+			cc.caReason = reason
+		}
+	}
 	pb, ok := cc.pending[n]
-	if !ok || pb.mode != calcModeBALDriven || cc.computedAhead[n] {
+	if !ok {
+		rec("noPending")
+		return
+	}
+	if pb.mode != calcModeBALDriven {
+		rec("notBALDriven")
+		return
+	}
+	if cc.computedAhead[n] {
+		rec("alreadyAhead")
 		return
 	}
 	// Batch cut: the shared executor context carries the coalesce block M. Compute
@@ -512,17 +547,22 @@ func (cc *commitmentCalculator) maybeComputeAhead(ctx context.Context, n uint64)
 	// at (an orphan → wrong root on restart). Read the signal context, never the
 	// compute ctx — compute must still finish blocks up to M.
 	if sc, stopping := stopCauseOf(cc.signalCtx); stopping && n > sc.block {
+		rec("stopCause")
 		return
 	}
 	if cc.ownsChangeset(n) {
+		rec("ownsChangeset")
 		return
 	}
 	if !cc.computeAheadGateOpen(n) {
+		rec("gateClosed")
 		return
 	}
 	if n != cc.firstBlockNum && !(cc.hasComputedAhead && cc.lastComputedAheadBlock == n-1) {
+		rec("noncontiguous")
 		return
 	}
+	rec("computedAhead")
 	cc.computeBlockFromBAL(ctx, pb)
 }
 
@@ -783,6 +823,11 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 // computeIsolated computes and flushes its own deferred updates under a nil
 // changeset accumulator, so a block that owns no changeset records into none.
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
+	start := time.Now()
+	defer func() {
+		cc.commitmentComputeNs.Add(int64(time.Since(start)))
+		cc.commitmentComputeCalls.Add(1)
+	}()
 	cc.doms.LockChangesetAccumulator()
 	defer cc.doms.UnlockChangesetAccumulator()
 	defer cc.doms.DetachChangesetAccumulatorLocked()()
@@ -890,6 +935,11 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 // when defer mode is on) with the block's hash, so the next call's
 // FlushPendingUpdates uses the same hash-aware routing.
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
+	start := time.Now()
+	defer func() {
+		cc.commitmentComputeNs.Add(int64(time.Since(start)))
+		cc.commitmentComputeCalls.Add(1)
+	}()
 	defer func() {
 		// Stamp the pending update (if any was set during ComputeCommitment)
 		// with this block's hash so FlushPendingUpdates on the next call

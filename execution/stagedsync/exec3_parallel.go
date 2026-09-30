@@ -105,6 +105,34 @@ type parallelExecutor struct {
 	rws            *exec.ResultsQueue
 	workerCount    int
 	blockExecutors map[uint64]*blockExecutor
+
+	// Instrumentation (all atomic, lock-free): per-block phase wall-times to
+	// decompose the exec+commitment window. vmFlushNs/memFlushNs = apply-loop
+	// flush-to-sd.mem; setupNs = channels+calculator create/start; execBlocksNs
+	// = executeBlocks (worker dispatch); applyRoTxNs = apply-loop BeginTemporalRo;
+	// applyLoopNs = apply-loop wall (contains the overlapped pipeline);
+	// waitApplyNs/waitRootNs = apply-loop select time attributed to the arm that
+	// fired (applyResults=gated on exec, rootResults=gated on committer);
+	// teardownNs = calculator.Stop drain.
+	vmFlushNs    atomic.Int64
+	memFlushNs   atomic.Int64
+	setupNs      atomic.Int64
+	execBlocksNs atomic.Int64
+	applyRoTxNs  atomic.Int64
+	applyLoopNs  atomic.Int64
+	waitApplyNs  atomic.Int64
+	waitRootNs   atomic.Int64
+	drainRootNs  atomic.Int64 // block-end `for cr := range rootResults` drain — direct measure of whether the apply loop blocks on the committer's final root
+	teardownNs   atomic.Int64
+	// Exec-loop side: execWaitResultsNs = blocked on rws.ResultCh (waiting for
+	// workers = EVM+reads); execWaitPendingNs = blocked on a new block request;
+	// processRequestNs = dispatch; processResultsNs = nextResult (OCC validate +
+	// flush); completeBlockNs = assemble + send to applyResults.
+	execWaitResultsNs atomic.Int64
+	execWaitPendingNs atomic.Int64
+	processRequestNs  atomic.Int64
+	processResultsNs  atomic.Int64
+	completeBlockNs   atomic.Int64
 	// applyResultsCh and commitResultsCh are set before execLoop starts.
 	// The exec loop closes them on exit to signal the apply loop and
 	// calculator to drain.
@@ -240,6 +268,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	// and cannot be shared with the execLoop goroutine. The execLoop creates
 	// its own roTx at line 571. executeBlocks uses its own roTx too.
 
+	tSetup := time.Now()
 	// applyResults receives completed block/tx results from execLoop for the apply goroutine.
 	// commitResults receives the same stream for the commitment calculator.
 	// Both are fed by the fan-out in the execLoop's blockExecutor.
@@ -349,10 +378,18 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		return nil, nil, err
 	}
 	calculator.Start(ctx)
-	defer calculator.Stop()
+	pe.setupNs.Add(int64(time.Since(tSetup)))
+	defer func() {
+		tStop := time.Now()
+		calculator.Stop()
+		pe.teardownNs.Add(int64(time.Since(tStop)))
+	}()
 
-	if err := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, blockRequests, commitResults); err != nil {
-		return nil, rwTx, err
+	tExecBlocks := time.Now()
+	errExecBlocks := pe.executeBlocks(executorContext, startBlockNum, maxBlockNum, blockLimit, initialTxNum, restoredTxNum, readAhead, initialCycle, applyResults, blockRequests, commitResults)
+	pe.execBlocksNs.Add(int64(time.Since(tExecBlocks)))
+	if errExecBlocks != nil {
+		return nil, rwTx, errExecBlocks
 	}
 
 	var lastExecutedLog time.Time
@@ -367,6 +404,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 
 	var lastProgress commitment.CommitProgress
 
+	tApplyLoop := time.Now()
 	execErr := func() (err error) {
 		defer func() {
 			if rec := recover(); rec != nil {
@@ -381,7 +419,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// Open a thread-local read-only tx for domain operations. The apply loop
 		// must not use the rwTx for domain reads — rwTx is thread-bound to the
 		// caller goroutine and will be used only for flush/unwind/stage-update.
+		tRoTx := time.Now()
 		applyRoTx, err := pe.cfg.db.BeginTemporalRo(ctx)
+		pe.applyRoTxNs.Add(int64(time.Since(tRoTx)))
 		if err != nil {
 			return fmt.Errorf("apply loop: open roTx: %w", err)
 		}
@@ -514,8 +554,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 		// the apply loop to exit before the calculator finishes, leaving
 		// sd.mem inconsistent with the commitment boundary.
 		for {
+			tSel := time.Now()
 			select {
 			case applyResult, ok := <-applyResults:
+				pe.waitApplyNs.Add(int64(time.Since(tSel)))
 				if !ok {
 					// Exec loop closed the channel — batch is complete.
 					// Drain calculator results, then exit. Skip the drain
@@ -523,11 +565,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// disabled by setting rootResults=nil; ranging a nil
 					// channel hangs forever).
 					if !rootResultsClosed {
+						tDrain := time.Now()
 						for cr := range rootResults {
 							if err := processCommit(cr); err != nil {
 								return err
 							}
 						}
+						pe.drainRootNs.Add(int64(time.Since(tDrain)))
 					}
 					if lastBlockResult.BlockNum > 0 {
 						pe.txExecutor.lastCommittedBlockNum.Store(lastBlockResult.BlockNum)
@@ -803,6 +847,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				}
 
 			case cr, ok := <-rootResults:
+				pe.waitRootNs.Add(int64(time.Since(tSel)))
 				if !ok {
 					// rootResults closed by the calculator on Stop.
 					//
@@ -837,6 +882,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 			}
 		}
 	}()
+	pe.applyLoopNs.Add(int64(time.Since(tApplyLoop)))
 
 	executorCancel(nil)
 
@@ -957,6 +1003,26 @@ func (pe *parallelExecutor) triggerBatchCommitment(ctx context.Context) {
 }
 
 func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
+	if pe.applyLoopNs.Load() > 0 {
+		r := func(v int64) time.Duration { return time.Duration(v).Round(time.Microsecond) }
+		pe.logger.Info("[phase-detail]",
+			"setup", r(pe.setupNs.Load()),
+			"execBlocks", r(pe.execBlocksNs.Load()),
+			"applyRoTx", r(pe.applyRoTxNs.Load()),
+			"applyLoop", r(pe.applyLoopNs.Load()),
+			"waitApply", r(pe.waitApplyNs.Load()),
+			"waitRoot", r(pe.waitRootNs.Load()),
+			"drainRoot", r(pe.drainRootNs.Load()),
+			"vmFlush", r(pe.vmFlushNs.Load()),
+			"memFlush", r(pe.memFlushNs.Load()),
+			"teardown", r(pe.teardownNs.Load()))
+		pe.logger.Info("[exec-detail]",
+			"waitResults", r(pe.execWaitResultsNs.Load()),
+			"waitPending", r(pe.execWaitPendingNs.Load()),
+			"processRequest", r(pe.processRequestNs.Load()),
+			"processResults", r(pe.processResultsNs.Load()),
+			"completeBlock", r(pe.completeBlockNs.Load()))
+	}
 	pe.progress.LogComplete(pe.rs.StateV3, pe, stepsInDb)
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domains", pe.logPrefix), domainMetrics...)
@@ -1043,15 +1109,21 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			pendingCh = pe.execRequests
 		}
 
+		tExecSel := time.Now()
 		select {
 		case exec := <-pendingCh:
-			if err := pe.processRequest(ctx, exec); err != nil {
+			pe.execWaitPendingNs.Add(int64(time.Since(tExecSel)))
+			tReq := time.Now()
+			err := pe.processRequest(ctx, exec)
+			pe.processRequestNs.Add(int64(time.Since(tReq)))
+			if err != nil {
 				return err
 			}
 			continue
 		case <-ctx.Done():
 			return pe.drainOnCancel(ctx, applyTx)
 		case nextResult, ok := <-pe.rws.ResultCh():
+			pe.execWaitResultsNs.Add(int64(time.Since(tExecSel)))
 			if !ok {
 				return pe.execLoopExitCheck(ctx, "main-select: rws.ResultCh closed")
 			}
@@ -1064,7 +1136,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			}
 		}
 
+		tProcRes := time.Now()
 		blockResult, err := pe.processResults(ctx, applyTx)
+		pe.processResultsNs.Add(int64(time.Since(tProcRes)))
 		if err != nil {
 			return err
 		}
@@ -1072,7 +1146,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			continue
 		}
 
+		tComplete := time.Now()
 		exit, err := pe.completeBlock(ctx, blockResult, &sizeCutPending)
+		pe.completeBlockNs.Add(int64(time.Since(tComplete)))
 		if err != nil {
 			return err
 		}
@@ -2793,7 +2869,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 		be.versionMap.SetTrace(trace)
 		writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
+		tVmFlush := time.Now()
 		be.versionMap.FlushVersionedWrites(writeSet, applyLoopFlushAsComplete(valid, cntInvalid), tracePrefix)
+		pe.vmFlushNs.Add(int64(time.Since(tVmFlush)))
 		be.versionMap.SetTrace(false)
 
 		if valid {
@@ -3232,9 +3310,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
+		tMemFlush := time.Now()
 		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 			return nil, err
 		}
+		pe.memFlushNs.Add(int64(time.Since(tMemFlush)))
 
 		be.result = &blockResult{
 			BlockNum:         be.blockNum,
