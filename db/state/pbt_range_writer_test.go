@@ -311,20 +311,22 @@ func selectPBinRangeWriterHash(t *testing.T) {
 func writePBinRangeWriterAccounts(t *testing.T, db kv.TemporalRwDB, endTxNum uint64) {
 	t.Helper()
 	for i := uint64(0); i < endTxNum; i += 8 {
-		tx, err := db.BeginTemporalRw(t.Context())
-		require.NoError(t, err)
-		defer tx.Rollback()
-		cfg := commitment.DefaultTrieConfig()
-		cfg.Variant = commitment.VariantCommitmentV3
-		domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentDomain))
-		require.NoError(t, err)
-		address := bytes.Repeat([]byte{byte(i/8 + 1)}, length.Addr)
-		account := accounts.Account{Nonce: i/8 + 1, Balance: *uint256.NewInt(i/8 + 1), CodeHash: accounts.EmptyCodeHash}
-		previous, _, err := domains.GetLatest(kv.AccountsDomain, tx, address)
-		require.NoError(t, err)
-		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), i, previous))
-		require.NoError(t, domains.Flush(t.Context(), tx))
-		domains.Close()
-		require.NoError(t, tx.Commit())
+		func() {
+			tx, err := db.BeginTemporalRw(t.Context())
+			require.NoError(t, err)
+			defer tx.Rollback()
+			cfg := commitment.DefaultTrieConfig()
+			cfg.Variant = commitment.VariantCommitmentV3
+			domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentDomain))
+			require.NoError(t, err)
+			address := bytes.Repeat([]byte{byte(i/8 + 1)}, length.Addr)
+			account := accounts.Account{Nonce: i/8 + 1, Balance: *uint256.NewInt(i/8 + 1), CodeHash: accounts.EmptyCodeHash}
+			previous, _, err := domains.GetLatest(kv.AccountsDomain, tx, address)
+			require.NoError(t, err)
+			require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), i, previous))
+			require.NoError(t, domains.Flush(t.Context(), tx))
+			domains.Close()
+			require.NoError(t, tx.Commit())
+		}()
 	}
 }

@@ -27,7 +27,7 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -108,7 +108,7 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	removeOutput := true
 	defer func() {
 		if removeOutput && err != nil {
-			_ = os.RemoveAll(outputDirs.DataDir)
+			_ = dir.RemoveAll(outputDirs.DataDir)
 		}
 	}()
 	sourceSettings, err := dbstate.ReadErigonDBSettings(sourceDirs)
@@ -138,15 +138,15 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 		return err
 	}
 	stagingDirs := datadir.Open(stagingRoot)
-	defer os.RemoveAll(stagingDirs.DataDir)
-	if err = os.MkdirAll(stagingDirs.Snap, 0o755); err != nil {
+	defer func() { _ = dir.RemoveAll(stagingDirs.DataDir) }()
+	if err := os.MkdirAll(stagingDirs.Snap, 0o755); err != nil {
 		return err
 	}
-	if _, err = linkSnapshotsExceptCommitment(sourceDirs.Snap, stagingDirs.Snap); err != nil {
+	if _, err := linkSnapshotsExceptCommitment(sourceDirs.Snap, stagingDirs.Snap); err != nil {
 		return err
 	}
 	if sourceSettings != nil {
-		if err = dbstate.WriteErigonDBSettings(stagingDirs, sourceSettings); err != nil {
+		if err := dbstate.WriteErigonDBSettings(stagingDirs, sourceSettings); err != nil {
 			return err
 		}
 	}
@@ -232,6 +232,7 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	if err != nil {
 		return err
 	}
+	defer targetTx.Rollback()
 	targetDomain := kv.CommitmentDomain
 	if keepHex {
 		targetDomain = kv.CommitmentBinDomain
@@ -244,7 +245,7 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 		TargetDomain:     targetDomain,
 		BlockNum:         point.BlockNum,
 		EndTxNum:         point.TxNum,
-		Hash:             func(preimage []byte) common.Hash { return eip8297.HashBytes(preimage) },
+		Hash:             eip8297.HashBytes,
 	})
 	targetTx.Rollback()
 	if err != nil {
@@ -254,6 +255,7 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	if err != nil {
 		return err
 	}
+	defer verifyTx.Rollback()
 	err = dbstate.VerifyPBinDomain(ctx, verifyTx, targetAgg, targetDomain)
 	verifyTx.Rollback()
 	if err != nil {

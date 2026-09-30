@@ -72,8 +72,8 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 	leaves := func(emit func(PBinLeaf) error) error {
 		return ForEachPBinLeaf(sourceFiles, opts.SourceTx, false, func(leaf PBinLeaf) error {
 			streamSeen = true
-			if err := rootBuilder.Add(leaf.Key, leaf.Value); err != nil {
-				return err
+			if addErr := rootBuilder.Add(leaf.Key, leaf.Value); addErr != nil {
+				return addErr
 			}
 			return emit(leaf)
 		})
@@ -92,8 +92,8 @@ func ConvertPBin(ctx context.Context, opts PBinConvertOptions) (common.Hash, err
 		if !ok {
 			return common.Hash{}, fmt.Errorf("pbin conversion: trie does not support verification")
 		}
-		if err := verifier.Verify(); err != nil {
-			return common.Hash{}, fmt.Errorf("pbin conversion: verify: %w", err)
+		if verifyErr := verifier.Verify(); verifyErr != nil {
+			return common.Hash{}, fmt.Errorf("pbin conversion: verify: %w", verifyErr)
 		}
 	}
 	streamRoot, err := rootBuilder.RootHash()

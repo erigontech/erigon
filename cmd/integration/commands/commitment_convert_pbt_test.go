@@ -210,6 +210,7 @@ func newPBTConversionSource(t *testing.T) (pbtConversionSource, common.Hash) {
 	})
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	genesis := common.Hash{1}
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
 	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{}))
@@ -243,6 +244,7 @@ func newPBTConversionSource(t *testing.T) (pbtConversionSource, common.Hash) {
 	require.NoError(t, err)
 	readTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer readTx.Rollback()
 	require.NoError(t, dbstate.ForEachPBinLeaf(at, readTx, false, func(leaf dbstate.PBinLeaf) error {
 		return builder.Add(leaf.Key, leaf.Value)
 	}))
@@ -282,6 +284,7 @@ func newPBTEmptyConversionSource(t *testing.T) pbtConversionSource {
 	require.NoError(t, err)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	genesis := common.Hash{1}
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
 	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{}))
@@ -315,6 +318,7 @@ func setPBTConversionPoint(t *testing.T, source pbtConversionSource, blockNum, t
 	require.NoError(t, err)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV3
 	cfg.EnableTrieWarmup = false
@@ -344,6 +348,7 @@ func removePBTConversionState(t *testing.T, source pbtConversionSource) {
 	require.NoError(t, err)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV3
 	cfg.EnableTrieWarmup = false
@@ -408,6 +413,7 @@ func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {
 	require.NoError(t, err)
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	root, err := domains.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()

@@ -57,6 +57,7 @@ func TestConvertPBinMatchesReferenceRootAndVerification(t *testing.T) {
 	targetTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer targetTx.Rollback()
+	defer targetTx.Rollback()
 	root, err := state.ConvertPBin(t.Context(), state.PBinConvertOptions{
 		SourceAggregator: agg,
 		SourceTx:         sourceTx,
@@ -109,6 +110,7 @@ func TestVerifyPBinDomainRejectsCorruptedRow(t *testing.T) {
 	defer sourceTx.Rollback()
 	targetTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer targetTx.Rollback()
 	root, err := state.ConvertPBin(t.Context(), state.PBinConvertOptions{
 		SourceAggregator: agg,
 		SourceTx:         sourceTx,
@@ -139,6 +141,7 @@ func TestVerifyPBinDomainRejectsCorruptedRow(t *testing.T) {
 	require.NotEmpty(t, rowKey)
 	badTx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer badTx.Rollback()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
 	cfg.EnableTrieWarmup = false
