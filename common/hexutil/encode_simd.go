@@ -18,7 +18,10 @@
 
 package hexutil
 
-import "simd/archsimd"
+import (
+	"encoding/hex"
+	"simd/archsimd"
+)
 
 var (
 	hexDigits32 = [32]uint8{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
@@ -26,20 +29,19 @@ var (
 	hasAVX2 = archsimd.X86.AVX2()
 )
 
-// encodeVector encodes whole 16-byte blocks of src and returns how many source bytes it took.
-// Each byte is widened to a uint16 holding its high nibble in the low byte and its low nibble
-// in the high byte, so one in-lane byte shuffle turns the nibbles into digits in output order.
-func encodeVector(dst, src []byte) int {
-	if !hasAVX2 || len(src) < 16 {
-		return 0
-	}
-	digits := archsimd.LoadUint8x32Array(&hexDigits32)
-	low := archsimd.BroadcastUint16x16(0x0f)
+// encodeHex is hex.Encode with whole 16-byte blocks done by AVX2. Each byte is widened to a
+// uint16 holding its high nibble in the low byte and its low nibble in the high byte, so one
+// in-lane byte shuffle turns the nibbles into digits in output order.
+func encodeHex(dst, src []byte) {
 	i := 0
-	for ; i+16 <= len(src); i += 16 {
-		w := archsimd.LoadUint8x16Array((*[16]uint8)(src[i:])).ExtendToUint16()
-		w = w.ShiftAllRight(4).Or(w.And(low).ShiftAllLeft(8))
-		digits.PermuteOrZeroGrouped(w.AsUint8x32().AsInt8x32()).StoreArray((*[32]uint8)(dst[2*i:]))
+	if hasAVX2 {
+		digits := archsimd.LoadUint8x32Array(&hexDigits32)
+		low := archsimd.BroadcastUint16x16(0x0f)
+		for ; i+16 <= len(src); i += 16 {
+			w := archsimd.LoadUint8x16Array((*[16]uint8)(src[i:])).ExtendToUint16()
+			w = w.ShiftAllRight(4).Or(w.And(low).ShiftAllLeft(8))
+			digits.PermuteOrZeroGrouped(w.AsUint8x32().AsInt8x32()).StoreArray((*[32]uint8)(dst[2*i:]))
+		}
 	}
-	return i
+	hex.Encode(dst[2*i:], src[i:])
 }

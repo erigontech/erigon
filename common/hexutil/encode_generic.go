@@ -18,4 +18,6 @@
 
 package hexutil
 
-func encodeVector(dst, src []byte) int { return 0 }
+import "encoding/hex"
+
+func encodeHex(dst, src []byte) { hex.Encode(dst, src) }
