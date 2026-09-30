@@ -234,7 +234,7 @@ var evmLog0 = []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.LOG0)}
 // evmRevert is a 5-byte EVM snippet that REVERTs with no return data.
 var evmRevert = []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.REVERT)}
 
-type fastJSON func(jsonstream.Stream) error
+type fastJSON func(*jsonstream.StackStream) error
 
 func (f fastJSON) MarshalFastJSONTo(s *jsonstream.StackStream) error { return f(s) }
 

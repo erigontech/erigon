@@ -911,7 +911,7 @@ func (goneWriter) Write([]byte) (int, error) { return 0, errWriterGone }
 // response accumulate. jsoniter's Flush returns early on a latched error without
 // truncating, so ignoring it would restore the unbounded growth this bounds.
 func TestFlushErrorDoesNotBuffer(t *testing.T) {
-	s := New(goneWriter{}).(*StackStream)
+	s := New(goneWriter{})
 
 	chunk := strings.Repeat("x", 4096)
 	for range 128 * FlushThreshold / len(chunk) {
@@ -940,7 +940,7 @@ func TestBufferBoundedForEveryWriter(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out discardCounter
-			s := New(&out).(*StackStream)
+			s := New(&out)
 			s.WriteArrayStart()
 
 			peak := 0
@@ -1004,7 +1004,7 @@ func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
 // latches the error on the stream, so leaving it set makes every later Flush
 // fail without draining, and the buffer bound then discards the response.
 func TestStackStreamResetClearsError(t *testing.T) {
-	s := New(goneWriter{}).(*StackStream)
+	s := New(goneWriter{})
 	s.WriteRaw(strings.Repeat("x", 2*FlushThreshold))
 	require.Error(t, s.Flush())
 
@@ -1124,10 +1124,10 @@ func TestWriteRawBytesLargePayloadWritesThrough(t *testing.T) {
 			require.Equal(t, `{"result":`+string(payload)+`}`, out.String())
 
 			if tc.writesThrough {
-				require.Less(t, cap(s.(*StackStream).Buffer()), FlushThreshold,
+				require.Less(t, cap(s.Buffer()), FlushThreshold,
 					"payload must reach the writer without being copied into the buffer")
 			} else {
-				require.GreaterOrEqual(t, cap(s.(*StackStream).Buffer()), FlushThreshold,
+				require.GreaterOrEqual(t, cap(s.Buffer()), FlushThreshold,
 					"a payload below the threshold must still be buffered")
 			}
 		})
@@ -1185,7 +1185,7 @@ func TestWriteRawBytesWriteThroughError(t *testing.T) {
 		"direct-write": &failingWriter{failAfter: len(payload) - 1},
 	} {
 		t.Run(name, func(t *testing.T) {
-			s := New(out).(*StackStream)
+			s := New(out)
 			s.WriteObjectStart()
 			s.Field("result")
 			s.WriteRawBytes(payload)

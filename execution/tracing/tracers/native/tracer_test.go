@@ -217,7 +217,7 @@ func TestTracerStopRace(t *testing.T) {
 	}
 }
 
-type fastJSON func(jsonstream.Stream) error
+type fastJSON func(*jsonstream.StackStream) error
 
 func (f fastJSON) MarshalFastJSONTo(s *jsonstream.StackStream) error { return f(s) }
 

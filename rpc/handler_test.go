@@ -77,7 +77,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				Result:  nil,
 			}
 
-			dummyFunc := func(id int, stream jsonstream.Stream) error {
+			dummyFunc := func(id int, stream *jsonstream.StackStream) error {
 				if id == 1 {
 					stream.WriteNil()
 					return errors.New("id 1")
@@ -153,7 +153,7 @@ func TestRunMethodStreamable(t *testing.T) {
 		Params:  []byte("[]"),
 	}
 
-	dummyFunc := func(stream jsonstream.Stream) error {
+	dummyFunc := func(stream *jsonstream.StackStream) error {
 		stream.WriteEmptyObject()
 		return nil
 	}
@@ -184,29 +184,29 @@ func TestRunMethodStreamable(t *testing.T) {
 func TestRunMethodStreamableEnvelope(t *testing.T) {
 	boom := errors.New("boom")
 	for name, tc := range map[string]struct {
-		write func(jsonstream.Stream) error
+		write func(*jsonstream.StackStream) error
 		want  string
 	}{
 		"value": {
-			func(s jsonstream.Stream) error { s.WriteEmptyObject(); return nil },
+			func(s *jsonstream.StackStream) error { s.WriteEmptyObject(); return nil },
 			`{"jsonrpc":"2.0","id":1,"result":{}}`,
 		},
 		"nothing written": {
-			func(jsonstream.Stream) error { return nil },
+			func(*jsonstream.StackStream) error { return nil },
 			`{"jsonrpc":"2.0","id":1,"result":null}`,
 		},
 		"error before any value": {
-			func(jsonstream.Stream) error { return boom },
+			func(*jsonstream.StackStream) error { return boom },
 			`{"jsonrpc":"2.0","id":1,"error":{"code":-32000,"message":"boom"}}`,
 		},
-		"error inside a partial value": {func(s jsonstream.Stream) error {
+		"error inside a partial value": {func(s *jsonstream.StackStream) error {
 			s.WriteArrayStart()
 			s.WriteString("a")
 			s.WriteObjectStart()
 			s.Field("b")
 			return boom
 		}, `{"jsonrpc":"2.0","id":1,"result":["a",{"b":null}],"error":{"code":-32000,"message":"boom"}}`},
-		"error after a flushed value": {func(s jsonstream.Stream) error {
+		"error after a flushed value": {func(s *jsonstream.StackStream) error {
 			s.WriteArrayStart()
 			s.WriteString("a")
 			if err := s.Flush(); err != nil {
@@ -233,7 +233,7 @@ func TestRunMethodReportsAnsweredError(t *testing.T) {
 	msg := jsonrpcMessage{Version: vsn, ID: []byte("1"), Method: "test_test"}
 	for name, cb := range map[string]*callback{
 		"streamable": {
-			fn:         reflect.ValueOf(func(stream jsonstream.Stream) error { return errors.New("boom") }),
+			fn:         reflect.ValueOf(func(stream *jsonstream.StackStream) error { return errors.New("boom") }),
 			errPos:     0,
 			streamable: true,
 		},

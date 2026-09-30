@@ -358,7 +358,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("content-type", contentType)
 	codec := newHTTPServerConn(r, w)
 	defer codec.Close()
-	var stream jsonstream.Stream
+	var stream *jsonstream.StackStream
 	var sent *sentWriter
 	if !s.disableStreaming {
 		sent = &sentWriter{w: w}

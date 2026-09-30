@@ -326,7 +326,7 @@ func (t *callTracer) GetResult() (json.RawMessage, error) {
 	return res, nil
 }
 
-func (t *callTracer) MarshalFastJSONTo(s jsonstream.Stream) error {
+func (t *callTracer) MarshalFastJSONTo(s *jsonstream.StackStream) error {
 	root, err := t.root()
 	if err != nil {
 		return err
@@ -338,7 +338,7 @@ func (t *callTracer) MarshalFastJSONTo(s jsonstream.Stream) error {
 	if p := t.reason.Load(); p != nil {
 		return *p
 	}
-	return root.MarshalFastJSONTo(s.Open())
+	return root.MarshalFastJSONTo(s)
 }
 
 // root is nil without an error when the top-level call went to a precompile and includePrecompiles is false.

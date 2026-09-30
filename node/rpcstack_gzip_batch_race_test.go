@@ -30,11 +30,11 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
-// gzipBatchStreamingService exposes a streamable method (last arg jsonstream.Stream), per
+// gzipBatchStreamingService exposes a streamable method (last arg *jsonstream.StackStream), per
 // rpc/service.go's streamable detection.
 type gzipBatchStreamingService struct{}
 
-func (gzipBatchStreamingService) Echo(s string, stream jsonstream.Stream) error {
+func (gzipBatchStreamingService) Echo(s string, stream *jsonstream.StackStream) error {
 	stream.WriteString(s)
 	return nil
 }

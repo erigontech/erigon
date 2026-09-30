@@ -69,7 +69,7 @@ func flushFull(stream *jsoniter.Stream) {
 }
 
 // New builds an unpooled stream. Request paths use Get.
-func New(out io.Writer) Stream {
+func New(out io.Writer) *StackStream {
 	return newStackStream(out, InitialBufferSize)
 }
 
@@ -85,13 +85,12 @@ func Get(out io.Writer) *StackStream {
 
 // Put returns a stream to the pool. The caller must hold no view of Buffer()
 // afterwards, and must not write to the stream again.
-func Put(s Stream) {
-	ss, ok := s.(*StackStream)
-	if !ok || cap(ss.stream.Buffer()) > maxPooledBufferSize {
+func Put(s *StackStream) {
+	if cap(s.stream.Buffer()) > maxPooledBufferSize {
 		return
 	}
-	ss.Reset(nil) // the writer goes too, so an idle stream pins no connection
-	streamPool.Put(ss)
+	s.Reset(nil) // the writer goes too, so an idle stream pins no connection
+	streamPool.Put(s)
 }
 
 // Marshaler is a value that writes its own JSON.

@@ -508,7 +508,7 @@ func FuzzFillMessage(f *testing.F) {
 	})
 }
 
-func respond(s jsonstream.Stream, id json.RawMessage, result any) {
+func respond(s *jsonstream.StackStream, id json.RawMessage, result any) {
 	_ = (&jsonrpcMessage{Version: vsn, ID: id}).writeResponse(s, result)
 }
 
@@ -609,7 +609,7 @@ func (failingFastJSON) MarshalFastJSONTo(*jsonstream.StackStream) error {
 }
 
 func testResponseEncodeFailure(t *testing.T, result any) {
-	bad := func(s jsonstream.Stream) {
+	bad := func(s *jsonstream.StackStream) {
 		respond(s, json.RawMessage(`7`), result)
 	}
 	assertErrorResponse := func(t *testing.T, raw []byte) {
