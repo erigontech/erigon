@@ -58,9 +58,6 @@ func writeBlobCellsV1(s *jsonstream.Stream, bp **BlobCellsAndProofsV1) {
 	s.WriteObjectEnd()
 }
 
-// writeHex writes one value per element, so a blob array flushes blob by blob instead of
-// growing one buffer for all of them.
-
 func writeHexPtr(s *jsonstream.Stream, b **hexutil.Bytes) {
 	if *b == nil {
 		s.WriteNil()
@@ -68,8 +65,6 @@ func writeHexPtr(s *jsonstream.Stream, b **hexutil.Bytes) {
 	}
 	s.WriteHex(**b)
 }
-
-func writeHex(s *jsonstream.Stream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 // writeMarshaler writes one element of a slice whose elements write themselves.
 func writeMarshaler[M jsonstream.Marshaler](s *jsonstream.Stream, m *M) {

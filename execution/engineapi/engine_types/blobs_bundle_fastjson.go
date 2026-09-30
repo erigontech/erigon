@@ -38,8 +38,7 @@ func (r *GetPayloadResponse) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	if err := r.BlobsBundle.MarshalFastJSONTo(s); err != nil {
 		return err
 	}
-	s.Field("executionRequests")
-	jsonstream.ArrayValue(s, r.ExecutionRequests, writeHex)
+	ethjson.Datas(s, "executionRequests", r.ExecutionRequests)
 	s.Field("shouldOverrideBuilder").WriteBool(r.ShouldOverrideBuilder)
 	s.WriteObjectEnd()
 	return nil
@@ -65,8 +64,7 @@ func (p *ExecutionPayload) writeTo(s *jsonstream.Stream) {
 	ethjson.Data(s, "extraData", p.ExtraData)
 	ethjson.Quantity256(s, "baseFeePerGas", (*uint256.Int)(p.BaseFeePerGas))
 	ethjson.Data(s, "blockHash", p.BlockHash[:])
-	s.Field("transactions")
-	jsonstream.ArrayValue(s, p.Transactions, writeHex)
+	ethjson.Datas(s, "transactions", p.Transactions)
 	s.Field("withdrawals")
 	_ = types.Withdrawals(p.Withdrawals).MarshalFastJSONTo(s)
 	jsonstream.Text(s, "blobGasUsed", p.BlobGasUsed)
