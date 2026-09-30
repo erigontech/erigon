@@ -814,7 +814,7 @@ func TestTraceBlockErrorAfterWrite(t *testing.T) {
 	s.WriteObjectStart()
 	s.Field("txHash")
 	s.WriteString("0xdeadbeef")
-	err := rpc.WriteFieldOrError(s, "result", func() error {
+	err := rpc.WriteFieldOrError(s, "result", func(*jsonstream.StackStream) error {
 		s.WriteObjectStart()
 		s.Field("from")
 		s.WriteString("0xabcd")

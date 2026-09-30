@@ -140,18 +140,18 @@ func writeResultResponse(stream jsonstream.Stream, id json.RawMessage, write fun
 		s.Field("id")
 		s.WriteRawBytes(id)
 	}
-	err := WriteFieldOrError(s, "result", func() error { return write(s) })
+	err := WriteFieldOrError(s, "result", write)
 	s.WriteObjectEnd()
 	return err
 }
 
 // WriteFieldOrError writes field with the value write streams. When write fails, a field that got no
 // value is taken back so the object carries only "error"; a partial value is closed and "error" follows.
-func WriteFieldOrError(stream jsonstream.Stream, field string, write func() error) error {
+func WriteFieldOrError(stream jsonstream.Stream, field string, write func(*jsonstream.StackStream) error) error {
 	s := stream.Open()
 	mark, depth := len(s.Buffer()), s.Depth()
 	s.Field(field)
-	err := write()
+	err := write(s)
 	if err == nil || !s.RewindField(mark, depth) {
 		_ = s.ClosePending(uint(depth)) // null for a field that got no value, the ends of a partial one
 	}

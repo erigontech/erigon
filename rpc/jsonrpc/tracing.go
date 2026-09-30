@@ -161,7 +161,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		ibs.SetTxContext(blockCtx.BlockNumber, txnIndex)
 
 		// A transaction's error is answered inside its own object; the block trace goes on.
-		_ = rpc.WriteFieldOrError(stream, "result", func() error {
+		_ = rpc.WriteFieldOrError(stream, "result", func(s *jsonstream.StackStream) error {
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
 				return fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
@@ -172,7 +172,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 				GasPrice:   *msg.GasPrice(),
 				BlobHashes: msg.BlobHashes(),
 			}
-			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, stream, api.evmCallTimeout, precompiles)
+			txnGasUsage, traceErr := transactions.TraceTx(ctx, engine, txn, msg, blockCtx, txCtx, &block.HeaderNoCopy().Number, block.Hash(), txnIndex, ibs, config, chainConfig, s, api.evmCallTimeout, precompiles)
 			gasUsed.BlockExecution += txnGasUsage.BlockExecutionGasUsed
 			gasUsed.BlockState += txnGasUsage.BlockStateGasUsed
 			if traceErr != nil {
