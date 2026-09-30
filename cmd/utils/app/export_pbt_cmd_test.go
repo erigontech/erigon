@@ -115,6 +115,7 @@ func TestRunExportPBTRefusesChangedBinRecord(t *testing.T) {
 	db, root := newPBTExportDB(t)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantCommitmentV3
 	cfg.EnableTrieWarmup = false
