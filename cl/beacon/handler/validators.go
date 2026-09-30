@@ -303,12 +303,16 @@ func (a *ApiHandler) writeValidatorsResponse(
 	}
 
 	if blockId.Head() { // Lets see if we point to head, if yes then we need to look at the head state we always keep.
+		var body string
 		if err := a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, _ uint64) error {
-			responseValidators(w, filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, a.forkchoiceStore.IsRootOptimistic(root))
-			return nil
+			var err error
+			body, err = buildValidatorsResponse(filterIndicies, statusFilters, state.Epoch(s), s.Balances(), s.Validators(), false, a.forkchoiceStore.IsRootOptimistic(root))
+			return err
 		}); err != nil {
 			beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("node is not synced")).WriteTo(w)
+			return
 		}
+		writeValidatorsResponseBody(w, body)
 		return
 	}
 	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
@@ -604,7 +608,22 @@ func (d directString) MarshalJSON() ([]byte, error) {
 }
 
 func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) {
-	// todo: refactor this function
+	body, err := buildValidatorsResponse(filterIndicies, filterStatuses, stateEpoch, balances, validators, finalized, optimistic)
+	if err != nil {
+		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+		return
+	}
+	writeValidatorsResponseBody(w, body)
+}
+
+func writeValidatorsResponseBody(w http.ResponseWriter, body string) {
+	w.Header().Set("Content-Type", "application/json")
+	if _, err := w.Write([]byte(body)); err != nil {
+		log.Error("failed to write response", "err", err)
+	}
+}
+
+func buildValidatorsResponse(filterIndicies []uint64, filterStatuses []validatorStatus, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (string, error) {
 	b := stringsBuilderPool.Get().(*strings.Builder)
 	defer func() {
 		b.Reset()
@@ -616,8 +635,7 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		isOptimistic = "true"
 	}
 	if _, err := b.WriteString("{\"execution_optimistic\":" + isOptimistic + ",\"finalized\":" + strconv.FormatBool(finalized) + ",\"data\":"); err != nil {
-		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-		return
+		return "", err
 	}
 	b.WriteString("[")
 	first := true
@@ -657,15 +675,12 @@ func responseValidators(w http.ResponseWriter, filterIndicies []uint64, filterSt
 		return true
 	})
 	if err != nil {
-		beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
-		return
+		return "", err
 	}
-	_, err = b.WriteString("]}\n")
-
-	w.Header().Set("Content-Type", "application/json")
-	if _, err := w.Write([]byte(b.String())); err != nil {
-		log.Error("failed to write response", "err", err)
+	if _, err = b.WriteString("]}\n"); err != nil {
+		return "", err
 	}
+	return b.String(), nil
 }
 
 func responseValidator(idx uint64, stateEpoch uint64, balances solid.Uint64ListSSZ, validators *solid.ValidatorSet, finalized bool, optimistic bool) (*beaconhttp.BeaconResponse, error) {
