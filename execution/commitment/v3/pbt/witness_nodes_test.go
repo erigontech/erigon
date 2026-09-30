@@ -204,6 +204,28 @@ func TestPBinWitnessResolverGroupRootReadBound(t *testing.T) {
 	require.LessOrEqual(t, reads, 18, "group root resolution reads too many rows")
 }
 
+func TestPBinWitnessResolverBucketGroupRootReadBound(t *testing.T) {
+	pbinUseBlake3(t)
+	address := bytes.Repeat([]byte{0xd3}, 20)
+	entries := make([]eip8297.Entry, 0, 256)
+	for slot := uint64(256); slot < 512; slot++ {
+		entries = append(entries, eip8297.Entry{Key: eip8297.TreeKeyStorage(address, pbinResolverSlot(slot)), Value: pbinResolverValue(0xd3, byte(slot))})
+	}
+	ctx := newTrieTestContext()
+	root, err := NewTrie(ctx).Process(entriesToOps(entries))
+	require.NoError(t, err)
+	resolver := NewPBinWitnessResolver(ctx, root)
+	reads := 0
+	read := resolver.read
+	resolver.read = func(key []byte) ([]byte, error) {
+		reads++
+		return read(key)
+	}
+	_, err = resolver.Resolve(nil)
+	require.NoError(t, err)
+	require.LessOrEqual(t, reads, 19, "bucket group root resolution reads too many rows")
+}
+
 func TestPBinWitnessResolverSystematicShapes(t *testing.T) {
 	pbinUseBlake3(t)
 	for poolIndex, pool := range pbinResolverShapePools() {
@@ -277,6 +299,44 @@ func TestPBinWitnessResolverCorruption(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestPBinWitnessResolverRejectsCorruptAuthenticatedEmptyChild(t *testing.T) {
+	pbinUseBlake3(t)
+	entries := make([]eip8297.Entry, 0, 8)
+	for digest := range 4 {
+		var stem [32]byte
+		stem[len(stem)-1] = byte(digest)
+		for _, sub := range []byte{0, 128} {
+			entries = append(entries, eip8297.Entry{Key: eip8297.TreeKey(eip8297.AccountZone, stem[:], sub), Value: testTrieValueBytes(1)})
+		}
+	}
+	ctx := newTrieTestContext()
+	root, err := NewTrie(ctx).Process(entriesToOps(entries))
+	require.NoError(t, err)
+	wantNodes, _ := pbinOracleNodes(t, entries)
+	firstPath, err := keyPath(entries[0].Key)
+	require.NoError(t, err)
+	rowPath := firstPath.Slice(0, 260)
+	rowKey, err := EncodeRowKey(&rowPath)
+	require.NoError(t, err)
+	corrupted := bytes.Clone(ctx.records[string(rowKey)])
+	require.NotEmpty(t, corrupted)
+	corrupted[2] ^= 0xff
+	ctx.records[string(rowKey)] = corrupted
+	resolver := NewPBinWitnessResolver(ctx, root)
+	checked := 0
+	for _, want := range wantNodes {
+		path, decodeErr := pbinDecodeWitnessPath(want.path)
+		require.NoError(t, decodeErr)
+		if path.BitLen < 263 {
+			continue
+		}
+		_, resolveErr := resolver.Resolve(want.path)
+		require.ErrorContains(t, resolveErr, "authenticated child", "corrupt authenticated empty child was accepted at %x", want.path)
+		checked++
+	}
+	require.NotZero(t, checked)
 }
 
 func TestPBinWitnessResolverBucketReadBound(t *testing.T) {

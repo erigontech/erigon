@@ -103,6 +103,9 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 	blobs := make(map[string][]byte, len(result.State))
 	for index, key := range result.Keys {
 		path := bytes.Clone(key)
+		if len(result.State[index]) == 0 {
+			return nil, fmt.Errorf("pbin witness: empty node at path %x", path)
+		}
 		if _, exists := blobs[string(path)]; exists {
 			return nil, fmt.Errorf("pbin witness: duplicate node path %x", path)
 		}

@@ -319,6 +319,9 @@ func pbinSlotMatches(slot int, path *eip8297.Bitpath, start int16, count int) bo
 
 func (r *PBinWitnessResolver) resolveRange(path eip8297.Bitpath, key []byte, record *Record, slots []int, from, to int, node, wanted, target eip8297.Bitpath, expected *common.Hash) ([]byte, bool, error) {
 	if from == to {
+		if expected != nil && *expected != (common.Hash{}) {
+			return nil, false, fmt.Errorf("pbin witness: authenticated child at %x is empty", node)
+		}
 		return nil, false, nil
 	}
 	parentSplit := node.BitLen - 1

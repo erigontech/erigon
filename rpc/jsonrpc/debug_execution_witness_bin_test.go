@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"fmt"
 	"maps"
 	"math/big"
 	"testing"
@@ -80,9 +81,13 @@ func pbinWitnessFixtureWithHook(t *testing.T, activation uint64, beforeInsert fu
 	return pbinWitnessFixtureWithGenerator(t, activation, beforeInsert, nil, dualOption...)
 }
 
-type pbinWitnessBlockGenerator func(int, *blockgen.BlockGen, func(common.Address, *uint256.Int, []byte), func(*uint256.Int, []byte))
+type pbinWitnessBlockGenerator func(int, *blockgen.BlockGen, func(common.Address, *uint256.Int, []byte), func(*uint256.Int, []byte), func(types.Transaction), func(common.Address, *uint256.Int, []byte))
 
 func pbinWitnessFixtureWithGenerator(t *testing.T, activation uint64, beforeInsert func(*execmoduletester.ExecModuleTester, *blockgen.ChainPack) error, generator pbinWitnessBlockGenerator, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+	return pbinWitnessFixtureWithGeneratorN(t, activation, 4, beforeInsert, generator, dualOption...)
+}
+
+func pbinWitnessFixtureWithGeneratorN(t *testing.T, activation uint64, blockCount int, beforeInsert func(*execmoduletester.ExecModuleTester, *blockgen.ChainPack) error, generator pbinWitnessBlockGenerator, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
 	t.Helper()
 	withCommitmentHistory(t)
 	dual := activation > 0
@@ -119,6 +124,10 @@ func pbinWitnessFixtureWithGenerator(t *testing.T, activation uint64, beforeInse
 	amsterdam := uint64(0)
 	config := chain.AllProtocolChanges.Copy()
 	config.AmsterdamTime = &amsterdam
+	if generator != nil {
+		require.True(t, config.IsCancun(0))
+		require.True(t, config.IsPrague(0))
+	}
 	if !hexOnly {
 		config.BinaryTrieTime = &activation
 	}
@@ -150,8 +159,19 @@ func pbinWitnessFixtureWithGenerator(t *testing.T, activation uint64, beforeInse
 	require.NoError(t, tx.Commit())
 	require.NoError(t, m.ExecModule.ResetCurrentContext(t.Context()))
 	signer := types.LatestSignerForChainID(config.ChainID)
-	pack, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
+	pack, err := m.GenerateChain(blockCount, func(i int, b *blockgen.BlockGen) {
 		if generator != nil {
+			getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+				parent := b.PrevBlock(-1)
+				if number == parent.NumberU64() {
+					return parent.Header(), nil
+				}
+				block := b.PrevBlock(int(number) - 1)
+				if block.Hash() != hash {
+					return nil, fmt.Errorf("unexpected ancestor hash for block %d", number)
+				}
+				return block.Header(), nil
+			}
 			addTransaction := func(to common.Address, value *uint256.Int, data []byte) {
 				txn, err := types.SignTx(types.NewTransaction(b.TxNonce(from), to, value, 2_000_000, uint256.NewInt(0), data), *signer, key)
 				require.NoError(t, err)
@@ -162,7 +182,17 @@ func pbinWitnessFixtureWithGenerator(t *testing.T, activation uint64, beforeInse
 				require.NoError(t, err)
 				b.AddTx(txn)
 			}
-			generator(i, b, addTransaction, addContract)
+			addSigned := func(tx types.Transaction) {
+				signed, err := types.SignTx(tx, *signer, key)
+				require.NoError(t, err)
+				b.AddTx(signed)
+			}
+			addTransactionWithChain := func(to common.Address, value *uint256.Int, data []byte) {
+				txn, err := types.SignTx(types.NewTransaction(b.TxNonce(from), to, value, 2_000_000, uint256.NewInt(0), data), *signer, key)
+				require.NoError(t, err)
+				b.AddTxWithChain(getHeader, nil, txn)
+			}
+			generator(i, b, addTransaction, addContract, addSigned, addTransactionWithChain)
 			return
 		}
 		data := common.BigToHash(big.NewInt(int64(i + 1)))
@@ -207,9 +237,12 @@ func repairPBinPreForkShadows(t *testing.T, m *execmoduletester.ExecModuleTester
 	require.NoError(t, err)
 	defer tx.Rollback()
 	roots := make(map[uint64]common.Hash)
-	for blockNum := uint64(0); blockNum <= 4; blockNum++ {
+	for blockNum := uint64(0); ; blockNum++ {
 		header := rawdb.ReadHeaderByNumber(tx, blockNum)
-		if header == nil || header.Time >= activation {
+		if header == nil {
+			break
+		}
+		if header.Time >= activation {
 			continue
 		}
 		maxTxNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, blockNum)
@@ -246,7 +279,7 @@ func TestPBinExecutionWitnessServedBinOnly(t *testing.T) {
 func TestPBinExecutionWitnessFreshContractAndEmptyTouch(t *testing.T) {
 	empty := common.HexToAddress("0x7300000000000000000000000000000000000000")
 	initCode := common.FromHex("0x6001600c60003960016000f36000")
-	api, _ := pbinWitnessFixtureWithGenerator(t, 0, nil, func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte)) {
+	api, _ := pbinWitnessFixtureWithGenerator(t, 0, nil, func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
 		switch i {
 		case 1:
 			addContract(uint256.NewInt(0), initCode)

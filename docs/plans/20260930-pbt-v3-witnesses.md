@@ -545,7 +545,7 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `rpc/jsonrpc/pbt_witness_wipe_test.go`
 - Create: `rpc/jsonrpc/pbt_witness_dual_test.go`
 
-- [ ] every block of test chains verifies, and dropping any single blob makes verification fail. The chains cover:
+- [x] every block of test chains verifies, and dropping any single blob makes verification fail. The chains cover:
       transfers to new accounts, storage writes and deletes including cascades, account deletion with storage,
       EIP-161 touch deletion, self-destruct in the creation transaction, deploys with shared code, EIP-7702 delegation
       set and clear, system calls, withdrawals, `BLOCKHASH`, and reverted calls
@@ -554,7 +554,7 @@ demand; a cache-only node serves the default trie only and returns a distinct er
       - `pbin_witness_e2e_test.go`, `pbin_witness_wipe_test.go`, `pbin_witness_phases_test.go`;
       - `pbin_witness_deploy_test.go` (`TestPBinWitnessConsecutiveDeploys`);
       - `pbin_witness_dual_test.go` (`TestPBinDualExecutionWitness`, `TestPBinHeadCaptureWithoutCommitmentHistory`)
-- [ ] corrupt cases: a blob that does not hash to its pointer, a blob under the wrong path, missing code, group depth
+- [x] corrupt cases: a blob that does not hash to its pointer, a blob under the wrong path, missing code, group depth
       disagreeing with its path, the empty root
 - [ ] dual matrix: bin-only; hex+bin before, at and after activation; canonical and shadow anchors; retained and pruned
       history; head capture; blocks that touch no state
