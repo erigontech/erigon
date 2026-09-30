@@ -90,9 +90,6 @@ func applyTransaction(config *chain.Config, engine rules.EngineReader, gp *GasPo
 	}
 
 	txContext := NewEVMTxContext(msg)
-	if cfg.TraceJumpDest {
-		txContext.TxHash = txn.Hash()
-	}
 
 	// Update the evm with the new transaction context.
 	evm.Reset(txContext, ibs)
