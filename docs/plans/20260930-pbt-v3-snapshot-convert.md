@@ -564,7 +564,7 @@
 - Create: `cmd/integration/commands/commitment_import_pbt.go`
 - Create: `cmd/integration/commands/commitment_import_pbt_test.go`
 
-- [ ] add the command with a stub. Write the acceptance test in `commitment_import_pbt_test.go` on a chain with PBT
+- [x] add the command with a stub. Write the acceptance test in `commitment_import_pbt_test.go` on a chain with PBT
       from genesis. The chain covers kinds 0, 1 and 2, shared code, code with an all-zero 31-byte chunk, and header and
       overflow slots. The test:
       1. exports at N from node A;
@@ -574,17 +574,17 @@
       5. executes to the tip, where every root must equal A's.
 
       Confirm it fails at the progress or root assertion.
-- [ ] implement:
+- [x] implement:
       - the `--block` check against the local canonical header, refusing N where bin is not canonical;
       - `ResetExec`;
       - the readers and the join;
       - writes through `SharedDomains` at T with incarnation normalized and address-keyed code;
       - the ordinary bin fold producing the rows and the commitment-state record.
-- [ ] implement the checks (roots against `pbtRoot` and `header(N).stateRoot`, code rules, kind 2 code hash
+- [x] implement the checks (roots against `pbtRoot` and `header(N).stateRoot`, code rules, kind 2 code hash
       `keccak256(ef0100 ‖ target)`)
-- [ ] write tests for each failing check (wrong chunk, `codeSize` disagreement, designator under kind 1, missing and
+- [x] write tests for each failing check (wrong chunk, `codeSize` disagreement, designator under kind 1, missing and
       surplus preimage) and for the empty state
-- [ ] run tests - must pass before task 15
+- [x] run tests - must pass before task 15
 
 ### Task 15: Remove rebuild's bin target
 
