@@ -42,5 +42,6 @@ func Test(t *testing.T) {
 		caplinConfig := clparams.CaplinConfig{}
 		clparams.InitGlobalStaticConfig(&clparams.MainnetBeaconConfig, &caplinConfig)
 	}
+	t.Run("mainnet_config", testMainnetConfig)
 	spectest.RunCases(t, consensus_tests.TestFormats, transition.ValidatingMachine, os.DirFS(mainnetDir))
 }

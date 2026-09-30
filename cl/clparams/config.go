@@ -1163,7 +1163,7 @@ var MainnetBeaconConfig BeaconChainConfig = BeaconChainConfig{
 	ConsolidationChurnLimitQuotient:      1 << 16,
 	MaxPerEpochActivationChurnLimitGloas: 256_000_000_000,
 	BuilderWithdrawalPrefix:              0xB0,
-	PayloadDueBps:                        7500,
+	PayloadDueBps:                        5000,
 	PtcSize:                              512,
 	MaxPayloadAttestations:               4,
 	BuilderRegistryLimit:                 1 << 40,
