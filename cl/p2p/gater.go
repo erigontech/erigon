@@ -2,12 +2,16 @@ package p2p
 
 import (
 	"net"
+	"time"
 
 	"github.com/libp2p/go-libp2p/core/control"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
 	manet "github.com/multiformats/go-multiaddr/net"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 var privateCIDRList = []string{
@@ -22,16 +26,43 @@ var privateCIDRList = []string{
 }
 
 type Gater struct {
-	filter *multiaddr.Filters
+	filter      *multiaddr.Filters
+	rateLimiter *ipRateLimiter
+	poolLimiter *peerPoolLimiter
 }
 
-func NewGater(cfg *P2PConfig) (g *Gater, err error) {
+func NewGater(cfg *P2PConfig, logger log.Logger) (g *Gater, err error) {
 	g = &Gater{}
 	g.filter, err = configureFilter(cfg)
 	if err != nil {
 		return nil, err
 	}
+	g.rateLimiter = newIPRateLimiter(defaultIPRateLimiterConfig(), logger, time.Now)
+	g.poolLimiter = newPeerPoolLimiter(cfg.MaxPeerCount)
 	return g, nil
+}
+
+// SetHost lets the gater see live connections once the host exists. buildOptions
+// registers the gater before libp2p.New returns the host it gates, so the peer-pool
+// occupancy check fails open (allow) until this is called.
+func (g *Gater) SetHost(h host.Host) {
+	g.poolLimiter.setHost(hostConns{h})
+}
+
+// hostConns adapts a live libp2p host.Host to liveConnsSource.
+type hostConns struct {
+	host host.Host
+}
+
+func (h hostConns) remoteIPs() []net.IP {
+	conns := h.host.Network().Conns()
+	ips := make([]net.IP, 0, len(conns))
+	for _, conn := range conns {
+		if ip, err := manet.ToIP(conn.RemoteMultiaddr()); err == nil {
+			ips = append(ips, ip)
+		}
+	}
+	return ips
 }
 
 // InterceptPeerDial tests whether we're permitted to Dial the specified peer.
@@ -52,9 +83,21 @@ func (g *Gater) InterceptAddrDial(_ peer.ID, n multiaddr.Multiaddr) (allow bool)
 // InterceptAccept tests whether an incipient inbound connection is allowed.
 //
 // This is called by the upgrader, or by the transport directly (e.g. QUIC,
-// Bluetooth), straight after it has accepted a connection from its socket.
+// Bluetooth), straight after it has accepted a connection from its socket. It is the
+// cheapest point to reject abusive traffic: no crypto handshake has run yet, for
+// either transport.
 func (g *Gater) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
-	return filterConnections(g.filter, n.RemoteMultiaddr())
+	if !filterConnections(g.filter, n.RemoteMultiaddr()) {
+		return false
+	}
+	ip, err := manet.ToIP(n.RemoteMultiaddr())
+	if err != nil {
+		return true
+	}
+	if !g.rateLimiter.allow(ip) {
+		return false
+	}
+	return g.poolLimiter.allow(ip)
 }
 
 // InterceptSecured tests whether a given connection, now authenticated,
