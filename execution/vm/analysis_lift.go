@@ -58,32 +58,19 @@ func codeBitmapLift(code []byte) bitvec {
 		p3 := p2.ConcatPermute(sink, p2)
 		p4 := p3.ConcatPermute(sink, p3)
 		p5 := p4.ConcatPermute(sink, p4)
-		cur := liftStep(p5, sink, lane, zero)
-		cur = liftStep(p4, sink, lane, cur)
-		cur = liftStep(p3, sink, lane, cur)
-		cur = liftStep(p2, sink, lane, cur)
-		cur = liftStep(p1, sink, lane, cur)
-		cur = liftStep(p0, sink, lane, cur)
+		cur := lift(p0, p1, p2, p3, p4, p5, sink, lane, zero)
 		first := p0.ConcatPermute(sink, cur)
 		isStart := first.Equal(lane)
-		chain := isStart.ToBits() | 1
+		starts := isStart.ToBits() | 1
+		if starts>>e&1 == 0 { // the entry is off the chain from 0: lift from the entry itself
+			entry := archsimd.BroadcastUint8x64(uint8(e))
+			cur = lift(p0, p1, p2, p3, p4, p5, sink, lane, entry)
+			isStart = p0.ConcatPermute(sink, cur).Equal(lane).Or(lane.Equal(entry))
+			starts = isStart.ToBits()
+		}
+		starts &^= uint64(1)<<e - 1
 		last := lane.IfElse(isStart, cur).GetHi().GetHi().GetElem(15) // the last start in the chunk
 		exit := int(last) + 1 + int(pushLenOf(chunk[last&63]))
-
-		starts := chain &^ (uint64(1)<<e - 1)
-		if chain>>e&1 == 0 {
-			var walked uint64
-			pc := e
-			for pc < 64 && chain>>(pc&63)&1 == 0 {
-				walked |= 1 << (pc & 63)
-				pc += 1 + int(pushLenOf(chunk[pc&63]))
-			}
-			if pc >= 64 {
-				starts, exit = walked, pc
-			} else {
-				starts = walked | chain&^(uint64(1)<<pc-1)
-			}
-		}
 		out[w] = starts & c.Equal(c5b).ToBits()
 		e = exit - 64
 	}
@@ -104,7 +91,17 @@ func pushLenOf(op byte) uint8 {
 	return 0
 }
 
-// liftStep moves each lane's chain position by the jump in p while that stays below the lane.
+// lift moves each lane from its position in cur along the chain of instruction starts, by
+// J^32 down to J^1, to the last start below the lane.
+func lift(p0, p1, p2, p3, p4, p5, sink, lane, cur archsimd.Uint8x64) archsimd.Uint8x64 {
+	cur = liftStep(p5, sink, lane, cur)
+	cur = liftStep(p4, sink, lane, cur)
+	cur = liftStep(p3, sink, lane, cur)
+	cur = liftStep(p2, sink, lane, cur)
+	cur = liftStep(p1, sink, lane, cur)
+	return liftStep(p0, sink, lane, cur)
+}
+
 func liftStep(p, sink, lane, cur archsimd.Uint8x64) archsimd.Uint8x64 {
 	nxt := p.ConcatPermute(sink, cur)
 	return nxt.IfElse(nxt.Less(lane), cur)
