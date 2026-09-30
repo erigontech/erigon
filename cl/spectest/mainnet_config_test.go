@@ -34,7 +34,7 @@ import (
 )
 
 type configValueCount struct {
-	node  yaml.Node
+	node  *yaml.Node
 	count int
 }
 
@@ -125,10 +125,10 @@ func testMainnetConfig(t *testing.T) {
 	}
 }
 
-func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]yaml.Node {
+func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]*yaml.Node {
 	t.Helper()
 
-	values := make(map[string]map[string]configValueCount)
+	values := make(map[string]map[string]*configValueCount)
 	configFiles := 0
 	err := fs.WalkDir(root, "mainnet", func(name string, entry fs.DirEntry, err error) error {
 		if err != nil {
@@ -150,25 +150,33 @@ func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]yaml.Node {
 		if err != nil {
 			return err
 		}
-		var config map[string]yaml.Node
-		if err := yaml.Unmarshal(contents, &config); err != nil {
+		var document yaml.Node
+		if err := yaml.Unmarshal(contents, &document); err != nil {
 			return fmt.Errorf("decode %s: %w", name, err)
 		}
+		if len(document.Content) != 1 || document.Content[0].Kind != yaml.MappingNode {
+			return fmt.Errorf("decode %s: expected config mapping", name)
+		}
 		configFiles++
-		for key, node := range config {
+		config := document.Content[0]
+		for i := 0; i < len(config.Content); i += 2 {
+			key := config.Content[i].Value
+			node := config.Content[i+1]
 			if strings.HasSuffix(key, "_FORK_EPOCH") {
 				continue
 			}
-			canonical, err := yaml.Marshal(&node)
+			canonical, err := yaml.Marshal(node)
 			if err != nil {
 				return fmt.Errorf("encode %s key %s: %w", name, key, err)
 			}
 			counts := values[key]
 			if counts == nil {
-				counts = make(map[string]configValueCount)
+				counts = make(map[string]*configValueCount)
 			}
 			count := counts[string(canonical)]
-			count.node = node
+			if count == nil {
+				count = &configValueCount{node: node}
+			}
 			count.count++
 			counts[string(canonical)] = count
 			values[key] = counts
@@ -182,12 +190,12 @@ func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]yaml.Node {
 		t.Fatal("no mainnet config fixtures found")
 	}
 
-	reference := make(map[string]yaml.Node, len(values))
+	reference := make(map[string]*yaml.Node, len(values))
 	for key, counts := range values {
-		mostCommon := configValueCount{}
+		var mostCommon *configValueCount
 		// Some fixture cases override config values, so one file does not reliably hold the spec default.
 		for _, candidate := range counts {
-			if candidate.count > mostCommon.count {
+			if mostCommon == nil || candidate.count > mostCommon.count {
 				mostCommon = candidate
 			}
 		}
@@ -196,13 +204,13 @@ func readMainnetConfigReference(t *testing.T, root fs.FS) map[string]yaml.Node {
 	return reference
 }
 
-func compareConfigFields(reference map[string]yaml.Node, builtIn, spec any, matched map[string]struct{}) []string {
+func compareConfigFields(reference map[string]*yaml.Node, builtIn, spec any, matched map[string]struct{}) []string {
 	builtInValue := reflect.ValueOf(builtIn)
 	specValue := reflect.ValueOf(spec)
 	builtInType := builtInValue.Type()
 	var problems []string
 	for i := 0; i < builtInType.NumField(); i++ {
-		key := strings.Split(builtInType.Field(i).Tag.Get("yaml"), ",")[0]
+		key, _, _ := strings.Cut(builtInType.Field(i).Tag.Get("yaml"), ",")
 		if key == "" || key == "-" {
 			continue
 		}
