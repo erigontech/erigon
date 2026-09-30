@@ -415,6 +415,48 @@ func TestPBinWitnessStatelessGenuineSystemAccessNeedsProof(t *testing.T) {
 	require.NotNil(t, account, "a genuine system-address read must use its witness proof")
 }
 
+func TestPBinWitnessStatelessSystemContractsNeedProof(t *testing.T) {
+	f := newPBinStatelessFixture(t)
+	rootOnly := &ExecutionWitnessResult{}
+	for index, path := range f.result.Keys {
+		if len(path) == 0 {
+			rootOnly.Keys = []hexutil.Bytes{f.result.Keys[index]}
+			rootOnly.State = []hexutil.Bytes{f.result.State[index]}
+			break
+		}
+	}
+	require.Len(t, rootOnly.Keys, 1)
+	for _, address := range []accounts.Address{params.BeaconRootsAddress, params.HistoryStorageAddress} {
+		t.Run(address.Value().Hex()+"-absent", func(t *testing.T) {
+			stateless, err := newPBinWitnessStateless(rootOnly, f.root)
+			require.NoError(t, err)
+			stateless.setPBinSystemCallScope(true)
+			_, err = stateless.ReadAccountData(address)
+			require.ErrorIs(t, err, commitment.ErrPBinWitnessBlinded)
+			require.ErrorIs(t, stateless.resolveError, commitment.ErrPBinWitnessBlinded)
+		})
+
+		result, root := pbinSystemContractWitness(t, address.Value())
+		stateless, err := newPBinWitnessStateless(result, root)
+		require.NoError(t, err)
+		stateless.setPBinSystemCallScope(true)
+		code, err := stateless.ReadAccountCode(address)
+		require.NoError(t, err)
+		require.NotEmpty(t, code)
+		for index := range result.Keys {
+			trimmed := cloneExecutionWitnessResult(result)
+			trimmed.Keys = append(trimmed.Keys[:index], trimmed.Keys[index+1:]...)
+			trimmed.State = append(trimmed.State[:index], trimmed.State[index+1:]...)
+			stateless, err = newPBinWitnessStateless(trimmed, root)
+			if err == nil {
+				stateless.setPBinSystemCallScope(true)
+				_, err = stateless.ReadAccountCode(address)
+			}
+			require.Error(t, err, "removing system-contract proof entry %d must fail", index)
+		}
+	}
+}
+
 func TestPBinWitnessStatelessCreateOverStorageNeedsProof(t *testing.T) {
 	f := newPBinStatelessFixture(t)
 	reads := [][]byte{
@@ -626,6 +668,29 @@ func pbinSystemAddressWitness(t *testing.T, f *pbinStatelessFixture, system comm
 	for i := range paths {
 		result.Keys[i] = paths[i]
 		result.State[i] = blobs[i]
+	}
+	return result, root
+}
+
+func pbinSystemContractWitness(t *testing.T, address common.Address) (*ExecutionWitnessResult, common.Hash) {
+	t.Helper()
+	code := []byte{0x60, 0x00, 0x35, 0x00}
+	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(1), uint64(len(code)))
+	require.NoError(t, err)
+	codeHash := eip8297.CodeHashValue(crypto.Keccak256Hash(code))
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), Value: basic[:]},
+		{Key: eip8297.TreeKeyAccount(address[:], eip8297.CodeHashLeafKey), Value: codeHash[:]},
+	}
+	ctx := newPBinWitnessInputContext()
+	root, err := pbtengine.NewTrie(ctx).Process(pbinStatelessEntriesToOps(entries))
+	require.NoError(t, err)
+	paths, blobs, _, err := pbtengine.NewTrie(ctx).Witness(context.Background(), root, eipWitness.PBinDriverInput{Reads: [][]byte{entries[0].Key, entries[1].Key}})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs)), Codes: []hexutil.Bytes{code}}
+	for index := range paths {
+		result.Keys[index] = paths[index]
+		result.State[index] = blobs[index]
 	}
 	return result, root
 }

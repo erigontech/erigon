@@ -1,7 +1,8 @@
 # PBT witnesses
 
-Erigon exposes execution witnesses through `debug_executionWitness`. The witness is built from the state before the
-requested block and is checked by replaying that block without reading the database.
+Erigon exposes execution witnesses through `debug_executionWitness`. A PBT witness is built from the state before the
+requested block and is checked by replaying that block without reading the database. MPT replay keeps the existing
+`witnessVerifySkipped` assertion gate.
 
 ## Request parameters
 
@@ -73,10 +74,10 @@ parent pointer, and checks the root against the pre-state anchor. `replayBlockOv
 that tree, the supplied code blobs, and the in-block overlays. It applies the block's writes through the same PBT
 driver and compares the resulting root with the post-state anchor.
 
-The verifier suppresses only the missing-node error for Erigon's synthetic system-caller touch and only while the
-system-call scope is active. That scope also covers `CommitBlock`; resolver errors are not latched while it is active.
-A genuine user access to the system address still needs its proof. Contract creation over an existing account with
-storage wipes that storage; creation of a previously absent account does not walk an unproved storage subtree. An
+The verifier suppresses the missing-node error only for the synthetic touch of `SYSTEM_ADDRESS`. The system-call scope
+also covers `CommitBlock`, but resolver errors are latched throughout that scope except for that synthetic touch.
+Genuine reads of the system address and system contracts need their proofs. Contract creation over an existing account
+with storage wipes that storage; creation of a previously absent account does not walk an unproved storage subtree. An
 account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is resolved. All
 supplied PBT entries must be consumed before verification succeeds.
 

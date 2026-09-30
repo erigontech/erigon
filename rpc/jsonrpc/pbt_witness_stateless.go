@@ -81,7 +81,8 @@ type pbinWitnessStateless struct {
 	tree  *eipWitness.PBinTree
 	codes map[common.Hash][]byte
 
-	systemCallScope bool
+	systemCallScope     bool
+	syntheticSystemRead bool
 
 	codeUpdates      map[common.Address][]byte
 	accountUpdates   map[common.Address]*accounts.Account
@@ -126,7 +127,7 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 		blob, ok := blobs[string(path)]
 		if !ok {
 			err := fmt.Errorf("%w: missing node at path %x", commitment.ErrPBinWitnessBlinded, path)
-			if stateless != nil && !stateless.systemCallScope {
+			if stateless != nil && !stateless.syntheticSystemRead {
 				stateless.resolveError = err
 			}
 			return nil, err
@@ -185,6 +186,9 @@ func (s *pbinWitnessStateless) ReadAccountDataForDebug(address accounts.Address)
 
 func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addr := address.Value()
+	previousSynthetic := s.syntheticSystemRead
+	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
+	defer func() { s.syntheticSystemRead = previousSynthetic }()
 	if account, ok := s.accountUpdates[addr]; ok {
 		return account, nil
 	}
@@ -254,6 +258,9 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 func (s *pbinWitnessStateless) readCodeHash(addr common.Address) (common.Hash, bool, error) {
 	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.CodeHashLeafKey))
 	if err != nil {
+		if s.syntheticSystemRead && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
+			return common.Hash{}, false, nil
+		}
 		return common.Hash{}, false, err
 	}
 	if !present {
@@ -268,6 +275,9 @@ func (s *pbinWitnessStateless) readCodeHash(addr common.Address) (common.Hash, b
 func (s *pbinWitnessStateless) readDelegation(addr common.Address) ([]byte, bool, error) {
 	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.DelegationLeafKey))
 	if err != nil {
+		if s.syntheticSystemRead && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
+			return nil, false, nil
+		}
 		return nil, false, err
 	}
 	if !present {
@@ -281,6 +291,9 @@ func (s *pbinWitnessStateless) readDelegation(addr common.Address) ([]byte, bool
 
 func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addr, slot := address.Value(), key.Value()
+	previousSynthetic := s.syntheticSystemRead
+	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
+	defer func() { s.syntheticSystemRead = previousSynthetic }()
 	if writes, ok := s.storageWrites[addr]; ok {
 		if value, ok := writes[slot]; ok {
 			return value, !value.IsZero(), nil
@@ -291,7 +304,7 @@ func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key 
 	}
 	value, present, err := s.tree.Read(eip8297.TreeKeyStorage(addr[:], slot[:]))
 	if err != nil {
-		if s.systemCallScope && isPBinSystemAddress(addr) && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
+		if s.syntheticSystemRead && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
 			return uint256.Int{}, false, nil
 		}
 		return uint256.Int{}, false, err
@@ -309,6 +322,9 @@ func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key 
 
 func (s *pbinWitnessStateless) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	addr := address.Value()
+	previousSynthetic := s.syntheticSystemRead
+	s.syntheticSystemRead = previousSynthetic || (s.systemCallScope && isPBinSystemAddress(addr))
+	defer func() { s.syntheticSystemRead = previousSynthetic }()
 	if code, ok := s.codeUpdates[addr]; ok {
 		return bytes.Clone(code), nil
 	}

@@ -84,7 +84,6 @@ func (t *PBinTree) Apply(input PBinDriverInput) (common.Hash, []PBinResolvedNode
 		}
 	}
 	for _, account := range accounts {
-		account.ResetStorage = false
 		if err := t.applyAccountUpdate(account); err != nil {
 			return common.Hash{}, nil, err
 		}
@@ -100,11 +99,6 @@ func (t *PBinTree) Apply(input PBinDriverInput) (common.Hash, []PBinResolvedNode
 }
 
 func (t *PBinTree) applyAccountUpdate(account PBinAccountUpdate) error {
-	if account.ResetStorage {
-		if err := t.DeleteAccount(account.Address); err != nil {
-			return err
-		}
-	}
 	values := make([]byte, 0, len(account.Values))
 	for sub := range account.Values {
 		values = append(values, sub)
@@ -121,6 +115,12 @@ func (t *PBinTree) applyAccountUpdate(account PBinAccountUpdate) error {
 		}
 		if len(value) != eip8297.ValueLength {
 			return fmt.Errorf("pbin witness: driver value length %d, want %d", len(value), eip8297.ValueLength)
+		}
+		if bytes.Equal(value, make([]byte, eip8297.ValueLength)) {
+			if err := t.Delete(key); err != nil {
+				return err
+			}
+			continue
 		}
 		if err := t.Put(key, value); err != nil {
 			return err

@@ -1039,7 +1039,7 @@ func witnessAnchorForBlock(tx kv.TemporalTx, header *types.Header, blockNum uint
 	if err != nil {
 		return common.Hash{}, fmt.Errorf("%s witness shadow root for block %d: %w", trieName, blockNum, err)
 	}
-	if len(shadowRoot) != len(common.Hash{}) || common.BytesToHash(shadowRoot) == (common.Hash{}) {
+	if len(shadowRoot) != len(common.Hash{}) {
 		return common.Hash{}, fmt.Errorf("%s witness shadow root missing for block %d", trieName, blockNum)
 	}
 	return common.BytesToHash(shadowRoot), nil

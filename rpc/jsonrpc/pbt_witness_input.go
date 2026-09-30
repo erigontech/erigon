@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	eipWitness "github.com/erigontech/erigon/execution/commitment/eip8297/witness"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -36,14 +37,14 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 	result := pbinWitnessInput{}
 	readKeys := make(map[string][]byte)
 	for address, source := range rs.accountReadSources {
-		if source&recordingReadPreState != 0 && source&recordingReadUser != 0 {
+		if pbinReadNeedsProof(address, source) {
 			key := eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey)
 			readKeys[string(key)] = key
 		}
 	}
 	for address, keys := range rs.storageReadSources {
 		for slot, source := range keys {
-			if source&recordingReadPreState != 0 && source&recordingReadUser != 0 {
+			if pbinReadNeedsProof(address, source) {
 				key := eip8297.TreeKeyStorage(address[:], slot[:])
 				readKeys[string(key)] = key
 			}
@@ -167,6 +168,17 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 	}
 	slices.SortFunc(result.Codes, bytes.Compare)
 	return result, nil
+}
+
+func pbinReadNeedsProof(address common.Address, source recordingReadSource) bool {
+	if source&recordingReadPreState == 0 {
+		return false
+	}
+	if source&recordingReadUser != 0 {
+		return true
+	}
+	systemAddress := common.Address(params.SystemAddress.Value())
+	return source&recordingReadSystemCall != 0 && address != systemAddress
 }
 
 func pbinAccountBasicValue(rs *RecordingState, address common.Address, account *accounts.Account, original bool) ([]byte, error) {

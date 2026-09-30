@@ -159,11 +159,6 @@ When adding a commitment-domain consumer, use `Aggregator.CommitmentDomains()` a
 do not use the hex branch cache or inter-domain references. A frozen domain remains on disk but must
 reject writes, folds, merges, and unwinds below its recorded `frozen_at_txnum`.
 
-PBT witnesses enter through `DebugAPIImpl.ExecutionWitness` and use `witnessAnchorForBlock` and
-`checkWitnessAvailability` in `rpc/jsonrpc/debug_execution_witness.go`. The PBT builder is
-`Trie.Witness` in `execution/commitment/v3/pbt/witness.go`; `verifyPBinWitnessAgainstBlock` in
-`rpc/jsonrpc/pbt_witness_stateless.go` verifies the response before it is served or cached.
-
 Cite by name, never by line number. An EIP reference is `eip:"<section name>"`, not `eip:NNN-NNN`; a reference to erigon source from `docs/` names the identifier and its file, not `file.go:NNN`. Line anchors rot on the next edit in either repo, and a stale one is worse than none — it points a reader at unrelated code with full confidence.
 
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.

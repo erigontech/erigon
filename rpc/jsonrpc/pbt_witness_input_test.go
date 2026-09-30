@@ -63,7 +63,7 @@ func TestPBinWitnessInputExcludesOverlayReads(t *testing.T) {
 }
 
 func TestPBinWitnessInputExcludesSyntheticSystemReads(t *testing.T) {
-	address := common.HexToAddress("0x4600000000000000000000000000000000000000")
+	address := params.SystemAddress.Value()
 	slot := common.HexToHash("0x80")
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}}
 	rs := NewRecordingState(inner)
@@ -72,14 +72,27 @@ func TestPBinWitnessInputExcludesSyntheticSystemReads(t *testing.T) {
 	require.NoError(t, err)
 	_, _, err = rs.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
 	require.NoError(t, err)
-	rs.systemCallScope = false
-	_, err = rs.ReadAccountData(params.SystemAddress)
+
+	got, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.Empty(t, got.Reads, "synthetic system reads must not enter the pbt input")
+}
+
+func TestPBinWitnessInputKeepsSystemContractReads(t *testing.T) {
+	address := params.HistoryStorageAddress.Value()
+	slot := common.HexToHash("0x80")
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Nonce: 1}}}
+	rs := NewRecordingState(inner)
+	rs.systemCallScope = true
+	_, err := rs.ReadAccountData(accounts.InternAddress(address))
+	require.NoError(t, err)
+	_, _, err = rs.ReadAccountStorage(accounts.InternAddress(address), accounts.InternKey(slot))
 	require.NoError(t, err)
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
-	systemAddress := params.SystemAddress.Value()
-	require.Equal(t, [][]byte{eip8297.TreeKeyAccount(systemAddress[:], eip8297.BasicDataLeafKey)}, got.Reads, "synthetic system reads must not enter the pbt input")
+	require.Contains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "system contract reads must enter the pbt input")
+	require.Contains(t, got.Reads, eip8297.TreeKeyStorage(address[:], slot[:]), "system contract storage reads must enter the pbt input")
 }
 
 func TestPBinWitnessInputKeepsRevertedCallReads(t *testing.T) {
