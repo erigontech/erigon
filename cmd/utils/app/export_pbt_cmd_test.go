@@ -274,18 +274,21 @@ func selectPBTExportSuite(t *testing.T) {
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment
 	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousParallel := statecfg.ExperimentalParallelCommitment
 	previousHash := statecfg.BinCommitmentHash
 	previousSuite := commitment.PBinHashSuiteName()
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = previousBin
 		statecfg.ExperimentalHexBinCommitment = previousHexBin
 		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.ExperimentalParallelCommitment = previousParallel
 		statecfg.BinCommitmentHash = previousHash
 		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.ExperimentalHexBinCommitment = true
 	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.ExperimentalParallelCommitment = false
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 }
