@@ -525,11 +525,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	var err error
 	var tmpdir string
 	var dirs datadir.Dirs
-	if opt.existingDirs != nil {
+	switch {
+	case opt.existingDirs != nil:
 		dirs = *opt.existingDirs
-	} else if opt.dataDirs != nil {
+	case opt.dataDirs != nil:
 		dirs = *opt.dataDirs
-	} else {
+	default:
 		tmpdir, err = os.MkdirTemp("", "mock-sentry-*")
 		if err != nil {
 			panic(err)

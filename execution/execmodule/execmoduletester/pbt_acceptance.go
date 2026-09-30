@@ -18,6 +18,7 @@ package execmoduletester
 
 import (
 	"bytes"
+	"maps"
 	"math/big"
 	"testing"
 
@@ -84,6 +85,7 @@ func NewPBTAcceptanceChain(tb testing.TB, binary bool, dual bool) (*PBTAcceptanc
 			tester.Close()
 			return nil, txErr
 		}
+		defer tx.Rollback()
 		if config.IsAmsterdam(0) {
 			for _, address := range []common.Address{
 				config.GetBuilderDepositContract().Value(),
@@ -227,8 +229,6 @@ func copyGenesisAccount(account types.GenesisAccount) types.GenesisAccount {
 	}
 	copy.Code = bytes.Clone(account.Code)
 	copy.Storage = make(map[common.Hash]common.Hash, len(account.Storage))
-	for key, value := range account.Storage {
-		copy.Storage[key] = value
-	}
+	maps.Copy(copy.Storage, account.Storage)
 	return copy
 }

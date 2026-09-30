@@ -51,39 +51,44 @@ func (emt *ExecModuleTester) ReExecuteTo(ctx context.Context, toBlock uint64) er
 		}
 	}
 	for {
-		tx, err := emt.DB.BeginTemporalRw(ctx)
+		progress, err := emt.reExecuteBatch(ctx, toBlock, cfg)
 		if err != nil {
 			return err
-		}
-		doms, err := execctx.NewSharedDomains(ctx, tx, emt.Log)
-		if err != nil {
-			tx.Rollback()
-			return err
-		}
-		doms.SetInMemHistoryReads(false)
-		s, err := emt.Sync.StageState(stages.Execution, tx, true, false)
-		if err != nil {
-			doms.Close()
-			tx.Rollback()
-			return err
-		}
-		err = stagedsync.SpawnExecuteBlocksStage(s, emt.Sync, doms, tx, toBlock, ctx, cfg, emt.Log)
-		if err != nil && !stagedsync.IsOnlyLoopExhausted(err) {
-			doms.Close()
-			tx.Rollback()
-			return err
-		}
-		progress, progressErr := stages.GetStageProgress(tx, stages.Execution)
-		if progressErr == nil {
-			progressErr = doms.Commit(ctx, tx)
-		}
-		doms.Close()
-		tx.Rollback()
-		if progressErr != nil {
-			return progressErr
 		}
 		if progress >= toBlock {
 			return nil
 		}
 	}
+}
+
+func (emt *ExecModuleTester) reExecuteBatch(ctx context.Context, toBlock uint64, cfg stagedsync.ExecuteBlockCfg) (uint64, error) {
+	tx, err := emt.DB.BeginTemporalRw(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	doms, err := execctx.NewSharedDomains(ctx, tx, emt.Log)
+	if err != nil {
+		return 0, err
+	}
+	doms.SetInMemHistoryReads(false)
+	s, err := emt.Sync.StageState(stages.Execution, tx, true, false)
+	if err != nil {
+		doms.Close()
+		return 0, err
+	}
+	err = stagedsync.SpawnExecuteBlocksStage(s, emt.Sync, doms, tx, toBlock, ctx, cfg, emt.Log)
+	if err != nil && !stagedsync.IsOnlyLoopExhausted(err) {
+		doms.Close()
+		return 0, err
+	}
+	progress, progressErr := stages.GetStageProgress(tx, stages.Execution)
+	if progressErr == nil {
+		progressErr = doms.Commit(ctx, tx)
+	}
+	doms.Close()
+	if progressErr != nil {
+		return 0, progressErr
+	}
+	return progress, nil
 }
