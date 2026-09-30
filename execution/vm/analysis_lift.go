@@ -46,7 +46,6 @@ func codeBitmapLift(code []byte) bitvec {
 	sink := archsimd.BroadcastUint8x64(64)
 	c5f := archsimd.BroadcastUint8x64(0x5f)
 	c5b := archsimd.BroadcastUint8x64(0x5b)
-	var zero archsimd.Uint8x64
 	e, w := 0, 0
 	for ; len(code) >= 64; w, code = w+1, code[64:] {
 		chunk := (*[64]byte)(code)
@@ -58,17 +57,10 @@ func codeBitmapLift(code []byte) bitvec {
 		p3 := p2.ConcatPermute(sink, p2)
 		p4 := p3.ConcatPermute(sink, p3)
 		p5 := p4.ConcatPermute(sink, p4)
-		cur := lift(p0, p1, p2, p3, p4, p5, sink, lane, zero)
-		first := p0.ConcatPermute(sink, cur)
-		isStart := first.Equal(lane)
-		starts := isStart.ToBits() | 1
-		if starts>>e&1 == 0 { // the entry is off the chain from 0: lift from the entry itself
-			entry := archsimd.BroadcastUint8x64(uint8(e))
-			cur = lift(p0, p1, p2, p3, p4, p5, sink, lane, entry)
-			isStart = p0.ConcatPermute(sink, cur).Equal(lane).Or(lane.Equal(entry))
-			starts = isStart.ToBits()
-		}
-		starts &^= uint64(1)<<e - 1
+		entry := archsimd.BroadcastUint8x64(uint8(e))
+		cur := lift(p0, p1, p2, p3, p4, p5, sink, lane, entry)
+		isStart := p0.ConcatPermute(sink, cur).Equal(lane).Or(lane.Equal(entry))
+		starts := isStart.ToBits()
 		last := lane.IfElse(isStart, cur).GetHi().GetHi().GetElem(15) // the last start in the chunk
 		exit := int(last) + 1 + int(pushLenOf(chunk[last&63]))
 		out[w] = starts & c.Equal(c5b).ToBits()
