@@ -43,8 +43,11 @@ func (b Bytes) MarshalText() ([]byte, error) {
 // AppendText implements encoding.TextAppender: the alloc-free, byte-identical
 // counterpart to MarshalText. Only encoding/json/v2 consults it today.
 func (b Bytes) AppendText(dst []byte) ([]byte, error) {
-	dst = append(dst, HexPrefix...)
-	return appendHex(dst, b), nil
+	n, size := len(dst), len(HexPrefix)+2*len(b)
+	dst = slices.Grow(dst, size)[:n+size]
+	dst[n], dst[n+1] = '0', 'x'
+	encodeHex(dst[n+2:], b)
+	return dst, nil
 }
 
 // QuotedLen is the length of n bytes encoded by AppendQuoted.
