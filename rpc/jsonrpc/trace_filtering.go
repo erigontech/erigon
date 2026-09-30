@@ -306,13 +306,16 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream *jsonstream.Stream) error {
+	if req.BlockHash != nil && (req.FromBlock != nil || req.ToBlock != nil) {
+		return &rpc.CustomError{Message: errBlockHashWithRange, Code: rpc.ErrCodeInvalidParams}
+	}
 	if req.FromBlock != nil {
-		if err := rejectPending(*req.FromBlock); err != nil {
+		if err := rejectPendingNumber(*req.FromBlock); err != nil {
 			return err
 		}
 	}
 	if req.ToBlock != nil {
-		if err := rejectPending(*req.ToBlock); err != nil {
+		if err := rejectPendingNumber(*req.ToBlock); err != nil {
 			return err
 		}
 	}
@@ -332,6 +335,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return err
 	}
 	fromBlock, toBlock := latest, latest
+	if req.BlockHash != nil {
+		if fromBlock, err = api.resolveFilterBlockHash(ctx, dbtx, *req.BlockHash); err != nil {
+			return err
+		}
+		toBlock = fromBlock
+	}
 	if req.FromBlock != nil {
 		if fromBlock, err = api.resolveFilterBound(ctx, dbtx, *req.FromBlock, latest); err != nil {
 			return err
@@ -365,11 +374,11 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 // latest executed block is invalid params, as in eth_getLogs, rather than an
 // empty or clamped result: the txnum index silently clamps a target past
 // execution to the last available txnum.
-func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound rpc.BlockNumberOrHash, latest uint64) (uint64, error) {
-	if number, ok := bound.Number(); ok && number >= 0 && uint64(number) > latest {
+func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound rpc.BlockNumber, latest uint64) (uint64, error) {
+	if bound >= 0 && uint64(bound) > latest {
 		return 0, errBlockRangeIntoFuture
 	}
-	blockNum, err := api.resolveCommittedBlockNumber(ctx, tx, bound)
+	blockNum, err := api.resolveCommittedBlockNumber(ctx, tx, rpc.BlockNumberOrHashWithNumber(bound))
 	if err != nil {
 		return 0, err
 	}
@@ -377,6 +386,18 @@ func (api *TraceAPIImpl) resolveFilterBound(ctx context.Context, tx kv.Tx, bound
 		return 0, errBlockRangeIntoFuture
 	}
 	return blockNum, nil
+}
+
+// resolveFilterBlockHash resolves the block a blockHash filter selects, as
+// eth_getLogs does: only a canonical block of tx, so that a side-chain hash is
+// never answered with the canonical block at its height. The block must also
+// be executed, so that an empty result always belongs to the requested block.
+func (api *TraceAPIImpl) resolveFilterBlockHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
+	blockNum, err := api.resolveLogsBlockHash(ctx, tx, hash)
+	if err != nil {
+		return 0, err
+	}
+	return blockNum, rpchelper.CheckBlockExecuted(tx, blockNum)
 }
 
 func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromBlock, toBlock uint64, req TraceFilterRequest, stream *jsonstream.Stream, gasBailOut bool, traceConfig *config.TraceConfig) error {
@@ -1062,15 +1083,18 @@ func (api *TraceAPIImpl) callTransaction(
 		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
 }
 
-// TraceFilterRequest represents the arguments for trace_filter
+// TraceFilterRequest represents the arguments for trace_filter. As in
+// eth_getLogs, range bounds are block numbers or tags, and BlockHash instead
+// selects a single block by hash.
 type TraceFilterRequest struct {
-	FromBlock   *rpc.BlockNumberOrHash `json:"fromBlock"`
-	ToBlock     *rpc.BlockNumberOrHash `json:"toBlock"`
-	FromAddress []*common.Address      `json:"fromAddress"`
-	ToAddress   []*common.Address      `json:"toAddress"`
-	Mode        TraceFilterMode        `json:"mode,omitempty"`
-	After       *uint64                `json:"after"`
-	Count       *uint64                `json:"count"`
+	BlockHash   *common.Hash      `json:"blockHash"`
+	FromBlock   *rpc.BlockNumber  `json:"fromBlock"`
+	ToBlock     *rpc.BlockNumber  `json:"toBlock"`
+	FromAddress []*common.Address `json:"fromAddress"`
+	ToAddress   []*common.Address `json:"toAddress"`
+	Mode        TraceFilterMode   `json:"mode,omitempty"`
+	After       *uint64           `json:"after"`
+	Count       *uint64           `json:"count"`
 }
 
 type TraceFilterMode string
