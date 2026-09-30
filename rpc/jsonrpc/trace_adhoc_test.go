@@ -3029,3 +3029,23 @@ func TestTraceCallManyChargesEachCall(t *testing.T) {
 	require.ErrorIs(t, err, protocol.ErrFeeCapTooLow)
 	require.Contains(t, err.Error(), "txIndex 1")
 }
+
+// TestTraceCallManyZeroesBlobBaseFeePerCall checks that only a call with unpriced blobs
+// sees BLOBBASEFEE 0, and that the zeroing does not reach the calls after it.
+func TestTraceCallManyZeroesBlobBaseFeePerCall(t *testing.T) {
+	c := newFeeProbeChain(t)
+	price := new(big.Int).Add(c.header.BaseFee.ToBig(), big.NewInt(2))
+	blobHash := `"blobVersionedHashes":["0x0100000000000000000000000000000000000000000000000000000000000001"]`
+
+	unpricedBlobs := c.call(c.bankAddress, ","+blobHash)
+	noBlobs := c.call(c.bankAddress, "")
+	pricedBlobs := c.call(c.bankAddress, fmt.Sprintf(`,"gasPrice":%q,"maxFeePerBlobGas":"0x3b9aca00",%s`, hexutil.EncodeBig(price), blobHash))
+	bundle := fmt.Sprintf(`[[%s,["trace"]],[%s,["trace"]],[%s,["trace"]]]`, unpricedBlobs, noBlobs, pricedBlobs)
+	results, err := c.traceAPI().CallMany(context.Background(), json.RawMessage(bundle), nil, nil)
+	require.NoError(t, err)
+	require.Len(t, results, 3)
+
+	require.Zero(t, readFeeProbe(t, results[0].Output).blobBaseFee.Sign(), "unpriced blobs see a zero BLOBBASEFEE")
+	require.Positive(t, readFeeProbe(t, results[1].Output).blobBaseFee.Sign(), "a call without blobs keeps the block's BLOBBASEFEE")
+	require.Positive(t, readFeeProbe(t, results[2].Output).blobBaseFee.Sign(), "priced blobs keep the block's BLOBBASEFEE")
+}
