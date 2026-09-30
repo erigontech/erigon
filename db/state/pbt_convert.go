@@ -121,7 +121,7 @@ func VerifyPBinDomain(ctx context.Context, tx kv.TemporalTx, aggregator *Aggrega
 	if len(at.Files(domain)) == 0 {
 		return nil
 	}
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(domain), execctx.WithPBinOnly())
+	domains, err := execctx.NewSharedDomains(ctx, tx, log.Root(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(domain))
 	if err != nil {
 		return err
 	}

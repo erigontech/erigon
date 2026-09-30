@@ -161,6 +161,35 @@ func TestVerifyPBinDomainRejectsCorruptedRow(t *testing.T) {
 	require.Error(t, state.VerifyPBinDomain(t.Context(), verifyTx, agg, kv.CommitmentDomain))
 }
 
+func TestVerifyPBinDomainAcceptsBinOnlyConversion(t *testing.T) {
+	selectPBinBinOnlyHash(t)
+	db, agg := temporal.Open(t, 8)
+	writePBinConvertState(t, db)
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, unboundedFinalityCtx, false))
+	agg.WaitForFiles()
+	sourceTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer sourceTx.Rollback()
+	targetTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer targetTx.Rollback()
+	_, err = state.ConvertPBin(t.Context(), state.PBinConvertOptions{
+		SourceAggregator: agg,
+		SourceTx:         sourceTx,
+		TargetAggregator: agg,
+		TargetTx:         targetTx,
+		TargetDomain:     kv.CommitmentDomain,
+		EndTxNum:         8,
+		Hash:             eip8297.HashBytes,
+	})
+	require.NoError(t, err)
+	targetTx.Rollback()
+	verifyTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer verifyTx.Rollback()
+	require.NoError(t, state.VerifyPBinDomain(t.Context(), verifyTx, agg, kv.CommitmentDomain))
+}
+
 func selectPBinConvertHash(t *testing.T) {
 	previousBin := statecfg.ExperimentalBinCommitment
 	previousHexBin := statecfg.ExperimentalHexBinCommitment

@@ -386,6 +386,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	if err != nil {
 		return nil, rwTx, err
 	}
+	calculator.maxReorgDepth = pe.cfg.syncCfg.MaxReorgDepth
+	calculator.blockReader = pe.cfg.blockReader
 	pe.calculator = calculator
 	calculator.Start(ctx)
 	defer calculator.Stop()

@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -213,7 +214,11 @@ type commitmentCalculator struct {
 	// deltas); blocks below it accumulate in batch mode. The last
 	// pre-window block triggers a transition compute (computeTransition)
 	// so no pre-window branch deltas leak into a window block's changeset.
-	perBlockFrom uint64
+	perBlockFrom       uint64
+	maxReorgDepth      uint64
+	activationBlock    uint64
+	hasActivationBlock bool
+	blockReader        dbservices.FullBlockReader
 
 	wg   sync.WaitGroup
 	done chan struct{}
@@ -1211,6 +1216,9 @@ func (cc *commitmentCalculator) computeDualFromUpdatesWithRole(ctx context.Conte
 
 	canonicalDomain := cc.canonicalCommitmentDomain(t.blockTime)
 	shadowDomain := otherCommitmentDomain(canonicalDomain)
+	if canonicalDomain == kv.CommitmentBinDomain {
+		cc.stopHexShadowAtWindow(ctx, t)
+	}
 	if cc.ShadowDomainStopped(canonicalDomain) {
 		return dualCommitmentResult{}, fmt.Errorf("commitment domain %s is stopped", canonicalDomain)
 	}
@@ -1291,6 +1299,28 @@ func otherCommitmentDomain(domain kv.Domain) kv.Domain {
 		return kv.CommitmentDomain
 	}
 	return kv.CommitmentBinDomain
+}
+
+func shouldStopHexShadow(activationBlock, maxReorgDepth, blockNum uint64) bool {
+	return blockNum > activationBlock && blockNum-activationBlock > maxReorgDepth
+}
+
+func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t commitTarget) {
+	if cc.chainConfig == nil || !cc.chainConfig.IsBinaryTrie(t.blockTime) || cc.ShadowDomainStopped(kv.CommitmentDomain) {
+		return
+	}
+	if !cc.hasActivationBlock {
+		cc.activationBlock = t.blockNum
+		if cc.blockReader != nil {
+			if activationBlock, found, err := binaryTrieActivationBlock(ctx, cc.roTx, cc.blockReader, cc.chainConfig, t.blockNum); err == nil && found {
+				cc.activationBlock = activationBlock
+			}
+		}
+		cc.hasActivationBlock = true
+	}
+	if shouldStopHexShadow(cc.activationBlock, cc.maxReorgDepth, t.blockNum) {
+		cc.stopShadowDomain(kv.CommitmentDomain)
+	}
 }
 
 func (cc *commitmentCalculator) canonicalCommitmentDomain(blockTime uint64) kv.Domain {

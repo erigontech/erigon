@@ -166,6 +166,55 @@ func checkUnwindConversionPoint(dirs datadir.Dirs, txNum uint64) error {
 	return nil
 }
 
+func stoppedHexShadowUnwindError(unwindPoint, activationBlock uint64) error {
+	if unwindPoint >= activationBlock {
+		return nil
+	}
+	return fmt.Errorf("%w: hex commitment shadow stopped at activation block %d", ErrTooDeepUnwind, activationBlock)
+}
+
+func checkStoppedHexShadowUnwind(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, config *chain.Config, currentBlock, unwindPoint uint64) error {
+	if config == nil || config.BinaryTrieTime == nil || br == nil {
+		return nil
+	}
+	stopped, err := rawdb.ReadCommitmentDomainStopped(tx, kv.CommitmentDomain)
+	if err != nil || !stopped {
+		return err
+	}
+	activationBlock, found, err := binaryTrieActivationBlock(ctx, tx, br, config, currentBlock)
+	if err != nil || !found {
+		return err
+	}
+	return stoppedHexShadowUnwindError(unwindPoint, activationBlock)
+}
+
+func binaryTrieActivationBlock(ctx context.Context, tx kv.TemporalTx, br dbservices.FullBlockReader, config *chain.Config, currentBlock uint64) (uint64, bool, error) {
+	head, err := br.HeaderByNumber(ctx, tx, currentBlock)
+	if err != nil {
+		return 0, false, err
+	}
+	if head == nil || !config.IsBinaryTrie(head.Time) {
+		return 0, false, nil
+	}
+	low, high := uint64(0), currentBlock
+	for low < high {
+		middle := low + (high-low)/2
+		header, err := br.HeaderByNumber(ctx, tx, middle)
+		if err != nil {
+			return 0, false, err
+		}
+		if header == nil {
+			return 0, false, nil
+		}
+		if config.IsBinaryTrie(header.Time) {
+			high = middle
+		} else {
+			low = middle + 1
+		}
+	}
+	return low, true, nil
+}
+
 // findExecutedDiffsetAtHeight returns the diffset of the block executed at currentBlock.
 // When no canonical hash is recorded at that height (e.g. the block is no longer canonical
 // after a reorg) it falls back to the stored header.
@@ -527,6 +576,9 @@ func unwindDomsToBlock(ctx context.Context, rwTx kv.TemporalRwTx, br dbservices.
 }
 
 func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDomains, rwTx kv.TemporalRwTx, ctx context.Context, cfg ExecuteBlockCfg, logger log.Logger) (err error) {
+	if err := checkStoppedHexShadowUnwind(ctx, rwTx, cfg.blockReader, cfg.chainConfig, s.BlockNumber, u.UnwindPoint); err != nil {
+		return err
+	}
 	if u.UnwindPoint >= s.BlockNumber {
 		// Disk holds nothing above s.BlockNumber, but the in-RAM overlay may.
 

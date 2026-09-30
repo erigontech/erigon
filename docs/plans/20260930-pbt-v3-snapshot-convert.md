@@ -459,17 +459,17 @@
 - Modify: `execution/stagedsync/stage_execute.go`
 - Create: `execution/stagedsync/committer_hex_stop_test.go`
 
-- [ ] write tests:
+- [x] write tests:
       - the hex domain keeps folding until the head is the stage loop's `MaxReorgDepth` blocks past activation, and
         stops on the next block;
       - `debug_migrationProgress` then reports `ShadowStopped`;
       - an unwind across the activation block is refused after the stop.
 
       Confirm they fail at the stop assertion.
-- [ ] implement the stop through `stopShadowDomain` and `recordStoppedCommitmentDomains`, reading the window from the
+- [x] implement the stop through `stopShadowDomain` and `recordStoppedCommitmentDomains`, reading the window from the
       sync config
-- [ ] write tests for a restart after the stop and for a reorg inside the window before the stop
-- [ ] run tests - must pass before task 10
+- [x] write tests for a restart after the stop and for a reorg inside the window before the stop
+- [x] run tests - must pass before task 10
 
 ### Task 10: Shared export pin
 
