@@ -79,14 +79,14 @@ func TestGetTransactionByBlockNumberAndIndex_PendingBlockPricesWithBaseFee(t *te
 }
 
 // Index 0 is the first non-system transaction of the block, and an index past the
-// last transaction is not an error.
+// last transaction is not an error. Holds whether or not the block cache holds the block.
 func TestGetTransactionByIndexMatchesBlock(t *testing.T) {
 	m, chain, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	ctx := context.Background()
 
 	checked := 0
-	for _, b := range chain.Blocks {
+	checkBlock := func(t *testing.T, b *types.Block) {
 		for i, want := range b.Transactions() {
 			byNum, err := api.GetTransactionByBlockNumberAndIndex(ctx, rpc.BlockNumber(b.NumberU64()), hexutil.Uint(i))
 			require.NoError(t, err)
@@ -119,5 +119,18 @@ func TestGetTransactionByIndexMatchesBlock(t *testing.T) {
 		require.NoError(t, err)
 		require.Nil(t, raw)
 	}
+
+	t.Run("block not cached", func(t *testing.T) {
+		for _, b := range chain.Blocks {
+			checkBlock(t, b)
+		}
+	})
+	t.Run("block cached", func(t *testing.T) {
+		for _, b := range chain.Blocks {
+			_, err := api.GetBlockByNumber(ctx, rpc.BlockNumber(b.NumberU64()), false)
+			require.NoError(t, err)
+			checkBlock(t, b)
+		}
+	})
 	require.NotZero(t, checked)
 }
