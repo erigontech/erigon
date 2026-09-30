@@ -1142,8 +1142,7 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 	case withdrawals == nil:
 		b.header.WithdrawalsHash = nil
 	case len(withdrawals) == 0:
-		emptyHash := empty.WithdrawalsHash
-		b.header.WithdrawalsHash = &emptyHash
+		b.header.WithdrawalsHash = &empty.WithdrawalsHash
 		b.withdrawals = make(Withdrawals, len(withdrawals))
 	default:
 		h := DeriveSha(Withdrawals(withdrawals))

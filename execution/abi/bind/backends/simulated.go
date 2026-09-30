@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
+	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -738,7 +739,7 @@ func (b *SimulatedBackend) callContract(_ context.Context, call bind.CallMsg, bl
 	const defaultCallGas = 50000000
 	// Ensure message is initialized properly.
 	if call.GasPrice == nil {
-		call.GasPrice = uint256.NewInt(1)
+		call.GasPrice = &u256.Num1
 	}
 	if call.FeeCap == nil {
 		call.FeeCap = uint256.NewInt(baseFeeUpperLimit)
