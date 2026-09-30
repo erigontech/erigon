@@ -506,6 +506,33 @@ func TestPBinWitnessStatelessMissingStorageForExistingEmptyAccountErrors(t *test
 	require.ErrorIs(t, err, commitment.ErrPBinWitnessBlinded)
 }
 
+func TestPBinWitnessStatelessRejectsHeaderOnlyAccountWithoutIdentityLeaf(t *testing.T) {
+	address := common.HexToAddress("0x6900000000000000000000000000000000000000")
+	slot := common.HexToHash("0x03")
+	entries := []eip8297.Entry{{
+		Key:   eip8297.TreeKeyStorage(address[:], slot[:]),
+		Value: pbinStatelessValue(9),
+	}}
+	ctx := newPBinWitnessInputContext()
+	root, err := pbtengine.NewTrie(ctx).Process(pbinStatelessEntriesToOps(entries))
+	require.NoError(t, err)
+	paths, blobs, _, err := pbtengine.NewTrie(ctx).Witness(context.Background(), root, eipWitness.PBinDriverInput{
+		Reads: [][]byte{
+			eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey),
+			eip8297.TreeKeyStorage(address[:], slot[:]),
+		},
+	})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		result.Keys[index] = paths[index]
+		result.State[index] = blobs[index]
+	}
+	stateless, err := newPBinWitnessStateless(result, root)
+	require.NoError(t, err)
+	require.ErrorContains(t, stateless.DeleteAccount(accounts.InternAddress(address), nil), "header data but no code-hash or delegation leaf", "an account without an identity leaf must fail closed")
+}
+
 func TestPBinWitnessStatelessCreateOverStorageWipesStorage(t *testing.T) {
 	f := newPBinStatelessFixture(t)
 	stateless := f.stateless(t)

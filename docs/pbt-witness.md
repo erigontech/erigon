@@ -73,12 +73,12 @@ parent pointer, and checks the root against the pre-state anchor. `replayBlockOv
 that tree, the supplied code blobs, and the in-block overlays. It applies the block's writes through the same PBT
 driver and compares the resulting root with the post-state anchor.
 
-The verifier suppresses only the missing-node error for Erigon's synthetic system-caller touch and only while that
-system call is running. A genuine user access to the system address still needs its proof. Contract creation over an
-existing account with storage wipes that storage; creation of a previously absent account does not walk an unproved
-storage subtree. An account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf, or
-an authenticated header-stem prefix, is resolved. All supplied PBT entries must be consumed before verification
-succeeds.
+The verifier suppresses only the missing-node error for Erigon's synthetic system-caller touch and only while the
+system-call scope is active. That scope also covers `CommitBlock`; resolver errors are not latched while it is active.
+A genuine user access to the system address still needs its proof. Contract creation over an existing account with
+storage wipes that storage; creation of a previously absent account does not walk an unproved storage subtree. An
+account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is resolved. All
+supplied PBT entries must be consumed before verification succeeds.
 
 ## Witness cache
 

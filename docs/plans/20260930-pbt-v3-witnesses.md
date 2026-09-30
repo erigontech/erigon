@@ -565,6 +565,7 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - [x] ➕ authenticate codeless accounts through their code-hash leaf, compare builder post-roots with block anchors, cover delegation clearing, and delete zero-valued BASIC_DATA leaves
 - [x] ➕ prove overflow-only and header-only accounts, reset storage before net recreation writes, and verify every wipe port
 - [x] ➕ delete zero BASIC_DATA values on every PBT insert path, preserve pending reference updates, and guard builder root refusal
+- [x] ➕ reject header-only accounts without identity leaves and document the scoped system-call exception
 
 ### Task 13: Witness documentation
 

@@ -487,6 +487,13 @@ func TestProcessFeedEmptyAccountStorageMatchesReferenceWithoutCodeWritten(t *tes
 	account := feedAccount(address)
 	account.CodeHash = empty.CodeHash
 	account.Slots = []commitment.PBinFeedSlot{{Key: []byte{0}, Value: []byte{0x01}}, {Key: []byte{1, 0}, Value: []byte{0x02}}}
+	ctx := newTrieTestContext()
+	_, err := NewTrie(ctx).ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{account}})
+	require.NoError(t, err)
+	codeHash, found, err := NewTrie(ctx).lookupLeaf(eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey))
+	require.NoError(t, err)
+	require.True(t, found, "an empty account with storage must carry its code-hash leaf")
+	require.Equal(t, eip8297.CodeHashValue(empty.CodeHash), codeHash.Value, "an empty account with storage must carry its code-hash leaf")
 	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{account}}}, [][]eip8297.State{{feedState(account)}})
 }
 

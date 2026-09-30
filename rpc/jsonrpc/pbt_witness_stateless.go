@@ -222,8 +222,7 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 			return nil, err
 		}
 		if headerPresent {
-			s.preStateAccounts[addr] = true
-			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash}, nil
+			return nil, fmt.Errorf("pbin witness: account %x has header data but no code-hash or delegation leaf", addr)
 		}
 		return nil, nil
 	}
