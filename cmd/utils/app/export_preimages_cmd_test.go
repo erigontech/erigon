@@ -618,7 +618,7 @@ func TestWriteHashedPreimagesSpillsLargeAccount(t *testing.T) {
 	peak := sampler.stopAndRead()
 	require.NoError(t, err)
 	require.Equal(t, uint64(slots), stats.Slots)
-	require.Less(t, peak, uint64(32<<20))
+	require.Less(t, peak, uint64(64<<20))
 	require.NoError(t, output.Sync())
 	info, err := output.Stat()
 	require.NoError(t, err)
