@@ -159,6 +159,9 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	if root != header.Root {
 		return common.Hash{}, fmt.Errorf("pbt import: computed root %s differs from header root %s", root.Hex(), header.Root.Hex())
 	}
+	if err := domains.Flush(ctx, tx); err != nil {
+		return common.Hash{}, err
+	}
 	return root, nil
 }
 

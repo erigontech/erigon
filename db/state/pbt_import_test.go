@@ -28,9 +28,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -96,7 +98,28 @@ func TestImportPBTSnapshotWritesProgressStateAndRoot(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Equal(t, root, got)
-	_, err = dbstate.ImportPBTSnapshot(t.Context(), tx, dbstate.PBTImportOptions{
+	require.NoError(t, tx.Commit())
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	func() {
+		defer roTx.Rollback()
+		cfg := commitment.DefaultTrieConfig()
+		cfg.Variant = commitment.VariantBinPatriciaTrie
+		cfg.EnableTrieWarmup = false
+		domains, domainErr := execctx.NewSharedDomains(t.Context(), roTx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentDomain), execctx.WithoutCommitmentSeek())
+		require.NoError(t, domainErr)
+		defer domains.Close()
+		value, _, domainErr := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+		require.NoError(t, domainErr)
+		require.NotEmpty(t, value)
+		_, blockNum, domainErr := domains.SeekCommitment(t.Context(), roTx)
+		require.NoError(t, domainErr)
+		require.Equal(t, uint64(1), blockNum, "the commitment point must survive commit and reopen")
+	}()
+	wtx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer wtx.Rollback()
+	_, err = dbstate.ImportPBTSnapshot(t.Context(), wtx, dbstate.PBTImportOptions{
 		Snapshot: bytes.NewReader(wrongSnapshot.Bytes()), SnapshotSize: int64(wrongSnapshot.Len()),
 		Preimages: bytes.NewReader(preimages.Bytes()), PreimageSize: int64(preimages.Len()),
 		BlockHash: blockHash, BlockNum: 1, TxNum: 1, Hash: eip8297.HashBytes, Logger: log.New(),

@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
@@ -36,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
@@ -90,9 +92,6 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if err != nil {
 		return err
 	}
-	if err := rawdbreset.ResetExec(ctx, db); err != nil {
-		return err
-	}
 	snapshot, err := os.Open(snapshotPath)
 	if err != nil {
 		return err
@@ -109,6 +108,12 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	}
 	preimagesInfo, err := preimages.Stat()
 	if err != nil {
+		return err
+	}
+	if err := validatePBTImportArtifacts(snapshot, snapshotInfo.Size(), preimages, preimagesInfo.Size()); err != nil {
+		return err
+	}
+	if err := rawdbreset.ResetExec(ctx, db); err != nil {
 		return err
 	}
 	tx, err := db.BeginTemporalRw(ctx)
@@ -189,11 +194,24 @@ func configureImportVariant(dirs datadir.Dirs) {
 		return
 	}
 	statecfg.ExperimentalBinCommitment = settings.TrieVariantName() == dbstate.TrieVariantBin
-	statecfg.ExperimentalHexBinCommitment = false
-	statecfg.ExperimentalCommitmentV3 = statecfg.ExperimentalBinCommitment
+	statecfg.ExperimentalHexBinCommitment = settings.TrieVariantName() == dbstate.TrieVariantHexBin
+	statecfg.ExperimentalCommitmentV3 = statecfg.ExperimentalHexBinCommitment
 	statecfg.BinCommitmentHash = settings.TrieHashName()
 	if statecfg.ExperimentalCommitmentV3 {
 		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	}
 	_ = commitment.SetPBinHashSuite(settings.TrieHashName())
+}
+
+func validatePBTImportArtifacts(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, preimageSize int64) error {
+	if _, err := artifact.ReadSnapshotStreamAt(snapshot, snapshotSize, artifact.SnapshotStreamCallbacks{}); err != nil {
+		return fmt.Errorf("commitment import-pbt: read snapshot: %w", err)
+	}
+	if err := artifact.ReadPreimagesStream(preimages, preimageSize, nil); err != nil {
+		return fmt.Errorf("commitment import-pbt: read preimages: %w", err)
+	}
+	if err := artifact.JoinAt(snapshot, snapshotSize, preimages, preimageSize, eip8297.HashBytes, nil); err != nil {
+		return fmt.Errorf("commitment import-pbt: join preimages: %w", err)
+	}
+	return nil
 }
