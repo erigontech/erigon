@@ -602,10 +602,10 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Modify: `docs/pbin-dual-commitment.md`
 - Modify: `CLAUDE.md`
 
-- [ ] replace the refusal statements in `docs/pbin-dual-commitment.md` (witnesses on binary and v3-hex blocks) with the
-      served behaviour, citing code by name
-- [ ] update `CLAUDE.md` with the PBT witness entry points if new conventions were introduced
-- [ ] move this plan to `docs/plans/completed/`
+- [x] replace the refusal statements in `docs/pbin-dual-commitment.md` (witnesses on binary and v3-hex blocks) with the
+  served behaviour, citing code by name
+- [x] update `CLAUDE.md` with the PBT witness entry points if new conventions were introduced
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

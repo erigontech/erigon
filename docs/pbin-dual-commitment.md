@@ -76,7 +76,12 @@ variant-specific state key. It freezes the selected hex domain at its recorded t
 leaves the binary domain canonical when the schedule has flipped.
 
 `debug_shadowStateRoot` reports the non-canonical root stored by
-`rawdb.WriteShadowStateRoot`. `debug_executionWitness` refuses binary blocks with
-`ErrBinCommitmentUnsupported`; `eth_getProof` and `eth_getWitness` have the same refusal for
-binary blocks. With v3-hex, `debug_executionWitness` also refuses hex blocks because the v3 hex
-trie does not provide the HPH witness implementation.
+`rawdb.WriteShadowStateRoot`. `debug_executionWitness` serves the requested trie through
+`DebugAPIImpl.ExecutionWitness` in `rpc/jsonrpc/debug_execution_witness.go`: omitted `trie` selects
+the trie canonical at the block, while `trie="mpt"` selects the v3 hex domain and `trie="pbt"`
+selects the binary domain. `witnessAnchorForBlock` uses the header root for the canonical trie and
+the shadow root for the other trie, and `checkWitnessAvailability` refuses missing, stopped,
+frozen, or pruned history without falling back to the other domain. The PBT response is verified
+by `verifyPBinWitnessAgainstBlock` before it is served or cached. `eth_getProof` and
+`eth_getWitness` remain MPT-only through `APIImpl.getProof` and `APIImpl.GetWitness`: they serve
+pre-fork blocks when v3-hex history is retained, and refuse blocks whose canonical trie is binary.
