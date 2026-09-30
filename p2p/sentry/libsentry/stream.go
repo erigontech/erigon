@@ -27,7 +27,7 @@ import (
 // NewSentryStream returns the sending and receiving ends of a shared bounded queue.
 func NewSentryStream[T protoreflect.ProtoMessage](ctx context.Context) (*SentryStreamS[T], *SentryStreamC[T]) {
 	queue := &messageQueue[T]{
-		items: make(chan streamReply[T], MessagesQueueSize),
+		items: make([]queuedMessage[T], 0, MessagesQueueSize),
 		ready: make(chan struct{}, 1),
 	}
 	return &SentryStreamS[T]{queue: queue, Ctx: ctx}, &SentryStreamC[T]{queue: queue, Ctx: ctx}
@@ -45,23 +45,24 @@ func (s *SentryStreamS[T]) Send(m T) error {
 	if err := s.Ctx.Err(); err != nil {
 		return err
 	}
-	return s.queue.push(m, nil)
+	return s.queue.push(m)
 }
 
 func (s *SentryStreamS[T]) Context() context.Context { return s.Ctx }
 
+// Err closes the stream with err unless it is nil or the stream is already closed.
+// Receivers drain queued messages, then receive the error once, followed by EOF.
 func (s *SentryStreamS[T]) Err(err error) {
 	if err == nil {
 		return
 	}
-	var zero T
-	_ = s.queue.push(zero, err)
+	s.queue.close(err)
 }
 
 // Close rejects new sends. Receivers can drain queued messages before EOF
 // unless their context is canceled.
 func (s *SentryStreamS[T]) Close() {
-	s.queue.close()
+	s.queue.close(nil)
 }
 
 type SentryStreamC[T protoreflect.ProtoMessage] struct {

@@ -19,6 +19,7 @@ package libsentry_test
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"io"
 	"sync"
 	"testing"
@@ -157,16 +158,70 @@ func TestSentryStream_RejectsOversizeMessage(t *testing.T) {
 
 func TestSentryStream_ErrorAfterMessages(t *testing.T) {
 	s, c := newTestSentryStream(t)
-	require.NoError(t, s.Send(&sentryproto.InboundMessage{Data: []byte{1}}))
+	// A terminal error must not consume a queue slot and trigger eviction.
+	for range libsentry.MessagesQueueSize / 2 {
+		require.NoError(t, s.Send(&sentryproto.InboundMessage{Data: []byte{1}}))
+	}
 	s.Err(io.ErrUnexpectedEOF)
 	s.Close()
-	message, err := c.Recv()
-	require.NoError(t, err)
-	require.Equal(t, []byte{1}, message.Data)
-	_, err = c.Recv()
+	for range libsentry.MessagesQueueSize / 2 {
+		message, err := c.Recv()
+		require.NoError(t, err)
+		require.Equal(t, []byte{1}, message.Data)
+	}
+	_, err := c.Recv()
 	require.ErrorIs(t, err, io.ErrUnexpectedEOF)
 	_, err = c.Recv()
 	require.ErrorIs(t, err, io.EOF)
+}
+
+func TestSentryStream_ErrorClosesStream(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		s, c := newTestSentryStream(t)
+		errs := make(chan error, 2)
+		for range 2 {
+			go func() {
+				_, err := c.Recv()
+				errs <- err
+			}()
+		}
+		synctest.Wait()
+		s.Err(io.ErrUnexpectedEOF)
+		require.ElementsMatch(t, []error{io.ErrUnexpectedEOF, io.EOF}, []error{<-errs, <-errs})
+		require.ErrorIs(t, s.Send(&sentryproto.InboundMessage{}), io.EOF)
+	})
+}
+
+func TestSentryStream_NilErrorKeepsStreamOpen(t *testing.T) {
+	s, c := newTestSentryStream(t)
+	s.Err(nil)
+	require.NoError(t, s.Send(&sentryproto.InboundMessage{}))
+	s.Close()
+	require.Len(t, drainMessages(t, c), 1)
+}
+
+func TestSentryStream_FirstCloseWins(t *testing.T) {
+	for _, terminalErr := range []error{io.ErrUnexpectedEOF, io.EOF} {
+		t.Run(terminalErr.Error(), func(t *testing.T) {
+			s, c := newTestSentryStream(t)
+			if errors.Is(terminalErr, io.EOF) {
+				s.Close()
+			} else {
+				s.Err(terminalErr)
+			}
+			s.Err(io.ErrClosedPipe)
+			var producers sync.WaitGroup
+			for range 4 {
+				producers.Go(func() { s.Err(io.ErrClosedPipe) })
+				producers.Go(s.Close)
+			}
+			producers.Wait()
+			_, err := c.Recv()
+			require.ErrorIs(t, err, terminalErr)
+			_, err = c.Recv()
+			require.ErrorIs(t, err, io.EOF)
+		})
+	}
 }
 
 func newTestSentryStream(t *testing.T) (*libsentry.SentryStreamS[*sentryproto.InboundMessage], *libsentry.SentryStreamC[*sentryproto.InboundMessage]) {

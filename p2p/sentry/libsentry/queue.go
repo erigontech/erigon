@@ -41,48 +41,41 @@ var (
 	sentryQueueDroppedByCount = metrics.GetOrCreateCounter(`p2p_sentry_queue_dropped_messages_total{limit="count"}`)
 )
 
-type streamReply[T protoreflect.ProtoMessage] struct {
+type queuedMessage[T protoreflect.ProtoMessage] struct {
 	message T
-	err     error
 	size    int
 }
 
 // messageQueue keeps eviction and receiving under the same lock, so each
 // item releases its byte budget exactly once. All access to items holds mu.
 type messageQueue[T protoreflect.ProtoMessage] struct {
-	mu     sync.Mutex
-	items  chan streamReply[T]
-	ready  chan struct{}
-	bytes  int
-	closed bool
+	mu    sync.Mutex
+	items []queuedMessage[T]
+	ready chan struct{}
+	bytes int
+	err   error // nil while open, the terminal error while draining, then io.EOF.
 }
 
-func (q *messageQueue[T]) push(message T, err error) error {
+func (q *messageQueue[T]) push(message T) error {
 	size := proto.Size(message)
 	if size > MessagesQueueByteLimit {
 		return fmt.Errorf("sentry message exceeds queue byte limit: %d", size)
 	}
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if q.closed {
+	if q.err != nil {
 		return io.EOF
 	}
 	for q.bytes+size > MessagesQueueByteLimit {
 		q.pop()
 		sentryQueueDroppedByBytes.Inc()
 	}
-	// Eviction must leave space. Blocking here would hold mu and prevent
-	// receivers from freeing a slot, so a broken invariant must fail loudly.
-	select {
-	case q.items <- streamReply[T]{message: message, err: err, size: size}:
-	default:
-		panic("sentry queue: push to full queue")
-	}
+	q.items = append(q.items, queuedMessage[T]{message: message, size: size})
 	q.bytes += size
 	// Evict in batches so slow consumers see recent traffic and the queue
 	// has room for the next burst of small messages.
-	if len(q.items) > cap(q.items)/2 {
-		for range cap(q.items) / 4 {
+	if len(q.items) > MessagesQueueSize/2 {
+		for range MessagesQueueSize / 4 {
 			q.pop()
 			sentryQueueDroppedByCount.Inc()
 		}
@@ -91,21 +84,24 @@ func (q *messageQueue[T]) push(message T, err error) error {
 	return nil
 }
 
-// pop requires mu to be held and items to be non-empty.
-func (q *messageQueue[T]) pop() streamReply[T] {
-	select {
-	case item := <-q.items:
-		q.bytes -= item.size
-		return item
-	default:
-		panic("sentry queue: pop from empty queue")
+// pop requires mu to be held. Clear the backing-array slot so removed
+// payloads can be collected while the queue still uses the array.
+func (q *messageQueue[T]) pop() queuedMessage[T] {
+	item := q.items[0]
+	q.items[0] = queuedMessage[T]{}
+	if len(q.items) == 1 {
+		q.items = q.items[:0]
+	} else {
+		q.items = q.items[1:]
 	}
+	q.bytes -= item.size
+	return item
 }
 
 // notify coalesces wake-ups. Receivers must recheck items and signal again
 // when messages remain. The caller must hold mu to avoid signaling after close.
 func (q *messageQueue[T]) notify() {
-	if !q.closed && len(q.items) > 0 {
+	if q.err == nil && len(q.items) > 0 {
 		select {
 		case q.ready <- struct{}{}:
 		default:
@@ -126,21 +122,27 @@ func (q *messageQueue[T]) recv(ctx context.Context) (T, error) {
 			item := q.pop()
 			q.notify()
 			q.mu.Unlock()
-			return item.message, item.err
+			return item.message, nil
 		}
-		closed := q.closed
+		err := q.err
+		if err != nil {
+			q.err = io.EOF
+		}
 		q.mu.Unlock()
-		if closed {
-			return zero, io.EOF
+		if err != nil {
+			return zero, err
 		}
 	}
 }
 
-func (q *messageQueue[T]) close() {
+func (q *messageQueue[T]) close(err error) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
-	if !q.closed {
-		q.closed = true
+	if q.err == nil {
+		if err == nil {
+			err = io.EOF
+		}
+		q.err = err
 		close(q.ready)
 	}
 }
