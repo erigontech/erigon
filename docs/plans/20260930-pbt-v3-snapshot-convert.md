@@ -436,21 +436,21 @@
 - Create: `cmd/integration/commands/commitment_attach_pbt.go`
 - Create: `cmd/integration/commands/commitment_attach_pbt_test.go`
 
-- [ ] add the command with a stub. Write a test:
+- [x] add the command with a stub. Write a test:
       - a node past S attaches files converted from a copy of its datadir at S;
       - it restarts and re-executes to its tip in dual mode;
       - its bin roots equal the shadow roots of a node that ran dual from genesis on the same chain.
 
       Confirm it fails at the root comparison.
-- [ ] implement the command:
+- [x] implement the command:
       - check the published settings (ranges, step size, both commitment domains, `trie_hash` against the node's suite);
       - swap the files;
       - run `ResetExec`;
       - write `trie_variant`, `trie_hash` and the conversion point.
-- [ ] write a test with an S that ends mid-block: the remainder of that block executes exactly once after restart
-- [ ] write tests for refusals: mismatched ranges or S, a published set without hex or bin, a different `trie_hash`, a
+- [x] write a test with an S that ends mid-block: the remainder of that block executes exactly once after restart
+- [x] write tests for refusals: mismatched ranges or S, a published set without hex or bin, a different `trie_hash`, a
       node behind S
-- [ ] run tests - must pass before task 9
+- [x] run tests - must pass before task 9
 
 ### Task 9: Automatic hex stop after the fork window
 

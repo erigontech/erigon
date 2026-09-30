@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -49,6 +50,7 @@ import (
 var (
 	convertPBTKeepHex       bool
 	convertPBTOutputDatadir string
+	convertPBTOutputHook    func() error
 )
 
 func init() {
@@ -98,16 +100,17 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 		return fmt.Errorf("commitment convert-pbt: output datadir %s is not empty", outputDirs.DataDir)
 	}
 
-	oldDatadir, oldChaindata := datadirCli, chaindata
+	oldDatadir, oldChaindata, oldRebuildOutput := datadirCli, chaindata, rebuildOutputDatadir
 	oldBin, oldHexBin, oldV3, oldHash, oldSchema := statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema
 	defer func() {
 		datadirCli, chaindata = oldDatadir, oldChaindata
+		rebuildOutputDatadir = oldRebuildOutput
 		statecfg.ExperimentalBinCommitment, statecfg.ExperimentalHexBinCommitment, statecfg.ExperimentalCommitmentV3, statecfg.BinCommitmentHash, statecfg.Schema = oldBin, oldHexBin, oldV3, oldHash, oldSchema
 	}()
 
 	removeOutput := true
 	defer func() {
-		if removeOutput && err != nil {
+		if removeOutput {
 			_ = dir.RemoveAll(outputDirs.DataDir)
 		}
 	}()
@@ -128,6 +131,11 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	}
 	if err := os.MkdirAll(outputDirs.Tmp, 0o755); err != nil {
 		return err
+	}
+	if convertPBTOutputHook != nil {
+		if err := convertPBTOutputHook(); err != nil {
+			return err
+		}
 	}
 	if _, err = linkSnapshotsExceptCommitment(sourceDirs.Snap, outputDirs.Snap); err != nil {
 		return err
@@ -152,6 +160,8 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	}
 	datadirCli = stagingDirs.DataDir
 	chaindata = sourceDirs.Chaindata
+	rebuildOutputDatadir = stagingDirs.DataDir
+	configurePBTSourceVariant(sourceSettings)
 	sourceDB, err := openDB(ctx, dbCfg(dbcfg.ChainDB, sourceDirs.Chaindata), false, chainName, logger)
 	if err != nil {
 		return fmt.Errorf("commitment convert-pbt: open source: %w", err)
@@ -282,6 +292,10 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 	if !keepHex {
 		finalSettings.ReferencesInCommitmentBranches = new(bool)
 	}
+	targetAgg.Close()
+	if err := verifyPBTOutputStandalone(ctx, outputDirs, finalSettings, point, logger); err != nil {
+		return err
+	}
 	if err := dbstate.WriteErigonDBSettings(outputDirs, finalSettings); err != nil {
 		return err
 	}
@@ -290,77 +304,92 @@ func convertPBT(ctx context.Context, sourcePath, outputPath string, keepHex bool
 }
 
 func readPBinSourcePoint(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, keepHex bool, logger log.Logger) (pbinConversionPoint, error) {
-	oldDatadir, oldChaindata := datadirCli, chaindata
-	defer func() { datadirCli, chaindata = oldDatadir, oldChaindata }()
-	datadirCli = dirs.DataDir
-	chaindata = dirs.Chaindata
-	rawDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).MustOpen()
+	if keepHex && (settings == nil || settings.TrieVariantName() == dbstate.TrieVariantHex) {
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+	}
 	aggOpts := dbstate.New(dirs).Logger(logger)
 	if settings != nil {
 		aggOpts = aggOpts.WithErigonDBSettings(settings)
 	}
+	aggOpts = aggOpts.SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps()
 	agg, err := aggOpts.Open(ctx)
 	if err != nil {
 		return pbinConversionPoint{}, fmt.Errorf("commitment convert-pbt: open source point: %w", err)
 	}
-	if err := agg.OpenFolder(rawDB); err != nil {
+	if err := agg.OpenFolder(nil); err != nil {
 		agg.Close()
-		rawDB.Close()
 		return pbinConversionPoint{}, err
 	}
-	db, err := dbtemporal.New(rawDB, agg, nil)
-	if err != nil {
-		agg.Close()
-		rawDB.Close()
-		return pbinConversionPoint{}, err
-	}
-	defer func() {
-		db.Close()
-		agg.Close()
-		rawDB.Close()
-	}()
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return pbinConversionPoint{}, err
-	}
-	defer tx.Rollback()
+	defer agg.Close()
+	at := agg.BeginFilesRo()
+	defer at.Close()
 	variant := dbstate.TrieVariantHex
 	if settings != nil {
 		variant = settings.TrieVariantName()
 	}
-	return readPBinConversionPoint(tx, variant, keepHex)
+	return readPBinConversionPointFromFiles(at, variant, keepHex)
 }
 
-func readPBinConversionPoint(tx kv.TemporalTx, variant string, keepHex bool) (pbinConversionPoint, error) {
+func configurePBTSourceVariant(settings *dbstate.ErigonDBSettings) {
+	variant := dbstate.TrieVariantHex
+	if settings != nil {
+		variant = settings.TrieVariantName()
+	}
+	switch variant {
+	case dbstate.TrieVariantHex:
+		statecfg.ExperimentalBinCommitment = false
+		statecfg.ExperimentalHexBinCommitment = false
+		statecfg.BinCommitmentHash = ""
+	case dbstate.TrieVariantHexBin:
+		statecfg.ExperimentalBinCommitment = true
+		statecfg.ExperimentalHexBinCommitment = true
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.BinCommitmentHash = settings.TrieHashName()
+	case dbstate.TrieVariantBin:
+		statecfg.ExperimentalBinCommitment = true
+		statecfg.ExperimentalHexBinCommitment = false
+		statecfg.ExperimentalCommitmentV3 = false
+		statecfg.BinCommitmentHash = settings.TrieHashName()
+	}
+}
+
+func readPBinConversionPointFromFiles(at *dbstate.AggregatorRoTx, variant string, keepHex bool) (pbinConversionPoint, error) {
 	domain := kv.CommitmentDomain
+	key := commitment.KeyCommitmentV3State
 	if variant == dbstate.TrieVariantBin || (variant == dbstate.TrieVariantHexBin && !keepHex) {
 		if variant == dbstate.TrieVariantHexBin {
 			domain = kv.CommitmentBinDomain
 		}
-		value, _, err := tx.GetLatest(domain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+		key = commitment.KeyCommitmentState
+		value, found, _, _, err := at.DebugGetLatestFromFiles(domain, key, ^uint64(0))
 		if err != nil {
 			return pbinConversionPoint{}, err
 		}
-		if len(value) < 16 {
-			return pbinConversionPoint{}, errors.New("commitment convert-pbt: binary commitment state is missing or truncated")
+		if !found || len(value) < 16 {
+			return pbinConversionPoint{}, errors.New("commitment convert-pbt: binary commitment state is missing from files; collate first")
 		}
 		txNum, blockNum := commitmentdb.DecodeTxBlockNums(value)
 		return pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, nil
 	}
-	value, _, err := tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentV3State, kv.GetLatestOptions{})
+	value, found, _, _, err := at.DebugGetLatestFromFiles(domain, key, ^uint64(0))
 	if err != nil {
 		return pbinConversionPoint{}, err
 	}
-	if len(value) == 0 {
-		if keepHex {
-			return pbinConversionPoint{}, errors.New("commitment convert-pbt: source hex commitment is legacy; run commitment convert --v3 or collate first")
-		}
-		value, _, err = tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
+	if !found || len(value) == 0 {
+		key = commitment.KeyCommitmentState
+		value, found, _, _, err = at.DebugGetLatestFromFiles(domain, key, ^uint64(0))
 		if err != nil {
 			return pbinConversionPoint{}, err
 		}
-		if len(value) < 16 {
-			return pbinConversionPoint{}, errors.New("commitment convert-pbt: source commitment state is missing or truncated")
+		if !found || len(value) < 16 {
+			if keepHex {
+				return pbinConversionPoint{}, errors.New("commitment convert-pbt: source hex commitment is legacy or missing; run commitment convert --v3 or collate first")
+			}
+			return pbinConversionPoint{}, errors.New("commitment convert-pbt: source commitment state is missing from files; collate first")
+		}
+		if keepHex {
+			return pbinConversionPoint{}, errors.New("commitment convert-pbt: source hex commitment is legacy; run commitment convert --v3 or collate first")
 		}
 		txNum, blockNum := commitmentdb.DecodeTxBlockNums(value)
 		return pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, nil
@@ -373,6 +402,52 @@ func readPBinConversionPoint(tx kv.TemporalTx, variant string, keepHex bool) (pb
 		return pbinConversionPoint{}, err
 	}
 	return pbinConversionPoint{BlockNum: blockNum, TxNum: txNum}, nil
+}
+
+func verifyPBTOutputStandalone(ctx context.Context, dirs datadir.Dirs, settings *dbstate.ErigonDBSettings, point pbinConversionPoint, logger log.Logger) error {
+	configurePBTSourceVariant(settings)
+	chaindataDir, err := os.MkdirTemp("", "convert-pbt-chaindata-")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = dir.RemoveAll(chaindataDir) }()
+	rawDB := mdbx.New(dbcfg.ChainDB, logger).Path(chaindataDir).MustOpen()
+	defer rawDB.Close()
+	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(settings).SkipFilesDBGapCheck().SkipPBinStateDBCheck().DisableInterDomainDeps().Open(ctx)
+	if err != nil {
+		return err
+	}
+	defer agg.Close()
+	if err := agg.OpenFolder(nil); err != nil {
+		return err
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+	tx, err := db.BeginTemporalRo(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutCommitmentSeek())
+	if err != nil {
+		return err
+	}
+	defer domains.Close()
+	contexts := make([]*commitmentdb.SharedDomainsCommitmentContext, 0, len(domains.CommitmentDomains()))
+	for _, domain := range domains.CommitmentDomains() {
+		contexts = append(contexts, domains.GetCommitmentCtxForDomain(domain))
+	}
+	txNum, blockNum, err := commitmentdb.SeekCommitments(ctx, tx, contexts...)
+	if err != nil {
+		return fmt.Errorf("commitment convert-pbt: standalone output: %w", err)
+	}
+	if txNum != point.TxNum || blockNum != point.BlockNum {
+		return fmt.Errorf("commitment convert-pbt: standalone output checkpoint is (%d, %d), want (%d, %d)", blockNum, txNum, point.BlockNum, point.TxNum)
+	}
+	return nil
 }
 
 func requirePBinSourceEnd(agg *dbstate.Aggregator, endTxNum uint64) error {
