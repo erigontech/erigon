@@ -559,13 +559,15 @@ func (p *Provider) Initialize(deps Deps) error {
 			}
 		},
 		func(deletedFiles []string) {
-			// Drop deleted files from Inventory. RemoveFile defers the
-			// drop when held views still reference the file, so reads
-			// in flight stay coherent.
-			//
+			// Drop consolidated files from Inventory. RetireFile defers
+			// the drop when held views still reference the file, so reads
+			// in flight stay coherent, and marks the name so the disk
+			// scan leaves it alone until the merger unlinks it —
+			// otherwise the scan re-adds the file it is about to delete,
+			// and the manifest advertises what nobody can serve.
 			if inv != nil {
 				for _, name := range deletedFiles {
-					inv.RemoveFile(name)
+					inv.RetireFile(name)
 				}
 			}
 

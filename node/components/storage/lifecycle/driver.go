@@ -296,6 +296,7 @@ func (d *Driver) Sweep(ctx context.Context, logger log.Logger) {
 	if logger == nil {
 		logger = log.Root()
 	}
+	d.clearRetiredGoneFiles(logger)
 	d.discoverNewFiles(logger)
 	d.removeGoneFiles(logger)
 	view := d.Inv.View()
@@ -430,6 +431,11 @@ func (d *Driver) discoverNewFiles(logger log.Logger) {
 			if _, ok := d.Inv.LifecycleState(name); ok {
 				continue
 			}
+			// Consolidated away and not yet unlinked: adding it back
+			// re-seeds a file that is about to disappear.
+			if d.Inv.IsRetired(name) {
+				continue
+			}
 			entry := &snapshot.FileEntry{
 				Name:  name,
 				Local: true, // → derives LifecycleDownloaded
@@ -451,6 +457,20 @@ func (d *Driver) discoverNewFiles(logger log.Logger) {
 			logger.Info("[storage-lifecycle] discovered new on-disk files",
 				"count", added, "first", firstAdded, "dir", sd.path)
 		}
+	}
+}
+
+// clearRetiredGoneFiles releases the retired mark once the merger has
+// unlinked the file, so the name is free for whatever takes it next. The
+// mark only has to outlive the gap between retirement and the unlink, and
+// the set is empty in steady state.
+func (d *Driver) clearRetiredGoneFiles(logger log.Logger) {
+	for _, name := range d.Inv.RetiredNames() {
+		if _, err := os.Stat(snapshot.ResolveExistingPath(d.SnapDir, name)); err == nil {
+			continue
+		}
+		d.Inv.ClearRetired(name)
+		logger.Debug("[storage-lifecycle] retired file gone from disk; name released", "name", name)
 	}
 }
 

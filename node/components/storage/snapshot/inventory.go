@@ -261,6 +261,13 @@ type Inventory struct {
 	// clears the mark (file has been re-materialised locally).
 	producing map[string]struct{}
 
+	// retired names files consolidated away by a merge. Unlike
+	// producing, nothing will re-materialise them: they sit on disk
+	// only until the merger unlinks them, and the disk scan must not
+	// take that corpse for a newly discovered file. The driver's sweep
+	// clears the mark once the file is off disk.
+	retired map[string]struct{}
+
 	// nowFn lets tests inject deterministic timestamps. Production
 	// leaves this nil and time.Now() is used. Set via WithClock.
 	nowFn func() time.Time
@@ -273,6 +280,7 @@ func NewInventory() *Inventory {
 		refcount:       make(map[string]int),
 		pendingDeletes: make(map[string]*FileEntry),
 		producing:      make(map[string]struct{}),
+		retired:        make(map[string]struct{}),
 	}
 }
 
@@ -285,6 +293,45 @@ func (inv *Inventory) IsProducing(name string) bool {
 	_, ok := inv.producing[name]
 	inv.mu.RUnlock()
 	return ok
+}
+
+// RetireFile removes name and marks it as consolidated away, so the disk
+// scan leaves it alone for as long as the file survives on disk.
+func (inv *Inventory) RetireFile(name string) {
+	inv.RemoveFile(name)
+	inv.mu.Lock()
+	inv.retired[name] = struct{}{}
+	inv.mu.Unlock()
+}
+
+// IsRetired reports whether name was consolidated away by a merge.
+func (inv *Inventory) IsRetired(name string) bool {
+	inv.mu.RLock()
+	_, ok := inv.retired[name]
+	inv.mu.RUnlock()
+	return ok
+}
+
+// RetiredNames lists the names currently marked retired.
+func (inv *Inventory) RetiredNames() []string {
+	inv.mu.RLock()
+	defer inv.mu.RUnlock()
+	if len(inv.retired) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(inv.retired))
+	for name := range inv.retired {
+		out = append(out, name)
+	}
+	return out
+}
+
+// ClearRetired drops the retired mark, freeing the name for whatever
+// legitimately takes it next.
+func (inv *Inventory) ClearRetired(name string) {
+	inv.mu.Lock()
+	delete(inv.retired, name)
+	inv.mu.Unlock()
 }
 
 // AddFile adds a file entry to the inventory. If an entry with the same name
