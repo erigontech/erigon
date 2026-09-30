@@ -474,7 +474,7 @@ scenario_test() {
     # what the depth-scaled budget sizes, so every poll that sees the
     # download advance credits its own duration back. A download that
     # stops advancing stops earning credit and the budget applies again.
-    local dl_last=-1 dl_credit=0
+    local dl_last=-1 dl_credit=0 dl_advancing=0
     while true; do
         sleep 5
         post_head_hex=$(eth_block_number)
@@ -542,6 +542,9 @@ scenario_test() {
             if [[ -n "${dl_now:-}" ]]; then
                 if [[ $dl_last -ge 0 && $dl_now -gt $dl_last ]]; then
                     dl_credit=$((dl_credit + 30))
+                    dl_advancing=1
+                else
+                    dl_advancing=0
                 fi
                 dl_last=$dl_now
             fi
@@ -577,8 +580,22 @@ scenario_test() {
         # progress but the unwind/recovery genuinely takes longer than
         # the depth-scaled budget. Bumped 2x vs the prior hard timeout
         # since the liveness gate is the primary fail mechanism now.
-        if [[ $elapsed -gt $((recovery_timeout * 2 + dl_credit)) ]]; then
+        #
+        # Credit only ever cancels the polls it was earned in, so it
+        # cannot outrun elapsed: a backfill slow enough to need more
+        # than ~3x the budget hits the net however healthy it is. One
+        # leg-P mode_b died that way at 9325/9420 blocks, minutes from
+        # done. So hold the net back while the backfill is still
+        # advancing — a backfill that stops advancing stops being
+        # exempt, and the stagnation and soft-wedge gates keep catching
+        # the wedges this net is not for. The ceiling below still bounds
+        # the pathological case.
+        if [[ $elapsed -gt $((recovery_timeout * 2 + dl_credit)) && $dl_advancing -eq 0 ]]; then
             echo "  HARD TIMEOUT after ${elapsed}s — exceeded 2x recovery_timeout + ${dl_credit}s of consensus-client backfill (system progressing but extremely slow)"
+            break
+        fi
+        if [[ $elapsed -gt $((recovery_timeout * 4 + dl_credit)) ]]; then
+            echo "  HARD CEILING after ${elapsed}s — 4x recovery_timeout + ${dl_credit}s of backfill credit, cl_dl=${dl_last}"
             break
         fi
     done
