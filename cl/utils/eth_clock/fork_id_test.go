@@ -3,8 +3,8 @@ package eth_clock
 import (
 	"encoding/binary"
 	"math"
-	"slices"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -85,9 +85,9 @@ func TestForkIdNextForkVersionWithBPO(t *testing.T) {
 			beaconCfg := *baseCfg
 			beaconCfg.GloasForkVersion = 0x0700006f
 			beaconCfg.GloasForkEpoch = tc.gloasEpoch
-			beaconCfg.BlobSchedule = append(slices.Clone(baseCfg.BlobSchedule), clparams.BlobParameters{Epoch: tc.bpoEpoch, MaxBlobsPerBlock: 9})
+			beaconCfg.BlobSchedule = []clparams.BlobParameters{{Epoch: tc.bpoEpoch, MaxBlobsPerBlock: 9}}
 			beaconCfg.InitializeForkSchedule()
-			clock := NewEthereumClock(beaconCfg.MinGenesisTime, common.Hash{}, &beaconCfg)
+			clock := NewEthereumClock(genesisAtEpoch(&beaconCfg, beaconCfg.FuluForkEpoch), common.Hash{}, &beaconCfg)
 
 			forkID, err := clock.ForkId()
 			require.NoError(t, err)
@@ -96,4 +96,28 @@ func TestForkIdNextForkVersionWithBPO(t *testing.T) {
 			require.Equal(t, tc.wantEpoch, binary.LittleEndian.Uint64(forkID[8:16]))
 		})
 	}
+}
+
+// Two regular forks at one epoch: next_fork_version is the later one, as
+// compute_fork_version gives at that epoch.
+func TestForkIdNextForkVersionWithForksAtSameEpoch(t *testing.T) {
+	const epoch = uint64(1) << 40
+	_, baseCfg := clparams.GetConfigsByNetwork(chainspec.ChiadoChainID)
+	beaconCfg := *baseCfg
+	beaconCfg.FuluForkEpoch = epoch
+	beaconCfg.GloasForkVersion = 0x0700006f
+	beaconCfg.GloasForkEpoch = epoch
+	beaconCfg.BlobSchedule = nil
+	beaconCfg.InitializeForkSchedule()
+	clock := NewEthereumClock(genesisAtEpoch(&beaconCfg, beaconCfg.ElectraForkEpoch), common.Hash{}, &beaconCfg)
+
+	forkID, err := clock.ForkId()
+	require.NoError(t, err)
+	require.Len(t, forkID, 16)
+	require.Equal(t, common.Bytes4(utils.Uint32ToBytes4(0x0700006f)), common.Bytes4(forkID[4:8]))
+	require.Equal(t, epoch, binary.LittleEndian.Uint64(forkID[8:16]))
+}
+
+func genesisAtEpoch(cfg *clparams.BeaconChainConfig, epoch uint64) uint64 {
+	return uint64(time.Now().Unix()) - epoch*cfg.SlotsPerEpoch*cfg.SecondsPerSlot
 }

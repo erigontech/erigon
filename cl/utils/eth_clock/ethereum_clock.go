@@ -183,13 +183,7 @@ func (t *ethereumClockImpl) ForkId() ([]byte, error) {
 	if nextForkEpoch != t.beaconCfg.FarFutureEpoch {
 		versionEpoch = nextForkEpoch
 	}
-	var nextForkVersion [4]byte
-	for _, fork := range forkList(t.beaconCfg.ForkVersionSchedule) {
-		if fork.epoch > versionEpoch {
-			break
-		}
-		nextForkVersion = fork.version
-	}
+	nextForkVersion := utils.Uint32ToBytes4(t.beaconCfg.GetForkVersionByVersion(t.beaconCfg.GetCurrentStateVersion(versionEpoch)))
 
 	enrForkId := make([]byte, 16)
 	copy(enrForkId, digest[:])                                  // current fork digest
