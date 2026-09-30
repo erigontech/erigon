@@ -150,17 +150,18 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 // present at txIdx. When incarnation >= 0 the cell must be at that incarnation — a newer
 // one means the flip targets a stale version, so panic rather than mark the wrong one.
 func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx, incarnation int, flag statusFlag) {
-	if cells == nil {
-		panic(missingCellMsg("markFlag", addr, path, key, txIdx))
+	var ci *WriteCell[T]
+	if cells != nil {
+		ci, _ = cells.Get(txIdx)
 	}
-	ci, ok := cells.Get(txIdx)
-	if !ok {
+	if ci == nil {
 		panic(missingCellMsg("markFlag", addr, path, key, txIdx))
 	}
 	// A cell at an EARLIER incarnation than the run is legitimate under the equal-value
 	// write-side no-bump; only a NEWER one means the flip targets a stale version.
 	if incarnation >= 0 && ci.incarnation > incarnation {
-		panic(fmt.Sprintf("%s: incarnation have=%d want=%d", missingCellMsg("markFlag", addr, path, key, txIdx), ci.incarnation, incarnation))
+		panic(fmt.Sprintf("markFlag: incarnation have=%d want=%d addr=%x path=%s key=%x txIdx=%d",
+			ci.incarnation, incarnation, addr.Value(), path, key.Value(), txIdx))
 	}
 	ci.flag = flag
 }
@@ -1248,14 +1249,11 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			valid = checkVersion(version, rr.Version())
 			if valid != VersionValid && rr.Version().TxIndex == version.TxIndex &&
 				matchesLive != nil && matchesLive() {
-				// Value tiebreaker: the SAME writer re-published under a new incarnation
-				// but the value this read saw is still the live one, so the read is
-				// accurate. Without it one re-execution invalidates every reader of a hot
-				// cell (the block's shared gas payer) and serializes the block. Restricted
-				// to the same writer: a different, higher writer means the read bound to a
-				// version that is no longer the one in effect, and an equal value there can
-				// still hide a lifecycle change (a lower tx's SELFDESTRUCT) the version
-				// check is the only thing that catches.
+				// The same writer re-published under a new incarnation but the value this
+				// read saw is still live, so the read stands; without this one
+				// re-execution invalidates every reader of a hot cell and serializes the
+				// block. Only the same writer: under a higher one an equal value can hide
+				// a lifecycle change that the version check alone catches.
 				valid = VersionValid
 			}
 			// An origin AddressPath read is the committed baseline; re-run the create/

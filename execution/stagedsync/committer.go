@@ -883,11 +883,9 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		return nil, err
 	}
 
-	// The exec loop saves the block's accumulator by hash before any of its work is
-	// dispatched, so the lookup identifies this block's changeset whatever the loop
-	// has rotated to since — including at a mid-block step boundary. There is no
-	// live-accumulator fallback on purpose: it would fold these writes into whichever
-	// block happens to be bound, so a missing save is a wiring error, not a slow path.
+	// The exec loop saves the accumulator by hash before dispatching the block, so
+	// this identifies the block's changeset whatever the loop rotated to since. A
+	// live-accumulator fallback would fold these writes into whichever block is bound.
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
 	if cs == nil {
 		return nil, fmt.Errorf("no changeset accumulator saved for block %d (%x)", t.blockNum, t.blockHash)

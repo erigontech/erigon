@@ -222,10 +222,10 @@ func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64, blockHas
 		pe.currentChangeSetBlock = blockNum
 		pe.currentChangeSetHash = common.Hash{}
 	}
-	// Save by hash as soon as the block starts, not only at its end: the
-	// calculator's mid-block step-boundary checkpoint routes its commitment
-	// writes through GetChangesetByHash, and an unsaved changeset drops them from
-	// the unwind diff, leaving commitment ahead of the state after a reorg.
+	// Save at block start, not only at its end: the calculator's mid-block
+	// step-boundary checkpoint looks the changeset up by hash, and an unsaved one
+	// drops those commitment writes from the unwind diff, leaving commitment ahead
+	// of the state after a reorg.
 	if blockHash != (common.Hash{}) && blockHash != pe.currentChangeSetHash {
 		pe.currentChangeSetHash = blockHash
 		pe.domains().SavePastChangesetAccumulator(blockHash, blockNum, pe.currentChangeSet)
@@ -1981,11 +1981,10 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
-				// A same-writer re-publication may still be forgiven by the value
-				// tiebreaker, so it names no blocker: parking on it would wait for a
-				// writer that did not invalidate this read. When it does invalidate
-				// (the value changed) the caller re-executes at once, which is right —
-				// the new value is already published.
+				// A same-writer re-publication names no blocker: the value tiebreaker
+				// may forgive it, and parking would wait on a writer that did not
+				// invalidate this read. If the value did change, re-executing at once is
+				// right — the new value is already published.
 				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
 					// Invariant: a read can only be invalidated by a PREDECESSOR write.
 					// A blocker >= this task is a forward dependency (a future write
