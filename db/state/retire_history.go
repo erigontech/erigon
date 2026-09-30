@@ -72,7 +72,7 @@ func (ht *HistoryRoTx) filesBeforeStep(cutoff kv.Step) (deleted []string, aged [
 	for _, out := range outs {
 		deleted = append(deleted, out.FilePaths(ht.h.dirs.Snap)...)
 	}
-	return deleted, []agedFiles{iAged, agedFiles{ht.h.dirtyFiles, ht.h.FilenameBase, outs}}
+	return deleted, []agedFiles{iAged, {ht.h.dirtyFiles, ht.h.FilenameBase, outs}}
 }
 
 // Retire drops old visible History+InvertedIndex files below their per-domain cutoff.

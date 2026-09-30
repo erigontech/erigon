@@ -19,7 +19,6 @@ func buildTestSeq(baseNum uint64, vals ...uint64) []byte {
 }
 
 func TestMultiEncSeq(t *testing.T) {
-
 	t.Run("plain elias fano", func(t *testing.T) {
 		b := make([]byte, 0)
 
@@ -275,14 +274,16 @@ func TestMergeEncodingBoundary(t *testing.T) {
 	}
 
 	// 8+8=16: must stay simple encoding
-	raw16 := merge(1000,
+	raw16 := merge(
+		1000,
 		buildTestSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
 		buildTestSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016),
 	)
 	require.Equal(t, byte(SimpleEncoding)|15, raw16[0], "8+8=16 must use simple encoding")
 
 	// 8+9=17: must flip to rebased EF
-	raw17 := merge(1000,
+	raw17 := merge(
+		1000,
 		buildTestSeq(1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008),
 		buildTestSeq(1000, 1009, 1010, 1011, 1012, 1013, 1014, 1015, 1016, 1017),
 	)

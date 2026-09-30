@@ -548,6 +548,7 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 		_ = g.Wait()
 	}
 }
+
 func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader) error {
 	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
@@ -572,7 +573,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 			continue
 		}
 
-		//Code domain using .bt index - means no false-positives
+		// Code domain using .bt index - means no false-positives
 		if code, _ := stateReader.ReadAccountCode(accounts.InternAddress(sender)); len(code) > 0 {
 			_, _ = code[0], code[len(code)-1]
 		}
@@ -601,7 +602,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 					}
 				}
 			}
-			//TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
+			// TODO: exec txn and pre-fetch commitment keys. see also: `func (p *statePrefetcher) Prefetch` in geth
 		}
 
 	}

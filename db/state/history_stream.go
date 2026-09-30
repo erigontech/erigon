@@ -126,7 +126,7 @@ func (hi *HistoryRangeAsOfFiles) advanceInFiles() error {
 			heap.Pop(&hi.h)
 		}
 
-		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { //TODO: replace by seekInFiles()
+		if hi.from != nil && bytes.Compare(key, hi.from) < 0 { // TODO: replace by seekInFiles()
 			continue
 		}
 
@@ -191,8 +191,8 @@ func (hi *HistoryRangeAsOfFiles) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from < to
-	//Desc: [from, to) AND from > to
+	// Asc:  [from, to) AND from < to
+	// Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
 	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
@@ -268,6 +268,7 @@ func (hi *HistoryRangeAsOfDB) advance() (err error) {
 	}
 	return hi.advanceSmallVals()
 }
+
 func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 	var seek []byte
 	var err error
@@ -312,6 +313,7 @@ func (hi *HistoryRangeAsOfDB) advanceLargeVals() error {
 	hi.nextKey = nil
 	return nil
 }
+
 func (hi *HistoryRangeAsOfDB) advanceSmallVals() error {
 	var seek []byte
 	var err error
@@ -373,8 +375,8 @@ func (hi *HistoryRangeAsOfDB) HasNext() bool {
 		return true
 	}
 
-	//Asc:  [from, to) AND from < to
-	//Desc: [from, to) AND from > to
+	// Asc:  [from, to) AND from < to
+	// Desc: [from, to) AND from > to
 	cmp := bytes.Compare(hi.nextKey, hi.toPrefix)
 	return (bool(hi.orderAscend) && cmp < 0) || (!bool(hi.orderAscend) && cmp > 0)
 }
@@ -555,6 +557,7 @@ func (hi *HistoryChangesIterDB) Close() {
 		hi.valsCDup.Close()
 	}
 }
+
 func (hi *HistoryChangesIterDB) advance() (err error) {
 	// not large:
 	//   keys: txNum -> key1+key2
@@ -640,6 +643,7 @@ func (hi *HistoryChangesIterDB) advanceLargeVals() error {
 	hi.nextKey = nil
 	return nil
 }
+
 func (hi *HistoryChangesIterDB) advanceSmallVals() (err error) {
 	var k []byte
 	if hi.valsCDup == nil {

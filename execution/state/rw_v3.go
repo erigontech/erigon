@@ -80,6 +80,9 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // needed to reconstruct the serialised account.
 func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
+		// One buffer for every storage key this call writes: consumers copy what they keep.
+		// Made on the first slot, since an array here escapes even when unused.
+		var storageKey []byte
 		type addrState struct {
 			balance        *uint256.Int
 			nonce          *uint64
@@ -273,9 +276,12 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 
 			for _, item := range d.storage {
 				key := item.key.Value()
-				composite := make([]byte, 0, len(address)+len(key))
-				composite = append(composite, address[:]...)
-				composite = append(composite, key[:]...)
+				if storageKey == nil {
+					storageKey = make([]byte, length.Addr+length.Hash)
+				}
+				copy(storageKey, address[:])
+				copy(storageKey[length.Addr:], key[:])
+				composite := storageKey
 				v := item.value.Bytes()
 				if len(v) == 0 {
 					if dbg.TraceApply && (trace || dbg.TraceAccount(addr.Handle())) {
@@ -698,6 +704,9 @@ type Writer struct {
 	trace       bool
 	accumulator *shards.Accumulator
 	txNum       uint64
+	// storageKey is the address+slot the next storage write addresses. Consumers copy what
+	// they keep; the buffer holds only across sequential writes, and a Writer is used that way.
+	storageKey [length.Addr + length.Hash]byte
 }
 
 func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint64) *Writer {
@@ -764,7 +773,7 @@ func (w *Writer) UpdateAccountData(address accounts.Address, original, account *
 	}
 	addressValue := address.Value()
 	if original.Incarnation > account.Incarnation {
-		//del, before create: to clanup code/storage
+		// del, before create: to clanup code/storage
 		if err := w.tx.DomainDel(kv.CodeDomain, addressValue[:], w.txNum, nil); err != nil {
 			return err
 		}
@@ -824,9 +833,9 @@ func (w *Writer) WriteAccountStorage(address accounts.Address, incarnation uint6
 	if !key.IsNil() {
 		keyValue = key.Value()
 	}
-	composite := make([]byte, 0, len(addressValue)+len(keyValue))
-	composite = append(composite, addressValue[:]...)
-	composite = append(composite, keyValue[:]...)
+	copy(w.storageKey[:], addressValue[:])
+	copy(w.storageKey[length.Addr:], keyValue[:])
+	composite := w.storageKey[:]
 	v := value.Bytes()
 	if w.trace {
 		fmt.Printf("storage: %x,%x,%x\n", address, key, v)
@@ -894,6 +903,12 @@ func (r *ReaderV3) TracePrefix() string {
 func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	_, acc, err := r.readAccountData(address)
 	return acc, err
+}
+
+func (r *ReaderV3) HasAccount(address accounts.Address) (bool, error) {
+	r.addr = address.Value()
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
+	return len(enc) > 0, err
 }
 
 func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {

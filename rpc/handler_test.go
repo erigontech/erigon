@@ -30,7 +30,6 @@ import (
 )
 
 func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
-
 	tests := map[string]struct {
 		params   []byte
 		expected string
@@ -92,21 +91,21 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				}
 				if id == 4 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyArray()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
 				if id == 5 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyObject()
 					stream.WriteObjectEnd()
 					return errors.New("id 4")
 				}
 				if id == 6 {
 					stream.WriteObjectStart()
-					stream.WriteObjectField("structLogs")
+					stream.Field("structLogs")
 					stream.WriteEmptyArray()
 					// intentionally leave the result object open: the tracer erroring out
 					// mid-write must not leave the response's "result" object unclosed.
@@ -125,7 +124,7 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 				streamable:  true,
 			}
 
-			args, err := parsePositionalArguments((msg).Params, cb.argTypes)
+			args, err := parsePositionalArguments(msg.Params, cb.argTypes)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -142,7 +141,6 @@ func TestHandlerDoesNotDoubleWriteNull(t *testing.T) {
 			assert.Equal(t, testParams.expected, output, "expected output should match")
 		})
 	}
-
 }
 
 // Smoke test for the streamable-callback path: runMethod writes the result

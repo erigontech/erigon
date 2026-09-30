@@ -50,12 +50,12 @@ func TestPutAppendHas(t *testing.T) {
 	require.NoError(t, err)
 	defer batch.Close()
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.5")))
-	//MDBX's APPEND checking only keys, not values
+	// MDBX's APPEND checking only keys, not values
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 
 	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("AAAA"), []byte("value1.3")))
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("CBAA"), []byte("value3.5")))
-	//MDBX's APPEND checking only keys, not values
+	// MDBX's APPEND checking only keys, not values
 	require.NoError(t, batch.Append(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
 	require.NoError(t, batch.AppendDup(kv.HeaderNumber, []byte("CBAA"), []byte("value3.1")))
 	// Pure Go backend allows out-of-order Append (no MDBX ordering check).
@@ -1062,6 +1062,84 @@ func TestDomainReadErrorsPropagate(t *testing.T) {
 
 			_, _, err = tx.HistorySeek(kv.ReceiptDomain, key, 1)
 			require.ErrorIs(t, err, wantErr, "HistorySeek must propagate the DomainReader error")
+		})
+	}
+}
+
+// historyDisabledDomainReader stands in for an in-memory batch that keeps only the latest value per
+// key: it has no historical answer to give, and says so with kv.ErrInMemHistoryDisabled. Receipts
+// are still served from memory, matching the carve-out in TemporalMemBatch.GetAsOf.
+type historyDisabledDomainReader struct{ receipt []byte }
+
+func (r historyDisabledDomainReader) GetAsOf(name kv.Domain, _ []byte, _ uint64) ([]byte, bool, error) {
+	if name == kv.ReceiptDomain {
+		return r.receipt, true, nil
+	}
+	return nil, false, kv.ErrInMemHistoryDisabled
+}
+
+func (r historyDisabledDomainReader) HistorySeek(name kv.Domain, k []byte, ts uint64) ([]byte, bool, error) {
+	return r.GetAsOf(name, k, ts)
+}
+
+// committedTemporalTx answers every history read with a fixed value, standing in for the backing
+// transaction that holds the committed history.
+type committedTemporalTx struct {
+	kv.TemporalTx
+	val []byte
+}
+
+func (t *committedTemporalTx) GetAsOf(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return t.val, true, nil
+}
+
+func (t *committedTemporalTx) HistorySeek(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return t.val, true, nil
+}
+
+// TestHistoryDisabledFallsThrough covers both overlay read views: when the DomainReader reports that
+// it holds no history, the read must reach the backing tx instead of failing, while receipt reads
+// keep being answered from memory.
+func TestHistoryDisabledFallsThrough(t *testing.T) {
+	t.Parallel()
+
+	_, rwTx := newTestTx(t)
+	committed := []byte("committed")
+	backingTx := &committedTemporalTx{TemporalTx: rwTx, val: committed}
+
+	batch, err := membatchwithdb.NewMemoryBatch(backingTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	inMemReceipt := []byte("in-memory receipt")
+	batch.DomainReader = historyDisabledDomainReader{receipt: inMemReceipt}
+
+	key := []byte{0x3}
+	for name, tx := range map[string]kv.TemporalTx{
+		"MemoryMutation":          batch,
+		"OverlayTemporalReadView": batch.NewTemporalReadView(backingTx),
+	} {
+		t.Run(name, func(t *testing.T) {
+			for _, domain := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+				t.Run(domain.String(), func(t *testing.T) {
+					val, ok, err := tx.GetAsOf(domain, key, 1)
+					require.NoError(t, err, "GetAsOf must fall through to the backing tx")
+					require.True(t, ok)
+					require.Equal(t, committed, val)
+
+					val, ok, err = tx.HistorySeek(domain, key, 1)
+					require.NoError(t, err, "HistorySeek must fall through to the backing tx")
+					require.True(t, ok)
+					require.Equal(t, committed, val)
+				})
+			}
+
+			t.Run("ReceiptDomain", func(t *testing.T) {
+				val, ok, err := tx.GetAsOf(kv.ReceiptDomain, key, 1)
+				require.NoError(t, err)
+				require.True(t, ok)
+				require.Equal(t, inMemReceipt, val, "receipts must still come from the overlay")
+			})
 		})
 	}
 }

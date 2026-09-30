@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
-	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/state"
@@ -174,8 +174,8 @@ func (ba *BlockAssembler) AddTransactions(
 	ibs *state.IntraBlockState,
 	interrupt *atomic.Bool,
 	logPrefix string,
-	logger log.Logger) (types.Logs, bool, error) {
-
+	logger log.Logger,
+) (types.Logs, bool, error) {
 	// Use len(ba.Txns) instead of ibs.TxnIndex()+1 to avoid gaps in the
 	// BAL access index sequence. When a batch ends with a failed tx,
 	// ibs.TxnIndex() reflects the failed tx's index (set by SetTxContext
@@ -227,7 +227,7 @@ func (ba *BlockAssembler) AddTransactions(
 
 	gasUsed := &ba.gasUsed
 
-	var commitTx = func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
+	commitTx := func(txn types.Transaction, coinbase accounts.Address, vmConfig *vm.Config, chainConfig *chain.Config, ibs *state.IntraBlockState, current *AssembledBlock) ([]*types.Log, error) {
 		ibs.SetTxContext(current.Header.Number.Uint64(), txnIdx)
 		// EIP-8037: execution and state gas pool dimensions can deplete
 		// independently — execution-time state-gas (e.g. CREATE code deposit)
@@ -298,6 +298,8 @@ func (ba *BlockAssembler) AddTransactions(
 		}
 	}()
 
+	minTxGas := mdgas.MinTxGas(ba.cfg.ChainConfig.IsAmsterdam(header.Time))
+
 	done := false
 
 LOOP:
@@ -322,8 +324,10 @@ LOOP:
 			stopped = time.NewTicker(500 * time.Millisecond)
 		}
 		// If we don't have enough gas for any further transactions then we're done.
-		if gasPool.Gas() < params.TxGas {
-			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", params.TxGas)
+		// Only the execution dimension bounds this exit: AA txns draw solely on the
+		// execution pool, so a state-gas exit would drop ones that still fit.
+		if gasPool.Gas() < minTxGas {
+			logger.Debug(fmt.Sprintf("[%s] Not enough gas for further transactions", logPrefix), "have", gasPool, "want", minTxGas)
 			done = true
 			break
 		}
@@ -396,7 +400,6 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 	}
 	block, ba.Requests, err = protocol.FinalizeBlockExecution(ba.cfg.Engine, stateReader, ba.Header, ba.Txns, ba.Uncles,
 		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
-
 	if err != nil {
 		return nil, fmt.Errorf("cannot finalize block execution: %w", err)
 	}

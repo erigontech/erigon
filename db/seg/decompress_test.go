@@ -362,7 +362,7 @@ func prepareLoremDictUncompressed(t *testing.T) *Decompressor {
 }
 
 func TestUncompressed(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDictUncompressed(t)
 	defer d.Close()
 	g := d.MakeGetter()
@@ -394,7 +394,7 @@ func TestUncompressed(t *testing.T) {
 	})
 	t.Run("BinarySearch end of file", func(t *testing.T) {
 		require := require.New(t)
-		//last word is `voluptate`
+		// last word is `voluptate`
 		_, ok := g.BinarySearch([]byte("voluptate"), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ := g.Next(nil)
@@ -409,7 +409,7 @@ func TestUncompressed(t *testing.T) {
 
 	t.Run("BinarySearch begin of file", func(t *testing.T) {
 		require := require.New(t)
-		//first word is ``
+		// first word is ``
 		_, ok := g.BinarySearch([]byte(""), d.Count(), func(i uint64) (offset uint64) { return offsets[i] })
 		require.True(ok)
 		k, _ := g.Next(nil)
@@ -420,11 +420,10 @@ func TestUncompressed(t *testing.T) {
 		k, _ = g.Next(nil)
 		require.Empty(string(k))
 	})
-
 }
 
 func TestDecompressor_OpenCorrupted(t *testing.T) {
-	var loremStrings = append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
+	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	logger := log.New()
 	tmpDir := t.TempDir()
 
@@ -520,7 +519,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		fpath := filepath.Join(tmpDir, "1gibberish")
-		err = os.WriteFile(fpath, aux, 0644)
+		err = os.WriteFile(fpath, aux, 0o644)
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
@@ -532,7 +531,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		require.NoError(t, err)
 
 		aux = make([]byte, compressedMinSize)
-		err = os.WriteFile(fpath, aux, 0644)
+		err = os.WriteFile(fpath, aux, 0o644)
 		require.NoError(t, err)
 
 		d, err = NewDecompressor(fpath)
@@ -548,7 +547,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		binary.BigEndian.PutUint64(aux[16:24], 10) // pattern dict size in bytes
 
 		fpath := filepath.Join(tmpDir, "invalidPatternDictionarySize")
-		err := os.WriteFile(fpath, aux, 0644)
+		err := os.WriteFile(fpath, aux, 0o644)
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
@@ -564,7 +563,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		binary.BigEndian.PutUint64(aux[24:32], 10) // dict size in bytes
 
 		fpath := filepath.Join(tmpDir, "invalidDictionarySize")
-		err := os.WriteFile(fpath, aux, 0644)
+		err := os.WriteFile(fpath, aux, 0o644)
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)
@@ -581,7 +580,7 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 		// dict size in bytes 0
 
 		fpath := filepath.Join(tmpDir, "fileSizeShouldBeMinimal")
-		err := os.WriteFile(fpath, aux, 0644)
+		err := os.WriteFile(fpath, aux, 0o644)
 		require.NoError(t, err)
 
 		d, err := NewDecompressor(fpath)

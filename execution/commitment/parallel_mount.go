@@ -25,6 +25,7 @@ func (hph *HexPatriciaHashed) mountTo(base *HexPatriciaHashed, nibble int) {
 	hph.branchBefore[0] = base.branchBefore[fork]
 	hph.touchMap[0] = base.touchMap[fork]
 	hph.afterMap[0] = base.afterMap[fork]
+	hph.witnessPath[0] = base.witnessPath[fork]
 	copy(hph.depthsToTxNum[:], base.depthsToTxNum[:])
 
 	// The clone did not read this row; the base did, so it holds no record for it.
