@@ -39,8 +39,9 @@ type SentryStreamS[T protoreflect.ProtoMessage] struct {
 	grpc.ServerStream
 }
 
-// Send evicts old messages as needed instead of waiting for a slow receiver.
-// The caller must not modify m while it is queued.
+// Send queues m without copying and evicts old messages instead of waiting for
+// a slow receiver. After a successful send, the caller must not modify m or its
+// payload, since queued messages and receivers may share the same data.
 func (s *SentryStreamS[T]) Send(m T) error {
 	if err := s.Ctx.Err(); err != nil {
 		return err
@@ -51,7 +52,8 @@ func (s *SentryStreamS[T]) Send(m T) error {
 func (s *SentryStreamS[T]) Context() context.Context { return s.Ctx }
 
 // Err closes the stream with err unless it is nil or the stream is already closed.
-// Receivers drain queued messages, then receive the error once, followed by EOF.
+// Receivers drain queued messages, then receive the error once, followed by EOF,
+// unless their context is canceled.
 func (s *SentryStreamS[T]) Err(err error) {
 	if err == nil {
 		return

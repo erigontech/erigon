@@ -151,8 +151,9 @@ func pumpStreamLoop[TMessage any](
 			return err
 		}
 
-		// Keep the backlog in the upstream queues, which bound bytes and evict
-		// old messages. Reading ahead here would retain copies outside that budget.
+		// Handle before reading again so slow consumers leave the backlog upstream.
+		// Read-ahead would retain payload copies after the upstream queues release
+		// their byte budget, bypassing the queue limits.
 		if err := handleInboundMessage(ctx, req, sentry); err != nil {
 			logger.Debug("Handling incoming message", "stream", streamName, "err", err)
 		}

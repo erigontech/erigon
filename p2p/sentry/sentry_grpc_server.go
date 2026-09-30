@@ -1502,6 +1502,8 @@ func (ss *GrpcServer) send(msgID sentryproto.MessageId, peerID [64]byte, b []byt
 		Id:     msgID,
 		Data:   b,
 	}
+	// Only enqueue here: transport sends must stay outside messageStreamsLock
+	// so slow subscribers cannot block peer handlers or subscription changes.
 	for i := range ss.messageStreams[msgID] {
 		_ = ss.messageStreams[msgID][i].Send(req)
 	}
