@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -49,13 +50,9 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 	}
 	defer tx.Rollback()
 
-	rcacheDomainProgress := tx.Debug().DomainProgress(kv.RCacheDomain)
-	rcacheTip, ok, err := txNumsReader.FindBlockNum(ctx, tx, rcacheDomainProgress)
+	rcacheTip, err := RCacheEndBlockNum(ctx, tx, txNumsReader)
 	if err != nil {
-		return fmt.Errorf("findBlockNum(%d) fails: %w", rcacheDomainProgress, err)
-	}
-	if !ok {
-		return fmt.Errorf("findBlockNum(%d) not found", rcacheDomainProgress)
+		return err
 	}
 
 	if err := ValidateDomainProgress(ctx, db, kv.RCacheDomain, txNumsReader); err != nil {
@@ -64,6 +61,32 @@ func CheckReceiptRootIntegrity(ctx context.Context, sc SamplerCfg, db kv.Tempora
 	tx.Rollback()
 
 	return CheckRCacheRootAtBlkRange(ctx, sc, db, blockReader, cc, 1, rcacheTip, failFast, logger)
+}
+
+func RCacheEndBlockNum(ctx context.Context, tx kv.TemporalTx, txNumsReader rawdbv3.TxNumsReader) (uint64, error) {
+	visibleEnd, ok := tx.Debug().DomainVisibleEnd(kv.RCacheDomain)
+	if !ok {
+		visibleEnd = tx.Debug().DomainProgress(kv.RCacheDomain)
+	}
+	if visibleEnd == 0 {
+		return 0, nil
+	}
+	lastTxNum := visibleEnd - 1
+	tip, ok, err := txNumsReader.FindBlockNum(ctx, tx, lastTxNum)
+	if err != nil {
+		return 0, fmt.Errorf("findBlockNum(%d) fails: %w", lastTxNum, err)
+	}
+	if !ok {
+		return 0, fmt.Errorf("findBlockNum(%d) not found", lastTxNum)
+	}
+	tipMaxTxNum, err := txNumsReader.Max(ctx, tx, tip)
+	if err != nil {
+		return 0, err
+	}
+	if tipMaxTxNum == lastTxNum {
+		return tip + 1, nil
+	}
+	return tip, nil
 }
 
 // CheckRCacheRootAtBlk verifies the receipt root for a single block by
