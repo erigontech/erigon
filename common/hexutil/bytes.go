@@ -20,6 +20,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"reflect"
+	"slices"
 )
 
 var bytesT = reflect.TypeFor[Bytes]()
@@ -35,7 +36,7 @@ const HexPrefix = `0x`
 func (b Bytes) MarshalText() ([]byte, error) {
 	result := make([]byte, len(b)*2+2)
 	copy(result, HexPrefix)
-	hex.Encode(result[2:], b)
+	encodeHex(result[2:], b)
 	return result, nil
 }
 
@@ -43,7 +44,7 @@ func (b Bytes) MarshalText() ([]byte, error) {
 // counterpart to MarshalText. Only encoding/json/v2 consults it today.
 func (b Bytes) AppendText(dst []byte) ([]byte, error) {
 	dst = append(dst, HexPrefix...)
-	return hex.AppendEncode(dst, b), nil
+	return appendHex(dst, b), nil
 }
 
 // QuotedLen is the length of n bytes encoded by AppendQuoted.
@@ -51,7 +52,11 @@ func QuotedLen(n int) int { return len(`"0x"`) + 2*n }
 
 // AppendQuoted appends b as a 0x-prefixed hex JSON string.
 func AppendQuoted(dst, b []byte) []byte {
-	return append(hex.AppendEncode(append(dst, `"`+HexPrefix...), b), '"')
+	n, size := len(dst), QuotedLen(len(b))
+	dst = slices.Grow(dst, size)[:n+size]
+	dst[n], dst[n+1], dst[n+2], dst[n+size-1] = '"', '0', 'x', '"'
+	encodeHex(dst[n+3:n+size-1], b)
+	return dst
 }
 
 // UnmarshalJSON implements json.Unmarshaler.

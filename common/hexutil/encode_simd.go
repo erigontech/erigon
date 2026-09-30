@@ -16,35 +16,30 @@
 
 //go:build go1.27 && goexperiment.simd && amd64
 
-package simdhex
+package hexutil
 
-import (
-	"encoding/hex"
-	"simd/archsimd"
-)
+import "simd/archsimd"
 
 var (
-	digits32 = [32]uint8{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
+	hexDigits32 = [32]uint8{'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f',
 		'0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'a', 'b', 'c', 'd', 'e', 'f'}
-	useAVX2 = archsimd.X86.AVX2()
+	hasAVX2 = archsimd.X86.AVX2()
 )
 
-// Encode is hex.Encode. Each source byte is widened to a uint16 holding its high nibble in
-// the low byte and its low nibble in the high byte, so one in-lane byte shuffle turns the
-// nibbles into digits already in output order.
-func Encode(dst, src []byte) int {
-	if !useAVX2 || len(src) < 16 {
-		return hex.Encode(dst, src)
+// encodeVector encodes whole 16-byte blocks of src and returns how many source bytes it took.
+// Each byte is widened to a uint16 holding its high nibble in the low byte and its low nibble
+// in the high byte, so one in-lane byte shuffle turns the nibbles into digits in output order.
+func encodeVector(dst, src []byte) int {
+	if !hasAVX2 || len(src) < 16 {
+		return 0
 	}
-	_ = dst[2*len(src)-1]
-	digits := archsimd.LoadUint8x32Array(&digits32)
+	digits := archsimd.LoadUint8x32Array(&hexDigits32)
 	low := archsimd.BroadcastUint16x16(0x0f)
 	i := 0
 	for ; i+16 <= len(src); i += 16 {
 		w := archsimd.LoadUint8x16Array((*[16]uint8)(src[i:])).ExtendToUint16()
 		w = w.ShiftAllRight(4).Or(w.And(low).ShiftAllLeft(8))
-		digits.PermuteOrZeroGrouped(w.AsUint8x32().AsInt8x32()).Store(dst[2*i:])
+		digits.PermuteOrZeroGrouped(w.AsUint8x32().AsInt8x32()).StoreArray((*[32]uint8)(dst[2*i:]))
 	}
-	hex.Encode(dst[2*i:], src[i:])
-	return 2 * len(src)
+	return i
 }

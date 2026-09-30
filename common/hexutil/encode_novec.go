@@ -16,9 +16,6 @@
 
 //go:build !(go1.27 && goexperiment.simd && amd64)
 
-package simdhex
+package hexutil
 
-import "encoding/hex"
-
-// Encode is hex.Encode.
-func Encode(dst, src []byte) int { return hex.Encode(dst, src) }
+func encodeVector(dst, src []byte) int { return 0 }

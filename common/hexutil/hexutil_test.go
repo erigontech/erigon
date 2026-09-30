@@ -17,8 +17,10 @@
 package hexutil
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
+	"math/rand/v2"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -259,5 +261,20 @@ func TestIsValidQuantity(t *testing.T) {
 			err := IsValidQuantity(test.input)
 			checkError(t, test.input, err, test.wantErr)
 		})
+	}
+}
+
+func TestEncodeHexMatchesStdlib(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	for n := 0; n <= 300; n++ {
+		src := make([]byte, n)
+		for i := range src {
+			src[i] = byte(r.Uint32())
+		}
+		want := hex.EncodeToString(src)
+		dst := make([]byte, 2*n)
+		encodeHex(dst, src)
+		require.Equal(t, want, string(dst), "len %d", n)
+		require.Equal(t, `x"0x`+want+`"`, string(AppendQuoted([]byte("x"), src)), "len %d", n)
 	}
 }
