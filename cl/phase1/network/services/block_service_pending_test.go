@@ -40,10 +40,17 @@ type blockDBError struct {
 	viewErr      error
 	updateErr    error
 	failUpdateAt int
+	views        int
 	updates      int
+	beforeView   func()
+	beforeUpdate func()
 }
 
 func (db *blockDBError) View(ctx context.Context, f func(kv.Tx) error) error {
+	db.views++
+	if db.beforeView != nil {
+		db.beforeView()
+	}
 	if db.viewErr != nil {
 		return db.viewErr
 	}
@@ -52,25 +59,79 @@ func (db *blockDBError) View(ctx context.Context, f func(kv.Tx) error) error {
 
 func (db *blockDBError) Update(ctx context.Context, f func(kv.RwTx) error) error {
 	db.updates++
+	if db.beforeUpdate != nil {
+		db.beforeUpdate()
+	}
 	if db.updateErr != nil && (db.failUpdateAt == 0 || db.updates == db.failUpdateAt) {
 		return db.updateErr
 	}
 	return db.RwDB.Update(ctx, f)
 }
 
-func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
+func TestPendingGossipRetainsCanceledDatabaseAttempt(t *testing.T) {
 	for _, operation := range []string{"read", "write"} {
 		t.Run(operation, func(t *testing.T) {
 			api, block, fcu, _, _ := newGloasGossipValidationFixture(t, func(head, _ common.Hash) common.Hash { return head })
 			service := api.(*blockService)
 			processing := &onBlockErrorStore{ForkChoiceStorage: fcu}
 			service.forkchoiceStore = processing
-			failure := errors.New("database unavailable")
+			ctx, cancel := context.WithCancel(t.Context())
+			defer cancel()
 			db := &blockDBError{RwDB: service.db}
 			if operation == "read" {
-				db.viewErr = failure
+				db.beforeView = cancel
 			} else {
+				db.beforeUpdate = cancel
+			}
+			service.db = db
+
+			err := service.ProcessMessage(ctx, nil, block)
+			require.ErrorIs(t, err, ErrIgnore)
+			require.ErrorIs(t, err, context.Canceled)
+			require.NotErrorIs(t, err, errBlockStorage)
+			root, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			job := serviceJob(t, service, root)
+			require.Zero(t, processing.calls.Load())
+
+			service.processScheduledBlock(ctx, root, job, time.Now())
+			require.ErrorIs(t, job.lastAttempt.err, context.Canceled)
+			require.NotErrorIs(t, job.lastAttempt.err, errBlockStorage)
+			require.True(t, job.retryAfter.IsZero())
+			require.Zero(t, job.retryDelay)
+			require.False(t, job.terminal)
+
+			db.beforeView, db.beforeUpdate = nil, nil
+			service.processScheduledBlock(t.Context(), root, job, time.Now())
+			require.Equal(t, int32(1), processing.calls.Load())
+			_, queued := service.blocksScheduledForLaterExecution.Load(root)
+			require.False(t, queued)
+		})
+	}
+}
+
+func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		writeFailure     bool
+		interveningError error
+	}{
+		{name: "read"},
+		{name: "write", writeFailure: true},
+		{name: "read with missing data", interveningError: forkchoice.ErrEIP4844DataNotAvailable},
+		{name: "read with missing segment", interveningError: forkchoice.ErrMissingSegment},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			api, block, fcu, _, _ := newGloasGossipValidationFixture(t, func(head, _ common.Hash) common.Hash { return head })
+			service := api.(*blockService)
+			processing := &onBlockErrorStore{ForkChoiceStorage: fcu}
+			service.forkchoiceStore = processing
+			failure := errors.New("database unavailable")
+			db := &blockDBError{RwDB: service.db}
+			if tc.writeFailure {
 				db.updateErr = failure
+			} else {
+				db.viewErr = failure
 			}
 			service.db = db
 
@@ -82,14 +143,34 @@ func TestPendingGossipRetainsInitialDatabaseFailure(t *testing.T) {
 			job := serviceJob(t, service, root)
 			require.Zero(t, processing.calls.Load())
 
-			service.processScheduledBlock(t.Context(), root, job, time.Now())
-			require.ErrorIs(t, job.lastAttempt.err, failure)
-			require.Equal(t, blockRetryInitialDelay, job.retryDelay)
+			now := time.Now()
+			for _, delay := range []time.Duration{250 * time.Millisecond, 500 * time.Millisecond, time.Second, 2 * time.Second, 2 * time.Second} {
+				viewsBefore := db.views
+				started := time.Now()
+				service.processScheduledBlock(t.Context(), root, job, now)
+				require.ErrorIs(t, job.lastAttempt.err, failure)
+				require.ErrorIs(t, job.lastAttempt.err, errBlockStorage)
+				require.Equal(t, viewsBefore+1, db.views)
+				require.Equal(t, delay, job.retryDelay)
+				require.False(t, job.retryAfter.Before(started.Add(delay)), "backoff must start after the failed attempt")
+				require.False(t, job.retryAfter.After(time.Now().Add(delay)))
+				service.processScheduledBlock(t.Context(), root, job, job.retryAfter.Add(-time.Nanosecond))
+				require.Equal(t, viewsBefore+1, db.views, "storage retries must respect the backoff")
+				now = job.retryAfter
+				if tc.interveningError != nil {
+					db.viewErr = nil
+					processing.err = tc.interveningError
+					service.processScheduledBlock(t.Context(), root, job, now)
+					require.ErrorIs(t, job.lastAttempt.err, tc.interveningError)
+					db.viewErr = failure
+					processing.err = nil
+				}
+			}
 			db.viewErr, db.updateErr = nil, nil
-			service.processScheduledBlock(t.Context(), root, job, job.retryAfter.Add(-time.Nanosecond))
-			require.Zero(t, processing.calls.Load(), "storage retries must respect the backoff")
-			service.processScheduledBlock(t.Context(), root, job, job.retryAfter)
-			require.Equal(t, int32(1), processing.calls.Load())
+			callsBefore := processing.calls.Load()
+			service.processScheduledBlock(t.Context(), root, job, now)
+			require.NoError(t, job.lastAttempt.err)
+			require.Equal(t, callsBefore+1, processing.calls.Load())
 			_, queued := service.blocksScheduledForLaterExecution.Load(root)
 			require.False(t, queued)
 		})
@@ -113,18 +194,14 @@ func TestPendingGossipFinalizedIndexFailureDoesNotReject(t *testing.T) {
 	require.False(t, queued)
 }
 
-func TestPublishedBlockJobBacksOffLocalFailures(t *testing.T) {
+func TestPublishedBlockJobBacksOffExecutionFailures(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
-		retryError       error
 		interveningError error
 	}{
-		{name: "consecutive EL failures", retryError: forkchoice.ErrNewPayloadNoStatus},
-		{name: "EL failures with missing data", retryError: forkchoice.ErrNewPayloadNoStatus, interveningError: forkchoice.ErrEIP4844DataNotAvailable},
-		{name: "EL failures with missing segment", retryError: forkchoice.ErrNewPayloadNoStatus, interveningError: forkchoice.ErrMissingSegment},
-		{name: "consecutive storage failures", retryError: errBlockStorage},
-		{name: "storage failures with missing data", retryError: errBlockStorage, interveningError: forkchoice.ErrEIP4844DataNotAvailable},
-		{name: "storage failures with missing segment", retryError: errBlockStorage, interveningError: forkchoice.ErrMissingSegment},
+		{name: "consecutive failures"},
+		{name: "interleaved with missing data", interveningError: forkchoice.ErrEIP4844DataNotAvailable},
+		{name: "interleaved with missing segment", interveningError: forkchoice.ErrMissingSegment},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service := &blockService{}
@@ -132,7 +209,7 @@ func TestPublishedBlockJobBacksOffLocalFailures(t *testing.T) {
 			root, err := block.Block.HashSSZ()
 			require.NoError(t, err)
 			calls := 0
-			retryError := fmt.Errorf("local failure: %w", tc.retryError)
+			retryError := fmt.Errorf("execution failure: %w", forkchoice.ErrNewPayloadNoStatus)
 			failure := retryError
 			handle := service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
 				calls++

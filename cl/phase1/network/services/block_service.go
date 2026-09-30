@@ -283,7 +283,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			b.ScheduleBlockForLaterProcessing(msg)
 			return nil
 		}
-		if shouldBackOffBlockRetry(err) {
+		// Retain canceled imports too: gossip validation has already marked the block as seen.
+		if shouldBackOffBlockRetry(err) || (ctx.Err() != nil && errors.Is(err, ctx.Err())) {
 			job, _ := b.scheduleBlockForLaterProcessing(msg, nil)
 			job.logStorageErrorOnce(err)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
@@ -896,12 +897,18 @@ func (b *blockService) processAndStoreBlock(ctx context.Context, block *cltypes.
 		persisted = slot != nil
 		return err
 	}); err != nil {
+		if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+			return err
+		}
 		return fmt.Errorf("%w: read block index: %w", errBlockStorage, err)
 	}
 	if !persisted {
 		if err := b.db.Update(ctx, func(tx kv.RwTx) error {
 			return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 		}); err != nil {
+			if ctx.Err() != nil && errors.Is(err, ctx.Err()) {
+				return err
+			}
 			return fmt.Errorf("%w: write block: %w", errBlockStorage, err)
 		}
 	}

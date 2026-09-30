@@ -1387,12 +1387,13 @@ func TestBlockServiceDecodeGossipMessageStrictPreGloasCompatibility(t *testing.T
 
 func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing.T) {
 	for _, tc := range []struct {
-		name string
-		err  error
+		name      string
+		err       error
+		blockOnly bool
 	}{
 		{name: "success"},
 		{name: "EL failure", err: forkchoice.ErrNewPayloadNoStatus},
-		{name: "storage failure", err: errBlockStorage},
+		{name: "block-only storage failure", err: errors.New("database unavailable"), blockOnly: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			service := &blockService{}
@@ -1402,11 +1403,20 @@ func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing
 			firstStarted := make(chan struct{})
 			firstRelease := make(chan struct{})
 			releaseFirst := sync.OnceFunc(func() { close(firstRelease) })
-			service.scheduleBlockForLaterProcessing(block, func(context.Context) error {
+			waitForRelease := func() {
 				close(firstStarted)
 				<-firstRelease
-				return tc.err
-			})
+			}
+			if tc.blockOnly {
+				service.db = &blockDBError{viewErr: tc.err, beforeView: waitForRelease}
+				service.forkchoiceStore = mock_services.NewForkChoiceStorageMock(t)
+				service.ScheduleBlockForLaterProcessing(block)
+			} else {
+				service.SchedulePublishedBlockForLaterProcessing(block, func(context.Context) error {
+					waitForRelease()
+					return tc.err
+				})
+			}
 			job := serviceJob(t, service, root)
 			firstDone := make(chan struct{})
 			go func() {
@@ -1427,6 +1437,10 @@ func TestPublishedBlockJobUpgradeKeepsWaiterOnRequiredStoreGeneration(t *testing
 			go func() { waitDone <- handle.Wait(t.Context()) }()
 			releaseFirst()
 			<-firstDone
+			require.ErrorIs(t, job.lastAttempt.err, tc.err)
+			if tc.blockOnly {
+				require.ErrorIs(t, job.lastAttempt.err, errBlockStorage)
+			}
 			_, scheduled := service.blocksScheduledForLaterExecution.Load(root)
 			require.True(t, scheduled)
 			require.True(t, job.retryAfter.IsZero(), "a stale attempt must not delay the new store generation")
