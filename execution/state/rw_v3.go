@@ -133,7 +133,7 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 		for a, vw := range writes.CreateContracts() {
 			ensure(a).createContract = vw.Val
 		}
-		for a, byKey := range writes.Storages() {
+		for a, byKey := range writes.StoragesChanged() {
 			d := ensure(a)
 			for k, vw := range byKey {
 				d.storage = append(d.storage, storageItem{k, vw.Val})
