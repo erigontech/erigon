@@ -128,7 +128,9 @@ type commitmentCalculator struct {
 
 	// lastTarget tracks the most recent block boundary so that
 	// computeAndPublish knows which block to compute for.
-	lastTarget commitTarget
+	lastTarget               commitTarget
+	activationFromTargets    uint64
+	hasActivationFromTargets bool
 
 	// lastComputedBlock tracks the block number of the last computed
 	// commitment to avoid duplicate computation when commitComputeRequest
@@ -535,12 +537,11 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		}
 		target := targetOf(r)
 		blockNum := target.blockNum
+		cc.recordBlockTarget(target)
 
 		// Track the latest block boundary. lastBlockResultSeen opens the
 		// compute-ahead gate for the next block (its baseline is now in sd.mem).
-		cc.lastTarget = target
 		cc.lastBlockResultSeen = blockNum
-		cc.hasSeenBlockResult = true
 
 		// Break logic: in per-block mode, compute at every block boundary.
 		// Skip the first block if it's a partial block (resumed mid-block).
@@ -612,6 +613,15 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 			cc.publish(ctx, commitmentResult{blockNum: cc.lastComputedBlock})
 		}
 	}
+}
+
+func (cc *commitmentCalculator) recordBlockTarget(target commitTarget) {
+	if cc.chainConfig != nil && cc.hasSeenBlockResult && !cc.chainConfig.IsBinaryTrie(cc.lastTarget.blockTime) && cc.chainConfig.IsBinaryTrie(target.blockTime) {
+		cc.activationFromTargets = target.blockNum
+		cc.hasActivationFromTargets = true
+	}
+	cc.lastTarget = target
+	cc.hasSeenBlockResult = true
 }
 
 // handleBlockRequest records the per-block mode from a blockRequest —
@@ -1315,29 +1325,17 @@ func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t com
 	}
 	if !cc.hasActivationBlock {
 		switch {
-		case cc.hasSeenBlockResult && !cc.chainConfig.IsBinaryTrie(cc.lastTarget.blockTime):
-			cc.activationBlock = t.blockNum
-			cc.hasActivationBlock = true
-		case cc.hasFirstBlock && cc.firstBlockNum == t.blockNum:
-			cc.activationBlock = t.blockNum
-			cc.hasActivationBlock = true
-		case cc.blockReader == nil:
-			cc.activationBlock = t.blockNum
+		case cc.hasActivationFromTargets:
+			cc.activationBlock = cc.activationFromTargets
 			cc.hasActivationBlock = true
 		default:
 			searchBlock := t.blockNum
 			canSearch := true
-			if cc.hasFirstBlock && cc.firstBlockNum < searchBlock {
-				firstHeader, err := cc.blockReader.HeaderByNumber(ctx, cc.roTx, cc.firstBlockNum)
-				if err == nil && firstHeader != nil && cc.chainConfig.IsBinaryTrie(firstHeader.Time) {
-					cc.activationBlock = cc.firstBlockNum
-					cc.hasActivationBlock = true
+			if cc.hasFirstBlock {
+				if cc.firstBlockNum == 0 {
+					canSearch = false
 				} else {
-					if cc.firstBlockNum == 0 {
-						canSearch = false
-					} else {
-						searchBlock = cc.firstBlockNum - 1
-					}
+					searchBlock = cc.firstBlockNum - 1
 				}
 			}
 			if !cc.hasActivationBlock && canSearch {

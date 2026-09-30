@@ -192,6 +192,18 @@ func TestArtifactReaderRejectsZeroGroupValue(t *testing.T) {
 	require.ErrorContains(t, err, "invalid group value", "a code group with a zero value must be rejected")
 }
 
+func TestArtifactReaderRejectsUnknownAccountKind(t *testing.T) {
+	data := minimalHeaderArtifact(3, true)
+	_, err := readSnapshot(t, data)
+	require.ErrorContains(t, err, "unknown account kind")
+}
+
+func TestArtifactReaderRejectsZeroKindZeroAccount(t *testing.T) {
+	data := minimalHeaderArtifact(0, false)
+	_, err := readSnapshot(t, data)
+	require.ErrorIs(t, err, ErrInvalidAccount)
+}
+
 func TestArtifactReaderRejectsMalformedInputs(t *testing.T) {
 	golden := readGolden(t)
 	data, err := hex.DecodeString(golden.Bytes)
@@ -589,8 +601,42 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	defer preimages.Close()
 	preimageInfo, err := preimages.Stat()
 	require.NoError(t, err)
-	_, err = ReadSnapshotStreamAt(snapshot, snapshotInfo.Size(), SnapshotStreamCallbacks{})
+	var readerPeak uint64
+	readGroups := 0
+	_, err = ReadSnapshotStreamAt(snapshot, snapshotInfo.Size(), SnapshotStreamCallbacks{
+		Storage: func(_ common.Hash, groups func(func(Group) error) error) error {
+			return groups(func(group Group) error {
+				readGroups += len(group.Entries)
+				if readGroups%10_000 == 0 {
+					runtime.GC()
+					var memory runtime.MemStats
+					runtime.ReadMemStats(&memory)
+					readerPeak = max(readerPeak, memory.HeapAlloc)
+				}
+				return nil
+			})
+		},
+	})
 	require.NoError(t, err)
+	require.Equal(t, slotCount, readGroups)
+	require.Less(t, readerPeak, uint64(32<<20))
+	var preimagePeak uint64
+	readSlots := 0
+	err = ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
+		return slots(func([32]byte) error {
+			readSlots++
+			if readSlots%10_000 == 0 {
+				runtime.GC()
+				var memory runtime.MemStats
+				runtime.ReadMemStats(&memory)
+				preimagePeak = max(preimagePeak, memory.HeapAlloc)
+			}
+			return nil
+		})
+	})
+	require.NoError(t, err)
+	require.Equal(t, slotCount, readSlots)
+	require.Less(t, preimagePeak, uint64(32<<20))
 	runtime.GC()
 	var peak uint64
 	seen := 0
@@ -607,6 +653,29 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, slotCount, seen)
 	require.Less(t, peak, uint64(32<<20))
+}
+
+func TestPreimageReaderAllocationsStayBounded(t *testing.T) {
+	const recordCount = 10_000
+	records := make([]Preimage, recordCount)
+	for i := range records {
+		records[i].Address[19] = byte(i)
+		records[i].Address[18] = byte(i >> 8)
+	}
+	sort.Slice(records, func(i, j int) bool {
+		left := keccak.Sum256(records[i].Address[:])
+		right := keccak.Sum256(records[j].Address[:])
+		return bytes.Compare(left[:], right[:]) < 0
+	})
+	var encoded bytes.Buffer
+	require.NoError(t, WritePreimages(&encoded, records))
+	allocations := testing.AllocsPerRun(3, func() {
+		err := ReadPreimagesStream(bytes.NewReader(encoded.Bytes()), int64(encoded.Len()), func(common.Address, func(func([32]byte) error) error) error {
+			return nil
+		})
+		require.NoError(t, err)
+	})
+	require.Less(t, allocations, float64(recordCount)*2, "the reader must reuse its cursor buffer")
 }
 
 type testLeaf struct {
@@ -676,4 +745,22 @@ func readGolden(t *testing.T) goldenArtifact {
 	var golden goldenArtifact
 	require.NoError(t, json.Unmarshal(data, &golden))
 	return golden
+}
+
+func minimalHeaderArtifact(kind byte, nonzero bool) []byte {
+	data := make([]byte, 0, 100)
+	data = append(data, make([]byte, 32)...)
+	var count [8]byte
+	binary.BigEndian.PutUint64(count[:], 1)
+	data = append(data, count[:]...)
+	data = append(data, make([]byte, 32)...)
+	if nonzero {
+		data = append(data, 1, 1, 1, 1)
+	} else {
+		data = append(data, 0, 0)
+	}
+	data = append(data, kind, 0)
+	data = append(data, make([]byte, 8)...)
+	data = append(data, make([]byte, 8)...)
+	return data
 }

@@ -288,17 +288,17 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 			return nil
 		}
 		if !wantOK {
-			return fmt.Errorf("%w: surplus key %x", ErrPreimages, got.key)
+			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
 		}
 		if !gotOK {
-			return fmt.Errorf("%w: missing key %x", ErrPreimages, want.key)
+			return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
 		}
 		comparison := bytes.Compare(want.key, got.key)
 		if comparison < 0 {
-			return fmt.Errorf("%w: missing key %x", ErrPreimages, want.key)
+			return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
 		}
 		if comparison > 0 {
-			return fmt.Errorf("%w: surplus key %x", ErrPreimages, got.key)
+			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
 		}
 		if got.hasSlot && yield != nil {
 			if err := yield(got.address, got.slot); err != nil {
@@ -306,6 +306,13 @@ func JoinAt(snapshot io.ReaderAt, snapshotSize int64, preimages io.ReaderAt, pre
 			}
 		}
 	}
+}
+
+func joinItemLabel(item joinItem) string {
+	if item.hasSlot {
+		return fmt.Sprintf("address %x slot %x tree key %x", item.address, item.slot, item.key)
+	}
+	return fmt.Sprintf("tree key %x", item.key)
 }
 
 func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func(func([]byte) error) error, hashFn eip8297.HashFn) error {
@@ -364,16 +371,16 @@ func CheckPreimageSetAt(preimages io.ReaderAt, preimageSize int64, expected func
 			return nil
 		}
 		if !wantOK {
-			return fmt.Errorf("%w: surplus key %x", ErrPreimages, got.key)
+			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
 		}
 		if !gotOK {
-			return fmt.Errorf("%w: missing key %x", ErrPreimages, want.key)
+			return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
 		}
 		if comparison := bytes.Compare(want.key, got.key); comparison != 0 {
 			if comparison < 0 {
-				return fmt.Errorf("%w: missing key %x", ErrPreimages, want.key)
+				return fmt.Errorf("%w: missing key (%s)", ErrPreimages, joinItemLabel(want))
 			}
-			return fmt.Errorf("%w: surplus key %x", ErrPreimages, got.key)
+			return fmt.Errorf("%w: surplus key (%s)", ErrPreimages, joinItemLabel(got))
 		}
 	}
 }

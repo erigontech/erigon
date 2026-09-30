@@ -220,7 +220,7 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	if err != nil {
 		return err
 	}
-	snapshotMeta, err := artifact.ReadSnapshotAt(snapshotRead, snapshotInfo.Size(), artifact.SnapshotCallbacks{})
+	snapshotMeta, err := artifact.ReadSnapshotStreamAt(snapshotRead, snapshotInfo.Size(), artifact.SnapshotStreamCallbacks{})
 	if err != nil {
 		return fmt.Errorf("export-pbt: read back snapshot: %w", err)
 	}

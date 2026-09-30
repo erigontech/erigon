@@ -220,7 +220,6 @@ func (c *artifactCursor) bytes(size int) ([]byte, error) {
 	if size < 0 || int64(size) > c.remaining() {
 		return nil, ErrMalformed
 	}
-	data := make([]byte, size)
 	if size <= 64<<10 {
 		if c.buffer == nil {
 			c.buffer = make([]byte, 64<<10)
@@ -240,12 +239,24 @@ func (c *artifactCursor) bytes(size int) ([]byte, error) {
 		if c.offset+int64(size) > c.end {
 			return nil, ErrMalformed
 		}
-		copy(data, c.buffer[c.offset-c.start:c.offset-c.start+int64(size)])
-	} else if _, err := c.src.ReadAt(data, c.offset); err != nil {
+		data := c.buffer[c.offset-c.start : c.offset-c.start+int64(size)]
+		c.offset += int64(size)
+		return data, nil
+	}
+	data := make([]byte, size)
+	if _, err := c.src.ReadAt(data, c.offset); err != nil {
 		return nil, ErrMalformed
 	}
 	c.offset += int64(size)
 	return data, nil
+}
+
+func (c *artifactCursor) bytesCopy(size int) ([]byte, error) {
+	data, err := c.bytes(size)
+	if err != nil {
+		return nil, err
+	}
+	return bytes.Clone(data), nil
 }
 
 func (c *artifactCursor) byte() (byte, error) {
@@ -375,7 +386,7 @@ func readIntegerAt(c *artifactCursor, width int) ([]byte, error) {
 	if err != nil || int(length) > width {
 		return nil, ErrMalformed
 	}
-	value, err := c.bytes(int(length))
+	value, err := c.bytesCopy(int(length))
 	if err != nil {
 		return nil, err
 	}

@@ -142,10 +142,18 @@ func TestRunExportPBTRefusesChangedBinRecord(t *testing.T) {
 }
 
 func TestExportPBTBinOnlyRootCrossCheck(t *testing.T) {
-	streamRoot := common.HexToHash("0x01")
-	pinRoot := common.HexToHash("0x02")
-	err := checkExportPBTStreamRoot(streamRoot, exportPin{Variant: commitment.VariantBinPatriciaTrie, Root: pinRoot}, common.Hash{}, false)
-	require.ErrorContains(t, err, "differs from bin root")
+	selectPBTExportSuite(t)
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = false
+	db, storedRoot := newPBTBinOnlyEmptyExportDB(t)
+	require.NotEqual(t, eip8297.EmptyTreeHash, storedRoot)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	err = runExportPBT(t.Context(), tx, func(uint64) (*types.Header, error) {
+		return &types.Header{Root: storedRoot, Time: 10}, nil
+	}, filepath.Join(t.TempDir(), "export"), log.New())
+	require.Error(t, err, "a nonzero stored bin root with an empty latest state must refuse export")
 }
 
 func TestRunExportPBTReadbackRefusesTruncatedSnapshot(t *testing.T) {
@@ -276,6 +284,47 @@ func newPBTExportDB(t *testing.T) (kv.TemporalRwDB, common.Hash) {
 
 func newPBTEmptyExportDB(t *testing.T) (kv.TemporalRwDB, common.Hash) {
 	return newPBTExportDBWithAccount(t, false)
+}
+
+func newPBTBinOnlyEmptyExportDB(t *testing.T) (kv.TemporalRwDB, common.Hash) {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	refs := false
+	variant := state.TrieVariantBin
+	hash := commitment.PBinHashBlake3
+	require.NoError(t, state.WriteErigonDBSettings(dirs, &state.ErigonDBSettings{
+		StepSize: 8, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs,
+		TrieVariant: &variant, TrieHash: &hash,
+	}))
+	db := temporaltest.NewTestDB(t, dirs)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	genesisHash := common.Hash{0x42}
+	forkTime := uint64(10)
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesisHash, 0))
+	require.NoError(t, rawdb.WriteChainConfig(tx, genesisHash, &chain.Config{BinaryTrieTime: &forkTime}))
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 7, 1))
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantBinPatriciaTrie
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithCommitmentDomain(kv.CommitmentDomain))
+	require.NoError(t, err)
+	binCtx := domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
+	address := bytes.Repeat([]byte{0xaa}, 20)
+	binCtx.SetPBinFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{{
+		Address: address, Exists: true, CodeWritten: true, Balance: *uint256.NewInt(1), CodeHash: common.Hash(empty.CodeHash),
+	}}})
+	rootBytes, err := binCtx.ComputeCommitment(t.Context(), tx, true, 7, 1, "export-pbt-test", nil)
+	require.NoError(t, err)
+	root := common.BytesToHash(rootBytes)
+	require.NoError(t, rawdb.WriteHeader(tx, &types.Header{Number: *uint256.NewInt(7), Time: forkTime, Root: root}))
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, common.Hash{7}, 7))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 7))
+	require.NoError(t, tx.Commit())
+	domains.Close()
+	return db, root
 }
 
 func newPBTExportDBWithAccount(t *testing.T, withAccount bool) (kv.TemporalRwDB, common.Hash) {

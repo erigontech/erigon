@@ -79,6 +79,7 @@ func TestConvertPBTHexSourceKeepHex(t *testing.T) {
 		chaindata = previousChaindata
 	})
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	statecfg.InitSchemas()
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	source, wantRoot := newPBTConversionSource(t)
@@ -288,14 +289,19 @@ func TestConvertPBTHexBinSourceWithOrdinaryHexFlags(t *testing.T) {
 		datadirCli = previousDatadir
 		chaindata = previousChaindata
 	})
-	statecfg.ExperimentalBinCommitment = false
-	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.InitSchemas()
 	statecfg.ExperimentalCommitmentV3 = true
 	statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
 	statecfg.BinCommitmentHash = ""
 	source, _ := newPBTConversionSource(t)
+	statecfg.InitSchemas()
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = false
 	dualPath := filepath.Join(t.TempDir(), "dual")
-	require.NoError(t, convertPBT(t.Context(), source.DataDir, dualPath, true, "", log.New()))
+	require.NotPanics(t, func() {
+		require.NoError(t, convertPBT(t.Context(), source.DataDir, dualPath, true, "", log.New()))
+	})
 	dualRoot := readPBTBinRoot(t, dualPath, source.Chaindata)
 	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
 	require.NoError(t, rawDB.Update(t.Context(), func(tx kv.RwTx) error {

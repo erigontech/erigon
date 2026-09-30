@@ -47,7 +47,9 @@ func TestCommitmentCalculatorStopsHexShadowAfterWindow(t *testing.T) {
 		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
 		maxReorgDepth: 2,
 	}
+	cc.recordBlockTarget(commitTarget{blockNum: 9, blockTime: activationTime - 1})
 	for blockNum := uint64(10); blockNum <= 12; blockNum++ {
+		cc.recordBlockTarget(commitTarget{blockNum: blockNum, blockTime: activationTime})
 		cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: blockNum, blockTime: activationTime})
 		require.False(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "hex shadow must fold through block %d", blockNum)
 	}
@@ -77,6 +79,39 @@ func TestCommitmentCalculatorKeepsHexWhenActivationIsUnresolved(t *testing.T) {
 	require.False(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "an unresolved activation must not stop the hex shadow")
 }
 
+func TestCommitmentCalculatorResolvesActivationFromBatchTargets(t *testing.T) {
+	activationTime := uint64(10)
+	cc := &commitmentCalculator{
+		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
+		blockReader:   missingActivationHeaderReader{},
+		maxReorgDepth: 2,
+	}
+	for blockNum := uint64(2); blockNum <= 4; blockNum++ {
+		cc.recordBlockTarget(commitTarget{blockNum: blockNum, blockTime: 0})
+	}
+	for blockNum := uint64(5); blockNum <= 8; blockNum++ {
+		cc.recordBlockTarget(commitTarget{blockNum: blockNum, blockTime: activationTime})
+		cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: blockNum, blockTime: activationTime})
+	}
+	require.Equal(t, uint64(5), cc.activationBlock)
+	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "the crossing target must resolve the activation block")
+}
+
+func TestCommitmentCalculatorSearchesBelowRestartBlock(t *testing.T) {
+	activationTime := uint64(10)
+	cc := &commitmentCalculator{
+		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
+		blockReader:   hexStopHeaderReader{},
+		firstBlockNum: 7,
+		hasFirstBlock: true,
+		maxReorgDepth: 2,
+	}
+	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 7, blockTime: activationTime})
+	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 8, blockTime: activationTime})
+	require.Equal(t, uint64(5), cc.activationBlock)
+	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "a restart inside the window must retain the fork activation")
+}
+
 func TestCommitmentCalculatorDiscardsLocalStopAfterRejectedBlock(t *testing.T) {
 	cc := &commitmentCalculator{}
 	cc.stopShadowDomain(kv.CommitmentDomain)
@@ -103,7 +138,9 @@ func TestCommitmentCalculatorStopsFoldingHexAtWindowEnd(t *testing.T) {
 	address := common.Address{0x42}
 	reader := &asOfStateReader{sd: doms, roTx: roTx, commitmentDomain: kv.CommitmentDomain}
 	var roots [4][]byte
+	cc.recordBlockTarget(commitTarget{blockNum: 9, blockTime: activationTime - 1})
 	for blockNum := uint64(10); blockNum <= 13; blockNum++ {
+		cc.recordBlockTarget(commitTarget{blockNum: blockNum, blockTime: activationTime})
 		account := accounts.Account{Nonce: blockNum, Balance: *uint256.NewInt(blockNum), CodeHash: accounts.EmptyCodeHash}
 		accountBytes := accounts.SerialiseV3(&account)
 		previous, _, err := doms.GetLatest(kv.AccountsDomain, tx, address[:])
@@ -135,7 +172,10 @@ func TestAutomaticHexStopRecordsMarkerInCommitmentTransaction(t *testing.T) {
 		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
 		maxReorgDepth: 0,
 	}
+	cc.recordBlockTarget(commitTarget{blockNum: 3, blockTime: activationTime - 1})
+	cc.recordBlockTarget(commitTarget{blockNum: 4, blockTime: activationTime})
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 4, blockTime: activationTime})
+	cc.recordBlockTarget(commitTarget{blockNum: 5, blockTime: activationTime})
 	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 5, blockTime: activationTime})
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain))
 	require.NoError(t, recordStoppedCommitmentDomains(tx, cc.shadowStopped))
