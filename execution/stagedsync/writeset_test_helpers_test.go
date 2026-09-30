@@ -7,19 +7,87 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// countPath counts writes in ws whose header has the given path.
-func countPath(ws *state.WriteSet, path state.AccountPath) int {
+// countViewPath counts the writes a read-only WriteSetView yields for the given
+// path. The view exposes no AddressPath/CodeSizePath accessor, so those paths
+// are structurally absent (count 0) — the field-level exclusion the old
+// Normalize did explicitly.
+func countViewPath(v state.WriteSetView, path state.AccountPath) int {
 	n := 0
-	for h := range ws.AllHeaders() {
-		if h.Path == path {
+	switch path {
+	case state.BalancePath:
+		for range v.Balances() {
 			n++
+		}
+	case state.NoncePath:
+		for range v.Nonces() {
+			n++
+		}
+	case state.IncarnationPath:
+		for range v.Incarnations() {
+			n++
+		}
+	case state.CodeHashPath:
+		for range v.CodeHashes() {
+			n++
+		}
+	case state.CodePath:
+		for range v.Codes() {
+			n++
+		}
+	case state.SelfDestructPath:
+		for range v.SelfDestructs() {
+			n++
+		}
+	case state.CreateContractPath:
+		for range v.CreateContracts() {
+			n++
+		}
+	case state.StoragePath:
+		for _, inner := range v.Storages() {
+			n += len(inner)
 		}
 	}
 	return n
 }
 
-// writeSetLen is the total number of writes across all paths.
-func writeSetLen(ws *state.WriteSet) int { return ws.Count() }
+func viewStorageVal(v state.WriteSetView, addr accounts.Address, key accounts.StorageKey) (uint256.Int, bool) {
+	for a, inner := range v.Storages() {
+		if a != addr {
+			continue
+		}
+		if w, ok := inner[key]; ok {
+			return w.Val, true
+		}
+	}
+	return uint256.Int{}, false
+}
+
+func viewBalanceVal(v state.WriteSetView, addr accounts.Address) (uint256.Int, bool) {
+	for a, w := range v.Balances() {
+		if a == addr {
+			return w.Val, true
+		}
+	}
+	return uint256.Int{}, false
+}
+
+func viewCodeVal(v state.WriteSetView, addr accounts.Address) (accounts.Code, bool) {
+	for a, w := range v.Codes() {
+		if a == addr {
+			return w.Val, true
+		}
+	}
+	return accounts.Code{}, false
+}
+
+func viewCodeHashVal(v state.WriteSetView, addr accounts.Address) (accounts.CodeHash, bool) {
+	for a, w := range v.CodeHashes() {
+		if a == addr {
+			return w.Val, true
+		}
+	}
+	return accounts.CodeHash{}, false
+}
 
 // wsb is a small fluent builder for assembling a typed *state.WriteSet in tests.
 type wsb struct{ ws *state.WriteSet }
