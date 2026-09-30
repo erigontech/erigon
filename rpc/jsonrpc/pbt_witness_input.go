@@ -50,7 +50,8 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			}
 		}
 	}
-	if rs.pbtSystemAddrTouchedInTx {
+	systemAddress := common.Address(params.SystemAddress.Value())
+	if rs.pbtSystemAddrTouchedInTx && rs.accountReadSources[systemAddress]&recordingReadSystemCall != 0 {
 		address := params.SystemAddress.Value()
 		key := eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey)
 		readKeys[string(key)] = key

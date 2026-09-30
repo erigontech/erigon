@@ -77,9 +77,10 @@ driver and compares the resulting root with the post-state anchor.
 The verifier suppresses the missing-node error only for the synthetic system-call touch of `SYSTEM_ADDRESS`. The scope
 covers system calls from `Initialize`, its `FinalizeTx`, `Finalize`, and `CommitBlock`, but resolver errors are latched
 throughout those scopes except for that synthetic touch. A user transaction access to `SYSTEM_ADDRESS` is retained when
-the per-transaction access set records it, or when code loading resolves a delegation designator targeting it. Both
-cases need the basic-data proof, even when the system call has already warmed the account; an access-list entry alone is
-not enough. Genuine reads of system contracts need their proofs. PBT replay also compares the receipt root after
+the per-transaction access set records it, or when `ResolveCode` or `ResolveCodeHash` follows a delegation designator
+to it. Loading a designator with `EXTCODE*` does not follow it, and an access-list entry alone is not enough. The
+delegation case needs the basic-data proof when the system call has already warmed the account. Genuine reads of system
+contracts need their proofs. PBT replay also compares the receipt root after
 Byzantium, gas used, and blob gas used with the block header. Contract creation over an
 existing account with storage wipes that storage; creation of a previously absent account does not walk an unproved
 storage subtree. An account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf is

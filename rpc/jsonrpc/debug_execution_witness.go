@@ -560,15 +560,16 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 
 // OnCodeAccess tracks code that bypasses ReadAccountCode via stateObject cache hits.
 func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
-	if !s.systemCallScope {
-		if delegation, ok := types.ParseDelegation(code); ok && isPBinSystemAddress(delegation.Value()) {
-			s.markPBinSystemAddrTouchedInTx()
-		}
-	}
 	if len(code) > 0 {
 		s.recordPBTCode(code)
 		s.AccessedCode[address.Value()] = code
 		//s.HashedCodes[crypto.Keccak256Hash(code)] = code
+	}
+}
+
+func (s *RecordingState) OnDelegationTarget(address accounts.Address) {
+	if !s.systemCallScope && isPBinSystemAddress(address.Value()) {
+		s.markPBinSystemAddrTouchedInTx()
 	}
 }
 

@@ -467,6 +467,78 @@ func TestPBinExecutionWitnessRejectsBlobGasMismatch(t *testing.T) {
 	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(t.Context(), result, tampered, parentRoot, postRoot, m.ChainConfig, m.Engine), "blob gas used mismatch")
 }
 
+func TestPBinExecutionWitnessDesignatorLoadDoesNotRequireDelegationTargetProof(t *testing.T) {
+	system := params.SystemAddress.Value()
+	delegated := common.HexToAddress("0x7700000000000000000000000000000000000077")
+	caller := common.HexToAddress("0x7800000000000000000000000000000000000078")
+	runtime := append([]byte{0x60, 0x17, 0x5f, 0x5f, 0x73}, delegated[:]...)
+	runtime = append(runtime, 0x3c, 0x00)
+	for _, systemCalls := range []bool{false, true} {
+		t.Run(map[bool]string{false: "pre-cancun", true: "amsterdam"}[systemCalls], func(t *testing.T) {
+			alloc := types.GenesisAlloc{
+				system:    {Balance: big.NewInt(5)},
+				delegated: {Balance: big.NewInt(1), Code: append([]byte{0xef, 0x01, 0x00}, system[:]...)},
+				caller:    {Code: runtime},
+			}
+			generator := func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), _ func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+				if i == 0 {
+					addTransaction(caller, uint256.NewInt(0), nil)
+				}
+			}
+			var api *DebugAPIImpl
+			var m *execmoduletester.ExecModuleTester
+			if systemCalls {
+				api, m = pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 1, nil, generator, alloc)
+			} else {
+				api, m = pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t, 1000, 1, generator, alloc)
+			}
+			repairPBinPreForkShadows(t, m, 1000)
+			result := pbtPortWitness(t, api, m, 1)
+			cache := new(eip8297.DigestCache)
+			stem := cache.AccountHeaderStem(system[:])
+			for index := range result.State {
+				decoded, err := eipWitness.PBinDecodeBlob(result.State[index])
+				require.NoError(t, err)
+				if decoded.Leaf != nil && bytes.Equal(decoded.Leaf.Key[:len(decoded.Leaf.Key)-1], stem) {
+					t.Fatalf("designator load unexpectedly included the delegation target")
+				}
+				if decoded.Group != nil && bytes.Equal(decoded.Group.Stem, stem) {
+					t.Fatalf("designator load unexpectedly included the delegation target")
+				}
+			}
+		})
+	}
+}
+
+func TestPBinWitnessPreByzantiumGates(t *testing.T) {
+	system := params.SystemAddress.Value()
+	runtime := append([]byte{0x73}, system[:]...)
+	runtime = append(runtime, 0x31, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xa0, 0x00)
+	api, m, _ := pbtSystemAddressFixture(t, runtime)
+	result := pbtPortWitness(t, api, m, 2)
+	block := pbtPortBlock(t, m, 2)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
+	pre := m.ChainConfig.Copy()
+	pre.ByzantiumBlock = common.NewUint64(10)
+	require.False(t, pre.IsByzantium(2))
+	require.NotNil(t, block.Header().BlobGasUsed)
+	verify := func(header *types.Header) error {
+		return verifyPBinWitnessAgainstBlock(t.Context(), result, block.WithSeal(header), parentRoot, postRoot, pre, m.Engine)
+	}
+	h := types.CopyHeader(block.HeaderNoCopy())
+	require.NoError(t, verify(h))
+	h = types.CopyHeader(block.HeaderNoCopy())
+	h.ReceiptHash[0] ^= 1
+	require.NoError(t, verify(h), "pre-Byzantium receipt roots must not be compared")
+	h = types.CopyHeader(block.HeaderNoCopy())
+	h.GasUsed++
+	require.ErrorContains(t, verify(h), "gas used mismatch")
+	h = types.CopyHeader(block.HeaderNoCopy())
+	blobGasUsed := *h.BlobGasUsed + 131072
+	h.BlobGasUsed = &blobGasUsed
+	require.ErrorContains(t, verify(h), "blob gas used mismatch")
+}
+
 func TestPBinExecutionWitnessProvesOverflowOnlyAccountCodeHashRead(t *testing.T) {
 	victim := common.HexToAddress("0x000000000000000000000000000000000000abcde")
 	caller := common.HexToAddress("0x000000000000000000000000000000000000abcdf")

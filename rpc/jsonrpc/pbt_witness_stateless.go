@@ -108,11 +108,8 @@ func (s *pbinWitnessStateless) latchPBinSystemAddressRead() {
 	}
 }
 
-func (s *pbinWitnessStateless) OnCodeAccess(_ accounts.Address, code []byte) {
-	if s.systemCallScope {
-		return
-	}
-	if delegation, ok := types.ParseDelegation(code); ok && isPBinSystemAddress(delegation.Value()) {
+func (s *pbinWitnessStateless) OnDelegationTarget(address accounts.Address) {
+	if !s.systemCallScope && isPBinSystemAddress(address.Value()) {
 		s.latchPBinSystemAddressRead()
 	}
 }

@@ -99,11 +99,26 @@ func TestPBinWitnessInputKeepsUserSystemAddressReads(t *testing.T) {
 	address := params.SystemAddress.Value()
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
 	rs := NewRecordingState(inner)
+	rs.systemCallScope = true
+	_, err := rs.ReadAccountData(accounts.InternAddress(address))
+	require.NoError(t, err)
+	rs.systemCallScope = false
 	rs.pbtSystemAddrTouchedInTx = true
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
 	require.Contains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "user system-address reads must enter the pbt input")
+}
+
+func TestPBinWitnessInputExcludesUnlatchedSystemAddressReads(t *testing.T) {
+	address := params.SystemAddress.Value()
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
+	rs := NewRecordingState(inner)
+	rs.pbtSystemAddrTouchedInTx = true
+
+	got, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.NotContains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "an unlatchable system-address read must not enter the pbt input")
 }
 
 func TestPBinWitnessInputKeepsRevertedCallReads(t *testing.T) {
