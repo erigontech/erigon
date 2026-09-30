@@ -269,9 +269,6 @@ func createDumpTestKV(t *testing.T, chainConfig *chain.Config, chainSize int) *e
 // A record that is not one whole transaction never becomes frozen: the dump decodes every
 // transaction before it writes the segment, so the block files cannot hold a malformed one.
 func TestDumpTxsRejectsMalformedStoredTxn(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
 	m := createDumpTestKV(t, chain.AllProtocolChanges, 3)
 
 	rwTx, err := m.DB.BeginRw(m.Ctx)

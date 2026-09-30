@@ -1144,21 +1144,30 @@ func TestBodyWithRawTransactionsRejectsMalformedRecord(t *testing.T) {
 	typedBinary, err := types.MarshalTransactionsBinary(types.Transactions{typed})
 	require.NoError(t, err)
 
-	records := map[uint64][][]byte{
-		1: valid,
-		2: {wrapped(typedBinary[0])},
-		3: {{0xc0}},
-		4: {wrapped([]byte{0x02})},
-		5: {append(wrapped(typedBinary[0]), 0xff)},
+	// want is the binary encoding the read must return, or nil when the record must be rejected.
+	records := []struct {
+		name   string
+		stored []byte
+		want   []byte
+	}{
+		{"legacy binary", valid[0], valid[0]},
+		{"typed wrapped in an rlp string", wrapped(typedBinary[0]), typedBinary[0]},
+		{"empty list", []byte{0xc0}, nil},
+		{"wrapped type byte with no fields", wrapped([]byte{0x02}), nil},
+		{"wrapped with a trailing byte", append(wrapped(typedBinary[0]), 0xff), nil},
+		{"legacy with one field", []byte{0xc1, 0x80}, nil},
+		{"typed with one field", []byte{0x02, 0xc1, 0x80}, nil},
+		{"unsupported type", []byte{0x7f, 0xc1, 0x80}, nil},
+		{"zero type byte", append([]byte{0x00}, valid[0]...), nil},
+		{"legacy list wrapped in an rlp string", wrapped(valid[0]), nil},
 	}
-	binary := map[uint64][]byte{1: valid[0], 2: typedBinary[0]}
 
 	rwTx, err := db.BeginRw(t.Context())
 	require.NoError(t, err)
 	defer rwTx.Rollback()
-	for num, txs := range records {
-		hash := common.Hash{byte(num)}
-		_, err = rawdb.WriteRawBody(rwTx, hash, num, &types.RawBody{Transactions: txs})
+	for i, rec := range records {
+		num, hash := uint64(i+1), common.Hash{byte(i + 1)}
+		_, err = rawdb.WriteRawBody(rwTx, hash, num, &types.RawBody{Transactions: [][]byte{rec.stored}})
 		require.NoError(t, err)
 		require.NoError(t, rawdb.WriteCanonicalHash(rwTx, hash, num))
 	}
@@ -1167,15 +1176,16 @@ func TestBodyWithRawTransactionsRejectsMalformedRecord(t *testing.T) {
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	for num := range uint64(5) {
-		num++
-		body, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{byte(num)}, num)
-		if num <= 2 {
-			require.NoError(t, err, "block %d", num)
-			require.Equal(t, binary[num], body.Transactions[0], "block %d", num)
-			continue
-		}
-		require.Error(t, err, "block %d served a malformed record", num)
-		require.Nil(t, body)
+	for i, rec := range records {
+		t.Run(rec.name, func(t *testing.T) {
+			body, err := blockReader.BodyWithRawTransactions(t.Context(), tx, common.Hash{byte(i + 1)}, uint64(i+1))
+			if rec.want == nil {
+				require.Error(t, err, "a malformed record must not be served as a transaction")
+				require.Nil(t, body)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, rec.want, body.Transactions[0])
+		})
 	}
 }
