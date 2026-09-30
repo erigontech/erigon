@@ -368,6 +368,10 @@ func TestPBinExecutionWitnessDelegationToSystemAddressProof(t *testing.T) {
 		}
 	}, alloc)
 	repairPBinPreForkShadows(t, m, 1000)
+	mptName := "mpt"
+	mpt, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(2)), nil, &mptName)
+	require.NoError(t, err)
+	require.False(t, slices.ContainsFunc(mpt.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, system[:]) }), "MPT must retain v3 system-address access tracking")
 	result := pbtPortWitness(t, api, m, 2)
 	block := pbtPortBlock(t, m, 2)
 	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
@@ -376,6 +380,91 @@ func TestPBinExecutionWitnessDelegationToSystemAddressProof(t *testing.T) {
 	require.NotEqual(t, -1, index, "the system-address header group must be in the witness")
 	trimmed := pbtCorpusCloneWithout(result, index)
 	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
+}
+
+func TestPBinExecutionWitnessAccessListOnlyDoesNotAddSystemProof(t *testing.T) {
+	bank := pbtCorpusBank(t)
+	system := params.SystemAddress.Value()
+	var target common.Address
+	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 2, nil, func(i int, b *blockgen.BlockGen, _ func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte), addSigned func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+		switch i {
+		case 0:
+			target = types.CreateAddress(bank, b.TxNonce(bank))
+			addContract(uint256.NewInt(0), []byte{0x00})
+		case 1:
+			addSigned(&types.AccessListTx{
+				LegacyTx:   types.LegacyTx{CommonTx: types.CommonTx{Nonce: b.TxNonce(bank), To: &target, GasLimit: 2_000_000}, GasPrice: *uint256.NewInt(0)},
+				AccessList: types.AccessList{{Address: system}},
+			})
+		}
+	}, types.GenesisAlloc{system: {Balance: big.NewInt(5)}})
+	repairPBinPreForkShadows(t, m, 1000)
+	mptName := "mpt"
+	mpt, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(2)), nil, &mptName)
+	require.NoError(t, err)
+	require.False(t, slices.ContainsFunc(mpt.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, system[:]) }), "an unused access-list entry must not add an MPT proof")
+	pbtName := "pbt"
+	pbt, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(2)), nil, &pbtName)
+	require.NoError(t, err)
+	require.False(t, slices.ContainsFunc(pbt.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, []byte{0x00, 0x10, 0x00, 0x4b}) }), "an unused access-list entry must not add a PBT proof")
+}
+
+func TestPBinExecutionWitnessRevertedDelegationToSystemAddressProof(t *testing.T) {
+	system := params.SystemAddress.Value()
+	delegated := common.HexToAddress("0x7700000000000000000000000000000000000077")
+	headerPath := []byte{0x00, 0x10, 0x00, 0x4b}
+	call := append(append([]byte{0x5f, 0x5f, 0x5f, 0x5f, 0x5f, 0x73}, delegated[:]...), 0x5a, 0xf1, 0x50)
+	runtime := slices.Clone(call)
+	runtime = append(runtime, 0x5f, 0x5f, 0xfd)
+	for _, test := range []struct {
+		name   string
+		system types.GenesisAccount
+	}{
+		{name: "code00", system: types.GenesisAccount{Balance: big.NewInt(5), Code: []byte{0x00}}},
+		{name: "funded", system: types.GenesisAccount{Balance: big.NewInt(5)}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			bank := pbtCorpusBank(t)
+			var caller common.Address
+			alloc := types.GenesisAlloc{
+				system:    test.system,
+				delegated: {Balance: big.NewInt(1), Code: append([]byte{0xef, 0x01, 0x00}, system[:]...)},
+			}
+			api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 2, nil, func(i int, b *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+				switch i {
+				case 0:
+					caller = types.CreateAddress(bank, b.TxNonce(bank))
+					addContract(uint256.NewInt(0), pbtCorpusDeployCode(runtime))
+				case 1:
+					addTransaction(caller, uint256.NewInt(0), nil)
+				}
+			}, alloc)
+			repairPBinPreForkShadows(t, m, 1000)
+			result := pbtPortWitness(t, api, m, 2)
+			block := pbtPortBlock(t, m, 2)
+			parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
+			index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, headerPath) })
+			require.NotEqual(t, -1, index, "a reverted delegation to SYSTEM_ADDRESS must retain its proof")
+			trimmed := pbtCorpusCloneWithout(result, index)
+			require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
+		})
+	}
+}
+
+func TestPBinExecutionWitnessRejectsBlobGasMismatch(t *testing.T) {
+	system := params.SystemAddress.Value()
+	runtime := append([]byte{0x73}, system[:]...)
+	runtime = append(runtime, 0x31, 0x60, 0x00, 0x55, 0x00)
+	api, m, _ := pbtSystemAddressFixture(t, runtime)
+	result := pbtPortWitness(t, api, m, 2)
+	block := pbtPortBlock(t, m, 2)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
+	require.NotNil(t, block.Header().BlobGasUsed)
+	header := types.CopyHeader(block.HeaderNoCopy())
+	blobGasUsed := *header.BlobGasUsed + 131072
+	header.BlobGasUsed = &blobGasUsed
+	tampered := block.WithSeal(header)
+	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(t.Context(), result, tampered, parentRoot, postRoot, m.ChainConfig, m.Engine), "blob gas used mismatch")
 }
 
 func TestPBinExecutionWitnessProvesOverflowOnlyAccountCodeHashRead(t *testing.T) {

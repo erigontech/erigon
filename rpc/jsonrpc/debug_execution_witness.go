@@ -98,8 +98,9 @@ type RecordingState struct {
 	// The system address is touched as msg.sender on every block's system calls;
 	// that alone is not a witness access. A real opcode access during a user tx
 	// (seen via the per-tx access set) sets this so it is kept (EIP-7928).
-	systemAddrTouchedInTx bool
-	systemCallScope       bool
+	systemAddrTouchedInTx    bool
+	pbtSystemAddrTouchedInTx bool
+	systemCallScope          bool
 }
 
 // NewRecordingState creates a new RecordingState wrapping the given inner reader.
@@ -133,6 +134,8 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 // MarkSystemAddrTouchedInTx records that a user transaction accessed the system
 // address via an opcode, so it is kept in the witness even without a state change.
 func (s *RecordingState) MarkSystemAddrTouchedInTx() { s.systemAddrTouchedInTx = true }
+
+func (s *RecordingState) markPBinSystemAddrTouchedInTx() { s.pbtSystemAddrTouchedInTx = true }
 
 func (s *RecordingState) SetAccountsToTrace(addrs []common.Address) {
 	if len(addrs) == 0 {
@@ -557,6 +560,11 @@ func (s *RecordingState) GetModifiedKeys() ([]common.Address, map[common.Address
 
 // OnCodeAccess tracks code that bypasses ReadAccountCode via stateObject cache hits.
 func (s *RecordingState) OnCodeAccess(address accounts.Address, code []byte) {
+	if !s.systemCallScope {
+		if delegation, ok := types.ParseDelegation(code); ok && isPBinSystemAddress(delegation.Value()) {
+			s.markPBinSystemAddrTouchedInTx()
+		}
+	}
 	if len(code) > 0 {
 		s.recordPBTCode(code)
 		s.AccessedCode[address.Value()] = code
@@ -809,8 +817,9 @@ func (api *BaseAPI) buildAccessedState(
 		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		// A user tx that accesses the system address via an opcode keeps it in the
 		// witness; the per-tx access set captures this even on state-cache hits.
-		if pbinSystemAddressWasAccessed(ibs) {
+		if ibs.AccessedAddr(params.SystemAddress) {
 			recordingState.MarkSystemAddrTouchedInTx()
+			recordingState.markPBinSystemAddrTouchedInTx()
 		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("failed to apply tx %d: %w", txIndex, err)
@@ -2481,10 +2490,6 @@ type pbinSystemAddressAccessed interface {
 	latchPBinSystemAddressRead()
 }
 
-func pbinSystemAddressWasAccessed(ibs *state.IntraBlockState) bool {
-	return ibs.AccessedAddr(params.SystemAddress) || ibs.AddressInAccessList(params.SystemAddress)
-}
-
 func withPBinSystemCallScope(stateless statelessWitnessState, call func() ([]byte, error)) ([]byte, error) {
 	scoped, ok := stateless.(pbinSystemCallScoped)
 	if !ok {
@@ -2552,7 +2557,7 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
-		if accessed, ok := stateless.(pbinSystemAddressAccessed); ok && pbinSystemAddressWasAccessed(ibs) {
+		if accessed, ok := stateless.(pbinSystemAddressAccessed); ok && ibs.AccessedAddr(params.SystemAddress) {
 			accessed.latchPBinSystemAddressRead()
 		}
 		if err != nil {
@@ -2590,9 +2595,11 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 	if err := withPBinSystemCallError(stateless, func() error { return ibs.CommitBlock(blockRules, stateless) }); err != nil {
 		return fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}
-	if _, ok := stateless.(*pbinWitnessStateless); ok && chainConfig.IsByzantium(blockNum) {
-		if got := types.DeriveSha(userReceipts); got != header.ReceiptHash {
-			return fmt.Errorf("[statelessExec] receipts root mismatch: got %x, expected %x", got, header.ReceiptHash)
+	if _, ok := stateless.(*pbinWitnessStateless); ok {
+		if chainConfig.IsByzantium(blockNum) {
+			if got := types.DeriveSha(userReceipts); got != header.ReceiptHash {
+				return fmt.Errorf("[statelessExec] receipts root mismatch: got %x, expected %x", got, header.ReceiptHash)
+			}
 		}
 		if got := gasUsed.BlockGasUsed(); got != header.GasUsed {
 			return fmt.Errorf("[statelessExec] gas used mismatch: got %d, expected %d", got, header.GasUsed)

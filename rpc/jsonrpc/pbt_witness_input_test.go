@@ -99,7 +99,7 @@ func TestPBinWitnessInputKeepsUserSystemAddressReads(t *testing.T) {
 	address := params.SystemAddress.Value()
 	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
 	rs := NewRecordingState(inner)
-	rs.systemAddrTouchedInTx = true
+	rs.pbtSystemAddrTouchedInTx = true
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
