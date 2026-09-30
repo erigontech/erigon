@@ -190,7 +190,11 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
-		if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
+		if fields := cellFields(fieldBits); fields&(fieldAccountAddr|fieldStorageAddr) != 0 {
+			if fields&fieldAccountAddr != 0 && depth < 64 && len(hashedKey) > 64 {
+				depth = 64
+				continue
+			}
 			break
 		}
 
@@ -198,7 +202,7 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		if hasExtension && pos < len(branchData) {
 			extLen, n := binary.Uvarint(branchData[pos:])
 			if n > 0 && extLen > 0 {
-				depth += int(extLen)
+				depth += 1 + int(extLen)
 				continue
 			}
 		}
