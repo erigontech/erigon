@@ -100,7 +100,7 @@ func TestArtifactReaderRejectsMalformedInputs(t *testing.T) {
 		}},
 	}
 	for _, test := range tests {
-			t.Run(test.name, func(t *testing.T) {
+		t.Run(test.name, func(t *testing.T) {
 			_, err := ReadSnapshot(bytes.NewReader(test.data()))
 			if test.name == "header slot is not below 64" {
 				require.ErrorContains(t, err, "header slot")
