@@ -27,8 +27,10 @@ const (
 
 var ErrConversionFloor = kv.ErrConversionFloor
 
-type ConversionFloorKind = kv.ConversionFloorKind
-type ConversionFloorError = kv.ConversionFloorError
+type (
+	ConversionFloorKind  = kv.ConversionFloorKind
+	ConversionFloorError = kv.ConversionFloorError
+)
 
 const (
 	ConversionFloorBlock = kv.ConversionFloorBlock
