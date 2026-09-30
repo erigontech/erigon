@@ -34,10 +34,11 @@ type PBinStorageWrite struct {
 }
 
 type PBinAccountUpdate struct {
-	Address    []byte
-	Values     map[byte][]byte
-	Code       []byte
-	Delegation []byte
+	Address      []byte
+	Values       map[byte][]byte
+	Code         []byte
+	Delegation   []byte
+	ResetStorage bool
 }
 
 type PBinDriverInput struct {
@@ -91,6 +92,11 @@ func (t *PBinTree) Apply(input PBinDriverInput) (common.Hash, []PBinResolvedNode
 }
 
 func (t *PBinTree) applyAccountUpdate(account PBinAccountUpdate) error {
+	if account.ResetStorage {
+		if err := t.DeleteAccount(account.Address); err != nil {
+			return err
+		}
+	}
 	values := make([]byte, 0, len(account.Values))
 	for sub := range account.Values {
 		values = append(values, sub)

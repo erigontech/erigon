@@ -71,7 +71,8 @@ func pbtCorpusChain(t *testing.T) (*DebugAPIImpl, *execmoduletester.ExecModuleTe
 	bank := pbtCorpusBank(t)
 	newAccount := common.HexToAddress("0x7500000000000000000000000000000000000000")
 	var storeA, storeB, destroyer, blockhashContract, revertContract common.Address
-	delegate := types.CreateAddress(bank, 4)
+	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
+	delegate := types.CreateAddress(bank, 5)
 	authorityKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
 	require.NoError(t, err)
 	authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
@@ -84,7 +85,6 @@ func pbtCorpusChain(t *testing.T) (*DebugAPIImpl, *execmoduletester.ExecModuleTe
 	require.NoError(t, err)
 	clearAuth, err := types.SignAuthorization(clearAuthorityKey, *chain.AllProtocolChanges.ChainID, common.Address{}, 1)
 	require.NoError(t, err)
-	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	blockhashRuntime := []byte{0x60, 0x00, 0x40, 0x60, 0x00, 0x55, 0x00}
 	revertRuntime := []byte{0x5f, 0x5f, 0xfd}
 	api, m := pbinWitnessFixtureWithGeneratorN(t, 1000, 11, nil, func(i int, b *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte), addSigned func(types.Transaction), addTransactionWithChain func(common.Address, *uint256.Int, []byte)) {
@@ -203,6 +203,19 @@ func TestPBinExecutionWitnessCorpus(t *testing.T) {
 			postRoot := pbtCorpusAnchor(t, m, number)
 			require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 			require.NotEmpty(t, result.State)
+			if number == 8 || number == 9 {
+				stateAfter := pbtStateAfterBlock(t, m, number)
+				authorityKey, err := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+				require.NoError(t, err)
+				authority := crypto.PubkeyToAddress(authorityKey.PublicKey)
+				value, err := stateAfter.GetState(accounts.InternAddress(authority), accounts.InternKey(pbtCorpusSlot(3)))
+				require.NoError(t, err)
+				if number == 8 {
+					require.Equal(t, uint64(1), value.Uint64())
+				} else {
+					require.Equal(t, uint64(2), value.Uint64())
+				}
+			}
 			for index := range result.Keys {
 				trimmed := pbtCorpusCloneWithout(result, index)
 				require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine), "dropping blob %d path %x must fail", index, []byte(result.Keys[index]))
@@ -236,7 +249,7 @@ func TestPBinExecutionWitnessDeletesPersistedEmptyStorageAccount(t *testing.T) {
 			pbtCorpusSlot(257): pbtCorpusSlot(2),
 		},
 	}, toucher: {Code: touchCode}}
-	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 1, nil, func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), _ func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+	api, m := pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t, 1000, 1, func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), _ func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
 		if i == 0 {
 			addTransaction(toucher, uint256.NewInt(0), nil)
 		}

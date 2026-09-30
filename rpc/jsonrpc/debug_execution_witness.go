@@ -623,6 +623,7 @@ type ExecutionWitnessResult struct {
 
 	// lookup map for BLOCKHASH opcode, not serialized to JSON
 	headerByNumber map[uint64]*types.Header
+	legacyRoot     hexutil.Bytes
 }
 
 // MarshalFastJSONTo writes the result field by field, in the order and form encoding/json uses.
@@ -1278,11 +1279,14 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	}
 
 	result.State = appendLegacyEmptyStorageNode(result.State, mode, binTrie)
-
-	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
-	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
-		return bytes.Compare(a, b)
-	})
+	if !binTrie {
+		if len(result.State) > 0 {
+			result.legacyRoot = bytes.Clone(result.State[0])
+		}
+		slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
+			return bytes.Compare(a, b)
+		})
+	}
 
 	return result, nil
 }
@@ -1988,8 +1992,18 @@ var (
 // newWitnessStateless creates a new witnessStateless from ExecutionWitnessResult
 func newWitnessStateless(result *ExecutionWitnessResult) (*witnessStateless, error) {
 	// Decode the witness trie from RLP-encoded nodes
-	encodedNodes := make([][]byte, len(result.State))
-	for i, node := range result.State {
+	state := result.State
+	if len(result.legacyRoot) > 0 {
+		state = make([]hexutil.Bytes, 0, len(result.State))
+		state = append(state, result.legacyRoot)
+		for _, node := range result.State {
+			if !bytes.Equal(node, result.legacyRoot) {
+				state = append(state, node)
+			}
+		}
+	}
+	encodedNodes := make([][]byte, len(state))
+	for i, node := range state {
 		encodedNodes[i] = node
 	}
 

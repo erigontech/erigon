@@ -128,15 +128,7 @@ func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit fun
 		if err != nil {
 			return err
 		}
-		basicOp := Op{Key: basicKey, Value: basic}
-		if basic == ([eip8297.ValueLength]byte{}) {
-			kind := mergeBasicDataPreserveEmpty
-			if len(account.Slots) != 0 {
-				kind = mergeBasicDataPresent
-			}
-			basicOp.merge = &feedMerge{kind: kind, nonce: account.Nonce, balance: account.Balance, codeHash: account.CodeHash}
-		}
-		if err := emit(basicOp); err != nil {
+		if err := emit(Op{Key: basicKey, Value: basic}); err != nil {
 			return err
 		}
 		if eip8297.IsDelegation(account.Code) {
@@ -178,12 +170,8 @@ func (e *FeedOpEmitter) EmitAccount(account commitment.PBinFeedAccount, emit fun
 			}
 		}
 	} else {
-		merge := mergeBasicDataRetain
-		if len(account.Slots) != 0 {
-			merge = mergeBasicDataPresent
-		}
 		if err := emit(Op{Key: basicKey, merge: &feedMerge{
-			kind: merge, nonce: account.Nonce, balance: account.Balance, codeHash: account.CodeHash,
+			kind: mergeBasicData, nonce: account.Nonce, balance: account.Balance, codeHash: account.CodeHash,
 		}}); err != nil {
 			return err
 		}

@@ -435,21 +435,37 @@ func TestProcessFeedEmptyCodeWriteLeavesCodeHash(t *testing.T) {
 	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{account}}}, [][]eip8297.State{{feedState(account)}})
 }
 
-func TestProcessFeedKeepsZeroBasicDataForStorageAccount(t *testing.T) {
+func TestProcessFeedEmptyAccountStorageMatchesReference(t *testing.T) {
 	address := common.Hex2Bytes("000000000000000000000000000000000000000e")
 	account := feedAccount(address)
 	account.CodeWritten = true
 	account.Code = []byte{}
 	account.CodeHash = empty.CodeHash
-	account.Slots = []commitment.PBinFeedSlot{{Key: []byte{0x01, 0x00}, Value: []byte{0x02}}}
+	account.Slots = []commitment.PBinFeedSlot{{Key: []byte{0}, Value: []byte{0x01}}, {Key: []byte{1, 0}, Value: []byte{0x02}}}
+	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{account}}}, [][]eip8297.State{{feedState(account)}})
+}
+
+func TestProcessFeedZeroMergeDeletesExistingBasicData(t *testing.T) {
+	address := common.Hex2Bytes("000000000000000000000000000000000000000f")
+	first := feedAccount(address)
+	first.CodeWritten = true
+	first.Code = []byte{}
+	first.CodeHash = empty.CodeHash
+	first.Nonce = 1
+	second := feedAccount(address)
+	second.CodeHash = empty.CodeHash
 	ctx := newTrieTestContext()
 	trie := NewTrie(ctx)
-	_, err := trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{account}})
+	_, err := trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{first}})
 	require.NoError(t, err)
-	cell, present, err := trie.lookupLeaf(eip8297.TreeKeyAccount(address, eip8297.BasicDataLeafKey))
+	_, err = trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{second}})
 	require.NoError(t, err)
-	require.True(t, present, "storage-bearing account must keep its zero BASIC_DATA leaf")
-	require.Equal(t, [eip8297.ValueLength]byte{}, cell.Value)
+	got, err := NewTrie(ctx).Process(nil)
+	require.NoError(t, err)
+	codeHashValue := eip8297.CodeHashValue(empty.CodeHash)
+	want, err := NewTrie(newTrieTestContext()).Process([]Op{{Key: eip8297.TreeKeyAccount(address, eip8297.CodeHashLeafKey), Value: codeHashValue}})
+	require.NoError(t, err)
+	require.Equal(t, want, got, "zero BASIC_DATA merge must delete the leaf")
 }
 
 func TestTranslateFeedRejectsCodeHashMismatch(t *testing.T) {

@@ -200,6 +200,19 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	}
 	s.preStateAccounts[addr] = present
 	if !present {
+		var cache eip8297.DigestCache
+		storage, err := s.tree.PBinHasPrefix(cache.AccountStoragePrefix(addr[:]))
+		if err != nil {
+			if errors.Is(err, commitment.ErrPBinWitnessBlinded) {
+				s.resolveError = nil
+				return nil, nil
+			}
+			return nil, err
+		}
+		if storage {
+			s.preStateAccounts[addr] = true
+			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash}, nil
+		}
 		return nil, nil
 	}
 	if len(value) != eip8297.ValueLength {

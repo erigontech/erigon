@@ -568,14 +568,14 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 **Files:**
 - Create: `docs/pbt-witness.md`
 
-- [ ] document the RPC parameters, anchors and availability rules, the blob format (with the geth-pbt ref it was taken
+- [x] document the RPC parameters, anchors and availability rules, the blob format (with the geth-pbt ref it was taken
       from), the node-set rules and the verifier
-- [ ] list where erigon's witness differs from geth-pbt's and why:
+- [x] list where erigon's witness differs from geth-pbt's and why:
       - geth's prefetcher dedups PBT reads by slot, not owner;
       - geth's witness carries a deleted account's whole storage subtree;
       - CREATE into an account that holds storage wipes it in erigon and keeps it in geth.
-- [ ] cite code by name, never by line number
-- [ ] run `make lint` - must pass before task 14
+- [x] cite code by name, never by line number
+- [x] run `make lint` - must pass before task 14
 
 ### Task 14: Verify acceptance criteria
 

@@ -93,6 +93,53 @@ func (t *PBinTree) Read(key []byte) ([]byte, bool, error) {
 	return t.readChild(t.root, eip8297.Bitpath{}, eip8297.PathFromBytes(key))
 }
 
+func (t *PBinTree) PBinHasPrefix(prefix []byte) (bool, error) {
+	if len(prefix) == 0 {
+		return t.root != nil, nil
+	}
+	target := eip8297.PathFromBytes(prefix)
+	return t.pbinHasPrefix(t.root, eip8297.Bitpath{}, target)
+}
+
+func (t *PBinTree) pbinHasPrefix(ref *pbinChild, walk, target eip8297.Bitpath) (bool, error) {
+	if ref == nil || (ref.node == nil && ref.hash == (common.Hash{})) {
+		return false, nil
+	}
+	if walk.BitLen >= target.BitLen {
+		return walk.HasPrefix(&target), nil
+	}
+	if !target.HasPrefix(&walk) {
+		return false, nil
+	}
+	node, err := t.resolveChild(ref, walk)
+	if err != nil {
+		return false, err
+	}
+	if node.group != nil {
+		for _, sub := range node.group.Subs {
+			key := append(slices.Clone(node.group.Stem), sub)
+			path := eip8297.PathFromBytes(key)
+			if path.HasPrefix(&target) {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	branchPath := pbinAppend(walk, &node.branch.prefix)
+	if target.BitLen <= branchPath.BitLen {
+		return branchPath.HasPrefix(&target), nil
+	}
+	if !target.HasPrefix(&branchPath) {
+		return false, nil
+	}
+	edge := target.Bit(branchPath.BitLen)
+	childWalk := pbinChildWalk(walk, &node.branch.prefix, edge)
+	if edge == 0 {
+		return t.pbinHasPrefix(node.branch.left, childWalk, target)
+	}
+	return t.pbinHasPrefix(node.branch.right, childWalk, target)
+}
+
 func (t *PBinTree) Put(key, value []byte) error {
 	if err := pbinValidateKey(key); err != nil {
 		return err

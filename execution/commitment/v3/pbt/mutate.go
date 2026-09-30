@@ -40,9 +40,6 @@ type mergeKind uint8
 const (
 	mergeBasicData mergeKind = iota + 1
 	mergeCodeHash
-	mergeBasicDataPresent
-	mergeBasicDataRetain
-	mergeBasicDataPreserveEmpty
 )
 
 type feedMerge struct {
@@ -52,22 +49,10 @@ type feedMerge struct {
 	codeHash common.Hash
 }
 
-func mergeKeepsZero(merge *feedMerge) bool {
-	return merge != nil && merge.kind == mergeBasicDataPresent
-}
-
-func mergeRetainsExisting(merge *feedMerge) bool {
-	return merge != nil && merge.kind == mergeBasicDataRetain
-}
-
-func mergeKeepsExistingEmpty(merge *feedMerge, value [eip8297.ValueLength]byte) bool {
-	return merge != nil && merge.kind == mergeBasicDataPreserveEmpty && value == ([eip8297.ValueLength]byte{})
-}
-
 func (t *Trie) applyMerge(op Op) error {
 	merge := op.merge
 	switch merge.kind {
-	case mergeBasicData, mergeBasicDataPresent, mergeBasicDataRetain, mergeBasicDataPreserveEmpty:
+	case mergeBasicData:
 		existing, err := t.insertWithMerge(op.Key, [eip8297.ValueLength]byte{}, merge)
 		if err == nil {
 			if !existing {
@@ -101,9 +86,6 @@ func (t *Trie) mergeValue(merge *feedMerge, existing *Cell, key []byte) ([eip829
 		return [eip8297.ValueLength]byte{}, nil
 	}
 	codeSize := uint64(0)
-	if merge.kind == mergeBasicDataPreserveEmpty {
-		return eip8297.EncodeBasicData(merge.nonce, &merge.balance, codeSize)
-	}
 	if existing != nil && !t.droppedLeaf(existing.Key) {
 		codeSize = uint64(binary.BigEndian.Uint32(existing.Value[eip8297.BasicDataCodeSizeOffset:]))
 	} else if !eip8297.IsEmptyCodeHash(merge.codeHash) {
@@ -318,17 +300,12 @@ func (t *Trie) insertWithMerge(key []byte, value [eip8297.ValueLength]byte, merg
 			}
 		}
 		if value == ([eip8297.ValueLength]byte{}) {
-			if mergeOp != nil && !mergeKeepsZero(mergeOp) {
-				if mergeRetainsExisting(mergeOp) {
-					return true, nil
-				}
+			if mergeOp != nil {
 				root.form = RowRoot
 				root.leaf = Cell{}
 				return true, nil
 			}
-			if mergeOp == nil {
-				return false, errInsertValue
-			}
+			return false, errInsertValue
 		}
 		root.form = LeafRoot
 		root.leaf = *t.leafCell(key, value).Cell
@@ -352,17 +329,12 @@ func (t *Trie) insertWithMerge(key []byte, value [eip8297.ValueLength]byte, merg
 				}
 			}
 			if value == ([eip8297.ValueLength]byte{}) {
-				if mergeOp != nil && !mergeKeepsZero(mergeOp) {
-					if mergeRetainsExisting(mergeOp) || mergeKeepsExistingEmpty(mergeOp, root.leaf.Value) {
-						return true, nil
-					}
+				if mergeOp != nil {
 					root.form = RowRoot
 					root.leaf = Cell{}
 					return true, nil
 				}
-				if mergeOp == nil {
-					return false, errInsertValue
-				}
+				return false, errInsertValue
 			}
 			root.leaf = *t.leafCell(key, value).Cell
 			return true, nil
@@ -374,12 +346,10 @@ func (t *Trie) insertWithMerge(key []byte, value [eip8297.ValueLength]byte, merg
 			}
 		}
 		if value == ([eip8297.ValueLength]byte{}) {
-			if mergeOp != nil && !mergeKeepsZero(mergeOp) {
+			if mergeOp != nil {
 				return false, nil
 			}
-			if mergeOp == nil {
-				return false, errInsertValue
-			}
+			return false, errInsertValue
 		}
 		return false, t.splitRootLeaf(root, oldPath, root.leaf, path, key, value, d)
 	case ExtRoot:
@@ -434,12 +404,10 @@ func (t *Trie) insertExtRoot(root *treeRoot, path eip8297.Bitpath, key []byte, v
 		}
 	}
 	if value == ([eip8297.ValueLength]byte{}) {
-		if merge != nil && !mergeKeepsZero(merge) {
+		if merge != nil {
 			return false, nil
 		}
-		if merge == nil {
-			return false, errInsertValue
-		}
+		return false, errInsertValue
 	}
 	window := (d / 4) * 4
 	oldPath := root.self
@@ -524,12 +492,10 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 			}
 		}
 		if value == ([eip8297.ValueLength]byte{}) {
-			if merge != nil && !mergeKeepsZero(merge) {
+			if merge != nil {
 				return false, nil
 			}
-			if merge == nil {
-				return false, errInsertValue
-			}
+			return false, errInsertValue
 		}
 		t.setLeaf(row, slot, key, value)
 		t.markDirty(row)
@@ -548,18 +514,13 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 				}
 			}
 			if value == ([eip8297.ValueLength]byte{}) {
-				if merge != nil && !mergeKeepsZero(merge) {
-					if mergeRetainsExisting(merge) || mergeKeepsExistingEmpty(merge, cell.Cell.Value) {
-						return true, nil
-					}
+				if merge != nil {
 					row.cells[slot] = rowCell{}
 					row.markCellDirty(slot)
 					t.markDirty(row)
 					return true, nil
 				}
-				if merge == nil {
-					return false, errInsertValue
-				}
+				return false, errInsertValue
 			}
 			t.setLeaf(row, slot, key, value)
 			t.markDirty(row)
@@ -574,12 +535,10 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 				}
 			}
 			if value == ([eip8297.ValueLength]byte{}) {
-				if merge != nil && !mergeKeepsZero(merge) {
+				if merge != nil {
 					return false, nil
 				}
-				if merge == nil {
-					return false, errInsertValue
-				}
+				return false, errInsertValue
 			}
 			newSlot := int(path.Bit(row.path.BitLen)*8 + path.Bit(row.path.BitLen+1)*4 + path.Bit(row.path.BitLen+2)*2 + path.Bit(row.path.BitLen+3))
 			t.setLeaf(row, newSlot, key, value)
@@ -593,12 +552,10 @@ func (t *Trie) insertRow(row *rowNode, path eip8297.Bitpath, key []byte, value [
 			}
 		}
 		if value == ([eip8297.ValueLength]byte{}) {
-			if merge != nil && !mergeKeepsZero(merge) {
+			if merge != nil {
 				return false, nil
 			}
-			if merge == nil {
-				return false, errInsertValue
-			}
+			return false, errInsertValue
 		}
 		window := (d / 4) * 4
 		childPath := path.Slice(0, window)

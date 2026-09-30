@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"encoding/binary"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,10 +26,29 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/rpc"
 )
+
+type pbinWitnessWithoutCommitmentHistory struct {
+	kv.TemporalTx
+}
+
+func (tx pbinWitnessWithoutCommitmentHistory) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bool, error) {
+	if domain == kv.CommitmentDomain || domain == kv.CommitmentBinDomain {
+		return nil, false, errors.New("commitment history read")
+	}
+	return tx.TemporalTx.GetAsOf(domain, key, ts)
+}
+
+func (tx pbinWitnessWithoutCommitmentHistory) BlockFilesRoTx() *blocksnapshots.View {
+	if p, ok := tx.TemporalTx.(interface{ BlockFilesRoTx() *blocksnapshots.View }); ok {
+		return p.BlockFilesRoTx()
+	}
+	return nil
+}
 
 func pbtDualAnchors(t *testing.T, m *execmoduletester.ExecModuleTester, number uint64, trie witnessTrie) (common.Hash, common.Hash) {
 	t.Helper()
@@ -83,7 +103,8 @@ func TestPBinDualExecutionWitness(t *testing.T) {
 						if trie == witnessTriePBT {
 							require.NoError(t, verifyPBinWitnessAgainstBlock(t.Context(), result, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 						} else {
-							require.NotEmpty(t, result.State)
+							require.NoError(t, verifyWitnessAgainstBlock(t.Context(), result, block, m.ChainConfig, m.Engine, postRoot))
+							require.NotEmpty(t, result.Codes, "MPT witness must carry accessed code")
 							require.NotEqual(t, common.Hash{}, parentRoot)
 							require.NotEqual(t, common.Hash{}, postRoot)
 						}
@@ -148,7 +169,7 @@ func TestPBinHeadCaptureWithoutCommitmentHistory(t *testing.T) {
 	blockNumber := rpc.BlockNumber(5)
 	info, err := api.resolveWitnessBlock(t.Context(), tx, rpc.BlockNumberOrHashWithNumber(blockNumber))
 	require.NoError(t, err)
-	result, err := api.buildWitnessResultHeadCapture(t.Context(), tx, pin.tx, info, witnessModeLegacy, witnessTriePBT)
+	result, err := api.buildWitnessResultHeadCapture(t.Context(), pbinWitnessWithoutCommitmentHistory{TemporalTx: tx}, pin.tx, info, witnessModeLegacy, witnessTriePBT)
 	require.NoError(t, err)
 	require.NotEmpty(t, result.State)
 }

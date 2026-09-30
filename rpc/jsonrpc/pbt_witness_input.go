@@ -49,12 +49,6 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			}
 		}
 	}
-	for address := range rs.DeletedAccounts {
-		if rs.innerExists(address) {
-			key := eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey)
-			readKeys[string(key)] = key
-		}
-	}
 	for address, code := range rs.PreStateCode {
 		if eip8297.IsDelegation(code) {
 			key := eip8297.TreeKeyAccount(address[:], eip8297.DelegationLeafKey)
@@ -99,6 +93,9 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 	}
 	for address := range accountAddresses {
 		update := eipWitness.PBinAccountUpdate{Address: append([]byte(nil), address[:]...)}
+		if _, created := rs.CreatedContracts[address]; created && rs.innerExists(address) {
+			update.ResetStorage = true
+		}
 		if account, ok := rs.accountOverlay[address]; ok && account != nil {
 			basic, err := pbinAccountBasicValue(rs, address, account, false)
 			if err != nil {

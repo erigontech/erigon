@@ -92,6 +92,18 @@ func pbinWitnessFixtureWithGeneratorN(t *testing.T, activation uint64, blockCoun
 }
 
 func pbinWitnessFixtureWithGeneratorNAlloc(t *testing.T, activation uint64, blockCount int, beforeInsert func(*execmoduletester.ExecModuleTester, *blockgen.ChainPack) error, generator pbinWitnessBlockGenerator, extraAlloc types.GenesisAlloc, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+	return pbinWitnessFixtureWithGeneratorNConfig(t, activation, blockCount, beforeInsert, generator, extraAlloc, true, dualOption...)
+}
+
+func pbinWitnessFixtureWithGeneratorNNoSystemCalls(t *testing.T, activation uint64, blockCount int, generator pbinWitnessBlockGenerator) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+	return pbinWitnessFixtureWithGeneratorNConfig(t, activation, blockCount, nil, generator, nil, false)
+}
+
+func pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t *testing.T, activation uint64, blockCount int, generator pbinWitnessBlockGenerator, extraAlloc types.GenesisAlloc) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+	return pbinWitnessFixtureWithGeneratorNConfig(t, activation, blockCount, nil, generator, extraAlloc, false)
+}
+
+func pbinWitnessFixtureWithGeneratorNConfig(t *testing.T, activation uint64, blockCount int, beforeInsert func(*execmoduletester.ExecModuleTester, *blockgen.ChainPack) error, generator pbinWitnessBlockGenerator, extraAlloc types.GenesisAlloc, systemCalls bool, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
 	t.Helper()
 	withCommitmentHistory(t)
 	dual := activation > 0
@@ -127,10 +139,21 @@ func pbinWitnessFixtureWithGeneratorNAlloc(t *testing.T, activation uint64, bloc
 	to := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	amsterdam := uint64(0)
 	config := chain.AllProtocolChanges.Copy()
-	config.AmsterdamTime = &amsterdam
+	if systemCalls {
+		config.AmsterdamTime = &amsterdam
+	} else {
+		config = chain.AllProtocolChanges.Copy()
+		config.ShanghaiTime = nil
+		config.CancunTime = nil
+		config.PragueTime = nil
+		config.OsakaTime = nil
+		config.AmsterdamTime = &activation
+	}
 	if generator != nil {
-		require.True(t, config.IsCancun(0))
-		require.True(t, config.IsPrague(0))
+		if systemCalls {
+			require.True(t, config.IsCancun(0))
+			require.True(t, config.IsPrague(0))
+		}
 	}
 	if !hexOnly {
 		config.BinaryTrieTime = &activation
@@ -143,26 +166,39 @@ func pbinWitnessFixtureWithGeneratorNAlloc(t *testing.T, activation uint64, bloc
 	}
 	m := execmoduletester.New(t, append(options, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(key))...)
 	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error { return rawdb.WriteDBCommitmentHistoryEnabled(tx, true) }))
-	tx, err := m.DB.BeginTemporalRw(t.Context())
-	require.NoError(t, err)
-	defer tx.Rollback()
-	for _, address := range []common.Address{config.GetWithdrawalRequestContract().Value(), config.GetConsolidationRequestContract().Value()} {
-		code, _, err := tx.GetLatest(kv.CodeDomain, address[:], kv.GetLatestOptions{})
+	if systemCalls {
+		tx, err := m.DB.BeginTemporalRw(t.Context())
 		require.NoError(t, err)
-		require.NotEmpty(t, code)
-		genesis.Alloc[address] = types.GenesisAccount{Balance: big.NewInt(0), Nonce: 1, Code: append([]byte(nil), code...)}
+		defer tx.Rollback()
+		for _, address := range []common.Address{config.GetWithdrawalRequestContract().Value(), config.GetConsolidationRequestContract().Value()} {
+			code, _, err := tx.GetLatest(kv.CodeDomain, address[:], kv.GetLatestOptions{})
+			require.NoError(t, err)
+			require.NotEmpty(t, code)
+			genesis.Alloc[address] = types.GenesisAccount{Balance: big.NewInt(0), Nonce: 1, Code: append([]byte(nil), code...)}
+		}
+		require.NoError(t, tx.Delete(kv.ConfigTable, kv.GenesisKey))
+		require.NoError(t, rawdb.WriteGenesisIfNotExist(tx, genesis))
+		domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
+		require.NoError(t, err)
+		root, ibs, err := genesiswrite.ComputeGenesisCommitment(t.Context(), genesis, tx, domains, m.Genesis.Header())
+		require.NoError(t, err)
+		ibs.Close()
+		header := m.Genesis.Header()
+		header.Root = common.BytesToHash(root)
+		m.Genesis = m.Genesis.WithSeal(header)
+		require.NoError(t, rawdb.WriteBlock(tx, m.Genesis))
+		require.NoError(t, rawdb.WriteChainConfig(tx, m.Genesis.Hash(), config))
+		require.NoError(t, rawdb.WriteTd(tx, m.Genesis.Hash(), 0, *genesis.Difficulty))
+		require.NoError(t, rawdb.WriteCanonicalHash(tx, m.Genesis.Hash(), 0))
+		rawdb.WriteHeadBlockHash(tx, m.Genesis.Hash())
+		require.NoError(t, rawdb.WriteHeadHeaderHash(tx, m.Genesis.Hash()))
+		require.NoError(t, domains.Commit(t.Context(), tx))
+		domains.Close()
+		require.NoError(t, tx.Commit())
 	}
-	require.NoError(t, tx.Delete(kv.ConfigTable, kv.GenesisKey))
-	require.NoError(t, rawdb.WriteGenesisIfNotExist(tx, genesis))
-	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithoutCommitmentSeek())
-	require.NoError(t, err)
-	_, ibs, err := genesiswrite.ComputeGenesisCommitment(t.Context(), genesis, tx, domains, m.Genesis.Header())
-	require.NoError(t, err)
-	ibs.Close()
-	require.NoError(t, domains.Commit(t.Context(), tx))
-	domains.Close()
-	require.NoError(t, tx.Commit())
-	require.NoError(t, m.ExecModule.ResetCurrentContext(t.Context()))
+	if systemCalls {
+		require.NoError(t, m.ExecModule.ResetCurrentContext(t.Context()))
+	}
 	signer := types.LatestSignerForChainID(config.ChainID)
 	pack, err := m.GenerateChain(blockCount, func(i int, b *blockgen.BlockGen) {
 		if generator != nil {
@@ -233,11 +269,18 @@ func pbinWitnessFixtureWithGeneratorNAlloc(t *testing.T, activation uint64, bloc
 	} else {
 		require.NoError(t, beforeInsert(m, pack))
 	}
-	return newDebugApiForTest(m), m
+	api := newDebugApiForTest(m)
+	api._chainConfig.Store(m.ChainConfig)
+	api._genesis.Store(m.Genesis)
+	return api, m
 }
 
 func repairPBinPreForkShadows(t *testing.T, m *execmoduletester.ExecModuleTester, activation uint64) {
 	t.Helper()
+	commitmentDomain := kv.CommitmentBinDomain
+	if !statecfg.ExperimentalHexBinCommitment {
+		commitmentDomain = kv.CommitmentDomain
+	}
 	tx, err := m.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -252,7 +295,7 @@ func repairPBinPreForkShadows(t *testing.T, m *execmoduletester.ExecModuleTester
 		}
 		maxTxNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, blockNum)
 		require.NoError(t, err)
-		data, ok, err := tx.GetAsOf(kv.CommitmentBinDomain, pbtengine.GlobalRootKey(), maxTxNum+1)
+		data, ok, err := tx.GetAsOf(commitmentDomain, pbtengine.GlobalRootKey(), maxTxNum+1)
 		require.NoError(t, err)
 		require.True(t, ok, "missing binary root record for block %d", blockNum)
 		record, err := pbtengine.DecodeRecord(pbtengine.GlobalRootKey(), data)
