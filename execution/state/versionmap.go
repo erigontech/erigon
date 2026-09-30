@@ -149,20 +149,28 @@ func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr a
 // markCellFlag sets the flag on an existing typed cell, panicking with msg if none is
 // present at txIdx. When incarnation >= 0 the cell must be at that incarnation — a newer
 // one means the flip targets a stale version, so panic rather than mark the wrong one.
-func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx, incarnation int, flag statusFlag, msg string) {
-	if cells == nil {
-		panic(msg)
+func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx, incarnation int, flag statusFlag) {
+	var ci *WriteCell[T]
+	if cells != nil {
+		ci, _ = cells.Get(txIdx)
 	}
-	ci, ok := cells.Get(txIdx)
-	if !ok {
-		panic(msg)
+	if ci == nil {
+		panic(missingCellMsg("markFlag", addr, path, key, txIdx))
 	}
 	// A cell at an EARLIER incarnation than the run is legitimate under the equal-value
 	// write-side no-bump; only a NEWER one means the flip targets a stale version.
 	if incarnation >= 0 && ci.incarnation > incarnation {
-		panic(fmt.Sprintf("%s: incarnation have=%d want=%d", msg, ci.incarnation, incarnation))
+		panic(fmt.Sprintf("markFlag: incarnation have=%d want=%d addr=%x path=%s key=%x txIdx=%d",
+			ci.incarnation, incarnation, addr.Value(), path, key.Value(), txIdx))
 	}
 	ci.flag = flag
+}
+
+// missingCellMsg is called from panic paths only: the mark* helpers run once per
+// written cell, and formatting an address plus a slot key on every call costs more
+// than the check itself.
+func missingCellMsg(what string, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx int) string {
+	return fmt.Sprintf("%s: missing cell addr=%x path=%s key=%x txIdx=%d", what, addr.Value(), path, key.Value(), txIdx)
 }
 
 // markCellComplete advances an existing cell to Done as a consistency check, not a
@@ -170,13 +178,12 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx, incarnatio
 // the tx's result arrived). A missing cell, newer incarnation, or changed value is a
 // one-value-per-version violation and panics. This is the commit-boundary enforcement point.
 func markCellComplete[T any](cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx, incarnation int, value T) {
-	msg := fmt.Sprintf("markComplete: missing cell addr=%x path=%s key=%x txIdx=%d", addr.Value(), path, key.Value(), txIdx)
 	if cells == nil {
-		panic(msg)
+		panic(missingCellMsg("markComplete", addr, path, key, txIdx))
 	}
 	ci, ok := cells.Get(txIdx)
 	if !ok {
-		panic(msg)
+		panic(missingCellMsg("markComplete", addr, path, key, txIdx))
 	}
 	if dbg.AssertEnabled {
 		// A cell held at an EARLIER incarnation than the committing run is legitimate: an
@@ -622,6 +629,18 @@ const (
 
 // AccountLifecycleAt resolves an account's lifecycle in one pass: the state, the canonical version dependent reads must anchor on, and the destruct (wipe) TxIndex.
 func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+	return vm.accountLifecycleAt(addr, txIdx, false)
+}
+
+// ResolvedAccountLifecycleAt counts only sealed (Done) revival writes. Anything
+// above a destruct that is still revertible may be withdrawn, so validation must
+// not take it as proof the account came back; the read path wants the opposite
+// and uses AccountLifecycleAt.
+func (vm *VersionMap) ResolvedAccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+	return vm.accountLifecycleAt(addr, txIdx, true)
+}
+
+func (vm *VersionMap) accountLifecycleAt(addr accounts.Address, txIdx int, resolvedRevivalsOnly bool) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
 	if vm == nil {
 		return LifecycleLive, Version{}, 0
 	}
@@ -664,16 +683,16 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 	}
 
 	revivalLimit := txIdx - 1
-	if hi, ok := highestBelow(e.Address, revivalLimit); ok && hi >= destroyedAt {
+	if hi, ok := highestBelow(e.Address, revivalLimit, resolvedRevivalsOnly); ok && hi >= destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
-	if hi, ok := highestBelow(e.Balance, revivalLimit); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.Balance, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
-	if hi, ok := highestBelow(e.Nonce, revivalLimit); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.Nonce, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
-	if hi, ok := highestBelow(e.CodeHash, revivalLimit); ok && hi > destroyedAt {
+	if hi, ok := highestBelow(e.CodeHash, revivalLimit, resolvedRevivalsOnly); ok && hi > destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
 	return LifecycleAbsent, canonicalVer, destroyedAt
@@ -681,12 +700,18 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 
 // highestBelow returns the largest TxIndex ≤ limit present in cells, if any. The
 // caller must hold the owning AddressEntry's lock.
-func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int) (int, bool) {
+func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int, resolvedOnly bool) (int, bool) {
 	if cells == nil {
 		return 0, false
 	}
 	hi, ok := 0, false
-	cells.Descend(limit, func(k int, _ *WriteCell[T]) bool {
+	cells.Descend(limit, func(k int, v *WriteCell[T]) bool {
+		// Only Done proves a lasting revival: a Validated cell is still revertible
+		// until the in-order seal, and withdrawing it re-validates its own readers,
+		// not the AddressPath reader this verdict serves.
+		if resolvedOnly && v.flag != FlagDone {
+			return true
+		}
 		hi, ok = k, true
 		return false
 	})
@@ -930,28 +955,27 @@ func (vm *VersionMap) MarkWritesValidated(writes *WriteSet, feeEstimate func(acc
 // Caller must hold e.mu.Lock(). Panics if no cell is present at txIdx. When
 // incarnation >= 0 the cell must be at that incarnation.
 func markFlag(e *AddressEntry, addr accounts.Address, path AccountPath, key accounts.StorageKey, txIdx, incarnation int, flag statusFlag) {
-	msg := fmt.Sprintf("markFlag: missing cell. addr=%x path=%s key=%x txIdx=%d", addr, path, key, txIdx)
 	switch path {
 	case AddressPath:
-		markCellFlag(e.Address, txIdx, incarnation, flag, msg)
+		markCellFlag(e.Address, addr, path, key, txIdx, incarnation, flag)
 	case SelfDestructPath:
-		markCellFlag(e.SelfDestruct, txIdx, incarnation, flag, msg)
+		markCellFlag(e.SelfDestruct, addr, path, key, txIdx, incarnation, flag)
 	case BalancePath:
-		markCellFlag(e.Balance, txIdx, incarnation, flag, msg)
+		markCellFlag(e.Balance, addr, path, key, txIdx, incarnation, flag)
 	case NoncePath:
-		markCellFlag(e.Nonce, txIdx, incarnation, flag, msg)
+		markCellFlag(e.Nonce, addr, path, key, txIdx, incarnation, flag)
 	case IncarnationPath:
-		markCellFlag(e.Incarnation, txIdx, incarnation, flag, msg)
+		markCellFlag(e.Incarnation, addr, path, key, txIdx, incarnation, flag)
 	case CodePath:
-		markCellFlag(e.Code, txIdx, incarnation, flag, msg)
+		markCellFlag(e.Code, addr, path, key, txIdx, incarnation, flag)
 	case CodeHashPath:
-		markCellFlag(e.CodeHash, txIdx, incarnation, flag, msg)
+		markCellFlag(e.CodeHash, addr, path, key, txIdx, incarnation, flag)
 	case CodeSizePath:
-		markCellFlag(e.CodeSize, txIdx, incarnation, flag, msg)
+		markCellFlag(e.CodeSize, addr, path, key, txIdx, incarnation, flag)
 	case CreateContractPath:
-		markCellFlag(e.CreateContract, txIdx, incarnation, flag, msg)
+		markCellFlag(e.CreateContract, addr, path, key, txIdx, incarnation, flag)
 	case StoragePath:
-		markCellFlag(e.Storage[key], txIdx, incarnation, flag, msg)
+		markCellFlag(e.Storage[key], addr, path, key, txIdx, incarnation, flag)
 	default:
 		panic(fmt.Errorf("markFlag: unknown path %v", path))
 	}
@@ -1226,6 +1250,15 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
+			if valid != VersionValid && rr.Version().TxIndex == version.TxIndex &&
+				matchesLive != nil && matchesLive() {
+				// The same writer re-published under a new incarnation but the value this
+				// read saw is still live, so the read stands; without this one
+				// re-execution invalidates every reader of a hot cell and serializes the
+				// block. Only the same writer: under a higher one an equal value can hide
+				// a lifecycle change that the version check alone catches.
+				valid = VersionValid
+			}
 			// An origin AddressPath read is the committed baseline; re-run the create/
 			// destruct cross-checks so a concurrent lower-tx create or SELFDESTRUCT invalidates it.
 			if valid == VersionValid && path == AddressPath && rr.Version().TxIndex == originIndex {
@@ -1236,6 +1269,15 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 						valid = VersionInvalid
 					}
 				}
+			}
+		}
+		// An AddressPath read predating a later self-destruct that nothing revived is
+		// stale. checkVersion misses it — the destruct writes no AddressPath cell — and
+		// the value tiebreaker above can forgive the version churn that would catch it.
+		if valid == VersionValid && path == AddressPath {
+			if st, _, destroyedAt := vm.ResolvedAccountLifecycleAt(addr, txIndex); st == LifecycleAbsent &&
+				destroyedAt > rr.Version().TxIndex {
+				valid = VersionInvalid
 			}
 		}
 		// A later tx self-destructed the account (no revival), so a read predating the

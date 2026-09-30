@@ -382,3 +382,159 @@ func TestSelfDestructKeepsDirtyStorageReadableSameTx(t *testing.T) {
 		}
 	}
 }
+
+// TestValueTiebreaker_MapReadIncarnationBump pins the value tiebreaker for a
+// version-map read: when the writer re-executes and re-publishes the same value
+// under a new incarnation, a reader of the old version is still accurate and
+// must not be forced to re-execute.
+func TestValueTiebreaker_MapReadIncarnationBump(t *testing.T) {
+	vm := NewVersionMap(nil)
+
+	addr := accounts.InternAddress([20]byte{0x04})
+	balance := uint256.NewInt(1000)
+
+	vm.WriteBalance(addr, Version{TxIndex: 5, Incarnation: 1}, *balance, true)
+
+	checkVersion := func(rv, wv Version) VersionValidity {
+		if rv != wv {
+			return VersionInvalid
+		}
+		return VersionValid
+	}
+
+	valid := validateRead(vm, 10, addr, BalancePath, accounts.NilKey, MapRead, Version{TxIndex: 5, Incarnation: 0},
+		*balance, liveBalance, eqUint256, checkVersion, false, "")
+	assert.Equal(t, VersionValid, valid, "same value under a bumped incarnation must stay valid")
+
+	valid = validateRead(vm, 10, addr, BalancePath, accounts.NilKey, MapRead, Version{TxIndex: 5, Incarnation: 0},
+		*uint256.NewInt(999), liveBalance, eqUint256, checkVersion, false, "")
+	assert.Equal(t, VersionInvalid, valid, "a changed value must still invalidate")
+}
+
+// A different, higher writer publishing an equal value says nothing about the
+// account still existing, so the tiebreaker must not forgive a read that a later
+// SELFDESTRUCT made stale. Under Tangerine Whistle rules a forgiven read skips
+// CreateBySelfdestructGas and the tx validates with the wrong gas.
+func TestValueTiebreaker_DifferentWriterMustNotBypassLaterSD(t *testing.T) {
+	addr := getAddress(160)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(6)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 0}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 5}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
+}
+
+// Same-writer variant: the tiebreaker legitimately forgives the incarnation bump,
+// so the AddressPath destruct check is the only thing left to catch the stale read.
+func TestValueTiebreaker_SameWriterMustNotBypassLaterSD(t *testing.T) {
+	addr := getAddress(162)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(6)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 3}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 5}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3, Incarnation: 1}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(5, io, validateEqualVersion, false, ""))
+}
+
+// A tentative revival must not hide the destruct under it: the latest SelfDestruct
+// cell is an unresolved false, so only the resolved history says the account is gone.
+// If tx5 later drops the revival the read is already invalid, rather than surviving on
+// a write that never committed.
+func TestValueTiebreaker_UnresolvedRevivalDoesNotHideDestruct(t *testing.T) {
+	addr := getAddress(164)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(7)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 3}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 6}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3, Incarnation: 1}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 5}, false, false)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))
+}
+
+// A tentative balance credit above a completed destruct is not a revival: until
+// it validates it may be withdrawn, and the account is still absent. Counting it
+// would let the value tiebreaker keep an AddressPath read that predates the
+// destruct.
+func TestValueTiebreaker_UnresolvedBalanceRevivalDoesNotHideDestruct(t *testing.T) {
+	addr := getAddress(165)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(7)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 3}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 6}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3, Incarnation: 1}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+	vm.WriteBalance(addr, Version{TxIndex: 5}, *uint256.NewInt(1), false)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))
+}
+
+// A validated-but-unsealed revival is still revertible, so it does not end a
+// destruct either. Only a Done revival proves the account came back; counting a
+// Validated one would let the tiebreaker keep an AddressPath read that predates
+// the destruct, and withdrawing the credit re-validates its balance readers, not
+// this address reader.
+func TestValueTiebreaker_ValidatedBalanceRevivalDoesNotHideDestruct(t *testing.T) {
+	addr := getAddress(166)
+	alive := &accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+
+	io := NewVersionedIO(7)
+	rs := ReadSet{}
+	rs.SetAddress(addr, VersionedRead[AccountView]{
+		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 3}},
+		Val:        NewAccountView(alive),
+	})
+	io.RecordReads(Version{TxIndex: 6}, rs)
+
+	vm := NewVersionMap(nil)
+	vm.WriteAddress(addr, Version{TxIndex: 3, Incarnation: 1}, alive, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 4}, true, true)
+	vm.WriteIncarnation(addr, Version{TxIndex: 4}, 1, true)
+
+	credit := newWriteSet(&VersionedWrite[uint256.Int]{
+		WriteHeader: WriteHeader{Address: addr, Path: BalancePath, Key: accounts.NilKey, Version: Version{TxIndex: 5}},
+		Val:         *uint256.NewInt(1),
+	})
+	vm.FlushVersionedWrites(credit, false, "")
+	vm.MarkWritesValidated(credit, nil)
+
+	assert.Equal(t, VersionInvalid, vm.ValidateVersion(6, io, validateEqualVersion, false, ""))
+}

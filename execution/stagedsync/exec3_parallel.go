@@ -143,6 +143,8 @@ type parallelExecutor struct {
 	currentChangeSet *changeset.StateChangeSet
 	// currentChangeSetBlock is the block currentChangeSet belongs to (0 == none).
 	currentChangeSetBlock uint64
+	// currentChangeSetHash is the hash currentChangeSet was last saved under.
+	currentChangeSetHash common.Hash
 }
 
 // stopKind classifies why the executor was asked to stop. It maps directly
@@ -207,18 +209,27 @@ func (pe *parallelExecutor) cancelOperational(blockNum uint64, err error) {
 // ensureChangesetAccumulator makes pe.currentChangeSet point at a fresh,
 // block-specific StateChangeSet, to be saved by hash and bound transiently by
 // the apply fold and the committer. Idempotent; a no-op outside the changeset
-// window. Exec-loop only.
-func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
+// window. A zero blockHash defers the save to the first caller that knows it.
+// Exec-loop only.
+func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64, blockHash common.Hash) {
 	if blockNum < pe.changesetWindowStart || blockNum == 0 || blockNum > pe.maxBlockNum {
 		return
 	}
-	if pe.currentChangeSet != nil && pe.currentChangeSetBlock == blockNum {
-		return
+	if pe.currentChangeSet == nil || pe.currentChangeSetBlock != blockNum {
+		// A stale changeset for a different block was already saved by hash, so
+		// overwriting it here loses nothing.
+		pe.currentChangeSet = &changeset.StateChangeSet{}
+		pe.currentChangeSetBlock = blockNum
+		pe.currentChangeSetHash = common.Hash{}
 	}
-	// A stale changeset for a different block was already saved by hash, so
-	// overwriting it here loses nothing.
-	pe.currentChangeSet = &changeset.StateChangeSet{}
-	pe.currentChangeSetBlock = blockNum
+	// Save at block start, not only at its end: the calculator's mid-block
+	// step-boundary checkpoint looks the changeset up by hash, and an unsaved one
+	// drops those commitment writes from the unwind diff, leaving commitment ahead
+	// of the state after a reorg.
+	if blockHash != (common.Hash{}) && blockHash != pe.currentChangeSetHash {
+		pe.currentChangeSetHash = blockHash
+		pe.domains().SavePastChangesetAccumulator(blockHash, blockNum, pe.currentChangeSet)
+	}
 }
 
 // clearChangesetAccumulator detaches the current changeset accumulator after
@@ -226,6 +237,7 @@ func (pe *parallelExecutor) ensureChangesetAccumulator(blockNum uint64) {
 func (pe *parallelExecutor) clearChangesetAccumulator() {
 	pe.currentChangeSet = nil
 	pe.currentChangeSetBlock = 0
+	pe.currentChangeSetHash = common.Hash{}
 }
 
 // bindBlockChangesetForFold binds block N's saved changeset (by hash) so the
@@ -374,7 +386,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// never race on SharedDomains.mem.
 	pe.changesetWindowStart = changesetWindowStart(pe.cfg.syncCfg.AlwaysGenerateChangesets,
 		pe.cfg.syncCfg.MaxReorgDepth, pe.cfg.blockReader.FrozenBlocks(), startBlockNum, maxBlockNum)
-	pe.ensureChangesetAccumulator(startBlockNum)
+	pe.ensureChangesetAccumulator(startBlockNum, common.Hash{})
 
 	// Start the commitment calculator. Blocks from the changeset window onward must
 	// compute per-block — otherwise batch-mode dedupes branch updates across the
@@ -1113,16 +1125,10 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
 				}
-				// Save the block's changeset by hash BEFORE sending the blockResult, so
-				// the calculator can find it via GetChangesetByHash and record its
-				// branch diffs into block N's CS. Saving after sendResult would let the
-				// calculator race ahead, look up an unsaved CS, and leak branch deltas
-				// into the next block's CS. ensureChangesetAccumulator covers an empty
-				// block that created no accumulator via a tx-result.
-				pe.ensureChangesetAccumulator(blockResult.BlockNum)
-				if pe.currentChangeSet != nil {
-					pe.domains().SavePastChangesetAccumulator(blockResult.BlockHash, blockResult.BlockNum, pe.currentChangeSet)
-				}
+				// Covers an empty block that created no accumulator via a tx-result; the
+				// save must land before the blockResult, else the calculator races ahead,
+				// looks up an unsaved CS and leaks branch deltas into the next block's CS.
+				pe.ensureChangesetAccumulator(blockResult.BlockNum, blockResult.BlockHash)
 
 				// Decide the stop BEFORE sending, so a terminal stop publishes the
 				// stopCause before blockResult(M) crosses the channel: the calculator
@@ -1203,7 +1209,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			if ok {
 				// Fast-path install of the next block's changeset accumulator, still in
 				// the exec loop (single-writer); lazily installed on first apply otherwise.
-				pe.ensureChangesetAccumulator(blockExecutor.blockNum)
+				pe.ensureChangesetAccumulator(blockExecutor.blockNum, blockExecutor.blockHash)
 				pe.onBlockStart(ctx, blockExecutor.blockNum, blockExecutor.blockHash)
 				blockExecutor.execStarted = time.Now()
 				blockExecutor.scheduleExecution(ctx, pe)
@@ -1501,7 +1507,7 @@ func (pe *parallelExecutor) processSingleResult(ctx context.Context, applyTx kv.
 	// Ensure this block's changeset accumulator is installed before its
 	// writes are applied — covers blocks scheduled out of band (with no
 	// preceding blockResult to trigger the fast-path install above).
-	pe.ensureChangesetAccumulator(txResult.Version().BlockNum)
+	pe.ensureChangesetAccumulator(txResult.Version().BlockNum, blockExecutor.blockHash)
 
 	return blockExecutor.nextResult(ctx, pe, txResult, applyTx)
 }
@@ -1975,7 +1981,11 @@ func (be *blockExecutor) selfLoopEvaluate(tv *taskVersion, result *exec.TxResult
 	v := be.versionMap.ValidateReadSet(tv.version.TxIndex, result.TxIn,
 		func(rv, wv state.Version) state.VersionValidity {
 			if rv != wv {
-				if b := be.taskIndexOf(wv.TxIndex); b > blocker {
+				// A same-writer re-publication names no blocker: the value tiebreaker
+				// may forgive it, and parking would wait on a writer that did not
+				// invalidate this read. If the value did change, re-executing at once is
+				// right — the new value is already published.
+				if b := be.taskIndexOf(wv.TxIndex); rv.TxIndex != wv.TxIndex && b > blocker {
 					// Invariant: a read can only be invalidated by a PREDECESSOR write.
 					// A blocker >= this task is a forward dependency (a future write
 					// invalidating a past read) — impossible in Block-STM; fail loud.

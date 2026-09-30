@@ -125,14 +125,26 @@ func (v *versionMapWriteView) Count() int {
 
 func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	return func(yield func(accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]) bool) {
+		// The map and the writes it points at are scratch, reused for every address:
+		// a consumer must read what it needs inside the loop body and retain neither.
+		// Allocating per address made this the hot path of storage-heavy blocks.
+		out := map[accounts.StorageKey]*VersionedWrite[uint256.Int]{}
+		var scratch []VersionedWrite[uint256.Int]
 		for addr, inner := range v.keys.Storages() {
-			out := make(map[accounts.StorageKey]*VersionedWrite[uint256.Int], len(inner))
+			clear(out)
+			if cap(scratch) < len(inner) {
+				scratch = make([]VersionedWrite[uint256.Int], len(inner))
+			}
+			scratch = scratch[:len(inner)]
+			i := 0
 			for key, kw := range inner {
 				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
 				if !ok {
 					val = kw.Val
 				}
-				out[key] = &VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
+				out[key] = &scratch[i]
+				i++
 			}
 			if !yield(addr, out) {
 				return

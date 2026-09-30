@@ -53,6 +53,7 @@ func TestStorageColdReadSeedsOrigin(t *testing.T) {
 	v, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, committed, v)
+	ibs.PublishOrigins()
 
 	// The seed is visible to any later reader as an originIndex cell.
 	got, res, ok := ibs.versionMap.ReadStorage(addr, key, 5)
@@ -90,6 +91,7 @@ func TestStorageCommittedReadSeedsOrigin(t *testing.T) {
 	v, err := ibs.GetCommittedState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, committed, v)
+	ibs.PublishOrigins()
 
 	got, res, ok := ibs.versionMap.ReadStorage(addr, key, 5)
 	require.True(t, ok, "cold committed read must seed a versionMap origin cell")

@@ -1004,6 +1004,7 @@ func TestCreateAccount_SyntheticIncarnationStamp_DoesNotInvalidate(t *testing.T)
 	ibs.SetVersionMap(vm)
 
 	require.NoError(t, ibs.CreateAccount(addr, false))
+	ibs.PublishOrigins()
 
 	io := NewVersionedIO(1)
 	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())

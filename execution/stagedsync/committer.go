@@ -883,18 +883,14 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		return nil, err
 	}
 
-	// Read live before the saved lookup: the exec loop saves N strictly before it
-	// rotates away from N, so whichever read lands after a rotation, the other
-	// still identifies N's changeset. A mid-block step-boundary finds no saved cs
-	// (the exec loop saves once the block is done) and falls back to live.
-	live := cc.doms.GetChangesetAccumulator()
+	// The exec loop saves the accumulator by hash before dispatching the block, so
+	// this identifies the block's changeset whatever the loop rotated to since. A
+	// live-accumulator fallback would fold these writes into whichever block is bound.
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
-	var diff *kv.DomainDiff
-	if cs != nil {
-		diff = &cs.Diffs[kv.CommitmentDomain]
-	} else if live != nil {
-		diff = &live.Diffs[kv.CommitmentDomain]
+	if cs == nil {
+		return nil, fmt.Errorf("no changeset accumulator saved for block %d (%x)", t.blockNum, t.blockHash)
 	}
+	diff := &cs.Diffs[kv.CommitmentDomain]
 	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
 }
 
