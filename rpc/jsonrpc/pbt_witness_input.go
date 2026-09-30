@@ -93,7 +93,9 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 	}
 	for address := range accountAddresses {
 		update := eipWitness.PBinAccountUpdate{Address: append([]byte(nil), address[:]...)}
-		if _, created := rs.CreatedContracts[address]; created && rs.innerExists(address) {
+		_, created := rs.CreatedContracts[address]
+		_, deletedInBlock := rs.DeletedInBlock[address]
+		if (created || deletedInBlock) && rs.innerExists(address) {
 			update.ResetStorage = true
 		}
 		if account, ok := rs.accountOverlay[address]; ok && account != nil {

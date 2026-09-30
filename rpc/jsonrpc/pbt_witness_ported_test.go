@@ -165,8 +165,11 @@ func TestPBinWitnessConsecutiveDeploys(t *testing.T) {
 		addContract(uint256.NewInt(0), pbtCorpusDeployCode(runtime))
 	})
 	repairPBinPreForkShadows(t, m, 1000)
+	witnesses := make([]*ExecutionWitnessResult, 0, 3)
 	for number := uint64(1); number <= 3; number++ {
-		require.NotEmpty(t, pbtPortWitness(t, api, m, number).State)
+		result := pbtPortWitness(t, api, m, number)
+		witnesses = append(witnesses, result)
+		require.NotEmpty(t, result.State)
 		requirePbtBlockReceipts(t, m, number)
 		stateAfter := pbtStateAfterBlock(t, m, number)
 		address := types.CreateAddress(pbtCorpusBank(t), number-1)
@@ -177,6 +180,7 @@ func TestPBinWitnessConsecutiveDeploys(t *testing.T) {
 		runtime[len(runtime)-1] = byte(number - 1)
 		require.Equal(t, runtime, code)
 	}
+	require.NotEqual(t, witnesses[0].State, witnesses[1].State)
 }
 
 func TestPBinExecutionWitnessEmptyBlock(t *testing.T) {

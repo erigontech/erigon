@@ -216,6 +216,15 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 			s.preStateAccounts[addr] = true
 			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.InternCodeHash(codeHash)}, nil
 		}
+		var cache eip8297.DigestCache
+		headerPresent, err := s.tree.PBinHasPrefix(cache.AccountHeaderStem(addr[:]))
+		if err != nil {
+			return nil, err
+		}
+		if headerPresent {
+			s.preStateAccounts[addr] = true
+			return &accounts.Account{Root: empty.RootHash, CodeHash: accounts.EmptyCodeHash}, nil
+		}
 		return nil, nil
 	}
 	if len(value) != eip8297.ValueLength {

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"fmt"
 	"math/big"
+	"slices"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -249,6 +250,43 @@ func TestPBinExecutionWitnessCorpus(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPBinExecutionWitnessProvesOverflowOnlyAccountCodeHashRead(t *testing.T) {
+	victim := common.HexToAddress("0x000000000000000000000000000000000000abcde")
+	caller := common.HexToAddress("0x000000000000000000000000000000000000abcdf")
+	runtime := append([]byte{0x73}, victim[:]...)
+	runtime = append(runtime, 0x3f, 0x50, 0x00)
+	alloc := types.GenesisAlloc{
+		victim: {Storage: map[common.Hash]common.Hash{pbtCorpusSlot(1 << 20): pbtCorpusSlot(9)}},
+		caller: {Code: runtime},
+	}
+	api, m := pbinWitnessFixtureWithGeneratorNAllocNoSystemCalls(t, 1000, 1, func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), _ func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
+		if i == 0 {
+			addTransaction(caller, uint256.NewInt(0), nil)
+		}
+	}, alloc)
+	repairPBinPreForkShadows(t, m, 1000)
+	result := pbtPortWitness(t, api, m, 1)
+	cache := new(eip8297.DigestCache)
+	headerStem := cache.AccountHeaderStem(victim[:])
+	stripped := pbtCorpusClone(result)
+	removed := false
+	for index := range slices.Backward(stripped.Keys) {
+		decoded, err := eipWitness.PBinDecodeBlob(stripped.State[index])
+		require.NoError(t, err)
+		remove := decoded.Leaf != nil && bytes.Equal(decoded.Leaf.Key[:len(decoded.Leaf.Key)-1], headerStem)
+		remove = remove || decoded.Group != nil && bytes.Equal(decoded.Group.Stem, headerStem)
+		if remove {
+			stripped.Keys = append(stripped.Keys[:index], stripped.Keys[index+1:]...)
+			stripped.State = append(stripped.State[:index], stripped.State[index+1:]...)
+			removed = true
+		}
+	}
+	require.True(t, removed)
+	block := pbtPortBlock(t, m, 1)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 1, witnessTriePBT)
+	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), stripped, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 }
 
 func TestPBinExecutionWitnessDeletesPersistedEmptyStorageAccount(t *testing.T) {

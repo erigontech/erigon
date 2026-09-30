@@ -76,7 +76,9 @@ driver and compares the resulting root with the post-state anchor.
 The verifier suppresses only the missing-node error for Erigon's synthetic system-caller touch and only while that
 system call is running. A genuine user access to the system address still needs its proof. Contract creation over an
 existing account with storage wipes that storage; creation of a previously absent account does not walk an unproved
-storage subtree. All supplied PBT entries must be consumed before verification succeeds.
+storage subtree. An account without `BASIC_DATA` is considered present only after its code-hash or delegation leaf, or
+an authenticated header-stem prefix, is resolved. All supplied PBT entries must be consumed before verification
+succeeds.
 
 ## Witness cache
 

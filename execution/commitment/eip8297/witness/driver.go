@@ -54,6 +54,15 @@ func (t *PBinTree) Apply(input PBinDriverInput) (common.Hash, []PBinResolvedNode
 			return common.Hash{}, nil, err
 		}
 	}
+	accounts := slices.Clone(input.Accounts)
+	slices.SortStableFunc(accounts, func(a, b PBinAccountUpdate) int { return bytes.Compare(a.Address, b.Address) })
+	for _, account := range accounts {
+		if account.ResetStorage {
+			if err := t.DeleteAccount(account.Address); err != nil {
+				return common.Hash{}, nil, err
+			}
+		}
+	}
 	storage := slices.Clone(input.Storage)
 	slices.SortStableFunc(storage, func(a, b PBinStorageWrite) int {
 		if addressOrder := bytes.Compare(a.Address, b.Address); addressOrder != 0 {
@@ -74,9 +83,8 @@ func (t *PBinTree) Apply(input PBinDriverInput) (common.Hash, []PBinResolvedNode
 			return common.Hash{}, nil, err
 		}
 	}
-	accounts := slices.Clone(input.Accounts)
-	slices.SortStableFunc(accounts, func(a, b PBinAccountUpdate) int { return bytes.Compare(a.Address, b.Address) })
 	for _, account := range accounts {
+		account.ResetStorage = false
 		if err := t.applyAccountUpdate(account); err != nil {
 			return common.Hash{}, nil, err
 		}
