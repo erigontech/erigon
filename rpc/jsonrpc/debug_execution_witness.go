@@ -2477,6 +2477,10 @@ type pbinSystemCallScoped interface {
 	setPBinSystemCallScope(bool)
 }
 
+type pbinSystemAddressAccessed interface {
+	latchPBinSystemAddressRead()
+}
+
 func withPBinSystemCallScope(stateless statelessWitnessState, call func() ([]byte, error)) ([]byte, error) {
 	scoped, ok := stateless.(pbinSystemCallScoped)
 	if !ok {
@@ -2528,6 +2532,8 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 	}
 
 	// Execute all transactions in the block
+	userReceipts := make(types.Receipts, 0, len(block.Transactions()))
+	gasUsed := new(protocol.GasUsed)
 	for txIndex, txn := range block.Transactions() {
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
@@ -2541,14 +2547,23 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 		ibs.SetTxContext(blockNum, txIndex)
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
-		if _, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine); err != nil {
+		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
+		if accessed, ok := stateless.(pbinSystemAddressAccessed); ok && ibs.AccessedAddr(params.SystemAddress) {
+			accessed.latchPBinSystemAddressRead()
+		}
+		if err != nil {
 			return fmt.Errorf("[statelessExec] failed to apply tx %d: %w", txIndex, err)
 		}
+		gasUsed.Receipt += result.ReceiptGasUsed
+		gasUsed.BlockExecution += result.BlockExecutionGasUsed
+		gasUsed.BlockState += result.BlockStateGasUsed
+		gasUsed.Blob += txn.GetBlobGas()
 
 		// Finalize tx - state changes go to the witness stateless
 		if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
 			return fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
 		}
+		userReceipts = append(userReceipts, protocol.MakeReceipt(&header.Number, header.Hash(), msg, txn, gasUsed.Receipt, result, ibs, evm))
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
@@ -2570,6 +2585,12 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 
 	if err := withPBinSystemCallError(stateless, func() error { return ibs.CommitBlock(blockRules, stateless) }); err != nil {
 		return fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+	}
+	if got := types.DeriveSha(userReceipts); got != header.ReceiptHash {
+		return fmt.Errorf("[statelessExec] receipts root mismatch: got %x, expected %x", got, header.ReceiptHash)
+	}
+	if got := gasUsed.BlockGasUsed(); got != header.GasUsed {
+		return fmt.Errorf("[statelessExec] gas used mismatch: got %d, expected %d", got, header.GasUsed)
 	}
 
 	return nil

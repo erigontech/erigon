@@ -81,8 +81,10 @@ type pbinWitnessStateless struct {
 	tree  *eipWitness.PBinTree
 	codes map[common.Hash][]byte
 
-	systemCallScope     bool
-	syntheticSystemRead bool
+	systemCallScope             bool
+	syntheticSystemRead         bool
+	systemAddressReadSuppressed bool
+	systemAddressReadError      error
 
 	codeUpdates      map[common.Address][]byte
 	accountUpdates   map[common.Address]*accounts.Account
@@ -98,6 +100,12 @@ type pbinWitnessStateless struct {
 
 func (s *pbinWitnessStateless) setPBinSystemCallScope(active bool) {
 	s.systemCallScope = active
+}
+
+func (s *pbinWitnessStateless) latchPBinSystemAddressRead() {
+	if s.systemAddressReadSuppressed && s.resolveError == nil {
+		s.resolveError = s.systemAddressReadError
+	}
 }
 
 var (
@@ -198,6 +206,8 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.BasicDataLeafKey))
 	if err != nil {
 		if s.systemCallScope && isPBinSystemAddress(addr) && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
+			s.systemAddressReadSuppressed = true
+			s.systemAddressReadError = err
 			return nil, nil
 		}
 		return nil, err
@@ -299,6 +309,8 @@ func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key 
 	value, present, err := s.tree.Read(eip8297.TreeKeyStorage(addr[:], slot[:]))
 	if err != nil {
 		if s.syntheticSystemRead && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
+			s.systemAddressReadSuppressed = true
+			s.systemAddressReadError = err
 			return uint256.Int{}, false, nil
 		}
 		return uint256.Int{}, false, err

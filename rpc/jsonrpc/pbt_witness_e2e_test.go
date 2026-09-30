@@ -285,11 +285,23 @@ func TestPBinExecutionWitnessCancunSystemContracts(t *testing.T) {
 }
 
 func TestPBinExecutionWitnessUserSystemAddressRead(t *testing.T) {
-	bank := pbtCorpusBank(t)
-	var caller common.Address
 	system := params.SystemAddress.Value()
 	runtime := append([]byte{0x73}, system[:]...)
 	runtime = append(runtime, 0x31, 0x60, 0x00, 0x55, 0x00)
+	api, m, caller := pbtSystemAddressFixture(t, runtime)
+	result := pbtPortWitness(t, api, m, 2)
+	require.NotEmpty(t, result.State)
+	stateAfter := pbtStateAfterBlock(t, m, 2)
+	value, err := stateAfter.GetState(accounts.InternAddress(caller), accounts.InternKey(common.Hash{}))
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), value.Uint64())
+}
+
+func pbtSystemAddressFixture(t *testing.T, runtime []byte) (*DebugAPIImpl, *execmoduletester.ExecModuleTester, common.Address) {
+	t.Helper()
+	bank := pbtCorpusBank(t)
+	var caller common.Address
+	system := params.SystemAddress.Value()
 	api, m := pbinWitnessFixtureWithGeneratorNAlloc(t, 1000, 2, nil, func(i int, b *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte), _ func(types.Transaction), _ func(common.Address, *uint256.Int, []byte)) {
 		switch i {
 		case 0:
@@ -300,12 +312,46 @@ func TestPBinExecutionWitnessUserSystemAddressRead(t *testing.T) {
 		}
 	}, types.GenesisAlloc{system: {Balance: big.NewInt(5)}})
 	repairPBinPreForkShadows(t, m, 1000)
+	return api, m, caller
+}
+
+func TestPBinExecutionWitnessUserSystemAddressLogProof(t *testing.T) {
+	system := params.SystemAddress.Value()
+	runtime := append([]byte{0x73}, system[:]...)
+	runtime = append(runtime, 0x31, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xa0, 0x00)
+	api, m, _ := pbtSystemAddressFixture(t, runtime)
 	result := pbtPortWitness(t, api, m, 2)
-	require.NotEmpty(t, result.State)
-	stateAfter := pbtStateAfterBlock(t, m, 2)
-	value, err := stateAfter.GetState(accounts.InternAddress(caller), accounts.InternKey(common.Hash{}))
-	require.NoError(t, err)
-	require.Equal(t, uint64(5), value.Uint64())
+	block := pbtPortBlock(t, m, 2)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
+	target := []byte{0x00, 0x10, 0x00, 0x4b}
+	index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, target) })
+	require.NotEqual(t, -1, index, "the system-address header group must be in the witness")
+	trimmed := pbtCorpusCloneWithout(result, index)
+	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
+
+	header := types.CopyHeader(block.HeaderNoCopy())
+	header.ReceiptHash[0] ^= 1
+	badReceiptBlock := block.WithSeal(header)
+	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(t.Context(), result, badReceiptBlock, parentRoot, postRoot, m.ChainConfig, m.Engine), "receipts root mismatch")
+	header = types.CopyHeader(block.HeaderNoCopy())
+	header.GasUsed++
+	badGasBlock := block.WithSeal(header)
+	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(t.Context(), result, badGasBlock, parentRoot, postRoot, m.ChainConfig, m.Engine), "gas used mismatch")
+}
+
+func TestPBinExecutionWitnessUserSystemAddressCodeSizeProof(t *testing.T) {
+	system := params.SystemAddress.Value()
+	runtime := append([]byte{0x73}, system[:]...)
+	runtime = append(runtime, 0x3b, 0x50, 0x00)
+	api, m, _ := pbtSystemAddressFixture(t, runtime)
+	result := pbtPortWitness(t, api, m, 2)
+	block := pbtPortBlock(t, m, 2)
+	parentRoot, postRoot := pbtDualAnchors(t, m, 2, witnessTriePBT)
+	target := []byte{0x00, 0x10, 0x00, 0x4b}
+	index := slices.IndexFunc(result.Keys, func(path hexutil.Bytes) bool { return bytes.Equal(path, target) })
+	require.NotEqual(t, -1, index, "the system-address header group must be in the witness")
+	trimmed := pbtCorpusCloneWithout(result, index)
+	require.Error(t, verifyPBinWitnessAgainstBlock(t.Context(), trimmed, block, parentRoot, postRoot, m.ChainConfig, m.Engine))
 }
 
 func TestPBinExecutionWitnessProvesOverflowOnlyAccountCodeHashRead(t *testing.T) {
