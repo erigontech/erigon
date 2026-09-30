@@ -92,6 +92,23 @@ func HexField(s *StackStream, name string, b []byte) {
 	flushIfFull(s.stream)
 }
 
+// HexUint256Field writes a field name and its HexUint256 value in one step, null for a nil one.
+func HexUint256Field(s *StackStream, name string, v *uint256.Int) {
+	s.beforeValue()
+	writeObjectFieldFast(s.stream, name)
+	buf := s.stream.Buffer()
+	start := len(buf)
+	if v == nil {
+		buf = append(buf, "null"...)
+	} else {
+		buf, _ = hexutil.U256(*v).AppendText(append(buf, '"'))
+		buf = append(buf, '"')
+	}
+	s.commit(buf, start)
+	s.separatorPending = true
+	flushIfFull(s.stream)
+}
+
 // HexUint256 does the same for a 256-bit value, null for a nil one.
 func HexUint256(s *StackStream, v *uint256.Int) {
 	if v == nil {

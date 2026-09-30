@@ -61,8 +61,7 @@ func String(s *jsonstream.StackStream, name string, v string) {
 
 // Quantity256 writes a 256-bit quantity, null when the field is absent.
 func Quantity256(s *jsonstream.StackStream, name string, v *uint256.Int) {
-	s.Field(name)
-	jsonstream.HexUint256(s, v)
+	jsonstream.HexUint256Field(s, name, v)
 }
 
 // Data writes a byte string whose length is its own, such as extraData or a log's data.
