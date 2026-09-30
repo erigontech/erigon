@@ -54,10 +54,10 @@ type StateContext struct {
 
 func validateBundles(bundles []Bundle, chainID *uint256.Int) error {
 	empty := true
-	for _, bundle := range bundles {
+	for b, bundle := range bundles {
 		for i := range bundle.Transactions {
 			if err := ethapi.CheckChainID(bundle.Transactions[i].ChainID, chainID); err != nil {
-				return err
+				return fmt.Errorf("bundle %d, transaction %d: %w", b, i, err)
 			}
 			empty = false
 		}

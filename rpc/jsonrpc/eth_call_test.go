@@ -2312,36 +2312,43 @@ func TestCallArgsRejectOtherChainID(t *testing.T) {
 	other.ChainID = (*hexutil.U256)(uint256.NewInt(1))
 	bundles := []Bundle{{Transactions: []ethapi.CallArgs{own, other}}}
 
-	for name, call := range map[string]func() error{
-		"eth_call": func() error {
+	_, err := api.Call(ctx, own, &latest, nil, nil)
+	require.NoError(t, err)
+
+	mismatch := "chainId does not match node's (have=1, want=1337)"
+	for name, tc := range map[string]struct {
+		call func() error
+		want string
+	}{
+		"eth_call": {func() error {
 			_, err := api.Call(ctx, other, &latest, nil, nil)
 			return err
-		},
-		"eth_estimateGas": func() error {
+		}, mismatch},
+		"eth_estimateGas": {func() error {
 			_, err := api.EstimateGas(ctx, &other, &latest, nil, nil)
 			return err
-		},
-		"eth_createAccessList": func() error {
+		}, mismatch},
+		"eth_createAccessList": {func() error {
 			_, err := api.CreateAccessList(ctx, other, &latest, nil, nil)
 			return err
-		},
-		"eth_callMany": func() error {
+		}, mismatch},
+		"eth_callMany": {func() error {
 			_, err := api.CallMany(ctx, bundles, stateCtx, nil, nil)
 			return err
-		},
-		"debug_traceCall": func() error {
+		}, "bundle 0, transaction 1: " + mismatch},
+		"debug_traceCall": {func() error {
 			return debugApi.TraceCall(ctx, other, &latest, nil, jsonstream.New(io.Discard))
-		},
-		"debug_traceCallMany": func() error {
+		}, mismatch},
+		"debug_traceCallMany": {func() error {
 			return debugApi.TraceCallMany(ctx, bundles, stateCtx, nil, jsonstream.New(io.Discard))
-		},
+		}, "bundle 0, transaction 1: " + mismatch},
 	} {
 		t.Run(name, func(t *testing.T) {
-			err := call()
+			err := tc.call()
 			var rpcErr rpc.Error
 			require.ErrorAs(t, err, &rpcErr)
 			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
-			require.ErrorContains(t, err, "chainId does not match node's (have=1, want=1337)")
+			require.EqualError(t, err, tc.want)
 		})
 	}
 }
