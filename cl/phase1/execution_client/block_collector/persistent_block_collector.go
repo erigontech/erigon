@@ -95,6 +95,10 @@ func NewPersistentBlockCollector(
 
 // AddBlock adds a block to the collector, persisting it to the database
 func (p *PersistentBlockCollector) AddBlock(block *cltypes.BeaconBlock) error {
+	if p == nil {
+		return nil // no collector: the caller falls back to its non-collecting path
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -148,6 +152,21 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 	})
 }
 
+// A NIL COLLECTOR IS A REAL STATE, SO EVERY METHOD HAS TO SURVIVE IT.
+//
+// NewPersistentBlockCollector returns nil when its database cannot be opened, and on Windows that is
+// the NORMAL outcome: openPersistentDB asks for MapSize(1TB), Windows has no overcommit, and MDBX
+// must reserve the whole map against the page file — so it fails with "The paging file is too small"
+// on any machine without a terabyte of commit. The error is logged once; the nil then travels.
+//
+// Measured on a cocoon dev node: cfg.blockCollector was nil, canRetryGloasPayloads checked only
+// executionClient and SupportInsertion(), and Flush's p.mu.Lock() dereferenced nil — 83,646 panics
+// in ChainTipSync, the consensus layer wedged, and the chain stopped at 81 of 256 deploys. Nothing
+// in that failure mentioned a database or a page file.
+//
+// Guarding the RECEIVER rather than one call site is deliberate: AddBlock and AddGloasBlock are
+// reached from forward_sync on the same nil, and the next caller added would be too.
+
 // Flush loads all collected blocks into the execution engine and clears the database.
 // Keys are block-number + payload SSZ root. Identical execution payloads therefore
 // collide on payloadKey and tx.Put overwrites the existing row, so multiple rows at
@@ -157,6 +176,10 @@ func (p *PersistentBlockCollector) AddGloasBlock(block *cltypes.BeaconBlock, env
 // If a real gap is detected, rows past the gap are kept so the next Flush can retry
 // once the missing range is re-downloaded.
 func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
+	if p == nil {
+		return nil // no collector: nothing was ever collected, so there is nothing to flush
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
