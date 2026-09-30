@@ -135,7 +135,7 @@ func newFailedBlockJob(block *cltypes.SignedBeaconBlock, store func(context.Cont
 	return job
 }
 
-func (job *blockJob) logStorageError(err error) {
+func (job *blockJob) logStorageErrorOnce(err error) {
 	if !errors.Is(err, errBlockStorage) {
 		return
 	}
@@ -283,14 +283,18 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 			b.ScheduleBlockForLaterProcessing(msg)
 			return nil
 		}
-		if errors.Is(err, forkchoice.ErrNewPayloadNoStatus) || errors.Is(err, errBlockStorage) {
+		if shouldBackOffBlockRetry(err) {
 			job, _ := b.scheduleBlockForLaterProcessing(msg, nil)
-			job.logStorageError(err)
+			job.logStorageErrorOnce(err)
 			return fmt.Errorf("%w: %w", ErrIgnore, err)
 		}
 		return err
 	}
 	return nil
+}
+
+func shouldBackOffBlockRetry(err error) bool {
+	return errors.Is(err, forkchoice.ErrNewPayloadNoStatus) || errors.Is(err, errBlockStorage)
 }
 
 func (b *blockService) ValidateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
@@ -513,7 +517,6 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 	}
 	finalizedCheckpoint := b.forkchoiceStore.FinalizedCheckpoint()
 
-	// Retry admission requires a verified signature.
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
@@ -534,6 +537,7 @@ func (b *blockService) validateGossip(ctx context.Context, msg *cltypes.SignedBe
 		return err
 	}
 
+	// Only signature-verified blocks may reach the retry checks below.
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
@@ -1026,7 +1030,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 		store = func(ctx context.Context) error { return b.processAndStoreBlock(ctx, job.block) }
 	}
 	err := store(ctx)
-	job.logStorageError(err)
+	job.logStorageErrorOnce(err)
 	job.mu.Lock()
 	job.running = false
 	if job.terminal && job.completedGeneration >= generation {
@@ -1040,7 +1044,7 @@ func (b *blockService) processScheduledBlock(ctx context.Context, key [32]byte, 
 	latest := generation == job.storeGeneration
 	// Preserve the accumulated delay across other errors so alternating failures
 	// cannot bypass backoff.
-	if latest && (errors.Is(err, forkchoice.ErrNewPayloadNoStatus) || errors.Is(err, errBlockStorage)) {
+	if latest && shouldBackOffBlockRetry(err) {
 		if job.retryDelay == 0 {
 			job.retryDelay = blockRetryInitialDelay
 		} else {
