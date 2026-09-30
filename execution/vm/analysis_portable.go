@@ -89,8 +89,8 @@ func codeBitmapPortable(code []byte) bitvec {
 			isPush := simd.LoadInt8s(win[32+j:]).Greater(c5f)
 			isPush.And(covered).ToInt8s().Store(conflict[j:])
 			isPush.ToInt8s().Store(cand[j:])
-			jd := simd.LoadUint8s(code[i+j:]).BitsToInt8().Equal(c5b).ToInt8s()
-			jd.AndNot(covered.ToInt8s()).Store(res[j:])
+			free := reach.Less(c5f).And(simd.LoadInt8s(portableIota[j:]).GreaterEqual(entry))
+			simd.LoadUint8s(code[i+j:]).BitsToInt8().Equal(c5b).And(free).ToInt8s().Store(res[j:])
 		}
 		if anyByte(&conflict) {
 			e = walkChunk(code, i, e, out)
