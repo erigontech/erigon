@@ -29,6 +29,7 @@ import (
 	"golang.org/x/crypto/sha3"
 
 	"github.com/erigontech/erigon/common"
+	keccak "github.com/erigontech/fastkeccak"
 )
 
 type referenceCorpus struct {
@@ -357,6 +358,73 @@ func TestEmbedStateStorageOnlyBatchKeepsAccount(t *testing.T) {
 	})
 	require.Contains(t, entries, Entry{Key: TreeKeyAccount(address, BasicDataLeafKey), Value: basic[:]})
 	require.Contains(t, entries, Entry{Key: TreeKeyStorage(address, slot), Value: storage[:]})
+}
+
+func TestEmbedStateStorageOnlyUpdateKeepsPendingAccount(t *testing.T) {
+	address := referenceAddress(14)
+	code := []byte{0x60, 0x01}
+	basic, err := EncodeBasicData(7, uint256.NewInt(9), uint64(len(code)))
+	require.NoError(t, err)
+	codeHash := CodeHashValue(common.Hash(keccak.Sum256(code)))
+	chunks := ChunkifyCode(code)
+	storage := EncodeStorageValue([]byte{0x42})
+	entries := EmbedState([][]State{{
+		{Address: address, Nonce: 7, Balance: *uint256.NewInt(9), Code: code},
+		{Address: address, Slots: map[string][]byte{string(referenceSlot(64)): {0x42}}},
+	}})
+	want := []Entry{
+		{Key: TreeKeyAccount(address, BasicDataLeafKey), Value: basic[:]},
+		{Key: TreeKeyAccount(address, CodeHashLeafKey), Value: codeHash[:]},
+		{Key: TreeKeyCodeChunk(common.Hash(keccak.Sum256(code)), 0), Value: chunks[0][:]},
+		{Key: TreeKeyStorage(address, referenceSlot(64)), Value: storage[:]},
+	}
+	require.Equal(t, want, entries)
+}
+
+func TestEmbedStateRandomPendingAccountUpdates(t *testing.T) {
+	for sequence := range 200 {
+		rnd := rand.New(rand.NewSource(int64(sequence + 1)))
+		states := make([]State, 0, 20)
+		want := make(map[string]Entry)
+		for accountIndex := byte(1); accountIndex <= 4; accountIndex++ {
+			address := referenceAddress(uint64(accountIndex))
+			code := []byte{0x60, accountIndex}
+			balance := *uint256.NewInt(uint64(rnd.Intn(100)))
+			state := State{Address: address, Nonce: uint64(rnd.Intn(10)), Balance: balance, Code: code}
+			states = append(states, state)
+			basic, err := EncodeBasicData(state.Nonce, &state.Balance, uint64(len(code)))
+			require.NoError(t, err)
+			want[string(TreeKeyAccount(address, BasicDataLeafKey))] = Entry{Key: TreeKeyAccount(address, BasicDataLeafKey), Value: basic[:]}
+			codeHash := common.Hash(keccak.Sum256(code))
+			codeHashValue := CodeHashValue(codeHash)
+			want[string(TreeKeyAccount(address, CodeHashLeafKey))] = Entry{Key: TreeKeyAccount(address, CodeHashLeafKey), Value: codeHashValue[:]}
+			chunks := ChunkifyCode(code)
+			chunk := chunks[0]
+			want[string(TreeKeyCodeChunk(codeHash, 0))] = Entry{Key: TreeKeyCodeChunk(codeHash, 0), Value: chunk[:]}
+		}
+		for range rnd.Intn(16) + 1 {
+			accountIndex := byte(rnd.Intn(4) + 1)
+			address := referenceAddress(uint64(accountIndex))
+			slot := referenceSlot(uint64([]uint64{0, 64, 256, 257}[rnd.Intn(4)]))
+			value := byte(rnd.Intn(4))
+			states = append(states, State{Address: address, Slots: map[string][]byte{string(slot): {value}}})
+			key := TreeKeyStorage(address, slot)
+			if value == 0 {
+				delete(want, string(key))
+				continue
+			}
+			encoded := EncodeStorageValue([]byte{value})
+			want[string(key)] = Entry{Key: key, Value: encoded[:]}
+		}
+		got := EmbedState([][]State{states})
+		wantEntries := make([]Entry, 0, len(want))
+		for _, entry := range want {
+			wantEntries = append(wantEntries, entry)
+		}
+		slices.SortFunc(wantEntries, func(a, b Entry) int { return bytes.Compare(a.Key, b.Key) })
+		slices.SortFunc(got, func(a, b Entry) int { return bytes.Compare(a.Key, b.Key) })
+		require.Equal(t, wantEntries, got, "sequence %d", sequence)
+	}
 }
 
 func TestEmbedStateStorageOnlyFirstBatchCreatesCodelessAccount(t *testing.T) {

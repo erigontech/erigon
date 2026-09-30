@@ -607,7 +607,10 @@ func (t *Trie) insertBranch(row *rowNode, slot int, path eip8297.Bitpath, key []
 			return false, err
 		}
 	}
-	if value == ([eip8297.ValueLength]byte{}) && merge == nil {
+	if value == ([eip8297.ValueLength]byte{}) {
+		if merge != nil {
+			return false, nil
+		}
 		return false, errInsertValue
 	}
 	window := (d / 4) * 4

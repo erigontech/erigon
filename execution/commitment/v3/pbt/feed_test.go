@@ -101,6 +101,36 @@ func TestProcessFeedZeroMergeAbsentLeafIsNoOp(t *testing.T) {
 	assertFeedState(t, []commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{first, second}}}, [][]eip8297.State{{feedState(first), feedState(second)}})
 }
 
+func TestProcessFeedZeroMergeBranchPathDeletesBasicData(t *testing.T) {
+	pbinUseBlake3(t)
+	makeAccount := func(last byte) commitment.PBinFeedAccount {
+		address := make([]byte, 20)
+		address[len(address)-1] = last
+		account := feedAccount(address)
+		account.CodeHash = empty.CodeHash
+		account.Slots = []commitment.PBinFeedSlot{{Key: []byte{0}, Value: []byte{1}}, {Key: []byte{1, 0}, Value: []byte{2}}}
+		return account
+	}
+	first := makeAccount(0)
+	second := makeAccount(1)
+	for _, accounts := range [][]commitment.PBinFeedAccount{{first, second}, {second, first}} {
+		assertFeedState(t,
+			[]commitment.PBinFeed{{Accounts: []commitment.PBinFeedAccount{accounts[0]}}, {Accounts: []commitment.PBinFeedAccount{accounts[1]}}},
+			[][]eip8297.State{{feedState(accounts[0])}, {feedState(accounts[1])}},
+		)
+		trie := NewTrie(newTrieTestContext())
+		_, err := trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{accounts[0]}})
+		require.NoError(t, err)
+		_, err = trie.ProcessFeed(&commitment.PBinFeed{Accounts: []commitment.PBinFeedAccount{accounts[1]}})
+		require.NoError(t, err)
+		for _, account := range accounts {
+			_, found, err := trie.lookupLeaf(eip8297.TreeKeyAccount(account.Address, eip8297.BasicDataLeafKey))
+			require.NoError(t, err)
+			require.False(t, found, "zero BASIC_DATA must not be inserted for %x", account.Address)
+		}
+	}
+}
+
 func TestTranslateFeedRejectsNil(t *testing.T) {
 	_, err := TranslateFeed(nil)
 	require.ErrorContains(t, err, "nil feed")

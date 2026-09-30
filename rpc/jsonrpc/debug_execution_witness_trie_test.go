@@ -217,7 +217,7 @@ func TestExecutionWitnessPBTMissingShadowRoot(t *testing.T) {
 	require.Nil(t, result)
 }
 
-func TestExecutionWitnessPBTVerifierRejectsShadowRootMismatch(t *testing.T) {
+func TestExecutionWitnessPBTBuilderRootMismatchStopsBeforeCache(t *testing.T) {
 	api, m := pbinWitnessFixture(t, 20)
 	repairPBinPreForkShadows(t, m, 20)
 	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
@@ -230,7 +230,7 @@ func TestExecutionWitnessPBTVerifierRejectsShadowRootMismatch(t *testing.T) {
 	pbt := "pbt"
 	block := rpc.BlockNumber(1)
 	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(block), nil, &pbt)
-	require.Error(t, err)
+	require.ErrorContains(t, err, "pbin witness builder post-state root")
 	require.Nil(t, result)
 	require.Empty(t, api.witnessCache.Len())
 }
