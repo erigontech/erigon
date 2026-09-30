@@ -99,6 +99,7 @@ func TestReceiptRootIntegrity(t *testing.T) {
 		{name: "hole over empty block", skip: []uint64{8, 9}, block: 3},
 		{name: "hole over block with txs", skip: []uint64{10, 11, 12}, block: 4},
 		{name: "missing system txNum in block with txs", skip: []uint64{10}, block: 4},
+		{name: "hole in last block", skip: []uint64{20}, block: 7},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -111,12 +112,16 @@ func TestReceiptRootIntegrity(t *testing.T) {
 			}
 			db, br := newRCacheChain(t, txsPerBlock, skip)
 
-			err := integrity.CheckRCacheRootAtBlkRange(ctx, integrity.SamplerCfg{Seed: 1, SampleRatio: 1}, db, br, chain.AllProtocolChanges, 1, uint64(len(txsPerBlock)), true, logger)
+			sc := integrity.SamplerCfg{Seed: 1, SampleRatio: 1}
+			rangeErr := integrity.CheckRCacheRootAtBlkRange(ctx, sc, db, br, chain.AllProtocolChanges, 1, uint64(len(txsPerBlock)), true, logger)
+			autoErr := integrity.CheckReceiptRootIntegrity(ctx, sc, db, br, chain.AllProtocolChanges, true, logger)
 			if len(tt.skip) == 0 {
-				require.NoError(t, err)
+				require.NoError(t, rangeErr)
+				require.NoError(t, autoErr)
 				return
 			}
-			require.ErrorIs(t, err, integrity.ErrIntegrity)
+			require.ErrorIs(t, rangeErr, integrity.ErrIntegrity)
+			require.ErrorIs(t, autoErr, integrity.ErrIntegrity)
 			require.ErrorIs(t, integrity.CheckRCacheRootAtBlk(ctx, db, br, chain.AllProtocolChanges, tt.block, true, logger), integrity.ErrIntegrity)
 		})
 	}
