@@ -471,7 +471,7 @@ func TestPBinExecutionWitnessDesignatorLoadDoesNotRequireDelegationTargetProof(t
 	system := params.SystemAddress.Value()
 	delegated := common.HexToAddress("0x7700000000000000000000000000000000000077")
 	caller := common.HexToAddress("0x7800000000000000000000000000000000000078")
-	runtime := append([]byte{0x60, 0x17, 0x5f, 0x5f, 0x73}, delegated[:]...)
+	runtime := append([]byte{0x60, 0x17, 0x60, 0x00, 0x60, 0x00, 0x73}, delegated[:]...)
 	runtime = append(runtime, 0x3c, 0x00)
 	for _, systemCalls := range []bool{false, true} {
 		t.Run(map[bool]string{false: "pre-cancun", true: "amsterdam"}[systemCalls], func(t *testing.T) {

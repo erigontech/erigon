@@ -121,6 +121,22 @@ func TestPBinWitnessInputExcludesUnlatchedSystemAddressReads(t *testing.T) {
 	require.NotContains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "an unlatchable system-address read must not enter the pbt input")
 }
 
+func TestPBinWitnessInputExcludesDesignatorOnlySystemTarget(t *testing.T) {
+	address := params.SystemAddress.Value()
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{address: {Balance: *uint256.NewInt(5)}}}
+	rs := NewRecordingState(inner)
+	rs.systemCallScope = true
+	_, err := rs.ReadAccountData(accounts.InternAddress(address))
+	require.NoError(t, err)
+	rs.systemCallScope = false
+	designator := append([]byte{0xef, 0x01, 0x00}, address[:]...)
+	rs.OnCodeAccess(accounts.InternAddress(common.Address{1}), designator)
+
+	got, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	require.NotContains(t, got.Reads, eip8297.TreeKeyAccount(address[:], eip8297.BasicDataLeafKey), "a designator load without delegation must not enter the pbt input")
+}
+
 func TestPBinWitnessInputKeepsRevertedCallReads(t *testing.T) {
 	address := common.HexToAddress("0x4700000000000000000000000000000000000000")
 	slot := common.HexToHash("0x80")
