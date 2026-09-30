@@ -225,9 +225,10 @@ func IsCommitmentStateKey(key []byte) bool {
 }
 
 var (
-	NewCommitmentV3Trie  func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
-	NewCommitmentBinTrie func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
-	ErrPBinUnsupported   = errors.New("pbin: unsupported under the bin commitment variant")
+	NewCommitmentV3Trie   func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+	NewCommitmentBinTrie  func(tmpdir string, cfg TrieConfig) (Trie, *Updates)
+	ErrPBinUnsupported    = errors.New("pbin: unsupported under the bin commitment variant")
+	ErrPBinWitnessBlinded = errors.New("pbin: witness node is blinded")
 )
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates, error) {

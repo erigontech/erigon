@@ -24,6 +24,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -660,7 +661,6 @@ type witnessRequest struct {
 }
 
 var (
-	errWitnessPBTNotServed    = errors.New("pbt witnesses are not served yet")
 	errWitnessModeMPTOnly     = errors.New("witness mode applies to the MPT witness only")
 	errWitnessTrieUnavailable = errors.New("requested witness trie is unavailable on this cache-only node")
 )
@@ -849,10 +849,6 @@ func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc
 	if err != nil {
 		return nil, err
 	}
-	if request.trie == witnessTriePBT {
-		return nil, errWitnessPBTNotServed
-	}
-
 	cached, ok, reorgedAway := api.serveFromWitnessCache(ctx, tx, blockNrOrHash, request.mode, request.trie, defaultTrie)
 	if ok {
 		return cached, nil
@@ -1050,10 +1046,6 @@ func (api *DebugAPIImpl) witnessAnchors(ctx context.Context, tx kv.TemporalTx, i
 
 func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.TemporalTx, info *witnessBlockInfo, trie witnessTrie, chainConfig *chain.Config, skipHistory bool) error {
 	trieName := witnessTrieName(trie)
-	domain := kv.CommitmentDomain
-	if trie == witnessTriePBT {
-		domain = kv.CommitmentBinDomain
-	}
 	variant := dbstate.TrieVariantHex
 	settings, err := dbstate.ReadErigonDBSettings(api.dirs)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
@@ -1062,6 +1054,7 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 	if settings != nil {
 		variant = settings.TrieVariantName()
 	}
+	domain := api.witnessCommitmentDomain(trie, variant)
 	if (trie == witnessTrieMPT && variant == dbstate.TrieVariantBin) || (trie == witnessTriePBT && variant == dbstate.TrieVariantHex) {
 		return fmt.Errorf("%s commitment domain is missing from datadir", trieName)
 	}
@@ -1118,6 +1111,13 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 	return err
 }
 
+func (api *DebugAPIImpl) witnessCommitmentDomain(trie witnessTrie, variant string) kv.Domain {
+	if trie == witnessTrieMPT || variant == dbstate.TrieVariantBin {
+		return kv.CommitmentDomain
+	}
+	return kv.CommitmentBinDomain
+}
+
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
 // against an open temporal tx: re-execute to record accesses, fold the commitment trie,
 // collect ancestor headers, verify statelessly, then append the legacy empty-storage node
@@ -1126,9 +1126,6 @@ func (api *DebugAPIImpl) checkWitnessAvailability(ctx context.Context, tx kv.Tem
 // hc redirects only the commitment-domain reads to a pinned parent snapshot (head-capture);
 // nil is the durable-history path.
 func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode, requestedTrie witnessTrie) (*ExecutionWitnessResult, error) {
-	if requestedTrie == witnessTriePBT {
-		return nil, errWitnessPBTNotServed
-	}
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -1140,10 +1137,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return nil, err
 	}
 	binTrie := requestedTrie == witnessTriePBT
-	commitmentDomain := kv.CommitmentDomain
-	if binTrie {
-		commitmentDomain = kv.CommitmentBinDomain
+	variant := dbstate.TrieVariantHex
+	if settings, settingsErr := dbstate.ReadErigonDBSettings(api.dirs); settingsErr == nil && settings != nil {
+		variant = settings.TrieVariantName()
 	}
+	commitmentDomain := api.witnessCommitmentDomain(requestedTrie, variant)
 	if err := api.checkWitnessAvailability(ctx, tx, info, requestedTrie, chainConfig, hc != nil); err != nil {
 		return nil, err
 	}
@@ -1174,11 +1172,55 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 		return nil, err
 	}
 	defer domains.Close()
-	sdCtx := domains.GetCommitmentContext()
+	sdCtx := domains.GetCommitmentCtxForDomain(commitmentDomain)
+	if sdCtx == nil {
+		return nil, fmt.Errorf("%s commitment domain is unavailable", witnessTrieName(requestedTrie))
+	}
+	if binTrie {
+		sdCtx.SetPBinWitnessStateReader(trieReaderFor(hc, tx, commitmentDomain, firstTxNumInBlock))
+	}
 
 	log.Debug("expected parent root", "stateRoot", parentRoot)
 
-	if accessed.isEmpty() { // nothing touched, return empty witness
+	if binTrie {
+		input, err := buildPBinWitnessInput(accessed.recordingState)
+		if err != nil {
+			return nil, err
+		}
+		result.Codes = make([]hexutil.Bytes, len(input.Codes))
+		for index, code := range input.Codes {
+			result.Codes[index] = hexutil.Bytes(code)
+		}
+		headers, byNumber, err := api.collectAccessedHeaders(ctx, tx, parentNum, accessedBlockHashes)
+		if err != nil {
+			return nil, err
+		}
+		result.Headers = headers
+		result.headerByNumber = byNumber
+		paths, blobs, _, err := sdCtx.PBinWitness(ctx, parentRoot, input.PBinDriverInput)
+		if err != nil {
+			return nil, err
+		}
+		result.Keys = make([]hexutil.Bytes, len(paths))
+		result.State = make([]hexutil.Bytes, len(blobs))
+		for index := range paths {
+			result.Keys[index] = hexutil.Bytes(paths[index])
+			result.State[index] = hexutil.Bytes(blobs[index])
+		}
+		if parentRoot == eip8297.EmptyTreeHash && len(result.State) == 0 {
+			result.Keys = nil
+		}
+		fullEngine, ok := engine.(rules.Engine)
+		if !ok {
+			return nil, fmt.Errorf("engine does not support full rules.Engine interface")
+		}
+		if err := verifyPBinWitnessAgainstBlock(ctx, result, block, parentRoot, postRoot, chainConfig, fullEngine); err != nil {
+			return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
+		}
+		return result, nil
+	}
+
+	if accessed.isEmpty() {
 		return result, nil
 	}
 
@@ -2389,6 +2431,20 @@ type statelessWitnessState interface {
 	state.StateWriter
 }
 
+type pbinSystemCallScoped interface {
+	setPBinSystemCallScope(bool)
+}
+
+func withPBinSystemCallScope(stateless statelessWitnessState, call func() ([]byte, error)) ([]byte, error) {
+	scoped, ok := stateless.(pbinSystemCallScoped)
+	if !ok {
+		return call()
+	}
+	scoped.setPBinSystemCallScope(true)
+	defer scoped.setPBinSystemCallScope(false)
+	return call()
+}
+
 // replayBlockOverWitness drives the block through the EVM against a witness-backed
 // reader/writer. It stops short of the post-state root, which each variant computes
 // its own way.
@@ -2408,7 +2464,9 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 
 	// Run block initialization (e.g. EIP-2935 blockhash contract, EIP-4788 beacon root)
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+		return withPBinSystemCallScope(stateless, func() ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
+		})
 	}
 	if err := engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
 		return fmt.Errorf("verification: failed to initialize block: %w", err)
@@ -2442,7 +2500,9 @@ func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, 
 	}
 
 	syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-		return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+		return withPBinSystemCallScope(stateless, func() ([]byte, error) {
+			return protocol.SysCallContract(contract, data, chainConfig, ibs, header, engine, false /* constCall */, vm.Config{})
+		})
 	}
 	// Collect logs accumulated during transaction execution into a synthetic receipt
 	// so that Finalize can parse EIP-6110 deposit requests from them.

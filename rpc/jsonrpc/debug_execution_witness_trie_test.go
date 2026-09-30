@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"testing"
@@ -168,25 +169,70 @@ func TestWitnessCacheOnlyRejectsNonDefaultTrie(t *testing.T) {
 	require.Nil(t, result)
 }
 
-func TestExecutionWitnessPBTNotServed(t *testing.T) {
-	api, _ := pbinWitnessFixture(t, 30)
+func TestExecutionWitnessPBTServed(t *testing.T) {
+	api, m := pbinWitnessFixture(t, 20)
+	repairPBinPreForkShadows(t, m, 20)
 	pbt := "pbt"
+	mpt := "mpt"
 	tests := []struct {
 		name  string
 		block rpc.BlockNumber
 		trie  *string
 	}{
-		{name: "pre-fork explicit", block: 2, trie: &pbt},
-		{name: "post-fork explicit", block: 3, trie: &pbt},
+		{name: "pre-fork explicit", block: 1, trie: &pbt},
+		{name: "first bin block explicit", block: 2, trie: &pbt},
+		{name: "first bin block mpt", block: 2, trie: &mpt},
 		{name: "post-fork default", block: 3},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(tt.block), nil, tt.trie)
-			require.ErrorIs(t, err, errWitnessPBTNotServed)
-			require.Nil(t, result)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.NotEmpty(t, result.State)
 		})
 	}
+}
+
+func TestExecutionWitnessPBTRefusesHexOnly(t *testing.T) {
+	api, _ := pbinWitnessFixture(t, 0, false)
+	pbt := "pbt"
+	block := rpc.BlockNumber(2)
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(block), nil, &pbt)
+	require.ErrorContains(t, err, "pbt commitment domain is missing")
+	require.Nil(t, result)
+}
+
+func TestExecutionWitnessPBTMissingShadowRoot(t *testing.T) {
+	api, m := pbinWitnessFixture(t, 20)
+	repairPBinPreForkShadows(t, m, 20)
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		header := rawdb.ReadHeaderByNumber(tx, 1)
+		return tx.Delete(kv.ShadowStateRoot, dbutils.BlockBodyKey(1, header.Hash()))
+	}))
+	pbt := "pbt"
+	block := rpc.BlockNumber(1)
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(block), nil, &pbt)
+	require.ErrorContains(t, err, "pbt witness shadow root missing for block 1")
+	require.Nil(t, result)
+}
+
+func TestExecutionWitnessPBTVerifierRejectsShadowRootMismatch(t *testing.T) {
+	api, m := pbinWitnessFixture(t, 20)
+	repairPBinPreForkShadows(t, m, 20)
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		header := rawdb.ReadHeaderByNumber(tx, 1)
+		badRoot := make([]byte, len(common.Hash{}))
+		badRoot[0] = 0x99
+		return rawdb.WriteShadowStateRoot(tx, header.Hash(), 1, badRoot)
+	}))
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	pbt := "pbt"
+	block := rpc.BlockNumber(1)
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(block), nil, &pbt)
+	require.ErrorContains(t, err, "pbin state root mismatch")
+	require.Nil(t, result)
+	require.Empty(t, api.witnessCache.Len())
 }
 
 func TestExecutionWitnessMPTAnchorsTransition(t *testing.T) {
@@ -243,6 +289,90 @@ func TestExecutionWitnessMPTAvailability(t *testing.T) {
 		mpt := "mpt"
 		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(2), nil, &mpt)
 		require.ErrorContains(t, err, "mpt commitment domain is missing")
+		require.Nil(t, result)
+	})
+}
+
+func TestExecutionWitnessPBTAvailability(t *testing.T) {
+	t.Run("frozen", func(t *testing.T) {
+		api, m := pbinWitnessFixture(t, 20)
+		repairPBinPreForkShadows(t, m, 20)
+		tx, err := m.DB.BeginTemporalRo(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		txNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, 2)
+		require.NoError(t, err)
+		tx.Rollback()
+		agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+		require.NoError(t, agg.FreezeDomain(kv.CommitmentBinDomain, txNum))
+		pbt := "pbt"
+		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(3), nil, &pbt)
+		require.NoError(t, err)
+		require.NotEmpty(t, result.State)
+		result, err = api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(4), nil, &pbt)
+		require.ErrorContains(t, err, "pbt commitment is frozen")
+		require.Nil(t, result)
+	})
+
+	t.Run("stopped", func(t *testing.T) {
+		t.Run("last parent served", func(t *testing.T) {
+			api, m := pbinWitnessFixture(t, 20)
+			repairPBinPreForkShadows(t, m, 20)
+			agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+			require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+				return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+			}))
+			agg.StopCommitmentDomain(kv.CommitmentBinDomain)
+			pbt := "pbt"
+			result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(3), nil, &pbt)
+			require.NoError(t, err)
+			require.NotEmpty(t, result.State)
+		})
+
+		t.Run("first parent refused", func(t *testing.T) {
+			api, m := pbinWitnessFixture(t, 20)
+			repairPBinPreForkShadows(t, m, 20)
+			agg := m.DB.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+			require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+				for _, table := range m.DB.Debug().DomainTables(kv.CommitmentBinDomain) {
+					if err := tx.ClearTable(table); err != nil {
+						return err
+					}
+				}
+				return rawdb.WriteCommitmentDomainStopped(tx, kv.CommitmentBinDomain)
+			}))
+			agg.StopCommitmentDomain(kv.CommitmentBinDomain)
+			pbt := "pbt"
+			result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(4), nil, &pbt)
+			require.ErrorContains(t, err, "pbt commitment was stopped before parent")
+			require.Nil(t, result)
+		})
+	})
+
+	t.Run("pruned", func(t *testing.T) {
+		api, m := pbinWitnessFixture(t, 20)
+		repairPBinPreForkShadows(t, m, 20)
+		tx, err := m.DB.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		defer tx.Rollback()
+		pruneTo, err := m.BlockReader.TxnumReader().Min(t.Context(), tx, 3)
+		require.NoError(t, err)
+		cursor, err := tx.RwCursorDupSort(kv.TblCommitmentBinHistoryKeys)
+		require.NoError(t, err)
+		defer cursor.Close()
+		for {
+			key, _, err := cursor.First()
+			require.NoError(t, err)
+			if key == nil || binary.BigEndian.Uint64(key) >= pruneTo {
+				break
+			}
+			require.NoError(t, cursor.DeleteCurrentDuplicates())
+		}
+		cursor.Close()
+		require.NoError(t, tx.Commit())
+		pbt := "pbt"
+		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(2), nil, &pbt)
+		require.ErrorContains(t, err, "pbt commitment history pruned")
 		require.Nil(t, result)
 	})
 }

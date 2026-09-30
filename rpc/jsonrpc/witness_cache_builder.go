@@ -395,9 +395,6 @@ func (api *DebugAPIImpl) buildAndCache(ctx context.Context, num uint64, hash com
 		witnessCacheBuildFailOtherCounter.Inc()
 		return false
 	}
-	if defaultTrie == witnessTriePBT {
-		return false
-	}
 	result, err := api.witnessCache.buildOnce(ctx, hash, func() (*ExecutionWitnessResult, error) {
 		start := time.Now()
 		r, err := api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy, defaultTrie)
@@ -497,9 +494,6 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 	if err != nil {
 		log.Warn("[witness-cache] resolve trie", "block", num, "err", err)
 		witnessCacheBuildFailOtherCounter.Inc()
-		return false
-	}
-	if defaultTrie == witnessTriePBT {
 		return false
 	}
 	result, err := api.witnessCache.buildOnce(ctx, hash, func() (*ExecutionWitnessResult, error) {

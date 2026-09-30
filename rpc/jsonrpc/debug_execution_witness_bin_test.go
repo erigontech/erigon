@@ -34,12 +34,12 @@ import (
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
+	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
-	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 func withBinCommitmentDatadir(t *testing.T) {
@@ -73,6 +73,16 @@ func enableCommitmentHistoryFlag(t *testing.T, db kv.TemporalRwDB) {
 }
 
 func pbinWitnessFixture(t *testing.T, activation uint64, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+	return pbinWitnessFixtureWithHook(t, activation, nil, dualOption...)
+}
+
+func pbinWitnessFixtureWithHook(t *testing.T, activation uint64, beforeInsert func(*execmoduletester.ExecModuleTester, *blockgen.ChainPack) error, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
+	return pbinWitnessFixtureWithGenerator(t, activation, beforeInsert, nil, dualOption...)
+}
+
+type pbinWitnessBlockGenerator func(int, *blockgen.BlockGen, func(common.Address, *uint256.Int, []byte), func(*uint256.Int, []byte))
+
+func pbinWitnessFixtureWithGenerator(t *testing.T, activation uint64, beforeInsert func(*execmoduletester.ExecModuleTester, *blockgen.ChainPack) error, generator pbinWitnessBlockGenerator, dualOption ...bool) (*DebugAPIImpl, *execmoduletester.ExecModuleTester) {
 	t.Helper()
 	withCommitmentHistory(t)
 	dual := activation > 0
@@ -141,6 +151,20 @@ func pbinWitnessFixture(t *testing.T, activation uint64, dualOption ...bool) (*D
 	require.NoError(t, m.ExecModule.ResetCurrentContext(t.Context()))
 	signer := types.LatestSignerForChainID(config.ChainID)
 	pack, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
+		if generator != nil {
+			addTransaction := func(to common.Address, value *uint256.Int, data []byte) {
+				txn, err := types.SignTx(types.NewTransaction(b.TxNonce(from), to, value, 2_000_000, uint256.NewInt(0), data), *signer, key)
+				require.NoError(t, err)
+				b.AddTx(txn)
+			}
+			addContract := func(value *uint256.Int, data []byte) {
+				txn, err := types.SignTx(types.NewContractCreation(b.TxNonce(from), value, 2_000_000, uint256.NewInt(0), data), *signer, key)
+				require.NoError(t, err)
+				b.AddTx(txn)
+			}
+			generator(i, b, addTransaction, addContract)
+			return
+		}
 		data := common.BigToHash(big.NewInt(int64(i + 1)))
 		txn, err := types.SignTx(types.NewTransaction(uint64(i), to, uint256.NewInt(1), 2_000_000, uint256.NewInt(0), data[:]), *signer, key)
 		require.NoError(t, err)
@@ -152,7 +176,7 @@ func pbinWitnessFixture(t *testing.T, activation uint64, dualOption ...bool) (*D
 		if i > 0 {
 			header.ParentHash = pack.Blocks[i-1].Hash()
 		}
-		if config.IsBinaryTrie(block.Time()) {
+		if generator == nil && config.IsBinaryTrie(block.Time()) {
 			alloc := maps.Clone(genesis.Alloc)
 			alloc[from] = types.GenesisAccount{Balance: new(big.Int).Sub(balance, big.NewInt(int64(i+1))), Nonce: uint64(i + 1)}
 			alloc[to] = types.GenesisAccount{Balance: big.NewInt(int64(i + 1)), Nonce: 1, Code: common.FromHex("0x60003560005500"), Storage: map[common.Hash]common.Hash{{}: common.BigToHash(big.NewInt(int64(i + 1)))}}
@@ -169,19 +193,74 @@ func pbinWitnessFixture(t *testing.T, activation uint64, dualOption ...bool) (*D
 		pack.Headers[i] = pack.Blocks[i].HeaderNoCopy()
 	}
 	pack.TopBlock = pack.Blocks[len(pack.Blocks)-1]
-	require.NoError(t, m.InsertChain(pack))
+	if beforeInsert == nil {
+		require.NoError(t, m.InsertChain(pack))
+	} else {
+		require.NoError(t, beforeInsert(m, pack))
+	}
 	return newDebugApiForTest(m), m
 }
 
-func TestPBinExecutionWitnessNotServedBinOnly(t *testing.T) {
-	withCommitmentHistory(t)
-	withBinCommitmentDatadir(t)
-	m, _, _, _ := chainWithDeployedContract(t)
-	enableCommitmentHistoryFlag(t, m.DB)
-	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+func repairPBinPreForkShadows(t *testing.T, m *execmoduletester.ExecModuleTester, activation uint64) {
+	t.Helper()
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	roots := make(map[uint64]common.Hash)
+	for blockNum := uint64(0); blockNum <= 4; blockNum++ {
+		header := rawdb.ReadHeaderByNumber(tx, blockNum)
+		if header == nil || header.Time >= activation {
+			continue
+		}
+		maxTxNum, err := m.BlockReader.TxnumReader().Max(t.Context(), tx, blockNum)
+		require.NoError(t, err)
+		data, ok, err := tx.GetAsOf(kv.CommitmentBinDomain, pbtengine.GlobalRootKey(), maxTxNum+1)
+		require.NoError(t, err)
+		require.True(t, ok, "missing binary root record for block %d", blockNum)
+		record, err := pbtengine.DecodeRecord(pbtengine.GlobalRootKey(), data)
+		require.NoError(t, err)
+		root, err := pbtengine.Fold(pbtengine.GlobalRootKey(), &record)
+		require.NoError(t, err)
+		roots[blockNum] = root
+	}
+	tx.Rollback()
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		for blockNum, root := range roots {
+			header := rawdb.ReadHeaderByNumber(tx, blockNum)
+			if err := rawdb.WriteShadowStateRoot(tx, header.Hash(), blockNum, root[:]); err != nil {
+				return err
+			}
+		}
+		return nil
+	}))
+}
+
+func TestPBinExecutionWitnessServedBinOnly(t *testing.T) {
+	api, _ := pbinWitnessFixture(t, 0)
 	bn := rpc.BlockNumber(2)
-	_, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
-	require.ErrorIs(t, err, errWitnessPBTNotServed)
+	result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHash{BlockNumber: &bn}, nil, nil)
+	require.NoError(t, err)
+	require.NotEmpty(t, result.State)
+}
+
+func TestPBinExecutionWitnessFreshContractAndEmptyTouch(t *testing.T) {
+	empty := common.HexToAddress("0x7300000000000000000000000000000000000000")
+	initCode := common.FromHex("0x6001600c60003960016000f36000")
+	api, _ := pbinWitnessFixtureWithGenerator(t, 0, nil, func(i int, _ *blockgen.BlockGen, addTransaction func(common.Address, *uint256.Int, []byte), addContract func(*uint256.Int, []byte)) {
+		switch i {
+		case 1:
+			addContract(uint256.NewInt(0), initCode)
+		case 2:
+			addTransaction(empty, uint256.NewInt(0), nil)
+		default:
+			addTransaction(common.HexToAddress("0x1000000000000000000000000000000000000001"), uint256.NewInt(1), nil)
+		}
+	})
+	for _, block := range []rpc.BlockNumber{2, 3} {
+		result, err := api.ExecutionWitness(t.Context(), rpc.BlockNumberOrHashWithNumber(block), nil, nil)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+	}
 }
 
 func TestPBinOnlyProofAndWitnessRefuse(t *testing.T) {
@@ -197,15 +276,16 @@ func TestPBinOnlyProofAndWitnessRefuse(t *testing.T) {
 	require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
 }
 
-func TestPBinDualExecutionWitnessNotServedBin(t *testing.T) {
-	api, m := pbinWitnessFixture(t, 30)
+func TestPBinDualExecutionWitnessServedBin(t *testing.T) {
+	api, m := pbinWitnessFixture(t, 2)
 	ethAPI := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	address := common.HexToAddress("0x1000000000000000000000000000000000000001")
 	for _, n := range []rpc.BlockNumber{3, 4} {
 		t.Run(n.String(), func(t *testing.T) {
 			selector := rpc.BlockNumberOrHashWithNumber(n)
-			_, err := api.ExecutionWitness(t.Context(), selector, nil, nil)
-			require.ErrorIs(t, err, errWitnessPBTNotServed)
+			result, err := api.ExecutionWitness(t.Context(), selector, nil, nil)
+			require.NoError(t, err)
+			require.NotEmpty(t, result.State)
 			_, err = ethAPI.GetProof(t.Context(), address, nil, &selector)
 			require.ErrorIs(t, err, execctx.ErrBinCommitmentUnsupported)
 			_, err = ethAPI.GetWitness(t.Context(), selector)

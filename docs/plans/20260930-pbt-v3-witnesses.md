@@ -518,22 +518,25 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 **Files:**
 - Modify: `rpc/jsonrpc/debug_execution_witness.go`
 - Modify: `rpc/jsonrpc/witness_cache_builder.go`
+- Modify: `execution/commitment/commitmentdb/commitment_context.go`
 - Modify: `rpc/jsonrpc/debug_execution_witness_trie_test.go`
+- Modify: `rpc/jsonrpc/debug_execution_witness_bin_test.go`
+- Modify: `rpc/jsonrpc/witness_cache_builder_test.go`
 
-- [ ] write tests: a pbt witness for a block on a bin-only datadir, for a pre-fork block on hex+bin (shadow anchors),
+- [x] write tests: a pbt witness for a block on a bin-only datadir, for a pre-fork block on hex+bin (shadow anchors),
       and for the first bin block under both tries; confirm they fail on the not-yet-served sentinel
-- [ ] build the pbt path:
+- [x] build the pbt path:
       - bin domain selection and the parent history check;
       - the anchors;
       - the hex environment gate and the empty-access early return bypassed;
       - the root blob always present.
-- [ ] shape the response (parallel `keys`/`state` sorted by path, content-keyed `codes`, RLP `headers`, empty-witness
+- [x] shape the response (parallel `keys`/`state` sorted by path, content-keyed `codes`, RLP `headers`, empty-witness
       form) and run the verifier on every pbt witness before serving it
-- [ ] apply the availability rules to pbt; the eager cache builder builds the default trie (pbt after the fork), removing the pre-Task-11 pbt skip
-- [ ] write tests:
+- [x] apply the availability rules to pbt; the eager cache builder builds the default trie (pbt after the fork)
+- [x] write tests:
       - pbt refusals: hex-only datadir, bin shadow not running at the parent, pruned bin history, missing shadow root;
       - cache behaviour after the fork
-- [ ] run tests - must pass before task 12
+- [x] run tests - must pass before task 12
 
 ### Task 12: End-to-end witness coverage
 

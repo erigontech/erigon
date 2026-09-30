@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	eipWitness "github.com/erigontech/erigon/execution/commitment/eip8297/witness"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -42,7 +43,7 @@ func pbinExecBlockStatelessly(ctx context.Context, result *ExecutionWitnessResul
 	if block.NumberU64() == 0 {
 		return block.Root(), nil, nil
 	}
-	if len(result.State) == 0 {
+	if len(result.State) == 0 && parentRoot != eip8297.EmptyTreeHash {
 		return common.Hash{}, nil, errors.New("empty State field in witness")
 	}
 	stateless, err := newPBinWitnessStateless(result, parentRoot)
@@ -74,13 +75,20 @@ type pbinWitnessStateless struct {
 	tree  *eipWitness.PBinTree
 	codes map[common.Hash][]byte
 
-	codeUpdates    map[common.Address][]byte
-	accountUpdates map[common.Address]*accounts.Account
-	storageWrites  map[common.Address]map[common.Hash]uint256.Int
-	deleted        map[common.Address]struct{}
+	systemCallScope bool
+
+	codeUpdates      map[common.Address][]byte
+	accountUpdates   map[common.Address]*accounts.Account
+	preStateAccounts map[common.Address]bool
+	storageWrites    map[common.Address]map[common.Hash]uint256.Int
+	deleted          map[common.Address]struct{}
 
 	trace       bool
 	tracePrefix string
+}
+
+func (s *pbinWitnessStateless) setPBinSystemCallScope(active bool) {
+	s.systemCallScope = active
 }
 
 var (
@@ -103,7 +111,7 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 	resolve := func(path []byte) ([]byte, error) {
 		blob, ok := blobs[string(path)]
 		if !ok {
-			return nil, fmt.Errorf("pbin witness: missing node at path %x", path)
+			return nil, fmt.Errorf("%w: missing node at path %x", commitment.ErrPBinWitnessBlinded, path)
 		}
 		return bytes.Clone(blob), nil
 	}
@@ -120,12 +128,13 @@ func newPBinWitnessStateless(result *ExecutionWitnessResult, parentRoot common.H
 		codes[hash] = bytes.Clone(code)
 	}
 	return &pbinWitnessStateless{
-		tree:           tree,
-		codes:          codes,
-		codeUpdates:    make(map[common.Address][]byte),
-		accountUpdates: make(map[common.Address]*accounts.Account),
-		storageWrites:  make(map[common.Address]map[common.Hash]uint256.Int),
-		deleted:        make(map[common.Address]struct{}),
+		tree:             tree,
+		codes:            codes,
+		codeUpdates:      make(map[common.Address][]byte),
+		accountUpdates:   make(map[common.Address]*accounts.Account),
+		preStateAccounts: make(map[common.Address]bool),
+		storageWrites:    make(map[common.Address]map[common.Hash]uint256.Int),
+		deleted:          make(map[common.Address]struct{}),
 	}, nil
 }
 
@@ -151,11 +160,12 @@ func (s *pbinWitnessStateless) ReadAccountData(address accounts.Address) (*accou
 	}
 	value, present, err := s.tree.Read(eip8297.TreeKeyAccount(addr[:], eip8297.BasicDataLeafKey))
 	if err != nil {
-		if isPBinSystemAddress(addr) {
+		if s.systemCallScope && isPBinSystemAddress(addr) && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
 			return nil, nil
 		}
 		return nil, err
 	}
+	s.preStateAccounts[addr] = present
 	if !present {
 		return nil, nil
 	}
@@ -224,7 +234,7 @@ func (s *pbinWitnessStateless) ReadAccountStorage(address accounts.Address, key 
 	}
 	value, present, err := s.tree.Read(eip8297.TreeKeyStorage(addr[:], slot[:]))
 	if err != nil {
-		if isPBinSystemAddress(addr) {
+		if s.systemCallScope && isPBinSystemAddress(addr) && errors.Is(err, commitment.ErrPBinWitnessBlinded) {
 			return uint256.Int{}, false, nil
 		}
 		return uint256.Int{}, false, err
@@ -290,11 +300,12 @@ func (s *pbinWitnessStateless) UpdateAccountData(address accounts.Address, _, ac
 
 func (s *pbinWitnessStateless) DeleteAccount(address accounts.Address, _ *accounts.Account) error {
 	addr := address.Value()
-	account, err := s.ReadAccountData(address)
-	if err != nil {
-		return err
+	if _, checked := s.preStateAccounts[addr]; !checked {
+		if _, err := s.ReadAccountData(address); err != nil {
+			return err
+		}
 	}
-	if account == nil && s.tree.RootHash() == (common.Hash{}) {
+	if !s.preStateAccounts[addr] {
 		return nil
 	}
 	if err := s.tree.DeleteAccount(addr[:]); err != nil {
@@ -329,8 +340,10 @@ func (s *pbinWitnessStateless) WriteAccountStorage(address accounts.Address, _ u
 
 func (s *pbinWitnessStateless) CreateContract(address accounts.Address) error {
 	addr := address.Value()
-	if err := s.tree.DeleteAccount(addr[:]); err != nil {
-		return err
+	if s.preStateAccounts[addr] {
+		if err := s.tree.DeleteAccount(addr[:]); err != nil {
+			return err
+		}
 	}
 	delete(s.deleted, addr)
 	delete(s.storageWrites, addr)

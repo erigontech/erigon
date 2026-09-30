@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -531,35 +532,42 @@ func TestBuildAndCacheJoinsRunningBuild(t *testing.T) {
 	require.Same(t, running, cached, "the builder must cache the running build's result, not build again")
 }
 
-func TestWitnessCacheSkipsDefaultPBT(t *testing.T) {
-	api, m := pbinWitnessFixture(t, 30)
-	api.witnessCache = newWitnessResultCache(96, 0, false, false)
-	ctx := t.Context()
-	var block3Hash, block4Hash common.Hash
-	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+func TestWitnessCacheBuildsDefaultPBT(t *testing.T) {
+	var pin *rollingPin
+	var block4Hash common.Hash
+	api, m := pbinWitnessFixtureWithHook(t, 20, func(m *execmoduletester.ExecModuleTester, pack *blockgen.ChainPack) error {
+		if err := m.InsertChain(pack.Slice(0, 3)); err != nil {
+			return err
+		}
 		var err error
-		block3Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 3)
+		pin, err = openRollingPin(t.Context(), m.DB)
 		if err != nil {
 			return err
 		}
-		block4Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 4)
+		block4Hash = pack.Blocks[3].Hash()
+		return m.InsertChain(pack.Slice(3, 4))
+	})
+	t.Cleanup(func() { pin.close() })
+	repairPBinPreForkShadows(t, m, 20)
+	api.witnessCache = newWitnessResultCache(96, 0, false, false)
+	ctx := t.Context()
+	var block3Hash common.Hash
+	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var err error
+		block3Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 3)
 		return err
 	}))
 	failuresBefore := witnessCacheBuildFailOtherCounter.GetValueUint64()
-	require.False(t, api.buildAndCache(ctx, 3, block3Hash))
+	require.True(t, api.buildAndCache(ctx, 3, block3Hash))
 	require.Equal(t, failuresBefore, witnessCacheBuildFailOtherCounter.GetValueUint64())
-	require.False(t, api.witnessCache.Contains(block3Hash))
+	require.True(t, api.witnessCache.Contains(block3Hash))
 
 	committedTx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer committedTx.Rollback()
-	pinTx, err := m.DB.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer pinTx.Rollback()
-	pin := &rollingPin{tx: pinTx, num: 3, hash: block3Hash}
-	require.False(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 4, block4Hash))
+	require.True(t, api.tryHeadCaptureBuild(ctx, committedTx, pin, 4, block4Hash))
 	require.Equal(t, failuresBefore, witnessCacheBuildFailOtherCounter.GetValueUint64())
-	require.False(t, api.witnessCache.Contains(block4Hash))
+	require.True(t, api.witnessCache.Contains(block4Hash))
 }
 
 func TestBuildAndCacheHeadCaptureJoinsRunningBuild(t *testing.T) {

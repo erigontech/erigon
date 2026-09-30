@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	eipWitness "github.com/erigontech/erigon/execution/commitment/eip8297/witness"
 	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
@@ -205,11 +206,40 @@ func TestPBinWitnessStatelessSyntheticSystemAccessIsSuppressed(t *testing.T) {
 	rootOnly := &ExecutionWitnessResult{Keys: []hexutil.Bytes{f.result.Keys[0]}, State: []hexutil.Bytes{f.result.State[0]}}
 	stateless, err := newPBinWitnessStateless(rootOnly, f.root)
 	require.NoError(t, err)
+	stateless.setPBinSystemCallScope(true)
 	account, err := stateless.ReadAccountData(params.SystemAddress)
 	require.NoError(t, err)
 	require.Nil(t, account)
 	_, err = stateless.ReadAccountData(accounts.InternAddress(f.address))
 	require.ErrorContains(t, err, "missing node")
+}
+
+func TestPBinWitnessStatelessGenuineSystemAccessWithoutProofErrors(t *testing.T) {
+	f := newPBinStatelessFixture(t)
+	rootOnly := &ExecutionWitnessResult{Keys: []hexutil.Bytes{f.result.Keys[0]}, State: []hexutil.Bytes{f.result.State[0]}}
+	stateless, err := newPBinWitnessStateless(rootOnly, f.root)
+	require.NoError(t, err)
+	_, err = stateless.ReadAccountData(params.SystemAddress)
+	require.ErrorIs(t, err, commitment.ErrPBinWitnessBlinded)
+}
+
+func TestPBinWitnessStatelessTamperedSystemBlobErrors(t *testing.T) {
+	f := newPBinStatelessFixture(t)
+	system := common.Address(params.SystemAddress.Value())
+	result, root := pbinSystemAddressWitness(t, f, system)
+	tampered := cloneExecutionWitnessResult(result)
+	rootIndex := -1
+	for index, path := range tampered.Keys {
+		if len(path) == 0 {
+			rootIndex = index
+			break
+		}
+	}
+	require.NotEqual(t, -1, rootIndex)
+	tampered.State[rootIndex] = append(hexutil.Bytes(nil), tampered.State[rootIndex]...)
+	tampered.State[rootIndex][len(tampered.State[rootIndex])-1] ^= 1
+	_, err := newPBinWitnessStateless(tampered, root)
+	require.Error(t, err)
 }
 
 func TestPBinWitnessStatelessGenuineSystemAccessNeedsProof(t *testing.T) {
@@ -245,10 +275,60 @@ func TestPBinWitnessStatelessGenuineSystemAccessNeedsProof(t *testing.T) {
 
 func TestPBinWitnessStatelessCreateOverStorageNeedsProof(t *testing.T) {
 	f := newPBinStatelessFixture(t)
-	rootOnly := &ExecutionWitnessResult{Keys: []hexutil.Bytes{f.result.Keys[0]}, State: []hexutil.Bytes{f.result.State[0]}}
-	stateless, err := newPBinWitnessStateless(rootOnly, f.root)
+	reads := [][]byte{
+		eip8297.TreeKeyAccount(f.address[:], eip8297.BasicDataLeafKey),
+		eip8297.TreeKeyAccount(f.address[:], eip8297.CodeHashLeafKey),
+	}
+	paths, blobs, _, err := pbtengine.NewTrie(f.context).Witness(context.Background(), f.root, eipWitness.PBinDriverInput{Reads: reads})
 	require.NoError(t, err)
+	partial := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		partial.Keys[index] = paths[index]
+		partial.State[index] = blobs[index]
+	}
+	stateless, err := newPBinWitnessStateless(partial, f.root)
+	require.NoError(t, err)
+	account, err := stateless.ReadAccountData(accounts.InternAddress(f.address))
+	require.NoError(t, err)
+	require.NotNil(t, account)
 	require.ErrorContains(t, stateless.CreateContract(accounts.InternAddress(f.address)), "missing node", "CREATE over storage must not treat missing storage proof as empty")
+}
+
+func TestPBinWitnessStatelessFreshLifecycleSkipsStorageDelete(t *testing.T) {
+	f := newPBinStatelessFixture(t)
+	fresh := accounts.InternAddress(common.HexToAddress("0x6300000000000000000000000000000000000000"))
+	freshAddress := fresh.Value()
+	basic := pbinStatelessAccountBasic(0)
+	codeHash := eip8297.CodeHashValue(common.Hash{})
+	paths, blobs, _, err := pbtengine.NewTrie(f.context).Witness(context.Background(), f.root, eipWitness.PBinDriverInput{Accounts: []eipWitness.PBinAccountUpdate{{Address: freshAddress[:], Values: map[byte][]byte{eip8297.BasicDataLeafKey: basic[:], eip8297.CodeHashLeafKey: codeHash[:]}}}})
+	require.NoError(t, err)
+	witness := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		witness.Keys[index] = paths[index]
+		witness.State[index] = blobs[index]
+	}
+	stateless, err := newPBinWitnessStateless(witness, f.root)
+	require.NoError(t, err)
+	require.NoError(t, stateless.CreateContract(fresh))
+	require.NoError(t, stateless.DeleteAccount(fresh, nil))
+}
+
+func TestPBinWitnessStatelessEmptyAccessNeedsRoot(t *testing.T) {
+	f := newPBinStatelessFixture(t)
+	paths, blobs, _, err := pbtengine.NewTrie(f.context).Witness(context.Background(), f.root, eipWitness.PBinDriverInput{})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for index := range paths {
+		result.Keys[index] = paths[index]
+		result.State[index] = blobs[index]
+	}
+	header := &types.Header{Root: f.root, Number: *uint256.NewInt(1), Difficulty: uint256.Int{}, GasLimit: 30_000_000, BaseFee: uint256.NewInt(7)}
+	block := types.NewBlock(header, nil, nil, nil, nil, nil)
+	engine := merge.New(ethash.NewFaker())
+	chainConfig := pbinStatelessChainConfig()
+	require.NoError(t, verifyPBinWitnessAgainstBlock(context.Background(), result, block, f.root, f.root, chainConfig, engine))
+	trimmed := &ExecutionWitnessResult{Keys: nil, State: []hexutil.Bytes{}}
+	require.ErrorContains(t, verifyPBinWitnessAgainstBlock(context.Background(), trimmed, block, f.root, f.root, chainConfig, engine), "empty State field")
 }
 
 func TestPBinWitnessStatelessHasStorage(t *testing.T) {
@@ -264,6 +344,8 @@ func TestPBinWitnessStatelessCreateOverStorageWipesStorage(t *testing.T) {
 	f := newPBinStatelessFixture(t)
 	stateless := f.stateless(t)
 	address := accounts.InternAddress(f.address)
+	_, err := stateless.ReadAccountData(address)
+	require.NoError(t, err)
 	require.NoError(t, stateless.CreateContract(address))
 	require.NoError(t, stateless.UpdateAccountData(address, nil, &accounts.Account{Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}))
 	got, err := stateless.Finalize(context.Background())
@@ -327,4 +409,30 @@ func cloneExecutionWitnessResult(result *ExecutionWitnessResult) *ExecutionWitne
 		clone.Codes[i] = append(hexutil.Bytes(nil), result.Codes[i]...)
 	}
 	return clone
+}
+
+func pbinSystemAddressWitness(t *testing.T, f *pbinStatelessFixture, system common.Address) (*ExecutionWitnessResult, common.Hash) {
+	t.Helper()
+	basic, err := eip8297.EncodeBasicData(1, uint256.NewInt(2), 0)
+	require.NoError(t, err)
+	emptyCodeHash := eip8297.CodeHashValue(common.Hash{})
+	otherBasic := pbinStatelessAccountBasic(1)
+	ctx := newPBinWitnessInputContext()
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyAccount(system[:], eip8297.BasicDataLeafKey), Value: basic[:]},
+		{Key: eip8297.TreeKeyAccount(system[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash[:]},
+		{Key: eip8297.TreeKeyAccount(f.address[:], eip8297.BasicDataLeafKey), Value: otherBasic[:]},
+		{Key: eip8297.TreeKeyAccount(f.address[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash[:]},
+	}
+	sort.Slice(entries, func(i, j int) bool { return bytes.Compare(entries[i].Key, entries[j].Key) < 0 })
+	root, err := pbtengine.NewTrie(ctx).Process(pbinStatelessEntriesToOps(entries))
+	require.NoError(t, err)
+	paths, blobs, _, err := pbtengine.NewTrie(ctx).Witness(context.Background(), root, eipWitness.PBinDriverInput{Reads: [][]byte{eip8297.TreeKeyAccount(system[:], eip8297.BasicDataLeafKey), eip8297.TreeKeyAccount(system[:], eip8297.CodeHashLeafKey)}})
+	require.NoError(t, err)
+	result := &ExecutionWitnessResult{Keys: make([]hexutil.Bytes, len(paths)), State: make([]hexutil.Bytes, len(blobs))}
+	for i := range paths {
+		result.Keys[i] = paths[i]
+		result.State[i] = blobs[i]
+	}
+	return result, root
 }
