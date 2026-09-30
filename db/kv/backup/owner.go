@@ -19,6 +19,7 @@
 package backup
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"syscall"
@@ -45,6 +46,9 @@ func restoreOwner(src os.FileInfo, path string) error {
 	}
 	err = os.Chown(path, int(st.Uid), int(st.Gid))
 	if err != nil && ok {
+		if errors.Is(err, os.ErrPermission) {
+			err = fmt.Errorf("%w; if running in docker, use --user uid:gid matching the database ownership", err)
+		}
 		return fmt.Errorf("cannot preserve ownership (database=%d:%d, copy=%d:%d): %w", st.Uid, st.Gid, owner.Uid, owner.Gid, err)
 	}
 	return err
