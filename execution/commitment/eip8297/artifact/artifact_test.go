@@ -136,8 +136,8 @@ func TestArtifactRoundTripAndEmptySnapshot(t *testing.T) {
 		_, err = ReadSnapshot(bytes.NewReader(encoded.Bytes()))
 		require.NoError(t, err)
 	}
-	for seed := int64(0); seed < 5; seed++ {
-		rng := rand.New(rand.NewSource(seed))
+	for seed := range 5 {
+		rng := rand.New(rand.NewSource(int64(seed)))
 		basic, err := eip8297.EncodeBasicData(uint64(seed+1), newBalance(uint64(seed+1)), 0)
 		require.NoError(t, err)
 		key := eip8297.TreeKey(eip8297.AccountZone, bytes.Repeat([]byte{byte(rng.Intn(255) + 1)}, 32), eip8297.BasicDataLeafKey)
@@ -150,7 +150,7 @@ func TestArtifactRoundTripAndEmptySnapshot(t *testing.T) {
 }
 
 func TestWriterRejectsEmptyAccountAndZeroSizeCode(t *testing.T) {
-	position := append(bytes.Repeat([]byte{0}, 31), 1)
+	position := append(make([]byte, 31), 1)
 	zeroBasic, err := eip8297.EncodeBasicData(0, uint256.NewInt(0), 0)
 	require.NoError(t, err)
 	write := func(leaves []testLeaf) error {
@@ -252,7 +252,7 @@ func goldenLeaves(t *testing.T) []testLeaf {
 	storage := func(address, stem []byte, sub byte) []byte {
 		return eip8297.TreeKey(eip8297.StorageZone, append(bytes.Clone(address), stem...), sub)
 	}
-	position := func(value byte) []byte { return append(bytes.Repeat([]byte{0}, 31), value) }
+	position := func(value byte) []byte { return append(make([]byte, 31), value) }
 	basic := func(nonce, balance, codeSize uint64) []byte {
 		value, err := eip8297.EncodeBasicData(nonce, newBalance(balance), codeSize)
 		require.NoError(t, err)
@@ -271,7 +271,7 @@ func goldenLeaves(t *testing.T) []testLeaf {
 		{account(position(3), 2), delegation},
 		{code(bytes.Repeat([]byte{0xcc}, 32), 0), leftPaddedValue(0x55)},
 		{code(bytes.Repeat([]byte{0xcc}, 32), 7), leftPaddedBytes(0x66, 0x77)},
-		{storage(append(bytes.Repeat([]byte{0}, 31), 1), bytes.Repeat([]byte{0xdd}, 32), 64), paddedValue(0x88)},
+		{storage(append(make([]byte, 31), 1), bytes.Repeat([]byte{0xdd}, 32), 64), paddedValue(0x88)},
 	}
 }
 

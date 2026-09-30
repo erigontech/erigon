@@ -27,6 +27,7 @@ import (
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
@@ -95,7 +96,7 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 		if err != nil {
 			return err
 		}
-		if err = appendSpilled(&storageGroups, encoded, w.StorageSpillThreshold); err != nil {
+		if err := appendSpilled(&storageGroups, encoded, w.StorageSpillThreshold); err != nil {
 			return err
 		}
 		storageCount++
@@ -270,10 +271,6 @@ type groupBuilder struct {
 	entries []GroupEntry
 }
 
-func (g *groupBuilder) encode() ([]byte, error) {
-	return g.encodeCode()
-}
-
 func (g *groupBuilder) encodeCode() ([]byte, error) {
 	if len(g.entries) == 0 || len(g.entries) > eip8297.StemSubtreeWidth {
 		return nil, fmt.Errorf("%w: group entry count %d", ErrInvalidLeaf, len(g.entries))
@@ -338,7 +335,7 @@ func appendSpilled(dst *bytes.Buffer, record []byte, threshold int) error {
 		return err
 	}
 	name := f.Name()
-	defer os.Remove(name)
+	defer func() { _ = dir.RemoveFile(name) }()
 	if _, err = f.Write(record); err == nil {
 		_, err = f.Seek(0, io.SeekStart)
 	}

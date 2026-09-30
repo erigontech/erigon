@@ -49,16 +49,17 @@ func readSnapshot(data []byte) (Snapshot, error) {
 	offset := 0
 	copy(snapshot.Root[:], data[:32])
 	offset = 32
-	headerCount, err := readCount(data, &offset)
+	headerCountValue, err := readCount(data, &offset)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if headerCount > uint64(len(data)) {
+	if headerCountValue > uint64(len(data)) {
 		return Snapshot{}, ErrMalformed
 	}
+	headerCount := int(headerCountValue)
 	snapshot.Headers = make([]Header, 0, headerCount)
 	var previousAddress common.Hash
-	for i := uint64(0); i < headerCount; i++ {
+	for i := range headerCount {
 		header, err := readHeader(data, &offset)
 		if err != nil {
 			return Snapshot{}, err
@@ -69,16 +70,17 @@ func readSnapshot(data []byte) (Snapshot, error) {
 		previousAddress = header.AddressHash
 		snapshot.Headers = append(snapshot.Headers, header)
 	}
-	codeCount, err := readCount(data, &offset)
+	codeCountValue, err := readCount(data, &offset)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if codeCount > uint64(len(data)) {
+	if codeCountValue > uint64(len(data)) {
 		return Snapshot{}, ErrMalformed
 	}
+	codeCount := int(codeCountValue)
 	snapshot.CodeGroups = make([]Group, 0, codeCount)
 	var previousStem common.Hash
-	for i := uint64(0); i < codeCount; i++ {
+	for i := range codeCount {
 		group, err := readGroup(data, &offset)
 		if err != nil {
 			return Snapshot{}, err
@@ -89,16 +91,17 @@ func readSnapshot(data []byte) (Snapshot, error) {
 		previousStem = group.StemHash
 		snapshot.CodeGroups = append(snapshot.CodeGroups, group)
 	}
-	storageCount, err := readCount(data, &offset)
+	storageCountValue, err := readCount(data, &offset)
 	if err != nil {
 		return Snapshot{}, err
 	}
-	if storageCount > uint64(len(data)) {
+	if storageCountValue > uint64(len(data)) {
 		return Snapshot{}, ErrMalformed
 	}
+	storageCount := int(storageCountValue)
 	snapshot.StorageGroups = make([]Storage, 0, storageCount)
 	var previousStorage common.Hash
-	for i := uint64(0); i < storageCount; i++ {
+	for i := range storageCount {
 		storage, err := readStorage(data, &offset)
 		if err != nil {
 			return Snapshot{}, err
@@ -113,8 +116,8 @@ func readSnapshot(data []byte) (Snapshot, error) {
 		return Snapshot{}, fmt.Errorf("%w: trailing bytes", ErrMalformed)
 	}
 	headerAddresses := make(map[common.Hash]struct{}, len(snapshot.Headers))
-	for _, header := range snapshot.Headers {
-		headerAddresses[header.AddressHash] = struct{}{}
+	for i := range snapshot.Headers {
+		headerAddresses[snapshot.Headers[i].AddressHash] = struct{}{}
 	}
 	for _, storage := range snapshot.StorageGroups {
 		if _, ok := headerAddresses[storage.AddressHash]; !ok {
@@ -184,7 +187,7 @@ func readHeader(data []byte, offset *int) (Header, error) {
 	*offset++
 	header.Slots = make([]Slot, 0, slotCount)
 	var previous byte
-	for i := 0; i < slotCount; i++ {
+	for i := range slotCount {
 		if *offset >= len(data) {
 			return Header{}, ErrMalformed
 		}
@@ -214,7 +217,7 @@ func readGroup(data []byte, offset *int) (Group, error) {
 	*offset++
 	group.Entries = make([]GroupEntry, 0, count)
 	var previous byte
-	for i := 0; i < count; i++ {
+	for i := range count {
 		if *offset >= len(data) {
 			return Group{}, ErrMalformed
 		}
@@ -250,7 +253,7 @@ func readStorage(data []byte, offset *int) (Storage, error) {
 	}
 	storage.Groups = make([]Group, 0, count)
 	var previous common.Hash
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		group, err := readGroup(data, offset)
 		if err != nil {
 			return Storage{}, err
