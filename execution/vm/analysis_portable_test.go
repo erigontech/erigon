@@ -1,0 +1,94 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+//go:build go1.27 && goexperiment.simd
+
+package vm
+
+import (
+	"math/rand"
+	"testing"
+
+	"github.com/erigontech/erigon/common"
+)
+
+func TestCodeBitmapPortableEquivalence(t *testing.T) {
+	r := rand.New(rand.NewSource(2))
+	for iter := range 200000 {
+		code := make([]byte, r.Intn(400))
+		for i := range code {
+			switch iter % 4 {
+			case 0:
+				code[i] = []byte{0x5b, 0x60, 0x7f, 0x00, 0x61}[r.Intn(5)]
+			case 1:
+				code[i] = byte(0x60 + r.Intn(32))
+			default:
+				code[i] = byte(r.Intn(256))
+			}
+		}
+		if !equalBitvec(codeBitmapPortable(code), codeBitmapRef(code)) {
+			t.Fatalf("mismatch len=%d code=%x", len(code), code)
+		}
+	}
+}
+
+func BenchmarkJumpdestAnalysisPortable(b *testing.B) {
+	for name, alphabet := range map[string][]byte{
+		"jumpdest":            {0x5b},
+		"stop_jumpdest_push1": {0x00, 0x5b, 0x60},
+		"jumpdest_push1":      {0x5b, 0x60},
+		"push1to32":           {0x5b, 0x60, 0x6f, 0x70, 0x7f, 0x00},
+		"push32":              {0x7f},
+		"random":              nil,
+	} {
+		r := rand.New(rand.NewSource(1))
+		codes := make([][]byte, 64)
+		for k := range codes {
+			codes[k] = make([]byte, 32*1024)
+			for i := range codes[k] {
+				if alphabet == nil {
+					codes[k][i] = byte(r.Intn(256))
+				} else {
+					codes[k][i] = alphabet[r.Intn(len(alphabet))]
+				}
+			}
+		}
+		b.Run("portable/"+name, func(b *testing.B) {
+			for i := 0; b.Loop(); i++ {
+				codeBitmapPortable(codes[i%len(codes)])
+			}
+		})
+	}
+}
+
+func BenchmarkJumpdestAnalysisContractPortable(b *testing.B) {
+	code := common.Hex2Bytes("6060604052361561006c5760e060020a600035046308551a53811461007457806335a063b4146100865780633fa4f245146100a6578063590e1ae3146100af5780637150d8ae146100cf57806373fac6f0146100e1578063c19d93fb146100fe578063d696069714610112575b610131610002565b610133600154600160a060020a031681565b610131600154600160a060020a0390811633919091161461015057610002565b61014660005481565b610131600154600160a060020a039081163391909116146102d557610002565b610133600254600160a060020a031681565b610131600254600160a060020a0333811691161461023757610002565b61014660025460ff60a060020a9091041681565b61013160025460009060ff60a060020a9091041681146101cc57610002565b005b600160a060020a03166060908152602090f35b6060908152602090f35b60025460009060a060020a900460ff16811461016b57610002565b600154600160a060020a03908116908290301631606082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f72c874aeff0b183a56e2b79c71b46e1aed4dee5e09862134b8821ba2fddbf8bf9250a150565b80546002023414806101dd57610002565b6002805460a060020a60ff021973ffffffffffffffffffffffffffffffffffffffff1990911633171660a060020a1790557fd5d55c8a68912e9a110618df8d5e2e83b8d83211c57a8ddd1203df92885dc881826060a15050565b60025460019060a060020a900460ff16811461025257610002565b60025460008054600160a060020a0390921691606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517fe89152acd703c9d8c7d28829d443260b411454d45394e7995815140c8cbcbcf79250a150565b60025460019060a060020a900460ff1681146102f057610002565b6002805460008054600160a060020a0390921692909102606082818181858883f150508354604051600160a060020a0391821694503090911631915082818181858883f150506002805460a060020a60ff02191660a160020a179055506040517f8616bbbbad963e4e65b1366f1d75dfb63f9e9704bbbf91fb01bec70849906cf79250a15056")
+	b.Run("dispatch", func(b *testing.B) {
+		for b.Loop() {
+			codeBitmap(code)
+		}
+	})
+	b.Run("portable", func(b *testing.B) {
+		for b.Loop() {
+			codeBitmapPortable(code)
+		}
+	})
+	b.Run("generic", func(b *testing.B) {
+		for b.Loop() {
+			codeBitmapGeneric(code)
+		}
+	})
+}
