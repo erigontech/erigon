@@ -269,7 +269,7 @@ func readHeaderAt(c *artifactCursor) (Header, error) {
 	if err != nil || int64(slotCount) > c.remaining()/3 {
 		return Header{}, ErrMalformed
 	}
-	header.Slots = make([]Slot, 0, slotCount)
+	header.Slots = make([]Slot, 0, eip8297.HeaderStorageSlots)
 	var previous byte
 	for i := 0; i < int(slotCount); i++ {
 		index, err := c.byte()
@@ -304,7 +304,7 @@ func readGroupAt(c *artifactCursor) (Group, error) {
 	if int64(entries)*3 > c.remaining() {
 		return Group{}, ErrMalformed
 	}
-	group.Entries = make([]GroupEntry, 0, entries)
+	group.Entries = make([]GroupEntry, 0, eip8297.StemSubtreeWidth)
 	var previous byte
 	for i := range entries {
 		index, err := c.byte()
@@ -339,7 +339,7 @@ func readStorageAt(c *artifactCursor) (Storage, error) {
 	if count == 0 || count > uint64(c.remaining()/35) {
 		return Storage{}, fmt.Errorf("%w: invalid storage group count", ErrMalformed)
 	}
-	storage.Groups = make([]Group, 0, int(count))
+	storage.Groups = make([]Group, 0)
 	var previous common.Hash
 	for i := range count {
 		group, err := readGroupAt(c)

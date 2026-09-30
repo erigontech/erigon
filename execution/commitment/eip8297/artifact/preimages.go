@@ -139,7 +139,7 @@ func ReadPreimagesAt(src io.ReaderAt, size int64, yield func(Preimage) error) er
 		}
 		previous = digest
 		index++
-		record.Slots = make([][32]byte, 0, int(count))
+		record.Slots = make([][32]byte, 0)
 		var previousSlot common.Hash
 		for i := range count {
 			slotBytes, err := c.bytes(32)
@@ -282,7 +282,7 @@ func nextPreimage(src io.ReaderAt, size int64, cursor *preimageCursor) (Preimage
 		return record, false, ErrPreimages
 	}
 	copy(record.Address[:], address)
-	record.Slots = make([][32]byte, 0, int(count))
+	record.Slots = make([][32]byte, 0)
 	digest := common.Hash(keccak.Sum256(record.Address[:]))
 	if cursor.hasPrevious && bytes.Compare(digest[:], cursor.previous[:]) <= 0 {
 		return Preimage{}, false, ErrUnsorted
