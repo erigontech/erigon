@@ -351,7 +351,7 @@ func TestPostPtcDutiesForkEpochUnavailableBeforeGloasHead(t *testing.T) {
 func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
 	const slot = uint64(64)
 	slotStart := time.Unix(1_700_000_000, 0)
-	payloadDue := 9 * time.Second
+	payloadDue := 6 * time.Second
 
 	tests := []struct {
 		name      string
@@ -368,8 +368,6 @@ func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 			handler.beaconChainCfg.GloasForkEpoch = 0
-			handler.beaconChainCfg.SecondsPerSlot = 12
-			handler.beaconChainCfg.PayloadDueBps = 7500
 			root := common.HexToHash("0x1234")
 			fcu.HeadSlotVal = slot
 			fcu.HeadVal = root
