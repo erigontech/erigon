@@ -1329,6 +1329,9 @@ func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t com
 			cc.activationBlock = cc.activationFromTargets
 			cc.hasActivationBlock = true
 		default:
+			if cc.blockReader == nil {
+				return
+			}
 			searchBlock := t.blockNum
 			canSearch := true
 			if cc.hasFirstBlock {
