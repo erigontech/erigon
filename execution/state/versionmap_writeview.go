@@ -1,10 +1,12 @@
 package state
 
 import (
+	"fmt"
 	"iter"
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -137,14 +139,27 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 			}
 			scratch = scratch[:len(inner)]
 			i := 0
+			var noop, noOrigin int
 			for key, kw := range inner {
 				val, ok := versionedUpdateStorage(v.vm, addr, key, v.txIdx+1)
 				if !ok {
 					val = kw.Val
 				}
+				if dbgNoopCount {
+					if ov, ores, ook := v.vm.ReadStorage(addr, key, v.txIdx); ook && ores.Status() != MVReadResultNone {
+						if val.Eq(&ov) {
+							noop++
+						}
+					} else {
+						noOrigin++
+					}
+				}
 				scratch[i] = VersionedWrite[uint256.Int]{WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: key}, Val: val}
 				out[key] = &scratch[i]
 				i++
+			}
+			if dbgNoopCount {
+				fmt.Printf("NOOPCNT tx=%d total=%d noop=%d noOrigin=%d\n", v.txIdx, len(inner), noop, noOrigin)
 			}
 			if !yield(addr, out) {
 				return
@@ -152,5 +167,7 @@ func (v *versionMapWriteView) Storages() iter.Seq2[accounts.Address, map[account
 		}
 	}
 }
+
+var dbgNoopCount = dbg.EnvBool("NOOP_COUNT", false)
 
 var _ WriteSetView = (*versionMapWriteView)(nil)
