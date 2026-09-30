@@ -39,7 +39,7 @@ type jdConsts struct {
 // jdHalf is the HALF macro of analysis_amd64.s: for the 16 code bytes in c and every entry
 // lane it returns xm (0x80 + entry into the next group), n (the exit of the lane's half) and
 // v (the instruction starts visited).
-func jdHalf(k *jdConsts, c archsimd.Uint8x16) (xm, n, v archsimd.Uint8x16) {
+func jdHalf(k jdConsts, c archsimd.Uint8x16) (xm, n, v archsimd.Uint8x16) {
 	x := c.AsInt8x16().Max(k.c5f.AsInt8x16()).Add(k.iota.AsInt8x16())
 	n = x.Sub(k.k8.AsInt8x16()).AsUint8x16()
 	x = x.Xor(k.k8.AsInt8x16()).Max(k.lane.AsInt8x16())
@@ -72,8 +72,8 @@ func jumpdestBitmapSIMD(code []byte, blocks int, bits bitvec) (entry int) {
 		lo := archsimd.LoadUint8x16Array((*[16]byte)(code[32*b:]))
 		hi := archsimd.LoadUint8x16Array((*[16]byte)(code[32*b+16:]))
 		jd := uint32(lo.Equal(k.c5b).ToBits()) | uint32(hi.Equal(k.c5b).ToBits())<<16
-		x1, x2, x3 := jdHalf(&k, lo)
-		x6, x7, x8 := jdHalf(&k, hi)
+		x1, x2, x3 := jdHalf(k, lo)
+		x6, x7, x8 := jdHalf(k, hi)
 
 		x1.StoreArray((*[16]byte)(tab[0:]))
 		x6.StoreArray((*[16]byte)(tab[64:]))
