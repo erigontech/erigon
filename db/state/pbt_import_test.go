@@ -59,8 +59,8 @@ func TestImportPBTSnapshotWritesProgressStateAndRoot(t *testing.T) {
 	var snapshot bytes.Buffer
 	_, err = artifact.WriteSnapshot(&snapshot, root, func(emit func([]byte, []byte) error) error {
 		for _, leaf := range leaves {
-			if err := emit(leaf.Key, leaf.Value); err != nil {
-				return err
+			if emitErr := emit(leaf.Key, leaf.Value); emitErr != nil {
+				return emitErr
 			}
 		}
 		return nil
@@ -82,8 +82,8 @@ func TestImportPBTSnapshotWritesProgressStateAndRoot(t *testing.T) {
 	var wrongSnapshot bytes.Buffer
 	_, err = artifact.WriteSnapshot(&wrongSnapshot, common.Hash{8}, func(emit func([]byte, []byte) error) error {
 		for _, leaf := range leaves {
-			if err := emit(leaf.Key, leaf.Value); err != nil {
-				return err
+			if emitErr := emit(leaf.Key, leaf.Value); emitErr != nil {
+				return emitErr
 			}
 		}
 		return nil
@@ -109,7 +109,7 @@ func TestImportPBTSnapshotAcceptsAllAccountKindsAndSharedCode(t *testing.T) {
 	t.Cleanup(func() { require.NoError(t, commitment.SetPBinHashSuite(previousSuite)) })
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashKeccak))
 	sharedCode := bytes.Repeat([]byte{1}, eip8297.ChunkDataLen+1)
-	zeroCode := bytes.Repeat([]byte{0}, eip8297.ChunkDataLen)
+	zeroCode := make([]byte, eip8297.ChunkDataLen)
 	delegation := append(append([]byte(nil), eip8297.DelegationMarker[:]...), bytes.Repeat([]byte{7}, 20)...)
 	address1 := common.Address{1}
 	address2 := common.Address{2}

@@ -229,23 +229,23 @@
 
 ### Artifact (spec "PBT snapshot artifact")
 
-- layout: `pbtRoot[32] | headerCount[8] | headerRecord* | codeCount[8] | group* | storageCount[8] | storageRecord*`,
-  counts big-endian, no trailing bytes.
+- layout: `record* | end[1] | pbtRoot[32]`, with end tag `0x07`, no section counts or group counts, and no trailing bytes.
 - integers: `name[≤w]` is a one-byte length followed by a minimal big-endian integer (zero is length 0). Erigon's compact
   code-leaf codec trims trailing zeros and is not used.
-- header record: `addressHash | nonce[≤8] | balance[≤16] | kind | codeRef | slotCount[1] | (slot[1] | value[≤32])*`,
-  every slot below `HEADER_STORAGE_SLOTS` (64).
+- header records use tags `0x00`, `0x01` and `0x02`: `kind | addressHash | nonce[≤8] | balance[≤16] | codeRef |
+  slotCount[1] | (slot[1] | value[≤32])*`, with every slot below `HEADER_STORAGE_SLOTS` (64).
   - kind 0: no code, and nonce and balance not both zero (even with storage). The account's code hash is
     `keccak256("")`.
   - kind 1: `codeHash[32] | codeSize[≤4]`, size > 0, the code never a designator.
   - kind 2: `target[20]`, for exactly 23 bytes starting `ef0100`. The account's code hash is
     `keccak256(ef0100 ‖ target)`.
-- code group: `stemHash | n[1] | (subIndex[1] | value[≤32]) * (n+1)`, non-zero values only.
-- storage record: `addressHash | groupCount[≤8] | group*`, with `groupCount > 0`.
+- code groups use tag `0x03`: `stemHash | n[1] | (subIndex[1] | value[≤32]) * (n+1)`, where `n=0` is valid.
+- storage records use `0x04 | addressHash`, followed by `0x05` single-leaf groups or `0x06` multi-leaf groups. A storage
+  account has at least one group, and `0x06` has more than one leaf. Records are ordered by zone.
 - the writer refuses records the spec forbids (kind 0 with nonce and balance both zero, kind 1 with size 0) rather than
   writing them.
-- the writer buffers each storage record, spilling past a threshold, because `groupCount` is variable-width and
-  precedes the groups. `pbtRoot` and the three counts are patched at their offsets at the end.
+- the writer streams in one pass: nothing is patched or buffered; it hashes the bytes as it writes them and takes
+  `pbtRoot` at the end.
 - the codec takes a plain (key, value) iterator defined in `eip8297/artifact`, so `db/state` adapts to it without an
   import cycle.
 - `snapshotDigest` is keccak256 of the finished file.
@@ -258,7 +258,8 @@
 
 - `erigon snapshots export-pbt --out <dir>`, registered beside `export-preimages` in `cmd/utils/app/snapshots_cmd.go`.
 - uses the shared pin; one temporal transaction pins the aggregator and block-file views for both files.
-- `pbtRoot` comes from the reference root and must equal the datadir's bin root when one exists at (B, T).
+- one leaf stream feeds the writer and the reference root in one pass; `pbtRoot` must equal the datadir's bin root when
+  one exists at (B, T).
 - before finishing, the export reads back both of its output files with the strict readers and the join.
 - output files: `pbt-snapshot.bin`, the preimage file, and a meta JSON with chain id, block number and hash, T, the hash
   suite, stateRoot, pbtRoot, section counts, snapshotDigest, preimageDigest and a finalized flag. The canonical artifact
@@ -520,6 +521,7 @@
       random states, and the empty snapshot
 - [x] run tests - must pass before task 12
 - [x] ➕ stream the artifact writer, reader, preimage codec and exact-set join with bounded memory
+- [x] ➕ follow EIP-8347 66daa411: tagged records, end tag and pbtRoot trailer, single-leaf storage groups
 
 ### Task 12: export-pbt command
 

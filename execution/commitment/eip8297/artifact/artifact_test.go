@@ -149,17 +149,32 @@ func TestStreamingReadersUseCallbacks(t *testing.T) {
 	require.Equal(t, 1, count)
 }
 
-func TestArtifactReaderRejectsMaximumCountsWithoutAllocating(t *testing.T) {
+func TestArtifactReaderRejectsMaximumFieldsWithoutAllocating(t *testing.T) {
 	golden := readGolden(t)
 	data, err := hex.DecodeString(golden.Bytes)
 	require.NoError(t, err)
-	for _, offset := range []int{32, 217, 265} {
-		broken := bytes.Clone(data)
-		for i := range 8 {
-			broken[offset+i] = 0xff
-		}
-		_, err := readSnapshot(t, broken)
-		require.Error(t, err, "count at offset %d must be bounded by the remaining bytes", offset)
+	for _, test := range []struct {
+		name   string
+		mutate func([]byte)
+	}{
+		{name: "header slot count", mutate: func(b []byte) { b[1+32+2+2] = 0xff }},
+		{name: "code group count", mutate: func(b []byte) {
+			index := bytes.Index(b, append([]byte{3}, bytes.Repeat([]byte{0xcc}, 32)...))
+			require.NotEqual(t, -1, index)
+			b[index+33] = 0xff
+		}},
+		{name: "storage group count", mutate: func(b []byte) {
+			index := bytes.Index(b, append([]byte{6}, bytes.Repeat([]byte{0xee}, 32)...))
+			require.NotEqual(t, -1, index)
+			b[index+33] = 0xff
+		}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			broken := bytes.Clone(data)
+			test.mutate(broken)
+			_, err := readSnapshot(t, broken)
+			require.Error(t, err)
+		})
 	}
 }
 
@@ -192,10 +207,81 @@ func TestArtifactReaderRejectsZeroGroupValue(t *testing.T) {
 	require.ErrorContains(t, err, "invalid group value", "a code group with a zero value must be rejected")
 }
 
-func TestArtifactReaderRejectsUnknownAccountKind(t *testing.T) {
-	data := minimalHeaderArtifact(3, true)
+func TestArtifactReaderRejectsUnknownTag(t *testing.T) {
+	data := append([]byte{8, 7}, make([]byte, 32)...)
 	_, err := readSnapshot(t, data)
-	require.ErrorContains(t, err, "unknown account kind")
+	require.ErrorContains(t, err, "unknown tag")
+}
+
+func TestArtifactReaderRejectsUpdatedRecordRules(t *testing.T) {
+	root := append([]byte{7}, make([]byte, 32)...)
+	address := append(make([]byte, 31), 1)
+	header := func() []byte {
+		data := append([]byte{0}, address...)
+		return append(data, 1, 1, 0, 0)
+	}
+	code := func() []byte {
+		data := append([]byte{3}, bytes.Repeat([]byte{2}, 32)...)
+		return append(data, 0, 0, 1, 1)
+	}
+	storage := func() []byte {
+		data := append([]byte{4}, address...)
+		data = append(data, 5)
+		data = append(data, bytes.Repeat([]byte{3}, 32)...)
+		return append(data, 0, 1, 1)
+	}
+	storageRecord := func(address, stems []byte) []byte {
+		data := append([]byte{4}, address...)
+		for _, stem := range stems {
+			data = append(data, 5)
+			data = append(data, bytes.Repeat([]byte{stem}, 32)...)
+			data = append(data, 0, 1, 1)
+		}
+		return data
+	}
+	account := func(address []byte) []byte { return append([]byte{4}, address...) }
+	address2 := append(make([]byte, 31), 2)
+	header2 := func() []byte {
+		data := append([]byte{0}, address2...)
+		return append(data, 1, 1, 0, 0)
+	}
+	withTrailer := func(records ...[]byte) []byte {
+		data := make([]byte, 0, 64)
+		for _, record := range records {
+			data = append(data, record...)
+		}
+		data = append(data, root...)
+		return data
+	}
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{name: "unknown tag 08", data: withTrailer([]byte{8})},
+		{name: "unknown tag ff", data: withTrailer([]byte{0xff})},
+		{name: "missing end tag", data: append(append([]byte{}, header()...), make([]byte, 32)...)},
+		{name: "truncated root", data: append(append(append([]byte{}, header()...), 7), make([]byte, 31)...)},
+		{name: "trailing byte", data: append(withTrailer(header()), 0)},
+		{name: "header after code", data: withTrailer(code(), header())},
+		{name: "code after storage", data: withTrailer(header(), storage(), code())},
+		{name: "header after storage", data: withTrailer(header(), storage(), header())},
+		{name: "storage account without group", data: withTrailer(header(), append([]byte{4}, address...))},
+		{name: "storage account followed by account", data: withTrailer(header(), account(address), account(address2))},
+		{name: "multi group with one leaf", data: withTrailer(header(), append(append([]byte{4}, address...), append(append([]byte{6}, bytes.Repeat([]byte{3}, 32)...), 0, 0, 1, 1)...))},
+		{name: "group before storage account", data: withTrailer(header(), append([]byte{5}, bytes.Repeat([]byte{3}, 32)...))},
+		{name: "storage accounts out of order", data: withTrailer(header(), header2(), storageRecord(address2, []byte{2}), storageRecord(address, []byte{1}))},
+		{name: "storage groups out of order", data: withTrailer(header(), storageRecord(address, []byte{2, 1}))},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := readSnapshot(t, test.data)
+			if test.name == "header after code" {
+				require.ErrorContains(t, err, "header after zone")
+				return
+			}
+			require.Error(t, err)
+		})
+	}
 }
 
 func TestArtifactReaderRejectsZeroKindZeroAccount(t *testing.T) {
@@ -710,6 +796,8 @@ func goldenLeaves(t *testing.T) []testLeaf {
 		{code(bytes.Repeat([]byte{0xcc}, 32), 0), leftPaddedValue(0x55)},
 		{code(bytes.Repeat([]byte{0xcc}, 32), 7), leftPaddedBytes(0x66, 0x77)},
 		{storage(append(make([]byte, 31), 1), bytes.Repeat([]byte{0xdd}, 32), 64), paddedValue(0x88)},
+		{storage(append(make([]byte, 31), 1), bytes.Repeat([]byte{0xee}, 32), 1), paddedValue(0x99)},
+		{storage(append(make([]byte, 31), 1), bytes.Repeat([]byte{0xee}, 32), 2), paddedValue(0xaa)},
 	}
 }
 
@@ -748,19 +836,20 @@ func readGolden(t *testing.T) goldenArtifact {
 }
 
 func minimalHeaderArtifact(kind byte, nonzero bool) []byte {
-	data := make([]byte, 0, 100)
-	data = append(data, make([]byte, 32)...)
-	var count [8]byte
-	binary.BigEndian.PutUint64(count[:], 1)
-	data = append(data, count[:]...)
+	data := []byte{kind}
 	data = append(data, make([]byte, 32)...)
 	if nonzero {
-		data = append(data, 1, 1, 1, 1)
+		data = append(data, 1, 1, 0)
 	} else {
 		data = append(data, 0, 0)
 	}
-	data = append(data, kind, 0)
-	data = append(data, make([]byte, 8)...)
-	data = append(data, make([]byte, 8)...)
+	if kind == 1 {
+		data = append(data, bytes.Repeat([]byte{1}, 32)...)
+		data = append(data, 1, 1)
+	} else if kind == 2 {
+		data = append(data, make([]byte, 20)...)
+	}
+	data = append(data, 0, 7)
+	data = append(data, make([]byte, 32)...)
 	return data
 }

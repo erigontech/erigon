@@ -17,18 +17,16 @@
 package artifact
 
 import (
-	"bufio"
 	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
-	"os"
+	"slices"
 
 	keccak "github.com/erigontech/fastkeccak"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 )
@@ -39,90 +37,56 @@ var (
 	ErrInvalidAccount = errors.New("pbt artifact: invalid account")
 )
 
-type Writer struct {
-	StorageSpillThreshold int
+type Writer struct{}
+
+type SnapshotRoot func() (common.Hash, error)
+
+type artifactWriter struct {
+	dst  io.Writer
+	hash io.Writer
 }
 
-type artifactCountingWriter struct {
-	writer io.Writer
-	count  int64
-}
-
-func (w *artifactCountingWriter) Write(data []byte) (int, error) {
-	n, err := w.writer.Write(data)
-	w.count += int64(n)
-	return n, err
-}
-
-func NewWriter() *Writer { return &Writer{StorageSpillThreshold: 1 << 20} }
+func NewWriter() *Writer { return &Writer{} }
 
 func WriteSnapshot(dst io.Writer, root common.Hash, leaves KVIterator) (common.Hash, error) {
 	return NewWriter().Write(dst, root, leaves)
 }
 
+func WriteSnapshotStream(dst io.Writer, leaves KVIterator, root SnapshotRoot) (common.Hash, error) {
+	return NewWriter().WriteStream(dst, leaves, root)
+}
+
 func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (common.Hash, error) {
-	if leaves == nil {
-		return common.Hash{}, errors.New("pbt artifact: nil leaf iterator")
+	return w.WriteStream(dst, leaves, func() (common.Hash, error) { return root, nil })
+}
+
+func (w *Writer) WriteStream(dst io.Writer, leaves KVIterator, root SnapshotRoot) (common.Hash, error) {
+	if dst == nil || leaves == nil || root == nil {
+		return common.Hash{}, errors.New("pbt artifact: missing writer input")
 	}
-	if w.StorageSpillThreshold <= 0 {
-		w.StorageSpillThreshold = 1 << 20
+	hash := keccak.NewFastKeccak()
+	output := &artifactWriter{dst: dst, hash: hash}
+	write := func(data []byte) error {
+		if n, err := output.Write(data); err != nil {
+			return err
+		} else if n != len(data) {
+			return io.ErrShortWrite
+		}
+		return nil
 	}
-	f, err := os.CreateTemp("", "pbt-artifact-")
-	if err != nil {
-		return common.Hash{}, err
-	}
-	name := f.Name()
-	defer func() {
-		_ = f.Close()
-		_ = dir.RemoveFile(name)
-	}()
-	if _, err = f.Write(make([]byte, 40)); err != nil {
-		return common.Hash{}, err
-	}
-	buffered := bufio.NewWriterSize(f, 4<<20)
-	output := &artifactCountingWriter{writer: buffered, count: 40}
 	var previous []byte
-	var lastZone byte
+	var zone byte
 	var haveZone bool
 	var header *headerBuilder
 	var code *groupBuilder
 	var storage *storageBuilder
-	var headerCount, codeCount, storageCount uint64
-	var codeCountPos, storageCountPos int64 = -1, -1
-	write := func(data []byte) error {
-		written, err := output.Write(data)
-		if err == nil && written != len(data) {
-			return io.ErrShortWrite
-		}
-		return err
-	}
-	ensureCodeSection := func() error {
-		if codeCountPos >= 0 {
-			return nil
-		}
-		codeCountPos = output.count
-		return write(make([]byte, 8))
-	}
-	ensureStorageSection := func() error {
-		if storageCountPos >= 0 {
-			return nil
-		}
-		if err := ensureCodeSection(); err != nil {
-			return err
-		}
-		storageCountPos = output.count
-		return write(make([]byte, 8))
-	}
 	flushHeader := func() error {
 		if header == nil {
 			return nil
 		}
 		encoded, err := header.encode()
-		if err != nil {
-			return err
-		}
-		if err = write(encoded); err == nil {
-			headerCount++
+		if err == nil {
+			err = write(encoded)
 		}
 		header = nil
 		return err
@@ -132,34 +96,42 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 			return nil
 		}
 		encoded, err := code.encodeCode()
-		if err != nil {
-			return err
-		}
-		if err = ensureCodeSection(); err == nil {
-			err = write(encoded)
-		}
 		if err == nil {
-			codeCount++
+			err = write(encoded)
 		}
 		code = nil
 		return err
+	}
+	flushStorageGroup := func() error {
+		if storage == nil {
+			return nil
+		}
+		return storage.flushGroup(write)
 	}
 	flushStorage := func() error {
 		if storage == nil {
 			return nil
 		}
-		if err := ensureStorageSection(); err != nil {
+		if err := flushStorageGroup(); err != nil {
 			return err
 		}
-		if err := storage.writeTo(output); err != nil {
-			return err
+		if storage.groupCount == 0 {
+			return ErrInvalidLeaf
 		}
-		storageCount++
 		storage = nil
 		return nil
 	}
-	if err := leaves(func(key, value []byte) error {
-		if bytes.Equal(key, previous) || (previous != nil && bytes.Compare(key, previous) < 0) {
+	flushZone := func() error {
+		if err := flushHeader(); err != nil {
+			return err
+		}
+		if err := flushCode(); err != nil {
+			return err
+		}
+		return flushStorage()
+	}
+	err := leaves(func(key, value []byte) error {
+		if previous != nil && bytes.Compare(key, previous) <= 0 {
 			return ErrUnsorted
 		}
 		if len(value) != eip8297.ValueLength || isZero(value) {
@@ -168,28 +140,21 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 		if len(key) == 0 {
 			return ErrInvalidLeaf
 		}
-		zone := key[0]
-		keyLength, ok := eip8297.ZoneKeyLength(zone)
+		currentZone := key[0]
+		keyLength, ok := eip8297.ZoneKeyLength(currentZone)
 		if !ok || len(key) != keyLength {
-			return fmt.Errorf("%w: key length %d for zone %#x", ErrInvalidLeaf, len(key), zone)
+			return fmt.Errorf("%w: key length %d for zone %#x", ErrInvalidLeaf, len(key), currentZone)
 		}
-		if haveZone && zone < lastZone {
+		if haveZone && currentZone < zone {
 			return ErrUnsorted
 		}
-		if !haveZone || zone != lastZone {
-			if err := flushHeader(); err != nil {
+		if !haveZone || currentZone != zone {
+			if err := flushZone(); err != nil {
 				return err
 			}
-			if err := flushCode(); err != nil {
-				return err
-			}
-			if err := flushStorage(); err != nil {
-				return err
-			}
-			lastZone = zone
-			haveZone = true
+			zone, haveZone = currentZone, true
 		}
-		switch zone {
+		switch currentZone {
 		case eip8297.AccountZone:
 			if header == nil || !bytes.Equal(header.address[:], key[1:33]) {
 				if err := flushHeader(); err != nil {
@@ -211,7 +176,15 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 				if err := flushStorage(); err != nil {
 					return err
 				}
-				storage = &storageBuilder{address: common.BytesToHash(key[1:33]), threshold: w.StorageSpillThreshold}
+				storage = &storageBuilder{address: common.BytesToHash(key[1:33])}
+				if err := write(append([]byte{0x04}, storage.address[:]...)); err != nil {
+					return err
+				}
+			}
+			if storage.current != nil && storage.current.stem != common.BytesToHash(key[33:65]) {
+				if err := flushStorageGroup(); err != nil {
+					return err
+				}
 			}
 			if err := storage.add(common.BytesToHash(key[33:65]), key[len(key)-1], value); err != nil {
 				return err
@@ -221,67 +194,32 @@ func (w *Writer) Write(dst io.Writer, root common.Hash, leaves KVIterator) (comm
 		}
 		previous = bytes.Clone(key)
 		return nil
-	}); err != nil {
+	})
+	if err != nil {
 		return common.Hash{}, err
 	}
-	if err := flushHeader(); err != nil {
+	if err := flushZone(); err != nil {
 		return common.Hash{}, err
 	}
-	if err := flushCode(); err != nil {
+	rootHash, err := root()
+	if err != nil {
 		return common.Hash{}, err
 	}
-	if err := flushStorage(); err != nil {
+	if err := write([]byte{0x07}); err != nil {
 		return common.Hash{}, err
 	}
-	if err := ensureStorageSection(); err != nil {
-		return common.Hash{}, err
-	}
-	if err := buffered.Flush(); err != nil {
-		return common.Hash{}, err
-	}
-	patchUint64 := func(offset, value int64) error {
-		if _, err := f.Seek(offset, io.SeekStart); err != nil {
-			return err
-		}
-		var encoded [8]byte
-		binary.BigEndian.PutUint64(encoded[:], uint64(value))
-		written, err := f.Write(encoded[:])
-		if err == nil && written != len(encoded) {
-			return io.ErrShortWrite
-		}
-		return err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return common.Hash{}, err
-	}
-	if written, err := f.Write(root[:]); err != nil {
-		return common.Hash{}, err
-	} else if written != len(root) {
-		return common.Hash{}, io.ErrShortWrite
-	}
-	if err := patchUint64(32, int64(headerCount)); err != nil {
-		return common.Hash{}, err
-	}
-	if err := patchUint64(codeCountPos, int64(codeCount)); err != nil {
-		return common.Hash{}, err
-	}
-	if err := patchUint64(storageCountPos, int64(storageCount)); err != nil {
-		return common.Hash{}, err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return common.Hash{}, err
-	}
-	hash := keccak.NewFastKeccak()
-	if _, err := io.Copy(hash, f); err != nil {
-		return common.Hash{}, err
-	}
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		return common.Hash{}, err
-	}
-	if _, err := io.Copy(dst, f); err != nil {
+	if err := write(rootHash[:]); err != nil {
 		return common.Hash{}, err
 	}
 	return common.BytesToHash(hash.Sum(nil)), nil
+}
+
+func (w *artifactWriter) Write(data []byte) (int, error) {
+	n, err := w.dst.Write(data)
+	if n > 0 {
+		_, _ = w.hash.Write(data[:n])
+	}
+	return n, err
 }
 
 type headerBuilder struct {
@@ -323,10 +261,10 @@ func (h *headerBuilder) encode() ([]byte, error) {
 		}
 	}
 	encoded := make([]byte, 0, 64)
+	encoded = append(encoded, kind)
 	encoded = append(encoded, h.address[:]...)
 	encoded = append(encoded, encodeIntegerBytes(nonce)...)
 	encoded = append(encoded, encodeIntegerBytes(balance)...)
-	encoded = append(encoded, kind)
 	encoded = append(encoded, codeRef...)
 	slots := make([]byte, 0, len(h.values))
 	for sub, value := range h.values {
@@ -341,11 +279,7 @@ func (h *headerBuilder) encode() ([]byte, error) {
 		}
 		slots = append(slots, sub)
 	}
-	for i := 1; i < len(slots); i++ {
-		for j := i; j > 0 && slots[j] < slots[j-1]; j-- {
-			slots[j], slots[j-1] = slots[j-1], slots[j]
-		}
-	}
+	slices.Sort(slots)
 	encoded = append(encoded, byte(len(slots)))
 	for _, sub := range slots {
 		encoded = append(encoded, sub-eip8297.HeaderStorageOffset)
@@ -363,10 +297,14 @@ func (g *groupBuilder) encodeCode() ([]byte, error) {
 	if len(g.entries) == 0 || len(g.entries) > eip8297.StemSubtreeWidth {
 		return nil, fmt.Errorf("%w: group entry count %d", ErrInvalidLeaf, len(g.entries))
 	}
-	encoded := append([]byte(nil), g.stem[:]...)
+	encoded := append([]byte{0x03}, g.stem[:]...)
 	encoded = append(encoded, byte(len(g.entries)-1))
-	previous := byte(0)
-	for i, entry := range g.entries {
+	return appendGroupEntries(encoded, g.entries)
+}
+
+func appendGroupEntries(encoded []byte, entries []GroupEntry) ([]byte, error) {
+	var previous byte
+	for i, entry := range entries {
 		if i != 0 && entry.Index <= previous {
 			return nil, ErrUnsorted
 		}
@@ -382,11 +320,8 @@ func (g *groupBuilder) encodeCode() ([]byte, error) {
 
 type storageBuilder struct {
 	address    common.Hash
-	threshold  int
 	current    *groupBuilder
 	groupCount uint64
-	memory     bytes.Buffer
-	spill      *os.File
 }
 
 func (s *storageBuilder) add(stem common.Hash, index byte, value []byte) error {
@@ -396,78 +331,42 @@ func (s *storageBuilder) add(stem common.Hash, index byte, value []byte) error {
 		if bytes.Compare(stem[:], s.current.stem[:]) <= 0 {
 			return ErrUnsorted
 		}
-		if err := s.flushGroup(); err != nil {
-			return err
-		}
 		s.current = &groupBuilder{stem: stem}
+	}
+	if len(s.current.entries) >= eip8297.StemSubtreeWidth {
+		return ErrInvalidLeaf
 	}
 	s.current.entries = append(s.current.entries, GroupEntry{Index: index, Value: bytes.Clone(value)})
 	return nil
 }
 
-func (s *storageBuilder) flushGroup() error {
+func (s *storageBuilder) flushGroup(write func([]byte) error) error {
 	if s.current == nil {
 		return nil
 	}
-	encoded, err := s.current.encodeCode()
-	if err != nil {
-		return err
-	}
-	if s.spill == nil && s.memory.Len()+len(encoded) <= s.threshold {
-		if _, err := s.memory.Write(encoded); err != nil {
+	if len(s.current.entries) == 1 {
+		entry := s.current.entries[0]
+		encoded := append([]byte{0x05}, s.current.stem[:]...)
+		encoded = append(encoded, entry.Index)
+		encoded = append(encoded, encodeIntegerBytes(entry.Value)...)
+		if err := write(encoded); err != nil {
 			return err
 		}
 	} else {
-		if s.spill == nil {
-			s.spill, err = os.CreateTemp("", "pbt-artifact-storage-")
-			if err != nil {
-				return err
-			}
-			if _, err := s.memory.WriteTo(s.spill); err != nil {
-				return err
-			}
+		encoded := append([]byte{0x06}, s.current.stem[:]...)
+		encoded = append(encoded, byte(len(s.current.entries)-1))
+		var err error
+		encoded, err = appendGroupEntries(encoded, s.current.entries)
+		if err != nil {
+			return err
 		}
-		if _, err := s.spill.Write(encoded); err != nil {
+		if err := write(encoded); err != nil {
 			return err
 		}
 	}
 	s.groupCount++
 	s.current = nil
 	return nil
-}
-
-func (s *storageBuilder) writeTo(dst io.Writer) error {
-	if err := s.flushGroup(); err != nil {
-		return err
-	}
-	if s.groupCount == 0 {
-		return ErrInvalidLeaf
-	}
-	if _, err := dst.Write(s.address[:]); err != nil {
-		return err
-	}
-	if _, err := dst.Write(encodeInteger(s.groupCount)); err != nil {
-		return err
-	}
-	if s.spill == nil {
-		_, err := dst.Write(s.memory.Bytes())
-		return err
-	}
-	if _, err := s.spill.Seek(0, io.SeekStart); err != nil {
-		return err
-	}
-	_, err := io.Copy(dst, s.spill)
-	name := s.spill.Name()
-	closeErr := s.spill.Close()
-	removeErr := dir.RemoveFile(name)
-	if err == nil {
-		err = closeErr
-	}
-	if err == nil {
-		err = removeErr
-	}
-	s.spill = nil
-	return err
 }
 
 func encodeInteger(value uint64) []byte {
@@ -487,5 +386,10 @@ func encodeIntegerBytes(value []byte) []byte {
 }
 
 func isZero(value []byte) bool {
-	return len(value) == 0 || bytes.Equal(value, make([]byte, len(value)))
+	for _, b := range value {
+		if b != 0 {
+			return false
+		}
+	}
+	return true
 }

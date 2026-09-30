@@ -18,7 +18,6 @@ package artifact
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -73,134 +72,157 @@ func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (S
 
 func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamCallbacks) (SnapshotMeta, error) {
 	var meta SnapshotMeta
-	if src == nil || size < 56 {
+	if src == nil || size < 33 {
 		return meta, ErrMalformed
 	}
-	c := artifactCursor{src: src, limit: size}
-	root, err := c.bytes(32)
-	if err != nil {
-		return meta, fmt.Errorf("%w: root: %w", ErrMalformed, err)
-	}
-	copy(meta.Root[:], root)
-	headerCount, err := c.count()
-	if err != nil {
-		return meta, fmt.Errorf("%w: header count: %w", ErrMalformed, err)
-	}
-	if err := countFits(headerCount, c.remaining(), 36); err != nil {
-		return meta, fmt.Errorf("%w: header count: %w", ErrMalformed, err)
-	}
-	headerStart := c.offset
+	recordLimit := size - 33
+	c := artifactCursor{src: src, limit: recordLimit}
+	var headerEnd int64
+	var headers *artifactCursor
 	var previousAddress common.Hash
-	for i := range headerCount {
-		header, err := readHeaderAt(&c)
-		if err != nil {
-			return meta, fmt.Errorf("%w: header %d: %w", ErrMalformed, i, err)
-		}
-		if i != 0 && bytes.Compare(header.AddressHash[:], previousAddress[:]) <= 0 {
-			return meta, ErrUnsorted
-		}
-		previousAddress = header.AddressHash
-		if callbacks.Header != nil {
-			if err := callbacks.Header(header); err != nil {
-				return meta, err
-			}
-		}
-	}
-	headerEnd := c.offset
-	codeCount, err := c.count()
-	if err != nil {
-		return meta, fmt.Errorf("%w: code count: %w", ErrMalformed, err)
-	}
-	if err := countFits(codeCount, c.remaining(), 35); err != nil {
-		return meta, fmt.Errorf("%w: code count: %w", ErrMalformed, err)
-	}
 	var previousStem common.Hash
-	for i := range codeCount {
-		group, err := readGroupAt(&c)
-		if err != nil {
-			return meta, fmt.Errorf("%w: code group %d: %w", ErrMalformed, i, err)
-		}
-		if i != 0 && bytes.Compare(group.StemHash[:], previousStem[:]) <= 0 {
-			return meta, ErrUnsorted
-		}
-		previousStem = group.StemHash
-		if callbacks.Code != nil {
-			if err := callbacks.Code(group); err != nil {
-				return meta, err
-			}
-		}
-	}
-	storageCount, err := c.count()
-	if err != nil {
-		return meta, fmt.Errorf("%w: storage count: %w", ErrMalformed, err)
-	}
-	if err := countFits(storageCount, c.remaining(), 68); err != nil {
-		return meta, fmt.Errorf("%w: storage count: %w", ErrMalformed, err)
-	}
-	headerCursor := artifactCursor{src: src, offset: headerStart, limit: headerEnd}
 	var previousStorage common.Hash
-	for i := range storageCount {
-		address, err := c.bytes(32)
+	var haveStorage bool
+	var storageHasGroups bool
+	phase := byte(0)
+	for c.offset < c.limit {
+		tag, err := c.byte()
 		if err != nil {
-			return meta, fmt.Errorf("%w: storage address: %w", ErrMalformed, err)
+			return meta, fmt.Errorf("%w: tag: %w", ErrMalformed, err)
 		}
-		var addressHash common.Hash
-		copy(addressHash[:], address)
-		if i != 0 && bytes.Compare(addressHash[:], previousStorage[:]) <= 0 {
-			return meta, ErrUnsorted
-		}
-		previousStorage = addressHash
-		if err := matchStorageHeader(&headerCursor, addressHash); err != nil {
-			return meta, fmt.Errorf("%w: storage header: %w", ErrMalformed, err)
-		}
-		countBytes, err := readIntegerAt(&c, 8)
-		if err != nil {
-			return meta, fmt.Errorf("%w: zero storage group count: %w", ErrMalformed, err)
-		}
-		if len(countBytes) == 0 {
-			return meta, fmt.Errorf("%w: zero storage group count", ErrMalformed)
-		}
-		count := integerValue(countBytes)
-		if count == 0 || count > uint64(c.remaining()/35) {
-			return meta, fmt.Errorf("%w: invalid storage group count %d", ErrMalformed, count)
-		}
-		groups := func(yield func(Group) error) error {
-			var previous common.Hash
-			for j := range count {
-				group, err := readGroupAt(&c)
-				if err != nil {
-					return fmt.Errorf("%w: storage group %d: %w", ErrMalformed, j, err)
+		switch tag {
+		case 0, 1, 2:
+			if phase != 0 {
+				return meta, fmt.Errorf("%w: header after zone", ErrMalformed)
+			}
+			header, err := readHeaderAt(&c, tag)
+			if err != nil {
+				return meta, fmt.Errorf("%w: header: %w", ErrMalformed, err)
+			}
+			if meta.HeaderCount != 0 && bytes.Compare(header.AddressHash[:], previousAddress[:]) <= 0 {
+				return meta, ErrUnsorted
+			}
+			previousAddress = header.AddressHash
+			meta.HeaderCount++
+			if callbacks.Header != nil {
+				if err := callbacks.Header(header); err != nil {
+					return meta, err
 				}
-				if j != 0 && bytes.Compare(group.StemHash[:], previous[:]) <= 0 {
-					return ErrUnsorted
+			}
+		case 3:
+			if phase == 2 {
+				return meta, fmt.Errorf("%w: code group after storage", ErrMalformed)
+			}
+			if phase == 0 {
+				phase = 1
+				headerEnd = c.offset - 1
+				headers = &artifactCursor{src: src, limit: headerEnd}
+			}
+			group, err := readGroupAt(&c, 3)
+			if err != nil {
+				return meta, fmt.Errorf("%w: code group: %w", ErrMalformed, err)
+			}
+			if meta.CodeGroupCount != 0 && bytes.Compare(group.StemHash[:], previousStem[:]) <= 0 {
+				return meta, ErrUnsorted
+			}
+			previousStem = group.StemHash
+			meta.CodeGroupCount++
+			if callbacks.Code != nil {
+				if err := callbacks.Code(group); err != nil {
+					return meta, err
 				}
-				previous = group.StemHash
-				if yield != nil {
-					if err := yield(group); err != nil {
+			}
+		case 4:
+			if phase == 0 {
+				phase = 2
+				headerEnd = c.offset - 1
+				headers = &artifactCursor{src: src, limit: headerEnd}
+			} else if phase == 1 {
+				phase = 2
+			}
+			if haveStorage && !storageHasGroups {
+				return meta, fmt.Errorf("%w: invalid storage account", ErrMalformed)
+			}
+			addressBytes, err := c.bytesCopy(32)
+			if err != nil {
+				return meta, fmt.Errorf("%w: storage address: %w", ErrMalformed, err)
+			}
+			var address common.Hash
+			copy(address[:], addressBytes)
+			if meta.StorageCount != 0 && bytes.Compare(address[:], previousStorage[:]) <= 0 {
+				return meta, ErrUnsorted
+			}
+			if headers == nil {
+				return meta, fmt.Errorf("%w: storage has no header", ErrMalformed)
+			}
+			if err := matchStorageHeader(headers, address); err != nil {
+				return meta, fmt.Errorf("%w: storage header: %w", ErrMalformed, err)
+			}
+			previousStorage = address
+			haveStorage = true
+			storageHasGroups = false
+			meta.StorageCount++
+			groups := func(yield func(Group) error) error {
+				var previousGroup common.Hash
+				count := 0
+				for c.offset < c.limit {
+					next, err := c.byte()
+					if err != nil {
 						return err
 					}
+					if next != 5 && next != 6 {
+						c.offset--
+						break
+					}
+					group, err := readGroupAt(&c, next)
+					if err != nil {
+						return err
+					}
+					if count != 0 && bytes.Compare(group.StemHash[:], previousGroup[:]) <= 0 {
+						return ErrUnsorted
+					}
+					previousGroup = group.StemHash
+					count++
+					if yield != nil {
+						if err := yield(group); err != nil {
+							return err
+						}
+					}
 				}
+				if count == 0 {
+					return fmt.Errorf("%w: storage account has no groups", ErrMalformed)
+				}
+				storageHasGroups = true
+				return nil
 			}
-			return nil
-		}
-		if callbacks.Storage != nil {
-			if err := callbacks.Storage(addressHash, groups); err != nil {
+			if callbacks.Storage != nil {
+				if err := callbacks.Storage(address, groups); err != nil {
+					return meta, err
+				}
+			} else if err := groups(nil); err != nil {
 				return meta, err
 			}
-		} else if err := groups(nil); err != nil {
-			return meta, err
+		default:
+			return meta, fmt.Errorf("%w: unknown tag %#x", ErrMalformed, tag)
 		}
 	}
-	if c.offset != c.limit {
-		return meta, fmt.Errorf("%w: trailing bytes", ErrMalformed)
+	if haveStorage && !storageHasGroups {
+		return meta, fmt.Errorf("%w: invalid storage account", ErrMalformed)
 	}
+	trailer := artifactCursor{src: src, offset: recordLimit, limit: size}
+	end, err := trailer.byte()
+	if err != nil || end != 0x07 {
+		return meta, fmt.Errorf("%w: missing end tag", ErrMalformed)
+	}
+	root, err := trailer.bytesCopy(32)
+	if err != nil || trailer.offset != size {
+		return meta, fmt.Errorf("%w: invalid root trailer", ErrMalformed)
+	}
+	copy(meta.Root[:], root)
 	hash := keccak.NewFastKeccak()
 	if _, err := io.Copy(hash, io.NewSectionReader(src, 0, size)); err != nil {
 		return meta, err
 	}
-	meta.HeaderCount = headerCount
-	meta.CodeGroupCount = codeCount
-	meta.StorageCount = storageCount
 	meta.SnapshotDigest = common.BytesToHash(hash.Sum(nil))
 	return meta, nil
 }
@@ -244,7 +266,8 @@ func (c *artifactCursor) bytes(size int) ([]byte, error) {
 		return data, nil
 	}
 	data := make([]byte, size)
-	if _, err := c.src.ReadAt(data, c.offset); err != nil {
+	n, err := c.src.ReadAt(data, c.offset)
+	if err != nil && !(err == io.EOF && n == size) {
 		return nil, ErrMalformed
 	}
 	c.offset += int64(size)
@@ -267,44 +290,27 @@ func (c *artifactCursor) byte() (byte, error) {
 	return data[0], nil
 }
 
-func (c *artifactCursor) count() (uint64, error) {
-	data, err := c.bytes(8)
-	if err != nil {
-		return 0, err
-	}
-	return binary.BigEndian.Uint64(data), nil
-}
-
-func countFits(count uint64, remaining int64, minimum int64) error {
-	if remaining < 0 || count > uint64(remaining/minimum) {
-		return ErrMalformed
-	}
-	return nil
-}
-
-func readHeaderAt(c *artifactCursor) (Header, error) {
+func readHeaderAt(c *artifactCursor, kind byte) (Header, error) {
 	var header Header
-	address, err := c.bytes(32)
+	address, err := c.bytesCopy(32)
 	if err != nil {
 		return header, err
 	}
 	copy(header.AddressHash[:], address)
+	header.Kind = kind
 	if header.Nonce, err = readIntegerAt(c, 8); err != nil {
 		return Header{}, err
 	}
 	if header.Balance, err = readIntegerAt(c, 16); err != nil {
 		return Header{}, err
 	}
-	if header.Kind, err = c.byte(); err != nil {
-		return Header{}, err
-	}
-	switch header.Kind {
+	switch kind {
 	case 0:
 		if len(header.Nonce) == 0 && len(header.Balance) == 0 {
 			return Header{}, ErrInvalidAccount
 		}
 	case 1:
-		codeHash, err := c.bytes(32)
+		codeHash, err := c.bytesCopy(32)
 		if err != nil {
 			return Header{}, err
 		}
@@ -314,19 +320,19 @@ func readHeaderAt(c *artifactCursor) (Header, error) {
 			return Header{}, fmt.Errorf("%w: invalid code size", ErrInvalidAccount)
 		}
 	case 2:
-		target, err := c.bytes(20)
+		target, err := c.bytesCopy(20)
 		if err != nil {
 			return Header{}, err
 		}
 		copy(header.Target[:], target)
 	default:
-		return Header{}, fmt.Errorf("%w: unknown account kind %d", ErrMalformed, header.Kind)
+		return Header{}, fmt.Errorf("%w: unknown account kind %d", ErrMalformed, kind)
 	}
 	slotCount, err := c.byte()
-	if err != nil || int64(slotCount) > c.remaining()/3 {
+	if err != nil || int64(slotCount)*3 > c.remaining() {
 		return Header{}, ErrMalformed
 	}
-	header.Slots = make([]Slot, 0, eip8297.HeaderStorageSlots)
+	header.Slots = make([]Slot, 0, int(slotCount))
 	var previous byte
 	for i := 0; i < int(slotCount); i++ {
 		index, err := c.byte()
@@ -346,22 +352,25 @@ func readHeaderAt(c *artifactCursor) (Header, error) {
 	return header, nil
 }
 
-func readGroupAt(c *artifactCursor) (Group, error) {
+func readGroupAt(c *artifactCursor, tag byte) (Group, error) {
 	var group Group
-	stem, err := c.bytes(32)
+	stem, err := c.bytesCopy(32)
 	if err != nil {
 		return group, err
 	}
 	copy(group.StemHash[:], stem)
-	count, err := c.byte()
-	if err != nil {
-		return Group{}, err
+	entries := 1
+	if tag != 5 {
+		count, err := c.byte()
+		if err != nil || tag == 6 && count == 0 {
+			return Group{}, fmt.Errorf("%w: invalid multi-leaf group", ErrMalformed)
+		}
+		entries = int(count) + 1
 	}
-	entries := int(count) + 1
 	if int64(entries)*3 > c.remaining() {
 		return Group{}, ErrMalformed
 	}
-	group.Entries = make([]GroupEntry, 0, eip8297.StemSubtreeWidth)
+	group.Entries = make([]GroupEntry, 0, entries)
 	var previous byte
 	for i := range entries {
 		index, err := c.byte()
@@ -396,15 +405,16 @@ func readIntegerAt(c *artifactCursor, width int) ([]byte, error) {
 	return value, nil
 }
 
-func integerValue(value []byte) uint64 {
-	var raw [8]byte
-	copy(raw[8-len(value):], value)
-	return binary.BigEndian.Uint64(raw[:])
-}
-
 func matchStorageHeader(headers *artifactCursor, address common.Hash) error {
 	for headers.offset < headers.limit {
-		header, err := readHeaderAt(headers)
+		tag, err := headers.byte()
+		if err != nil {
+			return err
+		}
+		if tag > 2 {
+			return ErrMalformed
+		}
+		header, err := readHeaderAt(headers, tag)
 		if err != nil {
 			return err
 		}

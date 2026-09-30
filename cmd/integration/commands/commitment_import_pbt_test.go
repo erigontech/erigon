@@ -34,6 +34,7 @@ func TestValidatePBTImportPointRefusesNonCanonicalBlock(t *testing.T) {
 	db, _ := temporal.Open(t, 8)
 	tx, err := db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	genesis := common.Hash{1}
 	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
 	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{BinaryTrieTime: new(uint64)}))

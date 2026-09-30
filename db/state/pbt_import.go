@@ -75,8 +75,8 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	if err != nil {
 		return common.Hash{}, err
 	}
-	if err := validatePBTImportState(state, opts.Hash); err != nil {
-		return common.Hash{}, err
+	if validationErr := validatePBTImportState(state, opts.Hash); validationErr != nil {
+		return common.Hash{}, validationErr
 	}
 	cfg := commitment.DefaultTrieConfig()
 	cfg.Variant = commitment.VariantBinPatriciaTrie
@@ -96,9 +96,9 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 	for _, addressHash := range addresses {
 		header := state.headers[addressHash]
 		address := state.addresses[addressHash]
-		code, codeHash, err := importCodeForHeader(header, state.code, opts.Hash)
-		if err != nil {
-			return common.Hash{}, err
+		code, codeHash, importErr := importCodeForHeader(header, state.code, opts.Hash)
+		if importErr != nil {
+			return common.Hash{}, importErr
 		}
 		balance := new(uint256.Int).SetBytes(header.Balance)
 		account := accounts.Account{
@@ -110,12 +110,12 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 		if len(code) != 0 {
 			account.Incarnation = 1
 		}
-		if err := domains.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&account), opts.TxNum, nil); err != nil {
-			return common.Hash{}, err
+		if putErr := domains.DomainPut(kv.AccountsDomain, tx, address[:], accounts.SerialiseV3(&account), opts.TxNum, nil); putErr != nil {
+			return common.Hash{}, putErr
 		}
 		if len(code) != 0 {
-			if err := domains.DomainPut(kv.CodeDomain, tx, address[:], code, opts.TxNum, nil); err != nil {
-				return common.Hash{}, err
+			if putErr := domains.DomainPut(kv.CodeDomain, tx, address[:], code, opts.TxNum, nil); putErr != nil {
+				return common.Hash{}, putErr
 			}
 		}
 		feedAccount := commitment.PBinFeedAccount{
@@ -132,8 +132,8 @@ func ImportPBTSnapshot(ctx context.Context, tx kv.TemporalRwTx, opts PBTImportOp
 			storageKey := make([]byte, 0, len(address)+len(slot))
 			storageKey = append(storageKey, address[:]...)
 			storageKey = append(storageKey, slot[:]...)
-			if err := domains.DomainPut(kv.StorageDomain, tx, storageKey, value, opts.TxNum, nil); err != nil {
-				return common.Hash{}, err
+			if putErr := domains.DomainPut(kv.StorageDomain, tx, storageKey, value, opts.TxNum, nil); putErr != nil {
+				return common.Hash{}, putErr
 			}
 		}
 		sort.Slice(feedAccount.Slots, func(i, j int) bool { return bytes.Compare(feedAccount.Slots[i].Key, feedAccount.Slots[j].Key) < 0 })
@@ -200,8 +200,8 @@ func readPBTImportState(opts PBTImportOptions) (*pbtImportState, error) {
 		return nil, fmt.Errorf("pbt import: read snapshot: %w", err)
 	}
 	result.meta = meta
-	if err := artifact.JoinAt(opts.Snapshot, opts.SnapshotSize, opts.Preimages, opts.PreimageSize, opts.Hash, nil); err != nil {
-		return nil, fmt.Errorf("pbt import: join preimages: %w", err)
+	if joinErr := artifact.JoinAt(opts.Snapshot, opts.SnapshotSize, opts.Preimages, opts.PreimageSize, opts.Hash, nil); joinErr != nil {
+		return nil, fmt.Errorf("pbt import: join preimages: %w", joinErr)
 	}
 	err = artifact.ReadPreimagesStream(opts.Preimages, opts.PreimageSize, func(address common.Address, slots func(func([32]byte) error) error) error {
 		address32 := eip8297.RightAlign32(address[:])
@@ -243,7 +243,8 @@ func readPBTImportState(opts PBTImportOptions) (*pbtImportState, error) {
 func validatePBTImportState(state *pbtImportState, hashFn eip8297.HashFn) error {
 	usedGroups := make(map[common.Hash]struct{})
 	codeSizes := make(map[common.Hash]uint64)
-	for _, header := range state.headers {
+	for addressHash := range state.headers {
+		header := state.headers[addressHash]
 		if header.Kind != 1 {
 			continue
 		}
@@ -253,7 +254,8 @@ func validatePBTImportState(state *pbtImportState, hashFn eip8297.HashFn) error 
 		}
 		codeSizes[header.CodeHash] = size
 	}
-	for addressHash, header := range state.headers {
+	for addressHash := range state.headers {
+		header := state.headers[addressHash]
 		address, ok := state.addresses[addressHash]
 		if !ok {
 			return fmt.Errorf("pbt import: header %x has no address preimage", addressHash)
@@ -262,14 +264,15 @@ func validatePBTImportState(state *pbtImportState, hashFn eip8297.HashFn) error 
 		if hashFn(address32[:]) != addressHash {
 			return fmt.Errorf("pbt import: address preimage %x hashes to the wrong header", address)
 		}
-		if header.Kind == 1 {
+		switch header.Kind {
+		case 1:
 			size := integerUint64(header.CodeSize)
 			if size == 0 {
 				return fmt.Errorf("pbt import: code size is zero for %x", address)
 			}
-			code, _, err := importCodeForHeader(header, state.code, hashFn)
-			if err != nil {
-				return err
+			code, _, codeErr := importCodeForHeader(header, state.code, hashFn)
+			if codeErr != nil {
+				return codeErr
 			}
 			for _, stem := range pbtCodeGroupStems(header.CodeHash, integerUint64(header.CodeSize), hashFn) {
 				usedGroups[stem] = struct{}{}
@@ -277,8 +280,8 @@ func validatePBTImportState(state *pbtImportState, hashFn eip8297.HashFn) error 
 			if eip8297.IsDelegation(code) {
 				return fmt.Errorf("pbt import: kind 1 account %x contains a delegation designator", address)
 			}
-		} else if header.Kind == 2 {
-		} else if header.Kind != 0 {
+		case 0, 2:
+		default:
 			return fmt.Errorf("pbt import: unknown account kind %d", header.Kind)
 		}
 	}

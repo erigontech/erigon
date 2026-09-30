@@ -132,15 +132,8 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	if err := checkRootPin(pin.Root, header, pin.Block); err != nil {
 		return err
 	}
-	root, err := exportPBTStreamRoot(tx)
-	if err != nil {
-		return err
-	}
 	binRoot, found, err := exportPBTBinRootAtPin(ctx, tx, pin, logger)
 	if err != nil {
-		return err
-	}
-	if err := checkExportPBTStreamRoot(root, pin, binRoot, found); err != nil {
 		return err
 	}
 	if err := os.MkdirAll(outDir, 0o755); err != nil {
@@ -163,17 +156,32 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	if err != nil {
 		return err
 	}
-	snapshotDigest, writeErr := artifact.WriteSnapshot(snapshotFile, root, func(emit func([]byte, []byte) error) error {
+	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
+	if err != nil {
+		_ = snapshotFile.Close()
+		return err
+	}
+	snapshotDigest, writeErr := artifact.WriteSnapshotStream(snapshotFile, func(emit func([]byte, []byte) error) error {
 		return state.ForEachPBinLeaf(state.AggTx(tx), tx, false, func(leaf state.PBinLeaf) error {
+			if err := builder.Add(leaf.Key, leaf.Value); err != nil {
+				return err
+			}
 			return emit(leaf.Key, leaf.Value)
 		})
-	})
+	}, builder.RootHash)
 	closeErr := snapshotFile.Close()
 	if writeErr != nil {
 		return writeErr
 	}
 	if closeErr != nil {
 		return closeErr
+	}
+	root, err := builder.RootHash()
+	if err != nil {
+		return err
+	}
+	if err := checkExportPBTStreamRoot(root, pin, binRoot, found); err != nil {
+		return err
 	}
 	preimageFile, err := os.Create(preimagePath)
 	if err != nil {
@@ -313,20 +321,6 @@ func digestPBTFile(file *os.File) (common.Hash, error) {
 		return common.Hash{}, err
 	}
 	return common.BytesToHash(hash.Sum(nil)), nil
-}
-
-func exportPBTStreamRoot(tx kv.TemporalTx) (common.Hash, error) {
-	builder, err := eip8297.NewStreamRootBuilder(eip8297.HashBytes)
-	if err != nil {
-		return common.Hash{}, err
-	}
-	err = state.ForEachPBinLeaf(state.AggTx(tx), tx, false, func(leaf state.PBinLeaf) error {
-		return builder.Add(leaf.Key, leaf.Value)
-	})
-	if err != nil {
-		return common.Hash{}, err
-	}
-	return builder.RootHash()
 }
 
 func exportPBTBinRootAtPin(ctx context.Context, tx kv.TemporalTx, pin exportPin, logger log.Logger) (common.Hash, bool, error) {
