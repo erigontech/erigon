@@ -290,7 +290,7 @@ func nextPreimage(src io.ReaderAt, size int64, cursor *preimageCursor) (Preimage
 	cursor.previous = digest
 	cursor.hasPrevious = true
 	var previousSlot common.Hash
-	for i := uint32(0); i < count; i++ {
+	for i := range count {
 		value, err := c.bytes(32)
 		if err != nil {
 			return Preimage{}, false, ErrPreimages
@@ -383,7 +383,7 @@ func snapshotCursors(src io.ReaderAt, size int64) (artifactCursor, artifactCurso
 		return artifactCursor{}, artifactCursor{}, 0, 0, err
 	}
 	headerStart := c.offset
-	for i := uint64(0); i < headerCount; i++ {
+	for range headerCount {
 		if _, err := readHeaderAt(&c); err != nil {
 			return artifactCursor{}, artifactCursor{}, 0, 0, err
 		}
@@ -393,7 +393,7 @@ func snapshotCursors(src io.ReaderAt, size int64) (artifactCursor, artifactCurso
 	if err != nil {
 		return artifactCursor{}, artifactCursor{}, 0, 0, err
 	}
-	for i := uint64(0); i < codeCount; i++ {
+	for range codeCount {
 		if _, err := readGroupAt(&c); err != nil {
 			return artifactCursor{}, artifactCursor{}, 0, 0, err
 		}

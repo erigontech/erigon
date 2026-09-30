@@ -115,7 +115,7 @@ func TestArtifactReaderRejectsMaximumCountsWithoutAllocating(t *testing.T) {
 	require.NoError(t, err)
 	for _, offset := range []int{32, 217, 265} {
 		broken := bytes.Clone(data)
-		for i := 0; i < 8; i++ {
+		for i := range 8 {
 			broken[offset+i] = 0xff
 		}
 		_, err := ReadSnapshot(bytes.NewReader(broken))

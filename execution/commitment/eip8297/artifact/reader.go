@@ -67,7 +67,7 @@ func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (S
 	}
 	headerStart := c.offset
 	var previousAddress common.Hash
-	for i := uint64(0); i < headerCount; i++ {
+	for i := range headerCount {
 		header, err := readHeaderAt(&c)
 		if err != nil {
 			return meta, err
@@ -91,7 +91,7 @@ func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (S
 		return meta, err
 	}
 	var previousStem common.Hash
-	for i := uint64(0); i < codeCount; i++ {
+	for i := range codeCount {
 		group, err := readGroupAt(&c)
 		if err != nil {
 			return meta, err
@@ -115,7 +115,7 @@ func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (S
 	}
 	headerCursor := artifactCursor{src: src, offset: headerStart, limit: headerEnd}
 	var previousStorage common.Hash
-	for i := uint64(0); i < storageCount; i++ {
+	for i := range storageCount {
 		storage, err := readStorageAt(&c)
 		if err != nil {
 			return meta, err
@@ -306,7 +306,7 @@ func readGroupAt(c *artifactCursor) (Group, error) {
 	}
 	group.Entries = make([]GroupEntry, 0, entries)
 	var previous byte
-	for i := 0; i < entries; i++ {
+	for i := range entries {
 		index, err := c.byte()
 		if err != nil {
 			return Group{}, err
@@ -341,7 +341,7 @@ func readStorageAt(c *artifactCursor) (Storage, error) {
 	}
 	storage.Groups = make([]Group, 0, int(count))
 	var previous common.Hash
-	for i := uint64(0); i < count; i++ {
+	for i := range count {
 		group, err := readGroupAt(c)
 		if err != nil {
 			return Storage{}, err
