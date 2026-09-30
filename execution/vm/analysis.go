@@ -21,6 +21,7 @@ package vm
 
 import (
 	"encoding/binary"
+	mathbits "math/bits"
 
 	"github.com/erigontech/erigon/common/bitutil"
 )
@@ -73,6 +74,38 @@ func codeBitmap(code []byte) bitvec {
 			bits.setN(uint64(1)<<numbits-1, pc)
 			pc += numbits
 		}
+	}
+	return bits
+}
+
+// codeBitmapJump is codeBitmap that jumps from PUSH to PUSH: the lowest PUSH lane of an 8-byte
+// word is exact, so the loop lands only on PUSH opcodes and never walks the 1-byte opcodes
+// between them.
+func codeBitmapJump(code []byte) bitvec {
+	bits := make(bitvec, (len(code)+32+63)/64)
+	codeLen := uint64(len(code))
+	pc := uint64(0)
+	for pc+8 <= codeLen {
+		w := binary.LittleEndian.Uint64(code[pc : pc+8])
+		m := bitutil.HasZero((w & swarPushHi) ^ swarPushPat)
+		if m == 0 {
+			pc += 8
+			continue
+		}
+		pc += uint64(mathbits.TrailingZeros64(m)) >> 3
+		numbits := uint64(code[pc] - byte(PUSH1) + 1)
+		bits.setN(uint64(1)<<numbits-1, pc+1)
+		pc += 1 + numbits
+	}
+	for pc < codeLen {
+		op := OpCode(code[pc])
+		pc++
+		if int8(op) < int8(PUSH1) {
+			continue
+		}
+		numbits := uint64(op - PUSH1 + 1)
+		bits.setN(uint64(1)<<numbits-1, pc)
+		pc += numbits
 	}
 	return bits
 }

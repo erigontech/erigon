@@ -102,3 +102,23 @@ func TestCodeBitmapSWAREquivalence(t *testing.T) {
 		}
 	}
 }
+
+func TestCodeBitmapJumpEquivalence(t *testing.T) {
+	r := rand.New(rand.NewSource(3))
+	for iter := range 200000 {
+		code := make([]byte, r.Intn(400))
+		for i := range code {
+			switch iter % 4 {
+			case 0:
+				code[i] = []byte{0x5b, 0x60, 0x7f, 0x00, 0x61}[r.Intn(5)]
+			case 1:
+				code[i] = byte(0x60 + r.Intn(32))
+			default:
+				code[i] = byte(r.Intn(256))
+			}
+		}
+		if !equalBitvec(codeBitmapJump(code), codeBitmapRef(code)) {
+			t.Fatalf("mismatch len=%d code=%x", len(code), code)
+		}
+	}
+}
