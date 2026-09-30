@@ -202,6 +202,15 @@ var (
 	zstdOutBytes = metrics.GetOrCreateCounter(`rpc_zstd_out_bytes_total{path="streaming"}`)
 )
 
+var (
+	gzipPoolHits     = metrics.GetOrCreateCounter(`rpc_gzip_pool_hit_total`)
+	gzipPoolMisses   = metrics.GetOrCreateCounter(`rpc_gzip_pool_miss_total`)
+	zstdPoolHits     = metrics.GetOrCreateCounter(`rpc_zstd_pool_hit_total`)
+	zstdPoolMisses   = metrics.GetOrCreateCounter(`rpc_zstd_pool_miss_total`)
+	gzipWritersInUse = metrics.GetOrCreateGauge(`rpc_gzip_writers_in_use`)
+	zstdWritersInUse = metrics.GetOrCreateGauge(`rpc_zstd_writers_in_use`)
+)
+
 // gzipWrapper compresses with klauspost's gzhttp middleware, which buffers only
 // minGzipBodySize -- enough to decide whether compressing pays -- then streams,
 // so no response is held whole.
@@ -211,6 +220,8 @@ var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 		gzhttp.CompressionLevel(gzip.BestSpeed), // gzip only
 		gzhttp.EnableZstd(true),
 		gzhttp.ZstdCompressionLevel(int(zstd.SpeedFastest)), // zstd only
+		gzhttp.Implementation(gzipWriterFactory),
+		gzhttp.ZstdImplementation(zstdWriterFactory),
 	)
 	if err != nil {
 		panic(fmt.Sprintf("rpc gzip wrapper: %v", err))

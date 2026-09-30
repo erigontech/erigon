@@ -447,3 +447,69 @@ func TestCompressionMetricsAttributed(t *testing.T) {
 		})
 	}
 }
+
+// TestCompressionPoolMetrics pins that every compressed response takes its
+// writer from our pool and is counted as exactly one hit or miss, and that
+// sequential responses reuse a writer.
+func TestCompressionPoolMetrics(t *testing.T) {
+	body := strings.Repeat(`{"pc":1,"op":"SSTORE","gas":42},`, 4000)
+	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body)
+	}))
+
+	for _, tc := range []struct {
+		accept       string
+		hits, misses metrics.Counter
+	}{
+		{"gzip", gzipPoolHits, gzipPoolMisses},
+		{"zstd", zstdPoolHits, zstdPoolMisses},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			const requests = 10
+			hitsBefore, missesBefore := tc.hits.GetValueUint64(), tc.misses.GetValueUint64()
+
+			for range requests {
+				req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+				req.Header.Set("Accept-Encoding", tc.accept)
+				rec := httptest.NewRecorder()
+				handler.ServeHTTP(rec, req)
+				require.Equal(t, tc.accept, rec.Header().Get("Content-Encoding"))
+			}
+
+			hits := tc.hits.GetValueUint64() - hitsBefore
+			misses := tc.misses.GetValueUint64() - missesBefore
+			assert.Equal(t, uint64(requests), hits+misses, "each compressed response must count one hit or miss")
+			assert.Positive(t, hits, "sequential responses must reuse a pooled writer")
+		})
+	}
+}
+
+// TestCompressionWritersInUse pins that a writer counts as in use from the
+// moment compression starts until the response is closed.
+func TestCompressionWritersInUse(t *testing.T) {
+	for _, tc := range []struct {
+		accept string
+		inUse  metrics.Gauge
+	}{
+		{"gzip", gzipWritersInUse},
+		{"zstd", zstdWritersInUse},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			before := tc.inUse.GetValue()
+			var during float64
+			handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write(bytes.Repeat([]byte("x"), 4*minGzipBodySize))
+				during = tc.inUse.GetValue()
+			}))
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
+			req.Header.Set("Accept-Encoding", tc.accept)
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, req)
+			require.Equal(t, tc.accept, rec.Header().Get("Content-Encoding"))
+
+			assert.Equal(t, before+1, during, "an active response must hold one writer")
+			assert.Equal(t, before, tc.inUse.GetValue(), "a closed response must release its writer")
+		})
+	}
+}
