@@ -391,6 +391,20 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 	// Typed ReadX returns T directly plus a ReadResult, never an any-boxed value (a
 	// heap alloc per non-storage read). On a miss it returns a pre-seeded (UnknownDep,
 	// -1) result, so res is always valid.
+	// A repeated write to a slot this attempt already probed: the own write wins,
+	// and the map floor can only feed the dependency bump the first probe of this
+	// slot already evaluated against the same memoized version.
+	if !commited && path == StoragePath {
+		if _, _, _, memoized := s.readStorageProbeMemo(addr, key); memoized {
+			if hasWrite := s.versionedWriteHit(addr, path, key, r); hasWrite {
+				r.outcome = outcomeWriteSetHit
+				r.source = WriteSetRead
+				r.version = Version{TxIndex: s.txIndex, Incarnation: s.version}
+				return
+			}
+		}
+	}
+
 	var res ReadResult
 reread:
 	switch path {
@@ -415,7 +429,7 @@ reread:
 	case CreateContractPath:
 		r.mapCreateContractVal, res, _ = s.versionMap.ReadCreateContract(addr, s.txIndex)
 	case StoragePath:
-		r.mapStorageVal, res, _ = s.versionMap.ReadStorage(addr, key, s.txIndex)
+		r.mapStorageVal, res, _ = s.readStorageProbe(addr, key)
 	default:
 		panic(fmt.Errorf("readPaths: unknown path %v", path))
 	}
@@ -439,6 +453,7 @@ reread:
 						}
 						s.versionedReads.SetHeader(addr, path, key, hdr)
 						if s.waitCommit != nil && s.waitCommit(hdr.Version.TxIndex) {
+							s.forgetStorageProbe(addr, key)
 							goto reread
 						}
 						// Shutdown / no pause hook: fall through to the tx's own write.
@@ -542,6 +557,7 @@ reread:
 		// only on shutdown; callers with no pause hook (serial/historical) never observe
 		// an Estimate and fall back to the in-flight value.
 		if s.waitCommit != nil && s.waitCommit(res.DepIdx()) {
+			s.forgetStorageProbe(addr, key)
 			goto reread
 		}
 		r.outcome = outcomeMapDone
