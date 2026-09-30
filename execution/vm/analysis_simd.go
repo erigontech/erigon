@@ -83,7 +83,7 @@ func jumpdestBitmapSIMD(code []byte, bits bitvec) (entry int) {
 	tab := jdTabInit
 	e := uint8(0x80)
 	var acc uint64
-	b := 0
+	b := uint(0)
 	for ; len(code) >= 32; b, code = b+1, code[32:] {
 		c := archsimd.LoadUint8x32Array((*[32]byte)(code))
 		jd := c.Equal(c5b).ToBits()
@@ -92,12 +92,12 @@ func jumpdestBitmapSIMD(code []byte, bits bitvec) (entry int) {
 		n := x.Sub(k8).AsUint8x32()
 		x = x.Xor(k8).Max(lane)
 		u := x.AsUint8x32()
-		v := bit
-		for range 3 {
-			v = v.Or(v.PermuteOrZeroGrouped(x))
-			u = u.PermuteOrZeroGrouped(x)
-			x = u.AsInt8x32()
-		}
+		v := bit.Or(bit.PermuteOrZeroGrouped(x))
+		x = u.PermuteOrZeroGrouped(x).AsInt8x32()
+		v = v.Or(v.PermuteOrZeroGrouped(x))
+		x = x.AsUint8x32().PermuteOrZeroGrouped(x).AsInt8x32()
+		v = v.Or(v.PermuteOrZeroGrouped(x))
+		x = x.AsUint8x32().PermuteOrZeroGrouped(x).AsInt8x32()
 		n = n.PermuteOrZeroGrouped(x)
 		xm := n.PermuteOrZeroGrouped(n.AsInt8x32()).Max(n)
 
@@ -107,8 +107,8 @@ func jumpdestBitmapSIMD(code []byte, bits bitvec) (entry int) {
 		idx := x1.Sub(c10)
 		x6.PermuteOrZero(idx.AsInt8x16()).Max(idx).StoreArray((*[16]byte)(tab[jdTabBase+48:]))
 		if jd == 0 { // no JUMPDEST: only the entry into the next block is needed
-			if b%2 == 1 {
-				bits[b/2] = acc
+			if b&1 == 1 {
+				bits[b>>1] = acc
 			}
 			acc = 0
 			e = tab[int(e)+jdTabBase-80]
@@ -128,15 +128,15 @@ func jumpdestBitmapSIMD(code []byte, bits bitvec) (entry int) {
 		e3 := tab[int(e2)+jdTabBase+16]
 		starts := uint32(tab[int(e)+jdTabBase+64]) | uint32(tab[int(e1)+jdTabBase+176])<<8 |
 			uint32(tab[int(e2)+jdTabBase+112])<<16 | uint32(tab[int(e3)+jdTabBase+224])<<24
-		if b%2 == 0 {
+		if b&1 == 0 {
 			acc = uint64(starts & jd)
 		} else {
-			bits[b/2] = acc | uint64(starts&jd)<<32
+			bits[b>>1] = acc | uint64(starts&jd)<<32
 		}
 		e = tab[int(e)+jdTabBase-80]
 	}
-	if b%2 == 1 {
-		bits[b/2] = acc
+	if b&1 == 1 {
+		bits[b>>1] = acc
 	}
 	return int(e) - 0x80
 }
