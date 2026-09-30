@@ -40,8 +40,43 @@ func NewGater(cfg *P2PConfig) (g *Gater, err error) {
 // SetHost lets the gater see live connections once the host exists. buildOptions
 // registers the gater before libp2p.New returns the host it gates, so InterceptSecured
 // fails open (allow) until this is called.
+//
+// It also registers a Connected notifee: InterceptSecured's ConnsToPeer check runs
+// before the connection it is deciding on is registered, so two connections for the
+// same peer that reach it concurrently can each observe an empty snapshot and both
+// admit themselves. onConnected is the backstop for that residual race - see its
+// doc comment.
 func (g *Gater) SetHost(h host.Host) {
 	g.host.Store(&h)
+	h.Network().Notify(&network.NotifyBundle{ConnectedF: g.onConnected})
+}
+
+// onConnected closes a peer's redundant non-QUIC connection once QUIC is known to also
+// be connected. Connected fires strictly after its own connection is added to the
+// swarm's connection map, so whichever of two racing connections (admitted
+// concurrently by InterceptSecured before either registered) registers second is
+// guaranteed to see both in ConnsToPeer here - the swarm's connection map serializes
+// the two registrations even when the admission checks raced.
+func (g *Gater) onConnected(net network.Network, conn network.Conn) {
+	conns := net.ConnsToPeer(conn.RemotePeer())
+	if len(conns) < 2 {
+		return
+	}
+	hasQUIC := false
+	for _, c := range conns {
+		if _, err := c.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+			hasQUIC = true
+			break
+		}
+	}
+	if !hasQUIC {
+		return
+	}
+	for _, c := range conns {
+		if _, err := c.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err != nil {
+			_ = c.Close()
+		}
+	}
 }
 
 // InterceptPeerDial tests whether we're permitted to Dial the specified peer.
