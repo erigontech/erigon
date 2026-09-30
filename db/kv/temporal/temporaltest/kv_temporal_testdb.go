@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
@@ -51,12 +52,19 @@ func NewTestTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx) {
 type Option func(*options)
 
 type options struct {
-	stepSize uint64
+	stepSize     uint64
+	openExisting bool
 }
 
 func WithStepSize(stepSize uint64) Option {
 	return func(opts *options) {
 		opts.stepSize = stepSize
+	}
+}
+
+func WithOpenExisting() Option {
+	return func(opts *options) {
+		opts.openExisting = true
 	}
 }
 
@@ -68,11 +76,11 @@ func NewTestDB(tb testing.TB, dirs datadir.Dirs, opts ...Option) kv.TemporalRwDB
 	for _, opt := range opts {
 		opt(&config)
 	}
-	return newTestDB(tb, dirs, config.stepSize)
+	return newTestDB(tb, dirs, config.stepSize, config.openExisting)
 }
 
 // nolint:thelper
-func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwDB {
+func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64, openExisting bool) kv.TemporalRwDB {
 	if tb != nil {
 		tb.Helper()
 	}
@@ -81,11 +89,14 @@ func newTestDB(tb testing.TB, dirs datadir.Dirs, stepSize uint64) kv.TemporalRwD
 
 	var rawDB kv.RwDB
 	ctx := context.Background()
-	if tb != nil {
+	if tb != nil && !openExisting {
 		ctx = tb.Context()
 		rawDB = mdbxtest.NewTestDB(tb, dbcfg.ChainDB)
 	} else {
-		rawDB = mdbxtest.New(nil, dirs.DataDir, dbcfg.ChainDB)
+		if tb != nil {
+			ctx = tb.Context()
+		}
+		rawDB = mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
 	}
 
 	blockSnapCfg := ethconfig.Defaults.Snapshot

@@ -150,31 +150,34 @@ type ExecModuleTester struct {
 	ReceiptsReader *receipts.Generator
 	posStagedSync  *stagedsync.Sync
 	bgComponentsEg errgroup.Group
+	closeOnce      sync.Once
 }
 
 func (emt *ExecModuleTester) Close() {
-	emt.cancel()
-	if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
-		require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
-	}
-	if emt.blockRetire != nil {
-		emt.blockRetire.Close()
-	}
-	if emt.Engine != nil {
-		emt.Engine.Close()
-	}
-	if emt.BlockSnapshots != nil {
-		emt.BlockSnapshots.Close()
-	}
-	if emt.DB != nil {
-		emt.DB.Close()
-	}
-	if emt.ExecModule != nil {
-		emt.ExecModule.Close()
-	}
-	if emt.tb == nil && emt.Dirs.DataDir != "" {
-		_ = dir.RemoveAll(emt.Dirs.DataDir)
-	}
+	emt.closeOnce.Do(func() {
+		emt.cancel()
+		if err := emt.bgComponentsEg.Wait(); err != nil && emt.tb != nil {
+			require.Equal(emt.tb, context.Canceled, err) // upon waiting for clean exit we should get ctx cancelled
+		}
+		if emt.blockRetire != nil {
+			emt.blockRetire.Close()
+		}
+		if emt.ExecModule != nil {
+			emt.ExecModule.Close()
+		}
+		if emt.Engine != nil {
+			emt.Engine.Close()
+		}
+		if emt.BlockSnapshots != nil {
+			emt.BlockSnapshots.Close()
+		}
+		if emt.DB != nil {
+			emt.DB.Close()
+		}
+		if emt.tb == nil && emt.Dirs.DataDir != "" {
+			_ = dir.RemoveAll(emt.Dirs.DataDir)
+		}
+	})
 }
 
 // Stream returns stream, waiting if necessary
@@ -357,6 +360,18 @@ func WithEnableDomain(domain kv.Domain) Option {
 	}
 }
 
+func WithExistingDataDir(dirs datadir.Dirs) Option {
+	return func(opts *options) {
+		opts.existingDirs = &dirs
+	}
+}
+
+func WithDataDir(dirs datadir.Dirs) Option {
+	return func(opts *options) {
+		opts.dataDirs = &dirs
+	}
+}
+
 func WithChainConfig(cfg *chain.Config) Option {
 	return func(opts *options) {
 		opts.chainConfig = cfg
@@ -432,6 +447,8 @@ type options struct {
 	sentryProtocol                uint
 	stateTransitionObserver       execmodule.StateTransitionObserver
 	skipAmsterdamBuilderContracts bool
+	existingDirs                  *datadir.Dirs
+	dataDirs                      *datadir.Dirs
 }
 
 func applyOptions(opts []Option) options {
@@ -505,11 +522,21 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	engine := opt.engine
 	pruneMode := *opt.pruneMode
 	withTxPool := opt.withTxPool
-	tmpdir, err := os.MkdirTemp("", "mock-sentry-*")
-	if err != nil {
-		panic(err)
+	var err error
+	var tmpdir string
+	var dirs datadir.Dirs
+	if opt.existingDirs != nil {
+		dirs = *opt.existingDirs
+	} else if opt.dataDirs != nil {
+		dirs = *opt.dataDirs
+	} else {
+		tmpdir, err = os.MkdirTemp("", "mock-sentry-*")
+		if err != nil {
+			panic(err)
+		}
+		dirs = datadir.New(tmpdir)
 	}
-	if tb != nil {
+	if tb != nil && opt.existingDirs == nil && opt.dataDirs == nil {
 		// we can't use tb.TempDir() here because some tests produce names long
 		// enough to cause 'file name too long' errors when reused as paths
 		tb.Cleanup(func() {
@@ -517,7 +544,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		})
 	}
 	ctrl := gomock.NewController(tb)
-	dirs := datadir.New(tmpdir)
 
 	cfg := ethconfig.Defaults
 	cfg.StateStream = true
@@ -566,6 +592,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	ctx, ctxCancel := context.WithCancel(context.Background())
 	var dbOpts []temporaltest.Option
+	if opt.existingDirs != nil || opt.dataDirs != nil {
+		dbOpts = append(dbOpts, temporaltest.WithOpenExisting())
+	}
 	if opt.stepSize != nil {
 		dbOpts = append(dbOpts, temporaltest.WithStepSize(*opt.stepSize))
 	}
@@ -615,7 +644,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)
+	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", dirs, mock.Log)
 	var compatErr *chain.ConfigCompatError
 	if err != nil && !errors.As(err, &compatErr) {
 		if tb != nil {
@@ -857,14 +886,15 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	})
 	mock.StreamWg.Wait()
 
-	// app expecting that genesis will always be in db
-	c := &blockgen.ChainPack{
-		Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},
-		Blocks:   []*types.Block{mock.Genesis},
-		TopBlock: mock.Genesis,
-	}
-	if err = mock.InsertChain(c); err != nil {
-		tb.Fatal(err)
+	if opt.existingDirs == nil {
+		c := &blockgen.ChainPack{
+			Headers:  []*types.Header{mock.Genesis.HeaderNoCopy()},
+			Blocks:   []*types.Block{mock.Genesis},
+			TopBlock: mock.Genesis,
+		}
+		if err = mock.InsertChain(c); err != nil {
+			tb.Fatal(err)
+		}
 	}
 
 	return mock

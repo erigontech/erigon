@@ -42,6 +42,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/commitment/eip8297/artifact"
 	"github.com/erigontech/erigon/execution/commitment/v3/pbt"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -214,48 +216,58 @@ func TestRunExportPBTEmptyState(t *testing.T) {
 	require.NoError(t, artifact.ReadPreimagesAt(bytes.NewReader(preimageBytes), int64(len(preimageBytes)), nil))
 }
 
-func TestRunExportPBTUsesStoppedExecutionStage(t *testing.T) {
+func TestRunExportPBTRealAcceptanceChain(t *testing.T) {
 	selectPBTExportSuite(t)
-	db, root := newPBTExportDB(t)
-	tx, err := db.BeginTemporalRo(t.Context())
+	fixture, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
+	require.NoError(t, err)
+	require.NoError(t, fixture.Tester.InsertChain(fixture.Chain))
+	tx, err := fixture.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	progress, err := stages.GetStageProgress(tx, stages.Execution)
-	require.NoError(t, err)
-	require.Equal(t, uint64(7), progress)
 	outDir := filepath.Join(t.TempDir(), "export")
-	require.NoError(t, runExportPBT(t.Context(), tx, func(blockNum uint64) (*types.Header, error) {
-		require.Equal(t, uint64(7), blockNum)
-		return &types.Header{Root: root, Time: 10}, nil
+	require.NoError(t, runExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
+		if block == 0 {
+			return fixture.Tester.Genesis.HeaderNoCopy(), nil
+		}
+		return fixture.Chain.Headers[block-1], nil
 	}, outDir, log.New()))
 }
 
-func TestRunExportPBTReplayMatchesConvertedState(t *testing.T) {
+func TestRunExportPBTUsesStoppedExecutionStage(t *testing.T) {
 	selectPBTExportSuite(t)
-	firstDB, firstRoot := newPBTExportDB(t)
-	secondDB, secondRoot := newPBTExportDB(t)
-	firstTx, err := firstDB.BeginTemporalRo(t.Context())
+	const block = 2
+	full, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
 	require.NoError(t, err)
-	defer firstTx.Rollback()
-	secondTx, err := secondDB.BeginTemporalRo(t.Context())
+	require.NoError(t, full.Tester.InsertChain(full.Chain))
+	require.NoError(t, rawdbreset.ResetExec(t.Context(), full.Tester.DB))
+	require.NoError(t, full.Tester.ExecModule.ResetCurrentContext(t.Context()))
+	require.NoError(t, full.Tester.ReExecuteTo(t.Context(), block))
+	fullDir := filepath.Join(t.TempDir(), "full")
+	fullTx, err := full.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
-	defer secondTx.Rollback()
-	firstDir := filepath.Join(t.TempDir(), "first")
-	secondDir := filepath.Join(t.TempDir(), "second")
-	require.NoError(t, runExportPBT(t.Context(), firstTx, func(uint64) (*types.Header, error) {
-		return &types.Header{Root: firstRoot, Time: 10}, nil
-	}, firstDir, log.New()))
-	require.NoError(t, runExportPBT(t.Context(), secondTx, func(uint64) (*types.Header, error) {
-		return &types.Header{Root: secondRoot, Time: 10}, nil
-	}, secondDir, log.New()))
-	firstMeta, err := os.ReadFile(filepath.Join(firstDir, pbtMetaFileName))
+	defer fullTx.Rollback()
+	require.NoError(t, runExportPBT(t.Context(), fullTx, func(n uint64) (*types.Header, error) {
+		return full.Chain.Headers[n-1], nil
+	}, fullDir, log.New()))
+
+	partial, err := execmoduletester.NewPBTAcceptanceChain(t, false, true)
 	require.NoError(t, err)
-	secondMeta, err := os.ReadFile(filepath.Join(secondDir, pbtMetaFileName))
+	require.NoError(t, partial.Tester.InsertChain(partial.Chain.Slice(0, block)))
+	partialDir := filepath.Join(t.TempDir(), "partial")
+	partialTx, err := partial.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
-	var first, second pbtExportMeta
-	require.NoError(t, json.Unmarshal(firstMeta, &first))
-	require.NoError(t, json.Unmarshal(secondMeta, &second))
-	require.Equal(t, first.SnapshotDigest, second.SnapshotDigest)
+	defer partialTx.Rollback()
+	require.NoError(t, runExportPBT(t.Context(), partialTx, func(n uint64) (*types.Header, error) {
+		return partial.Chain.Headers[n-1], nil
+	}, partialDir, log.New()))
+	fullMeta, err := os.ReadFile(filepath.Join(fullDir, pbtMetaFileName))
+	require.NoError(t, err)
+	partialMeta, err := os.ReadFile(filepath.Join(partialDir, pbtMetaFileName))
+	require.NoError(t, err)
+	var fullResult, partialResult pbtExportMeta
+	require.NoError(t, json.Unmarshal(fullMeta, &fullResult))
+	require.NoError(t, json.Unmarshal(partialMeta, &partialResult))
+	require.Equal(t, partialResult.SnapshotDigest, fullResult.SnapshotDigest)
 }
 
 func selectPBTExportSuite(t *testing.T) {
