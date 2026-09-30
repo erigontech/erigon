@@ -230,24 +230,24 @@ func pbtImportArtifactRoot(snapshot io.ReaderAt, snapshotSize int64, hashFn eip8
 			if encodeErr != nil {
 				return encodeErr
 			}
-			if err := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey), basic); err != nil {
-				return err
+			if addErr := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.BasicDataLeafKey), basic); addErr != nil {
+				return addErr
 			}
 			switch header.Kind {
 			case 0, 1:
-				if err := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.CodeHashLeafKey), eip8297.CodeHashValue(header.CodeHash)); err != nil {
-					return err
+				if addErr := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.CodeHashLeafKey), eip8297.CodeHashValue(header.CodeHash)); addErr != nil {
+					return addErr
 				}
 			case 2:
 				code := append(append([]byte(nil), eip8297.DelegationMarker[:]...), header.Target[:]...)
-				if err := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.DelegationLeafKey), eip8297.EncodeDelegation(code)); err != nil {
-					return err
+				if addErr := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.DelegationLeafKey), eip8297.EncodeDelegation(code)); addErr != nil {
+					return addErr
 				}
 			}
 			for _, slot := range header.Slots {
 				value := eip8297.EncodeStorageValue(slot.Value)
-				if err := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.HeaderStorageOffset+slot.Index), value); err != nil {
-					return err
+				if addErr := add(eip8297.TreeKey(eip8297.AccountZone, header.AddressHash[:], eip8297.HeaderStorageOffset+slot.Index), value); addErr != nil {
+					return addErr
 				}
 			}
 			return nil
@@ -260,8 +260,8 @@ func pbtImportArtifactRoot(snapshot io.ReaderAt, snapshotSize int64, hashFn eip8
 				}
 				var value [eip8297.ValueLength]byte
 				copy(value[eip8297.ValueLength-len(entry.Value):], entry.Value)
-				if err := add(key, value); err != nil {
-					return err
+				if addErr := add(key, value); addErr != nil {
+					return addErr
 				}
 			}
 			return nil
@@ -275,8 +275,8 @@ func pbtImportArtifactRoot(snapshot io.ReaderAt, snapshotSize int64, hashFn eip8
 					if decodeErr != nil {
 						return decodeErr
 					}
-					if err := add(key, value); err != nil {
-						return err
+					if addErr := add(key, value); addErr != nil {
+						return addErr
 					}
 				}
 				return nil

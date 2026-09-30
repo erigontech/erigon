@@ -54,6 +54,7 @@ func TestPBTImportAcceptanceAndReexecute(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "export")
 	tx, err := source.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	require.NoError(t, app.RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
 		return source.Chain.Headers[block-1], nil
 	}, output, log.New()))
@@ -105,6 +106,7 @@ func TestPBTImportIntoHexBinTargetUsesBinaryState(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "export")
 	tx, err := source.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	require.NoError(t, app.RunExportPBT(t.Context(), tx, func(block uint64) (*types.Header, error) {
 		return source.Chain.Headers[block-1], nil
 	}, output, log.New()))
@@ -181,6 +183,7 @@ func TestPBTReplayMatchesConvertedState(t *testing.T) {
 	require.NoError(t, err)
 	convertedTx, err := convertedDB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer convertedTx.Rollback()
 	convertedExport := filepath.Join(t.TempDir(), "converted-export")
 	require.NoError(t, app.RunExportPBT(t.Context(), convertedTx, func(block uint64) (*types.Header, error) {
 		return converted.Chain.Headers[block-1], nil
@@ -197,6 +200,7 @@ func TestPBTReplayMatchesConvertedState(t *testing.T) {
 	require.NoError(t, replayed.Tester.ReExecuteTo(t.Context(), replayed.Chain.TopBlock.NumberU64()))
 	replayedTx, err := replayed.Tester.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer replayedTx.Rollback()
 	replayedExport := filepath.Join(t.TempDir(), "replayed-export")
 	require.NoError(t, app.RunExportPBT(t.Context(), replayedTx, func(block uint64) (*types.Header, error) {
 		return replayed.Chain.Headers[block-1], nil
@@ -227,6 +231,7 @@ func buildPBTAcceptanceFiles(t *testing.T, fixture *execmoduletester.PBTAcceptan
 	require.NoError(t, err)
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
+	defer tx.Rollback()
 	_, lastTxNum, err := rawdbv3.TxNums.Last(tx)
 	require.NoError(t, err)
 	tx.Rollback()

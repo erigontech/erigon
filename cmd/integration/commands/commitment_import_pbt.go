@@ -124,6 +124,7 @@ func importPBT(ctx context.Context, dataDir, snapshotPath, preimagesPath, blockT
 	if err != nil {
 		return err
 	}
+	defer validationTx.Rollback()
 	validationErr := dbstate.ValidatePBTSnapshot(ctx, validationTx, importOptions)
 	validationTx.Rollback()
 	if validationErr != nil {
