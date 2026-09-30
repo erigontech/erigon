@@ -259,6 +259,7 @@ func processChainTipBatch(ctx context.Context, cfg *Cfg, args Args, blocks []*cl
 	}
 	storedReplayRoots := storedParentReplayRoots(
 		blocks,
+		args.targetSlot,
 		envelopes,
 		storedEnvelopeRoots,
 		parentBlockByRoot,
@@ -464,14 +465,17 @@ func storedParentEnvelopes(
 	storedRoots := make(map[common.Hash]struct{})
 	for _, requested := range roots {
 		root := common.Hash(requested)
-		if _, checked := storedRoots[root]; checked || !hasEnvelope(root) {
+		if !hasEnvelope(root) {
+			continue
+		}
+		envelope, err := readEnvelope(root)
+		if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.BeaconBlockRoot != root {
+			if hasEnvelope(root) {
+				storedRoots[root] = struct{}{}
+			}
 			continue
 		}
 		storedRoots[root] = struct{}{}
-		envelope, err := readEnvelope(root)
-		if err != nil || envelope == nil || envelope.Message == nil || envelope.Message.BeaconBlockRoot != root {
-			continue
-		}
 		envelopes[root] = envelope
 	}
 	return envelopes, storedRoots
@@ -479,6 +483,7 @@ func storedParentEnvelopes(
 
 func storedParentReplayRoots(
 	blocks []*cltypes.SignedBeaconBlock,
+	targetSlot uint64,
 	envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope,
 	storedRoots map[common.Hash]struct{},
 	parentBlock func(common.Hash) *cltypes.SignedBeaconBlock,
@@ -487,21 +492,22 @@ func storedParentReplayRoots(
 ) map[common.Hash]struct{} {
 	replayRoots := make(map[common.Hash]struct{})
 	for _, block := range blocks {
-		if block == nil || block.Block == nil || block.Version() < clparams.GloasVersion {
+		if block == nil || block.Block == nil {
 			continue
 		}
-		parentRoot := common.Hash(block.Block.ParentRoot)
-		if _, stored := storedRoots[parentRoot]; !stored || envelopes[parentRoot] == nil {
-			continue
+		if block.Version() >= clparams.GloasVersion {
+			parentRoot := common.Hash(block.Block.ParentRoot)
+			if _, stored := storedRoots[parentRoot]; stored && envelopes[parentRoot] != nil {
+				blockRoot, err := block.Block.HashSSZ()
+				if err == nil && !knownBlock(common.Hash(blockRoot)) && !seenBlock(common.Hash(blockRoot)) &&
+					parentEnvelopeRequired(block, parentBlock(parentRoot)) {
+					replayRoots[parentRoot] = struct{}{}
+				}
+			}
 		}
-		blockRoot, err := block.Block.HashSSZ()
-		if err != nil || knownBlock(common.Hash(blockRoot)) || seenBlock(common.Hash(blockRoot)) {
-			continue
+		if block.Block.Slot >= targetSlot {
+			break
 		}
-		if !parentEnvelopeRequired(block, parentBlock(parentRoot)) {
-			continue
-		}
-		replayRoots[parentRoot] = struct{}{}
 	}
 	return replayRoots
 }

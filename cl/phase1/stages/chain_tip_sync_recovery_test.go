@@ -345,6 +345,59 @@ func TestChainTipBatchReplayBudgetSkipsParentsWithUsableVerdict(t *testing.T) {
 	}
 }
 
+func TestChainTipBatchReplayBudgetStopsAtTarget(t *testing.T) {
+	cfg, graph, parentARoot, childA, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusValidated)
+	parentA := graph.parents[parentARoot]
+	parentB := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+	parentB.Block.Slot = parentA.Block.Slot
+	parentB.Block.ParentRoot = parentA.Block.ParentRoot
+	parentB.Block.Body.GetSignedExecutionPayloadBid().Message = parentA.Block.Body.GetSignedExecutionPayloadBid().Message.Copy()
+	parentB.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.Hash{2}
+	parentBRoot, err := parentB.Block.HashSSZ()
+	require.NoError(t, err)
+
+	encodedEnvelope, err := graph.envelopes[parentARoot].EncodeSSZ(nil)
+	require.NoError(t, err)
+	envelopeB := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg.beaconCfg)}
+	require.NoError(t, envelopeB.DecodeSSZ(encodedEnvelope, int(clparams.GloasVersion)))
+	envelopeB.Message.BeaconBlockRoot = parentBRoot
+	envelopeB.Message.Payload.BlockHash = parentB.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
+	graph.parents[parentBRoot] = parentB
+	graph.envelopes[parentBRoot] = envelopeB
+	cfg.forkChoice.MarkPayloadStatus(parentBRoot, envelopeB.Message.Payload.BlockHash, execution_client.PayloadStatusNone)
+
+	childB := cltypes.NewSignedBeaconBlock(cfg.beaconCfg, clparams.GloasVersion)
+	childB.Block.Slot = childA.Block.Slot + 1
+	childB.Block.ParentRoot = parentBRoot
+	childB.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = parentB.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash
+	childARoot, err := childA.Block.HashSSZ()
+	require.NoError(t, err)
+	childBRoot, err := childB.Block.HashSSZ()
+	require.NoError(t, err)
+
+	var replayBudget time.Duration
+	engine.newPayloadFn = func(ctx context.Context, _ *cltypes.Eth1Block) (execution_client.PayloadStatus, error) {
+		deadline, ok := ctx.Deadline()
+		require.True(t, ok)
+		replayBudget = time.Until(deadline)
+		return execution_client.PayloadStatusValidated, nil
+	}
+
+	reachedTarget := processChainTipBatch(
+		t.Context(),
+		cfg,
+		Args{targetSlot: childA.Block.Slot},
+		[]*cltypes.SignedBeaconBlock{childA, childB},
+		make(map[common.Hash]struct{}),
+	)
+
+	require.True(t, reachedTarget)
+	require.Equal(t, 1, engine.newPayloadCalls)
+	require.Greater(t, replayBudget, gloasPayloadRetryBudget*3/4)
+	require.Equal(t, 1, graph.added[common.Hash(childARoot)])
+	require.Zero(t, graph.added[common.Hash(childBRoot)])
+}
+
 func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 	t.Run("peer-fetched unavailable parent does not gate full child", func(t *testing.T) {
 		cfg, graph, parentRoot, fullChild, _, engine := newChainTipBatchFixture(t, execution_client.PayloadStatusNone)
@@ -431,34 +484,35 @@ func TestChainTipBatchReplaysStoredParentPayload(t *testing.T) {
 
 func TestStoredParentEnvelopesRestoresReadableParents(t *testing.T) {
 	storedRoot := common.Hash{1}
-	mismatchedRoot := common.Hash{2}
+	revokedRoot := common.Hash{2}
 	transientRoot := common.Hash{3}
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: storedRoot}}
-	reads := 0
+	present := map[common.Hash]bool{
+		storedRoot:    true,
+		revokedRoot:   true,
+		transientRoot: true,
+	}
 
 	got, storedRoots := storedParentEnvelopes(
-		[][32]byte{storedRoot, storedRoot, mismatchedRoot, transientRoot},
-		func(root common.Hash) bool {
-			return root == storedRoot || root == mismatchedRoot || root == transientRoot
-		},
+		[][32]byte{storedRoot, revokedRoot, transientRoot},
+		func(root common.Hash) bool { return present[root] },
 		func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
-			reads++
 			if root == storedRoot {
 				return envelope, nil
 			}
 			if root == transientRoot {
 				return nil, context.DeadlineExceeded
 			}
+			present[root] = false
 			return &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: common.Hash{9}}}, nil
 		},
 	)
 
-	require.Equal(t, 3, reads)
 	require.Equal(t, map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{storedRoot: envelope}, got)
-	require.Equal(t, map[common.Hash]struct{}{storedRoot: {}, mismatchedRoot: {}, transientRoot: {}}, storedRoots)
+	require.Equal(t, map[common.Hash]struct{}{storedRoot: {}, transientRoot: {}}, storedRoots)
 }
 
-func TestStoredParentReplayRootsExcludeKnownChildren(t *testing.T) {
+func TestStoredParentReplayRootsExcludeKnownAndIncludeTargetChildren(t *testing.T) {
 	knownParent := common.Hash{1}
 	unknownParent := common.Hash{2}
 	parent := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
@@ -476,10 +530,23 @@ func TestStoredParentReplayRootsExcludeKnownChildren(t *testing.T) {
 
 	got := storedParentReplayRoots(
 		[]*cltypes.SignedBeaconBlock{knownChild, unknownChild},
+		^uint64(0),
 		envelopes,
 		storedRoots,
 		func(common.Hash) *cltypes.SignedBeaconBlock { return parent },
 		func(root common.Hash) bool { return root == common.Hash(knownChildRoot) },
+		func(common.Hash) bool { return false },
+	)
+
+	require.Equal(t, map[common.Hash]struct{}{unknownParent: {}}, got)
+
+	got = storedParentReplayRoots(
+		[]*cltypes.SignedBeaconBlock{unknownChild},
+		unknownChild.Block.Slot,
+		envelopes,
+		storedRoots,
+		func(common.Hash) *cltypes.SignedBeaconBlock { return parent },
+		func(common.Hash) bool { return false },
 		func(common.Hash) bool { return false },
 	)
 
@@ -526,6 +593,7 @@ func TestStoredParentReplayRootsExcludeEmptyChildren(t *testing.T) {
 
 	got := storedParentReplayRoots(
 		[]*cltypes.SignedBeaconBlock{emptyChild, knownFullChild, parent2, unknownFullChild},
+		^uint64(0),
 		envelopes,
 		storedRoots,
 		parentBlock,
@@ -536,6 +604,7 @@ func TestStoredParentReplayRootsExcludeEmptyChildren(t *testing.T) {
 
 	got = storedParentReplayRoots(
 		[]*cltypes.SignedBeaconBlock{emptyChild},
+		^uint64(0),
 		envelopes,
 		storedRoots,
 		parentBlock,
