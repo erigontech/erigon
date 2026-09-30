@@ -22,16 +22,13 @@ import "simd/archsimd"
 
 var hasAVX512 = archsimd.X86.AVX512()
 
-// saltVectors is how many 8-lane salt batches are searched per pass. splitmix64
-// is a serial dependency chain, so one vector leaves the multiplier idle; four
-// independent chains keep it fed, which is the same reason the scalar form
-// unrolls eight salts by hand.
-const saltVectors = 4
-
 // findBijection is findBijectionGeneric with the salt candidates held in 512-bit
-// registers. AVX2 cannot host it: the 64x64 multiply both splitmix64 and remap16
-// need is VPMULLQ (AVX512DQ), and emulating it costs more than the unrolled
-// scalar form saves.
+// registers, two independent chains deep: splitmix64 is serial, so a single
+// vector leaves the multiplier idle between dependent steps.
+//
+// AVX2 cannot host it: the 64x64 multiply both splitmix64 and remap16 need is
+// VPMULLQ (AVX512DQ), and emulating it costs more than the unrolled scalar form
+// saves.
 func findBijection(bucket []uint64, salt uint64) uint64 {
 	if !hasAVX512 {
 		return findBijectionGeneric(bucket, salt)
@@ -49,32 +46,33 @@ func findBijection(bucket []uint64, salt uint64) uint64 {
 	c1 := archsimd.BroadcastUint64x8(0xbf58476d1ce4e5b9)
 	c2 := archsimd.BroadcastUint64x8(0x94d049bb133111eb)
 
-	var salts, acc [saltVectors]archsimd.Uint64x8
 	var out [8]uint64
 	for {
-		for v := range salts {
-			salts[v] = archsimd.BroadcastUint64x8(salt + uint64(8*v)).Add(offsets)
-			acc[v] = archsimd.Uint64x8{}
-		}
+		salts0 := archsimd.BroadcastUint64x8(salt).Add(offsets)
+		salts1 := archsimd.BroadcastUint64x8(salt + 8).Add(offsets)
+		acc0, acc1 := archsimd.Uint64x8{}, archsimd.Uint64x8{}
 		for _, key := range bucket {
 			k := archsimd.BroadcastUint64x8(key)
-			for v := range salts {
-				z := k.Add(salts[v])
-				z = z.Xor(z.ShiftAllRight(30)).Mul(c1)
-				z = z.Xor(z.ShiftAllRight(27)).Mul(c2)
-				z = z.Xor(z.ShiftAllRight(31))
-				// remap16: ((z & mask48) * m) >> 48, then set that bit.
-				acc[v] = acc[v].Or(one.ShiftLeft(z.And(mask48v).Mul(modulus).ShiftAllRight(48)))
+			z0, z1 := k.Add(salts0), k.Add(salts1)
+			z0, z1 = z0.Xor(z0.ShiftAllRight(30)).Mul(c1), z1.Xor(z1.ShiftAllRight(30)).Mul(c1)
+			z0, z1 = z0.Xor(z0.ShiftAllRight(27)).Mul(c2), z1.Xor(z1.ShiftAllRight(27)).Mul(c2)
+			z0, z1 = z0.Xor(z0.ShiftAllRight(31)), z1.Xor(z1.ShiftAllRight(31))
+			// remap16: ((z & mask48) * m) >> 48, then set that bit.
+			acc0 = acc0.Or(one.ShiftLeft(z0.And(mask48v).Mul(modulus).ShiftAllRight(48)))
+			acc1 = acc1.Or(one.ShiftLeft(z1.And(mask48v).Mul(modulus).ShiftAllRight(48)))
+		}
+		acc0.StoreArray(&out)
+		for i, bits := range out {
+			if bits == fullMask {
+				return salt + uint64(i)
 			}
 		}
-		for v := range acc {
-			acc[v].StoreArray(&out)
-			for i, bits := range out {
-				if bits == fullMask {
-					return salt + uint64(8*v+i)
-				}
+		acc1.StoreArray(&out)
+		for i, bits := range out {
+			if bits == fullMask {
+				return salt + 8 + uint64(i)
 			}
 		}
-		salt += 8 * saltVectors
+		salt += 16
 	}
 }
