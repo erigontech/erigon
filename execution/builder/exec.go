@@ -55,7 +55,6 @@ type BuilderExecCfg struct {
 	engine       rules.Engine
 	blockReader  dbservices.FullBlockReader
 	vmConfig     *vm.Config
-	tmpdir       string
 	interrupt    *atomic.Bool
 	payloadId    uint64
 	txnProvider  txnprovider.TxnProvider
@@ -67,7 +66,6 @@ func StageBuilderExecCfg(
 	chainConfig *chain.Config,
 	engine rules.Engine,
 	vmConfig *vm.Config,
-	tmpdir string,
 	interrupt *atomic.Bool,
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
@@ -80,7 +78,6 @@ func StageBuilderExecCfg(
 		engine:       engine,
 		blockReader:  blockReader,
 		vmConfig:     vmConfig,
-		tmpdir:       tmpdir,
 		interrupt:    interrupt,
 		payloadId:    payloadId,
 		txnProvider:  txnProvider,

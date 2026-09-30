@@ -800,11 +800,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 }
 
 func DumpHeaders(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, workers int, lvl log.Lvl, logger log.Logger) (uint64, error) {
-	return DumpHeadersRaw(ctx, db, nil, blockFrom, blockTo, nil, collect, lvl, logger, false)
+	return DumpHeadersRaw(ctx, db, blockFrom, blockTo, collect, lvl, logger, false)
 }
 
 // DumpHeadersRaw - [from, to)
-func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blockTo uint64, _ firstKeyGetter, collect func([]byte) error, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
+func DumpHeadersRaw(ctx context.Context, db kv.RoDB, blockFrom, blockTo uint64, collect func([]byte) error, lvl log.Lvl, logger log.Logger, test bool) (uint64, error) {
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
 

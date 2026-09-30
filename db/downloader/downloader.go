@@ -429,7 +429,6 @@ func (d *Downloader) AddTorrentsFromDisk(ctx context.Context) (incompleteTorrent
 	return
 }
 
-// I haven't removed logSeeding yet because I think Alex will want it back at some point.
 func (d *Downloader) InitBackgroundLogger() {
 	d.lock.Lock()
 	defer d.lock.Unlock()
@@ -674,7 +673,7 @@ func (d *Downloader) newStats(prevStats AggStats, torrents []snapshot) AggStats 
 	return stats
 }
 
-// Calculating rate with decay in order to avoid rate spikes
+// calculateRate returns the byte rate between two cumulative counters over interval.
 func calculateRate(current, previous uint64, interval time.Duration) uint64 {
 	if interval == 0 {
 		return math.MaxUint64
