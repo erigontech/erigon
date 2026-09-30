@@ -176,7 +176,8 @@ type ForkChoiceStorageWriter interface {
 	// MUST only be called from the local block production path.
 	ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] OnGossipPayloadAttestationMessage processes a PTC attestation message from gossip.
-	// Returns ErrIgnore for IGNORE conditions, other errors for REJECT conditions.
+	// ErrPayloadAttestationNotCurrentSlot means the message is valid gossip whose vote is not counted.
+	// Otherwise it returns ErrIgnore for IGNORE conditions and other errors for REJECT conditions.
 	OnGossipPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage) error
 	// [New in Gloas:EIP7732] StoreAnchorEnvelope persists an envelope to disk and updates
 	// eth2Roots without running state transition. Used during checkpoint sync where the

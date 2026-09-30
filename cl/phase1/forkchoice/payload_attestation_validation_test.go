@@ -552,3 +552,139 @@ func TestPayloadAttestationValidationContextSignature(t *testing.T) {
 	msg.Data.PayloadPresent = false
 	require.ErrorContains(t, validationContext.validateSignature(msg), "invalid payload attestation signature")
 }
+
+var gossipTestBlockRoot = common.HexToHash("0x1234")
+
+// newGossipPayloadAttestationTestStore returns a store at storeSlot whose cached validation
+// context makes validator 42 the PTC member at position 7 for the slot-100 block, and a
+// function that signs a slot-100 message for that validator.
+func newGossipPayloadAttestationTestStore(t *testing.T, storeSlot uint64) (*ForkChoiceStore, func(payloadPresent bool) *cltypes.PayloadAttestationMessage) {
+	t.Helper()
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	var publicKey common.Bytes48
+	copy(publicKey[:], bls.CompressPublicKey(privateKey.PublicKey()))
+	domain := common.HexToHash("0xabcd")
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+	contexts.cache.Add(gossipTestBlockRoot, &payloadAttestationValidationContext{
+		slot:       100,
+		domain:     domain,
+		positions:  map[uint64][]int{42: {7}},
+		publicKeys: map[uint64]common.Bytes48{42: publicKey},
+	})
+	f := &ForkChoiceStore{beaconCfg: &clparams.MainnetBeaconConfig, payloadAttestationContexts: contexts}
+	f.time.Store(storeSlot * f.beaconCfg.SecondsPerSlot)
+	sign := func(payloadPresent bool) *cltypes.PayloadAttestationMessage {
+		data := &cltypes.PayloadAttestationData{BeaconBlockRoot: gossipTestBlockRoot, Slot: 100, PayloadPresent: payloadPresent}
+		signingRoot, err := fork.ComputeSigningRoot(data, domain[:])
+		require.NoError(t, err)
+		msg := &cltypes.PayloadAttestationMessage{ValidatorIndex: 42, Data: data}
+		copy(msg.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+		return msg
+	}
+	return f, sign
+}
+
+func TestOnGossipPayloadAttestationMessageCountsOnlyFirstCurrentSlotMessage(t *testing.T) {
+	f, sign := newGossipPayloadAttestationTestStore(t, 100)
+
+	require.NoError(t, f.OnGossipPayloadAttestationMessage(context.Background(), sign(true)))
+	err := f.OnGossipPayloadAttestationMessage(context.Background(), sign(false))
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.NotErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
+	require.Equal(t, int8(1), f.payloadTimelinessVoteValue(gossipTestBlockRoot)[7])
+}
+
+func TestOnGossipPayloadAttestationMessageDoesNotCountLateMessage(t *testing.T) {
+	f, sign := newGossipPayloadAttestationTestStore(t, 101)
+
+	err := f.OnGossipPayloadAttestationMessage(context.Background(), sign(true))
+
+	require.ErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
+	timeliness, _ := f.PayloadAttestationVotes(gossipTestBlockRoot)
+	require.Equal(t, [clparams.PtcSize]int8{}, timeliness)
+}
+
+func TestOnGossipPayloadAttestationMessageLateConflictingMessagesHaveOneWinner(t *testing.T) {
+	f, sign := newGossipPayloadAttestationTestStore(t, 101)
+	messages := make([]*cltypes.PayloadAttestationMessage, 16)
+	for i := range messages {
+		messages[i] = sign(i%2 == 0)
+	}
+	start := make(chan struct{})
+	results := make(chan error, len(messages))
+	for _, msg := range messages {
+		go func() {
+			<-start
+			results <- f.OnGossipPayloadAttestationMessage(context.Background(), msg)
+		}()
+	}
+
+	close(start)
+	winners := 0
+	for range messages {
+		err := <-results
+		require.ErrorIs(t, err, ErrIgnore)
+		if errors.Is(err, ErrPayloadAttestationNotCurrentSlot) {
+			winners++
+		}
+	}
+
+	require.Equal(t, 1, winners)
+}
+
+func TestOnGossipPayloadAttestationMessageRejectsLateInvalidSignature(t *testing.T) {
+	f, sign := newGossipPayloadAttestationTestStore(t, 101)
+	msg := sign(true)
+	msg.Data.PayloadPresent = false
+
+	err := f.OnGossipPayloadAttestationMessage(context.Background(), msg)
+
+	require.ErrorContains(t, err, "invalid payload attestation signature")
+	require.NotErrorIs(t, err, ErrIgnore)
+}
+
+func TestOnGossipPayloadAttestationMessageInvalidLateMessageDoesNotBlockValidOne(t *testing.T) {
+	f, sign := newGossipPayloadAttestationTestStore(t, 101)
+	forged := sign(true)
+	forged.Data.PayloadPresent = false
+
+	require.Error(t, f.OnGossipPayloadAttestationMessage(context.Background(), forged))
+	err := f.OnGossipPayloadAttestationMessage(context.Background(), sign(true))
+
+	require.ErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
+}
+
+func TestOnGossipPayloadAttestationMessageIgnoresMessageAheadOfStore(t *testing.T) {
+	f, sign := newGossipPayloadAttestationTestStore(t, 99)
+
+	err := f.OnGossipPayloadAttestationMessage(context.Background(), sign(true))
+
+	require.ErrorIs(t, err, ErrIgnore)
+	require.NotErrorIs(t, err, ErrPayloadAttestationNotCurrentSlot)
+}
+
+func TestOnGossipPayloadAttestationMessageAheadOfStoreCountsAfterTick(t *testing.T) {
+	f, sign := newGossipPayloadAttestationTestStore(t, 99)
+	msg := sign(true)
+	require.ErrorIs(t, f.OnGossipPayloadAttestationMessage(context.Background(), msg), ErrIgnore)
+	f.time.Store(100 * f.beaconCfg.SecondsPerSlot)
+
+	require.NoError(t, f.OnGossipPayloadAttestationMessage(context.Background(), msg))
+
+	timeliness, _ := f.PayloadAttestationVotes(gossipTestBlockRoot)
+	require.Equal(t, int8(1), timeliness[7])
+}
+
+func TestPayloadAttestationSlotMismatchIsNoOpOnlyForSpecHandler(t *testing.T) {
+	f, sign := newGossipPayloadAttestationTestStore(t, 100)
+	msg := sign(true)
+	msg.Data.Slot = 99
+
+	require.NoError(t, f.OnPayloadAttestationMessage(context.Background(), msg, false))
+	require.ErrorIs(t, f.OnGossipPayloadAttestationMessage(context.Background(), msg), ErrIgnore)
+	timeliness, _ := f.PayloadAttestationVotes(gossipTestBlockRoot)
+	require.Equal(t, [clparams.PtcSize]int8{}, timeliness)
+}
