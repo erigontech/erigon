@@ -1841,6 +1841,35 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 		require.Equal(t, uint64(1), witnessCacheMissCounter.GetValueUint64()-missBefore, "a miss increments the miss counter once")
 	})
 
+	t.Run("legacy miss joins the running build", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, false, false)
+		registerFinishedBuild(cache, block1Hash, sentinel)
+		api.witnessCache = cache
+		t.Cleanup(func() { api.witnessCache = nil })
+
+		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
+		require.NoError(t, err)
+		require.Same(t, sentinel, result, "a legacy miss must take the running build's result, not build again")
+	})
+
+	t.Run("shared build survives its caller's cancellation", func(t *testing.T) {
+		cache := newWitnessResultCache(96, 0, false, false)
+		reqCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		tx, err := api.db.BeginTemporalRo(reqCtx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		info, err := api.resolveWitnessBlock(reqCtx, tx, rpc.BlockNumberOrHash{BlockNumber: &bn})
+		require.NoError(t, err)
+		cancel()
+
+		result, err := cache.buildOnce(reqCtx, block1Hash, func(ctx context.Context) (*ExecutionWitnessResult, error) {
+			return api.buildWitnessResult(ctx, tx, nil, info, witnessModeLegacy)
+		}, nil)
+		require.NoError(t, err, "a canceled caller must not fail the build its waiters share")
+		require.NotEmpty(t, result.State)
+	})
+
 	t.Run("nil cache path unaffected", func(t *testing.T) {
 		api.witnessCache = nil
 		result, err := api.ExecutionWitness(ctx, rpc.BlockNumberOrHash{BlockNumber: &bn}, nil)
