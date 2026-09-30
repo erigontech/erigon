@@ -57,3 +57,25 @@ func BenchmarkAppendQuoted(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkEncodeHexImpls(b *testing.B) {
+	for _, n := range []int{20, 32, 64, 256, 1024} {
+		src := make([]byte, n)
+		for i := range src {
+			src[i] = byte(i * 7)
+		}
+		dst := make([]byte, 2*n)
+		for name, fn := range map[string]func(dst, src []byte){
+			"stdlib":   func(d, s []byte) { hex.Encode(d, s) },
+			"pr":       encodeHex,
+			"portable": encodeHexPortable,
+		} {
+			b.Run(fmt.Sprintf("%s/%d", name, n), func(b *testing.B) {
+				b.SetBytes(int64(n))
+				for b.Loop() {
+					fn(dst, src)
+				}
+			})
+		}
+	}
+}

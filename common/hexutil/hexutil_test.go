@@ -280,3 +280,16 @@ func TestEncodeHexMatchesStdlib(t *testing.T) {
 		require.Equal(t, "x0x"+want, string(text), "len %d", n)
 	}
 }
+
+func TestEncodeHexPortableMatchesStdlib(t *testing.T) {
+	r := rand.New(rand.NewPCG(1, 2))
+	for n := 0; n <= 300; n++ {
+		src := make([]byte, n)
+		for i := range src {
+			src[i] = byte(r.Uint32())
+		}
+		dst := make([]byte, 2*n)
+		encodeHexPortable(dst, src)
+		require.Equal(t, hex.EncodeToString(src), string(dst), "len %d", n)
+	}
+}
