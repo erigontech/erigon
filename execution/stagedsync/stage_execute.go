@@ -208,13 +208,21 @@ func binaryTrieActivationBlockWithHead(ctx context.Context, tx kv.TemporalTx, br
 			return 0, false, err
 		}
 		if header == nil {
-			return 0, false, nil
+			high = middle
+			continue
 		}
 		if config.IsBinaryTrie(header.Time) {
 			high = middle
 		} else {
 			low = middle + 1
 		}
+	}
+	header, err := br.HeaderByNumber(ctx, tx, low)
+	if err != nil {
+		return 0, false, err
+	}
+	if header == nil || !config.IsBinaryTrie(header.Time) {
+		return 0, false, nil
 	}
 	return low, true, nil
 }

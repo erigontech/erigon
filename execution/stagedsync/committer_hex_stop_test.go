@@ -66,6 +66,25 @@ func TestCommitmentCalculatorUsesCurrentBranchHeaderForActivation(t *testing.T) 
 	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "hex shadow must stop at the first block after the activation window")
 }
 
+func TestCommitmentCalculatorKeepsHexWhenActivationIsUnresolved(t *testing.T) {
+	activationTime := uint64(10)
+	cc := &commitmentCalculator{
+		chainConfig:   &chain.Config{BinaryTrieTime: &activationTime},
+		blockReader:   missingActivationHeaderReader{},
+		maxReorgDepth: 1,
+	}
+	cc.stopHexShadowAtWindow(t.Context(), commitTarget{blockNum: 7, blockTime: activationTime})
+	require.False(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "an unresolved activation must not stop the hex shadow")
+}
+
+func TestCommitmentCalculatorDiscardsLocalStopAfterRejectedBlock(t *testing.T) {
+	cc := &commitmentCalculator{}
+	cc.stopShadowDomain(kv.CommitmentDomain)
+	require.True(t, cc.ShadowDomainStopped(kv.CommitmentDomain))
+	cc.handleMessage(t.Context(), &blockResult{Err: errors.New("rejected")})
+	require.False(t, cc.ShadowDomainStopped(kv.CommitmentDomain), "a rejected block must discard its local shadow stop")
+}
+
 func TestCommitmentCalculatorStopsFoldingHexAtWindowEnd(t *testing.T) {
 	db, tx, doms := dualCalculatorTest(t)
 	roTx, err := db.BeginTemporalRo(t.Context())
@@ -159,4 +178,12 @@ func (uncommittedActivationHeaderReader) HeaderByNumber(_ context.Context, _ kv.
 		return &types.Header{Time: 10}, nil
 	}
 	return &types.Header{}, nil
+}
+
+type missingActivationHeaderReader struct {
+	dbservices.FullBlockReader
+}
+
+func (missingActivationHeaderReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+	return nil, nil
 }

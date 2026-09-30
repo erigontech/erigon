@@ -530,6 +530,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		// A failed block may contain only partial state. Do not compute its
 		// commitment; the apply loop owns error classification.
 		if r.Err != nil {
+			cc.shadowStopped = nil
 			return
 		}
 		target := targetOf(r)
@@ -1313,15 +1314,40 @@ func (cc *commitmentCalculator) stopHexShadowAtWindow(ctx context.Context, t com
 		return
 	}
 	if !cc.hasActivationBlock {
-		if cc.blockReader == nil {
+		if cc.hasSeenBlockResult && !cc.chainConfig.IsBinaryTrie(cc.lastTarget.blockTime) {
 			cc.activationBlock = t.blockNum
 			cc.hasActivationBlock = true
-		} else if activationBlock, found, err := binaryTrieActivationBlockWithHead(ctx, cc.roTx, cc.blockReader, cc.chainConfig, t.blockNum, &types.Header{Time: t.blockTime}); err == nil && found {
-			cc.activationBlock = activationBlock
+		} else if cc.hasFirstBlock && cc.firstBlockNum == t.blockNum {
+			cc.activationBlock = t.blockNum
 			cc.hasActivationBlock = true
+		} else if cc.blockReader == nil {
+			cc.activationBlock = t.blockNum
+			cc.hasActivationBlock = true
+		} else {
+			searchBlock := t.blockNum
+			canSearch := true
+			if cc.hasFirstBlock && cc.firstBlockNum < searchBlock {
+				firstHeader, err := cc.blockReader.HeaderByNumber(ctx, cc.roTx, cc.firstBlockNum)
+				if err == nil && firstHeader != nil && cc.chainConfig.IsBinaryTrie(firstHeader.Time) {
+					cc.activationBlock = cc.firstBlockNum
+					cc.hasActivationBlock = true
+				} else {
+					if cc.firstBlockNum == 0 {
+						canSearch = false
+					} else {
+						searchBlock = cc.firstBlockNum - 1
+					}
+				}
+			}
+			if !cc.hasActivationBlock && canSearch {
+				if activationBlock, found, err := binaryTrieActivationBlockWithHead(ctx, cc.roTx, cc.blockReader, cc.chainConfig, searchBlock, &types.Header{Time: t.blockTime}); err == nil && found {
+					cc.activationBlock = activationBlock
+					cc.hasActivationBlock = true
+				}
+			}
 		}
 	}
-	if shouldStopHexShadow(cc.activationBlock, cc.maxReorgDepth, t.blockNum) {
+	if cc.hasActivationBlock && shouldStopHexShadow(cc.activationBlock, cc.maxReorgDepth, t.blockNum) {
 		cc.stopShadowDomain(kv.CommitmentDomain)
 	}
 }

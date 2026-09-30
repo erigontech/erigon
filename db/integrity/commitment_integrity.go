@@ -207,7 +207,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 	var info commitmentRootInfo
 	startTxNum := f.StartRootNum()
 	endTxNum := f.EndRootNum()
-	maxTxNum := endTxNum
+	maxTxNum := fileLookupMaxTxNum(endTxNum)
 	stateKey, v, ok, start, end, err := latestCommitmentStateFromFiles(tx, maxTxNum)
 	if err != nil {
 		return info, err
