@@ -2,8 +2,10 @@ package p2p
 
 import (
 	"net"
+	"sync/atomic"
 
 	"github.com/libp2p/go-libp2p/core/control"
+	"github.com/libp2p/go-libp2p/core/host"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/multiformats/go-multiaddr"
@@ -23,6 +25,7 @@ var privateCIDRList = []string{
 
 type Gater struct {
 	filter *multiaddr.Filters
+	host   atomic.Pointer[host.Host]
 }
 
 func NewGater(cfg *P2PConfig) (g *Gater, err error) {
@@ -32,6 +35,13 @@ func NewGater(cfg *P2PConfig) (g *Gater, err error) {
 		return nil, err
 	}
 	return g, nil
+}
+
+// SetHost lets the gater see live connections once the host exists. buildOptions
+// registers the gater before libp2p.New returns the host it gates, so InterceptSecured
+// fails open (allow) until this is called.
+func (g *Gater) SetHost(h host.Host) {
+	g.host.Store(&h)
 }
 
 // InterceptPeerDial tests whether we're permitted to Dial the specified peer.
@@ -63,7 +73,32 @@ func (g *Gater) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 // This is called by the upgrader, after it has performed the security
 // handshake, and before it negotiates the muxer, or by the directly by the
 // transport, at the exact same checkpoint.
-func (g *Gater) InterceptSecured(_ network.Direction, _ peer.ID, _ network.ConnMultiaddrs) (allow bool) {
+//
+// Two peers that discover each other via discv5 can each independently dial the
+// other around the same time, one over TCP and one over QUIC: go-libp2p does not
+// deduplicate connections across transports (swarm.addConn appends unconditionally),
+// so both dials succeed and the peer ends up with two live connections that never
+// converge on their own. Rejecting here, before the connection is registered or the
+// muxer negotiated, is cheaper than closing it afterwards and — because "is this
+// address QUIC" is a fact both sides compute identically — always converges on
+// keeping the same connection (the QUIC one) rather than racing on timestamps that
+// the two peers could disagree on.
+func (g *Gater) InterceptSecured(dir network.Direction, p peer.ID, addrs network.ConnMultiaddrs) (allow bool) {
+	if dir != network.DirInbound {
+		return true
+	}
+	hostPtr := g.host.Load()
+	if hostPtr == nil {
+		return true
+	}
+	if _, err := addrs.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+		return true
+	}
+	for _, conn := range (*hostPtr).Network().ConnsToPeer(p) {
+		if _, err := conn.RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1); err == nil {
+			return false
+		}
+	}
 	return true
 }
 
