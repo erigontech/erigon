@@ -160,6 +160,14 @@ func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*ty
 	if err != nil {
 		return err
 	}
+	completed := false
+	defer func() {
+		if completed {
+			return
+		}
+		_ = dir.RemoveFile(framedPath)
+		_ = dir.RemoveFile(metaPath)
+	}()
 	outputFile, err := os.Create(framedPath)
 	if err != nil {
 		return err
@@ -208,9 +216,31 @@ func runExport(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*ty
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(metaPath, append(metadataJSON, '\n'), 0o644); err != nil {
+	metaTemp, err := os.CreateTemp(outDir, ".preimages-meta-*.tmp")
+	if err != nil {
 		return err
 	}
+	metaTempName := metaTemp.Name()
+	defer func() {
+		_ = metaTemp.Close()
+		_ = dir.RemoveFile(metaTempName)
+	}()
+	if _, err := metaTemp.Write(append(metadataJSON, '\n')); err != nil {
+		return err
+	}
+	if err := metaTemp.Sync(); err != nil {
+		return err
+	}
+	if err := metaTemp.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(metaTempName, metaPath); err != nil {
+		return err
+	}
+	if err := dir.FsyncDir(outDir); err != nil {
+		return err
+	}
+	completed = true
 	logger.Info("[export-preimages] done", "accounts", stats.Accounts, "slots", stats.Slots, "file", framedPath, "bytes", stats.sizeBytes(), "took", time.Since(start).Round(time.Second))
 	return nil
 }
