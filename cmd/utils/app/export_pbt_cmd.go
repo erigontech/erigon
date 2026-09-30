@@ -117,6 +117,10 @@ func runExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (
 	return runExportPBTWithReadbackHook(ctx, tx, headerAt, outDir, logger, nil)
 }
 
+func RunExportPBT(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger) error {
+	return runExportPBT(ctx, tx, headerAt, outDir, logger)
+}
+
 func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerAt func(uint64) (*types.Header, error), outDir string, logger log.Logger, beforeReadback func(string) error) error {
 	if tx == nil || headerAt == nil {
 		return fmt.Errorf("export-pbt: missing input")

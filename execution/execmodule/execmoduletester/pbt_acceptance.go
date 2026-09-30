@@ -18,6 +18,7 @@ package execmoduletester
 
 import (
 	"bytes"
+	"crypto/ecdsa"
 	"maps"
 	"math/big"
 	"testing"
@@ -30,8 +31,11 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -43,6 +47,7 @@ type PBTAcceptanceChain struct {
 	Tester   *ExecModuleTester
 	Chain    *blockgen.ChainPack
 	Genesis  *types.Genesis
+	Key      *ecdsa.PrivateKey
 	Sender   common.Address
 	Contract common.Address
 }
@@ -74,11 +79,56 @@ func NewPBTAcceptanceChain(tb testing.TB, binary bool, dual bool) (*PBTAcceptanc
 		BaseFee:  uint256.NewInt(0),
 	}
 	dirs := datadir.New(tb.TempDir())
+	refs := false
+	variant := dbstate.TrieVariantHex
+	settings := &dbstate.ErigonDBSettings{StepSize: 1, StepsInFrozenFile: 1, ReferencesInCommitmentBranches: &refs, TrieVariant: &variant}
+	if binary {
+		variant = dbstate.TrieVariantBin
+	}
+	if dual {
+		variant = dbstate.TrieVariantHexBin
+	}
+	if binary || dual {
+		hash := statecfg.BinCommitmentHash
+		if hash == "" {
+			hash = commitment.PBinHashBlake3
+		}
+		settings.TrieHash = &hash
+	}
+	if err := dbstate.WriteErigonDBSettings(dirs, settings); err != nil {
+		return nil, err
+	}
 	options := []Option{WithGenesisSpec(genesis), WithKey(key), WithStepSize(1), WithDataDir(dirs)}
 	if dual {
+		previousBin := statecfg.ExperimentalBinCommitment
+		previousHexBin := statecfg.ExperimentalHexBinCommitment
+		previousV3 := statecfg.ExperimentalCommitmentV3
+		previousSchema := statecfg.Schema
+		statecfg.ExperimentalBinCommitment = true
+		statecfg.ExperimentalHexBinCommitment = true
+		statecfg.ExperimentalCommitmentV3 = true
+		statecfg.InitSchemas()
+		statecfg.EnableCommitmentV3Records(&statecfg.Schema.CommitmentDomain)
+		tb.Cleanup(func() {
+			statecfg.ExperimentalBinCommitment = previousBin
+			statecfg.ExperimentalHexBinCommitment = previousHexBin
+			statecfg.ExperimentalCommitmentV3 = previousV3
+			statecfg.Schema = previousSchema
+		})
 		options = append(options, WithEnableDomain(kv.CommitmentBinDomain))
 	}
 	tester := New(tb, options...)
+	settings, settingsErr := dbstate.ReadErigonDBSettings(dirs)
+	if settingsErr != nil {
+		tester.Close()
+		return nil, settingsErr
+	}
+	settings.StepSize = 1
+	settings.StepsInFrozenFile = 1
+	if writeErr := dbstate.WriteErigonDBSettings(dirs, settings); writeErr != nil {
+		tester.Close()
+		return nil, writeErr
+	}
 	{
 		tx, txErr := tester.DB.BeginTemporalRw(tb.Context())
 		if txErr != nil {
@@ -199,7 +249,7 @@ func NewPBTAcceptanceChain(tb testing.TB, binary bool, dual bool) (*PBTAcceptanc
 		}
 		pack.TopBlock = pack.Blocks[len(pack.Blocks)-1]
 	}
-	return &PBTAcceptanceChain{Tester: tester, Chain: pack, Genesis: genesis, Sender: sender, Contract: contract}, nil
+	return &PBTAcceptanceChain{Tester: tester, Chain: pack, Genesis: genesis, Key: key, Sender: sender, Contract: contract}, nil
 }
 
 func acceptanceAlloc(sender, contract common.Address, sharedCode, delegation []byte) types.GenesisAlloc {

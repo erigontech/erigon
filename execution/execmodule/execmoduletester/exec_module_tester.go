@@ -366,6 +366,12 @@ func WithExistingDataDir(dirs datadir.Dirs) Option {
 	}
 }
 
+func WithoutGenesisCommit() Option {
+	return func(opts *options) {
+		opts.skipGenesisCommit = true
+	}
+}
+
 func WithDataDir(dirs datadir.Dirs) Option {
 	return func(opts *options) {
 		opts.dataDirs = &dirs
@@ -449,6 +455,7 @@ type options struct {
 	skipAmsterdamBuilderContracts bool
 	existingDirs                  *datadir.Dirs
 	dataDirs                      *datadir.Dirs
+	skipGenesisCommit             bool
 }
 
 func applyOptions(opts []Option) options {
@@ -645,7 +652,15 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	}
 
 	// Committed genesis will be shared between download and mock sentry
-	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", dirs, mock.Log)
+	if opt.skipGenesisCommit {
+		var genesisState *state.IntraBlockState
+		mock.Genesis, genesisState, err = genesiswrite.GenesisToBlock(gspec, datadir.New(tb.TempDir()), mock.Log)
+		if genesisState != nil {
+			genesisState.Close()
+		}
+	} else {
+		_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", dirs, mock.Log)
+	}
 	var compatErr *chain.ConfigCompatError
 	if err != nil && !errors.As(err, &compatErr) {
 		if tb != nil {
