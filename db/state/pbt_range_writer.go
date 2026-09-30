@@ -77,7 +77,19 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 	defer at.Close()
 	files := at.Files(kv.AccountsDomain)
 	if len(files) == 0 {
-		return nil, fmt.Errorf("pbin range writer: accounts files are empty")
+		if endTxNum == 0 {
+			return &PBinRangeWriter{aggregator: aggregator, domain: domain}, nil
+		}
+		return &PBinRangeWriter{
+			aggregator: aggregator,
+			domain:     domain,
+			endTxNum:   endTxNum,
+			ranges: []pbinRange{{
+				start:     0,
+				end:       endTxNum,
+				collector: etl.NewCollector("pbin-range-writer", aggregator.Dirs().Tmp, etl.NewSortableBuffer(etl.BufferOptimalSize), log.Root()),
+			}},
+		}, nil
 	}
 	if endTxNum == 0 {
 		endTxNum = files.EndRootNum()
@@ -113,6 +125,10 @@ func NewPBinRangeWriter(aggregator *Aggregator, domain kv.Domain, endTxNum uint6
 }
 
 func (w *PBinRangeWriter) Write(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, leaves func(func(PBinLeaf) error) error) (common.Hash, error) {
+	return w.WriteAtBlock(ctx, tx, domains, leaves, 0)
+}
+
+func (w *PBinRangeWriter) WriteAtBlock(ctx context.Context, tx kv.TemporalTx, domains *execctx.SharedDomains, leaves func(func(PBinLeaf) error) error, blockNum uint64) (common.Hash, error) {
 	if w == nil || w.aggregator == nil {
 		return common.Hash{}, fmt.Errorf("pbin range writer: nil writer")
 	}
@@ -173,7 +189,7 @@ func (w *PBinRangeWriter) Write(ctx context.Context, tx kv.TemporalTx, domains *
 		domains.GetCommitmentCtx().SetPBinOps(batch)
 		var current *pbinRebuildOverlay
 		var err error
-		root, err = domains.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, 0, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
+		root, err = domains.GetCommitmentCtx().ComputeCommitmentWithDiffAndReader(ctx, tx, final, blockNum, w.endTxNum, "pbin-range-writer", nil, nil, nil, func(inner commitment.PatriciaContext) commitment.PatriciaContext {
 			if overlay == nil {
 				overlay = newPBinRebuildOverlay()
 			}

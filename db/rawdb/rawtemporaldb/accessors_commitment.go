@@ -48,7 +48,8 @@ func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
 	if err != nil {
 		return 0, err
 	}
-	if minUnwindable == math.MaxUint64 { // no unwindable block found
+	fromChangesets := minUnwindable != math.MaxUint64
+	if !fromChangesets { // no unwindable block found
 		domain := kv.CommitmentDomain
 		if provider, ok := tx.AggTx().(interface{ CanonicalCommitmentDomain() kv.Domain }); ok {
 			domain = provider.CanonicalCommitmentDomain()
@@ -59,7 +60,7 @@ func CanUnwindToBlockNum(tx kv.TemporalTx) (uint64, error) {
 			return 0, err
 		}
 	}
-	if minUnwindable > 0 {
+	if fromChangesets && minUnwindable > 0 {
 		minUnwindable-- // UnwindTo is exclusive, i.e. (unwindPoint,tip] get unwound
 	}
 	conversionBlock, ok, err := readConversionPoint(tx)

@@ -171,8 +171,9 @@
 ### Conversion point and unwind floor
 
 - `erigondb.toml` gains the conversion point (block, txNum).
-- `CanUnwindToBlockNum`, `CanUnwindBeforeBlockNum`, `UnwindExecutionStage`/`unwindExec3` and the in-memory unwind path
-  refuse an unwind argument U <= C (an unwind to U drops `[U, inf)`).
+- `CanUnwindToBlockNum`, `CanUnwindBeforeBlockNum` and `UnwindExecutionStage`/`unwindExec3` refuse `U < C_block`;
+  block-numbered unwinds drop `(U, tip]`. The in-memory and temporal tx-number paths refuse
+  `txNumUnwindTo <= C_txNum`, because they drop `[txNumUnwindTo, inf)`.
 - `SharedDomains.Unwind` has no error return: either its callers check the floor first, or it gains an error return,
   whichever is the smaller diff. Each site gets its own test.
 
@@ -391,7 +392,7 @@
 - Create: `cmd/integration/commands/commitment_convert_pbt_test.go`
 - Modify: `cmd/integration/commands/commitment.go`
 
-- [ ] add the command with a stub. Write tests on a hex test datadir converted with `--keep-hex`:
+- [x] add the command with a stub. Write tests on a hex test datadir converted with `--keep-hex`:
       - the hex+bin output's bin root equals the reference root;
       - its rows equal the engine's rows built incrementally over the same state;
       - converting twice gives byte-identical files;
@@ -399,19 +400,19 @@
       - the output's `erigondb.toml` holds `trie_hash` and the conversion point at S.
 
       Confirm they fail at the first assertion.
-- [ ] implement source opening (rebuild's options, both commitment domains excluded; `isCommitmentFileName` covers
+- [x] implement source opening (rebuild's options, both commitment domains excluded; `isCommitmentFileName` covers
       `commitmentbin`) on top of task 5's feed and writer
-- [ ] implement the outputs:
+- [x] implement the outputs:
       - `--keep-hex`: the v3 hex check and the alignment of its state record with S;
       - bin-only: refused before the fork;
       - the completion check: recursive `Verify`, reference root, header root at a post-fork block end;
       - settings written last.
-- [ ] write tests:
+- [x] write tests:
       - a corrupted non-root row makes the completion check fail and the output get removed;
       - refusals: a legacy hex source with `--keep-hex`, a hex record not at S, a pre-fork bin-only output;
       - a source that is itself hex+bin or bin;
       - the empty state
-- [ ] run tests - must pass before task 7
+- [x] run tests - must pass before task 7
 
 ### Task 7: Bin-aware commitment integrity
 

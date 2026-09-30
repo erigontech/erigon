@@ -761,6 +761,11 @@ func resolvePathForOverlap(path string) (string, error) {
 
 func isCommitmentFileName(name string) bool {
 	parsed, _, ok := snaptype.ParseFileName("", name)
+	return ok && (parsed.TypeString == kv.CommitmentDomain.String() || parsed.TypeString == kv.CommitmentBinDomain.String())
+}
+
+func isHexCommitmentFileName(name string) bool {
+	parsed, _, ok := snaptype.ParseFileName("", name)
 	return ok && parsed.TypeString == kv.CommitmentDomain.String()
 }
 
@@ -785,7 +790,7 @@ func commitmentFileSizes(snapDomain string) ([]commitmentFileSize, error) {
 	}
 	var sizes []commitmentFileSize
 	for _, e := range entries {
-		if e.IsDir() || filepath.Ext(e.Name()) != ".kv" || !isCommitmentFileName(e.Name()) {
+		if e.IsDir() || filepath.Ext(e.Name()) != ".kv" || !isHexCommitmentFileName(e.Name()) {
 			continue
 		}
 		info, err := e.Info()
@@ -872,7 +877,7 @@ func commitmentFilesIn(snapDomain string) ([]string, error) {
 	}
 	var found []string
 	for _, e := range entries {
-		if !e.IsDir() && isCommitmentFileName(e.Name()) {
+		if !e.IsDir() && isHexCommitmentFileName(e.Name()) {
 			found = append(found, e.Name())
 		}
 	}

@@ -25,6 +25,20 @@ const (
 	TrieVariantHexBin = "hex+bin"
 )
 
+var ErrConversionFloor = kv.ErrConversionFloor
+
+type ConversionFloorKind = kv.ConversionFloorKind
+type ConversionFloorError = kv.ConversionFloorError
+
+const (
+	ConversionFloorBlock = kv.ConversionFloorBlock
+	ConversionFloorTx    = kv.ConversionFloorTx
+)
+
+func NewConversionFloorError(blockNum, txNum, requested uint64, kind ConversionFloorKind) error {
+	return kv.NewConversionFloorError(blockNum, txNum, requested, kind)
+}
+
 type ErigonDBSettings struct {
 	StepSize                       uint64            `toml:"step_size"`
 	StepsInFrozenFile              uint64            `toml:"steps_in_frozen_file"`

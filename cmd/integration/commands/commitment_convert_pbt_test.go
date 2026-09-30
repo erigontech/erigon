@@ -1,0 +1,419 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package commands
+
+import (
+	"bytes"
+	"os"
+	"path/filepath"
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+	"lukechampine.com/blake3"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	dbtemporal "github.com/erigontech/erigon/db/kv/temporal"
+	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snaptype"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	chainpkg "github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	"github.com/erigontech/erigon/execution/execfinality"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
+
+func TestIsCommitmentFileNameAcceptsCommitmentBin(t *testing.T) {
+	require.True(t, isCommitmentFileName("v1.0-commitment-bin.0-1024.kv"), "the converter must exclude commitment-bin files from its source links")
+}
+
+func TestConvertPBTHexSourceKeepHex(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	previousDatadir := datadirCli
+	previousChaindata := chaindata
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+		datadirCli = previousDatadir
+		chaindata = previousChaindata
+	})
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source, wantRoot := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	datadirCli = source.DataDir
+	chaindata = source.Chaindata
+	statecfg.ExperimentalCommitmentV3 = true
+	statecfg.BinCommitmentHash = ""
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+	settings, err := dbstate.ReadErigonDBSettings(datadir.Open(output))
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantHexBin, settings.TrieVariantName())
+	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName())
+	blockNum, txNum, ok, err := settings.ConversionPoint()
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.Equal(t, uint64(1), blockNum)
+	require.Equal(t, uint64(8), txNum)
+	_, err = os.Stat(filepath.Join(output, "chaindata"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	outputDirs := datadir.Open(output)
+	var binFiles int
+	outputNames := domainFileNames(t, outputDirs.SnapDomain)
+	require.Equal(t, wantRoot, readPBTBinRoot(t, output, source.Chaindata))
+	for _, name := range outputNames {
+		parsed, _, ok := snaptype.ParseFileName(outputDirs.SnapDomain, name)
+		if !ok || parsed.TypeString != kv.CommitmentBinDomain.String() {
+			continue
+		}
+		binFiles++
+	}
+	require.NotZero(t, binFiles)
+
+	secondOutput := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, secondOutput, true, "", log.New()))
+	require.Equal(t, snapshotTree(t, output), snapshotTree(t, secondOutput))
+}
+
+func TestConvertPBTEmptyStateHasZeroRoot(t *testing.T) {
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	previousDatadir := datadirCli
+	previousChaindata := chaindata
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+		datadirCli = previousDatadir
+		chaindata = previousChaindata
+	})
+	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
+	source := newPBTEmptyConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	require.NoError(t, convertPBT(t.Context(), source.DataDir, output, true, "", log.New()))
+	require.Equal(t, eip8297.EmptyTreeHash, readPBTBinRoot(t, output, source.Chaindata))
+}
+
+func TestConvertPBTBinOnlyRefusesBeforeFork(t *testing.T) {
+	source, _ := newPBTConversionSource(t)
+	output := filepath.Join(t.TempDir(), "output")
+	err := convertPBT(t.Context(), source.DataDir, output, false, "", log.New())
+	require.ErrorContains(t, err, "after the binary trie fork")
+	_, statErr := os.Stat(output)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestConvertPBTHexStateMustBeAtSourceEnd(t *testing.T) {
+	source, _ := newPBTConversionSource(t)
+	setPBTConversionPoint(t, source, 1, 7)
+	output := filepath.Join(t.TempDir(), "output")
+	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
+	require.ErrorContains(t, err, "not at the accounts file end")
+	_, statErr := os.Stat(output)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+func TestConvertPBTLegacyHexSourceIsRefusedAndRemoved(t *testing.T) {
+	source, _ := newPBTConversionSource(t)
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSuite := commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	})
+	statecfg.ExperimentalBinCommitment = false
+	statecfg.ExperimentalHexBinCommitment = false
+	statecfg.ExperimentalCommitmentV3 = true
+	removePBTConversionState(t, source)
+	output := filepath.Join(t.TempDir(), "output")
+	err := convertPBT(t.Context(), source.DataDir, output, true, "", log.New())
+	require.ErrorContains(t, err, "run commitment convert --v3 or collate first")
+	_, statErr := os.Stat(output)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+type pbtConversionSource struct {
+	datadir.Dirs
+}
+
+func newPBTConversionSource(t *testing.T) (pbtConversionSource, common.Hash) {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	refs := false
+	variant := dbstate.TrieVariantHex
+	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
+		StepSize:                       8,
+		StepsInFrozenFile:              1,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-state.txt"), []byte{1, 2, 3, 4}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), []byte("blocks"), 0o644))
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	agg := dbstate.NewTest(dirs).StepSize(8).StepsInFrozenFile(1).WithErigonDBSettings(&dbstate.ErigonDBSettings{
+		StepSize:                       8,
+		StepsInFrozenFile:              1,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+	}).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	closed := false
+	t.Cleanup(func() {
+		if !closed {
+			db.Close()
+			agg.Close()
+			rawDB.Close()
+		}
+	})
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	genesis := common.Hash{1}
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
+	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{}))
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 0, 0))
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 8))
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	address := bytes.Repeat([]byte{0x11}, length.Addr)
+	account := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(1), CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, address, accounts.SerialiseV3(&account), 1, nil))
+	slot := append(bytes.Clone(address), bytes.Repeat([]byte{0x22}, 32)...)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, slot, []byte{1}, 1, nil))
+	updates := commitment.NewUpdates(commitment.ModeCollect, "", commitment.KeyToHexNibbleHash)
+	updates.TouchPlainKey(string(address), nil, func(*commitment.KeyUpdate, []byte) {})
+	updates.TouchPlainKey(string(slot), nil, func(*commitment.KeyUpdate, []byte) {})
+	ctx := domains.GetCommitmentCtxForDomain(kv.CommitmentDomain)
+	ctx.SetUpdates(updates)
+	_, err = ctx.ComputeCommitment(t.Context(), tx, true, 1, 8, "conversion-source", nil)
+	require.NoError(t, err)
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	domains.Close()
+	require.NoError(t, agg.BuildFiles2(t.Context(), db, 0, 1, execfinality.NewContext(^uint64(0), ^uint64(0), 0, false, rawdbv3.TxNums), false))
+	agg.WaitForFiles()
+	at := agg.BeginFilesRo()
+	require.NotEmpty(t, at.Files(kv.AccountsDomain))
+	builder, err := eip8297.NewStreamRootBuilder(func(data []byte) common.Hash { return common.Hash(blake3.Sum256(data)) })
+	require.NoError(t, err)
+	readTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	require.NoError(t, dbstate.ForEachPBinLeaf(at, readTx, false, func(leaf dbstate.PBinLeaf) error {
+		return builder.Add(leaf.Key, leaf.Value)
+	}))
+	pbtRoot, err := builder.RootHash()
+	require.NoError(t, err)
+	readTx.Rollback()
+	at.Close()
+	db.Close()
+	agg.Close()
+	rawDB.Close()
+	closed = true
+	return pbtConversionSource{Dirs: dirs}, pbtRoot
+}
+
+func newPBTEmptyConversionSource(t *testing.T) pbtConversionSource {
+	t.Helper()
+	dirs := datadir.New(t.TempDir())
+	refs := false
+	variant := dbstate.TrieVariantHex
+	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
+		StepSize:                       8,
+		StepsInFrozenFile:              1,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+	}))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-state.txt"), []byte{1, 2, 3, 4}, 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-blocks.txt"), []byte("blocks"), 0o644))
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(dirs.Chaindata).MustOpen()
+	agg := dbstate.NewTest(dirs).StepSize(8).StepsInFrozenFile(1).WithErigonDBSettings(&dbstate.ErigonDBSettings{
+		StepSize:                       8,
+		StepsInFrozenFile:              1,
+		ReferencesInCommitmentBranches: &refs,
+		TrieVariant:                    &variant,
+	}).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	genesis := common.Hash{1}
+	require.NoError(t, rawdb.WriteCanonicalHash(tx, genesis, 0))
+	require.NoError(t, rawdb.WriteChainConfig(tx, genesis, &chainpkg.Config{}))
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 0, 0))
+	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 8))
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), 1, 8, nil)
+	require.NoError(t, err)
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, state, 8, nil))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	domains.Close()
+	db.Close()
+	agg.Close()
+	rawDB.Close()
+	return pbtConversionSource{Dirs: dirs}
+}
+
+func setPBTConversionPoint(t *testing.T, source pbtConversionSource, blockNum, txNum uint64) {
+	t.Helper()
+	settings, err := dbstate.ReadErigonDBSettings(source.Dirs)
+	require.NoError(t, err)
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
+	agg := dbstate.New(source.Dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	previous, _, err := domains.GetLatest(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State)
+	require.NoError(t, err)
+	state, err := commitment.EncodeCommitmentV3State(make([]byte, 32), blockNum, txNum, nil)
+	require.NoError(t, err)
+	require.NoError(t, domains.DomainPut(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, state, 9, previous))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	domains.Close()
+	db.Close()
+	agg.Close()
+	rawDB.Close()
+}
+
+func removePBTConversionState(t *testing.T, source pbtConversionSource) {
+	t.Helper()
+	settings, err := dbstate.ReadErigonDBSettings(source.Dirs)
+	require.NoError(t, err)
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).Path(source.Chaindata).MustOpen()
+	agg := dbstate.New(source.Dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	cfg := commitment.DefaultTrieConfig()
+	cfg.Variant = commitment.VariantCommitmentV3
+	cfg.EnableTrieWarmup = false
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New(), execctx.WithTrieConfig(cfg), execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	previous, _, err := domains.GetLatest(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State)
+	require.NoError(t, err)
+	require.NotEmpty(t, previous)
+	require.NoError(t, domains.DomainDel(kv.CommitmentDomain, tx, commitment.KeyCommitmentV3State, 9, previous))
+	require.NoError(t, domains.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+	domains.Close()
+	db.Close()
+	agg.Close()
+	rawDB.Close()
+}
+
+func readPBTBinRoot(t *testing.T, output, rawPath string) common.Hash {
+	t.Helper()
+	previousBin := statecfg.ExperimentalBinCommitment
+	previousHexBin := statecfg.ExperimentalHexBinCommitment
+	previousV3 := statecfg.ExperimentalCommitmentV3
+	previousHash := statecfg.BinCommitmentHash
+	previousSchema := statecfg.Schema
+	previousSuite := commitment.PBinHashSuiteName()
+	defer func() {
+		statecfg.ExperimentalBinCommitment = previousBin
+		statecfg.ExperimentalHexBinCommitment = previousHexBin
+		statecfg.ExperimentalCommitmentV3 = previousV3
+		statecfg.BinCommitmentHash = previousHash
+		statecfg.Schema = previousSchema
+		require.NoError(t, commitment.SetPBinHashSuite(previousSuite))
+	}()
+	dirs := datadir.Open(output)
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.New(), false)
+	require.NoError(t, err)
+	rawDB := dbCfg(dbcfg.ChainDB, rawPath).MustOpen()
+	agg := dbstate.New(dirs).WithErigonDBSettings(settings).Logger(log.New()).MustOpen(t.Context())
+	require.NoError(t, agg.OpenFolder(rawDB))
+	at := agg.BeginFilesRo()
+	defer func() {
+		at.Close()
+		agg.Close()
+		rawDB.Close()
+	}()
+	iter, err := at.DebugRangeLatestFromFiles(kv.CommitmentBinDomain, nil, nil, kv.Unlim)
+	require.NoError(t, err)
+	hasRows := false
+	for iter.HasNext() {
+		key, _, nextErr := iter.Next()
+		require.NoError(t, nextErr)
+		if commitment.IsCommitmentStateKey(key) {
+			continue
+		}
+		hasRows = true
+	}
+	iter.Close()
+	if !hasRows {
+		return eip8297.EmptyTreeHash
+	}
+	db, err := dbtemporal.New(rawDB, agg, nil)
+	require.NoError(t, err)
+	tx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	domains, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	root, err := domains.GetCommitmentCtxForDomain(kv.CommitmentBinDomain).Trie().RootHash()
+	require.NoError(t, err)
+	domains.Close()
+	tx.Rollback()
+	db.Close()
+	return common.BytesToHash(root)
+}

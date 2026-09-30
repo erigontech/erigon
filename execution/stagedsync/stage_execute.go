@@ -161,7 +161,7 @@ func checkUnwindConversionPoint(dirs datadir.Dirs, txNum uint64) error {
 		return err
 	}
 	if ok && txNum <= conversionTxNum {
-		return fmt.Errorf("unwind txNum %d reaches conversion point block %d txNum %d", txNum, blockNum, conversionTxNum)
+		return fmt.Errorf("%w: %w", ErrTooDeepUnwind, state.NewConversionFloorError(blockNum, conversionTxNum, txNum, state.ConversionFloorTx))
 	}
 	return nil
 }
@@ -555,7 +555,11 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 			return conversionErr
 		}
 		if hasConversionPoint && u.UnwindPoint < conversionBlock {
-			return fmt.Errorf("%w: requested block %d is below conversion point block %d", ErrTooDeepUnwind, u.UnwindPoint, conversionBlock)
+			_, conversionTx, _, err := state.ReadErigonDBConversionPoint(rwTx.Debug().Dirs())
+			if err != nil {
+				return err
+			}
+			return fmt.Errorf("%w: %w", ErrTooDeepUnwind, state.NewConversionFloorError(conversionBlock, conversionTx, u.UnwindPoint, state.ConversionFloorBlock))
 		}
 		return fmt.Errorf("%w: %d < %d", ErrTooDeepUnwind, u.UnwindPoint, unwindToLimit)
 	}
