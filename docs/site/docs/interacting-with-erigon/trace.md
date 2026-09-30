@@ -336,16 +336,16 @@ params: [
   [
     [
       {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "to": "0x000000000000000000000000000000000000dead",
         "value": "0x186a0"
       },
       ["trace"]
     ],
     [
       {
-        "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-        "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+        "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+        "to": "0x000000000000000000000000000000000000dead",
         "value": "0x186a0"
       },
       ["trace"]
@@ -364,7 +364,7 @@ params: [
 Request
 
 ```bash
-curl --data '{"method":"trace_callMany","params":[[[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]],[{"from":"0x407d73d8a49eeb85d32cf465507dd71d507100c1","to":"0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
+curl --data '{"method":"trace_callMany","params":[[[{"from":"0x28c6c06298d514db089934071355e5743bf21d60","to":"0x000000000000000000000000000000000000dead","value":"0x186a0"},["trace"]],[{"from":"0x28c6c06298d514db089934071355e5743bf21d60","to":"0x000000000000000000000000000000000000dead","value":"0x186a0"},["trace"]]],"latest"],"id":1,"jsonrpc":"2.0"}' -H "Content-Type: application/json" -X POST localhost:8545
 ```
 
 
@@ -381,10 +381,10 @@ Response
       "trace": [{
         "action": {
           "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
+          "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "gas": "0x2fa9e78",
           "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "to": "0x000000000000000000000000000000000000dead",
           "value": "0x186a0"
         },
         "result": {
@@ -403,10 +403,10 @@ Response
       "trace": [{
         "action": {
           "callType": "call",
-          "from": "0x407d73d8a49eeb85d32cf465507dd71d507100c1",
-          "gas": "0x1dcd12f8",
+          "from": "0x28c6c06298d514db089934071355e5743bf21d60",
+          "gas": "0x2fa9e78",
           "input": "0x",
-          "to": "0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b",
+          "to": "0x000000000000000000000000000000000000dead",
           "value": "0x186a0"
         },
         "result": {
@@ -673,6 +673,8 @@ Returns traces matching given filter
    * `mode`: `String` - (optional) Default is `"intersection"`: OR within each address list, AND between the two lists. An omitted, `null`, or empty list imposes no restriction. Set `"union"` to match either populated list and preserve the previous behavior when both lists are set. A `null` mode is the same as an omitted one. Other mode values, including `""`, return `-32602`.
 
    The `'pending'` tag is not supported for either block bound and returns `-32602`: `trace_filter` scans committed trace history, which has no pending block.
+
+   A bound past the latest executed block returns `-32602`, as in `eth_getLogs`, rather than an empty or truncated result. A block hash that names no known block returns an error.
 
 ```js
 params: [{

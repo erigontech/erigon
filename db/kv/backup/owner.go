@@ -34,5 +34,12 @@ func restoreOwner(src os.FileInfo, path string) error {
 	if !ok {
 		return nil
 	}
+	dst, err := os.Stat(path)
+	if err != nil {
+		return err
+	}
+	if owner, ok := dst.Sys().(*syscall.Stat_t); ok && owner.Uid == st.Uid && owner.Gid == st.Gid {
+		return nil
+	}
 	return os.Chown(path, int(st.Uid), int(st.Gid))
 }

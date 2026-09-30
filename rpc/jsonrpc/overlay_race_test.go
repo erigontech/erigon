@@ -1457,31 +1457,51 @@ func (r rejectTxNumsAboveIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum
 	return rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(ctx, tx, txNum)
 }
 
+func requireBlockRangeIntoFuture(t *testing.T, err error) {
+	t.Helper()
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	require.EqualError(t, err, ErrBlockRangeIntoFuture)
+}
+
 // TestTraceFilter_FutureToBlockErrors pins that an explicit toBlock past the
-// executed head errors instead of silently clamping the scan to the last
-// available txnum, which would make an omitted head block look empty.
+// executed head is invalid params, even when its canonical header resolves or
+// the forkchoice head ("latest") is ahead of execution, instead of silently
+// clamping the scan to the last available txnum, which would make an omitted
+// head block look empty.
 func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 	t.Parallel()
-	m, _ := newHeaderAheadTester(t)
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
 	api := newTraceApiForTest(m)
 
-	stream := jsonstream.New(nil)
-
-	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.ErrorContains(t, err, "not executed")
+	for name, to := range map[string]rpc.BlockNumberOrHash{
+		"number": rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1)),
+		"hash":   rpc.BlockNumberOrHashWithHash(aheadHash, true),
+		"latest": rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.New(nil))
+			requireBlockRangeIntoFuture(t, err)
+		})
+	}
 }
 
 func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
 	t.Parallel()
-	m, _ := newHeaderAheadTester(t)
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
 	api := newTraceApiForTest(m)
 
-	stream := jsonstream.New(nil)
-
-	from := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
-	err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, stream)
-	require.ErrorContains(t, err, "not executed")
+	for name, from := range map[string]rpc.BlockNumberOrHash{
+		"number": rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1)),
+		"hash":   rpc.BlockNumberOrHashWithHash(aheadHash, true),
+		"latest": rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+	} {
+		t.Run(name, func(t *testing.T) {
+			err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, jsonstream.New(nil))
+			requireBlockRangeIntoFuture(t, err)
+		})
+	}
 }
 
 func TestTraceFilter_RejectsOverlayOnlyHead(t *testing.T) {
@@ -1517,15 +1537,31 @@ func TestTraceFilter_PropagatesOverlayProbeError(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 }
 
-func TestTraceFilter_UnknownBlockReturnsEmptyArray(t *testing.T) {
-	base, m, _ := newOverlayAheadTestAPI(t)
+// TestTraceFilter_UnknownBlockErrors pins that a bound naming no known block
+// is an error, not an empty result.
+func TestTraceFilter_UnknownBlockErrors(t *testing.T) {
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+	unknownHash := rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, true)
+	// Past the overlay head too, so neither view knows the block.
+	unknownNumber := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64() + 1))
 
-	stream := jsonstream.New(nil)
-	to := rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, true)
-	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
-	require.NoError(t, err)
-	require.Equal(t, "[]", string(stream.Buffer()))
+	t.Run("fromBlock hash", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &unknownHash}, new(bool), nil, jsonstream.New(nil))
+		require.ErrorAs(t, err, &rpc.BlockNotFoundErr{})
+	})
+	t.Run("toBlock hash", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &unknownHash}, new(bool), nil, jsonstream.New(nil))
+		require.ErrorAs(t, err, &rpc.BlockNotFoundErr{})
+	})
+	t.Run("fromBlock number", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &unknownNumber}, new(bool), nil, jsonstream.New(nil))
+		requireBlockRangeIntoFuture(t, err)
+	})
+	t.Run("toBlock number", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &unknownNumber}, new(bool), nil, jsonstream.New(nil))
+		requireBlockRangeIntoFuture(t, err)
+	})
 }
 
 func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
