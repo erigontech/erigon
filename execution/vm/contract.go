@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/cache"
+	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -63,8 +64,15 @@ type Contract struct {
 	selfBalanceCached bool
 }
 
-// around 64MB cache in the worst case.
-var jumpDestCache = cache.NewGenericCache[bitvec](64*datasize.MB, func(v bitvec) int { return len(v) }, cache.ModeEvictLRU)
+var jumpDestCache = newJumpDestCache()
+
+// maxJumpDestBitmapBytes is the bitmap of the largest deployable contract. Budgeting every entry
+// at it keeps the cache within 64MB, since the LRU mode caps entries rather than bytes.
+const maxJumpDestBitmapBytes = (params.MaxCodeSizeAmsterdam + 32 + 63) / 64 * 8
+
+func newJumpDestCache() *cache.GenericCache[bitvec] {
+	return cache.NewGenericCacheWithAvg[bitvec](64*datasize.MB, maxJumpDestBitmapBytes, func(v bitvec) int { return len(v) * 8 }, cache.ModeEvictLRU)
+}
 
 // NewContract returns a new contract environment for the execution of EVM.
 func NewContract(caller accounts.Address, callerAddress accounts.Address, addr accounts.Address, value uint256.Int) *Contract {

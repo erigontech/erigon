@@ -20,7 +20,13 @@
 package vm
 
 import (
+	"encoding/binary"
 	"testing"
+
+	"github.com/c2h5oh/datasize"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
 func TestJumpDestAnalysis(t *testing.T) {
@@ -50,4 +56,20 @@ func TestJumpDestAnalysis(t *testing.T) {
 			t.Fatalf("expected %x, got %02x", test.exp, ret[test.which])
 		}
 	}
+}
+
+// The JUMPDEST cache must stay within its byte budget even when every entry is the bitmap of the
+// largest contract a chain can deploy.
+func TestJumpDestCacheWorstCaseBytes(t *testing.T) {
+	t.Parallel()
+	c := newJumpDestCache()
+	bm := codeBitmap(make([]byte, params.MaxCodeSizeAmsterdam))
+	bmBytes := int64(len(bm)) * 8
+	var key [32]byte
+	for i := range 2 * int(64*datasize.MB) / int(bmBytes) {
+		binary.BigEndian.PutUint64(key[:], uint64(i))
+		c.Put(key[:], bm, 0)
+	}
+	require.LessOrEqual(t, int64(c.Len())*bmBytes, int64(c.CapacityBytes()))
+	require.GreaterOrEqual(t, c.SizeBytes(), int64(c.Len())*bmBytes)
 }
