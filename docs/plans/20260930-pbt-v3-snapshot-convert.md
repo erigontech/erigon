@@ -519,6 +519,7 @@
       or duplicate slot, truncated record, trailing byte; for the join: a missing and a surplus preimage), round trips on
       random states, and the empty snapshot
 - [x] run tests - must pass before task 12
+- [x] ➕ stream the artifact writer, reader, preimage codec and exact-set join with bounded memory
 
 ### Task 12: export-pbt command
 

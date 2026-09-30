@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 
 	keccak "github.com/erigontech/fastkeccak"
 
@@ -31,202 +32,288 @@ import (
 
 var ErrMalformed = errors.New("pbt artifact: malformed artifact")
 
+type SnapshotMeta struct {
+	Root           common.Hash
+	HeaderCount    uint64
+	CodeGroupCount uint64
+	StorageCount   uint64
+	SnapshotDigest common.Hash
+}
+
+type SnapshotCallbacks struct {
+	Header  func(Header) error
+	Code    func(Group) error
+	Storage func(Storage) error
+}
+
+func ReadSnapshotAt(src io.ReaderAt, size int64, callbacks SnapshotCallbacks) (SnapshotMeta, error) {
+	var meta SnapshotMeta
+	if src == nil || size < 56 {
+		return meta, ErrMalformed
+	}
+	c := artifactCursor{src: src, limit: size}
+	root, err := c.bytes(32)
+	if err != nil {
+		return meta, err
+	}
+	copy(meta.Root[:], root)
+	headerCount, err := c.count()
+	if err != nil {
+		return meta, err
+	}
+	if err := countFits(headerCount, c.remaining(), 36); err != nil {
+		return meta, err
+	}
+	headerStart := c.offset
+	var previousAddress common.Hash
+	for i := uint64(0); i < headerCount; i++ {
+		header, err := readHeaderAt(&c)
+		if err != nil {
+			return meta, err
+		}
+		if i != 0 && bytes.Compare(header.AddressHash[:], previousAddress[:]) <= 0 {
+			return meta, ErrUnsorted
+		}
+		previousAddress = header.AddressHash
+		if callbacks.Header != nil {
+			if err := callbacks.Header(header); err != nil {
+				return meta, err
+			}
+		}
+	}
+	headerEnd := c.offset
+	codeCount, err := c.count()
+	if err != nil {
+		return meta, err
+	}
+	if err := countFits(codeCount, c.remaining(), 35); err != nil {
+		return meta, err
+	}
+	var previousStem common.Hash
+	for i := uint64(0); i < codeCount; i++ {
+		group, err := readGroupAt(&c)
+		if err != nil {
+			return meta, err
+		}
+		if i != 0 && bytes.Compare(group.StemHash[:], previousStem[:]) <= 0 {
+			return meta, ErrUnsorted
+		}
+		previousStem = group.StemHash
+		if callbacks.Code != nil {
+			if err := callbacks.Code(group); err != nil {
+				return meta, err
+			}
+		}
+	}
+	storageCount, err := c.count()
+	if err != nil {
+		return meta, err
+	}
+	if err := countFits(storageCount, c.remaining(), 68); err != nil {
+		return meta, err
+	}
+	headerCursor := artifactCursor{src: src, offset: headerStart, limit: headerEnd}
+	var previousStorage common.Hash
+	for i := uint64(0); i < storageCount; i++ {
+		storage, err := readStorageAt(&c)
+		if err != nil {
+			return meta, err
+		}
+		if i != 0 && bytes.Compare(storage.AddressHash[:], previousStorage[:]) <= 0 {
+			return meta, ErrUnsorted
+		}
+		previousStorage = storage.AddressHash
+		if err := matchStorageHeader(&headerCursor, storage.AddressHash); err != nil {
+			return meta, err
+		}
+		if callbacks.Storage != nil {
+			if err := callbacks.Storage(storage); err != nil {
+				return meta, err
+			}
+		}
+	}
+	if c.offset != c.limit {
+		return meta, fmt.Errorf("%w: trailing bytes", ErrMalformed)
+	}
+	hash := keccak.NewFastKeccak()
+	if _, err := io.Copy(hash, io.NewSectionReader(src, 0, size)); err != nil {
+		return meta, err
+	}
+	meta.HeaderCount = headerCount
+	meta.CodeGroupCount = codeCount
+	meta.StorageCount = storageCount
+	meta.SnapshotDigest = common.BytesToHash(hash.Sum(nil))
+	return meta, nil
+}
+
 func ReadSnapshot(src io.Reader) (Snapshot, error) {
-	data, err := io.ReadAll(src)
+	file, cleanup, err := spoolReader(src, "pbt-artifact-read-")
 	if err != nil {
 		return Snapshot{}, err
 	}
-	return readSnapshot(data)
+	defer cleanup()
+	info, err := file.Stat()
+	if err != nil {
+		return Snapshot{}, err
+	}
+	var snapshot Snapshot
+	meta, err := ReadSnapshotAt(file, info.Size(), SnapshotCallbacks{
+		Header: func(header Header) error {
+			snapshot.Headers = append(snapshot.Headers, header)
+			return nil
+		},
+		Code: func(group Group) error {
+			snapshot.CodeGroups = append(snapshot.CodeGroups, group)
+			return nil
+		},
+		Storage: func(storage Storage) error {
+			snapshot.StorageGroups = append(snapshot.StorageGroups, storage)
+			return nil
+		},
+	})
+	if err != nil {
+		return Snapshot{}, err
+	}
+	snapshot.Root = meta.Root
+	snapshot.SnapshotDigest = meta.SnapshotDigest
+	return snapshot, nil
 }
 
 func Read(src io.Reader) (Snapshot, error) { return ReadSnapshot(src) }
 
-func readSnapshot(data []byte) (Snapshot, error) {
-	var snapshot Snapshot
-	if len(data) < 56 {
-		return snapshot, ErrMalformed
-	}
-	offset := 0
-	copy(snapshot.Root[:], data[:32])
-	offset = 32
-	headerCountValue, err := readCount(data, &offset)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if headerCountValue > uint64(len(data)) {
-		return Snapshot{}, ErrMalformed
-	}
-	headerCount := int(headerCountValue)
-	snapshot.Headers = make([]Header, 0, headerCount)
-	var previousAddress common.Hash
-	for i := range headerCount {
-		header, err := readHeader(data, &offset)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if i != 0 && bytes.Compare(header.AddressHash[:], previousAddress[:]) <= 0 {
-			return Snapshot{}, ErrUnsorted
-		}
-		previousAddress = header.AddressHash
-		snapshot.Headers = append(snapshot.Headers, header)
-	}
-	codeCountValue, err := readCount(data, &offset)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if codeCountValue > uint64(len(data)) {
-		return Snapshot{}, ErrMalformed
-	}
-	codeCount := int(codeCountValue)
-	snapshot.CodeGroups = make([]Group, 0, codeCount)
-	var previousStem common.Hash
-	for i := range codeCount {
-		group, err := readGroup(data, &offset)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if i != 0 && bytes.Compare(group.StemHash[:], previousStem[:]) <= 0 {
-			return Snapshot{}, ErrUnsorted
-		}
-		previousStem = group.StemHash
-		snapshot.CodeGroups = append(snapshot.CodeGroups, group)
-	}
-	storageCountValue, err := readCount(data, &offset)
-	if err != nil {
-		return Snapshot{}, err
-	}
-	if storageCountValue > uint64(len(data)) {
-		return Snapshot{}, ErrMalformed
-	}
-	storageCount := int(storageCountValue)
-	snapshot.StorageGroups = make([]Storage, 0, storageCount)
-	var previousStorage common.Hash
-	for i := range storageCount {
-		storage, err := readStorage(data, &offset)
-		if err != nil {
-			return Snapshot{}, err
-		}
-		if i != 0 && bytes.Compare(storage.AddressHash[:], previousStorage[:]) <= 0 {
-			return Snapshot{}, ErrUnsorted
-		}
-		previousStorage = storage.AddressHash
-		snapshot.StorageGroups = append(snapshot.StorageGroups, storage)
-	}
-	if offset != len(data) {
-		return Snapshot{}, fmt.Errorf("%w: trailing bytes", ErrMalformed)
-	}
-	headerIndex := 0
-	for _, storage := range snapshot.StorageGroups {
-		for headerIndex < len(snapshot.Headers) && bytes.Compare(snapshot.Headers[headerIndex].AddressHash[:], storage.AddressHash[:]) < 0 {
-			headerIndex++
-		}
-		if headerIndex == len(snapshot.Headers) || snapshot.Headers[headerIndex].AddressHash != storage.AddressHash {
-			return Snapshot{}, fmt.Errorf("%w: storage has no header", ErrMalformed)
-		}
-	}
-	snapshot.SnapshotDigest = common.Hash(keccak.Sum256(data))
-	return snapshot, nil
+type artifactCursor struct {
+	src    io.ReaderAt
+	offset int64
+	limit  int64
 }
 
-func readCount(data []byte, offset *int) (uint64, error) {
-	if *offset+8 > len(data) {
-		return 0, ErrMalformed
+func (c *artifactCursor) remaining() int64 { return c.limit - c.offset }
+
+func (c *artifactCursor) bytes(size int) ([]byte, error) {
+	if size < 0 || int64(size) > c.remaining() {
+		return nil, ErrMalformed
 	}
-	value := binary.BigEndian.Uint64(data[*offset : *offset+8])
-	*offset += 8
-	return value, nil
+	data := make([]byte, size)
+	if _, err := c.src.ReadAt(data, c.offset); err != nil {
+		return nil, ErrMalformed
+	}
+	c.offset += int64(size)
+	return data, nil
 }
 
-func readHeader(data []byte, offset *int) (Header, error) {
+func (c *artifactCursor) byte() (byte, error) {
+	data, err := c.bytes(1)
+	if err != nil {
+		return 0, err
+	}
+	return data[0], nil
+}
+
+func (c *artifactCursor) count() (uint64, error) {
+	data, err := c.bytes(8)
+	if err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(data), nil
+}
+
+func countFits(count uint64, remaining int64, minimum int64) error {
+	if remaining < 0 || count > uint64(remaining/minimum) {
+		return ErrMalformed
+	}
+	return nil
+}
+
+func readHeaderAt(c *artifactCursor) (Header, error) {
 	var header Header
-	if *offset+32 > len(data) {
-		return header, ErrMalformed
+	address, err := c.bytes(32)
+	if err != nil {
+		return header, err
 	}
-	copy(header.AddressHash[:], data[*offset:*offset+32])
-	*offset += 32
-	var err error
-	if header.Nonce, err = readInteger(data, offset, 8); err != nil {
+	copy(header.AddressHash[:], address)
+	if header.Nonce, err = readIntegerAt(c, 8); err != nil {
 		return Header{}, err
 	}
-	if header.Balance, err = readInteger(data, offset, 16); err != nil {
+	if header.Balance, err = readIntegerAt(c, 16); err != nil {
 		return Header{}, err
 	}
-	if *offset >= len(data) {
-		return Header{}, ErrMalformed
+	if header.Kind, err = c.byte(); err != nil {
+		return Header{}, err
 	}
-	header.Kind = data[*offset]
-	*offset++
 	switch header.Kind {
 	case 0:
 		if len(header.Nonce) == 0 && len(header.Balance) == 0 {
 			return Header{}, ErrInvalidAccount
 		}
 	case 1:
-		if *offset+32 > len(data) {
-			return Header{}, ErrMalformed
+		codeHash, err := c.bytes(32)
+		if err != nil {
+			return Header{}, err
 		}
-		copy(header.CodeHash[:], data[*offset:*offset+32])
-		*offset += 32
-		header.CodeSize, err = readInteger(data, offset, 4)
+		copy(header.CodeHash[:], codeHash)
+		header.CodeSize, err = readIntegerAt(c, 4)
 		if err != nil || len(header.CodeSize) == 0 {
 			return Header{}, fmt.Errorf("%w: invalid code size", ErrInvalidAccount)
 		}
 	case 2:
-		if *offset+20 > len(data) {
-			return Header{}, ErrMalformed
+		target, err := c.bytes(20)
+		if err != nil {
+			return Header{}, err
 		}
-		copy(header.Target[:], data[*offset:*offset+20])
-		*offset += 20
+		copy(header.Target[:], target)
 	default:
 		return Header{}, fmt.Errorf("%w: unknown account kind %d", ErrMalformed, header.Kind)
 	}
-	if *offset >= len(data) {
+	slotCount, err := c.byte()
+	if err != nil || int64(slotCount) > c.remaining()/3 {
 		return Header{}, ErrMalformed
 	}
-	slotCount := int(data[*offset])
-	*offset++
 	header.Slots = make([]Slot, 0, slotCount)
 	var previous byte
-	for i := range slotCount {
-		if *offset >= len(data) {
-			return Header{}, ErrMalformed
+	for i := 0; i < int(slotCount); i++ {
+		index, err := c.byte()
+		if err != nil {
+			return Header{}, err
 		}
-		slot := data[*offset]
-		*offset++
-		if slot >= eip8297.HeaderStorageSlots || i != 0 && slot <= previous {
-			return Header{}, fmt.Errorf("%w: header slot %d", ErrMalformed, slot)
+		if index >= eip8297.HeaderStorageSlots || i != 0 && index <= previous {
+			return Header{}, fmt.Errorf("%w: header slot %d", ErrMalformed, index)
 		}
-		value, err := readInteger(data, offset, eip8297.ValueLength)
+		value, err := readIntegerAt(c, eip8297.ValueLength)
 		if err != nil || len(value) == 0 {
 			return Header{}, fmt.Errorf("%w: invalid header slot", ErrMalformed)
 		}
-		header.Slots = append(header.Slots, Slot{Index: slot, Value: value})
-		previous = slot
+		header.Slots = append(header.Slots, Slot{Index: index, Value: value})
+		previous = index
 	}
 	return header, nil
 }
 
-func readGroup(data []byte, offset *int) (Group, error) {
+func readGroupAt(c *artifactCursor) (Group, error) {
 	var group Group
-	if *offset+33 > len(data) {
-		return group, ErrMalformed
+	stem, err := c.bytes(32)
+	if err != nil {
+		return group, err
 	}
-	copy(group.StemHash[:], data[*offset:*offset+32])
-	*offset += 32
-	count := int(data[*offset]) + 1
-	*offset++
-	group.Entries = make([]GroupEntry, 0, count)
+	copy(group.StemHash[:], stem)
+	count, err := c.byte()
+	if err != nil {
+		return Group{}, err
+	}
+	entries := int(count) + 1
+	if int64(entries)*3 > c.remaining() {
+		return Group{}, ErrMalformed
+	}
+	group.Entries = make([]GroupEntry, 0, entries)
 	var previous byte
-	for i := range count {
-		if *offset >= len(data) {
-			return Group{}, ErrMalformed
+	for i := 0; i < entries; i++ {
+		index, err := c.byte()
+		if err != nil {
+			return Group{}, err
 		}
-		index := data[*offset]
-		*offset++
 		if i != 0 && index <= previous {
 			return Group{}, ErrUnsorted
 		}
-		value, err := readInteger(data, offset, eip8297.ValueLength)
+		value, err := readIntegerAt(c, eip8297.ValueLength)
 		if err != nil || len(value) == 0 {
 			return Group{}, fmt.Errorf("%w: invalid group value", ErrMalformed)
 		}
@@ -236,25 +323,25 @@ func readGroup(data []byte, offset *int) (Group, error) {
 	return group, nil
 }
 
-func readStorage(data []byte, offset *int) (Storage, error) {
+func readStorageAt(c *artifactCursor) (Storage, error) {
 	var storage Storage
-	if *offset+32 > len(data) {
-		return storage, ErrMalformed
+	address, err := c.bytes(32)
+	if err != nil {
+		return storage, err
 	}
-	copy(storage.AddressHash[:], data[*offset:*offset+32])
-	*offset += 32
-	countBytes, err := readInteger(data, offset, 8)
+	copy(storage.AddressHash[:], address)
+	countBytes, err := readIntegerAt(c, 8)
 	if err != nil || len(countBytes) == 0 {
 		return Storage{}, fmt.Errorf("%w: zero storage group count", ErrMalformed)
 	}
 	count := integerValue(countBytes)
-	if count == 0 {
-		return Storage{}, fmt.Errorf("%w: zero storage group count", ErrMalformed)
+	if count == 0 || count > uint64(c.remaining()/35) {
+		return Storage{}, fmt.Errorf("%w: invalid storage group count", ErrMalformed)
 	}
-	storage.Groups = make([]Group, 0, count)
+	storage.Groups = make([]Group, 0, int(count))
 	var previous common.Hash
-	for i := range count {
-		group, err := readGroup(data, offset)
+	for i := uint64(0); i < count; i++ {
+		group, err := readGroupAt(c)
 		if err != nil {
 			return Storage{}, err
 		}
@@ -267,20 +354,18 @@ func readStorage(data []byte, offset *int) (Storage, error) {
 	return storage, nil
 }
 
-func readInteger(data []byte, offset *int, width int) ([]byte, error) {
-	if *offset >= len(data) {
+func readIntegerAt(c *artifactCursor, width int) ([]byte, error) {
+	length, err := c.byte()
+	if err != nil || int(length) > width {
 		return nil, ErrMalformed
 	}
-	length := int(data[*offset])
-	*offset++
-	if length > width || *offset+length > len(data) {
-		return nil, ErrMalformed
+	value, err := c.bytes(int(length))
+	if err != nil {
+		return nil, err
 	}
-	if length != 0 && data[*offset] == 0 {
+	if len(value) != 0 && value[0] == 0 {
 		return nil, fmt.Errorf("%w: leading zero", ErrMalformed)
 	}
-	value := bytes.Clone(data[*offset : *offset+length])
-	*offset += length
 	return value, nil
 }
 
@@ -288,4 +373,41 @@ func integerValue(value []byte) uint64 {
 	var raw [8]byte
 	copy(raw[8-len(value):], value)
 	return binary.BigEndian.Uint64(raw[:])
+}
+
+func matchStorageHeader(headers *artifactCursor, address common.Hash) error {
+	for headers.offset < headers.limit {
+		header, err := readHeaderAt(headers)
+		if err != nil {
+			return err
+		}
+		if bytes.Compare(header.AddressHash[:], address[:]) >= 0 {
+			if header.AddressHash != address {
+				return fmt.Errorf("%w: storage has no header", ErrMalformed)
+			}
+			return nil
+		}
+	}
+	return fmt.Errorf("%w: storage has no header", ErrMalformed)
+}
+
+func spoolReader(src io.Reader, pattern string) (*os.File, func(), error) {
+	file, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return nil, nil, err
+	}
+	cleanup := func() {
+		name := file.Name()
+		_ = file.Close()
+		_ = os.Remove(name)
+	}
+	if _, err := io.Copy(file, src); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	return file, cleanup, nil
 }

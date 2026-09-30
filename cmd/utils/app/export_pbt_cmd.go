@@ -17,10 +17,10 @@
 package app
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -165,7 +165,26 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	if err != nil {
 		return err
 	}
-	_, writeErr = writePreimagesFile(ctx, preimageFile, tx.Debug().Dirs().Tmp, state.AggTx(tx), tx, logger)
+	preimageTemp, err := os.CreateTemp(tx.Debug().Dirs().Tmp, "pbt-preimages-")
+	if err != nil {
+		_ = preimageFile.Close()
+		return err
+	}
+	_, writeErr = writePreimagesFile(ctx, preimageTemp, tx.Debug().Dirs().Tmp, state.AggTx(tx), tx, logger)
+	if writeErr == nil {
+		if _, writeErr = preimageTemp.Seek(0, io.SeekStart); writeErr == nil {
+			info, statErr := preimageTemp.Stat()
+			if statErr != nil {
+				writeErr = statErr
+			} else {
+				writeErr = artifact.WritePreimages(preimageFile, artifact.PreimageIterator(func(yield func(artifact.Preimage) error) error {
+					return artifact.ReadPreimagesAt(preimageTemp, info.Size(), yield)
+				}))
+			}
+		}
+	}
+	_ = preimageTemp.Close()
+	_ = os.Remove(preimageTemp.Name())
 	closeErr = preimageFile.Close()
 	if writeErr != nil {
 		return writeErr
@@ -178,27 +197,37 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 			return err
 		}
 	}
-	snapshotBytes, err := os.ReadFile(snapshotPath)
+	snapshotRead, err := os.Open(snapshotPath)
 	if err != nil {
 		return err
 	}
-	snapshot, err := artifact.ReadSnapshot(bytes.NewReader(snapshotBytes))
+	defer snapshotRead.Close()
+	snapshotInfo, err := snapshotRead.Stat()
+	if err != nil {
+		return err
+	}
+	snapshotMeta, err := artifact.ReadSnapshotAt(snapshotRead, snapshotInfo.Size(), artifact.SnapshotCallbacks{})
 	if err != nil {
 		return fmt.Errorf("export-pbt: read back snapshot: %w", err)
 	}
-	preimageBytes, err := os.ReadFile(preimagePath)
+	preimageRead, err := os.Open(preimagePath)
 	if err != nil {
 		return err
 	}
-	preimages, err := artifact.ReadPreimages(bytes.NewReader(preimageBytes))
+	defer preimageRead.Close()
+	preimageInfo, err := preimageRead.Stat()
 	if err != nil {
-		return fmt.Errorf("export-pbt: read back preimages: %w", err)
+		return err
 	}
-	if err := artifact.Join(snapshot, preimages, eip8297.HashBytes); err != nil {
+	if err := artifact.JoinAt(snapshotRead, snapshotInfo.Size(), preimageRead, preimageInfo.Size(), eip8297.HashBytes, nil); err != nil {
 		return fmt.Errorf("export-pbt: join preimages: %w", err)
 	}
-	if snapshot.SnapshotDigest != snapshotDigest {
+	if snapshotMeta.SnapshotDigest != snapshotDigest {
 		return fmt.Errorf("export-pbt: snapshot digest changed during read-back")
+	}
+	preimageDigest, err := digestPBTFile(preimageRead)
+	if err != nil {
+		return err
 	}
 	chainConfig, err := exportChainConfig(tx)
 	if err != nil {
@@ -211,9 +240,9 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 	meta := pbtExportMeta{
 		ChainID: chainID, Block: pin.Block, BlockHash: header.Hash().Hex(), TxNum: pin.TxNum,
 		HashSuite: commitment.PBinHashSuiteName(), StateRoot: header.Root.Hex(), PBTRoot: root.Hex(),
-		HeaderCount: uint64(len(snapshot.Headers)), CodeGroupCount: uint64(len(snapshot.CodeGroups)),
-		StorageCount: uint64(len(snapshot.StorageGroups)), SnapshotDigest: snapshotDigest.Hex(),
-		PreimageDigest: common.Hash(keccak.Sum256(preimageBytes)).Hex(),
+		HeaderCount: snapshotMeta.HeaderCount, CodeGroupCount: snapshotMeta.CodeGroupCount,
+		StorageCount: snapshotMeta.StorageCount, SnapshotDigest: snapshotDigest.Hex(),
+		PreimageDigest: preimageDigest.Hex(),
 		Finalized:      rawdb.ReadForkchoiceFinalizedNum(tx) >= pin.Block,
 	}
 	metaBytes, err := json.MarshalIndent(meta, "", "  ")
@@ -221,6 +250,17 @@ func runExportPBTWithReadbackHook(ctx context.Context, tx kv.TemporalTx, headerA
 		return err
 	}
 	return os.WriteFile(filepath.Join(outDir, pbtMetaFileName), append(metaBytes, '\n'), 0o644)
+}
+
+func digestPBTFile(file *os.File) (common.Hash, error) {
+	if _, err := file.Seek(0, io.SeekStart); err != nil {
+		return common.Hash{}, err
+	}
+	hash := keccak.NewFastKeccak()
+	if _, err := io.Copy(hash, file); err != nil {
+		return common.Hash{}, err
+	}
+	return common.BytesToHash(hash.Sum(nil)), nil
 }
 
 func exportPBTStreamRoot(tx kv.TemporalTx) (common.Hash, error) {

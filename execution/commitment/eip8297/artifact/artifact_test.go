@@ -73,6 +73,85 @@ func TestReaderAcceptsHandWrittenGolden(t *testing.T) {
 	require.Equal(t, golden.SnapshotDigest, hex.EncodeToString(snapshot.SnapshotDigest[:]))
 }
 
+func TestStreamingReadersUseCallbacks(t *testing.T) {
+	golden := readGolden(t)
+	data, err := hex.DecodeString(golden.Bytes)
+	require.NoError(t, err)
+	var headers, groups, storage uint64
+	meta, err := ReadSnapshotAt(bytes.NewReader(data), int64(len(data)), SnapshotCallbacks{
+		Header: func(Header) error { headers++; return nil },
+		Code:   func(Group) error { groups++; return nil },
+		Storage: func(Storage) error {
+			storage++
+			return nil
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(3), headers)
+	require.Equal(t, uint64(1), groups)
+	require.Equal(t, uint64(1), storage)
+	require.Equal(t, headers, meta.HeaderCount)
+
+	var empty bytes.Buffer
+	_, err = WriteSnapshot(&empty, common.Hash{}, func(func([]byte, []byte) error) error { return nil })
+	require.NoError(t, err)
+	require.NoError(t, JoinAt(bytes.NewReader(empty.Bytes()), int64(empty.Len()), bytes.NewReader(nil), 0, eip8297.HashBytes, nil))
+
+	var preimages bytes.Buffer
+	require.NoError(t, WritePreimages(&preimages, PreimageIterator(func(yield func(Preimage) error) error {
+		return yield(Preimage{Address: common.Address{1}})
+	})))
+	var count int
+	require.NoError(t, ReadPreimagesAt(bytes.NewReader(preimages.Bytes()), int64(preimages.Len()), func(Preimage) error {
+		count++
+		return nil
+	}))
+	require.Equal(t, 1, count)
+}
+
+func TestArtifactReaderRejectsMaximumCountsWithoutAllocating(t *testing.T) {
+	golden := readGolden(t)
+	data, err := hex.DecodeString(golden.Bytes)
+	require.NoError(t, err)
+	for _, offset := range []int{32, 217, 265} {
+		broken := bytes.Clone(data)
+		for i := 0; i < 8; i++ {
+			broken[offset+i] = 0xff
+		}
+		_, err := ReadSnapshot(bytes.NewReader(broken))
+		require.Error(t, err, "count at offset %d must be bounded by the remaining bytes", offset)
+	}
+}
+
+func TestArtifactReaderRejectsStorageWithoutHeader(t *testing.T) {
+	leaves := goldenLeaves(t)
+	leaves[len(leaves)-1].Key = bytes.Clone(leaves[len(leaves)-1].Key)
+	copy(leaves[len(leaves)-1].Key[1:33], bytes.Repeat([]byte{4}, 32))
+	var encoded bytes.Buffer
+	_, err := WriteSnapshot(&encoded, common.Hash{}, func(emit func([]byte, []byte) error) error {
+		for _, leaf := range leaves {
+			if err := emit(leaf.Key, leaf.Value); err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	_, err = ReadSnapshot(bytes.NewReader(encoded.Bytes()))
+	require.Error(t, err, "a storage record without a header must be rejected")
+}
+
+func TestArtifactReaderRejectsZeroGroupValue(t *testing.T) {
+	golden := readGolden(t)
+	data, err := hex.DecodeString(golden.Bytes)
+	require.NoError(t, err)
+	index := bytes.Index(data, []byte{1, 0, 1, 0x55})
+	require.NotEqual(t, -1, index)
+	data[index+2] = 0
+	_, err = ReadSnapshot(bytes.NewReader(data))
+	require.ErrorContains(t, err, "invalid group value", "a code group with a zero value must be rejected")
+}
+
 func TestArtifactReaderRejectsMalformedInputs(t *testing.T) {
 	golden := readGolden(t)
 	data, err := hex.DecodeString(golden.Bytes)
