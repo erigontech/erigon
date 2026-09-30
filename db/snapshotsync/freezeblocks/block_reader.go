@@ -81,6 +81,11 @@ func (r *RemoteBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx)
 		return 0, err
 	}
 
+	// Older servers report 1 for an unpruned MDBX range even though genesis
+	// is retained.
+	if reply.BlockNum == 1 {
+		return 0, nil
+	}
 	return reply.BlockNum, nil
 }
 
@@ -501,9 +506,8 @@ func (r *BlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint
 	return dbMinBlock, nil
 }
 
-// findFirstCompleteBlock finds the first block (after genesis) where block body is
-// available, and whether there is one: a database holding nothing beyond genesis gives no
-// answer, which is not the same as answering genesis.
+// findFirstCompleteBlock reports the retained MDBX range, including genesis when
+// block 1 is present. Genesis alone gives no answer about the contiguous range.
 func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 	secondKey, err := rawdbv3.SecondKey(tx, kv.BlockBody)
 	if err != nil {
@@ -515,6 +519,9 @@ func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, bool, error) {
 	}
 
 	result := binary.BigEndian.Uint64(secondKey[:8])
+	if result == 1 {
+		result = 0
+	}
 	return result, true, nil
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }

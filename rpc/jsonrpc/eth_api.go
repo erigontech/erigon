@@ -468,25 +468,23 @@ const systemTxsPerBlock = 2
 
 // checkPruneHistory requires history from the block's first system transaction.
 func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint64) error {
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
-		floors, err := api.historyStartBlocks(ctx, tx, head)
-		return floors.wholeBlock, err
-	})
+	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.wholeBlock })
 }
 
 // checkPruneState requires the state after the block, read at Min(block+1).
 func (api *BaseAPI) checkPruneState(ctx context.Context, tx kv.Tx, block uint64) error {
-	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
-		floors, err := api.historyStartBlocks(ctx, tx, head)
-		return floors.postState, err
-	})
+	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.postState })
 }
 
 // checkPruneStateAfterSystemTx matches state readers opened at Min(block+1)+1.
 func (api *BaseAPI) checkPruneStateAfterSystemTx(ctx context.Context, tx kv.Tx, block uint64) error {
+	return api.checkHistoryFloor(ctx, tx, block, func(f historyPruneFloors) uint64 { return f.stateAfterSystemTx })
+}
+
+func (api *BaseAPI) checkHistoryFloor(ctx context.Context, tx kv.Tx, block uint64, pick func(historyPruneFloors) uint64) error {
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.History }, "history is available", func(head uint64) (uint64, error) {
 		floors, err := api.historyStartBlocks(ctx, tx, head)
-		return floors.stateAfterSystemTx, err
+		return pick(floors), err
 	})
 }
 
@@ -678,16 +676,7 @@ func (api *BaseAPI) historyStartBlocksFromTxNum(ctx context.Context, tx kv.Tx, h
 func (api *BaseAPI) minimumBlockAvailable(ctx context.Context, tx kv.Tx, head uint64) (uint64, error) {
 	key := pruneFloorCacheKey{head: head, dbViewID: tx.ViewID(), blockFilesGeneration: blockFilesGeneration(tx)}
 	return api._blocksPruneFloor.getForKey(ctx, key, func() (uint64, error) {
-		floor, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
-		if err != nil {
-			return 0, err
-		}
-		// The MDBX scan intentionally starts after genesis. A result of one means
-		// genesis is also available, not that it was pruned.
-		if floor == 1 {
-			return 0, nil
-		}
-		return floor, nil
+		return api._blockReader.MinimumBlockAvailable(ctx, tx)
 	})
 }
 

@@ -608,6 +608,38 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 	require.Positive(t, bodiesInTxView())
 }
 
+type minimumBlockBackendClient struct {
+	remoteproto.ETHBACKENDClient
+	block uint64
+	err   error
+}
+
+func (c minimumBlockBackendClient) MinimumBlockAvailable(context.Context, *emptypb.Empty, ...grpc.CallOption) (*remoteproto.MinimumBlockAvailableReply, error) {
+	return &remoteproto.MinimumBlockAvailableReply{BlockNum: c.block}, c.err
+}
+
+func TestRemoteBlockReaderMinimumBlockAvailable(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name  string
+		block uint64
+		want  uint64
+		err   error
+	}{
+		{name: "unpruned", block: 0, want: 0},
+		{name: "legacy_unpruned", block: 1, want: 0},
+		{name: "pruned", block: 1000, want: 1000},
+		{name: "backend_error", err: errors.New("backend unavailable")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := NewRemoteBlockReader(minimumBlockBackendClient{block: tc.block, err: tc.err})
+			floor, err := reader.MinimumBlockAvailable(t.Context(), nil)
+			require.ErrorIs(t, err, tc.err)
+			require.Equal(t, tc.want, floor)
+		})
+	}
+}
+
 // frozenBlocksBackendClient stubs the one call under test; every other method of the
 // embedded interface stays nil and panics if reached.
 type frozenBlocksBackendClient struct {

@@ -163,8 +163,22 @@ func TestBlocksGateIncludesGenesisWithoutSnapshots(t *testing.T) {
 
 	oldest, err := apis.eth._blockReader.MinimumBlockAvailable(ctx, tx)
 	require.NoError(t, err)
-	require.Equal(t, uint64(1), oldest, "the MDBX convention reports the first block after genesis")
+	require.Zero(t, oldest, "genesis and block 1 form a contiguous retained range")
 	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, 0))
+}
+
+func TestBlockFloorPreservesReaderBoundary(t *testing.T) {
+	t.Parallel()
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	apis.eth._blockReader = &fixedMinimumBlockReader{FullBlockReader: apis.eth._blockReader, floor: 1}
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	floor, err := apis.eth.minimumBlockAvailable(ctx, tx, chainInfo.head)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), floor, "the RPC cache must not reinterpret the reader's boundary")
 }
 
 func TestPruneGatesUsePhysicalFloorsForUnboundedModes(t *testing.T) {

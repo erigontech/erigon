@@ -87,11 +87,12 @@ func (c *pruneFloorCache[T]) getForKey(ctx context.Context, key pruneFloorCacheK
 		floor, err := read()
 		return pruneFloorValue[T]{floor: floor, expiresAt: c.timeNow().Add(c.cacheTTL())}, true, err
 	})
+	floor := value.floor
 	if err != nil && !ran && ctx.Err() == nil {
 		// A shared failure may belong to the producer's context or transaction.
 		// Retry once on our own view, outside the coalescer so failures do not
 		// serialize callers. Both reads stay within their caller's transaction lifetime.
-		value.floor, err = read()
+		floor, err = read()
 	}
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		return zero, ctxErr
@@ -99,7 +100,7 @@ func (c *pruneFloorCache[T]) getForKey(ctx context.Context, key pruneFloorCacheK
 	if err != nil {
 		return zero, err
 	}
-	return value.floor, nil
+	return floor, nil
 }
 
 func (c *pruneFloorCache[T]) valueForKey(key pruneFloorCacheKey) *concurrent.CachedValue[pruneFloorValue[T]] {
