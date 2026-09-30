@@ -19,7 +19,10 @@ package p2p
 import (
 	"fmt"
 	"net"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -164,6 +167,78 @@ func TestPeerPoolLimiterCapsConnectionsFromSameIPv6Slash32(t *testing.T) {
 	require.False(t, l.allow(net.ParseIP("2001:db8:3::1")), "third distinct subscriber block within the same /32 must hit the AS-block cap")
 
 	require.True(t, l.allow(net.ParseIP("2001:db9::1")), "an address in an unrelated /32 must be unaffected")
+}
+
+// TestPeerPoolLimiterEnforcesCapUnderConcurrentAccepts reproduces the TOCTOU race
+// flagged in review on PR #24449: InterceptAccept runs before the connection it is
+// deciding on is registered in the live host's connection list. Deliberately never
+// update the fixture's conns, so every concurrent allow() call sees the same
+// "nothing live yet" snapshot - the cap can only be enforced if the limiter tracks
+// admissions itself, not just by querying the live host.
+func TestPeerPoolLimiterEnforcesCapUnderConcurrentAccepts(t *testing.T) {
+	const maxPerIP = 3
+	l := &peerPoolLimiter{
+		maxPerIP: maxPerIP, maxPerSubscriberBlock: 1000, maxPerASBlock: 1000,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+	}
+	l.setHost(&connsFixtureHost{})
+
+	ip := net.ParseIP("203.0.113.5")
+	const attempts = 50
+	var wg sync.WaitGroup
+	var allowed atomic.Int32
+	wg.Add(attempts)
+	for range attempts {
+		go func() {
+			defer wg.Done()
+			if l.allow(ip) {
+				allowed.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.LessOrEqual(t, int(allowed.Load()), maxPerIP,
+		"concurrent accepts from one IP must never exceed the per-IP cap, even though none of them are yet reflected in the live connection list")
+}
+
+func TestPeerPoolLimiterReservationsExpireAndFreeCapacity(t *testing.T) {
+	clock := &fakeClock{now: time.Unix(0, 0)}
+	l := &peerPoolLimiter{
+		maxPerIP: 1, maxPerSubscriberBlock: 100, maxPerASBlock: 100,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+		reservationTTL: time.Second, now: clock.Now,
+	}
+	l.setHost(&connsFixtureHost{})
+
+	ip := net.ParseIP("203.0.113.5")
+	require.True(t, l.allow(ip))
+	require.False(t, l.allow(ip), "the reservation from the first admission still occupies the only slot")
+
+	clock.advance(2 * time.Second)
+	require.True(t, l.allow(ip), "an expired reservation must free its slot")
+}
+
+func TestPeerPoolLimiterReservationDoesNotDoubleCountOnceLive(t *testing.T) {
+	// Same sequence as TestPeerPoolLimiterCapsConnectionsFromSameIP, but explicit
+	// about why it still holds under the reservation mechanism: once a reservation's
+	// connection becomes visible in the live host, the two must not stack and produce
+	// an over-strict effective count of live+reservation.
+	l := &peerPoolLimiter{
+		maxPerIP: 2, maxPerSubscriberBlock: 100, maxPerASBlock: 100,
+		v4SubscriberBlockBits: 24, v6SubscriberBlockBits: 56, v4ASBlockBits: 16, v6ASBlockBits: 32,
+	}
+	fixture := &connsFixtureHost{}
+	l.setHost(fixture)
+
+	ip := "203.0.113.5"
+	require.True(t, l.allow(net.ParseIP(ip)), "first admission reserves a slot")
+
+	fixture.conns = []string{ip}
+	require.True(t, l.allow(net.ParseIP(ip)), "the first admission is now live; its reservation must not also count separately")
+
+	fixture.conns = []string{ip, ip}
+	require.False(t, l.allow(net.ParseIP(ip)), "two live connections already occupy the cap of 2")
 }
 
 // connsFixtureHost is a minimal liveConnsSource stand-in: real libp2p hosts are
