@@ -33,15 +33,15 @@ var (
 // uint16 holding its high nibble in the low byte and its low nibble in the high byte, so one
 // in-lane byte shuffle turns the nibbles into digits in output order.
 func encodeHex(dst, src []byte) {
-	i := 0
 	if hasAVX2 {
 		digits := archsimd.LoadUint8x32Array(&hexDigits32)
 		low := archsimd.BroadcastUint16x16(0x0f)
-		for ; i+16 <= len(src); i += 16 {
-			w := archsimd.LoadUint8x16Array((*[16]uint8)(src[i:])).ExtendToUint16()
+		for len(src) >= 16 && len(dst) >= 32 {
+			w := archsimd.LoadUint8x16Array((*[16]uint8)(src)).ExtendToUint16()
 			w = w.ShiftAllRight(4).Or(w.And(low).ShiftAllLeft(8))
-			digits.PermuteOrZeroGrouped(w.AsUint8x32().AsInt8x32()).StoreArray((*[32]uint8)(dst[2*i:]))
+			digits.PermuteOrZeroGrouped(w.AsUint8x32().AsInt8x32()).StoreArray((*[32]uint8)(dst))
+			src, dst = src[16:], dst[32:]
 		}
 	}
-	hex.Encode(dst[2*i:], src[i:])
+	hex.Encode(dst, src)
 }
