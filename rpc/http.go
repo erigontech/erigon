@@ -362,9 +362,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var sent *sentWriter
 	if !s.disableStreaming {
 		sent = &sentWriter{w: w}
-		ss := jsonstream.Get(sent)
-		defer jsonstream.Put(ss)
-		stream = ss // a nil *Stream in the interface would not read as nil
+		stream = jsonstream.Get(sent)
+		defer jsonstream.Put(stream)
 	}
 
 	errorMsg := s.serveSingleRequest(ctx, codec, stream)

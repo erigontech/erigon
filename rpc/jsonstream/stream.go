@@ -453,10 +453,6 @@ func (s *Stream) beforeValue() {
 	}
 }
 
-// markSeparatorPending states that a sibling value precedes what is written next. It is for
-// a fragment written into a container this stream did not open, where the stack cannot say.
-func (s *Stream) markSeparatorPending() { s.separatorPending = true }
-
 // consumeField drops the pending field name once its value has been written. A container
 // consumes it when it opens, not when it closes: otherwise the field outlives its own
 // value and ClosePending fills it with a second null.
