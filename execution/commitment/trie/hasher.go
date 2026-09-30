@@ -43,6 +43,8 @@ type hasher struct {
 
 const rlpPrefixLength = 4
 
+var emptyHash [32]byte
+
 var hashersPool = sync.Pool{
 	New: func() any {
 		return &hasher{

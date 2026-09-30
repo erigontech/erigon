@@ -22,8 +22,6 @@ package trie
 import (
 	"fmt"
 
-	"github.com/holiman/uint256"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -35,8 +33,6 @@ import (
 type structInfoReceiver interface {
 	leaf(length int, keyHex []byte, val rlp.RlpSerializable) error
 	leafHash(length int, keyHex []byte, val rlp.RlpSerializable) error
-	accountLeaf(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32, codeSize int) error
-	accountLeafHash(length int, keyHex []byte, balance *uint256.Int, nonce uint64, incarnation uint64, fieldset uint32) error
 	extension(key []byte) error
 	extensionHash(key []byte) error
 	branch(set uint16) error
@@ -63,15 +59,6 @@ func calcPrecLen(groups []uint16) int {
 type GenStructStepData interface {
 	GenStructStepData()
 }
-
-type GenStructStepAccountData struct {
-	FieldSet    uint32
-	Balance     uint256.Int
-	Nonce       uint64
-	Incarnation uint64
-}
-
-func (GenStructStepAccountData) GenStructStepData() {}
 
 type GenStructStepLeafData struct {
 	Value rlp.RlpSerializable
@@ -162,16 +149,6 @@ func GenStructStep(
 					return nil, nil, nil, err
 				}
 				buildExtensions = true
-			case *GenStructStepAccountData:
-				if retain(curr[:maxLen]) {
-					if err := e.accountLeaf(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet, codeSizeUncached); err != nil {
-						return nil, nil, nil, err
-					}
-				} else {
-					if err := e.accountLeafHash(remainderLen, curr, &v.Balance, v.Nonce, v.Incarnation, v.FieldSet); err != nil {
-						return nil, nil, nil, err
-					}
-				}
 			case *GenStructStepLeafData:
 				/* building leafs */
 				if retain(curr[:maxLen]) {
