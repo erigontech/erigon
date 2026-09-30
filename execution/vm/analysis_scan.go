@@ -95,8 +95,18 @@ func codeBitmapScan(code []byte) bitvec {
 		var data, sure uint32
 		var reach archsimd.Uint8x32
 		resolved := false
+		if open == 0 { // no PUSH: every byte from the entry on is an instruction start
+			data, next := uint32(uint64(1)<<e-1), 0
+			out[i/64] |= uint64(jd&^data) << (uint(i) % 64)
+			e = max(next-32, 0)
+			continue
+		}
 		for range 3 {
-			coverOpen, _ := k.cover(ends, open, uint8(e))
+			coverOpen, reachOpen := k.cover(ends, open, uint8(e))
+			if coverOpen&open == 0 { // no PUSH reaches over another: all of them are real
+				sure, data, reach, resolved = open, coverOpen, reachOpen, true
+				break
+			}
 			sure = open &^ coverOpen
 			var coverReal uint32
 			coverReal, reach = k.cover(ends, sure, uint8(e))
