@@ -1185,6 +1185,8 @@ func TestTraceCallFailureLabels(t *testing.T) {
 	// bn256Add of (1, 1), which is not on the curve, and the zero point.
 	badPoint := append([]byte{byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.MSTORE), byte(vm.PUSH1), 1, byte(vm.PUSH1), 32, byte(vm.MSTORE)},
 		callCode(vm.CALL, 0x06, 1, 128)...)
+	// ecrecover costs 3000 gas; 100 gas plus the 2300 value stipend is not enough.
+	ecrecoverWith100Gas := []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.PUSH1), 1, byte(vm.PUSH1), 0x01, byte(vm.PUSH1), 100, byte(vm.CALL), byte(vm.STOP)}
 
 	for _, tc := range []struct {
 		name    string
@@ -1216,6 +1218,11 @@ func TestTraceCallFailureLabels(t *testing.T) {
 			error: "Out of gas",
 		},
 		{
+			name:  "create whose code deposit runs out of gas",
+			code:  createCode(0, []byte{byte(vm.PUSH2), byte(params.MaxCodeSize >> 8), byte(params.MaxCodeSize & 0xff), byte(vm.PUSH0), byte(vm.RETURN)}),
+			error: "Out of gas",
+		},
+		{
 			name:  "create of code starting with 0xEF",
 			code:  createCode(0, []byte{byte(vm.PUSH1), 0xef, byte(vm.PUSH0), byte(vm.MSTORE8), byte(vm.PUSH1), 1, byte(vm.PUSH0), byte(vm.RETURN)}),
 			error: "Invalid code",
@@ -1239,6 +1246,7 @@ func TestTraceCallFailureLabels(t *testing.T) {
 			callee: []byte{byte(vm.PUSH0), byte(vm.PUSH0), byte(vm.SSTORE)}, error: "Mutable Call In Static Context",
 		},
 		{name: "precompile failure", code: badPoint, balance: 1, error: "Built-in failed"},
+		{name: "precompile out of gas", code: ecrecoverWith100Gas, balance: 1, error: "Out of gas"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			code, calleeCode := hexutil.Bytes(tc.code), hexutil.Bytes(tc.callee)
