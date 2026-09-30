@@ -116,23 +116,28 @@ func jumpdestBitmapSIMD(code []byte, bits bitvec) (entry int) {
 		x6.StoreArray((*[16]byte)(tab[jdTabBase+64:]))
 		idx := x1.Sub(c10)
 		x6.PermuteOrZero(idx.AsInt8x16()).Max(idx).StoreArray((*[16]byte)(tab[jdTabBase+48:]))
-		var starts uint32
-		if jd != 0 { // without a JUMPDEST only the entry into the next block is needed
-			x1.StoreArray((*[16]byte)(tab[jdTabBase:]))
-			nq, vq := n.AsUint64x4(), v.AsUint64x4()
-			binary.LittleEndian.PutUint64(tab[jdTabBase+96:], nq.GetLo().GetElem(0))
-			binary.LittleEndian.PutUint64(tab[jdTabBase+144:], nq.GetHi().GetElem(0))
-			binary.LittleEndian.PutUint64(tab[jdTabBase+192:], vq.GetLo().GetElem(0))
-			binary.LittleEndian.PutUint64(tab[jdTabBase+240:], vq.GetHi().GetElem(0))
-			v.GetLo().StoreArray((*[16]byte)(tab[jdTabBase+288:]))
-			v.GetHi().StoreArray((*[16]byte)(tab[jdTabBase+336:]))
-
-			e1 := tab[int(e)+jdTabBase-32]
-			e2 := tab[int(e)+jdTabBase-128]
-			e3 := tab[int(e2)+jdTabBase+16]
-			starts = uint32(tab[int(e)+jdTabBase+64]) | uint32(tab[int(e1)+jdTabBase+176])<<8 |
-				uint32(tab[int(e2)+jdTabBase+112])<<16 | uint32(tab[int(e3)+jdTabBase+224])<<24
+		if jd == 0 { // no JUMPDEST: only the entry into the next block is needed
+			if b&1 == 1 {
+				bits[b>>1] = acc
+			}
+			acc = 0
+			e = tab[int(e)+jdTabBase-80]
+			continue
 		}
+		x1.StoreArray((*[16]byte)(tab[jdTabBase:]))
+		nq, vq := n.AsUint64x4(), v.AsUint64x4()
+		binary.LittleEndian.PutUint64(tab[jdTabBase+96:], nq.GetLo().GetElem(0))
+		binary.LittleEndian.PutUint64(tab[jdTabBase+144:], nq.GetHi().GetElem(0))
+		binary.LittleEndian.PutUint64(tab[jdTabBase+192:], vq.GetLo().GetElem(0))
+		binary.LittleEndian.PutUint64(tab[jdTabBase+240:], vq.GetHi().GetElem(0))
+		v.GetLo().StoreArray((*[16]byte)(tab[jdTabBase+288:]))
+		v.GetHi().StoreArray((*[16]byte)(tab[jdTabBase+336:]))
+
+		e1 := tab[int(e)+jdTabBase-32]
+		e2 := tab[int(e)+jdTabBase-128]
+		e3 := tab[int(e2)+jdTabBase+16]
+		starts := uint32(tab[int(e)+jdTabBase+64]) | uint32(tab[int(e1)+jdTabBase+176])<<8 |
+			uint32(tab[int(e2)+jdTabBase+112])<<16 | uint32(tab[int(e3)+jdTabBase+224])<<24
 		if b&1 == 0 {
 			acc = uint64(starts & jd)
 		} else {
