@@ -148,20 +148,25 @@ func TestGetPayloadAttestationDataUsesEnvelopeReceiptDeadline(t *testing.T) {
 	payloadDue := 6 * time.Second
 
 	tests := []struct {
-		name      string
-		received  time.Time
-		persisted bool
-		want      bool
+		name          string
+		payloadDueBps uint64
+		received      time.Time
+		persisted     bool
+		want          bool
 	}{
 		{name: "accepted before data availability", received: slotStart.Add(payloadDue - time.Millisecond), want: true},
 		{name: "persisted after deadline", received: slotStart.Add(payloadDue + time.Millisecond), persisted: true},
 		{name: "persisted at deadline", received: slotStart.Add(payloadDue), persisted: true},
+		{name: "uses configured payload due BPS", payloadDueBps: 4000, received: slotStart.Add(5 * time.Second)},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 			handler.beaconChainCfg.GloasForkEpoch = 0
+			if test.payloadDueBps != 0 {
+				handler.beaconChainCfg.PayloadDueBps = test.payloadDueBps
+			}
 			root := common.HexToHash("0x1234")
 			fcu.HeadSlotVal = slot
 			fcu.HeadVal = root
