@@ -58,11 +58,12 @@ func codeBitmapLift(code []byte) bitvec {
 		p3 := p2.ConcatPermute(sink, p2)
 		p4 := p3.ConcatPermute(sink, p3)
 		p5 := p4.ConcatPermute(sink, p4)
-		cur := zero
-		for _, p := range [...]archsimd.Uint8x64{p5, p4, p3, p2, p1, p0} {
-			nxt := p.ConcatPermute(sink, cur)
-			cur = nxt.IfElse(nxt.Less(lane), cur)
-		}
+		cur := liftStep(p5, sink, lane, zero)
+		cur = liftStep(p4, sink, lane, cur)
+		cur = liftStep(p3, sink, lane, cur)
+		cur = liftStep(p2, sink, lane, cur)
+		cur = liftStep(p1, sink, lane, cur)
+		cur = liftStep(p0, sink, lane, cur)
 		first := p0.ConcatPermute(sink, cur)
 		isStart := first.Equal(lane)
 		chain := isStart.ToBits() | 1
@@ -101,4 +102,10 @@ func pushLenOf(op byte) uint8 {
 		return op - byte(PUSH1) + 1
 	}
 	return 0
+}
+
+// liftStep moves each lane's chain position by the jump in p while that stays below the lane.
+func liftStep(p, sink, lane, cur archsimd.Uint8x64) archsimd.Uint8x64 {
+	nxt := p.ConcatPermute(sink, cur)
+	return nxt.IfElse(nxt.Less(lane), cur)
 }
