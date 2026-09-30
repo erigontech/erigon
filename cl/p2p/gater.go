@@ -89,10 +89,12 @@ func (g *Gater) InterceptAccept(n network.ConnMultiaddrs) (allow bool) {
 // allowing QUIC in that case would leave both connections live, so the QUIC arm also
 // closes any already-registered non-QUIC connection to the same peer, making the
 // outcome (QUIC survives, TCP doesn't) the same regardless of which one arrives first.
-func (g *Gater) InterceptSecured(dir network.Direction, p peer.ID, addrs network.ConnMultiaddrs) (allow bool) {
-	if dir != network.DirInbound {
-		return true
-	}
+//
+// This applies regardless of direction: the redundant leg of the pair is just as
+// likely to be one we dialed ourselves (e.g. a peer reaches us over TCP, and we
+// separately dial that same peer over QUIC) as one the peer dialed. Direction says
+// nothing about which transport should survive, only "is this QUIC or not" does.
+func (g *Gater) InterceptSecured(_ network.Direction, p peer.ID, addrs network.ConnMultiaddrs) (allow bool) {
 	hostPtr := g.host.Load()
 	if hostPtr == nil {
 		return true
