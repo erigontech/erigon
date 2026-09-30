@@ -235,13 +235,20 @@ func (cs *calcState) ApplyWrites(writes state.WriteSetView, eip8246 bool) {
 			slots = make(map[accounts.StorageKey]uint256.Int)
 			cs.storageState[addr] = slots
 		}
+		for key, vw := range inner {
+			slots[key] = vw.Val
+		}
+	}
+	// Only a slot whose value actually moved needs the commitment to refold its
+	// leaf. The account above is dirtied for every write, changed or not, because
+	// it was accessed; the slots are not.
+	for addr, inner := range writes.StoragesChanged() {
 		dirty := cs.storageDirty[addr]
 		if dirty == nil {
 			dirty = make(map[accounts.StorageKey]bool)
 			cs.storageDirty[addr] = dirty
 		}
-		for key, vw := range inner {
-			slots[key] = vw.Val
+		for key := range inner {
 			dirty[key] = true
 		}
 	}
