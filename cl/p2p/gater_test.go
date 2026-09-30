@@ -278,6 +278,87 @@ func TestInterceptSecuredRejectsInboundTCPWhenOurOwnOutboundQUICAlreadyExists(t 
 	require.NoError(t, err)
 }
 
+// TestOnConnectedClosesRedundantNonQUICConnection covers the residual race
+// InterceptSecured cannot close on its own: ConnsToPeer is a snapshot taken before the
+// connection under evaluation is registered, so two connections for the same peer that
+// reach InterceptSecured concurrently can each see an empty snapshot and both admit
+// themselves. Connected fires strictly after its own connection is added to the
+// swarm's connection map, so whichever of two racing connections registers second is
+// guaranteed to observe both - closing the non-QUIC one here, independent of
+// InterceptSecured, closes that window regardless of timing.
+//
+// Two connections are established with no gater attached (so nothing at the
+// InterceptSecured layer interferes) to reach the "both got through" state directly,
+// then onConnected is invoked as the Connected notifee would.
+func TestOnConnectedClosesRedundantNonQUICConnection(t *testing.T) {
+	serverKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
+	require.NoError(t, err)
+	server, err := libp2p.New(serverOpts...)
+	require.NoError(t, err)
+	defer server.Close()
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+
+	quicClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
+	require.NoError(t, err)
+	quicClient, err := libp2p.New(quicClientOpts...)
+	require.NoError(t, err)
+	defer quicClient.Close()
+
+	tcpOnlyClientOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1", DisableQUIC: true}, peerKey)
+	require.NoError(t, err)
+	tcpOnlyClient, err := libp2p.New(tcpOnlyClientOpts...)
+	require.NoError(t, err)
+	defer tcpOnlyClient.Close()
+
+	serverQUICAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_QUIC_V1)
+	serverTCPAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_TCP)
+
+	require.NoError(t, quicClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverQUICAddr}}))
+	require.NoError(t, tcpOnlyClient.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverTCPAddr}}))
+	conns := server.Network().ConnsToPeer(quicClient.ID())
+	require.Len(t, conns, 2, "both connections register since no gater is attached to reject either")
+
+	g := &Gater{}
+	g.onConnected(server.Network(), conns[0])
+
+	remaining := server.Network().ConnsToPeer(quicClient.ID())
+	require.Len(t, remaining, 1, "the redundant non-QUIC connection must be closed")
+	_, err = remaining[0].RemoteMultiaddr().ValueForProtocol(multiaddr.P_QUIC_V1)
+	require.NoError(t, err, "the surviving connection must be the QUIC one")
+}
+
+func TestSetHostRegistersConnectedNotifeeThatDoesNotPanicOnASingleConnection(t *testing.T) {
+	serverKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	serverOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, serverKey)
+	require.NoError(t, err)
+	server, err := libp2p.New(serverOpts...)
+	require.NoError(t, err)
+	defer server.Close()
+
+	g := &Gater{}
+	g.SetHost(server)
+
+	peerKey, err := crypto.GenerateKey()
+	require.NoError(t, err)
+	peerOpts, err := buildOptions(&P2PConfig{IpAddr: "127.0.0.1"}, peerKey)
+	require.NoError(t, err)
+	peerHost, err := libp2p.New(peerOpts...)
+	require.NoError(t, err)
+	defer peerHost.Close()
+
+	serverQUICAddr := firstMultiaddrWithProtocol(t, server.Addrs(), multiaddr.P_QUIC_V1)
+	require.NoError(t, peerHost.Connect(t.Context(), peer.AddrInfo{ID: server.ID(), Addrs: []multiaddr.Multiaddr{serverQUICAddr}}))
+
+	require.Eventually(t, func() bool {
+		return len(server.Network().ConnsToPeer(peerHost.ID())) == 1
+	}, time.Second, 10*time.Millisecond, "a single connection must be unaffected by the notifee")
+}
+
 func firstMultiaddrWithProtocol(t *testing.T, addrs []multiaddr.Multiaddr, protocol int) multiaddr.Multiaddr {
 	t.Helper()
 	for _, addr := range addrs {
