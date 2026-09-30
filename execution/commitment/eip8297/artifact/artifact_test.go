@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"math/rand"
 	"os"
+	"runtime"
 	"runtime/metrics"
 	"sort"
 	"sync/atomic"
@@ -446,6 +447,7 @@ func TestStreamingArtifactMemoryStaysBounded(t *testing.T) {
 	reader, err := os.Open(file.Name())
 	require.NoError(t, err)
 	defer reader.Close()
+	runtime.GC()
 	readerSampler := startHeapSampler()
 	_, err = ReadSnapshotAt(reader, info.Size(), SnapshotCallbacks{
 		Code: func(Group) error { return nil },
@@ -742,6 +744,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readGroups)
 	require.Less(t, readerPeak, uint64(32<<20))
+	runtime.GC()
 	preimageSampler := startHeapSampler()
 	readSlots := 0
 	err = ReadPreimagesStream(preimages, preimageInfo.Size(), func(_ common.Address, slots func(func([32]byte) error) error) error {
@@ -754,6 +757,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, slotCount, readSlots)
 	require.Less(t, preimagePeak, uint64(32<<20))
+	runtime.GC()
 	joinSampler := startHeapSampler()
 	seen := 0
 	err = joinAtWithBuffer(snapshot, snapshotInfo.Size(), preimages, preimageInfo.Size(), eip8297.HashBytes, func(common.Address, [32]byte) error {
