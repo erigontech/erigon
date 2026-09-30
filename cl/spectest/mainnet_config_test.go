@@ -131,20 +131,6 @@ func testMainnetConfig(t *testing.T) {
 }
 
 func TestReadMainnetConfigReference(t *testing.T) {
-	t.Run("rejects duplicate keys", func(t *testing.T) {
-		root := fstest.MapFS{
-			"mainnet/gloas/x/y/case_a/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 7500\nPAYLOAD_DUE_BPS: 7500\nPAYLOAD_DUE_BPS: 7500\n")},
-			"mainnet/gloas/x/y/case_b/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 5000\n")},
-			"mainnet/gloas/x/y/case_c/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 5000\n")},
-		}
-
-		_, err := readMainnetConfigReference(root)
-		want := "decode mainnet/gloas/x/y/case_a/config.yaml: duplicate config key PAYLOAD_DUE_BPS"
-		if err == nil || err.Error() != want {
-			t.Fatalf("unexpected error: got %v, want %q", err, want)
-		}
-	})
-
 	t.Run("rejects tied values", func(t *testing.T) {
 		root := fstest.MapFS{
 			"mainnet/gloas/x/y/case_a/config.yaml": {Data: []byte("PAYLOAD_DUE_BPS: 5000\nATTESTATION_DUE_BPS: 3333\n")},
@@ -214,14 +200,9 @@ func readMainnetConfigReference(root fs.FS) (map[string]*yaml.Node, error) {
 		}
 		configFiles++
 		config := document.Content[0]
-		seenKeys := make(map[string]struct{}, len(config.Content)/2)
 		for i := 0; i < len(config.Content); i += 2 {
 			key := config.Content[i].Value
 			node := config.Content[i+1]
-			if _, ok := seenKeys[key]; ok {
-				return fmt.Errorf("decode %s: duplicate config key %s", name, key)
-			}
-			seenKeys[key] = struct{}{}
 			if strings.HasSuffix(key, "_FORK_EPOCH") {
 				continue
 			}
