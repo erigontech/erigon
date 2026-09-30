@@ -32,6 +32,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
@@ -563,7 +564,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, snapshotFile.Close())
-	defer os.Remove(snapshotFile.Name())
+	defer func() { _ = dir.RemoveFile(snapshotFile.Name()) }()
 	snapshot, err := os.Open(snapshotFile.Name())
 	require.NoError(t, err)
 	defer snapshot.Close()
@@ -582,7 +583,7 @@ func TestJoinAtLargeStorageStaysBounded(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.NoError(t, preimageFile.Close())
-	defer os.Remove(preimageFile.Name())
+	defer func() { _ = dir.RemoveFile(preimageFile.Name()) }()
 	preimages, err := os.Open(preimageFile.Name())
 	require.NoError(t, err)
 	defer preimages.Close()

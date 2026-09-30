@@ -37,6 +37,7 @@ import (
 var ErrPreimages = errors.New("pbt artifact: invalid preimages")
 
 type PreimageIterator func(func(Preimage) error) error
+
 type PreimageStreamIterator func(func(common.Address, func(func([32]byte) error) error) error) error
 
 func WritePreimages(dst io.Writer, records any) error {

@@ -154,8 +154,11 @@ func ReadSnapshotStreamAt(src io.ReaderAt, size int64, callbacks SnapshotStreamC
 			return meta, fmt.Errorf("%w: storage header: %w", ErrMalformed, err)
 		}
 		countBytes, err := readIntegerAt(&c, 8)
-		if err != nil || len(countBytes) == 0 {
-			return meta, fmt.Errorf("%w: zero storage group count: %v", ErrMalformed, err)
+		if err != nil {
+			return meta, fmt.Errorf("%w: zero storage group count: %w", ErrMalformed, err)
+		}
+		if len(countBytes) == 0 {
+			return meta, fmt.Errorf("%w: zero storage group count", ErrMalformed)
 		}
 		count := integerValue(countBytes)
 		if count == 0 || count > uint64(c.remaining()/35) {
@@ -365,37 +368,6 @@ func readGroupAt(c *artifactCursor) (Group, error) {
 		previous = index
 	}
 	return group, nil
-}
-
-func readStorageAt(c *artifactCursor) (Storage, error) {
-	var storage Storage
-	address, err := c.bytes(32)
-	if err != nil {
-		return storage, err
-	}
-	copy(storage.AddressHash[:], address)
-	countBytes, err := readIntegerAt(c, 8)
-	if err != nil || len(countBytes) == 0 {
-		return Storage{}, fmt.Errorf("%w: zero storage group count", ErrMalformed)
-	}
-	count := integerValue(countBytes)
-	if count == 0 || count > uint64(c.remaining()/35) {
-		return Storage{}, fmt.Errorf("%w: invalid storage group count", ErrMalformed)
-	}
-	storage.Groups = make([]Group, 0)
-	var previous common.Hash
-	for i := range count {
-		group, err := readGroupAt(c)
-		if err != nil {
-			return Storage{}, err
-		}
-		if i != 0 && bytes.Compare(group.StemHash[:], previous[:]) <= 0 {
-			return Storage{}, ErrUnsorted
-		}
-		previous = group.StemHash
-		storage.Groups = append(storage.Groups, group)
-	}
-	return storage, nil
 }
 
 func readIntegerAt(c *artifactCursor, width int) ([]byte, error) {
