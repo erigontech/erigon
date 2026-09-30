@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
@@ -567,5 +568,24 @@ func TestResetNextSaltAfterCollision(t *testing.T) {
 		require.True(t, ok)
 		require.Equal(t, uint64(i), e)
 		require.Equal(t, uint64(i*17), idx.OrdinalLookup(e))
+	}
+}
+
+// findBijection must agree with findBijectionGeneric whatever build tags and CPU
+// selected, so a vector implementation cannot diverge silently.
+func TestFindBijectionMatchesGeneric(t *testing.T) {
+	rnd := rand.New(rand.NewSource(42))
+	// A bijection exists for only m!/m^m of salts, so keep m at the leaf sizes
+	// the search is actually run at — m=16 already needs ~10^6 tries.
+	for _, m := range []int{1, 2, 3, 5, 8, 10, 12} {
+		for trial := range 16 {
+			bucket := make([]uint64, m)
+			for i := range bucket {
+				bucket[i] = rnd.Uint64()
+			}
+			salt := rnd.Uint64()
+			require.Equal(t, findBijectionGeneric(bucket, salt), findBijection(bucket, salt),
+				"m=%d trial=%d salt=%d", m, trial, salt)
+		}
 	}
 }
