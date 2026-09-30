@@ -30,8 +30,15 @@ func TestAppendEncodeMatchesStdlib(t *testing.T) {
 			src[i] = byte(r.Uint32())
 		}
 		prefix := []byte("0x")
-		if got, want := string(AppendEncode(prefix, src)), "0x"+hex.EncodeToString(src); got != want {
-			t.Fatalf("len %d: got %s want %s", n, got, want)
+		want := hex.EncodeToString(src)
+		if got := string(AppendEncode(prefix, src)); got != "0x"+want {
+			t.Fatalf("len %d: got %s want 0x%s", n, got, want)
+		}
+		for name, enc := range map[string]func(dst, src []byte) int{"table": encodeTable, "swar": encodeSWAR} {
+			dst := make([]byte, 2*n)
+			if enc(dst, src); string(dst) != want {
+				t.Fatalf("%s len %d: got %s want %s", name, n, dst, want)
+			}
 		}
 	}
 }

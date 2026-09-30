@@ -28,17 +28,29 @@ func BenchmarkAppendEncode(b *testing.B) {
 		for i := range src {
 			src[i] = byte(i * 7)
 		}
-		dst := make([]byte, 0, 2*n)
+		out := make([]byte, 2*n)
 		b.Run(fmt.Sprintf("stdlib/%d", n), func(b *testing.B) {
 			b.SetBytes(int64(n))
 			for b.Loop() {
-				dst = hex.AppendEncode(dst[:0], src)
+				hex.Encode(out, src)
+			}
+		})
+		b.Run(fmt.Sprintf("table/%d", n), func(b *testing.B) {
+			b.SetBytes(int64(n))
+			for b.Loop() {
+				encodeTable(out, src)
+			}
+		})
+		b.Run(fmt.Sprintf("swar/%d", n), func(b *testing.B) {
+			b.SetBytes(int64(n))
+			for b.Loop() {
+				encodeSWAR(out, src)
 			}
 		})
 		b.Run(fmt.Sprintf("simd/%d", n), func(b *testing.B) {
 			b.SetBytes(int64(n))
 			for b.Loop() {
-				dst = AppendEncode(dst[:0], src)
+				Encode(out, src)
 			}
 		})
 	}
