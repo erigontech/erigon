@@ -106,6 +106,10 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 			original, originalOK := rs.originalAccounts[address]
 			if !originalOK || original == nil {
 				update.Values = map[byte][]byte{eip8297.BasicDataLeafKey: basic}
+				if code, delegated := rs.ModifiedCode[address]; !delegated || !eip8297.IsDelegation(code) {
+					codeHash := eip8297.CodeHashValue(common.Hash{})
+					update.Values[eip8297.CodeHashLeafKey] = codeHash[:]
+				}
 			} else {
 				oldBasic, err := pbinAccountBasicValue(rs, address, original, true)
 				if err != nil {
@@ -131,6 +135,9 @@ func buildPBinWitnessInput(rs *RecordingState) (pbinWitnessInput, error) {
 		}
 	}
 	for address := range rs.DeletedAccounts {
+		if !rs.innerExists(address) {
+			continue
+		}
 		result.Deletes = append(result.Deletes, append([]byte(nil), address[:]...))
 	}
 	slices.SortFunc(result.Storage, func(a, b eipWitness.PBinStorageWrite) int {

@@ -18,6 +18,8 @@ package jsonrpc
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -25,7 +27,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/eip8297"
+	pbtengine "github.com/erigontech/erigon/execution/commitment/v3/pbt"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -139,7 +144,7 @@ func TestPBinWitnessInputHandlesCreationDeletionAndDelegation(t *testing.T) {
 
 	got, err := buildPBinWitnessInput(rs)
 	require.NoError(t, err)
-	require.Contains(t, got.Deletes, created[:])
+	require.NotContains(t, got.Deletes, created[:], "an account created and destroyed in one transaction has no pre-state deletion")
 	require.Len(t, got.Accounts, 1)
 	require.Equal(t, designator, got.Accounts[0].Delegation)
 
@@ -150,6 +155,95 @@ func TestPBinWitnessInputHandlesCreationDeletionAndDelegation(t *testing.T) {
 	require.Len(t, got.Accounts, 1)
 	require.NotNil(t, got.Accounts[0].Code, "clearing delegation must be an explicit empty code update")
 	require.Empty(t, got.Accounts[0].Code)
+}
+
+func TestPBinWitnessInputNewAccountMatchesEngineRoot(t *testing.T) {
+	withBinCommitmentDatadir(t)
+	sender := common.HexToAddress("0x5000000000000000000000000000000000000000")
+	receiver := common.HexToAddress("0x5100000000000000000000000000000000000000")
+	balance := uint256.NewInt(100)
+	basic, err := eip8297.EncodeBasicData(0, balance, 0)
+	require.NoError(t, err)
+	emptyCodeHash := eip8297.CodeHashValue(common.Hash{})
+	entries := []eip8297.Entry{
+		{Key: eip8297.TreeKeyAccount(sender[:], eip8297.BasicDataLeafKey), Value: basic[:]},
+		{Key: eip8297.TreeKeyAccount(sender[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash[:]},
+	}
+	preContext := newPBinWitnessInputContext()
+	preRoot, err := pbtengine.NewTrie(preContext).Process(pbinWitnessInputEntriesToOps(entries))
+	require.NoError(t, err)
+
+	inner := &fakeStateReader{accounts: map[common.Address]*accounts.Account{sender: {Balance: *balance, CodeHash: accounts.EmptyCodeHash}}}
+	rs := NewRecordingState(inner)
+	newAccount := &accounts.Account{Balance: *uint256.NewInt(10), CodeHash: accounts.EmptyCodeHash}
+	require.NoError(t, rs.UpdateAccountData(accounts.InternAddress(receiver), nil, newAccount))
+	input, err := buildPBinWitnessInput(rs)
+	require.NoError(t, err)
+	receiverUpdate := input.Accounts[0]
+	require.Equal(t, emptyCodeHash[:], receiverUpdate.Values[eip8297.CodeHashLeafKey], "new codeless accounts need a code-hash leaf")
+
+	_, _, resolverRoot, err := pbtengine.NewTrie(preContext).Witness(context.Background(), preRoot, input.PBinDriverInput)
+	require.NoError(t, err)
+
+	postContext := newPBinWitnessInputContext()
+	postContext.records = clonePBinWitnessInputRecords(preContext.records)
+	postBasic, err := eip8297.EncodeBasicData(0, &newAccount.Balance, 0)
+	require.NoError(t, err)
+	postOps := []pbtengine.Op{{Key: eip8297.TreeKeyAccount(receiver[:], eip8297.BasicDataLeafKey), Value: postBasic}, {Key: eip8297.TreeKeyAccount(receiver[:], eip8297.CodeHashLeafKey), Value: emptyCodeHash}}
+	engineRoot, err := pbtengine.NewTrie(postContext).Process(postOps)
+	require.NoError(t, err)
+	require.Equal(t, engineRoot, resolverRoot, "the witness driver must match the engine root for a funded new account")
+}
+
+type pbinWitnessInputContext struct {
+	records map[string][]byte
+}
+
+func newPBinWitnessInputContext() *pbinWitnessInputContext {
+	return &pbinWitnessInputContext{records: make(map[string][]byte)}
+}
+
+func (c *pbinWitnessInputContext) Branch(key []byte) ([]byte, kv.Step, error) {
+	return bytes.Clone(c.records[string(key)]), 0, nil
+}
+
+func (c *pbinWitnessInputContext) PutBranch(key, data, prev []byte) error {
+	old := c.records[string(key)]
+	if !bytes.Equal(old, prev) {
+		return fmt.Errorf("pbin witness input: previous record mismatch for %x", key)
+	}
+	if len(data) == 0 {
+		delete(c.records, string(key))
+	} else {
+		c.records[string(key)] = bytes.Clone(data)
+	}
+	return nil
+}
+
+func (*pbinWitnessInputContext) Account([]byte) (*commitment.Update, error) {
+	return nil, fmt.Errorf("unexpected account read")
+}
+
+func (*pbinWitnessInputContext) Storage([]byte) (*commitment.Update, error) {
+	return nil, fmt.Errorf("unexpected storage read")
+}
+
+func pbinWitnessInputEntriesToOps(entries []eip8297.Entry) []pbtengine.Op {
+	ops := make([]pbtengine.Op, len(entries))
+	for i, entry := range entries {
+		var value [eip8297.ValueLength]byte
+		copy(value[:], entry.Value)
+		ops[i] = pbtengine.Op{Key: entry.Key, Value: value}
+	}
+	return ops
+}
+
+func clonePBinWitnessInputRecords(records map[string][]byte) map[string][]byte {
+	clone := make(map[string][]byte, len(records))
+	for key, value := range records {
+		clone[key] = bytes.Clone(value)
+	}
+	return clone
 }
 
 type pbinCodeReader struct {

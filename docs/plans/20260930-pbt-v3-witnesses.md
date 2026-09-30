@@ -493,23 +493,23 @@ demand; a cache-only node serves the default trie only and returns a distinct er
 - Create: `rpc/jsonrpc/pbt_witness_stateless.go`
 - Create: `rpc/jsonrpc/pbt_witness_stateless_test.go`
 
-- [ ] add the verifier signature with a stub; write tests: a correct witness reproduces the post-root; a witness missing
+- [x] add the verifier signature with a stub; write tests: a correct witness reproduces the post-root; a witness missing
       one needed blob fails; confirm they fail at the root comparison and at the missing-blob error
-- [ ] implement the witness resolver (path to blob from `keys`/`state`, hash-checked) and code lookup from `codes` plus
+- [x] implement the witness resolver (path to blob from `keys`/`state`, hash-checked) and code lookup from `codes` plus
       in-block overlays
-- [ ] port the overlays and account-lifecycle bookkeeping from `binary-trie`'s `rpc/jsonrpc/pbin_witness_stateless.go`:
+- [x] port the overlays and account-lifecycle bookkeeping from `binary-trie`'s `rpc/jsonrpc/pbin_witness_stateless.go`:
       - replay through `replayBlockOverWitness`;
       - suppress the synthetic system-caller touch;
       - wipe storage on a CREATE into an existing account that holds storage, returning an error when its storage proof
         is missing.
-- [ ] compare the post-root with the self-check anchor; a mismatch or a missing blob is an error
-- [ ] port the behaviours of `binary-trie`'s `pbin_witness_stateless_test.go` to the new format:
+- [x] compare the post-root with the self-check anchor; a mismatch or a missing blob is an error
+- [x] port the behaviours of `binary-trie`'s `pbin_witness_stateless_test.go` to the new format:
       - genuine and synthetic system-address access;
       - CREATE over storage;
       - delete and recreate in one block;
       - `TestPBinWitnessStatelessHasStorage`;
       - `TestPBinWitnessStatelessMissingNodeErrors`
-- [ ] run tests - must pass before task 11
+- [x] run tests - must pass before task 11
 
 ### Task 11: Serve trie=pbt
 
