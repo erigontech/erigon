@@ -19,7 +19,6 @@ package engine_types
 import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/rpc/jsonstream"
-	"github.com/erigontech/erigon/rpc/jsonstream/ethjson"
 )
 
 // BlobsBundleV1, BlobsBundleV2, and BlobsBundleV3 are engine_getBlobs response slices.
@@ -31,43 +30,18 @@ type (
 )
 
 func (bundle BlobsBundleV1) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	jsonstream.ArrayValue(s, bundle, writeBlobV1)
+	jsonstream.ArrayValue(s, bundle, writeMarshaler[*BlobAndProofV1])
 	return nil
 }
 
 func (bundle BlobsBundleV2) MarshalFastJSONTo(s *jsonstream.Stream) error {
-	jsonstream.ArrayValue(s, bundle, writeBlobV2)
+	jsonstream.ArrayValue(s, bundle, writeMarshaler[*BlobAndProofV2])
 	return nil
 }
 
 func (bundle BlobsBundleV3) MarshalFastJSONTo(s *jsonstream.Stream) error {
 	jsonstream.ArrayValue(s, bundle, writeBlobCellsV1)
 	return nil
-}
-
-func writeBlobV1(s *jsonstream.Stream, bp **BlobAndProofV1) {
-	b := *bp
-	if b == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	ethjson.Data(s, "blob", b.Blob)
-	ethjson.Data(s, "proof", b.Proof)
-	s.WriteObjectEnd()
-}
-
-func writeBlobV2(s *jsonstream.Stream, bp **BlobAndProofV2) {
-	b := *bp
-	if b == nil {
-		s.WriteNil()
-		return
-	}
-	s.WriteObjectStart()
-	ethjson.Data(s, "blob", b.Blob)
-	s.Field("proofs")
-	jsonstream.ArrayValue(s, b.CellProofs, writeHex)
-	s.WriteObjectEnd()
 }
 
 func writeBlobCellsV1(s *jsonstream.Stream, bp **BlobCellsAndProofsV1) {
@@ -86,7 +60,6 @@ func writeBlobCellsV1(s *jsonstream.Stream, bp **BlobCellsAndProofsV1) {
 
 // writeHex writes one value per element, so a blob array flushes blob by blob instead of
 // growing one buffer for all of them.
-func writeHex(s *jsonstream.Stream, b *hexutil.Bytes) { s.WriteHex(*b) }
 
 func writeHexPtr(s *jsonstream.Stream, b **hexutil.Bytes) {
 	if *b == nil {
@@ -94,4 +67,11 @@ func writeHexPtr(s *jsonstream.Stream, b **hexutil.Bytes) {
 		return
 	}
 	s.WriteHex(**b)
+}
+
+func writeHex(s *jsonstream.Stream, b *hexutil.Bytes) { s.WriteHex(*b) }
+
+// writeMarshaler writes one element of a slice whose elements write themselves.
+func writeMarshaler[M jsonstream.Marshaler](s *jsonstream.Stream, m *M) {
+	_ = (*m).MarshalFastJSONTo(s)
 }
