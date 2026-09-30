@@ -497,16 +497,16 @@
 - Create: `execution/commitment/eip8297/artifact/artifact_test.go`
 - Create: `execution/commitment/eip8297/artifact/testdata/golden.json`
 
-- [ ] write a golden artifact by hand from the spec text (kinds 0, 1 and 2, header slots, code groups, storage groups)
+- [x] write a golden artifact by hand from the spec text (kinds 0, 1 and 2, header slots, code groups, storage groups)
       with its snapshotDigest. Add the codec signatures with stubs; write tests that the writer reproduces the golden
       artifact and the reader accepts it; confirm they fail at the byte comparison
-- [ ] implement the writer over a plain (key, value) iterator:
+- [x] implement the writer over a plain (key, value) iterator:
       - minimal big-endian integers;
       - section counts and root patched at the end;
       - storage records buffered with a spill threshold;
       - refusal of kind-0 empty accounts and kind-1 size-0 code;
       - the digest over the finished file.
-- [ ] implement the strict reader:
+- [x] implement the strict reader:
       - widths and leading zeros;
       - kinds;
       - strict ordering;
@@ -514,11 +514,11 @@
       - header slots below 64;
       - storage records matched to header records by a second cursor over the header section;
       - counts and trailing bytes.
-- [ ] implement the strict preimage reader and the exact-set join
-- [ ] write the reject tables (one case per artifact rule; for preimages: unsorted address, duplicate address, unsorted
+- [x] implement the strict preimage reader and the exact-set join
+- [x] write the reject tables (one case per artifact rule; for preimages: unsorted address, duplicate address, unsorted
       or duplicate slot, truncated record, trailing byte; for the join: a missing and a surplus preimage), round trips on
       random states, and the empty snapshot
-- [ ] run tests - must pass before task 12
+- [x] run tests - must pass before task 12
 
 ### Task 12: export-pbt command
 
