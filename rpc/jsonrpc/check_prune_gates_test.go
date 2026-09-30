@@ -736,6 +736,18 @@ func TestFeeHistoryTruncatesAtPhysicalTransactionFloor(t *testing.T) {
 	require.Len(t, result.GasUsedRatio, 1)
 }
 
+func TestFeeHistoryIncludesIsolatedGenesis(t *testing.T) {
+	t.Parallel()
+	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	dropBodies(t, apis.rwDB, 1, 9)
+
+	result, err := apis.eth.FeeHistory(t.Context(), 1, rpc.BlockNumber(0), []float64{50})
+	require.NoError(t, err)
+	require.Len(t, result.Reward, 1)
+	require.Len(t, result.BaseFee, 2)
+	require.Equal(t, []float64{0}, result.GasUsedRatio)
+}
+
 func TestGenesisRangesRequireContiguousBlocks(t *testing.T) {
 	t.Parallel()
 	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})

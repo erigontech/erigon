@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -149,6 +150,50 @@ func TestErigonGetLatestLogs(t *testing.T) {
 		BlockTimestamp: &stampedAt,
 	}
 	assert.Equal(expectedLog, actual[0])
+}
+
+func TestGetLatestLogsStopsBeforePrunedBlocks(t *testing.T) {
+	t.Parallel()
+	m, chain := rpcdaemontest.CreateTestExecModuleNoInsert(t)
+	require.NoError(t, m.InsertChain(chain))
+	const firstRetained = uint64(10)
+	dropBodies(t, m.DB, 1, firstRetained)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	want, err := api.GetLogs(m.Ctx, blockFilter(firstRetained))
+	require.NoError(t, err)
+	require.Len(t, want, 1)
+
+	for _, tc := range []struct {
+		name    string
+		options filters.LogFilterOptions
+		noMatch bool
+		pruned  bool
+	}{
+		{name: "log_count", options: filters.LogFilterOptions{LogCount: 1}},
+		{name: "block_count", options: filters.LogFilterOptions{BlockCount: 1}},
+		{name: "too_few_logs", options: filters.LogFilterOptions{LogCount: 2}, pruned: true},
+		{name: "too_few_blocks", options: filters.LogFilterOptions{BlockCount: 2}, pruned: true},
+		{name: "no_matches", options: filters.LogFilterOptions{LogCount: 1}, noMatch: true, pruned: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			topic := want[0].Topics[0]
+			if tc.noMatch {
+				topic = common.Hash{}
+			}
+			logs, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{
+				ToBlock: new(big.Int).SetUint64(firstRetained),
+				Topics:  [][]common.Hash{{topic}},
+			}, tc.options)
+			if tc.pruned {
+				require.ErrorIs(t, err, state.ErrPruned)
+				require.Nil(t, logs)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, want, logs)
+		})
+	}
 }
 
 func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {

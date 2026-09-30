@@ -534,8 +534,8 @@ func (api *BaseAPI) checkPruneBlocksRange(ctx context.Context, tx kv.Tx, from, t
 		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.ErrPruned, from, *oldest)
 	}
 	return api.checkPruneField(tx, from, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available", func(head uint64) (uint64, error) {
-		// Genesis is kept separately. It can satisfy a genesis-only read,
-		// but cannot fill a gap in a range that includes later blocks.
+		// Separately kept genesis cannot fill a gap in a range. Only a genesis-only
+		// read may bypass the physical floor; retention and chain-history expiry still apply.
 		if from == 0 && to == 0 {
 			return 0, nil
 		}
@@ -776,8 +776,8 @@ func (api *BaseAPI) probePreMergeBlockData(ctx context.Context, tx kv.Tx, mergeH
 	if err != nil {
 		return preMergeBlockData{}, false, err
 	}
-	// Zero is a snapshot set starting at genesis, one a database holding every block
-	// after it; anything higher starts mid-chain, however far below the merge point.
+	// A floor above block 1 proves that the retained range starts mid-chain.
+	// Otherwise, probe transactions: stored bodies do not prove their transactions are readable.
 	if oldest > 1 {
 		return preMergeBlockData{oldest: oldest}, true, nil
 	}

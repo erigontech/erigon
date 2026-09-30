@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
@@ -807,8 +808,16 @@ func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.Bl
 }
 
 func (b *GasPriceOracleBackend) isBlockAvailable(ctx context.Context, number uint64) (bool, error) {
-	// Resolve the floor once per backend to avoid repeated availability lookups.
-	// Local files are pinned, but remote lookups use a separate server-side view.
+	// Genesis can survive below the contiguous floor; use its single-block gate.
+	if number == 0 {
+		err := b.baseApi.checkPruneBlocks(ctx, b.tx, number)
+		if errors.Is(err, state.ErrPruned) {
+			return false, nil
+		}
+		return err == nil, err
+	}
+	// A fork can pin different files even when its canonical blocks match.
+	// Remote lookups use separate server-side views and remain best effort.
 	b.blocksFloorOnce.Do(func() {
 		head, err := rpchelper.GetLatestBlockNumber(b.tx)
 		if err != nil {

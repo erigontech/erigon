@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
@@ -231,10 +232,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	// Searches the log indices and re-executes, so stored receipts cannot answer for it.
-	err = api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
-	if err != nil {
-		return nil, err
+	// A count-limited scan may finish before reaching the pruned part of its range.
+	// Keep that error for an incomplete scan: missing index entries can end it early.
+	rangeErr := api.BaseAPI.checkBlockHistoryRangeAvailable(ctx, tx, begin, end)
+	if rangeErr != nil && !errors.Is(rangeErr, state.ErrPruned) {
+		return nil, rangeErr
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -287,6 +289,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if blockNumChanged {
 			if logOptions.BlockCount != 0 && logOptions.BlockCount <= blockCount {
 				return rpcLogs, nil
+			}
+			if rangeErr != nil {
+				if err := api.checkBlockHistoryRangeAvailable(ctx, tx, blockNum, end); err != nil {
+					return nil, err
+				}
 			}
 			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
@@ -369,6 +376,9 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		if logOptions.LogCount != 0 && logOptions.LogCount <= logCount {
 			return rpcLogs, nil
 		}
+	}
+	if rangeErr != nil && (logOptions.BlockCount == 0 || blockCount < logOptions.BlockCount) {
+		return nil, rangeErr
 	}
 	return rpcLogs, nil
 }

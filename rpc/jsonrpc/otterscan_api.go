@@ -270,6 +270,13 @@ func (api *OtterscanAPIImpl) SearchTransactionsAfter(ctx context.Context, addr c
 	if uint64(pageSize) > api.maxPageSize {
 		return nil, fmt.Errorf("max allowed page size: %v", api.maxPageSize)
 	}
+	if blockNum == MaxBlockNum {
+		return &TransactionsWithReceipts{
+			Txs:       []*ethapi.RPCTransaction{},
+			Receipts:  []ReceiptWithTimestamp{},
+			FirstPage: true,
+		}, nil
+	}
 
 	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
