@@ -115,12 +115,12 @@ func readSnapshot(data []byte) (Snapshot, error) {
 	if offset != len(data) {
 		return Snapshot{}, fmt.Errorf("%w: trailing bytes", ErrMalformed)
 	}
-	headerAddresses := make(map[common.Hash]struct{}, len(snapshot.Headers))
-	for i := range snapshot.Headers {
-		headerAddresses[snapshot.Headers[i].AddressHash] = struct{}{}
-	}
+	headerIndex := 0
 	for _, storage := range snapshot.StorageGroups {
-		if _, ok := headerAddresses[storage.AddressHash]; !ok {
+		for headerIndex < len(snapshot.Headers) && bytes.Compare(snapshot.Headers[headerIndex].AddressHash[:], storage.AddressHash[:]) < 0 {
+			headerIndex++
+		}
+		if headerIndex == len(snapshot.Headers) || snapshot.Headers[headerIndex].AddressHash != storage.AddressHash {
 			return Snapshot{}, fmt.Errorf("%w: storage has no header", ErrMalformed)
 		}
 	}
