@@ -66,7 +66,8 @@ func codeBitmapLift(code []byte) bitvec {
 		first := p0.ConcatPermute(sink, cur)
 		isStart := first.Equal(lane)
 		chain := isStart.ToBits() | 1
-		exit := int(p0.IfElse(isStart, first).GetHi().GetHi().GetElem(15))
+		last := lane.IfElse(isStart, cur).GetHi().GetHi().GetElem(15) // the last start in the chunk
+		exit := int(last) + 1 + int(pushLenOf(chunk[last&63]))
 
 		starts := chain &^ (uint64(1)<<e - 1)
 		if chain>>e&1 == 0 {
